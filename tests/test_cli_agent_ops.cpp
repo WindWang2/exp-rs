@@ -37,7 +37,8 @@ namespace sicnu::cli {
 thread_local std::string g_lastEnvelope;
 
 int CliIO::finish(bool ok, const std::string &command, Json::Value data, int exitCode,
-                  const Json::Value &diagnostics, const std::string &errorMessage) const
+                  const Json::Value &diagnostics, const std::string &errorMessage,
+                  const CliErrorDetails *errorDetails) const
 {
     if (json || jsonLines)
     {
@@ -49,6 +50,10 @@ int CliIO::finish(bool ok, const std::string &command, Json::Value data, int exi
         envelope["data"] = data;
         if (!diagnostics.isNull())
             envelope["diagnostics"] = diagnostics;
+        // Track 14: mirror the real envelope's additive error_details so the
+        // captured document stays shape-compatible with the shipped CLI.
+        if (errorDetails)
+            envelope["error_details"] = errorDetails->toJson();
         envelope["api_version"] = std::string(EXP_RS_PLUGIN_API_VERSION);
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";

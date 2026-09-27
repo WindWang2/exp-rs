@@ -78,6 +78,31 @@ function(sicnu_configure_test_harness_env)
     endforeach()
   endif()
 
+  # Non-system GDAL/PROJ/GEOS prefixes ship transitive deps (libodbc, …) that
+  # qgis_core loads at runtime; raw `add_test` registrations bypass the
+  # per-test DL_PATHS the discover-based targets get, so pin the prefix into
+  # the ctest-process LD_LIBRARY_PATH (same policy as the /usr/lib pin below).
+  # No-op when GDAL comes from the system prefix.
+  set(_gdal_libdir "")
+  if(TARGET GDAL::GDAL)
+    # Imported GDAL targets carry config-specific locations (DEBUG/RELEASE/
+    # NOCONFIG, depending on how the prefix was configured) — probe them all.
+    foreach(_gcfg IN ITEMS "" _NOCONFIG _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+      if(NOT _gdal_libdir)
+        get_target_property(_gdal_imported_location GDAL::GDAL "IMPORTED_LOCATION${_gcfg}")
+        if(_gdal_imported_location)
+          get_filename_component(_gdal_libdir "${_gdal_imported_location}" DIRECTORY)
+        endif()
+      endif()
+    endforeach()
+    if(NOT _gdal_libdir)
+      get_target_property(_gdal_imported_implib GDAL::GDAL IMPORTED_IMPLIB)
+      if(_gdal_imported_implib)
+        get_filename_component(_gdal_libdir "${_gdal_imported_implib}" DIRECTORY)
+      endif()
+    endif()
+  endif()
+
   set(SICNU_TEST_PYTHONHOME "${_pythonhome}" PARENT_SCOPE)
   set(SICNU_TEST_PYTHONPATH "${_pythonpath}" PARENT_SCOPE)
   set(SICNU_TEST_QT_PLUGIN_PATH "${_qt_plugins}" PARENT_SCOPE)
@@ -119,18 +144,19 @@ function(sicnu_configure_test_harness_env)
   endif()
   set(SICNU_TEST_ENV_MODS "${_mods}" PARENT_SCOPE)
 
-  _sicnu_write_ctest_custom("${_pythonhome}" "${_pythonpath}" "${_qt_plugins}" "${_pathsep}" "${Python_EXECUTABLE}")
+  _sicnu_write_ctest_custom("${_pythonhome}" "${_pythonpath}" "${_qt_plugins}" "${_pathsep}" "${Python_EXECUTABLE}" "${_gdal_libdir}")
 
   message(STATUS
     "Test harness env (#730): PYTHONHOME=${_pythonhome} "
-    "LD_LIBRARY_PATH pin=/usr/lib QT_IM_MODULE=compose")
+    "LD_LIBRARY_PATH pin=/usr/lib GDAL-libdir=${_gdal_libdir} QT_IM_MODULE=compose")
 endfunction()
 
-function(_sicnu_write_ctest_custom pythonhome pythonpath qt_plugins pathsep python_executable)
+function(_sicnu_write_ctest_custom pythonhome pythonpath qt_plugins pathsep python_executable gdal_libdir)
   _sicnu_escape_cmake_path(_home_esc "${pythonhome}")
   _sicnu_escape_cmake_path(_path_esc "${pythonpath}")
   _sicnu_escape_cmake_path(_qt_esc "${qt_plugins}")
   _sicnu_escape_cmake_path(_pyexe_esc "${python_executable}")
+  _sicnu_escape_cmake_path(_gdal_esc "${gdal_libdir}")
 
   set(_out "")
   string(APPEND _out
@@ -150,12 +176,30 @@ function(_sicnu_write_ctest_custom pythonhome pythonpath qt_plugins pathsep pyth
     string(APPEND _out
       "\n"
       "# System libs first so miniconda on RUNPATH/LD_LIBRARY_PATH cannot shadow\n"
-      "# libxml2 (undefined symbol: xmlNanoHTTPCleanup from libspatialite).\n"
+      "# libxml2 (undefined symbol: xmlNanoHTTPCleanup from libspatialite).\n")
+    if(gdal_libdir AND NOT gdal_libdir MATCHES "^/usr/lib.*")
+      string(APPEND _out
+        "# Non-system GDAL prefix: its transitive deps (libodbc, …) must load\n"
+        "# for raw add_test targets that carry no DL_PATHS property.\n"
+        "# Deliberately inserted AFTER /usr/lib so system libraries keep\n"
+        "# priority (the #730 anti-shadowing policy below still wins).\n"
+        "set(ENV{LD_LIBRARY_PATH} \"${_gdal_esc}:\$ENV{LD_LIBRARY_PATH}\")\n")
+    endif()
+    string(APPEND _out
       "if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT \"\$ENV{LD_LIBRARY_PATH}\" STREQUAL \"\")\n"
       "  set(ENV{LD_LIBRARY_PATH} \"/usr/lib:\$ENV{LD_LIBRARY_PATH}\")\n"
       "else()\n"
       "  set(ENV{LD_LIBRARY_PATH} \"/usr/lib\")\n"
       "endif()\n")
+    if(gdal_libdir AND EXISTS "${gdal_libdir}/gdalplugins")
+      string(APPEND _out
+        "\n"
+        "# GDAL driver plugins shipped beside a non-system libgdal (JP2OpenJPEG,\n"
+        "# HDF5, netCDF, …). A prefix-built GDAL bakes its plugin search path\n"
+        "# from its configure-time prefix, so point GDAL_DRIVER_PATH at the\n"
+        "# shipped plugins explicitly; system-GDAL machines are unaffected.\n"
+        "set(ENV{GDAL_DRIVER_PATH} \"${_gdal_esc}/gdalplugins\")\n")
+    endif()
   endif()
 
   if(pythonhome)

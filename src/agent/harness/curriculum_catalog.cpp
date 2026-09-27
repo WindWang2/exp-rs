@@ -18,9 +18,10 @@ namespace {
 
 constexpr const char *kSchema = "sicnu.curriculum/1";
 
-const char *const kTopLevelKeys[] = { "schema",        "id",           "title",
-                                      "title_zh",      "audience_zh",  "note_zh",
-                                      "modules",       "forward_references" };
+const char *const kTopLevelKeys[] = { "schema",         "id",           "title",
+                                      "title_zh",       "audience_zh",  "note_zh",
+                                      "modules",        "autonomy_policy",
+                                      "forward_references" };
 
 const char *const kModuleKeys[] = { "id",
                                     "index",

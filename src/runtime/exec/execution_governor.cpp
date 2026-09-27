@@ -20,6 +20,14 @@ ExecutionGovernor::ExecutionGovernor( Config config )
     : m_config( std::move( config ) ), m_scratch( chunk::ScratchRegistry::Config{ m_config.scratchRoot, m_config.scratchBytes } ),
       m_writeGate( m_config.writeInFlightBytes )
 {
+    // A fresh governor starts a fresh leak-observation window: a previous
+    // governor's destructor report must not bleed into a LATER, strictly
+    // sequential governor's diagnostics. (Last-writer-wins: with overlapping
+    // lifetimes an inner construction clears and the outer destructor then
+    // overwrites — the sequential case is the contract, the overlap case is
+    // best-effort by design, matching the process-wide single-slot report.)
+    std::lock_guard<std::mutex> leakLock( g_lastLeakMutex );
+    g_lastLeakReportJson.clear();
 }
 
 ExecutionGovernor::~ExecutionGovernor()

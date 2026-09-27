@@ -118,7 +118,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u5bf9\u6bd4\u503c\u578b\uff08\u4e58\u6027\uff09\u53d8\u5316\u7a33\u5065\uff0c\u4f46\u540e\u4e00\u671f\u63a5\u8fd1 0 \u7684\u533a\u57df\u6bd4\u503c\u53d1\u6563\uff08\u4ee5 eps \u5e73\u6ed1\uff09\uff0c\u4e14\u5bf9\u52a0\u6027\u8f90\u5c04\u504f\u79fb\u654f\u611f\u3002"
+    ],
     "modality" : 
     [
       "optical"

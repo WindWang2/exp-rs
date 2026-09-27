@@ -202,6 +202,11 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.tags = parseStringArray( obj, QStringLiteral( "tags" ) );
   info.sourceManifest = source;
 
+  // P1-8: parse-time type findings are DEFERRED (JSON access is only alive
+  // here) and flushed right after the identity block — identity findings
+  // always precede content findings in the rejection list.
+  std::vector<std::string> p1_8DeferredFindings;
+
   // --- Platform 4.0 identity -------------------------------------------------
   info.id = obj.value( QStringLiteral( "id" ) ).toString().toStdString();
   info.modelVersion = obj.value( QStringLiteral( "model_version" ) ).toString().toStdString();
@@ -412,10 +417,50 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.postprocess.polygonize = postObj.value( QStringLiteral( "polygonize" ) ).toBool( false );
   // Platform 8.0 WP-E: product-class remap for Labels products (model class
   // i → product class mapping[i]; absent = identity).
-  if ( postObj.value( QStringLiteral( "class_mapping" ) ).isArray() )
+  // P1-8: declared-but-wrong TYPE is a typed refusal, never a silent drop
+  // (the #646 class), and non-integer elements report their DECLARED token —
+  // a string element used to collapse to -1 and surface as a bogus
+  // negative-value finding.
   {
-    for ( const auto &v : postObj.value( QStringLiteral( "class_mapping" ) ).toArray() )
-      info.postprocess.classMapping.push_back( v.toInt( -1 ) );
+    const QJsonValue mappingVal = postObj.value( QStringLiteral( "class_mapping" ) );
+    if ( mappingVal.isArray() )
+    {
+      int elementIndex = 0;
+      for ( const auto &v : mappingVal.toArray() )
+      {
+        const std::string indexText = std::to_string( elementIndex++ );
+        const bool integralNumber = v.isDouble() && v.toInt( -1 ) == v.toDouble();
+        if ( !integralNumber )
+        {
+          std::string declaredToken;
+          if ( v.isString() )
+            declaredToken = "'" + v.toString().toStdString() + "'";
+          else if ( v.isDouble() )
+            declaredToken = QString::number( v.toDouble(), 'g', 15 ).toStdString();
+          else if ( v.isBool() )
+            declaredToken = v.toBool() ? "true" : "false";
+          else
+            declaredToken = "<" + std::to_string( static_cast<int>( v.type() ) ) + ">";
+          p1_8DeferredFindings.push_back(
+            "postprocess.class_mapping element " + indexText + " must be an integer (declared "
+              + declaredToken + ")" );
+          continue;
+        }
+        info.postprocess.classMapping.push_back( v.toInt() );
+      }
+    }
+    else if ( !mappingVal.isUndefined() && !mappingVal.isNull() )
+    {
+      std::string declaredType = "<" + std::to_string( static_cast<int>( mappingVal.type() ) ) + ">";
+      if ( mappingVal.isString() )
+        declaredType = "string";
+      else if ( mappingVal.isBool() )
+        declaredType = "bool";
+      else if ( mappingVal.isObject() )
+        declaredType = "object";
+      p1_8DeferredFindings.push_back( "postprocess.class_mapping must be an array of integers "
+                                     "(declared " + declaredType + ")" );
+    }
   }
   const double simplify = postObj.value( QStringLiteral( "simplify" ) ).toDouble( 0.0 );
   info.postprocess.simplify = simplify > 0.0 ? simplify : 0.0;
@@ -474,6 +519,11 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   // --- Contract sanity (InvalidManifest reasons) ------------------------------
   auto markInvalid = [&info]( std::string reason ) {
     info.readiness = ModelReadiness::InvalidManifest;
+    // P1-8 error contract, assembled at THIS one exit (never re-spliced per
+    // call site): every finding carries the manifest path, the field name
+    // and the expected/actual values the individual site provides.
+    if ( !info.sourceManifest.empty() )
+      reason = info.sourceManifest + ": " + reason;
     // APPEND, don't replace: a manifest with several declared-but-unexecuted
     // knobs must report every one of them (the last-wins behavior hid all
     // but the final finding).
@@ -482,6 +532,61 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     else
       info.readinessReason += "; " + reason;
   };
+
+  // Platform 4.0 manifest_version: declared values must be 1..6 and must
+  // agree with the manifest's actual shape — a declared version is a
+  // contract claim, and a wrong claim means the author expects different
+  // parsing semantics than the shape delivers.
+  // P1-8 ORDER CONTRACT: identity checks (manifest_version + shape claim)
+  // run BEFORE any content check (package/aux, vocabulary, bounds), so a
+  // rejection list always opens with the identity finding.
+  {
+    const QJsonValue declaredVersion = obj.value( QStringLiteral( "manifest_version" ) );
+    if ( declaredVersion.isDouble() )
+    {
+      // Report the DECLARED token honestly: a non-integral value (5.5) must
+      // never surface as a silently-defaulted 0.
+      const double declared = declaredVersion.toDouble();
+      const int v = declaredVersion.toInt();
+      if ( v < 1 || v > 6 )
+        markInvalid( "manifest_version "
+                       + QString::number( declared, 'g', 15 ).toStdString()
+                       + " is unsupported (1..6)" );
+      else
+        info.manifestVersion = v;
+    }
+    else if ( !declaredVersion.isNull() && !declaredVersion.isUndefined() )
+    {
+      std::string declaredToken = "<" + std::to_string( static_cast<int>( declaredVersion.type() ) ) + ">";
+      if ( declaredVersion.isString() )
+        declaredToken = "'" + declaredVersion.toString().toStdString() + "'";
+      markInvalid( "manifest_version must be an integer (1..6) (declared " + declaredToken + ")" );
+    }
+    int shapeVersion = 1;
+    if ( inputsDeclaredAsArray )
+      shapeVersion = 3;
+    else if ( inputDeclaredAsObject )
+      shapeVersion = 2;
+    // Version 4 is the v3 shape plus the 4.0 vocabulary (identity fields,
+    // output.format / output.detection) - it validates against shape 3.
+    // Version 5 is the 7.0 vocabulary (multimodal inputs, typed heads,
+    // provider contracts) on the same v3 shape.
+    // Version 6 is the Platform 10.0 EO surface (eo domain truth section) on
+    // the same v3 shape.
+    const int effectiveDeclared =
+      ( info.manifestVersion >= 4 && info.manifestVersion <= 6 ) ? 3 : info.manifestVersion;
+    if ( effectiveDeclared > 0 && effectiveDeclared != shapeVersion )
+      markInvalid( "declared manifest_version " + std::to_string( info.manifestVersion )
+                   + " but the manifest shape is version " + std::to_string( shapeVersion )
+                   + ( shapeVersion == 3 ? " ('inputs' array)" : shapeVersion == 2 ? " ('input' object)"
+                                                                                   : " (legacy flat fields)" ) );
+  }
+
+  // P1-8 order contract: the deferred parse-time findings flush here — after
+  // identity, before any content check emits its own finding.
+  for ( std::string &deferred : p1_8DeferredFindings )
+    markInvalid( std::move( deferred ) );
+  p1_8DeferredFindings.clear();
 
   // --- Platform 9.0 (M7): package identity -------------------------------------
   // `package.aux_files[]`: auxiliary files (class ontology, preprocess config,
@@ -522,44 +627,6 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     {
       markInvalid( "package.aux_files must be an array" );
     }
-  }
-
-  // Platform 4.0 manifest_version: declared values must be 1..4 and must agree
-  // with the manifest's actual shape — a declared version is a contract claim,
-  // and a wrong claim means the author expects different parsing semantics
-  // than the shape delivers.
-  {
-    const QJsonValue declaredVersion = obj.value( QStringLiteral( "manifest_version" ) );
-    if ( declaredVersion.isDouble() )
-    {
-      const int v = declaredVersion.toInt();
-      if ( v < 1 || v > 6 )
-        markInvalid( "manifest_version " + std::to_string( v ) + " is unsupported (1..6)" );
-      else
-        info.manifestVersion = v;
-    }
-    else if ( !declaredVersion.isNull() && !declaredVersion.isUndefined() )
-    {
-      markInvalid( "manifest_version must be an integer (1..6)" );
-    }
-    int shapeVersion = 1;
-    if ( inputsDeclaredAsArray )
-      shapeVersion = 3;
-    else if ( inputDeclaredAsObject )
-      shapeVersion = 2;
-    // Version 4 is the v3 shape plus the 4.0 vocabulary (identity fields,
-    // output.format / output.detection) - it validates against shape 3.
-    // Version 5 is the 7.0 vocabulary (multimodal inputs, typed heads,
-    // provider contracts) on the same v3 shape.
-    // Version 6 is the Platform 10.0 EO surface (eo domain truth section) on
-    // the same v3 shape.
-    const int effectiveDeclared =
-      ( info.manifestVersion >= 4 && info.manifestVersion <= 6 ) ? 3 : info.manifestVersion;
-    if ( effectiveDeclared > 0 && effectiveDeclared != shapeVersion )
-      markInvalid( "declared manifest_version " + std::to_string( info.manifestVersion )
-                   + " but the manifest shape is version " + std::to_string( shapeVersion )
-                   + ( shapeVersion == 3 ? " ('inputs' array)" : shapeVersion == 2 ? " ('input' object)"
-                                                                                   : " (legacy flat fields)" ) );
   }
 
   // --- Platform 7.0: closed-vocabulary key check -----------------------------
@@ -1371,11 +1438,14 @@ std::string ModelDetectionContract::validate() const
     return "output.detection.tensor_layout '" + tensorLayout
              + "' is unsupported (supported: auto, channels_first, channels_last)";
   if ( confThreshold < 0.0 || confThreshold > 1.0 )
-    return "output.detection.conf_threshold must be in [0, 1]";
+    return "output.detection.conf_threshold must be in [0, 1] (declared "
+             + std::to_string( confThreshold ) + ")";
   if ( nmsIou <= 0.0 || nmsIou > 1.0 )
-    return "output.detection.nms_iou must be in (0, 1]";
+    return "output.detection.nms_iou must be in (0, 1] (declared "
+             + std::to_string( nmsIou ) + ")";
   if ( maxDetections < 1 )
-    return "output.detection.max_detections must be >= 1";
+    return "output.detection.max_detections must be >= 1 (declared "
+             + std::to_string( maxDetections ) + ")";
   if ( classes.empty() )
     return "output.detection.classes must declare at least one class name";
   return {};
@@ -1896,10 +1966,11 @@ std::string ModelCatalog::defaultModelsDirectory()
   if ( !envDir.isEmpty() )
     return envDir.toStdString();
 
-  const QDir cwdModels( QDir::current().filePath( QStringLiteral( "models" ) ) );
-  if ( cwdModels.exists() )
-    return cwdModels.absolutePath().toStdString();
-
+  // Review P1-6: the process working directory is NOT a model search root.
+  // Manifests select the worker process a model runs in, so a "models/"
+  // folder in an untrusted launch directory (shared drive, course pack,
+  // student folder) must never outrank — or silently replace — the bundled
+  // catalog. Use SICNU_MODELS_DIR to point at a project-local catalog.
   if ( QCoreApplication::instance() )
   {
     const QDir appModels( QCoreApplication::applicationDirPath()
@@ -1917,7 +1988,12 @@ std::string ModelCatalog::defaultModelsDirectory()
   }
 #endif
 
-  return QDir::current().filePath( QStringLiteral( "models" ) ).toStdString();
+  // Nothing exists yet: name the bundled location (never the CWD, and never
+  // an empty string — QDir("") would scan the working directory).
+  if ( QCoreApplication::instance() )
+    return QDir( QCoreApplication::applicationDirPath() + QStringLiteral( "/../models" ) )
+      .absolutePath().toStdString();
+  return QDir::home().filePath( QStringLiteral( ".exp-rs/models" ) ).toStdString();
 }
 
 void ModelCatalog::setDirectory( const std::string &dir )
@@ -1940,6 +2016,10 @@ bool ModelCatalog::verifyArtifactLocked( ModelInfo &info ) const
 {
   auto fail = [&info]( ModelReadiness state, std::string reason ) {
     info.readiness = state;
+    // P1-8: the artifact/digest family reports through the SAME path-prefixed
+    // shape as parseManifest's markInvalid — one error contract surface.
+    if ( !info.sourceManifest.empty() )
+      reason = info.sourceManifest + ": " + reason;
     info.readinessReason = std::move( reason );
     return false;
   };
@@ -2749,17 +2829,30 @@ Json::Value ModelCatalog::inspect( const std::string &idOrName ) const
 
 std::vector<std::string> ModelCatalog::validateManifestJson( const std::string &json ) const
 {
+  return validateManifestJson( json, std::string() );
+}
+
+std::vector<std::string> ModelCatalog::validateManifestJson( const std::string &json,
+                                                             const std::string &manifestPath ) const
+{
   std::vector<std::string> issues;
+  const auto prefix = [&manifestPath]( std::string message ) {
+    if ( !manifestPath.empty() )
+      message = manifestPath + ": " + message;
+    return message;
+  };
   QJsonParseError parseError{};
   const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ), &parseError );
   if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
   {
-    issues.push_back( "manifest is not valid JSON: " + parseError.errorString().toStdString() );
+    issues.push_back( prefix( "manifest is not valid JSON: " + parseError.errorString().toStdString() ) );
     return issues;
   }
-  ModelInfo info = parseManifest( doc.object(), std::string() );
+  // The manifest path flows into parseManifest so every markInvalid finding
+  // carries the path prefix (P1-8 quadruple: path + field + expected/actual).
+  ModelInfo info = parseManifest( doc.object(), manifestPath );
   if ( info.name.empty() )
-    issues.push_back( "manifest has no 'name'" );
+    issues.push_back( prefix( "manifest has no 'name'" ) );
   if ( info.readiness == ModelReadiness::InvalidManifest && !info.readinessReason.empty() )
     issues.push_back( info.readinessReason );
   return issues;

@@ -24,6 +24,8 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <stdexcept>
 #include <string>
 
 namespace sicnu::runtime::chunk
@@ -52,14 +54,56 @@ struct TileRunPartition
     int bandOffset = 0; ///< provenance: first source band carried by payloads
     int timeIndex = 0;  ///< provenance: temporal chunk index (0 = single step)
 
-    int tilesAcross() const { return ( rasterWidth + tileWidth - 1 ) / tileWidth; }
-    int tilesDown() const { return ( rasterHeight + tileHeight - 1 ) / tileHeight; }
+    // Overflow contract (#1056 discipline, mirrored from buildTileGrid): the
+    // partition arithmetic previously ran in plain int — a zero/negative tile
+    // or raster dimension was a division-by-zero UB and dims near INT_MAX
+    // wrapped. All math is int64 and typed-thrown when the result cannot be
+    // represented; the typed checks run in EVERY build type.
+    int tilesAcross() const
+    {
+        if ( tileWidth <= 0 || rasterWidth <= 0 )
+            throw std::invalid_argument( "TileRunPartition: raster and tile dimensions must be "
+                                         "positive (raster "
+                                         + std::to_string( rasterWidth ) + " x tile "
+                                         + std::to_string( tileWidth ) + ")" );
+        const std::int64_t cols64 =
+            ( static_cast<std::int64_t>( rasterWidth ) + tileWidth - 1 ) / tileWidth;
+        if ( cols64 > std::numeric_limits<int>::max() )
+            throw std::overflow_error( "TileRunPartition: tilesAcross " + std::to_string( cols64 )
+                                       + " overflows the int tile index domain — shrink the tile "
+                                         "size or bound the raster extent first" );
+        return static_cast<int>( cols64 );
+    }
+    int tilesDown() const
+    {
+        if ( tileHeight <= 0 || rasterHeight <= 0 )
+            throw std::invalid_argument( "TileRunPartition: raster and tile dimensions must be "
+                                         "positive (raster "
+                                         + std::to_string( rasterHeight ) + " x tile "
+                                         + std::to_string( tileHeight ) + ")" );
+        const std::int64_t rows64 =
+            ( static_cast<std::int64_t>( rasterHeight ) + tileHeight - 1 ) / tileHeight;
+        if ( rows64 > std::numeric_limits<int>::max() )
+            throw std::overflow_error( "TileRunPartition: tilesDown " + std::to_string( rows64 )
+                                       + " overflows the int tile index domain — shrink the tile "
+                                         "size or bound the raster extent first" );
+        return static_cast<int>( rows64 );
+    }
     /// Total logical tiles (never materialized: O(1) arithmetic, safe for
-    /// 10^6+ tile plans).
+    /// 10^6+ tile plans). Typed-thrown when the grid leaves the int tile
+    /// index domain (same bound as buildTileGrid).
     std::uint64_t totalTiles() const
     {
-        return static_cast<std::uint64_t>( tilesAcross() )
-               * static_cast<std::uint64_t>( tilesDown() );
+        const std::int64_t cols64 = static_cast<std::int64_t>( tilesAcross() );
+        const std::int64_t rows64 = static_cast<std::int64_t>( tilesDown() );
+        const std::int64_t total64 = cols64 * rows64;
+        if ( total64 > std::numeric_limits<int>::max() )
+            throw std::overflow_error( "TileRunPartition: tile grid " + std::to_string( cols64 )
+                                       + "x" + std::to_string( rows64 ) + " ("
+                                       + std::to_string( total64 )
+                                       + " tiles) overflows the int tile index domain — shrink "
+                                         "the tile size or bound the raster extent first" );
+        return static_cast<std::uint64_t>( total64 );
     }
 };
 
@@ -108,14 +152,22 @@ struct TileRunSpec
 
 /// O(1) tile lookup equivalent to buildTileGrid()[index] without
 /// materializing the grid (million-tile plans stay arithmetic-only).
+/// Throws std::invalid_argument when @p index is outside the partition and
+/// std::overflow_error when the grid leaves the int domain (same typed
+/// bounds as buildTileGrid / TileRunPartition).
 /// Equality with buildTileGrid is contract-tested in
 /// tests/test_execution_scale_fault_11.cpp.
 inline TileSpec tileSpecAt( const TileRunPartition &p, std::uint64_t index )
 {
+    const std::uint64_t total = p.totalTiles(); // typed: overflow-refusing
+    if ( index >= total )
+        throw std::invalid_argument( "tileSpecAt: tile index " + std::to_string( index )
+                                     + " outside the partition range (0.."
+                                     + std::to_string( total - 1 ) + ")" );
     const std::uint64_t across = static_cast<std::uint64_t>( p.tilesAcross() );
     TileSpec t;
     t.index = static_cast<int>( index );
-    t.totalTiles = static_cast<int>( p.totalTiles() );
+    t.totalTiles = static_cast<int>( total );
     t.xOffset = static_cast<int>( ( index % across ) * static_cast<std::uint64_t>( p.tileWidth ) );
     t.yOffset = static_cast<int>( ( index / across ) * static_cast<std::uint64_t>( p.tileHeight ) );
     t.width = p.tileWidth < p.rasterWidth - t.xOffset ? p.tileWidth : p.rasterWidth - t.xOffset;

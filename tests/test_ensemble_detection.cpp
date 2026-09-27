@@ -677,6 +677,13 @@ TEST_CASE( "detection ensemble refusals stay typed", "[models][ensemble][detecti
   DetectionHead headA;
   headA.candidates = { { 8, 8, 4, 4, 1.0f, 0.9f, 0.1f } };
   const DetectionProviderGuard guardA( "detfw-a", headA );
+  // seg-b runs on its own framework and needs a loadable provider too: the
+  // case asserts the typed TASK-contract refusal ("cannot run as a detection
+  // member"), which the chain only reaches when every member's provider can
+  // actually load. Without it the run dies earlier with the generic
+  // provider-unavailable error (order-dependent under ctest's per-case
+  // processes, where an earlier case's detfw-b registration is absent).
+  const DetectionProviderGuard guardB( "detfw-b", headA );
   QTemporaryDir dir;
   registerManifest( detectionMemberManifest( "det-a", "detfw-a", { "tree", "shrub" } ),
                     dir.filePath( QStringLiteral( "det-a/model.json" ) ).toStdString() );

@@ -33,14 +33,31 @@ quint64 RsScanPool::nextGeneration( const void *owner )
 void RsScanPool::cancel( quint64 generation, const void *owner )
 {
     const std::lock_guard<std::mutex> lock( m_canceledMutex );
-    if ( owner )
-        m_ownerActiveGeneration.erase( owner );
-    // Bound the set: a worker only ever polls its own (recent) token, so
-    // entries can be retired wholesale once the set grows large — by then
-    // the matching workers finished long ago.
-    if ( m_canceled.size() >= 1024 )
-        m_canceled.clear();
+    // F-07 (ui-backend-state-parity-r4): keep the owner's generation record.
+    // Erasing it left a canceled-but-not-superseded generation with only the
+    // canceled set as its staleness anchor — and the wholesale clear() below
+    // wiped that too, so an expired scan could still land (SP-2).
+    //
+    // Bound the set without losing live guarantees: entries below the
+    // minimum live generation (global + every owner's last issued one) are
+    // already stale by the generation comparison alone, so only those are
+    // retired.
     m_canceled.insert( generation );
+    if ( m_canceled.size() < 1024 )
+        return;
+    quint64 minLive = m_activeGeneration.load( std::memory_order_acquire );
+    for ( const auto &entry : m_ownerActiveGeneration )
+    {
+        if ( entry.second < minLive )
+            minLive = entry.second;
+    }
+    for ( auto it = m_canceled.begin(); it != m_canceled.end(); )
+    {
+        if ( *it < minLive )
+            it = m_canceled.erase( it );
+        else
+            ++it;
+    }
 }
 
 } // namespace sicnu::app

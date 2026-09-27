@@ -77,6 +77,18 @@ int main(int argc, char *argv[])
     std::signal( SIGINT, handleSignal );
     std::signal( SIGTERM, handleSignal );
 
+    // Track 14: QgsApplication derives QApplication, whose platform
+    // integration consumes `-name/--name <value>` (the classic X11
+    // application-name option) out of argv DURING construction — before any
+    // of our code runs. dataset/experiment `--name <x>` therefore never
+    // reached the command layer: master's `dataset create --name x` failed
+    // with "--name is required" on every invocation. Route from a snapshot
+    // of the user's argv taken before the Qt constructor runs.
+    QStringList originalArguments;
+    originalArguments.reserve( argc );
+    for ( int i = 0; i < argc; ++i )
+        originalArguments << QString::fromLocal8Bit( argv[i] );
+
     QgsApplication app(argc, argv, false);
     app.setApplicationName("sicnu_geo_rs_cli");
     QCoreApplication::setApplicationVersion("0.9.2-dev");
@@ -206,7 +218,7 @@ int main(int argc, char *argv[])
     // SICNU_OFFLINE engages the process-wide refusal of remote inputs plus the
     // GDAL cloud-/vsi* deny. Engaged before routing so CLI 3.0 subcommands
     // (which parse their own flags) honor it without knowing it exists.
-    QStringList routedArguments = app.arguments();
+    QStringList routedArguments = originalArguments;
     const bool offlineFlag = routedArguments.removeAll( QStringLiteral( "--offline" ) ) > 0;
     if ( offlineFlag || sicnu::data::offline::enabledFromEnv() )
     {

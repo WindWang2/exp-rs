@@ -1,0 +1,56 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 1,
+    "pages_requested" : 0,
+    "rows_materialized" : 0,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Release",
+    "compiler" : "gcc 16",
+    "cores" : 16,
+    "cpu_model" : "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "os" : "linux"
+  },
+  "extra" : 
+  {
+    "output_sum" : 5592760990.4125452
+  },
+  "generated_at" : "2026-09-27T00:06:15Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 1870.4639999999999,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 114,
+    "peak_rss_mb" : 68,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 1324,
+    "wall_ms" : 1802.9963620000001,
+    "write_bytes" : 0,
+    "write_ops" : 1182
+  },
+  "scale" : 
+  {
+    "items" : 16777216,
+    "kind" : "small",
+    "probes" : 2
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "bound_mb" : 97.0,
+    "gdal_cache_pinned_mb" : 64,
+    "promise" : "ADR 0089 block-wise O(tile); rs_change_primitives 256\u00b2 double buffer",
+    "tile_pixels" : 65536
+  },
+  "workload" : "guard_change_detection_rss"
+}

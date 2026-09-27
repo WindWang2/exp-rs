@@ -90,9 +90,11 @@ struct AcquireResult
 };
 
 /// Pooled session manager with VRAM budget admission and identity-keyed
-/// reuse. Fairness: one in-flight load per model id, and a bounded number of
-/// live sessions per device (default 2) so many small models cannot evict a
-/// big one. Thread-safe.
+/// reuse. Fairness: a bounded number of live sessions per device
+/// (kMaxSessionsPerDevice = 4, the warm-session fairness bound behind the
+/// VRAM budget — which is the primary limiter) so many small models cannot
+/// evict a big one. Released (warm) sessions keep occupying their bound slot
+/// until evicted. Thread-safe.
 class ModelSessionPool
 {
   public:

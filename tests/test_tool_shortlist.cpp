@@ -85,6 +85,13 @@ TEST_CASE( "The rendered page respects the hard byte budget with visible truncat
 TEST_CASE( "Capability operators serving an intent outrank loose description matches",
            "[tool_shortlist]" )
 {
+  // Self-sufficient warm-up: ctest's PRE_TEST discovery runs every case in
+  // its own process. loadHarnessKnowledge() pins the source-tree directories
+  // (default search paths do not resolve from the test working directory);
+  // in whole-binary runs an earlier case warmed the singletons and masked
+  // the cold-start emptiness.
+  loadHarnessKnowledge();
+
   const Json::Value page = toolShortlist( "ndvi", Json::Value(), Json::Value(), 24 );
   REQUIRE( !page["items"].empty() );
   // The top operator item must serve the intent through capability knowledge,

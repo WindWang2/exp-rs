@@ -211,9 +211,13 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
                 }
                 const QString abs = QDir( repoRoot ).filePath( rel );
                 QFileInfo fi( abs );
+                qint64 canonicalSize = -1;
                 if ( fi.exists() && fi.isFile() )
                 {
-                    sum += fi.size();
+                    // Canonical口径 (git bytes), matching the pins the
+                    // foundry committed — a CRLF checkout must not drift.
+                    canonicalSize = canonicalFileSize( abs );
+                    sum += canonicalSize > 0 ? canonicalSize : 0;
                     // Digest verification (strength follows the tier, as in
                     // the pack authority): declared sha256 on a committed
                     // fixture is a hard check, elsewhere an informative
@@ -223,7 +227,7 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
                     if ( !in.sha256.empty() )
                     {
                         const QString declaredSha = QString::fromStdString( in.sha256 );
-                        const QString actual = sha256OfFile( abs );
+                        const QString actual = canonicalFileSha256( abs );
                         if ( actual != declaredSha )
                         {
                             // Strength follows the tier (leaf policy): only
@@ -254,14 +258,15 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
                 {
                     declaredPerInputSum += in.declaredBytes;
                     // Byte pin: hard for committed fixtures (drift means the
-                    // deployment is not the audited one), informative elsewhere.
-                    if ( fi.exists() && fi.isFile()
-                         && in.declaredBytes != static_cast<qint64>( fi.size() ) )
+                    // deployment is not the audited one), informative
+                    // elsewhere. Compared on the canonical口径 so a Windows
+                    // CRLF checkout does not fake a drift.
+                    if ( canonicalSize >= 0 && in.declaredBytes != canonicalSize )
                         e.issues.push_back(
                           { QStringLiteral( "byte_mismatch" ), at,
                             QStringLiteral( "declared %1 bytes, actual %2" )
                               .arg( in.declaredBytes )
-                              .arg( static_cast<qint64>( fi.size() ) ),
+                              .arg( canonicalSize ),
                             committed ? QStringLiteral( "error" ) : QStringLiteral( "warning" ) } );
                 }
             }

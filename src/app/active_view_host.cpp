@@ -99,16 +99,13 @@ ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
     }
 
     // #778 companion: a removed layer leaves QgsMapCanvas::currentLayer()
-    // dangling — the canvas is never notified. Clear it before the layer
-    // object is destroyed.
-    if ( m_mapCanvas )
-    {
-        connect( QgsProject::instance(), qOverload<QgsMapLayer *>( &QgsProject::layerWillBeRemoved ),
-                 this, [this]( QgsMapLayer *layer ) {
-                     if ( m_mapCanvas && layer && m_mapCanvas->currentLayer() == layer )
-                         m_mapCanvas->setCurrentLayer( nullptr );
-                 } );
-    }
+    // dangling — the canvas is never notified. F-09
+    // (ui-backend-state-parity-r4): this write-back is owned by the single
+    // selection authority (SelectionContext::handleLayerWillBeRemoved,
+    // selection_context.cpp), which is always attached in this window and
+    // covers the same removal event. The duplicate second writer here was
+    // removed so the canvas cleanup has exactly one author; standalone
+    // canvas owners outside a shell window must provide their own guard.
 }
 
 ActiveViewHost::~ActiveViewHost() = default;

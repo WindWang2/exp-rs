@@ -1,0 +1,51 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 1,
+    "pages_requested" : 0,
+    "rows_materialized" : 1024,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Release",
+    "compiler" : "gcc 16",
+    "cores" : 16,
+    "cpu_model" : "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "os" : "linux"
+  },
+  "extra" : {},
+  "generated_at" : "2026-09-27T00:10:18Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 219.51300000000003,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 126,
+    "peak_rss_mb" : 27,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 205,
+    "wall_ms" : 214.20523,
+    "write_bytes" : 0,
+    "write_ops" : 85
+  },
+  "scale" : 
+  {
+    "items" : 1048576,
+    "kind" : "small",
+    "probes" : 1
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "memory_unit" : "tile",
+    "tile_pixels" : 65536
+  },
+  "workload" : "obs_op_spectral_index_stream"
+}

@@ -21,6 +21,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
+#include <vector>
 #include <sstream>
 
 namespace sicnu::operators::rs {
@@ -196,11 +198,25 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
         outputPath = fi.dir().filePath(fi.completeBaseName() + QStringLiteral("_recode.tif")).toStdString();
     }
 
-    QMap<int, int> recodeMap = parseRecodeMap(params);
+    const QMap<int, int> recodeMap = parseRecodeMap(params);
     if (recodeMap.isEmpty()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "recode_map must contain at least one valid {from_class: to_class} mapping");
     }
+    // Flat copy for the per-pixel sweeps: class maps are tiny (cache-resident),
+    // so a linear scan over contiguous pairs beats a tree walk per pixel.
+    // Semantics are identical to QMap::value(lbl, lbl).
+    std::vector<std::pair<int, int>> flatMap;
+    flatMap.reserve( static_cast<size_t>( recodeMap.size() ) );
+    for ( auto it = recodeMap.cbegin(); it != recodeMap.cend(); ++it )
+        flatMap.emplace_back( it.key(), it.value() );
+    auto mapLabel = [&flatMap](int lbl) -> int {
+        for (const auto &mapping : flatMap) {
+            if (mapping.first == lbl)
+                return mapping.second;
+        }
+        return lbl;
+    };
 
     context.logInfo("Running class recode on " + inputPath);
     context.reportProgress(0.1, "Loading classification label raster");
@@ -261,8 +277,7 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
                                       "Failed to read label band: " + inputPath);
             }
             for (size_t i = 0; i < n; ++i) {
-                const int lbl = toLabel(block[i]);
-                const int v = recodeMap.value(lbl, lbl);
+                const int v = mapLabel(toLabel(block[i]));
                 outMin = std::min(outMin, static_cast<double>(v));
                 outMax = std::max(outMax, static_cast<double>(v));
             }
@@ -317,22 +332,26 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
                 throw RSOperatorError(ErrorCode::GdalError,
                                       "Failed to read label band: " + inputPath);
             }
-            for (size_t i = 0; i < n; ++i) {
-                const int lbl = toLabel(block[i]);
-                const int v = recodeMap.value(lbl, lbl);
-                outBlock[i] = v;
-            }
+            // Fused map + typed-store: the pass used to fill the int block,
+            // then copy it sample-by-sample into the typed block. Mapping and
+            // narrowing are fused into one pass per output dtype (the pass-1
+            // range scan already picked gdt, so narrowing here is exact —
+            // labels are integral and the range guard chose the width).
             const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
                                              blockIndex, totalBlocks};
-            const void *pixels = outBlock.data();
+            const void *pixels = nullptr;
             if (gdt == GDT_Byte) {
                 for (size_t i = 0; i < n; ++i)
-                    u8Block[i] = static_cast<quint8>(outBlock[i]);
+                    u8Block[i] = static_cast<quint8>(mapLabel(toLabel(block[i])));
                 pixels = u8Block.data();
             } else if (gdt == GDT_UInt16) {
                 for (size_t i = 0; i < n; ++i)
-                    u16Block[i] = static_cast<quint16>(outBlock[i]);
+                    u16Block[i] = static_cast<quint16>(mapLabel(toLabel(block[i])));
                 pixels = u16Block.data();
+            } else {
+                for (size_t i = 0; i < n; ++i)
+                    outBlock[i] = mapLabel(toLabel(block[i]));
+                pixels = outBlock.data();
             }
             // writeTile writes floats; typed label blocks go through the raw
             // window writer so the output keeps the label dtype.
@@ -364,7 +383,7 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
             QHash<int, RsClassDef> remappedDefs;
             for (auto it = classDefs.constBegin(); it != classDefs.constEnd(); ++it) {
                 int oldId = it.key();
-                int newId = recodeMap.value(oldId, oldId);
+                int newId = mapLabel(oldId);
                 RsClassDef oldDef = it.value();
                 RsClassDef newDef( newId, oldDef.name(), oldDef.color() );
                 if (!remappedDefs.contains(newId)) {

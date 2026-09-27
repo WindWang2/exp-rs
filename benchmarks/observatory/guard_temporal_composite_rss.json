@@ -1,0 +1,58 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 1,
+    "pages_requested" : 0,
+    "rows_materialized" : 0,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Release",
+    "compiler" : "gcc 16",
+    "cores" : 16,
+    "cpu_model" : "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "os" : "linux"
+  },
+  "extra" : 
+  {
+    "output_sum" : 8388725632.9213657,
+    "scenes" : 6
+  },
+  "generated_at" : "2026-09-27T00:06:10Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 5101.7780000000012,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 115,
+    "peak_rss_mb" : 76,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 3769,
+    "wall_ms" : 4931.5114290000001,
+    "write_bytes" : 0,
+    "write_ops" : 1355
+  },
+  "scale" : 
+  {
+    "items" : 16777216,
+    "kind" : "small",
+    "probes" : 6
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "bound_mb" : 352.0,
+    "gdal_cache_pinned_mb" : 64,
+    "promise" : "docs/USER_GUIDE.md:1227 T\u00d7tile\u00d74B \u2264 256MiB shrink rule",
+    "scenes" : 6,
+    "tile_pixels" : 65536
+  },
+  "workload" : "guard_temporal_composite_rss"
+}

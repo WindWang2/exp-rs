@@ -112,7 +112,22 @@
     ],
     "schema_version" : 2,
     "summary" : "\u5149\u8c31\u2014\u7a7a\u95f4\u878d\u5408\uff1a\u5bf9\u76ee\u6807\u68c0\u6d4b\u5f97\u5206\u56fe\u505a\u5c40\u90e8\u7a97\u53e3\u805a\u5408\uff08mean \u5747\u503c\u6216 bilateral \u4fdd\u8fb9\uff09\uff0c\u6291\u5236\u5b64\u7acb\u5355\u50cf\u7d20\u865a\u8b66\uff0c\u65e0\u6548\u50cf\u5143\u4e0d\u53c2\u4e0e\u90bb\u57df\u805a\u5408\u3002",
-    "teaching_use" : {}
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5f97\u5206\u56fe\u90bb\u57df\u805a\u5408",
+        "\u5747\u503c\u6ee4\u6ce2",
+        "\u53cc\u8fb9\u6ee4\u6ce2\uff08\u4fdd\u8fb9\uff09",
+        "\u865a\u8b66\u6291\u5236"
+      ],
+      "courses" : 
+      [
+        "\u76ee\u6807\u68c0\u6d4b",
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u76ee\u6807\u68c0\u6d4b\u5f97\u5206\u56fe\u5206\u522b\u7528 mean \u4e0e bilateral \u805a\u5408\uff0c\u6bd4\u8f83\u5b64\u7acb\u865a\u8b66\u6291\u5236\u6548\u679c\u4e0e\u76ee\u6807\u8fb9\u7f18\u4fdd\u6301\u7684\u6743\u8861\u3002"
+    }
   },
   "description" : "Fuse a spectral score raster with its local spatial consistency: a NoData-aware convex combination of the score and the valid window mean (or edge-preserving bilateral aggregate).",
   "display_name" : "Spectral-Spatial Fuse",

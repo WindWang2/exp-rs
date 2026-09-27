@@ -633,7 +633,9 @@ class ModelCatalog {
     /// Currently scanned directory (defaultModelsDirectory() until overridden).
     std::string directory() const;
 
-    /// Default models directory resolution (env → cwd → app-relative).
+    /// Default models directory resolution: SICNU_MODELS_DIR → <app>/../models
+    /// → build-tree source models (dev builds). The CWD is never searched
+    /// (review P1-6: an untrusted launch directory must not supply manifests).
     static std::string defaultModelsDirectory();
 
     /// (Re)reads every models/<name>/model.json under the directory.
@@ -685,6 +687,11 @@ class ModelCatalog {
     /// (empty = valid). Checks JSON well-formedness, required fields and the
     /// full contract sanity (the same checks a scan applies).
     std::vector<std::string> validateManifestJson( const std::string &json ) const;
+    /// Path-carrying variant (P1-8 error contract): every finding is prefixed
+    /// with @p manifestPath so rejections are actionable — manifest path +
+    /// field name + expected/actual (order: identity before content).
+    std::vector<std::string> validateManifestJson( const std::string &json,
+                                                   const std::string &manifestPath ) const;
 
     /// Resolve "id" or "id@version" (Platform 4.0 identity reference).
     /// "id" matches the sole entry with that id (nullopt with @a error set

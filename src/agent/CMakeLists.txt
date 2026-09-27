@@ -275,6 +275,13 @@ target_link_libraries(sicnu_agent PUBLIC
   # RS14-12: teaching autonomy policy leaf (Qt-free); hosts the L0..L5
   # decision engine the lab copilot and the plan executor gate on.
   Sicnu::autonomy
+  # Track 14 unblock: lsisnu_agent.so references
+  # agent_loop::VerificationReport::aggregate (agent-ops session driver)
+  # but was never linked against the archive — every downstream executable
+  # link failed with an undefined reference. One-line inherited master
+  # link-graph repair (same class as open PR #1335); drop on rebase if
+  # #1335 lands first.
+  sicnu_agent_loop
   # RS14-15 Explainable Workflow: explain core + live adapters (registry
   # knowledge, workflow projection) behind the explain:step tool surface.
   Sicnu::explain_adapters
@@ -286,9 +293,23 @@ target_link_libraries(sicnu_agent PUBLIC
   # repair_capability_source adapts the live knowledge to the repair
   # planner's provider seam (Qt-free leaf).
   sicnu_repair_planner
+  # agent_session_adapter (tools/) implements the agent_loop seams and calls
+  # VerificationReport::aggregate (session_seams.cpp); its public header
+  # exposes agent_loop types, hence PUBLIC. Missing before: every consumer
+  # of libsicnu_agent.so failed to link on the undefined symbol.
+  sicnu_agent_loop
   # sicnu.lab-pack/1: lab_data_pack is a Qt façade over the Qt-free shared
   # leaf — the ONE parser/validator shared with sicnu::teaching_admin.
   sicnu_lab_pack
+  # agent/tools/agent_session_adapter.cpp consumes the agent_loop verification
+  # seams (VerificationReport::aggregate) — without this link every executable
+  # linking sicnu_agent fails with an undefined-symbol/DSO error (master link
+  # break tracked by open PR #1335; minimal unlock for the R4 model-runtime
+  # track's own verification, semantics untouched).
+  sicnu_agent_loop
+  # mcp_server.h routes agent:ops through OpsDriver — same #1335 link-graph
+  # class as above (undefined OpsDriver::apply at every consumer's link).
+  sicnu_agent_ops
   ${JSONCPP_LIBRARIES}
 )
 

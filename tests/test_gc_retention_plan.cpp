@@ -11,6 +11,7 @@
 #include "data/governance/workspace_service.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
+#include "experiment/evaluation.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -298,6 +299,17 @@ TEST_CASE( "experiment run retention: benchmark-cited runs are not pruned (#1173
     result.setBenchmarkId( QStringLiteral( "bench-a" ) );
     result.setBenchmarkVersion( 1 );
     result.setExperimentRunId( QStringLiteral( "cited-run" ) );
+    // The store's read gate is fail-closed: benchmarkResultById parses the
+    // row through EvaluationProtocol::fromJson, whose validate() requires a
+    // dataset version + split manifest. A result without a protocol is not
+    // a persistable benchmark result — give the fixture a valid one.
+    {
+        EvaluationProtocol protocol;
+        protocol.setDatasetVersionId( QStringLiteral( "dv-gc" ) );
+        protocol.setSplitManifestId( QStringLiteral( "sp-gc" ) );
+        REQUIRE( protocol.validate().has_value() );
+        result.setProtocol( protocol );
+    }
     REQUIRE( store.saveBenchmarkResult( result ).has_value() );
 
     ExperimentStore::RunPrunePolicy policy;
@@ -340,6 +352,13 @@ TEST_CASE( "experiment run retention: keepWithBenchmarkCitation=false cannot str
     result.setBenchmarkId( QStringLiteral( "bench-a" ) );
     result.setBenchmarkVersion( 1 );
     result.setExperimentRunId( QStringLiteral( "cited-run" ) );
+    {
+        EvaluationProtocol protocol;
+        protocol.setDatasetVersionId( QStringLiteral( "dv-gc" ) );
+        protocol.setSplitManifestId( QStringLiteral( "sp-gc" ) );
+        REQUIRE( protocol.validate().has_value() );
+        result.setProtocol( protocol );
+    }
     REQUIRE( store.saveBenchmarkResult( result ).has_value() );
 
     ExperimentStore::RunPrunePolicy policy;

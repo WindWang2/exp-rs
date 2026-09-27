@@ -216,3 +216,102 @@ TEST_CASE( "ExecutionResultCache with V2 fingerprints", "[workflow][v2][cache]" 
   cache.clear();
   cache.setEnabled( false );
 }
+
+// --- Track 10 durability R4: cache-coherence contracts ----------------------
+//
+// ADR 0125 §3: the cache hashes identity + revision, never a file path, so a
+// downstream entry is keyed on the UPSTREAM OUTPUT'S REVISION — the content
+// lineage, not the node id or the path. These cases pin the invalidation
+// semantics that crash/resume correctness silently depends on: an upstream
+// re-run must strand the downstream entry, a targeted invalidate must not
+// over-invalidate sibling lineages, and a disabled cache must never serve.
+
+TEST_CASE( "An upstream re-run (new output revision) moves the downstream cache key",
+           "[workflow][r4][cache][invalidation]" )
+{
+  auto &cache = ExecutionResultCache::instance();
+  cache.clear();
+  cache.setEnabled( true );
+
+  const AssetId upstreamOut = AssetId::generate();
+  const AssetId downstreamOutV1 = AssetId::generate();
+  const AssetId downstreamOutV2 = AssetId::generate();
+
+  TaggedDerivationInput fromUpstream;
+  fromUpstream.assetId = upstreamOut;
+  fromUpstream.revision = AssetRevision::fromValue( 1 ); // upstream pass 1
+  fromUpstream.fromPort = "output";
+  fromUpstream.toPort = "input";
+
+  QJsonObject params;
+  params["kernel"] = 3;
+
+  const auto downstreamFpV1 =
+    makeExecutionFingerprintV2( "rs:majority_filter", "1.0", params, { fromUpstream } );
+  REQUIRE( downstreamFpV1.isValid() );
+
+  cache.store( downstreamFpV1, downstreamOutV1 );
+  auto hit = cache.lookup( downstreamFpV1 );
+  REQUIRE( hit.has_value() );
+  REQUIRE( *hit == downstreamOutV1 );
+
+  // Upstream re-runs: same node id, same path semantics, NEW content
+  // revision. The downstream key derived from the OLD revision must no
+  // longer be served — the invalidation travels through the fingerprint,
+  // not through any per-node bookkeeping.
+  TaggedDerivationInput fromUpstreamRerun = fromUpstream;
+  fromUpstreamRerun.revision = AssetRevision::fromValue( 2 );
+  const auto downstreamFpV2 =
+    makeExecutionFingerprintV2( "rs:majority_filter", "1.0", params, { fromUpstreamRerun } );
+  REQUIRE( downstreamFpV2.isValid() );
+  REQUIRE_FALSE( downstreamFpV2 == downstreamFpV1 );
+  REQUIRE_FALSE( cache.lookup( downstreamFpV2 ).has_value() );
+
+  // The downstream re-execution under the new revision seeds a fresh entry;
+  // the stale entry is stranded at its own key — nothing serves it for the
+  // new lineage, and the targeted invalidate removes it without over-reach.
+  cache.store( downstreamFpV2, downstreamOutV2 );
+  REQUIRE( *cache.lookup( downstreamFpV2 ) == downstreamOutV2 );
+  REQUIRE( *cache.lookup( downstreamFpV1 ) == downstreamOutV1 ); // still addressable by its own key
+  cache.invalidate( downstreamFpV1 );
+  REQUIRE_FALSE( cache.lookup( downstreamFpV1 ).has_value() );
+  REQUIRE( *cache.lookup( downstreamFpV2 ) == downstreamOutV2 ); // targeted, not over-reached
+
+  cache.clear();
+  cache.setEnabled( false );
+}
+
+TEST_CASE( "A content digest on the input lineage changes the key even at an equal revision",
+           "[workflow][r4][cache][invalidation]" )
+{
+  auto &cache = ExecutionResultCache::instance();
+  cache.clear();
+  cache.setEnabled( true );
+
+  const AssetId asset = AssetId::generate();
+  TaggedDerivationInput in;
+  in.assetId = asset;
+  in.revision = AssetRevision::fromValue( 1 );
+  in.toPort = "input";
+
+  QJsonObject params;
+  params["mode"] = "point";
+
+  // #749's threat at the fingerprint level: an out-of-band same-revision
+  // rewrite registers as a different lazy content digest, and THAT alone
+  // must move the key — a stat-only identity would serve foreign bytes.
+  const auto fpBefore = makeExecutionFingerprintV2( "rs:op", "1.0", params, { in } );
+  TaggedDerivationInput rewritten = in;
+  rewritten.lazyContentDigest = "digest-of-rewritten-bytes";
+  const auto fpAfter = makeExecutionFingerprintV2( "rs:op", "1.0", params, { rewritten } );
+
+  REQUIRE( fpBefore.isValid() );
+  REQUIRE( fpAfter.isValid() );
+  REQUIRE_FALSE( fpBefore == fpAfter );
+
+  cache.store( fpBefore, AssetId::generate() );
+  REQUIRE_FALSE( cache.lookup( fpAfter ).has_value() );
+
+  cache.clear();
+  cache.setEnabled( false );
+}

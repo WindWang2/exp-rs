@@ -56,16 +56,24 @@ void addFinding( LeakageReport &report, LeakageKind kind, const AuditSample &a,
     }
     finding.sampleA = a.input.sampleId < b.input.sampleId ? a.input.sampleId : b.input.sampleId;
     finding.sampleB = a.input.sampleId < b.input.sampleId ? b.input.sampleId : a.input.sampleId;
+    // The evidence must follow the ID-SORTED pair, not the enumeration
+    // order: bucket scans can hand the same unordered pair in either
+    // argument order, and role_a/role_b (or fold_a/fold_b) attached to the
+    // wrong side would make the report bytes depend on container iteration
+    // order even though the findings sequence is sorted below.
+    const bool aIsFirst = a.input.sampleId <= b.input.sampleId;
+    const AuditSample &first = aIsFirst ? a : b;
+    const AuditSample &second = aIsFirst ? b : a;
     QJsonObject proof = evidence;
     if ( foldBased )
     {
-        proof.insert( QStringLiteral( "fold_a" ), a.fold );
-        proof.insert( QStringLiteral( "fold_b" ), b.fold );
+        proof.insert( QStringLiteral( "fold_a" ), first.fold );
+        proof.insert( QStringLiteral( "fold_b" ), second.fold );
     }
     else
     {
-        proof.insert( QStringLiteral( "role_a" ), splitRoleToString( a.role ) );
-        proof.insert( QStringLiteral( "role_b" ), splitRoleToString( b.role ) );
+        proof.insert( QStringLiteral( "role_a" ), splitRoleToString( first.role ) );
+        proof.insert( QStringLiteral( "role_b" ), splitRoleToString( second.role ) );
     }
     finding.evidence = proof;
     report.findings().append( finding );
@@ -418,7 +426,21 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             const auto otherIt = byId.constFind( sample.pairCounterpartId );
             if ( otherIt == byId.constEnd() )
                 continue;
+            // Each unordered pair once: both endpoints carry the counterpart
+            // id, and emitting from both sides duplicated the finding (the
+            // kind count read as two contacts where one existed).
+            if ( !( sample.input.sampleId < samples.at( *otherIt ).input.sampleId ) )
+                continue;
             const AuditSample &other = samples.at( *otherIt );
+            // Dedup only genuinely SYMMETRIC pairs (both endpoints link
+            // back): emit once, anchored on the lower id. A one-sided
+            // reference — the counterpart does not link back, e.g.
+            // asymmetric import data — still reports from its linking side;
+            // suppressing it would convert the old double-emission into a
+            // silent audit gap, the wrong failure direction.
+            if ( other.pairCounterpartId == sample.input.sampleId &&
+                 !( sample.input.sampleId < other.input.sampleId ) )
+                continue;
             if ( config.crossSplitOnly && !crossSplit( sample, other, foldBased ) )
                 continue;
             QJsonObject evidence;

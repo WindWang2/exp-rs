@@ -152,7 +152,7 @@ void GuidedWorkflowWidget::populateWorkflowList()
     if ( errorCount > 0 )
     {
         // Typed error entry pinned to the top: selecting it shows the reasons.
-        m_workflowList->addItem( tr( "⚠ 实验规格加载失败（%1 项）" ).arg( errorCount ) );
+        m_workflowList->addItem( tr( "⚠ Experiment spec load failures (%1)" ).arg( errorCount ) );
         QListWidgetItem *errorItem = m_workflowList->item( 0 );
         errorItem->setToolTip( m_loadResult.errors.first().toString() );
     }
@@ -180,8 +180,8 @@ void GuidedWorkflowWidget::onWorkflowSelected(int index)
         m_runButton->setEnabled(false);
         m_nextButton->setEnabled(false);
         m_startButton->setEnabled(false);
-        m_stepLabel->setText( tr( "<b>实验规格加载失败</b>" ) );
-        QString errorHtml = tr( "<p>以下 LabSpec 文件无法加载，请修复后重启或重新打开本面板：</p><ul>" );
+        m_stepLabel->setText( tr( "<b>Experiment spec load failures</b>" ) );
+        QString errorHtml = tr( "<p>The following LabSpec files failed to load. Fix them and restart or reopen this panel:</p><ul>" );
         for ( const auto &error : m_loadResult.errors )
             errorHtml += QStringLiteral( "<li><code>%1</code></li>" ).arg( error.toString().toHtmlEscaped() );
         errorHtml += QLatin1String( "</ul>" );
@@ -223,13 +223,13 @@ void GuidedWorkflowWidget::onWorkflowSelected(int index)
         stepsHtml += QString("<li>%1</li>").arg(wf.steps[i].title.toHtmlEscaped());
 
     const QString startHint = walkable
-        ? tr("点击 <b>开始实验</b> 以开始。")
-        : tr("此实验为 LabSpec 2/3 文档：操作序列由流水线定义，暂无分步引导。");
+        ? tr( "Click <b>Start experiment</b> to begin." )
+        : tr( "This experiment is a LabSpec 2/3 document: the operation sequence is defined by a pipeline; no step-by-step guidance yet." );
     m_stepBrowser->setHtml(
         QString("<p>%1</p><p><b>%2</b></p><ol>%3</ol>"
                 "<p>%4</p>")
         .arg(wf.description.toHtmlEscaped(),
-             tr("步骤"),
+             tr( "Step" ),
              stepsHtml,
              startHint)
     );
@@ -266,10 +266,9 @@ void GuidedWorkflowWidget::onNextStep()
         m_workflowActive = false;
         m_runButton->setEnabled(false);
         m_nextButton->setEnabled(false);
-        m_stepLabel->setText(tr("<b>实验完成！</b>"));
+        m_stepLabel->setText(tr( "<b>Experiment complete!</b>" ));
         m_stepBrowser->setHtml(
-            tr("<p>恭喜！你已完成 <b>%1</b> 实验。</p>"
-               "<p>可以继续尝试其他实验，或调整参数进行更多探索。</p>")
+            tr( "<p>Congratulations! You completed the <b>%1</b> experiment.</p><p>You can try other experiments or adjust parameters for further exploration.</p>" )
             .arg(wf.title.toHtmlEscaped())
         );
         emit workflowCompleted(wf.id);
@@ -304,7 +303,7 @@ void GuidedWorkflowWidget::onRunStepAction()
     {
         // UI-verb step: invoke the named slot on the main window.
         if ( !QMetaObject::invokeMethod( m_mainWindow, step.action.toUtf8().constData() ) )
-            showRunMessage( tr( "主窗口上不存在操作 “%1”，实验规格可能已过期。" ).arg( step.action ), true );
+            showRunMessage( tr( "Action \"%1\" does not exist on the main window; the experiment spec may be outdated." ).arg( step.action ), true );
         return;
     }
 }
@@ -313,7 +312,7 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
 {
     if ( m_jobHandle->isRunning() )
     {
-        showRunMessage( tr( "已有任务正在运行，请等待其完成后再执行下一步。" ), true );
+        showRunMessage( tr( "A task is already running; wait for it to finish before the next step." ), true );
         return;
     }
 
@@ -337,7 +336,7 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
                 const QString outputDir = QFileInfo( value ).absolutePath();
                 if ( !QDir().mkpath( outputDir ) )
                 {
-                    showRunMessage( tr( "无法创建输出目录：%1" ).arg( outputDir ), true );
+                    showRunMessage( tr( "Cannot create the output directory: %1" ).arg( outputDir ), true );
                     return;
                 }
             }
@@ -370,7 +369,7 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
     const QString stepTitle = step.title;
 
     m_runButton->setEnabled(false);
-    m_runButton->setText( tr( "运行中…" ) );
+    m_runButton->setText( tr( "Running…" ) );
 
     // True when the student is still in the workflow the job belongs to (the
     // session boundary may have switched the view to another experiment).
@@ -383,7 +382,7 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
 
     auto restoreButton = [this, workflowId, stepIndex]
     {
-        m_runButton->setText( tr( "执行此步" ) );
+        m_runButton->setText( tr( "Run this step" ) );
         const bool onSameStep = m_workflowActive
             && m_currentWorkflowIndex >= 0
             && m_workflows[m_currentWorkflowIndex].id == workflowId
@@ -414,7 +413,7 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
             // The outcome is reported in the owning workflow's transcript
             // only; the Task Center keeps the record for every other case.
             if ( onOwningWorkflow() )
-                showRunMessage( tr( "“%1” 完成。输出：%2" ).arg( stepTitle, outputPath ), false );
+                showRunMessage( tr( "\"%1\" finished. Output: %2" ).arg( stepTitle, outputPath ), false );
         },
         [this, stepTitle, onOwningWorkflow, restoreButton]( const QString &error, bool canceled )
         {
@@ -422,16 +421,16 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
             if ( !onOwningWorkflow() )
                 return;
             if ( canceled )
-                showRunMessage( tr( "“%1” 已取消。" ).arg( stepTitle ), true );
+                showRunMessage( tr( "\"%1\" cancelled." ).arg( stepTitle ), true );
             else
-                showRunMessage( tr( "“%1” 失败：%2" ).arg( stepTitle, error ), true );
+                showRunMessage( tr( "\"%1\" failed: %2" ).arg( stepTitle, error ), true );
         } );
 
     if ( taskId < 0 )
     {
         // Submission rejected (e.g. shutdown): no callback will fire.
         restoreButton();
-        showRunMessage( tr( "任务提交被拒绝，请稍后重试。" ), true );
+        showRunMessage( tr( "Task submission was rejected; try again later." ), true );
     }
 }
 
@@ -450,7 +449,7 @@ void GuidedWorkflowWidget::showStep(int index)
     const auto &step = wf.steps[index];
 
     m_stepLabel->setText(
-        tr("<b>步骤 %1/%2：%3</b>")
+        tr( "<b>Step %1/%2: %3</b>" )
         .arg(index + 1)
         .arg(wf.steps.size())
         .arg(step.title.toHtmlEscaped())
@@ -458,22 +457,22 @@ void GuidedWorkflowWidget::showStep(int index)
 
     QString binding;
     if ( step.hasOperator() )
-        binding = tr( "<p><b>%1</b> <code>%2</code></p>" ).arg( tr( "绑定算子：" ), step.operatorId.toHtmlEscaped() );
+        binding = tr( "<p><b>%1</b> <code>%2</code></p>" ).arg( tr( "Bound operator:" ), step.operatorId.toHtmlEscaped() );
     else if ( !step.action.isEmpty() )
-        binding = tr( "<p><b>%1</b> <code>%2</code></p>" ).arg( tr( "界面操作：" ), step.action.toHtmlEscaped() );
+        binding = tr( "<p><b>%1</b> <code>%2</code></p>" ).arg( tr( "UI action:" ), step.action.toHtmlEscaped() );
 
     QString hintHtml;
     if ( !step.teachingNote.isEmpty() )
-        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "原理：" ), step.teachingNote.toHtmlEscaped() );
+        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "Rationale:" ), step.teachingNote.toHtmlEscaped() );
     if ( !step.completionHint.isEmpty() )
-        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "完成标志：" ), step.completionHint.toHtmlEscaped() );
+        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "Completion sign:" ), step.completionHint.toHtmlEscaped() );
 
     m_stepBrowser->setHtml(
         QString("<p><b>%1</b> %2</p>"
                 "%3"
                 "<hr>"
                 "%4")
-        .arg(tr("任务："), step.description.toHtmlEscaped(), binding, hintHtml)
+        .arg(tr( "Task:" ), step.description.toHtmlEscaped(), binding, hintHtml)
     );
 
     // Update navigation buttons

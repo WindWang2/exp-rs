@@ -74,11 +74,27 @@ std::string makePluginDir( const std::string &root, const std::string &id,
 }
 
 namespace {
+/// Process-unique scratch roots: ctest's PRE_TEST discovery runs each case
+/// in its own process (often two processes of this binary in parallel under
+/// ctest -j2), and a shared fixed /tmp name lets one case's `rm -rf` race
+/// another's mid-test (hardening 15/20 cases went red intermittently).
+std::string scratchRoot( const char *leaf )
+{
+    return std::string( "/tmp/" ) + leaf + "." + std::to_string( ::getpid() );
+}
+} // namespace
+
+namespace {
 /// Redirects the user plugin root (and the enable/disable index) away from
 /// the real user profile for the whole binary.
 const bool kUserRootRedirected = []() {
-    ::setenv( "SICNU_PLUGIN_USER_ROOT", "/tmp/exprs_test_userroot", 1 );
-    ::system( "rm -rf /tmp/exprs_test_userroot" );
+    // Nested under a pid-unique scratch so the product's ../-relative
+    // index location (userRoot/../plugins.index.json) also lands inside
+    // this process's private subtree — the flat /tmp root made the index
+    // path shared across every parallel process of this binary.
+    const std::string userRoot = scratchRoot( "exprs_test_userroot" ) + "/plugins";
+    ::setenv( "SICNU_PLUGIN_USER_ROOT", userRoot.c_str(), 1 );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_userroot" ) ).c_str() );
     return true;
 }();
 } // namespace
@@ -95,7 +111,7 @@ struct RegistryGuard
 
 TEST_CASE( "discovery scans roots and caches manifests", "[plugin][discovery]" )
 {
-    const std::string root = "/tmp/exprs_test_discovery";
+    const std::string root = scratchRoot( "exprs_test_discovery" );
     ::system( ( "rm -rf " + root ).c_str() );
     makePluginDir( root, "org.test.alpha", "alpha:echo" );
 
@@ -127,8 +143,8 @@ TEST_CASE( "discovery scans roots and caches manifests", "[plugin][discovery]" )
 
 TEST_CASE( "duplicate plugin ids: first root wins", "[plugin][discovery]" )
 {
-    const std::string rootA = "/tmp/exprs_test_dup_a";
-    const std::string rootB = "/tmp/exprs_test_dup_b";
+    const std::string rootA = scratchRoot( "exprs_test_dup_a" );
+    const std::string rootB = scratchRoot( "exprs_test_dup_b" );
     ::system( ( "rm -rf " + rootA + " " + rootB ).c_str() );
     makePluginDir( rootA, "org.test.same", "same:echo" );
     makePluginDir( rootB, "org.test.same", "same:echo2" );
@@ -145,7 +161,7 @@ TEST_CASE( "duplicate plugin ids: first root wins", "[plugin][discovery]" )
 TEST_CASE( "registry lifecycle: validate, policy, disable", "[plugin][registry]" )
 {
     RegistryGuard guard;
-    const std::string root = "/tmp/exprs_test_registry";
+    const std::string root = scratchRoot( "exprs_test_registry" );
     ::system( ( "rm -rf " + root ).c_str() );
     makePluginDir( root, "org.test.life", "life:echo" );
 
@@ -177,7 +193,7 @@ TEST_CASE( "registry lifecycle: validate, policy, disable", "[plugin][registry]"
 TEST_CASE( "registry policy blocks plugin ids", "[plugin][registry]" )
 {
     RegistryGuard guard;
-    const std::string root = "/tmp/exprs_test_policy";
+    const std::string root = scratchRoot( "exprs_test_policy" );
     ::system( ( "rm -rf " + root ).c_str() );
     makePluginDir( root, "org.test.blocked", "blocked:echo" );
 
@@ -196,9 +212,9 @@ TEST_CASE( "registry policy blocks plugin ids", "[plugin][registry]" )
 
 TEST_CASE( "plugin packages install and uninstall with traversal protection", "[plugin][package]" )
 {
-    const std::string pkgRoot = "/tmp/exprs_test_pkg_src";
+    const std::string pkgRoot = scratchRoot( "exprs_test_pkg_src" );
     const std::string source = pkgRoot + "/org.test.package";
-    ::system( "rm -rf /tmp/exprs_test_pkg_src" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_src" ) ).c_str() );
     makePluginDir( pkgRoot, "org.test.package", "package:echo" );
 
     // A symlink escape attempt must be refused.
@@ -220,13 +236,13 @@ TEST_CASE( "plugin packages install and uninstall with traversal protection", "[
         // uninstall removes it again
         REQUIRE( PluginPackage::uninstall( "org.test.package", log ) );
     }
-    ::system( "rm -rf /tmp/exprs_test_pkg_src" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_src" ) ).c_str() );
 }
 
 TEST_CASE( "staged install verifies declared checksums with rollback", "[plugin][package]" )
 {
-    const std::string pkgRoot = "/tmp/exprs_test_pkg_ck";
-    ::system( "rm -rf /tmp/exprs_test_pkg_ck" );
+    const std::string pkgRoot = scratchRoot( "exprs_test_pkg_ck" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_ck" ) ).c_str() );
     ::mkdir( pkgRoot.c_str(), 0755 );
 
     // Payload with one payload file and matching checksums (computed with
@@ -337,7 +353,7 @@ TEST_CASE( "staged install verifies declared checksums with rollback", "[plugin]
     REQUIRE( !std::filesystem::exists(
         exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.ck" ) );
 
-    ::system( "rm -rf /tmp/exprs_test_pkg_ck" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_ck" ) ).c_str() );
 }
 
 TEST_CASE( "staged-install sha256 matches reference vectors at block boundaries",
@@ -355,8 +371,8 @@ TEST_CASE( "staged-install sha256 matches reference vectors at block boundaries"
     };
     for ( const auto &[ body, digest ] : vectors )
     {
-        const std::string pkgRoot = "/tmp/exprs_test_pkg_vec";
-        ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
+        const std::string pkgRoot = scratchRoot( "exprs_test_pkg_vec" );
+        ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_vec" ) ).c_str() );
         ::mkdir( pkgRoot.c_str(), 0755 );
         const std::string source = pkgRoot + "/org.test.vec";
         ::mkdir( source.c_str(), 0755 );
@@ -382,7 +398,7 @@ TEST_CASE( "staged-install sha256 matches reference vectors at block boundaries"
         REQUIRE( PluginPackage::install( source, installed, log ) );
         REQUIRE( PluginPackage::uninstall( "org.test.vec", log ) );
     }
-    ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_vec" ) ).c_str() );
 }
 
 // -- plugin-platform 9.0: packaging 3.0 ---------------------------------------
@@ -418,8 +434,8 @@ TEST_CASE( "interrupted-install staging leftovers are swept before a new install
            "[plugin][package][p12]" )
 {
     namespace fs = std::filesystem;
-    const std::string pkgRoot = "/tmp/exprs_test_pkg_stale";
-    ::system( "rm -rf /tmp/exprs_test_pkg_stale" );
+    const std::string pkgRoot = scratchRoot( "exprs_test_pkg_stale" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_stale" ) ).c_str() );
     const std::string source = pkgRoot + "/org.test.stale";
     makePluginDir( pkgRoot, "org.test.stale", "stale:echo" );
 
@@ -450,7 +466,7 @@ TEST_CASE( "interrupted-install staging leftovers are swept before a new install
     REQUIRE( exprs::loadManifestFromFile( installed + "/plugin.json", installedManifest, parseError ) );
     REQUIRE( installedManifest.id == "org.test.stale" );
     REQUIRE( exprs::PluginPackage::uninstall( "org.test.stale", log ) );
-    ::system( "rm -rf /tmp/exprs_test_pkg_stale" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_stale" ) ).c_str() );
 }
 
 TEST_CASE( "crashed swap parks restore the missing install and live parks are kept",
@@ -542,8 +558,8 @@ TEST_CASE( "crashed swap parks restore the missing install and live parks are ke
 TEST_CASE( "dependency constraints are probed at install time, warnings not blocks",
            "[plugin][package][p12]" )
 {
-    const std::string pkgRoot = "/tmp/exprs_test_pkg_dep";
-    ::system( "rm -rf /tmp/exprs_test_pkg_dep" );
+    const std::string pkgRoot = scratchRoot( "exprs_test_pkg_dep" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_dep" ) ).c_str() );
     makePluginDir( pkgRoot, "org.test.depbase", "dep:echo" );
 
     PluginDiagnosticLog log;
@@ -609,7 +625,7 @@ TEST_CASE( "dependency constraints are probed at install time, warnings not bloc
 
     REQUIRE( exprs::PluginPackage::uninstall( "org.test.depped", log ) );
     REQUIRE( exprs::PluginPackage::uninstall( "org.test.depbase", log ) );
-    ::system( "rm -rf /tmp/exprs_test_pkg_dep" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_pkg_dep" ) ).c_str() );
 }
 
 // -- plugin-platform 9.0: offline plugin index ---------------------------------
@@ -618,8 +634,8 @@ TEST_CASE( "offline index scans, filters compatibility and honors pins",
            "[plugin][index][p12]" )
 {
     namespace fs = std::filesystem;
-    const std::string root = "/tmp/exprs_test_index";
-    ::system( "rm -rf /tmp/exprs_test_index" );
+    const std::string root = scratchRoot( "exprs_test_index" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_index" ) ).c_str() );
     std::error_code ec;
     fs::create_directories( fs::path( root ) / "good", ec );
     fs::create_directories( fs::path( root ) / "badapi", ec );
@@ -713,14 +729,14 @@ TEST_CASE( "offline index scans, filters compatibility and honors pins",
             REQUIRE( plugin["pin"].asString() == "unpinned" );
     }
 
-    ::system( "rm -rf /tmp/exprs_test_index" );
+    ::system( ( "rm -rf " + scratchRoot( "exprs_test_index" ) ).c_str() );
 }
 
 TEST_CASE( "registry load drops the lock so a peer record() is not stalled (issue #928)",
            "[plugin][registry][lockdrop]" )
 {
     RegistryGuard guard;
-    const std::string root = "/tmp/exprs_test_lockdrop_sys";
+    const std::string root = scratchRoot( "exprs_test_lockdrop_sys" );
     ::system( ( "rm -rf " + root ).c_str() );
     ::mkdir( root.c_str(), 0755 );
     ::mkdir( ( root + "/org.test.slow-sys" ).c_str(), 0755 );
@@ -882,7 +898,7 @@ bool logMentionsInstallLock( const PluginDiagnosticLog &log )
 TEST_CASE( "uninstall holds the cross-process install lock (hardening 15/20)",
            "[plugin][package][p15]" )
 {
-    const std::string sourceRoot = "/tmp/exprs_test_pkgsrc_p15u";
+    const std::string sourceRoot = scratchRoot( "exprs_test_pkgsrc_p15u" );
     ::system( ( "rm -rf " + sourceRoot ).c_str() );
     const std::string source =
         makePluginDir( sourceRoot, "org.test.locky-uninstall", "locky-uninstall:echo" );
@@ -915,7 +931,7 @@ TEST_CASE( "uninstall holds the cross-process install lock (hardening 15/20)",
 TEST_CASE( "install fails typed and bounded while the lock is held elsewhere (hardening 15/20)",
            "[plugin][package][p15]" )
 {
-    const std::string sourceRoot = "/tmp/exprs_test_pkgsrc_p15i";
+    const std::string sourceRoot = scratchRoot( "exprs_test_pkgsrc_p15i" );
     ::system( ( "rm -rf " + sourceRoot ).c_str() );
     const std::string source =
         makePluginDir( sourceRoot, "org.test.locky-install", "locky-install:echo" );
@@ -950,7 +966,7 @@ TEST_CASE( "user index save survives a stale fixed-name temp (hardening 15/20)",
            "[plugin][registry][p15]" )
 {
     RegistryGuard guard;
-    const std::string root = "/tmp/exprs_test_p15_index_root";
+    const std::string root = scratchRoot( "exprs_test_p15_index_root" );
     ::system( ( "rm -rf " + root ).c_str() );
     makePluginDir( root, "org.test.p15.index", "p15-index:echo" );
 
@@ -968,7 +984,11 @@ TEST_CASE( "user index save survives a stale fixed-name temp (hardening 15/20)",
     // here: a directory, which made ofstream fail and the save silently
     // vanish.
     const std::string indexPath = PluginDiscovery::userPluginRoot() + "/../plugins.index.json";
-    ::system( ( "rm -f " + indexPath + " " + indexPath + ".tmp*" ).c_str() );
+    // rm -rf (not -f): a prior run may have left the planted path as a
+    // DIRECTORY, which rm -f silently refuses and the mkdir below then
+    // reports EEXIST. mkdir -p first: the nested user root has no parents.
+    ::system( ( "mkdir -p " + PluginDiscovery::userPluginRoot() ).c_str() );
+    ::system( ( "rm -rf " + indexPath + " " + indexPath + ".tmp*" ).c_str() );
     REQUIRE( ::mkdir( ( indexPath + ".tmp" ).c_str(), 0755 ) == 0 );
 
     REQUIRE( registry.setEnabled( "org.test.p15.index", false ) );

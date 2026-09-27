@@ -5,6 +5,8 @@
 #include <QProcess>
 #include <QString>
 
+#include <QByteArray>
+
 namespace sicnu::python::isolated
 {
 
@@ -26,6 +28,15 @@ class PythonWorkerProcess : public QObject
     qint64 processId() const;
     QProcess::ProcessState state() const;
 
+    /// Full worker stderr captured so far (bounded tail; diagnostics for
+    /// crash classification). Never truncated within the cap.
+    QByteArray capturedStderr() const;
+    /// Classification axis of the last finished exit (worker_protocol error
+    /// contract family): the raw exit code and whether Qt classified the
+    /// death as a crash (CrashExit). Valid after workerFinished.
+    int lastExitCode() const { return m_lastExitCode; }
+    bool lastExitWasCrash() const { return m_lastExitWasCrash; }
+
   signals:
     void workerStarted();
     void workerFinished( int exitCode, QProcess::ExitStatus exitStatus );
@@ -36,7 +47,15 @@ class PythonWorkerProcess : public QObject
     void onProcessError( QProcess::ProcessError error );
 
   private:
+    /// Best-effort kill of the worker's WHOLE process group (POSIX: the
+    /// worker is spawned as its own group leader). TERM-ignoring workers
+    /// that spawn grandchildren would otherwise leak them.
+    void killProcessTree();
+
     QProcess *m_process = nullptr;
+    QByteArray m_stderrBuffer;
+    int m_lastExitCode = -1;
+    bool m_lastExitWasCrash = false;
 };
 
 } // namespace sicnu::python::isolated

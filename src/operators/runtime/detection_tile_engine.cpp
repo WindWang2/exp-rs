@@ -236,8 +236,17 @@ void writeDetectionVector( const std::vector<DetectionBox> &boxes,
   GDALClose( outDs );
 
   // #1174: atomic_fs group publish (sidecars FIRST, main LAST, .bak rollback).
+  // Durability gate (atomic_fs.h contract): flush the staged main and every
+  // staged sidecar that exists before the group publish (existence-guarded:
+  // publishStagedGroup skips missing sidecars).
   try
   {
+    for ( const std::string &stagedSidecar : sicnu::geo::atomic_fs::sidecarsFor( workPath.toStdString() ) )
+    {
+      if ( sicnu::geo::atomic_fs::fileExists( stagedSidecar ) )
+        sicnu::geo::atomic_fs::fsyncFile( stagedSidecar );
+    }
+    sicnu::geo::atomic_fs::fsyncFile( workPath.toStdString() );
     sicnu::geo::atomic_fs::publishStagedGroup( workPath.toStdString(), outputPath );
   }
   catch ( const sicnu::geo::GeoError &ex )

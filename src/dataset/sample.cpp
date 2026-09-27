@@ -1,6 +1,8 @@
 // sample.cpp — sample serialization + spatial contract implementation.
 #include "sample.h"
 
+#include "wkt.h"
+
 #include <QJsonArray>
 
 #include <cmath>
@@ -496,23 +498,32 @@ sicnu::data::Result<SampleRecord> SampleRecord::fromJson( const QJsonObject &jso
 sicnu::data::Result<void> validateSample( const SampleRecord &sample )
 {
     using Result = sicnu::data::Result<void>;
-    auto fail = []( const QString &message ) {
-        return Result::failure( Diagnostic{ QStringLiteral( "dataset.sample_invalid" ), message,
-                                            DiagnosticSeverity::Error } );
+    // Locator contract (R7): every message names the record and the field so
+    // ingest refusals are machine-parseable.
+    auto fail = [ &sample ]( const QString &field, const QString &detail ) {
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.sample_invalid" ),
+            QStringLiteral( "sample %1: %2 %3" ).arg( sample.sampleId(), field, detail ),
+            DiagnosticSeverity::Error } );
     };
     if ( sample.sampleId().isEmpty() || sample.datasetVersionId().isEmpty() )
-        return fail( QStringLiteral( "sample requires ids" ) );
+        return fail( QStringLiteral( "id" ),
+                     QStringLiteral( "sample requires sample_id and dataset_version_id" ) );
     if ( !( sample.weight() > 0.0 ) || !std::isfinite( sample.weight() ) )
-        return fail( QStringLiteral( "sample weight must be a positive finite number" ) );
+        return fail( QStringLiteral( "weight" ),
+                     QStringLiteral( "must be a positive finite number" ) );
     if ( sample.validFromUtc().isValid() && sample.validUntilUtc().isValid() &&
          sample.validFromUtc() > sample.validUntilUtc() )
-        return fail( QStringLiteral( "sample validity window is empty (from > until)" ) );
+        return fail( QStringLiteral( "valid_until_utc" ),
+                     QStringLiteral( "validity window is empty (from > until)" ) );
     if ( sample.timeUtc().isValid() && sample.validFromUtc().isValid() &&
          sample.timeUtc() < sample.validFromUtc() )
-        return fail( QStringLiteral( "sample observation time precedes its validity window" ) );
+        return fail( QStringLiteral( "time_utc" ),
+                     QStringLiteral( "observation time precedes its validity window" ) );
     if ( sample.timeUtc().isValid() && sample.validUntilUtc().isValid() &&
          sample.timeUtc() > sample.validUntilUtc() )
-        return fail( QStringLiteral( "sample observation time exceeds its validity window" ) );
+        return fail( QStringLiteral( "time_utc" ),
+                     QStringLiteral( "observation time exceeds its validity window" ) );
 
     const bool payloadMatches =
         ( sample.kind() == SampleKind::Point &&
@@ -534,26 +545,75 @@ sicnu::data::Result<void> validateSample( const SampleRecord &sample )
         ( sample.kind() == SampleKind::MultiModal &&
           std::holds_alternative<MultiModalSample>( sample.payload() ) );
     if ( !payloadMatches )
-        return fail( QStringLiteral( "sample kind does not match payload type" ) );
+        return fail( QStringLiteral( "kind" ),
+                     QStringLiteral( "sample kind does not match payload type" ) );
 
+    if ( sample.kind() == SampleKind::Point )
+    {
+        const auto &point = std::get<PointSample>( sample.payload() );
+        if ( !std::isfinite( point.x ) || !std::isfinite( point.y ) )
+            return fail( QStringLiteral( "x" ),
+                         QStringLiteral( "point coordinates must be finite (x=%1, y=%2)" )
+                             .arg( point.x, 0, 'g', 17 )
+                             .arg( point.y, 0, 'g', 17 ) );
+    }
+    if ( sample.kind() == SampleKind::Pixel )
+    {
+        const auto &pixel = std::get<PixelSample>( sample.payload() );
+        if ( pixel.column < 0 || pixel.row < 0 )
+            return fail( QStringLiteral( "column" ),
+                         QStringLiteral( "pixel indices must be non-negative (column=%1, row=%2)" )
+                             .arg( pixel.column )
+                             .arg( pixel.row ) );
+    }
+    if ( sample.kind() == SampleKind::Polygon )
+    {
+        // Reuses the module's own WKT reader: a non-empty wkt that cannot
+        // parse is illegal, never a silent guess (wkt.h contract).
+        const auto &polygon = std::get<PolygonSample>( sample.payload() );
+        if ( !polygon.wkt.isEmpty() && !parseWktPolygon( polygon.wkt ).has_value() )
+            return fail( QStringLiteral( "wkt" ),
+                         QStringLiteral( "polygon geometry does not parse" ) );
+    }
+    if ( sample.kind() == SampleKind::Pair )
+    {
+        const auto &pair = std::get<PairSample>( sample.payload() );
+        if ( pair.primaryRef.isEmpty() || pair.secondaryRef.isEmpty() )
+            return fail( QStringLiteral( "pair_ref" ),
+                         QStringLiteral( "pair sample requires primary_ref and secondary_ref" ) );
+        if ( pair.primaryRef == pair.secondaryRef )
+            return fail( QStringLiteral( "pair_ref" ),
+                         QStringLiteral( "pair members must be distinct samples" ) );
+    }
+    if ( sample.kind() == SampleKind::Object )
+    {
+        const auto &object = std::get<ObjectSample>( sample.payload() );
+        if ( object.objectRef.isEmpty() )
+            return fail( QStringLiteral( "object_ref" ),
+                         QStringLiteral( "object sample requires the segment reference" ) );
+    }
     if ( sample.kind() == SampleKind::Patch )
     {
         const auto &patch = std::get<PatchSample>( sample.payload() );
         if ( !patch.window.isValid() )
-            return fail( QStringLiteral( "patch window is not valid" ) );
+            return fail( QStringLiteral( "window" ),
+                         QStringLiteral( "patch window is not valid" ) );
     }
     if ( sample.kind() == SampleKind::Window )
     {
         const auto &window = std::get<WindowSample>( sample.payload() );
         if ( !window.window.isValid() )
-            return fail( QStringLiteral( "window is not valid" ) );
+            return fail( QStringLiteral( "window" ),
+                         QStringLiteral( "window is not valid" ) );
     }
     if ( sample.kind() == SampleKind::Temporal &&
          std::get<TemporalSample>( sample.payload() ).observations.isEmpty() )
-        return fail( QStringLiteral( "temporal sample requires observations" ) );
+        return fail( QStringLiteral( "observations" ),
+                     QStringLiteral( "temporal sample requires observations" ) );
     if ( sample.kind() == SampleKind::MultiModal &&
          std::get<MultiModalSample>( sample.payload() ).members.isEmpty() )
-        return fail( QStringLiteral( "multimodal sample requires members" ) );
+        return fail( QStringLiteral( "members" ),
+                     QStringLiteral( "multimodal sample requires members" ) );
     return Result::success();
 }
 
