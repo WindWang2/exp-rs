@@ -74,6 +74,14 @@ function(sicnu_add_test NAME)
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
     sicnu_workflow_runtime
   )
+  # sicnu_agent.so references the agent_loop VerificationReport seam
+  # (agent_session_adapter) without linking sicnu_agent_loop itself, so the
+  # symbol must resolve at FINAL link time. WHOLE_ARCHIVE because CMake
+  # places static archives before shared libs on the line — a plain archive
+  # ahead of sicnu_agent.so would never be pulled (Track 13 R4; tests-link
+  # layer only, the src/agent PUBLIC-link fix is recommended upstream).
+  set_property( TARGET ${NAME} APPEND PROPERTY LINK_LIBRARIES
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>" )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/stubs
@@ -3321,6 +3329,12 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# Track 13 R4 dataset fingerprint determinism: checkout byte perturbation
+# matrix (EOL/BOM/indent/number spelling), independent known-answer vector,
+# double-run + store funnel round-trip, binary loud-failure guard.
+sicnu_add_test(test_dataset_fingerprint_determinism TIMEOUT 120)
+target_link_libraries(test_dataset_fingerprint_determinism PRIVATE Sicnu::dataset SQLite::SQLite3)
+
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
 target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
@@ -3615,6 +3629,7 @@ sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 
 # Workspace Governance 3.0 — persistent governance store.
 sicnu_add_test(test_governance_store TIMEOUT 300)
+
 sicnu_add_test(test_workspace_services TIMEOUT 600)
 # Workspace Governance 3.0 — scale contract (SICNU_WS3_STRESS=1 -> 100k).
 sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
