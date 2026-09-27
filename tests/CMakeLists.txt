@@ -3335,6 +3335,11 @@ target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
 sicnu_add_test(test_dataset_fingerprint_determinism TIMEOUT 120)
 target_link_libraries(test_dataset_fingerprint_determinism PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# Track 13 R4 split reproducibility: SplitMix64/Pcg32/seedFor known-answer
+# vectors, double-run manifest digest identity, seed=0 vs seed-absence gate.
+sicnu_add_test(test_split_reproducibility TIMEOUT 120)
+target_link_libraries(test_split_reproducibility PRIVATE Sicnu::dataset SQLite::SQLite3)
+
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
 target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
