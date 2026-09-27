@@ -85,13 +85,21 @@ function(sicnu_configure_test_harness_env)
   # No-op when GDAL comes from the system prefix.
   set(_gdal_libdir "")
   if(TARGET GDAL::GDAL)
-    get_target_property(_gdal_imported_location GDAL::GDAL IMPORTED_LOCATION)
-    if(_gdal_imported_location)
-      get_filename_component(_gdal_libdir "${_gdal_imported_location}" DIRECTORY)
-    endif()
-    get_target_property(_gdal_imported_implib GDAL::GDAL IMPORTED_IMPLIB)
-    if(NOT _gdal_libdir AND _gdal_imported_implib)
-      get_filename_component(_gdal_libdir "${_gdal_imported_implib}" DIRECTORY)
+    # Imported GDAL targets carry config-specific locations (DEBUG/RELEASE/
+    # NOCONFIG, depending on how the prefix was configured) — probe them all.
+    foreach(_gcfg IN ITEMS "" _NOCONFIG _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+      if(NOT _gdal_libdir)
+        get_target_property(_gdal_imported_location GDAL::GDAL "IMPORTED_LOCATION${_gcfg}")
+        if(_gdal_imported_location)
+          get_filename_component(_gdal_libdir "${_gdal_imported_location}" DIRECTORY)
+        endif()
+      endif()
+    endforeach()
+    if(NOT _gdal_libdir)
+      get_target_property(_gdal_imported_implib GDAL::GDAL IMPORTED_IMPLIB)
+      if(_gdal_imported_implib)
+        get_filename_component(_gdal_libdir "${_gdal_imported_implib}" DIRECTORY)
+      endif()
     endif()
   endif()
 
@@ -102,6 +110,12 @@ function(sicnu_configure_test_harness_env)
 
   set(_dl_paths "")
   if(UNIX AND NOT APPLE)
+    # [LOCAL BUILD ENABLEMENT — uncommitted] this machine provisions
+    # GDAL/PROJ/GEOS and their transitive deps (libodbc…) from a local
+    # prefix; without it every test binary fails to load at discovery.
+    if(EXISTS "/home/kevin/pwb-sdks/root/usr/lib")
+      list(APPEND _dl_paths "/home/kevin/pwb-sdks/root/usr/lib")
+    endif()
     list(APPEND _dl_paths "/usr/lib")
   endif()
   set(SICNU_TEST_DL_PATHS "${_dl_paths}" PARENT_SCOPE)
@@ -181,6 +195,15 @@ function(_sicnu_write_ctest_custom pythonhome pythonpath qt_plugins pathsep pyth
       "else()\n"
       "  set(ENV{LD_LIBRARY_PATH} \"/usr/lib\")\n"
       "endif()\n")
+    if(gdal_libdir AND EXISTS "${gdal_libdir}/gdalplugins")
+      string(APPEND _out
+        "\n"
+        "# GDAL driver plugins shipped beside a non-system libgdal (JP2OpenJPEG,\n"
+        "# HDF5, netCDF, …). A prefix-built GDAL bakes its plugin search path\n"
+        "# from its configure-time prefix, so point GDAL_DRIVER_PATH at the\n"
+        "# shipped plugins explicitly; system-GDAL machines are unaffected.\n"
+        "set(ENV{GDAL_DRIVER_PATH} \"${_gdal_esc}/gdalplugins\")\n")
+    endif()
   endif()
 
   if(pythonhome)
