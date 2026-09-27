@@ -91,6 +91,14 @@ public:
 
     void start(QCoreApplication *app);
 
+    /// Resolves the effective MCP workspace root (default-deny, review P1-1),
+    /// publishes it as SICNU_MCP_WORKSPACE for every downstream consumer and
+    /// makes it the process working directory so relative path arguments are
+    /// opened where they were validated (P1-2). Called by start(); hosts that
+    /// read the variable before start() (main.cpp --mcp) call it first.
+    /// Returns the installed root.
+    static QString installWorkspaceSandbox();
+
     /// Drains queued experiment-recording lifecycle events (call at shutdown;
     /// the destructor also does this).
     void flushExperimentRecording();
@@ -201,7 +209,9 @@ private:
     /// harness:, mission:, … — full table in surfaceAllowedPrefixes(), the one
     /// authority; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1).
     static bool isToolIdAllowed(const QString &toolId, QString *reason = nullptr);
-    /// When SICNU_MCP_WORKSPACE is set, reject absolute string params outside that root.
+    /// Reject string params resolving outside the effective workspace root
+    /// (SICNU_MCP_WORKSPACE, else the default root — see
+    /// containment::effectiveMcpWorkspaceRoot; never unrestricted).
     static bool validateWorkspacePaths(const QVariantMap &parameters, QString *reason = nullptr);
 
     StdinReader *mReader = nullptr;

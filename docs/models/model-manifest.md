@@ -6,7 +6,8 @@ the single source of truth for discovery, identity, contracts and runtime
 selection; GUI, CLI, Workflow, MCP/Pi and the SDK reference models by stable
 id — never by weight file path.
 
-Discovery: `$SICNU_MODELS_DIR` → `<cwd>/models` → `<app dir>/../models`.
+Discovery: `$SICNU_MODELS_DIR` → `<app dir>/../models` (→ the source-tree
+`models/` in developer builds). The working directory is **not** searched.
 The registry (`ModelCatalog`) is authoritative: `find(id)` / `resolve("id@version")`
 / `inspect(id)` / `health(id)` / `validateManifestJson(json)` /
 `registerManifestJson(json, source)` (session-scoped, plugins/tests).
@@ -233,5 +234,10 @@ fields stay the `heads[0]` mirror.
 
 `framework: "http"` requires `url`; `framework: "python"` requires
 `worker_script` (+ optional `interpreter`, `timeout_ms`, `max_body_mb`).
+`interpreter` is restricted to a Python launcher name (`python`, `python3`,
+`python3.N`, `pythonw`, `py`, optional `.exe`) or a path the user trusted via
+`SICNU_MODEL_INTERPRETERS` (list separated by `:` / `;` on Windows) or
+`SICNU_PYTHON_EXECUTABLE`; `worker_script` must resolve inside the manifest
+directory. Violations fail the runtime acquire.
 Declaring a provider on an in-process framework is a parse error. See
 [backend-compatibility](../inference/backend-compatibility.md).

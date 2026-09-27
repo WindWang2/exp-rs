@@ -15,17 +15,17 @@ namespace sicnu::processing
 /// Staged publication for raster outputs written directly to a caller-named
 /// path (the GUI/CLI paths that bypass the OutputCommitter, #617): the
 /// dataset is created at a unique staged path NEXT TO the target
-/// (atomic_fs::stagedPathFor keeps the final extension, so extension-driven
-/// drivers still recognize the staged dataset), and is published with
-/// fsync + atomic rename only after the writer reports success. From
-/// construction to a successful publish() the guard owns the staged file:
-/// destruction without publish discards the staged group and leaves the
-/// target untouched — a failed run can neither leave a partial product at
-/// the target path nor destroy the previous result there.
+/// (atomic_fs::reservedStagedPathFor keeps the final extension, so
+/// extension-driven drivers still recognize the staged dataset), and is
+/// published with fsync + atomic rename only after the writer reports
+/// success. From construction to a successful publish() the guard owns the
+/// staged file: destruction without publish discards the staged group and
+/// leaves the target untouched — a failed run can neither leave a partial
+/// product at the target path nor destroy the previous result there.
 ///
-/// Thin composition over the geospatial atomic_fs authority (stagedPathFor /
-/// fsyncFile / publishStagedFile / discardStaged); no staging semantics are
-/// re-implemented here.
+/// Thin composition over the geospatial atomic_fs authority
+/// (reservedStagedPathFor / fsyncFile / publishStagedFile / discardStaged);
+/// no staging semantics are re-implemented here.
 ///
 /// Note: publication renames the staged file OVER the target path, so a
 /// pre-existing SYMLINK at the target is replaced as a link (the referent is
@@ -40,7 +40,11 @@ class StagedRasterOutput
     explicit StagedRasterOutput( const QString &targetPath )
       : m_target( targetPath ),
         m_staged( QString::fromStdString(
-          sicnu::geo::atomic_fs::stagedPathFor( targetPath.toStdString() ) ) ) {}
+          // Reserved (not created) name: the writer below drives GDAL
+          // creation at this path, and GDAL drivers refuse an existing
+          // target — stagedPathFor's O_EXCL-pre-created empty file would
+          // fail them before any output lands.
+          sicnu::geo::atomic_fs::reservedStagedPathFor( targetPath.toStdString() ) ) ) {}
 
     ~StagedRasterOutput()
     {
