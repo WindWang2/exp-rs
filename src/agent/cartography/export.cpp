@@ -249,8 +249,11 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
   }
   // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW). The verified
   // temp bytes stay put until publish succeeds; a locked target fails closed.
+  // Durability gate (atomic_fs.h contract): flush the staged bytes before the
+  // rename — a crash must leave the old export or the new one, not junk.
   try
   {
+    sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
     sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), finalPath.toStdString() );
   }
   catch ( const sicnu::geo::GeoError &ex )
@@ -428,6 +431,7 @@ MapAtlasExportResult exportMapAtlas( QgsPrintLayout *layout, const MapAtlasExpor
     }
     try
     {
+      sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
       sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), finalPath.toStdString() );
     }
     catch ( const sicnu::geo::GeoError &ex )

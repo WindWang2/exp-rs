@@ -188,7 +188,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u74e6\u7247\u6d41\u5f0f O(tile) \u5185\u5b58\uff0c\u8f93\u51fa\u89c4\u6a21\u4e0d\u53d7\u6805\u683c\u5927\u5c0f\u9650\u5236\uff1b\u76f4\u65b9\u56fe\u7c7b stretch \u4f1a\u5148\u505a\u4e00\u6b21\u9010\u6ce2\u6bb5\u7edf\u8ba1\u904d\u5386\u518d\u5199\u51fa\u3002"
+    ],
     "modality" : 
     [
       "optical",
@@ -197,7 +200,10 @@
       "dem"
     ],
     "operator_group" : "enhancement",
-    "prerequisites" : [],
+    "prerequisites" : 
+    [
+      "\u5148\u9009 method \u518d\u7ed9\u53c2\uff1a\u53ea\u6709\u6240\u9009\u65b9\u6cd5\uff08stretch / filter / ratio_ihs transform / SAR speckle \u65cf\uff09\u7684\u53c2\u6570\u4f1a\u88ab\u8bfb\u53d6\uff0c\u5176\u4f59\u5ffd\u7565\u3002"
+    ],
     "schema_version" : 2,
     "summary" : "\u901a\u7528\u5f71\u50cf\u589e\u5f3a\u5165\u53e3\uff1a\u96c6\u6210\u6ee4\u6ce2\u3001\u9510\u5316\u3001\u76f4\u65b9\u56fe\u5747\u8861\u7b49\u663e\u793a\u7ea7\u589e\u5f3a\u7b97\u5b50\uff0c\u6309 method \u53c2\u6570\u9009\u62e9\u5177\u4f53\u7b97\u6cd5\u3002",
     "teaching_use" : 

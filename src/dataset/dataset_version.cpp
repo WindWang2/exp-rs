@@ -4,6 +4,8 @@
 #include <QJsonArray>
 #include <QHash>
 
+#include <algorithm>
+
 namespace sicnu::dataset
 {
 
@@ -91,6 +93,17 @@ sicnu::data::Result<DatasetVersionDiff> diffManifests( const DatasetManifest &fr
         if ( !toEntries.contains( it.key() ) )
             diff.removedEntries.append( it.value() );
     }
+
+    // Entry vectors are ordered by (kind, refId): QHash iteration order is
+    // unspecified (and re-seeded per process in Qt6), so an unsorted diff
+    // serializes to different bytes for identical inputs. The entry key is
+    // the natural total order — same key the diff itself is computed on.
+    const auto byEntryKey = []( const DatasetEntry &a, const DatasetEntry &b ) {
+        return entryKey( a ) < entryKey( b );
+    };
+    std::sort( diff.addedEntries.begin(), diff.addedEntries.end(), byEntryKey );
+    std::sort( diff.removedEntries.begin(), diff.removedEntries.end(), byEntryKey );
+    std::sort( diff.changedEntries.begin(), diff.changedEntries.end(), byEntryKey );
 
     diff.sourceAssetsChanged = !( from.sourceAssets() == to.sourceAssets() );
     diff.schemaChanged = !( from.schema() == to.schema() );

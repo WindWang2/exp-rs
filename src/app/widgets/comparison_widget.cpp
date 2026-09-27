@@ -108,6 +108,10 @@ void ComparisonWidget::setMode(ComparisonMode mode)
 
 void ComparisonWidget::setFlickerInterval(int ms)
 {
+    // F-13 (ui-backend-state-parity-r4): match setMode's change detection —
+    // re-emitting flickerIntervalChanged without a change produced spurious
+    // notifications the mode setter never had.
+    if (m_flickerInterval == ms) return;
     m_flickerInterval = ms;
     if (m_flickerTimer.isActive()) {
         m_flickerTimer.setInterval(ms);

@@ -222,12 +222,16 @@ FeatureJoinResult joinFeaturesBySampleId( const FeatureSet &featureSet,
     for ( int i = 0; i < rows.size(); ++i )
         index[rows.at( i ).sampleId].append( i );
 
-    QSet<QString> required;
+    // Sorted names: the per-row scan below names the FIRST missing column,
+    // and a QSet's iteration order is unspecified (re-seeded per process in
+    // Qt6) — an unsorted list would make the finding text vary run to run.
+    QStringList required;
     for ( const FeatureColumn &column : featureSet.columns() )
     {
         if ( column.required )
-            required.insert( column.name );
+            required.append( column.name );
     }
+    required.sort();
 
     auto pushFinding = [&]( FeatureJoinFinding finding ) {
         if ( result.findings.size() < maxFindings )

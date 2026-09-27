@@ -1,6 +1,23 @@
 # SICNU GEO RS — Unit Tests (Catch2)
 include(Catch)
 
+# Fault-tolerant PRE_TEST discovery (review P0-4): a test binary that crashes
+# while listing its tests registers one `<exe>_DISCOVERY_FAILED` test instead
+# of aborting the entire CTest run (previously a single segfaulting binary
+# made even `ctest -N` fail). See cmake/SicnuCatchAddTests.cmake.
+option(SICNU_TOLERANT_TEST_DISCOVERY
+  "Turn a crashing Catch2 test discovery into one failing test instead of a CTest abort" ON)
+if(SICNU_TOLERANT_TEST_DISCOVERY)
+  set(SICNU_CATCH_ADD_TESTS_UPSTREAM "$CACHE{_CATCH_DISCOVER_TESTS_SCRIPT}")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake"
+    "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake"
+    @ONLY)
+  # Directory-scoped normal variable shadows Catch2's INTERNAL cache entry,
+  # which catch_discover_tests() reads when generating each include file.
+  set(_CATCH_DISCOVER_TESTS_SCRIPT "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake")
+endif()
+
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
   # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0),
@@ -54,6 +71,15 @@ endfunction()
 # Helper function to add a test executable. Extra args (TIMEOUT n,
 # RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
 # properties — previously they were accepted and silently dropped.
+# GNU/ELF-only whole-archive fragment for the sicnu_agent_loop stopgap (see
+# the sicnu_add_test comment). Empty on non-GNU platforms: MSVC/PE executables
+# do not export symbols to DLLs and Mach-O dylibs link their undefined symbols
+# at library time, so there is nothing this fragment could fix there.
+if(UNIX AND NOT APPLE)
+  set(SICNU_TEST_AGENT_LOOP_LINK
+      "-Wl,--whole-archive" sicnu_agent_loop "-Wl,--no-whole-archive")
+endif()
+
 function(sicnu_add_test NAME)
   cmake_parse_arguments(SAT "" "TEST_PREFIX" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
@@ -69,11 +95,43 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    # GNU/ELF stopgap for sicnu_agent.so referencing agent_loop symbols
+    # (e.g. VerificationReport::aggregate via tools/agent_session_adapter.cpp)
+    # while src/agent/CMakeLists.txt lacks the sicnu_agent_loop link edge —
+    # the library-level fix is in-flight PR #1335 (P0-3); GNU ld never
+    # extracts archive members to satisfy a SHARED library's undefined
+    # symbols, so the archive is force-included here and the executable
+    # exports the definitions back to libsicnu_agent.so at runtime.
+    # Spelling note: classic -Wl flags, not $<LINK_LIBRARY:WHOLE_ARCHIVE>,
+    # because that genex needs CMake >= 3.24 while this project declares
+    # cmake_minimum_required 3.20. Both edges drop once #1335 merges.
+    ${SICNU_TEST_AGENT_LOOP_LINK}
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
     sicnu_workflow_runtime
   )
+  # sicnu_agent.so references the agent_loop VerificationReport seam
+  # (agent_session_adapter) without linking sicnu_agent_loop itself, so the
+  # symbol must resolve at FINAL link time. WHOLE_ARCHIVE because CMake
+  # places static archives before shared libs on the line — a plain archive
+  # ahead of sicnu_agent.so would never be pulled (Track 13 R4; tests-link
+  # layer only, the src/agent PUBLIC-link fix is recommended upstream).
+  # The LINK_LIBRARY generator expression requires CMake 3.24; fail loudly
+  # on older CMake instead of silently reverting to an ineffective plain
+  # archive (the closure was already broken there — undefined
+  # VerificationReport::aggregate — this just names the actual remedy).
+  if( CMAKE_VERSION VERSION_LESS 3.24 )
+    message( FATAL_ERROR
+      "sicnu_add_test needs CMake 3.24+ for the $<LINK_LIBRARY:WHOLE_ARCHIVE> "
+      "generator expression (found ${CMAKE_VERSION}). The test closure must "
+      "force-load sicnu_agent_loop to resolve sicnu_agent.so's "
+      "VerificationReport::aggregate; either upgrade CMake or apply the "
+      "upstream fix: add sicnu_agent_loop to sicnu_agent's PUBLIC "
+      "target_link_libraries in src/agent/CMakeLists.txt." )
+  endif()
+  set_property( TARGET ${NAME} APPEND PROPERTY LINK_LIBRARIES
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>" )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/stubs
@@ -801,6 +859,7 @@ target_link_libraries(test_mapspec PRIVATE
   qgis_gui
   sicnu_data
   sicnu_agent
+  ${SICNU_TEST_AGENT_LOOP_LINK}
   sicnu_operators
   sicnu_workflow
   sicnu_processing
@@ -1038,6 +1097,8 @@ sicnu_link_jsoncpp(test_explain_step_panel)
 set_target_properties(test_explain_step_panel PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
+  # embedded inspector_host.cpp declares a Q_OBJECT (drift gate rule 13).
+  AUTOMOC ON
 )
 sicnu_discover_tests(test_explain_step_panel TEST_PREFIX "test_explain_step_panel::")
 
@@ -1238,6 +1299,8 @@ target_link_libraries(test_adversarial_m5 PRIVATE
   sicnu_operators
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_adversarial_m5 PRIVATE sicnu_runtime)
 target_include_directories(test_adversarial_m5 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -2459,6 +2522,7 @@ target_link_libraries(test_surface_parity PRIVATE
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
+    Sicnu::agent_ops
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
@@ -2477,6 +2541,113 @@ target_compile_definitions(test_surface_parity PRIVATE
   SICNU_TEST_SURFACE_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
 sicnu_discover_tests(test_surface_parity)
+
+# Track 9 (mcp-surface-r4): three-surface parity LOCK. The snapshot
+# tests/surface_diff_snapshot.json is the shared contract consumed by BOTH
+# ends: test_surface_snapshot (C++: registry vs projection vs tools/list
+# wire) and pi/test/surface_snapshot.test.mjs (pi: name mapping, category
+# curation, schema round-trip). When a LEGITIMATE surface change turns the
+# snapshot gate red, regenerate with:
+#   ninja -C build-r4 surface_snapshot_regen
+# and commit the refreshed snapshot in the SAME commit as the surface
+# change. Never hand-edit the snapshot: the generator is the only writer.
+add_executable(surface_snapshot_gen surface_snapshot_main.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(surface_snapshot_gen PRIVATE
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+    Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(surface_snapshot_gen PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(surface_snapshot_gen PRIVATE jsoncpp)
+endif()
+target_include_directories(surface_snapshot_gen PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+add_custom_target(surface_snapshot_regen
+  COMMAND surface_snapshot_gen --output "${CMAKE_SOURCE_DIR}/tests/surface_diff_snapshot.json"
+  DEPENDS surface_snapshot_gen
+  COMMENT "Regenerating tests/surface_diff_snapshot.json from the in-process union projection"
+)
+
+add_executable(test_surface_snapshot test_surface_snapshot.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_surface_snapshot PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+    Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_surface_snapshot PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_surface_snapshot PRIVATE jsoncpp)
+endif()
+target_include_directories(test_surface_snapshot PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_surface_snapshot PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_surface_snapshot TEST_PREFIX "test_surface_snapshot::")
+
+# Track 9 (mcp-surface-r4) WP-C: protocol robustness (malformed frames,
+# -32002 gate, #644 id contract, #634 cancellation bookkeeping, surface
+# filter). Separate file from test_surface_protocol.cpp so in-flight #1334
+# hardening of that file never conflicts with these cases.
+add_executable(test_surface_protocol_r4 test_surface_protocol_r4.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_surface_protocol_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+    Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_surface_protocol_r4 PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_surface_protocol_r4 PRIVATE jsoncpp)
+endif()
+target_include_directories(test_surface_protocol_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_surface_protocol_r4 TEST_PREFIX "test_surface_protocol_r4::")
 
 # Track D1 (ds41-capability-help-sync): capability surface parity gate.
 # registry descriptors <-> sidecar A <-> sidecar B <-> help operator topics
@@ -2575,6 +2746,7 @@ target_link_libraries(test_surface_protocol PRIVATE
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
+    Sicnu::agent_ops
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
@@ -2607,6 +2779,7 @@ target_link_libraries(surface_mcp_host PRIVATE
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
+  Sicnu::agent_ops
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
@@ -2620,6 +2793,18 @@ target_include_directories(surface_mcp_host PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+
+# Every target that compiles src/agent/mcp_server.cpp in-process needs the
+# agent_ops closure: the scientific:agent_session tool calls
+# sicnu::agent_ops::OpsDriver::apply (review P0-3 — "OpsDriver::apply
+# undefined"). test_mcp_server already lists it.
+foreach(_mcp_embed test_interaction_tools test_raster_display_tools
+        test_surface_parity test_capability_surface_parity test_algorithm_search
+        test_surface_protocol surface_mcp_host)
+  if(TARGET ${_mcp_embed})
+    target_link_libraries(${_mcp_embed} PRIVATE Sicnu::agent_ops)
+  endif()
+endforeach()
 
 add_executable(test_surface_e2e test_surface_e2e.cpp)
 target_link_libraries(test_surface_e2e PRIVATE
@@ -3321,6 +3506,27 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# Track 13 R4 dataset fingerprint determinism: checkout byte perturbation
+# matrix (EOL/BOM/indent/number spelling), independent known-answer vector,
+# double-run + store funnel round-trip, binary loud-failure guard.
+sicnu_add_test(test_dataset_fingerprint_determinism TIMEOUT 120)
+target_link_libraries(test_dataset_fingerprint_determinism PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Track 13 R4 split reproducibility: SplitMix64/Pcg32/seedFor known-answer
+# vectors, double-run manifest digest identity, seed=0 vs seed-absence gate.
+sicnu_add_test(test_split_reproducibility TIMEOUT 120)
+target_link_libraries(test_split_reproducibility PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Track 13 R4 leakage audit coverage: constructed-leakage matrix over all
+# checks, input-permutation invariance, fold honest-gaps + replay.
+sicnu_add_test(test_leakage_audit_coverage TIMEOUT 120)
+target_link_libraries(test_leakage_audit_coverage PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Track 13 R4 version migration: golden v1 fixture tripwire, foreign-version
+# refusal matrix, diff ordering determinism.
+sicnu_add_test(test_dataset_version_migration TIMEOUT 120)
+target_link_libraries(test_dataset_version_migration PRIVATE Sicnu::dataset SQLite::SQLite3)
+
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
 target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
@@ -3615,6 +3821,11 @@ sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 
 # Workspace Governance 3.0 — persistent governance store.
 sicnu_add_test(test_governance_store TIMEOUT 300)
+
+# Track 13 R4 governance mirror consistency: reference-family chain walk,
+# planted dangling-reference surfacing, fingerprint lookup convention.
+sicnu_add_test(test_data_governance_consistency TIMEOUT 300)
+
 sicnu_add_test(test_workspace_services TIMEOUT 600)
 # Workspace Governance 3.0 — scale contract (SICNU_WS3_STRESS=1 -> 100k).
 sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
@@ -3849,6 +4060,8 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_spectral_profile_widget PRIVATE sicnu_runtime)
 target_include_directories(test_spectral_profile_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3872,6 +4085,8 @@ target_link_libraries(test_roi_statistics_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_roi_statistics_widget PRIVATE sicnu_runtime)
 target_include_directories(test_roi_statistics_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3899,6 +4114,8 @@ target_link_libraries(test_comparison_widget PRIVATE
   sicnu_data
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_comparison_widget PRIVATE sicnu_runtime)
 target_include_directories(test_comparison_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -5169,7 +5386,7 @@ if(TARGET qgis_app_classify)
     qgis_core
     qgis_analysis
     qgis_app_classify
-  )
+   sicnu_agent_loop)
   target_include_directories(test_global_help_tips PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/app
@@ -7616,7 +7833,7 @@ sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
-)
+ sicnu_agent_loop)
 
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
@@ -8255,6 +8472,8 @@ target_link_libraries(test_band_role_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_band_role_combo PRIVATE sicnu_runtime)
 target_include_directories(test_band_role_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8278,6 +8497,8 @@ target_link_libraries(test_raster_layer_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_raster_layer_combo PRIVATE sicnu_runtime)
 target_include_directories(test_raster_layer_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8613,6 +8834,8 @@ add_executable(test_workbench_enum_provider
   ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  # schema_form_builder.cpp schedules async checks on RsScanPool::instance().
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_workbench_enum_provider PRIVATE
   Catch2::Catch2WithMain
@@ -8622,6 +8845,11 @@ target_link_libraries(test_workbench_enum_provider PRIVATE
   sicnu_operators
   GDAL::GDAL
   Sicnu::help
+  # crs_selector.cpp (embedded by fce8703e) is a QWidget over
+  # QgsProjectionSelectionDialog: needs the QGIS GUI/core closure.
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
 )
 target_include_directories(test_workbench_enum_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9652,6 +9880,13 @@ target_compile_definitions(test_plugin_host_process PRIVATE
 # #1186: target-scoped builds must build runtime-loaded fixtures first.
 add_dependencies(test_plugin_host_process isolation_plugin exprs_plugin_host_worker)
 
+# Review P1-5: legacy in-process PluginHost allowlist / IID gate. Default
+# configuration (sicnu_core only); test_plugin_host needs SICNU_EMBED_PYTHON.
+add_executable(test_plugin_host_allowlist test_plugin_host_allowlist.cpp)
+target_link_libraries(test_plugin_host_allowlist PRIVATE Catch2::Catch2WithMain Qt6::Core sicnu_core)
+target_include_directories(test_plugin_host_allowlist PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_plugin_host_allowlist)
+
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 
@@ -9707,10 +9942,13 @@ target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 if(NOT WIN32)
 # Surface-11: batch manifest runner (unit level, no CLI binary needed).
 sicnu_add_test(test_cli_batch_manifest)
-target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk)
+target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk sicnu_agent_loop)
 
 sicnu_add_test(test_cli_commands_json)
-target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
+# Track 14: sicnu_agent (reached PRIVATELY through sicnu_plugins_framework)
+# references agent_loop symbols; the executable link must name the archive
+# itself. Same link-graph class as open PR #1335 - rebase note in the PR body.
+target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework sicnu_agent_loop)
 # 8.0: data identity / data cache check tests drive the CLI against an
 # in-test loopback range server (shared fixture with the io suites).
 target_sources(test_cli_commands_json PRIVATE support/http_range_server.cpp)
@@ -9721,6 +9959,47 @@ endif()
 target_compile_definitions(test_cli_commands_json PRIVATE
   SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
+
+# Track 14 (WP-A): per-command exit-code contract conformance. Same POSIX
+# popen()/WEXITSTATUS CLI-spawn fixture as test_cli_commands_json.
+if(NOT WIN32)
+sicnu_add_test(test_cli_exit_codes_r4)
+target_link_libraries(test_cli_exit_codes_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_exit_codes_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# Track 14 (WP-B): structured error-message four-tuple on failure paths.
+sicnu_add_test(test_cli_error_messages_r4)
+target_link_libraries(test_cli_error_messages_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_error_messages_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# Track 14 (WP-E): parse-time rejection with zero side effects.
+sicnu_add_test(test_cli_fail_fast_r4)
+target_link_libraries(test_cli_fail_fast_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_fail_fast_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# Track 14 (WP-C): README command vocabulary <-> CLI, bidirectional. Reads
+# the source tree (like test_cli_command_surface) and spawns the real binary
+# (like test_cli_commands_json) — POSIX popen only.
+if(NOT WIN32)
+sicnu_add_sdk_test(test_cli_help_vocabulary_r4)
+target_compile_definitions(test_cli_help_vocabulary_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+endif()
+
+# Track 14 (WP-D): CLI-side parity assertions for the three-surface table.
+sicnu_add_test(test_surface_parity_r4)
+target_link_libraries(test_surface_parity_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_surface_parity_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+endif()
 endif()
 
 # The plugins host runtime: registry bridging + external tool operator.
@@ -9812,6 +10091,19 @@ sicnu_link_jsoncpp(test_harness_evals)
 # cases, diagnostic brain, step anchoring, budgets.
 sicnu_add_test(test_harness_lab_evals)
 sicnu_link_jsoncpp(test_harness_lab_evals)
+
+# Teacher credential gate (SICNU_LAB_TEACHER_TOKEN): focused, minimal-link
+# regression test for the inverted constant-time comparison (#1202). Kept
+# tiny on purpose so it builds even when the heavy harness suites do not.
+add_executable(test_teacher_credential test_teacher_credential.cpp)
+target_link_libraries(test_teacher_credential PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_agent
+)
+target_include_directories(test_teacher_credential PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_link_jsoncpp(test_teacher_credential)
+sicnu_discover_tests(test_teacher_credential)
 
 
 # Harness 7.0 capability-knowledge drift guard: entries vs the live operator
@@ -10592,6 +10884,27 @@ target_include_directories(test_contract_fuzz_agent PRIVATE
 # coherence + behavioral pin of the version-selected VSI code. Light lane
 # (Catch2 + Sicnu::Geospatial only).
 sicnu_add_io_test(test_portability_contract)
+
+# core-foundations-r4 (Track 5): atomic_fs caller contract lane — runtime
+# contract cases over atomic_fs itself + source pins for the caller-side
+# fsync gate / staged-cleanup unification. Light lane (Catch2 +
+# Sicnu::Geospatial only).
+sicnu_add_io_test(test_atomic_fs_caller_contract)
+
+# core-foundations-r4 (Track 5): controlled error-path failure injection
+# (RO-DIR / MISSING / AS-DIR / CORRUPT / INTERRUPT devices) through public
+# geospatial seams. POSIX-only: the injection devices are chmod-based (the
+# same lane precedent as test_fault_injection).
+if(NOT WIN32)
+  sicnu_add_io_test(test_core_failure_injection_r4)
+endif()
+
+# core-foundations-r4 (Track 5): hot publish-path concurrency stress with
+# pre-declared criteria (16-thread staging uniqueness; 8-thread same-target
+# atomic publish storm with a torn-state monitor). Light lane.
+if(NOT WIN32)
+  sicnu_add_io_test(test_core_concurrency_stress_r4)
+endif()
 
 # Header self-containment probes (task A, failure class F1 / PR #833): every
 # nominated first-party leaf header must compile as the FIRST include of a
@@ -11793,6 +12106,8 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
     ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_BINARY_DIR}
   )
+  # classification_studio_widget → object_identity.h → <json/json.h>
+  sicnu_link_jsoncpp(${_d15_g_test})
   set_target_properties(${_d15_g_test} PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
 endforeach()
@@ -12476,6 +12791,57 @@ sicnu_add_test(test_snapshot_drift_12)
 target_link_libraries(test_snapshot_drift_12 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_snapshot_drift_12)
 
+# R4 processing-meta track: the byte gate itself as a Catch2 assertion.
+# test_snapshot_drift_12 answers "is the graph sound / how does drift render?";
+# this lane adds what it deliberately omits — committed-vs-live byte freshness
+# for BOTH snapshots, double-run generator stability, and drift attribution —
+# so a stale snapshot ("算子/元数据改了、快照没跟") is red locally without the
+# CLI tool. Read-only: regeneration stays a reviewed commit, never a test
+# side effect (see tests/test_snapshot_gate_r4.cpp header).
+sicnu_add_test(test_snapshot_gate_r4)
+target_link_libraries(test_snapshot_gate_r4 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_snapshot_gate_r4)
+
+# R4 processing-meta track (hardening/r4-processing-meta): at this baseline
+# every executable that links sicnu_agent fails to resolve two symbols that
+# live in the sibling static libs — agent_loop::VerificationReport::aggregate
+# (src/agent_loop) and agent_ops::OpsDriver::apply (src/agent_ops) — because
+# sicnu_agent's own link does not propagate them (upstream repair in flight:
+# PR #1335 "restore master build/CI (review P0) — link graph"). This block
+# resolves them for the affected test targets so the capability/meta/snapshot
+# gates can link and run; DELETE this block once #1335 lands and propagates
+# the link through the sicnu_agent target itself.
+foreach( r4_agent_link_target IN ITEMS
+    capability_knowledge_tool
+    test_algorithm_meta_drift
+    test_capability_completeness
+    test_capability_contract_9
+    test_capability_drift
+    test_capability_knowledge
+    test_capability_surface_parity
+    test_chunk_contract_11
+    test_command_contract_9
+    test_contract_census_11
+    test_contract_cross_surface_11
+    test_contract_determinism_11
+    test_contract_fuzz_agent
+    test_contract_fuzz_data
+    test_contract_fuzz_io
+    test_contract_fuzz_ops
+    test_contract_platform_9
+    test_contract_projection_9
+    test_diagnostics_contract_9
+    test_fault_registry
+    test_harness9_contracts
+    test_scientific_contract_10
+    test_snapshot_drift_12
+    test_snapshot_gate_r4
+    test_spatial_contracts
+    test_trace_contract
+    test_verification_metamorphic_11 )
+  target_link_libraries( ${r4_agent_link_target} PRIVATE sicnu_agent_loop sicnu_agent_ops )
+endforeach()
+
 # E-16: `origin/master` ships 25 unparseable `data/**/*.json` files, landed by
 # two EVIL MERGES (43dcf19cd truncated-capability-block x19, 4713528ef
 # zero-byte x4). E-15 was the same defect in one file; E-16 is the census.
@@ -12557,6 +12923,19 @@ endif()
 # standard sicnu_add_test registration is kept and the vendored gui is built
 # anyway. Anyone who wants to make the observatory gui-free has to break that
 # transitive edge in production CMake, not here.
+
+# Operator-path wing of the observatory (same harness, tests/perf/
+# perf_observatory.h): real operator workloads (spectral index, qa_mask,
+# recode, majority filter, temporal composite, change detection) as "obs op"
+# baseline records, plus the "memory guard" O(tile) RSS guards for the
+# documented streaming promises (ADR 0073 / USER_GUIDE temporal window /
+# ADR 0089). RUN_SERIAL keeps the RSS measurements uncontended; the guards pin
+# GDAL_CACHEMAX locally so the block cache is a constant, not a confounder.
+sicnu_add_test(test_perf_operator_observatory TIMEOUT 900 RUN_SERIAL TRUE)
+target_include_directories(test_perf_operator_observatory PRIVATE
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_link_jsoncpp(test_perf_operator_observatory)
 
 # ---------------------------------------------------------------------------
 # Data Scale 13.0 (Track C) — structural scale oracles for the DataManager
@@ -13471,6 +13850,11 @@ target_link_libraries(test_workbench_full_shell_lifecycle PRIVATE
   qgis_core
   qgis_gui
   sicnu_geo_rs_shell
+  # PR #1335 (pending): resolve sicnu_agent's agent_loop/OpsDriver undefineds
+  # at final link — the parity-r4 track carries the same explicit links as
+  # its own suites until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
 )
 target_include_directories(test_workbench_full_shell_lifecycle PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -13986,3 +14370,461 @@ foreach(_t
     target_link_libraries(${_t} PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>)
   endif()
 endforeach()
+###############################################################################
+# Track R4 (plugin lifecycle & exprs registry rollback)
+add_library(broken_plugin MODULE fixtures/broken_plugin/broken_plugin.cpp)
+target_include_directories(broken_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/sdk
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(broken_plugin PRIVATE sicnu_operators sicnu_operators_core jsoncpp)
+set_target_properties(broken_plugin PROPERTIES
+  LIBRARY_OUTPUT_NAME broken_plugin
+  PREFIX "lib"
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/broken_plugin
+)
+
+sicnu_add_sdk_test(test_plugin_lifecycle_halffail_r4)
+target_link_libraries(test_plugin_lifecycle_halffail_r4 PRIVATE sicnu_operators_core)
+target_compile_definitions(test_plugin_lifecycle_halffail_r4 PRIVATE
+  SICNU_TEST_BROKEN_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/broken_plugin"
+)
+# #1186 rule: target-scoped builds must build runtime-loaded fixtures first.
+add_dependencies(test_plugin_lifecycle_halffail_r4 broken_plugin)
+
+sicnu_add_sdk_test(test_plugin_lifecycle_unload_order_r4)
+target_link_libraries(test_plugin_lifecycle_unload_order_r4 PRIVATE sicnu_operators_core)
+target_compile_definitions(test_plugin_lifecycle_unload_order_r4 PRIVATE
+  SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
+)
+add_dependencies(test_plugin_lifecycle_unload_order_r4 hello_plugin)
+
+sicnu_add_sdk_test(test_plugin_host_boundary_r4)
+target_link_libraries(test_plugin_host_boundary_r4 PRIVATE sicnu_operators_core)
+target_compile_definitions(test_plugin_host_boundary_r4 PRIVATE
+  SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
+)
+add_dependencies(test_plugin_host_boundary_r4 hello_plugin)
+
+sicnu_add_sdk_test(test_plugin_channel_parity_r4)
+target_link_libraries(test_plugin_channel_parity_r4 PRIVATE
+  sicnu_plugins_hostprocess sicnu_operators_core)
+target_compile_definitions(test_plugin_channel_parity_r4 PRIVATE
+  SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
+  SICNU_TEST_PARITY_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
+)
+add_dependencies(test_plugin_channel_parity_r4 hello_plugin exprs_plugin_host_worker)
+
+sicnu_add_sdk_test(test_plugin_pollution_gate_r4)
+target_link_libraries(test_plugin_pollution_gate_r4 PRIVATE sicnu_operators_core)
+target_compile_definitions(test_plugin_pollution_gate_r4 PRIVATE
+  SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
+)
+add_dependencies(test_plugin_pollution_gate_r4 hello_plugin)
+# === ui-backend-state-parity-r4 (Track 3 R4): parity oracle suites ===# Each suite drives the real shell library (#1312 full-shell precedent — no
+# embedded TU copies) against landing-policy / mirror contracts. The pairs,
+# drift registry and race classes live in
+# .planning/ui-backend-state-parity-r4/PARITY_MAP.md.
+add_executable(test_parity_async_late_arrival_r4
+  test_parity_async_late_arrival_r4.cpp
+)
+target_link_libraries(test_parity_async_late_arrival_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  # qgis usage requirements must come from a direct link: the shell library's
+  # PRIVATE deps propagate symbols only (same reasoning as the full-shell suite).
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  sicnu_processing
+  # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
+  # resolve them at final link here until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
+)
+target_include_directories(test_parity_async_late_arrival_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_async_late_arrival_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_async_late_arrival_r4)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_async_late_arrival_r4 TEST_PREFIX test_parity_async_late_arrival_r4:: TIMEOUT 300)
+
+add_executable(test_parity_selection_authority_r4
+  test_parity_selection_authority_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_parity_selection_authority_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_parity_selection_authority_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_selection_authority_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_selection_authority_r4 TEST_PREFIX test_parity_selection_authority_r4:: TIMEOUT 300)
+
+add_executable(test_parity_state_mirror_r4
+  test_parity_state_mirror_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_workbench_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/timeline_scrubber_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/guided_workflow_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+)
+target_link_libraries(test_parity_state_mirror_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_jobs
+  sicnu_operators
+  sicnu_task_center
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_parity_state_mirror_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_state_mirror_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_state_mirror_r4)
+set_target_properties(test_parity_state_mirror_r4 PROPERTIES AUTOMOC ON)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_state_mirror_r4 TEST_PREFIX test_parity_state_mirror_r4:: TIMEOUT 300)
+
+add_executable(test_parity_restore_failsafe_r4
+  test_parity_restore_failsafe_r4.cpp
+)
+target_link_libraries(test_parity_restore_failsafe_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  sicnu_processing
+  # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
+  # resolve them at final link here until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
+)
+target_include_directories(test_parity_restore_failsafe_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_restore_failsafe_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_restore_failsafe_r4)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_restore_failsafe_r4 TEST_PREFIX test_parity_restore_failsafe_r4:: TIMEOUT 300)
+
+add_executable(test_parity_stress_r4
+  test_parity_stress_r4.cpp
+)
+target_link_libraries(test_parity_stress_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  sicnu_processing
+  # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
+  # resolve them at final link here until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
+)
+target_include_directories(test_parity_stress_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_stress_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_stress_r4)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_stress_r4 TEST_PREFIX test_parity_stress_r4:: TIMEOUT 300)
+
+# Living-documentation gate: PARITY_MAP.md rows must resolve to real oracle
+# tags in the parity suites (WP-G). No Qt needed.
+add_executable(test_parity_map_gate_r4
+  test_parity_map_gate_r4.cpp
+)
+target_link_libraries(test_parity_map_gate_r4 PRIVATE
+  Catch2::Catch2WithMain
+)
+target_compile_definitions(test_parity_map_gate_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_parity_map_gate_r4 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_parity_map_gate_r4 TEST_PREFIX test_parity_map_gate_r4::)
+=======
+# ---------------------------------------------------------------------------
+# track-16 verify-chain closure (hardening/r4-verify-chain) — new test targets
+# Append-only; each block is independent so sibling-track rebase conflicts
+# stay line-local.
+# ---------------------------------------------------------------------------
+
+# WP-B: dual-locale byte-stability matrix over every chain digest production
+# point (verify / grader / preflight / science_context / suitability).
+add_executable(test_verify_chain_locale_matrix test_verify_chain_locale_matrix.cpp)
+target_link_libraries(test_verify_chain_locale_matrix PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+  sicnu_grader
+  sicnu_preflight
+  Sicnu::ScienceContext
+  sicnu_recipes
+  Sicnu::ScientificState
+  sicnu_suitability
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_verify_chain_locale_matrix)
+target_include_directories(test_verify_chain_locale_matrix PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_verify_chain_locale_matrix TEST_PREFIX "test_verify_chain_locale_matrix::")
+
+# WP-D: preflight <-> science_context invalidation linkage matrix (shared
+# authority, fail-closed transitions, no stale facts).
+add_executable(test_preflight_authority_invalidation test_preflight_authority_invalidation.cpp)
+target_link_libraries(test_preflight_authority_invalidation PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+  sicnu_preflight_state_adapter
+  sicnu_scientific_state
+  Sicnu::ScienceContext
+  sicnu_recipes
+)
+sicnu_link_jsoncpp(test_preflight_authority_invalidation)
+target_include_directories(test_preflight_authority_invalidation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_preflight_authority_invalidation TEST_PREFIX "test_preflight_authority_invalidation::")
+# ── Track 2 (R4 Deep, cluster A): teardown lifecycle fixtures (WP-C) ──────
+# Every binary here registers the shared ordered-teardown listener
+# (tests/support/qt_lifecycle.h) and must survive glibc exit() with no
+# std::_Exit defense. TEST_CASE names carry "teardown" for the ctest gate.
+
+add_executable(test_canvas_teardown_r4 test_canvas_teardown_r4.cpp)
+target_link_libraries(test_canvas_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_canvas_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+set_target_properties(test_canvas_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_canvas_teardown_r4)
+
+add_executable(test_dual_viewport_teardown_r4 test_dual_viewport_teardown_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_dual_viewport_sync_controller.cpp)
+target_link_libraries(test_dual_viewport_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_dual_viewport_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_dual_viewport_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_dual_viewport_teardown_r4)
+
+add_executable(test_timeline_scrubber_teardown_r4 test_timeline_scrubber_teardown_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/timeline_scrubber_widget.cpp)
+target_link_libraries(test_timeline_scrubber_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_timeline_scrubber_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_timeline_scrubber_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_timeline_scrubber_teardown_r4)
+
+add_executable(test_roi_statistics_teardown_r4 test_roi_statistics_teardown_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/algorithms/math_utils.cpp)
+target_link_libraries(test_roi_statistics_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_roi_statistics_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_roi_statistics_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_roi_statistics_teardown_r4)
+
+add_executable(test_maptool_teardown_r4 test_maptool_teardown_r4.cpp)
+target_link_libraries(test_maptool_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_maptool_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_maptool_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_maptool_teardown_r4)
+
+add_executable(test_exit_path_contracts_r4 test_exit_path_contracts_r4.cpp)
+target_link_libraries(test_exit_path_contracts_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Test
+  sicnu_task_center sicnu_jobs
+  qgis_core
+)
+target_include_directories(test_exit_path_contracts_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_exit_path_contracts_r4 PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+set_target_properties(test_exit_path_contracts_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_exit_path_contracts_r4)
+
+add_executable(test_teardown_retirement_gate_r4 test_teardown_retirement_gate_r4.cpp)
+target_link_libraries(test_teardown_retirement_gate_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Test
+  qgis_core
+)
+target_include_directories(test_teardown_retirement_gate_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_teardown_retirement_gate_r4 PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+set_target_properties(test_teardown_retirement_gate_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_teardown_retirement_gate_r4)
+# ---------------------------------------------------------------------------
+# Track 7 R4 (rs-operator-oracles): NoData/mask semantics, tolerance chains,
+# determinism digests, preflight refusals, known-answer gap-filling.
+# ---------------------------------------------------------------------------
+# R4 operator-oracle suites run on the LIGHT lane (Catch2 + Qt6::Core +
+# sicnu_operators -> sicnu_processing): they exercise the registry/run seam
+# directly and need no qgis_gui chain.
+foreach(_r4_test
+    test_operator_nodata_semantics
+    test_operator_chain_tolerance
+    test_operator_determinism_digest
+    test_operator_preflight_refusals
+    test_known_answer_corpus_r4)
+  add_executable(${_r4_test} ${_r4_test}.cpp)
+  target_link_libraries(${_r4_test} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_operators
+    sicnu_processing
+  )
+  target_include_directories(${_r4_test} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${_r4_test} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+endforeach()
+# TEST_PREFIX r4:: lets track gates select the R4 operator-oracle cases
+# with `ctest -R "^r4::"` (D15 selection convention).
+sicnu_discover_tests(test_operator_nodata_semantics TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_operator_chain_tolerance TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_operator_determinism_digest TEST_PREFIX r4:: TIMEOUT 600)
+sicnu_discover_tests(test_operator_preflight_refusals TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_known_answer_corpus_r4 TEST_PREFIX r4:: TIMEOUT 300)
+# Track 17 R4 (WP-D): commands.json schema / entry-floor / EOL gate. Light —
+# Catch2 + Qt6::Core only (QJsonDocument); the registry bidirectional diff
+# stays in test_help_coverage, the corpus shape gate in test_help_integrity_12.
+add_executable(test_help_commands_schema test_help_commands_schema.cpp)
+target_link_libraries(test_help_commands_schema PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_help_commands_schema PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_help_commands_schema PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_help_commands_schema PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+# Static registration: 3 fast cases, no need for per-case discovery.
+add_test(NAME test_help_commands_schema
+  COMMAND test_help_commands_schema
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Track 17 R4 (WP-F): extraction/no-regression gate. Runs the single-source
+# string audit scanner over the frozen Phase 0 file list and asserts the
+# frozen baseline (tests/fixtures/i18n_string_baseline.json — the time anchor;
+# do not recompute at close): hard classes at 0 steady state, non-UI Chinese
+# ceiling, tr()-extraction floor. Selftest-gated scanner (constructive pos/neg).
+if(Python_EXECUTABLE)
+  add_test(NAME test_i18n_string_audit
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/scripts/audit_i18n_strings.py"
+            "--files" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_audit_files.txt"
+            "--gate" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_string_baseline.json"
+            "--selftest")
+  set_tests_properties(test_i18n_string_audit PROPERTIES
+    TIMEOUT 300
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+
+# Track 17 R4 (WP-F guard): the WP-B zh_CN backfill entries live under moc
+# short-name contexts, which today's lupdate attributes to namespace-qualified
+# names — a sicnu_i18n_update run would -no-obsolete them away silently.
+# Pin a representative (context, source, translation) sample. Light target.
+add_executable(test_i18n_migrated_translations test_i18n_migrated_translations.cpp)
+target_link_libraries(test_i18n_migrated_translations PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_compile_definitions(test_i18n_migrated_translations PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_i18n_migrated_translations PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_i18n_migrated_translations
+  COMMAND test_i18n_migrated_translations
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

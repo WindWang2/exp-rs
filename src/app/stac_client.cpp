@@ -162,6 +162,10 @@ void StacClient::search(const QString &endpoint, const QString &collection,
                         const QString &datetime, const QStringList &bbox,
                         int limit)
 {
+    // F-02: every user-initiated search supersedes every older one (the
+    // generation the finished handlers compare against). searchNext()
+    // deliberately does NOT bump — pagination continues the same query.
+    ++m_searchGeneration;
     QUrl endpointUrl(endpoint);
     // Allow endpoint without path scheme form "https://host/stac"
     if (!endpointUrl.scheme().isEmpty()) {
@@ -187,6 +191,9 @@ void StacClient::runSearch(const QUrl &url)
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
 
+    // Capture this reply's generation: only the newest query may deliver.
+    const quint64 generation = m_searchGeneration;
+
     QNetworkReply *reply = mManager.get(request);
     connect(reply, &QNetworkReply::redirected, this, [reply](const QUrl &url){
         // 392: re-validate every redirect target against the same SSRF policy
@@ -195,8 +202,18 @@ void StacClient::runSearch(const QUrl &url)
             reply->abort();
         }
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation]() {
         reply->deleteLater();
+        // F-02/F-03: the reply belongs to a superseded query (newer search
+        // started, host closed, or the query timed out after its successor
+        // succeeded). Late results — successes AND errors — must never
+        // overwrite the newest state: drop with a trace.
+        if (generation != m_searchGeneration)
+        {
+            emit searchDropped(QStringLiteral(
+                "stale STAC search result dropped (superseded generation)"));
+            return;
+        }
         // 392 belt-and-suspenders: final URL after redirects must still pass policy
         const QString policyError = validateUrlPolicy(reply->url(), true);
         if (!policyError.isEmpty()) {

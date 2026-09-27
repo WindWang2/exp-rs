@@ -112,7 +112,10 @@
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : [],
+    "prerequisites" : 
+    [
+      "\u8f93\u5165\u9700\u542b NIR \u4e0e Red \u6ce2\u6bb5\uff1a\u53ef\u7531 SICNU_BAND_ROLE \u89e3\u6790\u6216\u663e\u5f0f 1-based \u6ce2\u6bb5\u53f7\u6307\u5b9a\uff08\u9ed8\u8ba4 4/3\uff09\uff1b\u5efa\u8bae\u5728\u5927\u6c14\u6821\u6b63\u540e\u8ba1\u7b97\u3002"
+    ],
     "schema_version" : 2,
     "summary" : "\u5f52\u4e00\u5316\u690d\u88ab\u6307\u6570 NDVI = (NIR-Red)/(NIR+Red)\uff0c\u6700\u5e38\u7528\u7684\u690d\u88ab\u6d3b\u529b\u4e0e\u8986\u76d6\u5ea6\u6307\u6807\u3002",
     "teaching_use" : 

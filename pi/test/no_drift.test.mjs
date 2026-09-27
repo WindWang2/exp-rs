@@ -38,14 +38,23 @@ test("the extension shell imports the shared bridge (no second implementation)",
 });
 
 test("the shared bridge kills the child on a runaway line (F-PI-1 behavior anchor)", () => {
-  // The overflow branch must tear the child down instead of zombie-streaming.
+  // The overflow branch must route through the shared teardown instead of
+  // only clearing the buffer. The kill itself lives in failDesyncedStream
+  // (pinned by bridge_parity.test.mjs); `exited` flips via the child exit
+  // handler so lazy respawn replaces the dead generation.
   const overflowBranch = bridgeSource.slice(
     bridgeSource.indexOf("MAX_LINE_BUFFER_CHARS) {"),
     bridgeSource.indexOf("private onLine"),
   );
   assert.ok(overflowBranch.length > 0, "overflow branch not found");
-  assert.match(overflowBranch, /child\.kill\(\)/);
-  assert.match(overflowBranch, /this\.exited = true/);
+  assert.match(overflowBranch, /failDesyncedStream\(/);
+  // The exit handler (not the overflow branch) owns the exited latch.
+  const exitHandler = bridgeSource.slice(
+    bridgeSource.indexOf('this.child.on("exit"'),
+    bridgeSource.indexOf("child.stdin!.on"),
+  );
+  assert.ok(exitHandler.length > 0, "exit handler not found");
+  assert.match(exitHandler, /this\.exited = true/);
 });
 
 test("the shared bridge clears the startup deadline on every settle path (F-PI-2)", () => {
@@ -72,7 +81,12 @@ test("a >32 MiB unbounded line kills the child; the next request recovers", asyn
     assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
     // Flood: the runaway line rejects the pending request…
     await assert.rejects(() => bridge.request("tools/call", { flood: true }), /response line exceeded/);
-    // …and the child is dead (killed by the overflow branch).
+    // …and the child is dead (killed by the overflow branch). The kill is
+    // asynchronous (SIGTERM, then the exit event flips `alive`), so poll for
+    // it instead of asserting in the same tick as the rejection — the
+    // in-tick assertion was a stale-shape false red (Track 9).
+    for (let waited = 0; waited < 5000 && bridge.alive; waited += 25)
+      await new Promise((r) => setTimeout(r, 25));
     assert.equal(bridge.alive, false);
     // The next request lazy-respawns and SUCCEEDS — before the fix the
     // bridge zombied and this call timed out against the desynced stream.

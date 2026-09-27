@@ -228,6 +228,20 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
     if (!dst.isOpen()) {
         throw RSOperatorError(ErrorCode::ComputationError, "Failed to create output raster");
     }
+    // Output NoData contract, per method: the stretch kernels rewrite
+    // invalid pixels with the band's resolved sentinel (NaN when undeclared),
+    // while ratio/IHS write NaN. Declaring what is actually written keeps
+    // the holes machine-readable instead of silent magic values.
+    for (int b = 1; b <= outBands; ++b) {
+        if (methodIndex == 0) {
+            const float nd = bandNodata[b - 1];
+            dst.setBandNoDataValue(b, std::isfinite(nd)
+                                            ? static_cast<double>(nd)
+                                            : std::numeric_limits<double>::quiet_NaN());
+        } else {
+            dst.setBandNoDataValue(b, std::numeric_limits<double>::quiet_NaN());
+        }
+    }
     QString closeError;
     bool ok = true;
 
@@ -290,7 +304,8 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
                     band1Buf[i] = bip[i * 2];
                     band2Buf[i] = bip[i * 2 + 1];
                 }
-                bandRatioTile(band1Buf.data(), band2Buf.data(), out.data(), n);
+                bandRatioTile(band1Buf.data(), band2Buf.data(), out.data(), n,
+                              bandNodata[band1 - 1], bandNodata[band2 - 1]);
                 return dst.writeTile(1, tile, out.data());
             });
         } else {

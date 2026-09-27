@@ -122,7 +122,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "(a-b)/(a+b) \u5f62\u5f0f\u538b\u5236\u516c\u5171\u4e58\u6027\u56e0\u5b50\uff0c\u4f46\u5bf9\u52a0\u6027\u504f\u79fb\uff08\u5927\u6c14/\u5149\u7167\u6574\u4f53\u62ac\u5347\uff09\u4ecd\u654f\u611f\uff1b\u5206\u6bcd\u63a5\u8fd1 0\uff08a\u2248-b\uff09\u7684\u533a\u57df\u4e0d\u7a33\u5b9a\u3002"
+    ],
     "modality" : 
     [
       "optical"

@@ -347,7 +347,7 @@ void QgisDesktopWindow::setupDockWidgets()
         } );
         m_labCockpitDock = new QgsDockWidget( this );
         m_labCockpitDock->setObjectName( QStringLiteral( "labCockpitDock" ) );
-        m_labCockpitDock->setWindowTitle( tr( "遥感实验学习工作台" ) );
+        m_labCockpitDock->setWindowTitle( tr( "Undergraduate Lab Teaching Workbench" ) );
         m_labCockpitDock->setWidget( cockpit );
         addDockWidget( Qt::RightDockWidgetArea, m_labCockpitDock );
         tabifyDockWidget( m_workflowDock, m_labCockpitDock );
@@ -359,7 +359,7 @@ void QgisDesktopWindow::setupDockWidgets()
         auto *admin = new sicnu::app::teaching_admin::TeachingAdminDock( this );
         m_teachingAdminDock = new QgsDockWidget( this );
         m_teachingAdminDock->setObjectName( QStringLiteral( "teachingAdminDock" ) );
-        m_teachingAdminDock->setWindowTitle( tr( "教学作者与评测控制台" ) );
+        m_teachingAdminDock->setWindowTitle( tr( "Teacher Authoring & Assessment Console" ) );
         m_teachingAdminDock->setWidget( admin );
         addDockWidget( Qt::RightDockWidgetArea, m_teachingAdminDock );
         tabifyDockWidget( m_workflowDock, m_teachingAdminDock );
@@ -677,8 +677,43 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
         m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
 
     // Single Task Center UI is the bottom RsJobPanel (rsJobPanelDock).
+    // F-05/F-06 (ui-backend-state-parity-r4): auto-load requests are stamped
+    // with the session that started the task (recorded at taskAdded). A
+    // request arriving after the shell moved on — project open/new or Save
+    // As bumped the epoch — is dropped with a status-bar trace instead of
+    // landing in the context the user has already left.
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskAdded,
+             this, [this]( const sicnu::AlgorithmTaskInfo &info ) {
+                 if ( info.autoLoadLayer && !info.outputLayerPath.isEmpty() )
+                 {
+                     m_autoLoadTaskEpoch.insert( info.taskId, m_sessionEpoch );
+                     // Bound the map: task ids are monotonic, so dropping the
+                     // smallest keys retires the oldest submissions first.
+                     while ( m_autoLoadTaskEpoch.size() > 256 )
+                         m_autoLoadTaskEpoch.erase( m_autoLoadTaskEpoch.begin() );
+                 }
+             } );
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::layerAutoLoadRequested,
-             this, [this]( const QString &path ) {
+             this, [this]( const QString &path, long taskId ) {
+                 // Pair by task id — a FIFO pop would mispair when tasks
+                 // complete out of order, and an unpaired request (its task
+                 // never registered, e.g. pre-window submission) is stale by
+                 // definition and dropped with a trace.
+                 const auto it = m_autoLoadTaskEpoch.constFind( taskId );
+                 if ( it == m_autoLoadTaskEpoch.constEnd() )
+                 {
+                     statusBar()->showMessage(
+                         tr( "Dropped stale task auto-load: %1" ).arg( path ), 5000 );
+                     return;
+                 }
+                 const quint64 submittedEpoch = it.value();
+                 m_autoLoadTaskEpoch.erase( it );
+                 if ( submittedEpoch != m_sessionEpoch )
+                 {
+                     statusBar()->showMessage(
+                         tr( "Dropped stale task auto-load: %1" ).arg( path ), 5000 );
+                     return;
+                 }
                  // Generic path open → DataManager + main Display View.
                  ( void ) loadDataLayer( path );
              } );

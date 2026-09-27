@@ -291,9 +291,12 @@ TemporalCadenceFacts temporalCadenceFromDates( const Json::Value &dates )
     return out;
   }
 
-  // Parse + keep precision; dedup by epoch keeping the COARSER precision
+  // Parse + keep precision; dedup by UTC DAY keeping the COARSER precision
   // when two entries collide (a mixed list stays honest about its coarsest
-  // member).
+  // member). A date-only entry names an observation day, so it collides with
+  // any timestamped entry on that day — the pair is one acquisition reported
+  // at two precisions, not two observations. Two distinct timestamped entries
+  // on the same day are distinct observations and both stay.
   std::vector<std::pair<long long, bool>> instants; // (epoch, dateOnly)
   int unboundedCount = 0;
   for ( const Json::Value &entry : dates )
@@ -320,16 +323,38 @@ TemporalCadenceFacts temporalCadenceFromDates( const Json::Value &dates )
         out.unparseable.push_back( text );
       continue;
     }
-    // Merge precision per epoch.
+    // UTC day bucket (floor division so pre-1970 epochs stay on their day).
+    const long long day = parsed.epochSeconds -
+                          ( parsed.epochSeconds >= 0 ? parsed.epochSeconds % 86400
+                                                     : parsed.epochSeconds % 86400 + 86400 );
+    // Merge precision on collision, coarsest wins: a date-only member makes
+    // the whole day-collision collapse onto that day's midnight (the coarsest
+    // report of the acquisition is the honest representative). Corner case —
+    // two distinct timestamped entries PLUS a date-only entry on the same
+    // day: the date-only folds into the FIRST timestamp's day bucket (its
+    // representative moves to that midnight) and the second timestamp stays
+    // a distinct observation.
     bool merged = false;
     for ( auto &existing : instants )
     {
-      if ( existing.first == parsed.epochSeconds )
+      const long long existingDay =
+        existing.first - ( existing.first >= 0 ? existing.first % 86400
+                                               : existing.first % 86400 + 86400 );
+      if ( existingDay != day )
+        continue;
+      if ( existing.second || parsed.dateOnly )
       {
-        existing.second = existing.second && parsed.dateOnly;
+        existing.first = day;
+        existing.second = true;
         merged = true;
         break;
       }
+      if ( existing.first == parsed.epochSeconds )
+      {
+        merged = true; // identical timestamped instant twice
+        break;
+      }
+      // Both timestamped, different times of day: distinct observations.
     }
     if ( !merged )
       instants.emplace_back( parsed.epochSeconds, parsed.dateOnly );
@@ -357,7 +382,11 @@ TemporalCadenceFacts temporalCadenceFromDates( const Json::Value &dates )
   for ( size_t i = 1; i < instants.size(); ++i )
     gaps.push_back( instants[i].first - instants[i - 1].first );
 
-  const double median = medianOfSorted( gaps );
+  // medianOfSorted expects sorted input; gaps arrive in sequence order and a
+  // single long gap between short ones would otherwise be read as the median.
+  std::vector<long long> sortedGaps( gaps );
+  std::sort( sortedGaps.begin(), sortedGaps.end() );
+  const double median = medianOfSorted( sortedGaps );
   out.cadenceDays = median / 86400.0;
 
   int deviations = 0;
@@ -379,37 +408,43 @@ TemporalCadenceFacts temporalCadenceFromDates( const Json::Value &dates )
   else
     out.regularity = regularity::kIrregular;
 
-  // Cadence label — closed rules, hand-computable:
+  // Cadence label — closed rules, hand-computable, and only for a series
+  // whose gaps are at least near-regular: labeling an irregular series'
+  // median gap as a "cadence" would dress noise up as a repeat cycle.
   //  monthly: every consecutive pair advances exactly one calendar month and
   //           the day-of-month moves by at most one day;
   //  annual:  every gap is 365 or 366 days AND each pair advances one year;
   //  "<N>d":  median gap is an integer number of days (0.01 tolerance).
-  bool monthly = true;
-  bool annual = true;
-  for ( size_t i = 1; i < instants.size(); ++i )
+  if ( out.regularity == regularity::kRegular ||
+       out.regularity == regularity::kNearRegular )
   {
-    const QDate previous =
-      QDateTime::fromSecsSinceEpoch( instants[i - 1].first, QTimeZone::utc() ).date();
-    const QDate current =
-      QDateTime::fromSecsSinceEpoch( instants[i].first, QTimeZone::utc() ).date();
-    const int monthDelta =
-      ( current.year() - previous.year() ) * 12 + ( current.month() - previous.month() );
-    if ( monthDelta != 1 || std::abs( current.day() - previous.day() ) > 1 )
-      monthly = false;
-    const long long gap = instants[i].first - instants[i - 1].first;
-    const int yearDelta = current.year() - previous.year();
-    if ( !( ( gap == 365 * 86400 || gap == 366 * 86400 ) && yearDelta == 1 ) )
-      annual = false;
-  }
-  if ( monthly )
-    out.cadenceLabel = "monthly";
-  else if ( annual )
-    out.cadenceLabel = "annual";
-  else
-  {
-    const double rounded = std::round( out.cadenceDays );
-    if ( rounded >= 1.0 && std::abs( out.cadenceDays - rounded ) < 0.01 )
-      out.cadenceLabel = std::to_string( static_cast<long long>( rounded ) ) + "d";
+    bool monthly = true;
+    bool annual = true;
+    for ( size_t i = 1; i < instants.size(); ++i )
+    {
+      const QDate previous =
+        QDateTime::fromSecsSinceEpoch( instants[i - 1].first, QTimeZone::utc() ).date();
+      const QDate current =
+        QDateTime::fromSecsSinceEpoch( instants[i].first, QTimeZone::utc() ).date();
+      const int monthDelta =
+        ( current.year() - previous.year() ) * 12 + ( current.month() - previous.month() );
+      if ( monthDelta != 1 || std::abs( current.day() - previous.day() ) > 1 )
+        monthly = false;
+      const long long gap = instants[i].first - instants[i - 1].first;
+      const int yearDelta = current.year() - previous.year();
+      if ( !( ( gap == 365 * 86400 || gap == 366 * 86400 ) && yearDelta == 1 ) )
+        annual = false;
+    }
+    if ( monthly )
+      out.cadenceLabel = "monthly";
+    else if ( annual )
+      out.cadenceLabel = "annual";
+    else
+    {
+      const double rounded = std::round( out.cadenceDays );
+      if ( rounded >= 1.0 && std::abs( out.cadenceDays - rounded ) < 0.01 )
+        out.cadenceLabel = std::to_string( static_cast<long long>( rounded ) ) + "d";
+    }
   }
   return out;
 }
@@ -728,7 +763,9 @@ ProductGenerationFacts productGenerationFacts( const Json::Value &understanding 
     if ( match.hasMatch() )
     {
       out.generationLevel = match.captured( 1 ).toInt();
-      out.levelSuffix = match.captured( 2 ).toStdString();
+      // Mechanical parse: the suffix is normalized to lowercase so "L2A" and
+      // "l2a" produce identical facts (and identical digests).
+      out.levelSuffix = match.captured( 2 ).toLower().toStdString();
     }
   }
   return out;
@@ -912,7 +949,9 @@ std::string workflowFactsDigest( const Json::Value &facts )
   const std::string serialized = Json::writeString( builder, facts );
   const QByteArray digest = QCryptographicHash::hash(
     QByteArray::fromStdString( serialized ), QCryptographicHash::Sha256 );
-  return QString::fromLatin1( digest.left( 16 ).toHex() ).toStdString();
+  // sha256 truncated to 16 hex chars — the repo-wide digest width (matching
+  // the repair planner's findings_digest), stable and collision-safe here.
+  return QString::fromLatin1( digest.left( 8 ).toHex() ).toStdString();
 }
 
 } // namespace sicnu::agent::harness::wfacts

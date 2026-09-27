@@ -95,6 +95,24 @@ namespace exprs_ns = exprs;
 
 namespace {
 
+/// Track 14 (WP-B): one construction site for the usage-error four-tuple —
+/// code + reason + the usage line as the suggested action. No call site
+/// assembles error strings by hand.
+int usageError( const CliIO &io, const std::string &command, const std::string &usage )
+{
+    // The usage line IS the reason and the suggested action in one; the
+    // hint segment stays empty so text mode does not print it twice.
+    const CliErrorDetails details {
+        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ) };
+    return io.finish( false, command, {},
+                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                      usage, &details );
+}
+
+} // namespace
+
+namespace {
+
 Json::Value parseJsonFile( const std::string &path, std::string &error )
 {
     std::ifstream input( path );
@@ -352,14 +370,48 @@ int commandAlgorithms( QStringList args, const CliIO &io )
         }
         if ( schemaJson.isNull() )
         {
-            return io.finish( false, "algorithms", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
-                              {}, "unknown algorithm: " + needle.toStdString() );
+            const CliErrorDetails details {
+                .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ) };
+            return io.finish( false, "algorithms", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
+                              {}, "unknown algorithm: " + needle.toStdString(), &details );
         }
         Json::Value data( Json::objectValue );
         data["id"] = needle.toStdString();
         data["description"] = description;
         data["input_schema"] = schemaJson;
         return io.finish( true, "algorithms", data, 0 );
+    }
+
+    // Track 14 (WP-E): `algorithms list` accepts no flags; an unknown flag
+    // used to be silently ignored while the list printed anyway.
+    for ( const QString &leftover : args )
+    {
+        if ( leftover.startsWith( QStringLiteral( "--" ) ) )
+        {
+            const CliErrorDetails details {
+                .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                .expected = "list takes no flags (see: algorithms search)",
+                .actual = leftover.toStdString() };
+            return io.finish( false, "algorithms", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                              "unknown flag: " + leftover.toStdString(), &details );
+        }
+    }
+
+    // Track 14 (WP-E): an unknown subcommand used to fall through to `list`
+    // and exit 0 — a silently-misleading verb. Reject it at parse time.
+    if ( sub != "list" )
+    {
+        const sicnu::cli::CliErrorDetails details {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+            .expected = "list|search|schema",
+            .actual = sub.toStdString(),
+            .hint = "usage: algorithms list | algorithms search [text] [filters] | "
+                    "algorithms schema <id>" };
+        return io.finish( false, "algorithms", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "unknown algorithms subcommand: " + sub.toStdString(), &details );
     }
 
     // list
@@ -387,8 +439,7 @@ int commandRun( QStringList args, const CliIO &io )
     extractGlobalFlags( args );
     if ( args.isEmpty() )
     {
-        return io.finish( false, "run", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: run <operator-id> [--param k=v ...] [--params-file f]" );
+        return usageError( io, "run", "usage: run <operator-id> [--param k=v ...] [--params-file f]" );
     }
     const std::string operatorId = args.takeFirst().toStdString();
 
@@ -422,6 +473,22 @@ int commandRun( QStringList args, const CliIO &io )
             }
             for ( const std::string &key : fileParams.getMemberNames() )
                 params[key] = fileParams[key];
+        }
+    }
+
+    // Track 14 (WP-E): unknown flags are rejected at parse time instead of
+    // being silently ignored while the operator runs anyway.
+    for ( const QString &leftover : args )
+    {
+        if ( leftover.startsWith( QStringLiteral( "--" ) ) )
+        {
+            const CliErrorDetails details {
+                .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                .expected = "--param k=v | --params-file <file>",
+                .actual = leftover.toStdString() };
+            return io.finish( false, "run", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                              "unknown flag: " + leftover.toStdString(), &details );
         }
     }
 
@@ -483,10 +550,21 @@ int commandPipeline( QStringList args, const CliIO &io )
 {
     extractGlobalFlags( args );
     QString sub = args.isEmpty() ? "run" : args.takeFirst();
+    // Track 14 (WP-E): an unknown subcommand used to be treated as `run` —
+    // reject it instead of executing the pipeline under a renamed verb.
+    if ( sub != "run" && sub != "validate" && sub != "resume" )
+    {
+        const CliErrorDetails details {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+            .expected = "run|validate|resume",
+            .actual = sub.toStdString() };
+        return io.finish( false, "pipeline", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "unknown pipeline subcommand: " + sub.toStdString(), &details );
+    }
     if ( args.isEmpty() )
     {
-        return io.finish( false, "pipeline", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: pipeline run <file.json>" );
+        return usageError( io, "pipeline", "usage: pipeline run <file.json>" );
     }
     const QString path = args.takeFirst();
 
@@ -517,6 +595,19 @@ int commandPipeline( QStringList args, const CliIO &io )
         Json::Value data( Json::objectValue );
         data["valid"] = true;
         return io.finish( true, "pipeline", data, 0 );
+    }
+    // Track 14 (WP-A): a missing/unreadable file is InvalidInput(6) per the
+    // published contract ("malformed arguments/unreadable files"); reserve
+    // ExecutionFailure(3) for documents that exist but fail at run time.
+    if ( sub != "validate" && !QFileInfo::exists( path ) )
+    {
+        const sicnu::cli::CliErrorDetails details {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+            .expected = "a readable pipeline document",
+            .actual = path.toStdString(),
+            .hint = "usage: pipeline run <file.json> | pipeline resume <run_id>" };
+        return io.finish( false, "pipeline", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                          {}, "pipeline document not found: " + path.toStdString(), &details );
     }
     if ( sub == "resume" )
     {
@@ -579,8 +670,7 @@ int commandWorkflow( QStringList args, const CliIO &io )
     {
         if ( args.isEmpty() )
         {
-            return io.finish( false, "workflow", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: workflow resume <run_id>" );
+            return usageError( io, "workflow", "usage: workflow resume <run_id>" );
         }
         auto progressCb = [&io]( int stepIndex, int totalSteps, double stepProgress,
                                  const std::string &message ) {
@@ -724,8 +814,7 @@ int commandWorkflow( QStringList args, const CliIO &io )
         return io.finish( true, "workflow", data, 0 );
     }
 
-    return io.finish( false, "workflow", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "usage: workflow validate|run|list-runs|resume ..." );
+    return usageError( io, "workflow", "usage: workflow validate|run|list-runs|resume ..." );
 }
 
 // ---------------------------------------------------------------------------
@@ -766,8 +855,7 @@ int commandPlugin( QStringList args, const CliIO &io )
     {
         if ( args.isEmpty() )
         {
-            return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: plugin validate|doctor <plugin-dir>" );
+            return usageError( io, "plugin", "usage: plugin validate|doctor <plugin-dir>" );
         }
         const std::string directory = args.takeFirst().toStdString();
         exprs_ns::PluginDiagnosticLog diagnostics;
@@ -868,8 +956,7 @@ int commandPlugin( QStringList args, const CliIO &io )
     {
         if ( args.isEmpty() )
         {
-            return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: plugin install <package-dir>" );
+            return usageError( io, "plugin", "usage: plugin install <package-dir>" );
         }
         // Track 13.0: install over an EXISTING plugin is a lifecycle-aware
         // atomic upgrade (drain -> swap -> load -> rollback on failure),
@@ -901,17 +988,38 @@ int commandPlugin( QStringList args, const CliIO &io )
     {
         if ( args.isEmpty() )
         {
-            return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: plugin uninstall <plugin-id>" );
+            return usageError( io, "plugin", "usage: plugin uninstall <plugin-id>" );
         }
         // Track 13.0: drain-gated uninstall — a loaded plugin unloads
         // first (E4005 while executing), and its last-good snapshot is
         // removed with the package.
-        if ( !registry.uninstallPlugin( args.takeFirst().toStdString() ) )
+        // Track 14 (WP-A/WP-B): an unknown id is MissingDependency(5) — the
+        // same class `plugin inspect` reports — while a real uninstall
+        // failure (drain gate etc.) is ExecutionFailure(3) with the host
+        // diagnostics. The id used to collapse both into a bare
+        // GenericError(1).
+        const std::string uninstallId = args.takeFirst().toStdString();
+        exprs_ns::PluginRecord uninstallRecord;
+        if ( !registry.copyRecord( uninstallId, uninstallRecord ) )
+        {
+            const sicnu::cli::CliErrorDetails details {
+                .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
+                .expected = "an installed plugin id",
+                .actual = uninstallId,
+                .hint = "usage: sicnu_geo_rs_cli plugin list" };
+            return io.finish( false, "plugin", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
+                              {}, "unknown plugin: " + uninstallId, &details );
+        }
+        if ( !registry.uninstallPlugin( uninstallId ) )
         {
             const Json::Value diagnostics = registry.diagnostics().toJson();
-            return io.finish( false, "plugin", {}, 1, diagnostics,
-                              "uninstall failed" );
+            const sicnu::cli::CliErrorDetails details {
+                .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
+                .hint = "plugin doctor <plugin-dir> explains load/drain failures" };
+            return io.finish( false, "plugin", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
+                              diagnostics, "uninstall failed", &details );
         }
         return io.finish( true, "plugin", {}, 0, registry.diagnostics().toJson() );
     }
@@ -920,8 +1028,7 @@ int commandPlugin( QStringList args, const CliIO &io )
     {
         if ( args.isEmpty() )
         {
-            return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: plugin inspect <plugin-id>" );
+            return usageError( io, "plugin", "usage: plugin inspect <plugin-id>" );
         }
         const std::string pluginId = args.takeFirst().toStdString();
         exprs_ns::PluginRecord record;
@@ -947,9 +1054,7 @@ int commandPlugin( QStringList args, const CliIO &io )
         // through secret redaction before it leaves the process.
         if ( args.isEmpty() )
         {
-            return io.finish( false, "plugin", {},
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: plugin debug-bundle <plugin-id>" );
+            return usageError( io, "plugin", "usage: plugin debug-bundle <plugin-id>" );
         }
         const std::string pluginId = args.takeFirst().toStdString();
         exprs_ns::PluginRecord record;
@@ -1029,8 +1134,7 @@ int commandPlugin( QStringList args, const CliIO &io )
         // round-trip. Structured PT_* checks; exit code reflects the verdict.
         if ( args.isEmpty() )
         {
-            return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: plugin test <plugin-dir>" );
+            return usageError( io, "plugin", "usage: plugin test <plugin-dir>" );
         }
         const std::string directory = args.takeFirst().toStdString();
 
@@ -1869,8 +1973,7 @@ int commandPlugin( QStringList args, const CliIO &io )
                           ok ? "" : "plugin conformance failed: " + failedChecks );
     }
 
-    return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "usage: plugin list|validate|doctor|test|enable|disable|install|uninstall|inspect|index|debug-bundle ..." );
+    return usageError( io, "plugin", "usage: plugin list|validate|doctor|test|enable|disable|install|uninstall|inspect|index|debug-bundle ..." );
 }
 
 // ---------------------------------------------------------------------------
@@ -1897,6 +2000,22 @@ int commandModels( QStringList args, const CliIO &io )
         return io.finish( true, "models", data, 0 );
     }
 
+    // Track 14 (WP-E): `models inspect` without an id and unknown subcommands
+    // used to fall through to `list` and exit 0. Reject both at parse time.
+    if ( sub != "list" )
+    {
+        const sicnu::cli::CliErrorDetails details {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+            .expected = sub == "inspect" ? "models inspect <name>" : std::string( "list|inspect" ),
+            .actual = sub == "inspect" ? std::string( "missing <name>" ) : sub.toStdString(),
+            .hint = "usage: models list | models inspect <name>" };
+        return io.finish( false, "models", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          sub == "inspect" ? std::string( "models inspect requires a model name" )
+                                           : "unknown models subcommand: " + sub.toStdString(),
+                          &details );
+    }
+
     Json::Value list( Json::arrayValue );
     for ( const auto &model : models )
     {
@@ -1921,8 +2040,7 @@ int commandProject( QStringList args, const CliIO &io )
         return runProjectGovernanceCommand( sub, args, io );
     if ( sub != "info" || args.isEmpty() )
     {
-        return io.finish( false, "project", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: project info <file.qgz|.qgs>" );
+        return usageError( io, "project", "usage: project info <file.qgz|.qgs>" );
     }
     const QString path = args.takeFirst();
     if ( !QFileInfo::exists( path ) )
@@ -1982,8 +2100,10 @@ int commandData( QStringList args, const CliIO &io )
     extractGlobalFlags( args );
     const QString sub = args.isEmpty() ? "inspect" : args.takeFirst();
     if ( args.isEmpty() )
-        return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|plan|stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]" );
+        return usageError( io, "data",
+                          "usage: data inspect|doctor|probe|capabilities|product describe|plan|"
+                          "stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]|"
+                          "cube plan|window <spec.json> [-o out.tif]|mirror materialize|stats" );
     // Fabric 8.0 (D8): `data cache status|clear`. Claimed ONLY in the exact
     // single-argument form — `status`/`clear` must be the first token after
     // `cache` and the only one. Any other shape (a URL, or `status <url>`)
@@ -2257,8 +2377,7 @@ int commandData( QStringList args, const CliIO &io )
             // the outer dispatch already consumed "cube" and the sub2 token.
             const QString sub2 = stdPath.c_str();
             if ( sub2 != "plan" && sub2 != "window" )
-                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                                  {}, "usage: data cube plan|window <spec.json> [-o out.tif]" );
+                return usageError( io, "data", "usage: data cube plan|window <spec.json> [-o out.tif]" );
             if ( args.isEmpty() )
                 return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                   {}, "data cube " + sub2.toStdString() + " needs a spec JSON path" );
@@ -2410,9 +2529,7 @@ int commandData( QStringList args, const CliIO &io )
                                       {}, error.what() );
                 }
             }
-            return io.finish( false, "data", {},
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, "usage: data mirror materialize|stats …" );
+            return usageError( io, "data", "usage: data mirror materialize|stats …" );
         }
         if ( sub == "identity" )
         {
@@ -2495,8 +2612,13 @@ int commandData( QStringList args, const CliIO &io )
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                           {}, error.what() );
     }
+    const CliErrorDetails dataDetails {
+        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+        .expected = "inspect|doctor|probe|capabilities|product|plan|stac|identity|cache|"
+                    "cube|mirror|<url>",
+        .actual = sub.toStdString() };
     return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "unknown data subcommand: " + sub.toStdString() );
+                      {}, "unknown data subcommand: " + sub.toStdString(), &dataDetails );
 }
 
 int commandDataProviders( QStringList args, const CliIO &io )
@@ -2525,8 +2647,7 @@ int commandCatalogExport( QStringList args, const CliIO &io )
     extractGlobalFlags( args );
     if ( args.isEmpty() )
     {
-        return io.finish( false, "catalog", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: catalog export <dir>" );
+        return usageError( io, "catalog", "usage: catalog export <dir>" );
     }
     const QString outDir = args.takeFirst();
     const auto descriptors = processing::AtomicAlgorithmRegistry::instance().listDescriptors();
@@ -2592,7 +2713,8 @@ void CliIO::reportLog( const std::string &level, const std::string &message ) co
 }
 
 int CliIO::finish( bool ok, const std::string &command, Json::Value data, int exitCode,
-                   const Json::Value &diagnostics, const std::string &errorMessage ) const
+                   const Json::Value &diagnostics, const std::string &errorMessage,
+                   const CliErrorDetails *errorDetails ) const
 {
     if ( json || jsonLines )
     {
@@ -2604,6 +2726,8 @@ int CliIO::finish( bool ok, const std::string &command, Json::Value data, int ex
         envelope["data"] = data;
         if ( !diagnostics.isNull() )
             envelope["diagnostics"] = diagnostics;
+        if ( errorDetails )
+            envelope["error_details"] = errorDetails->toJson();
         envelope["api_version"] = std::string( EXP_RS_PLUGIN_API_VERSION );
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
@@ -2611,7 +2735,23 @@ int CliIO::finish( bool ok, const std::string &command, Json::Value data, int ex
     }
     else if ( !ok && !errorMessage.empty() )
     {
-        std::cerr << errorMessage << "\n";
+        if ( !errorDetails )
+        {
+            std::cerr << errorMessage << "\n";
+        }
+        else
+        {
+            // One structured stderr line: code + reason + optional
+            // expected/actual/hint segments (the four-tuple).
+            std::string line = "[" + errorDetails->codeToken() + "] " + errorMessage;
+            if ( !errorDetails->expected.empty() )
+                line += "; expected: " + errorDetails->expected;
+            if ( !errorDetails->actual.empty() )
+                line += "; actual: " + errorDetails->actual;
+            if ( !errorDetails->hint.empty() )
+                line += "; hint: " + errorDetails->hint;
+            std::cerr << line << "\n";
+        }
     }
     return exitCode;
 }
@@ -2637,7 +2777,58 @@ bool isCliCommand( const QString &firstArg )
     return kCommands.contains( firstArg );
 }
 
+/// The original dispatch chain; dispatchCliCommand wraps it in the outermost
+/// exception boundary (Track 14 WP-F).
+int dispatchCliCommandImpl( const QStringList &arguments, const CliIO &io );
+
 int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
+{
+    // Track 14 (WP-F): the dispatch layer is the outermost exception boundary
+    // of every CLI 3.0 command. main() has no try/catch, so before this
+    // boundary an exception escaping a subcommand TU ran to std::terminate —
+    // a crash (SIGABRT) with zero structured output. Now it leaves through
+    // the published contract: the four-tuple on stderr / error_details in the
+    // envelope, exit code ExecutionFailure(3) — never a silent 0, never a
+    // terminate().
+    try
+    {
+        return dispatchCliCommandImpl( arguments, io );
+    }
+    catch ( const sicnu::operators::RSOperatorError &error )
+    {
+        const bool cancelled = error.code() == sicnu::operators::ErrorCode::Cancelled;
+        Json::Value details( Json::objectValue );
+        details["code"] = sicnu::operators::errorCodeToString( error.code() );
+        details["message"] = error.message();
+        const CliErrorDetails errorDetails {
+            .exitCode = exprs_ns::exitCodeValue( cancelled ? exprs_ns::ExitCode::Cancelled
+                                                           : exprs_ns::ExitCode::ExecutionFailure ),
+            .hint = "re-run with --json for the full diagnostics payload" };
+        return io.finish( false, arguments.value( 0 ).toStdString(), details,
+                          errorDetails.exitCode, error.toJson(), error.message(),
+                          &errorDetails );
+    }
+    catch ( const std::exception &exception )
+    {
+        const CliErrorDetails errorDetails {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
+            .hint = "re-run with --json for the full diagnostics payload" };
+        return io.finish( false, arguments.value( 0 ).toStdString(), {},
+                          errorDetails.exitCode, {}, std::string( "uncaught exception: " ) + exception.what(),
+                          &errorDetails );
+    }
+    catch ( ... )
+    {
+        const CliErrorDetails errorDetails {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
+            .hint = "re-run with --json for the full diagnostics payload" };
+        return io.finish( false, arguments.value( 0 ).toStdString(), {},
+                          errorDetails.exitCode, {}, "uncaught non-standard exception",
+                          &errorDetails );
+    }
+}
+
+int dispatchCliCommandImpl( const QStringList &arguments, const CliIO &io )
 {
     if ( arguments.isEmpty() )
         return exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput );
@@ -2687,9 +2878,7 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         // catalog export <dir> — the legacy --export-catalog surface.
         const QString sub = args.isEmpty() ? "export" : args.takeFirst();
         if ( sub != "export" || args.isEmpty() )
-            return io.finish( false, "catalog", {},
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
-                              "usage: catalog export <dir>" );
+            return usageError( io, "catalog", "usage: catalog export <dir>" );
         return commandCatalogExport( args, io );
     }
     return exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput );
