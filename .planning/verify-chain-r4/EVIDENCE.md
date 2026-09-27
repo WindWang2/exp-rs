@@ -98,3 +98,55 @@ agent 轨），白名单外不修、如实披露。ctest 占位后缀 `_NOT_BUIL
 ## 7. 非本域发现披露
 
 `cmake/raise-compiler-stack.sh`：`status=$?` 位于整个 `if` 语句之后，POSIX sh 中条件失败且无 else 时 if 语句退出码为 0 → 确定性编译错误重试 12 次后 `exit 0`（假绿）。本机实测 GCC 16.2.1 现装。属 build-infra 域（白名单外），本轨以 gcc-15 构建栈绕过并在此披露。
+
+---
+
+# R2 证据附录（2026-09-28，hardening/r4-verify-chain-r2，基线 a726d17a62）
+
+## R2.1 构建与门禁
+
+- 全新构建目录 `build-r2/`（gcc-15 Debug ENABLE_TESTS=ON，ninja -j2，RSS 峰值 <40%）。
+- 52 个正则域测试目标全部建成（含 R1 披露为 master 断链的 8 个重域目标——#1335 `3af4b83cf3` 解锁后首次建成，**零编译修复**）。
+- ninja 真实退出核验：NINJA_EXIT=0 + 复跑 "no work to do"（记忆教训④⑤流程）。
+- 正则域人口首次实现**零 `_NOT_BUILT` 占位**（R1 轻域 19 项 → 0）。
+
+## R2.2 门禁盲区缺陷（本轮核心发现）与修复
+
+**缺陷**：`ctest -R "verif|grader|preflight|suitab|science_context|evidence"`（D6 轨道门）按用例名匹配，而 29 个域目标的 `sicnu_discover_tests` 未传 `TEST_PREFIX` → 裸英文用例名逃逸门禁：**~270 个用例完全不可选或仅靠用例名偶然含关键词"部分入选"**（含六模块核心 test_science_context_broker 33 例、test_science_context_live_authorities 14 例、grader 四件套 44 例、suitability 十一件套 142 例、8 个重域首建目标 62 例）。R1 的 236/161 全绿人口对这批用例同样失明。
+
+**修复**（tests/CMakeLists.txt，白名单内）：29 处补 `TEST_PREFIX "<target>::"` + `sicnu_add_sdk_test` 宏扩展透传 TEST_PREFIX。修复后**现有 D6 正则零改动**即可确定性选中全部域目标（前缀含目标名含关键词）。
+
+**守卫**：`.planning/verify-chain-r4/chain_gate_census.sh` 机械枚举域目标 → 断言全部用例带目标前缀；allowlist 显式记录 `r4::`（D15 算子门，5 例可选）与 CLI helper。终轮：**50 OK + 2 ALLOWED，ALL GREEN**。
+
+**人口变化**：252（含 5 个占位符、混入偶然命中）→ **525**（确定性全集）。
+
+## R2.3 F5 真红与校准
+
+门禁修复后首个浮出的真红：`test_verification_failure_11::F5`（该测试门禁不可见 12 天，从未绿过）。
+- 断言：缺失输出目录的 `io:translate` 拒绝码 ∈ {FileNotWritable, GdalError, DirectoryNotFound, InvalidInputData}；实测 **InvalidParameter**。
+- 根因：`geospatial/io/param_guard.cpp checkTargetPath` 作为**参数前置守卫**刻意抛 `InvalidArgument`（合同注释 "io: never creates directories implicitly"，reason=target_directory_missing），io 翻译链 G::InvalidArgument→InvalidParameter。
+- 处置：白名单内校准测试期望集（+InvalidParameter，引用生产合同），保留承重断言（typed refusal + no partials）。生产行为跨域披露：io fabric 可考虑将 target_directory_missing 提级为 RS DirectoryNotFound（属主 geospatial/operators 域，本轨不处置）。
+- 修后：二进制 32 断言 5 用例全绿。
+
+## R2.4 Oracle（正式双轮，最终树，全新构建目录）
+
+```
+ctest -R "verif|grader|preflight|suitab|science_context|evidence" -j1  (QT_QPA_PLATFORM=offscreen)
+第 1 轮：100% tests passed out of 525 — CTEST_EXIT=0
+第 2 轮：100% tests passed out of 525 — CTEST_EXIT=0（38.00s）
+```
+
+run_matrices.sh 重域补跑（R1 记忆遗留项收口）：
+```
+MATRIX test_verify_chain_locale_matrix round1/2: PASS (199 assertions)
+MATRIX test_preflight_authority_invalidation round1/2: PASS (294 assertions)
+ALL MATRICES GREEN (2 rounds)
+```
+
+## R2.5 跨域披露（白名单外，不处置）
+
+| 发现 | 归属 | 证据 |
+|---|---|---|
+| `src/app/panels/data_manager_panel.cpp:222 'tr' was not declared`（app 全量构建必炸；i18n 轨 #1339 `0814f03abe` 2026-09-27 引入） | i18n/app 域 | 裸 `ninja` 全量构建实录；本分支 diff 零 src/ 触碰 |
+| `cmake/raise-compiler-stack.sh` `status=$?` 假绿陷阱（R1 已披露） | build-infra 域 | 本轨以 gcc-15 构建栈绕过 |
+| F5 生产行为分类问题（见 R2.3） | geospatial/operators 域 | param_guard.cpp:83 合同注释 |

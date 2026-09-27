@@ -50,3 +50,13 @@ provider 未挂载 = Indeterminate(verify:i_provider_missing)；不可判读（�
 ## D7 非本域发现登记
 
 `cmake/raise-compiler-stack.sh`：`status=$?` 在整个 if 语句后捕获，POSIX sh 条件失败无 else 时 if 退出码为 0 → 确定性编译错误重试 12 次后 `exit 0`（假绿）。**build-infra 轨所有，白名单外不修**；本轨以 gcc-15 配置绕过（launcher 仅 GCC≥16 挂载）。已在 PR 正文披露。
+
+---
+
+# R2 追加规则（2026-09-28）
+
+- **D-R2-1（门禁可选择性合同）**：凡二进制名命中轨道域正则的测试目标，其全部 ctest 用例必须携带 `<target>::` 前缀（`sicnu_discover_tests(... TEST_PREFIX "<target>::")`）；例外仅限显式 allowlist（他轨门约定 r4:: / 非 Catch2 helper）。裸英文用例名视为门禁逃逸缺陷。守卫：chain_gate_census.sh。
+- **D-R2-2（轨道门人口确定性）**：轨道验收人口 = 各域目标前缀选择的并集，禁止依赖"用例名偶然含关键词"的偶然入选；人口数字必须与 census 一致可复算。
+- **D-R2-3（门禁修复先于验收）**：门禁盲区发现的真红（如 F5）按"先使缺陷可见、再按合同校准"处置；测试期望集改动必须引用生产合同原文（param_guard.cpp 的 io 边界注释），并保留原承重断言（typed + no-partials）。
+- **D-R2-4（跨域分类披露）**：生产侧 typed-code 分类的跨层语义问题（InvalidArgument vs DirectoryNotFound）属 io/operators 域主，本轨以披露 + 建议处置，不动白名单外生产码。
+- **D-R2-5（占位符卫生）**：正则域人口内 `_NOT_BUILT` 占位必须为 0；出现即视为构建缺口信号（本轮 5 个 sicnu_add_sdk_test/foreach 注册逃逸枚举的教训：目标枚举必须覆盖全部注册宏通道）。
