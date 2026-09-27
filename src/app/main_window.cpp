@@ -192,6 +192,12 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     m_appInterface->setPluginMenu( appMenuBar()->addMenu( tr( "Plugins" ) ) );
     m_pluginHost->setAppInterface(m_appInterface.get());
 #endif
+    // Review P1-5: the legacy in-process channel no longer dlopens every
+    // library in <app>/../plugins. Only the first-party modules this build
+    // ships are allowlisted; third-party native plugins must go through the
+    // validated exprs registry below (manifest, id, checksum checks).
+    m_pluginHost->setTrustedNativePlugins( { QStringLiteral( "processing_plugin" ),
+                                             QStringLiteral( "layer_tree_plugin" ) } );
     m_pluginHost->loadPlugins(QCoreApplication::applicationDirPath() + "/../plugins");
     for (const QString &pluginName : m_pluginHost->loadedPlugins()) {
         SicnuPluginInterface *plugin = m_pluginHost->plugin(pluginName);

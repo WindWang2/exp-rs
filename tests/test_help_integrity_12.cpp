@@ -419,7 +419,7 @@ TEST_CASE( "every shipped help file parses as an array of uniquely-identified en
     CHECK( problems.isEmpty() );
 
     // Non-vacuity: a corpus that silently emptied must not pass. The floors
-    // are deliberately below the authored counts (335 topics / 76 commands)
+    // are deliberately below the authored counts (340 topics / 81 commands)
     // so that ordinary content edits do not trip them, while a total loss
     // (the E-15 failure mode) does.
     INFO( "total entries: " << totalEntries );

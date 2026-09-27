@@ -35,6 +35,8 @@
 
 #include <gdal.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 
 using sicnu::app::ViewLinkController;
@@ -81,11 +83,21 @@ int main( int argc, char *argv[] )
     // Mirror test_qgis_display_manager: a heap-held QgsApplication with GUI
     // enabled (QT_QPA_PLATFORM=offscreen carries it); QgsMapCanvas aborts
     // without the QGIS singletons.
-    static QgsApplication app( argc, argv, true );
+    // Intentionally leaked (never destroyed, no exitQgis): a function-static
+    // QgsApplication is torn down during static destruction after QGIS
+    // singletons are gone, which segfaulted Catch2 test discovery
+    // (`--list-tests`) and aborted the whole CTest run.
+    auto *app = new QgsApplication( argc, argv, true );
+    ( void ) app;
     QgsApplication::initQgis();
     const int result = Catch::Session().run( argc, argv );
-    QgsApplication::exitQgis();
-    return result;
+    // Canvas/project cases still crashed in glibc atexit cleanup (QGIS
+    // thread-local PROJ context) once ctest ran them one case per process,
+    // after every assertion had passed. Skip static destruction entirely,
+    // like test_workbench_full_shell_lifecycle / test_twincanvas_sync.
+    std::fflush( stdout );
+    std::fflush( stderr );
+    std::_Exit( result );
 }
 
 TEST_CASE( "view link propagates extents across linked views",
