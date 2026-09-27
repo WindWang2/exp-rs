@@ -59,11 +59,14 @@ void fsyncFile( const std::string &path );
 /// the gate is the directory's write permission, and Windows clears a stale
 /// READONLY attribute to answer with the same contract).
 /// Windows: ReplaceFileW when the target exists (transactional with backup
-/// metadata), MoveFileExW(MOVEFILE_REPLACE_EXISTING) otherwise. When the
+/// metadata), MoveFileExW(MOVEFILE_REPLACE_EXISTING) otherwise; its
+/// durability rides MOVEFILE_WRITE_THROUGH inside that rename. When the
 /// target is locked the function fails with GeoError(IoError) — callers roll
-/// back (staged file is left for `discardStaged` by the caller). Both the
-/// rename and the post-publish directory sync ride platform/portable.h, the
-/// single authority for these syscalls.
+/// back (staged file is left for `discardStaged` by the caller). The POSIX
+/// rename and the POSIX-lane post-publish directory sync ride
+/// platform/portable.h, the single authority for these syscalls; the
+/// Windows rename branches remain here (ReplaceFileW has no write-through
+/// flag on its fast path — pre-existing, unchanged).
 void publishStagedFile( const std::string &stagedPath, const std::string &targetPath );
 
 /// Best-effort rename that replaces an existing destination.

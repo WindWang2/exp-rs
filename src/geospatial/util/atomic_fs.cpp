@@ -126,10 +126,10 @@ std::string stagedPathFor( const std::string &targetPath )
   // The exclusive-creation staging claim is the whole reservation contract: the
   // name exists (as an empty file) from allocation until the writer fills
   // it, so no other allocator can hand out the same path. The claim syscall
-  // itself is portable.h's claimExclusiveUtf8 (single authority); this layer
-  // adds the retry-on-lost-race and the typed GeoError. Retry ONLY on a
-  // lost claim race; any other refusal (missing directory, permissions)
-  // fails immediately with the raw OS cause in the details.
+  // itself lives in the portable authority (single home, source-pinned);
+  // this layer adds the retry-on-lost-race and the typed GeoError. Retry
+  // ONLY on a lost claim race; any other refusal (missing directory,
+  // permissions) fails immediately with the raw OS cause in the details.
   static const int kMaxAttempts = 64;
   for ( int attempt = 0; attempt < kMaxAttempts; ++attempt )
   {
@@ -156,8 +156,9 @@ std::string stagedPathFor( const std::string &targetPath )
 
 void fsyncFile( const std::string &path )
 {
-  // The flush syscall is portable.h's syncFileUtf8 (single authority); this
-  // layer turns the two failure classes back into the typed GeoError with
+  // The flush syscall lives in the portable authority (single home,
+  // source-pinned); this layer turns the two failure classes back into the
+  // typed GeoError with
   // the raw OS cause preserved (errno on POSIX, the Win32 error on Windows
   // — both lanes used to keep only one of the two).
   sicnu::portable::SyncFailure failure = sicnu::portable::SyncFailure::OpenFailed;
@@ -253,14 +254,16 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
       throw;
     }
   }
-  // Durability of the RENAME itself: fsync the containing directory so a
-  // crash after publish cannot revert the directory entry. Best-effort and
-  // silent: several legitimate filesystems (some network/FUSE mounts) refuse
-  // directory fsync with EINVAL — failing the publish there would trade a
-  // real capability for a durability nicety. The file-content fsync above is
-  // the correctness gate; this only narrows the crash window for the entry.
-  // portable.h's directory flush is the single authority (Windows now rides
-  // the same best-effort directory flush instead of a silent no-op).
+  // Durability of the RENAME itself (POSIX lane): fsync the containing
+  // directory so a crash after publish cannot revert the directory entry.
+  // Best-effort and silent: several legitimate filesystems (some network/
+  // FUSE mounts) refuse directory fsync with EINVAL — failing the publish
+  // there would trade a real capability for a durability nicety. The
+  // file-content fsync above is the correctness gate; this only narrows the
+  // crash window for the entry. The portable authority's directory flush is
+  // the single implementation. (The Windows lane of this function returned
+  // above: its durability rides MOVEFILE_WRITE_THROUGH inside the
+  // MoveFileExW call.)
   sicnu::portable::syncDirectoryBestEffortUtf8( targetPath );
 #endif
 }

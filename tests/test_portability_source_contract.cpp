@@ -284,9 +284,12 @@ TEST_CASE( "atomic_fs rides portable.h instead of hand-rolling the claim/flush s
   // Reintroducing a second copy of either syscall branch here is the drift
   // the R5 convergence closed — this pin kills that mutation on the POSIX
   // lane where the Windows branches cannot be observed at runtime.
-  REQUIRE( source.find( "sicnu::portable::claimExclusiveUtf8" ) != std::string::npos );
-  REQUIRE( source.find( "sicnu::portable::syncFileUtf8" ) != std::string::npos );
-  REQUIRE( source.find( "sicnu::portable::syncDirectoryBestEffortUtf8" ) != std::string::npos );
+  // Call-shaped needles: a comment MENTIONING the helper must not satisfy
+  // the pin — only the real call does (mutation: delete the call, keep the
+  // comment → red).
+  REQUIRE( source.find( "sicnu::portable::claimExclusiveUtf8( staged" ) != std::string::npos );
+  REQUIRE( source.find( "sicnu::portable::syncFileUtf8( path" ) != std::string::npos );
+  REQUIRE( source.find( "sicnu::portable::syncDirectoryBestEffortUtf8( targetPath" ) != std::string::npos );
   REQUIRE( source.find( "O_EXCL" ) == std::string::npos );
   REQUIRE( source.find( "CREATE_NEW" ) == std::string::npos );
   REQUIRE( source.find( "FlushFileBuffers" ) == std::string::npos );
@@ -305,8 +308,8 @@ TEST_CASE( "chunk durability rides portable.h",
   // per-platform syscall branches must stay in portable.h — the third copy
   // that used to live here also disagreed on the open mode (O_RDONLY fsync
   // vs the XSI-strict O_WRONLY the atomic lane uses).
-  REQUIRE( source.find( "sicnu::portable::syncFileUtf8" ) != std::string::npos );
-  REQUIRE( source.find( "sicnu::portable::syncDirectoryBestEffortUtf8" ) != std::string::npos );
+  REQUIRE( source.find( "sicnu::portable::syncFileUtf8( path" ) != std::string::npos );
+  REQUIRE( source.find( "sicnu::portable::syncDirectoryBestEffortUtf8( path" ) != std::string::npos );
   REQUIRE( source.find( "FlushFileBuffers" ) == std::string::npos );
   REQUIRE( source.find( "MultiByteToWideChar" ) == std::string::npos );
 }

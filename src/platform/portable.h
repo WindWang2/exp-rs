@@ -200,7 +200,8 @@ enum class ClaimFailure
 /// The optional out-parameters report WHY a refused claim failed so callers
 /// can keep the typed OS cause (errno / Win32 error code) in their own
 /// error details instead of flattening every refusal into "already exists":
-/// NameExists retries with a fresh name, Other carries @p osError verbatim.
+/// NameExists retries with a fresh name, anything else carries @p osError
+/// verbatim.
 inline bool claimExclusiveUtf8( const std::string &path,
                                 ClaimFailure *failure = nullptr,
                                 std::uint64_t *osError = nullptr )
@@ -329,11 +330,14 @@ inline bool syncFileUtf8( const std::string &path, SyncFailure *failure = nullpt
 /// with EINVAL, and failing the publish there would trade a real
 /// capability for a durability nicety.
 ///
-/// Windows carries the same best-effort contract: directories open through
-/// FILE_FLAG_BACKUP_SEMANTICS and FlushFileBuffers reaches the volume's
-/// directory metadata where the filesystem supports it. This used to be a
-/// no-op on Windows while the chunk family flushed for real — one repo,
-/// one durability answer now.
+/// Windows: the attempt is best-effort and in practice always refused —
+/// FlushFileBuffers requires a GENERIC_WRITE handle and directories cannot
+/// be opened with write access, so the call errors out and is ignored
+/// (both syscalls ride the same silent-best-effort contract as the POSIX
+/// lane). The real Windows durability gate for a
+/// publish remains the publisher's own MOVEFILE_WRITE_THROUGH rename. The
+/// attempt is kept so the two lanes share one code shape and a future
+/// handle-privilege path needs no API change.
 inline void syncDirectoryBestEffortUtf8( const std::string &path, bool pathIsDirectory = false )
 {
   const std::filesystem::path target = pathFromUtf8( path );

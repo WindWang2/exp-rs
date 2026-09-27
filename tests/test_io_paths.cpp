@@ -281,8 +281,13 @@ TEST_CASE( "staging allocation resolves symlinked '..' to the physical directory
     INFO( "target: " << target << "\nstaged: " << staged );
     // The staged name must live in the PHYSICAL directory the rename
     // destination resolves into (same volume, one atomic rename, no
-    // cross-device fallback detour).
-    CHECK( fs::weakly_canonical( fs::path( staged ).parent_path() ) == dir );
+    // cross-device fallback detour). Both sides canonicalized so the
+    // comparison is independent of how the temp root is spelled.
+    CHECK( fs::weakly_canonical( fs::path( staged ).parent_path() )
+           == fs::weakly_canonical( dir ) );
+    // stagedPathFor's claim created an empty file — clean it up like a
+    // publisher's discard path would.
+    sicnu::geo::atomic_fs::discardStaged( staged );
   }
 #endif
 }

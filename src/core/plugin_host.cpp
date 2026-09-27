@@ -24,7 +24,9 @@ using namespace sicnu::python::isolated;
 
 void PluginHost::reportPluginFailure(const QString &subject, const QString &reason)
 {
-    qWarning() << "PluginHost:" << reason << ":" << subject;
+    // One composed line (QDebug's per-token spacing would render a stray
+    // space before the colon).
+    qWarning().noquote() << QStringLiteral("PluginHost: %1: %2").arg(reason, subject);
     emit pluginError(subject, reason);
 }
 
