@@ -8,6 +8,7 @@
 #include <QCloseEvent>
 #include <QSettings>
 #include <QElapsedTimer>
+#include <QMap>
 
 // QGIS includes
 #include <qgsmapcanvas.h>
@@ -739,6 +740,14 @@ private:
     std::unique_ptr<class MapToolManager> m_toolManager;
     std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
     std::unique_ptr<ActiveViewHost> m_activeViewHost;
+
+    // F-05/F-06 (ui-backend-state-parity-r4): session epoch for the async
+    // landing policy. Bumped at every story boundary (open/new project,
+    // successful Save As) so a task's late layer auto-load can be
+    // recognized as belonging to a dead session and dropped with a trace
+    // instead of landing in the context the shell has already left.
+    quint64 m_sessionEpoch = 1;
+    QMap<long, quint64> m_autoLoadTaskEpoch;
 
     // Workbench 5.0 (children of the window — destroyed with it)
     sicnu::app::WorkbenchHost *m_workbenchHost = nullptr;

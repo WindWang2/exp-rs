@@ -23,6 +23,18 @@
 #include "processing/framework/task_center.h"
 #include <QJsonObject>
 
+// Review P1-1: the MCP sandbox is default-deny (unset SICNU_MCP_WORKSPACE =
+// the process CWD). This binary's fixtures live at arbitrary absolute paths
+// (QTemporaryDir, /tmp/...), so it opts into the widest sandbox explicitly —
+// the documented SICNU_MCP_WORKSPACE=/ — unless the caller configured one.
+// Sandbox-specific test cases set (and restore) their own root.
+static const bool kFixtureWorkspaceInstalled = [] {
+    if ( qEnvironmentVariableIsEmpty( "SICNU_MCP_WORKSPACE" ) )
+        qputenv( "SICNU_MCP_WORKSPACE", QDir::rootPath().toUtf8() );
+    return true;
+}();
+
+
 namespace {
 
 using namespace sicnu::agent::tool_catalog;
@@ -411,7 +423,9 @@ TEST_CASE("artifact_read enforces the workspace sandbox", "[surface][artifact]")
                 .value(QStringLiteral("text")).toString()
                 .contains(QStringLiteral("rejected")));
 
-    qunsetenv("SICNU_MCP_WORKSPACE");
+    // Restore this binary's fixture sandbox (see kFixtureWorkspaceInstalled);
+    // unsetting would now mean "sandbox to the CWD", not "unrestricted".
+    qputenv("SICNU_MCP_WORKSPACE", QDir::rootPath().toUtf8());
 }
 
 // ---------------------------------------------------------------------------
