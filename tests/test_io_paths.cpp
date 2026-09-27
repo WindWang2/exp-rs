@@ -225,3 +225,22 @@ TEST_CASE( "atomic staging never escapes the target directory", "[io][paths][sec
   const std::string second = sicnu::geo::atomic_fs::stagedPathFor( target );
   CHECK( staged != second );
 }
+
+TEST_CASE( "reserved staging names are unique but never pre-created", "[io][paths][atomic]" )
+{
+  const std::string dir = scratch( "staging_reserved" );
+  const std::string target = ( fs::path( dir ) / "out.tif" ).string();
+  const std::string staged = sicnu::geo::atomic_fs::reservedStagedPathFor( target );
+
+  // Same-directory reservation (same volume → atomic rename), same shape.
+  CHECK( staged.rfind( dir, 0 ) == 0 );
+  CHECK( staged.find( ".tmp" ) != std::string::npos );
+  // The reserved name is NOT claimed: GDAL-style creators require a target
+  // that does not exist — the driver's own Create is what claims it, and it
+  // fails loudly if the name was somehow taken in between.
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( staged ) );
+  const std::string second = sicnu::geo::atomic_fs::reservedStagedPathFor( target );
+  CHECK( staged != second );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( second ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( staged ) );
+}

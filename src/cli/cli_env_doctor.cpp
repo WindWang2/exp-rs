@@ -43,10 +43,13 @@ int commandEnvDoctor( QStringList args, const CliIO &io )
     if ( !args.isEmpty() )
     {
         const std::string unknown = args.front().toStdString();
+        sicnu::cli::CliErrorDetails details;
+        details.exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput );
+        details.expected = "--json";
+        details.actual = unknown;
         return io.finish( false, "env-doctor", {},
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "unknown env-doctor argument: " + unknown
-                                  + " (supported: --json)" );
+                          {}, "unknown env-doctor argument: " + unknown, &details );
     }
     const bool asJson = io.json || io.jsonLines;
 

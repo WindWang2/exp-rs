@@ -434,11 +434,13 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             QaMask::landsatQaMask(values.data(), mask.data(), n, landsatFlags);
         }
         // Fail closed: unreadable samples are masked regardless of what the
-        // kernel decided for the placeholder word (F-OPS-3).
-        for (size_t i = 0; i < n; ++i)
+        // kernel decided for the placeholder word (F-OPS-3). The unknown-OR
+        // and the masked-count sweep are fused into one pass — both walked
+        // every sample of the block separately.
+        for (size_t i = 0; i < n; ++i) {
             mask[i] = static_cast<uint8_t>(mask[i] | unknown[i]);
-        for (size_t i = 0; i < n; ++i)
             masked += (mask[i] != 0) ? 1 : 0;
+        }
 
         const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
                                          blockIndex, totalBlocks};

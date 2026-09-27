@@ -247,8 +247,8 @@ void DatasetExperimentPanel::rebuildDatasets()
     m_datasets = page->second;
     for ( const QVariantMap &row : m_datasets )
         m_datasetCombo->addItem(
-            QStringLiteral( "%1 (%2)" ).arg( row.value( "name" ).toString(),
-                                             row.value( "id" ).toString() ),
+            tr( "%1 (%2)" ).arg( row.value( "name" ).toString(),
+                                      row.value( "id" ).toString() ),
             row.value( "id" ).toString() );
     m_datasetDbLabel->setText( tr( "%1 — %2 datasets in total" )
                                    .arg( m_datasetStore.storePath() )
@@ -274,7 +274,7 @@ void DatasetExperimentPanel::rebuildVersions()
     m_versions = m_datasetStore.versionsOfDataset( *id );
     for ( const sicnu::dataset::DatasetVersionRecord &version : m_versions )
         m_versionList->addItem(
-            QStringLiteral( "%1 — %2" ).arg( version.versionId(), statusText( version.status() ) ) );
+            tr( "%1 — %2" ).arg( version.versionId(), statusText( version.status() ) ) );
     if ( m_versions.isEmpty() )
         m_versionDetail->setText( tr( "This dataset has no versions yet." ) );
 }
@@ -381,7 +381,7 @@ void DatasetExperimentPanel::rebuildExperiments()
     m_experiments = page->second;
     for ( const sicnu::experiment::Experiment &experiment : m_experiments )
         m_experimentCombo->addItem(
-            QStringLiteral( "%1 (%2)" ).arg( experiment.name(), experiment.experimentId() ),
+            tr( "%1 (%2)" ).arg( experiment.name(), experiment.experimentId() ),
             experiment.experimentId() );
     m_experimentDbLabel->setText( m_experimentDbLabel->text() +
                                   QStringLiteral( " — " ) +

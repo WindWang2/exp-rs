@@ -113,6 +113,28 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
     if ( sub == QLatin1String( "info" ) )
         return -1;  // handled by the caller (legacy path)
 
+    // Track 14 (WP-E): reject an unknown subcommand BEFORE loading the
+    // project - loading is the expensive step and a rejected invocation must
+    // not depend on the file being readable at all.
+    static const QStringList kKnownSubs = {
+        QStringLiteral( "validate" ), QStringLiteral( "health" ),
+        QStringLiteral( "search" ),   QStringLiteral( "migrate" ),
+        QStringLiteral( "relink" ),   QStringLiteral( "lineage" ),
+        QStringLiteral( "import" ),   QStringLiteral( "export-manifest" ),
+        QStringLiteral( "audit" ) };
+    if ( !kKnownSubs.contains( sub ) )
+    {
+        sicnu::cli::CliErrorDetails details;
+        details.exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput );
+        details.expected =
+            "info|validate|health|search|migrate|relink|lineage|import|export-manifest|audit";
+        details.actual = sub.toStdString();
+        details.hint = usage.toStdString();
+        return io.finish( false, "project", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "unknown project subcommand: " + sub.toStdString(), &details );
+    }
+
     // Every governance subcommand needs a file argument.
     if ( args.isEmpty() )
         return io.finish( false, "project", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -209,8 +231,10 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
                 const std::string detail = writeOk
                     ? ( "cannot write project: " + loaded.project.error().toStdString() )
                     : "serializer refused the v3 workspace block";
+                // Track 14 (WP-A): a load-then-failed persist is an
+                // execution failure, not a bare GenericError(1).
                 return io.finish( false, "project.migrate", data,
-                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ),
+                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
                                   {}, detail );
             }
             data["persisted"] = true;
@@ -231,7 +255,7 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
         {
             const sicnu::workspace::RelinkOutcome outcome = relink.applyRootMove( from, to, verify );
             return io.finish( outcome.failed == 0, "project.relink", qJsonObjectToJson( outcome.toJson() ),
-                              outcome.failed == 0 ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+                              outcome.failed == 0 ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ) );
         }
         if ( !assetId.isEmpty() && !newPath.isEmpty() )
         {
@@ -249,7 +273,7 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
             }
             data["diagnostics"] = diags;
             return io.finish( relinked, "project.relink", data,
-                              relinked ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+                              relinked ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ) );
         }
         return io.finish( false, "project.relink", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                           {}, "pass --from/--to (root move) or --asset/--path (single relink)" );
@@ -299,7 +323,7 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
         const sicnu::workspace::ReproBundleReport report = exporter.exportBundle( options );
         Json::Value data = qJsonObjectToJson( report.toJson() );
         return io.finish( report.ok, "project.export-manifest", data,
-                          report.ok ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+                          report.ok ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ) );
     }
 
     if ( sub == QLatin1String( "import" ) )
@@ -328,7 +352,7 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
         const sicnu::workspace::ImportScanReport report = importer.importRemote( remoteUrls );
         Json::Value data = qJsonObjectToJson( report.toJson() );
         return io.finish( report.failed == 0, "project.import", data,
-                          report.failed == 0 ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+                          report.failed == 0 ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ) );
     }
 
     if ( sub == QLatin1String( "audit" ) )

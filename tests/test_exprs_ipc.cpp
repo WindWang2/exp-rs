@@ -509,12 +509,43 @@ TEST_CASE( "the recv cap refuses oversized peer frames (E6003)", "[ipc][channel]
 
     // The request must be IN FLIGHT before the oversized frame is written,
     // or the reader could tear the channel down before the caller registers
-    // (yielding the post-close E6005 instead of the typed E6003 under test).
+    // (yielding the post-close E6005/E6002 instead of the typed E6003 under
+    // test). Instead of a timing window (a sleep loses the race under heavy
+    // machine load), the writer DRAINS the request frame from the peer side
+    // first: sendEnvelope only returns after the pending entry is
+    // registered, so once the request bytes are observable the registry
+    // state the reader's failAllPending walks is stable.
     IpcChannel::Outcome outcome;
     std::thread requester( [&host, &outcome] {
         outcome = host.request( "work", {}, 5000 );
     } );
-    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+    // A failed REQUIRE unwinds the case while `requester` is joinable — the
+    // std::thread destructor would then std::terminate the whole binary.
+    struct JoinGuard
+    {
+        std::thread &thread;
+        ~JoinGuard() { if ( thread.joinable() ) thread.join(); }
+    } joinGuard{ requester };
+    auto readFull = [ &workerSide ]( char *data, size_t len ) {
+        size_t got = 0;
+        while ( got < len )
+        {
+            const int n = workerSide->readSome( data + got, len - got, 1000 );
+            if ( n <= 0 )
+                return false;
+            got += static_cast<size_t>( n );
+        }
+        return true;
+    };
+    char prefix[ 4 ];
+    REQUIRE( readFull( prefix, 4 ) ); // the in-flight request's length prefix
+    uint32_t length = static_cast<uint32_t>( static_cast<unsigned char>( prefix[ 0 ] ) )
+                      | ( static_cast<uint32_t>( static_cast<unsigned char>( prefix[ 1 ] ) ) << 8 )
+                      | ( static_cast<uint32_t>( static_cast<unsigned char>( prefix[ 2 ] ) ) << 16 )
+                      | ( static_cast<uint32_t>( static_cast<unsigned char>( prefix[ 3 ] ) ) << 24 );
+    std::string requestPayload( length, '\0' );
+    REQUIRE( readFull( requestPayload.data(), length ) );
+
     std::string error;
     const std::string payload = std::string( 2048, 'z' );
     REQUIRE( writeRawFrame( *workerSide, payload, error ) );

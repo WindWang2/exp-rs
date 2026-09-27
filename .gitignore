@@ -141,8 +141,13 @@ vendor/
 .gstack/
 .planning/*
 !.planning/RS14-05-process-grader/
+!.planning/processing-meta-r4/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
+# Track 14 CLI surface R4 planning artifacts (markdown only).
+!.planning/cli-surface-r4/
+.planning/cli-surface-r4/*
+!.planning/cli-surface-r4/*.md
 !.planning/cartography-platform-7/
 !.planning/dataset-experiment-7/
 !.planning/geospatial-data-fabric-8/
@@ -160,6 +165,8 @@ vendor/
 !.planning/RS14-13-fault-injection-labs/*.md
 !.planning/scientific-processing-8/
 !.planning/scientific-algorithms-9/
+# Track 7 R4 (rs-operator-oracles): audit artifacts are deliverables.
+!.planning/rs-operator-oracles-r4/
 !.planning/plugin-platform-8/
 !.planning/verification-platform-8/
 !.planning/spatial-scientist-harness-8/
@@ -488,3 +495,16 @@ data/labs/_tmp/
 !.planning/dataset-governance-r4/
 .planning/dataset-governance-r4/*
 !.planning/dataset-governance-r4/*.md
+# ui-backend-state-parity-r4 (Track 3 R4): track planning notes (markdown only; logs stay local).
+!.planning/ui-backend-state-parity-r4/
+.planning/ui-backend-state-parity-r4/*
+!.planning/ui-backend-state-parity-r4/*.md
+!.planning/verify-chain-r4/
+.planning/verify-chain-r4/*
+!.planning/verify-chain-r4/*.md
+!.planning/verify-chain-r4/*.sh
+
+# hardening/r4-qt-teardown (Track 2, R4 Deep): teardown-lifecycle planning notes (markdown only; logs stay local).
+!.planning/qt-teardown-lifecycle-r4/
+.planning/qt-teardown-lifecycle-r4/*
+!.planning/qt-teardown-lifecycle-r4/*.md

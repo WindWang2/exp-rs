@@ -1,5 +1,7 @@
 // qgs_display_stretch.cpp — QGIS production adapters for display stretch
 #include "qgs_display_stretch.h"
+
+#include <qgsproject.h>
 #include "piecewise_linear_enhancement.h"
 
 #include <qgsrectangle.h>
@@ -350,6 +352,16 @@ ApplyStretchResult QgsRasterDisplayTarget::apply( void *layerToken,
 
   layer->setRenderer( newRenderer.release() );
   layer->triggerRepaint();
+
+  // F-08 (ui-backend-state-parity-r4): the renderer mutation is project
+  // state. Writing it directly left the project's dirty flag false, so a
+  // UI-applied stretch silently vanished on close. Record it where the save
+  // contract can see it — only for layers the project actually owns.
+  if ( QgsProject *project = QgsProject::instance() )
+  {
+    if ( project->mapLayer( layer->id() ) == layer )
+      project->setDirty( true );
+  }
 
   ApplyStretchSuccess ok;
   ok.applied = resolved;

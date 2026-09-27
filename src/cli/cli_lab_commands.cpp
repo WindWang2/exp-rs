@@ -93,17 +93,42 @@ Json::StreamWriterBuilder prettyWriter()
 
 namespace {
 
-/// Pops the value after @p flag; on failure prints the typed message and
-/// returns false (usage error at the call site).
+/// Pops the value after @p flag; returns false on failure (usage error at
+/// the call site, which routes the message through labFlagError()).
 bool takeValue( QStringList &arguments, const char *flag, QString &value )
 {
     if ( arguments.isEmpty() )
-    {
-        std::cerr << "lab: " << flag << " requires a value\n";
         return false;
-    }
     value = arguments.takeFirst();
     return true;
+}
+
+} // namespace
+
+namespace {
+
+const int kValidationFailureLab =
+    exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+const int kInvalidInputLab = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput );
+
+/// Track 14 (WP-A/WP-B): lab's early validation paths used to print a bare
+/// std::cerr line and return a raw exit code — no envelope, no code anchor,
+/// no hint. All of them leave through this single finish() site now.
+int labError( const CliIO &io, const std::string &message, int exitCode,
+              const std::string &actual = {} )
+{
+    sicnu::cli::CliErrorDetails details;
+    details.exitCode = exitCode;
+    details.hint = "run `sicnu_geo_rs_cli lab --help` for usage";
+    if ( !actual.empty() )
+        details.actual = actual;
+    return io.finish( false, "lab", {}, exitCode, {}, message, &details );
+}
+
+int labFlagError( const CliIO &io, const char *flag )
+{
+    return labError( io, std::string( "lab: " ) + flag + " requires a value",
+                     kValidationFailureLab );
 }
 
 } // namespace
@@ -140,8 +165,7 @@ int commandLab( QStringList arguments, const CliIO &io )
         {
             if ( arguments.isEmpty() )
             {
-                std::cerr << "lab: --lab requires a value\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --lab requires a value", kValidationFailureLab );
             }
             lab = arguments.takeFirst();
         }
@@ -149,8 +173,7 @@ int commandLab( QStringList arguments, const CliIO &io )
         {
             if ( arguments.isEmpty() )
             {
-                std::cerr << "lab: --grade requires a value\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --grade requires a value", kValidationFailureLab );
             }
             artifact = arguments.takeFirst();
         }
@@ -158,8 +181,7 @@ int commandLab( QStringList arguments, const CliIO &io )
         {
             if ( arguments.isEmpty() )
             {
-                std::cerr << "lab: --out requires a value\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --out requires a value", kValidationFailureLab );
             }
             outPath = arguments.takeFirst();
         }
@@ -168,8 +190,7 @@ int commandLab( QStringList arguments, const CliIO &io )
         {
             if ( arguments.isEmpty() )
             {
-                std::cerr << "lab: --batch requires a value\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --batch requires a value", kValidationFailureLab );
             }
             batchDir = arguments.takeFirst();
         }
@@ -177,8 +198,7 @@ int commandLab( QStringList arguments, const CliIO &io )
         {
             if ( arguments.isEmpty() )
             {
-                std::cerr << "lab: --csv requires a value\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --csv requires a value", kValidationFailureLab );
             }
             csvPath = arguments.takeFirst();
         }
@@ -186,46 +206,42 @@ int commandLab( QStringList arguments, const CliIO &io )
         {
             if ( arguments.isEmpty() )
             {
-                std::cerr << "lab: --max-bytes requires a value\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --max-bytes requires a value", kValidationFailureLab );
             }
             bool ok = false;
             maxBytes = arguments.takeFirst().toLongLong( &ok );
             if ( !ok || maxBytes <= 0 )
             {
-                std::cerr << "lab: --max-bytes must be a positive integer\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --max-bytes must be a positive integer", kValidationFailureLab );
             }
             haveMaxBytes = true;
         }
         else if ( arg == QLatin1String( "--roster" ) )
         {
             if ( !takeValue( arguments, "--roster", rosterPath ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--roster" );
         }
         else if ( arg == QLatin1String( "--json" ) )
         {
             if ( !takeValue( arguments, "--json", jsonPath ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--json" );
         }
         else if ( arg == QLatin1String( "--html" ) )
         {
             if ( !takeValue( arguments, "--html", htmlPath ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--html" );
         }
         else if ( arg == QLatin1String( "--max-submissions" ) )
         {
             if ( arguments.isEmpty() )
             {
-                std::cerr << "lab: --max-submissions requires a value\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --max-submissions requires a value", kValidationFailureLab );
             }
             bool ok = false;
             maxSubmissions = arguments.takeFirst().toInt( &ok );
             if ( !ok || maxSubmissions <= 0 )
             {
-                std::cerr << "lab: --max-submissions must be a positive integer\n";
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labError( io, "lab: --max-submissions must be a positive integer", kValidationFailureLab );
             }
             haveMaxSubmissions = true;
         }
@@ -236,17 +252,17 @@ int commandLab( QStringList arguments, const CliIO &io )
         else if ( arg == QLatin1String( "--pack-root" ) )
         {
             if ( !takeValue( arguments, "--pack-root", selfCheckPackRoot ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--pack-root" );
         }
         else if ( arg == QLatin1String( "--rules-dir" ) )
         {
             if ( !takeValue( arguments, "--rules-dir", selfCheckRulesDir ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--rules-dir" );
         }
         else if ( arg == QLatin1String( "--lab-id" ) )
         {
             if ( !takeValue( arguments, "--lab-id", selfCheckLabId ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--lab-id" );
         }
         else if ( arg == QLatin1String( "--packs-only" ) )
         {
@@ -259,52 +275,53 @@ int commandLab( QStringList arguments, const CliIO &io )
         else if ( arg == QLatin1String( "--experiment-db" ) )
         {
             if ( !takeValue( arguments, "--experiment-db", experimentDb ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--experiment-db" );
         }
         else if ( arg == QLatin1String( "--experiment" ) )
         {
             if ( !takeValue( arguments, "--experiment", experimentId ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--experiment" );
         }
         else if ( arg == QLatin1String( "--student" ) )
         {
             if ( !takeValue( arguments, "--student", student ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--student" );
         }
         else if ( arg == QLatin1String( "--session" ) )
         {
             if ( !takeValue( arguments, "--session", session ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--session" );
         }
         else if ( arg == QLatin1String( "--run" ) )
         {
             if ( !takeValue( arguments, "--run", runId ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--run" );
         }
         else if ( arg == QLatin1String( "--lab-name" ) )
         {
             if ( !takeValue( arguments, "--lab-name", labName ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--lab-name" );
         }
         else if ( arg == QLatin1String( "--objective" ) )
         {
             if ( !takeValue( arguments, "--objective", objective ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--objective" );
         }
         else if ( arg == QLatin1String( "--grade-transcript" ) )
         {
             if ( !takeValue( arguments, "--grade-transcript", gradeTranscript ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--grade-transcript" );
         }
         else if ( arg == QLatin1String( "--report-out" ) )
         {
             if ( !takeValue( arguments, "--report-out", reportOutBase ) )
-                return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+                return labFlagError( io, "--report-out" );
         }
         else
         {
-            std::cerr << "lab: unknown option \"" << arg.toStdString() << "\"\n" << kLabUsage;
-            return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+            std::cerr << kLabUsage;
+            return labError( io, "lab: unknown option \"" + arg.toStdString() + "\"",
+                             kValidationFailureLab, arg.toStdString() );
         }
     }
 
@@ -367,8 +384,9 @@ int commandLab( QStringList arguments, const CliIO &io )
 
     if ( reportOutBase.isEmpty() && ( lab.isEmpty() || ( artifact.isEmpty() && batchDir.isEmpty() ) ) )
     {
-        std::cerr << "lab: --lab and (--grade or --batch) are required\n" << kLabUsage;
-        return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+        std::cerr << kLabUsage;
+        return labError( io, "lab: --lab and (--grade or --batch) are required",
+                         kValidationFailureLab );
     }
 
     sicnu::agent::OutputVerifier::LabGradeOptions options;
@@ -464,8 +482,10 @@ int commandLab( QStringList arguments, const CliIO &io )
         QFile out( outPath );
         if ( !out.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
         {
-            std::cerr << "lab: cannot write report file: " << outPath.toStdString() << "\n";
-            return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+            // Track 14 (WP-A): an unwritable --out path is invalid input,
+            // not schema validation.
+            return labError( io, "lab: cannot write report file: " + outPath.toStdString(),
+                             kInvalidInputLab, outPath.toStdString() );
         }
         out.write( Json::writeString( prettyWriter(), document ).c_str() );
         out.write( "\n" );

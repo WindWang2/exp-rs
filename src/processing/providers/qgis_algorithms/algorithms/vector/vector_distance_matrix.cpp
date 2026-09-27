@@ -172,7 +172,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 double dist = std::sqrt( dx * dx + dy * dy );
 
                 QgsFeature outputFeat;
-                outputFeat.setFields( outputFields );
+                outputFeat.setFields( outputFields, /*initAttributes=*/true );
                 outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
                 outputFeat.setAttribute( QStringLiteral( "TargetID" ), nearest.attribute( targetFieldName ).toString() );
                 outputFeat.setAttribute( QStringLiteral( "Distance" ), dist );
@@ -184,7 +184,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
         {
             // Standard N x M matrix: one row per input feature with columns for every target feature
             QgsFeature outputFeat;
-            outputFeat.setFields( outputFields );
+            outputFeat.setFields( outputFields, /*initAttributes=*/true );
             outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
             for ( const auto &[targetId, colName] : targetColumns )
             {
@@ -227,7 +227,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
             for ( const auto &de : distances )
             {
                 QgsFeature outputFeat;
-                outputFeat.setFields( outputFields );
+                outputFeat.setFields( outputFields, /*initAttributes=*/true );
                 outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
                 outputFeat.setAttribute( QStringLiteral( "TargetID" ), de.targetId );
                 outputFeat.setAttribute( QStringLiteral( "Distance" ), de.distance );

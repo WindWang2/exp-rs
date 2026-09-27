@@ -1,0 +1,96 @@
+{
+  "rs:sieve": {
+    "prerequisites": [
+      "输入为二值掩膜/类别图并给定最小斑块像元数阈值：小于阈值的连通斑块被移除以压制椒盐噪声。"
+    ],
+    "limitations": [
+      "筛除不区分噪声与真实小目标：阈值过大时真实小斑块一并被移除；连通性约定（4/8 邻接）决定斑块判定结果。"
+    ]
+  },
+  "rs:solar_geometry": {
+    "applicability": {
+      "land_cover": ["任意光学处理链"],
+      "scenes": ["辐射定标前的太阳几何计算", "BRDF 归一化的角度输入准备"],
+      "notes": "可把 SICNU_SUN_* 元数据写回输入栅格供定标/BRDF 链使用。"
+    },
+    "teaching_use": {
+      "concepts": ["太阳高度角/方位角", "太阳赤纬", "日地距离", "平方反比因子", "Spencer 公式"],
+      "courses": ["遥感物理", "定量遥感"],
+      "exercise": "由成像日期/UTC 时间与场景中心经纬度计算太阳几何并写回元数据，追踪 rs:dn_to_radiance 与 rs:brdf_normalization 如何消费这些角度。"
+    }
+  },
+  "rs:sparse_unmixing": {
+    "applicability": {
+      "land_cover": ["矿物丰度制图区", "植被-土壤-不透水面混合区"],
+      "scenes": ["过完备光谱库解混", "丰度图生产"],
+      "notes": "端元字典可多于波段数（过完备），lambda 控制稀疏度。"
+    },
+    "teaching_use": {
+      "concepts": ["稀疏解混", "L1 正则", "FISTA 迭代", "丰度", "过完备字典"],
+      "courses": ["高光谱遥感"],
+      "exercise": "调节 lambda 与容差观察丰度稀疏性与收敛行为，并解释 sum-to-one 作为软约束（惩罚项）而非硬约束的含义。"
+    }
+  },
+  "rs:spectral_similarity": {
+    "applicability": {
+      "land_cover": ["矿物/植被光谱匹配区"],
+      "scenes": ["参考光谱逐像元标注", "光谱库比对分类"],
+      "notes": "参考光谱需为同网格、反射率域的非负光谱。"
+    },
+    "teaching_use": {
+      "concepts": ["光谱信息散度（SID）", "光谱角（SAM）", "混合相似度度量"],
+      "courses": ["高光谱遥感"],
+      "exercise": "调整 SID-SAM 混合形式观察标注变化，并解释负值波段/零范数光谱输出 NaN（未标注）而非强行归类的设计。"
+    }
+  },
+  "rs:spectral_spatial_fuse": {
+    "teaching_use": {
+      "concepts": ["得分图邻域聚合", "均值滤波", "双边滤波（保边）", "虚警抑制"],
+      "courses": ["目标检测", "高光谱遥感"],
+      "exercise": "对目标检测得分图分别用 mean 与 bilateral 聚合，比较孤立虚警抑制效果与目标边缘保持的权衡。"
+    }
+  },
+  "rs:stack_register": {
+    "applicability": {
+      "land_cover": ["多时相堆栈生产区"],
+      "scenes": ["时序堆栈构建前的平移配准"],
+      "notes": "仅处理成对平移观测（无旋转/缩放）。"
+    },
+    "teaching_use": {
+      "concepts": ["全局平移平差", "最小二乘", "回路闭合漂移", "边残差"],
+      "courses": ["遥感数字图像处理"],
+      "exercise": "对多景影像执行堆栈配准，解读回路闭合漂移指标（最大/RMS 边残差）并定位被报告的断开景。"
+    },
+    "limitations": [
+      "仅估计全局平移：旋转、缩放与局部形变需上游处理；断开景被显式报告而非静默丢弃，闭合漂移超阈值时应人工复核。"
+    ]
+  },
+  "rs:supervised_classification": {
+    "limitations": [
+      "分类质量取决于训练样本的代表性与质量（随机森林/SVM 按 model 参数选择）：算子输出精度报告但不纠正样本偏差；类别集合由训练样本决定。"
+    ]
+  },
+  "rs:tcimf_detection": {
+    "teaching_use": {
+      "concepts": ["目标约束干扰最小化滤波（TCIMF）", "零约束", "干扰光谱", "背景相关矩阵"],
+      "courses": ["高光谱遥感", "目标检测"],
+      "exercise": "在已知干扰光谱条件下对比 CEM 与 TCIMF：验证 TCIMF 对干扰光谱得分恒为 0 的精确零约束，并讨论目标灵敏度的差异。"
+    }
+  },
+  "rs:temporal_anomaly": {
+    "prerequisites": [
+      "需要足够长的历史时序建立均值基线：基线期被污染（历史异常）会带入阈值并抬高/压低当期虚警。"
+    ],
+    "limitations": [
+      "z-score/差值阈值对全场景统一适用：趋势与季节性强的像元（物候循环）需先去季节项，否则常态循环会被误报为异常。"
+    ]
+  },
+  "rs:temporal_breakpoints": {
+    "prerequisites": [
+      "需要足够长的时序观测（分段线性拟合要求每段最少点数）：时相缺失或采样过稀会降低断点定位精度。"
+    ],
+    "limitations": [
+      "检出的是结构性趋势突变点，不区分突变原因（扰动/撂荒/洪泛等需业务判读）；定位精度受时序长度、采样密度与噪声影响。"
+    ]
+  }
+}

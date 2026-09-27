@@ -342,14 +342,18 @@ bool GdalDatasetWrapper::readBandWindow(int bandNum, int xOff, int yOff,
     // Pad out-of-raster regions with the band's NoData (NaN when unset) instead
     // of leaving them uninitialized / zero-filled: zero is a real pixel value
     // for DN imagery and silently corrupts downstream statistics.
+    // Interior windows skip the fill entirely — GDALRasterIO below overwrites
+    // every pixel of the window, so there the pre-fill is redundant work on
+    // the hot path of tile/row-block streams over large rasters.
     bool hasNodata = false;
     const double nd = bandNoDataValue( bandNum, &hasNodata );
     const float pad = hasNodata ? static_cast<float>( nd )
                                 : std::numeric_limits<float>::quiet_NaN();
-    std::fill( buffer, buffer + static_cast<size_t>( srcWidth ) * srcHeight, pad );
-
     const int clampedWidth = (std::min)(srcWidth, bw - xOff);
     const int clampedHeight = (std::min)(srcHeight, bh - yOff);
+
+    if ( clampedWidth < srcWidth || clampedHeight < srcHeight )
+        std::fill( buffer, buffer + static_cast<size_t>( srcWidth ) * srcHeight, pad );
 
     CPLErr err = GDALRasterIO(band, GF_Read,
                               xOff, yOff, clampedWidth, clampedHeight,
@@ -380,10 +384,14 @@ bool GdalDatasetWrapper::readWindowBip(const std::vector<int> &bands, int xOff, 
     const int nBands = static_cast<int>(bands.size());
     const size_t totalFloats = static_cast<size_t>(srcWidth) * srcHeight * nBands;
 
-    std::fill(bipBuffer, bipBuffer + totalFloats, std::numeric_limits<float>::quiet_NaN());
-
     const int clampedWidth = (std::min)(srcWidth, bw - xOff);
     const int clampedHeight = (std::min)(srcHeight, bh - yOff);
+
+    // NaN pre-fill only when the window actually clamps (see readBandWindow):
+    // interior windows are fully overwritten by GDALDatasetRasterIO below, so
+    // filling them is redundant traffic on the multi-band tile-stream hot path.
+    if ( clampedWidth < srcWidth || clampedHeight < srcHeight )
+        std::fill(bipBuffer, bipBuffer + totalFloats, std::numeric_limits<float>::quiet_NaN());
 
     CPLErr err = GDALDatasetRasterIO(
         static_cast<GDALDatasetH>(m_dataset), GF_Read,
