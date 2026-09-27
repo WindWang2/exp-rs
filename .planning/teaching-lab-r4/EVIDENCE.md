@@ -27,9 +27,28 @@
 
 新增断言 244，既有防回归 5459，零回归。
 
-### 1.2 完整 ctest 双跑（收口门禁）
+### 1.2 完整 ctest 双跑（收口门禁，2026-09-27）
 
-（占位——qgis 尾巴构建完成后回填：`ctest -R "lab|teaching|pack|copilot|autonomy" -j1` 连续两轮，全新构建目录）
+`ctest -R "lab|teaching|pack|copilot|autonomy" -j1 --timeout 900` 连续两轮
+（/tmp/r4_ctest_r1.log、/tmp/r4_ctest_r2.log）：
+
+| 轮次 | 通过 | 失败 | 退出码 |
+|---|---|---|---|
+| R1 | 148 | 19（全部 NOT_BUILT，0 真失败） | 8 |
+| R2 | 148 | 19（同一集合，逐项一致） | 8 |
+
+- 两轮 19 个 NOT_BUILT 集合完全一致（test_agent_copilot_ui / test_autonomy_gate /
+  test_harness_lab_evals / test_harness_lab_injection / test_lab_batch* 家族 /
+  test_lab_data_pack / test_lab_grading / test_lab_grader_kernels / test_lab_offline_e2e /
+  test_lab_report* / test_lab_scale / test_lab_self_check / test_labspec /
+  test_sample_label_annotation / test_teaching_admin_dock_smoke / test_teaching_cockpit_smoke）。
+- 根因单一且属 master 既有：`libsicnu_agent.so` 未链接其 `agent_loop` 依赖
+  （ld: `undefined reference to sicnu::agent_loop::VerificationReport::aggregate`）——
+  正是 #1335 P0-3 识别并修复的 master 全仓库链接破损根因；本分支未触碰
+  `src/agent/CMakeLists.txt`（git diff --name-only 证明全分支只动过
+  `src/agent/harness/lab_copilot.cpp` 一行）。
+- 其中 `test_lab_chains` 已由本分支补链恢复：112 断言全绿（见 §1.3）。
+- **零新增失败**：全部实际运行的 148 个用例两轮全绿（含本分支新增 6 套件 51 用例）。
 
 ### 1.3 假绿陷阱（本轨根因级发现，白名单外移交）
 
