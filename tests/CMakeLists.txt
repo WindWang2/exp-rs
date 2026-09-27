@@ -3340,6 +3340,11 @@ target_link_libraries(test_dataset_fingerprint_determinism PRIVATE Sicnu::datase
 sicnu_add_test(test_split_reproducibility TIMEOUT 120)
 target_link_libraries(test_split_reproducibility PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# Track 13 R4 leakage audit coverage: constructed-leakage matrix over all
+# checks, input-permutation invariance, fold honest-gaps + replay.
+sicnu_add_test(test_leakage_audit_coverage TIMEOUT 120)
+target_link_libraries(test_leakage_audit_coverage PRIVATE Sicnu::dataset SQLite::SQLite3)
+
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
 target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
