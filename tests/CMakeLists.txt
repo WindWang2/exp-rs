@@ -13921,7 +13921,6 @@ if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
 
-<<<<<<< HEAD
 # ---------------------------------------------------------------------------
 # Track 7 R4 (rs-operator-oracles): NoData/mask semantics, tolerance chains,
 # determinism digests, preflight refusals, known-answer gap-filling.
@@ -13957,7 +13956,6 @@ sicnu_discover_tests(test_operator_chain_tolerance TEST_PREFIX r4:: TIMEOUT 300)
 sicnu_discover_tests(test_operator_determinism_digest TEST_PREFIX r4:: TIMEOUT 600)
 sicnu_discover_tests(test_operator_preflight_refusals TEST_PREFIX r4:: TIMEOUT 300)
 sicnu_discover_tests(test_known_answer_corpus_r4 TEST_PREFIX r4:: TIMEOUT 300)
-=======
 # Track 17 R4 (WP-D): commands.json schema / entry-floor / EOL gate. Light —
 # Catch2 + Qt6::Core only (QJsonDocument); the registry bidirectional diff
 # stays in test_help_coverage, the corpus shape gate in test_help_integrity_12.
@@ -14015,4 +14013,3 @@ set_target_properties(test_i18n_migrated_translations PROPERTIES
 add_test(NAME test_i18n_migrated_translations
   COMMAND test_i18n_migrated_translations
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
->>>>>>> origin/master
