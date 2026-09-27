@@ -68,9 +68,32 @@ ROUND_A_EXIT=0 — 100% tests passed out of 236
 | 触碰文件 | ≥16 | 见 PR 正文 diff --stat（回填） | git |
 | DECISIONS 链路规则 | ≥5 | **7 条**（D1-D7），抽查对照=代码 | DECISIONS.md |
 
-## 6. 重链补跑记录
+## 6. 重链补跑记录（build/ 全栈目录，gcc-15 Debug）
 
-（build/ 完成后回填）
+前置：重链闭包（qgis_core 1054 TU + qgis_gui ~2000 TU + ui/app/processing 链）构建完成后，
+域目标 32/39 链接成功。
+
+```
+QT_QPA_PLATFORM=offscreen ctest -R "verif|grader|preflight|suitab|science_context|evidence" -E "_NOT_BUILT" -j1
+ROUND A: EXIT=0 — 100% tests passed out of 161
+ROUND B: EXIT=0 — 100% tests passed out of 161   （匹配项共 180；19 个 _NOT_BUILT 占位见下）
+```
+
+161 项 = 本轨全部新增测试 + 全部轻域既有套件 + 重域建成目标
+（test_virtual_raster_preflight、test_teaching_fake_grader_cli）在完整 Qt/QGIS 栈上的
+Catch2 展开，**双轮全绿**。
+
+### 6.1 未建成重目标（7 个）—— master 既有断链，与本分支无关
+
+| 目标 | 失败签名 | 根因 |
+|---|---|---|
+| test_preflight、test_preflight_check_tool、test_science_verification_10、test_lab_grader_kernels、test_output_verifier、test_verification_metamorphic_11、test_verification_numeric_reference_11 | `undefined reference to sicnu::agent_loop::VerificationReport::aggregate` | `sicnu::agent` 从未链接 `sicnu_agent_loop`（定义在 src/agent_loop/session_seams.cpp:157；src/agent/CMakeLists.txt 仅注释提及）——master 既有断链 |
+| test_verification_env_12 | `'QTemporaryDir' was not declared` | 该测试源缺 `#include <QTemporaryDir>`（文件属 open PR #1335 所有） |
+
+证据：本分支 `git diff origin/master..HEAD --stat -- src/` 为空（零生产代码修改），上述
+断链在 origin/master 上等价存在；agent 域/build 域分别属他轨（#1335 build-restore、
+agent 轨），白名单外不修、如实披露。ctest 占位后缀 `_NOT_BUILT`（19 项含 SECTION 展开
+及 mlops9/harness evidence 两个非本域未建目标）随之排除。
 
 ## 7. 非本域发现披露
 

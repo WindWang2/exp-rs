@@ -41,11 +41,12 @@
 
 - Oracle（轻域，含全部字面口径）：`ctest -R "verif|grader|preflight|suitab|science_context|evidence"`（宽口径，D6 修正：字面正则漏 verifier/verification 家族）**连续两轮 100%（236/236），exit 0/0**。
 - 矩阵复跑：`run_matrices.sh build-lite 2` → ALL MATRICES GREEN。
+- **全栈 Oracle（build/ 完整 Qt/QGIS 栈目录）**：同宽口径 ctest **连续两轮 100%（161/161），exit 0/0**——包含本轨全部新增测试、全部轻域既有套件与 2 个建成重域目标；19 个 `_NOT_BUILT` 占位 = 7 个 master 既有断链目标（见未解决项 1）+ 2 个非本域未建目标，逐项披露于 EVIDENCE §6.1。
 - 独立对抗 review：SHIP-WITH-FIXES，2×P1 + 5×P2 + 5×NIT 全部整改（REVIEW_LOG.md 逐条对照），整改后全部套件重跑绿——含整改自身引入的一处 budget 案 finding 数回归（双跑抓到并修复，1f307197ce）。
 - 构建栈：gcc-15 专用目录（系统 GCC 16.2.1 会触发 `cmake/raise-compiler-stack.sh`，该脚本 `status=$?` 在 if 语句后捕获、恒 exit 0 —— 假绿陷阱，实测未修复；属 build-infra 域，本轨不越界修，在此披露并建议其所有轨跟进）。
 
 ### 未解决项
 
-1. 重域测试目标（test_preflight / test_preflight_check_tool / test_science_verification_10 / test_lab_grader_kernels / test_virtual_raster_preflight / test_output_verifier / test_verification_*_11/12 / test_teaching_fake_grader_cli）：其 qgis_gui/ui 依赖闭包在本机 -j2 后台构建中，完成后在本 PR 追加运行记录（本分支 diff 不触碰其代码路径，预期与基线一致）。
+1. **【已部分收口，见下方补跑记录】** 重域目标中 2 个建成并纳入全栈双跑（test_virtual_raster_preflight、test_teaching_fake_grader_cli）；其余 7 个被 **master 既有断链**挡住（`sicnu::agent` 缺链接 `sicnu_agent_loop` → 6 目标 undefined reference；test_verification_env_12 缺 `#include <QTemporaryDir>`，文件属 #1335）——本分支 src/ 零改动，断链在 master 等价存在，属 build-restore/agent 轨域，白名单外不修、EVIDENCE §6.1 逐项披露。
 2. metric seam 无生产 IMetricView：产品空位（事实源在他域），非缺陷，ADAPTER_MATRIX.md 已声明。
 3. suitability "冲突/过期事实"判定面：合同无此概念（单 facts 通道、无采集时间戳），按铁律不新增语义；两事实源的真实形态（显式 facts vs provider）已由 precedence 案钉死。
