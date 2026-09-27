@@ -14,9 +14,20 @@
 
 #include <json/json.h>
 
+#include <mutex>
+#include <set>
 #include <string>
 
 namespace sicnu::operators::runtime {
+
+namespace {
+/// Publish occupancy fence: one ProductPublishGuard per canonical final path
+/// per process (see the class comment). Guards the WHOLE guard lifetime —
+/// adoption included, which is exactly the window a second guard would
+/// corrupt by adopting the parked product back.
+std::mutex g_publishFenceMutex;
+std::set<std::string> g_publishFences;
+} // namespace
 
 std::string crsDisplayName( const QString &wkt )
 {
@@ -133,16 +144,25 @@ DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
     // Companions and prov restore FIRST, the main file LAST: a crash
     // mid-recovery leaves the main still parked, which is exactly the state
     // the next run's adoption branch re-enters through — every crash suffix
-    // is recoverable (mirror of the park ladder).
+    // is recoverable (mirror of the park ladder). Qt6 QFile::rename refuses
+    // to overwrite, so any stray companion/prov left by an interrupted
+    // adoption is cleared before its restore — the parked pair's own
+    // sidecars must win.
     for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
     {
       const QString backupCompanion = companion + m_backupSuffix;
       if ( QFile::exists( backupCompanion ) )
+      {
+        QFile::remove( companion );
         QFile::rename( backupCompanion, companion );
+      }
     }
     const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
     if ( QFile::exists( backupProv ) )
+    {
+      QFile::remove( m_final + QStringLiteral( ".prov.json" ) );
       QFile::rename( backupProv, m_final + QStringLiteral( ".prov.json" ) );
+    }
     if ( !QFile::rename( m_backup, m_final ) )
       throw RSOperatorError( ErrorCode::FileNotWritable,
                              "detection publish could not recover the previously parked "
@@ -242,6 +262,15 @@ void ProductPublishGuard::removeBackupFamily()
   QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
 }
 
+void ProductPublishGuard::releasePublishFence()
+{
+  if ( !m_fenceHeld )
+    return;
+  std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
+  g_publishFences.erase( QDir::cleanPath( m_final ).toStdString() );
+  m_fenceHeld = false;
+}
+
 ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QString &backupSuffix,
                                           const char *parkFaultPoint,
                                           const QString &stageForCleanup )
@@ -249,6 +278,19 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
       m_backup( finalPath + backupSuffix ),
       m_stageForCleanup( stageForCleanup )
 {
+  // Occupancy fence FIRST (before any adoption/park touches the path): a
+  // concurrent guard on the same path must be refused typed, never allowed
+  // to adopt or clean the live guard's parked pair.
+  const std::string fenceKey = QDir::cleanPath( finalPath ).toStdString();
+  {
+    std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
+    if ( !g_publishFences.insert( fenceKey ).second )
+      throw RSOperatorError( ErrorCode::AlreadyRunning,
+                             "another publish is already in progress for "
+                               + finalPath.toStdString() );
+  }
+  m_fenceHeld = true;
+
   const QString provPath = m_final + QStringLiteral( ".prov.json" );
   const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
   // Every throw path below must not leave the freshly written stage behind
@@ -277,7 +319,13 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
     // it IS the parked product's own sidecar, so it stays — leaving it pairs
     // the restored product with exactly what it was published with.
     if ( QFile::exists( backupProv ) )
+    {
+      // Qt6 QFile::rename refuses to overwrite (measured on this platform,
+      // not a Windows-only quirk): the stray prov MUST be cleared first or
+      // the parked pair's own sidecar silently never restores.
+      QFile::remove( provPath );
       QFile::rename( backupProv, provPath );
+    }
     if ( !QFile::rename( m_backup, m_final ) )
       fail( "publish could not recover the previously parked product: " );
   }
@@ -323,20 +371,27 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
 ProductPublishGuard::~ProductPublishGuard()
 {
   if ( m_disarmed )
+  {
+    releasePublishFence();
     return;
+  }
   // Remove the partial NEW product and its sidecar, then restore the parked
   // previous pair — sidecar first, the main file LAST: a crash mid-restore
   // leaves the main parked, i.e. exactly the state the next run's adoption
   // branch re-enters through.
   QFile::remove( m_final );
   QFile::remove( m_final + QStringLiteral( ".prov.json" ) );
-  if ( !m_hadExisting )
-    return;
-  const QString provPath = m_final + QStringLiteral( ".prov.json" );
-  const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
-  if ( m_hadProv && QFile::exists( backupProv ) )
-    QFile::rename( backupProv, provPath );
-  QFile::rename( m_backup, m_final );
+  if ( m_hadExisting )
+  {
+    const QString provPath = m_final + QStringLiteral( ".prov.json" );
+    const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
+    if ( m_hadProv && QFile::exists( backupProv ) )
+      QFile::rename( backupProv, provPath );
+    QFile::rename( m_backup, m_final );
+  }
+  // Fence releases LAST: the restore above must complete while the path is
+  // still exclusively held.
+  releasePublishFence();
 }
 
 void ProductPublishGuard::publishStaged( const QString &stagePath, const char *swapFaultPoint,
