@@ -35,6 +35,8 @@
 
 #include <gdal.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 
 using sicnu::app::ViewLinkController;
@@ -91,8 +93,13 @@ int main( int argc, char *argv[] )
     QgsApplication app( argc, argv, true );
     QgsApplication::initQgis();
     const int result = Catch::Session().run( argc, argv );
-    QgsApplication::exitQgis();
-    return result;
+    // Canvas/project cases still crashed in glibc atexit cleanup (QGIS
+    // thread-local PROJ context) once ctest ran them one case per process,
+    // after every assertion had passed. Skip static destruction entirely,
+    // like test_workbench_full_shell_lifecycle / test_twincanvas_sync.
+    std::fflush( stdout );
+    std::fflush( stderr );
+    std::_Exit( result );
 }
 
 TEST_CASE( "view link propagates extents across linked views",

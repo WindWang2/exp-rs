@@ -38,6 +38,19 @@ PluginHost::~PluginHost()
     unloadAll();
 }
 
+QString PluginHost::nativeModuleName(const QString &libraryPath)
+{
+    QString base = QFileInfo(libraryPath).fileName();
+    // Strip every library suffix component (".so.1.2", ".dll", ".dylib").
+    const int dot = base.indexOf(QLatin1Char('.'));
+    if (dot > 0)
+        base = base.left(dot);
+    // Unix and MinGW prefix shared libraries with "lib"; MSVC does not.
+    if (base.startsWith(QLatin1String("lib")) && base.size() > 3)
+        base = base.mid(3);
+    return base;
+}
+
 void PluginHost::loadPlugins(const QString &pluginDir)
 {
     QDir dir(pluginDir);
@@ -45,21 +58,55 @@ void PluginHost::loadPlugins(const QString &pluginDir)
         qWarning() << "PluginHost: Plugin directory not found:" << pluginDir;
         return;
     }
+    const QString canonicalDir = dir.canonicalPath();
+    if (canonicalDir.isEmpty()) {
+        qWarning() << "PluginHost: Plugin directory cannot be resolved:" << pluginDir;
+        return;
+    }
+    // A plugin directory anyone can write to is not a trust boundary.
+    if (QFileInfo(canonicalDir).permissions() & QFileDevice::WriteOther) {
+        qWarning() << "PluginHost: Refusing world-writable plugin directory:" << canonicalDir;
+        emit pluginError(canonicalDir, QStringLiteral("Plugin directory is world-writable"));
+        return;
+    }
 
-    qDebug() << "PluginHost: Loading plugins from:" << pluginDir;
+    qDebug() << "PluginHost: Loading plugins from:" << canonicalDir;
 
-    // 1. Scan for C++ plugin libraries (.so / .dll)
+    const auto insideDir = [&canonicalDir](const QString &path) {
+        const QString canonical = QFileInfo(path).canonicalFilePath();
+        return !canonical.isEmpty()
+               && canonical.startsWith(canonicalDir + QLatin1Char('/'));
+    };
+
+    // 1. First-party C++ plugin libraries (.so / .dll) — allowlisted only.
     for (const QString &fileName : dir.entryList(QDir::Files)) {
-        QString filePath = dir.absoluteFilePath(fileName);
-        if (QLibrary::isLibrary(filePath)) {
-            loadPlugin(filePath);
+        const QString filePath = dir.absoluteFilePath(fileName);
+        if (!QLibrary::isLibrary(filePath))
+            continue;
+        const QString module = nativeModuleName(filePath);
+        if (!m_trustedNativePlugins.contains(module)) {
+            qDebug() << "PluginHost: Skipping non-allowlisted native library:" << fileName;
+            continue;
         }
+        if (!insideDir(filePath)) {
+            qWarning() << "PluginHost: Refusing plugin that resolves outside" << canonicalDir << ":" << fileName;
+            emit pluginError(fileName, QStringLiteral("Plugin path escapes the plugin directory"));
+            continue;
+        }
+        loadPlugin(filePath);
     }
 
     // 2. Scan for Python plugin directories containing metadata.txt + __init__.py
+    if (!m_pythonPluginsEnabled)
+        return;
     for (const QString &subDirName : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         QString subDirPath = dir.absoluteFilePath(subDirName);
         if (QFileInfo::exists(subDirPath + "/metadata.txt") && QFileInfo::exists(subDirPath + "/__init__.py")) {
+            if (!insideDir(subDirPath)) {
+                qWarning() << "PluginHost: Refusing Python plugin that resolves outside" << canonicalDir << ":" << subDirName;
+                emit pluginError(subDirName, QStringLiteral("Plugin path escapes the plugin directory"));
+                continue;
+            }
             loadPythonPlugin(subDirPath);
         }
     }
@@ -72,6 +119,16 @@ bool PluginHost::loadPlugin(const QString &pluginPath)
 
     if (metadata.isEmpty()) {
         qWarning() << "PluginHost: No metadata in plugin:" << pluginPath;
+        delete loader;
+        return false;
+    }
+    // Reading the metadata does not run library code; instance() does. Only
+    // libraries that declare the SICNU plugin interface get that far — other
+    // Qt plugins (e.g. SQL drivers sharing the directory) are never
+    // instantiated through this host.
+    if (metadata.value(QStringLiteral("IID")).toString() != QLatin1String(SicnuPluginInterface_iid)) {
+        qWarning() << "PluginHost: Not a SICNU plugin (IID mismatch):" << pluginPath;
+        emit pluginError(pluginPath, QStringLiteral("Library does not declare SicnuPluginInterface"));
         delete loader;
         return false;
     }

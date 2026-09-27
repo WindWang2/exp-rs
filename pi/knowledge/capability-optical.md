@@ -35,6 +35,7 @@
 - 输入：input（raster）
 - 输出：band（integer）、method（string）、output（raster）
 - 参数：airmass（numeric）、band（integer）、bias（numeric）、gain（numeric）、metadata_path（string）、method（enum）、output（string）
+- 前置条件：按 method 选择前置条件：dos1 适用于含可信暗像元（深水体、阴影）的 DN/TOA 场景；dos2 运行于 TOA 反射率空间（#610，需产品元数据带反射率系数）；quac 无需定标文件但输入应为多波段光学影像。sensor-calibration 路径先执行 rs:dn_to_radiance。
 - 局限：Gain/bias are resolved from product metadata (MTL/MTD) when omitted; explicit values always win.
 - 适用地物：植被、水体、城市、土壤
 - 适用场景：地表反射率反演、植被指数计算前的定量预处理、多时相影像辐射一致性归一化
@@ -56,6 +57,8 @@ DOS1 暗像元大气校正：假设场景内存在零反射暗像元，估计大
 - 输入：input（raster）
 - 输出：band（integer）、method（string）、output（raster）
 - 参数：band（integer）、bias（numeric）、gain（numeric）、metadata_path（string）、output（string）
+- 前置条件：场景内必须存在零反射暗像元（深水体、地形阴影等）：路径辐射估计直接来自暗像元 DN，缺少可信暗目标时估计有偏。
+- 局限：单景全局暗像元估计：假设整景大气条件均匀，不建模地形效应与邻域效应；这是 DOS1 方法的固有适用范围。
 - 适用地物：植被、土壤、水体
 - 适用场景：缺少辅助大气参数时的快速校正、历史存档影像的相对辐射归一化
 - 失败模式：
@@ -73,6 +76,8 @@ DOS2 经验大气校正（DOS + 透射率）：运行于 TOA 反射率空间（#
 - 输入：input（raster）
 - 输出：band（integer）、method（string）、output（raster）
 - 参数：airmass（numeric）、band（integer）、bias（numeric）、gain（numeric）、metadata_path（string）、output（string）
+- 前置条件：输入必须位于 TOA 反射率空间（#610）：DN 域场景需先经 rs:dn_to_radiance 与反射率定标，产品元数据需携带反射率尺度系数。
+- 局限：在 DOS 暗像元基础上加入太阳天顶角透射率项，仍属经验校正：不含气溶胶类型反演、邻域效应与地形辐射校正。
 - 适用地物：植被、土壤、水体
 - 适用场景：无大气参数的定量预处理、教学演示经验校正与辐射传输校正的差异
 - 失败模式：
@@ -92,6 +97,8 @@ QUAC 快速大气校正：从影像自身统计自动估计平均地表反射率
 - 输入：input（raster）
 - 输出：band（integer）、method（string）、output（raster）
 - 参数：output（string）
+- 前置条件：输入为多波段光学影像即可运行：QUAC 从影像自身统计估计平均地表反射率与大气参数，不读取传感器定标文件。
+- 局限：精度为经验近似级（零配置的代价）：参数由场景统计估计、无辐射传输模型约束，估计质量依赖场景内地物光谱多样性。
 - 适用地物：植被、土壤、城市
 - 适用场景：批量存档影像的快速定量预处理、缺少传感器定标参数时的兜底校正
 - 失败模式：
@@ -111,11 +118,16 @@ QUAC 快速大气校正：从影像自身统计自动估计平均地表反射率
 - 参数：f_geo（numeric）、f_vol（numeric）、output（string）、ref_relative_azimuth（numeric）、ref_view_zenith（numeric）、sun_azimuth（numeric）、sun_zenith（numeric）、view_azimuth（numeric）、view_zenith（numeric）
 - 前置条件：Sun and view angles via parameters or SICNU_SUN_* / SICNU_VIEW_* dataset metadata — a missing angle is a typed refusal (use rs:solar_geometry to stamp sun angles).；Per-band kernel weights (f_vol, f_geo); the normalization denominator must stay positive.
 - 局限：Single-scene weights cannot be fitted from the scene itself; for angle-less two-date leveling use the BrdfNormalization::PairStatistics::fitCFactor API (mean-preserving c = mean(ref)/mean(target)).；Non-finite pixels pass through as NaN NoData.
+- 适用地物：植被、农田、林地
+- 适用场景：多时相植被制图、不同观测几何影像的联合分析、多日期堆栈构建前的辐射一致性处理
 - 失败模式：
   - `INVALID_PARAMETER` — 太阳或观测角度既未通过 sun_zenith/sun_azimuth/view_zenith/view_azimuth 参数给出，栅格元数据中也无 SICNU_SUN_*/SICNU_VIEW_*。处置：显式传入四个角度参数，或先用 rs:solar_geometry 给栅格打上 SICNU_SUN_* 元数据
   - `INVALID_PARAMETER` — f_vol/f_geo 缺失或既非数值、也非与波段数等长的数值数组；或太阳天顶角≥90°、视角天顶角/方位角越界，使各向异性因子 1+f_vol·k_vol+f_geo·k_geo ≤ 0（非物理）。处置：用标量或逐波段数值数组给出有限核权重；角度取太阳天顶角 [0,90)、视角天顶角 [0,90) 与方位角 [0,360)，保证归一化分母为正
   - `DATASET_NOT_FOUND` — 输入反射率栅格无法打开（路径无效/格式不支持），或为空（宽高或波段数为 0）。处置：检查输入路径与产品完整性，确认为至少含一个波段的反射率栅格
   - `OUTPUT_INVALID` — 输出栅格无法创建、分块写入失败或收尾失败（目标路径不可写、磁盘空间不足）。处置：更换可写输出路径并确认磁盘空间后重跑
+- 教学概念：BRDF、核驱动模型、Ross-Thick 核、Li-Sparse-Reciprocal 核、反射各向异性
+- 适用课程：定量遥感、遥感物理
+- 典型练习：对同一区域两个不同观测几何获取的反射率影像执行 BRDF 归一化，比较多日期堆栈在归一化前后的辐射一致性差异。
 
 ## rs:contrast_stretch
 
@@ -126,6 +138,8 @@ QUAC 快速大气校正：从影像自身统计自动估计平均地表反射率
 - 输入：input（raster）
 - 输出：bands（integer）、output（raster）
 - 参数：clipPercent（numeric）、method（enum）、output（string）、piecewisePoints（string）、stddevK（numeric）
+- 前置条件：输入为待增强栅格；按方法给参：percent_clip→clipPercent（默认 2%），stddev→stddevK（默认 2），piecewise→piecewisePoints（≥2 个数值 [in,out] 点对，否则类型化拒绝）。
+- 局限：统计量（min-max/百分位/σ/直方图）按波段、以两遍流式计算，声明 NoData 像元同时从统计与输出中掩除。；显示级增强：不改变定量语义，下游定量分析链不要以拉伸后的影像为输入。
 - 适用地物：任意地物
 - 适用场景：制图出图前的显示优化、 Screenshots 与报告插图的可视化增强
 - 适用性备注：仅用于显示，不要对拉伸结果再做定量反演。
@@ -144,6 +158,8 @@ QUAC 快速大气校正：从影像自身统计自动估计平均地表反射率
 - 输入：input（raster）
 - 输出：band（integer）、method（string）、output（raster）
 - 参数：band（integer）、bias（numeric）、gain（numeric）、metadata_path（string）、output（string）
+- 前置条件：需要传感器辐射定标参数（增益/偏置）：缺定标元数据的产品需先补齐定标链，或改用不依赖定标文件的经验校正族（quac）。
+- 局限：输出为 TOA 辐亮度：仅完成传感器级定标、未做大气校正；地表反射率反演需接 DOS1/DOS2/QUAC 等经验链。
 - 适用地物：任意地物
 - 适用场景：Landsat/MODIS 等存档数据的定标入口、定量遥感处理链的起点
 - 失败模式：
@@ -164,6 +180,7 @@ Brovey 全色锐化：按波段比例加权融合，计算快、色彩保持好�
 - 输出：bands（integer）、method（string）、output（raster）
 - 参数：blueIdx（integer）、greenIdx（integer）、msWeights（numeric）、output（string）、panWeight（numeric）、redIdx（integer）
 - 前置条件：Pan and MS rasters must be co-registered.
+- 局限：按波段比例加权注入全色细节：计算快、色彩保持好，但存在光谱失真，适合快速出图而非定量分析。
 - 适用地物：城市、农田
 - 适用场景：快速可视化产品生产、出版级 RGB 影像制作
 - 失败模式：
@@ -183,6 +200,7 @@ Gram-Schmidt 全色锐化：以正交化方法保持光谱信息，光谱保真�
 - 输出：bands（integer）、method（string）、output（raster）
 - 参数：blueIdx（integer）、greenIdx（integer）、msWeights（numeric）、output（string）、panWeight（numeric）、redIdx（integer）
 - 前置条件：Pan and MS rasters must be co-registered.
+- 局限：以 Gram-Schmidt 正交化模拟全色波段，光谱保真度高于 Brovey/IHS，是定量用途的推荐融合方法，但仍非无失真融合。
 - 适用地物：城市、海岸带、农田
 - 适用场景：高保真融合产品、融合后需继续做指数计算的场景
 - 失败模式：
@@ -202,6 +220,7 @@ IHS 全色锐化：RGB→IHS 变换后以全色替换亮度分量，色彩鲜艳
 - 输出：bands（integer）、method（string）、output（raster）
 - 参数：blueIdx（integer）、greenIdx（integer）、msWeights（numeric）、output（string）、panWeight（numeric）、redIdx（integer）
 - 前置条件：Pan and MS rasters must be co-registered.
+- 局限：RGB→IHS 后以全色替换亮度分量：色彩鲜艳但光谱失真较大，仅推荐显示用途，不用于定量反演。
 - 适用地物：城市
 - 适用场景：演示性可视化产品、教学比较不同融合方法的光谱失真
 - 失败模式：
@@ -220,6 +239,7 @@ IHS 全色锐化：RGB→IHS 变换后以全色替换亮度分量，色彩鲜艳
 - 输出：bands（integer）、method（string）、output（raster）
 - 参数：blueIdx（integer）、greenIdx（integer）、msWeights（numeric）、output（string）、panWeight（numeric）、redIdx（integer）
 - 前置条件：Pan and MS rasters must be co-registered.
+- 局限：线性加权注入全色细节：参数可控、行为可预期；融合强度参数同时决定细节注入量与光谱改变量。
 - 适用地物：农田、城市
 - 适用场景：批量业务化融合生产、融合参数敏感性实验
 - 失败模式：
@@ -238,6 +258,7 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 输出：bands（integer）、method（string）、output（raster）
 - 参数：blueIdx（integer）、greenIdx（integer）、msWeights（numeric）、output（string）、panWeight（numeric）、redIdx（integer）
 - 前置条件：Pan and MS rasters must be co-registered.
+- 局限：以第一主成分承载空间结构并被全色替换：适合波段较多的多光谱数据；主成分方向随场景统计变化，跨场景行为不完全一致。
 - 适用地物：城市、矿区
 - 适用场景：多波段影像融合、融合前后信息量分析
 - 失败模式：
@@ -256,6 +277,8 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 输入：input（raster）
 - 输出：bands（integer）、output（raster）
 - 参数：band1（integer）、band2（integer）、band3（integer）、clipPercent（numeric）、damping（numeric）、filterType（enum）、kernelSize（integer）、method（enum）、noiseVariance（numeric）、output（string）、sigma（numeric）、speckleType（enum）、stddevK（numeric）、stretchType（enum）、transform（enum）
+- 前置条件：先选 method 再给参：只有所选方法（stretch / filter / ratio_ihs transform / SAR speckle 族）的参数会被读取，其余忽略。
+- 局限：瓦片流式 O(tile) 内存，输出规模不受栅格大小限制；直方图类 stretch 会先做一次逐波段统计遍历再写出。
 - 适用地物：任意地物
 - 适用场景：目视解译前的影像优化、教学演示各种增强方法
 - 适用性备注：显示级增强会破坏辐射定量语义，定量反演前不要使用。
@@ -315,6 +338,7 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 输入：input（raster）
 - 输出：bandCount（integer）、output（raster）、unit（string）
 - 参数：bands（integer）、metadata_path（string）、output（string）、unit（enum）
+- 前置条件：需要传感器定标参数（增益/偏置；TOA 反射率还需太阳角度与距离因子）：参数缺失时以类型化错误拒绝，不臆测定标系数。
 - 局限：Coefficients are read from MTL/MTD metadata; provide metadata_path for stacked rasters without embedded coefficients.；Brightness temperature requires thermal-band K1/K2 constants.
 - 适用地物：任意地物
 - 适用场景：多源影像的辐射统一、时间序列分析前的定标准备
@@ -336,11 +360,17 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 参数：mask_flag（enum）、output（string）、qa_radsat_band（integer）、qa_radsat_bits（string）、saturation_level（numeric）
 - 前置条件：The cloud mask must share the input grid (CRS, geotransform, size); mismatched grids are refused, never resampled.
 - 局限：Flags describe the delivered values, not the sensor's full quality model; pair with QaMask on QA_PIXEL/SCL for the complete classification.；A QA_RADSAT band given via qa_radsat_band also receives its own reflectance-domain flag band; consumers should ignore the flag band of the QA band itself.
+- 适用地物：含云/雪/饱和场景的质检
+- 适用场景：多源反射率产品的统一质量层生产、时序合成前的像元级质检
+- 适用性备注：输出 uint16 质量标志图层（0 = 干净像元），多源标志取并集。
 - 失败模式：
   - `INVALID_PARAMETER` — 缺少必需参数 input/output，或 qa_radsat_band 为负、超过输入波段数，或 qa_radsat_bits 条目数与输入波段数不符、取值超出 [0, 65535]。处置：补齐 input/output；qa_radsat_band 用 0（关闭）或 1..波段数；qa_radsat_bits 按输入波段数给出逗号分隔的 [0, 65535] 掩码
   - `GRID_MISMATCH` — cloud_mask 与输入栅格的 CRS、地理变换或尺寸不一致（不做重采样）。处置：提供与输入同网格的掩膜，或先用 rs:resample 对齐到同一网格
   - `DATASET_NOT_FOUND` — 输入反射率栅格或 cloud_mask 无法打开（路径无效/格式不支持），或输入为空（宽高或波段数为 0）。处置：检查输入与掩膜路径、驱动及文件权限，确认输入为含至少一个波段的反射率栅格
   - `OUTPUT_INVALID` — 输出标志栅格无法创建、分块写入失败或收尾失败（目标路径不可写、磁盘空间不足）。处置：更换可写输出路径并确认磁盘空间后重跑
+- 教学概念：辐射质量标志、饱和与超范围、QA_RADSAT 位、像元级 QC
+- 适用课程：遥感数字图像处理、定量遥感
+- 典型练习：对导入后的反射率产品生成质量标志层，统计各标志位占比并在时序合成前解释掩膜策略。
 
 ## rs:solar_geometry
 
@@ -353,11 +383,17 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 参数：date（string）、latitude（numeric）、longitude（numeric）、utc_time（string）、write_metadata（boolean）
 - 前置条件：Acquisition date and UTC time (e.g. Landsat MTL DATE_ACQUIRED + SCENE_CENTER_TIME) and the scene centre latitude/longitude.
 - 局限：Below-horizon suns are still stamped for traceability; downstream operators refuse to calibrate with them (sun_above_horizon=false and elevation <= 0 in the record).；In-place metadata update requires a writable raster; read-only sources are refused with a typed error.
+- 适用地物：任意光学处理链
+- 适用场景：辐射定标前的太阳几何计算、BRDF 归一化的角度输入准备
+- 适用性备注：可把 SICNU_SUN_* 元数据写回输入栅格供定标/BRDF 链使用。
 - 失败模式：
   - `INVALID_PARAMETER` — 缺少必需参数 date/utc_time，或 date 不是合法 ISO YYYY-MM-DD、utc_time 不是 HH:mm 或 HH:mm:ss。处置：按 schema 提供成像日期与 UTC 时间（如 Landsat MTL 的 DATE_ACQUIRED + SCENE_CENTER_TIME）
   - `INVALID_PARAMETER` — latitude/longitude 缺失，或超出 [-90, 90] / [-180, 180] 度范围。处置：提供场景中心经纬度并保证落在合法范围内
   - `INVALID_PARAMETER` — write_metadata=true 但未提供 input 栅格。处置：补上要写元数据的 input 栅格，或将 write_metadata 置为 false 只取计算结果
   - `NOT_SUPPORTED` — 以 GA_Update 打开 input 栅格失败（只读源或无写权限），无法原地写入 SICNU_SUN_* 元数据。处置：改用可写副本后重试，或将 write_metadata 置为 false
+- 教学概念：太阳高度角/方位角、太阳赤纬、日地距离、平方反比因子、Spencer 公式
+- 适用课程：遥感物理、定量遥感
+- 典型练习：由成像日期/UTC 时间与场景中心经纬度计算太阳几何并写回元数据，追踪 rs:dn_to_radiance 与 rs:brdf_normalization 如何消费这些角度。
 
 ## rs:topographic_correction
 

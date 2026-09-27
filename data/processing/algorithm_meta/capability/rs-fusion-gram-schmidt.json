@@ -114,7 +114,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u4ee5 Gram-Schmidt \u6b63\u4ea4\u5316\u6a21\u62df\u5168\u8272\u6ce2\u6bb5\uff0c\u5149\u8c31\u4fdd\u771f\u5ea6\u9ad8\u4e8e Brovey/IHS\uff0c\u662f\u5b9a\u91cf\u7528\u9014\u7684\u63a8\u8350\u878d\u5408\u65b9\u6cd5\uff0c\u4f46\u4ecd\u975e\u65e0\u5931\u771f\u878d\u5408\u3002"
+    ],
     "modality" : 
     [
       "multimodal",

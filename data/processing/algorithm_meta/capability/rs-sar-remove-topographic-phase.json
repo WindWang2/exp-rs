@@ -1,7 +1,19 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u8d77\u4f0f\u5730\u5f62\u7684\u5f62\u53d8\u76d1\u6d4b\u533a"
+      ],
+      "notes" : "\u9700\u8981 DEM \u4e0e\u4e24\u666f\u8f68\u9053\u7684\u9010\u50cf\u7d20\u4e25\u683c\u8ddd\u79bb\u5dee\u51e0\u4f55\u3002",
+      "scenes" : 
+      [
+        "\u5730\u5f62\u76f8\u4f4d\u5254\u9664",
+        "\u5f62\u53d8/\u5927\u6c14\u76f8\u4f4d\u5206\u79bb\u524d\u7f6e\u6b65\u9aa4"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -126,7 +138,21 @@
     ],
     "schema_version" : 2,
     "summary" : "InSAR \u5730\u5f62\u76f8\u4f4d\u5254\u9664\uff1a\u7528\u4e24\u666f\u8f68\u9053\u7684\u9010\u50cf\u7d20\u4e25\u683c\u8ddd\u79bb\u5dee\u51e0\u4f55\uff0c\u4ece\u590d\u5e72\u6d89\u56fe\u4e2d\u79fb\u9664 DEM/\u8f68\u9053\u5730\u5f62\u76f8\u4f4d\uff0c\u7559\u4e0b\u5f62\u53d8\u4e0e\u5927\u6c14\u76f8\u4f4d\u3002",
-    "teaching_use" : {}
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5730\u5f62\u76f8\u4f4d",
+        "\u8ddd\u79bb\u5dee\u51e0\u4f55",
+        "DEM",
+        "\u6b8b\u4f59\u76f8\u4f4d"
+      ],
+      "courses" : 
+      [
+        "InSAR"
+      ],
+      "exercise" : "\u5bf9\u590d\u5e72\u6d89\u56fe\u6267\u884c\u5730\u5f62\u76f8\u4f4d\u5254\u9664\uff0c\u6bd4\u8f83\u5254\u9664\u524d\u540e\u7684\u76f8\u4f4d\u7ed3\u6784\u5e76\u89e3\u91ca\u6b8b\u4f59\u76f8\u4f4d\u7684\u53ef\u80fd\u6765\u6e90\u3002"
+    }
   },
   "description" : "Remove the DEM/orbit topographic phase from a complex interferogram using the rigorous per-pixel range-difference geometry of both scene orbits (not an approximation).",
   "display_name" : "InSAR Topographic Phase Removal",

@@ -141,6 +141,7 @@ vendor/
 .gstack/
 .planning/*
 !.planning/RS14-05-process-grader/
+!.planning/processing-meta-r4/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
 !.planning/cartography-platform-7/
@@ -160,6 +161,8 @@ vendor/
 !.planning/RS14-13-fault-injection-labs/*.md
 !.planning/scientific-processing-8/
 !.planning/scientific-algorithms-9/
+# Track 7 R4 (rs-operator-oracles): audit artifacts are deliverables.
+!.planning/rs-operator-oracles-r4/
 !.planning/plugin-platform-8/
 !.planning/verification-platform-8/
 !.planning/spatial-scientist-harness-8/

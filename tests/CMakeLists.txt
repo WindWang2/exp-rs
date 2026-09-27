@@ -1,6 +1,23 @@
 # SICNU GEO RS — Unit Tests (Catch2)
 include(Catch)
 
+# Fault-tolerant PRE_TEST discovery (review P0-4): a test binary that crashes
+# while listing its tests registers one `<exe>_DISCOVERY_FAILED` test instead
+# of aborting the entire CTest run (previously a single segfaulting binary
+# made even `ctest -N` fail). See cmake/SicnuCatchAddTests.cmake.
+option(SICNU_TOLERANT_TEST_DISCOVERY
+  "Turn a crashing Catch2 test discovery into one failing test instead of a CTest abort" ON)
+if(SICNU_TOLERANT_TEST_DISCOVERY)
+  set(SICNU_CATCH_ADD_TESTS_UPSTREAM "$CACHE{_CATCH_DISCOVER_TESTS_SCRIPT}")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake"
+    "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake"
+    @ONLY)
+  # Directory-scoped normal variable shadows Catch2's INTERNAL cache entry,
+  # which catch_discover_tests() reads when generating each include file.
+  set(_CATCH_DISCOVER_TESTS_SCRIPT "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake")
+endif()
+
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
   # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0),
@@ -1038,6 +1055,8 @@ sicnu_link_jsoncpp(test_explain_step_panel)
 set_target_properties(test_explain_step_panel PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
+  # embedded inspector_host.cpp declares a Q_OBJECT (drift gate rule 13).
+  AUTOMOC ON
 )
 sicnu_discover_tests(test_explain_step_panel TEST_PREFIX "test_explain_step_panel::")
 
@@ -1238,6 +1257,8 @@ target_link_libraries(test_adversarial_m5 PRIVATE
   sicnu_operators
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_adversarial_m5 PRIVATE sicnu_runtime)
 target_include_directories(test_adversarial_m5 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -2621,6 +2642,18 @@ target_include_directories(surface_mcp_host PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 
+# Every target that compiles src/agent/mcp_server.cpp in-process needs the
+# agent_ops closure: the scientific:agent_session tool calls
+# sicnu::agent_ops::OpsDriver::apply (review P0-3 — "OpsDriver::apply
+# undefined"). test_mcp_server already lists it.
+foreach(_mcp_embed test_interaction_tools test_raster_display_tools
+        test_surface_parity test_capability_surface_parity test_algorithm_search
+        test_surface_protocol surface_mcp_host)
+  if(TARGET ${_mcp_embed})
+    target_link_libraries(${_mcp_embed} PRIVATE Sicnu::agent_ops)
+  endif()
+endforeach()
+
 add_executable(test_surface_e2e test_surface_e2e.cpp)
 target_link_libraries(test_surface_e2e PRIVATE
   Catch2::Catch2WithMain
@@ -3849,6 +3882,8 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_spectral_profile_widget PRIVATE sicnu_runtime)
 target_include_directories(test_spectral_profile_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3872,6 +3907,8 @@ target_link_libraries(test_roi_statistics_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_roi_statistics_widget PRIVATE sicnu_runtime)
 target_include_directories(test_roi_statistics_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3899,6 +3936,8 @@ target_link_libraries(test_comparison_widget PRIVATE
   sicnu_data
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_comparison_widget PRIVATE sicnu_runtime)
 target_include_directories(test_comparison_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8251,6 +8290,8 @@ target_link_libraries(test_band_role_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_band_role_combo PRIVATE sicnu_runtime)
 target_include_directories(test_band_role_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8274,6 +8315,8 @@ target_link_libraries(test_raster_layer_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_raster_layer_combo PRIVATE sicnu_runtime)
 target_include_directories(test_raster_layer_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8609,6 +8652,8 @@ add_executable(test_workbench_enum_provider
   ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  # schema_form_builder.cpp schedules async checks on RsScanPool::instance().
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_workbench_enum_provider PRIVATE
   Catch2::Catch2WithMain
@@ -8618,6 +8663,11 @@ target_link_libraries(test_workbench_enum_provider PRIVATE
   sicnu_operators
   GDAL::GDAL
   Sicnu::help
+  # crs_selector.cpp (embedded by fce8703e) is a QWidget over
+  # QgsProjectionSelectionDialog: needs the QGIS GUI/core closure.
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
 )
 target_include_directories(test_workbench_enum_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9578,6 +9628,13 @@ target_compile_definitions(test_plugin_host_process PRIVATE
 # #1186: target-scoped builds must build runtime-loaded fixtures first.
 add_dependencies(test_plugin_host_process isolation_plugin exprs_plugin_host_worker)
 
+# Review P1-5: legacy in-process PluginHost allowlist / IID gate. Default
+# configuration (sicnu_core only); test_plugin_host needs SICNU_EMBED_PYTHON.
+add_executable(test_plugin_host_allowlist test_plugin_host_allowlist.cpp)
+target_link_libraries(test_plugin_host_allowlist PRIVATE Catch2::Catch2WithMain Qt6::Core sicnu_core)
+target_include_directories(test_plugin_host_allowlist PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_plugin_host_allowlist)
+
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 
@@ -9738,6 +9795,19 @@ sicnu_link_jsoncpp(test_harness_evals)
 # cases, diagnostic brain, step anchoring, budgets.
 sicnu_add_test(test_harness_lab_evals)
 sicnu_link_jsoncpp(test_harness_lab_evals)
+
+# Teacher credential gate (SICNU_LAB_TEACHER_TOKEN): focused, minimal-link
+# regression test for the inverted constant-time comparison (#1202). Kept
+# tiny on purpose so it builds even when the heavy harness suites do not.
+add_executable(test_teacher_credential test_teacher_credential.cpp)
+target_link_libraries(test_teacher_credential PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_agent
+)
+target_include_directories(test_teacher_credential PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_link_jsoncpp(test_teacher_credential)
+sicnu_discover_tests(test_teacher_credential)
 
 
 # Harness 7.0 capability-knowledge drift guard: entries vs the live operator
@@ -11694,6 +11764,8 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
     ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_BINARY_DIR}
   )
+  # classification_studio_widget → object_identity.h → <json/json.h>
+  sicnu_link_jsoncpp(${_d15_g_test})
   set_target_properties(${_d15_g_test} PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
 endforeach()
@@ -12376,6 +12448,57 @@ sicnu_link_jsoncpp(test_help_integrity_12)
 sicnu_add_test(test_snapshot_drift_12)
 target_link_libraries(test_snapshot_drift_12 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_snapshot_drift_12)
+
+# R4 processing-meta track: the byte gate itself as a Catch2 assertion.
+# test_snapshot_drift_12 answers "is the graph sound / how does drift render?";
+# this lane adds what it deliberately omits — committed-vs-live byte freshness
+# for BOTH snapshots, double-run generator stability, and drift attribution —
+# so a stale snapshot ("算子/元数据改了、快照没跟") is red locally without the
+# CLI tool. Read-only: regeneration stays a reviewed commit, never a test
+# side effect (see tests/test_snapshot_gate_r4.cpp header).
+sicnu_add_test(test_snapshot_gate_r4)
+target_link_libraries(test_snapshot_gate_r4 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_snapshot_gate_r4)
+
+# R4 processing-meta track (hardening/r4-processing-meta): at this baseline
+# every executable that links sicnu_agent fails to resolve two symbols that
+# live in the sibling static libs — agent_loop::VerificationReport::aggregate
+# (src/agent_loop) and agent_ops::OpsDriver::apply (src/agent_ops) — because
+# sicnu_agent's own link does not propagate them (upstream repair in flight:
+# PR #1335 "restore master build/CI (review P0) — link graph"). This block
+# resolves them for the affected test targets so the capability/meta/snapshot
+# gates can link and run; DELETE this block once #1335 lands and propagates
+# the link through the sicnu_agent target itself.
+foreach( r4_agent_link_target IN ITEMS
+    capability_knowledge_tool
+    test_algorithm_meta_drift
+    test_capability_completeness
+    test_capability_contract_9
+    test_capability_drift
+    test_capability_knowledge
+    test_capability_surface_parity
+    test_chunk_contract_11
+    test_command_contract_9
+    test_contract_census_11
+    test_contract_cross_surface_11
+    test_contract_determinism_11
+    test_contract_fuzz_agent
+    test_contract_fuzz_data
+    test_contract_fuzz_io
+    test_contract_fuzz_ops
+    test_contract_platform_9
+    test_contract_projection_9
+    test_diagnostics_contract_9
+    test_fault_registry
+    test_harness9_contracts
+    test_scientific_contract_10
+    test_snapshot_drift_12
+    test_snapshot_gate_r4
+    test_spatial_contracts
+    test_trace_contract
+    test_verification_metamorphic_11 )
+  target_link_libraries( ${r4_agent_link_target} PRIVATE sicnu_agent_loop sicnu_agent_ops )
+endforeach()
 
 # E-16: `origin/master` ships 25 unparseable `data/**/*.json` files, landed by
 # two EVIL MERGES (43dcf19cd truncated-capability-block x19, 4713528ef
@@ -13940,3 +14063,95 @@ target_compile_definitions(test_teardown_retirement_gate_r4 PRIVATE
   SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 set_target_properties(test_teardown_retirement_gate_r4 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_teardown_retirement_gate_r4)
+# ---------------------------------------------------------------------------
+# Track 7 R4 (rs-operator-oracles): NoData/mask semantics, tolerance chains,
+# determinism digests, preflight refusals, known-answer gap-filling.
+# ---------------------------------------------------------------------------
+# R4 operator-oracle suites run on the LIGHT lane (Catch2 + Qt6::Core +
+# sicnu_operators -> sicnu_processing): they exercise the registry/run seam
+# directly and need no qgis_gui chain.
+foreach(_r4_test
+    test_operator_nodata_semantics
+    test_operator_chain_tolerance
+    test_operator_determinism_digest
+    test_operator_preflight_refusals
+    test_known_answer_corpus_r4)
+  add_executable(${_r4_test} ${_r4_test}.cpp)
+  target_link_libraries(${_r4_test} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_operators
+    sicnu_processing
+  )
+  target_include_directories(${_r4_test} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${_r4_test} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+endforeach()
+# TEST_PREFIX r4:: lets track gates select the R4 operator-oracle cases
+# with `ctest -R "^r4::"` (D15 selection convention).
+sicnu_discover_tests(test_operator_nodata_semantics TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_operator_chain_tolerance TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_operator_determinism_digest TEST_PREFIX r4:: TIMEOUT 600)
+sicnu_discover_tests(test_operator_preflight_refusals TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_known_answer_corpus_r4 TEST_PREFIX r4:: TIMEOUT 300)
+# Track 17 R4 (WP-D): commands.json schema / entry-floor / EOL gate. Light —
+# Catch2 + Qt6::Core only (QJsonDocument); the registry bidirectional diff
+# stays in test_help_coverage, the corpus shape gate in test_help_integrity_12.
+add_executable(test_help_commands_schema test_help_commands_schema.cpp)
+target_link_libraries(test_help_commands_schema PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_help_commands_schema PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_help_commands_schema PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_help_commands_schema PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+# Static registration: 3 fast cases, no need for per-case discovery.
+add_test(NAME test_help_commands_schema
+  COMMAND test_help_commands_schema
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Track 17 R4 (WP-F): extraction/no-regression gate. Runs the single-source
+# string audit scanner over the frozen Phase 0 file list and asserts the
+# frozen baseline (tests/fixtures/i18n_string_baseline.json — the time anchor;
+# do not recompute at close): hard classes at 0 steady state, non-UI Chinese
+# ceiling, tr()-extraction floor. Selftest-gated scanner (constructive pos/neg).
+if(Python_EXECUTABLE)
+  add_test(NAME test_i18n_string_audit
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/scripts/audit_i18n_strings.py"
+            "--files" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_audit_files.txt"
+            "--gate" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_string_baseline.json"
+            "--selftest")
+  set_tests_properties(test_i18n_string_audit PROPERTIES
+    TIMEOUT 300
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+
+# Track 17 R4 (WP-F guard): the WP-B zh_CN backfill entries live under moc
+# short-name contexts, which today's lupdate attributes to namespace-qualified
+# names — a sicnu_i18n_update run would -no-obsolete them away silently.
+# Pin a representative (context, source, translation) sample. Light target.
+add_executable(test_i18n_migrated_translations test_i18n_migrated_translations.cpp)
+target_link_libraries(test_i18n_migrated_translations PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_compile_definitions(test_i18n_migrated_translations PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_i18n_migrated_translations PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_i18n_migrated_translations
+  COMMAND test_i18n_migrated_translations
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

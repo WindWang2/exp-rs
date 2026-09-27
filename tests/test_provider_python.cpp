@@ -9,6 +9,7 @@
 #include "operators/framework/model_catalog.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/model_runtime.h"
+#include "operators/runtime/python_worker_provider.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -301,4 +302,123 @@ TEST_CASE( "shared python worker session survives concurrent probes of its negot
   // negotiation state cannot produce this.
   CHECK( session->capabilities().maxRank == 5 );
   CHECK( session->providerDetails().executionProvider == "crashfake-ep" );
+}
+
+// Review P1-6: a model manifest is data — it must not choose an arbitrary
+// program to run, and its worker script must live next to the manifest.
+TEST_CASE( "manifest interpreter is restricted to Python launchers or configured paths",
+           "[models][python][security]" )
+{
+  CHECK( modelInterpreterAllowed( "" ) );
+  CHECK( modelInterpreterAllowed( "python3" ) );
+  CHECK( modelInterpreterAllowed( "python" ) );
+  CHECK( modelInterpreterAllowed( "python3.12" ) );
+  CHECK( modelInterpreterAllowed( "py" ) );
+  CHECK( modelInterpreterAllowed( "python.exe" ) );
+
+  std::string reason;
+  CHECK_FALSE( modelInterpreterAllowed( "cmd.exe", &reason ) );
+  CHECK( reason.find( "not allowed" ) != std::string::npos );
+  CHECK_FALSE( modelInterpreterAllowed( "sh" ) );
+  CHECK_FALSE( modelInterpreterAllowed( "bash" ) );
+  CHECK_FALSE( modelInterpreterAllowed( "python3; rm -rf /" ) );
+
+  // A path that merely LOOKS like python is rejected unless configured.
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString fakePython = dir.filePath( QStringLiteral( "python3" ) );
+  {
+    QFile f( fakePython );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( "#!/bin/sh\necho pwned\n" );
+  }
+  const QByteArray savedList = qgetenv( "SICNU_MODEL_INTERPRETERS" );
+  const QByteArray savedExec = qgetenv( "SICNU_PYTHON_EXECUTABLE" );
+  qunsetenv( "SICNU_MODEL_INTERPRETERS" );
+  qunsetenv( "SICNU_PYTHON_EXECUTABLE" );
+  CHECK_FALSE( modelInterpreterAllowed( fakePython.toStdString() ) );
+  qputenv( "SICNU_MODEL_INTERPRETERS", fakePython.toUtf8() );
+  CHECK( modelInterpreterAllowed( fakePython.toStdString() ) );
+  qunsetenv( "SICNU_MODEL_INTERPRETERS" );
+  qputenv( "SICNU_PYTHON_EXECUTABLE", fakePython.toUtf8() );
+  CHECK( modelInterpreterAllowed( fakePython.toStdString() ) );
+  if ( savedList.isNull() ) qunsetenv( "SICNU_MODEL_INTERPRETERS" ); else qputenv( "SICNU_MODEL_INTERPRETERS", savedList );
+  if ( savedExec.isNull() ) qunsetenv( "SICNU_PYTHON_EXECUTABLE" ); else qputenv( "SICNU_PYTHON_EXECUTABLE", savedExec );
+}
+
+TEST_CASE( "manifest with a foreign interpreter is refused at acquire", "[models][python][security]" )
+{
+  ( void )ensureApp();
+  QTemporaryDir dir;
+  const std::string script =
+    ( QFileInfo( __FILE__ ).absolutePath() + QStringLiteral( "/data/py_worker_fake.py" ) )
+      .toStdString();
+  ModelInfo model = makeWorkerModel( dir, script, "foreign-interp.bin" );
+  model.runtime.provider.interpreter = "/bin/sh";
+  std::string error;
+  const auto session =
+    ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
+  CHECK_FALSE( session );
+  CHECK( error.find( "not allowed" ) != std::string::npos );
+}
+
+TEST_CASE( "manifest worker_script must stay inside the manifest directory", "[models][python][security]" )
+{
+  QTemporaryDir root;
+  REQUIRE( root.isValid() );
+  REQUIRE( QDir( root.path() ).mkpath( QStringLiteral( "model/workers" ) ) );
+  REQUIRE( QDir( root.path() ).mkpath( QStringLiteral( "elsewhere" ) ) );
+  for ( const QString &rel : { QStringLiteral( "model/workers/w.py" ), QStringLiteral( "elsewhere/evil.py" ) } )
+  {
+    QFile f( root.filePath( rel ) );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( "print('x')\n" );
+  }
+  const std::string manifest = root.filePath( QStringLiteral( "model/model.json" ) ).toStdString();
+
+  std::string resolved;
+  std::string reason;
+  REQUIRE( resolveModelWorkerScript( "workers/w.py", manifest, &resolved, &reason ) );
+  CHECK( QFileInfo( QString::fromStdString( resolved ) ).fileName() == QStringLiteral( "w.py" ) );
+
+  CHECK_FALSE( resolveModelWorkerScript( "../elsewhere/evil.py", manifest, &resolved, &reason ) );
+  CHECK( reason.find( "outside the manifest directory" ) != std::string::npos );
+  CHECK_FALSE( resolveModelWorkerScript( root.filePath( QStringLiteral( "elsewhere/evil.py" ) ).toStdString(),
+                                         manifest, &resolved, &reason ) );
+  CHECK_FALSE( resolveModelWorkerScript( "workers/missing.py", manifest, &resolved, &reason ) );
+  CHECK( reason.find( "not found" ) != std::string::npos );
+
+  // Symlink inside the model dir pointing outside is still outside.
+  if ( QFile::link( root.filePath( QStringLiteral( "elsewhere/evil.py" ) ),
+                    root.filePath( QStringLiteral( "model/workers/link.py" ) ) ) )
+    CHECK_FALSE( resolveModelWorkerScript( "workers/link.py", manifest, &resolved, &reason ) );
+
+  // Programmatic models (no manifest on disk) keep their explicit script.
+  REQUIRE( resolveModelWorkerScript( "/abs/worker.py", "", &resolved, &reason ) );
+  CHECK( resolved == "/abs/worker.py" );
+}
+
+TEST_CASE( "default model search never uses the working directory", "[models][catalog][security]" )
+{
+  ( void )ensureApp();
+  QTemporaryDir untrusted;
+  REQUIRE( untrusted.isValid() );
+  REQUIRE( QDir( untrusted.path() ).mkpath( QStringLiteral( "models/evil" ) ) );
+
+  const QByteArray savedModels = qgetenv( "SICNU_MODELS_DIR" );
+  qunsetenv( "SICNU_MODELS_DIR" );
+  const QString savedCwd = QDir::currentPath();
+  REQUIRE( QDir::setCurrent( untrusted.path() ) );
+
+  const QString chosen = QString::fromStdString( sicnu::operators::ModelCatalog::defaultModelsDirectory() );
+  const QString cwdModels = QDir( untrusted.path() ).filePath( QStringLiteral( "models" ) );
+
+  QDir::setCurrent( savedCwd );
+  if ( !savedModels.isNull() )
+    qputenv( "SICNU_MODELS_DIR", savedModels );
+
+  INFO( "chosen models dir: " << chosen.toStdString() );
+  CHECK_FALSE( chosen.isEmpty() );
+  CHECK( QFileInfo( chosen ).absoluteFilePath() != QFileInfo( cwdModels ).absoluteFilePath() );
+  CHECK_FALSE( QFileInfo( chosen ).canonicalFilePath().startsWith( QFileInfo( untrusted.path() ).canonicalFilePath() ) );
 }
