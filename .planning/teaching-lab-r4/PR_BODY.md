@@ -6,7 +6,7 @@ fix(teaching,lab-pack): teaching-chain R4 hardening — pack boundary matrix, cr
 
 ## 基线与在途 PR 重叠
 
-- 基线 `origin/master` = `15e5c66b5`（#1333 合并点；fetch 时未前进）。本分支领先 15 提交、落后 0。
+- 基线 `origin/master` = `15e5c66b5`（#1333 合并点；fetch 时未前进）。本分支领先 17 提交、落后 0。
 - **#1336（未合并）**：拥有 `src/lab_pack/lab_pack.cpp` 与 `scripts/gen_lab_packs.py` → 本分支全程未触碰这两个文件（写作提示声称 #1336 还改 `tests/test_lab_data_pack.cpp`，实测不改——已勘误记录）。WP-A 的边界矩阵因此先落 admin 层（`json_util.h` 单入口 + `data_pack_manager.cpp`），复用 `lab_pack.h` 公有原语，未造第二套校验。
 - **#1335（未合并）**：拥有 `lab_copilot.cpp` 与 `test_teacher_credential/test_lab_grading/test_harness_lab_evals` 接线 → 本分支不接这 3 个目标；`lab_copilot.cpp:432` 在 master 仍是反转缺陷（`return diff;`），本分支携带与 #1335 P0-1 相同的一行修复（rebase 时同内容自然收敛），账本逐处记账（共 1 处）。
 - 开放 issue：0。本地已验证、未等待线上 CI。
