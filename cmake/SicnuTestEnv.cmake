@@ -110,12 +110,6 @@ function(sicnu_configure_test_harness_env)
 
   set(_dl_paths "")
   if(UNIX AND NOT APPLE)
-    # [LOCAL BUILD ENABLEMENT — uncommitted] this machine provisions
-    # GDAL/PROJ/GEOS and their transitive deps (libodbc…) from a local
-    # prefix; without it every test binary fails to load at discovery.
-    if(EXISTS "/home/kevin/pwb-sdks/root/usr/lib")
-      list(APPEND _dl_paths "/home/kevin/pwb-sdks/root/usr/lib")
-    endif()
     list(APPEND _dl_paths "/usr/lib")
   endif()
   set(SICNU_TEST_DL_PATHS "${_dl_paths}" PARENT_SCOPE)
@@ -187,6 +181,8 @@ function(_sicnu_write_ctest_custom pythonhome pythonpath qt_plugins pathsep pyth
       string(APPEND _out
         "# Non-system GDAL prefix: its transitive deps (libodbc, …) must load\n"
         "# for raw add_test targets that carry no DL_PATHS property.\n"
+        "# Deliberately inserted AFTER /usr/lib so system libraries keep\n"
+        "# priority (the #730 anti-shadowing policy below still wins).\n"
         "set(ENV{LD_LIBRARY_PATH} \"${_gdal_esc}:\$ENV{LD_LIBRARY_PATH}\")\n")
     endif()
     string(APPEND _out
