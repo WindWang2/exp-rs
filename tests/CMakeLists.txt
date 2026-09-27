@@ -41,10 +41,17 @@ endif()
 function(sicnu_discover_tests NAME)
   # Optional TEST_PREFIX (D15): forwarded to catch_discover_tests so track
   # gates can select cases by binary name (`ctest -R "test_xxx::"`).
+  # Optional TEST_SPEC (#1363): a Catch2 test spec (e.g. `~[longrun]`) that
+  # partitions a binary's cases across multiple registrations — each
+  # registration can then carry its own LABELS/TIMEOUT/RUN_SERIAL profile.
   set(_sat_prefix "")
-  cmake_parse_arguments(SDT "" "TEST_PREFIX" "" ${ARGN})
+  set(_sat_spec "")
+  cmake_parse_arguments(SDT "" "TEST_PREFIX;TEST_SPEC" "" ${ARGN})
   if(SDT_TEST_PREFIX)
     set(_sat_prefix TEST_PREFIX ${SDT_TEST_PREFIX})
+  endif()
+  if(SDT_TEST_SPEC)
+    set(_sat_spec TEST_SPEC ${SDT_TEST_SPEC})
   endif()
   set(_discovery_props "")
   if(ENABLE_SANITIZERS)
@@ -64,6 +71,7 @@ function(sicnu_discover_tests NAME)
   catch_discover_tests(${NAME}
     DISCOVERY_MODE PRE_TEST
     ${_sat_prefix}
+    ${_sat_spec}
     ${_dl_paths}
     PROPERTIES ${_discovery_props})
 endfunction()
@@ -81,7 +89,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 function(sicnu_add_test NAME)
-  cmake_parse_arguments(SAT "" "TEST_PREFIX" "" ${ARGN})
+  cmake_parse_arguments(SAT "" "TEST_PREFIX;TEST_SPEC" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
@@ -140,16 +148,17 @@ function(sicnu_add_test NAME)
   target_compile_definitions(${NAME} PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   )
+  set(_sat_forward "")
   if(SAT_TEST_PREFIX)
-    if(SAT_UNPARSED_ARGUMENTS)
-      sicnu_discover_tests(${NAME} TEST_PREFIX ${SAT_TEST_PREFIX} ${SAT_UNPARSED_ARGUMENTS})
-    else()
-      sicnu_discover_tests(${NAME} TEST_PREFIX ${SAT_TEST_PREFIX})
-    endif()
-  elseif(SAT_UNPARSED_ARGUMENTS)
-    sicnu_discover_tests(${NAME} ${SAT_UNPARSED_ARGUMENTS})
+    list(APPEND _sat_forward TEST_PREFIX ${SAT_TEST_PREFIX})
+  endif()
+  if(SAT_TEST_SPEC)
+    list(APPEND _sat_forward TEST_SPEC ${SAT_TEST_SPEC})
+  endif()
+  if(SAT_UNPARSED_ARGUMENTS)
+    sicnu_discover_tests(${NAME} ${_sat_forward} ${SAT_UNPARSED_ARGUMENTS})
   else()
-    sicnu_discover_tests(${NAME})
+    sicnu_discover_tests(${NAME} ${_sat_forward})
   endif()
 endfunction()
 
@@ -3571,9 +3580,37 @@ target_link_libraries(test_experiment_debugger PRIVATE
 # RUN_SERIAL TRUE is forwarded through sicnu_discover_tests as a real ctest
 # test property (a target-level RUN_SERIAL would be a no-op for discovered
 # tests — review round 1).
-sicnu_add_test(test_mlops9_scale TIMEOUT 900 RUN_SERIAL TRUE)
+# #1363 scale budget: the [longrun] 100k case is registered TWICE from the
+# same binary — the regular registration below excludes it (`~[longrun]`),
+# and the LONG_RUN-labeled registration runs only it, so
+#   ctest -LE LONG_RUN   # fast local/PR loop
+#   ctest -L LONG_RUN    # periodic full-scale session
+# both stay explainable in `ctest -N -V`.
+sicnu_add_test(test_mlops9_scale TEST_SPEC "~[longrun]" TIMEOUT 900 RUN_SERIAL TRUE)
+if(NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE MATCHES "^Debug$")
+  # Debug (+sanitizer) instrumentation pays ~3x per single-row transaction
+  # and the full 100k seed blew the wall-time budget (#1363). Debug asserts
+  # the same linear-cost contract at 30k; Release/RelWithDebInfo keep the
+  # true product SLO shape. A LONG_RUN session restores full scale via
+  # SICNU_MLOPS9_SCALE_RUNS without a rebuild (see test_mlops9_scale.cpp).
+  # An EMPTY CMAKE_BUILD_TYPE compiles -O0 (Debug-like cost), so it gets the
+  # reduced scale too. Multi-config generators leave CMAKE_BUILD_TYPE empty:
+  # there the definition then applies to ALL their configs — accepted here
+  # (conservative test scale, no CI lane uses multi-config).
+  target_compile_definitions(test_mlops9_scale PRIVATE SICNU_SCALE_TEST_DEFAULT_RUNS=30000)
+endif()
 target_link_libraries(test_mlops9_scale PRIVATE
   Sicnu::experiment Sicnu::dataset SQLite::SQLite3 sicnu_runtime)
+# sicnu_discover_tests on the existing binary (created above): the
+# [longrun]-only registration carries the label so periodic full runs select
+# it explicitly. Generous TIMEOUT: at 100k under sanitizers the seed alone
+# was measured past 900s on loaded hosts.
+sicnu_discover_tests(test_mlops9_scale
+  TEST_PREFIX test_mlops9_scale_longrun::
+  TEST_SPEC "[longrun]"
+  LABELS LONG_RUN
+  RUN_SERIAL TRUE
+  TIMEOUT 2400)
 
 # MLOps 9.0 CLI auto-recording E2E: real sicnu_geo_rs_cli subprocess with
 # --experiment-record; POSIX spawn (popen) like test_cli_commands_json.

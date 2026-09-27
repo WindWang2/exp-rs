@@ -4,6 +4,14 @@
 // failure (the REAL failure branch, then a clean retry).
 //
 // RUN_SERIAL by design: it pays 100k single-row transactions on purpose.
+//
+// #1363 scale budget: the full 100k seed is the product SLO shape and stays
+// the default on Release/RelWithDebInfo profiles. Debug (+sanitizer) builds
+// pay ~3x instrumentation cost per transaction and blew the wall-time
+// budget, so their default is 30k — the SAME linear-cost contract at reduced
+// n (the per-run budgets below scale with the active run count). A LONG_RUN
+// session can restore full scale in a Debug tree without a rebuild:
+//   SICNU_MLOPS9_SCALE_RUNS=100000 ctest -R mlops9_scale_longrun -L LONG_RUN
 #include <catch2/catch_test_macros.hpp>
 
 #include "experiment/experiment_store.h"
@@ -23,6 +31,43 @@ using namespace sicnu::experiment;
 
 namespace
 {
+
+#ifdef SICNU_SCALE_TEST_DEFAULT_RUNS
+constexpr qint64 kDefaultScaleRuns = SICNU_SCALE_TEST_DEFAULT_RUNS;
+#else
+constexpr qint64 kDefaultScaleRuns = 100000;
+#endif
+
+// Ref-scan budget per run (the bounded-per-run ⇒ linear-total contract).
+// Baseline measured ~0.7 ms/run at 100k on the baseline host under three
+// concurrent track builds; 1.2 ms/run keeps that headroom. Sanitizer
+// instrumentation roughly doubles the per-row SQLite cost (see
+// test_workspace_catalog.cpp), so the sanitizer tier gets the doubled bound.
+double refScanBudgetPerRunMs()
+{
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    return 2.4;
+#else
+    return 1.2;
+#endif
+}
+
+// Active run count for this process: the compile-time profile default, or a
+// clamped SICNU_MLOPS9_SCALE_RUNS override (LONG_RUN sessions only; the
+// variable is read by this test process and nothing else).
+qint64 activeScaleRuns()
+{
+    qint64 runs = kDefaultScaleRuns;
+    const QString env = qEnvironmentVariable( "SICNU_MLOPS9_SCALE_RUNS" );
+    if ( !env.isEmpty() )
+    {
+        bool ok = false;
+        const qint64 parsed = env.toLongLong( &ok );
+        if ( ok && parsed >= 1 && parsed <= 1000000 )
+            runs = parsed;
+    }
+    return runs;
+}
 
 QString runIdFor( qint64 index )
 {
@@ -53,8 +98,12 @@ ExperimentRun scaleRun( const QString &experimentId, qint64 index )
 } // namespace
 
 TEST_CASE( "100k-run store: bounded paged access and pinned counts (M9)",
-           "[mlops9][scale]" )
+           "[mlops9][scale][longrun]" )
 {
+    const qint64 kRunCount = activeScaleRuns();
+    INFO( "active_scale_runs=" << kRunCount
+          << " (default=" << kDefaultScaleRuns
+          << "; override via SICNU_MLOPS9_SCALE_RUNS)" );
     QTemporaryDir dir;
     ExperimentStore store;
     REQUIRE( store.open( dir.filePath( QStringLiteral( "scale9.db" ) ) ) );
@@ -67,7 +116,6 @@ TEST_CASE( "100k-run store: bounded paged access and pinned counts (M9)",
 
     QElapsedTimer seedTimer;
     seedTimer.start();
-    constexpr qint64 kRunCount = 100000;
     for ( qint64 i = 0; i < kRunCount; ++i )
     {
         const auto written = store.upsertRun( scaleRun( experimentId, i ) );
@@ -75,7 +123,7 @@ TEST_CASE( "100k-run store: bounded paged access and pinned counts (M9)",
             FAIL( written.diagnostics().first().message.toStdString() );
     }
     const qint64 seedMs = seedTimer.elapsed();
-    INFO( "seed_ms=" << seedMs );
+    INFO( "seed_ms=" << seedMs << " seed_ms_per_run=" << ( double( seedMs ) / double( kRunCount ) ) );
     REQUIRE( store.runCount() == kRunCount );
 
     // Paged listing stays bounded: every page ≤ kMaxPageSize, and one page
@@ -94,11 +142,16 @@ TEST_CASE( "100k-run store: bounded paged access and pinned counts (M9)",
     REQUIRE( pageMs < 5000 );
 
     // Filtered lookup by execution ref (cold-path SUBSTRING scan over the
-    // run JSON) terminates boundedly. The needle is chosen so no sibling ref
-    // contains it (exec-4242 would also match exec-42420…exec-42429).
+    // run JSON) terminates boundedly. The needle is derived from the ACTIVE
+    // scale (index kRunCount-1, the highest ref with the most digits) so any
+    // scale hits exactly one run: no sibling ref can contain it as a
+    // substring, because that would require an index >= kRunCount (the old
+    // hard-coded exec-99999 broke the 30k Debug default — found by the
+    // focused ctest run).
     QElapsedTimer refTimer;
     refTimer.start();
-    const auto refLookup = store.runIdsByExecutionRef( QStringLiteral( "exec-99999" ) );
+    const auto refLookup = store.runIdsByExecutionRef(
+        QStringLiteral( "exec-%1" ).arg( kRunCount - 1 ) );
     REQUIRE( refLookup.has_value() );
     const QStringList refs = refLookup.value();
     const qint64 refMs = refTimer.elapsed();
@@ -106,12 +159,13 @@ TEST_CASE( "100k-run store: bounded paged access and pinned counts (M9)",
     REQUIRE( refs.size() == 1 );
     // The ref scan is the documented COLD-PATH reconciliation helper (a
     // bounded substring scan over every run JSON — the store docstring tells
-    // live callers to keep their own ref→runId map). Measured on the
-    // baseline host under three concurrent track builds: ~0.7 ms/run at
-    // 100k → ~72 s total. The 9.0 contract requires BOUNDED and LINEAR,
-    // which this asserts; a dedicated execution_ref column + index would be
-    // an O(log n) follow-up for the store owner.
-    REQUIRE( refMs < 120000 );
+    // live callers to keep their own ref→runId map). The 9.0 contract
+    // requires BOUNDED and LINEAR: the budget is expressed PER RUN so the
+    // 30k Debug default and a full-scale LONG_RUN session assert the same
+    // complexity contract (see refScanBudgetPerRunMs for the derivation).
+    const double refBudgetMs = refScanBudgetPerRunMs() * double( kRunCount );
+    INFO( "execution_ref_budget_ms=" << refBudgetMs );
+    REQUIRE( double( refMs ) < refBudgetMs );
 }
 
 TEST_CASE( "concurrent readers coexist with a writer (M9)", "[mlops9][scale][concurrency]" )
