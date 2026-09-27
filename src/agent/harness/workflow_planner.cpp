@@ -247,6 +247,8 @@ Json::Value agentPlanToDocument( const AgentPlan &plan )
   // raw document to bind it into the run context.
   if ( plan.raw.isObject() && plan.raw.isMember( "workflow_ir" ) )
     doc["workflow_ir"] = plan.raw["workflow_ir"];
+  if ( plan.raw.isObject() && plan.raw.isMember( "compiler" ) )
+    doc["compiler"] = plan.raw["compiler"];
   return doc;
 }
 
@@ -566,6 +568,13 @@ CompiledWorkflow compileWorkflow( const CompileWorkflowRequest &request, Harness
         provenance["refusals"] = refusalList;
         Json::Value raw( Json::objectValue );
         raw["workflow_ir"] = provenance;
+        // Compiler & grounding 11.0: the projection must survive document
+        // round-trips (agentPlanToDocument re-emits it and
+        // compilePlanToWorkflowJson re-attaches it to the engine JSON),
+        // otherwise a plan re-compiled from its wire document loses
+        // metadata.compiler and the two engine JSONs diverge. The block is
+        // stored AFTER the attach below so it carries the stable digest the
+        // engine JSON carries — raw and wire stay byte-identical.
         plan.raw = raw;
 
         // Compiler & grounding 11.0: the canonical compiler projection
@@ -582,6 +591,14 @@ CompiledWorkflow compileWorkflow( const CompileWorkflowRequest &request, Harness
           compact["indentation"] = "";
           result.workflowJson =
             Json::writeString( compact, projection::attachToWorkflowJson( workflowDoc, block ) );
+          // Re-parse the attached engine JSON so plan.raw["compiler"] is the
+          // digest-stamped block the wire actually carries.
+          Json::Value attached;
+          if ( Json::Reader().parse( result.workflowJson, attached ) &&
+               attached["metadata"].isObject() &&
+               attached["metadata"].isMember( projection::kCompilerMetadataKey ) )
+            plan.raw[projection::kCompilerMetadataKey] =
+              attached["metadata"][projection::kCompilerMetadataKey];
         }
         else
           result.workflowJson = workflowJson;
