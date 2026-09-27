@@ -561,27 +561,31 @@ TEST_CASE( "pack manifests are in sync with gen_lab_packs.py (zero diff)",
            "[lab_pack][drift][docs]" )
 {
   // std::system twin of the previous QProcess gate: `gen_lab_packs.py
-  // --check` must exit 0 in the source tree.
+  // --check` must exit 0 in the source tree. The stdout sink must be the
+  // SAME path for the redirect and the diagnostic tail: the previous form
+  // redirected into the cwd but tailed ${TMPDIR:-/tmp}, so the && chain's
+  // exit status came from tail (file not found → 1) and the generator's
+  // verdict was discarded — the gate could never pass (it first ran at all
+  // only after #1335 revived this target).
   const std::string root = sourceRoot();
   REQUIRE( fs::exists( sicnu::labpack::pathFromUtf8( root + "/scripts/gen_lab_packs.py" ) ) );
-  const std::string redirect =
-    " > lab_pack_gen_check_stdout.txt 2>&1";
+  const std::string sink = "${TMPDIR:-/tmp}/lab_pack_gen_check_stdout.txt";
   int rc = -1;
   bool started = false;
   for ( const char *python : { "python3", "python" } )
   {
-    const std::string probe = std::string( python ) + " --version" + redirect;
+    const std::string probe = std::string( python ) + " --version > " + sink + " 2>&1";
     if ( std::system( probe.c_str() ) == 0 )
     {
       started = true;
       const std::string cmd =
-        "cd \"" + root + "\" && " + python + " scripts/gen_lab_packs.py --check" + redirect
-        + " && tail -20 ${TMPDIR:-/tmp}/lab_pack_gen_check_stdout.txt >&2";
+        "cd \"" + root + "\" && " + python + " scripts/gen_lab_packs.py --check > " + sink + " 2>&1";
       rc = std::system( cmd.c_str() );
       break;
     }
   }
   REQUIRE( started ); // no silent skips: a host without python cannot run this gate
   INFO( "gen_lab_packs --check exit: " << rc );
+  std::system( ( "tail -20 " + sink + " >&2" ).c_str() ); // diagnostics only, never the verdict
   REQUIRE( rc == 0 );
 }
