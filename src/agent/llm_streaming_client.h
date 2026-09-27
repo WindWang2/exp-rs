@@ -63,6 +63,14 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
 
     QString finishReason() const { return m_lastFinishReason; }
 
+    /// Bounded accumulation: a tool call whose streamed arguments exceed this
+    /// many characters is refused as oversized (never accumulated unbounded).
+    static constexpr int kMaxToolCallArgumentChars = 1 << 20; // 1 MiB
+    /// Bounded SSE line: a data: line longer than this is refused as
+    /// oversized — a hostile stream cannot make the client buffer without
+    /// limit, on the network path and on the test seam alike.
+    static constexpr int kMaxSseLineChars = 8 << 20; // 8 MiB
+
   signals:
     void reasoningTokenReceived( const QString &reasoningText );
     void contentTokenReceived( const QString &textDelta );
@@ -70,6 +78,13 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
     // {id, type, function:{name, arguments}}). The client never executes tool
     // calls — it is pure transport; execution is the caller's decision.
     void toolCallParsed( const QJsonObject &toolCallJson );
+    /// Emitted when a streamed tool call is REFUSED before toolCallParsed:
+    /// truncated arguments (finish_reason=length), unparseable argument JSON,
+    /// a missing function name, or an oversized line/accumulation. Payload:
+    /// {reason, name?, finish_reason?, size?}. #701 refused these calls but
+    /// only logged the refusal — the session and journal cannot account for
+    /// a drop they cannot observe.
+    void malformedToolCall( const QJsonObject &detail );
     void finished();
     void errorOccurred( const QString &errorMessage );
 
@@ -90,6 +105,7 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
       QString id;
       QString name;
       QString arguments;
+      bool oversized = false; ///< argument stream crossed the bound; accumulation stops
     };
 
     QNetworkAccessManager *m_networkManager = nullptr;

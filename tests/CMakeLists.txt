@@ -9691,6 +9691,22 @@ sicnu_link_jsoncpp(test_harness_adversarial_matrix)
 # — Track 8 R4 WP-B/WP-C/WP-D/WP-E: adversarial hardening lanes —
 # verifier robustness, ledger completeness, grounding/evidence oracle,
 # session-checkpoint recovery pressure. See .planning/agent-harness-r4/PLAN.md.
+sicnu_add_test(test_verifier_robustness_r4)
+sicnu_link_jsoncpp(test_verifier_robustness_r4)
+
+sicnu_add_test(test_context_ledger_completeness_r4)
+sicnu_link_jsoncpp(test_context_ledger_completeness_r4)
+
+sicnu_add_test(test_grounding_evidence_r4)
+sicnu_link_jsoncpp(test_grounding_evidence_r4)
+
+sicnu_add_test(test_runloop_recovery_r4)
+sicnu_link_jsoncpp(test_runloop_recovery_r4)
+
+# — Track 8 R4 WP-F: boundary matrix over harness tool entry points + the
+# error taxonomy envelope. See .planning/agent-harness-r4/PLAN.md.
+sicnu_add_test(test_harness_boundaries_r4)
+sicnu_link_jsoncpp(test_harness_boundaries_r4)
 
 
 # — Scientific Workflow Compiler 10.0 (ADR 0149) —

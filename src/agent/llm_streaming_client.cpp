@@ -158,6 +158,17 @@ void LlmStreamingClient::onReadyRead()
 
 void LlmStreamingClient::parseSseLine( const QString &line )
 {
+  if ( line.size() > kMaxSseLineChars )
+  {
+    // A line beyond the bound is refused unexamined: the transport cannot
+    // buffer a hostile stream without limit. Emitted, not swallowed.
+    QJsonObject detail;
+    detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_line" );
+    detail[QStringLiteral( "size" )] = line.size();
+    emit malformedToolCall( detail );
+    return;
+  }
+
   if ( !line.startsWith( QStringLiteral( "data:" ) ) )
     return;
 
@@ -235,7 +246,14 @@ void LlmStreamingClient::parseSseLine( const QString &line )
         }
         if ( funcObj.contains( QStringLiteral( "arguments" ) ) && funcObj[QStringLiteral( "arguments" )].isString() )
         {
-          accu.arguments += funcObj[QStringLiteral( "arguments" )].toString();
+          // Bound the accumulation: once a call crosses the argument bound,
+          // further fragments are refused at the source instead of buffered.
+          if ( !accu.oversized )
+          {
+            accu.arguments += funcObj[QStringLiteral( "arguments" )].toString();
+            if ( accu.arguments.size() > kMaxToolCallArgumentChars )
+              accu.oversized = true;
+          }
         }
       }
     }
@@ -250,8 +268,28 @@ void LlmStreamingClient::emitParsedToolCallOnce()
   for ( const auto &pair : m_toolCalls )
   {
     const ToolCallAccumulator &accu = pair.second;
-    if ( accu.name.isEmpty() )
+
+    // R4: every refusal below is OBSERVABLE (malformedToolCall), not just a
+    // log line — the session can re-prompt or account only for what it can
+    // see. Order: size refusals first, then identity, then arguments.
+    if ( accu.oversized )
+    {
+      QJsonObject detail;
+      detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_arguments" );
+      if ( !accu.name.isEmpty() )
+        detail[QStringLiteral( "name" )] = accu.name;
+      detail[QStringLiteral( "size" )] = accu.arguments.size();
+      emit malformedToolCall( detail );
       continue;
+    }
+    if ( accu.name.isEmpty() )
+    {
+      QJsonObject detail;
+      detail[QStringLiteral( "reason" )] = QStringLiteral( "missing_name" );
+      detail[QStringLiteral( "id" )] = accu.id;
+      emit malformedToolCall( detail );
+      continue;
+    }
 
     QJsonObject funcObj;
     funcObj[QStringLiteral( "name" )] = accu.name;
@@ -266,6 +304,11 @@ void LlmStreamingClient::emitParsedToolCallOnce()
         // zero-argument call would execute the tool with wrong arguments.
         qWarning() << "[llm] dropping tool call" << accu.name
                    << "(finish_reason=length cut the call before any arguments)";
+        QJsonObject detail;
+        detail[QStringLiteral( "reason" )] = QStringLiteral( "truncated_arguments" );
+        detail[QStringLiteral( "name" )] = accu.name;
+        detail[QStringLiteral( "finish_reason" )] = m_lastFinishReason;
+        emit malformedToolCall( detail );
         continue;
       }
       // A tool call with NO arguments is legitimate on a clean finish —
@@ -305,11 +348,17 @@ void LlmStreamingClient::emitParsedToolCallOnce()
     // garbage raw string that exploded downstream schema validation — and
     // worse, an EMPTY arguments string emitted a call that looked complete.
     // Refuse to emit an unparsed tool call: the model is re-prompted with
-    // the plain-text remainder instead of executing a broken call.
+    // the plain-text remainder instead of executing a broken call. R4: the
+    // refusal is now a typed signal, so the drop is accountable.
     if ( !argsResolved )
     {
       qWarning() << "[llm] dropping truncated tool call" << accu.name
                  << "(arguments did not parse as a JSON object; stream ended mid-call)";
+      QJsonObject detail;
+      detail[QStringLiteral( "reason" )] = QStringLiteral( "unparseable_arguments" );
+      detail[QStringLiteral( "name" )] = accu.name;
+      detail[QStringLiteral( "size" )] = accu.arguments.size();
+      emit malformedToolCall( detail );
       continue;
     }
 
