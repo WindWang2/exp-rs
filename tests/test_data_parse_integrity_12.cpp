@@ -103,23 +103,13 @@ const KnownBadFile *knownBadFiles( std::size_t &count )
 {
     static const KnownBadFile kKnown[] = {
         // --- Family A: duplicated-key prefix block (evil merge 43dcf19cd) ---
-        // NOTE: help/commands.json (E-15) and agent/capabilities/preprocess.json
-        // were repaired earlier in this track by restoring the authored
-        // revision, so neither is listed here. The gate's own "stale
-        // allowlist" assertion is what forced their removal; see E-16g.
-        //
-        // PRUNED (closure-io-processing-r4): all remaining 19 Family A
-        // capability sidecars now parse — the sidecar regeneration on master
-        // (capability-search #1140 lineage) rewrote them as valid JSON. The
-        // gate's stale-allowlist assertion went red with the full list, and
-        // this is the mandated prune: a repaired file may not linger on the
-        // list (a list that outlives its defect starts hiding new ones).
-
+        // All 19 capability files were repaired by later R3 merges; the
+        // gate's stale-allowlist assertion forced the pruning below (the
+        // entries lingered while the files already parsed cleanly).
         // --- Family B: truncated to zero bytes (evil merge 4713528ef) ---
-        { "processing/algorithm_meta/rs-temporal-extract-regions.json", "B:zero-byte" },
-        { "processing/algorithm_meta/rs-temporal-harmonic-breaks.json", "B:zero-byte" },
-        { "processing/algorithm_meta/rs-temporal-region-features.json", "B:zero-byte" },
-        { "processing/algorithm_meta/rs-temporal-regularize.json", "B:zero-byte" },
+        // The four rs-temporal-*.json files were deleted outright by later
+        // merges; there is nothing left to tolerate, so their entries went
+        // with them.
     };
     count = sizeof( kKnown ) / sizeof( kKnown[0] );
     return kKnown;
@@ -128,10 +118,11 @@ const KnownBadFile *knownBadFiles( std::size_t &count )
 /// The ceiling. Repairing a file cannot break this assertion; ADDING one does.
 /// Set to the authored defect count so the gate is exactly as tight as the
 /// evidence supports at the moment it lands. Lowered 25 -> 23 when the two
-/// already-repaired Family-A files were pruned (E-16g); lowered 23 -> 4 when
-/// the whole regenerated Family A parsed and was pruned
-/// (closure-io-processing-r4) — the four zero-byte Family-B files remain.
-constexpr std::size_t kMaxTolerated = 4;
+/// already-repaired Family-A files were pruned (E-16g), and to 0 when the
+/// remaining Family-A files parsed (repaired by R3 merges) and the
+/// Family-B files were gone from the tree — the authored defect set is now
+/// fully repaired; a future defect must fix the data, not the list.
+constexpr std::size_t kMaxTolerated = 0;
 
 QString dataRoot()
 {

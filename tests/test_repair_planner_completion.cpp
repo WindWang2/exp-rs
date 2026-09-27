@@ -177,7 +177,9 @@ TEST_CASE( "finding codes map onto the closed requirement vocabulary", "[repair]
 TEST_CASE( "unknown finding codes become typed unsupported requirements, never drops",
            "[repair][reqs]" )
 {
-  std::vector<Json::Value> findings = { findingOf( "SPF_RADIOMETRIC_STATE_MISMATCH" ),
+  // "SPF_RADIOMETRIC_STATE_MISMATCH" joined the closed mapping table in the
+  // R3 track-14 SPF_* integration; use a code that is genuinely outside it.
+  std::vector<Json::Value> findings = { findingOf( "SPF_TOTALLY_UNKNOWN_CODE" ),
                                         findingOf( "CRS_MISMATCH" ) };
   std::vector<RepairRequirement> reqs;
   RepairError error;
@@ -197,7 +199,7 @@ TEST_CASE( "unknown finding codes become typed unsupported requirements, never d
   }
   REQUIRE( crs != nullptr );
   REQUIRE( unsupported != nullptr );
-  CHECK( unsupported->findingCode == "SPF_RADIOMETRIC_STATE_MISMATCH" );
+  CHECK( unsupported->findingCode == "SPF_TOTALLY_UNKNOWN_CODE" );
   CHECK( !unsupported->unsupportedReason.empty() );
   CHECK( isKnownRequirementKind( requirement_kind::kUnsupported ) );
 }
