@@ -2325,6 +2325,17 @@ sicnu::data::Result<void> ExperimentStore::saveBenchmarkResult( const BenchmarkR
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.benchmark_result_invalid" ),
                                             QStringLiteral( "result_id and benchmark_id required" ) ) );
 
+    // Write gate == read gate (#1360): BenchmarkResult::fromJson refuses any
+    // result whose protocol fails EvaluationProtocol::validate, so persisting
+    // one would create a row this store can never parse back.
+    const auto protocolValid = result.protocol().validate();
+    if ( !protocolValid )
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.benchmark_result_invalid" ),
+            protocolValid.diagnostics().isEmpty()
+                ? QStringLiteral( "protocol validation failed" )
+                : protocolValid.diagnostics().first().message ) );
+
     const QString json = jsonToText( result.toJson() );
     // #1173 doctrine: BEGIN IMMEDIATE around the conflict check + insert so a
     // concurrent connection cannot race a second insert past the SELECT and

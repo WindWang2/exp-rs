@@ -568,9 +568,14 @@ Result<void> EvaluationProtocol::validate() const
         return fail( QStringLiteral( "protocol requires dataset version + split manifest" ) );
     if ( m_subset.isEmpty() )
         return fail( QStringLiteral( "protocol requires a subset" ) );
-    if ( m_iouThreshold <= 0.0 || m_iouThreshold > 1.0 )
+    // qIsFinite first: every ordered comparison against NaN is false, so the
+    // range checks alone would let NaN through — and toJson serializes NaN as
+    // null, which fromJson reads back as the default. A round-trip must not
+    // be able to rewrite the protocol silently.
+    if ( !qIsFinite( m_iouThreshold ) || m_iouThreshold <= 0.0 || m_iouThreshold > 1.0 )
         return fail( QStringLiteral( "IoU threshold must be in (0,1]" ) );
-    if ( m_confidenceThreshold < 0.0 || m_confidenceThreshold >= 1.0 )
+    if ( !qIsFinite( m_confidenceThreshold ) || m_confidenceThreshold < 0.0 ||
+         m_confidenceThreshold >= 1.0 )
         return fail( QStringLiteral( "confidence threshold must be in [0,1)" ) );
     if ( m_aggregation != QLatin1String( "macro" ) &&
          m_aggregation != QLatin1String( "micro" ) &&
