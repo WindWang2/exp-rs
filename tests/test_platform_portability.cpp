@@ -281,6 +281,57 @@ TEST_CASE( "claimExclusiveUtf8 grants one exclusive owner per name", "[platform]
   fs::remove_all( base );
 }
 
+// The refusal details: a lost claim race reports NameExists (retry with a
+// fresh name), an impossible claim reports Other plus the raw OS error, and
+// the file-sync gate separates open faults from flush faults with the OS
+// code attached — the typed-cause contract the publish lanes build their
+// GeoError details on.
+TEST_CASE( "claim and sync refusals report the typed failure class and OS error",
+           "[platform][fs][staging][durability][typed-cause]" )
+{
+  const fs::path base = fs::temp_directory_path() / "sicnu-portable-claim-detail";
+  fs::remove_all( base );
+  fs::create_directories( base );
+  const std::string staged = sicnu::portable::pathToUtf8( base / "publish.tmp" );
+
+  sicnu::portable::ClaimFailure failure = sicnu::portable::ClaimFailure::Other;
+  std::uint64_t osError = 0;
+  REQUIRE( sicnu::portable::claimExclusiveUtf8( staged ) );
+  // Lost race: the name exists, owned by the first claim.
+  REQUIRE_FALSE( sicnu::portable::claimExclusiveUtf8( staged, &failure, &osError ) );
+  CHECK( failure == sicnu::portable::ClaimFailure::NameExists );
+#if !defined( _WIN32 )
+  CHECK( osError == static_cast<std::uint64_t>( EEXIST ) );
+#endif
+  // Impossible claim: the parent directory does not exist — nothing to
+  // retry, the OS cause must survive the bool boundary.
+  const std::string nowhere =
+    sicnu::portable::pathToUtf8( base / "absent-dir" / "x.tmp" );
+  REQUIRE_FALSE( sicnu::portable::claimExclusiveUtf8( nowhere, &failure, &osError ) );
+  CHECK( failure == sicnu::portable::ClaimFailure::Other );
+#if !defined( _WIN32 )
+  CHECK( osError == static_cast<std::uint64_t>( ENOENT ) );
+#endif
+
+  sicnu::portable::SyncFailure syncFailure = sicnu::portable::SyncFailure::FlushFailed;
+  REQUIRE_FALSE( sicnu::portable::syncFileUtf8(
+    sicnu::portable::pathToUtf8( base / "absent.txt" ), &syncFailure, &osError ) );
+  CHECK( syncFailure == sicnu::portable::SyncFailure::OpenFailed );
+#if !defined( _WIN32 )
+  CHECK( osError == static_cast<std::uint64_t>( ENOENT ) );
+#endif
+
+  // The directory-self mode (chunk scratch/checkpoint family): silent
+  // best-effort on every input, including a missing directory.
+  REQUIRE_NOTHROW(
+    sicnu::portable::syncDirectoryBestEffortUtf8( sicnu::portable::pathToUtf8( base ),
+                                                  /*pathIsDirectory=*/true ) );
+  REQUIRE_NOTHROW( sicnu::portable::syncDirectoryBestEffortUtf8(
+    sicnu::portable::pathToUtf8( base / "absent-dir" ), /*pathIsDirectory=*/true ) );
+
+  fs::remove_all( base );
+}
+
 // ============================================================================
 // UTF-8 boundary regression family (WP-D, core-foundations-r4): six named
 // asset classes that historically broke narrow-conversion code paths. Each

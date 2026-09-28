@@ -79,15 +79,6 @@ endfunction()
 # Helper function to add a test executable. Extra args (TIMEOUT n,
 # RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
 # properties — previously they were accepted and silently dropped.
-# GNU/ELF-only whole-archive fragment for the sicnu_agent_loop stopgap (see
-# the sicnu_add_test comment). Empty on non-GNU platforms: MSVC/PE executables
-# do not export symbols to DLLs and Mach-O dylibs link their undefined symbols
-# at library time, so there is nothing this fragment could fix there.
-if(UNIX AND NOT APPLE)
-  set(SICNU_TEST_AGENT_LOOP_LINK
-      "-Wl,--whole-archive" sicnu_agent_loop "-Wl,--no-whole-archive")
-endif()
-
 function(sicnu_add_test NAME)
   cmake_parse_arguments(SAT "" "TEST_PREFIX;TEST_SPEC" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
@@ -103,43 +94,11 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
-    # GNU/ELF stopgap for sicnu_agent.so referencing agent_loop symbols
-    # (e.g. VerificationReport::aggregate via tools/agent_session_adapter.cpp)
-    # while src/agent/CMakeLists.txt lacks the sicnu_agent_loop link edge —
-    # the library-level fix is in-flight PR #1335 (P0-3); GNU ld never
-    # extracts archive members to satisfy a SHARED library's undefined
-    # symbols, so the archive is force-included here and the executable
-    # exports the definitions back to libsicnu_agent.so at runtime.
-    # Spelling note: classic -Wl flags, not $<LINK_LIBRARY:WHOLE_ARCHIVE>,
-    # because that genex needs CMake >= 3.24 while this project declares
-    # cmake_minimum_required 3.20. Both edges drop once #1335 merges.
-    ${SICNU_TEST_AGENT_LOOP_LINK}
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
     sicnu_workflow_runtime
   )
-  # sicnu_agent.so references the agent_loop VerificationReport seam
-  # (agent_session_adapter) without linking sicnu_agent_loop itself, so the
-  # symbol must resolve at FINAL link time. WHOLE_ARCHIVE because CMake
-  # places static archives before shared libs on the line — a plain archive
-  # ahead of sicnu_agent.so would never be pulled (Track 13 R4; tests-link
-  # layer only, the src/agent PUBLIC-link fix is recommended upstream).
-  # The LINK_LIBRARY generator expression requires CMake 3.24; fail loudly
-  # on older CMake instead of silently reverting to an ineffective plain
-  # archive (the closure was already broken there — undefined
-  # VerificationReport::aggregate — this just names the actual remedy).
-  if( CMAKE_VERSION VERSION_LESS 3.24 )
-    message( FATAL_ERROR
-      "sicnu_add_test needs CMake 3.24+ for the $<LINK_LIBRARY:WHOLE_ARCHIVE> "
-      "generator expression (found ${CMAKE_VERSION}). The test closure must "
-      "force-load sicnu_agent_loop to resolve sicnu_agent.so's "
-      "VerificationReport::aggregate; either upgrade CMake or apply the "
-      "upstream fix: add sicnu_agent_loop to sicnu_agent's PUBLIC "
-      "target_link_libraries in src/agent/CMakeLists.txt." )
-  endif()
-  set_property( TARGET ${NAME} APPEND PROPERTY LINK_LIBRARIES
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>" )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/stubs
@@ -868,7 +827,6 @@ target_link_libraries(test_mapspec PRIVATE
   qgis_gui
   sicnu_data
   sicnu_agent
-  ${SICNU_TEST_AGENT_LOOP_LINK}
   sicnu_operators
   sicnu_workflow
   sicnu_processing
@@ -7498,10 +7456,6 @@ if(TARGET sicnu_workflow)
     sicnu_task_center
     sicnu_jobs
     sicnu_agent
-    # Track 10 enablement: master's link graph leaves libsicnu_agent.so with
-    # an unresolved sicnu_agent_loop symbol at this commit (#1335's domain);
-    # this target must link to run its lane until that fix lands.
-    $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
     Sicnu::data
     Qt6::Core
     Qt6::Gui
@@ -9551,10 +9505,6 @@ target_link_libraries(workflow_crash_helper PRIVATE
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
-  # master's link graph leaves libsicnu_agent.so with an unresolved
-  # sicnu_agent_loop symbol at this commit (#1335's fix domain); every
-  # executable pulling the agent .so must satisfy it itself until then.
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 if(TARGET jsoncpp)
   target_link_libraries(workflow_crash_helper PRIVATE jsoncpp)
@@ -9576,9 +9526,6 @@ target_link_libraries(test_workflow_crash_recovery_r4 PRIVATE
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
-  # See workflow_crash_helper: satisfies libsicnu_agent.so's unresolved
-  # sicnu_agent_loop symbol until #1335 lands.
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_workflow_crash_recovery_r4 PRIVATE jsoncpp)
@@ -9676,8 +9623,6 @@ target_link_libraries(test_workflow_cache_e2e PRIVATE
   sicnu_workflow
   sicnu_operators
   GDAL::GDAL
-  # Track 10 enablement: same link-graph gap as test_workflow_cancel (#1335).
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 target_include_directories(test_workflow_cache_e2e PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -14536,43 +14481,14 @@ set_target_properties(test_teaching_credential_paths_r4 PROPERTIES
 )
 sicnu_discover_tests(test_teaching_credential_paths_r4)
 # ---------------------------------------------------------------------------
-# Track 10 (workflow-durability R4): master@15e5c66b5 link-graph band-aid.
-# libsicnu_agent.so references
-# sicnu_agent_loop::VerificationReport::aggregate but does not link
-# sicnu_agent_loop, so every executable that pulls the agent .so fails to
-# link (301 targets repo-wide at this commit; #1335 is the proper fix, whose
-# domain includes src/agent). Band-aided here — tests/CMakeLists.txt ONLY —
-# for exactly the durability oracle lane targets, so the
-# crash/lock/cancel/cache lanes are measurable. REVERT this block when
-# #1335 lands.
-foreach(_t
-    test_agent_golden_workflow
-    test_agent_workflow_executor
-    test_classify_workflow_bridge
-    test_classify_workflow_controller
-    test_exprs_workflow_schema
-    test_guided_workflow_widget
-    test_workflow_analysis
-    test_workflow_analysis_11
-    test_workflow_artifact_gc
-    test_workflow_engine_v2
-    test_workflow_execution_plane
-    test_workflow_facts_11
-    test_workflow_ir
-    test_workflow_pipeline
-    test_workflow_pipeline_ui
-    test_workflow_planner
-    test_workflow_recovery
-    test_workflow_repair
-    test_workflow_resume_provenance
-    test_workflow_run_coordinator
-    test_workflow_runtime
-    test_workflow_session_controller
-)
-  if(TARGET ${_t})
-    target_link_libraries(${_t} PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>)
-  endif()
-endforeach()
+# Track 10 band-aid removed (R5 core/platform): the workflow-durability R4
+# whole-archive band-aid that lived here forced sicnu_agent_loop into 22
+# workflow lane targets because libsicnu_agent.so did not link its
+# VerificationReport seam. #1335 landed that library-level fix, so the
+# executables resolve it transitively again and the band-aid is reverted per
+# its own REVERT note.
+# ---------------------------------------------------------------------------
+
 ###############################################################################
 # Track R4 (plugin lifecycle & exprs registry rollback)
 add_library(broken_plugin MODULE fixtures/broken_plugin/broken_plugin.cpp)

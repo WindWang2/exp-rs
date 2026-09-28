@@ -42,6 +42,8 @@
 #include <string>
 #include <vector>
 
+#include <cerrno>
+
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -570,3 +572,53 @@ TEST_CASE( "inject AS-DIR: removeFileQuiet treats a directory as nothing-to-do (
   REQUIRE( fs::is_directory( sicnu::portable::pathFromUtf8( sub ) ) );
   REQUIRE( readBytes( dir.child( "precious/keep.txt" ) ) == "still here" );
 }
+
+#if !defined( _WIN32 )
+// The typed-cause contract: every fsync failure carries the raw OS error in
+// details, not just a message — the POSIX lane asserts errno, the Windows
+// branch mirrors it with win32_error (static evidence in the portability
+// contract). A bare "cannot open" string cannot be told apart from a
+// permission problem by a caller that wants to retry or report.
+TEST_CASE( "inject MISSING: fsyncFile typed cause carries errno",
+           "[inject][missing][fsync][typed-cause]" )
+{
+  ScratchDir dir;
+  bool threw = false;
+  try
+  {
+    atomic_fs::fsyncFile( dir.child( "absent.bin" ) );
+  }
+  catch ( const GeoError &ex )
+  {
+    threw = true;
+    INFO( "details: " << ex.toJson()["details"] );
+    CHECK( ex.details().isMember( "errno" ) );
+    CHECK( ex.details()["errno"].asInt() == ENOENT );
+    CHECK( std::string( ex.what() ).find( "absent.bin" ) != std::string::npos );
+  }
+  REQUIRE( threw );
+}
+
+TEST_CASE( "inject RO-FILE: stagedPathFor refusal carries the typed OS cause",
+           "[inject][ro-file][staging][typed-cause]" )
+{
+  ScratchDir dir;
+  dir.makeReadOnly();
+  bool threw = false;
+  try
+  {
+    atomic_fs::stagedPathFor( dir.child( "out.tif" ) );
+  }
+  catch ( const GeoError &ex )
+  {
+    threw = true;
+    INFO( "details: " << ex.toJson()["details"] );
+    CHECK( ex.details().isMember( "errno" ) );
+    CHECK( ex.details()["errno"].asInt() == EACCES );
+  }
+  REQUIRE( threw );
+  dir.makeWritable();
+  // Reuse leg: with the fault cleared the same allocation succeeds.
+  REQUIRE_NOTHROW( atomic_fs::stagedPathFor( dir.child( "out.tif" ) ) );
+}
+#endif

@@ -139,23 +139,12 @@ ParsedBlock parseBlock( const std::string &basisHash, const std::vector<unsigned
 
 void fsyncPath( const fs::path &path )
 {
-#ifdef _WIN32
-  const HANDLE handle = CreateFileW( path.wstring().c_str(), GENERIC_WRITE,
-                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                     nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
-  if ( handle != INVALID_HANDLE_VALUE )
-  {
-    FlushFileBuffers( handle );
-    CloseHandle( handle );
-  }
-#else
-  const int fd = ::open( path.c_str(), O_RDONLY );
-  if ( fd >= 0 )
-  {
-    ::fsync( fd );
-    ::close( fd );
-  }
-#endif
+  // Best-effort flush through platform/portable.h — the repo's single
+  // authority for the fsync/FlushFileBuffers branches (this file used to
+  // hand-roll a second copy, with the O_RDONLY fsync spelling the XSI-strict
+  // lane refuses; syncFileUtf8 opens O_WRONLY and fails the block publish
+  // path exactly where the atomic lane would).
+  (void)sicnu::portable::syncFileUtf8( sicnu::portable::pathToUtf8( path ) );
 }
 
 /// LRU (mtime) eviction under the byte cap. Bounded walk: a pathological

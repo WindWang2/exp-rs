@@ -268,3 +268,74 @@ TEST_CASE( "atomic publish callers never hand-roll the staging claim",
     REQUIRE( source.find( claim.required ) != std::string::npos );
   }
 }
+
+TEST_CASE( "atomic_fs rides portable.h instead of hand-rolling the claim/flush syscalls",
+           "[portability][contract][static][authority]" )
+{
+  if ( !sourcesAvailable() )
+    return;
+  const std::string source =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/geospatial/util/atomic_fs.cpp" );
+  REQUIRE_FALSE( source.empty() );
+
+  // platform/portable.h is the repo's single authority for the staging
+  // claim (O_EXCL / CREATE_NEW) and the durability flush (fsync(2) /
+  // FlushFileBuffers). atomic_fs layers retry + typed GeoError ON TOP of it.
+  // Reintroducing a second copy of either syscall branch here is the drift
+  // the R5 convergence closed — this pin kills that mutation on the POSIX
+  // lane where the Windows branches cannot be observed at runtime.
+  // Call-shaped needles: a comment MENTIONING the helper must not satisfy
+  // the pin — only the real call does (mutation: delete the call, keep the
+  // comment → red).
+  REQUIRE( source.find( "sicnu::portable::claimExclusiveUtf8( staged" ) != std::string::npos );
+  REQUIRE( source.find( "sicnu::portable::syncFileUtf8( path" ) != std::string::npos );
+  REQUIRE( source.find( "sicnu::portable::syncDirectoryBestEffortUtf8( targetPath" ) != std::string::npos );
+  REQUIRE( source.find( "O_EXCL" ) == std::string::npos );
+  REQUIRE( source.find( "CREATE_NEW" ) == std::string::npos );
+  REQUIRE( source.find( "FlushFileBuffers" ) == std::string::npos );
+}
+
+TEST_CASE( "chunk durability rides portable.h",
+           "[portability][contract][static][authority]" )
+{
+  if ( !sourcesAvailable() )
+    return;
+  const std::string source =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/runtime/chunk/fsync_compat.h" );
+  REQUIRE_FALSE( source.empty() );
+
+  // The chunk family keeps its own throw/best-effort ERROR contract, but the
+  // per-platform syscall branches must stay in portable.h — the third copy
+  // that used to live here also disagreed on the open mode (O_RDONLY fsync
+  // vs the XSI-strict O_WRONLY the atomic lane uses).
+  REQUIRE( source.find( "sicnu::portable::syncFileUtf8( path" ) != std::string::npos );
+  REQUIRE( source.find( "sicnu::portable::syncDirectoryBestEffortUtf8( path" ) != std::string::npos );
+  REQUIRE( source.find( "FlushFileBuffers" ) == std::string::npos );
+  REQUIRE( source.find( "MultiByteToWideChar" ) == std::string::npos );
+}
+
+TEST_CASE( "publish clears a stale read-only attribute on Windows before replacing",
+           "[portability][contract][static][fs]" )
+{
+  if ( !sourcesAvailable() )
+    return;
+  const std::string source =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/geospatial/util/atomic_fs.cpp" );
+  REQUIRE_FALSE( source.empty() );
+
+  // POSIX rename(2) replaces a read-only TARGET (the gate is the directory's
+  // write permission) — the runtime oracle lives in test_io_paths. Windows'
+  // ReplaceFileW/MoveFileExW refuse a READONLY target, so the Windows branch
+  // must clear FILE_ATTRIBUTE_READONLY inside publishStagedFile BEFORE the
+  // first replace call, or the same publish fails there with
+  // ERROR_ACCESS_DENIED (static evidence: this lane cannot run Windows).
+  const std::size_t publish = source.find( "void publishStagedFile(" );
+  REQUIRE( publish != std::string::npos );
+  const std::size_t readonlyClear = source.find( "FILE_ATTRIBUTE_READONLY", publish );
+  const std::size_t replaceCall = source.find( "ReplaceFileW(", publish );
+  REQUIRE( readonlyClear != std::string::npos );
+  REQUIRE( replaceCall != std::string::npos );
+  INFO( "readonlyClear=" << readonlyClear << " replaceCall=" << replaceCall );
+  REQUIRE( readonlyClear < replaceCall );
+  REQUIRE( source.find( "SetFileAttributesW", publish ) != std::string::npos );
+}

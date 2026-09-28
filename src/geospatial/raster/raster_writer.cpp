@@ -130,7 +130,9 @@ RasterWriter RasterWriter::create( const std::string &targetPath, int width, int
     details["path"] = stagedPath;
     if ( lastError && *lastError )
       details["gdal_error"] = lastError;
-    throw GeoError( ErrorCode::WriteFailed, "RasterWriter::create: dataset creation failed", details );
+    throw GeoError( ErrorCode::WriteFailed, "RasterWriter::create: dataset creation failed for " +
+                                                  targetPath + " (staged " + stagedPath + ")",
+                    details );
   }
 
   // Declared metadata goes in before pixels: the transaction carries fidelity.

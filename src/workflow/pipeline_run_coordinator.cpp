@@ -10,6 +10,8 @@
 
 #include "runtime/observability/fault_point.h"
 
+#include "platform/portable.h"
+
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QCryptographicHash>
@@ -250,39 +252,23 @@ bool isContainedInDirectory( const QString &artifactPath, const QString &canonic
 }
 
 /// Returns false when the flush itself failed — atomicWriteJson must not
-/// promote a file whose bytes never reached stable storage.
+/// promote a file whose bytes never reached stable storage. Rides
+/// platform/portable.h's syncFileUtf8 (the single authority for the
+/// fsync/FlushFileBuffers branches; this file used to hand-roll a
+/// _wsopen_s/_commit + O_RDONLY-fsync copy, and the old QFile::encodeName
+/// spelling was locale-dependent rather than the UTF-8 the path convention
+/// mandates).
 bool fsyncFile( const QString &path )
 {
-#ifdef Q_OS_WIN
-    int fd = -1;
-    if ( _wsopen_s( &fd, reinterpret_cast<const wchar_t *>( path.utf16() ),
-                    _O_WRONLY | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE ) != 0 )
-        return false;
-    const int rc = _commit( fd );
-    _close( fd );
-    return rc == 0;
-#else
-    const int fd = ::open( QFile::encodeName( path ).constData(), O_RDONLY );
-    if ( fd < 0 )
-        return false;
-    const int rc = ::fsync( fd );
-    ::close( fd );
-    return rc == 0;
-#endif
+    return sicnu::portable::syncFileUtf8( path.toStdString() );
 }
 
 void fsyncDirectory( const QString &path )
 {
-#ifdef Q_OS_WIN
-    Q_UNUSED( path ); // Windows metadata durability is handled by the OS volume logic.
-#else
-    const int fd = ::open( QFile::encodeName( path ).constData(), O_RDONLY | O_DIRECTORY );
-    if ( fd >= 0 )
-    {
-        ::fsync( fd );
-        ::close( fd );
-    }
-#endif
+    // Best-effort by contract; the Windows branch used to be a silent no-op
+    // while the atomic publish lane flushed for real.
+    sicnu::portable::syncDirectoryBestEffortUtf8( path.toStdString(),
+                                                  /*pathIsDirectory=*/true );
 }
 
 /// Runs @p body on the coordinator's affinity thread when the caller lives on

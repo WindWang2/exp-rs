@@ -55,18 +55,31 @@ std::string reservedStagedPathFor( const std::string &targetPath );
 void fsyncFile( const std::string &path );
 
 /// Publishes a staged file to its target.
-/// POSIX: rename() (atomic replacement).
+/// POSIX: rename(2) (atomic replacement; a read-only TARGET is replaced —
+/// the gate is the directory's write permission, and Windows clears a stale
+/// READONLY attribute to answer with the same contract).
 /// Windows: ReplaceFileW when the target exists (transactional with backup
-/// metadata), MoveFileExW(MOVEFILE_REPLACE_EXISTING) otherwise. When the
+/// metadata), MoveFileExW(MOVEFILE_REPLACE_EXISTING) otherwise; its
+/// durability rides MOVEFILE_WRITE_THROUGH inside that rename. When the
 /// target is locked the function fails with GeoError(IoError) — callers roll
-/// back (staged file is left for `discardStaged` by the caller).
+/// back (staged file is left for `discardStaged` by the caller). The POSIX
+/// rename and the POSIX-lane post-publish directory sync ride
+/// platform/portable.h, the single authority for these syscalls; the
+/// Windows rename branches remain here (ReplaceFileW has no write-through
+/// flag on its fast path — pre-existing, unchanged).
 void publishStagedFile( const std::string &stagedPath, const std::string &targetPath );
 
 /// Best-effort rename that replaces an existing destination.
-/// Windows: MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED).
-/// POSIX: rename(2). Returns false on any failure (locked source/target, etc.).
+/// Windows: MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) —
+/// a cross-VOLUME move silently degrades to copy+delete (NOT atomic);
+/// POSIX: rename(2) fails false across volumes (EXDEV). Same-volume
+/// behavior is atomic-or-false on both platforms.
+/// Returns false on any failure (locked source/target, missing source, etc.).
 /// Prefer publishStagedFile for publication paths that must fail closed with
-/// GeoError — this helper is for GC / quarantine / soft paths.
+/// GeoError — this helper is for GC / quarantine / soft paths, and it is
+/// also the backup-move primitive behind publishStagedGroup /
+/// publishStagedMembers (MoveFileExW replaces an existing backup name the
+/// way publishStagedFile does, #1178 — fs::rename refuses that).
 bool renameReplaceQuiet( const std::string &from, const std::string &to );
 
 /// Removes a staged/stray file; missing files are not an error. Returns false

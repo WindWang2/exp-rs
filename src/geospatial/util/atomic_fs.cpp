@@ -47,13 +47,8 @@ std::uint64_t stagingProcessId()
 }
 
 #ifdef _WIN32
-// Single implementation lives in platform/portable.h — this local name
-// keeps the existing call sites unchanged.
-std::wstring wideFromUtf8( const std::string &text )
-{
-  return sicnu::portable::wideFromUtf8( text );
-}
-
+// The UTF-8→wide conversion lives in platform/portable.h (the single
+// authority for this repo's per-platform shims).
 void throwLastWindowsError( const std::string &context, const std::string &path )
 {
   Json::Value details;
@@ -62,7 +57,6 @@ void throwLastWindowsError( const std::string &context, const std::string &path 
   throw GeoError( ErrorCode::IoError, context, details );
 }
 #endif
-
 } // namespace
 
 bool fileExists( const std::string &path )
@@ -88,7 +82,6 @@ std::string reservedStagedPathFor( const std::string &targetPath )
     return std::string( text.begin(), text.end() );
   };
   const fs::path target = sicnu::portable::pathFromUtf8( targetPath );
-  const fs::path directory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
   const std::string filename = u8( target.filename() );
   // Keep the final extension in place: extension-driven drivers (ESRI
   // Shapefile, ENVI, ...) must still recognize the staged dataset.
@@ -109,93 +102,80 @@ std::string reservedStagedPathFor( const std::string &targetPath )
   // opens files through \\?\-prefixed paths, where forward slashes are NOT
   // normalized away — a mixed-separator staged name made VRT/COG (and any
   // driver taking the strict long-path open) fail with "Failed to open … to
-  // write". lexically_normal() rewrites every separator to the platform's
-  // preferred one, and u8string() renders it back as UTF-8.
-  const fs::path staged = directory.lexically_normal() / sicnu::portable::pathFromUtf8( leaf );
+  // write". u8string() renders the platform-preferred separators as UTF-8.
+  //
+  // The staging directory resolves PHYSICALLY (weakly_canonical, lexical
+  // fallback): ".." after a symlinked component pops the LINK TARGET's
+  // parent for the kernel while lexically_normal drops the link textually,
+  // so the lexical form can allocate the staged name in a different
+  // directory than the one the publish rename's destination resolves into.
+  // Canonicalizing first makes the lexical ".." pop on the canonical tail
+  // physical-safe; an unresolvable path keeps the previous lexical behavior.
+  std::error_code resolutionEc;
+  fs::path directory = fs::weakly_canonical(
+    target.parent_path().empty() ? fs::path( "." ) : target.parent_path(), resolutionEc );
+  if ( resolutionEc )
+    directory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
+  directory = directory.lexically_normal();
+  const fs::path staged = directory / sicnu::portable::pathFromUtf8( leaf );
   return u8( staged );
 }
 
 std::string stagedPathFor( const std::string &targetPath )
 {
-  // The O_EXCL / CREATE_NEW claim is the whole reservation contract: the
+  // The exclusive-creation staging claim is the whole reservation contract: the
   // name exists (as an empty file) from allocation until the writer fills
-  // it, so no other allocator can hand out the same path. Retry only on a
-  // lost claim race.
+  // it, so no other allocator can hand out the same path. The claim syscall
+  // itself lives in the portable authority (single home, source-pinned);
+  // this layer adds the retry-on-lost-race and the typed GeoError. Retry
+  // ONLY on a lost claim race; any other refusal (missing directory,
+  // permissions) fails immediately with the raw OS cause in the details.
   static const int kMaxAttempts = 64;
   for ( int attempt = 0; attempt < kMaxAttempts; ++attempt )
   {
     const std::string staged = reservedStagedPathFor( targetPath );
+    sicnu::portable::ClaimFailure failure = sicnu::portable::ClaimFailure::NameExists;
+    std::uint64_t osError = 0;
+    if ( sicnu::portable::claimExclusiveUtf8( staged, &failure, &osError ) )
+      return staged;
+    if ( failure != sicnu::portable::ClaimFailure::NameExists )
+    {
+      Json::Value details;
+      details["path"] = staged;
 #ifdef _WIN32
-    const HANDLE handle = CreateFileW( wideFromUtf8( staged ).c_str(), GENERIC_WRITE,
-                                       FILE_SHARE_READ, nullptr, CREATE_NEW,
-                                       FILE_ATTRIBUTE_NORMAL, nullptr );
-    if ( handle != INVALID_HANDLE_VALUE )
-    {
-      CloseHandle( handle );
-      return staged;
-    }
-    if ( GetLastError() != ERROR_FILE_EXISTS )
-      throwLastWindowsError( "Cannot allocate a staging path", staged );
+      details["win32_error"] = static_cast<Json::UInt64>( osError );
 #else
-    const int fd = ::open( staged.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600 );
-    if ( fd >= 0 )
-    {
-      ::close( fd );
-      return staged;
-    }
-    if ( errno != EEXIST )
-      throw GeoError( ErrorCode::IoError, "Cannot allocate a staging path next to " + targetPath );
+      details["errno"] = static_cast<Json::Int64>( osError );
 #endif
+      throw GeoError( ErrorCode::IoError, "Cannot allocate a staging path next to " + targetPath,
+                      details );
+    }
   }
   throw GeoError( ErrorCode::IoError, "Cannot allocate a staging path next to " + targetPath );
 }
 
 void fsyncFile( const std::string &path )
 {
-#ifdef _WIN32
-  const HANDLE handle = CreateFileW( wideFromUtf8( path ).c_str(), GENERIC_WRITE,
-                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
-  if ( handle == INVALID_HANDLE_VALUE )
-    throwLastWindowsError( "fsync: cannot open " + path, path );
-  if ( !FlushFileBuffers( handle ) )
-  {
-    const Json::UInt64 code = static_cast<Json::UInt64>( GetLastError() );
-    CloseHandle( handle );
-    Json::Value details;
-    details["path"] = path;
-    details["win32_error"] = code;
-    throw GeoError( ErrorCode::IoError, "fsync: FlushFileBuffers failed for " + path, details );
-  }
-  CloseHandle( handle );
-#else
-  const int fd = ::open( path.c_str(), O_WRONLY );
-  if ( fd < 0 )
-    throw GeoError( ErrorCode::IoError, "fsync: cannot open " + path );
-  if ( ::fsync( fd ) != 0 )
-  {
-    ::close( fd );
-    throw GeoError( ErrorCode::IoError, "fsync failed for " + path );
-  }
-  ::close( fd );
-#endif
-}
-
-#ifndef _WIN32
-/// POSIX only: best-effort fsync of the directory containing `path` (the
-/// durability gate for a rename's directory entry). Silent by design — see
-/// the call site in publishStagedFile.
-void fsyncDirectoryQuiet( const std::string &path )
-{
-  const fs::path target = sicnu::portable::pathFromUtf8( path );
-  const fs::path directory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
-  const int fd = ::open( directory.c_str(), O_RDONLY );
-  if ( fd < 0 )
+  // The flush syscall lives in the portable authority (single home,
+  // source-pinned); this layer turns the two failure classes back into the
+  // typed GeoError with
+  // the raw OS cause preserved (errno on POSIX, the Win32 error on Windows
+  // — both lanes used to keep only one of the two).
+  sicnu::portable::SyncFailure failure = sicnu::portable::SyncFailure::OpenFailed;
+  std::uint64_t osError = 0;
+  if ( sicnu::portable::syncFileUtf8( path, &failure, &osError ) )
     return;
-  ::fsync( fd ); // ignored: EINVAL on filesystems without directory fsync
-  ::close( fd );
-}
+  Json::Value details;
+  details["path"] = path;
+#ifdef _WIN32
+  details["win32_error"] = static_cast<Json::UInt64>( osError );
+#else
+  details["errno"] = static_cast<Json::Int64>( osError );
 #endif
+  if ( failure == sicnu::portable::SyncFailure::OpenFailed )
+    throw GeoError( ErrorCode::IoError, "fsync: cannot open " + path, details );
+  throw GeoError( ErrorCode::IoError, "fsync failed for " + path, details );
+}
 
 /// Copies src over dst (creating/overwriting), throwing GeoError on failure.
 /// Used by the cross-device publish fallback (#807); callers fsync + rename
@@ -215,10 +195,19 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
   if ( !fileExists( stagedPath ) )
     throw GeoError( ErrorCode::IoError, "publish: staged file missing: " + stagedPath );
 #ifdef _WIN32
-  const std::wstring staged = wideFromUtf8( stagedPath );
-  const std::wstring target = wideFromUtf8( targetPath );
+  const std::wstring staged = sicnu::portable::wideFromUtf8( stagedPath );
+  const std::wstring target = sicnu::portable::wideFromUtf8( targetPath );
   if ( fileExists( targetPath ) )
   {
+    // POSIX rename(2) replaces a read-only target — the gate is the
+    // DIRECTORY's write permission, never the target's R/O bit. Windows'
+    // ReplaceFileW/MoveFileExW refuse a READONLY target with
+    // ERROR_ACCESS_DENIED, so a stale attribute (a former RO output, a
+    // restored backup) would fail the publish where POSIX publishes. Clear
+    // it first so both platforms answer with the same contract.
+    const DWORD attributes = ::GetFileAttributesW( target.c_str() );
+    if ( attributes != INVALID_FILE_ATTRIBUTES && ( attributes & FILE_ATTRIBUTE_READONLY ) )
+      ::SetFileAttributesW( target.c_str(), attributes & ~FILE_ATTRIBUTE_READONLY );
     // ReplaceFileW swaps in one call when the target exists (the target's
     // previous content is preserved as backup until the swap completes).
     if ( ReplaceFileW( target.c_str(), staged.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr ) )
@@ -265,13 +254,17 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
       throw;
     }
   }
-  // Durability of the RENAME itself: fsync the containing directory so a
-  // crash after publish cannot revert the directory entry. Best-effort and
-  // silent: several legitimate filesystems (some network/FUSE mounts) refuse
-  // directory fsync with EINVAL — failing the publish there would trade a
-  // real capability for a durability nicety. The file-content fsync above is
-  // the correctness gate; this only narrows the crash window for the entry.
-  fsyncDirectoryQuiet( targetPath );
+  // Durability of the RENAME itself (POSIX lane): fsync the containing
+  // directory so a crash after publish cannot revert the directory entry.
+  // Best-effort and silent: several legitimate filesystems (some network/
+  // FUSE mounts) refuse directory fsync with EINVAL — failing the publish
+  // there would trade a real capability for a durability nicety. The
+  // file-content fsync above is the correctness gate; this only narrows the
+  // crash window for the entry. The portable authority's directory flush is
+  // the single implementation. (The Windows lane of this function returned
+  // above: its durability rides MOVEFILE_WRITE_THROUGH inside the
+  // MoveFileExW call.)
+  sicnu::portable::syncDirectoryBestEffortUtf8( targetPath );
 #endif
 }
 
@@ -280,21 +273,13 @@ bool renameReplaceQuiet( const std::string &from, const std::string &to )
   if ( !fileExists( from ) )
     return false;
 #ifdef _WIN32
-  const std::wstring wideFrom = wideFromUtf8( from );
-  const std::wstring wideTo = wideFromUtf8( to );
+  const std::wstring wideFrom = sicnu::portable::wideFromUtf8( from );
+  const std::wstring wideTo = sicnu::portable::wideFromUtf8( to );
   return MoveFileExW( wideFrom.c_str(), wideTo.c_str(),
                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED ) != 0;
 #else
   return ::rename( from.c_str(), to.c_str() ) == 0;
 #endif
-}
-
-/// Renames a file within the same directory (backup moves). Quiet: false on
-/// any failure. Windows uses MoveFileExW so an existing destination is replaced
-/// the same way publishStagedFile does (#1178) — fs::rename refuses that.
-bool moveFileQuiet( const std::string &from, const std::string &to )
-{
-  return renameReplaceQuiet( from, to );
 }
 
 bool removeFileQuiet( const std::string &path )
@@ -373,7 +358,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     if ( hadMainTarget && fileExists( mainBackup ) )
     {
       removeFileQuiet( targetMainPath );
-      if ( !moveFileQuiet( mainBackup, targetMainPath ) )
+      if ( !renameReplaceQuiet( mainBackup, targetMainPath ) )
         throw GeoError( ErrorCode::IoError,
                         "group publish failed at " + failedName +
                             "; the previous main file could not be restored from " + mainBackup );
@@ -384,7 +369,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
       if ( hadTarget[i] && fileExists( backup ) )
       {
         removeFileQuiet( targetSidecars[i] );
-        moveFileQuiet( backup, targetSidecars[i] );
+        renameReplaceQuiet( backup, targetSidecars[i] );
       }
     }
     // Drop any leftover backup copies.
@@ -407,7 +392,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     {
       const std::string backup = targetSidecars[i] + ".bak";
       removeFileQuiet( backup );
-      if ( !moveFileQuiet( targetSidecars[i], backup ) )
+      if ( !renameReplaceQuiet( targetSidecars[i], backup ) )
         cleanup( targetSidecars[i] ); // cannot protect the old member: refuse
     }
     try
@@ -424,7 +409,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   if ( hadMainTarget )
   {
     removeFileQuiet( mainBackup );
-    if ( !moveFileQuiet( targetMainPath, mainBackup ) )
+    if ( !renameReplaceQuiet( targetMainPath, mainBackup ) )
       cleanup( targetMainPath ); // cannot protect the old main file: refuse
   }
   try
@@ -473,7 +458,7 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
       if ( hadTarget[mainIdx] && fileExists( mainBackup ) )
       {
         removeFileQuiet( live[mainIdx].second );
-        if ( !moveFileQuiet( mainBackup, live[mainIdx].second ) )
+        if ( !renameReplaceQuiet( mainBackup, live[mainIdx].second ) )
           throw GeoError( ErrorCode::IoError,
                           "group publish failed at " + failedName +
                               "; the previous main file could not be restored from " + mainBackup );
@@ -484,7 +469,7 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
         if ( hadTarget[i] && fileExists( backup ) )
         {
           removeFileQuiet( live[i].second );
-          moveFileQuiet( backup, live[i].second );
+          renameReplaceQuiet( backup, live[i].second );
         }
       }
     }
@@ -502,7 +487,7 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
     {
       const std::string backup = live[i].second + ".bak";
       removeFileQuiet( backup );
-      if ( !moveFileQuiet( live[i].second, backup ) )
+      if ( !renameReplaceQuiet( live[i].second, backup ) )
         cleanup( live[i].second );
     }
     try

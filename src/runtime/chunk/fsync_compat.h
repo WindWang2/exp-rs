@@ -1,72 +1,42 @@
 // fsync_compat.h — portable file/directory durability for the chunk family.
 //
-// POSIX: fsync(2). Windows: FlushFileBuffers (real durability — a silent
-// no-op previously allowed the journal to outlive unflushed tile bytes
-// (#1228 / #1186 item 33)). File flush failure throws; directory flush is
-// best-effort (BACKUP_SEMANTICS open can fail on some volumes).
+// Thin adapter over platform/portable.h, the repo's single authority for the
+// claim/fsync syscalls: this header keeps the chunk family's own error
+// contract (file flush failure throws std::runtime_error; directory flush is
+// best-effort) without hand-rolling a third copy of the per-platform
+// branches. File flush failure throws; directory flush is best-effort
+// (BACKUP_SEMANTICS open can fail on some volumes). Real durability on both
+// platforms — a silent no-op previously allowed the journal to outlive
+// unflushed tile bytes (#1228 / #1186 item 33).
+//
+// Semantic alignment with the atomic publish lane (R5 core/platform): a file
+// is opened FOR WRITING (O_WRONLY / GENERIC_WRITE), so a durability claim on
+// a file that cannot be written fails closed exactly like
+// geospatial/util/atomic_fs::fsyncFile — an O_RDONLY fsync used to "succeed"
+// here on read-only files while the atomic lane refused the same state.
 #pragma once
 
 #include <string>
 #include <stdexcept>
 
-#if !defined( _WIN32 )
-#include <fcntl.h>
-#include <unistd.h>
-#else
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
+#include "platform/portable.h"
 
 namespace sicnu::runtime::chunk
 {
 
 inline void fsyncPathCompat( const std::string &path, bool directory )
 {
-#if !defined( _WIN32 )
-    const int flags = directory ? ( O_RDONLY | O_DIRECTORY ) : O_RDONLY;
-    const int fd = ::open( path.c_str(), flags );
-    if ( fd < 0 )
+    if ( directory )
     {
-        if ( !directory )
-            throw std::runtime_error( "fsync: cannot open " + path );
+        sicnu::portable::syncDirectoryBestEffortUtf8( path, /*pathIsDirectory=*/true );
         return;
     }
-    if ( ::fsync( fd ) != 0 && !directory )
-    {
-        ::close( fd );
-        throw std::runtime_error( "fsync failed for " + path );
-    }
-    ::close( fd );
-#else
-    const int wlen = MultiByteToWideChar( CP_UTF8, 0, path.c_str(), -1, nullptr, 0 );
-    if ( wlen <= 0 )
-    {
-        if ( !directory )
-            throw std::runtime_error( "fsync: cannot widen path " + path );
+    sicnu::portable::SyncFailure failure = sicnu::portable::SyncFailure::OpenFailed;
+    if ( sicnu::portable::syncFileUtf8( path, &failure ) )
         return;
-    }
-    std::wstring wpath( static_cast<std::size_t>( wlen ), L'\0' );
-    MultiByteToWideChar( CP_UTF8, 0, path.c_str(), -1, wpath.data(), wlen );
-    const DWORD flags = directory ? FILE_FLAG_BACKUP_SEMANTICS : FILE_ATTRIBUTE_NORMAL;
-    const DWORD access = directory ? GENERIC_READ : GENERIC_WRITE;
-    const HANDLE handle =
-      CreateFileW( wpath.c_str(), access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                   nullptr, OPEN_EXISTING, flags, nullptr );
-    if ( handle == INVALID_HANDLE_VALUE )
-    {
-        if ( !directory )
-            throw std::runtime_error( "fsync: cannot open " + path );
-        return;
-    }
-    if ( !FlushFileBuffers( handle ) && !directory )
-    {
-        CloseHandle( handle );
-        throw std::runtime_error( "fsync: FlushFileBuffers failed for " + path );
-    }
-    CloseHandle( handle );
-#endif
+    throw std::runtime_error( failure == sicnu::portable::SyncFailure::OpenFailed
+                                ? "fsync: cannot open " + path
+                                : "fsync failed for " + path );
 }
 
 /// Best-effort wrapper: never throws (legacy call sites that tolerate miss).

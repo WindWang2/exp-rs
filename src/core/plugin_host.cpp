@@ -22,6 +22,14 @@
 
 using namespace sicnu::python::isolated;
 
+void PluginHost::reportPluginFailure(const QString &subject, const QString &reason)
+{
+    // One composed line (QDebug's per-token spacing would render a stray
+    // space before the colon).
+    qWarning().noquote() << QStringLiteral("PluginHost: %1: %2").arg(reason, subject);
+    emit pluginError(subject, reason);
+}
+
 PluginHost::PluginHost(int pythonPoolSize, QObject *parent)
     : QObject(parent)
     , m_pythonPoolSize(pythonPoolSize)
@@ -65,8 +73,7 @@ void PluginHost::loadPlugins(const QString &pluginDir)
     }
     // A plugin directory anyone can write to is not a trust boundary.
     if (QFileInfo(canonicalDir).permissions() & QFileDevice::WriteOther) {
-        qWarning() << "PluginHost: Refusing world-writable plugin directory:" << canonicalDir;
-        emit pluginError(canonicalDir, QStringLiteral("Plugin directory is world-writable"));
+        reportPluginFailure(canonicalDir, QStringLiteral("Plugin directory is world-writable"));
         return;
     }
 
@@ -89,8 +96,7 @@ void PluginHost::loadPlugins(const QString &pluginDir)
             continue;
         }
         if (!insideDir(filePath)) {
-            qWarning() << "PluginHost: Refusing plugin that resolves outside" << canonicalDir << ":" << fileName;
-            emit pluginError(fileName, QStringLiteral("Plugin path escapes the plugin directory"));
+            reportPluginFailure(fileName, QStringLiteral("Plugin path escapes the plugin directory"));
             continue;
         }
         loadPlugin(filePath);
@@ -103,8 +109,7 @@ void PluginHost::loadPlugins(const QString &pluginDir)
         QString subDirPath = dir.absoluteFilePath(subDirName);
         if (QFileInfo::exists(subDirPath + "/metadata.txt") && QFileInfo::exists(subDirPath + "/__init__.py")) {
             if (!insideDir(subDirPath)) {
-                qWarning() << "PluginHost: Refusing Python plugin that resolves outside" << canonicalDir << ":" << subDirName;
-                emit pluginError(subDirName, QStringLiteral("Plugin path escapes the plugin directory"));
+                reportPluginFailure(subDirName, QStringLiteral("Plugin path escapes the plugin directory"));
                 continue;
             }
             loadPythonPlugin(subDirPath);
@@ -127,31 +132,27 @@ bool PluginHost::loadPlugin(const QString &pluginPath)
     // Qt plugins (e.g. SQL drivers sharing the directory) are never
     // instantiated through this host.
     if (metadata.value(QStringLiteral("IID")).toString() != QLatin1String(SicnuPluginInterface_iid)) {
-        qWarning() << "PluginHost: Not a SICNU plugin (IID mismatch):" << pluginPath;
-        emit pluginError(pluginPath, QStringLiteral("Library does not declare SicnuPluginInterface"));
+        reportPluginFailure(pluginPath, QStringLiteral("Library does not declare SicnuPluginInterface"));
         delete loader;
         return false;
     }
 
     QObject *plugin = loader->instance();
     if (!plugin) {
-        emit pluginError(pluginPath, loader->errorString());
-        qWarning() << "PluginHost: Failed to load plugin:" << pluginPath << loader->errorString();
+        reportPluginFailure(pluginPath, loader->errorString());
         delete loader;
         return false;
     }
 
     SicnuPluginInterface *interface = qobject_cast<SicnuPluginInterface*>(plugin);
     if (!interface) {
-        emit pluginError(pluginPath, "Plugin does not implement SicnuPluginInterface");
-        qWarning() << "PluginHost: Invalid plugin interface:" << pluginPath;
+        reportPluginFailure(pluginPath, QStringLiteral("Plugin does not implement SicnuPluginInterface"));
         delete loader;
         return false;
     }
 
     if (!interface->initialize(m_appInterface)) {
-        emit pluginError(interface->name(), "Plugin initialization failed");
-        qWarning() << "PluginHost: Plugin init failed:" << interface->name();
+        reportPluginFailure(interface->name(), QStringLiteral("Plugin initialization failed"));
         delete loader;
         return false;
     }
@@ -192,8 +193,7 @@ bool PluginHost::loadPythonPlugin(const QString &pluginDir)
     QString error;
     PythonPluginAdapter *adapter = m_pythonHost->loadPlugin(pluginDir, context, &error);
     if (!adapter) {
-        emit pluginError(QDir(pluginDir).dirName(), error);
-        qWarning() << "PluginHost: Python plugin load failed:" << pluginDir << error;
+        reportPluginFailure(QDir(pluginDir).dirName(), error);
         return false;
     }
 

@@ -77,6 +77,16 @@ signals:
     void pluginError(const QString &name, const QString &error);
 
 private:
+    /**
+     * One shared two-channel failure report: every plugin refusal logs the
+     * exact fact it signals, under the single "PluginHost" prefix, so the
+     * diagnostic log line and the pluginError signal can no longer drift
+     * into different wordings for the same failure (R5 core/platform
+     * plumbing convergence — the signal contract, incl. the substrings the
+     * allowlist suite pins, is unchanged).
+     */
+    void reportPluginFailure(const QString &subject, const QString &reason);
+
     struct PluginInfo {
         SicnuPluginInterface *instance = nullptr;
         QPluginLoader *loader = nullptr; // nullptr for Python plugins

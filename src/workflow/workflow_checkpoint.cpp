@@ -9,6 +9,7 @@
 #include <QFile>
 
 #include "geospatial/util/atomic_fs.h"
+#include "platform/portable.h"
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QtGlobal>
@@ -31,17 +32,12 @@ namespace {
 
 void fsyncDirectory( const QString &dirPath )
 {
-#if defined( Q_OS_UNIX )
-  const int dfd = ::open( QDir::toNativeSeparators( dirPath ).toUtf8().constData(),
-                          O_RDONLY | O_DIRECTORY );
-  if ( dfd >= 0 )
-  {
-    ::fsync( dfd );
-    ::close( dfd );
-  }
-#else
-  Q_UNUSED( dirPath );
-#endif
+  // Best-effort through platform/portable.h — the single authority for the
+  // directory-flush branches (the Windows branch used to be a silent no-op
+  // here while the atomic publish lane flushed for real). Silent by design:
+  // some filesystems refuse directory fsync with EINVAL.
+  sicnu::portable::syncDirectoryBestEffortUtf8( dirPath.toStdString(),
+                                                /*pathIsDirectory=*/true );
 }
 
 } // namespace

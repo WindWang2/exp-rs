@@ -135,7 +135,9 @@ VectorWriter VectorWriter::create( const std::string &targetPath, const std::str
     details["path"] = stagedPath;
     if ( lastError && *lastError )
       details["gdal_error"] = lastError;
-    throw GeoError( ErrorCode::WriteFailed, "VectorWriter::create: dataset creation failed", details );
+    throw GeoError( ErrorCode::WriteFailed, "VectorWriter::create: dataset creation failed for " +
+                                                  targetPath + " (staged " + stagedPath + ")",
+                    details );
   }
 
   OGRSpatialReferenceH layerSrs = nullptr;
