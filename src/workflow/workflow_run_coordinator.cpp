@@ -979,6 +979,25 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
         return -1;
     }
 
+    // A rejected degenerate lineage (zero-step definition, the Track 10
+    // empty-DAG refusal) is not resumable: its checkpoint carries no
+    // executable steps, so the empty-remaining derivation below could only
+    // fabricate a terminal verdict over a rejection — Failed escalated to
+    // Completed with zero execution. Refuse and leave the persisted verdict
+    // (and the lineage envelope) byte-identical. Placed AFTER the reconcile
+    // and the state-wall check so a legacy zero-step checkpoint left ACTIVE
+    // by a pre-Track-10 build still converges (Interrupted + persisted,
+    // then refused) instead of being re-elected by every recovery pass.
+    if ( run->definition().steps.empty() )
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_locksByRunId.erase( runId ); // releases the run lock
+        if ( error )
+            *error = QStringLiteral( "Run %1 was rejected with no steps — a zero-step lineage cannot be resumed" )
+                       .arg( QString::fromStdString( runId ) );
+        return -1;
+    }
+
     // Steps already completed whose outputs still exist keep BOTH their
     // result payload and canonical output path: port-aware resolution needs
     // the payload's named ports, not just the raster path (#727 RC2).
@@ -1312,7 +1331,11 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             // is released with it — the ORIGINAL run's lock (held by this
             // resuming process) remains the ownership handle until finalize.
             QFile::remove( checkpointPathLocked( ghostRunId ) );
-            m_locksByRunId.erase( ghostRunId ); // destructor releases + drops lock file
+            // Releasing the shared_ptr releases the flock. The lock FILE is
+            // never unlinked (workflow_run_lock.h: an unlink-while-held race
+            // would reopen the ownership hole) — it stays as a ~40-byte
+            // marker of a run that once executed.
+            m_locksByRunId.erase( ghostRunId );
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             swapPersists.push_back( capturePersistLocked( run ) );

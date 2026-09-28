@@ -959,6 +959,77 @@ TEST_CASE( "MCP Server protocol lifecycle handshake and meta handlers", "[agent]
 
 namespace {
 
+/// Relocates the checkpoint family (SICNU_CHECKPOINT_DIR) for the duration of
+/// one TEST_CASE: a run_workflow submission persists checkpoints and run-lock
+/// files, and without this guard they land in the developer's real
+/// ~/.rs_studio/checkpoints where accumulated state from other sessions made
+/// these cases flaky (crash-at-exit/hang; #1351 backlog). Restores the
+/// previous env on scope exit.
+struct CheckpointEnvGuard
+{
+    QTemporaryDir dir;
+    const QByteArray saved = qgetenv( "SICNU_CHECKPOINT_DIR" );
+    const bool had = qEnvironmentVariableIsSet( "SICNU_CHECKPOINT_DIR" );
+    CheckpointEnvGuard() { REQUIRE( dir.isValid() ); REQUIRE( qputenv( "SICNU_CHECKPOINT_DIR", dir.path().toUtf8() ) ); }
+    ~CheckpointEnvGuard()
+    {
+        if ( had )
+            qputenv( "SICNU_CHECKPOINT_DIR", saved );
+        else
+            qunsetenv( "SICNU_CHECKPOINT_DIR" );
+    }
+    QStringList checkpoints() const
+    {
+        return QDir( dir.path() )
+            .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+    }
+    /// Checkpoints anywhere in the family: a COMPLETED run is archived into
+    /// history/ by the finalize sweep, so the live-directory count alone
+    /// races the run's completion (a fast noop pipeline can finish and
+    /// archive before the assertion runs).
+    int checkpointCount() const
+    {
+        return checkpoints().size()
+               + QDir( dir.filePath( QStringLiteral( "history" ) ) )
+                     .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
+                                 QDir::Files )
+                     .size();
+    }
+    /// Bounded wait for a run's LAST DURABLE STATE: a checkpoint carrying @p
+    /// workflowId that reads back with a terminal @p state from the family
+    /// (live dir or history/). Waiting on get_workflow_status alone races
+    /// the coordinator fold — the pipeline status flips BEFORE the fold's
+    /// identity hashing and terminal persist complete, and an exit-time fold
+    /// still in flight segfaults against process teardown (Qt's lazy OpenSSL
+    /// provider load on a JobEngine worker thread).
+    bool waitDurableTerminal( const QString &workflowId, const QString &state )
+    {
+        for ( int attempt = 0; attempt < 1200; ++attempt )
+        {
+            const QStringList live =
+                checkpoints()
+                + QDir( dir.filePath( QStringLiteral( "history" ) ) )
+                      .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
+                                  QDir::Files );
+            for ( const QString &entry : live )
+            {
+                QFile f( dir.filePath( QStringLiteral( "history" ) ) + QDir::separator() + entry );
+                if ( !f.exists() )
+                    f.setFileName( dir.filePath( entry ) );
+                if ( !f.open( QIODevice::ReadOnly ) )
+                    continue;
+                const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
+                f.close();
+                if ( doc.object().value( QStringLiteral( "workflowId" ) ).toString() == workflowId
+                     && doc.object().value( QStringLiteral( "state" ) ).toString() == state )
+                    return true;
+            }
+            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        }
+        return false;
+    }
+};
+
 QString createWorkflowGeoJson( const QString &path )
 {
     GDALAllRegister();
@@ -990,6 +1061,9 @@ TEST_CASE( "McpServer run_workflow executes agent-generated pipelines", "[agent]
 {
     registerNoopOperator();
     TestMcpServer server;
+    // The submission persists checkpoints + run locks: keep them in a
+    // session-scoped family, never the developer's real HOME.
+    CheckpointEnvGuard checkpointGuard;
 
     QVariantMap args;
     args[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
@@ -1005,6 +1079,9 @@ TEST_CASE( "McpServer run_workflow executes agent-generated pipelines", "[agent]
     const QVariantMap submitted = server.testRunWorkflow( args );
     const long pipelineId = submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong();
     CHECK( pipelineId >= 0 );
+    // Pollution gate: the tracked run's checkpoint lands in the isolated
+    // session family (never the shared ~/.rs_studio/checkpoints).
+    REQUIRE( checkpointGuard.checkpointCount() == 1 );
 
     const QVariantList steps = submitted.value( QStringLiteral( "steps" ) ).toList();
     REQUIRE( steps.size() == 2 );
@@ -1035,6 +1112,11 @@ TEST_CASE( "McpServer run_workflow executes agent-generated pipelines", "[agent]
         std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
     }
     CHECK( completed );
+    // Drain to the run's last durable state before the test ends — the
+    // pipeline status can flip before the coordinator fold finishes its
+    // terminal persist (see CheckpointEnvGuard::waitDurableTerminal).
+    CHECK( checkpointGuard.waitDurableTerminal( QStringLiteral( "agent_pipeline" ),
+                                                QStringLiteral( "Completed" ) ) );
 
     // Unknown pipeline ids surface a readable error.
     bool threw = false;
@@ -1060,6 +1142,8 @@ TEST_CASE( "McpServer run_workflow opt-in experiment recording records the run",
     if ( !QCoreApplication::instance() )
         new QCoreApplication( appArgc, appArgv );
     TestMcpServer server;
+    // The submission persists a tracked run: session-scoped checkpoint family.
+    CheckpointEnvGuard checkpointGuard;
 
     QTemporaryDir storeDir;
     const QString experimentDb = storeDir.filePath( QStringLiteral( "exp.db" ) );
@@ -1080,6 +1164,7 @@ TEST_CASE( "McpServer run_workflow opt-in experiment recording records the run",
     const QVariantMap submitted = server.testRunWorkflow( args );
     const long pipelineId = submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong();
     REQUIRE( pipelineId >= 0 );
+    REQUIRE( checkpointGuard.checkpointCount() == 1 );
     // The submission response carries the experiment run id (recorded
     // synchronously with the submission).
     const QString experimentRunId =
@@ -1171,6 +1256,9 @@ TEST_CASE( "McpServer run_workflow recording requires experiment_id and valid se
 TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][workflow]" )
 {
     TestMcpServer server;
+    // Rejections persist nothing: prove no checkpoint (and no lock file)
+    // leaks into the checkpoint family, session-scoped for this case.
+    CheckpointEnvGuard checkpointGuard;
 
     QVariantMap args;
     args[QStringLiteral( "pipeline" )] = QStringLiteral( "{not json" );
@@ -1192,11 +1280,16 @@ TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][w
     {
         server.testRunWorkflow( missing );
     }
-    catch ( const std::runtime_error & )
+    catch ( const std::runtime_error &e )
     {
         threwMissing = true;
+        CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "pipeline" ) ) );
     }
     CHECK( threwMissing );
+
+    // Neither the malformed document nor the missing parameter left a run
+    // behind: a rejection must not fabricate persistent state.
+    REQUIRE( checkpointGuard.checkpointCount() == 0 );
 }
 
 TEST_CASE( "McpServer run_workflow survives a deeply-nested pipeline depth bomb (#1154)",
@@ -1204,6 +1297,7 @@ TEST_CASE( "McpServer run_workflow survives a deeply-nested pipeline depth bomb 
 {
     registerNoopOperator();
     TestMcpServer server;
+    CheckpointEnvGuard checkpointGuard;
 
     // ~1000 nested arrays: past jsoncpp's useful recursion bound. The pre-fix
     // default reader crashed the process (SIGSEGV on MSVC at depth ~866,
@@ -1240,6 +1334,13 @@ TEST_CASE( "McpServer run_workflow survives a deeply-nested pipeline depth bomb 
     })" );
     const QVariantMap submitted = server.testRunWorkflow( okArgs );
     CHECK( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+    // The accepted control run landed in the session-scoped family.
+    CHECK( checkpointGuard.checkpointCount() == 1 );
+    // Drain the control run to its LAST DURABLE STATE before the test ends
+    // (see waitDurableTerminal — an exit-time fold still in flight races
+    // process teardown). The test is about the depth bomb, not teardown.
+    CHECK( checkpointGuard.waitDurableTerminal( QStringLiteral( "after_depth_bomb" ),
+                                                QStringLiteral( "Completed" ) ) );
 }
 
 TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every execution entry point", "[agent][mcp][sandbox]" )
@@ -2225,4 +2326,108 @@ TEST_CASE( "mcp agent_session tool drives the shared driver envelope",
                                 .toString();
     CHECK( runText.contains( QStringLiteral( "SEAMS_UNAVAILABLE" ) ) );
     CHECK( runText.contains( QStringLiteral( "missing_seams" ) ) );
+}
+
+// ---------------------------------------------------------------------------
+// Track 10 R5 — workflow tool error-code parity: every parameter gate on the
+// run_workflow / get_workflow_status / resume_workflow family answers with a
+// STABLE structured code on the wire (errorCode/errorCategory ride the
+// isError result), never an untyped transport error.
+// ---------------------------------------------------------------------------
+TEST_CASE( "workflow tool gates return stable structured error codes", "[agent][mcp][workflow][r5]" )
+{
+    TestMcpServer server;
+    initializeServer( server );
+
+    SECTION( "run_workflow with a missing pipeline parameter is INVALID_PIPELINE" )
+    {
+        const QVariantMap result = callTool( server, 50, QStringLiteral( "run_workflow" ), {} );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PIPELINE" ) );
+        CHECK( result.value( QStringLiteral( "errorCategory" ) ).toString()
+               == QStringLiteral( "validation" ) );
+    }
+
+    SECTION( "run_workflow with an empty pipeline document is INVALID_PIPELINE" )
+    {
+        const QVariantMap result = callTool(
+            server, 51, QStringLiteral( "run_workflow" ),
+            { { QStringLiteral( "pipeline" ), QStringLiteral( "   " ) } } );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PIPELINE" ) );
+    }
+
+    SECTION( "a malformed pipeline text is INVALID_PIPELINE, never a workspace verdict" )
+    {
+        // Deliberately malformed AND starting with an absolute path: the raw
+        // text used to be scanned as a path and misclassified as
+        // PATH_OUTSIDE_WORKSPACE instead of the pipeline-structure verdict.
+        const QVariantMap result = callTool(
+            server, 52, QStringLiteral( "run_workflow" ),
+            { { QStringLiteral( "pipeline" ),
+                QStringLiteral( "/etc/outside {\"steps\": [not json" ) } } );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PIPELINE" ) );
+        CHECK( toolText( result ).contains( QStringLiteral( "pipeline rejected" ) ) );
+    }
+
+    SECTION( "a bare-array pipeline document is INVALID_PIPELINE" )
+    {
+        const QVariantMap result = callTool(
+            server, 53, QStringLiteral( "run_workflow" ),
+            { { QStringLiteral( "pipeline" ), QStringLiteral( "[{\"id\": \"s1\"}]" ) } } );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PIPELINE" ) );
+    }
+
+    SECTION( "a deeply-nested depth bomb is INVALID_PIPELINE, never an escaping exception" )
+    {
+        // #1154 regression: the bounded reader must refuse the bomb INSIDE the
+        // structural gate (typed INVALID_PIPELINE), not let the Json::Exception
+        // escape the tools/call dispatcher as an untyped error.
+        QString depthBomb;
+        for ( int i = 0; i < 1000; ++i )
+            depthBomb += QLatin1Char( '[' );
+        depthBomb += QStringLiteral( "1" );
+        for ( int i = 0; i < 1000; ++i )
+            depthBomb += QLatin1Char( ']' );
+        const QVariantMap result = callTool(
+            server, 57, QStringLiteral( "run_workflow" ),
+            { { QStringLiteral( "pipeline" ), depthBomb } } );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PIPELINE" ) );
+    }
+
+    SECTION( "resume_workflow without run_id is INVALID_PARAMETER" )
+    {
+        const QVariantMap result = callTool( server, 54, QStringLiteral( "resume_workflow" ), {} );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PARAMETER" ) );
+        CHECK( result.value( QStringLiteral( "errorCategory" ) ).toString()
+               == QStringLiteral( "validation" ) );
+    }
+
+    SECTION( "resume_workflow keeps the handler's INVALID_PARAMETER for bad run-id characters" )
+    {
+        const QVariantMap result = callTool(
+            server, 55, QStringLiteral( "resume_workflow" ),
+            { { QStringLiteral( "run_id" ), QStringLiteral( "../escape" ) } } );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PARAMETER" ) );
+    }
+
+    SECTION( "get_workflow_status without pipeline_id is INVALID_PARAMETER" )
+    {
+        const QVariantMap result = callTool( server, 56, QStringLiteral( "get_workflow_status" ), {} );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PARAMETER" ) );
+    }
 }

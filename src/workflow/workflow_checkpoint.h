@@ -69,7 +69,10 @@ public:
   /// to reconcile). Callers are responsible for persisting afterwards.
   static bool reconcileToInterrupted( WorkflowRun &run );
 
-  /// Default directory for workflow checkpoints.
+  /// Default directory for workflow checkpoints: $SICNU_CHECKPOINT_DIR when
+  /// set (session isolation — an MCP/CLI session or a test relocates the
+  /// whole checkpoint family for its process instead of sharing
+  /// ~/.rs_studio/checkpoints), else ~/.rs_studio/checkpoints.
   static QString defaultCheckpointDirectory();
 };
 

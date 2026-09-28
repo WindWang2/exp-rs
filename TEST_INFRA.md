@@ -89,6 +89,7 @@ Host layouts that mix a system GIS stack with a conda/miniconda Python (this pro
 | `XMODIFIERS` | **`@im=none`** | Stop IM auto-detect from re-selecting fcitx. |
 | `QT_PLUGIN_PATH` | **Set to Qt's `QT_INSTALL_PLUGINS`** | Isolates extra desktop plugin trees. Distro Qt may still ship fcitx next to compose; `QT_IM_MODULE` is what actually avoids loading it. Overriding the whole plugin path to an empty sandbox would break `platforms/offscreen` and imageformats. |
 | `LSAN_OPTIONS` | `detect_leaks=0` | QGIS/Qt/GDAL process-lifetime singletons (#706). |
+| `SICNU_CHECKPOINT_DIR` | **Point at a per-run temp dir in tests / per-session dir in headless sessions** (unset keeps `~/.rs_studio/checkpoints`) | Workflow checkpoints, run-lock files and history live under one directory read per call from this env (workflow_checkpoint.h). Without it, every `run_workflow`/`workflow resume` test writes the developer's real HOME where accumulated lock files from other sessions made the MCP run_workflow lane flaky (#1351 backlog). |
 
 Do not skip or disable the embedded-Python tests or the QSS stress test to go green. If a new host still fails:
 

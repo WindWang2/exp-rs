@@ -366,3 +366,43 @@ TEST_CASE( "lock acquisition in a nonexistent directory creates it; a read-only 
     REQUIRE( lock.tryAcquire() == WorkflowRunLock::TryResult::Error );
     REQUIRE( lock.tryAcquire() == WorkflowRunLock::TryResult::Error ); // stable, not wedged
 }
+
+TEST_CASE( "SICNU_CHECKPOINT_DIR relocates the default checkpoint family for one session",
+           "[workflow][r5][run_lock][isolation]" )
+{
+    // Session isolation knob (Track 10 R5, #1351 backlog): an MCP/CLI session
+    // or a test relocates the WHOLE checkpoint family (checkpoints, run locks,
+    // history) with one env var — two processes sharing $HOME no longer share
+    // checkpoint state, and a test never writes the developer's real
+    // ~/.rs_studio/checkpoints. Unset keeps the historical default.
+    struct EnvGuard
+    {
+        const QByteArray saved = qgetenv( "SICNU_CHECKPOINT_DIR" );
+        const bool had = qEnvironmentVariableIsSet( "SICNU_CHECKPOINT_DIR" );
+        ~EnvGuard()
+        {
+            if ( had )
+                qputenv( "SICNU_CHECKPOINT_DIR", saved );
+            else
+                qunsetenv( "SICNU_CHECKPOINT_DIR" );
+        }
+    } guard;
+
+    QTemporaryDir sessionDir;
+    REQUIRE( sessionDir.isValid() );
+
+    qputenv( "SICNU_CHECKPOINT_DIR", sessionDir.path().toUtf8() );
+    REQUIRE( WorkflowCheckpointManager::defaultCheckpointDirectory() == sessionDir.path() );
+
+    // The default-directory save path lands inside the relocated family.
+    const QString path = saveRunningRun( QString(), "r5_env_override" );
+    REQUIRE( path.startsWith( sessionDir.path() ) );
+    REQUIRE( QDir( sessionDir.path() )
+                 .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files )
+                 .size() == 1 );
+
+    // Unset restores the historical HOME-derived default.
+    qunsetenv( "SICNU_CHECKPOINT_DIR" );
+    REQUIRE( WorkflowCheckpointManager::defaultCheckpointDirectory()
+             == QDir::homePath() + QStringLiteral( "/.rs_studio/checkpoints" ) );
+}

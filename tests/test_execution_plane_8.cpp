@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/atomic_algorithm_adapter.h"
+#include "processing/framework/execution_resource_bridge.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/algorithm_descriptor.h"
 #include "processing/framework/task_center.h"
@@ -742,6 +743,13 @@ class Ep8ResumeOperator : public sicnu::operators::RSOperator
 /// it (schema text + determinism grade through makeImplementationIdentity).
 std::string identityOf( sicnu::operators::RSOperator &op )
 {
+    // The production resume gate stamps identities WITH the environment pins
+    // the coordinator installs at construction (execution_resource_bridge).
+    // Install the same pins BEFORE computing the expected stamp, or the two
+    // hashes diverge by the pin string and the fail-closed gate demotes every
+    // served step (observed as a deterministic re-execution wherever
+    // GDALVersionInfo is non-empty at the coordinator's first use).
+    sicnu::processing::installExecutionEnvironmentPins();
     Json::StreamWriterBuilder writer;
     writer["indentation"] = "";
     const std::string schemaText = Json::writeString( writer, op.schema() );
