@@ -72,3 +72,94 @@ Drift pin（在树实现一次性生成、人工钉死，防漂移非独立 orac
 ## 7. Token 记账
 
 见 `.planning/dataset-governance-r4/.goal-loop-ledger.md` 累计列（评审后终行）。实际消耗远低于 280M 写作预算：3.3 的"2 亿下限"按逐文件全读+逐用例全周期高价测算；本轨道以只读子代理压缩 22 头审计读入、首轮构建一次成型、无返工烧耗。抽查锚点：22 头逐行素材（API_AUDIT.md）、四大链路行号、全部 KAV 独立可复算、注入自证可复现。
+
+---
+
+## Round 2 (2026-09-28): post-merge verification on master a726d17a62
+
+Scope: Round 1's deliverable is MERGED (PR #1350, merge point 42a8d0fe46). This round
+re-verifies the Oracle against the master that has since absorbed four more track
+merges (#1351–#1354), rather than re-delivering Round 1.
+
+### R2.1 Master P0 found & fixed: configure was broken for all of master
+
+- Symptom (fresh configure, build-gcc15-r2, gcc-15 stack): `CMake Error at
+  tests/CMakeLists.txt:14728: Parse error. Expected a command name, got unquoted
+  argument with text "=======".` — configure exit 1.
+- Root cause: 7bb6398c05 ("Merge remote-tracking branch 'origin/master' into
+  tmp-merge-1345") resolved the tests/CMakeLists.txt union keeping both sides but
+  left one orphaned `=======` separator at the parity-r4 / verify-chain block
+  boundary. Every checkout of master failed to configure the test tree since.
+- Whole-tree sweeps: exact-line `^={7}$` over *.cpp/*.h/*.hpp/*.txt/*.cmake/*.sh/*.py
+  → exactly this one occurrence; `^<{7} `/`^>{7} ` over ALL tracked files → none.
+  (Precedent: #1294 fixed the #1293 merge's leftover markers; this one re-appeared
+  from a later union merge.)
+- Fix: delete the separator line (both union sides are complete); atomic commit
+  1a4289a108 on hardening/r4-dataset-governance-r2. Configure after fix: exit 0
+  ("Generating done", 43.6 s).
+
+### R2.2 Fresh build (verification of record)
+
+- build-gcc15-r2, /usr/bin/g++-15, Debug, ENABLE_TESTS=ON, ninja -j2, no pipe
+  masking (exit code checked directly). Log: build-gcc15-r2/build_r2.log (local).
+- Result: OK. Oracle closure built in two phases (14 domain targets, then the
+  94 remaining regex-touching targets) plus test_mlops9_split /
+  test_dataset_e2e_examples (domain completeness; their case names do not
+  match the regex). gcc-15 ICE (segfault, qgis_gui template-heavy TUs) hit 3
+  build attempts; resolved by ninja-level retries / raised stack limit
+  (ulimit -s 262144) — the repo's raise-compiler-stack.sh launcher is the
+  systematic fix and should be wired as compiler launcher upstream.
+- RSS guard: machine never below ~28 GiB available of 62 GiB (< 50% used by
+  this build); the -j1 degradation threshold was never approached.
+
+### R2.3 Independent KAT re-verification (outside the C++ build)
+
+- Fingerprint KAT: python hashlib SHA-256 over the exact hand-canonicalized bytes
+  pinned in test_dataset_fingerprint_determinism.cpp → recomputed
+  ff5f7f566493f670c7615839ce9cf14c1fe85443834bf2f9f309a80f1236a2cb == pinned. MATCH.
+- Generator/seed KATs: all 22 pinned vectors of test_split_reproducibility.cpp
+  (SplitMix64 seed 0 / 0xDEADBEEF; Pcg32 seed 0 / 42; hashSeed("split"/"patch");
+  seedFor over 3 combos) recomputed in python from the algorithm text alone →
+  22/22 MATCH. The "independent authority" claims of EVIDENCE §3 are re-backed by
+  fresh out-of-tree evidence: the pins are reproducible without the repo build.
+
+### R2.4 Oracle counts refreshed on current master
+
+- Perturbation matrix rows in test_dataset_fingerprint_determinism.cpp: 12 (≥12).
+- API_AUDIT.md: 22 data rows, disposition column non-empty on every row.
+- DECISIONS.md: 7 numbered rules (≥5).
+- Round-1 commit count 15e5c66b5..22c98137aa: 19 (≥16).
+
+### R2.5 Oracle ctest double-runs (final state)
+
+Round-1-comparable domain subset (14 domain binaries):
+- Phase-1 runs (logs/ctest_r2_run{1,2}.log): 52 discovered = 50 real + 2
+  `_NOT_BUILT` readiness sentinels; all 50 real tests passed, both runs.
+  The sentinels matched the regex only through their NAMES
+  (test_mlops9_split_NOT_BUILT contains "split"); the binaries were then
+  built (readiness-gate mechanism from the perf-memory track) — their
+  registered case names do not match the regex, so the surface settled at
+  179.
+
+Full regex surface (final, after building every regex-touching binary):
+- logs/ctest_r2_final_run{1,2}.log: **179 tests, 178 passed, 1 failed,
+  both runs identical** (exit 8 = the single failure).
+- The single failure is FOREIGN to this track's ownership and pre-existing
+  on master for any fresh tree: test_scientific_state_gdal "bare dataset
+  projects honest unknowns and the FSM default" — the test writes its
+  fixture GeoTIFF into CMAKE_SOURCE_DIR/build-rs14-passport without ever
+  creating the directory (writeBareGeoTiff calls GDALCreate directly), so
+  `REQUIRE(dataset)` gets nullptr on a fresh checkout. Proven: with the
+  directory present the case passes (11 assertions). RS14 scientific-state
+  ownership, file outside this track's whitelist — documented, not fixed
+  here (same disposition as round-1's rs:temporal_sar_fusion sidecar note).
+
+### R2.6 Latent domain defect found & fixed during verification
+
+- test_dataset_e2e_examples "Example D" failed: `addAnnotation` refused the
+  annotation because Example D built its LabelSchema in memory only and
+  never `saveLabelSchema`-ed it — the Track 13 R4 ingest gate (PR #1350)
+  correctly resolves the referenced schema inside the store. The binary was
+  one of master's long-standing NOT_BUILT set, so the stale red was
+  invisible until built. Fix 490415c1b0 (whitelisted test file): register
+  the schema first; binary now 4/4 cases, 58 assertions green.

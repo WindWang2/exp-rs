@@ -60,3 +60,22 @@
 - 全新构建目录 `build-gcc15`：`cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON -DENABLE_LOCAL_BUILD_SHORTCUTS=ON -DCMAKE_{C,CXX}_COMPILER=/usr/bin/{gcc,g++}-15`（gcc-15 栈；默认 gcc 16.2 未验证，按既往轨道教训直接用 gcc-15；**不走 raise-compiler-stack.sh**——既往教训：该脚本吞编译失败留陈旧 .o）。
 - 资源红线：`ninja -j2`、`CTEST_PARALLEL_LEVEL=1`；RSS>70%（62Gi 总量 → 阈值 ≈43Gi）降 -j1。
 - 测试框架：Catch2（`catch2/catch_test_macros.hpp`），注册宏 `sicnu_add_test`（tests/CMakeLists.txt）。
+
+---
+
+## Round 2 baseline addendum (2026-09-28, post-merge verification round)
+
+- origin/master实测: a726d17a62（#1354 顶）。Round 1 载体 PR #1350 已 MERGE（合并点 42a8d0fe46）。
+- 白名单域漂移（42a8d0fe46..a726d17a62）: src/dataset、src/data **0 文件**；tests/ 仅
+  tests/test_data_manager_reap.cpp（他轨道，不在 oracle 正则内）→ 实现核心无漂移。
+- 在途 PR: 仅 #1365 (r5-persistence-consistency)，触碰 tests/test_d19_benchmark.cpp，
+  与本轨道改动面不相交。
+- 遗留处置复核（在树证据）: 独立 KAT 已入库 —— tests/test_dataset_fingerprint_determinism.cpp
+  (hand-canonicalized SHA-256 KAV)、tests/test_split_reproducibility.cpp (SplitMix64 公开参考
+  向量 + Pcg32 钉死向量)；drift-pin 与独立权威已在 EVIDENCE §3 分开陈述；P2-9 WHOLE_ARCHIVE
+  为已申报临时停gap（上游 src/agent PUBLIC-link = E5，白名单外）。
+- **master P0（本轮发现并修复）**: tests/CMakeLists.txt:14728 残留 `=======`
+  （引入者 7bb6398c05，tmp-merge-1345 union 合并）→ master 全员 configure 失败。
+  修复提交 1a4289a108（本分支）。全树扫描无第二处。
+- 构建基线: 全新目录 build-gcc15-r2，/usr/bin/g++-15，Debug，ENABLE_TESTS=ON，
+  ninja -j2 / ctest -j1（沿用 Round 1 配方；系统默认 gcc 16.2.1 有 ICE 前科，不采用）。

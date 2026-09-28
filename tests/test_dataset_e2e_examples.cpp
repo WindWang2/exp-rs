@@ -443,6 +443,11 @@ TEST_CASE( "Example D — segmentation chain with polygon labels and QA",
     }();
     REQUIRE( schema.validate().has_value() );
 
+    // The annotation ingest gate (Track 13 R4) resolves the referenced
+    // schema INSIDE the store; an unregistered schema is refused at ingest,
+    // so the example must persist its schema before annotating.
+    REQUIRE( scenario.datasets.saveLabelSchema( schema ).has_value() );
+
     // Polygon samples as segmentation labels.
     SampleRecord polygon;
     polygon.setSampleId( SampleId::generate().toString() );
