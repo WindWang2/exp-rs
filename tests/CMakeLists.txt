@@ -94,6 +94,11 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    # sicnu_agent's run-summary/verification seam references agent_loop
+    # symbols (sicnu_agent_loop is a static lib nobody links transitively).
+    # WHOLE_ARCHIVE beats the linker's archive-ordering discard (CMake
+    # orders the .a before the .so, where its objects look unneeded).
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -684,6 +689,10 @@ target_link_libraries(test_tool_call_dispatcher PRIVATE
   sicnu_task_center
   sicnu_workflow_runtime
   sicnu_operators
+  # sicnu_agent.so arrives transitively; its verification seam needs the
+  # agent_loop symbols resolved at final link time. WHOLE_ARCHIVE beats the
+  # linker's archive-ordering discard (CMake orders the .a before the .so).
+  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
 )
 sicnu_link_jsoncpp(test_tool_call_dispatcher)
 target_include_directories(test_tool_call_dispatcher PRIVATE
@@ -2845,6 +2854,8 @@ target_link_libraries(test_output_verifier PRIVATE
   Qt6::Core
   qgis_core
   sicnu_agent
+  # sicnu_agent's verification seam resolves agent_loop symbols at final link.
+  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
   GDAL::GDAL
 )
 target_include_directories(test_output_verifier PRIVATE
@@ -7971,7 +7982,12 @@ sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
- sicnu_agent_loop)
+  # sicnu_agent's verification seam resolves agent_loop symbols at final
+  # link; WHOLE_ARCHIVE beats archive-ordering discard.
+  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+)
+# R4 WP-G: the corpus-driven SSE cases consume jsoncpp (adversarial_corpus.h).
+sicnu_link_jsoncpp(test_llm_streaming_client)
 
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
@@ -10149,6 +10165,32 @@ target_link_libraries(test_plugin_ui_schema_host PRIVATE sicnu_plugins_framework
 # Error taxonomy (Phase 12) and canonical tool manifest/taxonomy (Phases 1/2).
 sicnu_add_test(test_harness_error)
 sicnu_link_jsoncpp(test_harness_error)
+
+# — Track 8 R4 WP-A: model-authored plan layer of the LLM failure matrix —
+# adversarial pins + new contracts (type confusion, duplicate outputs,
+# step bound). See .planning/agent-harness-r4/PLAN.md.
+sicnu_add_test(test_harness_adversarial_matrix)
+sicnu_link_jsoncpp(test_harness_adversarial_matrix)
+
+# — Track 8 R4 WP-B/WP-C/WP-D/WP-E: adversarial hardening lanes —
+# verifier robustness, ledger completeness, grounding/evidence oracle,
+# session-checkpoint recovery pressure. See .planning/agent-harness-r4/PLAN.md.
+sicnu_add_test(test_verifier_robustness_r4)
+sicnu_link_jsoncpp(test_verifier_robustness_r4)
+
+sicnu_add_test(test_context_ledger_completeness_r4)
+sicnu_link_jsoncpp(test_context_ledger_completeness_r4)
+
+sicnu_add_test(test_grounding_evidence_r4)
+sicnu_link_jsoncpp(test_grounding_evidence_r4)
+
+sicnu_add_test(test_runloop_recovery_r4)
+sicnu_link_jsoncpp(test_runloop_recovery_r4)
+
+# — Track 8 R4 WP-F: boundary matrix over harness tool entry points + the
+# error taxonomy envelope. See .planning/agent-harness-r4/PLAN.md.
+sicnu_add_test(test_harness_boundaries_r4)
+sicnu_link_jsoncpp(test_harness_boundaries_r4)
 
 
 # — Scientific Workflow Compiler 10.0 (ADR 0149) —

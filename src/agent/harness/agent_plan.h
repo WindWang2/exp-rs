@@ -37,6 +37,15 @@ namespace sicnu::agent::harness {
 
 inline constexpr const char *kAgentPlanSchemaVersion = "2.0";
 
+/// Bounded plan: a model-authored plan beyond this many steps is a typed
+/// INVALID_PLAN rejection before validation walks it (drift anchor for
+/// tests/docs; same discipline as HarnessSessionStore::kMaxDocumentBytes).
+inline constexpr int kMaxPlanSteps = 4096;
+/// Bounded plan document: the serialized plan may not exceed this many bytes
+/// (drift anchor for tests/docs; same discipline as
+/// HarnessSessionStore::kMaxDocumentBytes).
+inline constexpr long long kMaxPlanDocumentBytes = 4LL * 1024 * 1024;
+
 /// Closed intent vocabulary driving scientific preflight rule packs.
 /// "" (empty) means a custom plan with no intent-specific preflight.
 bool isKnownIntent( const std::string &intent );

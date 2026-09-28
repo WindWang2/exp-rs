@@ -529,3 +529,6 @@ data/labs/_tmp/
 !.planning/r5-runtime-lifecycle-teardown/
 .planning/r5-runtime-lifecycle-teardown/*
 !.planning/r5-runtime-lifecycle-teardown/*.md
+
+# Track 8 R4 planning artifacts
+!.planning/agent-harness-r4/

@@ -1326,3 +1326,119 @@ TEST_CASE( "commit refusal downgrades without touching the rollback path",
   CHECK( manager.asset( assetId ).has_value() );
   CHECK( QFileInfo::exists( outPath ) );
 }
+
+// — Track 8 R4 WP-A: the dispatch lane of the LLM failure matrix ——————
+// Failure classes 6 (missing tool parameters) and 7 (hallucinated tool),
+// pinned against the machine-readable validateCall contract — the same
+// refusal the copilot dock and the MCP boundary surface to the agent.
+
+TEST_CASE( "R4 failure matrix — a hallucinated tool name is refused by the "
+           "registry whitelist, observably", "[processing][tool_call_dispatcher][r4][hallucination]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+  FakeDispatcherHarness harness;
+
+  const Json::Value envelope =
+    objectEnvelope( "rs:fabricate_revenue", "parameters", Json::Value( Json::objectValue ) );
+
+  // Classification: not a tool this platform owns.
+  CHECK( harness.dispatcher.classify( envelope ) == ToolCallClassification::Invalid );
+  CHECK( harness.dispatcher.rejectionReason( envelope )
+             .contains( QStringLiteral( "Algorithm not registered: rs:fabricate_revenue" ) ) );
+
+  // The machine-readable record names the refusal (never a bare apology).
+  const Json::Value verdict = harness.dispatcher.validateCall( envelope );
+  CHECK_FALSE( verdict["valid"].asBool() );
+  CHECK( verdict["errors"].isArray() );
+  CHECK_FALSE( verdict["errors"].empty() );
+
+  // Submission refuses and the execution plane is never touched.
+  QString error;
+  REQUIRE_FALSE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+  REQUIRE_FALSE( error.isEmpty() );
+  CHECK( harness.sinkCalls == 0 );
+  CHECK( harness.watcherCalls == 0 );
+}
+
+TEST_CASE( "R4 failure matrix — missing required parameters are refused with "
+           "the field names", "[processing][tool_call_dispatcher][r4][params]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+
+  AlgorithmDescriptor desc;
+  PortDescriptor inputPort;
+  inputPort.name = "input";
+  inputPort.required = true;
+  desc.inputs.push_back( inputPort );
+  PortDescriptor modelPort;
+  modelPort.name = "model";
+  modelPort.required = true;
+  desc.inputs.push_back( modelPort );
+  registry.registerAdapter( std::make_shared<StubAdapter>( "stub:two_required", desc ) );
+  FakeDispatcherHarness harness;
+
+  // Both required parameters missing: EACH error names its field.
+  const Json::Value verdict =
+    harness.dispatcher.validateCall( objectEnvelope( "stub:two_required", "parameters",
+                                                     Json::Value( Json::objectValue ) ) );
+  CHECK_FALSE( verdict["valid"].asBool() );
+  REQUIRE( verdict["errors"].size() == 2 );
+  for ( const Json::Value &entry : verdict["errors"] )
+  {
+    CHECK( entry.isMember( "parameter" ) );
+    const std::string parameter = entry["parameter"].asString();
+    CHECK( ( parameter == "input" || parameter == "model" ) );
+    CHECK_FALSE( entry["message"].asString().empty() );
+  }
+
+  // The dispatcher refuses the call; the sink never sees it.
+  QString error;
+  REQUIRE_FALSE( harness.dispatcher.submit(
+    objectEnvelope( "stub:two_required", "parameters", Json::Value( Json::objectValue ) ),
+    []( const Json::Value & ) {}, &error ) );
+  REQUIRE( error.contains( QStringLiteral( "Missing required parameter" ) ) );
+  CHECK( harness.sinkCalls == 0 );
+
+  // Supplying both fields validates clean — the refusal is about the
+  // missing fields, not the call shape.
+  Json::Value params( Json::objectValue );
+  params["input"] = "/tmp/in.tif";
+  params["model"] = "models/weights.onnx";
+  const Json::Value clean = harness.dispatcher.validateCall(
+    objectEnvelope( "stub:two_required", "parameters", params ) );
+  CHECK( clean["valid"].asBool() );
+  CHECK( clean["errors"].empty() );
+}
+
+TEST_CASE( "R4 failure matrix — an unknown parameter warns but does not "
+           "reject (documented boundary)", "[processing][tool_call_dispatcher][r4][params]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+
+  AlgorithmDescriptor desc;
+  PortDescriptor inputPort;
+  inputPort.name = "input";
+  inputPort.required = true;
+  desc.inputs.push_back( inputPort );
+  registry.registerAdapter( std::make_shared<StubAdapter>( "stub:strict", desc ) );
+  FakeDispatcherHarness harness;
+
+  // UnknownParameterPolicy::Warn: an extra hallucinated field rides through
+  // with a warning — the documented boundary between the dispatcher layer
+  // and per-operator schema validation. Pinned so a silent policy change is
+  // a visible event.
+  Json::Value params( Json::objectValue );
+  params["input"] = "/tmp/in.tif";
+  params["flavor"] = "vanilla"; // not in the descriptor
+  const Json::Value verdict = harness.dispatcher.validateCall(
+    objectEnvelope( "stub:strict", "parameters", params ) );
+  CHECK( verdict["valid"].asBool() );
+  CHECK( verdict["errors"].empty() );
+
+  // Leave the process-wide registry as found (the stubs are this case's
+  // fixture, not a global side effect for later cases under --order rand).
+  registry.reset();
+}

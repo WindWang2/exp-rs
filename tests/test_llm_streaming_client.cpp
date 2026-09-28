@@ -2,6 +2,7 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "adversarial_corpus.h"
 #include "agent/llm_config_manager.h"
 #include "agent/llm_streaming_client.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -426,4 +427,237 @@ TEST_CASE( "LlmConfigManager falls back to QSettings when the secure store is un
   manager.updateProfiles( edited );
   CHECK( settingsHoldPlaintextKey() );
   CHECK( store->writes == 0 );
+// — Track 8 R4 WP-A: the SSE lane of the LLM failure matrix ————————
+// The client is the ONE production seam that consumes raw model output.
+// #701 made it refuse truncated/unparseable tool calls, but the refusal was
+// a qWarning only: the session and the journal cannot account for a drop
+// they cannot observe. The R4 contract: every refusal emits the typed
+// `malformedToolCall` signal ({reason, ...}) — observability, not silence.
+
+namespace {
+
+/// Records the malformed-tool-call refusals of one client.
+struct MalformedRecorder
+{
+    QList<QJsonObject> refusals;
+    LlmStreamingClient &client;
+
+    explicit MalformedRecorder( LlmStreamingClient &target ) : client( target )
+    {
+        QObject::connect( &client, &LlmStreamingClient::malformedToolCall,
+                          [ this ]( const QJsonObject &detail ) { refusals.append( detail ); } );
+    }
+
+    bool hasReason( const QString &reason ) const
+    {
+        for ( const QJsonObject &detail : refusals )
+            if ( detail[QStringLiteral( "reason" )].toString() == reason )
+                return true;
+        return false;
+    }
+};
+
+} // namespace
+
+TEST_CASE( "LlmStreamingClient reports a length-truncated tool call as "
+           "malformed, observably", "[agent][client][r4]" )
+{
+    ensureQtApp();
+    LlmStreamingClient client;
+    bool toolCallEmitted = false;
+    QObject::connect( &client, &LlmStreamingClient::toolCallParsed,
+                      [&]( const QJsonObject & ) { toolCallEmitted = true; } );
+    MalformedRecorder malformed( client );
+
+    // The name arrives, then the stream hits the token limit before ANY
+    // argument fragment: a fabricated zero-argument call would execute the
+    // tool with invented defaults.
+    client.parseSseLine( QStringLiteral(
+        "data: {\"choices\": [{\"finish_reason\": \"length\"}]}" ) );
+    client.parseSseLine( QStringLiteral(
+        "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"call_9\", "
+        "\"function\": {\"name\": \"rs_change_difference\"}}]}}]}" ) );
+    client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+    CHECK_FALSE( toolCallEmitted );
+    REQUIRE( malformed.hasReason( QStringLiteral( "truncated_arguments" ) ) );
+    // The refusal carries what the session needs to re-prompt honestly.
+    bool sawDetail = false;
+    for ( const QJsonObject &detail : malformed.refusals )
+    {
+        if ( detail[QStringLiteral( "reason" )].toString() != QStringLiteral( "truncated_arguments" ) )
+            continue;
+        sawDetail = true;
+        CHECK( detail[QStringLiteral( "name" )].toString() == QStringLiteral( "rs_change_difference" ) );
+        CHECK( detail[QStringLiteral( "finish_reason" )].toString() == QStringLiteral( "length" ) );
+    }
+    CHECK( sawDetail );
+}
+
+TEST_CASE( "LlmStreamingClient reports unparseable streamed arguments as "
+           "malformed with the byte size", "[agent][client][r4]" )
+{
+    ensureQtApp();
+    LlmStreamingClient client;
+    bool toolCallEmitted = false;
+    QObject::connect( &client, &LlmStreamingClient::toolCallParsed,
+                      [&]( const QJsonObject & ) { toolCallEmitted = true; } );
+    MalformedRecorder malformed( client );
+
+    // "Partial JSON": the stream ends cleanly but the accumulated arguments
+    // are half of a document — the model rambled past its own syntax.
+    client.parseSseLine( QStringLiteral(
+        "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c1\", "
+        "\"function\": {\"name\": \"harness_plan\", \"arguments\": \"{\\\"plan\\\": {\\\"steps\\\": [\"}}]}}]}" ) );
+    client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+    CHECK_FALSE( toolCallEmitted );
+    CHECK( malformed.hasReason( QStringLiteral( "unparseable_arguments" ) ) );
+    for ( const QJsonObject &detail : malformed.refusals )
+    {
+        if ( detail[QStringLiteral( "reason" )].toString() != QStringLiteral( "unparseable_arguments" ) )
+            continue;
+        CHECK( detail[QStringLiteral( "size" )].toInt() > 0 );
+    }
+}
+
+TEST_CASE( "LlmStreamingClient reports a nameless tool call as malformed "
+           "instead of skipping it silently", "[agent][client][r4]" )
+{
+    ensureQtApp();
+    LlmStreamingClient client;
+    bool toolCallEmitted = false;
+    QObject::connect( &client, &LlmStreamingClient::toolCallParsed,
+                      [&]( const QJsonObject & ) { toolCallEmitted = true; } );
+    MalformedRecorder malformed( client );
+
+    // An id arrived, the function name never did. Before R4 this row simply
+    // vanished; the provider contract (every tool call has a name) makes it
+    // a malformed call.
+    client.parseSseLine( QStringLiteral(
+        "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"call_ghost\"}]}}]}" ) );
+    client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+    CHECK_FALSE( toolCallEmitted );
+    CHECK( malformed.hasReason( QStringLiteral( "missing_name" ) ) );
+}
+
+TEST_CASE( "LlmStreamingClient refuses an oversized argument accumulation "
+           "before parsing it", "[agent][client][r4][bounded]" )
+{
+    ensureQtApp();
+    LlmStreamingClient client;
+    bool toolCallEmitted = false;
+    QObject::connect( &client, &LlmStreamingClient::toolCallParsed,
+                      [&]( const QJsonObject & ) { toolCallEmitted = true; } );
+    MalformedRecorder malformed( client );
+
+    // Stream syntactically VALID fragments past the accumulation bound.
+    // The refusal is about SIZE, not syntax: a hostile (or runaway) stream
+    // must not make the client buffer without limit, and the refusal must
+    // say so. Each fragment is a valid JSON string escape (\" for the
+    // inner quotes) so the data: line itself parses — only the accumulated
+    // arguments exceed the bound.
+    const QString pad = QString( 4096, QLatin1Char( 'p' ) );
+    client.parseSseLine( QStringLiteral(
+        "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c2\", "
+        "\"function\": {\"name\": \"bulk\", \"arguments\": \"{\"}}}]}]}" ) );
+    for ( int i = 0; i < 600; ++i ) // 600 x ~4.1 KiB > 1 MiB bound
+    {
+        client.parseSseLine( QStringLiteral(
+            "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 0, "
+            "\"function\": {\"arguments\": \"\\\"pad\\\":\\\"%1\\\"\"}}]}}]}" )
+                                 .arg( pad ) );
+    }
+    client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+    CHECK_FALSE( toolCallEmitted );
+    CHECK( malformed.hasReason( QStringLiteral( "oversized_arguments" ) ) );
+}
+
+TEST_CASE( "LlmStreamingClient refuses a stream that mints unlimited "
+           "tool-call indices", "[agent][client][r4][bounded]" )
+{
+  ensureQtApp();
+  LlmStreamingClient client;
+  QList<QJsonObject> refusals;
+  QObject::connect( &client, &LlmStreamingClient::malformedToolCall,
+                    [&]( const QJsonObject &detail ) { refusals.append( detail ); } );
+
+  // A hostile stream sending {"index":N} for N = 0..999: each distinct
+  // index would otherwise allocate an accumulator entry forever.
+  for ( int i = 0; i < 1000; ++i )
+  {
+    client.parseSseLine( QStringLiteral(
+        "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": %1, "
+        "\"function\": {\"name\": \"tool_%1\", \"arguments\": \"{}\"}}]}}]}" ).arg( i ) );
+  }
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+  bool sawBound = false;
+  for ( const QJsonObject &detail : refusals )
+    if ( detail[QStringLiteral( "reason" )].toString() ==
+         QStringLiteral( "too_many_tool_calls" ) )
+      sawBound = true;
+  CHECK( sawBound );
+}
+
+TEST_CASE( "LlmStreamingClient refuses an oversized data line as malformed",
+           "[agent][client][r4][bounded]" )
+{
+    ensureQtApp();
+    LlmStreamingClient client;
+    MalformedRecorder malformed( client );
+
+    // A single SSE line beyond the line bound: dropped with a typed refusal
+    // (the transport cannot buffer a hostile stream without limit).
+    const QString hugePayload = QStringLiteral( "x" ).repeated( 9 * 1024 * 1024 );
+    client.parseSseLine( QStringLiteral( "data: " ) + hugePayload );
+
+    CHECK( malformed.refusals.size() >= 1 );
+    CHECK( malformed.hasReason( QStringLiteral( "oversized_line" ) ) );
+}
+
+// — WP-G: corpus-driven SSE cases (same single sample source as the
+// plan-layer matrix; load schema-validates the corpus). ————————————————
+
+TEST_CASE( "corpus SSE samples behave exactly as their recorded contract "
+           "says", "[agent][client][r4][corpus]" )
+{
+  ensureQtApp();
+  sicnu::testing::AdversarialCorpus corpus;
+  std::string error;
+  REQUIRE( sicnu::testing::AdversarialCorpus::load(
+    sicnu::testing::adversarialCorpusPath(), corpus, &error ) );
+
+  const auto samples = corpus.forSeam( "llm_streaming.parse" );
+  REQUIRE_FALSE( samples.empty() );
+  for ( const sicnu::testing::AdversarialSample &sample : samples )
+  {
+    INFO( "corpus sample: " << sample.id );
+    LlmStreamingClient client;
+    bool toolCallEmitted = false;
+    QObject::connect( &client, &LlmStreamingClient::toolCallParsed,
+                      [&]( const QJsonObject & ) { toolCallEmitted = true; } );
+    QList<QJsonObject> refusals;
+    QObject::connect( &client, &LlmStreamingClient::malformedToolCall,
+                      [&]( const QJsonObject &detail ) { refusals.append( detail ); } );
+
+    const Json::Value &lines = sample.payload["lines"];
+    REQUIRE( lines.isArray() );
+    for ( const Json::Value &line : lines )
+      client.parseSseLine( QString::fromStdString( line.asString() ) );
+
+    const bool expectedEmitted = sample.expected["tool_call_emitted"].asBool();
+    CHECK( toolCallEmitted == expectedEmitted );
+    if ( sample.expected.isMember( "reason" ) )
+    {
+      const QString reason = QString::fromStdString( sample.expected["reason"].asString() );
+      bool found = false;
+      for ( const QJsonObject &detail : refusals )
+        if ( detail[QStringLiteral( "reason" )].toString() == reason )
+          found = true;
+      CHECK( found );
+    }
+  }
 }

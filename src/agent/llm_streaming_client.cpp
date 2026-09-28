@@ -139,6 +139,21 @@ void LlmStreamingClient::onReadyRead()
 
   m_buffer.append( m_currentReply->readAll() );
 
+  // R4 (bounded streaming): the unterminated tail of m_buffer is exactly
+  // where a hostile newline-free stream would grow memory without limit.
+  // Bound it HERE, before any line can be assembled — the parseSseLine
+  // bound alone is too late because the bytes are already buffered.
+  if ( m_buffer.size() > kMaxSseLineChars )
+  {
+    QJsonObject detail;
+    detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_line" );
+    detail[QStringLiteral( "size" )] = static_cast<int>( m_buffer.size() );
+    emit malformedToolCall( detail );
+    m_buffer.clear();
+    cancel(); // stop pulling from the reply; the caller sees the refusal
+    return;
+  }
+
   while ( true )
   {
     int newlinePos = m_buffer.indexOf( '\n' );
@@ -158,6 +173,17 @@ void LlmStreamingClient::onReadyRead()
 
 void LlmStreamingClient::parseSseLine( const QString &line )
 {
+  if ( line.size() > kMaxSseLineChars )
+  {
+    // A line beyond the bound is refused unexamined: the transport cannot
+    // buffer a hostile stream without limit. Emitted, not swallowed.
+    QJsonObject detail;
+    detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_line" );
+    detail[QStringLiteral( "size" )] = line.size();
+    emit malformedToolCall( detail );
+    return;
+  }
+
   if ( !line.startsWith( QStringLiteral( "data:" ) ) )
     return;
 
@@ -219,6 +245,18 @@ void LlmStreamingClient::parseSseLine( const QString &line )
     {
       QJsonObject tcObj = tcVal.toObject();
       int index = tcObj.contains( QStringLiteral( "index" ) ) ? tcObj[QStringLiteral( "index" )].toInt( 0 ) : 0;
+      // R4 (bounded accumulation): a hostile stream can mint unlimited
+      // distinct indices ("index":N for N = 0..10M); each would otherwise
+      // allocate an accumulator entry forever. Refuse past the bound.
+      if ( !m_toolCalls.contains( index ) &&
+           static_cast<int>( m_toolCalls.size() ) >= kMaxToolCallIndices )
+      {
+        QJsonObject detail;
+        detail[QStringLiteral( "reason" )] = QStringLiteral( "too_many_tool_calls" );
+        detail[QStringLiteral( "bound" )] = kMaxToolCallIndices;
+        emit malformedToolCall( detail );
+        continue;
+      }
       auto &accu = m_toolCalls[index];
 
       if ( tcObj.contains( QStringLiteral( "id" ) ) && !tcObj[QStringLiteral( "id" )].toString().isEmpty() )
@@ -235,7 +273,14 @@ void LlmStreamingClient::parseSseLine( const QString &line )
         }
         if ( funcObj.contains( QStringLiteral( "arguments" ) ) && funcObj[QStringLiteral( "arguments" )].isString() )
         {
-          accu.arguments += funcObj[QStringLiteral( "arguments" )].toString();
+          // Bound the accumulation: once a call crosses the argument bound,
+          // further fragments are refused at the source instead of buffered.
+          if ( !accu.oversized )
+          {
+            accu.arguments += funcObj[QStringLiteral( "arguments" )].toString();
+            if ( accu.arguments.size() > kMaxToolCallArgumentChars )
+              accu.oversized = true;
+          }
         }
       }
     }
@@ -250,8 +295,28 @@ void LlmStreamingClient::emitParsedToolCallOnce()
   for ( const auto &pair : m_toolCalls )
   {
     const ToolCallAccumulator &accu = pair.second;
-    if ( accu.name.isEmpty() )
+
+    // R4: every refusal below is OBSERVABLE (malformedToolCall), not just a
+    // log line — the session can re-prompt or account only for what it can
+    // see. Order: size refusals first, then identity, then arguments.
+    if ( accu.oversized )
+    {
+      QJsonObject detail;
+      detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_arguments" );
+      if ( !accu.name.isEmpty() )
+        detail[QStringLiteral( "name" )] = accu.name;
+      detail[QStringLiteral( "size" )] = accu.arguments.size();
+      emit malformedToolCall( detail );
       continue;
+    }
+    if ( accu.name.isEmpty() )
+    {
+      QJsonObject detail;
+      detail[QStringLiteral( "reason" )] = QStringLiteral( "missing_name" );
+      detail[QStringLiteral( "id" )] = accu.id;
+      emit malformedToolCall( detail );
+      continue;
+    }
 
     QJsonObject funcObj;
     funcObj[QStringLiteral( "name" )] = accu.name;
@@ -266,6 +331,11 @@ void LlmStreamingClient::emitParsedToolCallOnce()
         // zero-argument call would execute the tool with wrong arguments.
         qWarning() << "[llm] dropping tool call" << accu.name
                    << "(finish_reason=length cut the call before any arguments)";
+        QJsonObject detail;
+        detail[QStringLiteral( "reason" )] = QStringLiteral( "truncated_arguments" );
+        detail[QStringLiteral( "name" )] = accu.name;
+        detail[QStringLiteral( "finish_reason" )] = m_lastFinishReason;
+        emit malformedToolCall( detail );
         continue;
       }
       // A tool call with NO arguments is legitimate on a clean finish —
@@ -305,11 +375,17 @@ void LlmStreamingClient::emitParsedToolCallOnce()
     // garbage raw string that exploded downstream schema validation — and
     // worse, an EMPTY arguments string emitted a call that looked complete.
     // Refuse to emit an unparsed tool call: the model is re-prompted with
-    // the plain-text remainder instead of executing a broken call.
+    // the plain-text remainder instead of executing a broken call. R4: the
+    // refusal is now a typed signal, so the drop is accountable.
     if ( !argsResolved )
     {
       qWarning() << "[llm] dropping truncated tool call" << accu.name
                  << "(arguments did not parse as a JSON object; stream ended mid-call)";
+      QJsonObject detail;
+      detail[QStringLiteral( "reason" )] = QStringLiteral( "unparseable_arguments" );
+      detail[QStringLiteral( "name" )] = accu.name;
+      detail[QStringLiteral( "size" )] = accu.arguments.size();
+      emit malformedToolCall( detail );
       continue;
     }
 

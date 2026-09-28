@@ -249,6 +249,27 @@ ArtifactVerification verifyArtifact( const std::string &path,
       if ( expectations.expectedExtent.isObject() &&
            expectations.expectedExtent.isMember( "xmin" ) )
       {
+        // R4 (type confusion): the declared AOI rectangle is caller data.
+        // A non-numeric member is a structural lie — report it as an honest
+        // failing check instead of throwing on asDouble().
+        auto numericMember = []( const Json::Value &doc, const char *key ) {
+          return doc.isMember( key ) && doc[key].isNumeric();
+        };
+        if ( !numericMember( expectations.expectedExtent, "xmin" ) ||
+             !numericMember( expectations.expectedExtent, "ymin" ) ||
+             !numericMember( expectations.expectedExtent, "xmax" ) ||
+             !numericMember( expectations.expectedExtent, "ymax" ) )
+        {
+          VerificationCheck check;
+          check.check = "extent_covers_aoi";
+          check.passed = false;
+          check.severity = "error";
+          check.code = error_codes::kOutputInvalid;
+          check.details["reason"] = "expected_extent members must be numeric";
+          result.checks.push_back( std::move( check ) );
+          result.verdict = verdictFromChecks( result.checks );
+          return result;
+        }
         double gt[6] = { 0, 1, 0, 0, 0, 1 };
         const bool hasTransform = ds->GetGeoTransform( gt ) == CE_None;
         const bool extentUsable = hasTransform && gt[2] == 0 && gt[4] == 0;
@@ -348,10 +369,18 @@ ArtifactVerification verifyArtifact( const std::string &path,
             bool allKnown = true;
             for ( double value : unique )
             {
+              // R4 (type confusion): a non-numeric member in the declared
+              // class domain is a structural lie by the caller, not a
+              // runtime fault — it can never match a probed value, and it
+              // must not throw (asDouble on a string/object member does).
+              // Numeric members compare on the documented tolerance.
               const bool found = std::any_of(
                 expectations.classValues.begin(), expectations.classValues.end(),
-                [ value ]( const Json::Value &allowed )
-                { return std::fabs( allowed.asDouble() - value ) < 1e-6; } );
+                [ value ]( const Json::Value &allowed ) {
+                  if ( !allowed.isNumeric() )
+                    return false;
+                  return std::fabs( allowed.asDouble() - value ) < 1e-6;
+                } );
               if ( !found )
               {
                 Json::Value details;
