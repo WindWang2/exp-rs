@@ -233,6 +233,21 @@ static QString outputPathFromResult( const Json::Value &result )
 
 TaskCenter& TaskCenter::instance()
 {
+    // Destruction-order anchors (#1357 exit-phase family): TaskCenter's
+    // DESTRUCTOR calls back into process-wide singletons — shutdown() calls
+    // JobEngine::instance().shutdown(), and shutdownSharedWorkerPool()
+    // records into ExecutionTelemetry::instance(). Static destruction runs
+    // in reverse-construction order, so anything the destructor touches
+    // must be constructed BEFORE this singleton; otherwise exit() calls
+    // into already-destroyed objects (the exit-time heap corruption
+    // family). Both anchors are cheap: JobEngine() is defaulted (workers
+    // spawn on submit), and the telemetry object is created by the first
+    // dispatch anyway.
+    static auto& engineAnchor = sicnu::jobs::JobEngine::instance();
+    static auto& telemetryAnchor =
+        sicnu::runtime::observability::ExecutionTelemetry::instance();
+    Q_UNUSED( engineAnchor );
+    Q_UNUSED( telemetryAnchor );
     static TaskCenter s_instance;
     return s_instance;
 }
