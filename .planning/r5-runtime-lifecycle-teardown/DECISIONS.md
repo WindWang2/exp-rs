@@ -45,8 +45,10 @@ Comparison run (identical driver, only the coordinator TU differs):
 
 | Build | TSan result |
 |---|---|
-| **master coordinator** (a726d17a6) | 11 reports incl. **3 heap-use-after-free** at the exact statically-predicted unprotected path: `onNodeFinished` hash-loop cancel-flag read (`:964`), `~BusyGuard` affinityBusy decrement (`:924`), `invokeOnCoordinatorThread` (`:147`) — plus 3 QWaitCondition teardown races and Qt-copy noise |
+| **master coordinator** (a726d17a6) | 11 reports incl. **3 heap-use-after-free** at the exact statically-predicted unprotected path: `invokeOnCoordinatorThread`/`aborted()` hash-loop cancel-flag read (`master:147`), `~BusyGuard` affinityBusy decrement (`master:924`), the frame-tail cancel-branch state write in `onNodeFinished` (`master:964`) — plus 3 QWaitCondition teardown races and Qt-copy noise |
 | **fixed coordinator** (43650f0a9) | 0 heap-use-after-free; 0 races involving the m_stateMutex/shared_ptr protocol; remaining reports are the same pre-existing QWaitCondition teardown races (present identically on master — the `pool.clear()+waitForDone()` drain is unchanged Track-13 code) and Qt-copy noise |
+
+The driver itself ships under `.planning/r5-runtime-lifecycle-teardown/tsan_coordinator_driver.cpp` so the comparison is reproducible.
 
 Caveat recorded honestly: a TSan runtime-internal `CHECK failed: sanitizer_thread_registry.cpp` aborts some runs late (Qt worker-thread churn vs TSan thread registry — a TSan/Qt interaction, not a data race); runs with the 2-3 QWaitCondition reports + the joinable-driver fix still demonstrate the UAF delta deterministically. Combined with the deterministic regressions (T1-T3) and the ASan-clean destroy runs, the #1358 acceptance "TSan shows the race fixed" is closed.
 
