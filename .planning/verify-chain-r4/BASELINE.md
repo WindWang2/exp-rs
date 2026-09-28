@@ -139,16 +139,16 @@
 
 ## R3.1 实测基线（2026-09-29）
 
-- origin/master = `cf2d41647e`（"fix(tests): restore closing brace lost in the #1377 union splice"）；R2 基线 `a726d17a62` 以来 **+713 提交**。R2 分支（PR #1370）已 MERGED。
+- origin/master = `cf2d41647e`（"fix(tests): restore closing brace lost in the #1377 union splice"）；R2 基线 `a726d17a62` 以来 **+129 提交**（自 R2 合并 e338398748 起为 +91；本地 master eac910dff9 落后 origin 713 提交，与本轨分析窗口无关）。R2 分支（PR #1370）已 MERGED。
 - 本轮分支：`hardening/r4-verify-chain-r3`（基于 cf2d41647e，无 merge 需求——R2 已在 master 祖先中）。
 - 注意 master HEAD 本身即一次 union splice 断裂修复（#1377），冲突残留陷阱在本仓持续复发（本轨 R2 修过一例、Track 11 修过一例）。
 
-## R3.2 漂移审计（713 提交逐面实测）
+## R3.2 漂移审计（129 提交逐面实测）
 
 | 面 | 实测 | 对本轨的含义 |
 |---|---|---|
 | 六模块 src（verify/verify_adapters/grader/preflight/suitability/science_context） | 仅 1 提交（94757d67bd sicnu_grader PIC 修复，构建设置无 API 变化） | R1 的 72 头 API_AUDIT、13 产出点、失效接缝清单**继续有效**（头文件计数复核 72 = 11+5+8+12+21+15 不变） |
-| R2 的 29 处 TEST_PREFIX 收口 | 全部健在（grader/suitability/preflight/verifier/science_context_broker 抽查 + 源码级全枚举复核） | R2 修复未被 713 提交冲掉 |
+| R2 的 29 处 TEST_PREFIX 收口 | 全部健在（grader/suitability/preflight/verifier/science_context_broker 抽查 + 源码级全枚举复核） | R2 修复未被 129 提交冲掉 |
 | tests/CMakeLists.txt | +352/-137 行；21 个新增测试文件 | **R2 盲区缺陷类复发**：Track 8（agent-harness R4）新增 7 个套件裸注册，其中 2 个二进制名匹配 D6（FORWARD）、1 个用例名撞关键词（REVERSE） |
 | 'tr' was not declared（R2 跨域披露） | 已被 i18n 轨道修复（data_manager_panel.cpp 现为 QObject::tr） | 披露项销账 |
 | r4:: 门载体 | test_operator_preflight_refusals 等五套件以 foreach 通道注册，TEST_PREFIX r4:: 健在 | r4:: 门保留；同时暴露 census FORWARD 枚举盲区（见 R3.3） |

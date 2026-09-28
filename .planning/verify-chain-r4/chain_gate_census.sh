@@ -17,11 +17,21 @@
 # name and non-keyword case names would blind BOTH v2 rules. v3 therefore:
 #   1. FORWARD is population-derived: every built discovery file whose target
 #      name matches D6 must register ALL its cases under "<target>::".
-#      This covers every registration channel that produces a discovery file.
+#      This covers every registration channel that produces a discovery file
+#      under BUILD_DIR at maxdepth 2 (today: build-root and tests/; review
+#      F8: do not claim deeper layouts).
 #   2. BUILD-GAP keeps v2's signal: every D6-matching target found in the
 #      CMakeLists enumeration must have a discovery file in the build dir
-#      (a missing file is the _NOT_BUILT signal, D-R2-5).
+#      (a missing file is the _NOT_BUILT signal, D-R2-5). Allowlisted
+#      targets are echoed so allowlist drift stays visible (review F6').
 #   3. REVERSE and the r4:: gate are unchanged from v2.
+#
+# Residual blind spot (review F9, accepted): a foreach-registered suite with
+# a D6-matching binary name that is NOT in the current build population has
+# no discovery file (FORWARD silent) and no literal name for BUILD-GAP's
+# grep — both rules stay blind until it enters a built population (e.g. a
+# full build). Closure runs (this track's criterion) accept that; full-build
+# runs close it.
 #
 # Usage: chain_gate_census.sh <build-dir>   (default: build)
 set -u
@@ -96,10 +106,14 @@ for t in $targets; do
     for f in "$BUILD_DIR"/tests/"$t"-*_tests.cmake "$BUILD_DIR"/"$t"-*_tests.cmake; do
         if [ -f "$f" ]; then disc="$f"; break; fi
     done
-    if [ -z "$disc" ] && ! allow "$t"; then
-        echo "BUILD-GAP: $t matches D6 but has no discovered cases in $BUILD_DIR (_NOT_BUILT)"
-        gap=$((gap + 1))
-        overall=1
+    if [ -z "$disc" ]; then
+        if allow "$t"; then
+            echo "BUILD-GAP: $t not built (allowlisted: exempt) — visibility line, not a failure"
+        else
+            echo "BUILD-GAP: $t matches D6 but has no discovered cases in $BUILD_DIR (_NOT_BUILT)"
+            gap=$((gap + 1))
+            overall=1
+        fi
     fi
 done
 [ "$gap" -eq 0 ] && echo "BUILD-GAP: 0 missing D6 targets"
