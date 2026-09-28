@@ -101,3 +101,38 @@
 ## 9. ctest 口径说明（Oracle 修正记录）
 
 提示词 Oracle 命令 `ctest -R "verify|grader|preflight|suitab|science_context"` 在 ctest 名上是**下界口径**：`test_verifier_*`（"verifier" 不含 "verify" 子串）与 `test_verification_*_11/12` 家族不被匹配。本轨道执行**更宽口径** `ctest -R "verif|grader|preflight|suitab|science_context|evidence"`（47 文件全集的超集），两轮全绿即同时覆盖字面 Oracle。两个口径的输出均入 EVIDENCE.md。
+
+---
+
+# R2 基线附录（2026-09-28，第二轮：漂移驱动的再收口）
+
+## R2.1 实测基线
+
+- `origin/master` 实测 SHA：**`a726d17a62`**（Merge PR #1354 r4-ci-redzone）。自 R1 基线 `15e5c66b54` 前进 **425** 提交。
+- **PR #1343（本轨 R1）已并入 master** —— R1 全部交付（locale 矩阵/失效联动/边界案/工件）已是 master 现状。
+- 本轨 worktree 沿用 `/home/kevin/projects/rs-studio/exp-rs-verify-chain-r4`，新分支 **`hardening/r4-verify-chain-r2`**，起点 `a726d17a62`。
+- 构建目录全新：`build-r2/`（gcc-15 Debug ENABLE_TESTS=ON，ninja -j2，资源纪律同 R1）。
+
+## R2.2 漂移审计（425 提交逐面实测）
+
+| 面 | 漂移 | 判定 |
+|---|---|---|
+| 六模块 src（verify/verify_adapters/grader/preflight/suitability/science_context） | **零漂移**（`git diff --stat 15e5c66b54..origin/master -- <六目录>` 为空） | R1 的 72 头 API_AUDIT、13 产出点、失效接缝清单继续有效 |
+| tests/ 正则域 | 仅 #1343 自身文件并入 + 他轨新增（test_operator_preflight_refusals 等） | 正则域测试文件 42-43 → **45**；域目标 45 → **47**（add_executable + sicnu_add_test 全集） |
+| 依赖面（白名单外 src/） | 146 文件（teaching_admin/json_util.h、runtime/gpu、workflow 等） | 由 ctest 门覆盖，不主动处置 |
+| 计数锚定复核 | 72 头（11+5+8+12+21+15）不变 | 提示词写作值与实测一致 |
+
+## R2.3 在途 PR 盘点（2026-09-28 实测）
+
+- **仅 1 个 open PR：#1365**（hardening/r5-persistence-consistency，experiment/agent-harness 域）——与本轨白名单**零文件重叠**。
+- R1 时在途的 #1334/#1335/#1336/#1337/#1339/#1340 等全部已并入或关闭。
+
+## R2.4 本轮核心增量（为什么有第二轮）
+
+1. **master 既有阻塞缺陷（本轨白名单内，实测）**：`tests/CMakeLists.txt:14728` 残留一行 merge 冲突标记 `=======`（`<<<<<<<`/`>>>>>>>` 已被解决删除，本行为漏删分隔线；全树扫描仅此一处）→ **任何人在该 master 上 configure 即 Parse error 失败**。本仓有冲突标记残留前科（8781892972 "drop conflict markers left by #1293 merge"）。修复属 tests/ 白名单，本轨处置。
+2. **重域解锁（R1 未解决项 #1 的后续）**：#1335 已并入（`3af4b83cf3` 将 sicnu_agent_loop/sicnu_agent_ops 链入 sicnu_agent；env_12 的 QTemporaryDir include 已补）→ R1 披露的 7-8 个 `_NOT_BUILT` 重域目标（test_preflight、test_preflight_check_tool、test_science_verification_10、test_lab_grader_kernels、test_output_verifier、test_verification_metamorphic_11、test_verification_numeric_reference_11、test_verification_env_12，另 test_verification_failure_11 同族）**首次具备构建条件，且全部属本轨正则域**。本轮首建 + 首跑 + 收口。
+3. **run_matrices.sh 重域补跑**（R1 记忆遗留项）：守望脚本在重域真实构建目录中补跑。
+
+## R2.5 边界声明（沿用 R1）
+
+白名单：`src/verify|verify_adapters|grader|preflight|suitability|science_context`、`tests/` 对应文件、`.planning/verify-chain-r4/`。白名单外改动一律拒绝并记账。零新功能方向（铁律同 R1）。

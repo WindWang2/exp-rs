@@ -48,7 +48,7 @@ function(sicnu_discover_tests NAME)
   set(_sat_spec "")
   cmake_parse_arguments(SDT "" "TEST_PREFIX;TEST_SPEC" "" ${ARGN})
   if(SDT_TEST_PREFIX)
-    set(_sat_prefix TEST_PREFIX ${SDT_TEST_PREFIX})
+    set(_sat_prefix TEST_PREFIX "${SDT_TEST_PREFIX}")
   endif()
   if(SDT_TEST_SPEC)
     set(_sat_spec TEST_SPEC ${SDT_TEST_SPEC})
@@ -109,7 +109,7 @@ function(sicnu_add_test NAME)
   )
   set(_sat_forward "")
   if(SAT_TEST_PREFIX)
-    list(APPEND _sat_forward TEST_PREFIX ${SAT_TEST_PREFIX})
+    list(APPEND _sat_forward TEST_PREFIX "${SAT_TEST_PREFIX}")
   endif()
   if(SAT_TEST_SPEC)
     list(APPEND _sat_forward TEST_SPEC ${SAT_TEST_SPEC})
@@ -150,6 +150,10 @@ endfunction()
 # sicnu_sdk (jsoncpp transitively) — no Qt, no QGIS — so the IPC/capability
 # contract suites build and run fast on every platform lane.
 function(sicnu_add_sdk_test NAME)
+  # Optional TEST_PREFIX (D15): forwarded so track gates can select cases by
+  # binary name (`ctest -R "test_xxx::"`) — bare English case names are not
+  # selectable by any domain gate (R2 finding, track-16).
+  cmake_parse_arguments(SDKT "" "TEST_PREFIX" "" ${ARGN})
   add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
@@ -166,7 +170,11 @@ function(sicnu_add_sdk_test NAME)
   set_target_properties(${NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   )
-  sicnu_discover_tests(${NAME})
+  if(SDKT_TEST_PREFIX)
+    sicnu_discover_tests(${NAME} TEST_PREFIX "${SDKT_TEST_PREFIX}")
+  else()
+    sicnu_discover_tests(${NAME})
+  endif()
 endfunction()
 
 # RS14-07 Parameter Studio: light study test executables. Links only
@@ -610,7 +618,7 @@ sicnu_add_test(test_atomic_algorithm_adapter)
 sicnu_add_test(test_atomic_algorithm_registry)
 sicnu_add_test(test_descriptor_outputs)
 sicnu_add_test(test_schema_validator)
-sicnu_add_test(test_preflight)
+sicnu_add_test(test_preflight TEST_PREFIX "test_preflight::")
 sicnu_add_test(test_agent_golden_workflow)
 sicnu_add_test(test_atomic_registry_contract)
 sicnu_add_test(test_catalog_size)
@@ -2843,7 +2851,7 @@ target_include_directories(test_output_verifier PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_output_verifier)
+sicnu_discover_tests(test_output_verifier TEST_PREFIX "test_output_verifier::")
 
 # Spatial Scientist 3.0 contract documents (ADR 0128) — light target, no QGIS GUI.
 add_executable(test_spatial_contracts test_spatial_contracts.cpp)
@@ -3521,7 +3529,7 @@ sicnu_add_test(test_mlops9_version_dag TIMEOUT 120)
 target_link_libraries(test_mlops9_version_dag PRIVATE Sicnu::dataset SQLite::SQLite3)
 
 # MLOps 9.0 evidence/matrix/replay/promotion over a real ExperimentStore.
-sicnu_add_test(test_mlops9_evidence TIMEOUT 300)
+sicnu_add_test(test_mlops9_evidence TEST_PREFIX "test_mlops9_evidence::" TIMEOUT 300)
 target_link_libraries(test_mlops9_evidence PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
 # RS14-06 Experiment Debugger (ADR 0174): normalized run snapshots, step
@@ -9125,7 +9133,7 @@ target_link_libraries(test_virtual_raster_preflight PRIVATE
 target_include_directories(test_virtual_raster_preflight PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_virtual_raster_preflight)
+sicnu_discover_tests(test_virtual_raster_preflight TEST_PREFIX "test_virtual_raster_preflight::")
 
 # Shared raster-grid compatibility service tests (pure structure comparisons).
 qt_add_executable(test_raster_grid_compat
@@ -10118,7 +10126,7 @@ sicnu_link_jsoncpp(test_harness_grounding)
 # Harness 4.0 evals: six deterministic RS scenarios + anti-hallucination +
 # token budgets (mission Phases 18-20).
 sicnu_add_test(test_harness_evals)
-sicnu_add_test(test_harness_evidence)
+sicnu_add_test(test_harness_evidence TEST_PREFIX "test_harness_evidence::")
 sicnu_add_test(test_harness_eval_corpus)
 sicnu_link_jsoncpp(test_harness_evals)
 
@@ -10373,7 +10381,7 @@ target_link_libraries(test_preflight_report_schema PRIVATE
   Catch2::Catch2WithMain
   sicnu_preflight
 )
-sicnu_discover_tests(test_preflight_report_schema)
+sicnu_discover_tests(test_preflight_report_schema TEST_PREFIX "test_preflight_report_schema::")
 
 # RS14-03 Scientific Repair Planner: versioned repair_plan/1.0 schema,
 # SHA-256/16 fingerprints, fail-closed envelope reader (Qt-free leaf).
@@ -10512,7 +10520,7 @@ target_link_libraries(test_grader_schema PRIVATE
   Catch2::Catch2WithMain
   sicnu_grader
 )
-sicnu_discover_tests(test_grader_schema)
+sicnu_discover_tests(test_grader_schema TEST_PREFIX "test_grader_schema::")
 
 # RS14-05 Slices B/C: matching/scoring engine, document-shape adapters and
 # report renderers (same leaf lane, no new links).
@@ -10521,21 +10529,21 @@ target_link_libraries(test_grader_engine PRIVATE
   Catch2::Catch2WithMain
   sicnu_grader
 )
-sicnu_discover_tests(test_grader_engine)
+sicnu_discover_tests(test_grader_engine TEST_PREFIX "test_grader_engine::")
 
 add_executable(test_grader_adapters test_grader_adapters.cpp)
 target_link_libraries(test_grader_adapters PRIVATE
   Catch2::Catch2WithMain
   sicnu_grader
 )
-sicnu_discover_tests(test_grader_adapters)
+sicnu_discover_tests(test_grader_adapters TEST_PREFIX "test_grader_adapters::")
 
 add_executable(test_grader_render test_grader_render.cpp)
 target_link_libraries(test_grader_render PRIVATE
   Catch2::Catch2WithMain
   sicnu_grader
 )
-sicnu_discover_tests(test_grader_render)
+sicnu_discover_tests(test_grader_render TEST_PREFIX "test_grader_render::")
 
 # LabSpec v3 runtime: checkpoint verify, hint policy, session state/store,
 # spec runtime (sicnu_lab_runtime links jsoncpp PUBLIC).
@@ -10561,7 +10569,7 @@ sicnu_link_jsoncpp(test_drift_projection_10)
 
 # Verification Platform 10.0: metamorphic invariants, reproducibility
 # replay, seed determinism, bounded CRS refusal fuzz, provenance checks.
-sicnu_add_test(test_science_verification_10)
+sicnu_add_test(test_science_verification_10 TEST_PREFIX "test_science_verification_10::")
 target_link_libraries(test_science_verification_10 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_science_verification_10)
 
@@ -11183,7 +11191,7 @@ target_link_libraries(test_lab_self_check PRIVATE sicnu_lab_self_check)
 
 # teaching-lab-platform-11: grader 2.0 kernel unit tests (independent
 # in-test arithmetic oracle over raw-GDAL-written scenes).
-sicnu_add_test(test_lab_grader_kernels TIMEOUT 300)
+sicnu_add_test(test_lab_grader_kernels TEST_PREFIX "test_lab_grader_kernels::" TIMEOUT 300)
 sicnu_link_jsoncpp(test_lab_grader_kernels)
 target_link_libraries(test_lab_grader_kernels PRIVATE GDAL::GDAL ZLIB::ZLIB)
 
@@ -12761,11 +12769,11 @@ sicnu_link_jsoncpp(test_contract_determinism_11)
 # relations with sensitivity controls, independent numeric references,
 # oracle mutation-kill discrimination, and the failure/cancel/atomic lane
 # (append-only block).
-sicnu_add_test(test_verification_metamorphic_11)
+sicnu_add_test(test_verification_metamorphic_11 TEST_PREFIX "test_verification_metamorphic_11::")
 target_link_libraries(test_verification_metamorphic_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_verification_metamorphic_11)
 
-sicnu_add_test(test_verification_numeric_reference_11)
+sicnu_add_test(test_verification_numeric_reference_11 TEST_PREFIX "test_verification_numeric_reference_11::")
 target_link_libraries(test_verification_numeric_reference_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_verification_numeric_reference_11)
 
@@ -12773,7 +12781,7 @@ sicnu_add_test(test_mutation_kill_11)
 target_link_libraries(test_mutation_kill_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_mutation_kill_11)
 
-sicnu_add_test(test_verification_failure_11)
+sicnu_add_test(test_verification_failure_11 TEST_PREFIX "test_verification_failure_11::")
 target_link_libraries(test_verification_failure_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_verification_failure_11)
 
@@ -12801,7 +12809,7 @@ sicnu_add_test(test_platform_integrity_12)
 target_link_libraries(test_platform_integrity_12 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_platform_integrity_12)
 
-sicnu_add_test(test_verification_env_12)
+sicnu_add_test(test_verification_env_12 TEST_PREFIX "test_verification_env_12::")
 target_link_libraries(test_verification_env_12 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_verification_env_12)
 
@@ -13186,7 +13194,7 @@ target_link_libraries(test_suitability_core PRIVATE
 target_include_directories(test_suitability_core PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_core)
+sicnu_discover_tests(test_suitability_core TEST_PREFIX "test_suitability_core::")
 
 qt_add_executable(test_suitability_spatial
   test_suitability_spatial.cpp
@@ -13199,7 +13207,7 @@ target_link_libraries(test_suitability_spatial PRIVATE
 target_include_directories(test_suitability_spatial PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_spatial)
+sicnu_discover_tests(test_suitability_spatial TEST_PREFIX "test_suitability_spatial::")
 
 qt_add_executable(test_suitability_spectral
   test_suitability_spectral.cpp
@@ -13212,7 +13220,7 @@ target_link_libraries(test_suitability_spectral PRIVATE
 target_include_directories(test_suitability_spectral PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_spectral)
+sicnu_discover_tests(test_suitability_spectral TEST_PREFIX "test_suitability_spectral::")
 
 qt_add_executable(test_suitability_temporal
   test_suitability_temporal.cpp
@@ -13225,7 +13233,7 @@ target_link_libraries(test_suitability_temporal PRIVATE
 target_include_directories(test_suitability_temporal PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_temporal)
+sicnu_discover_tests(test_suitability_temporal TEST_PREFIX "test_suitability_temporal::")
 
 qt_add_executable(test_suitability_labels
   test_suitability_labels.cpp
@@ -13238,7 +13246,7 @@ target_link_libraries(test_suitability_labels PRIVATE
 target_include_directories(test_suitability_labels PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_labels)
+sicnu_discover_tests(test_suitability_labels TEST_PREFIX "test_suitability_labels::")
 
 qt_add_executable(test_suitability_store_provider
   test_suitability_store_provider.cpp
@@ -13253,7 +13261,7 @@ target_link_libraries(test_suitability_store_provider PRIVATE
 target_include_directories(test_suitability_store_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_store_provider)
+sicnu_discover_tests(test_suitability_store_provider TEST_PREFIX "test_suitability_store_provider::")
 
 qt_add_executable(test_suitability_profiles
   test_suitability_profiles.cpp
@@ -13266,7 +13274,7 @@ target_link_libraries(test_suitability_profiles PRIVATE
 target_include_directories(test_suitability_profiles PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_profiles)
+sicnu_discover_tests(test_suitability_profiles TEST_PREFIX "test_suitability_profiles::")
 
 qt_add_executable(test_suitability_adversarial
   test_suitability_adversarial.cpp
@@ -13281,7 +13289,7 @@ target_link_libraries(test_suitability_adversarial PRIVATE
 target_include_directories(test_suitability_adversarial PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_adversarial)
+sicnu_discover_tests(test_suitability_adversarial TEST_PREFIX "test_suitability_adversarial::")
 
 qt_add_executable(test_suitability_uncertainty
   test_suitability_uncertainty.cpp
@@ -13294,7 +13302,7 @@ target_link_libraries(test_suitability_uncertainty PRIVATE
 target_include_directories(test_suitability_uncertainty PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_uncertainty)
+sicnu_discover_tests(test_suitability_uncertainty TEST_PREFIX "test_suitability_uncertainty::")
 
 qt_add_executable(test_suitability_teaching
   test_suitability_teaching.cpp
@@ -13307,7 +13315,7 @@ target_link_libraries(test_suitability_teaching PRIVATE
 target_include_directories(test_suitability_teaching PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_teaching)
+sicnu_discover_tests(test_suitability_teaching TEST_PREFIX "test_suitability_teaching::")
 
 # RS14 Slice H3: the suitability agent adapter lives INSIDE sicnu_suitability
 # precisely so this suite needs no qgis/agent link; the agent-side dispatch
@@ -13325,7 +13333,7 @@ target_link_libraries(test_suitability_agent_tools PRIVATE
 target_include_directories(test_suitability_agent_tools PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-sicnu_discover_tests(test_suitability_agent_tools)
+sicnu_discover_tests(test_suitability_agent_tools TEST_PREFIX "test_suitability_agent_tools::")
 # =============================================================================
 # RS14-01 Scientific Data Passport: unified scientific asset state layer.
 # Core contracts run in the jsoncpp-only lane (no Qt, no QGIS, no GDAL);
@@ -13362,7 +13370,7 @@ sicnu_add_sdk_test(test_scientific_state_review)
 target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificState)
 
 # Science Context Broker & Skill Router (Qt-free; Sicnu::ScienceContext).
-sicnu_add_sdk_test(test_science_context_broker)
+sicnu_add_sdk_test(test_science_context_broker TEST_PREFIX "test_science_context_broker::")
 target_link_libraries(test_science_context_broker PRIVATE Sicnu::ScienceContext)
 
 # Science context live-authority probes: broker + real ScientificRecipeRegistry
@@ -13381,7 +13389,7 @@ target_compile_definitions(test_science_context_live_authorities PRIVATE
 set_target_properties(test_science_context_live_authorities PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
-sicnu_discover_tests(test_science_context_live_authorities)
+sicnu_discover_tests(test_science_context_live_authorities TEST_PREFIX "test_science_context_live_authorities::")
 
 # R3 track 14 seam 2: science_context bundle → planner goal/context
 # projection (Qt-free: ScienceContext + planner + planner_live read path);

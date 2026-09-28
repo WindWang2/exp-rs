@@ -38,3 +38,31 @@ NIT-3 处置说明：`scenePassportJson` 的 pixelSize 仅取 10.0（整数可�
 - test_preflight_authority_invalidation：294 assertions / 20 cases
 - test_grader_engine：264 / 16；test_suitability_adversarial：385 / 28；test_verifier_engine：126 / 17；test_verify_adapters：225 / 9
 - run_matrices.sh：ALL MATRICES GREEN (2 rounds)
+
+---
+
+# R2 独立对抗评审（2026-09-28）
+
+评审员：独立只读 subagent（1 槽位），对象 hardening/r4-verify-chain-r2（a726d17a62 + 4 commits）。两轴（Standards/Spec）+ 红线核对。用量 2.86M tokens / 67 工具调用。
+
+## 确认为真的关键声明（评审员独立复证）
+- 冲突标记为全树唯一残留，由 merge `c747617f79` 引入（两父均无此行），两侧内容均保留且必要；master configure 必炸成立。
+- 29 处 TEST_PREFIX 机械正确；vendored Catch2 + Sicnu 包装器对 TEST_PREFIX 全透传；`^r4::` 等 6 处既有选择器零破坏；RS14-05 `^test_grader` 选择器修复后反而从 0 命中变命中。
+- F5 的 InvalidParameter 确为生产合同（param_guard 前置 InvalidArgument + io_operators.cpp:39 确定性映射）；no-partials 断言仍承重。
+- 红线：diff 7 文件全部白名单内，零 src/ 触碰。
+
+## 发现与处置
+
+| id | 级 | 轴 | 摘要 | 处置 |
+|---|---|---|---|---|
+| F1 | P1 | Spec | census 只查域二进制内部，源码级 ~189 个非域套件用例撞 D6 关键词不可见 | **事实修正 + 工具补强**：机械复算本构建人口（52 目标闭包，530 例）裸撞名 = 0（评审 189 例属未入闭包的 agent/cartography 等域套件，仅全量构建口径进入人口）；census v2 增加反向断言（任意构建口径下，D6 匹配且无 `::` 前缀的用例即 FAIL），EVIDENCE/PR 改三层口径并披露 189 例为他域卫生 |
+| F2 | P2 | Standards | 域目标枚举只覆盖 14 种注册宏中 6 种 | census v2 改 `sicnu_add_[a-z_]+\(` 通配全部宏 |
+| F3 | P2 | Spec | LEDGER R2-4/R2-5 时序矛盾（357 vs 525；"52 全前缀化" vs "50+2"） | LEDGER 拆为 R2-4a/4b/5 真实时序；措辞改为"50 前缀化 + 2 allowlist" |
+| F4 | P2 | Spec | 人口阶梯口径与"entirely escaped"措辞过强 | EVIDENCE R2.2 改三层口径（完全隐藏/偶然入选/残余 0）；suitability 90/142 基线本就偶然入选如实入档 |
+| F5 | P3 | Standards | TEST_PREFIX 链路展开未加引号（未来含空格前缀会拆参） | 4 处展开加引号（现值无空格，零风险） |
+| F6 | P3 | Standards | r4:: 计数只打印不强制 | census v2 加 `[ "$r4" -lt 1 ] && overall=1` |
+| F7 | P3 | Standards | disc glob 多行/多配置隐患 | census v2 逐文件取第一个存在文件 |
+| F8 | P3 | Spec | F5 接受集偏松（DirectoryNotFound 为死码选项） | 收紧为精确码 `CHECK(code == "InvalidParameter")`，注释写明合同变更协议 |
+| F9 | P3 | Spec | "文档化合同"表述偏强（合同仅在生产源码注释） | 措辞改"生产合同注释"（EVIDENCE/测试注释/PR 同步） |
+
+**结论：SHIP-WITH-FIXES → 全部 P1/P2/P3 已整改**（F1 以"事实修正 + census v2 反向断言"落地；非域 189 例前缀卫生披露给他域，本轨不越界代修）。整改后复验：census v2 ALL GREEN（前向 + 反向 + r4:: 强制），ctest 双轮见 R2-6。
