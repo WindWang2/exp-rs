@@ -348,10 +348,18 @@ ArtifactVerification verifyArtifact( const std::string &path,
             bool allKnown = true;
             for ( double value : unique )
             {
+              // R4 (type confusion): a non-numeric member in the declared
+              // class domain is a structural lie by the caller, not a
+              // runtime fault — it can never match a probed value, and it
+              // must not throw (asDouble on a string/object member does).
+              // Numeric members compare on the documented tolerance.
               const bool found = std::any_of(
                 expectations.classValues.begin(), expectations.classValues.end(),
-                [ value ]( const Json::Value &allowed )
-                { return std::fabs( allowed.asDouble() - value ) < 1e-6; } );
+                [ value ]( const Json::Value &allowed ) {
+                  if ( !allowed.isNumeric() )
+                    return false;
+                  return std::fabs( allowed.asDouble() - value ) < 1e-6;
+                } );
               if ( !found )
               {
                 Json::Value details;
