@@ -427,6 +427,8 @@ TEST_CASE( "LlmConfigManager falls back to QSettings when the secure store is un
   manager.updateProfiles( edited );
   CHECK( settingsHoldPlaintextKey() );
   CHECK( store->writes == 0 );
+}
+
 // — Track 8 R4 WP-A: the SSE lane of the LLM failure matrix ————————
 // The client is the ONE production seam that consumes raw model output.
 // #701 made it refuse truncated/unparseable tool calls, but the refusal was
