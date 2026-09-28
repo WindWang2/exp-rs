@@ -74,3 +74,21 @@
 ## 9. 既有测试载体清单（过滤面内）
 
 test_provider_python / test_provider_algorithm_adapter / test_provider_fallback / test_provider_http / test_preflight_provider / test_onnxruntime_provider / test_model_catalog_v2 / test_model_ensemble / test_model_failure_matrix / test_model_library_manifests / test_model_manifest7 / test_model_runtime{,_8,_9,_bench,_stress} / test_model_selector / test_model_tasks / test_gpu_plane / test_worker_lease_11 / test_worker_host / test_chunk_{graph,contract_11,resume_11,adoption_11} / test_execution_{governor_11,authority_11,scale_fault_11} / test_external_memory_10 / test_trace_contract / test_python_engine / test_python_plugin_host 等。
+
+## 10. Round 2 基线（2026-09-28，PR #1353 合并后重入）
+- origin/master 实测 `a726d17a6`（= PR #1354 ci-redzone 合并点）；Round 1 基线 15e5c66b5 以来
+  master 前进 414 提交（#1334–#1354 整波 R4 全部并入）。
+- Round 1 交付（PR #1353，65 用例）已在 master；分支 `hardening/r4-model-runtime-r2` 自
+  a726d17a6 新开，worktree 复用 exp-rs-model-runtime-r4（构建目录 build-gcc15 延用，g++-15/
+  Debug/Makefiles/LAUNCHER 空）。
+- **master P0 断裂 #1（已修，提交 ae9fcf1616）**：tests/CMakeLists.txt:14728 孤立 `=======`
+  冲突标记（R4 合并列车遗留），cmake configure 必败，全仓 blocked。全库 tracked 扫描无第二处。
+- **master P0 断裂 #2（D-14 解锁）**：tests/support/qt_lifecycle.h:48（#1342 e4b3d245df）g++
+  硬错误，打穿 teardown 族全部测试 TU + 本轨道白名单内 test_provider_http。
+- 白名单域漂移：src/runtime+src/python 在 414 提交中仅 8 文件变动 = Round 1 自身合并内容
+  （gpu_plane/chunk_graph/tile_run_contract/execution_governor/python_worker_process*）——域仍
+  归本轨道，无外来语义冲突。
+- 遗留项#4 实测升级：tile_spec.h 在 15e5c66b5..master 字节一致 → length_error→overflow_error
+  翻转发生在更早的 #1056 提交 3070d3e1ad，test_chunk_contract_11 三用例为 master 长期既有红
+  （"chunk" 不匹配过滤面正则所以 Round 1 未见于红榜）。
+- 过滤面基线红绿分布：构建完成后回填（§10.1）。

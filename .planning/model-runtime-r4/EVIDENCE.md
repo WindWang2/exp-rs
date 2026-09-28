@@ -42,3 +42,55 @@
 - 构建 `-j2`（`CMAKE_BUILD_PARALLEL_LEVEL=2`）、ctest `-j1`；RSS 观测 35-39%，未超 70%。
 - subagent：Phase 0 用 2 个只读扫读（context-sweeper），无递归；Phase 5 review 用 1 个。
 - 未等待线上 CI；未触碰白名单外目录（例外：src/agent/CMakeLists.txt 一行链接，D-9 披露）。
+
+## Round 2 证据（2026-09-28，PR #1353 合并后分支 hardening/r4-model-runtime-r2）
+
+### 1. 提交清单（6 个原子提交，全部独立可编译）
+| 提交 | 内容 |
+|---|---|
+| ae9fcf1616 | tests/CMakeLists.txt 冲突标记 P0（master 必断 configure） |
+| 58b76ca1c8 | qt_lifecycle.h 类型修复（D-14，解锁 test_provider_http + teardown 族 17 TU） |
+| aaec6433b5 | （被 ac26c2a86a 和解覆盖，见 D-15：单行 grep 漏 chunk_graph 多行钉子） |
+| 419d1e2ad1 | publish fence 生命周期缺陷（D-17）+ 用例握手 fenceHeld 边 |
+| 2fd7ce5f91 | python 池真实恢复路径端到端 3 用例（遗留#5）+ waitUntil helper |
+| ef263ce196 | test_gpu_plane 合并拼接语义并集（D-16） |
+| ac26c2a86a | chunk 契约双钉和解：impl 保持 #1056 overflow_error + contract_11 三断言更新（review P0-1/D-15）+ rig 崩溃余量 6s（P2-1） |
+
+### 2. 基线 → 终局（过滤面 ctest -j1）
+- 基线（修复前，master a726d17a6 + 本分支前 3 提交前）：396 例，394 过 / 2 红
+  （GPU plane evicts stale model identities；test_runtime_publish_orphan_r4 fence 用例）。
+  Round 1 基线的 8 个既有红中 7 个已被合并列车修复，1 个（mission runtime）转为 Skipped。
+- 终局双跑：见 §3（回填）。
+
+### 3. 终局门禁（连续两轮）
+- Pass 1（提交 ac26c2a86a 前，过滤面不含 chunk 测试，结论仍有效）：399/399 100% passed，
+  exit 0（151.86s）；mission runtime helper = Skipped（typed skip）。
+- Pass 2（同前）：399/399 100% passed，exit 0（159.25s）。
+- 和解后复跑（ac26c2a86a：tile_spec 回 master 态 + contract_11 更新）：见 §3b。
+
+### 4. 单套件证据
+- test_chunk_contract_11：56 断言 / 9 用例全绿（和解后，断言已随 #1056 契约更新为
+  overflow_error；基线 3 红的性质=与 chunk_graph 的双钉矛盾，非 impl 缺陷）。
+- test_chunk_graph：365 断言 / 31 用例全绿（#1056 钉子保持 master 态）。
+- test_runtime_chunk_boundaries_r4：50/7 全绿（partition 面 overflow_error 不变）。
+- test_execution_scale_fault_11：86/4 全绿（buildTileGrid happy-path 等价）。
+- test_gpu_plane：22/4 全绿（held/drop 两段钉子）。
+- test_runtime_publish_orphan_r4：87/4 全绿；fence 用例 10/10 连跑。
+- test_runtime_python_channel_r4：75/9 全绿 ×4 连跑（6 既有 + 3 新真池恢复）。
+
+### 5. 白名单外触碰披露（D-9/D-14/D-16 先例）
+- tests/support/qt_lifecycle.h（D-14，解锁白名单内 test_provider_http）
+- tests/test_gpu_plane.cpp（D-16，合并拼接产物修复）
+- tests/CMakeLists.txt 的冲突标记删除属白名单内（文件本身在列）。
+- src/operators/runtime/model_publish.cpp：Round 1 已实际触碰（fence/adoption 即在此文件），
+  Round 2 的 fence 生命周期修复延续同一授权面；如需严格口径，见 PR 正文披露段。
+
+### 6. master 既有断裂（白名单外，移交）
+- src/app/panels/data_manager_panel.cpp:222 'tr' was not declared → sicnu_geo_rs_shell
+  （主程序二进制）无法编译。精确修复建议：为该文件补 Q_OBJECT 语境或改用 QObject::tr/上下文
+  枚举（i18n 域，#1339 系移交）。
+- test_chunk_contract_11 的 3 红由本轨道收口（aaec6433b5），不再移交。
+
+### 3b. 和解后过滤面复跑（ac26c2a86a 之后）
+- Pass 1: {回填}
+- Pass 2: {回填}
