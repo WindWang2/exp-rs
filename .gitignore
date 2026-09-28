@@ -525,3 +525,7 @@ data/labs/_tmp/
 !.planning/r5-rs-gdal-fused-correctness/
 .planning/r5-rs-gdal-fused-correctness/*
 !.planning/r5-rs-gdal-fused-correctness/*.md
+# R5 Track 01 (runtime lifecycle teardown): planning notes, markdown only.
+!.planning/r5-runtime-lifecycle-teardown/
+.planning/r5-runtime-lifecycle-teardown/*
+!.planning/r5-runtime-lifecycle-teardown/*.md

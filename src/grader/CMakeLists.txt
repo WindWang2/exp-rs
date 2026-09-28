@@ -19,6 +19,13 @@ set( SICNU_GRADER_SOURCES
 )
 
 add_library( sicnu_grader STATIC ${SICNU_GRADER_SOURCES} )
+# Under ENABLE_SANITIZERS the ASan runtime introduces
+# __asan_option_* references even in -O0 objects; this leaf is linked into
+# the SHARED sicnu_agent library, so its objects must be PIC or the agent
+# link fails with "relocation R_X86_64_PC32 against undefined symbol
+# __asan_option_detect_stack_use_after_return". PIC is a no-op for the
+# normal (non-sanitizer) lane beyond an indirect-addressing choice.
+set_target_properties( sicnu_grader PROPERTIES POSITION_INDEPENDENT_CODE ON )
 target_link_libraries( sicnu_grader PUBLIC jsoncpp )
 target_include_directories( sicnu_grader PUBLIC ${CMAKE_SOURCE_DIR}/src )
 target_compile_features( sicnu_grader PUBLIC cxx_std_20 )

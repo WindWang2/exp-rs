@@ -478,125 +478,146 @@ struct PipelineRunCoordinator::RunState
     // mints a fresh runId, so there is nothing to own).
     std::unique_ptr<WorkflowRunLock> runLock;
 
-    // Depth of onNodeFinished frames live on the affinity thread. The whole-
-    // file hash pumps the event loop, so the destructor's drain functor can
-    // run RE-ENTRANTLY inside an onNodeFinished frame; the destructor waits
-    // for this to reach zero before freeing m_state (Track 13 contract: a
-    // foreign-thread destruction is safe).
-    std::atomic<int> affinityBusy{ 0 };
-
     ~RunState() { pool.waitForDone(); }
 };
 
 PipelineRunCoordinator::PipelineRunCoordinator( QObject *parent )
     : QObject( parent )
-    , m_state( std::make_unique<RunState>() )
+    , m_state( std::make_shared<RunState>() )
 {
     qRegisterMetaType<sicnu::workflow::ExecutionState>( "sicnu::workflow::ExecutionState" );
     m_state->pool.setMaxThreadCount( m_state->maxParallelism );
 }
 
+std::shared_ptr<PipelineRunCoordinator::RunState> PipelineRunCoordinator::adoptState() const
+{
+    std::lock_guard<std::mutex> lock( m_stateMutex );
+    return m_state;
+}
+
 PipelineRunCoordinator::~PipelineRunCoordinator()
 {
+    // Adopt the state first: everything below works on the shared record, so
+    // a completion frame still unwinding on the affinity thread can keep it
+    // alive past this destructor (release at the bottom).
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return;
     // Trip the cancel flag from ANY thread first: an artifact hash in flight
     // on the affinity thread then aborts within one chunk, so the drain below
     // never waits for a whole-file hash. Destroying on the affinity thread
     // (the documented fast path) runs the drain inline.
-    m_state->cancelRequested.store( true, std::memory_order_relaxed );
-    invokeOnCoordinatorThread( this, [this] {
-        m_state->shuttingDown.store( true, std::memory_order_relaxed );
-        m_state->pool.clear();    // drop queued, not-yet-started node work
-        m_state->pool.waitForDone(); // drain the running workers
-        // Completions already posted to this thread must not be delivered to
-        // a dying object; the worker lambdas additionally hold a QPointer.
-        QCoreApplication::removePostedEvents( this );
+    // Phase 1 (lock-free, ANY thread): trip the cancel flag AND the shutdown
+    // latch together, BEFORE the marshalled drain. An in-flight whole-file
+    // hash aborts within one chunk AND its frame abandons the completion at
+    // the next shuttingDown check — with both flags already set there is no
+    // window between "cancel observed" and "shutdown observed" for state
+    // mutations or emissions to sneak through the frame's tail.
+    state->cancelRequested.store( true, std::memory_order_relaxed );
+    state->shuttingDown.store( true, std::memory_order_relaxed );
+    invokeOnCoordinatorThread( this, [state] {
+        state->shuttingDown.store( true, std::memory_order_relaxed ); // idempotent
+        state->pool.clear();       // drop queued, not-yet-started node work
+        state->pool.waitForDone(); // drain the running workers
     } );
-    // The drain above may have executed INSIDE an onNodeFinished frame — the
-    // whole-file hash pumps this thread's event loop, so the BlockingQueued
-    // drain is serviced re-entrantly and returns while the hash (and every
-    // m_state touch after it) is still on the affinity stack. Freeing
-    // m_state here would be a use-after-free; wait for the frame(s) to
-    // unwind instead. The cancel flag tripped above bounds the wait to one
-    // hash chunk.
-    if ( QThread::currentThread() != thread() )
-    {
-        int waitedMs = 0;
-        while ( m_state->affinityBusy.load( std::memory_order_acquire ) > 0 )
-        {
-            QThread::msleep( 1 );
-            if ( ++waitedMs == 5000 )
-                qWarning( "PipelineRunCoordinator: destructor still waiting for an active "
-                          "completion frame after %d ms", waitedMs );
-        }
-        // Late emissions from the unwinding frame must not outlive `this`.
-        QCoreApplication::removePostedEvents( this );
-    }
-    else if ( m_state->affinityBusy.load( std::memory_order_acquire ) > 0 )
-    {
-        // Affinity-thread destruction FROM INSIDE a pump-serviced event
-        // (delete while onNodeFinished's hash pump dispatches it): waiting
-        // would deadlock against our own stack, so this unsupported
-        // deletion point is called out loudly instead of silently racing.
-        qWarning( "PipelineRunCoordinator: deleted from its affinity thread while a completion "
-                  "frame is active (pump-reentrant delete); concurrent state access is unsafe" );
-    }
+    // Completions already posted to the affinity thread must not be delivered
+    // to a dying object. Dropping them AFTER the drain means every worker has
+    // already exited, so no straggler post can land past this point.
+    // removePostedEvents is thread-safe; the destroying thread may be foreign.
+    QCoreApplication::removePostedEvents( this );
+    // Release the run state. If a completion frame is still unwinding on the
+    // affinity thread — the whole-file hash pumps that thread's event loop,
+    // so a queued/timer delete serviced by the pump runs this destructor
+    // RE-ENTRANTLY inside the frame — the frame's own adoptState() reference
+    // keeps RunState alive until it returns. The state is freed exactly when
+    // the last reference drops: never under a live frame, with no busy-wait,
+    // no detached threads and no leak on any deletion path.
+    std::lock_guard<std::mutex> lock( m_stateMutex );
+    m_state.reset();
 }
 
 void PipelineRunCoordinator::setExecutor( NodeExecutor executor )
 {
-    invokeOnCoordinatorThread( this, [this, executor = std::move( executor )]() mutable {
-        m_state->executor = std::move( executor );
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return;
+    invokeOnCoordinatorThread( this, [state, executor = std::move( executor )]() mutable {
+        state->executor = std::move( executor );
     } );
 }
 
 void PipelineRunCoordinator::setMaxParallelism( int workers )
 {
-    invokeOnCoordinatorThread( this, [this, workers] {
-        m_state->maxParallelism = std::clamp( workers, 1, kMaxPoolWorkers );
-        m_state->pool.setMaxThreadCount( m_state->maxParallelism );
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return;
+    invokeOnCoordinatorThread( this, [state, workers] {
+        state->maxParallelism = std::clamp( workers, 1, kMaxPoolWorkers );
+        state->pool.setMaxThreadCount( state->maxParallelism );
     } );
 }
 
 void PipelineRunCoordinator::setArtifactIdentityMode( ArtifactIdentityMode mode )
 {
-    invokeOnCoordinatorThread( this, [this, mode] { m_state->identityMode = mode; } );
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return;
+    invokeOnCoordinatorThread( this, [state, mode] { state->identityMode = mode; } );
 }
 
 ArtifactIdentityMode PipelineRunCoordinator::artifactIdentityMode() const
 {
-    return invokeOnCoordinatorThread( this, [this] { return m_state->identityMode; } );
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return ArtifactIdentityMode::Auto;
+    return invokeOnCoordinatorThread( this, [state] { return state->identityMode; } );
 }
 
 QString PipelineRunCoordinator::checkpointPath() const
 {
-    return invokeOnCoordinatorThread( this, [this] { return m_state->checkpointPath; } );
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return {};
+    return invokeOnCoordinatorThread( this, [state] { return state->checkpointPath; } );
 }
 
 QString PipelineRunCoordinator::provenancePath() const
 {
     // Written on the affinity thread during finalizeIfDone — an unmarshal'd
     // read from a UI thread races the QString assignment.
-    return invokeOnCoordinatorThread( this, [this] { return m_state->provenancePath; } );
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return {};
+    return invokeOnCoordinatorThread( this, [state] { return state->provenancePath; } );
 }
 
 bool PipelineRunCoordinator::isRunning() const
 {
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return false;
     // Marshal the read onto the affinity thread: onNodeFinished flips
-    // m_state->finished there and an unsynchronised cross-thread read races.
+    // state->finished there and an unsynchronised cross-thread read races.
     return invokeOnCoordinatorThread(
-        this, [this] { return !m_state->finished && !m_state->def.nodes.isEmpty(); } );
+        this, [state] { return !state->finished && !state->def.nodes.isEmpty(); } );
 }
 
 bool PipelineRunCoordinator::hasCompleted() const
 {
-    return invokeOnCoordinatorThread( this, [this] { return m_state->finished; } );
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return false;
+    return invokeOnCoordinatorThread( this, [state] { return state->finished; } );
 }
 
 QMap<QString, NodeStatusSnapshot> PipelineRunCoordinator::getAllStatuses() const
 {
-    return invokeOnCoordinatorThread( this, [this] {
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return {};
+    return invokeOnCoordinatorThread( this, [state] {
         QMap<QString, NodeStatusSnapshot> map;
-        for ( auto it = m_state->statuses.cbegin(); it != m_state->statuses.cend(); ++it )
+        for ( auto it = state->statuses.cbegin(); it != state->statuses.cend(); ++it )
             map.insert( it.key(), it.value() );
         return map;
     } );
@@ -607,11 +628,18 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
     // Marshalled like every other public entry point (DECISIONS D7): the run
     // state this body installs is also mutated by onNodeFinished on the
     // affinity thread.
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+    {
+        if ( outError )
+            *outError = QStringLiteral( "coordinator is being destroyed" );
+        return false;
+    }
     return invokeOnCoordinatorThread(
-        this, [&] { return startRunOnAffinity( def, runDirectory, outError ); } );
+        this, [&, state] { return startRunOnAffinity( state.get(), def, runDirectory, outError ); } );
 }
 
-bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, const QString &runDirectory, QString *outError )
+bool PipelineRunCoordinator::startRunOnAffinity( RunState *state, const WorkflowDocument &def, const QString &runDirectory, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -619,7 +647,7 @@ bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, co
         return false;
     };
 
-    if ( !m_state->finished && !m_state->def.nodes.isEmpty() )
+    if ( !state->finished && !state->def.nodes.isEmpty() )
         return fail( QStringLiteral( "a run is already active on this coordinator" ) );
     QString semanticError;
     if ( !WorkflowIR::validateSemantics( def, &semanticError ) )
@@ -673,24 +701,24 @@ bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, co
     }
 
     // Fresh state.
-    m_state->def = runDef;
-    m_state->runDirectory = absoluteRunDirectory;
-    m_state->runId = freshRunId;
-    m_state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( m_state->runId ) );
+    state->def = runDef;
+    state->runDirectory = absoluteRunDirectory;
+    state->runId = freshRunId;
+    state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( state->runId ) );
     // Ownership of the fresh run: released when this run finalizes or the
     // coordinator is destroyed.
-    m_state->runLock = std::move( freshLock );
-    m_state->finished = false;
-    m_state->success = false;
+    state->runLock = std::move( freshLock );
+    state->finished = false;
+    state->success = false;
     // #1158: do NOT clear the cancel flag here. The previous run is
     // terminal (its finalization cleared the flag), so a set flag can only
     // be a requestCancel whose phase-2 hop is queued behind this start —
     // wiping it would swallow that cancel (nodes completing before the hop
     // would be recorded Succeeded with full artifact identity).
-    m_state->statuses.clear();
-    m_state->remainingParents.clear();
-    m_state->provenancePath.clear();
-    m_state->attempt = 1;
+    state->statuses.clear();
+    state->remainingParents.clear();
+    state->provenancePath.clear();
+    state->attempt = 1;
 
     const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( runDef );
     for ( const NodeFact &node : runDef.nodes )
@@ -698,41 +726,44 @@ bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, co
         NodeStatusSnapshot snapshot;
         snapshot.nodeId = node.nodeId;
         snapshot.lineageSignature = signatures.value( node.nodeId );
-        m_state->statuses.insert( node.nodeId, snapshot );
+        state->statuses.insert( node.nodeId, snapshot );
 
         int parents = 0;
         for ( const EdgeFact &edge : runDef.edges )
             if ( edge.targetNodeId == node.nodeId )
                 ++parents;
-        m_state->remainingParents.insert( node.nodeId, parents );
+        state->remainingParents.insert( node.nodeId, parents );
     }
 
     QDir().mkpath( runDirectory );
-    persistCheckpoint();
-    dispatchReadyNodes();
-    finalizeIfDone(); // empty documents complete synchronously
+    persistCheckpoint( state );
+    dispatchReadyNodes( state );
+    finalizeIfDone( state ); // empty documents complete synchronously
     return true;
 }
 
 void PipelineRunCoordinator::requestCancel()
 {
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+        return;
     // Phase 1 — lock-free, callable from ANY thread: trip the atomic so a
     // whole-file artifact hash in flight on the affinity thread aborts within
     // one chunk. Phase 2 (status mutation) must never wait on that hash, so
     // the flag is set BEFORE the blocking marshal, not inside it (Track 13).
-    m_state->cancelRequested.store( true, std::memory_order_relaxed );
+    state->cancelRequested.store( true, std::memory_order_relaxed );
     // Phase 2 — affinity thread: mutate statuses/bookkeeping. Callers already
     // on the affinity thread run inline; a failed marshal (dying object)
     // drops phase-2 — the atomic above still aborts in-flight hashes (#1186).
     if ( QThread::currentThread() == thread() )
     {
-        requestCancelOnAffinity();
+        requestCancelOnAffinity( state.get() );
         return;
     }
-    (void) runOnCoordinatorThread( this, [this] { requestCancelOnAffinity(); } );
+    (void) runOnCoordinatorThread( this, [this, &state] { requestCancelOnAffinity( state.get() ); } );
 }
 
-void PipelineRunCoordinator::requestCancelOnAffinity()
+void PipelineRunCoordinator::requestCancelOnAffinity( RunState *state )
 {
     // Cancelling an idle coordinator must not emit a phantom completion:
     // with no document loaded there is nothing to cancel and finalizeIfDone
@@ -740,33 +771,33 @@ void PipelineRunCoordinator::requestCancelOnAffinity()
     // store this hop followed has already tripped the atomic — un-trip it
     // HERE (#1158): clearing a lock-free foreign-writer flag anywhere on
     // the start/resume paths swallowed cancels that raced the clear.
-    if ( m_state->def.nodes.isEmpty() || m_state->finished )
+    if ( state->def.nodes.isEmpty() || state->finished )
     {
         // Nothing to cancel (no document, or the loaded run is already
         // terminal — finalizeIfDone's early return skips its own clear).
-        m_state->cancelRequested.store( false, std::memory_order_relaxed );
+        state->cancelRequested.store( false, std::memory_order_relaxed );
         return;
     }
-    markRemaining( ExecutionState::Cancelled );
-    dispatchReadyNodes(); // nothing will be dispatched; drive finalization
-    finalizeIfDone();
+    markRemaining( state, ExecutionState::Cancelled );
+    dispatchReadyNodes( state ); // nothing will be dispatched; drive finalization
+    finalizeIfDone( state );
 }
 
-void PipelineRunCoordinator::markRemaining( ExecutionState state )
+void PipelineRunCoordinator::markRemaining( RunState *state, ExecutionState stateToMark )
 {
-    for ( auto it = m_state->statuses.begin(); it != m_state->statuses.end(); ++it )
+    for ( auto it = state->statuses.begin(); it != state->statuses.end(); ++it )
     {
         if ( it.value().state == ExecutionState::Pending || it.value().state == ExecutionState::Ready )
         {
-            it.value().state = state;
-            emit nodeStatusChanged( it.key(), state, 0.0f );
+            it.value().state = stateToMark;
+            emit nodeStatusChanged( it.key(), stateToMark, 0.0f );
         }
     }
 }
 
-void PipelineRunCoordinator::dispatchReadyNodes()
+void PipelineRunCoordinator::dispatchReadyNodes( RunState *state )
 {
-    if ( m_state->finished || m_state->shuttingDown.load( std::memory_order_relaxed ) )
+    if ( state->finished || state->shuttingDown.load( std::memory_order_relaxed ) )
         return;
 
     bool anySkipped = false;
@@ -782,20 +813,20 @@ void PipelineRunCoordinator::dispatchReadyNodes()
         toDispatch.clear();
         QVector<QString> newlySkipped;
 
-        for ( auto it = m_state->remainingParents.cbegin(); it != m_state->remainingParents.cend(); ++it )
+        for ( auto it = state->remainingParents.cbegin(); it != state->remainingParents.cend(); ++it )
         {
             if ( it.value() != 0 )
                 continue;
-            const NodeStatusSnapshot &snapshot = m_state->statuses[it.key()];
+            const NodeStatusSnapshot &snapshot = state->statuses[it.key()];
             if ( snapshot.state != ExecutionState::Pending && snapshot.state != ExecutionState::Ready )
                 continue;
             // Skip cascade: any non-Succeeded parent stops this node.
             bool blocked = false;
-            for ( const EdgeFact &edge : m_state->def.edges )
+            for ( const EdgeFact &edge : state->def.edges )
             {
                 if ( edge.targetNodeId != it.key() )
                     continue;
-                const ExecutionState parentState = m_state->statuses.value( edge.sourceNodeId ).state;
+                const ExecutionState parentState = state->statuses.value( edge.sourceNodeId ).state;
                 if ( parentState != ExecutionState::Succeeded )
                 {
                     blocked = true;
@@ -812,17 +843,17 @@ void PipelineRunCoordinator::dispatchReadyNodes()
         {
             for ( const QString &nodeId : newlySkipped )
             {
-                NodeStatusSnapshot &snapshot = m_state->statuses[nodeId];
+                NodeStatusSnapshot &snapshot = state->statuses[nodeId];
                 snapshot.state = ExecutionState::Skipped;
                 emit nodeStatusChanged( nodeId, ExecutionState::Skipped, 0.0f );
-                m_state->remainingParents[nodeId] = -1; // terminal, do not revisit
+                state->remainingParents[nodeId] = -1; // terminal, do not revisit
                 // Release the skipped node's children so the cascade drains.
-                for ( const EdgeFact &edge : m_state->def.edges )
+                for ( const EdgeFact &edge : state->def.edges )
                 {
                     if ( edge.sourceNodeId != nodeId )
                         continue;
-                    const auto child = m_state->remainingParents.find( edge.targetNodeId );
-                    if ( child != m_state->remainingParents.end() && child.value() > 0 )
+                    const auto child = state->remainingParents.find( edge.targetNodeId );
+                    if ( child != state->remainingParents.end() && child.value() > 0 )
                         child.value() -= 1;
                 }
             }
@@ -832,39 +863,39 @@ void PipelineRunCoordinator::dispatchReadyNodes()
     }
 
     if ( anySkipped )
-        persistCheckpoint();
+        persistCheckpoint( state );
 
     // Deterministic dispatch order (QHash iteration order is not).
     std::sort( toDispatch.begin(), toDispatch.end() );
     for ( const QString &nodeId : toDispatch )
     {
-        NodeStatusSnapshot &snapshot = m_state->statuses[nodeId];
+        NodeStatusSnapshot &snapshot = state->statuses[nodeId];
         snapshot.state = ExecutionState::Running;
         emit nodeStatusChanged( nodeId, ExecutionState::Running, 0.0f );
-        m_state->remainingParents[nodeId] = -1; // claimed
+        state->remainingParents[nodeId] = -1; // claimed
 
         // Capture for the worker lambda (values, no coordinator access).
-        const NodeFact node = *m_state->def.findNode( nodeId );
+        const NodeFact node = *state->def.findNode( nodeId );
         // D-W6: key by target port name (explicit IR2 port→param mapping).
         // Single-source invariant guarantees one edge per input port.
         QHash<QString, QString> inputArtifacts;
-        for ( const EdgeFact &edge : m_state->def.edges )
+        for ( const EdgeFact &edge : state->def.edges )
             if ( edge.targetNodeId == nodeId )
                 inputArtifacts.insert( edge.targetPortName,
-                                       m_state->statuses.value( edge.sourceNodeId ).outputArtifactPath );
-        const QString runDirectory = m_state->runDirectory;
+                                       state->statuses.value( edge.sourceNodeId ).outputArtifactPath );
+        const QString runDirectory = state->runDirectory;
         QPointer<PipelineRunCoordinator> self( this );
         // The executor is copied into the worker: no shared mutable state
         // crosses the thread boundary, and no worker blocks on a peer node.
-        NodeExecutor executor = m_state->executor;
+        NodeExecutor executor = state->executor;
         // #1152: hand the run's cooperative cancel flag to the executor so
         // requestCancel() aborts a long-running registry operator mid-run
         // instead of freezing the GUI thread for the node's full duration.
         // RunState's destructor drains the pool before destruction, so the
         // pointer outlives every worker that can read it.
-        const std::atomic<bool> *cancelFlag = &m_state->cancelRequested;
+        const std::atomic<bool> *cancelFlag = &state->cancelRequested;
         const qint64 startedAt = QDateTime::currentMSecsSinceEpoch();
-        m_state->pool.start( [self, node, inputArtifacts, runDirectory, startedAt,
+        state->pool.start( [self, node, inputArtifacts, runDirectory, startedAt,
                               cancelFlag, executor = std::move( executor )]() {
             NodeExecutionResult result;
             if ( executor )
@@ -888,32 +919,32 @@ void PipelineRunCoordinator::dispatchReadyNodes()
     }
 
     // A terminal skip cascade can finish the run without any node event.
-    finalizeIfDone();
+    finalizeIfDone( state );
 }
 
 void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutionResult result, qint64 elapsedMs )
 {
-    if ( !m_state->statuses.contains( nodeId ) )
+    // Adopt the state for THIS frame: the whole-file hash below pumps the
+    // affinity thread's event loop, so a delete serviced by that pump (a
+    // queued functor, a timer, deleteLater) runs the destructor re-entrantly
+    // INSIDE this frame. The destructor releases its own reference; the state
+    // lives until this frame drops the last one — every access below is
+    // memory-safe on any deletion path.
+    const std::shared_ptr<RunState> adopted = adoptState();
+    if ( !adopted )
+        return;
+    RunState *state = adopted.get();
+    if ( !state->statuses.contains( nodeId ) )
         return;
     // The destructor's drain stops completion handling: no state mutation may
-    // outlive the drain that precedes m_state's destruction.
-    if ( m_state->shuttingDown.load( std::memory_order_relaxed ) )
+    // outlive the drain that precedes the state's release.
+    if ( state->shuttingDown.load( std::memory_order_relaxed ) )
         return;
 
-    // Counted for the destructor: the whole-file hash below pumps the event
-    // loop, so the destructor's drain functor can run RE-ENTRANTLY inside
-    // this frame — the destructor must not free m_state until it unwinds.
-    m_state->affinityBusy.fetch_add( 1, std::memory_order_acq_rel );
-    struct BusyGuard
-    {
-        std::atomic<int> &flag;
-        ~BusyGuard() { flag.fetch_sub( 1, std::memory_order_release ); }
-    } busyGuard{ m_state->affinityBusy };
-
-    NodeStatusSnapshot &snapshot = m_state->statuses[nodeId];
+    NodeStatusSnapshot &snapshot = state->statuses[nodeId];
     snapshot.elapsedMs = elapsedMs;
 
-    if ( m_state->cancelRequested.load( std::memory_order_relaxed ) )
+    if ( state->cancelRequested.load( std::memory_order_relaxed ) )
     {
         // A draining worker after a cancel request is Cancelled regardless
         // of its outcome — the run as a whole did not produce it.
@@ -926,14 +957,14 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
         // fingerprintable — a success we cannot re-verify on resume is a
         // contract violation, not a cacheable result.
         const QFileInfo artifactInfo( result.artifactPath );
-        const QString canonicalRunDir = QDir( m_state->runDirectory ).canonicalPath();
+        const QString canonicalRunDir = QDir( state->runDirectory ).canonicalPath();
         if ( !artifactInfo.isFile()
              || !isContainedInDirectory( result.artifactPath, canonicalRunDir ) )
         {
             snapshot.state = ExecutionState::Failed;
             snapshot.errorMessage =
                 QStringLiteral( "ir2.artifact_outside_run: artifact '%1' is missing or resolves outside run directory '%2' (node '%3')" )
-                    .arg( result.artifactPath, m_state->runDirectory, nodeId );
+                    .arg( result.artifactPath, state->runDirectory, nodeId );
         }
         else
         {
@@ -944,7 +975,7 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
             // produce it) instead of failing it.
             const FingerprintResult fingerprint =
                 computeArtifactFingerprint( artifactInfo.canonicalFilePath(), artifactInfo.size(),
-                                            m_state->identityMode, &m_state->cancelRequested );
+                                            state->identityMode, &state->cancelRequested );
             if ( fingerprint.cancelled )
             {
                 snapshot.state = ExecutionState::Cancelled;
@@ -986,39 +1017,39 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
     // recorded parent states inside dispatchReadyNodes.
     // A drain that ran inside the hash pump marks a coordinator under
     // destruction: abandon the completion here instead of persisting and
-    // emitting from a dying object (the destructor's busy-wait keeps the
+    // emitting from a dying object (the frame's adopted reference keeps the
     // accesses above memory-safe either way).
-    if ( m_state->shuttingDown.load( std::memory_order_relaxed ) )
+    if ( state->shuttingDown.load( std::memory_order_relaxed ) )
         return;
-    for ( const EdgeFact &edge : m_state->def.edges )
+    for ( const EdgeFact &edge : state->def.edges )
     {
         if ( edge.sourceNodeId != nodeId )
             continue;
-        const auto child = m_state->remainingParents.find( edge.targetNodeId );
-        if ( child != m_state->remainingParents.end() && child.value() > 0 )
+        const auto child = state->remainingParents.find( edge.targetNodeId );
+        if ( child != state->remainingParents.end() && child.value() > 0 )
             child.value() -= 1;
     }
 
     emit nodeStatusChanged( nodeId, snapshot.state, snapshot.progress );
     emit nodeFinished( nodeId, snapshot.state == ExecutionState::Succeeded, snapshot.outputArtifactPath );
-    persistCheckpoint();
-    finalizeIfDone();
-    dispatchReadyNodes();
+    persistCheckpoint( state );
+    finalizeIfDone( state );
+    dispatchReadyNodes( state );
 }
 
-void PipelineRunCoordinator::finalizeIfDone()
+void PipelineRunCoordinator::finalizeIfDone( RunState *state )
 {
-    if ( m_state->finished )
+    if ( state->finished )
         return;
-    for ( const NodeStatusSnapshot &snapshot : std::as_const( m_state->statuses ) )
+    for ( const NodeStatusSnapshot &snapshot : std::as_const( state->statuses ) )
         if ( snapshot.state == ExecutionState::Pending || snapshot.state == ExecutionState::Ready
              || snapshot.state == ExecutionState::Running )
             return;
 
-    m_state->finished = true;
+    state->finished = true;
     bool success = true;
     int succeeded = 0, skipped = 0, failed = 0, cancelled = 0;
-    for ( const NodeStatusSnapshot &snapshot : std::as_const( m_state->statuses ) )
+    for ( const NodeStatusSnapshot &snapshot : std::as_const( state->statuses ) )
     {
         switch ( snapshot.state )
         {
@@ -1041,43 +1072,43 @@ void PipelineRunCoordinator::finalizeIfDone()
                 break;
         }
     }
-    m_state->success = success;
-    persistCheckpoint();
+    state->success = success;
+    persistCheckpoint( state );
 
     // The run is terminal: release the resume-ownership lock AFTER the final
     // checkpoint persist — a peer process may re-verify this checkpoint from
     // here on, but never against a half-published terminal state.
-    m_state->runLock.reset();
+    state->runLock.reset();
 
     // Provenance (WP5/D9): one queryable lineage record per terminal ATTEMPT,
     // emitted for successes AND failures — audits need the failure paths
     // most. The attempt suffix keeps a resumed run from overwriting the
     // record whose artifacts it marked reusedFrom. A write failure never
     // fails the run it describes.
-    if ( !m_state->def.nodes.isEmpty() )
+    if ( !state->def.nodes.isEmpty() )
     {
         const ProvenanceGraph graph = ProvenanceGraph::fromRunState(
-            m_state->runId, m_state->def, m_state->statuses,
-            WorkflowPlanOptimizer::computePlanSignature( m_state->def ) );
+            state->runId, state->def, state->statuses,
+            WorkflowPlanOptimizer::computePlanSignature( state->def ) );
         // Attempt 1 keeps the canonical provenance_<runId>.json beside the
         // checkpoint; later attempts live in attempt-<N>/ — the SYSTEM
         // lineage in a path segment and the USER identity in the filename.
         // A valid runId cannot contain '/', so no user-named runId can
         // collide with the attempt encoding (DECISIONS D6); a single-segment
         // suffix could not promise that.
-        QString provenanceTarget = QDir( m_state->runDirectory ).filePath(
-            QStringLiteral( "provenance_%1.json" ).arg( m_state->runId ) );
-        if ( m_state->attempt > 1 )
+        QString provenanceTarget = QDir( state->runDirectory ).filePath(
+            QStringLiteral( "provenance_%1.json" ).arg( state->runId ) );
+        if ( state->attempt > 1 )
         {
-            const QString attemptDir = QDir( m_state->runDirectory ).filePath(
-                QStringLiteral( "attempt-%1" ).arg( m_state->attempt ) );
+            const QString attemptDir = QDir( state->runDirectory ).filePath(
+                QStringLiteral( "attempt-%1" ).arg( state->attempt ) );
             QDir().mkpath( attemptDir );
             provenanceTarget =
-                QDir( attemptDir ).filePath( QStringLiteral( "provenance_%1.json" ).arg( m_state->runId ) );
+                QDir( attemptDir ).filePath( QStringLiteral( "provenance_%1.json" ).arg( state->runId ) );
         }
         const QString path = atomicWriteJson( provenanceTarget, graph.toJson(), "d17_provenance.publish" );
         if ( !path.isEmpty() )
-            m_state->provenancePath = path;
+            state->provenancePath = path;
     }
 
     emit pipelineCompleted(
@@ -1092,30 +1123,30 @@ void PipelineRunCoordinator::finalizeIfDone()
     // clear it now — never earlier (#1158). A foreign requestCancel that
     // lands after this point takes the idle path, which clears its own
     // phase-1 store.
-    m_state->cancelRequested.store( false, std::memory_order_relaxed );
+    state->cancelRequested.store( false, std::memory_order_relaxed );
 }
 
-void PipelineRunCoordinator::persistCheckpoint()
+void PipelineRunCoordinator::persistCheckpoint( RunState *state )
 {
-    if ( m_state->def.nodes.isEmpty() )
+    if ( state->def.nodes.isEmpty() )
         return;
 
     QJsonObject document;
     document.insert( QLatin1String( "kind" ), kCheckpointKind );
     document.insert( QLatin1String( "version" ), kCheckpointVersionCurrent );
-    document.insert( QLatin1String( "runId" ), m_state->runId );
-    document.insert( QLatin1String( "runDirectory" ), m_state->runDirectory );
-    document.insert( QLatin1String( "workflow" ), WorkflowIR::toJson( m_state->def ) );
-    document.insert( QLatin1String( "attempt" ), m_state->attempt );
-    document.insert( QLatin1String( "finished" ), m_state->finished );
-    document.insert( QLatin1String( "success" ), m_state->success );
+    document.insert( QLatin1String( "runId" ), state->runId );
+    document.insert( QLatin1String( "runDirectory" ), state->runDirectory );
+    document.insert( QLatin1String( "workflow" ), WorkflowIR::toJson( state->def ) );
+    document.insert( QLatin1String( "attempt" ), state->attempt );
+    document.insert( QLatin1String( "finished" ), state->finished );
+    document.insert( QLatin1String( "success" ), state->success );
     document.insert( QLatin1String( "updatedAt" ),
                      QDateTime::currentDateTimeUtc().toString( Qt::ISODateWithMs ) );
 
     QJsonArray nodes;
-    for ( const NodeFact &node : m_state->def.nodes ) // document order, deterministic
+    for ( const NodeFact &node : state->def.nodes ) // document order, deterministic
     {
-        const NodeStatusSnapshot &snapshot = m_state->statuses.value( node.nodeId );
+        const NodeStatusSnapshot &snapshot = state->statuses.value( node.nodeId );
         QJsonObject entry;
         entry.insert( QLatin1String( "nodeId" ), snapshot.nodeId );
         entry.insert( QLatin1String( "state" ), stateKey( snapshot.state ) );
@@ -1132,7 +1163,7 @@ void PipelineRunCoordinator::persistCheckpoint()
     }
     document.insert( QLatin1String( "nodes" ), nodes );
 
-    const QString path = atomicWriteJson( m_state->checkpointPath, document, "d17_checkpoint.publish" );
+    const QString path = atomicWriteJson( state->checkpointPath, document, "d17_checkpoint.publish" );
     if ( !path.isEmpty() )
         emit checkpointPersisted( path );
 }
@@ -1141,11 +1172,18 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
 {
     // Symmetric with startRun: a live run's queued completions must never
     // mutate a resumed run's state, so the whole body runs on the owner.
+    const std::shared_ptr<RunState> state = adoptState();
+    if ( !state )
+    {
+        if ( outError )
+            *outError = QStringLiteral( "coordinator is being destroyed" );
+        return false;
+    }
     return invokeOnCoordinatorThread(
-        this, [&] { return resumeOnAffinity( checkpointFilePath, outError ); } );
+        this, [&, state] { return resumeOnAffinity( state.get(), checkpointFilePath, outError ); } );
 }
 
-bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath, QString *outError )
+bool PipelineRunCoordinator::resumeOnAffinity( RunState *state, const QString &checkpointFilePath, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -1155,7 +1193,7 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
 
     // Symmetric with startRun: a live run's queued completions must never
     // mutate a resumed run's state.
-    if ( !m_state->finished && !m_state->def.nodes.isEmpty() )
+    if ( !state->finished && !state->def.nodes.isEmpty() )
         return fail( QStringLiteral( "a run is already active on this coordinator" ) );
 
     // #1158: no stale-clear before the verification loop. Stale flags can
@@ -1283,7 +1321,7 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
         // A cancel requested while this (possibly whole-file) verification
         // pass runs aborts the resume before anything is dispatched — no
         // partial publish, no phantom run.
-        if ( m_state->cancelRequested.load( std::memory_order_relaxed ) )
+        if ( state->cancelRequested.load( std::memory_order_relaxed ) )
             return fail( QStringLiteral( "checkpoint '%1' verification cancelled" )
                              .arg( checkpointFilePath ) );
 
@@ -1329,7 +1367,7 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
             {
                 identityMatches =
                     verifyRecordedFingerprint( recordedFingerprint, snapshot.outputArtifactPath,
-                                               artifactInfo.size(), &m_state->cancelRequested,
+                                               artifactInfo.size(), &state->cancelRequested,
                                                &hashCancelled );
                 if ( hashCancelled )
                     return fail( QStringLiteral( "checkpoint '%1' verification cancelled at node '%2'" )
@@ -1376,61 +1414,61 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     // the commit (the pre-fix clear swallowed it — already-dispatched nodes
     // then recorded Succeeded with full artifact identity and poisoned the
     // resume cache). Refuse the resume instead: nothing has run yet.
-    if ( m_state->cancelRequested.load( std::memory_order_relaxed ) )
+    if ( state->cancelRequested.load( std::memory_order_relaxed ) )
     {
         // The cancel is honored by this refusal — nothing started, so
         // consume it here rather than leaving it to poison the next resume
         // (finalizeIfDone early-returns on the already-terminal state and
         // would never clear it).
-        m_state->cancelRequested.store( false, std::memory_order_relaxed );
+        state->cancelRequested.store( false, std::memory_order_relaxed );
         return fail( QStringLiteral( "resume cancelled before it started" ) );
     }
 
     // All validation passed — commit to run state in one step. The attempt
     // counter continues from the checkpoint so this resume's provenance file
     // does not overwrite the record of the attempt it reuses artifacts from.
-    m_state->def = resumedDef;
-    m_state->runDirectory = runDirectory;
-    m_state->runId = runId;
+    state->def = resumedDef;
+    state->runDirectory = runDirectory;
+    state->runId = runId;
     // Ownership transfers to the run state: the lock releases when this run
     // finalizes (finalizeIfDone), when a fresh startRun clears it, or when
     // the coordinator is destroyed.
-    m_state->runLock = std::move( acquiredLock );
+    state->runLock = std::move( acquiredLock );
     // #1186: attempt-less v1.1 checkpoints must resume as attempt 2 (default
     // 1 + 1), not attempt 1 — otherwise provenance overwrites the original
     // attempt's canonical record under the same path.
-    m_state->attempt = document.value( QLatin1String( "attempt" ) ).toInteger( 1 ) + 1;
-    m_state->checkpointPath = checkpointFilePath;
-    m_state->finished = false;
-    m_state->success = false;
-    m_state->statuses = restored;
-    m_state->remainingParents.clear();
-    m_state->provenancePath.clear();
+    state->attempt = document.value( QLatin1String( "attempt" ) ).toInteger( 1 ) + 1;
+    state->checkpointPath = checkpointFilePath;
+    state->finished = false;
+    state->success = false;
+    state->statuses = restored;
+    state->remainingParents.clear();
+    state->provenancePath.clear();
 
     // Second pass over the FULL status map (never the partially filled one):
     // count only parents that still need to RUN this round — CacheHit
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
     // of the checkpoint array is irrelevant.
-    // Iterate the stored document directly (m_state->def was assigned the
+    // Iterate the stored document directly (state->def was assigned the
     // parsed checkpoint above): the msbuild/clang builds of this file also
     // reject the same-scope redefinition of `resumedDef` (C2373).
-    for ( const NodeFact &node : m_state->def.nodes )
+    for ( const NodeFact &node : state->def.nodes )
     {
         int parents = 0;
-        for ( const EdgeFact &edge : m_state->def.edges )
+        for ( const EdgeFact &edge : state->def.edges )
         {
             if ( edge.targetNodeId != node.nodeId )
                 continue;
-            const NodeStatusSnapshot &parentSnapshot = m_state->statuses.value( edge.sourceNodeId );
+            const NodeStatusSnapshot &parentSnapshot = state->statuses.value( edge.sourceNodeId );
             if ( parentSnapshot.state != ExecutionState::Succeeded )
                 ++parents;
         }
-        m_state->remainingParents.insert( node.nodeId, parents );
+        state->remainingParents.insert( node.nodeId, parents );
     }
 
-    dispatchReadyNodes();
-    finalizeIfDone();
+    dispatchReadyNodes( state );
+    finalizeIfDone( state );
     return true;
 }
 
