@@ -702,20 +702,22 @@ TEST_CASE( "edge: an empty DAG is refused with a Failed on-disk run and no lock 
         WorkflowRunLock::lockPathForRun( fx.scratch.path(), runId ) );
     REQUIRE( probe.state == WorkflowRunLock::OwnerProbe::State::NoHolder );
 
-    // The resumable-cycle contract stays consistent for the degenerate
-    // lineage: resume of the Failed run finalizes it Completed from an empty
-    // remaining set (#1078a), re-executing nothing.
+    // Track 10 R5 contract change (was: resume finalized the Failed run
+    // Completed from an empty remaining set per #1078a — a rejected lineage
+    // escalated to Completed with zero execution, #1351 backlog). Resume now
+    // REFUSES the degenerate lineage with a typed reason and leaves the
+    // persisted Failed verdict (and its checkpoint location) untouched.
     QString err;
     const long resumeOutcome = coordinator.resumeRun( runId, &err );
     INFO( err.toStdString() );
-    REQUIRE( resumeOutcome == 0 );
-    // Completed runs archive to history/ — check both locations.
-    const QString stateAfter = injector_read_state( fx.scratch.path(), runId ).isEmpty()
-                                   ? injector_read_state(
-                                       QDir( fx.scratch.path() ).filePath( QStringLiteral( "history" ) ),
-                                       runId )
-                                   : injector_read_state( fx.scratch.path(), runId );
-    REQUIRE( stateAfter == "Completed" );
+    REQUIRE( resumeOutcome == -1 );
+    REQUIRE( err.contains( QStringLiteral( "no steps" ) ) );
+    REQUIRE( injector_read_state( fx.scratch.path(), runId ) == "Failed" );
+    // The refusal never archived or rewrote the checkpoint: no history/
+    // entry appeared for this runId.
+    REQUIRE_FALSE(
+        QFile::exists( QDir( fx.scratch.path() ).filePath(
+            QStringLiteral( "history/checkpoint_%1.json" ).arg( runId.c_str() ) ) ) );
 }
 
 TEST_CASE( "edge: a single-node DAG completes, archives, and leaves the world terminal",

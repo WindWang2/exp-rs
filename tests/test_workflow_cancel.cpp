@@ -325,6 +325,192 @@ TEST_CASE( "cancelRun reaches a running step and lands Canceled with the prefix 
              == WorkflowRunLock::OwnerProbe::State::NoHolder );
 }
 
+TEST_CASE( "a rejected empty lineage refuses resume and never escalates Failed to Completed",
+           "[workflow][cancel][r5][coordinator][recovery]" )
+{
+    CancelCoordinatorFixture fx;
+    auto &coordinator = WorkflowRunCoordinator::instance();
+
+    // A zero-step submission is refused up front (Track 10): -1 to the
+    // caller, a persisted Failed run, and no lock was ever taken.
+    WorkflowDefinition empty;
+    empty.id = "wf5empty_def";
+    empty.title = "Empty";
+    REQUIRE( coordinator.startTrackedPipeline( empty, /*autoLoad=*/false ) == -1 );
+
+    // The rejection persists a Failed checkpoint under a generated runId —
+    // the identity the runs index (WorkspaceService) surfaces to users.
+    const QStringList checkpoints = QDir( fx.scratch.path() ).entryList(
+        QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+    REQUIRE( checkpoints.size() == 1 );
+    const QString entry = checkpoints.first();
+    const std::string runId =
+        entry.mid( QStringLiteral( "checkpoint_" ).size(),
+                   entry.size() - QStringLiteral( "checkpoint_" ).size()
+                       - QStringLiteral( ".json" ).size() )
+            .toStdString();
+    const QString path = fx.scratch.path() + QDir::separator() + entry;
+    const QByteArray before = [&] {
+        QFile f( path );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        return f.readAll();
+    }();
+
+    // Resume refuses: a zero-step lineage has nothing to execute, and the
+    // #1078a empty-remaining derivation must not fabricate a Completed
+    // verdict over a Failed one with zero execution.
+    QString err;
+    REQUIRE( coordinator.resumeRun( runId, &err ) == -1 );
+    INFO( err.toStdString() );
+    REQUIRE( err.contains( QStringLiteral( "no steps" ) ) );
+
+    // The on-disk verdict is untouched: still Failed, byte-identical
+    // envelope/lineage/provenance (a refused resume persists nothing).
+    const QByteArray after = [&] {
+        QFile f( path );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        return f.readAll();
+    }();
+    REQUIRE( after == before );
+    QString loadErr;
+    const auto run = WorkflowCheckpointManager().loadCheckpoint( path, &loadErr );
+    REQUIRE( run );
+    REQUIRE( run->state() == WorkflowRunState::Failed );
+    REQUIRE( WorkflowRunLock::probeOwner( WorkflowRunLock::lockPathForRun(
+                 fx.scratch.path(), runId ) ).state
+             == WorkflowRunLock::OwnerProbe::State::NoHolder );
+}
+
+TEST_CASE( "a legacy ACTIVE zero-step lineage converges to Interrupted on refused resume",
+           "[workflow][cancel][r5][coordinator][recovery]" )
+{
+    // Pre-Track-10 builds could persist a zero-step run in an ACTIVE state
+    // (the wedge the Track 10 refusal replaced). The resume gate sits AFTER
+    // the inline reconcile, so such a legacy checkpoint still converges —
+    // Interrupted, persisted, then refused — instead of being re-elected by
+    // every recoverAtStartup pass forever.
+    CancelCoordinatorFixture fx;
+    auto &coordinator = WorkflowRunCoordinator::instance();
+
+    WorkflowDefinition empty;
+    empty.id = "wf5legacy_def";
+    empty.title = "legacy empty";
+    auto run = WorkflowRun::createFromDefinition( empty, "wf5legacy_empty" );
+    REQUIRE( run );
+    run->transitionTo( WorkflowRunState::Planning );
+    run->transitionTo( WorkflowRunState::Ready );
+    run->transitionTo( WorkflowRunState::Running );
+    REQUIRE_FALSE( WorkflowCheckpointManager().saveCheckpoint( *run, fx.scratch.path() ).isEmpty() );
+
+    QString err;
+    REQUIRE( coordinator.resumeRun( "wf5legacy_empty", &err ) == -1 );
+    INFO( err.toStdString() );
+    REQUIRE( err.contains( QStringLiteral( "no steps" ) ) );
+
+    // Converged, not stranded: the on-disk state is the recovery-terminal
+    // Interrupted (a non-candidate for the next pass), and the lock is free.
+    const QString path = fx.scratch.path() + QDir::separator()
+                         + QStringLiteral( "checkpoint_wf5legacy_empty.json" );
+    QString loadErr;
+    const auto loaded = WorkflowCheckpointManager().loadCheckpoint( path, &loadErr );
+    REQUIRE( loaded );
+    REQUIRE( loaded->state() == WorkflowRunState::Interrupted );
+    REQUIRE( WorkflowRunLock::probeOwner( WorkflowRunLock::lockPathForRun(
+                 fx.scratch.path(), "wf5legacy_empty" ) ).state
+             == WorkflowRunLock::OwnerProbe::State::NoHolder );
+}
+
+TEST_CASE( "resume state matrix: terminal verdicts are refused with their specific reason",
+           "[workflow][cancel][r5][coordinator][recovery]" )
+{
+    CancelCoordinatorFixture fx;
+    auto &coordinator = WorkflowRunCoordinator::instance();
+    const std::string prefix = "wf5matrix";
+
+    sicnu::jobs::JobEngine::instance().registerExecutor(
+        prefix + ":first",
+        []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+            return Json::Value( Json::objectValue );
+        } );
+    sicnu::jobs::JobEngine::instance().registerExecutor(
+        prefix + ":second",
+        []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+            return Json::Value( Json::objectValue );
+        } );
+
+    // --- Completed lineage -------------------------------------------------
+    const long completedPipeline =
+        coordinator.startTrackedPipeline( CancelCoordinatorFixture::twoStepDefinition( prefix ),
+                                          /*autoLoad=*/false );
+    REQUIRE( completedPipeline > 0 );
+    const auto completedSnapshot =
+        CancelCoordinatorFixture::runToTerminal( coordinator, completedPipeline );
+    REQUIRE( completedSnapshot );
+    REQUIRE( completedSnapshot->state() == WorkflowRunState::Completed );
+    const std::string completedRunId = completedSnapshot->runId();
+
+    // A Completed lineage is not resumable. The terminal checkpoint may
+    // already be in history/ (the finalize sweep archives Completed runs
+    // concurrently with this call), so the typed refusal is EITHER the
+    // state wall naming Completed OR the no-checkpoint refusal — never a
+    // successful resume and never a re-execution.
+    QString err;
+    REQUIRE( coordinator.resumeRun( completedRunId, &err ) == -1 );
+    INFO( err.toStdString() );
+    REQUIRE( ( err.contains( QStringLiteral( "only interrupted/failed/canceled runs resume" ) )
+               || err.contains( QStringLiteral( "No checkpoint for run" ) ) ) );
+
+    // The durable verdict is untouched wherever it lives (live dir or
+    // history/ archive): still Completed.
+    const QString completedPath = [&] {
+        const QString live = fx.scratch.path() + QDir::separator()
+                             + QStringLiteral( "checkpoint_%1.json" )
+                                   .arg( QString::fromStdString( completedRunId ) );
+        if ( QFile::exists( live ) )
+            return live;
+        return fx.scratch.path() + QDir::separator() + QStringLiteral( "history" )
+               + QDir::separator() + QStringLiteral( "checkpoint_%1.json" )
+                     .arg( QString::fromStdString( completedRunId ) );
+    }();
+    REQUIRE( QFile::exists( completedPath ) );
+    QString loadErr;
+    const auto completedRun =
+        WorkflowCheckpointManager().loadCheckpoint( completedPath, &loadErr );
+    REQUIRE( completedRun );
+    REQUIRE( completedRun->state() == WorkflowRunState::Completed );
+
+    // --- Completed checkpoint crafted on disk ------------------------------
+    // A Completed lineage is RESUME-REFUSED with the exact state-wall text.
+    // Written directly (no coordinator finalize) so the checkpoint stays
+    // LIVE — no archive race in the message assertion. Failed/Canceled/
+    // Interrupted are the resumable states (covered by the other cases in
+    // this file); Completed is the terminal wall of the resume matrix.
+    auto completedOnDisk = WorkflowRun::createFromDefinition(
+        CancelCoordinatorFixture::twoStepDefinition( prefix ), "wf5matrix_completed" );
+    REQUIRE( completedOnDisk );
+    completedOnDisk->transitionTo( WorkflowRunState::Planning );
+    completedOnDisk->transitionTo( WorkflowRunState::Ready );
+    completedOnDisk->transitionTo( WorkflowRunState::Running );
+    completedOnDisk->transitionTo( WorkflowRunState::Completed );
+    REQUIRE_FALSE( WorkflowCheckpointManager()
+                       .saveCheckpoint( *completedOnDisk, fx.scratch.path() )
+                       .isEmpty() );
+
+    QString wallErr;
+    REQUIRE( coordinator.resumeRun( completedOnDisk->runId(), &wallErr ) == -1 );
+    INFO( wallErr.toStdString() );
+    REQUIRE( wallErr.contains( QStringLiteral( "only interrupted/failed/canceled runs resume" ) ) );
+    REQUIRE( wallErr.contains( QStringLiteral( "Completed" ) ) );
+
+    // A refused resume never rewrites the verdict on disk.
+    const QString wallPath = fx.scratch.path() + QDir::separator()
+                             + QStringLiteral( "checkpoint_%1.json" )
+                                   .arg( QString::fromStdString( completedOnDisk->runId() ) );
+    const auto wallRun = WorkflowCheckpointManager().loadCheckpoint( wallPath, &loadErr );
+    REQUIRE( wallRun );
+    REQUIRE( wallRun->state() == WorkflowRunState::Completed );
+}
+
 TEST_CASE( "cancelRun cannot resurrect or re-terminal a completed run",
            "[workflow][cancel][r4][coordinator]" )
 {
