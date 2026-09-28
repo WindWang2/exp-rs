@@ -14725,7 +14725,6 @@ set_target_properties(test_parity_map_gate_r4 PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_parity_map_gate_r4 TEST_PREFIX test_parity_map_gate_r4::)
-=======
 # ---------------------------------------------------------------------------
 # track-16 verify-chain closure (hardening/r4-verify-chain) — new test targets
 # Append-only; each block is independent so sibling-track rebase conflicts
@@ -14947,3 +14946,56 @@ set_target_properties(test_i18n_migrated_translations PROPERTIES
 add_test(NAME test_i18n_migrated_translations
   COMMAND test_i18n_migrated_translations
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# ---------------------------------------------------------------------------
+# R5 track 07 (hardening/r5-model-runtime-workers) — REAL worker/pool restart
+# recovery oracles for the python worker channel, publish-fence path identity,
+# and the provider wire error contract. Append-only block; TEST_PREFIX keeps
+# every case selectable by `ctest -R`.
+# ---------------------------------------------------------------------------
+add_executable(sicnu_fake_python_worker
+  fixtures/fake_python_worker.cpp
+)
+target_link_libraries(sicnu_fake_python_worker PRIVATE
+  Qt6::Core
+  Qt6::Network
+)
+set_target_properties(sicnu_fake_python_worker PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+qt_add_executable(test_runtime_pool_recovery_r5
+  test_runtime_pool_recovery_r5.cpp
+)
+target_link_libraries(test_runtime_pool_recovery_r5 PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Network
+  Qt6::Widgets
+  sicnu_python_isolated
+  sicnu_jobs
+  # sicnu_python_isolated references app-side symbols (ProjectContext,
+  # JobEngine) that resolve through these targets — same link set every
+  # other consumer of the isolated lib uses.
+  sicnu_qgis_display
+  sicnu_processing
+  sicnu_operators
+  qgis_core
+)
+target_include_directories(test_runtime_pool_recovery_r5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_runtime_pool_recovery_r5 PRIVATE
+  FAKE_WORKER_BIN="${CMAKE_BINARY_DIR}/sicnu_fake_python_worker"
+)
+add_dependencies(test_runtime_pool_recovery_r5 sicnu_fake_python_worker)
+set_target_properties(test_runtime_pool_recovery_r5 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_runtime_pool_recovery_r5 TEST_PREFIX "test_runtime_pool_recovery_r5::" TIMEOUT 300 RUN_SERIAL TRUE)
+
+# R5 track 07: publish-fence path identity + detection-guard occupancy.
+sicnu_add_test(test_model_publish_fence_r5 TIMEOUT 180 RUN_SERIAL TRUE TEST_PREFIX "test_model_publish_fence_r5::")
+target_link_libraries(test_model_publish_fence_r5 PRIVATE sicnu_operators)
+if(TARGET jsoncpp)
+  target_link_libraries(test_model_publish_fence_r5 PRIVATE jsoncpp)
+endif()
