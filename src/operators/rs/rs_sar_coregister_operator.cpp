@@ -270,6 +270,10 @@ Json::Value RsSarCoregisterOperator::run( const Json::Value &params, RSOperatorC
     out.setMetadataItem( "SICNU_SAR_INSAR_PRODUCT", "coregistered_slave" );
     out.setMetadataItem( "SICNU_SAR_INSAR_COREG_DX", std::to_string( shift.dx ).c_str() );
     out.setMetadataItem( "SICNU_SAR_INSAR_COREG_DY", std::to_string( shift.dy ).c_str() );
+    // Resampling voids are written as NaN (shiftComplexBilinear); declare the
+    // same convention the local coregister path already declares so readers
+    // never mistake voids for data.
+    out.setBandNoDataValue( 1, std::numeric_limits<double>::quiet_NaN() );
 
     std::vector<std::complex<float>> tile( static_cast<size_t>( 256 ) * 256 );
     for ( int ty = 0; ty < height; ty += 256 )

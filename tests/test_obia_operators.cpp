@@ -782,4 +782,48 @@ TEST_CASE( "rs:obia_hierarchy build mode still fails closed without OTB", "[obia
     }
 }
 
+TEST_CASE( "obia_segment otb adapter relabels all-void segments to nodata",
+           "[obia][operator][segment][nodata][r5]" )
+{
+    // R5 NoData audit: the OTB CLI has no input-sentinel contract, so a void
+    // region (band declared sentinel) can cluster into its own fake object.
+    // The adapter's relabel pass must drop every segment whose pixels are ALL
+    // declared void (any-band rule), keep mixed and clean segments, and keep
+    // label 0 untouched. Grid: 2x2 segments over a 2-band raster; band 2
+    // declares -9999.
+    //   seg 1 @ pixels 0-1   : clean (10/10)                → survives
+    //   seg 2 @ pixels 2-3   : band2 sentinel at BOTH px    → relabeled 0
+    //   seg 3 @ pixels 4-5   : one clean px + one band2 px  → survives (mixed)
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString rasterPath = tmp.filePath( "void_src.tif" );
+    {
+        GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+        REQUIRE( driver != nullptr );
+        GDALDatasetH ds = GDALCreate( driver, rasterPath.toUtf8().constData(), 3, 2, 2,
+                                      GDT_Float32, nullptr );
+        REQUIRE( ds != nullptr );
+        std::vector<float> b1 = { 10, 10, 10, 10, 10, 10 };
+        std::vector<float> b2 = { 10, 10, -9999.0f, -9999.0f, 10, -9999.0f };
+        REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), -7777.0 ) == CE_None ); // unused decl
+        REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( ds, 2 ), -9999.0 ) == CE_None );
+        REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, 3, 2, b1.data(), 3, 2,
+                               GDT_Float32, 0, 0 ) == CE_None );
+        REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 2 ), GF_Write, 0, 0, 3, 2, b2.data(), 3, 2,
+                               GDT_Float32, 0, 0 ) == CE_None );
+        GDALClose( ds );
+    }
+
+    RsSegmentMap segMap( QVector<quint32>{ 1, 1, 2, 2, 3, 3 }, 3, 2 );
+    REQUIRE( RsOtbSegmenter::relabelAllVoidSegments( segMap, rasterPath ) );
+
+    const auto &labels = segMap.labels();
+    REQUIRE( labels[0] == 1 ); // clean segment survives
+    REQUIRE( labels[1] == 1 );
+    REQUIRE( labels[2] == 0 ); // all-void segment relabeled to nodata
+    REQUIRE( labels[3] == 0 );
+    REQUIRE( labels[4] == 3 ); // mixed segment survives
+    REQUIRE( labels[5] == 3 );
+}
+
 #endif // SICNU_HAS_OPENCV

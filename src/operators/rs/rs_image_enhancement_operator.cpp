@@ -286,7 +286,8 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
             case 4: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
                         convolveTileLaplacian(tile, buf, core); }; break;
             }
-            ok = streamBandWindowed(src, b, dst, kTileDim, half, kernel);
+            ok = streamBandWindowed(src, b, dst, kTileDim, half, kernel,
+                                    bandNodata[b - 1]);
             context.reportProgress(static_cast<double>(b) / bands, "Filtering bands");
         }
     } else if (methodIndex == 2) {
@@ -344,7 +345,8 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
             case 3: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
                         speckleTileGammaMap(tile, buf, core, speckleKernel, static_cast<float>(noiseVar)); }; break;
             }
-            ok = streamBandWindowed(src, b, dst, kTileDim, half, kernel);
+            ok = streamBandWindowed(src, b, dst, kTileDim, half, kernel,
+                                    bandNodata[b - 1]);
             context.reportProgress(static_cast<double>(b) / bands, "Despeckling bands");
         }
     }

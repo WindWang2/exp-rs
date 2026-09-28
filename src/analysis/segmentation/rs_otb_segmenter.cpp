@@ -7,13 +7,123 @@
 #include <gdal.h>
 
 #include <QFile>
+#include <QHash>
 #include <QObject>
 #include <QProcess>
 #include <QTemporaryDir>
 
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
 bool RsOtbSegmenter::isAvailable()
 {
     return !ToolPathManager::instance().otbToolPath( QStringLiteral( "Segmentation" ) ).isEmpty();
+}
+
+bool RsOtbSegmenter::relabelAllVoidSegments( RsSegmentMap &segMap, const QString &rasterPath )
+{
+    if ( segMap.isEmpty() || rasterPath.isEmpty() )
+        return false;
+
+    GDALDatasetH srcDs = GDALOpen( rasterPath.toUtf8().constData(), GA_ReadOnly );
+    if ( !srcDs )
+        return false;
+    const int width = GDALGetRasterXSize( srcDs );
+    const int height = GDALGetRasterYSize( srcDs );
+    const int bandCount = GDALGetRasterCount( srcDs );
+    if ( width != segMap.width() || height != segMap.height() || bandCount < 1 )
+    {
+        GDALClose( srcDs );
+        return false;
+    }
+
+    // Per-band declared finite sentinels; bands without one void only on
+    // non-finite samples (the rs:obia_features any-band invalid convention).
+    std::vector<float> sentinels( static_cast<size_t>( bandCount ), 0.0f );
+    std::vector<bool> hasSentinel( static_cast<size_t>( bandCount ), false );
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( srcDs, b );
+        if ( !band )
+        {
+            GDALClose( srcDs );
+            return false;
+        }
+        int hasNd = 0;
+        const double nd = GDALGetRasterNoDataValue( band, &hasNd );
+        if ( hasNd && std::isfinite( nd ) )
+        {
+            sentinels[static_cast<size_t>( b - 1 )] = static_cast<float>( nd );
+            hasSentinel[static_cast<size_t>( b - 1 )] = true;
+        }
+    }
+
+    const size_t nPixels = static_cast<size_t>( width ) * static_cast<size_t>( height );
+    const QVector<quint32> &labels = segMap.labels();
+
+    // 1 byte/px void mask (row-block reads, #648 convention): a pixel is void
+    // when ANY band hits its declared sentinel or is non-finite.
+    std::vector<char> pixelVoid( nPixels, 0 );
+    {
+        constexpr int kBlockRows = 256;
+        std::vector<float> rowBlock;
+        for ( int y = 0; y < height; y += kBlockRows )
+        {
+            const int rows = std::min( kBlockRows, height - y );
+            for ( int b = 1; b <= bandCount; ++b )
+            {
+                GDALRasterBandH band = GDALGetRasterBand( srcDs, b );
+                rowBlock.assign( static_cast<size_t>( width ) * rows, 0.0f );
+                if ( GDALRasterIO( band, GF_Read, 0, y, width, rows, rowBlock.data(),
+                                   width, rows, GDT_Float32, 0, 0 ) != CE_None )
+                {
+                    GDALClose( srcDs );
+                    return false;
+                }
+                const bool bHasSentinel = hasSentinel[static_cast<size_t>( b - 1 )];
+                const float sentinel = sentinels[static_cast<size_t>( b - 1 )];
+                for ( int r = 0; r < rows; ++r )
+                {
+                    const float *row = rowBlock.data() + static_cast<size_t>( r ) * width;
+                    char *voidRow = pixelVoid.data()
+                                    + static_cast<size_t>( y + r ) * width;
+                    for ( int x = 0; x < width; ++x )
+                    {
+                        const float v = row[x];
+                        if ( !std::isfinite( v ) || ( bHasSentinel && v == sentinel ) )
+                            voidRow[x] = 1;
+                    }
+                }
+            }
+        }
+    }
+    GDALClose( srcDs );
+
+    // A label survives when it owns at least one non-void pixel; all-void
+    // segments (fake objects clustered from sentinel regions) relabel to 0.
+    QHash<quint32, bool> alive;
+    alive.reserve( 1024 );
+    for ( size_t i = 0; i < nPixels; ++i )
+    {
+        const quint32 label = labels[static_cast<qsizetype>( i )];
+        if ( label != 0 && !pixelVoid[i] )
+            alive[label] = true;
+    }
+    QVector<quint32> relabeled = labels;
+    bool changed = false;
+    for ( size_t i = 0; i < nPixels; ++i )
+    {
+        const quint32 label = relabeled[static_cast<qsizetype>( i )];
+        if ( label != 0 && !alive.contains( label ) )
+        {
+            relabeled[static_cast<qsizetype>( i )] = 0;
+            changed = true;
+        }
+    }
+    if ( changed )
+        segMap = RsSegmentMap( std::move( relabeled ), segMap.width(), segMap.height() );
+    return true;
 }
 
 RsSegmenterResult RsOtbSegmenter::segment(
@@ -139,6 +249,17 @@ RsSegmenterResult RsOtbSegmenter::segment(
             result.segMap = RsSegmentMap();
             return result;
         }
+    }
+
+    // Void contract: declared-sentinel regions must not survive as fake
+    // objects (R5 NoData audit). Best-effort — a failed relabel pass is
+    // logged, it does not discard a successful segmentation.
+    if ( !relabelAllVoidSegments( result.segMap, rasterPath ) )
+    {
+        SICNU_LOG_WARN( SicnuLogTags::Segmentation,
+                           QStringLiteral( "RsOtbSegmenter: void relabel skipped "
+                                           "(input unreadable or grid mismatch): %1" )
+                             .arg( rasterPath ) );
     }
 
     result.ok = true;

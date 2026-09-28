@@ -97,7 +97,9 @@ std::optional<FusedStage> makeNdviStage( const Json::Value &params )
 
 /// rs:threshold_raster — manual threshold method, no cleanup/MMU. Replicates
 /// ChangeDetection::changeMask: NaN input → 255 (nodata), v >= threshold → 1,
-/// else 0, written as GDT_Byte.
+/// else 0, written as GDT_Byte. Payload/metadata contract mirrors
+/// thresholdRasterToMask: maskedPixels/totalPixels/maskedPercent derived from
+/// the written mask (255 = NoData) and the SICNU_CHANGE_* metadata items.
 std::optional<FusedStage> makeThresholdStage( const Json::Value &params )
 {
     if ( getString( params, "thresholdMethod", "manual" ) != "manual" )
@@ -123,7 +125,38 @@ std::optional<FusedStage> makeThresholdStage( const Json::Value &params )
         planes[0] = std::move( out );
         return planes;
     };
-    stage.resultExtras["thresholdUsed"] = threshold;
+    // Unfused parity: the operator reports the float-space threshold it
+    // actually applied (float(0.3) != double(0.3) in the JSON double round
+    // trip), stamps the same metadata items, and counts masked/total pixels
+    // off the written mask with 255 = NoData excluded from the total.
+    stage.resultExtras["thresholdUsed"] = static_cast<double>( thresholdF );
+    stage.outputMetadata = {
+        { "SICNU_CHANGE_METHOD", "threshold" },
+        { "SICNU_CHANGE_THRESHOLD", QString::number( thresholdF, 'g', 10 ).toStdString() },
+    };
+    auto counts = std::make_shared<std::pair<Json::UInt64, Json::UInt64>>( 0, 0 );
+    stage.postRunExtras = std::make_shared<Json::Value>( Json::objectValue );
+    stage.tailPlaneObserver =
+        [thresholdF, counts, extras = stage.postRunExtras]( const float *plane, int width,
+                                                            int height ) {
+            const size_t n = static_cast<size_t>( width ) * height;
+            for ( size_t i = 0; i < n; ++i )
+            {
+                const float v = plane[i];
+                if ( v == 255.0f )
+                    continue;
+                ++counts->second;
+                if ( v >= thresholdF )
+                    ++counts->first;
+            }
+            ( *extras )["maskedPixels"] = counts->first;
+            ( *extras )["totalPixels"] = counts->second;
+            ( *extras )["maskedPercent"] =
+                counts->second == 0
+                    ? 0.0
+                    : 100.0 * static_cast<double>( counts->first )
+                          / static_cast<double>( counts->second );
+        };
     return stage;
 }
 
@@ -376,9 +409,13 @@ void runPipeline( const FusedChainPlan &plan,
         } );
     }
 
-    // Consumer: write the tail planes onto the output raster.
+    // Consumer: write the tail planes onto the output raster, feeding each
+    // plane to the tail adapter's observer before the dtype cast (payload
+    // parity with the unfused operator).
     const int tailDtype = plan.stages.back().tailOutputDtype;
-    auto consumer = [&output, tailDtype, &throwIfContextCancelled]( TilePayload &&p ) -> bool {
+    const auto &tailObserver = plan.stages.back().tailPlaneObserver;
+    auto consumer = [&output, tailDtype, &tailObserver,
+                     &throwIfContextCancelled]( TilePayload &&p ) -> bool {
         throwIfContextCancelled();
         GdalBlockStream::Tile tile;
         tile.index = p.spec.index;
@@ -396,6 +433,8 @@ void runPipeline( const FusedChainPlan &plan,
         for ( int b = 0; b < p.spec.bands; ++b )
         {
             const float *plane = p.pixels->data() + static_cast<size_t>( b ) * planeSize;
+            if ( tailObserver )
+                tailObserver( plane, p.spec.width, p.spec.height );
             if ( tailDtype == GDT_Byte )
             {
                 std::vector<uint8_t> bytes( planeSize );
@@ -454,6 +493,11 @@ Json::Value executeFusedChain( const FusedChainPlan &plan,
     if ( !output.isOpen() )
         throw std::runtime_error( "fused chain: cannot create output" );
     output.setNoDataValue( plan.stages.back().tailOutputDtype == GDT_Byte ? 255.0 : kNaN );
+    // Tail metadata parity: the unfused operator stamps its output with
+    // machine-readable contract items; the fused output must carry the same.
+    for ( const auto &item : plan.stages.back().outputMetadata )
+        output.setMetadataItem( QString::fromStdString( item.first ),
+                                QString::fromStdString( item.second ) );
 
     try
     {
@@ -479,6 +523,9 @@ Json::Value executeFusedChain( const FusedChainPlan &plan,
     if ( plan.stages.back().resultExtras.isObject() )
         for ( const auto &key : plan.stages.back().resultExtras.getMemberNames() )
             result[key] = plan.stages.back().resultExtras[key];
+    if ( plan.stages.back().postRunExtras && plan.stages.back().postRunExtras->isObject() )
+        for ( const auto &key : plan.stages.back().postRunExtras->getMemberNames() )
+            result[key] = ( *plan.stages.back().postRunExtras )[key];
     return result;
 }
 

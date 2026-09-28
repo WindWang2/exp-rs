@@ -13,7 +13,10 @@
 
 #include <QString>
 
+#include <gdal.h>
+
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -68,6 +71,46 @@ std::size_t resolveWarpMemoryLimit( const Json::Value &params )
         return static_cast<std::size_t>( v );
     }
     return 0; // GDAL default
+}
+
+/// R5 NoData audit: pin the warp void contract instead of leaning on GDAL's
+/// implicit "copy source declarations" default. Declared on every band: mask
+/// with (-srcnodata) and declare on the output (-dstnodata) the same values,
+/// so resampled/aligned voids stay readable voids. Undeclared float raster:
+/// declare NaN — warp voids become machine-readable holes, never fake zeros
+/// flowing into downstream statistics (the rs:align padding case). Integer or
+/// mixed-declaration rasters keep GDAL's per-band default (fabricating a 0 or
+/// 255 void value would falsify real pixels of that value).
+void applyWarpNodataContract( const GdalDatasetWrapper &src, sicnu::geo::WarpOptions &options )
+{
+    const int bands = src.bandCount();
+    if ( bands < 1 )
+        return;
+    std::vector<double> declared;
+    declared.reserve( static_cast<size_t>( bands ) );
+    bool allDeclared = true;
+    bool allFloat = true;
+    for ( int b = 1; b <= bands; ++b )
+    {
+        const int dtype = src.bandDataType( b );
+        if ( dtype != GDT_Float32 && dtype != GDT_Float64 )
+            allFloat = false;
+        bool has = false;
+        const double nd = src.bandNoDataValue( b, &has );
+        if ( has && std::isfinite( nd ) )
+            declared.push_back( nd );
+        else
+            allDeclared = false;
+    }
+    if ( allDeclared )
+    {
+        options.sourceNodata = declared;
+        options.targetNodata = declared;
+    }
+    else if ( allFloat )
+    {
+        options.targetNodata = { std::numeric_limits<double>::quiet_NaN() };
+    }
 }
 
 void requireCrs( GdalDatasetWrapper &dataset, const std::string &path, const char *role )
@@ -189,6 +232,7 @@ Json::Value RsResampleOperator::run(const Json::Value& params,
     options.targetResolutionX = resolutionX;
     options.targetResolutionY = resolutionY;
     options.warpMemoryLimitBytes = resolveWarpMemoryLimit(params);
+    applyWarpNodataContract(src, options);
 
     context.throwIfCancelled();
     context.reportProgress(0.05, "Resampling raster");
@@ -354,6 +398,7 @@ Json::Value RsAlignOperator::run(const Json::Value& params,
         options.targetResolutionY = resY;
         options.targetBounds = {minX, minY, maxX, maxY};
         options.warpMemoryLimitBytes = resolveWarpMemoryLimit(params);
+        applyWarpNodataContract(src, options);
         context.throwIfCancelled();
         context.reportProgress(0.05, "Aligning raster to reference grid");
         sicnu::geo::ConvertProgress progress = makeProgress(context, 0.05, 0.95);

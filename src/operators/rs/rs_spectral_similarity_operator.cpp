@@ -116,19 +116,20 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
     const std::vector<int> bands = parseBands(params, bandCount);
     const int nBands = static_cast<int>(bands.size());
 
-    // Declared per-band sentinel on the used bands (float-space compare in
-    // the kernel, #444). First declared finite sentinel wins — the kernel
-    // interface carries a single sentinel. With no declaration the spectral
-    // family sentinel (-9999) keeps the historical behavior. NaN-declared
-    // bands need no sentinel: the kernel already rejects non-finite samples.
-    float inputSentinel = -9999.0f;
-    for (const int b : bands) {
+    // Per-band sentinel wash (R5 closure of the single-sentinel backlog):
+    // each used band's declared finite sentinel becomes NaN before the kernel
+    // runs, so heterogeneous declarations are all honored — the old
+    // "first declared sentinel wins" let a second band's void pass as data.
+    // Bands without a declaration keep the historical spectral-family
+    // fallback (-9999 voids, documented in metadata()). The kernel receives
+    // NaN and voids on its own non-finite rule, which covers every washed
+    // sentinel and actual NaN samples.
+    std::vector<float> bandSentinels(static_cast<size_t>(nBands), -9999.0f);
+    for (size_t bi = 0; bi < bands.size(); ++bi) {
         bool has = false;
-        const double nd = ds.bandNoDataValue(b, &has);
-        if (has && std::isfinite(nd)) {
-            inputSentinel = static_cast<float>(nd);
-            break;
-        }
+        const double nd = ds.bandNoDataValue(bands[bi], &has);
+        if (has && std::isfinite(nd))
+            bandSentinels[bi] = static_cast<float>(nd);
     }
 
     QString gridError;
@@ -177,6 +178,7 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
     try {
         std::vector<float> tileLabels;
         std::vector<float> tileScores;
+        std::vector<float> washed; // sentinel-washed copy of the tile's BIP buffer
         if (!stream.forEach([&](const GdalMultibandBlockStream::Tile& tile, const float* bip) {
                 context.throwIfCancelled();
                 const size_t tilePixels = static_cast<size_t>(tile.width) * tile.height;
@@ -184,15 +186,25 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
                 if (!scorePath.empty())
                     tileScores.assign(tilePixels, std::numeric_limits<float>::quiet_NaN());
 
+                washed.assign(bip, bip + tilePixels * static_cast<size_t>(nBands));
+                for (size_t p = 0; p < tilePixels; ++p) {
+                    float *pixel = washed.data() + p * static_cast<size_t>(nBands);
+                    for (size_t bi = 0; bi < bandSentinels.size(); ++bi) {
+                        const float v = pixel[bi];
+                        if (v == bandSentinels[bi] || !std::isfinite(v))
+                            pixel[bi] = std::numeric_limits<float>::quiet_NaN();
+                    }
+                }
+
                 std::vector<int> labels(tilePixels, -1);
                 // Scores are always computed so the meanScore QA is real
                 // even when no score raster is requested.
                 std::vector<float> scores(tilePixels, 0.0f);
                 QString kernelError;
                 if (!SpectralHybridSimilarity::classify(
-                        bip, tilePixels, nBands, refs.data(), refCount,
+                        washed.data(), tilePixels, nBands, refs.data(), refCount,
                         labels.data(), scores.data(),
-                        form, inputSentinel, &kernelError))
+                        form, std::numeric_limits<float>::quiet_NaN(), &kernelError))
                     throw RSOperatorError(ErrorCode::ComputationError,
                                           kernelError.isEmpty()
                                               ? "Hybrid similarity classification failed"

@@ -14600,7 +14600,8 @@ target_compile_definitions(test_plugin_pollution_gate_r4 PRIVATE
   SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
 )
 add_dependencies(test_plugin_pollution_gate_r4 hello_plugin)
-# === ui-backend-state-parity-r4 (Track 3 R4): parity oracle suites ===# Each suite drives the real shell library (#1312 full-shell precedent — no
+# === ui-backend-state-parity-r4 (Track 3 R4): parity oracle suites ==========
+# Each suite drives the real shell library (#1312 full-shell precedent — no
 # embedded TU copies) against landing-policy / mirror contracts. The pairs,
 # drift registry and race classes live in
 # .planning/ui-backend-state-parity-r4/PARITY_MAP.md.
@@ -14950,6 +14951,31 @@ sicnu_discover_tests(test_operator_chain_tolerance TEST_PREFIX r4:: TIMEOUT 300)
 sicnu_discover_tests(test_operator_determinism_digest TEST_PREFIX r4:: TIMEOUT 600)
 sicnu_discover_tests(test_operator_preflight_refusals TEST_PREFIX r4:: TIMEOUT 300)
 sicnu_discover_tests(test_known_answer_corpus_r4 TEST_PREFIX r4:: TIMEOUT 300)
+
+# ---------------------------------------------------------------------------
+# Track 02 R5 (rs-gdal-fused-correctness): NoData/lifecycle contract oracles
+# for the R5 audit fixes (enhancement windows, warp void contract,
+# register/similarity/OBIA per-band sentinels, SAR void declarations).
+# Light lane like the r4 suites: registry/run seam, no qgis_gui chain.
+# ---------------------------------------------------------------------------
+add_executable(test_r5_nodata_contracts test_r5_nodata_contracts.cpp)
+target_link_libraries(test_r5_nodata_contracts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+  sicnu_processing
+  Sicnu::Geospatial
+)
+target_include_directories(test_r5_nodata_contracts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r5_nodata_contracts PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+# TEST_PREFIX r5:: lets track gates select these with `ctest -R "^r5::"`.
+sicnu_discover_tests(test_r5_nodata_contracts TEST_PREFIX r5:: TIMEOUT 300)
+
 # Track 17 R4 (WP-D): commands.json schema / entry-floor / EOL gate. Light —
 # Catch2 + Qt6::Core only (QJsonDocument); the registry bidirectional diff
 # stays in test_help_coverage, the corpus shape gate in test_help_integrity_12.
