@@ -18,6 +18,7 @@
 #include <QString>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <vector>
 
@@ -172,6 +173,14 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
         || !readBand1Bounded(ref.get(), maxDim, refW, refH, refData, refGt, rawRefW, rawRefH))
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Failed to read band 1 of source or reference raster");
+    // The warp must treat the SOURCE's declared sentinel as void, not only the
+    // resampler's -9999 default (a -3.4e38/0-void source would otherwise enter
+    // resampling as data). NaN declarations already void via the resampler's
+    // isnan rule; the -9999 fill/default stays for undeclared sources.
+    int srcHasNodata = 0;
+    const double srcNodata = src->GetRasterBand(1)->GetNoDataValue(&srcHasNodata);
+    const double warpNodata =
+        (srcHasNodata && std::isfinite(srcNodata)) ? srcNodata : -9999.0;
     const std::string refProjection = [&] {
         const char* proj = ref->GetProjectionRef();
         return (proj && *proj) ? std::string(proj) : std::string();
@@ -237,6 +246,7 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     // The product keeps the source radiometry: no [0,1] clamping (the
     // WarpOptions default range is for normalized rasters only).
     warp.clampRange = false;
+    warp.noDataValue = warpNodata;
     if (!::rs::algorithms::Resampler::warpRaster(srcData.data(), srcW, srcH, identityGt,
                                                  outData.data(), refW, refH, identityGt,
                                                  [&transform](double x, double y) {
@@ -256,11 +266,10 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     if (!outDs)
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Cannot create output raster: " + outputPath);
-    // The shared warp seam fills unmapped target pixels with the WarpOptions
-    // sentinel (-9999, resampler.h); declare it so the voids are readable
-    // NoData instead of undeclared magic values (R4 NoData audit). A source
-    // with a different declared sentinel keeps its pixels as data — the
-    // warp-nodata contract itself is tracked as backlog.
+    // The shared warp seam fills unmapped target pixels with warp.noDataValue
+    // (the source's declared sentinel, -9999 when undeclared); declare the
+    // same value so the voids are readable NoData instead of undeclared magic
+    // values (R4 NoData audit; source-sentinel contract closed in R5).
     outDs->GetRasterBand(1)->SetNoDataValue(warp.noDataValue);
     outDs->SetGeoTransform(refGtBuf);
     if (!refProjection.empty())

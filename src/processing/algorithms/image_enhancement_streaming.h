@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -58,10 +59,17 @@ using WindowedTileFn = std::function<void( const GdalBlockStream::Tile &tile,
  * Stream one band of @a src through halo tiles, apply @a fn per tile and
  * write each tile core to band @a bandNum of @a dst. @a halo must be at
  * least the kernel radius. Returns false when a read or a tile write fails.
+ *
+ * @a noData is the band's declared finite sentinel: when given, every sample
+ * equal to it (and every non-finite sample) is NaN-ized before the kernel
+ * runs, so the NaN-aware window kernels exclude the sentinel from statistics
+ * and void centers stay void (matching the operators' NaN output contract).
+ * The default (NaN) keeps the historical undeclared behavior unchanged.
  */
 bool streamBandWindowed( const GdalDatasetWrapper &src, int bandNum,
                          GdalStreamingOutput &dst, int tileDim, int halo,
-                         const WindowedTileFn &fn );
+                         const WindowedTileFn &fn,
+                         float noData = std::numeric_limits<float>::quiet_NaN() );
 
 // --- Tile-window speckle kernels: formula replicas of ImageEnhancement::
 // --- leeFilter / frostFilter / kuanFilter / gammaMapFilter (the full-frame

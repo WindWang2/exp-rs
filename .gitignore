@@ -520,6 +520,12 @@ data/labs/_tmp/
 !.planning/qt-teardown-lifecycle-r4/
 .planning/qt-teardown-lifecycle-r4/*
 !.planning/qt-teardown-lifecycle-r4/*.md
+
+# hardening/r5-rs-gdal-fused-correctness (R5 Track 02): NoData/lifecycle closure planning notes (markdown only; logs stay local).
+!.planning/r5-rs-gdal-fused-correctness/
+.planning/r5-rs-gdal-fused-correctness/*
+!.planning/r5-rs-gdal-fused-correctness/*.md
+
 # R5 track 07 model runtime / python worker recovery planning notes (markdown only).
 !.planning/r5-model-runtime-workers/
 .planning/r5-model-runtime-workers/*

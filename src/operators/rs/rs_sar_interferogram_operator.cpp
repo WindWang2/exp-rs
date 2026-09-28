@@ -237,6 +237,10 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
     out.setMetadataItem( "SICNU_SAR_INSAR_MASTER", masterPath.c_str() );
     out.setMetadataItem( "SICNU_SAR_INSAR_SLAVE", slavePath.c_str() );
     out.setMetadataItem( "SICNU_SAR_INSAR_RAMP", rampMode.c_str() );
+    // Non-finite input samples (coregistration voids, layover zeros in ramp
+    // mode) come out as NaN complex samples; declare it like the coherence
+    // band below does, so the interferogram's void convention is readable.
+    out.setBandNoDataValue( 1, kNaN );
 
     GdalStreamingOutput coherenceOut(
         QString::fromStdString( coherencePath ), master.width(), master.height(), 1,

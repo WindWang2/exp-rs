@@ -239,6 +239,25 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
   }
   if ( options.multithread )
     args.emplace_back( "-multi" );
+  // Explicit void contract (R5 NoData audit): emit the caller-pinned nodata
+  // lists instead of relying on gdalwarp's implicit copy-source-declarations
+  // default. Multi-band values join into gdalwarp's space-separated form.
+  if ( !options.sourceNodata.empty() )
+  {
+    std::string joined;
+    for ( const double nd : options.sourceNodata )
+      joined += ( joined.empty() ? std::string() : std::string( " " ) ) + std::to_string( nd );
+    args.emplace_back( "-srcnodata" );
+    args.push_back( joined );
+  }
+  if ( !options.targetNodata.empty() )
+  {
+    std::string joined;
+    for ( const double nd : options.targetNodata )
+      joined += ( joined.empty() ? std::string() : std::string( " " ) ) + std::to_string( nd );
+    args.emplace_back( "-dstnodata" );
+    args.push_back( joined );
+  }
   for ( const std::string &creationOption : options.creationOptions )
   {
     args.emplace_back( "-co" );

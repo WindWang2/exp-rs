@@ -401,6 +401,52 @@ bool warpToCrs(const QString& inputPath, const QString& outputPath, const QStrin
     push("COMPRESS=LZW");
     push("-co");
     push("TILED=YES");
+
+    // Explicit NoData contract instead of relying on gdalwarp's implicit
+    // "copy source nodata to the output" default: reprojecting always creates
+    // voids outside the source footprint, and they must be declared, never
+    // silently zero-filled "data".
+    //  - Source declares nodata on every band: pin -srcnodata/-dstnodata to it
+    //    (uniform value; heterogeneous declarations keep GDAL's per-band copy).
+    //  - Undeclared float source: declare NaN so warp voids are machine-
+    //    readable holes rather than fake zeros.
+    {
+        const int bandCount = GDALGetRasterCount(src);
+        int declaredBands = 0;
+        double firstNd = 0.0;
+        bool uniform = true;
+        bool allFloat = bandCount > 0;
+        for (int b = 1; b <= bandCount; ++b) {
+            GDALRasterBandH band = GDALGetRasterBand(src, b);
+            if (!band) {
+                allFloat = false;
+                continue;
+            }
+            if (GDALGetRasterDataType(band) != GDT_Float32
+                && GDALGetRasterDataType(band) != GDT_Float64)
+                allFloat = false;
+            int hasNd = 0;
+            const double nd = GDALGetRasterNoDataValue(band, &hasNd);
+            if (hasNd && std::isfinite(nd)) {
+                if (declaredBands == 0)
+                    firstNd = nd;
+                else if (nd != firstNd)
+                    uniform = false;
+                ++declaredBands;
+            }
+        }
+        if (declaredBands == bandCount && bandCount > 0 && uniform) {
+            const QByteArray ndBytes = QByteArray::number(firstNd, 'g', 17);
+            push("-srcnodata");
+            push(ndBytes.constData());
+            push("-dstnodata");
+            push(ndBytes.constData());
+        } else if (declaredBands == 0 && allFloat) {
+            push("-dstnodata");
+            push("nan");
+        }
+    }
+
     argv.push_back(nullptr);
 
     GDALWarpAppOptions* opts = GDALWarpAppOptionsNew(argv.data(), nullptr);
@@ -743,6 +789,21 @@ bool assignModisSinusoidalGeoref(const QString& inputPath,
         GDALClose(src);
         GDALClose(dst);
         return false;
+    }
+
+    // Keep the source's per-band NoData declaration on the copy: the sinusoidal
+    // product is either the final output or the warp source, and a dropped
+    // declaration turns declared fill values (e.g. MODIS 32767/-9999) into
+    // "real data" for every downstream reader and loses warp masking.
+    for (int b = 1; b <= bandCount; ++b) {
+        GDALRasterBandH sb = GDALGetRasterBand(src, b);
+        GDALRasterBandH db = GDALGetRasterBand(dst, b);
+        if (!sb || !db)
+            continue;
+        int hasNd = 0;
+        const double nd = GDALGetRasterNoDataValue(sb, &hasNd);
+        if (hasNd)
+            GDALSetRasterNoDataValue(db, nd);
     }
 
     GDALSetMetadataItem(dst, "SICNU_PRODUCT_TYPE", "MODIS", nullptr);

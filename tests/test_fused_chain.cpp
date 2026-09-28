@@ -217,9 +217,14 @@ struct FusedEquivalenceFixture
 
     FusedEquivalenceFixture()
     {
-        int argc = 1;
+        // QCoreApplication stores POINTERS to argc/argv (it does not copy
+        // them); locals here died at scope exit, so the first deep Qt path
+        // (QSettings via QgsApplication::members()) dereferenced dead stack
+        // and SIGSEGV'd (issue #1356). The rest of the suite pins the same
+        // fixture with static storage — match it.
+        static int argc = 1;
         static char arg0[] = "test_fused_chain";
-        char *argv[] = { arg0, nullptr };
+        static char *argv[] = { arg0, nullptr };
         if ( !QCoreApplication::instance() )
             new QCoreApplication( argc, argv );
         input = dir.filePath( "in.tif" );
@@ -248,7 +253,7 @@ TEST_CASE( "fused NDVI→threshold is bit-identical to the real operator chain",
     thrParams["input"] = refNdvi.toStdString();
     thrParams["output"] = refFinal.toStdString();
     thrParams["threshold"] = 0.3;
-    runOperator( "rs:threshold_raster", thrParams, ctx );
+    const Json::Value refThrPayload = runOperator( "rs:threshold_raster", thrParams, ctx );
 
     // 2) Fused: plan against the same logical chain and execute directly.
     WorkflowDefinition def;
@@ -281,6 +286,49 @@ TEST_CASE( "fused NDVI→threshold is bit-identical to the real operator chain",
             ++mismatches;
     INFO( "mask mismatches: " << mismatches );
     REQUIRE( mismatches == 0 );
+
+    // 4) Payload contract parity: the fused tail must report the same
+    // run-derived values as the unfused operator (identical masks ⇒ identical
+    // counts; thresholdUsed must survive the float round trip identically).
+    REQUIRE( fusedPayload["maskedPixels"].asUInt64() == refThrPayload["maskedPixels"].asUInt64() );
+    REQUIRE( fusedPayload["totalPixels"].asUInt64() == refThrPayload["totalPixels"].asUInt64() );
+    REQUIRE( fusedPayload["maskedPercent"].asDouble() == refThrPayload["maskedPercent"].asDouble() );
+    REQUIRE( fusedPayload["thresholdUsed"].asDouble() == refThrPayload["thresholdUsed"].asDouble() );
+
+    // 5) Metadata parity: pixel values, NoData declaration, geotransform/CRS
+    // and the change-family metadata items must all match (bit-identical in
+    // the wide sense — the manifest is part of the product).
+    {
+        ensureGdalInit();
+        GDALDataset *refDs = static_cast<GDALDataset *>(
+            GDALOpen( refFinal.toUtf8().constData(), GA_ReadOnly ) );
+        GDALDataset *fusedDs = static_cast<GDALDataset *>(
+            GDALOpen( fx.dir.filePath( "fused_final.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+        REQUIRE( refDs != nullptr );
+        REQUIRE( fusedDs != nullptr );
+        double refGt[6] = {};
+        double fusedGt[6] = {};
+        REQUIRE( refDs->GetGeoTransform( refGt ) == CE_None );
+        REQUIRE( fusedDs->GetGeoTransform( fusedGt ) == CE_None );
+        for ( int i = 0; i < 6; ++i )
+            REQUIRE( refGt[i] == fusedGt[i] );
+        REQUIRE( std::string( refDs->GetProjectionRef() )
+                 == std::string( fusedDs->GetProjectionRef() ) );
+        REQUIRE( refDs->GetRasterBand( 1 )->GetNoDataValue()
+                 == fusedDs->GetRasterBand( 1 )->GetNoDataValue() );
+        const char *refMethod = refDs->GetMetadataItem( "SICNU_CHANGE_METHOD", "" );
+        const char *fusedMethod = fusedDs->GetMetadataItem( "SICNU_CHANGE_METHOD", "" );
+        REQUIRE( refMethod != nullptr );
+        REQUIRE( fusedMethod != nullptr );
+        REQUIRE( std::string( refMethod ) == std::string( fusedMethod ) );
+        const char *refThreshold = refDs->GetMetadataItem( "SICNU_CHANGE_THRESHOLD", "" );
+        const char *fusedThreshold = fusedDs->GetMetadataItem( "SICNU_CHANGE_THRESHOLD", "" );
+        REQUIRE( refThreshold != nullptr );
+        REQUIRE( fusedThreshold != nullptr );
+        REQUIRE( std::string( refThreshold ) == std::string( fusedThreshold ) );
+        GDALClose( refDs );
+        GDALClose( fusedDs );
+    }
 }
 
 TEST_CASE( "TaskCenter completes fused members with the tail payload",
@@ -293,9 +341,11 @@ TEST_CASE( "TaskCenter completes fused members with the tail payload",
         ~EnvReset() { qunsetenv( "SICNU_FUSED_CHAIN" ); }
     } envReset;
 
-    int argc = 1;
+    // Same #1356 contract as the fixture above: static argc/argv —
+    // QCoreApplication keeps the pointers, it never copies them.
+    static int argc = 1;
     static char arg0[] = "test_fused_chain";
-    char *argv[] = { arg0, nullptr };
+    static char *argv[] = { arg0, nullptr };
     if ( !QCoreApplication::instance() )
         new QCoreApplication( argc, argv );
 
