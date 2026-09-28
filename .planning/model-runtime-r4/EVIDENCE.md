@@ -92,5 +92,5 @@
 - test_chunk_contract_11 的 3 红由本轨道收口（aaec6433b5），不再移交。
 
 ### 3b. 和解后过滤面复跑（ac26c2a86a 之后）
-- Pass 1: {回填}
-- Pass 2: {回填}
+- Pass 1: exit 0（144.67s）；唯一未运行 = mission runtime fresh-process load helper（typed Skipped）。
+- Pass 2: exit 0（140.18s）；同上。零失败。
