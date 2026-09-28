@@ -112,29 +112,35 @@ agent 轨），白名单外不修、如实披露。ctest 占位后缀 `_NOT_BUIL
 
 ## R2.2 门禁盲区缺陷（本轮核心发现）与修复
 
-**缺陷**：`ctest -R "verif|grader|preflight|suitab|science_context|evidence"`（D6 轨道门）按用例名匹配，而 29 个域目标的 `sicnu_discover_tests` 未传 `TEST_PREFIX` → 裸英文用例名逃逸门禁：**~270 个用例完全不可选或仅靠用例名偶然含关键词"部分入选"**（含六模块核心 test_science_context_broker 33 例、test_science_context_live_authorities 14 例、grader 四件套 44 例、suitability 十一件套 142 例、8 个重域首建目标 62 例）。R1 的 236/161 全绿人口对这批用例同样失明。
+**缺陷**：`ctest -R "verif|grader|preflight|suitab|science_context|evidence"`（D6 轨道门）按用例名匹配，而 29 个域目标的 `sicnu_discover_tests` 未传 `TEST_PREFIX` → 裸英文用例名逃逸门禁。三层口径（评审 F4 采纳）：
+1. **完全隐藏**（基线零入选）：8 个重域首建目标 62 例（env_12/output_verifier/lab_grader_kernels/science_verification_10/metamorphic_11/numeric_reference_11/virtual_raster_preflight 用例名不含关键词）+ test_science_context_broker 33 例 + test_science_context_live_authorities 14 例 + grader 四件套 44 例等；
+2. **关键词偶然入选**（基线部分/全部入选，改名即失明）：suitability 142 例中 90 例名字含 "suitab" 等 —— 入选是运气不是合同；
+3. **修复后残余**：本构建人口（52 目标闭包，530 例）裸撞名 = **0**（机械复算）；52 目标之外、未入本构建闭包的套件（agent/cartography/agentbench 等域）源码级仍有 ~189 例关键词撞名 —— 全量构建口径下会撞入 D6 门，属各域前缀卫生，census v2 反向断言在任意构建口径下可检出（本轨披露不代修）。
+R1 的 236/161 全绿人口对第 1 层完全失明，对第 2 层靠运气。
 
 **修复**（tests/CMakeLists.txt，白名单内）：29 处补 `TEST_PREFIX "<target>::"` + `sicnu_add_sdk_test` 宏扩展透传 TEST_PREFIX。修复后**现有 D6 正则零改动**即可确定性选中全部域目标（前缀含目标名含关键词）。
 
 **守卫**：`.planning/verify-chain-r4/chain_gate_census.sh` 机械枚举域目标 → 断言全部用例带目标前缀；allowlist 显式记录 `r4::`（D15 算子门，5 例可选）与 CLI helper。终轮：**50 OK + 2 ALLOWED，ALL GREEN**。
 
-**人口变化**：252（含 5 个占位符、混入偶然命中）→ **525**（确定性全集）。
+**人口阶梯**：252（5 个占位符 + 偶然命中混合）→ 357（第一批 12 处修复）→ **525**（第二批 17 处修复后；D6 -R 口径）。构建人口 530 例（含 5 个 r4:: 算子门用例）裸撞名 0 = 确定性全集（52 目标闭包口径）。
 
 ## R2.3 F5 真红与校准
 
 门禁修复后首个浮出的真红：`test_verification_failure_11::F5`（该测试门禁不可见 12 天，从未绿过）。
 - 断言：缺失输出目录的 `io:translate` 拒绝码 ∈ {FileNotWritable, GdalError, DirectoryNotFound, InvalidInputData}；实测 **InvalidParameter**。
 - 根因：`geospatial/io/param_guard.cpp checkTargetPath` 作为**参数前置守卫**刻意抛 `InvalidArgument`（合同注释 "io: never creates directories implicitly"，reason=target_directory_missing），io 翻译链 G::InvalidArgument→InvalidParameter。
-- 处置：白名单内校准测试期望集（+InvalidParameter，引用生产合同），保留承重断言（typed refusal + no partials）。生产行为跨域披露：io fabric 可考虑将 target_directory_missing 提级为 RS DirectoryNotFound（属主 geospatial/operators 域，本轨不处置）。
+- 处置：白名单内校准测试期望集：先放宽（+InvalidParameter）验证绿，评审 F8 后收紧为精确码 `CHECK(code == "InvalidParameter")`（映射确定性，DirectoryNotFound 为死码选项；若 io 域主改分类，此 CHECK 即可见的合同变更点），保留承重断言（typed refusal + no partials）。生产行为跨域披露：io fabric 可考虑将 target_directory_missing 提级为 RS DirectoryNotFound（属主 geospatial/operators 域，本轨不处置）。
 - 修后：二进制 32 断言 5 用例全绿。
 
 ## R2.4 Oracle（正式双轮，最终树，全新构建目录）
 
+评审整改后最终树（census v2 + 引号化 + F5 精确码）上的正式双轮：
 ```
 ctest -R "verif|grader|preflight|suitab|science_context|evidence" -j1  (QT_QPA_PLATFORM=offscreen)
-第 1 轮：100% tests passed out of 525 — CTEST_EXIT=0
-第 2 轮：100% tests passed out of 525 — CTEST_EXIT=0（38.00s）
+第 1 轮：100% tests passed out of 525 — CTEST1_EXIT=0
+第 2 轮：100% tests passed out of 525 — CTEST_EXIT=0（35.74s）
 ```
+（评审前 525/525 ×2 的两轮同样 exit 0，见 /tmp 归档 r2_ctest_final1/final2.log 的 round 记录与本文件 git 历史。）
 
 run_matrices.sh 重域补跑（R1 记忆遗留项收口）：
 ```
