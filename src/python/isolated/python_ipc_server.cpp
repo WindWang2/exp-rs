@@ -111,10 +111,40 @@ void PythonIpcServer::onSocketDisconnected()
 {
   if ( m_socket )
   {
-    m_socket->deleteLater();
-    m_socket = nullptr;
+    // The peer may have written final answers immediately before dying:
+    // give them one parse pass BEFORE the teardown, or a request whose
+    // response raced the disconnect is answered by nobody (the death
+    // notification and the data notification are unordered). The parse may
+    // re-enter close() (oversized line / callback closing the server) and
+    // null m_socket — re-check before touching it again.
+    drainBufferedResponses();
+    if ( m_socket )
+    {
+      m_socket->deleteLater();
+      m_socket = nullptr;
+    }
   }
   emit clientDisconnected();
+}
+
+void PythonIpcServer::drainBufferedResponses()
+{
+  if ( !m_socket )
+    return;
+  // bytesAvailable() only counts what Qt already pulled into its internal
+  // buffer — on the death path the kernel may still hold the peer's final
+  // writes, so force one bounded kernel read (waitForReadyRead returns
+  // quickly when data is already pending; the readyRead signal then parses
+  // through the normal path) and give whatever arrived one parse pass.
+  // readyRead is dispatched synchronously inside waitForReadyRead and its
+  // handlers may close() this server — re-check m_socket afterwards.
+  if ( m_socket->bytesAvailable() > 0 )
+    onReadyRead();
+  else if ( m_socket->waitForReadyRead( 50 ) )
+  {
+    if ( m_socket && m_socket->bytesAvailable() > 0 )
+      onReadyRead();
+  }
 }
 
 void PythonIpcServer::onReadyRead()
@@ -184,11 +214,11 @@ void PythonIpcServer::onReadyRead()
   }
 }
 
-void PythonIpcServer::sendRequest( const QString &method, const QJsonObject &params,
-                                   std::function<void( const QJsonObject &, bool )> callback,
-                                   int retriesLeft )
+int PythonIpcServer::sendRequest( const QString &method, const QJsonObject &params,
+                                  std::function<void( const QJsonObject &, bool )> callback,
+                                  int retriesLeft )
 {
-  sendRequestInternal( method, params, std::move( callback ), retriesLeft, true );
+  return sendRequestInternal( method, params, std::move( callback ), retriesLeft, true );
 }
 
 int PythonIpcServer::sendRequestInternal( const QString &method, const QJsonObject &params,

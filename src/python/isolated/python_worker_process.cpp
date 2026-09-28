@@ -28,11 +28,7 @@ PythonWorkerProcess::PythonWorkerProcess( QObject *parent )
   connect( m_process, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ),
            this, &PythonWorkerProcess::onProcessFinished );
   connect( m_process, &QProcess::errorOccurred, this, &PythonWorkerProcess::onProcessError );
-  connect( m_process, &QProcess::readyReadStandardError, this, [this] {
-    m_stderrBuffer.append( m_process->readAllStandardError() );
-    if ( m_stderrBuffer.size() > kStderrCapBytes )
-      m_stderrBuffer.remove( 0, m_stderrBuffer.size() - kStderrCapBytes );
-  } );
+  connect( m_process, &QProcess::readyReadStandardError, this, &PythonWorkerProcess::onReadyReadStderr );
 #if defined(Q_OS_UNIX)
   // Own process group: lets stopWorker() sweep TERM-ignoring workers WITH
   // their grandchildren (see killProcessTree).
@@ -153,10 +149,13 @@ void PythonWorkerProcess::killProcessTree()
 void PythonWorkerProcess::ensureSignalsConnected()
 {
   // stopWorker() blanket-disconnects the QProcess; a reused instance would
-  // otherwise lose crash detection entirely (#523).
+  // otherwise lose crash detection entirely (#523) — and, as the R5 residual
+  // of #1353's comment-only "stderr re-arm" fix showed, also its bounded
+  // stderr capture, which the crash reason depends on. Re-arm all three.
   connect( m_process, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ),
            this, &PythonWorkerProcess::onProcessFinished, Qt::UniqueConnection );
   connect( m_process, &QProcess::errorOccurred, this, &PythonWorkerProcess::onProcessError, Qt::UniqueConnection );
+  connect( m_process, &QProcess::readyReadStandardError, this, &PythonWorkerProcess::onReadyReadStderr, Qt::UniqueConnection );
 }
 
 bool PythonWorkerProcess::isRunning() const
@@ -188,6 +187,15 @@ void PythonWorkerProcess::onProcessFinished( int exitCode, QProcess::ExitStatus 
 QByteArray PythonWorkerProcess::capturedStderr() const
 {
   return m_stderrBuffer;
+}
+
+void PythonWorkerProcess::onReadyReadStderr()
+{
+  if ( !m_process )
+    return;
+  m_stderrBuffer.append( m_process->readAllStandardError() );
+  if ( m_stderrBuffer.size() > kStderrCapBytes )
+    m_stderrBuffer.remove( 0, m_stderrBuffer.size() - kStderrCapBytes );
 }
 
 void PythonWorkerProcess::onProcessError( QProcess::ProcessError error )

@@ -51,6 +51,12 @@ class PythonWorkerProcess : public QObject
     /// worker is spawned as its own group leader). TERM-ignoring workers
     /// that spawn grandchildren would otherwise leak them.
     void killProcessTree();
+    /// Appends fresh stderr into the bounded tail buffer. A member slot (not
+    /// a constructor lambda) so ensureSignalsConnected() can re-arm it after
+    /// stopWorker()'s blanket disconnect — a reused instance would otherwise
+    /// lose crash diagnostics permanently (#523 family, R5 residual of the
+    /// #1353 "stderr re-arm" fix that shipped comment-only).
+    void onReadyReadStderr();
 
     QProcess *m_process = nullptr;
     QByteArray m_stderrBuffer;
