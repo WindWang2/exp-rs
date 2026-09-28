@@ -105,7 +105,9 @@ class WorkflowRunCoordinator : public QObject {
     QString explainDump() const;
 
     /// Checkpoint directory override (tests); empty restores the default
-    /// (~/.rs_studio/checkpoints, see WorkflowCheckpointManager).
+    /// ($SICNU_CHECKPOINT_DIR when set, else ~/.rs_studio/checkpoints, see
+    /// WorkflowCheckpointManager::defaultCheckpointDirectory). An explicit
+    /// override wins over the env var for this process.
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
     /// Test-only: the next persistRun sleeps this many milliseconds AFTER

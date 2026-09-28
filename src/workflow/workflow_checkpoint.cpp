@@ -48,6 +48,13 @@ void fsyncDirectory( const QString &dirPath )
 
 QString WorkflowCheckpointManager::defaultCheckpointDirectory()
 {
+  // Session isolation knob (Track 10 R5): two processes sharing $HOME no
+  // longer have to share checkpoint state. An MCP/CLI session (or a test)
+  // relocates the whole checkpoint family — checkpoints, run locks, history —
+  // for its process lifetime; empty/unset keeps the historical default.
+  const QString overrideDir = qEnvironmentVariable( "SICNU_CHECKPOINT_DIR" );
+  if ( !overrideDir.isEmpty() )
+    return overrideDir;
   QString base = QDir::homePath() + QStringLiteral( "/.rs_studio/checkpoints" );
   return base;
 }
