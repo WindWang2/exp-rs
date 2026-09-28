@@ -90,18 +90,12 @@ inline std::vector<TileSpec> buildTileGrid( int rasterWidth, int rasterHeight,
     const std::int64_t rows64 =
         ( static_cast<std::int64_t>( rasterHeight ) + tileHeight - 1 ) / tileHeight;
     const std::int64_t total64 = cols64 * rows64;
-    // Refusal family is the master-locked contract (test_chunk_contract_11):
-    // construction-time refusals are logic_error — invalid_argument for
-    // malformed axes, std::length_error when the resulting grid leaves the
-    // int tile index domain or the halo would wrap the buffer span. The
-    // partition arithmetic core (tile_run_contract.h) keeps
-    // std::overflow_error for its own runtime surfaces.
     if ( cols64 > std::numeric_limits<int>::max() || rows64 > std::numeric_limits<int>::max() ||
          total64 > std::numeric_limits<int>::max() )
-        throw std::length_error( "buildTileGrid: tile grid " + std::to_string( cols64 ) + "x" +
-                                 std::to_string( rows64 ) + " (" + std::to_string( total64 ) +
-                                 " tiles) leaves the int tile index domain — shrink the "
-                                 "tile size or bound the raster extent first" );
+        throw std::overflow_error( "buildTileGrid: tile grid " + std::to_string( cols64 ) + "x" +
+                                   std::to_string( rows64 ) + " (" + std::to_string( total64 ) +
+                                   " tiles) overflows the int tile index domain — shrink the "
+                                   "tile size or bound the raster extent first" );
     const int cols = static_cast<int>( cols64 );
     const int rows = static_cast<int>( rows64 );
     const int total = static_cast<int>( total64 );
@@ -112,14 +106,14 @@ inline std::vector<TileSpec> buildTileGrid( int rasterWidth, int rasterHeight,
              static_cast<std::int64_t>( std::min( tileWidth, rasterWidth ) ) +
              2 * static_cast<std::int64_t>( halo );
          bufferSpanW > std::numeric_limits<int>::max() )
-        throw std::length_error( "buildTileGrid: tile buffer width + 2*halo = " +
-                                 std::to_string( bufferSpanW ) + " leaves int — reduce the halo" );
+        throw std::overflow_error( "buildTileGrid: tile buffer width + 2*halo = " +
+                                   std::to_string( bufferSpanW ) + " overflows int — reduce the halo" );
     if ( const std::int64_t bufferSpanH =
              static_cast<std::int64_t>( std::min( tileHeight, rasterHeight ) ) +
              2 * static_cast<std::int64_t>( halo );
          bufferSpanH > std::numeric_limits<int>::max() )
-        throw std::length_error( "buildTileGrid: tile buffer height + 2*halo = " +
-                                 std::to_string( bufferSpanH ) + " leaves int — reduce the halo" );
+        throw std::overflow_error( "buildTileGrid: tile buffer height + 2*halo = " +
+                                   std::to_string( bufferSpanH ) + " overflows int — reduce the halo" );
 
     std::vector<TileSpec> tiles;
     tiles.reserve( static_cast<size_t>( total ) );

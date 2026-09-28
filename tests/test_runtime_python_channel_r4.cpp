@@ -459,7 +459,7 @@ struct PoolRecoveryRig
 TEST_CASE( "Pool auto-heal replays an in-flight request onto the restarted worker",
            "[runtime][python][r4]" )
 {
-    PoolRecoveryRig rig( "#!/bin/sh\nsleep 2\nexit 42\n" );
+    PoolRecoveryRig rig( "#!/bin/sh\nsleep 6\nexit 42\n" );
     rig.send( /*retriesLeft=*/1 );
 
     REQUIRE( waitOn( rig.restarted, 15'000 ) );
@@ -480,7 +480,7 @@ TEST_CASE( "Pool auto-heal replays an in-flight request onto the restarted worke
 TEST_CASE( "Pool replay answers recovered requests whose retry budget is exhausted",
            "[runtime][python][r4]" )
 {
-    PoolRecoveryRig rig( "#!/bin/sh\nsleep 2\nexit 42\n" );
+    PoolRecoveryRig rig( "#!/bin/sh\nsleep 6\nexit 42\n" );
     rig.send( /*retriesLeft=*/0 );
 
     // The restarted worker's server must gain a client for the replay gate to
@@ -501,7 +501,7 @@ TEST_CASE( "Recovery watchdog answers pending calls when the restarted worker ne
     // the restarted node must stay clientless, so drive the raw pieces here.
     ScriptFixture fixture;
     const QString script =
-        fixture.write( "pool_watchdog.sh", "#!/bin/sh\nsleep 2\nexit 42\n" );
+        fixture.write( "pool_watchdog.sh", "#!/bin/sh\nsleep 6\nexit 42\n" );
 
     PythonWorkerProcessPool pool( 1 );
     std::atomic<bool> restarted{ false };
