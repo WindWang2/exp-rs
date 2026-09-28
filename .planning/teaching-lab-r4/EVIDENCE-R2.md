@@ -9,7 +9,7 @@
   3. `29cabb6da4` fix(tests): packs-in-sync 门重定向/tail 路径错配修复 + 误入库的 stdout 产物删除
   4. `52b4e4ba55` refactor(teaching_admin): canonical file digest 委托 lab-pack 权威（含 bytesOut null-guard 缺陷修复）
   5. `12c44a4fa2` test(lab-pack): PackVerifier 直测面 6 用例
-- 净变更：6 文件（tests/CMakeLists.txt、test_teaching_cockpit_smoke.cpp、test_lab_data_pack.cpp、lab_pack.h、lab_pack.cpp、json_util.h、test_lab_pack_boundaries_r4.cpp），删除误入库产物 1 个。
+- 净变更：7 个代码文件（tests/CMakeLists.txt、test_teaching_cockpit_smoke.cpp、test_lab_data_pack.cpp、lab_pack.h、lab_pack.cpp、json_util.h、test_lab_pack_boundaries_r4.cpp）+ 误入库产物删除 1 个 + planning 工件 2 个。
 
 ## 1. 基线构建（43 过滤面目标）
 
