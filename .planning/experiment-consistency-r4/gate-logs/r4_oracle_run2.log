@@ -1,0 +1,53 @@
+Test project /home/kevin/projects/rs-studio/exp-rs-experiment-consistency-r4/build-r4-gate
+      Start 401: test_experiment_consistency_r4::runsForCell filters edge kind before the page limit
+ 1/24 Test #401: test_experiment_consistency_r4::runsForCell filters edge kind before the page limit .......................   Passed    0.04 sec
+      Start 402: test_experiment_consistency_r4::runsForCell refuses a cell whose recorded runs overflow the page
+ 2/24 Test #402: test_experiment_consistency_r4::runsForCell refuses a cell whose recorded runs overflow the page ..........   Passed    0.04 sec
+      Start 403: test_experiment_consistency_r4::paired comparison names structural asymmetries instead of dropping them
+ 3/24 Test #403: test_experiment_consistency_r4::paired comparison names structural asymmetries instead of dropping them ...   Passed    0.03 sec
+      Start 404: test_experiment_consistency_r4::legacy decimal seeds outside the lossless domain are refused
+ 4/24 Test #404: test_experiment_consistency_r4::legacy decimal seeds outside the lossless domain are refused ..............   Passed    0.06 sec
+      Start 405: test_experiment_consistency_r4::skipped corrupt split manifest rows are named, not silent
+ 5/24 Test #405: test_experiment_consistency_r4::skipped corrupt split manifest rows are named, not silent .................   Passed    0.04 sec
+      Start 406: test_experiment_consistency_r4::a corrupt run row is refused by the promotion gate, not read as absent
+ 6/24 Test #406: test_experiment_consistency_r4::a corrupt run row is refused by the promotion gate, not read as absent ....   Passed    0.04 sec
+      Start 407: test_experiment_consistency_r4::lineage edge page reports truncation instead of hiding it
+ 7/24 Test #407: test_experiment_consistency_r4::lineage edge page reports truncation instead of hiding it .................   Passed    0.04 sec
+      Start 408: test_experiment_consistency_r4::reproduction bundle double export is byte-stable
+ 8/24 Test #408: test_experiment_consistency_r4::reproduction bundle double export is byte-stable ..........................   Passed    0.05 sec
+      Start 409: test_experiment_consistency_r4::promotionRecordById separates corrupt from not-found
+ 9/24 Test #409: test_experiment_consistency_r4::promotionRecordById separates corrupt from not-found ......................   Passed    0.04 sec
+      Start 410: test_experiment_consistency_r4::repeat verdict marks when the twin scan hits its cap
+10/24 Test #410: test_experiment_consistency_r4::repeat verdict marks when the twin scan hits its cap ......................   Passed    0.08 sec
+      Start 411: test_experiment_benchmark_r4::duplicate truth rows are refused by typed code (r4)
+11/24 Test #411: test_experiment_benchmark_r4::duplicate truth rows are refused by typed code (r4) .........................   Passed    0.03 sec
+      Start 412: test_experiment_benchmark_r4::duplicate prediction rows are refused by typed code (r4)
+12/24 Test #412: test_experiment_benchmark_r4::duplicate prediction rows are refused by typed code (r4) ....................   Passed    0.04 sec
+      Start 413: test_experiment_benchmark_r4::distinct rows still evaluate to the exact known answer (r4 control)
+13/24 Test #413: test_experiment_benchmark_r4::distinct rows still evaluate to the exact known answer (r4 control) .........   Passed    0.04 sec
+      Start 414: test_experiment_bridge_r4::markdown fences outgrow backtick runs inside step payloads (r4)
+14/24 Test #414: test_experiment_bridge_r4::markdown fences outgrow backtick runs inside step payloads (r4) ................   Passed    0.22 sec
+      Start 415: test_experiment_bridge_r4::clean payloads keep the report-standard four-backtick fence (r4)
+15/24 Test #415: test_experiment_bridge_r4::clean payloads keep the report-standard four-backtick fence (r4) ...............   Passed    0.22 sec
+      Start 416: test_experiment_bridge_r4::bridge workflow steps partition: missing refused, empty legal (r4)
+16/24 Test #416: test_experiment_bridge_r4::bridge workflow steps partition: missing refused, empty legal (r4) .............   Passed    0.22 sec
+      Start 417: test_experiment_parity_r4::batch rollback parity: refused batch appears on neither side
+17/24 Test #417: test_experiment_parity_r4::batch rollback parity: refused batch appears on neither side ...................   Passed    0.05 sec
+      Start 418: test_experiment_parity_r4::row parity: projection equals the store cursor walk exactly
+18/24 Test #418: test_experiment_parity_r4::row parity: projection equals the store cursor walk exactly ....................   Passed    0.06 sec
+      Start 419: test_experiment_parity_r4::transition-refusal parity: re-projection is stable after a refused write
+19/24 Test #419: test_experiment_parity_r4::transition-refusal parity: re-projection is stable after a refused write .......   Passed    0.05 sec
+      Start 420: test_experiment_parity_r4::metric parity: projected values equal persisted metric records
+20/24 Test #420: test_experiment_parity_r4::metric parity: projected values equal persisted metric records .................   Passed    0.07 sec
+      Start 421: test_experiment_parity_r4::stopped report surfaces its refusal in the view model (r4)
+21/24 Test #421: test_experiment_parity_r4::stopped report surfaces its refusal in the view model (r4) .....................   Passed    0.09 sec
+      Start 422: test_experiment_txn_r4::metric record batch rolls back whole on the first conflict
+22/24 Test #422: test_experiment_txn_r4::metric record batch rolls back whole on the first conflict ........................   Passed    0.04 sec
+      Start 423: test_experiment_txn_r4::lineage commit fault leaves no partial edge and the store usable
+23/24 Test #423: test_experiment_txn_r4::lineage commit fault leaves no partial edge and the store usable ..................   Passed    0.04 sec
+      Start 424: test_experiment_txn_r4::reopen after faults shows no half transaction
+24/24 Test #424: test_experiment_txn_r4::reopen after faults shows no half transaction .....................................   Passed    0.04 sec
+
+100% tests passed out of 24
+
+Total Test time (real) =   1.74 sec

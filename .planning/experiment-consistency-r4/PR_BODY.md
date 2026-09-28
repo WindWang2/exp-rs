@@ -29,12 +29,12 @@
 | ③ markdown ≥4 反引号残余向量 | `jsonCodeFence` 单点助手（围栏 = max(4, 载荷最长反引号串+1)，CommonMark），5 处调用点统一；载荷字节不变 | 5925e8aed9 + oracle 27b963d40e | test_experiment_bridge_r4: 2 例（毒载荷 7 反引号围栏 / 干净载荷 4 反引号零漂移） |
 | ⑫ capsule 生产 run 端到端重放 | fixture 级闭环落地；真实平台部分书面保留（r2 起延续） | e77443ddbc | test_experiment_capsule: "capsule replay closure through disk keeps identity and verdict (r4)" |
 
-## 一致性 oracle（20 个，全部可重复运行）
+## 一致性 oracle（ctest 可数 24 个，全部可重复运行）
 
-（清单在 EVIDENCE.md §oracle；跨 5 个新测试文件 + 3 个既有文件扩展，见下）
+五个新 r4 套件注册带 TEST_PREFIX（e4261ece92），oracle 在 ctest 输出逐一可数：`ctest -R "_r4::"` → **24 条**：
 
-- 新文件：test_experiment_consistency_r4（9 例）、test_experiment_benchmark_r4（3 例）、test_experiment_parity_r4（4 例）、test_experiment_txn_r4（3 例）、test_experiment_bridge_r4（3 例）。
-- 既有扩展：test_experiment_debugger（⑦）、test_experiment_capsule（⑫）、test_study_analysis（④传播 + 空study 边界）。
+- test_experiment_consistency_r4::（10）、test_experiment_parity_r4::（5）、test_experiment_benchmark_r4::（3）、test_experiment_bridge_r4::（3）、test_experiment_txn_r4::（3）。
+- 另有既有载体扩展：test_experiment_debugger（⑦）、test_experiment_capsule（⑫）、test_study_analysis（④传播 + 空 study 边界）——在全卷 29 载体双扫中运行（EVIDENCE §5.3）。
 
 ## studio↔store parity（WP-C）
 
@@ -54,8 +54,13 @@ metric 批首冲突全回滚（直查 sqlite 文件计数）、lineage commit �
 
 - 配置：gcc-15 / Ninja / Debug / ENABLE_TESTS=ON（复刻 r3 栈；无包装脚本）。
 - 全程 `-j2`、`CTEST_PARALLEL_LEVEL=1`、`QT_QPA_PLATFORM=offscreen`。
-- 轻量道逐套件绿 + 重链载体 `ctest -R "experiment|capsule|debugger|study|scientific_state" -j1` 连续两轮全绿（日志见 EVIDENCE.md，回填）。
-- 每条修复 RED 先行（stash/checkout 回退实现后断言变红），变异效力测试一条（WP-E）。
+- **终门禁（全新 build-r4-gate 目录，gcc-15/Debug/Ninja/无 PCH，-j2/-j1 全程红线内）**：
+  - 字面门禁 `ctest -R "experiment|capsule|debugger|study|scientific_state" -j1` 连续两轮 **67/67 全绿**、零 Not Run（gate-logs/gate_run1/2.log）；
+  - oracle 可数门禁 `ctest -R "_r4::"` 连续两轮 **24/24 全绿**（gate-logs/r4_oracle_run1/2.log）；
+  - 全二进制整卷双扫 **29/29 × 2 全绿**（含真实 spine study_e2e / studio_live_e2e / 3931 断言的 study_export；gate-logs/gate_sweep1/2.log）；
+  - union 树快反馈道（build-r4-light 增量）28 载体直跑全绿（EVIDENCE §4.2）。
+- 变异效力两处实证：WP-E 事务回滚删除→oracle 红（前段）；⑦ attempt 解析守卫反向补丁→oracle 红→恢复→绿（本段）。
+- 构建事故与定性：两次 g++-15 ICE（不同 TU、诊断/GC 路径崩溃栈）在高并发负载下复现、`-j1` 后零复现 → 定性负载型偶发，非代码错误（账本 3-9 轮）。
 
 ## 未解决项（移交对象明确）
 

@@ -88,7 +88,41 @@
 - test_experiment_txn_r4：42 断言 / 3 例，All tests passed。
 - test_experiment_capsule：261 断言 / 55 例，All tests passed。
 
-## 5. 重链载体（build-r4 定向构建，待回填）
+## 5. 终门禁（2026-09-28，全新 build-r4-gate 目录，gcc-15/Debug/Ninja/无 PCH/ENABLE_TESTS=ON）
+
+构建事实：全新目录 configure→构建 28+1 载体（含重链 qgis_core/qgis_gui 闭包）。两次 `-j2` 构建各遇一次 g++-15 ICE（段错误，每次不同 TU，崩溃栈均在诊断/GC 路径；同批 TU 在 light 道与第 4 次 `-j1` 构建中全部干净编过）→ 定性为高负载下（当时 3 ninja + 7 cc1plus 并发）PCH/内存压力型偶发，非代码错误；改 `-j1` 后 2451/2451 一次通过零 ICE。ICE 期间的漏配修正（BASELINE §5 配方补 `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`）已记账 3-9 轮。
+
+### 5.1 ctest 门禁（`ctest -C Debug -R "experiment|capsule|debugger|study|scientific_state" -j1`，QT_QPA_PLATFORM=offscreen）
+
+| 轮 | 结果 | 日志 |
+|---|---|---|
+| 1 | **100% tests passed out of 67**，0 Not Run | gate-logs/gate_run1.log |
+| 2 | **100% tests passed out of 67**，0 Not Run | gate-logs/gate_run2.log |
+
+### 5.2 oracle 可数性（本轨附加修复 e4261ece92：五个 r4 套件注册加 TEST_PREFIX，无前缀时 catch_discover_tests 以裸用例名注册，轨道正则退化为用例名过滤、oracle 不可数）
+
+`ctest -R "_r4::"`：**24 个 oracle 条目逐一可数**（consistency_r4:: 10 + parity_r4:: 5 + benchmark_r4:: 3 + bridge_r4:: 3 + txn_r4:: 3），双跑 24/24 全绿（gate-logs/r4_oracle_run1/2.log）。
+
+### 5.3 全二进制整卷双扫（29 载体完整套件，覆盖正则够不着的用例）
+
+| 轮 | 结果 | 日志 |
+|---|---|---|
+| 1 | **29/29 PASS，FULL_SWEEP_OK** | gate-logs/gate_sweep1.log |
+| 2 | **29/29 PASS，FULL_SWEEP_OK** | gate-logs/gate_sweep2.log |
+
+要点：study_e2e（真实 spine NDVI 端到端）、studio_live_e2e（fake+real 双后端闭环）、study_export（3931 断言）双扫均绿；test_scientific_state_gdal 双扫绿（前次一次性红不再复现，见 §4.2 备注）。
+
+### 5.4 完成门禁对照
+
+| 门禁 | 要求 | 实测 |
+|---|---|---|
+| ctest 双跑全绿零新增失败 | 2× | 67/67 ×2 + 全卷 29/29 ×2 + oracle 24/24 ×2 |
+| 12 条处置 | 12/12 | R4_BACKLOG.md 12 行全 FIXED/KEPT 带提交号 |
+| oracle | ≥15 可数 | **24**（`_r4::` 前缀 ctest 可数）+ 既有载体扩展 |
+| 原子提交 | ≥16 | **30**（`git rev-list --count origin/master..HEAD`） |
+| 触碰文件 | ≥14 白名单内 | **41**，全部白名单内（delta 评审逐文件核过） |
+| bundle 双跑 | ≥1 组 | §4.1/§4.2 双跑逐字节稳定 oracle（consistency_r4 内） |
+| 规划工件 | 6 件齐 | BASELINE/PLAN/DECISIONS/EVIDENCE/REVIEW_LOG/R4_BACKLOG 齐 |
 
 - ③ 围栏自适应 RED/GREEN。
 - 基线 ctest `-R "experiment|capsule|debugger|study|scientific_state" -j1` 红绿分布。
