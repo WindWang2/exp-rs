@@ -156,3 +156,53 @@ ALL MATRICES GREEN (2 rounds)
 | `src/app/panels/data_manager_panel.cpp:222 'tr' was not declared`（app 全量构建必炸；i18n 轨 #1339 `0814f03abe` 2026-09-27 引入） | i18n/app 域 | 裸 `ninja` 全量构建实录；本分支 diff 零 src/ 触碰 |
 | `cmake/raise-compiler-stack.sh` `status=$?` 假绿陷阱（R1 已披露） | build-infra 域 | 本轨以 gcc-15 构建栈绕过 |
 | F5 生产行为分类问题（见 R2.3） | geospatial/operators 域 | param_guard.cpp:83 合同注释 |
+
+## R3.1 构建与口径（2026-09-29）
+
+- 全新构建目录 `build-r3`（gcc-15 Debug ENABLE_TESTS=ON，复刻 build-r2 配方），**D6 域目标闭包口径**（R2 决策延续）：53 个 CMakeLists 域目标 + 5 个 foreach 注册的 r4:: 算子目标，ninja -j2 **3382/3382 exit 0**，复跑 "no work to do"（真实退出核验，教训④⑤）。
+- 全量口径实测 8576 边（master 测试面 +713 提交膨胀），本轨不建：R2 决策「闭包人口全绿 + 全量撞名披露不代修」。
+
+## R3.2 盲区缺陷类复发与修复（本轮核心）
+
+Track 8（agent-harness R4，`.planning/agent-harness-r4/`）新增 7 个裸注册套件，其中 3 个与本轨 D6 门相撞：
+
+| 套件 | 撞法 | 修复后人口 |
+|---|---|---|
+| `test_verifier_robustness_r4` | FORWARD（二进制名含 "verif"，10 例完全逃逸门） | 10 例入 D6 |
+| `test_grounding_evidence_r4` | FORWARD（名含 "evidence"，13 例逃逸） | 13 例入 D6 |
+| `test_harness_adversarial_matrix` | REVERSE（用例 "stays verifiable" 撞 "verif"） | 16 例前缀化 |
+
+修复 = 3 行 `TEST_PREFIX "<target>::"`（R2 同款模式）。修复无害性验证：三套件二进制直跑全绿（41 + 88 + 88 断言，exit 0）。Track 8 自身门（EVIDENCE.md:40 宽正则）与钉前缀兼容——前缀含其关键词，选择集只增不减。
+
+## R3.3 census 守卫 v3（foreach 盲区加固）
+
+R2 v2 的 FORWARD 目标枚举靠单行 `sicnu_add_*(`/`add_executable(` grep；`foreach` 通道（`add_executable(${_var})`，即 r4:: 五套件的注册方式）不可见——未来 foreach + D6 域名 + 非关键词用例名可同时逃逸 FORWARD 与 REVERSE（结构性双盲）。v3：FORWARD 改**人口推导**（内建 discovery 文件枚举），BUILD-GAP 保留 CMakeLists 枚举（_NOT_BUILT 信号，D-R2-5），REVERSE 与 r4:: 门不变。
+
+**v3 on build-r3 双跑：52 OK + 1 ALLOWED（test_operator_preflight_refusals，r4:: 门所有者）、BUILD-GAP 0、REVERSE 0、r4:: 35 例可选（R2 时代 5 → 35，foreach 套件人口增长），exit 0/0。**
+
+## R3.4 Oracle（正式双轮）
+
+```
+ctest --test-dir build-r3 -j1 (QT_QPA_PLATFORM=offscreen)
+字面口径 -R "verify|grader|preflight|suitab|science_context"：
+  第 1 轮 100% tests passed out of 409 — EXIT=0
+  第 2 轮 100% tests passed out of 409 — EXIT=0
+R2 宽口径 -R "verif|grader|preflight|suitab|science|evidence"：
+  第 1 轮 100% tests passed out of 549 — EXIT=0
+  第 2 轮 100% tests passed out of 549 — EXIT=0
+run_matrices.sh build-r3 2：
+  locale matrix 199 assertions ×2 PASS
+  authority invalidation matrix 294 assertions ×2 PASS
+```
+
+人口阶梯：R2 525 → R3 549（宽口径）；增量 = 新入 D6 的 23 例（10+13）+ 既有套件用例增长 + evidence_seam 等套件扩容（机械对账：census v3 FORWARD 52 目标逐格 OK）。
+
+## R3.5 瞬态异常记录（诚实披露）
+
+首轮 census v2（06:09:45）曾全目标 FAIL "no discovered cases"，约 1 分钟后同参数复跑即 ALL GREEN，且 discovery 文件 mtime（06:09:36-37）早于失败日志写入时间——未能完全归因（错误 cwd 假说被 r4::=35 反证；文件缺失假说被 mtime 反证）。连测 4 轮（含 -x 轨迹轮）全绿。v3 的 find 制 FORWARD 消除此类 glob 探测脆弱面；若复现按 census 缺陷处置。
+
+## R3.6 跨域披露（白名单外，不处置）
+
+1. **全量口径撞词扫描**（源码级，DOMAIN_RE=verif|grader|preflight|suitab|science|evidence）：33 个未前缀目标 / 58 用例（agent/lab/cartography/exprs 等域），全量构建口径下会撞入 D6 门——R2 披露口径的 713 提交后刷新值（R2 口径 ~189 例基于更宽正则），各域前缀卫生，census v3 REVERSE 在任意构建人口上可检出。
+2. r4:: 算子门人口 5 → 35：Track 7 系轨道在 foreach 五套件中新增用例，均带 r4:: 前缀，门健康。
+3. `src/app` 'tr' 缺陷（R2 披露）：已被 i18n 轨道修复（data_manager_panel.cpp 现为 QObject::tr），销账。
