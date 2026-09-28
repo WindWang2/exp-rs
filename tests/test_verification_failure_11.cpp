@@ -233,15 +233,16 @@ TEST_CASE( "F5: read-only output location is a typed write refusal with no parti
     const std::string code = expectTypedFailure( op.get(), p );
     INFO( "typed refusal: " << code );
     // R2 calibration (track-16): the io boundary guard refuses a missing
-    // target directory as a PARAMETER precondition before any GDAL work
-    // ("io: never creates directories implicitly", geospatial/io/
-    // param_guard.cpp reason "target_directory_missing") → G::InvalidArgument
-    // → InvalidParameter. Refusing the unusable parameter is the contract;
-    // the load-bearing halves stay hard: the refusal is typed and no partial
-    // output exists afterwards.
-    CHECK( ( code == "FileNotWritable" || code == "GdalError"
-             || code == "DirectoryNotFound" || code == "InvalidInputData"
-             || code == "InvalidParameter" ) );
+    // target directory as a PARAMETER precondition before any GDAL work —
+    // production contract comment "io: never creates directories implicitly"
+    // (geospatial/io/param_guard.cpp, reason "target_directory_missing") —
+    // and the io translation maps G::InvalidArgument to InvalidParameter
+    // deterministically (src/operators/io/io_operators.cpp). The
+    // load-bearing halves stay hard: the refusal is typed and no partial
+    // output exists afterwards. If the io owners ever reclassify
+    // target_directory_missing (e.g. to RS DirectoryNotFound), this CHECK is
+    // the visible contract change to update alongside.
+    CHECK( code == "InvalidParameter" );
     const fs::path outPath = ( missingDir + QStringLiteral( "/f5_out.tif" ) ).toStdString();
     std::error_code ec;
     CHECK_FALSE( fs::exists( outPath, ec ) );
