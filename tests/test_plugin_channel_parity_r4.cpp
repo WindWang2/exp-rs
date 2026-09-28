@@ -12,27 +12,29 @@
 // A channel that goes silent — or drifts to an unrelated code — is a
 // regression this suite catches.
 //
-// Mapping table (observed contract, master @ 15e5c66b5):
+// Mapping table (contract after the D-6 closure — the host-process runtime
+// now forwards the worker's typed load log from IpcError.data instead of
+// folding every failure into LibraryLoadFailed):
 //   sample                in-process            host-process
 //   --------------------  --------------------  ------------------------
 //   garbage payload       LibraryLoadFailed     LibraryLoadFailed
 //                         (dlopen refuses)      (worker refuses; the
-//                                                session forwards it)
+//                                                typed log is forwarded)
 //   entrypoint missing    EntrypointMissing     EntrypointMissing
 //                         (validation stage,    (validation stage,
 //                         channel-independent)   channel-independent)
-//   id mismatch           InitializationFailed  LibraryLoadFailed
-//                         (loader:448)          (the worker refuses with
-//                                                its own typed code but the
-//                                                session folds it into
-//                                                "worker plugin.load
-//                                                failed" — DRIFT, see
-//                                                DECISIONS.md D-6)
+//   id mismatch           InitializationFailed  InitializationFailed
+//                         (loader:448)          (the worker's loader
+//                                                refuses with the same
+//                                                typed code; the host
+//                                                re-emits it verbatim)
 #include <catch2/catch_test_macros.hpp>
 
 #include "exprs/plugin_diagnostics.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_registry.h"
+#include "support/exprs_test_env.h"
+#include "exprs/plugin_snapshot.h"
 #include "plugins/host/plugin_host_process_runtime.h"
 
 #include <filesystem>
@@ -41,6 +43,14 @@
 #include <vector>
 
 using namespace exprs;
+namespace {
+/// Binary-wide pid-unique user plugin root: without this redirect every
+/// setEnabled() below persists the REAL $HOME/sicnu_geo_rs/plugins.index.json
+/// — parallel case processes race that shared file and tests write into the
+/// developer's profile (issue #1364 cross-process trampling class).
+const exprs_test::UserRootRedirect kUserRootRedirected;
+} // namespace
+
 
 #ifndef SICNU_TEST_HELLO_PLUGIN_DIR
 #error "SICNU_TEST_HELLO_PLUGIN_DIR must point at the built hello fixture plugin dir"
@@ -73,7 +83,7 @@ const ParityRow kParityTable[] = {
     { "entrypoint missing", PluginDiagnosticCode::EntrypointMissing,
       PluginDiagnosticCode::EntrypointMissing },
     { "id mismatch", PluginDiagnosticCode::InitializationFailed,
-      PluginDiagnosticCode::LibraryLoadFailed },
+      PluginDiagnosticCode::InitializationFailed },
 };
 
 bool sawCodeFor( const std::vector<PluginDiagnostic> &items, const std::string &pluginId,
@@ -95,7 +105,10 @@ bool sawAnyCodeFor( const std::vector<PluginDiagnostic> &items, const std::strin
 }
 
 /// A scratch plugin tree for ONE sample in ONE channel. The sample is
-/// identified by its own plugin id so diagnostics never cross.
+/// identified by its own plugin id so diagnostics never cross. The root is
+/// pid-unique: ctest's PRE_TEST discovery runs each case as its own process,
+/// and a shared fixed name would let two parallel case processes (or a
+/// rerun) trample each other's fixtures mid-attempt.
 struct ParityFixture
 {
     const std::string root;
@@ -105,7 +118,9 @@ struct ParityFixture
                           // id-mismatch sample; set by writeManifest)
 
     ParityFixture( const std::string &base, const char *pluginId )
-        : root( ( std::filesystem::temp_directory_path() / base ).generic_string() )
+        : root( ( std::filesystem::temp_directory_path()
+                  / ( base + "." + std::to_string( snapshotOwnerPid() ) ) )
+                    .generic_string() )
         , pluginDir( root + "/" + pluginId )
         , id( pluginId )
     {
@@ -232,7 +247,9 @@ TEST_CASE( "garbage payload is reported typed by BOTH channels",
     options.handshakeTimeoutMs = 15000;
     sicnu::plugins::PluginHostProcessRuntime runtime( options );
     const std::string tempDir =
-        ( std::filesystem::temp_directory_path() / "exprs_parity_temp" ).generic_string();
+        ( std::filesystem::temp_directory_path()
+          / ( "exprs_parity_temp." + std::to_string( snapshotOwnerPid() ) ) )
+            .generic_string();
     std::filesystem::create_directories( tempDir );
     TempDirCleanup tempCleanup{ tempDir };
 
@@ -276,7 +293,9 @@ TEST_CASE( "entrypoint missing is reported typed by BOTH channels",
     options.handshakeTimeoutMs = 15000;
     sicnu::plugins::PluginHostProcessRuntime runtime( options );
     const std::string tempDir =
-        ( std::filesystem::temp_directory_path() / "exprs_parity_temp" ).generic_string();
+        ( std::filesystem::temp_directory_path()
+          / ( "exprs_parity_temp." + std::to_string( snapshotOwnerPid() ) ) )
+            .generic_string();
     std::filesystem::create_directories( tempDir );
     TempDirCleanup tempCleanup{ tempDir };
 
@@ -311,7 +330,9 @@ TEST_CASE( "manifest/binary id mismatch is reported typed by BOTH channels",
     options.handshakeTimeoutMs = 15000;
     sicnu::plugins::PluginHostProcessRuntime runtime( options );
     const std::string tempDir =
-        ( std::filesystem::temp_directory_path() / "exprs_parity_temp" ).generic_string();
+        ( std::filesystem::temp_directory_path()
+          / ( "exprs_parity_temp." + std::to_string( snapshotOwnerPid() ) ) )
+            .generic_string();
     std::filesystem::create_directories( tempDir );
     TempDirCleanup tempCleanup{ tempDir };
 

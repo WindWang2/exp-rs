@@ -19,6 +19,7 @@
 #include "exprs/plugin_discovery.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_registry.h"
+#include "support/exprs_test_env.h"
 
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,14 @@
 #include <string>
 
 using namespace exprs;
+namespace {
+/// Binary-wide pid-unique user plugin root: without this redirect every
+/// setEnabled() below persists the REAL $HOME/sicnu_geo_rs/plugins.index.json
+/// — parallel case processes race that shared file and tests write into the
+/// developer's profile (issue #1364 cross-process trampling class).
+const exprs_test::UserRootRedirect kUserRootRedirected;
+} // namespace
+
 
 #ifndef SICNU_TEST_HELLO_PLUGIN_DIR
 #error "SICNU_TEST_HELLO_PLUGIN_DIR must point at the built hello fixture plugin dir"
@@ -69,7 +78,8 @@ struct PollutionFixture
     const std::string strangerDir;
 
     PollutionFixture()
-        : root( ( std::filesystem::temp_directory_path() / "exprs_test_pollution_r4" )
+        : root( ( std::filesystem::temp_directory_path()
+                      / ( "exprs_test_pollution_r4." + std::to_string( snapshotOwnerPid() ) ) )
                     .generic_string() )
         , helloDir( root + "/" + kHelloId )
         , strangerDir( root + "/org.test.stranger" )

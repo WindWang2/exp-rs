@@ -161,8 +161,40 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
         session->requestControlRaw( kLoadPlugin, params, mOptions.loadTimeoutMs );
     if ( outcome.status != IpcChannel::Outcome::Status::Ok )
     {
-        log.add( PluginDiagnosticCode::LibraryLoadFailed, PluginDiagnosticSeverity::Error,
-                 "worker plugin.load failed: " + outcome.error.message, pluginId );
+        // Parity contract (#1348 D-6 closure): the worker's own loader runs
+        // the SAME typed diagnostics as the in-process loader and ships its
+        // whole log in IpcError.data (plugin_host_worker_main.cpp, E4002).
+        // Re-emit those records with their ORIGINAL codes so the host-process
+        // channel reports e.g. InitializationFailed for an id mismatch
+        // exactly like dlopen in-process — no folding into LibraryLoadFailed.
+        // Unreachable-worker failures (timeout, channel closed) carry no
+        // typed log and keep the session-level diagnostic below.
+        bool forwardedTyped = false;
+        if ( outcome.status == IpcChannel::Outcome::Status::Error
+             && outcome.error.data.isArray() )
+        {
+            for ( const Json::Value &item : outcome.error.data )
+            {
+                PluginDiagnostic diagnostic = PluginDiagnostic::fromJson( item );
+                if ( diagnostic.code == PluginDiagnosticCode::None )
+                    continue;
+                diagnostic.pluginId = pluginId;
+                log.add( diagnostic );
+                forwardedTyped = true;
+            }
+        }
+        if ( !forwardedTyped )
+        {
+            log.add( PluginDiagnosticCode::LibraryLoadFailed, PluginDiagnosticSeverity::Error,
+                     "worker plugin.load failed: " + outcome.error.message, pluginId );
+        }
+        else
+        {
+            log.add( PluginDiagnosticCode::LibraryLoadFailed, PluginDiagnosticSeverity::Error,
+                     "worker plugin.load failed (" + outcome.error.message
+                         + "); the worker's typed load diagnostics are recorded above",
+                     pluginId );
+        }
         session->shutdown( 5000, log );
         return false;
     }

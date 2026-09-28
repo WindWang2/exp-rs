@@ -11,7 +11,10 @@ Json::Value IpcError::toJson() const
     json["code"] = code;
     json["message"] = message;
     json["retryable"] = retryable;
-    if ( !data.isNull() && data.isObject() )
+    // Accept object AND array payloads: the plugin-load failure path ships
+    // the worker's whole typed diagnostic log as a JSON array here (D-6
+    // parity closure) — the old isObject() filter silently dropped it.
+    if ( !data.isNull() && ( data.isObject() || data.isArray() ) )
         json["data"] = data;
     return json;
 }
