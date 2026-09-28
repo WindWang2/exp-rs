@@ -97,3 +97,25 @@ CpuFallback——真实但未声明的交互。
 `request.callback( error, true )` 验证"恢复请求以 typed error 收尾"——驱动的是测试自身
 簿记而非 pool 的真实恢复路径（pool 恢复涉及时钟/重启时序，超出本边界用例的确定性预算）。
 记录为已知限制。
+
+## Round 2 独立对抗 review（2026-09-28，1 个只读 subagent，~1.78M tokens）
+范围：a726d17a6..HEAD 全部提交；双轴（Standards：C++20/Qt6/资源安全/并发纪律；Spec：声称修复
+真实性、断言独立权威、越界、同义反复）。抽查指令：fence 全 throw 路径、恢复用例竞态面、
+chunk 异常类型 catch 站点、commit message 与 diff 相符性。
+
+- **判定：BLOCK**（后全部处置 → 和解后四套件+终局双跑全绿）
+- **P0-1** aaec6433b5 把红换了个文件：全库断言类型核查的单行 grep 漏掉 test_chunk_graph.cpp
+  :88-105 的多行 overflow_error 钉（#1056 3070d3e1ad 自己添加，master 绿）→ master 实为双钉
+  矛盾而非单侧陈旧。处置：ac26c2a86a 尊重 #1056 契约，impl 回 master 字节态、contract_11 三
+  断言更新为 overflow_error（D-15 修订记录裁决过程）。教训：宏钉子全库核查必须容忍多行格式。
+- **P1-1** 提交 message 引用的 D-14/D-16 未随分支提交（悬空引用）。处置：d4a47c2916 提交全部
+  规划工件。
+- **P2-1** rig 崩溃窗口余量 2s 在高负载宿主可 false-red。处置：随 ac26c2a86a 提至 6s。
+- P3 备注（3 条，均判定可接受）：fence 握手 winner-ctor-throw 时 loser 永等（由 ctest TIMEOUT
+  兜底，fixture 内不可能发生）；watchdog 用例 +8s 在 TIMEOUT 180 预算内；事件循环停滞 >5s 时
+  watchdog 先于 fakeWorker2 连接触发会 false-red（非假绿，余量可接受）。
+- 抽查通过项：419d1e2ad1 的两个成功出口均 release()、四 fail 站点均由 holder 兜底、
+  m_fenceHeld 不变式（完全构造 ⇒ true）成立、dtor 释放幂等；2fd7ce5f91 无跨线程竞争
+  （全主线程直接连接）、answeredCount==1 有真实约束（onReadyRead 先 erase 再回调）、
+  workerRestarted 在 server 交换后发射；aaec6433b5 的 src/ catch 站点核查（零命中）在和解后
+  依然成立；其余 5 提交 message 与 diff 相符。
