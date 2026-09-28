@@ -3630,7 +3630,7 @@ target_include_directories(test_experiment_consistency_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_experiment_consistency_r4 TIMEOUT 180)
+sicnu_discover_tests(test_experiment_consistency_r4 TEST_PREFIX test_experiment_consistency_r4:: TIMEOUT 180)
 
 # Track 11 R4 benchmark input-contract regressions (#1333 item 2). LIGHT —
 # science-core libs only.
@@ -3646,7 +3646,7 @@ target_include_directories(test_experiment_benchmark_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_experiment_benchmark_r4 TIMEOUT 180)
+sicnu_discover_tests(test_experiment_benchmark_r4 TEST_PREFIX test_experiment_benchmark_r4:: TIMEOUT 180)
 
 # Track 11 R4 lab-report markdown fence regression (#1333 item 3). LIGHT —
 # bridge + science-core only.
@@ -3663,7 +3663,7 @@ target_include_directories(test_experiment_bridge_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_experiment_bridge_r4 TIMEOUT 180)
+sicnu_discover_tests(test_experiment_bridge_r4 TEST_PREFIX test_experiment_bridge_r4:: TIMEOUT 180)
 
 # Track 11 R4 studio↔store parity oracles (WP-C). LIGHT — studio projection
 # + study report + science-core libs.
@@ -3681,7 +3681,7 @@ target_include_directories(test_experiment_parity_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_experiment_parity_r4 TIMEOUT 180)
+sicnu_discover_tests(test_experiment_parity_r4 TEST_PREFIX test_experiment_parity_r4:: TIMEOUT 180)
 
 # Track 11 R4 store transaction-boundary oracles (WP-E). LIGHT — science
 # core + the fault registry.
@@ -3698,7 +3698,7 @@ target_include_directories(test_experiment_txn_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_experiment_txn_r4 TIMEOUT 180)
+sicnu_discover_tests(test_experiment_txn_r4 TEST_PREFIX test_experiment_txn_r4:: TIMEOUT 180)
 
 # RS14-17 reproducibility capsule: LIGHT executable on purpose — links only
 # the capsule projection module + experiment/dataset (Qt/Core level). The
