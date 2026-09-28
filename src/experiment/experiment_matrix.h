@@ -98,14 +98,19 @@ class MatrixLedger
 
     /// Links one recorded run to its cell (idempotent by edge identity).
     sicnu::data::Result<void> link( const QString &cellId, const QString &runId );
-    /// Run ids linked to @p cellId (store order, bounded). The default bound
-    /// is the matrix-cell budget a study can legally accumulate (reruns and
-    /// replicates included) — statistics over a truncated list would skew
-    /// toward the earliest runs with no marker anywhere in the report.
-    QStringList runsForCell( const QString &cellId,
-                             qint64 limit = kMaxMatrixCells ) const;
+    /// Run ids linked to @p cellId (store order). The default bound is the
+    /// matrix-cell budget a study can legally accumulate (reruns and
+    /// replicates included); exceeding it is a typed refusal
+    /// (`experiment.matrix_cell_runs_overflow`), never a silent truncation —
+    /// statistics over a truncated list would skew toward the earliest runs
+    /// with no marker anywhere in the report (#1333 item 4; the refusal is
+    /// typed for the same reason the cell-count cap is).
+    Result<QStringList> runsForCell( const QString &cellId,
+                                     qint64 limit = kMaxMatrixCells ) const;
     /// Cells that have at least one linked run, as cellId → run ids.
-    QHash<QString, QStringList> ledgerForMatrix( const QVector<MatrixCell> &cells ) const;
+    /// Refuses (typed) if any cell's run page overflows — see runsForCell.
+    Result<QHash<QString, QStringList>> ledgerForMatrix(
+        const QVector<MatrixCell> &cells ) const;
 
   private:
     ExperimentStore &m_store;

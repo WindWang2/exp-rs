@@ -55,6 +55,13 @@ class ExperimentStore
     /// back the whole batch — no partial batch ever becomes visible.
     sicnu::data::Result<void> upsertRunsBatch( const QVector<ExperimentRun> &runs );
     std::optional<ExperimentRun> runById( const QString &runId ) const;
+    /// Typed single-record reader (#1333 item 11): `experiment.run_not_found`
+    /// vs `experiment.run_corrupt` are distinct failures. Decision paths
+    /// (promotion gate, verdicts, aggregates) MUST use this — a row that no
+    /// longer parses is evidence of tamper or torn writes and must never
+    /// read as absence. The optional runById remains for display seams and
+    /// collapses corrupt rows to "absent" by documented contract.
+    sicnu::data::Result<ExperimentRun> runRecordById( const QString &runId ) const;
     sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> listRuns(
         const QString &experimentId = QString(), const QString &datasetVersionId = QString(),
         const QString &status = QString(), qint64 offset = 0,
@@ -169,11 +176,31 @@ class ExperimentStore
         QString toKind;
         QString toId;
     };
+    /// Outgoing lineage edges of one node. When @p edgeKind / @p toKind are
+    /// non-empty they filter INSIDE the query, before the page @p limit —
+    /// so a caller looking for one edge kind can never have its page
+    /// consumed by edges it would discard (#1333 ⑤: LIMIT-before-filter
+    /// made runsForCell silently under-report when other edge kinds shared
+    /// the node).
     QVector<LineageEdge> outgoingEdges( const QString &kind, const QString &id,
-                                        qint64 limit = 1000 ) const;
+                                        qint64 limit = 1000,
+                                        const QString &edgeKind = QString(),
+                                        const QString &toKind = QString() ) const;
     QVector<LineageEdge> incomingEdges( const QString &kind, const QString &id,
                                         qint64 limit = 1000 ) const;
+    /// Whole-table edge page (#1333 item 9): truncation is part of the
+    /// return value, never silent — @p truncated with @p total lets the
+    /// consumer decide, the way LineageQueryResult::budgetExhausted does.
+    struct LineageEdgePage
+    {
+        QVector<LineageEdge> edges;
+        qint64 total = 0;       ///< rows actually in the table
+        bool truncated = false; ///< true when edges.size() < total
+    };
+    LineageEdgePage lineageEdgePage( qint64 limit = 100000 ) const;
     /// Whole-table edge scan (graph assembly input; bounded by @p limit).
+    /// Compat wrapper over lineageEdgePage().edges — call the page variant
+    /// when truncation must be observable.
     QVector<LineageEdge> allLineageEdges( qint64 limit = 100000 ) const;
 
     // --- model promotion evidence (M8; evidence only, no registry) -----------
@@ -181,6 +208,9 @@ class ExperimentStore
     /// id with different content is a conflict (`experiment.promotion_conflict`).
     sicnu::data::Result<void> savePromotionRecord( const PromotionRecord &record );
     std::optional<PromotionRecord> promotionById( const QString &promotionId ) const;
+    /// Typed single-record reader (#1333 item 11): see runRecordById.
+    sicnu::data::Result<PromotionRecord> promotionRecordById(
+        const QString &promotionId ) const;
     /// Promotion evidence for one model catalog id (ascending creation order).
     /// A stored promotion row that no longer parses is a typed failure —
     /// promotion decisions must not silently ignore evidence they know about.

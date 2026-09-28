@@ -1,0 +1,139 @@
+Test project /home/kevin/projects/rs-studio/exp-rs-experiment-consistency-r4/build-r4-gate
+      Start  21: study matrix identity is namespaced per study
+ 1/67 Test  #21: study matrix identity is namespaced per study ..................................................................................   Passed    0.03 sec
+      Start  23: study runner records every point truthfully (happy path)
+ 2/67 Test  #23: study runner records every point truthfully (happy path) .......................................................................   Passed    0.06 sec
+      Start  24: study runner never exceeds the in-flight window
+ 3/67 Test  #24: study runner never exceeds the in-flight window ................................................................................   Passed    0.06 sec
+      Start  35: a lineage link refusal during submit-refusal recording aborts the study
+ 4/67 Test  #35: a lineage link refusal during submit-refusal recording aborts the study ........................................................   Passed    0.05 sec
+      Start  44: empty study projects to an honest empty analysis (r4)
+ 5/67 Test  #44: empty study projects to an honest empty analysis (r4) ..........................................................................   Passed    0.04 sec
+      Start  53: study report carries the full teaching + agent evidence
+ 6/67 Test  #53: study report carries the full teaching + agent evidence ........................................................................   Passed    0.06 sec
+      Start  60: study sweep cap refuses oversized specs instead of truncating
+ 7/67 Test  #60: study sweep cap refuses oversized specs instead of truncating ..................................................................   Passed    0.03 sec
+      Start  62: experiment_studio valid StudySpec via designer
+ 8/67 Test  #62: experiment_studio valid StudySpec via designer .................................................................................   Passed    0.03 sec
+      Start  63: experiment_studio invalid StudySpec ranges
+ 9/67 Test  #63: experiment_studio invalid StudySpec ranges .....................................................................................   Passed    0.04 sec
+      Start  64: experiment_studio too-many-combinations refused
+10/67 Test  #64: experiment_studio too-many-combinations refused ................................................................................   Passed    0.03 sec
+      Start  65: experiment_studio deterministic point identity
+11/67 Test  #65: experiment_studio deterministic point identity .................................................................................   Passed    0.03 sec
+      Start  66: experiment_studio run matrix one failed point + filter
+12/67 Test  #66: experiment_studio run matrix one failed point + filter .........................................................................   Passed    0.03 sec
+      Start  67: experiment_studio report reload export roundtrip
+13/67 Test  #67: experiment_studio report reload export roundtrip ...............................................................................   Passed    0.03 sec
+      Start  68: experiment_studio spatial grid mismatch typed refusal
+14/67 Test  #68: experiment_studio spatial grid mismatch typed refusal ..........................................................................   Passed    0.03 sec
+      Start  69: experiment_studio spatial nodata handled in buffer summary
+15/67 Test  #69: experiment_studio spatial nodata handled in buffer summary .....................................................................   Passed    0.03 sec
+      Start  70: experiment_studio uncertainty missing replicate flagged
+16/67 Test  #70: experiment_studio uncertainty missing replicate flagged ........................................................................   Passed    0.04 sec
+      Start  71: experiment_studio fault sandbox unchanged + diagnosis mismatch
+17/67 Test  #71: experiment_studio fault sandbox unchanged + diagnosis mismatch .................................................................   Passed    0.04 sec
+      Start  72: experiment_studio debugger exact first divergence + confidence downgrade
+18/67 Test  #72: experiment_studio debugger exact first divergence + confidence downgrade .......................................................   Passed    0.04 sec
+      Start  73: experiment_studio cancellation status surfaces in matrix
+19/67 Test  #73: experiment_studio cancellation status surfaces in matrix .......................................................................   Passed    0.04 sec
+      Start  74: experiment_studio 1000-point table projection baseline
+20/67 Test  #74: experiment_studio 1000-point table projection baseline .........................................................................   Passed    0.05 sec
+      Start  75: experiment_studio session roundtrip
+21/67 Test  #75: experiment_studio session roundtrip ............................................................................................   Passed    0.04 sec
+      Start  76: experiment_studio csv export neutralizes formula cells
+22/67 Test  #76: experiment_studio csv export neutralizes formula cells .........................................................................   Passed    0.04 sec
+      Start  84: NDVI threshold exemplar study, end to end on the real spine
+23/67 Test  #84: NDVI threshold exemplar study, end to end on the real spine ....................................................................   Passed    0.56 sec
+      Start  85: studio live: fake-backend study records real store truth that the Studio projections consume
+24/67 Test  #85: studio live: fake-backend study records real store truth that the Studio projections consume ...................................   Passed    0.37 sec
+      Start  86: studio live: real spine closed loop — study, spatial refusal, divergence, fault sandbox, capsule reload, refs-only session
+25/67 Test  #86: studio live: real spine closed loop — study, spatial refusal, divergence, fault sandbox, capsule reload, refs-only session ...   Passed    0.45 sec
+      Start 379: experiment store enforces transitions, identity and conflicts
+26/67 Test #379: experiment store enforces transitions, identity and conflicts ..................................................................   Passed    0.31 sec
+      Start 393: a run that moves experiments keeps listing columns and run-id mirrors consistent
+27/67 Test #393: a run that moves experiments keeps listing columns and run-id mirrors consistent ...............................................   Passed    0.28 sec
+      Start 401: test_experiment_consistency_r4::runsForCell filters edge kind before the page limit
+28/67 Test #401: test_experiment_consistency_r4::runsForCell filters edge kind before the page limit ............................................   Passed    0.04 sec
+      Start 402: test_experiment_consistency_r4::runsForCell refuses a cell whose recorded runs overflow the page
+29/67 Test #402: test_experiment_consistency_r4::runsForCell refuses a cell whose recorded runs overflow the page ...............................   Passed    0.04 sec
+      Start 403: test_experiment_consistency_r4::paired comparison names structural asymmetries instead of dropping them
+30/67 Test #403: test_experiment_consistency_r4::paired comparison names structural asymmetries instead of dropping them ........................   Passed    0.04 sec
+      Start 404: test_experiment_consistency_r4::legacy decimal seeds outside the lossless domain are refused
+31/67 Test #404: test_experiment_consistency_r4::legacy decimal seeds outside the lossless domain are refused ...................................   Passed    0.06 sec
+      Start 405: test_experiment_consistency_r4::skipped corrupt split manifest rows are named, not silent
+32/67 Test #405: test_experiment_consistency_r4::skipped corrupt split manifest rows are named, not silent ......................................   Passed    0.04 sec
+      Start 406: test_experiment_consistency_r4::a corrupt run row is refused by the promotion gate, not read as absent
+33/67 Test #406: test_experiment_consistency_r4::a corrupt run row is refused by the promotion gate, not read as absent .........................   Passed    0.04 sec
+      Start 407: test_experiment_consistency_r4::lineage edge page reports truncation instead of hiding it
+34/67 Test #407: test_experiment_consistency_r4::lineage edge page reports truncation instead of hiding it ......................................   Passed    0.04 sec
+      Start 408: test_experiment_consistency_r4::reproduction bundle double export is byte-stable
+35/67 Test #408: test_experiment_consistency_r4::reproduction bundle double export is byte-stable ...............................................   Passed    0.05 sec
+      Start 409: test_experiment_consistency_r4::promotionRecordById separates corrupt from not-found
+36/67 Test #409: test_experiment_consistency_r4::promotionRecordById separates corrupt from not-found ...........................................   Passed    0.04 sec
+      Start 410: test_experiment_consistency_r4::repeat verdict marks when the twin scan hits its cap
+37/67 Test #410: test_experiment_consistency_r4::repeat verdict marks when the twin scan hits its cap ...........................................   Passed    0.09 sec
+      Start 411: test_experiment_benchmark_r4::duplicate truth rows are refused by typed code (r4)
+38/67 Test #411: test_experiment_benchmark_r4::duplicate truth rows are refused by typed code (r4) ..............................................   Passed    0.04 sec
+      Start 412: test_experiment_benchmark_r4::duplicate prediction rows are refused by typed code (r4)
+39/67 Test #412: test_experiment_benchmark_r4::duplicate prediction rows are refused by typed code (r4) .........................................   Passed    0.04 sec
+      Start 413: test_experiment_benchmark_r4::distinct rows still evaluate to the exact known answer (r4 control)
+40/67 Test #413: test_experiment_benchmark_r4::distinct rows still evaluate to the exact known answer (r4 control) ..............................   Passed    0.04 sec
+      Start 414: test_experiment_bridge_r4::markdown fences outgrow backtick runs inside step payloads (r4)
+41/67 Test #414: test_experiment_bridge_r4::markdown fences outgrow backtick runs inside step payloads (r4) .....................................   Passed    0.21 sec
+      Start 415: test_experiment_bridge_r4::clean payloads keep the report-standard four-backtick fence (r4)
+42/67 Test #415: test_experiment_bridge_r4::clean payloads keep the report-standard four-backtick fence (r4) ....................................   Passed    0.21 sec
+      Start 416: test_experiment_bridge_r4::bridge workflow steps partition: missing refused, empty legal (r4)
+43/67 Test #416: test_experiment_bridge_r4::bridge workflow steps partition: missing refused, empty legal (r4) ..................................   Passed    0.22 sec
+      Start 417: test_experiment_parity_r4::batch rollback parity: refused batch appears on neither side
+44/67 Test #417: test_experiment_parity_r4::batch rollback parity: refused batch appears on neither side ........................................   Passed    0.05 sec
+      Start 418: test_experiment_parity_r4::row parity: projection equals the store cursor walk exactly
+45/67 Test #418: test_experiment_parity_r4::row parity: projection equals the store cursor walk exactly .........................................   Passed    0.07 sec
+      Start 419: test_experiment_parity_r4::transition-refusal parity: re-projection is stable after a refused write
+46/67 Test #419: test_experiment_parity_r4::transition-refusal parity: re-projection is stable after a refused write ............................   Passed    0.07 sec
+      Start 420: test_experiment_parity_r4::metric parity: projected values equal persisted metric records
+47/67 Test #420: test_experiment_parity_r4::metric parity: projected values equal persisted metric records ......................................   Passed    0.07 sec
+      Start 421: test_experiment_parity_r4::stopped report surfaces its refusal in the view model (r4)
+48/67 Test #421: test_experiment_parity_r4::stopped report surfaces its refusal in the view model (r4) ..........................................   Passed    0.08 sec
+      Start 422: test_experiment_txn_r4::metric record batch rolls back whole on the first conflict
+49/67 Test #422: test_experiment_txn_r4::metric record batch rolls back whole on the first conflict .............................................   Passed    0.04 sec
+      Start 423: test_experiment_txn_r4::lineage commit fault leaves no partial edge and the store usable
+50/67 Test #423: test_experiment_txn_r4::lineage commit fault leaves no partial edge and the store usable .......................................   Passed    0.04 sec
+      Start 424: test_experiment_txn_r4::reopen after faults shows no half transaction
+51/67 Test #424: test_experiment_txn_r4::reopen after faults shows no half transaction ..........................................................   Passed    0.04 sec
+      Start 425: capsule digest is stable under key insertion order
+52/67 Test #425: capsule digest is stable under key insertion order .............................................................................   Passed    0.03 sec
+      Start 426: capsule digest changes when recorded content changes
+53/67 Test #426: capsule digest changes when recorded content changes ...........................................................................   Passed    0.04 sec
+      Start 434: shape validation: missing capsule id is refused
+54/67 Test #434: shape validation: missing capsule id is refused ................................................................................   Passed    0.05 sec
+      Start 438: builder projects a recorded run into a shape-valid capsule
+55/67 Test #438: builder projects a recorded run into a shape-valid capsule .....................................................................   Passed    0.05 sec
+      Start 440: wired capability hook pins the descriptor digest; changes move the capsule
+56/67 Test #440: wired capability hook pins the descriptor digest; changes move the capsule .....................................................   Passed    0.04 sec
+      Start 445: identical store content builds byte-identical capsules
+57/67 Test #445: identical store content builds byte-identical capsules .........................................................................   Passed    0.04 sec
+      Start 458: validate passes a clean capsule with per-gate evidence
+58/67 Test #458: validate passes a clean capsule with per-gate evidence .........................................................................   Passed    0.05 sec
+      Start 459: fully resolvable capsule assesses Exact
+59/67 Test #459: fully resolvable capsule assesses Exact ........................................................................................   Passed    0.05 sec
+      Start 470: a relocated workspace builds a byte-identical capsule
+60/67 Test #470: a relocated workspace builds a byte-identical capsule ..........................................................................   Passed    0.05 sec
+      Start 477: a refused export leaves the previously published capsule intact
+61/67 Test #477: a refused export leaves the previously published capsule intact ................................................................   Passed    0.04 sec
+      Start 478: a stale capsule ref is a typed load refusal, never a fake readiness
+62/67 Test #478: a stale capsule ref is a typed load refusal, never a fake readiness ............................................................   Passed    0.03 sec
+      Start 479: capsule replay closure through disk keeps identity and verdict (r4)
+63/67 Test #479: capsule replay closure through disk keeps identity and verdict (r4) ............................................................   Passed    0.04 sec
+      Start 983: test_experiment_studio_dock::studio dock demo study report is stamped synthetic in the session
+64/67 Test #983: test_experiment_studio_dock::studio dock demo study report is stamped synthetic in the session .................................   Passed    0.40 sec
+      Start 984: test_experiment_studio_dock::studio dock store open failures are typed and honest
+65/67 Test #984: test_experiment_studio_dock::studio dock store open failures are typed and honest ..............................................   Passed    0.39 sec
+      Start 985: test_experiment_studio_dock::studio dock busy gate keeps store A runs from publishing over store B
+66/67 Test #985: test_experiment_studio_dock::studio dock busy gate keeps store A runs from publishing over store B .............................   Passed    0.54 sec
+      Start 986: test_experiment_studio_dock::studio dock destruction with a study in flight is clean
+67/67 Test #986: test_experiment_studio_dock::studio dock destruction with a study in flight is clean ...........................................   Passed    0.39 sec
+
+100% tests passed out of 67
+
+Total Test time (real) =   6.88 sec

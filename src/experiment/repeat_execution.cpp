@@ -90,12 +90,19 @@ QString classificationToString( RepeatExecutionClassifier::Classification classi
 
 } // namespace
 
+/// Upper bound of the identity-twin scan per verdict (#1333 ⑥). The scan is
+/// a bounded lookup by contract; when the store matches this many twins,
+/// more rows may exist beyond the page and the verdict says so
+/// (Verdict::twinScanCapped) instead of staying silent about the bound.
+constexpr qint64 kMaxTwinScan = 50;
+
 QJsonObject RepeatExecutionClassifier::Verdict::toJson() const
 {
     QJsonObject json;
     json.insert( QStringLiteral( "schema_version" ), kRepeatExecutionSchemaVersion );
     json.insert( QStringLiteral( "classification" ),
                  classificationToString( classification ) );
+    json.insert( QStringLiteral( "twin_scan_capped" ), twinScanCapped );
     QJsonArray matched;
     for ( const QString &runId : matchedRunIds )
         matched.append( runId );
@@ -133,27 +140,46 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
     // Identity twins via the indexed fingerprint column (12.0): the hash IS
     // the identity semantics, so the index lookup is exact, not heuristic.
     const QString identityHash = runExecutionFingerprint( identity );
-    const auto twinLookup = m_store->runIdsByExecutionFingerprint( identityHash, /*limit=*/50 );
+    const auto twinLookup =
+        m_store->runIdsByExecutionFingerprint( identityHash, kMaxTwinScan );
     if ( !twinLookup )
         return Result<Verdict>::failure( twinLookup.diagnostics() );
     const QStringList twins = twinLookup.value();
+    if ( twins.size() >= kMaxTwinScan )
+    {
+        verdict.twinScanCapped = true;
+        verdict.reasons.append(
+            QStringLiteral( "twin scan hit its %1-record cap; further identity"
+                            " twins may exist beyond the scanned page" )
+                .arg( kMaxTwinScan ) );
+    }
 
     for ( const QString &runId : twins )
     {
-        const std::optional<ExperimentRun> recorded = m_store->runById( runId );
+        const auto recorded = m_store->runRecordById( runId );
         if ( !recorded )
         {
-            // A row whose JSON no longer parses cannot back a verdict.
+            // Corrupt and vanished rows are distinguishable now (#1333 item
+            // 11); neither can back a verdict, both are named honestly.
+            const auto &diagnostics = recorded.diagnostics();
+            const bool corrupt = !diagnostics.isEmpty() &&
+                                 diagnostics.constFirst().code ==
+                                     QLatin1String( "experiment.run_corrupt" );
             verdict.reasons.append(
-                QStringLiteral( "matched run %1 is unreadable; excluded from the verdict" )
-                    .arg( runId ) );
+                corrupt
+                    ? QStringLiteral( "matched run %1 is unreadable; excluded from the verdict" )
+                          .arg( runId )
+                    : QStringLiteral( "matched run %1 is no longer present; excluded from"
+                                      " the verdict" )
+                          .arg( runId ) );
             continue;
         }
+        const ExperimentRun &recordedRun = recorded.value();
         verdict.matchedRunIds.append( runId );
         // Drift evidence is computed ONCE, against the first matched run.
         if ( repeatEnvironment && verdict.environmentDrift.isEmpty() )
             verdict.environmentDrift =
-                environmentDrift( recorded->environment(), *repeatEnvironment );
+                environmentDrift( recordedRun.environment(), *repeatEnvironment );
     }
 
     // Every identity twin is unreadable: twins.isNotEmpty means the indexed
@@ -171,6 +197,8 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
 
     if ( twins.isEmpty() )
     {
+        QStringList byRef;
+        int unreadableByRef = 0;
         // No identity twin. A platform execution that ALREADY recorded runs
         // under other pins is the dangerous case: same ref, different
         // experiment.
@@ -179,12 +207,25 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
             const auto byRefLookup = m_store->runIdsByExecutionRef( executionRef, 10 );
             if ( !byRefLookup )
                 return Result<Verdict>::failure( byRefLookup.diagnostics() );
-            const QStringList byRef = byRefLookup.value();
+            byRef = byRefLookup.value();
+            // The byRef scan reads through the typed reader too: a corrupted
+            // ref-matched row is Deviation evidence being destroyed — the
+            // same all-unreadable refusal as the twin scan, never a
+            // confident "New" (#1333 item 11).
+            int unreadableByRef = 0;
             for ( const QString &runId : byRef )
             {
-                const std::optional<ExperimentRun> recorded = m_store->runById( runId );
+                const auto recorded = m_store->runRecordById( runId );
                 if ( !recorded )
+                {
+                    const auto &refDiagnostics = recorded.diagnostics();
+                    const bool refCorrupt = !refDiagnostics.isEmpty() &&
+                                            refDiagnostics.constFirst().code ==
+                                                QLatin1String( "experiment.run_corrupt" );
+                    if ( refCorrupt )
+                        ++unreadableByRef;
                     continue;
+                }
                 ExperimentRun repeatStub;
                 repeatStub.setAlgorithmId( identity.algorithmId );
                 repeatStub.setAlgorithmVersion( identity.algorithmVersion );
@@ -209,6 +250,18 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
         }
         if ( verdict.classification != C::Deviated )
         {
+            if ( !byRef.isEmpty() && unreadableByRef == byRef.size() )
+            {
+                // Every ref match is unreadable: the deviation question
+                // cannot be answered on destroyed evidence.
+                return Result<Verdict>::failure( Diagnostic{
+                    QStringLiteral( "experiment.repeat_unreadable_twin" ),
+                    QStringLiteral( "%1 execution-ref match(es) exist but none of their"
+                                    " records parse; refusing to classify on unreadable"
+                                    " evidence" )
+                        .arg( byRef.size() ),
+                    DiagnosticSeverity::Error } );
+            }
             verdict.classification = C::New;
             verdict.reasons.append( QStringLiteral( "no recorded run shares the identity" ) );
         }
@@ -229,7 +282,7 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
     QStringList sameResult;
     for ( const QString &runId : verdict.matchedRunIds )
     {
-        const std::optional<ExperimentRun> recorded = m_store->runById( runId );
+        const auto recorded = m_store->runRecordById( runId );
         if ( recorded && recorded->resultFingerprint() == resultFingerprint )
             sameResult.append( runId );
     }

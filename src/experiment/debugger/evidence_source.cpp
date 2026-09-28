@@ -377,6 +377,14 @@ Result<StepEvidence> stepEvidenceFromBridgeWorkflowMetrics( const QJsonObject &w
             kCodeMalformedEvidence,
             QStringLiteral( "bridge step evidence was truncated by the recorder — the snapshot covers only the reported prefix" ),
             DiagnosticSeverity::Warning );
+    // Missing vs empty are TWO states (#1333 item 1/WP-D partition
+    // completeness): an empty steps array is a legal empty partition, but a
+    // document without the steps partition at all is torn evidence and is
+    // refused instead of silently reading as "no steps".
+    if ( !workflow.contains( QLatin1String( "steps" ) ) )
+        return Result<StepEvidence>::failure( typedFailure(
+            kCodeMalformedEvidence,
+            QStringLiteral( "bridge workflow document carries no steps partition" ) ) );
     const QJsonArray steps = workflow.value( QLatin1String( "steps" ) ).toArray();
     QSet<QString> seenStepIds; // the runtime keys steps by id; a repeat is corrupt
     for ( const QJsonValue &value : steps )
@@ -478,11 +486,23 @@ Result<ExperimentRun> DirectoryEvidenceSource::run( const QString &runId )
     if ( !m_store )
         return Result<ExperimentRun>::failure(
             typedFailure( kCodeUnknownRun, QStringLiteral( "no recorded run '%1'" ).arg( runId ) ) );
-    auto stored = m_store->runById( runId );
+    auto stored = m_store->runRecordById( runId );
     if ( !stored )
+    {
+        // A corrupt row must not pose as an unknown run (#1333 item 11).
+        const auto &diagnostics = stored.diagnostics();
+        const bool corrupt = !diagnostics.isEmpty() &&
+                             diagnostics.constFirst().code ==
+                                 QLatin1String( "experiment.run_corrupt" );
         return Result<ExperimentRun>::failure(
-            typedFailure( kCodeUnknownRun, QStringLiteral( "no recorded run '%1'" ).arg( runId ) ) );
-    return Result<ExperimentRun>::success( *stored );
+            corrupt ? typedFailure( kCodeRunCorrupt,
+                                    QStringLiteral( "run '%1' exists but its record"
+                                                    " is unreadable" )
+                                        .arg( runId ) )
+                    : typedFailure( kCodeUnknownRun,
+                                    QStringLiteral( "no recorded run '%1'" ).arg( runId ) ) );
+    }
+    return Result<ExperimentRun>::success( stored.value() );
 }
 
 namespace
@@ -502,8 +522,17 @@ QStringList candidatePaths( const QString &runDirectory, const QString &fileName
     for ( const QString &entry : entries )
     {
         const auto match = attemptDir.match( entry );
-        if ( match.hasMatch() )
-            attempts.append( { match.captured( 1 ).toInt(), entry } );
+        if ( !match.hasMatch() )
+            continue;
+        // A digit run that overflows int (e.g. attempt-99999999999999) is
+        // not a usable attempt number: excluding it keeps it from silently
+        // masquerading as attempt 0 — the OLDEST slot — in the ordering
+        // below (#1333 ⑦).
+        bool numberOk = false;
+        const int attemptNumber = match.captured( 1 ).toInt( &numberOk );
+        if ( !numberOk )
+            continue;
+        attempts.append( { attemptNumber, entry } );
     }
     std::sort( attempts.begin(), attempts.end(),
                []( const QPair<int, QString> &a, const QPair<int, QString> &b ) {

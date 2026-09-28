@@ -1720,3 +1720,52 @@ TEST_CASE( "a stale capsule ref is a typed load refusal, never a fake readiness"
     REQUIRE( !refused.has_value() );
     CHECK( refused.diagnostics().first().code == QLatin1String( "capsule.unreadable" ) );
 }
+
+// --- Track 11 R4 (#1333 item 12): fixture-level replay closure. The r2/r3
+// known limitation is END-TO-END REPLAY ON A REAL PRODUCTION RUN (real
+// platform, real execution plane) — that part stays handed off. What a
+// fixture CAN close is the document-level replay loop: build → canonical
+// bytes on disk → load through the real gates → readiness verdict travels
+// with the file → a second build of the same store content diffs Identical.
+TEST_CASE( "capsule replay closure through disk keeps identity and verdict (r4)",
+           "[capsule][replay][r4]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+
+    // 1. Canonical bytes on disk through the real export gate.
+    QTemporaryDir outDir;
+    const QString path = outDir.filePath( QStringLiteral( "capsule-replay-r4.json" ) );
+    const auto exported = CapsuleIO::exportCapsule( ready.doc, path );
+    REQUIRE( exported.has_value() );
+    CHECK( exported->bytes > 0 );
+
+    // 2. Reload through the real load gates (canonical form + shape + digest).
+    const auto reloaded = CapsuleIO::loadCapsule( path );
+    REQUIRE( reloaded.has_value() );
+
+    // 3. The file round-trip is identity-preserving: diff says Identical.
+    const auto roundTrip = CapsuleDiffReport::diff( ready.doc, reloaded.value() );
+    CHECK( roundTrip.level == CapsuleDiffReport::Level::Identical );
+
+    // 4. Rebuilding from the SAME store content with the same fixed
+    // creation stamp is deterministic — the diff verdict is Identical, so
+    // "same capsule" is identity, not luck.
+    {
+        const CapsuleBuilder builder( ready.fixture.experiments, ready.fixture.datasets );
+        auto rebuilt =
+            builder.build( QStringLiteral( "run-1" ), fixedOptions(),
+                           matchingHooks( ready.descriptor ) );
+        REQUIRE( rebuilt.has_value() );
+        const auto rebuildDiff = CapsuleDiffReport::diff( ready.doc, rebuilt.value() );
+        CHECK( rebuildDiff.level == CapsuleDiffReport::Level::Identical );
+    }
+
+    // 5. The replay verdict travels with the FILE: assessing the reloaded
+    // document reaches the same Exact verdict as the in-memory original.
+    const auto reportFromDisk =
+        CapsuleReadiness::assess( reloaded.value(), &ready.fixture.datasets,
+                                  matchingHooks( ready.descriptor ),
+                                  matchingReadinessHooks() );
+    CHECK( reportFromDisk.level == sicnu::dataset::ReproductionLevel::Exact );
+}

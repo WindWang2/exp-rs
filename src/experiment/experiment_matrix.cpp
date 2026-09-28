@@ -301,26 +301,54 @@ sicnu::data::Result<void> MatrixLedger::link( const QString &cellId, const QStri
                                    QStringLiteral( "run" ), runId );
 }
 
-QStringList MatrixLedger::runsForCell( const QString &cellId, qint64 limit ) const
+Result<QStringList> MatrixLedger::runsForCell( const QString &cellId, qint64 limit ) const
 {
-    QStringList runIds;
-    const auto edges = m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit );
-    for ( const auto &edge : edges )
+    // The edge-kind/to-kind filters bind inside the query, BEFORE the page
+    // limit (#1333 ⑤): the limit bounds recorded runs, never other edges
+    // sharing the cell node. The page is probed one row past the limit so
+    // overflowing the budget is a typed refusal, never a silent truncation
+    // (#1333 ④) — the same honesty contract as the kMaxMatrixCells cap.
+    if ( cellId.isEmpty() )
+        return Result<QStringList>::failure( matrixError(
+            QStringLiteral( "experiment.matrix_invalid" ),
+            QStringLiteral( "ledger lookup requires a cell id" ) ) );
+    if ( limit < 1 || limit >= 10000 )
+        return Result<QStringList>::failure( matrixError(
+            QStringLiteral( "experiment.matrix_invalid" ),
+            QStringLiteral( "ledger page limit must be positive and below the"
+                            " store's 10000-row page clamp, so overflow stays"
+                            " detectable" ) ) );
+    const auto edges =
+        m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit + 1,
+                               QStringLiteral( "recorded" ), QStringLiteral( "run" ) );
+    if ( edges.size() > limit )
     {
-        if ( edge.edgeKind == QStringLiteral( "recorded" ) &&
-             edge.toKind == QStringLiteral( "run" ) )
-            runIds.append( edge.toId );
+        return Result<QStringList>::failure( matrixError(
+            QStringLiteral( "experiment.matrix_cell_runs_overflow" ),
+            QStringLiteral( "cell %1 has more than %2 recorded runs (%3 visible);"
+                            " statistics over a truncated list would be fabricated —"
+                            " raise the limit explicitly to proceed" )
+                .arg( cellId, QString::number( limit ), QString::number( edges.size() ) ) ) );
     }
-    return runIds;
+    QStringList runIds;
+    runIds.reserve( edges.size() );
+    for ( const auto &edge : edges )
+        runIds.append( edge.toId );
+    return Result<QStringList>::success( runIds );
 }
 
-QHash<QString, QStringList> MatrixLedger::ledgerForMatrix(
+Result<QHash<QString, QStringList>> MatrixLedger::ledgerForMatrix(
     const QVector<MatrixCell> &cells ) const
 {
     QHash<QString, QStringList> ledger;
     for ( const MatrixCell &cell : cells )
-        ledger.insert( cell.cellId, runsForCell( cell.cellId ) );
-    return ledger;
+    {
+        const auto runs = runsForCell( cell.cellId );
+        if ( !runs )
+            return Result<QHash<QString, QStringList>>::failure( runs.diagnostics() );
+        ledger.insert( cell.cellId, runs.value() );
+    }
+    return Result<QHash<QString, QStringList>>::success( ledger );
 }
 
 QJsonObject MetricAggregate::toJson() const
@@ -356,7 +384,10 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
         CellAggregate cellAggregate;
         cellAggregate.cellId = cell.cellId;
         cellAggregate.assignments = cell.assignments;
-        cellAggregate.runIds = m_ledger->runsForCell( cell.cellId );
+        const auto cellRuns = m_ledger->runsForCell( cell.cellId );
+        if ( !cellRuns )
+            return Result<MatrixAggregate>::failure( cellRuns.diagnostics() );
+        cellAggregate.runIds = cellRuns.value();
 
         bool anyRecorded = false;
         bool anyFailed = false;
@@ -365,9 +396,19 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
 
         for ( const QString &runId : cellAggregate.runIds )
         {
-            const auto run = m_store->runById( runId );
+            const auto run = m_store->runRecordById( runId );
             if ( !run )
+            {
+                // A corrupt row is evidence the ledger vouches for — refusing
+                // beats aggregating over a silently missing run (#1333 item 11).
+                const auto &diagnostics = run.diagnostics();
+                const bool corrupt = !diagnostics.isEmpty() &&
+                                     diagnostics.constFirst().code ==
+                                         QLatin1String( "experiment.run_corrupt" );
+                if ( corrupt )
+                    return Result<MatrixAggregate>::failure( diagnostics );
                 continue; // dangling ledger edge: counted as neither recorded nor failed
+            }
             if ( run->status() == RunStatus::Completed )
             {
                 anyRecorded = true;
@@ -412,12 +453,21 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
         bool anyInFlight = false;
         for ( const QString &runId : cellAggregate.runIds )
         {
-            const auto run = m_store->runById( runId );
-            if ( run.has_value() &&
-                 ( run->status() == RunStatus::Created ||
-                   run->status() == RunStatus::Running ||
-                   run->status() == RunStatus::Interrupted ||
-                   run->status() == RunStatus::Cancelling ) )
+            const auto run = m_store->runRecordById( runId );
+            if ( !run )
+            {
+                const auto &diagnostics = run.diagnostics();
+                const bool corrupt = !diagnostics.isEmpty() &&
+                                     diagnostics.constFirst().code ==
+                                         QLatin1String( "experiment.run_corrupt" );
+                if ( corrupt )
+                    return Result<MatrixAggregate>::failure( diagnostics );
+                continue;
+            }
+            if ( run->status() == RunStatus::Created ||
+                 run->status() == RunStatus::Running ||
+                 run->status() == RunStatus::Interrupted ||
+                 run->status() == RunStatus::Cancelling )
                 anyInFlight = true;
         }
         cellAggregate.status =

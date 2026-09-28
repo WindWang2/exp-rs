@@ -102,6 +102,9 @@ struct StudyReport
 /// points. @p runnerSummary (optional) carries the runner's live accounting;
 /// @p spatialSummaries carries precomputed run-vs-baseline summaries.
 /// @p generatedAtUtc defaults to now; tests pin it for byte-stable output.
+/// When the underlying analysis refuses (ledger overflow, #1333 item 4) the
+/// report is STOPPED: stoppedReason carries the typed refusal and no rows
+/// are fabricated to fill the shape.
 StudyReport buildStudyReport( experiment::ExperimentStore &store,
                               experiment::MatrixLedger &ledger, const ParameterStudySpec &spec,
                               const QVector<StudyPoint> &points,

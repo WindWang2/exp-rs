@@ -14,6 +14,7 @@
 // (they are derived evidence ABOUT a version, not mutations of it).
 #include "dataset_store_impl.h"
 #include <QJsonArray>
+#include <QDebug>
 
 #include "leakage_audit.h"
 #include "split.h"
@@ -143,6 +144,7 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
         return manifests;
     stmt.bind( 1, versionId.toString() );
     stmt.bind( 2, qint64( 10000 ) );
+    int corruptRows = 0;
     while ( stmt.stepRow() )
     {
         auto parsed = SplitManifest::fromJson( textToJson( stmt.text( 0 ) ) );
@@ -153,6 +155,22 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
             manifest.setFingerprint( stmt.text( 1 ) );
             manifests.append( manifest );
         }
+        else
+        {
+            // Skipped rows are now NAMED (#1333 item 10): the caller only
+            // sees the list, so an unparsable row would otherwise shrink the
+            // version's split evidence silently. Signature stays
+            // QVector<SplitManifest> — its other callers live outside this
+            // track's scope — so the skip is made loud here instead.
+            ++corruptRows;
+        }
+    }
+    if ( corruptRows > 0 )
+    {
+        qWarning( "dataset.split_manifest_corrupt_skipped: version %s has %d"
+                  " unparsable split manifest row(s); the returned list is a"
+                  " SUBSET of the stored evidence",
+                  qUtf8Printable( versionId.toString() ), corruptRows );
     }
     return manifests;
 }

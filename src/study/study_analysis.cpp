@@ -122,9 +122,10 @@ QString assignmentsKey( const QHash<QString, QString> &assignments )
 
 } // namespace
 
-StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
-                            experiment::MatrixLedger &ledger, const ParameterStudySpec &spec,
-                            const QVector<StudyPoint> &points )
+sicnu::data::Result<StudyAnalysis> analyzeStudy( experiment::ExperimentStore &store,
+                                                 experiment::MatrixLedger &ledger,
+                                                 const ParameterStudySpec &spec,
+                                                 const QVector<StudyPoint> &points )
 {
     // Pass 1: per-point truth projection + run-level metric values.
     QVector<PointAggregate> pointAggregates;
@@ -138,16 +139,31 @@ StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
         aggregate.pointId = point.pointId;
         aggregate.assignments = point.assignments;
 
-        const QStringList linkedRuns = ledger.runsForCell( point.pointId );
+        const auto linkedPage = ledger.runsForCell( point.pointId );
+        if ( !linkedPage )
+            return sicnu::data::Result<StudyAnalysis>::failure( linkedPage.diagnostics() );
+        const QStringList linkedRuns = linkedPage.value();
         bool anyRecorded = false;
         bool anyFailed = false;
         bool anyCancelled = false;
         bool anyInFlight = false;
         for ( const QString &runId : linkedRuns )
         {
-            const auto run = store.runById( runId );
+            const auto run = store.runRecordById( runId );
             if ( !run )
+            {
+                // Corrupt rows refuse the analysis (#1333 item 11
+                // propagation): statistics computed past unreadable evidence
+                // are fabricated; dangling edges keep the no-evidence
+                // semantics.
+                const auto &diagnostics = run.diagnostics();
+                const bool corrupt = !diagnostics.isEmpty() &&
+                                     diagnostics.constFirst().code ==
+                                         QLatin1String( "experiment.run_corrupt" );
+                if ( corrupt )
+                    return sicnu::data::Result<StudyAnalysis>::failure( diagnostics );
                 continue; // dangling edge — counts as no evidence, never as success
+            }
             aggregate.runIds.append( runId );
             const dataset::RunStatus status = run.value().status();
             if ( status == dataset::RunStatus::Completed )
@@ -386,7 +402,7 @@ StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
         }
     }
 
-    return analysis;
+    return sicnu::data::Result<StudyAnalysis>::success( analysis );
 }
 
 } // namespace sicnu::study

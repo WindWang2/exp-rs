@@ -29,6 +29,9 @@ inline constexpr int kMaxSnapshotArtifacts = 8192;
 /// Typed error codes (closed set, `experiment.debugger.*` convention).
 inline constexpr char kCodeUnknownRun[] = "experiment.debugger.unknown_run";
 inline constexpr char kCodeEvidenceAbsent[] = "experiment.debugger.evidence_absent";
+/// The store HOLDS the run but its record no longer parses (#1333 item 11):
+/// distinct from kCodeUnknownRun so a corrupt row can never pose as absence.
+inline constexpr char kCodeRunCorrupt[] = "experiment.debugger.run_corrupt";
 inline constexpr char kCodeEvidenceTooLarge[] = "experiment.debugger.evidence_too_large";
 inline constexpr char kCodeMalformedEvidence[] = "experiment.debugger.malformed_evidence";
 inline constexpr char kCodeMalformedSnapshot[] = "experiment.debugger.malformed_snapshot";

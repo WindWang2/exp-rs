@@ -183,8 +183,9 @@ TEST_CASE( "NDVI threshold exemplar study, end to end on the real spine",
             + QStringLiteral( "/output.tif" );
         REQUIRE( QFile::exists( output ) );
         const auto runs = ledger.runsForCell( point.pointId );
-        REQUIRE( runs.size() == 1 );
-        const auto run = store.runById( runs.first() );
+        REQUIRE( runs.has_value() );
+        REQUIRE( runs.value().size() == 1 );
+        const auto run = store.runById( runs.value().first() );
         REQUIRE( run.has_value() );
         REQUIRE( run.value().status() == sicnu::experiment::RunStatus::Completed );
         REQUIRE( run.value()
@@ -244,7 +245,9 @@ TEST_CASE( "NDVI threshold exemplar study, end to end on the real spine",
     // 6. Cross-module identity: the SAME store feeds the capsule, the
     // debugger and the lab report, and none of them contradict each other —
     // one recorded run, one identity, wherever it is consumed.
-    const QString probeRunId = ledger.runsForCell( points.first().pointId ).first();
+    const auto probeRuns = ledger.runsForCell( points.first().pointId );
+    REQUIRE( probeRuns.has_value() );
+    const QString probeRunId = probeRuns.value().first();
 
     // (a) Debugger: the snapshot builds from recorded evidence, its pins are
     // the run's own pins, and rebuilding cannot move the identity digest.
@@ -304,11 +307,13 @@ TEST_CASE( "NDVI threshold exemplar study, end to end on the real spine",
     // ledger wrote — the same identity the matrix authority derives.
     for ( const StudyPoint &point : points )
     {
-        const QStringList cellRuns = ledger.runsForCell( point.pointId );
-        REQUIRE( cellRuns.size() == 1 );
+        const auto cellRuns = ledger.runsForCell( point.pointId );
+        REQUIRE( cellRuns.has_value() );
+        REQUIRE( cellRuns.value().size() == 1 );
         sicnu::experiment::LineageGraph graph( datasets, store );
         const auto ancestors = graph.ancestors(
-            sicnu::experiment::LineageNodeId{ QStringLiteral( "run" ), cellRuns.first() },
+            sicnu::experiment::LineageNodeId{ QStringLiteral( "run" ),
+                                              cellRuns.value().first() },
             4, 64 );
         REQUIRE( !ancestors.budgetExhausted );
         bool sawCell = false;

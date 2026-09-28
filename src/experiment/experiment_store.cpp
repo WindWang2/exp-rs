@@ -546,16 +546,32 @@ namespace
 
 /// Loads the stored run JSON (status included) while the caller holds the
 /// mutex; nullopt when absent or corrupt.
-std::optional<ExperimentRun> loadRunLocked( sqlite3 *db, const QString &runId )
+/// Tri-state single-record reader (#1333 item 11): typed not-found vs typed
+/// corrupt. Same honesty contract as the write path's ExistingRun tri-state
+/// and the batch readers' fail-closed rows.
+sicnu::data::Result<ExperimentRun> loadRunRecordLocked( sqlite3 *db, const QString &runId )
 {
+    using ResultT = sicnu::data::Result<ExperimentRun>;
     Stmt stmt( db, QStringLiteral( "SELECT json FROM experiment_runs WHERE run_id=?" ) );
     if ( !stmt )
-        return std::nullopt;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            QStringLiteral( "run lookup failed" ) ) );
     stmt.bind( 1, runId );
     if ( !stmt.stepRow() )
-        return std::nullopt;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.run_not_found" ),
+                                            QStringLiteral( "no recorded run '%1'" ).arg( runId ) ) );
     const auto parsed = ExperimentRun::fromJson( textToJson( stmt.text( 0 ) ) );
-    return parsed ? std::optional<ExperimentRun>( parsed.value() ) : std::nullopt;
+    if ( !parsed )
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.run_corrupt" ),
+            QStringLiteral( "run '%1' exists but its record no longer parses" ).arg( runId ) ) );
+    return ResultT::success( parsed.value() );
+}
+
+std::optional<ExperimentRun> loadRunLocked( sqlite3 *db, const QString &runId )
+{
+    const auto record = loadRunRecordLocked( db, runId );
+    return record ? std::optional<ExperimentRun>( record.value() ) : std::nullopt;
 }
 
 /// Tri-state view of the stored run row for the write path (#1056): absent
@@ -999,6 +1015,16 @@ std::optional<ExperimentRun> ExperimentStore::runById( const QString &runId ) co
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
     return loadRunLocked( m_impl->db, runId );
+}
+
+sicnu::data::Result<ExperimentRun> ExperimentStore::runRecordById( const QString &runId ) const
+{
+    using ResultT = sicnu::data::Result<ExperimentRun>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    return loadRunRecordLocked( m_impl->db, runId );
 }
 
 sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::listRuns(
@@ -1947,17 +1973,34 @@ sicnu::data::Result<void> ExperimentStore::addLineageEdge( const QString &fromKi
 namespace
 {
 
-QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QString &sql,
+QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QString &sqlBase,
                                                         const QString &kind,
-                                                        const QString &id, qint64 limit )
+                                                        const QString &id, qint64 limit,
+                                                        const QString &edgeKind = QString(),
+                                                        const QString &toKind = QString() )
 {
+    // Optional edge-kind/to-kind filters bind INSIDE the query, before the
+    // page limit: a caller paging over one edge kind must not have its page
+    // consumed by rows it would discard (#1333 ⑤).
+    QString sql = sqlBase;
+    if ( !edgeKind.isEmpty() )
+        sql += QStringLiteral( " AND edge_kind=?" );
+    if ( !toKind.isEmpty() )
+        sql += QStringLiteral( " AND to_kind=?" );
+    sql += QStringLiteral( " LIMIT ?" );
+
     QVector<ExperimentStore::LineageEdge> edges;
     Stmt stmt( db, sql );
     if ( !stmt )
         return edges;
-    stmt.bind( 1, kind );
-    stmt.bind( 2, id );
-    stmt.bind( 3, limit );
+    int bindIndex = 1;
+    stmt.bind( bindIndex++, kind );
+    stmt.bind( bindIndex++, id );
+    if ( !edgeKind.isEmpty() )
+        stmt.bind( bindIndex++, edgeKind );
+    if ( !toKind.isEmpty() )
+        stmt.bind( bindIndex++, toKind );
+    stmt.bind( bindIndex++, limit );
     while ( stmt.stepRow() )
     {
         ExperimentStore::LineageEdge edge;
@@ -1973,18 +2016,26 @@ QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QStri
 
 } // namespace
 
-QVector<ExperimentStore::LineageEdge> ExperimentStore::allLineageEdges( qint64 limit ) const
+ExperimentStore::LineageEdgePage ExperimentStore::lineageEdgePage( qint64 limit ) const
 {
+    LineageEdgePage page;
     if ( !m_impl )
-        return {};
+        return page;
     QMutexLocker lock( &m_impl->mutex );
-    QVector<LineageEdge> edges;
+    const qint64 bounded = qBound<qint64>( qint64( 1 ), limit, qint64( 1000000 ) );
+    {
+        Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM experiment_lineage" ) );
+        if ( count.stepRow() )
+            page.total = count.i64( 0 );
+        else
+            page.truncated = true; // count unreadable: report conservatively (P3-1)
+    }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
         " FROM experiment_lineage LIMIT ?" ) );
     if ( !stmt )
-        return edges;
-    stmt.bind( 1, qBound<qint64>( qint64( 1 ), limit, qint64( 1000000 ) ) );
+        return page;
+    stmt.bind( 1, bounded );
     while ( stmt.stepRow() )
     {
         LineageEdge edge;
@@ -1993,14 +2044,22 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::allLineageEdges( qint64 l
         edge.edgeKind = stmt.text( 2 );
         edge.toKind = stmt.text( 3 );
         edge.toId = stmt.text( 4 );
-        edges.append( edge );
+        page.edges.append( edge );
     }
-    return edges;
+    page.truncated = page.edges.size() < page.total;
+    return page;
+}
+
+QVector<ExperimentStore::LineageEdge> ExperimentStore::allLineageEdges( qint64 limit ) const
+{
+    return lineageEdgePage( limit ).edges;
 }
 
 QVector<ExperimentStore::LineageEdge> ExperimentStore::outgoingEdges( const QString &kind,
                                                                       const QString &id,
-                                                                      qint64 limit ) const
+                                                                      qint64 limit,
+                                                                      const QString &edgeKind,
+                                                                      const QString &toKind ) const
 {
     if ( !m_impl )
         return {};
@@ -2008,8 +2067,9 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::outgoingEdges( const QStr
     return queryEdgesLocked( m_impl->db,
                              QStringLiteral(
                                  "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
-                                 " FROM experiment_lineage WHERE from_kind=? AND from_id=? LIMIT ?" ),
-                             kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+                                 " FROM experiment_lineage WHERE from_kind=? AND from_id=?" ),
+                             kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ),
+                             edgeKind, toKind );
 }
 
 QVector<ExperimentStore::LineageEdge> ExperimentStore::incomingEdges( const QString &kind,
@@ -2022,7 +2082,7 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::incomingEdges( const QStr
     return queryEdgesLocked( m_impl->db,
                              QStringLiteral(
                                  "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
-                                 " FROM experiment_lineage WHERE to_kind=? AND to_id=? LIMIT ?" ),
+                                 " FROM experiment_lineage WHERE to_kind=? AND to_id=?" ),
                              kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
 }
 
@@ -2112,21 +2172,36 @@ sicnu::data::Result<void> ExperimentStore::savePromotionRecord( const PromotionR
 
 std::optional<PromotionRecord> ExperimentStore::promotionById( const QString &promotionId ) const
 {
+    const auto record = promotionRecordById( promotionId );
+    return record ? std::optional<PromotionRecord>( record.value() ) : std::nullopt;
+}
+
+sicnu::data::Result<PromotionRecord> ExperimentStore::promotionRecordById(
+    const QString &promotionId ) const
+{
+    using ResultT = sicnu::data::Result<PromotionRecord>;
     if ( !m_impl )
-        return std::nullopt;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
     QMutexLocker lock( &m_impl->mutex );
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM model_promotions WHERE promotion_id=?" ) );
     if ( !stmt )
-        return std::nullopt;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            QStringLiteral( "promotion lookup failed" ) ) );
     stmt.bind( 1, promotionId );
     if ( !stmt.stepRow() )
-        return std::nullopt;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.promotion_not_found" ),
+                                            QStringLiteral( "no recorded promotion '%1'" )
+                                                .arg( promotionId ) ) );
     const auto parsed = PromotionRecord::fromJson(
         QJsonDocument::fromJson( stmt.text( 0 ).toUtf8() ).object() );
     if ( !parsed )
-        return std::nullopt;
-    return parsed.value();
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.promotion_corrupt" ),
+            QStringLiteral( "promotion '%1' exists but its record no longer parses" )
+                .arg( promotionId ) ) );
+    return ResultT::success( parsed.value() );
 }
 
 sicnu::data::Result<QVector<PromotionRecord>> ExperimentStore::promotionsForModel(

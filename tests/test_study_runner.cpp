@@ -258,7 +258,9 @@ TEST_CASE( "study runner records every point truthfully (happy path)", "[study][
                      .toDouble() != 0.0 );
         REQUIRE( run.value().executionRef() == QString::number( 1001 + i ) );
         // Ledger linkage exists for the point.
-        REQUIRE( !fix.ledger.runsForCell( pointId ).isEmpty() );
+        const auto linkedRuns = fix.ledger.runsForCell( pointId );
+        REQUIRE( linkedRuns.has_value() );
+        REQUIRE( !linkedRuns.value().isEmpty() );
     }
 
     // Metric selection: only declared metrics recorded (payload had
@@ -304,7 +306,9 @@ TEST_CASE( "failed points are recorded as failures with typed evidence", "[study
              == QStringLiteral( "study.operator_failed" ) );
     // The failed point is still linked in the ledger.
     const auto points = sampleStudyPoints( spec ).value();
-    REQUIRE( !fix.ledger.runsForCell( points.at( 1 ).pointId ).isEmpty() );
+    const auto linkedRuns = fix.ledger.runsForCell( points.at( 1 ).pointId );
+    REQUIRE( linkedRuns.has_value() );
+    REQUIRE( !linkedRuns.value().isEmpty() );
 }
 
 TEST_CASE( "submit refusals become failed runs with an empty execution ref",

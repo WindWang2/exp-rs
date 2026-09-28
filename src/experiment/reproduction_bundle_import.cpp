@@ -6,6 +6,8 @@
 // never observed the execution never fabricates a terminal lifecycle.
 #include "reproduction_bundle_import.h"
 
+#include <cmath>
+
 #include "experiment_types.h"
 
 #include <QDir>
@@ -210,8 +212,28 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         }
     }
     else
-        run.setSeed( static_cast<quint64>(
-            runConfig->value( QStringLiteral( "seed" ) ).toDouble( 0 ) ) );
+    {
+        // Legacy decimal seed (bundles written before the hex pin existed,
+        // #1333 item 8): a JSON number survives a double round-trip exactly
+        // only as a non-negative integer below 2^53. Anything else — huge
+        // seeds, negative JSON numbers, non-numeric values — cannot restore
+        // the recorded seed, and importing a silently wrong one forges
+        // reproducibility. Refused, never guessed.
+        static constexpr double kMaxLosslessSeed = 9007199254740992.0; // 2^53
+        const QJsonValue seedValue = runConfig->value( QStringLiteral( "seed" ) );
+        const double seedDouble = seedValue.toDouble( -1.0 );
+        const bool integral = seedDouble == std::floor( seedDouble );
+        if ( !seedValue.isDouble() || !integral || seedDouble < 0.0 ||
+             seedDouble >= kMaxLosslessSeed )
+        {
+            report.warnings.append( QStringLiteral(
+                "run_config.json seed is not losslessly restorable (legacy decimal"
+                " seeds must be integers in [0, 2^53); re-export the bundle with a"
+                " seed_hex pin) — import refused rather than guessing" ) );
+            return report;
+        }
+        run.setSeed( static_cast<quint64>( seedDouble ) );
+    }
     if ( runConfig->contains( QStringLiteral( "determinism_note" ) ) )
         run.setDeterminismNote(
             runConfig->value( QStringLiteral( "determinism_note" ) ).toString() );

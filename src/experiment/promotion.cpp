@@ -135,25 +135,35 @@ Result<PromotionEvaluation> PromotionEvaluator::evaluate(
 
     PromotionEvaluation evaluation;
 
-    const auto run = m_store->runById( request.runId );
-    if ( !run )
+    const auto runRecord = m_store->runRecordById( request.runId );
+    if ( !runRecord )
     {
+        // Corruption must never read as absence (#1333 item 11): an
+        // unreadable evidence row is tamper-or-torn-write evidence and the
+        // gate refuses on it, exactly like the batch reader does.
+        const auto &diagnostics = runRecord.diagnostics();
+        const bool corrupt = !diagnostics.isEmpty() &&
+                             diagnostics.constFirst().code ==
+                                 QLatin1String( "experiment.run_corrupt" );
+        if ( corrupt )
+            return Result<PromotionEvaluation>::failure( diagnostics );
         evaluation.missingEvidence.append( QStringLiteral( "run" ) );
         return Result<PromotionEvaluation>::success( evaluation );
     }
-    if ( run->status() != RunStatus::Completed )
+    const ExperimentRun &run = runRecord.value();
+    if ( run.status() != RunStatus::Completed )
     {
         // Only a completed run is promotion evidence — a failed/interrupted
         // candidate cannot be "grandfathered" in.
         evaluation.missingEvidence.append( QStringLiteral( "completed_status" ) );
     }
-    if ( !request.modelDigest.isEmpty() && run->modelDigest().isEmpty() )
+    if ( !request.modelDigest.isEmpty() && run.modelDigest().isEmpty() )
     {
         // The request names a digest the evidence run never pinned: the
         // evidence cannot vouch for THAT artifact.
         evaluation.missingEvidence.append( QStringLiteral( "model_digest_pin" ) );
     }
-    else if ( !request.modelDigest.isEmpty() && run->modelDigest() != request.modelDigest )
+    else if ( !request.modelDigest.isEmpty() && run.modelDigest() != request.modelDigest )
     {
         evaluation.missingEvidence.append( QStringLiteral( "model_digest_mismatch" ) );
     }
@@ -198,7 +208,7 @@ Result<PromotionEvaluation> PromotionEvaluator::evaluate(
     {
         const std::set<QString> benchmarks( request.benchmarkDatasetVersions.cbegin(),
                                             request.benchmarkDatasetVersions.cend() );
-        if ( !benchmarks.contains( run->datasetVersionId() ) )
+        if ( !benchmarks.contains( run.datasetVersionId() ) )
         {
             evaluation.missingEvidence.append( QStringLiteral( "benchmark_set" ) );
         }
@@ -233,8 +243,9 @@ Result<QString> PromotionEvaluator::record( const PromotionRequest &request,
     record.runId = request.runId;
     record.modelId = request.modelId;
     record.modelDigest = request.modelDigest;
-    const auto run = m_store->runById( request.runId );
-    record.datasetVersionId = run.has_value() ? run->datasetVersionId() : QString();
+    const auto runRecord = m_store->runRecordById( request.runId );
+    record.datasetVersionId =
+        runRecord ? runRecord->datasetVersionId() : QString();
     record.verdict = evaluation.value().eligible ? QStringLiteral( "eligible" )
                                                  : QStringLiteral( "ineligible" );
     record.decision = decision;
