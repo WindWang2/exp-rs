@@ -100,3 +100,44 @@ debug package build-id mismatch were tried). Evidence comes from a scoped
 ASan+UBSan build (`build-sanitizer`, ENABLE_SANITIZERS=ON, repo preset) of
 test_fused_chain; the pre-fix deterministic SIGSEGV + gdb backtrace and the
 post-fix green run are recorded in EVIDENCE.md.
+
+## D7 — Independent review round (fresh-eyes subagent, PASS-with-issues) and dispositions
+
+Reviewer verdict: PASS-with-issues — 0 Blocker / 2 High / 4 Medium / 4 Low / 3 Nit.
+
+Fixed in this round:
+- High-1 (family sweep incomplete): the remaining stack-local argc/argv app
+  sites are fixed — test_gui_job_adapter.cpp (3 sites) and
+  test_execution_plane.cpp (1 site); the earlier commit message's incorrect
+  "only two files deviated" claim is superseded by the reordered commit's
+  message (4 files / 8 sites, static-review verified).
+- High-2 (nodata serialization precision): warpRaster now serializes nodata
+  via std::to_chars (locale-independent, round-trip exact) instead of
+  std::to_string's %-format; fractional sentinels can no longer be rounded
+  into mask mismatches.
+- Medium-3 (mixed-declaration float rasters): applyWarpNodataContract no
+  longer pins -dstnodata nan over partially declared inputs — mixed
+  declarations keep GDAL's per-band default, matching warpToCrs's policy.
+- Medium-4 (red intermediate commits): history reordered — every fix commit
+  now precedes the commits that consume it; test-parity assertions land with
+  their implementation; the r5 suite commit is last. HEAD tree is identical
+  to the reviewed tree (diff verified empty).
+- Medium-6 (missing undeclared-align regression): new pin case — undeclared
+  float align pads with NaN and declares NaN, zero-pad count asserted.
+- Low-7 (single-use plan): documented on FusedStage::postRunExtras.
+- Low-8 (relabel copies labels): the rewrite is skipped when no segment is
+  dead (copy happens only when a relabel actually occurs).
+- Low-9/Low-10 (comment accuracy / pin-vs-guard): VRT comments now quote the
+  observed GDAL single-nodata behavior; the suite header labels which cases
+  pin fixes vs guard contracts.
+- Nit-11: log-call indentation fixed.
+- Medium-5: EVIDENCE.md lands with the completed sanitizer results (this
+  branch, final commit) — see D6/EVIDENCE.md §5.
+
+Accepted / documented, not code changes:
+- Nit-12 (NaN-declared source in register_images keeps -9999 output
+  declaration): output fill and declaration remain mutually consistent;
+  changing the fill value would alter pixels. Noted as future polish.
+- Nit-13 (commit message wording): clarified in the reordered commit and
+  this PR body — the Float32 dtype conversion of the MODIS temp copy is by
+  design and remains.
