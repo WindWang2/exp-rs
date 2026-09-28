@@ -18,6 +18,36 @@ function(_sicnu_escape_cmake_path out_var path)
   set(${out_var} "${_esc}" PARENT_SCOPE)
 endfunction()
 
+# Ctest-process CMake code that pins GDAL_DRIVER_PATH at <plugins_dir>, or an
+# empty string when the pin must NOT happen (#1355):
+#  - an empty <plugins_dir> pins nothing;
+#  - a system prefix (/usr/lib*) pins nothing — on distro-GDAL machines the
+#    plugin dir comes from the package layout and the user's environment is
+#    authoritative (same exclusion policy as the LD_LIBRARY_PATH pin above);
+#  - otherwise the prefix-built GDAL's shipped plugin dir is pinned with
+#    prepend-or-set semantics, so an explicit GDAL_DRIVER_PATH from the user
+#    is carried along instead of being clobbered by a whole-value overwrite.
+# POSIX-only: the prepend uses the `:` list separator, so call sites must be
+# inside `if(UNIX AND NOT APPLE)` (GDAL_DRIVER_PATH is `;`-separated on
+# Windows — parameterize the separator before adding a Windows caller).
+# The pinned prefix dir is PREPENDED, so prefix plugins win over same-name
+# drivers in a user dir (GDAL registers first-found); that precedence is the
+# harness intent — tests exercise the GDAL build the project was configured
+# against.
+# <plugins_dir> must already be cmake-escaped (see _sicnu_escape_cmake_path).
+function(sicnu_gdal_driver_path_snippet plugins_dir out)
+  set(_snippet "")
+  if(plugins_dir AND NOT plugins_dir MATCHES "^/usr/lib.*")
+    string(APPEND _snippet
+      "if(DEFINED ENV{GDAL_DRIVER_PATH} AND NOT \"\$ENV{GDAL_DRIVER_PATH}\" STREQUAL \"\")\n"
+      "  set(ENV{GDAL_DRIVER_PATH} \"${plugins_dir}:\$ENV{GDAL_DRIVER_PATH}\")\n"
+      "else()\n"
+      "  set(ENV{GDAL_DRIVER_PATH} \"${plugins_dir}\")\n"
+      "endif()\n")
+  endif()
+  set(${out} "${_snippet}" PARENT_SCOPE)
+endfunction()
+
 function(sicnu_configure_test_harness_env)
   set(_pythonhome "")
   if(Python_EXECUTABLE)
@@ -192,13 +222,19 @@ function(_sicnu_write_ctest_custom pythonhome pythonpath qt_plugins pathsep pyth
       "  set(ENV{LD_LIBRARY_PATH} \"/usr/lib\")\n"
       "endif()\n")
     if(gdal_libdir AND EXISTS "${gdal_libdir}/gdalplugins")
-      string(APPEND _out
-        "\n"
-        "# GDAL driver plugins shipped beside a non-system libgdal (JP2OpenJPEG,\n"
-        "# HDF5, netCDF, …). A prefix-built GDAL bakes its plugin search path\n"
-        "# from its configure-time prefix, so point GDAL_DRIVER_PATH at the\n"
-        "# shipped plugins explicitly; system-GDAL machines are unaffected.\n"
-        "set(ENV{GDAL_DRIVER_PATH} \"${_gdal_esc}/gdalplugins\")\n")
+      sicnu_gdal_driver_path_snippet("${_gdal_esc}/gdalplugins" _gdal_driver_snippet)
+      if(_gdal_driver_snippet)
+        string(APPEND _out
+          "\n"
+          "# GDAL driver plugins shipped beside a non-system libgdal (JP2OpenJPEG,\n"
+          "# HDF5, netCDF, …). A prefix-built GDAL bakes its plugin search path\n"
+          "# from its configure-time prefix, so point GDAL_DRIVER_PATH at the\n"
+          "# shipped plugins explicitly. System-GDAL machines (plugin dir under\n"
+          "# /usr/lib*) and an explicit user GDAL_DRIVER_PATH are left intact\n"
+          "# (#1355 — same exclusion policy as the LD_LIBRARY_PATH pin above;\n"
+          "# prepend instead of overwrite so the user's value is carried).\n"
+          "${_gdal_driver_snippet}")
+      endif()
     endif()
   endif()
 
