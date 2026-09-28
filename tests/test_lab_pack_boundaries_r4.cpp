@@ -12,14 +12,19 @@
 
   Entries:
     sicnu::labpack::PackVerifier::loadFromBytes  — the ONE pack parser
+    sicnu::labpack::PackVerifier::verify         — the authority direct surface
+                                                   (round-2 遗留3: the same EOL/
+                                                   encoding classes at the
+                                                   authority's own verdict)
     sicnu::teaching_admin::inventoryPacks        — the admin inventory entry
     sicnu::teaching_admin::canonicalFileSha256/Size — direct unit pins
     (linked via Sicnu::teaching_admin's PUBLIC sicnu_lab_pack)
 
-  The #1336 first-round semantics (fileSha256 canonicalization) must NOT
-  regress: B01/B02/B17 pin it from the outside. Chunk-boundary cases
-  (CHUNK-1/2/3) exercise the streaming pending-CR logic directly — the
-  inventory fixtures are tiny, so these are the only cases > 8000 bytes.
+    The #1336 first-round semantics (canonical-bytes pins) must NOT
+    regress: B01/B02/B17 pin it from the outside. Chunk-boundary cases
+    (CHUNK-1/2/3) exercise the streaming pending-CR logic directly against
+    the authority's 64KiB-from-offset-0 reads — the delegate of both the
+    admin entry and the verifier since the round-2 mirror removal.
  ***************************************************************************/
 
 #include <catch2/catch_test_macros.hpp>
@@ -471,18 +476,19 @@ TEST_CASE( "boundary CHUNK-1: CRLF spanning the 64KiB chunk boundary normalizes"
            "[teaching_r4][boundary][chunking]" )
 {
     QTemporaryDir root;
-    // 8000-byte text head, then 64KiB chunk whose LAST byte is '\r' with its
-    // '\n' in the next chunk, then more text, then a lone trailing '\r' at
-    // EOF (kept as-is).
+    // The authority (sicnu::labpack canonical digest, which the admin entry
+    // now delegates to) streams 64KiB reads from offset 0, so the pending-CR
+    // edge case is a CR as the LAST byte of chunk 1 with its LF opening
+    // chunk 2. (While the admin mirror existed — removed in favour of the
+    // delegation — its 8000-byte head shifted the boundary by 8000; the
+    // fixture pins the surviving, authoritative chunking.)
     QByteArray raw;
-    raw.reserve( 8000 + 65536 + 16 + 1 );
-    raw.append( QByteArray( 8000, 'h' ) );
-    QByteArray block( 65536, 'a' );
-    block[65535] = '\r'; // last byte of the first 64KiB chunk after head
-    raw.append( block );
-    raw.append( "\nmid" ); // '\n' arrives in the NEXT chunk
+    raw.reserve( 65536 + 16 + 1 );
+    raw.append( QByteArray( 65535, 'a' ) );
+    raw.append( '\r' );    // last byte of chunk 1
+    raw.append( "\nmid" ); // the LF opens chunk 2
     raw.append( QByteArray( 8, 'b' ) );
-    raw.append( '\r' ); // lone CR at EOF — kept
+    raw.append( '\r' );    // lone CR at EOF — kept
 
     const QString path = root.filePath( QStringLiteral( "chunked.txt" ) );
     writeBytes( path, raw );
@@ -491,7 +497,7 @@ TEST_CASE( "boundary CHUNK-1: CRLF spanning the 64KiB chunk boundary normalizes"
     // equality proves the streamed pending-CR logic is equivalent.
     CHECK( canonicalFileSha256( path ) == oracleSha256( canonicalBytes( raw ) ) );
     CHECK( canonicalFileSize( path ) == static_cast<qint64>( canonicalBytes( raw ).size() ) );
-    // The mid-file CRLF normalized away, the trailing lone CR kept:
+    // The mid-file CRLF normalized away (2 bytes → 1), the trailing lone CR kept:
     CHECK( canonicalFileSize( path ) == static_cast<qint64>( raw.size() - 1 ) );
 }
 
@@ -575,4 +581,147 @@ TEST_CASE( "boundary B18: generated-tier byte drift degrades as a warning, not a
                      QStringLiteral( "declared" ) ) );
     CHECK_FALSE( hasIssue( inv.packs.front(), QStringLiteral( "byte_mismatch" ), QStringLiteral( "error" ),
                            QString() ) );
+}
+// ---------------------------------------------------------------------------
+// Authority direct surface (round-2 遗留3): the SAME EOL/encoding boundary
+// classes pinned at sicnu::labpack::PackVerifier::verify itself — not through
+// the admin projection. #1336's canonical-bytes semantics live here; if the
+// admin layer ever grows another mirror, these rows keep the authority's own
+// verdict on record and the divergence becomes testable from both sides.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Load a pack document through the ONE authority parser.
+sicnu::labpack::PackDocument loadedPack( const QString &docPath )
+{
+    const sicnu::labpack::PackLoadResult r = sicnu::labpack::PackVerifier::load(
+      sicnu::labpack::pathFromUtf8( docPath.toStdString() ) );
+    REQUIRE( r.ok );
+    return r.pack;
+}
+
+/// One committed-fixture layout for direct verify() calls: <root>/<assetRel>
+/// holds @p onDisk; the pack pins the CANONICAL bytes of @p pinnedContent
+/// (truth from this file's oracle, never from the implementation).
+struct DirectPack
+{
+    QTemporaryDir root;
+    sicnu::labpack::PackDocument doc;
+
+    DirectPack( const QString &assetRel, const QByteArray &onDisk,
+                const QByteArray &pinnedContent )
+    {
+        const QString abs = root.filePath( assetRel );
+        REQUIRE( QDir().mkpath( QFileInfo( abs ).absolutePath() ) );
+        writeBytes( abs, onDisk );
+
+        const QString docPath = root.filePath( QStringLiteral( "b.pack.json" ) );
+        writeBytes( docPath, packWith( assetRel,
+                                       oracleSha256( canonicalBytes( pinnedContent ) ).toLatin1().constData(),
+                                       canonicalBytes( pinnedContent ).size() ) );
+        doc = loadedPack( docPath );
+    }
+
+    sicnu::labpack::PackVerification verify()
+    {
+        return sicnu::labpack::PackVerifier::verify(
+          doc, sicnu::labpack::pathFromUtf8( root.path().toStdString() ) );
+    }
+};
+
+bool pvHasIssue( const sicnu::labpack::PackVerification &v, const char *code,
+                 const char *pathNeedle )
+{
+    for ( const Json::Value &issue : v.issues )
+        if ( issue["code"].asString() == code
+             && issue["path"].asString().find( pathNeedle ) != std::string::npos )
+            return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE( "authority PV-B01: CRLF fixture verifies against LF pins at PackVerifier itself",
+           "[teaching_r4][boundary][authority][eol]" )
+{
+    DirectPack fx( QStringLiteral( "data/fixture.txt" ), "line1\r\nline2\r\n", "line1\r\nline2\r\n" );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    INFO( "overall=" << v.overall );
+    REQUIRE( v.overall == "verified" );
+    REQUIRE( v.issues.empty() );
+    REQUIRE( v.verifiedBytes == static_cast<std::int64_t>( canonicalBytes( "line1\r\nline2\r\n" ).size() ) );
+}
+
+TEST_CASE( "authority PV-B02: lone-CR fixture verifies — CRs are content at the authority too",
+           "[teaching_r4][boundary][authority][eol]" )
+{
+    DirectPack fx( QStringLiteral( "data/fixture.txt" ), "a\rb\rc\r", "a\rb\rc\r" );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "verified" );
+    REQUIRE( v.issues.empty() );
+}
+
+TEST_CASE( "authority PV-B03: a BOM participates in the pin — present and absent pins both typed",
+           "[teaching_r4][boundary][authority][encoding]" )
+{
+    const QByteArray withBom = "\xEF\xBB\xBF" "plan\r\n";
+
+    // Pin over the real bytes (BOM included) → verified.
+    {
+        DirectPack fx( QStringLiteral( "data/bom.json" ), withBom, withBom );
+        REQUIRE( fx.verify().overall == "verified" );
+    }
+    // Pin computed as if the BOM were not content → hard checksum rejection
+    // naming the asset (the authority never strips a BOM to make pins fit).
+    {
+        DirectPack fx( QStringLiteral( "data/bom.json" ), withBom, "plan\r\n" );
+        const sicnu::labpack::PackVerification v = fx.verify();
+        REQUIRE( v.overall == "failed" );
+        // The size check precedes the digest check for committed fixtures, so
+        // pinning the BOM-less bytes names lab.pack_size_mismatch — the byte
+        // count is part of the pin, which is the point: the BOM is content.
+        REQUIRE( pvHasIssue( v, "lab.pack_size_mismatch", "bom.json" ) );
+    }
+}
+
+TEST_CASE( "authority PV-CHUNK: CRLF straddling the authority's own 64KiB chunk edge normalizes",
+           "[teaching_r4][boundary][authority][chunking]" )
+{
+    QByteArray raw;
+    raw.reserve( 65536 + 16 + 1 );
+    raw.append( QByteArray( 65535, 'a' ) );
+    raw.append( '\r' );    // last byte of the authority's chunk 1
+    raw.append( "\nmid" ); // LF opens chunk 2
+    raw.append( QByteArray( 8, 'b' ) );
+    raw.append( '\r' );    // lone CR at EOF
+
+    DirectPack fx( QStringLiteral( "data/chunked.txt" ), raw, raw );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "verified" );
+    REQUIRE( v.issues.empty() );
+    // Canonical size: the mid-file CRLF collapsed, the lone CR kept.
+    REQUIRE( v.verifiedBytes == static_cast<std::int64_t>( raw.size() - 1 ) );
+}
+
+TEST_CASE( "authority PV-B15: digest drift is a named hard rejection at PackVerifier itself",
+           "[teaching_r4][boundary][authority][assets]" )
+{
+    // Same canonical LENGTH, different bytes — isolates the digest check from
+    // the size check that runs first for committed fixtures.
+    DirectPack fx( QStringLiteral( "data/drifted.bin" ), "current-bytes", "current-bytez" );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "failed" );
+    REQUIRE( pvHasIssue( v, "lab.pack_checksum_mismatch", "drifted.bin" ) );
+}
+
+TEST_CASE( "authority PV-B06: a missing committed fixture is a typed hard rejection",
+           "[teaching_r4][boundary][authority][assets]" )
+{
+    DirectPack fx( QStringLiteral( "data/absent.tif" ), "soon-gone", "soon-gone" );
+    REQUIRE( QFile::remove( fx.root.filePath( QStringLiteral( "data/absent.tif" ) ) ) );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "failed" );
+    REQUIRE( pvHasIssue( v, "lab.pack_input_missing", "absent.tif" ) );
 }
