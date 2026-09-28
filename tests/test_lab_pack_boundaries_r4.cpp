@@ -578,3 +578,157 @@ TEST_CASE( "boundary B18: generated-tier byte drift degrades as a warning, not a
     CHECK_FALSE( hasIssue( inv.packs.front(), QStringLiteral( "byte_mismatch" ), QStringLiteral( "error" ),
                            QString() ) );
 }
+// ---------------------------------------------------------------------------
+// Authority direct surface (round-2 遗留3): the SAME EOL/encoding boundary
+// classes pinned at sicnu::labpack::PackVerifier::verify itself — not through
+// the admin projection. #1336's canonical-bytes semantics live here; if the
+// admin layer ever grows another mirror, these rows keep the authority's own
+// verdict on record and the divergence becomes testable from both sides.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Load a pack document through the ONE authority parser.
+sicnu::labpack::PackDocument loadedPack( const QString &docPath )
+{
+    const sicnu::labpack::PackLoadResult r = sicnu::labpack::PackVerifier::load(
+      sicnu::labpack::pathFromUtf8( docPath.toStdString() ) );
+    REQUIRE( r.ok );
+    return r.pack;
+}
+
+/// One committed-fixture layout for direct verify() calls: <root>/<assetRel>
+/// holds @p onDisk; the pack pins the CANONICAL bytes of @p pinnedContent
+/// (truth from this file's oracle, never from the implementation).
+struct DirectPack
+{
+    QTemporaryDir root;
+    sicnu::labpack::PackDocument doc;
+
+    DirectPack( const QString &assetRel, const QByteArray &onDisk,
+                const QByteArray &pinnedContent )
+    {
+        const QString abs = root.filePath( assetRel );
+        REQUIRE( QDir().mkpath( QFileInfo( abs ).absolutePath() ) );
+        writeBytes( abs, onDisk );
+
+        const QString docPath = root.filePath( QStringLiteral( "b.pack.json" ) );
+        writeBytes( docPath, packWith( assetRel,
+                                       oracleSha256( canonicalBytes( pinnedContent ) ).toLatin1().constData(),
+                                       canonicalBytes( pinnedContent ).size() ) );
+        doc = loadedPack( docPath );
+    }
+
+    sicnu::labpack::PackVerification verify()
+    {
+        return sicnu::labpack::PackVerifier::verify(
+          doc, sicnu::labpack::pathFromUtf8( root.path().toStdString() ) );
+    }
+};
+
+bool pvHasIssue( const sicnu::labpack::PackVerification &v, const char *code,
+                 const char *pathNeedle )
+{
+    for ( const Json::Value &issue : v.issues )
+        if ( issue["code"].asString() == code
+             && issue["path"].asString().find( pathNeedle ) != std::string::npos )
+            return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE( "authority PV-B01: CRLF fixture verifies against LF pins at PackVerifier itself",
+           "[teaching_r4][boundary][authority][eol]" )
+{
+    DirectPack fx( QStringLiteral( "data/fixture.txt" ), "line1\r\nline2\r\n", "line1\r\nline2\r\n" );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    INFO( "overall=" << v.overall );
+    REQUIRE( v.overall == "verified" );
+    REQUIRE( v.issues.empty() );
+    REQUIRE( v.verifiedBytes == static_cast<std::int64_t>( canonicalBytes( "line1\r\nline2\r\n" ).size() ) );
+}
+
+TEST_CASE( "authority PV-B02: lone-CR fixture verifies — CRs are content at the authority too",
+           "[teaching_r4][boundary][authority][eol]" )
+{
+    DirectPack fx( QStringLiteral( "data/fixture.txt" ), "a\rb\rc\r", "a\rb\rc\r" );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "verified" );
+    REQUIRE( v.issues.empty() );
+}
+
+TEST_CASE( "authority PV-B03: a BOM participates in the pin — present and absent pins both typed",
+           "[teaching_r4][boundary][authority][encoding]" )
+{
+    const QByteArray withBom = "\xEF\xBB\xBF" "plan\r\n";
+
+    // Pin over the real bytes (BOM included) → verified.
+    {
+        DirectPack fx( QStringLiteral( "data/bom.json" ), withBom, withBom );
+        REQUIRE( fx.verify().overall == "verified" );
+    }
+    // Pin computed as if the BOM were not content → hard checksum rejection
+    // naming the asset (the authority never strips a BOM to make pins fit).
+    {
+        DirectPack fx( QStringLiteral( "data/bom.json" ), withBom, "plan\r\n" );
+        const sicnu::labpack::PackVerification v = fx.verify();
+        REQUIRE( v.overall == "failed" );
+        // The size check precedes the digest check for committed fixtures, so
+        // pinning the BOM-less bytes names lab.pack_size_mismatch — the byte
+        // count is part of the pin, which is the point: the BOM is content.
+        REQUIRE( pvHasIssue( v, "lab.pack_size_mismatch", "bom.json" ) );
+    }
+}
+
+TEST_CASE( "authority PV-CHUNK: CRLF straddling the authority's own 64KiB chunk edge normalizes",
+           "[teaching_r4][boundary][authority][chunking]" )
+{
+    QByteArray raw;
+    raw.reserve( 65536 + 16 + 1 );
+    raw.append( QByteArray( 65535, 'a' ) );
+    raw.append( '\r' );    // last byte of the authority's chunk 1
+    raw.append( "\nmid" ); // LF opens chunk 2
+    raw.append( QByteArray( 8, 'b' ) );
+    raw.append( '\r' );    // lone CR at EOF
+
+    DirectPack fx( QStringLiteral( "data/chunked.txt" ), raw, raw );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "verified" );
+    REQUIRE( v.issues.empty() );
+    // Canonical size: the mid-file CRLF collapsed, the lone CR kept.
+    REQUIRE( v.verifiedBytes == static_cast<std::int64_t>( raw.size() - 1 ) );
+}
+
+TEST_CASE( "authority PV-B15: digest drift is a named hard rejection at PackVerifier itself",
+           "[teaching_r4][boundary][authority][assets]" )
+{
+    // Same canonical LENGTH, different bytes — isolates the digest check from
+    // the size check that runs first for committed fixtures.
+    DirectPack fx( QStringLiteral( "data/drifted.bin" ), "current-bytes", "current-bytez" );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "failed" );
+    REQUIRE( pvHasIssue( v, "lab.pack_checksum_mismatch", "drifted.bin" ) );
+}
+
+TEST_CASE( "authority PV-B06: a missing committed fixture is a typed hard rejection",
+           "[teaching_r4][boundary][authority][assets]" )
+{
+    DirectPack fx( QStringLiteral( "data/absent.tif" ), "soon-gone", "soon-gone" );
+    REQUIRE( QFile::remove( fx.root.filePath( QStringLiteral( "data/absent.tif" ) ) ) );
+    const sicnu::labpack::PackVerification v = fx.verify();
+    REQUIRE( v.overall == "failed" );
+    REQUIRE( pvHasIssue( v, "lab.pack_input_missing", "absent.tif" ) );
+}
+
+// ------------------------- EDIT D3 (header comment) ------------------------
+// In the header comment block, after the line
+//     sicnu::teaching_admin::canonicalFileSha256/Size — direct unit pins
+// insert:
+//     sicnu::labpack::PackVerifier::verify — the authority direct surface
+//     (round-2 遗留3: the same EOL/encoding classes at PackVerifier itself)
+// and update the tail note "(CHUNK-1/2/3) exercise the streaming pending-CR
+// logic directly — the inventory fixtures are tiny, so these are the only
+// cases > 8000 bytes." to drop the stale 8000-byte rationale (the mirror's
+// head is gone; CHUNK fixtures are aligned to the authority's 64KiB reads).
