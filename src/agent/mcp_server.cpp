@@ -921,14 +921,19 @@ void McpServer::handleRequest(const QVariantMap &request)
                 bool idOk = false;
                 const long pipelineId = arguments.value(QStringLiteral("pipeline_id")).toLongLong(&idOk);
                 if (!idOk || pipelineId < 0)
-                    throw std::runtime_error("Invalid or missing pipeline_id");
+                    throw McpToolError(
+                        QStringLiteral("get_workflow_status: Invalid or missing pipeline_id"),
+                        QStringLiteral("INVALID_PARAMETER"), QStringLiteral("validation"));
                 resultData = handleGetWorkflowStatus(pipelineId);
             }
             else if (toolName == QStringLiteral("resume_workflow"))
             {
                 const QString runId = arguments.value(QStringLiteral("run_id")).toString().trimmed();
                 if (runId.isEmpty())
-                    throw std::runtime_error("Invalid or missing run_id");
+                    // Same structured vocabulary as the handler's own gate
+                    // (invalid characters) — one code per failure class.
+                    throw McpToolError(QStringLiteral("resume_workflow: Invalid or missing run_id"),
+                                       QStringLiteral("INVALID_PARAMETER"), QStringLiteral("validation"));
                 resultData = handleResumeWorkflow(runId);
             }
             else if (toolName == QStringLiteral("artifact_read"))
@@ -2519,7 +2524,11 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
         pipelineJson = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
     }
     if (pipelineJson.trimmed().isEmpty())
-        throw std::runtime_error("Missing required parameter: pipeline");
+        // Stable structured code (Track 10 R5): an empty workflow document is
+        // the INVALID_PIPELINE class, not an untyped transport error.
+        throw McpToolError(QStringLiteral("run_workflow: pipeline parameter is missing or empty — "
+                                          "expected {id, steps: [{id, operator, params, inputs}]}"),
+                           QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
 
     // run_workflow submits straight into TaskCenter, so it must satisfy the
     // same SICNU_MCP_WORKSPACE containment as execute_algorithm - otherwise
@@ -2529,9 +2538,44 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
     {
         QVariant pipelineValue = pipelineArg;
         if (pipelineArg.typeId() == QMetaType::QString) {
-            const QJsonDocument doc = QJsonDocument::fromJson(pipelineJson.toUtf8());
-            if (doc.isObject())
-                pipelineValue = doc.object().toVariantMap();
+            // Parse with THE SAME reader and bounds startTrackedPipelineJson
+            // uses (stackLimit 64, #1154) so this structural gate can only
+            // reject what the submit path would reject anyway — never a
+            // stricter dialect (jsoncpp accepts JSON comments).
+            Json::CharReaderBuilder builder;
+            builder["stackLimit"] = 64;
+            Json::Value root;
+            std::string parseErrs;
+            std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+            const std::string pipelineBytes = pipelineJson.toStdString();
+            // #1154: a depth bomb makes the bounded reader THROW
+            // (Json::Exception), never return false — catch it here so the
+            // structural gate stays a typed INVALID_PIPELINE, exactly like
+            // startTrackedPipelineJson.
+            bool parsed = false;
+            try
+            {
+                parsed = reader->parse(pipelineBytes.data(),
+                                       pipelineBytes.data() + pipelineBytes.size(),
+                                       &root, &parseErrs);
+            }
+            catch ( const Json::Exception & )
+            {
+                parsed = false;
+            }
+            if (!parsed || !root.isObject())
+                // The pipeline text is not a JSON object (malformed JSON, a
+                // bare array, a depth bomb): typed INVALID_PIPELINE, BEFORE
+                // containment. Scanning the raw text as a path would
+                // misclassify a '/'-prefixed malformed document as
+                // PATH_OUTSIDE_WORKSPACE (Track 10 R5); the text is also not
+                // a structural pipeline, so startTrackedPipelineJson could
+                // only reject it anyway.
+                throw McpToolError(
+                    QStringLiteral("run_workflow: pipeline rejected; the pipeline text is not a JSON "
+                                   "object — expected {id, steps: [{id, operator, params, inputs}]}"),
+                    QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
+            pipelineValue = sicnu::processing::jsonObjectToVariantMap(root);
         }
         QVariantMap containmentArgs;
         containmentArgs.insert(QStringLiteral("pipeline"), pipelineValue);
