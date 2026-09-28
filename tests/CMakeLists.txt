@@ -7474,10 +7474,6 @@ if(TARGET sicnu_workflow)
     sicnu_task_center
     sicnu_jobs
     sicnu_agent
-    # Track 10 enablement: master's link graph leaves libsicnu_agent.so with
-    # an unresolved sicnu_agent_loop symbol at this commit (#1335's domain);
-    # this target must link to run its lane until that fix lands.
-    $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
     Sicnu::data
     Qt6::Core
     Qt6::Gui
@@ -9527,10 +9523,6 @@ target_link_libraries(workflow_crash_helper PRIVATE
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
-  # master's link graph leaves libsicnu_agent.so with an unresolved
-  # sicnu_agent_loop symbol at this commit (#1335's fix domain); every
-  # executable pulling the agent .so must satisfy it itself until then.
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 if(TARGET jsoncpp)
   target_link_libraries(workflow_crash_helper PRIVATE jsoncpp)
@@ -9552,9 +9544,6 @@ target_link_libraries(test_workflow_crash_recovery_r4 PRIVATE
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
-  # See workflow_crash_helper: satisfies libsicnu_agent.so's unresolved
-  # sicnu_agent_loop symbol until #1335 lands.
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_workflow_crash_recovery_r4 PRIVATE jsoncpp)
@@ -9652,8 +9641,6 @@ target_link_libraries(test_workflow_cache_e2e PRIVATE
   sicnu_workflow
   sicnu_operators
   GDAL::GDAL
-  # Track 10 enablement: same link-graph gap as test_workflow_cancel (#1335).
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 target_include_directories(test_workflow_cache_e2e PRIVATE
   ${CMAKE_SOURCE_DIR}/src
