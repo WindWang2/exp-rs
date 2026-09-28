@@ -17,9 +17,10 @@ Static teardown walk of the current destructor (`src/workflow/pipeline_run_coord
 
 ## D3 — Deterministic regressions (replaces the 150 ms timing window)
 
-- **T1 (existing, kept)**: foreign-thread delete mid-whole-file-hash.
-- **T2 (new, deterministic)**: pump-reentrant same-thread delete — the executor posts the completion and a queued "destroyer" functor to an affinity-thread helper QObject; event order (completion, destroyer) guarantees the delete lands inside the hash's own pump. Asserts: no crash, `guard.isNull()`, `nodeFinished` abandoned (no emission after destruction), run state never mutated post-drain.
-- **T3 (new)**: worker-outlives-owner — 2-node chain, worker parked on a gate while a foreign delete runs (drain passes with the worker parked → `pool.waitForDone` returns only after the gate releases); the late completion must never reach a dying object; asserts no emission and clean destruction.
+- **T1 (existing, rebuilt)**: foreign-thread delete mid-whole-file-hash — the destroyer thread waits on a promise armed by a 10 ms one-shot on the affinity loop (no sleep race on the arming side); 1 GiB artifact keeps the hash frame live >=3x the delay on the reference host.
+- **T2 (new)**: pump-reentrant SAME-THREAD delete — a 20 ms one-shot on the affinity loop fires ~20 ms into the (multi-hundred-ms worst-case) hash; its functor is delivered by the hash's own processEvents pump and deletes the coordinator INSIDE the frame. The delivery is timer-latency-based (not strict event-order): on a pathologically delayed completion dispatch the delete could land past the frame and the pass would be vacuous; the >=25x hash-vs-delay margin makes that practically unreachable.
+- **T3 (new)**: worker-outlives-owner — 1-node chain whose worker parks on a gate (honouring the cancel flag) while a foreign delete runs; the drain joins the parked worker, then removePostedEvents drops the late completion. Asserts no emission and clean destruction.
+- All three scrub their scratch via a RAII guard (assertion failures included) — multi-hundred-MiB artifacts have filled tmpfs before (and did once during this track; see ledger Round 2).
 
 ## D4 — #1357 investigation plan (empirics-first)
 
@@ -27,6 +28,27 @@ Static teardown walk of the current destructor (`src/workflow/pipeline_run_coord
 2. ASan lane (`sanitizer-debug` preset) serially after the dev build; capture the two free stacks.
 3. Suspect zone mapped: `TaskCenter::instance()` + `WorkflowRunCoordinator::instance()` + `JobEngine::instance()` + `ExecutionResultCache::instance()` Meyers cluster (destruction-order hazards already documented in `TaskCenter::~TaskCenter`'s ArtifactGC guard) — verify from ASan stacks, fix at the root (ordered teardown / ownership handoff), no new workarounds.
 4. Any `_Exit`/leak workaround RELATED to the fixed root cause gets removed and double-run-verified (#1342 pattern).
+
+## D5 — Review round 1 (independent subagent, post-implementation) — all addressed
+
+- B-1 (Medium): T2 lacked the scratch scrub its siblings had; demonstrably re-filled /tmp and broke an unrelated suite. Fixed: RAII ScratchCleanup guard armed in all three destroy tests (assertion-failure-safe).
+- E-1 (Medium): TSan evidence was missing. Closed: see D6.
+- A-Low (documented, no fix required): a completion frame that already passed its entry checks when the destructor starts can still emit/persist/dispatch (memory-safely, under its own state reference) until the drain executes on the affinity thread. This window is strictly smaller than the pre-fix code's and is inherent to two-phase teardown; recorded here as the intended semantics.
+- Nit (documented): ~RunState's pool.waitForDone backstop runs under m_stateMutex; workers never take that mutex, and the drain already joined the pool, so this is a no-op in practice.
+- D3 drift corrected (T2 timer-based, T3 1-node).
+
+## D6 — TSan evidence (#1358 acceptance) — RESULT: bug reproduced on master, gone in the fix
+
+Driver: `/tmp/tsan_coordinator_driver.cpp` (scratch, not shipped) — the same three destruction scenarios against a TSan-instrumented `sicnu_workflow` (scratch build dir, `-fsanitize=thread -g -fno-omit-frame-pointer`, serial). Qt itself is uninstrumented (no TSan Qt exists on this host), so queued-connection capture copies and Qt's QThreadPool teardown internals produce structural false positives: their happens-before edges live in Qt's inline futex fast paths, invisible to TSan.
+
+Comparison run (identical driver, only the coordinator TU differs):
+
+| Build | TSan result |
+|---|---|
+| **master coordinator** (a726d17a6) | 11 reports incl. **3 heap-use-after-free** at the exact statically-predicted unprotected path: `onNodeFinished` hash-loop cancel-flag read (`:964`), `~BusyGuard` affinityBusy decrement (`:924`), `invokeOnCoordinatorThread` (`:147`) — plus 3 QWaitCondition teardown races and Qt-copy noise |
+| **fixed coordinator** (43650f0a9) | 0 heap-use-after-free; 0 races involving the m_stateMutex/shared_ptr protocol; remaining reports are the same pre-existing QWaitCondition teardown races (present identically on master — the `pool.clear()+waitForDone()` drain is unchanged Track-13 code) and Qt-copy noise |
+
+Caveat recorded honestly: a TSan runtime-internal `CHECK failed: sanitizer_thread_registry.cpp` aborts some runs late (Qt worker-thread churn vs TSan thread registry — a TSan/Qt interaction, not a data race); runs with the 2-3 QWaitCondition reports + the joinable-driver fix still demonstrate the UAF delta deterministically. Combined with the deterministic regressions (T1-T3) and the ASan-clean destroy runs, the #1358 acceptance "TSan shows the race fixed" is closed.
 
 ## Residual (explicitly deferred, re-evaluated at review)
 

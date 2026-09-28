@@ -402,6 +402,16 @@ QByteArray readFileBytes( const QString &path )
     return f.readAll();
 }
 
+/// RAII scrub for large scratch directories: a REQUIRE failure unwinds the
+/// test frame, and the multi-hundred-MiB artifacts of the destroy tests must
+/// never survive it (they bypass the coordinator's own finalization, so
+/// nothing else removes them — leftover dirs have filled tmpfs before).
+struct ScratchCleanup
+{
+    QString dir;
+    ~ScratchCleanup() { QDir( dir ).removeRecursively(); }
+};
+
 } // namespace
 
 TEST_CASE( "A checkpoint mid-resume is owned by one process at a time", "[d17][e2e][resume][ownership]" )
@@ -535,6 +545,7 @@ TEST_CASE( "Foreign-thread destruction during a whole-file hash never frees live
 {
     ensureApp();
     const QString dir = scratchDir( QStringLiteral( "destroy-hash" ) );
+    ScratchCleanup scratchGuard{ dir };
 
     // 1 GiB artifact: Auto identity escalates to the whole-file hash — 1024
     // chunked reads, each pumping the event loop, plus SHA-256 over the whole
@@ -614,9 +625,6 @@ TEST_CASE( "Foreign-thread destruction during a whole-file hash never frees live
     REQUIRE( guard.isNull() );
     REQUIRE_FALSE( completionSeen->load() );
     delete loopGuard;
-    // The artifact is 1 GiB and the destroying coordinator never got to
-    // finalization: remove the scratch here or repeated runs fill tmpfs.
-    QDir( dir ).removeRecursively();
 }
 
 TEST_CASE( "Deleting the coordinator from its own hash pump never frees live state",
@@ -624,6 +632,7 @@ TEST_CASE( "Deleting the coordinator from its own hash pump never frees live sta
 {
     ensureApp();
     const QString dir = scratchDir( QStringLiteral( "destroy-pump" ) );
+    ScratchCleanup scratchGuard{ dir };
 
     // Same sizing math as the foreign-thread case: the hash frame must still
     // be pumping when the 20 ms one-shot fires (measured hash: ~100 ms).
@@ -698,6 +707,7 @@ TEST_CASE( "A completion whose worker outlives the coordinator is never delivere
 {
     ensureApp();
     const QString dir = scratchDir( QStringLiteral( "destroy-late" ) );
+    ScratchCleanup scratchGuard{ dir };
 
     auto gate = std::make_shared<std::atomic<bool>>( false );
     auto destroyed = std::make_shared<std::atomic<bool>>( false );
@@ -763,7 +773,4 @@ TEST_CASE( "A completion whose worker outlives the coordinator is never delivere
     REQUIRE( guard.isNull() );
     REQUIRE_FALSE( completionSeen->load() );
     delete loopGuard;
-    // The artifact is 1 GiB and the destroying coordinator never got to
-    // finalization: remove the scratch here or repeated runs fill tmpfs.
-    QDir( dir ).removeRecursively();
 }
