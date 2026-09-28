@@ -13,6 +13,10 @@
 | A5 | SSE 层截断/坏参数/空名工具调用仅 qWarning 丢弃（#701 遗留可观测性缺口）；arguments 累积与 SSE 行缓冲无上限 | src/agent/llm_streaming_client.cpp:245-325 | 通读实证 | 本轨道修复：`malformedToolCall` 类型化信号 + 1MiB/8MiB 双上限 |
 | A6 | **`probeModelManifest` 永远失败**：`modelContracts()` 返回数组（context_ledger.cpp:282），而探针按对象键检查 `contracts.isMember(modelId)`（grounding_probes.cpp:428-435）→ 抗幻觉面全失效 | grounding_probes.cpp | 逐行对照；红跑（见 §C） | [收窄] **#1337 已含逐字修复**（其分支 diff 实证，grounding_probes.cpp:450 区域）；本轨道不重复修，避免合并冲突——只钉 master 上成立的合同（unknown/empty id 类型化拒绝） |
 | A7 | `validateAgentPlan` 接线查重为 O(steps²) any_of | agent_plan.cpp:204-213 | 通读 | 顺手修复：id 集合 O(1) 查（保持前向引用合法语义，预收集全量 id） |
+| A8 | `validateAgentPlan` 的 inputs 名与 pins slot lambda 同样可抛（非字符串 name） | agent_plan.cpp:224,388 | 独立评审复现实证 | 已修：类型化 issue + isString 守卫 |
+| A9 | `planFingerprint`/`planSummary` 对非 object step 抛；harness:plan 在校验前调 planSummary | agent_plan.cpp:508,584 | 独立评审复现实证 | 已修：isObject 跳过 + 3 用例 |
+| A10 | SSE 网络路径 `m_buffer` 与 tool-call index 映射均无上限（400 MiB 无换行行全量缓冲；100k index +22 MB） | llm_streaming_client.cpp:140,233 | 独立评审实测 | 已修：onReadyRead 未闭合尾部队界 + cancel；index ≤64 |
+| A11 | `expectedExtent` 非数值成员抛 `asDouble()` 异常 | harness_verification.cpp:261 | 独立评审 + WP-B 规格 | 已修：四成员 isNumeric 守卫 + 用例 |
 
 ## B. 交付物清单（对照任务书 3.2 下限）
 
@@ -25,15 +29,37 @@
 | 触碰文件 | ≥12 | 实现 5（agent_plan.{h,cpp}, llm_streaming_client.{h,cpp}）+ 测试 8 + CMake 1 + 语料/加载器 2 + planning 4 | [待验证] |
 | 语料文件 | ≥1 且被 ≥2 目标复用 | tests/data/harness_adversarial_corpus.json + tests/adversarial_corpus.h（schema 自校验），消费者：adversarial_matrix + llm_streaming_client | [待验证] |
 
-## C. 关键验证记录（命令 + 双跑结果，收口时填）
+## C. 关键验证记录
 
-（预留：ctest 输出摘录、红跑证据、双跑退出码）
+### C1 车道 ctest 双跑（Oracle 门禁）
 
-### C1 红跑证据（WP-A 计划层，实现前）
-（预留）
+命令（worktree 的 build-r4，全新配置、Debug、ENABLE_TESTS=ON、offscreen、串行）：
 
-### C2 probeModelManifest 缺陷红跑（A6，仅在 #1337 合并前可复现）
-（预留）
+```
+QT_QPA_PLATFORM=offscreen CTEST_PARALLEL_LEVEL=1 LD_LIBRARY_PATH=$PWB_SDKS/root/usr/lib \
+  ctest -R "harness|verifier|grounding|evidence|ledger|llm_streaming|tool_call_dispatcher|model_failure|io_atomic|verification_failure" -j1
+```
+
+两轮逐项一致：**98% tests passed, 3 tests failed out of 126**（123/126）。
+3 个失败的归属（全部非本轨道引入，均有实证）：
+
+| 失败 | 归属 | 证据 |
+|---|---|---|
+| test_grounding_probes_11_NOT_BUILT | 纯 verifier 库兄弟目标，master 上同样未构建（链 sicnu_verifier，与车道无关） | ctest -N 列表 |
+| harness_lab: teacher path is credential-gated (×2) | **master 既有缺陷**：`constantTimeEquals` 的 `return diff;` 在相等时返回 false（fail-always 而非 fail-closed）→ 教师面永不放行。#1335（fix/review-p0-build-restore）已含逐字修复 `return diff == 0;`（pr1335 分支实证）。按 BASELINE §3 规避决策不重复修 | INFO 探针实证返回 TEACHING_REFUSAL；gh pr diff 1335 实证 |
+
+本车道新增/扩展的 20 个测试目标（6 新文件 + 2 既有扩展 + 12 个 harness 基线目标）**全部通过**，各目标实测：adversarial_matrix 88 断言/16 例、verifier_robustness_r4 41/10、context_ledger_completeness_r4 122/14、grounding_evidence_r4 全绿、runloop_recovery_r4 122/9、harness_boundaries_r4 210/4、llm_streaming_client 55/15、tool_call_dispatcher 226/27。
+
+### C2 红跑证据（TDD 节拍）
+
+- WP-A 计划层：type-confusion（kind/schema_version 为数组/对象时 readAgentPlan 抛 `Json::LogicError`）、duplicate output names 无探针、5000 步无上限——三条红均由对抗用例先红后绿（提交 2ca1c6663）。
+- WP-B：verifyArtifact 对 classValues 含字符串/对象成员抛 `Value is not convertible to double`（红）→ isNumeric 守卫（绿）；expectedExtent 同类问题在复审中发现并同法修复。
+- 语料可用性红：adversarialCorpusPath 的 `__FILE__` 语义错误使语料从未加载（复审 P1-7 实证）→ 修复后两目标真实复用。
+- 教师令牌红：#1335 修复前的既有失败（见 C1 表）。
+
+### C3 环境事实（复现用）
+
+cmake=/home/kevin/toolchain/cmake-dist/bin/cmake；ninja=/home/kevin/pwb-sdks/root/usr/bin/ninja；Qt/GDAL 等在 $PWB_SDKS/root/usr；运行时需 LD_LIBRARY_PATH=$PWB_SDKS/root/usr/lib（libodbc 等不在默认路径）。构建纪律：-j2、CTEST_PARALLEL_LEVEL=1。本环境每次 cmake 重配置会刷新 sicnu_feature_probes.h 的 mtime 使 ninja 判脏 ~2600 边（deps 数据库按 mtime），故 CMakeLists 一次性定稿后不再 configure。
 
 ## D. 与任务书前提的偏离台账
 
