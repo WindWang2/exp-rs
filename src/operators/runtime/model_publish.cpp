@@ -18,49 +18,116 @@
 #include <set>
 #include <string>
 
+#if !defined(Q_OS_WIN)
+#include <sys/stat.h>
+#endif
+
 namespace sicnu::operators::runtime {
 
 namespace {
-/// Publish occupancy fence: one ProductPublishGuard per canonical final path
-/// per process (see the class comment). Guards the WHOLE guard lifetime —
+/// Publish occupancy fence: one guard per canonical final path per process
+/// (see PublishFenceLease in the header). Guards the WHOLE guard lifetime —
 /// adoption included, which is exactly the window a second guard would
 /// corrupt by adopting the parked product back.
 std::mutex g_publishFenceMutex;
 std::set<std::string> g_publishFences;
 
-/// RAII fence slot. A throwing constructor never runs the destructor, so the
-/// raw bool flag would leak the slot on every throw path after acquisition —
-/// this holder owns the release (scope exit, including throw).
-class PublishFenceSlot
+/// Case-flips the first alphabetic character of the last path component.
+/// Empty when the component carries no letter (nothing to flip) — the probe
+/// then reports "unknown" and the key is NOT folded: the miss direction is
+/// conservative (two spellings of one artifact on a case-insensitive mount
+/// keep distinct fences), never a false merge of distinct files.
+QString flipLastComponentCase( const QString &path )
 {
-  public:
-    PublishFenceSlot( std::set<std::string> &fences, const std::string &key, bool acquired )
-        : m_fences( fences ), m_key( key ), m_acquired( acquired )
+  const int start = path.lastIndexOf( QLatin1Char( '/' ) ) + 1;
+  for ( int i = start; i < path.size(); ++i )
+  {
+    const QChar c = path.at( i );
+    if ( c.isLetter() )
     {
+      QString flipped = path;
+      flipped[i] = c.isUpper() ? c.toLower() : c.toUpper();
+      return flipped;
     }
-    ~PublishFenceSlot()
-    {
-        if ( m_acquired )
-        {
-            std::lock_guard<std::mutex> lock( g_publishFenceMutex );
-            m_fences.erase( m_key );
-        }
-    }
-    PublishFenceSlot( const PublishFenceSlot & ) = delete;
-    PublishFenceSlot &operator=( const PublishFenceSlot & ) = delete;
+  }
+  return {};
+}
 
-    /// Ownership handover on successful guard construction: the fence must
-    /// outlive the constructor (it guards the WHOLE guard lifetime), so the
-    /// constructor-scoped holder must not erase the key at scope exit. After
-    /// release() the guard's own m_fenceHeld flag owns the erase.
-    void release() { m_acquired = false; }
-
-  private:
-    std::set<std::string> &m_fences;
-    std::string m_key;
-    bool m_acquired;
-};
+/// True when the filesystem holding @p existingPath treats case-distinct
+/// spellings as the same file. Probed, never assumed from the OS: on POSIX a
+/// case-flipped spelling of the path that stats to the SAME file (st_dev +
+/// st_ino) is the ground truth — a case-sensitive filesystem misses or hits a
+/// genuinely different file, so it is never folded.
+bool pathIsCaseInsensitive( const QString &existingPath )
+{
+#if defined(Q_OS_WIN)
+  // Windows volume filesystems (NTFS/FAT/exFAT) are case-insensitive by
+  // default; per-directory case-sensitive directories are exotic enough to
+  // trade away here for the alias protection everywhere else.
+  Q_UNUSED( existingPath )
+  return true;
+#else
+  struct stat probe{};
+  if ( ::stat( QFile::encodeName( existingPath ).constData(), &probe ) != 0 )
+    return false;
+  const QString flipped = flipLastComponentCase( existingPath );
+  if ( flipped.isEmpty() )
+    return false;
+  struct stat alias{};
+  if ( ::stat( QFile::encodeName( flipped ).constData(), &alias ) != 0 )
+    return false;
+  return probe.st_dev == alias.st_dev && probe.st_ino == alias.st_ino;
+#endif
+}
 } // namespace
+
+std::string canonicalPublishFenceKey( const QString &finalPath )
+{
+  QString key = QDir::cleanPath( QFileInfo( finalPath ).absoluteFilePath() );
+  QString cursor = key;
+  QString tail;
+  for ( ;; )
+  {
+    QFileInfo info( cursor );
+    if ( info.exists() )
+    {
+      const QString canonical = info.canonicalFilePath();
+      if ( !canonical.isEmpty() )
+        cursor = canonical;
+      break;
+    }
+    const int slash = cursor.lastIndexOf( QLatin1Char( '/' ) );
+    if ( slash <= 0 )
+      break;
+    tail.prepend( cursor.mid( slash ) );
+    cursor.truncate( slash );
+  }
+  key = tail.isEmpty() ? cursor : cursor + tail;
+  if ( pathIsCaseInsensitive( cursor ) )
+    key = key.toLower();
+  return key.toStdString();
+}
+
+PublishFenceLease::PublishFenceLease( const QString &finalPath )
+{
+  m_key = canonicalPublishFenceKey( finalPath );
+  {
+    std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
+    if ( !g_publishFences.insert( m_key ).second )
+      throw RSOperatorError( ErrorCode::AlreadyRunning,
+                             "another publish is already in progress for "
+                               + finalPath.toStdString() );
+  }
+  m_held = true;
+}
+
+PublishFenceLease::~PublishFenceLease()
+{
+  if ( !m_held )
+    return;
+  std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
+  g_publishFences.erase( m_key );
+}
 
 std::string crsDisplayName( const QString &wkt )
 {
@@ -163,7 +230,12 @@ void DetectionPublishGuard::removeBackupFamily()
 
 DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
                                               const QString &backupSuffix )
-    : m_final( finalPath ),
+    : m_fenceLease( finalPath ), // acquired FIRST: a concurrent guard on the same artifact must
+                                 // be refused typed before any adoption or park touches the path —
+                                 // the detection guard has exactly the "second guard adopts the
+                                 // first's parked pair" corruption window the ProductPublishGuard
+                                 // fence was added for
+      m_final( finalPath ),
       m_backup( finalPath + backupSuffix ),
       m_backupSuffix( backupSuffix )
 {
@@ -295,38 +367,18 @@ void ProductPublishGuard::removeBackupFamily()
   QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
 }
 
-void ProductPublishGuard::releasePublishFence()
-{
-  if ( !m_fenceHeld )
-    return;
-  std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
-  g_publishFences.erase( QDir::cleanPath( m_final ).toStdString() );
-  m_fenceHeld = false;
-}
-
 ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QString &backupSuffix,
                                           const char *parkFaultPoint,
                                           const QString &stageForCleanup )
-    : m_final( finalPath ),
+    : m_fenceLease( finalPath ), // occupancy fence FIRST (declared first member): acquired before
+                                 // any adoption/park touches the path; a concurrent guard on the
+                                 // same artifact is refused typed. Released on EVERY exit — the
+                                 // member is destroyed when the constructor body throws, and the
+                                 // destructor releases it last, after the restore completed.
+      m_final( finalPath ),
       m_backup( finalPath + backupSuffix ),
       m_stageForCleanup( stageForCleanup )
 {
-  // Occupancy fence FIRST (before any adoption/park touches the path): a
-  // concurrent guard on the same path must be refused typed, never allowed
-  // to adopt or clean the live guard's parked pair.
-  const std::string fenceKey = QDir::cleanPath( finalPath ).toStdString();
-  {
-    std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
-    if ( !g_publishFences.insert( fenceKey ).second )
-      throw RSOperatorError( ErrorCode::AlreadyRunning,
-                             "another publish is already in progress for "
-                               + finalPath.toStdString() );
-  }
-  // RAII: released on EVERY exit below (including the throwing constructor
-  // paths a destructor cannot cover); the dtor's own release stays idempotent.
-  PublishFenceSlot fenceSlot( g_publishFences, fenceKey, /*acquired=*/true );
-  m_fenceHeld = true;
-
   const QString provPath = m_final + QStringLiteral( ".prov.json" );
   const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
   // Every throw path below must not leave the freshly written stage behind
@@ -384,7 +436,6 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
     // interrupted run so it can never resurface or wedge a later park
     // (Windows rename does not overwrite).
     removeBackupFamily();
-    fenceSlot.release(); // the guard's m_fenceHeld owns the fence from here
     return;
   }
 
@@ -403,21 +454,12 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
       QFile::rename( backupProv, provPath );
     fail( "publish could not back up the previous product: " );
   }
-  // Success: hand the fence over to the guard (m_fenceHeld). Without this
-  // the constructor-scoped holder erased the key at ctor exit, so the fence
-  // only repelled a second guard whose constructor overlapped this one's —
-  // the guard's whole lifetime ran unfenced, exactly the window a second
-  // guard would corrupt by adopting the parked product back.
-  fenceSlot.release();
 }
 
 ProductPublishGuard::~ProductPublishGuard()
 {
   if ( m_disarmed )
-  {
-    releasePublishFence();
     return;
-  }
   // Remove the partial NEW product and its sidecar, then restore the parked
   // previous pair — sidecar first, the main file LAST: a crash mid-restore
   // leaves the main parked, i.e. exactly the state the next run's adoption
@@ -432,9 +474,8 @@ ProductPublishGuard::~ProductPublishGuard()
       QFile::rename( backupProv, provPath );
     QFile::rename( m_backup, m_final );
   }
-  // Fence releases LAST: the restore above must complete while the path is
-  // still exclusively held.
-  releasePublishFence();
+  // The fence releases LAST (declared-first member, destroyed last): the
+  // restore above must complete while the path is still exclusively held.
 }
 
 void ProductPublishGuard::publishStaged( const QString &stagePath, const char *swapFaultPoint,

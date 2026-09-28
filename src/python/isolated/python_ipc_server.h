@@ -59,10 +59,14 @@ class PythonIpcServer : public QObject
      *                    it replays the request on a restarted worker; 0 means
      *                    the request is answered with an error instead of being
      *                    sent again.
+     * @return the correlated request id, or -1 when NOTHING was sent and the
+     *         callback was NOT registered (no connected client) — recovery
+     *         paths must answer the caller instead of waiting for a response
+     *         that can never arrive.
      */
-    void sendRequest( const QString &method, const QJsonObject &params,
-                      std::function<void( const QJsonObject &result, bool isError )> callback = nullptr,
-                      int retriesLeft = 1 );
+    int sendRequest( const QString &method, const QJsonObject &params,
+                     std::function<void( const QJsonObject &result, bool isError )> callback = nullptr,
+                     int retriesLeft = 1 );
 
     /// Sends a request and blocks the calling thread in a nested event loop
     /// until the correlated response arrives, the timeout elapses, or the
@@ -97,6 +101,21 @@ class PythonIpcServer : public QObject
      * second call returns an empty vector.
      */
     std::vector<PendingRequest> takeInFlightRequests();
+
+    /// Number of requests currently in flight (sent, not yet answered).
+    /// The pool reads this to distinguish a worker retiring cleanly from one
+    /// that disappeared with unanswered work.
+    int inFlightCount() const { return static_cast<int>( m_inFlight.size() ); }
+
+    /// Parses any bytes still buffered on the (possibly half-closed) socket.
+    /// Called by the pool BEFORE takeInFlightRequests(): a worker that wrote
+    /// its final answer and died in the same instant leaves the answer in the
+    /// receive buffer, and the process-death and data-ready notifications are
+    /// separate notifiers with NO ordering guarantee — without this drain the
+    /// recovery path tears down the callback before the answer ever parses
+    /// and the caller is told the worker died on a request it actually
+    /// completed.
+    void drainBufferedResponses();
 
   signals:
     void clientConnected();

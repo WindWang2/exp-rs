@@ -532,3 +532,8 @@ data/labs/_tmp/
 
 # Track 8 R4 planning artifacts
 !.planning/agent-harness-r4/
+
+# R5 track 07 model runtime / python worker recovery planning notes (markdown only).
+!.planning/r5-model-runtime-workers/
+.planning/r5-model-runtime-workers/*
+!.planning/r5-model-runtime-workers/*.md

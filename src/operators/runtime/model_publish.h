@@ -20,6 +20,43 @@
 
 namespace sicnu::operators::runtime {
 
+/// Process-wide publish occupancy lease: ONE live guard per canonical
+/// artifact path per process. The fence key is the PLATFORM-TRUE identity of
+/// the path (absolute + lexically clean + deepest-existing ancestor resolved
+/// through symlinks; case-folded only when a filesystem probe proves the
+/// location case-insensitive) — "./out.tif", "<cwd>/out.tif" and a symlinked
+/// spelling of one artifact therefore share a single fence, while genuinely
+/// distinct case-sensitive files never merge. A second guard on the same
+/// artifact throws RSOperatorError(AlreadyRunning) — without the fence the
+/// second guard's crash-orphan adoption would pull the first guard's parked
+/// product back out from under its live publish.
+///
+/// RAII across BOTH throwing constructors and destructors: a guard whose
+/// constructor throws after acquisition releases its slot (fully-constructed
+/// members are destroyed when a constructor body throws), and the normal
+/// destructor releases it last — after the parked pair has been restored.
+class PublishFenceLease
+{
+  public:
+    PublishFenceLease() = default;
+    /// Acquires the slot for finalPath; throws RSOperatorError(AlreadyRunning)
+    /// when another guard holds the same artifact.
+    explicit PublishFenceLease( const QString &finalPath );
+    ~PublishFenceLease();
+    PublishFenceLease( const PublishFenceLease & ) = delete;
+    PublishFenceLease &operator=( const PublishFenceLease & ) = delete;
+
+  private:
+    std::string m_key;
+    bool m_held = false;
+};
+
+/// The platform-true fence key for an artifact path (see PublishFenceLease).
+/// Declared alongside the lease so the identity oracles pin the alias rules
+/// directly: relative/absolute/symlinked-directory spellings of one artifact
+/// MUST produce one key; genuinely distinct case-sensitive files must not.
+std::string canonicalPublishFenceKey( const QString &finalPath );
+
 /// Compact CRS display string for payloads/sidecars: "EPSG:32633" when the
 /// SRS carries an authority code, else a truncated WKT; "" for undeclared.
 std::string crsDisplayName( const QString &wkt );
@@ -64,6 +101,10 @@ class DetectionPublishGuard
     /// Removes the whole backup family (main + companions + prov backup).
     void removeBackupFamily();
 
+    /// Declared first: the fence is acquired before any other member is
+    /// initialized (and before any adoption/park runs) and released last
+    /// (reverse declaration order) — after the restore completed.
+    PublishFenceLease m_fenceLease;
     QString m_final;
     QString m_backup;
     QString m_backupSuffix;
@@ -122,16 +163,17 @@ class ProductPublishGuard
   private:
     /// Removes the backup family (main + prov sidecar backup).
     void removeBackupFamily();
-    /// Releases the process-wide publish occupancy slot for m_final.
-    void releasePublishFence();
 
+    /// Declared first: the fence is acquired before any other member is
+    /// initialized (and before any adoption/park runs) and released last
+    /// (reverse declaration order) — after the restore completed.
+    PublishFenceLease m_fenceLease;
     QString m_final;
     QString m_backup;
     QString m_stageForCleanup;
     bool m_hadExisting = false;
     bool m_hadProv = false;
     bool m_disarmed = false;
-    bool m_fenceHeld = false; ///< process-wide publish slot for m_final
 };
 
 /// Builds the single-model detection provenance document (schema

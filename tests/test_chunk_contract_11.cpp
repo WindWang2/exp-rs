@@ -337,10 +337,12 @@ TEST_CASE( "buildTileGrid refuses overflow-sized grids instead of wrapping (#105
 
     // GDAL-reported dimensions near INT_MAX: `rasterWidth + tileWidth - 1`
     // and `cols * rows` overflow signed int — the grid must refuse loudly
-    // rather than wrap into UB or an absurd reserve. The refusal is typed
-    // std::overflow_error since master 3070d3e1a; this suite still expected
-    // the pre-typing std::length_error (a stale merge-side expectation that
-    // made the case red at master a726d17a6).
+    // rather than wrap into UB or an absurd reserve. The pinned type is
+    // std::overflow_error, matching buildTileGrid's actual (and documented,
+    // tile_spec.h) contract and the test_chunk_graph pins — this suite's
+    // historic std::length_error expectation predated the #1056 int64
+    // rework and made the contract impossible to satisfy for every suite
+    // at once (R5 Track 07 error-contract closure).
     REQUIRE_THROWS_AS( buildTileGrid( std::numeric_limits<int>::max(),
                                       std::numeric_limits<int>::max(), 64, 64, 0, 1 ),
                        std::overflow_error );

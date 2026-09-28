@@ -422,3 +422,75 @@ TEST_CASE( "default model search never uses the working directory", "[models][ca
   CHECK( QFileInfo( chosen ).absoluteFilePath() != QFileInfo( cwdModels ).absoluteFilePath() );
   CHECK_FALSE( QFileInfo( chosen ).canonicalFilePath().startsWith( QFileInfo( untrusted.path() ).canonicalFilePath() ) );
 }
+
+TEST_CASE( "a malformed wire answer is output-invalid, never a phantom crash",
+           "[models][python][r5]" )
+{
+  ( void )ensureApp();
+  QTemporaryDir dir;
+  const std::string script =
+    ( QFileInfo( __FILE__ ).absolutePath() + QStringLiteral( "/data/py_worker_garbage.py" ) )
+      .toStdString();
+  const ModelInfo model = makeWorkerModel( dir, script );
+  std::string error;
+  const auto session =
+    ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
+  INFO( "acquire error: " << error );
+  REQUIRE( session );
+
+  std::vector<float> a = { 1.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+
+  // The worker announces ready, then answers the forward with a NON-JSON
+  // line while staying ALIVE. The R4 catch-all reported exactly this as
+  // "worker exited unexpectedly before responding".
+  try
+  {
+    session->inferNamed( inputs, {} );
+    FAIL( "expected the garbage answer to fail the forward" );
+  }
+  catch ( const std::exception &e )
+  {
+    INFO( "forward error: " << e.what() );
+    CHECK_THAT( e.what(), Catch::Matchers::ContainsSubstring( "malformed response" ) );
+    CHECK_THAT( e.what(), Catch::Matchers::ContainsSubstring( "output invalid" ) );
+    CHECK_FALSE( Catch::Matchers::ContainsSubstring( "exited unexpectedly" ).match( e.what() ) );
+    // The taxonomy projection: an unusable answer is OutputInvalid ->
+    // ComputationError, never the ProviderCrash misclassification.
+    const InferenceFailureKind kind = classifyInferenceError( e.what() );
+    CHECK( kind == InferenceFailureKind::OutputInvalid );
+    CHECK( errorCodeForInferenceFailure( kind ) == sicnu::operators::ErrorCode::ComputationError );
+  }
+
+  // The stream position past the garbage line is lost — the session must be
+  // dead-for-good (fail closed), never replayed into the misaligned stream.
+  REQUIRE_THROWS_AS( session->inferNamed( inputs, {} ), std::runtime_error );
+  // And health() carries the honest reason for diagnostics.
+  CHECK_THAT( session->health().lastError,
+              Catch::Matchers::ContainsSubstring( "malformed response" ) );
+}
+
+TEST_CASE( "wire failure classification pins the protocol families",
+           "[models][python][r5]" )
+{
+  // The ready handshake failing is a provider-channel failure (used to be
+  // Unknown); a malformed answer is an output failure, not a crash; the
+  // timeout-vs-crash precedence stays deterministic.
+  CHECK( classifyInferenceError( "python worker handshake failed (expected event=ready)" )
+         == InferenceFailureKind::ProviderCrash );
+  CHECK( classifyInferenceError( "python worker sent a malformed response (output invalid)" )
+         == InferenceFailureKind::OutputInvalid );
+  CHECK( errorCodeForInferenceFailure( InferenceFailureKind::OutputInvalid )
+         == sicnu::operators::ErrorCode::ComputationError );
+  CHECK( classifyInferenceError( "python worker exited unexpectedly before responding" )
+         == InferenceFailureKind::ProviderCrash );
+  CHECK( classifyInferenceError( "python worker stopped accepting requests (broken pipe)" )
+         == InferenceFailureKind::ProviderCrash );
+  CHECK( classifyInferenceError( "python worker did not report ready (timed out or exited); "
+                                 "stderr: boom" )
+         == InferenceFailureKind::Timeout );
+  CHECK( errorCodeForInferenceFailure( classifyInferenceError(
+           "provider crashed: python worker crashed and the session restart budget is exhausted" ) )
+         == sicnu::operators::ErrorCode::RuntimeProviderFailed );
+}
