@@ -18,14 +18,20 @@
       "failure_class": "format_error",
       "target_seam": "agent_plan.read",
       "payload": [],
-      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+      "expected": {
+        "outcome": "reject",
+        "code": "INVALID_PLAN"
+      }
     },
     {
       "id": "plan-top-level-string",
       "failure_class": "format_error",
       "target_seam": "agent_plan.read",
       "payload": "execute everything",
-      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+      "expected": {
+        "outcome": "reject",
+        "code": "INVALID_PLAN"
+      }
     },
     {
       "id": "plan-kind-is-array",
@@ -36,7 +42,10 @@
         "schema_version": "2.0",
         "steps": []
       },
-      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+      "expected": {
+        "outcome": "reject",
+        "code": "INVALID_PLAN"
+      }
     },
     {
       "id": "plan-refusal-empty-steps",
@@ -47,7 +56,10 @@
         "schema_version": "2.0",
         "steps": []
       },
-      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+      "expected": {
+        "outcome": "reject",
+        "code": "INVALID_PLAN"
+      }
     },
     {
       "id": "plan-hallucinated-operator",
@@ -57,10 +69,18 @@
         "kind": "execution_plan",
         "schema_version": "2.0",
         "steps": [
-          { "id": "s1", "operator_id": "rs:fabricate_revenue", "inputs": [] }
+          {
+            "id": "s1",
+            "operator_id": "rs:fabricate_revenue",
+            "inputs": []
+          }
         ]
       },
-      "expected": { "outcome": "reject", "code": "INVALID_PLAN", "summary_contains": "Unknown operator id" }
+      "expected": {
+        "outcome": "reject",
+        "code": "INVALID_PLAN",
+        "summary_contains": "Unknown operator id"
+      }
     },
     {
       "id": "plan-duplicate-output-names",
@@ -70,15 +90,37 @@
         "kind": "execution_plan",
         "schema_version": "2.0",
         "steps": [
-          { "id": "a", "operator_id": "rs:spectral_index", "inputs": [] },
-          { "id": "b", "operator_id": "rs:spectral_index", "inputs": [] }
+          {
+            "id": "a",
+            "operator_id": "rs:spectral_index",
+            "inputs": []
+          },
+          {
+            "id": "b",
+            "operator_id": "rs:spectral_index",
+            "inputs": []
+          }
         ],
         "outputs": [
-          { "name": "product", "from_step": "a", "port": "output", "kind": "raster" },
-          { "name": "product", "from_step": "b", "port": "output", "kind": "raster" }
+          {
+            "name": "product",
+            "from_step": "a",
+            "port": "output",
+            "kind": "raster"
+          },
+          {
+            "name": "product",
+            "from_step": "b",
+            "port": "output",
+            "kind": "raster"
+          }
         ]
       },
-      "expected": { "outcome": "reject", "code": "INVALID_PLAN", "summary_contains": "Duplicate output name" }
+      "expected": {
+        "outcome": "reject",
+        "code": "INVALID_PLAN",
+        "summary_contains": "Duplicate output name"
+      }
     },
     {
       "id": "sse-truncated-by-length",
@@ -91,7 +133,11 @@
           "data: [DONE]"
         ]
       },
-      "expected": { "outcome": "refuse", "reason": "truncated_arguments", "tool_call_emitted": false }
+      "expected": {
+        "outcome": "refuse",
+        "reason": "truncated_arguments",
+        "tool_call_emitted": false
+      }
     },
     {
       "id": "sse-partial-json-arguments",
@@ -99,11 +145,15 @@
       "target_seam": "llm_streaming.parse",
       "payload": {
         "lines": [
-          "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c2\", \"function\": {\"name\": \"harness_plan\", \"arguments\": \"{\\\"plan\\\": {\\\"steps\\\": [\"}}]}}]}]}",
+          "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c2\", \"function\": {\"name\": \"harness_plan\", \"arguments\": \"{\\\"plan\\\": {\\\"steps\\\": [\"}}]}}]}",
           "data: [DONE]"
         ]
       },
-      "expected": { "outcome": "refuse", "reason": "unparseable_arguments", "tool_call_emitted": false }
+      "expected": {
+        "outcome": "refuse",
+        "reason": "unparseable_arguments",
+        "tool_call_emitted": false
+      }
     },
     {
       "id": "sse-argument-less-call-is-legitimate",
@@ -115,7 +165,10 @@
           "data: [DONE]"
         ]
       },
-      "expected": { "outcome": "emit", "tool_call_emitted": true }
+      "expected": {
+        "outcome": "emit",
+        "tool_call_emitted": true
+      }
     }
   ]
 }
