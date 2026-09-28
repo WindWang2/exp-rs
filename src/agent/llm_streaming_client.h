@@ -70,6 +70,9 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
     /// oversized — a hostile stream cannot make the client buffer without
     /// limit, on the network path and on the test seam alike.
     static constexpr int kMaxSseLineChars = 8 << 20; // 8 MiB
+    /// Bounded in-flight tool calls: distinct streamed indices beyond this
+    /// are refused (a hostile stream can mint unlimited indices).
+    static constexpr int kMaxToolCallIndices = 64;
 
   signals:
     void reasoningTokenReceived( const QString &reasoningText );

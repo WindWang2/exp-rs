@@ -208,7 +208,7 @@ TEST_CASE( "type-confused discriminator fields are rejected, not crashed on",
     AgentPlan plan;
     HarnessError error;
     bool threw = false;
-    bool accepted = false;
+    bool accepted = true;
     try
     {
       accepted = readAgentPlan( doc, plan, error );
@@ -237,15 +237,19 @@ TEST_CASE( "type-confused content fields degrade to defaults instead of "
   AgentPlan plan;
   HarnessError error;
   bool threw = false;
+  bool accepted = true;
   try
   {
-    REQUIRE( readAgentPlan( doc, plan, error ) );
+    accepted = readAgentPlan( doc, plan, error );
   }
   catch ( ... )
   {
     threw = true;
   }
+  // The assertion lives OUTSIDE the try: a Catch2 failure thrown inside
+  // would be swallowed by the catch(...) and misreported as a throw.
   CHECK_FALSE( threw );
+  REQUIRE( accepted );
   // Non-string intent falls back to "" (custom plan), not to a crash and
   // not to a fabricated known intent.
   CHECK( plan.intent.empty() );
@@ -266,18 +270,19 @@ TEST_CASE( "type-confused step fields produce validation issues, never "
 
   bool threw = false;
   std::vector<AgentPlanIssue> issues;
+  std::string workflow;
   HarnessError compileError;
   try
   {
     issues = validateAgentPlan( plan );
-    const std::string workflow = compilePlanToWorkflowJson( plan, compileError );
-    CHECK( workflow.empty() ); // type-confused plan never compiles clean
+    workflow = compilePlanToWorkflowJson( plan, compileError );
   }
   catch ( ... )
   {
     threw = true;
   }
   CHECK_FALSE( threw );
+  CHECK( workflow.empty() ); // type-confused plan never compiles clean
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +349,90 @@ TEST_CASE( "distinct output names with distinct producers stay consistent",
 // kMaxDocumentBytes discipline; bound value is a documented drift anchor.
 // ---------------------------------------------------------------------------
 
+TEST_CASE( "a plan beyond the document byte bound is a typed rejection "
+           "before anything is walked", "[harness][adversarial][plan][bounds]" )
+{
+  // The bound is measured on the serialized document (the caller's bytes).
+  Json::Value doc = goodPlan();
+  doc["steps"][0]["params"]["blob"] = std::string( 5 * 1024 * 1024, 'z' );
+  AgentPlan plan;
+  HarnessError error;
+  bool threw = false;
+  bool accepted = true;
+  try
+  {
+    accepted = readAgentPlan( doc, plan, error );
+  }
+  catch ( ... )
+  {
+    threw = true;
+  }
+  CHECK_FALSE( threw );
+  REQUIRE_FALSE( accepted );
+  CHECK( error.code == sicnu::agent::harness::error_codes::kInvalidPlan );
+  CHECK( error.summary.find( "byte bound" ) != std::string::npos );
+}
+
+TEST_CASE( "type-confused input slots and pins produce issues, never "
+           "exceptions", "[harness][adversarial][plan][types]" )
+{
+  // The reader copies inputs verbatim; validation walks them. A non-string
+  // slot name (and a pins block referencing one) must be a typed issue.
+  Json::Value doc = goodPlan();
+  doc["inputs"][0]["name"] = Json::Value( Json::objectValue );
+  doc["pins"] = Json::Value( Json::objectValue );
+  doc["pins"]["datasets"] = Json::Value( Json::objectValue );
+  doc["pins"]["datasets"]["scene"] = Json::Value( Json::objectValue );
+  doc["pins"]["datasets"]["scene"]["path"] = "data/scene.tif";
+
+  AgentPlan plan;
+  HarnessError error;
+  REQUIRE( readAgentPlan( doc, plan, error ) );
+
+  bool threw = false;
+  std::vector<AgentPlanIssue> issues;
+  try
+  {
+    issues = validateAgentPlan( plan );
+  }
+  catch ( ... )
+  {
+    threw = true;
+  }
+  CHECK_FALSE( threw );
+  CHECK_FALSE( issues.empty() );
+}
+
+TEST_CASE( "a plan whose steps are not objects is typed, not thrown",
+           "[harness][adversarial][plan][types]" )
+{
+  // Every summary/fingerprint walk runs BEFORE validation on the
+  // harness:plan surface (plan_tools.cpp calls planSummary first) — a
+  // non-object step must not reach a throwing member access there.
+  Json::Value doc = goodPlan();
+  doc["steps"][0] = "not an object";
+
+  AgentPlan plan;
+  HarnessError error;
+  REQUIRE( readAgentPlan( doc, plan, error ) );
+
+  bool threw = false;
+  try
+  {
+    const Json::Value summary = sicnu::agent::harness::planSummary( plan );
+    CHECK( summary.isObject() );
+    const std::string fingerprint = sicnu::agent::harness::planFingerprint( plan );
+    CHECK_FALSE( fingerprint.empty() );
+    const std::vector<AgentPlanIssue> issues = validateAgentPlan( plan );
+    CHECK_FALSE( issues.empty() );
+  }
+  catch ( ... )
+  {
+    threw = true;
+  }
+  CHECK_FALSE( threw );
+}
+
 TEST_CASE( "a plan beyond the step bound is a typed rejection before "
            "validation walks it", "[harness][adversarial][plan][bounds]" )
 {
@@ -360,7 +449,7 @@ TEST_CASE( "a plan beyond the step bound is a typed rejection before "
   AgentPlan plan;
   HarnessError error;
   bool threw = false;
-  bool accepted = false;
+  bool accepted = true;
   try
   {
     accepted = readAgentPlan( doc, plan, error );

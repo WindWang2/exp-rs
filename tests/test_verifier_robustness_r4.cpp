@@ -282,6 +282,44 @@ TEST_CASE( "expectations with extreme magnitudes stay structured",
 // class domain is strings (or nested arrays) must not turn into a throw —
 // the verifier's contract is structured termination for ANY input.
 
+TEST_CASE( "a type-confused expected extent is a structured rejection, "
+           "never an exception", "[harness][verifier-r4][robustness][types]" )
+{
+  QTemporaryDir dir;
+  const std::string raster = writeTinyRaster( dir.filePath( "tiny3.tif" ) );
+  REQUIRE_FALSE( raster.empty() );
+
+  // The AOI rectangle is caller data: a non-numeric member is a structural
+  // lie and must surface as a failing check, not a throw from asDouble().
+  VerificationExpectations expectations;
+  expectations.expectedExtent = Json::Value( Json::objectValue );
+  expectations.expectedExtent["xmin"] = "five hundred thousand";
+
+  ArtifactVerification result;
+  bool threw = false;
+  CHECK( terminatesStructured(
+    [&] { return verifyArtifact( raster, expectations ); }, result, threw ) );
+  CHECK_FALSE( threw );
+
+  // The control: a numeric extent still performs the real coverage check.
+  VerificationExpectations numeric;
+  numeric.expectedExtent = Json::Value( Json::objectValue );
+  numeric.expectedExtent["xmin"] = 500000.0;
+  numeric.expectedExtent["ymin"] = 4999970.0;
+  numeric.expectedExtent["xmax"] = 500240.0;
+  numeric.expectedExtent["ymax"] = 5000000.0;
+  ArtifactVerification coverage;
+  bool threw2 = false;
+  CHECK( terminatesStructured(
+    [&] { return verifyArtifact( raster, numeric ); }, coverage, threw2 ) );
+  CHECK_FALSE( threw2 );
+  bool hasCoverageCheck = false;
+  for ( const VerificationCheck &check : coverage.checks )
+    if ( check.check == "extent_covers_aoi" )
+      hasCoverageCheck = true;
+  CHECK( hasCoverageCheck );
+}
+
 TEST_CASE( "a type-confused class-value domain is a structured rejection, "
            "never an exception", "[harness][verifier-r4][robustness][types]" )
 {

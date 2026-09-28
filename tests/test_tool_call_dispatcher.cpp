@@ -1437,4 +1437,8 @@ TEST_CASE( "R4 failure matrix — an unknown parameter warns but does not "
     objectEnvelope( "stub:strict", "parameters", params ) );
   CHECK( verdict["valid"].asBool() );
   CHECK( verdict["errors"].empty() );
+
+  // Leave the process-wide registry as found (the stubs are this case's
+  // fixture, not a global side effect for later cases under --order rand).
+  registry.reset();
 }

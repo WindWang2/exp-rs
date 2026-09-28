@@ -120,6 +120,25 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
     return false;
   }
 
+  // R4 (bounded plans): the raw document is caller data — a runaway model
+  // must not be able to hand the reader an unbounded payload. Measured on
+  // the serialized form (the same bytes the caller sent).
+  {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    builder["commentStyle"] = "None";
+    const std::string serialized = Json::writeString( builder, doc );
+    if ( static_cast<long long>( serialized.size() ) > kMaxPlanDocumentBytes )
+    {
+      Json::Value details( Json::objectValue );
+      details["bytes"] = static_cast<Json::Int64>( serialized.size() );
+      details["bound"] = static_cast<Json::Int64>( kMaxPlanDocumentBytes );
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "Plan document exceeds the byte bound", details );
+      return false;
+    }
+  }
+
   plan = AgentPlan{};
   plan.raw = doc;
   // Identity/content fields degrade to their documented defaults on type
@@ -220,8 +239,18 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
   for ( const Json::Value &input : plan.inputs )
   {
     if ( !input.isObject() )
+    {
+      addIssue( error_codes::kInvalidPlan, "Declared input must be an object", "", true,
+                "rename_input" );
       continue;
-    const std::string name = input.get( "name", "" ).asString();
+    }
+    if ( nonStringMember( input, "name" ) )
+    {
+      addIssue( error_codes::kInvalidPlan, "Input slot 'name' must be a string", "", true,
+                "rename_input" );
+      continue;
+    }
+    const std::string name = input["name"].asString();
     if ( !name.empty() && !inputNames.insert( name ).second )
       addIssue( error_codes::kInvalidPlan,
                 "Duplicate input slot name: " + name + " — pins cannot gate it",
@@ -385,7 +414,8 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
         const bool slotDeclared = std::any_of(
           plan.inputs.begin(), plan.inputs.end(),
           [ &slot ]( const Json::Value &input ) {
-            return input.isObject() && input.get( "name", "" ).asString() == slot;
+            return input.isObject() && input.isMember( "name" ) &&
+                   input["name"].isString() && input["name"].asString() == slot;
           } );
         if ( !slotDeclared )
         {
@@ -502,6 +532,8 @@ std::string planFingerprint( const AgentPlan &plan )
   Json::Value steps( Json::arrayValue );
   for ( const Json::Value &step : plan.steps )
   {
+    if ( !step.isObject() )
+      continue; // a non-object step carries no scientific content to hash
     Json::Value entry( Json::objectValue );
     entry["id"] = stepIdOf( step );
     entry["operator_id"] = operatorIdOf( step );
@@ -578,6 +610,8 @@ Json::Value planSummary( const AgentPlan &plan )
   Json::Value steps( Json::arrayValue );
   for ( const Json::Value &step : plan.steps )
   {
+    if ( !step.isObject() )
+      continue; // structural issues are validation's business, not the summary's
     Json::Value entry( Json::objectValue );
     entry["id"] = stepIdOf( step );
     entry["operator_id"] = operatorIdOf( step );

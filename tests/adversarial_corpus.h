@@ -114,11 +114,15 @@ class AdversarialCorpus
     std::vector<AdversarialSample> mSamples;
 };
 
-/// The corpus path relative to this test source tree (tests run from the
-/// build directory; the source anchor is __FILE__ in the tests/ directory).
+/// The corpus path, resolved from THIS header's location in the source
+/// tree (__FILE__ is the header's own path including its filename — the
+/// filename component must be stripped before "../data" can resolve).
 inline std::string adversarialCorpusPath()
 {
-    return std::string( __FILE__ ) + "/../data/harness_adversarial_corpus.json";
+    const std::string here( __FILE__ );
+    const std::string::size_type slash = here.find_last_of( "/\\" );
+    const std::string dir = slash == std::string::npos ? std::string() : here.substr( 0, slash );
+    return dir + "/data/harness_adversarial_corpus.json";
 }
 
 } // namespace sicnu::testing

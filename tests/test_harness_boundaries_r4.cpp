@@ -147,15 +147,21 @@ TEST_CASE( "the error envelope carries the full typed contract for every "
         error_codes::kInvalidPlan, "boundary fixture",
         "harness:plan", Json::Value() );
     const Json::Value envelope = errorEnvelope( structured );
-    // The wire shape agents consume (harness_error.h): every field present,
-    // the code from the closed taxonomy, retryability derived not guessed.
+    // The wire shape agents consume (harness_error.h:139-142): a failed
+    // envelope whose error object carries code/message/category/retryable/
+    // recoverable/suggested_actions — every field present, the code from
+    // the closed taxonomy, retryability derived not guessed.
     CHECK( envelope.isObject() );
-    CHECK( envelope["code"].asString() == error_codes::kInvalidPlan );
-    CHECK_FALSE( envelope["message"].asString().empty() );
-    CHECK( envelope.isMember( "category" ) );
-    CHECK( envelope.isMember( "retryable" ) );
-    CHECK( envelope.isMember( "recoverable" ) );
-    CHECK( envelope.isMember( "suggested_actions" ) );
+    CHECK_FALSE( envelope["success"].asBool() );
+    const Json::Value &error = envelope["error"];
+    REQUIRE( error.isObject() );
+    CHECK( error["code"].asString() == error_codes::kInvalidPlan );
+    CHECK_FALSE( error["message"].asString().empty() );
+    CHECK( error.isMember( "category" ) );
+    CHECK( error.isMember( "retryable" ) );
+    CHECK( error.isMember( "recoverable" ) );
+    CHECK( error.isMember( "suggested_actions" ) );
+    CHECK( error["suggested_actions"].isArray() );
 
     // The code → category/retry mapping is total: every code in the closed
     // vocabulary maps, and nothing outside it claims to be known.

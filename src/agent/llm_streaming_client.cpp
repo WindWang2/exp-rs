@@ -139,6 +139,21 @@ void LlmStreamingClient::onReadyRead()
 
   m_buffer.append( m_currentReply->readAll() );
 
+  // R4 (bounded streaming): the unterminated tail of m_buffer is exactly
+  // where a hostile newline-free stream would grow memory without limit.
+  // Bound it HERE, before any line can be assembled — the parseSseLine
+  // bound alone is too late because the bytes are already buffered.
+  if ( m_buffer.size() > kMaxSseLineChars )
+  {
+    QJsonObject detail;
+    detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_line" );
+    detail[QStringLiteral( "size" )] = static_cast<int>( m_buffer.size() );
+    emit malformedToolCall( detail );
+    m_buffer.clear();
+    cancel(); // stop pulling from the reply; the caller sees the refusal
+    return;
+  }
+
   while ( true )
   {
     int newlinePos = m_buffer.indexOf( '\n' );
@@ -230,6 +245,18 @@ void LlmStreamingClient::parseSseLine( const QString &line )
     {
       QJsonObject tcObj = tcVal.toObject();
       int index = tcObj.contains( QStringLiteral( "index" ) ) ? tcObj[QStringLiteral( "index" )].toInt( 0 ) : 0;
+      // R4 (bounded accumulation): a hostile stream can mint unlimited
+      // distinct indices ("index":N for N = 0..10M); each would otherwise
+      // allocate an accumulator entry forever. Refuse past the bound.
+      if ( !m_toolCalls.contains( index ) &&
+           static_cast<int>( m_toolCalls.size() ) >= kMaxToolCallIndices )
+      {
+        QJsonObject detail;
+        detail[QStringLiteral( "reason" )] = QStringLiteral( "too_many_tool_calls" );
+        detail[QStringLiteral( "bound" )] = kMaxToolCallIndices;
+        emit malformedToolCall( detail );
+        continue;
+      }
       auto &accu = m_toolCalls[index];
 
       if ( tcObj.contains( QStringLiteral( "id" ) ) && !tcObj[QStringLiteral( "id" )].toString().isEmpty() )

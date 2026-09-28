@@ -386,24 +386,54 @@ TEST_CASE( "LlmStreamingClient refuses an oversized argument accumulation "
                       [&]( const QJsonObject & ) { toolCallEmitted = true; } );
     MalformedRecorder malformed( client );
 
-    // Stream a syntactically VALID object past the accumulation bound. The
-    // refusal is about size, not syntax: a hostile (or runaway) stream must
-    // not make the client buffer without limit, and the refusal must say so.
-    const QString chunk = QStringLiteral( "{\"pad\":\"%1\"}," ).arg( std::string( 4096, 'p' ).c_str() );
+    // Stream syntactically VALID fragments past the accumulation bound.
+    // The refusal is about SIZE, not syntax: a hostile (or runaway) stream
+    // must not make the client buffer without limit, and the refusal must
+    // say so. Each fragment is a valid JSON string escape (\" for the
+    // inner quotes) so the data: line itself parses — only the accumulated
+    // arguments exceed the bound.
+    const QString pad = QString( 4096, QLatin1Char( 'p' ) );
     client.parseSseLine( QStringLiteral(
         "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c2\", "
         "\"function\": {\"name\": \"bulk\", \"arguments\": \"{\"}}}]}]}" ) );
-    for ( int i = 0; i < 600; ++i ) // 600 x ~4 KiB > 1 MiB bound
+    for ( int i = 0; i < 600; ++i ) // 600 x ~4.1 KiB > 1 MiB bound
     {
         client.parseSseLine( QStringLiteral(
             "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 0, "
-            "\"function\": {\"arguments\": \"%1\"}}]}}]}" )
-                                 .arg( chunk ) );
+            "\"function\": {\"arguments\": \"\\\"pad\\\":\\\"%1\\\"\"}}]}}]}" )
+                                 .arg( pad ) );
     }
     client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
 
     CHECK_FALSE( toolCallEmitted );
     CHECK( malformed.hasReason( QStringLiteral( "oversized_arguments" ) ) );
+}
+
+TEST_CASE( "LlmStreamingClient refuses a stream that mints unlimited "
+           "tool-call indices", "[agent][client][r4][bounded]" )
+{
+  ensureQtApp();
+  LlmStreamingClient client;
+  QList<QJsonObject> refusals;
+  QObject::connect( &client, &LlmStreamingClient::malformedToolCall,
+                    [&]( const QJsonObject &detail ) { refusals.append( detail ); } );
+
+  // A hostile stream sending {"index":N} for N = 0..999: each distinct
+  // index would otherwise allocate an accumulator entry forever.
+  for ( int i = 0; i < 1000; ++i )
+  {
+    client.parseSseLine( QStringLiteral(
+        "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": %1, "
+        "\"function\": {\"name\": \"tool_%1\", \"arguments\": \"{}\"}}]}}]}" ).arg( i ) );
+  }
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+  bool sawBound = false;
+  for ( const QJsonObject &detail : refusals )
+    if ( detail[QStringLiteral( "reason" )].toString() ==
+         QStringLiteral( "too_many_tool_calls" ) )
+      sawBound = true;
+  CHECK( sawBound );
 }
 
 TEST_CASE( "LlmStreamingClient refuses an oversized data line as malformed",

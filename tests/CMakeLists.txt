@@ -2688,6 +2688,8 @@ target_link_libraries(test_output_verifier PRIVATE
   Qt6::Core
   qgis_core
   sicnu_agent
+  # sicnu_agent's verification seam resolves agent_loop symbols at final link.
+  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
   GDAL::GDAL
 )
 target_include_directories(test_output_verifier PRIVATE
