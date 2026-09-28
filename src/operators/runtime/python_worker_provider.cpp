@@ -239,6 +239,21 @@ class PythonWorkerSession final : public IModelRuntime
             throw std::runtime_error( "python worker response exceeds the "
                                       "runtime.provider.max_body_mb guard (output invalid)" );
           }
+          if ( outcome == ReadOutcome::Malformed )
+          {
+            // A complete line arrived but is not a JSON object: the worker
+            // is (or was) ALIVE yet the wire stream is unusable — classify
+            // it as an output failure, not a crash (the previous catch-all
+            // misreported garbage answers as "exited unexpectedly"), and do
+            // not replay: bytes after the first newline are already lost, so
+            // the stream position can never realign with the protocol. Stop
+            // the worker fail-closed, like the oversized branch.
+            recordFailure( "python worker sent a malformed response (output invalid); stderr: "
+                           + drainStderr() );
+            m_permanentlyDead.store( true, std::memory_order_release );
+            stopWorker();
+            throw std::runtime_error( "python worker sent a malformed response (output invalid)" );
+          }
           if ( attempt == 0 && m_process->state() != QProcess::Running )
             continue; // worker EXITED (crash) → restart + replay
           recordFailure( "python worker exited unexpectedly before responding; stderr: "
@@ -388,8 +403,10 @@ class PythonWorkerSession final : public IModelRuntime
     enum class ReadOutcome
     {
       Ok,
-      Failed,   // timeout or worker exit; the document is meaningless
-      Oversized // response exceeded the max_body_mb read guard
+      Failed,    // timeout or worker exit; the document is meaningless
+      Oversized, // response exceeded the max_body_mb read guard
+      Malformed  // a complete line arrived but is not a JSON object — a
+                 // wire-protocol violation (alive worker, unusable stream)
     };
 
     /// Reads ONE newline-terminated JSON document. Failed on timeout or
@@ -397,6 +414,10 @@ class PythonWorkerSession final : public IModelRuntime
     /// runtime.provider.max_body_mb guard the HTTP transport enforces —
     /// a worker streaming an unbounded stdout must hit a typed failure,
     /// never silently truncate (or OOM the host while the timeout runs).
+    /// Malformed when a complete line arrives but does not parse as a JSON
+    /// object — kept apart from Failed so an ALIVE worker that answers
+    /// garbage is never misreported as "exited unexpectedly" (and never
+    /// handed a replay into a stream whose read position is already lost).
     ReadOutcome readLine( QJsonObject &document, int timeoutMs )
     {
       QByteArray line;
@@ -426,7 +447,7 @@ class PythonWorkerSession final : public IModelRuntime
       const QJsonDocument doc =
         QJsonDocument::fromJson( line.left( newline ), &parseError );
       if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
-        return ReadOutcome::Failed;
+        return ReadOutcome::Malformed;
       document = doc.object();
       return ReadOutcome::Ok;
     }

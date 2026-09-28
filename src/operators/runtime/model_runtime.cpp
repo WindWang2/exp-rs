@@ -509,10 +509,14 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
     return InferenceFailureKind::Timeout;
   // Platform 7.0 taxonomy: external-provider death beats shape/corrupt checks
   // — a worker that died mid-run must not read as a model or tensor problem.
+  // A worker that never completed its ready handshake is the same family: the
+  // provider channel failed before any model work happened (it used to fall
+  // through to Unknown).
   if ( contains( "worker exited" ) || contains( "worker crashed" ) || contains( "provider crashed" )
        || contains( "terminated unexpectedly" ) || contains( "connection refused" )
        || contains( "connection reset" ) || contains( "broken pipe" )
        || contains( "no response from provider" )
+       || contains( "handshake failed" )
        || contains( "provider error" ) )
     return InferenceFailureKind::ProviderCrash;
   if ( contains( "not addressable" ) || contains( "device unavailable" )
