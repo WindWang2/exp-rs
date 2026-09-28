@@ -76,3 +76,11 @@
 WP-G 收口对账：SUBDOMAIN_BOUNDARIES 全部 33 个四子域用例 + 15 个跨子域用例均可在 ctest 输出
 中以带 TEST_PREFIX 的完整测试名计数（`ctest -N -R "test_runtime_|test_provider_guard|test_model_manifest_r4"` = 44 条
 Catch2 case 级注册）。
+
+## Round 2 追加用例（python 通道子域，2fd7ce5f91）
+| # | 子域 | 边界类型 | 注入手段 | 测试名 | 提交 |
+|---|---|---|---|---|---|
+| 66 | python/pool | 真实恢复路径：crash→takeover→退避重启→replay→关联响应 | 真 /bin/sh worker `sleep 2; exit 42` 崩溃 + 测试侧假 worker 以 newline-JSON 协议应答重放帧 | Pool auto-heal replays an in-flight request onto the restarted worker | 2fd7ce5f91 |
+| 67 | python/pool | replay 预算耗尽：replay 时刻 typed 拒绝而非重发 | retriesLeft=0 + 真崩溃 + 重启后接假 worker 触发 replay 门 | Pool replay answers recovered requests whose retry budget is exhausted | 2fd7ce5f91 |
+| 68 | python/pool | watchdog 兜底：重启后 worker 永不接入，in-flight 不泄漏 | 不接假 worker，等 5s watchdog typed 超时 | Recovery watchdog answers pending calls when the restarted worker never connects | 2fd7ce5f91 |
+判定：68 例总数（Round 1 的 65 + Round 2 的 3）；三例全部驱动生产恢复机械（PythonWorkerProcessPool::handleWorkerCrash 的 takeover/backoff/replay/watchdog 分支），非模拟注入。

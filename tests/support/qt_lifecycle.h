@@ -45,7 +45,7 @@ namespace sicnu::test::qtlifecycle
       // Fail fast on app-kind mismatch rather than returning a nullptr the
       // caller would dereference (review P2, Phase 5).
       QCoreApplication *existing = QCoreApplication::instance();
-      QCoreApplication *asApp = qobject_cast<QApplication *>( existing );
+      QApplication *asApp = qobject_cast<QApplication *>( existing );
       if ( !asApp )
         qFatal( "qt_lifecycle: existing app is not a QApplication" );
       return asApp;

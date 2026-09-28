@@ -87,3 +87,53 @@ RED 在首轮定位（SIGFPE/SEGFAULT 一眼可判）。已按 goal-loop 账本�
 ## D-12 Qt6 QFile::rename 拒绝覆盖（平台事实）
 本机 Qt6 实测（探针程序）：rename 到已存在目标返回 false 且目标保持原内容——非 Windows-only
 行为。所有"恢复/替换"路径必须先 remove 目标再 rename（已在 model_publish.cpp 三处落地）。
+
+## D-13 Round 2 范围决策（PR #1353 合并后的证据驱动重入）
+PR #1353（本轨道 Round 1 全部交付：65 用例/P1-8 四元组/OOM 6 真实档/provider 4 格/crash-orphan
+fence/python 通道）已于 master `6ff7aabd81` 合并；#1334–#1354 整波 R4 均已合并。Round 1 各 WP
+前提已消耗，按"Phase 0 实测前提不成立→记录证据后收窄，不要为了做而做"条款不重做。Round 2 范围
+= 新 master 实测缺口 + Round 1 遗留项中白名单内者：①master 自身构建/测试断裂收口（见 D-14/D-15）
+；②遗留项#4（buildTileGrid 异常族恢复，D-15）；③遗留项#5（python 池真实恢复路径端到端驱动，
+替代 Round 1 的手工回调验证）；④过滤面基线红测中文件归属在本轨道白名单内者。
+
+## D-14 qt_lifecycle.h 一行解锁（白名单边界例外，D-9 先例）
+`tests/support/qt_lifecycle.h:48`（#1342 提交 e4b3d245df 引入）：`QCoreApplication *asApp =
+qobject_cast<QApplication*>(existing)` 把派生类指针存入基类变量后 `return asApp`——g++ 下
+invalid conversion 硬错误，打穿全部 teardown 族测试 TU（dual_viewport/layer_sync/timeline/
+retirement_gate/d17_workflow 等）**以及本轨道白名单内、过滤面内的 test_provider_http**。修复 =
+变量声明改为 `QApplication *asApp`（qobject_cast 结果本就是 QApplication*，零语义变化）。
+该文件在白名字面之外，按 D-9 先例记为显式例外；PR 正文披露并知会 #1342 域。
+
+## D-15 chunk 契约双钉矛盾的和解（经对抗 review 修正方向，最终裁定 #1056 契约）
+初始判断：master 上 test_chunk_contract_11 的 3 红（length_error）是 #1056（3070d3e1ad）改 impl
+未同步旧测试所致，遂在 aaec6433b5 把 impl 恢复为 length_error。对抗 review（P0-1）推翻：单行
+grep 漏掉了多行格式的 test_chunk_graph.cpp:88-105——#1056 自己在同一批拒绝路径上钉了 4 个
+overflow_error（master 绿）。即 master 同时存在两个矛盾钉子（contract_11 旧契约红 /
+chunk_graph 新契约绿），翻转 impl 只是把红换了个文件。最终裁定：尊重 #1056 的蓄意契约变更，
+impl 保持 std::overflow_error（tile_spec.h/tile_run_contract.h 恢复与 master 字节一致），更新
+contract_11 的三处陈旧断言并注明和解缘由（ac26c2a86a）。裁决依据：#1056 是蓄意的 typed
+arithmetic 契约 overhaul（impl+新钉子一体交付），contract_11 是被遗忘的陈旧断言；src/ 无任何
+catch 站点依赖两种类型（review grep 实证）。contract_11 在白名字面外，按 D-9/D-14/D-16 先例
+披露。教训记入账本：断言类型全库核查必须容忍多行宏格式。
+
+## D-16 test_gpu_plane stale-eviction 双改并集修复（#1353 合并拼接产物，白名单例外披露）
+基线红 `GPU plane evicts stale model identities`（0==1）定性：#1353 合并把同一测试块的两个正当
+改写做了并集——master 侧 b42e92a1f0 钉 #1094 use_count 门（held 不回收/drop 后回收两段式），
+本轨道 Round 1 的 a9b10e7928 在首次 evictStale 前丢弃句柄。并集后测试既丢了句柄又期望 held
+语义，必然红。impl 在 ed762cc1b8..a726d17a6 净差为零（git diff 实证），唯一牺牲品是测试文本。
+修复=保留 held/drop 两段结构、删除矛盾的 pre-eviction reset（ef263ce196）。文件在白名字面外，
+按 D-9/D-14 先例披露；替代方案（改 impl 迁就拼坏的测试）会废掉 #1094 门，不可取。
+
+## D-17 publish 占位 fence 生命周期缺陷（Round 1 自身实现的真缺陷，本 Round 核心 P1）
+Round 1 的 PublishFenceSlot 是构造器局部 RAII：构造器一结束就擦掉全局 fence key——fence 只
+覆盖构造器窗口，guard 存续期（park + 慢发布 + swap）全程无防。类注释宣称"guards the WHOLE
+guard lifetime"，实现与之相悖；既有并发用例靠时序运气通过（loser 的构造恰落在 winner 构造窗口
+内），基线在高负载宿主上翻红暴露了缺陷。修复=PublishFenceSlot::release() 在构造器两个成功出口
+把 key 所有权移交 guard 的 m_fenceHeld；全部 throw 路径仍由 holder 兜底（throwing ctor 不跑
+析构），无泄漏。用例侧握手补 fenceHeld 边实现确定性（419d1e2ad1）。证据：10/10 连跑绿 +
+全套 87 断言绿；修改前握手修正版 1/10 绿、基线 1 红。
+## D-18 独立对抗 review 的处置（1 个只读 subagent）
+判定 BLOCK → 全部处置：P0-1（chunk_graph 遗漏，见 D-15 与 ac26c2a86a）；P1-1（规划工件未提交，
+本提交补齐）；P2-1（rig 崩溃窗口余量 sleep 2→6s，false-red 风险消除，随 ac26c2a86a）。抽查
+通过项：fence 所有权移交的全部 throw 路径覆盖与 m_fenceHeld 不变式、恢复用例的线程模型与
+answeredCount 恰一次约束、白名单例外最小性、其余 5 提交 message 与 diff 相符。

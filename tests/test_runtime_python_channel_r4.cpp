@@ -12,7 +12,15 @@
 //   4. channel errors surface as typed AwaitStatus values: NoClient when no
 //      worker is connected, Disconnected when the worker dies mid-request;
 //   5. in-flight request recovery: takeInFlightRequests hands back the
-//      pending call once, then is empty (idempotent).
+//      pending call once, then is empty (idempotent);
+//   6. pool auto-heal drives the REAL recovery path end to end: crash →
+//      pending takeover → backoff restart → replay onto the restarted
+//      worker's fresh IPC server → correlated response (Round-2: replaces
+//      the manual-callback proof for the recovery seam);
+//   7. replay answers recovered requests whose retry budget is exhausted
+//      with a typed error at replay time;
+//   8. the recovery watchdog answers pending calls when the restarted
+//      worker never gains a client (no leaked in-flight on a dead node).
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,6 +30,7 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QJsonDocument>
 #include <QLocalSocket>
 #include <QProcess>
 #include <QTemporaryDir>
@@ -31,6 +40,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <thread>
 
@@ -64,6 +74,26 @@ bool waitOn( std::atomic<bool> &flag, int timeoutMs = 5'000 )
         std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
     }
     return flag.load();
+}
+
+bool waitUntil( const std::function<bool()> &predicate, int timeoutMs = 5'000 )
+{
+    // The predicate may carry side effects (e.g. acquireWorker hands out the
+    // one node and marks it busy), so it must NEVER be re-evaluated after it
+    // has succeeded — the result is captured, not recomputed at the end.
+    QEventLoop loop;
+    QTimer deadline;
+    deadline.setSingleShot( true );
+    QObject::connect( &deadline, &QTimer::timeout, &loop, &QEventLoop::quit );
+    deadline.start( timeoutMs );
+    while ( deadline.isActive() )
+    {
+        if ( predicate() )
+            return true;
+        loop.processEvents( QEventLoop::AllEvents, 20 );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    return false;
 }
 
 void sleepMs( int ms )
@@ -325,4 +355,184 @@ TEST_CASE( "In-flight request recovery hands back pending calls exactly once",
         request.callback( error, true );
     }
     REQUIRE( answered.load() );
+}
+
+namespace
+{
+// Shared skeleton for the real-pool recovery cases: a one-worker pool whose
+// fixture worker stays alive long enough for a request to go in flight and
+// then dies with a real crash exit (every auto-restart re-runs the same
+// script, so later crash cycles churn harmlessly with nothing pending).
+struct PoolRecoveryRig
+{
+    ScriptFixture fixture;
+    PythonWorkerProcessPool pool;
+    QLocalSocket fakeWorker1;
+    QLocalSocket fakeWorker2;
+    WorkerNode *node = nullptr;
+    std::atomic<bool> restarted{ false };
+    std::atomic<bool> connected2{ false };
+    std::atomic<bool> answered{ false };
+    std::atomic<int> answeredCount{ 0 };
+    std::atomic<bool> answeredIsError{ false };
+    QString answeredMessage;
+    QByteArray replayBytes;
+    std::atomic<bool> replayed{ false };
+
+    explicit PoolRecoveryRig( const std::string &scriptBody )
+        : pool( 1 )
+        , script( fixture.write( "pool_recovery.sh", scriptBody ) )
+    {
+        QObject::connect( &fakeWorker2, &QLocalSocket::connected,
+                          [&] { connected2.store( true ); } );
+        QObject::connect( &fakeWorker2, &QLocalSocket::readyRead, [&] {
+            replayBytes += fakeWorker2.readAll();
+            if ( replayBytes.contains( '\n' ) )
+                replayed.store( true );
+        } );
+        QObject::connect( &pool, &PythonWorkerProcessPool::workerRestarted,
+                          [&]( int ) {
+                              restarted.store( true );
+                              // Bind the second fake worker to the restarted
+                              // node's fresh IPC server: the pool gates the
+                              // replay on that server gaining a client, and
+                              // node->server already points at the new server
+                              // when workerRestarted fires.
+                              if ( node && node->server &&
+                                   fakeWorker2.state() == QLocalSocket::UnconnectedState )
+                              {
+                                  fakeWorker2.connectToServer( node->server->serverName() );
+                              }
+                          } );
+        QObject::connect( &pool, &PythonWorkerProcessPool::workerCrashed,
+                          [&]( int, const QString &reason ) { crashReason = reason; });
+
+        REQUIRE( pool.initialize( "/bin/sh", script ) );
+
+        // acquireWorker() only hands out nodes whose IPC server already has a
+        // client, and the fixture worker never speaks the protocol: bind a
+        // fake worker to the deterministic production socket name first.
+        const QString firstServer =
+            QStringLiteral( "sicnu_pool_%1_1" ).arg( QCoreApplication::applicationPid() );
+        fakeWorker1.connectToServer( firstServer );
+        REQUIRE( waitUntil( [&] { return ( node = pool.acquireWorker() ) != nullptr; }, 10'000 ) );
+        REQUIRE( node );
+        REQUIRE( node->server );
+    }
+
+    void send( int retriesLeft )
+    {
+        node->server->sendRequest(
+            QStringLiteral( "iface.run" ), {},
+            [&]( const QJsonObject &result, bool isError ) {
+                answeredCount.fetch_add( 1 );
+                answeredIsError.store( isError );
+                answeredMessage = result[QStringLiteral( "message" )].toString();
+                answered.store( true );
+            },
+            retriesLeft );
+    }
+
+    // Answers the replayed request frame with a real correlated result frame.
+    void answerReplay()
+    {
+        REQUIRE( waitOn( replayed, 15'000 ) );
+        const int newline = replayBytes.indexOf( '\n' );
+        REQUIRE( newline > 0 );
+        const QJsonDocument doc = QJsonDocument::fromJson( replayBytes.left( newline ) );
+        REQUIRE( doc.isObject() );
+        REQUIRE( doc.object()[QStringLiteral( "method" )].toString() ==
+                 QStringLiteral( "iface.run" ) );
+        QJsonObject resp;
+        resp[QStringLiteral( "jsonrpc" )] = QStringLiteral( "2.0" );
+        resp[QStringLiteral( "id" )] = doc.object()[QStringLiteral( "id" )];
+        resp[QStringLiteral( "result" )] = QJsonObject{ { QStringLiteral( "replayed" ), true } };
+        fakeWorker2.write( QJsonDocument( resp ).toJson( QJsonDocument::Compact ) + '\n' );
+        fakeWorker2.flush();
+    }
+
+    QString script;
+    QString crashReason;
+};
+} // namespace
+
+TEST_CASE( "Pool auto-heal replays an in-flight request onto the restarted worker",
+           "[runtime][python][r4]" )
+{
+    PoolRecoveryRig rig( "#!/bin/sh\nsleep 6\nexit 42\n" );
+    rig.send( /*retriesLeft=*/1 );
+
+    REQUIRE( waitOn( rig.restarted, 15'000 ) );
+    REQUIRE( waitOn( rig.connected2, 10'000 ) );
+    rig.answerReplay();
+    REQUIRE( waitOn( rig.answered, 10'000 ) );
+    REQUIRE( rig.answeredCount.load() == 1 );
+    REQUIRE( !rig.answeredIsError.load() );
+
+    // Exactly once: after the answer, later crash cycles of the fixture
+    // script must not re-fire the consumed callback.
+    sleepMs( 500 );
+    REQUIRE( rig.answeredCount.load() == 1 );
+    CHECK( rig.crashReason.contains( QStringLiteral( "42" ) ) );
+    rig.pool.shutdown();
+}
+
+TEST_CASE( "Pool replay answers recovered requests whose retry budget is exhausted",
+           "[runtime][python][r4]" )
+{
+    PoolRecoveryRig rig( "#!/bin/sh\nsleep 6\nexit 42\n" );
+    rig.send( /*retriesLeft=*/0 );
+
+    // The restarted worker's server must gain a client for the replay gate to
+    // run; with a zeroed budget the replay answers typed instead of resending.
+    REQUIRE( waitOn( rig.restarted, 15'000 ) );
+    REQUIRE( waitOn( rig.connected2, 10'000 ) );
+    REQUIRE( waitOn( rig.answered, 10'000 ) );
+    REQUIRE( rig.answeredCount.load() == 1 );
+    REQUIRE( rig.answeredIsError.load() );
+    CHECK( rig.answeredMessage.contains( QStringLiteral( "retries exhausted" ) ) );
+    rig.pool.shutdown();
+}
+
+TEST_CASE( "Recovery watchdog answers pending calls when the restarted worker never connects",
+           "[runtime][python][r4]" )
+{
+    // The rig binds a second fake worker inside workerRestarted; for this case
+    // the restarted node must stay clientless, so drive the raw pieces here.
+    ScriptFixture fixture;
+    const QString script =
+        fixture.write( "pool_watchdog.sh", "#!/bin/sh\nsleep 6\nexit 42\n" );
+
+    PythonWorkerProcessPool pool( 1 );
+    std::atomic<bool> restarted{ false };
+    std::atomic<bool> answered{ false };
+    std::atomic<bool> answeredIsError{ false };
+    QString answeredMessage;
+    QObject::connect( &pool, &PythonWorkerProcessPool::workerRestarted,
+                      [&]( int ) { restarted.store( true ); } );
+    REQUIRE( pool.initialize( "/bin/sh", script ) );
+
+    // Put the pool's IPC server into the acquirable state, then send.
+    QLocalSocket fakeWorker1;
+    const QString firstServer =
+        QStringLiteral( "sicnu_pool_%1_1" ).arg( QCoreApplication::applicationPid() );
+    fakeWorker1.connectToServer( firstServer );
+    WorkerNode *node = nullptr;
+    REQUIRE( waitUntil( [&] { return ( node = pool.acquireWorker() ) != nullptr; }, 10'000 ) );
+    node->server->sendRequest(
+        QStringLiteral( "iface.run" ), {},
+        [&]( const QJsonObject &result, bool isError ) {
+            answeredIsError.store( isError );
+            answeredMessage = result[QStringLiteral( "message" )].toString();
+            answered.store( true );
+        },
+        /*retriesLeft=*/1 );
+
+    // No client ever binds to the restarted node: the watchdog must fail the
+    // pending callback instead of leaking it.
+    REQUIRE( waitOn( restarted, 15'000 ) );
+    REQUIRE( waitOn( answered, 15'000 ) );
+    REQUIRE( answeredIsError.load() );
+    CHECK( answeredMessage.contains( QStringLiteral( "restart timed out" ) ) );
+    pool.shutdown();
 }
