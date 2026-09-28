@@ -569,7 +569,7 @@ TEST_CASE( "pack manifests are in sync with gen_lab_packs.py (zero diff)",
   // only after #1335 revived this target).
   const std::string root = sourceRoot();
   REQUIRE( fs::exists( sicnu::labpack::pathFromUtf8( root + "/scripts/gen_lab_packs.py" ) ) );
-  const std::string sink = "${TMPDIR:-/tmp}/lab_pack_gen_check_stdout.txt";
+  const std::string sink = "\"${TMPDIR:-/tmp}/lab_pack_gen_check_stdout.txt\"";
   int rc = -1;
   bool started = false;
   for ( const char *python : { "python3", "python" } )

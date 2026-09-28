@@ -12,6 +12,10 @@
 
   Entries:
     sicnu::labpack::PackVerifier::loadFromBytes  — the ONE pack parser
+    sicnu::labpack::PackVerifier::verify         — the authority direct surface
+                                                   (round-2 遗留3: the same EOL/
+                                                   encoding classes at the
+                                                   authority's own verdict)
     sicnu::teaching_admin::inventoryPacks        — the admin inventory entry
     sicnu::teaching_admin::canonicalFileSha256/Size — direct unit pins
     (linked via Sicnu::teaching_admin's PUBLIC sicnu_lab_pack)
@@ -721,14 +725,3 @@ TEST_CASE( "authority PV-B06: a missing committed fixture is a typed hard reject
     REQUIRE( v.overall == "failed" );
     REQUIRE( pvHasIssue( v, "lab.pack_input_missing", "absent.tif" ) );
 }
-
-// ------------------------- EDIT D3 (header comment) ------------------------
-// In the header comment block, after the line
-//     sicnu::teaching_admin::canonicalFileSha256/Size — direct unit pins
-// insert:
-//     sicnu::labpack::PackVerifier::verify — the authority direct surface
-//     (round-2 遗留3: the same EOL/encoding classes at PackVerifier itself)
-// and update the tail note "(CHUNK-1/2/3) exercise the streaming pending-CR
-// logic directly — the inventory fixtures are tiny, so these are the only
-// cases > 8000 bytes." to drop the stale 8000-byte rationale (the mirror's
-// head is gone; CHUNK fixtures are aligned to the authority's 64KiB reads).
