@@ -126,6 +126,19 @@ std::filesystem::path pathFromUtf8( const std::string &utf8 );
 /// UTF-8 rendering of a filesystem path (inverse of pathFromUtf8).
 std::string utf8FromPath( const std::filesystem::path &path );
 
+/// Streaming sha256 over the canonical bytes of @p path — the bytes git
+/// would store for it: a NUL anywhere in the first 8000 bytes ⇒ the file is
+/// binary and hashed verbatim; otherwise it is text and CRLF pairs collapse
+/// to LF while lone CRs are kept (twin of canonical_bytes() in
+/// scripts/gen_lab_packs.py). THE single authority for canonical file
+/// digests: the pack verifier pins with it and the admin console
+/// (teaching_admin/json_util.h) delegates here, so an admin verdict and an
+/// agent verdict cannot diverge on a checkout whose EOL policy differs from
+/// the committed pins'. Empty string on failure; *bytesOut (canonical byte
+/// count) is written only on success.
+std::string canonicalFileSha256( const std::filesystem::path &path,
+                                 std::int64_t *bytesOut = nullptr );
+
 class PackVerifier
 {
   public:

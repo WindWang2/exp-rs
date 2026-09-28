@@ -76,8 +76,13 @@ bool looksBinary( const std::filesystem::path &path )
 /// CRLF, while the pins in the pack were taken from the committed (LF) blob,
 /// so hashing the raw working-tree bytes could never match off Windows.
 /// Returns an empty string when the file cannot be opened (caller reports the
-/// typed issue).
-std::string fileSha256( const std::filesystem::path &path, std::int64_t *bytesOut )
+/// typed issue). Public authority (see lab_pack.h): teaching_admin/json_util.h
+/// delegates here — one implementation, two verdicts, zero mirrors.
+/// Declared at labpack scope, so this definition closes the anonymous
+/// namespace for its duration.
+} // namespace
+
+std::string canonicalFileSha256( const std::filesystem::path &path, std::int64_t *bytesOut )
 {
   const bool text = !looksBinary( path );
   std::ifstream file( path, std::ios::binary );
@@ -146,9 +151,13 @@ std::string fileSha256( const std::filesystem::path &path, std::int64_t *bytesOu
   }
   if ( file.bad() )
     return std::string();
-  *bytesOut = total;
+  if ( bytesOut ) // null since the public digest-only entry (json_util.h delegate)
+    *bytesOut = total;
   return hash.hexDigest();
 }
+
+namespace
+{
 
 /// Splits on '/' keeping empty components (the agent parser's split twin):
 /// component equality is what the lexical `..` check needs.
@@ -454,7 +463,7 @@ PackVerification PackVerifier::verify( const PackDocument &pack,
     if ( input.provenance == Provenance::CommittedFixture )
     {
       std::int64_t actualBytes = -1;
-      const std::string actualHash = fileSha256( absolute, &actualBytes );
+      const std::string actualHash = canonicalFileSha256( absolute, &actualBytes );
       if ( actualHash.empty() )
       {
         Json::Value issue( Json::objectValue );

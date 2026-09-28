@@ -16,10 +16,11 @@
     sicnu::teaching_admin::canonicalFileSha256/Size — direct unit pins
     (linked via Sicnu::teaching_admin's PUBLIC sicnu_lab_pack)
 
-  The #1336 first-round semantics (fileSha256 canonicalization) must NOT
-  regress: B01/B02/B17 pin it from the outside. Chunk-boundary cases
-  (CHUNK-1/2/3) exercise the streaming pending-CR logic directly — the
-  inventory fixtures are tiny, so these are the only cases > 8000 bytes.
+    The #1336 first-round semantics (canonical-bytes pins) must NOT
+    regress: B01/B02/B17 pin it from the outside. Chunk-boundary cases
+    (CHUNK-1/2/3) exercise the streaming pending-CR logic directly against
+    the authority's 64KiB-from-offset-0 reads — the delegate of both the
+    admin entry and the verifier since the round-2 mirror removal.
  ***************************************************************************/
 
 #include <catch2/catch_test_macros.hpp>
@@ -471,18 +472,19 @@ TEST_CASE( "boundary CHUNK-1: CRLF spanning the 64KiB chunk boundary normalizes"
            "[teaching_r4][boundary][chunking]" )
 {
     QTemporaryDir root;
-    // 8000-byte text head, then 64KiB chunk whose LAST byte is '\r' with its
-    // '\n' in the next chunk, then more text, then a lone trailing '\r' at
-    // EOF (kept as-is).
+    // The authority (sicnu::labpack canonical digest, which the admin entry
+    // now delegates to) streams 64KiB reads from offset 0, so the pending-CR
+    // edge case is a CR as the LAST byte of chunk 1 with its LF opening
+    // chunk 2. (While the admin mirror existed — removed in favour of the
+    // delegation — its 8000-byte head shifted the boundary by 8000; the
+    // fixture pins the surviving, authoritative chunking.)
     QByteArray raw;
-    raw.reserve( 8000 + 65536 + 16 + 1 );
-    raw.append( QByteArray( 8000, 'h' ) );
-    QByteArray block( 65536, 'a' );
-    block[65535] = '\r'; // last byte of the first 64KiB chunk after head
-    raw.append( block );
-    raw.append( "\nmid" ); // '\n' arrives in the NEXT chunk
+    raw.reserve( 65536 + 16 + 1 );
+    raw.append( QByteArray( 65535, 'a' ) );
+    raw.append( '\r' );    // last byte of chunk 1
+    raw.append( "\nmid" ); // the LF opens chunk 2
     raw.append( QByteArray( 8, 'b' ) );
-    raw.append( '\r' ); // lone CR at EOF — kept
+    raw.append( '\r' );    // lone CR at EOF — kept
 
     const QString path = root.filePath( QStringLiteral( "chunked.txt" ) );
     writeBytes( path, raw );
@@ -491,7 +493,7 @@ TEST_CASE( "boundary CHUNK-1: CRLF spanning the 64KiB chunk boundary normalizes"
     // equality proves the streamed pending-CR logic is equivalent.
     CHECK( canonicalFileSha256( path ) == oracleSha256( canonicalBytes( raw ) ) );
     CHECK( canonicalFileSize( path ) == static_cast<qint64>( canonicalBytes( raw ).size() ) );
-    // The mid-file CRLF normalized away, the trailing lone CR kept:
+    // The mid-file CRLF normalized away (2 bytes → 1), the trailing lone CR kept:
     CHECK( canonicalFileSize( path ) == static_cast<qint64>( raw.size() - 1 ) );
 }
 
