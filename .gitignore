@@ -520,3 +520,7 @@ data/labs/_tmp/
 !.planning/qt-teardown-lifecycle-r4/
 .planning/qt-teardown-lifecycle-r4/*
 !.planning/qt-teardown-lifecycle-r4/*.md
+# R5 track 07 model runtime / python worker recovery planning notes (markdown only).
+!.planning/r5-model-runtime-workers/
+.planning/r5-model-runtime-workers/*
+!.planning/r5-model-runtime-workers/*.md

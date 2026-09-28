@@ -150,7 +150,14 @@ TEST_CASE( "Two threads publishing to the same path: the second guard is refused
 
     // Strict ordering: the first guard's fence is held BEFORE the second
     // thread even starts constructing, and stays held until the second's
-    // attempt is DONE — no wall-clock timing anywhere.
+    // attempt is DONE — no wall-clock timing anywhere. The first thread
+    // signals firstHeld only after its guard (and its fence) exists; without
+    // that handshake both threads race for the slot and the LOSER'S
+    // AlreadyRunning escapes an uncaught-lambda thread (std::terminate) —
+    // the fence key computation does filesystem probing, so thread-start
+    // jitter can order either way on a loaded machine (R5).
+    std::promise<void> firstHolding;
+    std::future<void> fenceHeld = firstHolding.get_future();
     std::promise<void> secondAttempting;
     std::future<void> attemptStarted = secondAttempting.get_future();
     std::promise<void> secondDone;
@@ -161,6 +168,7 @@ TEST_CASE( "Two threads publishing to the same path: the second guard is refused
     std::thread first( [ & ] {
         // Parks the first product; holds the slot across the "slow" publish.
         ProductPublishGuard guard( fixture.path( "product.tif" ), kSuffix, nullptr );
+        firstHolding.set_value();
         attemptStarted.wait(); // the second guard is about to construct
         attemptFinished.wait(); // ...and has finished (refused, with the fence)
         publishNew( guard, fixture, "SECOND-BYTES", R"({ "schema": "exp-rs-prov/1" })" );
@@ -168,6 +176,7 @@ TEST_CASE( "Two threads publishing to the same path: the second guard is refused
     } );
 
     std::thread second( [ & ] {
+        fenceHeld.wait(); // the first guard provably owns the slot now
         secondAttempting.set_value();
         try
         {
