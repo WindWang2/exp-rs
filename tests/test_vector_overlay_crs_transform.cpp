@@ -369,7 +369,8 @@ TEST_CASE("VectorMergeAlgorithm accepts every geometry class into an Unknown-cla
     QgsFeature pg(anyLayer->fields());
     pg.setAttribute("name", "pg");
     pg.setGeometry(QgsGeometry::fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"));
-    REQUIRE(anyLayer->dataProvider()->addFeatures(QgsFeatureList{pg}));
+    QgsFeatureList pgList{pg};
+    REQUIRE(anyLayer->dataProvider()->addFeatures(pgList));
 
     std::unique_ptr<QgsVectorLayer> pointLayer(new QgsVectorLayer(
         "Point?crs=EPSG:4326&field=name:string", "merge_pt3", "memory"));
@@ -377,7 +378,8 @@ TEST_CASE("VectorMergeAlgorithm accepts every geometry class into an Unknown-cla
     QgsFeature pt(pointLayer->fields());
     pt.setAttribute("name", "pt");
     pt.setGeometry(QgsGeometry::fromWkt("POINT(2 2)"));
-    REQUIRE(pointLayer->dataProvider()->addFeatures(QgsFeatureList{pt}));
+    QgsFeatureList ptList{pt};
+    REQUIRE(pointLayer->dataProvider()->addFeatures(ptList));
 
     VectorMergeAlgorithm proto;
     std::unique_ptr<QgsProcessingAlgorithm> alg(proto.create());
