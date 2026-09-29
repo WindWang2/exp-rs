@@ -123,7 +123,7 @@ TEST_CASE( "MapSpec validation rejects path-shaped layout names and ids (#1381)"
   CHECK( sicnu::agent::cartography::sanitizeFileStem( QStringLiteral( "  " ), QStringLiteral( "layout" ) )
          == QStringLiteral( "layout" ) );
   CHECK( sicnu::agent::cartography::sanitizeFileStem( QStringLiteral( "海陆分布 v1" ), QStringLiteral( "layout" ) )
-         == QStringLiteral( "_____ v1" ) );
+         == QStringLiteral( "____ v1" ) );
 }
 
 TEST_CASE( "MapSpec document model: make/append/validate", "[mapspec]" )

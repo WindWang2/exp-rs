@@ -4,6 +4,7 @@
 #include "exprs/plugin_discovery.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -41,6 +42,39 @@ long long modificationTicks( const std::string &path )
     if ( error )
         return 0;
     return time.time_since_epoch().count();
+}
+
+/// Content fingerprint of the manifest bytes ("<size>:<fnv1a64-hex>"), or
+/// empty when unreadable. mtime alone is NOT a sufficient cache key: file
+/// timestamps come from the kernel's coarse clock (one scheduler tick), so
+/// two same-length manifests written within one tick — an upgrade's v1 and
+/// v2, a rollback's restored copy — share an mtime and the scan would serve
+/// the stale cached manifest. The fingerprint makes the cache re-parse
+/// whenever the bytes actually differ; it still saves the JSON parse and
+/// the full manifest validation on the hit path.
+std::string contentFingerprint( const std::string &path )
+{
+    std::ifstream input( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
+    if ( !input )
+        return {};
+    std::uint64_t hash = 1469598103934665603ULL; // FNV-1a 64 offset basis
+    std::uint64_t size = 0;
+    char buffer[4096];
+    while ( input.read( buffer, sizeof buffer ) || input.gcount() > 0 )
+    {
+        const std::streamsize got = input.gcount();
+        for ( std::streamsize i = 0; i < got; ++i )
+        {
+            hash ^= static_cast<unsigned char>( buffer[i] );
+            hash *= 1099511628211ULL; // FNV-1a 64 prime
+        }
+        size += static_cast<std::uint64_t>( got );
+        if ( !input )
+            break;
+    }
+    char hex[17];
+    std::snprintf( hex, sizeof hex, "%016llx", static_cast<unsigned long long>( hash ) );
+    return std::to_string( size ) + ":" + hex;
 }
 
 std::vector<std::string> listSubdirectories( const std::string &root )
@@ -141,6 +175,13 @@ bool tryCachedManifest( const Json::Value &index, const std::string &dir,
         return false;
     if ( modificationTicks( manifestPath ) != entry["mtime"].asInt64() )
         return false;
+    // Entries written before the fingerprint existed carry no "content"
+    // member: treat them as misses so they are re-parsed and re-stamped.
+    if ( !entry.isMember( "content" ) || !entry["content"].isString() )
+        return false;
+    const std::string fingerprint = contentFingerprint( manifestPath );
+    if ( fingerprint.empty() || fingerprint != entry["content"].asString() )
+        return false;
     PluginDiagnostic ignored;
     return manifestFromIndexValue( entry["manifest"], out, ignored );
 }
@@ -151,8 +192,12 @@ void appendToIndex( Json::Value &index, const std::string &dir, const std::strin
     const long long ticks = modificationTicks( manifestPath );
     if ( ticks == 0 )
         return;
+    const std::string fingerprint = contentFingerprint( manifestPath );
+    if ( fingerprint.empty() )
+        return;
     Json::Value entry( Json::objectValue );
     entry["mtime"] = static_cast<Json::Int64>( ticks );
+    entry["content"] = fingerprint;
     entry["manifest"] = manifest.toJson();
     index[dir] = entry;
 }
