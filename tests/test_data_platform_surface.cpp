@@ -26,6 +26,8 @@
 #include <QTemporaryDir>
 #include <QVariantMap>
 
+#include <sqlite3.h>
+
 #include <stdexcept>
 
 using namespace sicnu::dataset;
@@ -167,6 +169,51 @@ TEST_CASE( "split manifest persistence is immutable and idempotent", "[dataset][
         DatasetVersionId::fromString( manifest->datasetVersionId() ).value() );
     REQUIRE( listed.size() == 1 );
     REQUIRE( listed.first().manifestId() == seeded.manifestId );
+}
+
+TEST_CASE( "a newer-schema store opens read-only WITHOUT running DDL against it (#1390)",
+           "[dataset][store][schema]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString dbPath = dir.filePath( QStringLiteral( "newer.db" ) );
+
+    // Minimal store written by a NEWER binary: ds_meta carries a higher
+    // schema_version and nothing else exists yet.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open( dbPath.toUtf8().constData(), &raw ) == SQLITE_OK );
+        char *error = nullptr;
+        REQUIRE( sqlite3_exec( raw,
+                               "CREATE TABLE ds_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+                               "INSERT INTO ds_meta(key,value) VALUES('schema_version','9999');",
+                               nullptr, nullptr, &error ) == SQLITE_OK );
+        sqlite3_close( raw );
+    }
+
+    DatasetStore store;
+    QString error;
+    REQUIRE( store.open( dbPath, &error ) );
+    INFO( error.toStdString() );
+    REQUIRE( store.isReadOnly() );
+
+    // The gate must run BEFORE the DDL: opening must not add THIS binary's
+    // objects to the newer store (pre-fix, the full CREATE TABLE IF NOT
+    // EXISTS batch executed first and mutated the read-only-by-contract
+    // file).
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw, SQLITE_OPEN_READONLY,
+                                  nullptr ) == SQLITE_OK );
+        sqlite3_stmt *stmt = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw, "SELECT COUNT(*) FROM sqlite_master"
+                                          " WHERE type='table' AND name='datasets'",
+                                     -1, &stmt, nullptr ) == SQLITE_OK );
+        REQUIRE( sqlite3_step( stmt ) == SQLITE_ROW );
+        CHECK( sqlite3_column_int( stmt, 0 ) == 0 );
+        sqlite3_finalize( stmt );
+        sqlite3_close( raw );
+    }
 }
 
 TEST_CASE( "leakage reports are append-only and keyed by manifest", "[dataset][store][leakage]" )

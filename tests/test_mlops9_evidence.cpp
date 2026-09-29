@@ -478,6 +478,22 @@ TEST_CASE( "promotion seam: criteria, benchmark gap, approval metadata (M8)",
     CHECK( benchmarkGap.value().missingEvidence.contains(
         QStringLiteral( "benchmark_set" ) ) );
 
+    // #1390: an INELIGIBLE evaluation cannot be approved — the recorded
+    // evidence contradicts the decision. record() must refuse (and a direct
+    // savePromotionRecord carrying verdict=ineligible + decision=approved
+    // is refused by the store itself).
+    auto refusedApproval = evaluator.record( request, QStringLiteral( "approved" ),
+                                             QStringLiteral( "release-board" ) );
+    REQUIRE( !refusedApproval.has_value() );
+    PromotionRecord inconsistent = persisted.value();
+    inconsistent.promotionId = QStringLiteral( "promo-inconsistent" );
+    inconsistent.verdict = QStringLiteral( "ineligible" );
+    inconsistent.decision = QStringLiteral( "approved" );
+    auto refusedSave = fixture.store.savePromotionRecord( inconsistent );
+    REQUIRE( !refusedSave.has_value() );
+    CHECK( refusedSave.diagnostics().first().code ==
+           QStringLiteral( "experiment.promotion_invalid" ) );
+
     // Idempotent re-save of byte-identical content is NOT a conflict (the
     // equality is over CANONICAL compact JSON, so a record that round-trips
     // through the store compares equal to itself — review round 1).
