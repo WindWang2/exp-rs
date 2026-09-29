@@ -40,7 +40,10 @@ inline const char *wgs84Wkt()
 
 inline void setGrid( GDALDatasetH ds, int h )
 {
-    const double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( h ), 0.0, -1.0 };
+    // Non-const buffer: GDAL's C signature for GDALSetGeoTransform is
+    // double* on older releases and const double* on newer ones — a plain
+    // local array satisfies both (a const array fails the older).
+    double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( h ), 0.0, -1.0 };
     REQUIRE( GDALSetGeoTransform( ds, gt ) == CE_None );
     REQUIRE( GDALSetProjection( ds, wgs84Wkt() ) == CE_None );
 }

@@ -152,7 +152,7 @@ void GuidedLabWorkspace::setAutonomy( const sicnu::teaching::AutonomyEffectiveDi
   // Policy issues (parse failures, undeclared authority) surface on the
   // label itself — a tooltip-only honesty note is too easy to miss.
   if ( !a.issuesZh.empty() )
-    text += QStringLiteral( "  ⚠ %1" ).arg( a.issuesZh.front() );
+    text += QStringLiteral( "  ⚠ %1" ).arg( QString::fromStdString( a.issuesZh.front() ) );
   m_autonomyLabel->setText( text );
   QString tip = tr( "Ladder:\n" );
   for ( const auto &l : a.ladderLabelsZh ) tip += QString::fromStdString( l ) + QLatin1Char( '\n' );

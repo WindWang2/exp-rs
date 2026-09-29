@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 #include "processing/algorithms/image_enhancement_streaming.h"

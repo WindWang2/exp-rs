@@ -285,7 +285,7 @@ TEST_CASE( "mask-grid CRS mismatch and missing QA band roles are typed refusals"
         "PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],"
         "PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],"
         "AUTHORITY[\"EPSG\",\"32633\"]]";
-    const double utmGt[6] = { 500000.0, 1.0, 0.0, 4000010.0, 0.0, -1.0 };
+    double utmGt[6] = { 500000.0, 1.0, 0.0, 4000010.0, 0.0, -1.0 };
     REQUIRE( GDALSetGeoTransform( ds, utmGt ) == CE_None );
     REQUIRE( GDALSetProjection( ds, utmWkt ) == CE_None );
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
