@@ -282,6 +282,26 @@ std::vector<PythonIpcServer::PendingRequest> PythonIpcServer::takeInFlightReques
   return taken;
 }
 
+bool PythonIpcServer::cancelInFlight( int id )
+{
+  // #1384: the caller abandoned this request (timeout). dropInFlight alone
+  // is not enough — the response dispatch would still fire the registered
+  // callback, and a worker crash before the late answer would replay the
+  // request into a fresh worker.
+  bool erasedPending = false;
+  for ( auto it = m_inFlight.begin(); it != m_inFlight.end(); ++it )
+  {
+    if ( it->id == id )
+    {
+      m_inFlight.erase( it );
+      erasedPending = true;
+      break;
+    }
+  }
+  const bool erasedCallback = m_callbacks.erase( id ) > 0;
+  return erasedPending || erasedCallback;
+}
+
 AwaitStatus PythonIpcServer::sendRequestAndAwait( const QString &method, const QJsonObject &params,
                                                   QJsonObject &result, bool &isError, int timeoutMs )
 {

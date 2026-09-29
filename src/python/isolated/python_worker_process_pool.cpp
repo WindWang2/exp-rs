@@ -563,8 +563,34 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
   }
   else
   {
+    // Listen failure: the server allocated above never listened and the
+    // worker was never started, so bindNodeSignals never ran — no
+    // workerCrashed/workerFinished can ever fire for this node again, and
+    // without the disposal below the node would sit with dead objects it
+    // can never lose (#1384). Dispose both allocations (the node itself
+    // stays: a busy node is still owned by its adapter, which re-acquires
+    // through the normal !server error path — DATAPY-3) and refund the
+    // budget step: nothing was restarted.
+    if ( node->server )
+    {
+      node->server->disconnect();
+      node->server->close();
+      node->server->deleteLater();
+      node->server = nullptr;
+    }
+    if ( node->worker )
+    {
+      node->worker->disconnect();
+      node->worker->deleteLater();
+      node->worker = nullptr;
+    }
     node->isRestarting = false;
-    qWarning() << "Worker restart listen failed for id:" << id;
+    if ( !wasBusy )
+      node->isBusy = false; // unowned: let shrink/acquire reclaim the slot
+    if ( node->crashBudgetLeft < kMaxWorkerCrashRestarts )
+      node->crashBudgetLeft++; // refund — the restart never launched
+    qWarning() << "Worker restart listen failed for id:" << id
+               << "; node drained (server/worker disposed)";
     if ( borrowed != m_pendingRecovery.end() )
     {
       failPendingRequests( *borrowed->second, QStringLiteral( "Worker restart failed (listen)" ) );
