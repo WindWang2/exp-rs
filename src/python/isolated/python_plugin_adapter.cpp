@@ -162,15 +162,15 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
     // The callback outlives this frame when the pool replays it after a worker
     // crash (ADR 0064 recovery), so it must not capture stack locals: the
     // result lives on the heap and the loop is accessed through a QPointer.
-    m_workerNode->server->sendRequest( QStringLiteral( "load_plugin" ), params,
+    const int loadRequestId = m_workerNode->server->sendRequest( QStringLiteral( "load_plugin" ), params,
       [successState, loopPtr]( const QJsonObject &response, bool isError ) {
         if ( !isError && response.contains( QStringLiteral( "status" ) ) && response[QStringLiteral( "status" )].toString() == QStringLiteral( "loaded" ) )
         {
-            *successState = true;
+          *successState = true;
         }
         else if ( isError )
         {
-            qWarning() << "PythonPluginAdapter load_plugin error:" << response;
+          qWarning() << "PythonPluginAdapter load_plugin error:" << response;
         }
         if ( loopPtr )
             loopPtr->quit();
@@ -186,6 +186,23 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
         qWarning() << "PythonPluginAdapter: Timed out or failed to load plugin:" << m_packageName;
         if ( m_pool && m_workerNode )
         {
+            // #1384: a TIMEOUT is not an answer — the load RPC may still be
+            // in flight. Retire it before releasing the node: otherwise the
+            // pool's crash replay re-injects THIS plugin into whatever
+            // worker later owns the node, and releaseWorker hands a daemon
+            // that is mid-load (sys.path polluted, plugin half-registered)
+            // to the NEXT plugin's initialize() — crossed IPC. A best-effort
+            // daemon-side unload undoes a load that completes late
+            // (unloading a not-loaded package is a daemon no-op).
+            if ( m_workerNode->server )
+            {
+                m_workerNode->server->cancelInFlight( loadRequestId );
+                QJsonObject unloadParams;
+                unloadParams[QStringLiteral( "plugin_dir" )] = m_pluginDir;
+                unloadParams[QStringLiteral( "package_name" )] = m_packageName;
+                m_workerNode->server->sendRequest( QStringLiteral( "unload_plugin" ), unloadParams,
+                                                   nullptr, 0 );
+            }
             m_pool->releaseWorker( m_workerNode );
             m_workerNode = nullptr;
         }

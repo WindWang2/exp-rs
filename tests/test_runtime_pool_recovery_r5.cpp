@@ -40,6 +40,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonObject>
+#include <QLocalServer>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -422,6 +423,60 @@ TEST_CASE( "Exhausting the crash budget retires the node and answers typed (no c
     CHECK( pool.poolHealth().totalRestarts == 5 );
     pool.releaseWorker( node ); // a retired node earns nothing back
     CHECK( pool.poolHealth().active == 0 );
+    pool.shutdown();
+}
+
+TEST_CASE( "A restart whose listen fails drains the node instead of stranding it (#1384)",
+           "[runtime][python][pool][r5]" )
+{
+    FixtureEnv env;
+    PythonWorkerProcessPool pool( 1 );
+    std::atomic<int> restarts{ 0 };
+    QObject::connect( &pool, &PythonWorkerProcessPool::workerRestarted,
+                      [ &restarts ]( int ) { restarts.fetch_add( 1 ); } );
+
+    REQUIRE( pool.initialize( QLatin1String( FAKE_WORKER_BIN ), QStringLiteral( "/dev/null" ) ) );
+    WorkerNode *node = acquireOne( pool );
+    REQUIRE( node != nullptr );
+    REQUIRE( waitLogCount( env.logPath, "connected", 1 ) );
+
+    const qint64 firstPid = node->worker->processId();
+    REQUIRE( firstPid > 0 );
+
+    // A HELD job makes the crash run the recovery-restart path.
+    Probe job;
+    sendHeldJob( node, QStringLiteral( "A" ), /*retriesLeft=*/2, job );
+    REQUIRE( waitLogCount( env.logPath, "held", 1 ) );
+
+    // Occupy the DETERMINISTIC restart socket name so the listen() inside
+    // the restart lambda fails: sicnu_pool_<pid>_<id>_<restartCount>.
+    // handleWorkerLoss increments restartCount before arming the timer, so
+    // the restart uses the post-crash value.
+    QLocalServer squatter;
+    const QString socketName = QStringLiteral( "sicnu_pool_%1_%2_%3" )
+                                   .arg( QCoreApplication::applicationPid() )
+                                   .arg( node->id )
+                                   .arg( node->restartCount + 1 );
+    INFO( "squatting socket: " << socketName.toStdString() );
+    REQUIRE( squatter.listen( socketName ) );
+
+    ::kill( static_cast<pid_t>( firstPid ), SIGKILL );
+
+    // The recovered job is answered with the TYPED listen failure (never a
+    // hang), and by then the node is drained: dead allocations disposed,
+    // budget refunded — the restart never launched — and no restart
+    // announced for a worker that does not exist.
+    REQUIRE( waitOn( job.answered ) );
+    CHECK( job.isError.load() );
+    CHECK( job.message.contains( QStringLiteral( "listen" ) ) );
+    CHECK( node->server == nullptr );
+    CHECK( node->worker == nullptr );
+    CHECK( !node->isRestarting );
+    CHECK( node->crashBudgetLeft == kMaxWorkerCrashRestarts );
+    CHECK( restarts.load() == 0 );
+
+    // The drained slot is releasable and the pool shuts down cleanly.
+    pool.releaseWorker( node );
     pool.shutdown();
 }
 

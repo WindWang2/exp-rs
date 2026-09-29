@@ -241,13 +241,27 @@ class PythonWorkerSession final : public IModelRuntime
           }
           if ( outcome == ReadOutcome::Malformed )
           {
-            // A complete line arrived but is not a JSON object: the worker
-            // is (or was) ALIVE yet the wire stream is unusable — classify
-            // it as an output failure, not a crash (the previous catch-all
+            // A complete line arrived but is not a JSON object. When the
+            // worker is still ALIVE the wire stream is unusable — classify
+            // as an output failure, not a crash (the previous catch-all
             // misreported garbage answers as "exited unexpectedly"), and do
             // not replay: bytes after the first newline are already lost, so
             // the stream position can never realign with the protocol. Stop
-            // the worker fail-closed, like the oversized branch.
+            // the worker fail-closed, like the oversized branch. A DEAD
+            // worker, however, means it crashed mid-line: the trailing
+            // newline-terminated fragment is leak output of the crash
+            // (traceback tail, partial flush), not evidence about the
+            // stream — route to the bounded crash restart below, which
+            // re-handshakes from byte zero (#1384). The line landing and
+            // the exit being observable are separate notifications, so give
+            // death a brief settlement window before classifying.
+            if ( attempt == 0 )
+            {
+              if ( m_process->state() == QProcess::Running )
+                m_process->waitForFinished( 500 );
+              if ( m_process->state() != QProcess::Running )
+                continue; // crash-mid-line → restart + replay
+            }
             recordFailure( "python worker sent a malformed response (output invalid); stderr: "
                            + drainStderr() );
             m_permanentlyDead.store( true, std::memory_order_release );

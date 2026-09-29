@@ -471,6 +471,48 @@ TEST_CASE( "a malformed wire answer is output-invalid, never a phantom crash",
               Catch::Matchers::ContainsSubstring( "malformed response" ) );
 }
 
+TEST_CASE( "a garbage line followed by a crash is a crash-mid-line, not a forfeit (#1384)",
+           "[models][python][r5]" )
+{
+  ( void )ensureApp();
+  QTemporaryDir dir;
+  const std::string script =
+    ( QFileInfo( __FILE__ ).absolutePath()
+      + QStringLiteral( "/data/py_worker_garbage_crash_once.py" ) )
+      .toStdString();
+  // One-shot marker: the FIRST worker prints a complete garbage line and
+  // hard-exits; the restarted worker (which serves the replayed forward)
+  // answers like py_worker_fake.py.
+  const QString marker = dir.filePath( QStringLiteral( "crash-once.marker" ) );
+  qputenv( "SICNU_GARBAGE_CRASH_ONCE_MARKER", marker.toUtf8() );
+
+  const ModelInfo model = makeWorkerModel( dir, script );
+  std::string error;
+  const auto session =
+    ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
+  INFO( "acquire error: " << error );
+  REQUIRE( session );
+
+  std::vector<float> a = { 2.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+
+  // The newline-terminated garbage line followed by death is the crash's
+  // last words: the provider must classify it as a crash, spend one bounded
+  // restart, replay the forward on the fresh worker (marker present → good
+  // answers) and SUCCEED — pre-fix this exact shape forfeited the restart
+  // and threw output-invalid on a dead worker.
+  const auto outputs = session->inferNamed( inputs, { "sum" } );
+  REQUIRE( outputs.size() == 1 );
+  CHECK( outputs[0].second.dataFloat32()[0] == Catch::Approx( 2.0f ) );
+
+  // The restarted worker keeps serving: the session survived its crash.
+  const auto again = session->inferNamed( inputs, { "sum" } );
+  REQUIRE( again.size() == 1 );
+
+  qunsetenv( "SICNU_GARBAGE_CRASH_ONCE_MARKER" );
+}
+
 TEST_CASE( "wire failure classification pins the protocol families",
            "[models][python][r5]" )
 {

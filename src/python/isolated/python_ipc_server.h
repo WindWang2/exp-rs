@@ -102,6 +102,12 @@ class PythonIpcServer : public QObject
      */
     std::vector<PendingRequest> takeInFlightRequests();
 
+    /// Retires ONE in-flight request the caller gave up on (e.g. a load
+    /// that timed out, #1384): it is removed from crash-recovery replay
+    /// AND from the response dispatch, so neither a restarted worker nor a
+    /// late answer can act on it. Returns true when something was retired.
+    bool cancelInFlight( int id );
+
     /// Number of requests currently in flight (sent, not yet answered).
     /// The pool reads this to distinguish a worker retiring cleanly from one
     /// that disappeared with unanswered work.
