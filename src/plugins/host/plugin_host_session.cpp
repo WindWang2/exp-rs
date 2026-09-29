@@ -1059,25 +1059,22 @@ bool PluginHostProcessSession::shutdownImpl( int timeoutMs,
         const auto graceDeadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds( kKillGraceMs );
         bool exited = false;
-        while ( std::chrono::steady_clock::now() < graceDeadline )
+        // Election discipline (#1382): never wait on the raw handle in this
+        // loop. A concurrent killProcess()/confirmProcessDeath() winner can
+        // close it while we are polling — WaitForSingleObject on a recycled
+        // handle value is documented UB on Windows, and on POSIX the loop
+        // re-reads mProcessHandle every iteration, so after a winner nulls
+        // it, waitpid(0, ...) would reap ANOTHER session's worker. Poll the
+        // liveness flag (same shape as escalateTimeout) and route the
+        // probe/reap through confirmProcessDeath(), whose exchange elects
+        // exactly one closer.
+        while ( std::chrono::steady_clock::now() < graceDeadline && mProcessAlive.load() )
         {
-#ifdef _WIN32
-            if ( ::WaitForSingleObject( mProcessHandle, 50 ) == WAIT_OBJECT_0 )
+            if ( confirmProcessDeath() )
             {
                 exited = true;
                 break;
             }
-#else
-            int status = 0;
-            const pid_t waited =
-                ::waitpid( static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) ),
-                           &status, WNOHANG );
-            if ( waited > 0 || ( waited < 0 && errno != EINTR ) )
-            {
-                exited = true;
-                break;
-            }
-#endif
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
         }
         // NOTE: mProcessAlive is deliberately NOT cleared here before the
@@ -1098,12 +1095,23 @@ bool PluginHostProcessSession::shutdownImpl( int timeoutMs,
 #endif
         if ( !exited )
         {
-            killProcess( "shutdown grace elapsed" );
-            diagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
-                             PluginDiagnosticSeverity::Warning,
-                             "worker ignored the shutdown reply window and was killed",
-                             mOptions.pluginId );
-            return false;
+            if ( !mProcessAlive.load() )
+            {
+                // A racing killProcess()/confirmProcessDeath() won the close
+                // election while this loop was polling: it owns the
+                // termination and already released the handles. Treat the
+                // worker as exited — there is nothing left to kill.
+                exited = true;
+            }
+            else
+            {
+                killProcess( "shutdown grace elapsed" );
+                diagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
+                                 PluginDiagnosticSeverity::Warning,
+                                 "worker ignored the shutdown reply window and was killed",
+                                 mOptions.pluginId );
+                return false;
+            }
         }
         // Worker exited by itself: release the handles under the SAME
         // exchange-winner discipline killProcess uses — a concurrent killer

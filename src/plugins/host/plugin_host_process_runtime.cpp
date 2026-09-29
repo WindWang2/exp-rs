@@ -319,6 +319,17 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     // DISTINCT entries are safe.
     std::lock_guard<std::mutex> entryLock( entry.mutex );
 
+    // The plugin was unloaded while this recovery raced it: the entry is
+    // orphaned (out of mSessions), so a spawned worker here would be
+    // invisible to diagnostics and outlive the unload contract (#1383).
+    if ( entry.retired.load( std::memory_order_acquire ) )
+    {
+        log.add( PluginDiagnosticCode::HostProcessCrashed, PluginDiagnosticSeverity::Warning,
+                 "respawn refused: the plugin was unloaded while recovery was in flight",
+                 pluginId );
+        return false;
+    }
+
     PluginHostProcessSession::SpawnOptions spawnOptions;
     spawnOptions.workerPath = mOptions.workerPath;
     spawnOptions.pluginId = pluginId;
@@ -371,6 +382,11 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
         std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
         session = iterator->second->session;
         entry = iterator->second;
+        // Retire BEFORE the map erase leaves this lock: any in-flight proxy
+        // that later wins tryRecovery sees retired under respawn()'s
+        // entry.mutex and cannot resurrect a worker for the unloaded plugin
+        // (#1383).
+        iterator->second->retired.store( true, std::memory_order_release );
     }
     // Erase the map entry OUTSIDE the entry's own mutex: erase() drops the
     // map's shared_ptr, and when this was the last reference the entry (with

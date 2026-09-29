@@ -1279,6 +1279,59 @@ TEST_CASE( "repeated load/unload cycles return handles and workers to baseline",
     REQUIRE( registry.loadedPluginIds().empty() );
 }
 
+TEST_CASE( "in-flight proxy cannot respawn a worker after unloadPlugin (#1383)",
+           "[hostprocess][lifecycle][unload]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 1 );
+
+    // Hold a proxy instance the way an in-flight call does: the shared
+    // entry outlives the unload (plugin_host_session.h:18-21), and this
+    // path carries NO execution lease, so the registry drain never waits
+    // for it.
+    auto factoryIterator = stack.sink.operators.find( "test:iso-echo" );
+    REQUIRE( factoryIterator != stack.sink.operators.end() );
+    std::unique_ptr<sicnu::operators::RSOperator> proxy = factoryIterator->second();
+
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+
+    // The call must refuse typed: the entry is retired, so recovery must
+    // not resurrect a worker nobody hosts (pre-fix this echo SUCCEEDED on
+    // a respawned orphan worker invisible to diagnostics).
+    Json::Value refused;
+    bool threw = false;
+    try
+    {
+        sicnu::operators::RSOperatorContext context;
+        refused = proxy->run( Json::Value( Json::objectValue ), context );
+    }
+    catch ( const sicnu::operators::RSOperatorError &error )
+    {
+        threw = true;
+        CHECK( error.message().find( "E6005" ) != std::string::npos );
+    }
+    CHECK( threw );
+    CHECK( ( !refused.isMember( "success" ) || !refused["success"].asBool() ) );
+
+    // And nothing came back alive: the diagnostics surface (mSessions)
+    // stays empty — with the fix there is no orphan entry to hide.
+    CHECK( liveWorkerEntries( *stack.runtime ) == 0 );
+    CHECK( registry.loadedPluginIds().empty() );
+
+    // A clean reload still works afterwards (retirement did not poison the
+    // plugin record).
+    REQUIRE( loadOrExplain( kPluginId ) );
+    Json::Value params( Json::objectValue );
+    params["after"] = "reload";
+    Json::Value echo = runOperator( stack, "test:iso-echo", params );
+    REQUIRE( echo["success"].asBool() );
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+}
+
 TEST_CASE( "repeated crash/restart cycles return handles and workers to baseline",
            "[hostprocess][crash][lifecycle][p12]" )
 {
