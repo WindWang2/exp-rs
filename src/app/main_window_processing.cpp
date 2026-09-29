@@ -657,9 +657,12 @@ void QgisDesktopWindow::toggleSwipeTool()
         return;
     }
 
-    // Lazily create the swipe tool
+    // Lazily create the swipe tool. Parented to the canvas: QgsMapTool is
+    // NOT owned by the canvas that uses it and this member is a raw
+    // pointer — without the parent every MainWindow leaked the tool (#1389).
     if (!m_swipeTool) {
         m_swipeTool = new SwipeMapTool(m_mapCanvas);
+        m_swipeTool->setParent(m_mapCanvas);
     }
 
     // Use current layer as base and first other visible raster as compare
