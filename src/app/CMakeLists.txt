@@ -405,6 +405,12 @@ add_executable(sicnu_geo_rs main.cpp)
 # The shell library is PRIVATE: the executable is its only production
 # consumer, and static-library PRIVATE deps still resolve at final link.
 target_link_libraries(sicnu_geo_rs PRIVATE sicnu_geo_rs_shell)
+# MSVC link closure: the shell references explain::adapters symbols
+# (step_explanation_section) and the VS-generator link line for the
+# executable did not carry the shell's PRIVATE static dep — LNK2019 on
+# sicnu_geo_rs.exe while the GNU link resolves it. Declaring the archive
+# on the executable pins the closure for every generator.
+target_link_libraries(sicnu_geo_rs PRIVATE Sicnu::explain_adapters)
 set_target_properties(sicnu_geo_rs_shell PROPERTIES
     AUTOMOC ON
     # Same contract as the executable had: the dialog headers name ui_*.h
