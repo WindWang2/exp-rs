@@ -17,12 +17,19 @@
  *     returns.
  *   - Workspace effect policy (issue #757): while SICNU_MCP_WORKSPACE is
  *     set, the resolved working directory, every absolute/escaping path in
- *     argv (except argv[0]) and every absolute path in manifest env values
- *     must resolve inside the workspace root or additionalAllowedRoots —
- *     otherwise run() refuses with refusedByPolicy=true BEFORE any spawn.
- *     This is a PATH policy, not an OS sandbox: the executable resolved via
- *     PATH is not confined, and an allowed-but-malicious tool can still
- *     write inside the workspace.
+ *     argv and every absolute path in manifest env values must resolve
+ *     inside the workspace root or additionalAllowedRoots — otherwise
+ *     run() refuses with refusedByPolicy=true BEFORE any spawn. argv[0]
+ *     stays exempt ONLY while it names a program (an absolute system
+ *     install or a bare PATH name); a relative argv[0] containing ".." is
+ *     a path fragment and is containment-checked like any other argument
+ *     (issue #1380). This is a PATH policy, not an OS sandbox: the
+ *     executable resolved via PATH is not confined, and an
+ *     allowed-but-malicious tool can still write inside the workspace.
+ *   - No CWD program resolution on Windows (issue #1380): the spawn passes
+ *     an explicit absolute lpApplicationName — bare names resolve through
+ *     the child's PATH only, and empty PATH entries (the CWD convention)
+ *     are skipped, so a planted .\name.exe never executes.
  ***************************************************************************/
 #pragma once
 
