@@ -323,6 +323,26 @@ TEST_CASE( "workspace effect policy contains resolved execution effects (issue #
         REQUIRE_FALSE( result.started );
         REQUIRE( result.refusedByPolicy );
     }
+    SECTION( "relative .. argv[0] is a path fragment and is refused (#1380)" )
+    {
+        // argv[0] names a program; while it is an absolute system install or
+        // a bare PATH name it stays exempt (the external-tool surface). A
+        // relative program containing ".." is a location and gets the same
+        // containment check as any other argument.
+        ExternalProcessRequest request;
+        request.argv = { "../../../outside/evil-tool", "-n", "ok" };
+        request.workingDirectory = root + "/inside";
+        const auto result = ExternalProcess::run( request );
+        REQUIRE_FALSE( result.started );
+        REQUIRE( result.refusedByPolicy );
+        REQUIRE( result.error.find( "program path" ) != std::string::npos );
+    }
+    SECTION( "absolute system argv[0] stays the exempt program surface (#1380)" )
+    {
+        const auto result = runEcho( root );
+        REQUIRE( result.exitedCleanly() );
+        REQUIRE_FALSE( result.refusedByPolicy );
+    }
 
     fs::remove_all( root );
     fs::remove_all( outside );

@@ -44,8 +44,11 @@ to spawn — before any process exists, `refusedByPolicy=true`, stable code
 `E5005 workspace_escape` — when any RESOLVED execution effect escapes:
 
 - the resolved working directory (manifest constant or params value);
-- any argv element except `argv[0]` that is an absolute path or contains
-  `..` and resolves outside the workspace;
+- any argv element that is an absolute path or contains `..` and resolves
+  outside the workspace — including `argv[0]` when it is a RELATIVE path
+  containing `..` (a path fragment, not a program name; issue #1380). An
+  absolute `argv[0]` (a system install) and a bare PATH name stay exempt:
+  they name the program, not a workspace location;
 - any `environment` value that is an absolute path outside the workspace;
 - declared output publish targets (checked at the operator layer, since the
   host — not the child — performs the transactional rename).
@@ -60,9 +63,12 @@ manifest constant — manifest constants cannot bypass it (issue #757).
 - No OS sandbox / seccomp: native plugins and external processes run with
   the privileges of the user. The permission declaration makes the risk
   visible; it is not a containment mechanism. The workspace effect policy is
-  a PATH policy, not isolation: PATH-resolved executables are not confined
-  (`argv[0]` is exempt), and an allowed tool can still write inside the
+  a PATH policy, not isolation: PATH-resolved executables are not confined,
+  and an allowed tool can still write inside the
   workspace — the boundary constrains WHERE effects land, not WHAT an
-  allowed effect can do.
+  allowed effect can do. On Windows the spawn passes an explicit absolute
+  `lpApplicationName` (issue #1380): bare program names resolve through the
+  child's PATH only — empty PATH entries and the current directory are never
+  searched, so a planted `.\name.exe` cannot execute.
 - No resource cgroup limits. Timeout + output caps bound the practical
   blast radius.

@@ -123,7 +123,7 @@ std::string workspaceEffectEscape( const ExternalProcessRequest &request )
                     : std::filesystem::current_path().generic_string() + "/"
                           + request.workingDirectory )
             : std::filesystem::current_path().generic_string();
-    for ( size_t index = 1; index < request.argv.size(); ++index )
+    for ( size_t index = 0; index < request.argv.size(); ++index )
     {
         const std::string &argument = request.argv[index];
         if ( argument.empty() )
@@ -136,9 +136,17 @@ std::string workspaceEffectEscape( const ExternalProcessRequest &request )
         {
             pathish = true;
             if ( !allowed( base + "/" + argument ) )
-                return "argument path escapes the workspace policy: " + argument;
+                return std::string( index == 0 ? "program path" : "argument path" )
+                    + " escapes the workspace policy: " + argument;
             continue;
         }
+        // argv[0] is exempt ONLY while it names a program rather than a
+        // location (#1380): an absolute system install or a bare PATH name
+        // is the documented external-tool surface, but a RELATIVE program
+        // containing ".." is a path fragment and got the same containment
+        // check as any other argument above.
+        if ( index == 0 )
+            continue;
         if ( pathish && !allowed( argument ) )
             return "argument path escapes the workspace policy: " + argument;
     }
@@ -188,6 +196,107 @@ std::string wideToUtf8( const wchar_t *text )
     if ( size > 1 )
         WideCharToMultiByte( CP_UTF8, 0, text, -1, utf8.data(), size, nullptr, nullptr );
     return utf8;
+}
+
+/// Resolves the spawn's application to an ABSOLUTE path with the current
+/// directory excluded from the search (#1380). When lpApplicationName is
+/// null, Windows re-parses the first command-line token and its search
+/// order includes the parent's CURRENT DIRECTORY — a planted .\name.exe
+/// executes. Passing an explicit absolute lpApplicationName removes CWD
+/// from the resolution entirely: absolute programs pass through, programs
+/// with separators anchor at the child's (policy-gated) working
+/// directory, and bare names walk the child's PATH with empty entries
+/// (the CWD convention) skipped. Returns an empty string when a bare name
+/// is nowhere on the PATH.
+std::wstring resolveWindowsProgram( const std::string &program,
+                                    const std::vector<wchar_t> &environment,
+                                    const std::string &workingDirectory )
+{
+    const std::wstring wide = utf8ToWide( program );
+    const auto isDriveAbsolute = []( const std::wstring &candidate ) {
+        if ( candidate.empty() )
+            return false;
+        if ( candidate[0] == L'\\' )
+            return true; // rooted (also covers \\?\ and UNC after joins)
+        if ( candidate.size() < 3 )
+            return false;
+        const wchar_t drive = candidate[0];
+        const bool letter = ( drive >= L'a' && drive <= L'z' ) || ( drive >= L'A' && drive <= L'Z' );
+        return letter && candidate[1] == L':' && ( candidate[2] == L'\\' || candidate[2] == L'/' );
+    };
+    if ( isDriveAbsolute( wide ) )
+        return wide;
+    if ( program.find( '/' ) != std::string::npos
+         || program.find( '\\' ) != std::string::npos )
+    {
+        // Relative with separators: anchor at the child working directory
+        // (the workspace policy already bounds it); std::filesystem mirrors
+        // the host-cwd anchoring CreateProcessW applies to a relative
+        // lpCurrentDirectory.
+        std::error_code error;
+        std::filesystem::path anchored =
+            workingDirectory.empty()
+                ? std::filesystem::absolute( std::filesystem::path( program ), error )
+                : std::filesystem::absolute( std::filesystem::path( workingDirectory ) / program,
+                                             error );
+        if ( error )
+            return std::wstring();
+        return anchored.wstring();
+    }
+    // Bare name: walk the child's PATH only.
+    std::wstring searchPath;
+    for ( size_t index = 0; index + 1 < environment.size(); )
+    {
+        const std::wstring entry( environment.data() + index );
+        if ( entry.size() >= 5 && _wcsnicmp( entry.c_str(), L"PATH=", 5 ) == 0 )
+        {
+            searchPath = entry.substr( 5 );
+            break;
+        }
+        index += entry.size() + 1;
+    }
+    if ( searchPath.empty() )
+    {
+        const DWORD size = ::GetEnvironmentVariableW( L"PATH", nullptr, 0 );
+        if ( size > 0 )
+        {
+            searchPath.resize( size );
+            ::GetEnvironmentVariableW( L"PATH", searchPath.data(), size );
+            if ( !searchPath.empty() && searchPath.back() == L'\0' )
+                searchPath.pop_back();
+        }
+    }
+    const bool hasExtension = wide.find( L'.' ) != std::wstring::npos;
+    size_t start = 0;
+    while ( start <= searchPath.size() )
+    {
+        const size_t next = searchPath.find( L';', start );
+        const size_t end = next == std::wstring::npos ? searchPath.size() : next;
+        const std::wstring dir = searchPath.substr( start, end - start );
+        // Empty PATH entries mean the current directory — skipped: that is
+        // exactly the resolution this function exists to prevent.
+        if ( !dir.empty() )
+        {
+            const bool tryExeSuffix = !hasExtension;
+            const std::wstring exact = dir + L"\\" + wide;
+            const DWORD attributes = ::GetFileAttributesW( exact.c_str() );
+            if ( attributes != INVALID_FILE_ATTRIBUTES
+                 && !( attributes & FILE_ATTRIBUTE_DIRECTORY ) )
+                return exact;
+            if ( tryExeSuffix )
+            {
+                const std::wstring withExe = exact + L".exe";
+                const DWORD exeAttributes = ::GetFileAttributesW( withExe.c_str() );
+                if ( exeAttributes != INVALID_FILE_ATTRIBUTES
+                     && !( exeAttributes & FILE_ATTRIBUTE_DIRECTORY ) )
+                    return withExe;
+            }
+        }
+        if ( next == std::wstring::npos )
+            break;
+        start = next + 1;
+    }
+    return std::wstring();
 }
 
 /// Quotes one argv element with MSVCRT command-line rules: backslash runs
@@ -345,11 +454,31 @@ bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::s
          && program.find( ':' ) == std::string::npos )
     {
         // Bare name: verify presence on PATH for diagnostics (the security
-        // boundary is argv-only spawn, never this check).
+        // boundary is argv-only spawn, never this check). The search uses an
+        // EXPLICIT path — SearchPathW with a null path searches the current
+        // directory FIRST, which is exactly the resolution the spawn itself
+        // no longer performs (#1380); diagnostics must not report a
+        // CWD-planted executable as found.
+        DWORD pathSize = ::GetEnvironmentVariableW( L"PATH", nullptr, 0 );
+        std::wstring explicitPath;
+        if ( pathSize > 0 )
+        {
+            explicitPath.resize( pathSize );
+            ::GetEnvironmentVariableW( L"PATH", explicitPath.data(), pathSize );
+            if ( !explicitPath.empty() && explicitPath.back() == L'\0' )
+                explicitPath.pop_back();
+        }
+        if ( explicitPath.empty() )
+        {
+            // No PATH at all: a bare name has nothing to resolve against
+            // (and the current directory must not stand in for it).
+            error = "program '" + program + "' not found in PATH";
+            return false;
+        }
         wchar_t pathBuffer[ MAX_PATH ];
         std::wstring bare = utf8ToWide( program );
         wchar_t *filePart = nullptr;
-        DWORD searched = ::SearchPathW( nullptr, bare.c_str(), L".exe",
+        DWORD searched = ::SearchPathW( explicitPath.c_str(), bare.c_str(), L".exe",
                                         MAX_PATH, pathBuffer, &filePart );
         if ( searched >= MAX_PATH )
         {
@@ -360,7 +489,7 @@ bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::s
             const DWORD required = searched + 1;
             std::wstring longPath( required, L'\0' );
             const DWORD retried =
-                ::SearchPathW( nullptr, bare.c_str(), L".exe", required,
+                ::SearchPathW( explicitPath.c_str(), bare.c_str(), L".exe", required,
                                longPath.data(), &filePart );
             if ( retried == 0 || retried >= required )
             {
@@ -487,6 +616,23 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     const std::wstring workingDirectory =
         request.workingDirectory.empty() ? std::wstring() : utf8ToWide( request.workingDirectory );
 
+    // #1380: an explicit absolute lpApplicationName takes the current
+    // directory out of the program resolution entirely (the command line
+    // below still carries the caller's argv[0], so the child's $0 is
+    // unchanged).
+    const std::wstring applicationName =
+        resolveWindowsProgram( request.argv.front(), environment, request.workingDirectory );
+    if ( applicationName.empty() )
+    {
+        result.error = "program '" + request.argv.front()
+                       + "' not found in PATH (the current directory is never searched)";
+        ::CloseHandle( stdoutRead );
+        ::CloseHandle( stderrRead );
+        if ( job )
+            ::CloseHandle( job );
+        return result;
+    }
+
     PROCESS_INFORMATION processInfo;
     ZeroMemory( &processInfo, sizeof( processInfo ) );
     // CREATE_SUSPENDED: assign the job before the first instruction runs, so
@@ -496,7 +642,8 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
                                 | EXTENDED_STARTUPINFO_PRESENT;
     const BOOL created =
         attributesOk
-            ? ::CreateProcessW( nullptr, commandWide.data(), nullptr, nullptr, TRUE,
+            ? ::CreateProcessW( applicationName.c_str(), commandWide.data(), nullptr, nullptr,
+                                TRUE,
                                 creationFlags,
                                 environment.empty() ? nullptr : environment.data(),
                                 workingDirectory.empty() ? nullptr : workingDirectory.c_str(),
