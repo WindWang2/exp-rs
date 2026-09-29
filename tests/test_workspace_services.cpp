@@ -574,6 +574,11 @@ TEST_CASE( "#1153: destroying ImportCenter mid-scan cannot deadlock the owner th
     // owner thread that starts a scan and is destroyed WITHOUT ever pumping
     // must complete its destruction under a deadline (the worker observes
     // cancel() inside the latch wait).
+    // The application must be born on the main thread: run on its own (ctest
+    // runs one case per process) the Fixture below would otherwise create the
+    // function-static QCoreApplication on the async worker, and exit() then
+    // destroys it after that thread is gone (SEGFAULT in ~QCoreApplication).
+    testApp();
     std::future<bool> teardown = std::async( std::launch::async, [] {
         Fixture fx;
         QTemporaryDir dir;

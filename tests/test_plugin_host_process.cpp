@@ -15,10 +15,12 @@
 
 #include "plugins/host/plugin_host_process_runtime.h"
 #include "plugins/host/plugin_host_session.h"
+#include "support/exprs_test_env.h"
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <future>
 
 #ifdef _WIN32
@@ -38,7 +40,37 @@ using namespace exprs;
 
 namespace {
 
-const char *kFixtureDir = SICNU_TEST_ISOLATION_PLUGIN_DIR;
+/// Binary-wide pid-unique user plugin root: the Stack below persists the
+/// enable/disable index, which otherwise lands in the REAL
+/// $HOME/sicnu_geo_rs/plugins.index.json shared by every parallel process
+/// (issue #1364 cross-process trampling class).
+const exprs_test::UserRootRedirect kUserRootRedirected;
+
+/// A per-process COPY of the built isolation fixture. writeManifest() and
+/// the refresh cases rewrite plugin.json; doing that in the shared build-tree
+/// dir let parallel ctest processes of this binary read each other's
+/// half-written manifests ("E3001: unknown plugin") (issue #1364).
+const exprs_test::ScratchGuard kFixtureScratch{ "exprs_test_isolation_copy" };
+
+std::string privateFixtureCopy()
+{
+    const std::string dir = kFixtureScratch.path + "/isolation_plugin";
+    std::error_code ec;
+    std::filesystem::create_directories( dir, ec );
+    std::filesystem::copy( SICNU_TEST_ISOLATION_PLUGIN_DIR, dir,
+                           std::filesystem::copy_options::recursive
+                             | std::filesystem::copy_options::overwrite_existing,
+                           ec );
+    if ( ec )
+    {
+        std::fprintf( stderr, "cannot copy the isolation fixture into %s: %s\n", dir.c_str(),
+                      ec.message().c_str() );
+        std::abort();
+    }
+    return dir;
+}
+
+const std::string kFixtureDir = privateFixtureCopy();
 const char *kWorkerPath = SICNU_TEST_PLUGIN_HOST_WORKER;
 const char *kPluginId = "org.exprs.test.isolation-plugin";
 

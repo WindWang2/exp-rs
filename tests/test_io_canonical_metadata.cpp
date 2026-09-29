@@ -19,6 +19,11 @@ using Catch::Approx;
 #include <mutex>
 #include <fstream>
 #include <string>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -96,16 +101,37 @@ std::string writeRichGeoTiff( const std::string &dir )
   return path;
 }
 
+long sicnuTestPid()
+{
+#ifdef _WIN32
+  return static_cast<long>( _getpid() );
+#else
+  return static_cast<long>( getpid() );
+#endif
+}
+
 std::string tempDir()
 {
   static std::string dir;
   if ( dir.empty() )
   {
-    const auto base = fs::temp_directory_path() / "sicnu_io_test_canonical";
+    // Per-process: ctest runs every case in its own process in parallel, and
+    // a shared directory let one case's remove_all delete another's fixture.
+    const auto base = fs::temp_directory_path()
+                      / ( "sicnu_io_test_canonical_" + std::to_string( sicnuTestPid() ) );
     std::error_code ec;
     fs::remove_all( base, ec ); // idempotent suites
     fs::create_directories( base );
     dir = base.string();
+    static const struct Cleanup
+    {
+      fs::path path;
+      ~Cleanup()
+      {
+        std::error_code ignored;
+        fs::remove_all( path, ignored );
+      }
+    } cleanup{ base };
   }
   return dir;
 }
