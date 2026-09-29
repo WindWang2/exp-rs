@@ -88,10 +88,26 @@ std::string sha256OfFile( const QString &path, long long *bytes )
   return std::string( hash.result().toHex().constData() );
 }
 
-/// Bare, filesystem-safe page file stem: the filename expression may
-/// evaluate to anything, so characters outside [A-Za-z0-9._- ] collapse to
-/// '_' (empty/unsafe results fall back to the caller-provided fallback).
-QString sanitizePageStem( const QString &raw, const QString &fallback )
+/// Feature geometry bounding box in the coverage layer CRS (null when the
+/// feature has no geometry).
+Json::Value featureExtentJson( const QgsFeature &feature, const QgsVectorLayer *layer )
+{
+  Json::Value extent( Json::nullValue );
+  if ( !feature.hasGeometry() || feature.geometry().isEmpty() )
+    return extent;
+  const QgsRectangle box = feature.geometry().boundingBox();
+  extent = Json::Value( Json::objectValue );
+  extent["x_min"] = box.xMinimum();
+  extent["y_min"] = box.yMinimum();
+  extent["x_max"] = box.xMaximum();
+  extent["y_max"] = box.yMaximum();
+  extent["crs"] = layer ? layer->crs().authid().toStdString() : std::string();
+  return extent;
+}
+
+} // namespace
+
+QString sanitizeFileStem( const QString &raw, const QString &fallback )
 {
   QString stem = raw.trimmed();
   QString safe;
@@ -111,25 +127,6 @@ QString sanitizePageStem( const QString &raw, const QString &fallback )
     return fallback;
   return safe;
 }
-
-/// Feature geometry bounding box in the coverage layer CRS (null when the
-/// feature has no geometry).
-Json::Value featureExtentJson( const QgsFeature &feature, const QgsVectorLayer *layer )
-{
-  Json::Value extent( Json::nullValue );
-  if ( !feature.hasGeometry() || feature.geometry().isEmpty() )
-    return extent;
-  const QgsRectangle box = feature.geometry().boundingBox();
-  extent = Json::Value( Json::objectValue );
-  extent["x_min"] = box.xMinimum();
-  extent["y_min"] = box.yMinimum();
-  extent["x_max"] = box.xMaximum();
-  extent["y_max"] = box.yMaximum();
-  extent["crs"] = layer ? layer->crs().authid().toStdString() : std::string();
-  return extent;
-}
-
-} // namespace
 
 std::vector<std::string> validateMapExportRequest( const QgsPrintLayout *layout,
                                                    const MapExportRequest &request )
@@ -383,7 +380,7 @@ MapAtlasExportResult exportMapAtlas( QgsPrintLayout *layout, const MapAtlasExpor
     const QgsFeature feature = currentFeature;
     const QString label = atlas->currentFilename();
     const QString stem =
-      sanitizePageStem( label, QStringLiteral( "p%1" ).arg( index + 1 ) );
+      sanitizeFileStem( label, QStringLiteral( "p%1" ).arg( index + 1 ) );
     QString unique = stem;
     int disambiguator = 2;
     while ( usedStems.contains( unique.toLower() ) )

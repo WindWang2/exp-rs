@@ -4,6 +4,7 @@
 #include "../cartography/chart_registry.h"
 #include "../cartography/composition.h"
 #include "../cartography/design_tokens.h"
+#include "../cartography/export.h"
 #include "../cartography/registry.h"
 #include "../layout_tools/layout_service.h"
 #include "../workspace_state.h"
@@ -921,8 +922,14 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   // Rendered chart/colorbar PNGs are layout-scoped so two layouts cannot
   // clobber each other's pictures when item ids coincide. Files live in a
   // session temp subdir (the OS tmpdir reaper bounds accumulation).
-  const QString tempDirPath = QDir::temp().filePath(
-    QStringLiteral( "sicnu-cartography-%1" ).arg( QString::fromStdString( spec["layout_name"].asString() ) ) );
+  // layout_name and item ids are spec-controlled strings spliced into a
+  // path: they pass through sanitizeFileStem first, where every path
+  // separator (and any other traversal-capable byte) collapses, so the
+  // mkpath/write below cannot leave the temp root (#1381).
+  const QString layoutStem = sicnu::agent::cartography::sanitizeFileStem(
+    QString::fromStdString( spec["layout_name"].asString() ), QStringLiteral( "layout" ) );
+  const QString tempDirPath =
+    QDir::temp().filePath( QStringLiteral( "sicnu-cartography-%1" ).arg( layoutStem ) );
   QDir().mkpath( tempDirPath );
   QString chartError;
   QString chartPath;
@@ -1001,8 +1008,9 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       // file, then land as picture items.
       chartPath = QDir( tempDirPath ).filePath(
         QStringLiteral( "sicnu-chart-%1-%2.png" )
-          .arg( QString::fromStdString( spec["layout_name"].asString() ),
-                QString::fromStdString( chartItem["id"].asString() ) ) );
+          .arg( layoutStem,
+                sicnu::agent::cartography::sanitizeFileStem(
+                  QString::fromStdString( chartItem["id"].asString() ), QStringLiteral( "chart" ) ) ) );
       if ( sicnu::agent::cartography::renderChartToFile( chart, chartPath, &chartError ) )
       {
         props["path"] = chartPath.toStdString();
@@ -1044,8 +1052,9 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         "typography.styles.caption.size_pt", 8.0 );
     const QString path = QDir( tempDirPath ).filePath(
       QStringLiteral( "sicnu-colorbar-%1-%2.png" )
-        .arg( QString::fromStdString( spec["layout_name"].asString() ),
-              QString::fromStdString( colorbar["id"].asString() ) ) );
+        .arg( layoutStem,
+              sicnu::agent::cartography::sanitizeFileStem(
+                QString::fromStdString( colorbar["id"].asString() ), QStringLiteral( "colorbar" ) ) ) );
     if ( sicnu::agent::cartography::renderColorbarToFile( colorbar, path ) )
     {
       Json::Value props = rectToProps( colorbar["rect_mm"] );
