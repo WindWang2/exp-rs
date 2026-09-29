@@ -45,6 +45,7 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
+#include <QSignalSpy>
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
 

@@ -62,9 +62,17 @@ Canonical metadata inspection (raster/vector/multidimensional). Read-only; never
 
 Produce a Cloud Optimized GeoTIFF through the COG driver with a safe preset (lossless_scientific / visualization / categorical / continuous_float / sar), then validate before publishing. Categorical scientific products are lossless by policy.
 
+## Patch Metadata（operator.io.metadata_patch）
+
+Whitelist-validated metadata write-back (scale/offset/unit/nodata/role/wavelength/fwhm/color/SICNU_* stamps): validate-then-apply, update-capability gate, read-back verification, and finalize-manifest digest continuity.
+
 ## Reproject Raster（operator.io.reproject）
 
 Reproject a raster to a declared target CRS (io:warp with a minimal, explicit contract). The dataset CRS is read from the file; a CRS-less input is refused unless srcCrsOverride is declared by the caller.
+
+## Subdataset Inventory（operator.io.subdatasets）
+
+Enumerate HDF/NetCDF/VRT subdatasets (bounded, classified, redacted) and optionally project one selected subdataset into the canonical metadata model.
 
 ## Translate Raster（operator.io.translate）
 
@@ -73,6 +81,10 @@ Convert a raster between formats/subsets through GDAL translate; output is stage
 ## Convert Vector（operator.io.vector_convert）
 
 Convert vector data (GPKG/GeoJSON/Shapefile/FlatGeobuf) with optional declared CRS transform, attribute filter and clip box; streams in bounded batches.
+
+## Verify Dataset（operator.io.verify_dataset）
+
+Independent dataset integrity check: recompute the streamed SHA-256 against the finalize manifest sidecar and re-check the declared shape. Fails closed when the manifest is absent unless allowMissingManifest is set (absence is then reported, never green-washed).
 
 ## Warp Raster（operator.io.warp）
 
@@ -211,6 +223,14 @@ Band ratio (numerator/denominator) or RGB-to-IHS color transform.
 **适用**：矿物/植被比值特征、光照差异抑制。
 
 **局限**：分母为零需要保护
+
+## BRDF Normalization（operator.rs.brdf_normalization）
+
+Normalize optical reflectance from the observed sun/view geometry to a reference geometry (nadir view by default) with the Ross-Thick + Li-Sparse-Reciprocal kernels. Requires per-band kernel weights and sun/view angles (parameters or SICNU_* metadata); refuses when the geometry or weights are missing/nonphysical.
+
+## CEM Detector（operator.rs.cem_detection）
+
+Constrained energy minimization target detection against the scene correlation background: the target scores exactly 1.
 
 ## Change Detection (Model)（operator.rs.change）
 
@@ -399,6 +419,10 @@ Run an embedding model on a raster; writes the feature stack (aggregate=mean add
 **适用**：小样本分类（特征复用）、相似性检索。
 
 **局限**：嵌入域偏移影响下游任务
+
+## Endmember Analysis（operator.rs.endmember_analysis）
+
+Reduce an endmember set to non-redundant representatives (spectral-angle clustering), report the SAM matrix, and optionally project onto a sensor grid — as a provenance-carrying spectral table.
 
 ## Endmember Extraction (PPI)（operator.rs.endmember_extraction）
 
@@ -616,6 +640,10 @@ Flag window maxima or minima as 1/0.
 
 **适用**：特征点/树峰/热异常定位。
 
+## Local (Dual-Window) RX Anomaly Detection（operator.rs.local_rx_anomaly）
+
+Reed-Xiaoli distance to the local background (dual window with guard), with scaled diagonal loading and per-pixel quality counts.
+
 ## 3x3 Majority Filter（operator.rs.majority_filter）
 
 Apply a majority sliding-window filter to a classification raster to reduce noise.
@@ -788,6 +816,10 @@ Segment imagery into objects (teaching segmenter or OTB MeanShift).
 
 **局限**：单一尺度难以兼顾大小地物；过分割/欠分割都损害精度
 
+## OSP Detector（operator.rs.osp_detection）
+
+Orthogonal subspace projection target detection: suppresses the undesired signature subspace and projects the target onto what remains; interference scores exactly 0.
+
 ## Principal Component Analysis（operator.rs.pca）
 
 Compute PCA components of a multi-band raster and write them as a GeoTIFF.
@@ -834,6 +866,10 @@ Derive a cloud / cloud-shadow / snow mask from Landsat QA_PIXEL or Sentinel-2 SC
 
 **局限**：云影/薄云漏检是常态，可叠加阈值辅助
 
+## Quality Mosaic（operator.rs.quality_mosaic）
+
+Seam-lined, radiometrically balanced quality mosaic with per-pixel provenance, feather blending, tiled atomic output, overviews and a quality report.
+
 ## Radiometric Calibration（operator.rs.radiometric_calibration）
 
 Convert DN to radiance, TOA reflectance, or brightness temperature from Landsat MTL / Sentinel-2 MTD / generic GDAL scale-offset metadata.
@@ -843,6 +879,10 @@ Convert DN to radiance, TOA reflectance, or brightness temperature from Landsat 
 **适用**：所有定量处理前；跨期比较的基础。
 
 **假设**：产品元数据完整
+
+## Radiometric QA Flags（operator.rs.radiometric_qa）
+
+Derive per-pixel radiometric QA flags (saturation, negative, over-range, non-finite, cloud/shadow/snow propagation, QA_RADSAT saturation bits) for each band of a reflectance raster, written as uint16 flag bands with a summary report. Flags union across sources; 0 = clean pixel.
 
 ## Rasterize Vector（operator.rs.rasterize）
 
@@ -855,6 +895,10 @@ Remap integer class labels according to a recode mapping table.
 **原理**：按 provided 映射替换类别值，可合并类别。
 
 **适用**：分类体系转换、聚类簇→语义类别归并。
+
+## Image Registration（operator.rs.register_images）
+
+Cross-modal (optical-SAR) image registration with refusal semantics: match, fit, warp into the reference frame, and report CE90/residual-field quality. Refusals write nothing; low-confidence outputs are flagged.
 
 ## Continuous Regression (Model)（operator.rs.regress）
 
@@ -930,6 +974,10 @@ Detect change between two co-registered SAR scenes: log-ratio magnitude (dB) thr
 
 Estimate the residual global shift between a same-grid complex SLC pair (patch NCC, sub-pixel) and resample the slave onto the master by bilinear complex interpolation.
 
+## SAR Local Coregistration（operator.rs.sar_coregister_local）
+
+Estimate a local offset field between same-grid complex SLC rasters (patch NCC lattice with sub-pixel refinement and median filtering) and resample the slave onto the master.
+
 ## InSAR LOS Displacement（operator.rs.sar_displacement）
 
 Convert an unwrapped interferometric phase to line-of-sight displacement (metres) with an Itoh discontinuity quality diagnostic.
@@ -954,6 +1002,14 @@ Range-Doppler geocoding of a SAR scene onto a DEM map grid with real-geometry in
 
 Interferogram (s1·conj(s2)) and optional coherence from a co-registered complex SLC pair on the same grid, with an optional robust flat-earth ramp removal.
 
+## InSAR Network Inversion（operator.rs.sar_network_inversion）
+
+Solve per-epoch displacement and linear velocity from a connected pair network of unwrapped LOS displacement rasters (small-baseline linear inversion).
+
+## InSAR Pair Network（operator.rs.sar_pair_network）
+
+Build a time/space-baseline-constrained pair network from a scene truth stack (orbits, wavelengths, acquisition dates) with connectivity QA and typed fail-closed semantics.
+
 ## InSAR Phase Filter（operator.rs.sar_phase_filter）
 
 Goldstein-Werner spatial phase filtering of a complex interferogram (window size and alpha exponent configurable).
@@ -973,6 +1029,10 @@ Ratio, log-ratio or absolute log-difference magnitude between two co-registered 
 **假设**：两极化通道已配准且定标一致
 
 **局限**：零值分母需要 NoData 保护
+
+## InSAR Topographic Phase Removal（operator.rs.sar_remove_topographic_phase）
+
+Remove the DEM/orbit topographic phase from a complex interferogram using the rigorous per-pixel range-difference geometry of both scene orbits (not an approximation).
 
 ## SAR Speckle Filter（operator.rs.sar_speckle）
 
@@ -1098,6 +1158,14 @@ Remove foreground components smaller than a minimum area (pixels).
 
 **适用**：分类后处理的最小制图单元控制。
 
+## Solar Geometry（operator.rs.solar_geometry）
+
+Compute sun elevation/azimuth, solar declination, earth-sun distance and the inverse-square earth-sun factor from acquisition date/time and scene centre (Spencer 1971 / NOAA closed forms). Optionally writes SICNU_SUN_ZENITH, SICNU_SUN_AZIMUTH, SICNU_SUN_ELEVATION, SICNU_EARTH_SUN_FACTOR and SICNU_EARTH_SUN_DISTANCE_AU dataset metadata onto the input raster.
+
+## Sparse Unmixing (L1 + Non-negative)（operator.rs.sparse_unmixing）
+
+Sparse abundance estimation (L1 + non-negativity, optional sum-to-one penalty) with FISTA; supports overcomplete dictionaries.
+
 ## Spectral Band Select（operator.rs.spectral_band_select）
 
 Select or exclude raster bands by index or wavelength range; wavelength metadata is normalized to nm and propagated.
@@ -1138,6 +1206,14 @@ Resample spectra onto a target wavelength grid by linear interpolation.
 
 **局限**：窄特征可能被平滑掉
 
+## SID-SAM Hybrid Similarity（operator.rs.spectral_similarity）
+
+Hybrid spectral similarity combining SAM and SID (bounded product or classic tan form); classifies pixels to the most similar reference.
+
+## Spectral-Spatial Fuse（operator.rs.spectral_spatial_fuse）
+
+Fuse a spectral score raster with its local spatial consistency: a NoData-aware convex combination of the score and the valid window mean (or edge-preserving bilateral aggregate).
+
 ## Linear Spectral Unmixing（operator.rs.spectral_unmixing）
 
 Estimate per-pixel endmember abundances by linear spectral unmixing.
@@ -1149,6 +1225,10 @@ Estimate per-pixel endmember abundances by linear spectral unmixing.
 **假设**：端元光谱已知或已提取；线性混合假设成立
 
 **局限**：多次散射/非线性混合时误差大
+
+## Stack Registration（operator.rs.stack_register）
+
+Multi-scene stack registration: global translation least squares over pairwise observations with loop-closure drift metrics.
 
 ## Supervised Classification（operator.rs.supervised_classification）
 
@@ -1163,6 +1243,10 @@ Train or apply SVM/NormalBayes classification on multi-band rasters.
 **局限**：样本偏差直接进入模型；类别体系需互斥完备
 
 深入阅读：docs/processing/foundation-5.md
+
+## TCIMF Detector（operator.rs.tcimf_detection）
+
+Target-constrained interference-minimized filter: CEM with exact null constraints on undesired signatures (target scores 1, interference scores 0).
 
 ## Temporal Anomaly（operator.rs.temporal_anomaly）
 
@@ -1258,6 +1342,10 @@ Spectral index time series: computes NDVI/EVI/SAVI/NDWI/NDBI/MNDWI/NBR/NDRE/NDSI
 
 **适用**：物候/趋势分析的特征准备。
 
+## Temporal Model Select (Per-Segment Order + Breaks)（operator.rs.temporal_model_select）
+
+Bounded per-segment model selection for seasonal-trend series: every pixel's candidate grid {harmonic order 0..maxHarmonics} x {break budget 0..maxBreaks} is scored with AICc, BIC, or deterministic contiguous-block cross-validation, and the winner (exact ties resolve to the smallest model) is reported with its parameter count, score, and segments actually fitted. An explicit, bounded, explainable selection - NOT CCDC (no L1, no online per-element model update). Degenerate pixels (too few valid samples, no fittable candidate) report NaN - a refusal, never a fabricated model.
+
 ## Temporal Monitor（operator.rs.temporal_monitor）
 
 Per-pixel temporal monitoring: CUSUM and EWMA of standardized anomalies, or seasonal Mann-Kendall trend (calendar-month seasons).
@@ -1272,7 +1360,7 @@ Per-pixel temporal monitoring: CUSUM and EWMA of standardized anomalies, or seas
 
 ## Temporal Phenology Metrics（operator.rs.temporal_phenology）
 
-Seasonal phenology metrics per pixel from a vegetation-index time series: start/peak/end of season (SOS/POS/EOS, day-of-year), season length (LOS, days), amplitude, base level and the small integral of the index over the season. Threshold method: SOS/EOS are the first/last crossings of base + crossingFraction·amplitude inside the season window [seasonStartDoy, seasonEndDoy] (a window that wraps the year end is supported). Metrics are computed once per pixel over the whole series for the requested season window; pixels with fewer than minValidPerSeason valid in-season samples stay NoData. cycles=2 adds a second cycle window (double cropping): the complement of the first window or an explicit [season2StartDoy, season2EndDoy], reporting c2_<metric> bands plus a cycle_count band; per-year cycle metrics are the rs:temporal_region_features surface.
+Seasonal phenology metrics per pixel from a vegetation-index time series: start/peak/end of season (SOS/POS/EOS, day-of-year), season length (LOS, days), amplitude, base level, the small integral of the index over the season, and limb dynamics (WP4): green-up and senescence rates (mean slope between the 20% and 80% amplitude crossings, index units/day on the real day axis) plus the 50% midpoint day-of-year per limb — NoData when a crossing is not sampled inside the limb. Threshold method: SOS/EOS are the first/last crossings of base + crossingFraction·amplitude inside the season window [seasonStartDoy, seasonEndDoy] (a window that wraps the year end is supported). Metrics are computed once per pixel over the whole series for the requested season window; pixels with fewer than minValidPerSeason valid in-season samples stay NoData. cycles=2 adds a second cycle window (double cropping): the complement of the first window or an explicit [season2StartDoy, season2EndDoy], reporting c2_<metric> bands plus a cycle_count band; per-year cycle metrics are the rs:temporal_region_features surface.
 
 **原理**：以阈值/曲率法从平滑曲线判定 SOS/EOS/POS 与季节积分。
 
@@ -1282,6 +1370,10 @@ Seasonal phenology metrics per pixel from a vegetation-index time series: start/
 
 **局限**：双季作物需要多峰处理
 
+## Temporal Phenology Multi (Auto Cycles + Quality Flags)（operator.rs.temporal_phenology_multi）
+
+Phenology 2.0 with automatic cycle candidates: per pixel, cycle windows are proposed from the pixel's own seasonal component (peaks of the seasonalDecompose climatology, at most maxCyclesPerYear per year, merged by minimum span), wrapped windows count toward the HARVEST year (year of the window end), and every window is quality-gated - sample count, coverage, largest-gap fraction, amplitude share. Refused windows carry no metrics (no low-sample guessing). Outputs per cycle index the median-of-seasons SOS/POS/EOS/LOS/amplitude plus a valid flag, the cycle count (cropping-system indicator), and the refusal count.
+
 ## Temporal Region Features (ML Table)（operator.rs.temporal_region_features）
 
 Compute a typed per-region temporal feature table for ML / agent consumption: series quality (valid_fraction), distribution (mean/stddev/min/max), robust trend (Sen slope + Mann-Kendall p, or OLS), anomalies (most recent z-score, max |z|), change (break count, first break day, max magnitude from the joint harmonic+trend segmentation; optional disturbance onset and recovery), and multi-cycle phenology (per-cycle median across years of SOS/POS/EOS/LOS/amplitude/integral). Output is one CSV row per region with a versioned JSON schema sidecar (exp_rs_temporal_region_features/1) so label tables join by region_id.
@@ -1289,6 +1381,14 @@ Compute a typed per-region temporal feature table for ML / agent consumption: se
 ## Temporal Regularize (Regular Calendar)（operator.rs.temporal_regularize）
 
 Re-cast an irregular acquisition series onto a regular calendar (e.g. every 16 days, or monthly) so downstream series models see a uniform grid. Methods: nearest (closest observation within max_window_days, ties -> earlier), window_mean (mean of the observations inside the window), linear (time-weighted interpolation between the bracketing observations), whittaker (penalized smoother defined on the calendar grid; bridges data-free runs up to max_gap_nodes). No method extrapolates past the observed span. Every calendar point carries valid_count / filled_count provenance bands so synthetic values stay distinguishable from observed ones.
+
+## Temporal Optical+SAR Feature Fusion（operator.rs.temporal_sar_fusion）
+
+Feature-level fusion of already-coregistered optical and SAR temporal feature rasters. Both inputs must share the SAME pixel grid (width, height, geotransform, CRS); the operator verifies the grid signature and concatenates bands as opt_<name> / sar_<name> with fusion provenance metadata. Registration, resampling and reprojection are NOT performed — a grid mismatch is a typed error, keeping 'coregister' and 'fuse' as separate, explicit steps.
+
+## Temporal Seasonal Breaks (Attribution + CI)（operator.rs.temporal_seasonal_breaks）
+
+Seasonal-component break detection with trend/seasonal attribution: segments each pixel with the shared joint harmonic+trend kernel, then tests every break with nested weighted-LS F comparisons — did the seasonal basis (harmonic sin/cos amplitude/phase) change beyond the trend change? Per break: attribution kind, day offset, fitted-level jump, seasonal coefficient shift, harmonic-1 amplitude/phase change, F statistic and p-value. BFAST-inspired seasonal-change testing - NOT full BFAST (no iterative alternation) and NOT CCDC (no L1 / online model update). Optional per-break bootstrap confidence intervals on the level jump (seeded, deterministic; refused - never fabricated - when too many refits fail).
 
 ## Temporal Sen Trend（operator.rs.temporal_sen_trend）
 
@@ -1356,6 +1456,18 @@ Depression filling (priority-flood), D8 flow directions, and drainage accumulati
 
 **局限**：大型平坦/城市区 D8 结果呈平行条纹；填洼会改变原始高程
 
+## Terrain Landform（operator.rs.terrain_landform）
+
+Multiscale topographic position (TPI), Weiss landform classes, and geomorphon form patterns over a DEM.
+
+## Terrain Solar（operator.rs.terrain_solar）
+
+Terrain shadow duration over a weighted sun track and hillshade series; sun positions from an explicit track or generated from date/latitude in local solar time.
+
+## Terrain Viewshed（operator.rs.terrain_viewshed）
+
+Line-of-sight viewshed (single or cumulative observers) over a DEM with optional Earth-curvature/refraction correction.
+
 ## Threshold Raster（operator.rs.threshold_raster）
 
 Threshold a raster into a binary mask (manual/Otsu/percentile/statistical).
@@ -1395,4 +1507,3 @@ Import a Ziyuan-3 L1A product (TLC/NAD/FWD/BWD) into a multi-band GeoTIFF with b
 **假设**：完整产品包
 
 **局限**：ZY-1 02D/02E AHSI 高光谱不支持
-

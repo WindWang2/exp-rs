@@ -89,7 +89,7 @@
     "limitations" : 
     [
       "Output band count shrinks by the derivative order (B\u22121 / B\u22122); output band b carries the midpoint wavelength of its input pair.",
-      "NaN pixels propagate to every output derivative that touches them."
+      "NaN pixels propagate to every output derivative that touches them; declared NoData sentinels are NaN-ized per band before differencing and therefore propagate identically."
     ],
     "modality" : 
     [

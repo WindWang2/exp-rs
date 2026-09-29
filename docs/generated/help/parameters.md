@@ -194,6 +194,9 @@
 ### parameter.io.cube_window.output
 
 
+### parameter.io.cube_window.window
+
+
 ### parameter.io.doctor.includeStatistics
 
 
@@ -206,7 +209,16 @@
 ### parameter.io.inspect.input
 
 
+### parameter.io.make_cog.blocksize
+
+
 ### parameter.io.make_cog.creationOptions
+
+
+### parameter.io.make_cog.deflateLevel
+
+
+### parameter.io.make_cog.deterministic
 
 
 ### parameter.io.make_cog.input
@@ -215,7 +227,16 @@
 ### parameter.io.make_cog.output
 
 
+### parameter.io.make_cog.overviews
+
+
 ### parameter.io.make_cog.preset
+
+
+### parameter.io.metadata_patch.input
+
+
+### parameter.io.metadata_patch.patches
 
 
 ### parameter.io.reproject.input
@@ -231,6 +252,15 @@
 
 
 ### parameter.io.reproject.targetCrs
+
+
+### parameter.io.subdatasets.input
+
+
+### parameter.io.subdatasets.maxEntries
+
+
+### parameter.io.subdatasets.select
 
 
 ### parameter.io.translate.bands
@@ -279,6 +309,12 @@
 
 
 ### parameter.io.vector_convert.where
+
+
+### parameter.io.verify_dataset.allowMissingManifest
+
+
+### parameter.io.verify_dataset.input
 
 
 ### parameter.io.warp.bounds
@@ -467,6 +503,9 @@
 ### parameter.otb.svm_classification.vector
 
 
+### parameter.rs.ace.background
+
+
 ### parameter.rs.ace.input
 
 
@@ -624,6 +663,60 @@
 
 
 ### parameter.rs.band_ratio.redBand
+
+
+### parameter.rs.brdf_normalization.f_geo
+
+
+### parameter.rs.brdf_normalization.f_vol
+
+
+### parameter.rs.brdf_normalization.input
+
+
+### parameter.rs.brdf_normalization.output
+
+
+### parameter.rs.brdf_normalization.ref_relative_azimuth
+
+
+### parameter.rs.brdf_normalization.ref_view_zenith
+
+
+### parameter.rs.brdf_normalization.sun_azimuth
+
+
+### parameter.rs.brdf_normalization.sun_zenith
+
+
+### parameter.rs.brdf_normalization.view_azimuth
+
+
+### parameter.rs.brdf_normalization.view_zenith
+
+
+### parameter.rs.cem_detection.background
+
+
+### parameter.rs.cem_detection.input
+
+
+### parameter.rs.cem_detection.libraryMaterials
+
+
+### parameter.rs.cem_detection.libraryPath
+
+
+### parameter.rs.cem_detection.loading
+
+
+### parameter.rs.cem_detection.output
+
+
+### parameter.rs.cem_detection.target
+
+
+### parameter.rs.cem_detection.targetRef
 
 
 ### parameter.rs.change.bandsA
@@ -1008,6 +1101,27 @@
 ### parameter.rs.embedding.tta
 
 
+### parameter.rs.endmember_analysis.angleMatrix
+
+
+### parameter.rs.endmember_analysis.endmembersRef
+
+
+### parameter.rs.endmember_analysis.mergeAngleDegrees
+
+
+### parameter.rs.endmember_analysis.output
+
+
+### parameter.rs.endmember_analysis.ppiCounts
+
+
+### parameter.rs.endmember_analysis.requireFullCoverage
+
+
+### parameter.rs.endmember_analysis.sensor
+
+
 ### parameter.rs.endmember_extraction.endmembersOut
 
 
@@ -1341,6 +1455,9 @@
 - 推荐值：从 1.0 起步；出现光晕/过锐时降低。
 - 权衡：权重越高细节越强，光谱失真与振铃风险越大。
 
+### parameter.rs.image_fusion.qualityReport
+
+
 ### parameter.rs.image_fusion.redIdx
 
 
@@ -1443,6 +1560,30 @@
 ### parameter.rs.local_extrema.window
 
 
+### parameter.rs.local_rx_anomaly.covariance
+
+
+### parameter.rs.local_rx_anomaly.innerWindow
+
+
+### parameter.rs.local_rx_anomaly.input
+
+
+### parameter.rs.local_rx_anomaly.loading
+
+
+### parameter.rs.local_rx_anomaly.minSamples
+
+
+### parameter.rs.local_rx_anomaly.outerWindow
+
+
+### parameter.rs.local_rx_anomaly.output
+
+
+### parameter.rs.local_rx_anomaly.qualityOut
+
+
 ### parameter.rs.majority_filter.input
 
 
@@ -1450,6 +1591,9 @@
 
 
 ### parameter.rs.majority_filter.output
+
+
+### parameter.rs.matched_filter.background
 
 
 ### parameter.rs.matched_filter.input
@@ -1829,6 +1973,30 @@
 ### parameter.rs.obia_segment.threshold
 
 
+### parameter.rs.osp_detection.input
+
+
+### parameter.rs.osp_detection.interference
+
+
+### parameter.rs.osp_detection.interferenceRef
+
+
+### parameter.rs.osp_detection.libraryMaterials
+
+
+### parameter.rs.osp_detection.libraryPath
+
+
+### parameter.rs.osp_detection.output
+
+
+### parameter.rs.osp_detection.target
+
+
+### parameter.rs.osp_detection.targetRef
+
+
 ### parameter.rs.pca.input
 
 
@@ -1892,6 +2060,39 @@
 ### parameter.rs.qa_mask.source
 
 
+### parameter.rs.quality_mosaic.balancing
+
+
+### parameter.rs.quality_mosaic.bandCount
+
+
+### parameter.rs.quality_mosaic.blending
+
+
+### parameter.rs.quality_mosaic.inputs
+
+
+### parameter.rs.quality_mosaic.method
+
+
+### parameter.rs.quality_mosaic.output
+
+
+### parameter.rs.quality_mosaic.overviews
+
+
+### parameter.rs.quality_mosaic.provenance
+
+
+### parameter.rs.quality_mosaic.qualityWeights
+
+
+### parameter.rs.quality_mosaic.reportOutput
+
+
+### parameter.rs.quality_mosaic.seamline
+
+
 ### parameter.rs.radiometric_calibration.bands
 
 
@@ -1905,6 +2106,27 @@
 
 
 ### parameter.rs.radiometric_calibration.unit
+
+
+### parameter.rs.radiometric_qa.cloud_mask
+
+
+### parameter.rs.radiometric_qa.input
+
+
+### parameter.rs.radiometric_qa.mask_flag
+
+
+### parameter.rs.radiometric_qa.output
+
+
+### parameter.rs.radiometric_qa.qa_radsat_band
+
+
+### parameter.rs.radiometric_qa.qa_radsat_bits
+
+
+### parameter.rs.radiometric_qa.saturation_level
 
 
 ### parameter.rs.rasterize.allTouched
@@ -1941,6 +2163,27 @@
 
 
 ### parameter.rs.recode.recode_map
+
+
+### parameter.rs.register_images.maxDim
+
+
+### parameter.rs.register_images.metric
+
+
+### parameter.rs.register_images.output
+
+
+### parameter.rs.register_images.reference
+
+
+### parameter.rs.register_images.reportPath
+
+
+### parameter.rs.register_images.resampling
+
+
+### parameter.rs.register_images.source
 
 
 ### parameter.rs.regress.bands
@@ -2054,6 +2297,9 @@
 ### parameter.rs.sar_calibrate.calibrationA
 
 
+### parameter.rs.sar_calibrate.calibrationLut
+
+
 ### parameter.rs.sar_calibrate.incidenceDeg
 
 
@@ -2150,6 +2396,39 @@
 ### parameter.rs.sar_coregister.slaveBand
 
 
+### parameter.rs.sar_coregister_local.master
+
+
+### parameter.rs.sar_coregister_local.masterBand
+
+
+### parameter.rs.sar_coregister_local.medianRadius
+
+
+### parameter.rs.sar_coregister_local.minPeakRatio
+
+
+### parameter.rs.sar_coregister_local.offsetFieldOutput
+
+
+### parameter.rs.sar_coregister_local.output
+
+
+### parameter.rs.sar_coregister_local.patchSize
+
+
+### parameter.rs.sar_coregister_local.patchStride
+
+
+### parameter.rs.sar_coregister_local.searchRadius
+
+
+### parameter.rs.sar_coregister_local.slave
+
+
+### parameter.rs.sar_coregister_local.slaveBand
+
+
 ### parameter.rs.sar_displacement.band
 
 
@@ -2222,6 +2501,57 @@
 ### parameter.rs.sar_interferogram.slaveBand
 
 
+### parameter.rs.sar_network_inversion.displacementInputs
+
+
+### parameter.rs.sar_network_inversion.displacementOutput
+
+
+### parameter.rs.sar_network_inversion.epochTemporalYears
+
+
+### parameter.rs.sar_network_inversion.maskStrategy
+
+
+### parameter.rs.sar_network_inversion.maxPatterns
+
+
+### parameter.rs.sar_network_inversion.pairWeights
+
+
+### parameter.rs.sar_network_inversion.pairs
+
+
+### parameter.rs.sar_network_inversion.rmsOutput
+
+
+### parameter.rs.sar_network_inversion.velocityOutput
+
+
+### parameter.rs.sar_pair_network.allowDisconnected
+
+
+### parameter.rs.sar_pair_network.maxPerpendicularM
+
+
+### parameter.rs.sar_pair_network.maxTemporalDays
+
+
+### parameter.rs.sar_pair_network.minPerpendicularM
+
+
+### parameter.rs.sar_pair_network.outputFile
+
+
+### parameter.rs.sar_pair_network.referenceIdx
+
+
+### parameter.rs.sar_pair_network.scenes
+
+
+### parameter.rs.sar_pair_network.strategy
+
+
 ### parameter.rs.sar_phase_filter.alpha
 
 
@@ -2289,6 +2619,33 @@
 
 
 ### parameter.rs.sar_ratio.sensor
+
+
+### parameter.rs.sar_remove_topographic_phase.band
+
+
+### parameter.rs.sar_remove_topographic_phase.dem
+
+
+### parameter.rs.sar_remove_topographic_phase.demBand
+
+
+### parameter.rs.sar_remove_topographic_phase.interferogram
+
+
+### parameter.rs.sar_remove_topographic_phase.masterOrbitStates
+
+
+### parameter.rs.sar_remove_topographic_phase.output
+
+
+### parameter.rs.sar_remove_topographic_phase.slaveOrbitStates
+
+
+### parameter.rs.sar_remove_topographic_phase.topoPhaseOutput
+
+
+### parameter.rs.sar_remove_topographic_phase.wavelengthUm
 
 
 ### parameter.rs.sar_speckle.band
@@ -2535,6 +2892,15 @@
 ### parameter.rs.sar_unwrap.provider
 
 
+### parameter.rs.sar_unwrap.providerArgs
+
+
+### parameter.rs.sar_unwrap.providerBin
+
+
+### parameter.rs.sar_unwrap.providerTimeoutSec
+
+
 ### parameter.rs.sar_unwrap.qualityBand
 
 
@@ -2617,6 +2983,63 @@
 
 
 ### parameter.rs.sieve.output
+
+
+### parameter.rs.solar_geometry.date
+
+
+### parameter.rs.solar_geometry.input
+
+
+### parameter.rs.solar_geometry.latitude
+
+
+### parameter.rs.solar_geometry.longitude
+
+
+### parameter.rs.solar_geometry.utc_time
+
+
+### parameter.rs.solar_geometry.write_metadata
+
+
+### parameter.rs.sparse_unmixing.bands
+
+
+### parameter.rs.sparse_unmixing.collinearAngleDegrees
+
+
+### parameter.rs.sparse_unmixing.endmembers
+
+
+### parameter.rs.sparse_unmixing.endmembersRef
+
+
+### parameter.rs.sparse_unmixing.errorOut
+
+
+### parameter.rs.sparse_unmixing.input
+
+
+### parameter.rs.sparse_unmixing.lambda
+
+
+### parameter.rs.sparse_unmixing.libraryMaterials
+
+
+### parameter.rs.sparse_unmixing.libraryPath
+
+
+### parameter.rs.sparse_unmixing.maxIterations
+
+
+### parameter.rs.sparse_unmixing.output
+
+
+### parameter.rs.sparse_unmixing.sumToOnePenalty
+
+
+### parameter.rs.sparse_unmixing.tolerance
 
 
 ### parameter.rs.spectral_band_select.bands
@@ -2704,6 +3127,51 @@
 ### parameter.rs.spectral_resample.wavelengths
 
 
+### parameter.rs.spectral_similarity.bands
+
+
+### parameter.rs.spectral_similarity.form
+
+
+### parameter.rs.spectral_similarity.input
+
+
+### parameter.rs.spectral_similarity.libraryMaterials
+
+
+### parameter.rs.spectral_similarity.libraryPath
+
+
+### parameter.rs.spectral_similarity.output
+
+
+### parameter.rs.spectral_similarity.refs
+
+
+### parameter.rs.spectral_similarity.refsRef
+
+
+### parameter.rs.spectral_similarity.scoreOut
+
+
+### parameter.rs.spectral_spatial_fuse.beta
+
+
+### parameter.rs.spectral_spatial_fuse.input
+
+
+### parameter.rs.spectral_spatial_fuse.method
+
+
+### parameter.rs.spectral_spatial_fuse.output
+
+
+### parameter.rs.spectral_spatial_fuse.radius
+
+
+### parameter.rs.spectral_spatial_fuse.sigmaRange
+
+
 ### parameter.rs.spectral_unmixing.bands
 
 
@@ -2729,6 +3197,18 @@
 
 
 ### parameter.rs.spectral_unmixing.output
+
+
+### parameter.rs.stack_register.observations
+
+
+### parameter.rs.stack_register.reference
+
+
+### parameter.rs.stack_register.reportPath
+
+
+### parameter.rs.stack_register.scenes
 
 
 ### parameter.rs.supervised_classification.bands
@@ -2769,6 +3249,9 @@
 
 - 含义：输出各类别概率图。
 
+### parameter.rs.supervised_classification.rejectThreshold
+
+
 ### parameter.rs.supervised_classification.scale
 
 - 含义：特征缩放开关（SVM 建议）。
@@ -2788,6 +3271,42 @@
 
 - 含义：训练样本矢量图层（含类别字段）。
 - 推荐值：每类样本量 ≥ 特征维数的 10 倍；空间分布分散。
+
+### parameter.rs.supervised_classification.uncertaintyMeasure
+
+
+### parameter.rs.supervised_classification.uncertaintyOutput
+
+
+### parameter.rs.tcimf_detection.background
+
+
+### parameter.rs.tcimf_detection.input
+
+
+### parameter.rs.tcimf_detection.interference
+
+
+### parameter.rs.tcimf_detection.interferenceRef
+
+
+### parameter.rs.tcimf_detection.libraryMaterials
+
+
+### parameter.rs.tcimf_detection.libraryPath
+
+
+### parameter.rs.tcimf_detection.loading
+
+
+### parameter.rs.tcimf_detection.output
+
+
+### parameter.rs.tcimf_detection.target
+
+
+### parameter.rs.tcimf_detection.targetRef
+
 
 ### parameter.rs.temporal_anomaly.apply_qa_masking
 
@@ -2838,6 +3357,9 @@
 
 
 ### parameter.rs.temporal_breakpoints.collection
+
+
+### parameter.rs.temporal_breakpoints.compute_ci
 
 
 ### parameter.rs.temporal_breakpoints.duplicate_policy
@@ -3034,6 +3556,9 @@
 ### parameter.rs.temporal_gap_fill.output
 
 
+### parameter.rs.temporal_gap_fill.provenance_output
+
+
 ### parameter.rs.temporal_gap_fill.scenes
 
 
@@ -3097,7 +3622,13 @@
 ### parameter.rs.temporal_harmonic_fit.band_role
 
 
+### parameter.rs.temporal_harmonic_fit.ci_level
+
+
 ### parameter.rs.temporal_harmonic_fit.collection
+
+
+### parameter.rs.temporal_harmonic_fit.compute_ci
 
 
 ### parameter.rs.temporal_harmonic_fit.duplicate_policy
@@ -3146,6 +3677,51 @@
 
 
 ### parameter.rs.temporal_index_series.tile_size
+
+
+### parameter.rs.temporal_model_select.apply_qa_masking
+
+
+### parameter.rs.temporal_model_select.band
+
+
+### parameter.rs.temporal_model_select.band_role
+
+
+### parameter.rs.temporal_model_select.collection
+
+
+### parameter.rs.temporal_model_select.cvFolds
+
+
+### parameter.rs.temporal_model_select.duplicate_policy
+
+
+### parameter.rs.temporal_model_select.maxBreaks
+
+
+### parameter.rs.temporal_model_select.maxHarmonics
+
+
+### parameter.rs.temporal_model_select.minImprovement
+
+
+### parameter.rs.temporal_model_select.minSegmentDays
+
+
+### parameter.rs.temporal_model_select.output
+
+
+### parameter.rs.temporal_model_select.penalty
+
+
+### parameter.rs.temporal_model_select.robust
+
+
+### parameter.rs.temporal_model_select.scenes
+
+
+### parameter.rs.temporal_model_select.tile_size
 
 
 ### parameter.rs.temporal_monitor.apply_qa_masking
@@ -3211,6 +3787,9 @@
 ### parameter.rs.temporal_phenology.output
 
 
+### parameter.rs.temporal_phenology.provenance
+
+
 ### parameter.rs.temporal_phenology.scenes
 
 
@@ -3227,6 +3806,48 @@
 
 
 ### parameter.rs.temporal_phenology.tile_size
+
+
+### parameter.rs.temporal_phenology_multi.apply_qa_masking
+
+
+### parameter.rs.temporal_phenology_multi.band
+
+
+### parameter.rs.temporal_phenology_multi.band_role
+
+
+### parameter.rs.temporal_phenology_multi.collection
+
+
+### parameter.rs.temporal_phenology_multi.crossingFraction
+
+
+### parameter.rs.temporal_phenology_multi.duplicate_policy
+
+
+### parameter.rs.temporal_phenology_multi.maxCyclesPerYear
+
+
+### parameter.rs.temporal_phenology_multi.maxGapFraction
+
+
+### parameter.rs.temporal_phenology_multi.minCoverage
+
+
+### parameter.rs.temporal_phenology_multi.minPeakFraction
+
+
+### parameter.rs.temporal_phenology_multi.minValidPerSeason
+
+
+### parameter.rs.temporal_phenology_multi.output
+
+
+### parameter.rs.temporal_phenology_multi.scenes
+
+
+### parameter.rs.temporal_phenology_multi.tile_size
 
 
 ### parameter.rs.temporal_region_features.apply_qa_masking
@@ -3319,6 +3940,75 @@
 ### parameter.rs.temporal_regularize.tile_size
 
 
+### parameter.rs.temporal_sar_fusion.grid_tolerance
+
+
+### parameter.rs.temporal_sar_fusion.optical
+
+
+### parameter.rs.temporal_sar_fusion.output
+
+
+### parameter.rs.temporal_sar_fusion.sar
+
+
+### parameter.rs.temporal_sar_fusion.tile_size
+
+
+### parameter.rs.temporal_seasonal_breaks.alpha
+
+
+### parameter.rs.temporal_seasonal_breaks.apply_qa_masking
+
+
+### parameter.rs.temporal_seasonal_breaks.band
+
+
+### parameter.rs.temporal_seasonal_breaks.band_role
+
+
+### parameter.rs.temporal_seasonal_breaks.bootstrap_resamples
+
+
+### parameter.rs.temporal_seasonal_breaks.bootstrap_seed
+
+
+### parameter.rs.temporal_seasonal_breaks.ci_level
+
+
+### parameter.rs.temporal_seasonal_breaks.collection
+
+
+### parameter.rs.temporal_seasonal_breaks.compute_ci
+
+
+### parameter.rs.temporal_seasonal_breaks.duplicate_policy
+
+
+### parameter.rs.temporal_seasonal_breaks.harmonics
+
+
+### parameter.rs.temporal_seasonal_breaks.maxBreaks
+
+
+### parameter.rs.temporal_seasonal_breaks.minImprovement
+
+
+### parameter.rs.temporal_seasonal_breaks.minSegmentDays
+
+
+### parameter.rs.temporal_seasonal_breaks.output
+
+
+### parameter.rs.temporal_seasonal_breaks.robust
+
+
+### parameter.rs.temporal_seasonal_breaks.scenes
+
+
+### parameter.rs.temporal_seasonal_breaks.tile_size
+
+
 ### parameter.rs.temporal_sen_trend.alpha
 
 
@@ -3334,10 +4024,16 @@
 ### parameter.rs.temporal_sen_trend.collection
 
 
+### parameter.rs.temporal_sen_trend.compute_ci
+
+
 ### parameter.rs.temporal_sen_trend.duplicate_policy
 
 
 ### parameter.rs.temporal_sen_trend.output
+
+
+### parameter.rs.temporal_sen_trend.provenance
 
 
 ### parameter.rs.temporal_sen_trend.scenes
@@ -3376,6 +4072,9 @@
 ### parameter.rs.temporal_smooth.output
 
 
+### parameter.rs.temporal_smooth.provenance
+
+
 ### parameter.rs.temporal_smooth.robust_iterations
 
 
@@ -3386,6 +4085,9 @@
 
 
 ### parameter.rs.temporal_smooth.window
+
+
+### parameter.rs.temporal_smooth.window_days
 
 
 ### parameter.rs.temporal_summary.apply_qa_masking
@@ -3433,6 +4135,9 @@
 ### parameter.rs.temporal_trend.output
 
 
+### parameter.rs.temporal_trend.provenance
+
+
 ### parameter.rs.temporal_trend.scenes
 
 
@@ -3473,6 +4178,9 @@
 - 含义：垂直夸张系数，水平垂直单位不一致时必设。
 - 推荐值：经纬度 DEM 与米高程混用时按纬度换算设置。
 
+### parameter.rs.terrain_flow.include_segments
+
+
 ### parameter.rs.terrain_flow.input
 
 
@@ -3486,6 +4194,105 @@
 
 
 ### parameter.rs.terrain_flow.product
+
+
+### parameter.rs.terrain_flow.threshold
+
+
+### parameter.rs.terrain_landform.flat_radius
+
+
+### parameter.rs.terrain_landform.flat_slope_deg
+
+
+### parameter.rs.terrain_landform.flat_thresh_deg
+
+
+### parameter.rs.terrain_landform.inner_radius
+
+
+### parameter.rs.terrain_landform.input
+
+
+### parameter.rs.terrain_landform.nodata
+
+
+### parameter.rs.terrain_landform.outer_radius
+
+
+### parameter.rs.terrain_landform.output
+
+
+### parameter.rs.terrain_landform.product
+
+
+### parameter.rs.terrain_landform.radii
+
+
+### parameter.rs.terrain_landform.search_radius
+
+
+### parameter.rs.terrain_solar.day_of_year
+
+
+### parameter.rs.terrain_solar.end_hour
+
+
+### parameter.rs.terrain_solar.input
+
+
+### parameter.rs.terrain_solar.latitude
+
+
+### parameter.rs.terrain_solar.nodata
+
+
+### parameter.rs.terrain_solar.output
+
+
+### parameter.rs.terrain_solar.product
+
+
+### parameter.rs.terrain_solar.start_hour
+
+
+### parameter.rs.terrain_solar.step_hours
+
+
+### parameter.rs.terrain_solar.sun_track
+
+
+### parameter.rs.terrain_viewshed.curvature
+
+
+### parameter.rs.terrain_viewshed.input
+
+
+### parameter.rs.terrain_viewshed.nodata
+
+
+### parameter.rs.terrain_viewshed.observer
+
+
+### parameter.rs.terrain_viewshed.observer_height
+
+
+### parameter.rs.terrain_viewshed.observers
+
+
+### parameter.rs.terrain_viewshed.output
+
+
+### parameter.rs.terrain_viewshed.product
+
+
+### parameter.rs.terrain_viewshed.radius
+
+
+### parameter.rs.terrain_viewshed.refraction_k
+
+
+### parameter.rs.terrain_viewshed.target_height
 
 
 ### parameter.rs.threshold_raster.cleanup

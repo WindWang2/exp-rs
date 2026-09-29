@@ -35,6 +35,7 @@
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QJsonObject>
 
 #include <atomic>
 #include <chrono>

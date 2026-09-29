@@ -343,7 +343,7 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 输出：bandsOut（integer）、order（integer）、output（raster）
 - 参数：order（integer）、output（string）、wavelengths（numeric）
 - 前置条件：Bands must carry WAVELENGTH metadata (nm) or an explicit 'wavelengths' parameter; the axis must be strictly ascending in band order.
-- 局限：Output band count shrinks by the derivative order (B−1 / B−2); output band b carries the midpoint wavelength of its input pair.；NaN pixels propagate to every output derivative that touches them.
+- 局限：Output band count shrinks by the derivative order (B−1 / B−2); output band b carries the midpoint wavelength of its input pair.；NaN pixels propagate to every output derivative that touches them; declared NoData sentinels are NaN-ized per band before differencing and therefore propagate identically.
 - 适用地物：植被、矿物、水体
 - 适用场景：红边位置分析、作物胁迫探测
 - 失败模式：
@@ -384,7 +384,7 @@ SID-SAM 混合光谱相似度：把光谱角（形状）与信息散度（分布
 - 输出：form（string）、meanScore（numeric）、output（raster）、refs（integer）
 - 参数：bands（integer）、form（enum）、libraryMaterials（string）、libraryPath（string）、output（string）、refs（string）、refsRef（string）、scoreOut（string）
 - 前置条件：References must be reflectance-like (non-negative) on the same band grid as the input.
-- 局限：Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class.
+- 局限：Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class.；Pixels whose spectrum carries a declared NoData sentinel are unlabelled; the first declared finite sentinel on the used bands is honoured (-9999 when none is declared).
 - 适用地物：矿物/植被光谱匹配区
 - 适用场景：参考光谱逐像元标注、光谱库比对分类
 - 适用性备注：参考光谱需为同网格、反射率域的非负光谱。

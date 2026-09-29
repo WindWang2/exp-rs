@@ -2568,6 +2568,7 @@ target_include_directories(surface_snapshot_gen PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(surface_snapshot_gen PROPERTIES AUTOMOC ON)
 add_custom_target(surface_snapshot_regen
   COMMAND surface_snapshot_gen --output "${CMAKE_SOURCE_DIR}/tests/surface_diff_snapshot.json"
   DEPENDS surface_snapshot_gen
@@ -2602,6 +2603,7 @@ target_include_directories(test_surface_snapshot PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_surface_snapshot PROPERTIES AUTOMOC ON)
 target_compile_definitions(test_surface_snapshot PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 sicnu_discover_tests(test_surface_snapshot TEST_PREFIX "test_surface_snapshot::")
 
@@ -2637,6 +2639,7 @@ target_include_directories(test_surface_protocol_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_surface_protocol_r4 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_surface_protocol_r4 TEST_PREFIX "test_surface_protocol_r4::")
 
 # Track D1 (ds41-capability-help-sync): capability surface parity gate.
@@ -14728,6 +14731,7 @@ target_link_libraries(test_parity_selection_authority_r4 PRIVATE
   qgis_core
   qgis_gui
 )
+set_target_properties(test_parity_selection_authority_r4 PROPERTIES AUTOMOC ON)
 target_include_directories(test_parity_selection_authority_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -14770,6 +14774,9 @@ target_link_libraries(test_parity_state_mirror_r4 PRIVATE
   sicnu_task_center
   sicnu_processing
   sicnu_data
+  # guided_workflow_widget.cpp (embedded) uses spatial_tool.h, whose body
+  # lives in sicnu_agent (build wiring drift: companion bodies).
+  sicnu_agent
 )
 target_include_directories(test_parity_state_mirror_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src

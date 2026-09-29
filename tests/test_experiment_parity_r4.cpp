@@ -19,6 +19,7 @@
 
 #include <QJsonDocument>
 #include <QTemporaryDir>
+#include <QJsonObject>
 
 using namespace sicnu::study;
 namespace es = sicnu::experiment_studio;
