@@ -98,7 +98,12 @@ function(sicnu_add_test NAME)
     # symbols (sicnu_agent_loop is a static lib nobody links transitively).
     # WHOLE_ARCHIVE beats the linker's archive-ordering discard (CMake
     # orders the .a before the .so, where its objects look unneeded).
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+    # MSVC cannot take the WHOLE_ARCHIVE twin: sicnu_agent's PUBLIC interface
+    # already contributes a plain sicnu_agent_loop item, and CMake rejects a
+    # mixed-feature duplicate at generate time. Static on-demand object
+    # pulling resolves the seam symbols there, so a plain item suffices.
+    "$<$<NOT:$<BOOL:${MSVC}>>:$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>>"
+    "$<$<BOOL:${MSVC}>:sicnu_agent_loop>"
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -692,7 +697,10 @@ target_link_libraries(test_tool_call_dispatcher PRIVATE
   # sicnu_agent.so arrives transitively; its verification seam needs the
   # agent_loop symbols resolved at final link time. WHOLE_ARCHIVE beats the
   # linker's archive-ordering discard (CMake orders the .a before the .so).
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+  # MSVC: plain item — the WHOLE_ARCHIVE twin conflicts with the plain
+  # sicnu_agent_loop item sicnu_agent's PUBLIC interface contributes.
+  "$<$<NOT:$<BOOL:${MSVC}>>:$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>>"
+  "$<$<BOOL:${MSVC}>:sicnu_agent_loop>"
 )
 sicnu_link_jsoncpp(test_tool_call_dispatcher)
 target_include_directories(test_tool_call_dispatcher PRIVATE
@@ -2858,7 +2866,10 @@ target_link_libraries(test_output_verifier PRIVATE
   qgis_core
   sicnu_agent
   # sicnu_agent's verification seam resolves agent_loop symbols at final link.
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+  # MSVC: plain item — the WHOLE_ARCHIVE twin conflicts with the plain
+  # sicnu_agent_loop item sicnu_agent's PUBLIC interface contributes.
+  "$<$<NOT:$<BOOL:${MSVC}>>:$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>>"
+  "$<$<BOOL:${MSVC}>:sicnu_agent_loop>"
   GDAL::GDAL
 )
 target_include_directories(test_output_verifier PRIVATE
@@ -7986,8 +7997,11 @@ target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
   # sicnu_agent's verification seam resolves agent_loop symbols at final
-  # link; WHOLE_ARCHIVE beats archive-ordering discard.
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+  # link; WHOLE_ARCHIVE beats archive-ordering discard. MSVC: plain item —
+  # the WHOLE_ARCHIVE twin conflicts with the plain sicnu_agent_loop item
+  # sicnu_agent's PUBLIC interface contributes.
+  "$<$<NOT:$<BOOL:${MSVC}>>:$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>>"
+  "$<$<BOOL:${MSVC}>:sicnu_agent_loop>"
 )
 # R4 WP-G: the corpus-driven SSE cases consume jsoncpp (adversarial_corpus.h).
 sicnu_link_jsoncpp(test_llm_streaming_client)
