@@ -1062,6 +1062,8 @@ target_link_libraries(test_provenance_section PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 target_include_directories(test_provenance_section PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1093,6 +1095,8 @@ target_link_libraries(test_explain_step_panel PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 target_include_directories(test_explain_step_panel PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8691,6 +8695,8 @@ target_link_libraries(test_crs_selector PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 target_include_directories(test_crs_selector PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -11431,6 +11437,8 @@ target_link_libraries(test_object_identity PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_object_identity PRIVATE jsoncpp)
@@ -11463,6 +11471,8 @@ target_link_libraries(test_mission_context PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_mission_context PRIVATE jsoncpp)
@@ -11501,6 +11511,8 @@ target_link_libraries(test_mission_runtime_store PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_mission_runtime_store PRIVATE jsoncpp)
@@ -11532,6 +11544,8 @@ target_link_libraries(test_mission_e2e_scaffolding PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_mission_e2e_scaffolding PRIVATE jsoncpp)
@@ -11607,6 +11621,8 @@ target_link_libraries(test_mission_timeline_surface PRIVATE
   qgis_core
   qgis_gui
   sicnu_data
+  # R6: mission sidecar writes route through the platform authority.
+  Sicnu::Platform
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_mission_timeline_surface PRIVATE jsoncpp)
@@ -13240,6 +13256,8 @@ function(sicnu_add_mission_runtime_test NAME)
     qgis_core
     qgis_gui
     sicnu_data
+    # R6: the shared mission sources write sidecars through the platform authority.
+    Sicnu::Platform
   )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src

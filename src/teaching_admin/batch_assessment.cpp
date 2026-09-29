@@ -8,7 +8,6 @@
 #include <QJsonDocument>
 #include <QMutex>
 #include <QSet>
-#include <QSaveFile>
 #include "platform/durable_sidecar.h"
 #include <algorithm>
 #include <cstring>
@@ -558,8 +557,9 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
     // Real UTF-8 BOM as BYTES: a QStringLiteral "ï»¿" would hold
     // code points U+00EF/U+00BB/U+00BF and toUtf8() would double-encode
     // them (C3 AF ...) — a BOM no spreadsheet recognizes.
-    if ( !writeBytesAtomically( csvPath, QByteArrayLiteral( "ï»¿" ) + csv.toUtf8() ) )
-        return false;    return true;
+    if ( !writeBytesAtomically( csvPath, QByteArrayLiteral( "\xEF\xBB\xBF" ) + csv.toUtf8() ) )
+        return false;
+    return true;
 }
 
 QJsonObject regradeTraceability( const BatchAssessmentReport &report )

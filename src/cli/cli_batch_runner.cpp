@@ -128,8 +128,7 @@ void writeResultIndex( const std::string &path, const std::vector<TaskRecord> &r
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
         payload += Json::writeString( builder, line );
-        payload += '
-';
+        payload += '\n';
     }
 
     const sicnu::platform::sidecar::WriteResult result =

@@ -50,7 +50,7 @@ cli_batch_runner writeResultIndex (#4), workflow_checkpoint Windows lane (#5),
 harness evidence atomicWrite + writeProvenanceSidecarIfAbsent + provenance_projection
 writeCompileSidecar (#6), output_committer group publish → atomic_fs::publishStagedMembers
 (#7, processing already links geospatial), study/studio/registration/lab-batch
-QSaveFile quartet (#8), range_cache putBlock (#9, verifyReadBack off — large blocks),
+QSaveFile quartet (#8), range_cache putBlock (#9 — EXEMPT after review: cache-only, loss benign, deliberate lock-scope design),
 session_journal (#10), mission_context_store sidecar write + mission_runtime_store
 rotateLastGood (the reference family adopts its own generalized authority), 
 teaching_admin batch checkpoint. Each migration: same-file behavior preserved,

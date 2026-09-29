@@ -42,10 +42,13 @@ set(SICNU_WORKFLOW_RUNTIME_SOURCES
   builtin_definitions.cpp
 )
 add_library(sicnu_workflow SHARED ${SICNU_WORKFLOW_CORE_SOURCES})
+# R6: checkpoint writes route through the platform durable-sidecar authority.
+# The link edge lives HERE (sicnu_workflow compiles workflow_checkpoint.cpp);
+# putting it on sicnu_workflow_runtime left the shared library resolving the
+# symbols only transitively.
+target_link_libraries(sicnu_workflow PUBLIC Sicnu::Platform)
 add_library(sicnu_workflow_runtime STATIC ${SICNU_WORKFLOW_RUNTIME_SOURCES})
-target_link_libraries(sicnu_workflow_runtime PUBLIC
-  # R6: checkpoint writes route through the platform durable-sidecar authority.
-  Sicnu::Platform sicnu_workflow)
+target_link_libraries(sicnu_workflow_runtime PUBLIC sicnu_workflow)
 # D17: pipeline_run_coordinator.h carries Q_OBJECT — moc the core library.
 set_target_properties(sicnu_workflow PROPERTIES AUTOMOC ON)
 target_include_directories(sicnu_workflow PUBLIC

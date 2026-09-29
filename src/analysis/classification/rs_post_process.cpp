@@ -848,8 +848,25 @@ bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsC
     return false;
   }
 
-  const QJsonDocument doc = QJsonDocument::fromJson(
+  QJsonDocument doc = QJsonDocument::fromJson(
     QByteArray( read.bytes.data(), static_cast<int>( read.bytes.size() ) ) );
+
+  if ( !doc.isObject()
+       && read.source == sicnu::platform::sidecar::ReadSource::Main )
+  {
+    // The main READ fine (I/O level) but does not decode — e.g. a torn main
+    // that stayed JSON-prefixed. The last-good copy the authority rotated
+    // after the previous successful save is the recovery channel; consult
+    // it before giving up.
+    const sicnu::platform::sidecar::ReadResult lastGood =
+      sicnu::platform::sidecar::read(
+        sidecarPath.toUtf8().constData() + sicnu::platform::sidecar::kDefaultLastGoodSuffix,
+        "" );
+    if ( lastGood.source == sicnu::platform::sidecar::ReadSource::Main )
+      doc = QJsonDocument::fromJson(
+        QByteArray( lastGood.bytes.data(),
+                    static_cast<int>( lastGood.bytes.size() ) ) );
+  }
 
   if ( !doc.isObject() )
   {

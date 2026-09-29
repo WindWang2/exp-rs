@@ -218,24 +218,47 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
         publishOk = false;
         break;
       }
-      // R6: the per-pair publish rides the geospatial atomic_fs authority —
-      // fsync the staged bytes, then one atomic replace (POSIX rename(2);
-      // Windows ReplaceFileW/MoveFileExW-WRITE_THROUGH; a cross-volume temp
-      // falls back to a same-dir fsync'd copy + rename, #807). The old
-      // QFile::copy to "<to>.new" + rename had no durability gate at all: a
-      // power loss could commit the directory entry for bytes that never
-      // reached the device. The .old backup and the !publishOk rollback are
-      // unchanged (#617), as is the injected fault above.
-      try
-      {
-        sicnu::geo::atomic_fs::fsyncFile( pair.from.toUtf8().constData() );
-        sicnu::geo::atomic_fs::publishStagedFile( pair.from.toUtf8().constData(),
-                                                  pair.to.toUtf8().constData() );
-      }
-      catch ( const sicnu::geo::GeoError & )
+      // R6 durability fix on the #617 flow: the temp is first copied into
+      // the STABLE directory ("<to>.new" — same volume as the target, so the
+      // rename below can never cross a device) and the copied bytes are
+      // fsynced BEFORE the one-step rename. The pre-R6 flow copied to
+      // "<to>.new" and renamed it (atomic on both platforms) but never
+      // fsynced: a power loss could commit the directory entry for bytes
+      // still in cache. Calling atomic_fs::publishStagedFile on the temp
+      // directly was rejected in review: on Windows its cross-volume
+      // MOVEFILE_COPY_ALLOWED fallback is a non-atomic copy ONTO the live
+      // target — after the .old rename above that would tear the stable
+      // output with no healer. The .old backup and the !publishOk rollback
+      // are unchanged (#617), as is the injected fault above.
+      const QString staging = pair.to + QStringLiteral( ".new" );
+      QFile::remove( staging );
+      if ( !QFile::copy( pair.from, staging ) )
       {
         publishOk = false;
         // Restore this pair's previous stable file if it was moved aside.
+        if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
+          QFile::rename( backup, pair.to );
+        break;
+      }
+      try
+      {
+        sicnu::geo::atomic_fs::fsyncFile( staging.toUtf8().constData() );
+      }
+      catch ( const sicnu::geo::GeoError & )
+      {
+        QFile::remove( staging );
+        publishOk = false;
+        if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
+          QFile::rename( backup, pair.to );
+        break;
+      }
+      if ( !QFile::rename( staging, pair.to ) )
+      {
+        // A failed rename can leave a partial "<to>.new" behind — remove it
+        // so nothing half-written survives (#703.4).
+        if ( QFile::exists( staging ) )
+          QFile::remove( staging );
+        publishOk = false;
         if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
           QFile::rename( backup, pair.to );
         break;

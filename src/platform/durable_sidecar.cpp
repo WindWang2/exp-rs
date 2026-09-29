@@ -195,8 +195,16 @@ ReadOutcome readWholeFile( const std::string &path, std::size_t maxBytes, std::s
 {
   std::error_code ec;
   const std::filesystem::path fsPath = sicnu::portable::pathFromUtf8( path );
-  if ( !std::filesystem::exists( fsPath, ec ) || ec )
+  const bool exists = std::filesystem::exists( fsPath, ec );
+  if ( !exists )
     return ReadOutcome::Missing;
+  if ( ec )
+  {
+    // An existing-but-unstatable file (e.g. traversal denied) is NOT "fresh
+    // state" — reporting Missing here would fail open.
+    error = "stat failed: " + ec.message();
+    return ReadOutcome::Unreadable;
+  }
 
   std::string statError;
   if ( !fileSizeAtMost( path, maxBytes, statError ) )
@@ -205,22 +213,70 @@ ReadOutcome readWholeFile( const std::string &path, std::size_t maxBytes, std::s
     return ReadOutcome::Unreadable;
   }
 
+  // Open with FULL sharing on Windows: the authority own reads (verify
+  // read-back, recovery resolution) must never create a sharing-violation
+  // window that fails a concurrent publisher rename (win32_error=5/32).
+  std::string bytes;
+#ifdef _WIN32
+  const HANDLE handle = ::CreateFileW( portable::wideFromUtf8( path ).c_str(), GENERIC_READ,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
+  if ( handle == INVALID_HANDLE_VALUE )
+  {
+    error = "open failed (" + lastOsError() + ")";
+    return ReadOutcome::Unreadable;
+  }
+  char buffer[8192];
+  DWORD got = 0;
+  for ( ;; )
+  {
+    if ( !::ReadFile( handle, buffer, sizeof( buffer ), &got, nullptr ) )
+    {
+      error = "read failed (" + lastOsError() + ")";
+      ::CloseHandle( handle );
+      return ReadOutcome::Unreadable;
+    }
+    if ( got == 0 )
+      break;
+    bytes.append( buffer, got );
+    if ( bytes.size() > maxBytes )
+    {
+      // Grew past the cap between stat and read — enforce the bound here,
+      // not just in the pre-check.
+      error = "oversize during read";
+      ::CloseHandle( handle );
+      return ReadOutcome::Unreadable;
+    }
+  }
+  ::CloseHandle( handle );
+#else
   std::FILE *file = portable::fileOpenUtf8( path, "rb" );
   if ( !file )
   {
     error = "open failed (" + lastOsError() + ")";
     return ReadOutcome::Unreadable;
   }
-
-  out.resize( static_cast<std::size_t>( std::filesystem::file_size( fsPath, ec ) ) );
-  const std::size_t got = out.empty() ? 0u : std::fread( out.data(), 1, out.size(), file );
+  char buffer[8192];
+  std::size_t got = 0;
+  while ( ( got = std::fread( buffer, 1, sizeof( buffer ), file ) ) > 0 )
+  {
+    bytes.append( buffer, got );
+    if ( bytes.size() > maxBytes )
+    {
+      error = "oversize during read";
+      std::fclose( file );
+      return ReadOutcome::Unreadable;
+    }
+  }
   const bool readError = std::ferror( file ) != 0;
   std::fclose( file );
-  if ( got != out.size() || readError )
+  if ( readError )
   {
-    error = "short read";
+    error = "read failed";
     return ReadOutcome::Unreadable;
   }
+#endif
+  out = bytes;
   return ReadOutcome::Ok;
 }
 
@@ -331,8 +387,15 @@ WriteResult write( const WriteRequest &request )
   // that the verify gate must catch.
   if ( request.hooks.failAt && request.hooks.failAt( WritePhase::WriteTemp ) )
   {
-    removeQuiet( staged );
-    result.status = WriteStatus::WriteFailed;
+    if ( !removeQuiet( staged ) )
+    {
+      result.status = WriteStatus::StagedCleanupFailed;
+      result.stagedPath = staged;
+    }
+    else
+    {
+      result.status = WriteStatus::WriteFailed;
+    }
     result.error = "injected WriteTemp fault";
     return result;
   }
@@ -360,8 +423,15 @@ WriteResult write( const WriteRequest &request )
   // branch discards the temp and leaves the target untouched.
   if ( request.hooks.failAt && request.hooks.failAt( WritePhase::Durability ) )
   {
-    removeQuiet( staged );
-    result.status = WriteStatus::DurabilityFailed;
+    if ( !removeQuiet( staged ) )
+    {
+      result.status = WriteStatus::StagedCleanupFailed;
+      result.stagedPath = staged;
+    }
+    else
+    {
+      result.status = WriteStatus::DurabilityFailed;
+    }
     result.error = "injected Durability fault";
     return result;
   }
@@ -388,8 +458,15 @@ WriteResult write( const WriteRequest &request )
   // (temp discarded, target untouched) BEFORE the rename is attempted.
   if ( request.hooks.failAt && request.hooks.failAt( WritePhase::Publish ) )
   {
-    removeQuiet( staged );
-    result.status = WriteStatus::PublishFailed;
+    if ( !removeQuiet( staged ) )
+    {
+      result.status = WriteStatus::StagedCleanupFailed;
+      result.stagedPath = staged;
+    }
+    else
+    {
+      result.status = WriteStatus::PublishFailed;
+    }
     result.error = "injected Publish fault";
     return result;
   }

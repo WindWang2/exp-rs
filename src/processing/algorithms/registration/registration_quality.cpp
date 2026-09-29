@@ -4,7 +4,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include "platform/durable_sidecar.h"
-#include <QSaveFile>
 
 #include <algorithm>
 #include <cmath>

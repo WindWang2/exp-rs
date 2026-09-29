@@ -11,7 +11,6 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <random>
 #include <sstream>
 #include <system_error>
 
@@ -47,11 +46,6 @@ bool sessionIdCharsetSafe( const std::string &id )
     return id != "." && id != "..";
 }
 
-std::atomic<unsigned long long> &stagingCounter()
-{
-    static std::atomic<unsigned long long> counter{ 0 };
-    return counter;
-}
 
 bool writeFileAtomic( const fs::path &target, const std::string &body, std::string &error )
 {
@@ -237,10 +231,21 @@ bool SessionJournal::save( const std::string &directory, std::string *error ) co
         doc = compactProjection();
 
     std::string writeError;
-    if ( !writeFileAtomic( dir / ( mSessionId + ".json" ), jsonToString( doc ), writeError ) )
+    // The compaction projection above bounds the document in practice; the
+    // explicit cap gives the authority a real bound with headroom over the
+    // 1 MiB compaction threshold instead of its 32 MiB metadata default.
+    const std::size_t kJournalWriteCapBytes = 64ull * 1024ull * 1024ull;
+    sicnu::platform::sidecar::WriteRequest journalWrite;
+    journalWrite.targetPath = sicnu::portable::pathToUtf8( dir / ( mSessionId + ".json" ) );
+    journalWrite.bytes = jsonToString( doc );
+    journalWrite.lastGoodSuffix = "";
+    journalWrite.maxBytes = kJournalWriteCapBytes;
+    const sicnu::platform::sidecar::WriteResult result =
+      sicnu::platform::sidecar::write( journalWrite );
+    if ( !result )
     {
         if ( error )
-            *error = writeError;
+            *error = result.error;
         return false;
     }
     return true;

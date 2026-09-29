@@ -31,16 +31,6 @@ namespace sicnu::workflow {
 
 namespace {
 
-void fsyncDirectory( const QString &dirPath )
-{
-  // Best-effort through platform/portable.h — the single authority for the
-  // directory-flush branches (the Windows branch used to be a silent no-op
-  // here while the atomic publish lane flushed for real). Silent by design:
-  // some filesystems refuse directory fsync with EINVAL.
-  sicnu::portable::syncDirectoryBestEffortUtf8( dirPath.toStdString(),
-                                                /*pathIsDirectory=*/true );
-}
-
 } // namespace
 
 QString WorkflowCheckpointManager::defaultCheckpointDirectory()
@@ -429,6 +419,36 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
         QDir::Files );
       for ( const QString &orphan : retired )
         QFile::remove( d.absoluteFilePath( orphan ) );
+
+      // R6: the authority-staged temps have the shape
+      // "checkpoint_<runId>.<pid>.<ctr>.<rng>.tmp.json". A temp whose owner
+      // pid is gone is inert residue from a killed save; sweep it with the
+      // same live-owner guard as the old "<name>.json.tmp.*" family.
+      const QStringList authorityTemps = d.entryList(
+        QStringList{ QStringLiteral( "checkpoint_*.tmp.json" ) }, QDir::Files );
+      for ( const QString &orphan : authorityTemps )
+      {
+        const QString stem = orphan.left( orphan.size() -
+                                          QStringLiteral( ".tmp.json" ).size() );
+        const QStringList fields = stem.split( QLatin1Char( '.' ) );
+        if ( fields.size() < 5 )
+          continue; // checkpoint_<runId> + at least pid.ctr.rng
+        const QString pidField = fields.at( fields.size() - 3 );
+        const QString ctrField = fields.at( fields.size() - 2 );
+        const QString rngField = fields.at( fields.size() - 1 );
+        bool pidOk = false, ctrOk = false, rngOk = false;
+        const qlonglong pidValue = pidField.toLongLong( &pidOk );
+        ctrField.toLongLong( &ctrOk );
+        rngField.toLongLong( &rngOk );
+        if ( !pidOk || !ctrOk || !rngOk || pidValue <= 0 )
+          continue; // not a name this writer family produces
+        QString runId = fields.mid( 1, fields.size() - 4 ).join( QLatin1Char( '.' ) );
+        const WorkflowRunLock::OwnerProbe probe = WorkflowRunLock::probeOwner(
+          WorkflowRunLock::lockPathForRun( dir, runId.toStdString() ) );
+        if ( probe.state == WorkflowRunLock::OwnerProbe::State::LiveOwner )
+          continue;
+        QFile::remove( d.absoluteFilePath( orphan ) );
+      }
     }
   }
 

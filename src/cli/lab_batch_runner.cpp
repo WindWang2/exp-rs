@@ -12,7 +12,6 @@
 #include <QIODevice>
 #include <QJsonDocument>
 #include <QMap>
-#include <QSaveFile>
 #include "platform/durable_sidecar.h"
 #include <QSet>
 #include <QTextStream>
@@ -132,9 +131,9 @@ QString submissionDigest( const QString &path, qint64 *bytesOut )
     return QString::fromLatin1( hash.result().toHex() );
 }
 
-/// Atomic text write: QSaveFile stages a temp file in the SAME directory and
-/// commit() renames it over the target, so a crash never leaves a torn
-/// summary next to the graded CSV.
+/// Atomic text write through the platform sidecar authority: the bytes are
+/// staged, fsynced and published with one rename, so a crash never leaves a
+/// torn summary next to the graded CSV.
 bool atomicWrite( const QString &path, const QByteArray &text )
 {
     // R6: the single sidecar write authority — temp + fsync + atomic publish.

@@ -182,8 +182,7 @@ SidecarResult writeCompileSidecar( const std::string &outputPath,
   // R6: the single sidecar write authority (temp + fsync + atomic publish +
   // verify read-back) replaces the QSaveFile lane; short-write/cancel
   // semantics now come from the authority's typed statuses.
-  const std::string body = canonicalJson( projection ) + "
-";
+  const std::string body = canonicalJson( projection ) + "\n";
   const sicnu::platform::sidecar::WriteResult write =
     sicnu::platform::sidecar::write( { result.path, body, "" } );
   if ( !write )
@@ -193,4 +192,6 @@ SidecarResult writeCompileSidecar( const std::string &outputPath,
   }
   result.written = true;
   return result;
+}
+
 } // namespace sicnu::agent::harness::projection

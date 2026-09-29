@@ -10,7 +10,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
-#include <QSaveFile>
 
 namespace sicnu::app
 {
@@ -361,7 +360,7 @@ bool saveMissionRuntime( const QString &projectFilePath, QDomDocument &projectDo
     // Rotate the last-known-good snapshot AFTER a successful commit: the
     // snapshot is exactly the last state the authority durably held. A failed
     // save leaves both the old sidecar and the old snapshot untouched (the
-    // write itself is QSaveFile-atomic).
+    // write itself is rename-atomic — platform::sidecar on this branch).
     if ( !projectFilePath.isEmpty() )
         rotateLastGood( projectFilePath );
 

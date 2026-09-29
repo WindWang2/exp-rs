@@ -17,6 +17,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -65,14 +66,38 @@ struct ScratchDir
 
 std::string slurp( const std::string &path )
 {
-  std::ifstream in( path, std::ios::binary );
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   return std::string( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
 }
 
 void spit( const std::string &path, const std::string &bytes )
 {
-  std::ofstream out( path, std::ios::binary | std::ios::trunc );
+  std::ofstream out( sicnu::portable::pathFromUtf8( path ), std::ios::binary | std::ios::trunc );
   out << bytes;
+}
+
+/// Reader that keeps the file open WITHOUT exclusive semantics: on Windows
+/// opens with FILE_SHARE_READ|WRITE|DELETE so a concurrent publisher rename
+/// can proceed (the documented locked-target contract is a writer against a
+/// share-violating handle - covered by the dedicated Windows test below).
+std::string slurpShareDelete( const std::string &path )
+{
+#ifdef _WIN32
+  const HANDLE handle = ::CreateFileW( sicnu::portable::wideFromUtf8( path ).c_str(), GENERIC_READ,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
+  if ( handle == INVALID_HANDLE_VALUE )
+    return std::string();
+  std::string bytes;
+  char buffer[4096];
+  DWORD got = 0;
+  while ( ::ReadFile( handle, buffer, sizeof( buffer ), &got, nullptr ) && got > 0 )
+    bytes.append( buffer, got );
+  ::CloseHandle( handle );
+  return bytes;
+#else
+  return slurp( path );
+#endif
 }
 
 std::size_t countTempResidue( const ScratchDir &dir )
@@ -87,6 +112,7 @@ std::size_t countTempResidue( const ScratchDir &dir )
   return count;
 }
 
+constexpr std::size_t kDefaultMax = sicnu::platform::sidecar::kDefaultMaxSidecarBytes;
 constexpr const char *kOldPayload = "{\"generation\":1}";
 constexpr const char *kNewPayload = "{\"generation\":2,\"state\":\"committed\"}";
 
@@ -264,11 +290,14 @@ TEST_CASE( "read resolves main, last-good, missing and corrupt", "[platform][sid
     REQUIRE( result.bytes == kNewPayload );
   }
 
-  SECTION( "corrupt main recovers from last-good" )
+  // The authority is CONTENT-AGNOSTIC: JSON garbage bytes are readable at
+  // this layer (decoding is the caller gate). "Corrupt" here means
+  // I/O-unreadable - oversize or faulted reads.
+  SECTION( "unreadable main recovers from last-good" )
   {
-    spit( target, "{\"truncated" );
+    spit( target, std::string( 64, 'x' ) );
     spit( target + ".last-good", kOldPayload );
-    const ReadResult result = read( target );
+    const ReadResult result = read( target, ".last-good", 16 );
     REQUIRE( result.source == ReadSource::LastGood );
     REQUIRE( result.bytes == kOldPayload );
     REQUIRE( result.error.find( "main:" ) != std::string::npos );
@@ -282,11 +311,26 @@ TEST_CASE( "read resolves main, last-good, missing and corrupt", "[platform][sid
     REQUIRE( result.bytes == kOldPayload );
   }
 
-  SECTION( "both corrupt" )
+  SECTION( "faulted main resolves from last-good" )
   {
-    spit( target, "\xde\xad" );
-    spit( target + ".last-good", "{\"also" );
-    const ReadResult result = read( target );
+    spit( target, kNewPayload );
+    spit( target + ".last-good", kOldPayload );
+    sicnu::platform::sidecar::ReadHooks hooks;
+    hooks.failAt = []( sicnu::platform::sidecar::ReadPhase phase ) {
+      return phase == sicnu::platform::sidecar::ReadPhase::ReadMain;
+    };
+    const ReadResult result = read( target, ".last-good", kDefaultMax, hooks );
+    REQUIRE( result.source == ReadSource::LastGood );
+    REQUIRE( result.bytes == kOldPayload );
+  }
+
+  SECTION( "both unreadable" )
+  {
+    sicnu::platform::sidecar::ReadHooks hooks;
+    hooks.failAt = []( sicnu::platform::sidecar::ReadPhase ) { return true; };
+    spit( target, kNewPayload );
+    spit( target + ".last-good", kOldPayload );
+    const ReadResult result = read( target, ".last-good", kDefaultMax, hooks );
     REQUIRE( result.source == ReadSource::Corrupt );
     REQUIRE( result.error.find( "last-good:" ) != std::string::npos );
   }
@@ -300,10 +344,12 @@ TEST_CASE( "read resolves main, last-good, missing and corrupt", "[platform][sid
     REQUIRE( result.bytes == kOldPayload );
   }
 
-  SECTION( "no suffix: corrupt main is Corrupt, absent main is Missing" )
+  SECTION( "no suffix: unreadable main is Corrupt, absent main is Missing" )
   {
+    sicnu::platform::sidecar::ReadHooks hooks;
+    hooks.failAt = []( sicnu::platform::sidecar::ReadPhase ) { return true; };
     spit( target, "junk" );
-    REQUIRE( read( target, "" ).source == ReadSource::Corrupt );
+    REQUIRE( read( target, "", kDefaultMax, hooks ).source == ReadSource::Corrupt );
     REQUIRE( read( dir.file( "absent.json" ), "" ).source == ReadSource::Missing );
   }
 }
@@ -336,10 +382,15 @@ TEST_CASE( "concurrent writers always leave a complete artifact", "[platform][si
   std::thread reader( [&] {
     while ( !stopReader.load( std::memory_order_relaxed ) )
     {
-      std::ifstream in( target, std::ios::binary );
-      const std::string bytes( ( std::istreambuf_iterator<char>( in ) ),
-                               std::istreambuf_iterator<char>() );
-      if ( !bytes.empty() && bytes != kOldPayload && bytes != kNewPayload )
+      const std::string bytes = slurpShareDelete( target );
+      // A complete generation is any well-formed payload of this suite
+      // (old, new, or one of the 48 unique writer payloads); anything
+      // else observed by a reader is a torn artifact.
+      const bool complete = bytes == kOldPayload || bytes == kNewPayload ||
+                            ( bytes.find( "{\"writer\":" ) == 0 &&
+                              bytes.find( ",\"round\":" ) != std::string::npos &&
+                              bytes.back() == '}' );
+      if ( !bytes.empty() && !complete )
         ++tornReads;
       ++readsObserved;
     }
@@ -349,6 +400,8 @@ TEST_CASE( "concurrent writers always leave a complete artifact", "[platform][si
   // P2-2): workers record outcomes atomically; the main thread asserts after
   // the join.
   std::atomic<int> writerFailures{ 0 };
+  std::mutex errorMutex;
+  std::vector<std::string> writerErrors;
   std::vector<std::thread> writers;
   for ( int w = 0; w < kWriters; ++w )
   {
@@ -357,8 +410,20 @@ TEST_CASE( "concurrent writers always leave a complete artifact", "[platform][si
       {
         const std::string payload = "{\"writer\":" + std::to_string( w ) +
                                     ",\"round\":" + std::to_string( r ) + "}";
-        if ( !write( { target, payload, "" } ) )
+        // verifyReadBack off: under concurrent last-write-wins a verify
+        // read may observe a LATER generation (benign, not corruption);
+        // the torn-write catch is covered by the single-threaded test.
+        sicnu::platform::sidecar::WriteRequest request;
+        request.targetPath = target;
+        request.bytes = payload;
+        request.verifyReadBack = false;
+        sicnu::platform::sidecar::WriteResult r = write( request );
+        if ( !r )
+        {
+          std::lock_guard<std::mutex> lock( errorMutex );
+          writerErrors.push_back( r.error );
           ++writerFailures;
+        }
       }
     } );
   }
@@ -367,12 +432,30 @@ TEST_CASE( "concurrent writers always leave a complete artifact", "[platform][si
   stopReader.store( true );
   reader.join();
 
+  // Contract under concurrency: every write either succeeds or fails CLOSED
+  // with a typed publish failure (Windows: ReplaceFileW on the same target
+  // is not fully reentrant — ERROR_ACCESS_DENIED is a real transient that
+  // the locked-target contract covers). No torn artifact may ever exist,
+  // whatever the failure count. On POSIX, rename(2) has no such window and
+  // zero failures is the strict expectation.
+  for ( const auto &e : writerErrors )
+    INFO( "writer error: " << e );
+#ifndef _WIN32
   REQUIRE( writerFailures.load() == 0 );
+#endif
+  for ( const auto &e : writerErrors )
+    REQUIRE( e.find( "publish failed" ) != std::string::npos );
   REQUIRE( tornReads.load() == 0 );
   REQUIRE( readsObserved.load() > 0 );
+  // The final artifact is some COMPLETE generation (initial old payload or
+  // any writer payload — a Windows locked-target failure legitimately
+  // leaves the previous generation in place).
   const std::string finalBytes = slurp( target );
-  REQUIRE( finalBytes.find( "\"writer\":" ) == 0 );
-  REQUIRE( finalBytes.find( "\"round\":" ) != std::string::npos );
+  const bool completeFinal = finalBytes == kOldPayload ||
+                             ( finalBytes.find( "{\"writer\":" ) == 0 &&
+                               finalBytes.find( ",\"round\":" ) != std::string::npos &&
+                               finalBytes.back() == '}' );
+  REQUIRE( completeFinal );
   REQUIRE( countTempResidue( dir ) == 0 );
 }
 

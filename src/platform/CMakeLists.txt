@@ -19,3 +19,11 @@ install( TARGETS sicnu_platform
   LIBRARY DESTINATION lib COMPONENT sdk
   INCLUDES DESTINATION include
 )
+
+
+# The exported target must ship its headers (the SDK package links
+# ExpRS::sicnu_platform; without these the installed target is unbuildable).
+install( FILES durable_sidecar.h portable.h
+  DESTINATION include/platform
+  COMPONENT sdk
+)
