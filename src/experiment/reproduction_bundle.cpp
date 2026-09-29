@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSaveFile>
 #include <QTextStream>
 
 namespace sicnu::experiment
@@ -25,10 +26,16 @@ namespace
 // it unused.)
 
 /// Writes one bundle file + returns its checksum line content.
+/// Crash-durable (#1386): the member lands through QSaveFile (temp file in
+/// the same directory + atomic rename on commit), so a crash mid-write can
+/// never leave a truncated member in the bundle — the codebase's capsule
+/// export already follows this doctrine ("a failed write must leave the
+/// previous file intact"), and a bundle whose checksums.txt then verifies
+/// is recoverable instead of corrupt.
 bool writeFileWithChecksum( const QString &path, const QByteArray &content, QString *errorOut,
                             QStringList *checksumLines, const QString &relativeName )
 {
-    QFile file( path );
+    QSaveFile file( path );
     if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     {
         if ( errorOut )
@@ -39,6 +46,12 @@ bool writeFileWithChecksum( const QString &path, const QByteArray &content, QStr
     {
         if ( errorOut )
             *errorOut = QStringLiteral( "short write %1" ).arg( path );
+        return false;
+    }
+    if ( !file.commit() )
+    {
+        if ( errorOut )
+            *errorOut = QStringLiteral( "cannot commit %1" ).arg( path );
         return false;
     }
     checksumLines->append( QString::fromUtf8(
@@ -379,31 +392,26 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
     if ( !writeJson( QStringLiteral( "manifest.json" ), manifest ) )
         return report;
 
-    QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
-    if ( !checksumFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    // checksums.txt is the bundle's integrity root: written through
+    // QSaveFile LAST and atomically (#1386) — QFile::flush() only drains
+    // Qt's buffer to the OS, so the previous in-place write could leave a
+    // truncated table after a crash, failing the whole bundle on verify.
     {
-        report.warnings.append( QStringLiteral( "cannot write checksums.txt" ) );
-        return report;
-    }
-    {
-        const QByteArray checksumBytes =
-            checksums.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
-        if ( checksumFile.write( checksumBytes ) != checksumBytes.size() )
+        const QByteArray checksumBytes = checksums.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
+        QSaveFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
+        if ( !checksumFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
         {
-            report.warnings.append( QStringLiteral( "short write checksums.txt" ) );
-            checksumFile.close();
+            report.warnings.append( QStringLiteral( "cannot write checksums.txt" ) );
+            return report;
+        }
+        if ( checksumFile.write( checksumBytes ) != checksumBytes.size()
+             || !checksumFile.commit() )
+        {
+            report.warnings.append( QStringLiteral( "cannot write checksums.txt atomically" ) );
             report.ok = false;
             return report;
         }
     }
-    if ( !checksumFile.flush() )
-    {
-        report.warnings.append( QStringLiteral( "flush failed checksums.txt" ) );
-        checksumFile.close();
-        report.ok = false;
-        return report;
-    }
-    checksumFile.close();
     ++report.fileCount;
 
     report.ok = report.warnings.isEmpty();
@@ -469,6 +477,29 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
         validation.reasons.append( QStringLiteral( "dataset fingerprint mismatch" ) );
         validation.level = dataset::ReproductionLevel::Impossible;
         return validation;
+    }
+    // #1386: the fingerprint binds the manifest BYTES, and a manifest whose
+    // source assets carry revision == 0 ("not pinned") can have identical
+    // bytes at different upstream revisions — the identity is not bound to
+    // a provenance point. Track it: Exact below requires every source
+    // revision pinned.
+    bool provenancePinned = true;
+    {
+        const QJsonObject manifestJson =
+            QJsonDocument::fromJson( version->manifestJson().toUtf8() ).object();
+        for ( const QJsonValue &asset :
+              manifestJson.value( QStringLiteral( "source_assets" ) ).toArray() )
+        {
+            if ( asset.toObject().value( QStringLiteral( "revision" ) ).toInteger() <= 0 )
+            {
+                provenancePinned = false;
+                break;
+            }
+        }
+        if ( !provenancePinned )
+            validation.reasons.append(
+                QStringLiteral( "source revision not pinned (revision = 0): identical working "
+                                "bytes at different upstream revisions share this identity" ) );
     }
     Q_UNUSED( impossible );
     validation.reasons.append( QStringLiteral( "dataset version available, fingerprint match" ) );
@@ -582,7 +613,11 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
 
     const bool strictRun = runConfig.value( QStringLiteral( "determinism" ) ).toString() ==
                            QStringLiteral( "strict" );
-    if ( artifactsOk && artifactsChecked && environmentIdentical && strictRun && modelChecked )
+    // Exact demands pinned provenance (#1386): unpinned source revisions
+    // mean the identity is not bound to an upstream point, so byte-identical
+    // replay is not actually guaranteed — the honest ceiling is Compatible.
+    if ( artifactsOk && artifactsChecked && environmentIdentical && strictRun && modelChecked
+         && provenancePinned )
         validation.level = dataset::ReproductionLevel::Exact;
     else if ( artifactsOk && modelChecked )
         validation.level = dataset::ReproductionLevel::Compatible;
