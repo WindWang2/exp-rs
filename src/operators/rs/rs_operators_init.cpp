@@ -405,6 +405,10 @@ void initBuiltinRsOperators() {
   add( "rs:sar_displacement", [] { return std::make_unique<RsSarDisplacementOperator>(); } );
   add( "rs:sar_coregister", [] { return std::make_unique<RsSarCoregisterOperator>(); } );
   add( "rs:sar_temporal_events", [] { return std::make_unique<RsSarTemporalEventsOperator>(); } );
+  add( "rs:sar_remove_topographic_phase", [] { return std::make_unique<RsSarRemoveTopographicPhaseOperator>(); } );
+  add( "rs:sar_coregister_local", [] { return std::make_unique<RsSarCoregisterLocalOperator>(); } );
+  add( "rs:sar_pair_network", [] { return std::make_unique<RsSarPairNetworkOperator>(); } );
+  add( "rs:sar_network_inversion", [] { return std::make_unique<RsSarNetworkInversionOperator>(); } );
   add( "rs:zonal_stats", [] { return std::make_unique<RsZonalStatsOperator>(); } );
   add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
   add( "rs:terrain_flow", [] { return std::make_unique<RsTerrainFlowOperator>(); } );
@@ -440,6 +444,14 @@ add( "rs:terrain_landform", [] { return std::make_unique<RsTerrainLandformOperat
   add( "rs:temporal_decompose", [] { return std::make_unique<RsTemporalDecomposeOperator>(); } );
   add( "rs:temporal_anomaly", [] { return std::make_unique<RsTemporalAnomalyOperator>(); } );
   add( "rs:temporal_extract_series", [] { return std::make_unique<RsTemporalExtractSeriesOperator>(); } );
+  add( "rs:temporal_sar_fusion", [] { return std::make_unique<RsTemporalSarFusionOperator>(); } );
+  add( "rs:temporal_extract_regions", [] { return std::make_unique<RsTemporalExtractRegionsOperator>(); } );
+  add( "rs:temporal_regularize", [] { return std::make_unique<RsTemporalRegularizeOperator>(); } );
+  add( "rs:temporal_harmonic_breaks", [] { return std::make_unique<RsTemporalHarmonicBreaksOperator>(); } );
+  add( "rs:temporal_seasonal_breaks", [] { return std::make_unique<RsTemporalSeasonalBreaksOperator>(); } );
+  add( "rs:temporal_model_select", [] { return std::make_unique<RsTemporalModelSelectOperator>(); } );
+  add( "rs:temporal_phenology_multi", [] { return std::make_unique<RsTemporalPhenologyMultiOperator>(); } );
+  add( "rs:temporal_region_features", [] { return std::make_unique<RsTemporalRegionFeaturesOperator>(); } );
   add( "rs:landsat_import", [] { return std::make_unique<RsLandsatImportOperator>(); } );
   add( "rs:sentinel2_import", [] { return std::make_unique<RsSentinel2ImportOperator>(); } );
   add( "rs:modis_import", [] { return std::make_unique<RsModisImportOperator>(); } );
