@@ -28,7 +28,6 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QSaveFile>
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <atomic>

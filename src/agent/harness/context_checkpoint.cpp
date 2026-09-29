@@ -10,7 +10,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
-#include <QSaveFile>
 #include <QStringList>
 #include <QDateTime>
 
@@ -279,13 +278,15 @@ QString HarnessSessionStore::saveSession( const HarnessSessionState &state, Harn
   // Evict oldest sessions beyond the bound AFTER a successful write, and
   // never when the target session already exists (a re-save must not destroy
   // an unrelated oldest session — review B-16).
-  QSaveFile file( finalPath );
-  if ( !file.open( QIODevice::WriteOnly ) ||
-       file.write( QByteArray::fromStdString( text ) ) < 0 || !file.commit() )
+  // R6: the single sidecar write authority — temp + fsync + atomic publish.
+  const sicnu::platform::sidecar::WriteResult writeResult =
+    sicnu::platform::sidecar::write(
+      { finalPath.toUtf8().constData(), text, "" } );
+  if ( !writeResult )
   {
     error = HarnessError::make( error_codes::kExecutionFailed,
                                 "failed to write session checkpoint: " +
-                                  file.errorString().toStdString() );
+                                  writeResult.error );
     return {};
   }
   QFileInfoList sessions =

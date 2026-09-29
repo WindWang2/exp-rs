@@ -1,5 +1,7 @@
 #include "workflow_runtime.h"
 
+#include "platform/durable_sidecar.h"
+
 #include "builtin_definitions.h"
 #include "workflow_gate.h"
 #include "operators/framework/rs_operator.h"
@@ -10,7 +12,6 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QJsonDocument>
-#include <QSaveFile>
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
@@ -620,18 +621,20 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
         QString::number( taskId ) );
       const QString sidecarPath = QString::fromStdString( outputTempPath )
                                     + QStringLiteral( ".provenance.json" );
-      QSaveFile sidecarFile( sidecarPath );
-      if ( sidecarFile.open( QIODevice::WriteOnly ) )
-      {
-        const QJsonDocument doc( sidecar.toJson() );
-        sidecarFile.write( doc.toJson( QJsonDocument::Compact ) );
-        if ( !sidecarFile.commit() )
-          qWarning() << "[workflow] provenance sidecar write failed:" << sidecarPath;
-      }
-      else
-      {
-        qWarning() << "[workflow] provenance sidecar open failed:" << sidecarPath;
-      }
+      // R6: the single sidecar write authority (temp + fsync + atomic
+      // publish) replaces the QSaveFile lane. Still best-effort: a failed
+      // sidecar write logs and continues (the output itself already exists).
+      const QByteArray provenanceBytes =
+        QJsonDocument( sidecar.toJson() ).toJson( QJsonDocument::Compact );
+      const sicnu::platform::sidecar::WriteResult sidecarWrite =
+        sicnu::platform::sidecar::write(
+          { sidecarPath.toUtf8().constData(),
+            std::string( provenanceBytes.constData(),
+                         static_cast<std::size_t>( provenanceBytes.size() ) ),
+            "" } );
+      if ( !sidecarWrite )
+        qWarning() << "[workflow] provenance sidecar write failed:" << sidecarPath
+                   << QString::fromStdString( sidecarWrite.error );
     }
 
     // Closed-loop verification via OutputVerifier

@@ -29,4 +29,6 @@ target_link_libraries(sicnu_experiment_capsule
   PUBLIC
     Qt6::Core
     Sicnu::experiment
+    # R6: capsule export writes through the platform durable-sidecar authority.
+    Sicnu::Platform
 )

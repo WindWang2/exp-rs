@@ -1,6 +1,8 @@
 // capsule_io.cpp — see capsule_io.h.
 #include "capsule_io.h"
 
+#include "platform/durable_sidecar.h"
+
 #include "data/execution_fingerprint.h"
 #include "experiment/experiment_types.h"
 
@@ -10,7 +12,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
-#include <QSaveFile>
 
 namespace sicnu::experiment::capsule
 {
@@ -117,16 +118,21 @@ Result<CapsuleExportReport> CapsuleIO::exportCapsule( const CapsuleDocument &doc
             QStringLiteral( "capsule.unwritable" ),
             QStringLiteral( "cannot create parent directory of %1" ).arg( path ) ) );
     }
-    // QSaveFile (same doctrine as the study report writer): a capsule is a
+    // R6 (same doctrine as the study report writer): a capsule is a
     // complete, verifiable byte sequence — a failed write must leave the
     // previous capsule intact instead of truncating it to a partial file.
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly ) || file.write( bytes ) != bytes.size()
-         || !file.commit() )
+    // The platform sidecar authority adds the fsync the QSaveFile lane lacked.
+    const sicnu::platform::sidecar::WriteResult result =
+      sicnu::platform::sidecar::write(
+        { path.toUtf8().constData(),
+          std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ),
+          "" } );
+    if ( !result )
     {
         return Result<CapsuleExportReport>::failure( failure(
             QStringLiteral( "capsule.unwritable" ),
-            QStringLiteral( "cannot write %1: %2" ).arg( path, file.errorString() ) ) );
+            QStringLiteral( "cannot write %1: %2" )
+                .arg( path, QString::fromUtf8( result.error.c_str() ) ) ) );
     }
     CapsuleExportReport report;
     report.ok = true;
