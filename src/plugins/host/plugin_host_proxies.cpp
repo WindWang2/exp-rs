@@ -34,6 +34,10 @@ bool tryRecovery( PluginHostSessionEntry &entry )
 {
     if ( !entry.runtime )
         return false;
+    // Unloaded plugin: recovery would respawn a worker nobody hosts anymore
+    // (#1383) — fail typed instead of arming the restart machinery.
+    if ( entry.retired.load( std::memory_order_acquire ) )
+        return false;
     bool expected = false;
     if ( !entry.respawnArmed.compare_exchange_strong( expected, true ) )
         return false; // recovery already in flight; caller fails typed

@@ -37,6 +37,11 @@ struct PluginHostSessionEntry
     Json::Value loadParams;
     std::string entrypointPath;
     std::atomic<bool> respawnArmed{ false };
+    /// Set by unloadPlugin (under mutex) before the map erase: an in-flight
+    /// proxy holding this entry must never respawn a worker for a plugin
+    /// that is no longer hosted — the resurrected worker would be invisible
+    /// to diagnostics and outlive the unload contract (#1383).
+    std::atomic<bool> retired{ false };
     /// Recovery wiring (set by the runtime at load).
     PluginHostProcessRuntime *runtime = nullptr;
     std::string pluginId;
