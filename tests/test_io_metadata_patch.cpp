@@ -21,6 +21,7 @@ using Catch::Approx;
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 
@@ -255,4 +256,76 @@ TEST_CASE( "patching keeps finalize-manifest provenance true", "[io][metadata_pa
   CHECK( manifest["patches"].isArray() );
   CHECK( manifest["patches"].size() == 1 );
   CHECK( manifest["producer"].asString() == "test-harness" ); // provenance preserved
+}
+
+TEST_CASE( "a malformed finalize manifest refuses the patch BEFORE any bytes change (#1391)",
+           "[io][metadata_patch][manifest][negative]" )
+{
+  const std::string dir = scratch( "manifest-malformed" );
+  const std::string staged = ( fs::path( dir ) / "out.1.2.tmp.tif" ).string();
+  ensureGdal();
+  {
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH dataset = GDALCreate( driver, staged.c_str(), 4, 4, 1, GDT_Byte, nullptr );
+    REQUIRE( dataset );
+    GDALClose( dataset );
+  }
+  StageRecord record;
+  record.runId = "run-manifest-malformed";
+  record.producer = "test-harness";
+  record.finalPath = ( fs::path( dir ) / "out.tif" ).string();
+  record.stagedPath = staged;
+  record.driver = "GTiff";
+  record.width = 4;
+  record.height = 4;
+  record.bandCount = 1;
+  recordStaged( record );
+  FinalizeManifestFields fields;
+  fields.producer = "test-harness";
+  fields.driver = "GTiff";
+  fields.width = 4;
+  fields.height = 4;
+  fields.bandCount = 1;
+  fields.dtype = "Byte";
+  finalizeAttached( record.finalPath, &fields );
+  REQUIRE( verifyDataset( record.finalPath ).verified );
+
+  // Corrupt the manifest with a foreign-typed field: the Phase-1b pre-flight
+  // must refuse BEFORE the in-place mutation. Pre-fix this exact shape
+  // applied the patch and then stranded the patched bytes under the stale
+  // digest as a mere warning (permanent digest_mismatch, no repair path —
+  // re-patching failed the same way).
+  const std::string manifestPath = record.finalPath + ".sicnu-manifest.json";
+  {
+    std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
+    out << R"({"producer": 12345, "shape": {"width": 4}})"; // producer is not a string
+  }
+
+  MetadataPatch patch;
+  patch.band = 1;
+  patch.field = "unit";
+  patch.value = "degC";
+  bool refused = false;
+  try
+  {
+    (void)applyMetadataPatch( record.finalPath, { patch } );
+  }
+  catch ( const GeoError &error )
+  {
+    refused = true;
+    CHECK( error.code() == ErrorCode::InvalidMetadata );
+    INFO( error.what() );
+    CHECK( std::string( error.what() ).find( "stale digest" ) != std::string::npos );
+  }
+  REQUIRE( refused );
+
+  // The bytes were never touched: the band unit is still the default and
+  // the digest still verifies against the unpatched file.
+  GDALDatasetH verify = GDALOpen( record.finalPath.c_str(), GA_ReadOnly );
+  REQUIRE( verify );
+  const char *unit = GDALGetMetadataItem( GDALGetRasterBand( verify, 1 ), "UNITTYPE", nullptr );
+  CHECK( ( unit == nullptr || std::string( unit ) != "degC" ) );
+  GDALClose( verify );
+  CHECK( verifyDataset( record.finalPath ).verified );
 }
