@@ -39,6 +39,14 @@ namespace
   int fake_argc = 1;
   char fake_argv0[] = "test_exit_path_contracts_r4";
   char *fake_argv[] = { fake_argv0, nullptr };
+
+  // Heap-owned app (orderly teardown via the registered listener). The
+  // exit-path cases assert the application SURVIVES the shutdown calls, so
+  // one must exist before they run.
+  QCoreApplication *ensureApp()
+  {
+    return sicnu::test::qtlifecycle::heapQgsApplication( fake_argc, fake_argv, false );
+  }
 }
 
 TEST_CASE( "Exit path: GUI and MCP tails share the shutdown pair", "[teardown][r4]" )
@@ -72,6 +80,7 @@ TEST_CASE( "Exit path: GUI and MCP tails share the shutdown pair", "[teardown][r
 
 TEST_CASE( "Exit path: shutdownForTests is idempotent and leaves reusable engine", "[teardown][r4]" )
 {
+  REQUIRE( ensureApp() != nullptr );
   sicnu::TaskCenter::instance().shutdownForTests();
   sicnu::jobs::JobEngine::instance().shutdownForTests();
   // Second pass must be a safe no-op join, not a double-join crash; the app
@@ -83,6 +92,7 @@ TEST_CASE( "Exit path: shutdownForTests is idempotent and leaves reusable engine
 
 TEST_CASE( "Exit path: terminal shutdown tolerates late cleanup call", "[teardown][r4]" )
 {
+  REQUIRE( ensureApp() != nullptr );
   sicnu::jobs::JobEngine::instance().shutdown();
   sicnu::jobs::JobEngine::instance().shutdownForTests();
   REQUIRE( QCoreApplication::instance() != nullptr );
@@ -90,6 +100,7 @@ TEST_CASE( "Exit path: terminal shutdown tolerates late cleanup call", "[teardow
 
 TEST_CASE( "Exit path: exitQgis idempotent with and without QGIS application", "[teardown][r4]" )
 {
+  REQUIRE( ensureApp() != nullptr );
   // No QgsApplication instance in this binary; every exitQgis sub-step must
   // guard "don't create just to delete" instead of instantiating singletons.
   QgsApplication::exitQgis();

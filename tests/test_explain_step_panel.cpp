@@ -243,7 +243,7 @@ TEST_CASE( "plan-only: machine facts and authored guidance render, execution sta
     // State synthesis from declared ports: DN -> Radiance.
     CHECK( panel.renderedText().contains( "radiometric_state: DN → Radiance" ) );
     // Plan-only honesty: no status, no invented timestamps.
-    CHECK( panel.renderedText().contains( QStringLiteral( "执行情况未知（计划模式" ) ) );
+    CHECK( panel.renderedText().contains( QStringLiteral( "Execution status unknown (plan mode" ) ) );
     CHECK_FALSE( panel.renderedText().contains( "状态: " ) );
     CHECK_FALSE( panel.renderedText().contains( "UTC" ) );
     // Deterministic markdown from the same view model.
@@ -321,7 +321,7 @@ TEST_CASE( "unknown run renders honest unknown even with a loaded evidence sourc
     const WorkflowDocument document = parsedDocument();
     panel.showStep( nodeRequest( document, "n1", "run-missing" ) );
 
-    CHECK( panel.renderedText().contains( QStringLiteral( "执行情况未知（运行 run-missing 中没有此步骤的执行证据）" ) ) );
+    CHECK( panel.renderedText().contains( QStringLiteral( "Execution status unknown (run run-missing has no execution evidence for this step)" ) ) );
     CHECK_FALSE( panel.renderedText().contains( "sha256full:abc123" ) );
 }
 
@@ -431,7 +431,7 @@ TEST_CASE( "identical requests re-render deterministically without accumulation"
     CHECK( panel.renderedText() == firstText );
     // One render per call — the second render REPLACED the first.
     CHECK( panel.requestGeneration() == 2 );
-    CHECK( countOccurrences( panel.renderedText(), QStringLiteral( "执行情况（Execution）" ) ) == 1 );
+    CHECK( countOccurrences( panel.renderedText(), QStringLiteral( "Execution:\n" ) ) == 1 );
 }
 
 TEST_CASE( "run switch replaces content with no stale artifacts from the previous run",
@@ -457,14 +457,14 @@ TEST_CASE( "run switch replaces content with no stale artifacts from the previou
 
     // …run B arrives: a full synchronous re-render replaces everything.
     panel.showStep( nodeRequest( document, "n1", "run-other" ) );
-    CHECK( panel.renderedText().contains( QStringLiteral( "执行情况未知（运行 run-other" ) ) );
+    CHECK( panel.renderedText().contains( QStringLiteral( "Execution status unknown (run run-other" ) ) );
     CHECK_FALSE( panel.renderedText().contains( "sha256full:abc123" ) );
 
     // The session boundary (project close / story boundary) clears content.
     panel.reset();
     CHECK_FALSE( panel.hasExplanation() );
     CHECK( panel.markdown().isEmpty() );
-    CHECK( panel.renderedText().contains( QStringLiteral( "未选择需要解释的步骤" ) ) );
+    CHECK( panel.renderedText().contains( QStringLiteral( "No step selected to explain" ) ) );
     CHECK( panel.requestGeneration() == 3 );
 }
 
@@ -485,7 +485,7 @@ TEST_CASE( "unknown operators fail closed with the builder's typed code",
 
     CHECK_FALSE( panel.hasExplanation() );
     CHECK( panel.lastFailureCode() == "operator_unknown" );
-    CHECK( panel.renderedText().contains( QStringLiteral( "无法解释此步骤" ) ) );
+    CHECK( panel.renderedText().contains( QStringLiteral( "Cannot explain this step" ) ) );
 }
 
 TEST_CASE( "showNote replaces any previous explanation (never mixed content)",
@@ -568,7 +568,7 @@ TEST_CASE( "section populate projects the node and surfaces run evidence lifecyc
     section.populate( snapshot );
     REQUIRE( section.panel() != nullptr );
     CHECK( section.panel()->hasExplanation() );
-    CHECK( section.panel()->renderedText().contains( QStringLiteral( "执行情况未知（计划模式" ) ) );
+    CHECK( section.panel()->renderedText().contains( QStringLiteral( "Execution status unknown (plan mode" ) ) );
 
     // Run A finalizes: its provenance record is attached and served.
     section.attachRunProvenance(
@@ -592,7 +592,7 @@ TEST_CASE( "section populate projects the node and surfaces run evidence lifecyc
     section.clearRunEvidence();
     section.populate( snapshot );
     CHECK( section.currentRunId().isEmpty() );
-    CHECK( section.panel()->renderedText().contains( QStringLiteral( "执行情况未知（计划模式" ) ) );
+    CHECK( section.panel()->renderedText().contains( QStringLiteral( "Execution status unknown (plan mode" ) ) );
     CHECK_FALSE( section.panel()->renderedText().contains( "sha256full:feed" ) );
 }
 
@@ -687,8 +687,8 @@ TEST_CASE( "tampered provenance records surface as typed problems and stay unkno
     section.populate( snapshot42 );
     CHECK_FALSE( section.panel()->renderedText().contains( QStringLiteral( "状态: Succeeded" ) ) );
     CHECK( section.panel()->renderedText().contains(
-        QStringLiteral( "执行情况未知（证据记录被拒绝" ) ) );
-    CHECK( section.panel()->renderedText().contains( QStringLiteral( "证据记录问题" ) ) );
+        QStringLiteral( "Execution status unknown (evidence record rejected" ) ) );
+    CHECK( section.panel()->renderedText().contains( QStringLiteral( "Evidence record issues" ) ) );
 
     // A fresh section against a tampered-only directory behaves the same.
     StepExplanationSection freshSection(
@@ -704,7 +704,7 @@ TEST_CASE( "tampered provenance records surface as typed problems and stay unkno
     snapshot.selectedPipelineNodeId = QStringLiteral( "n1" );
     freshSection.populate( snapshot );
     CHECK( freshSection.panel()->renderedText().contains(
-        QStringLiteral( "执行情况未知（证据记录被拒绝" ) ) );
+        QStringLiteral( "Execution status unknown (evidence record rejected" ) ) );
     CHECK_FALSE( freshSection.panel()->renderedText().contains( "状态: " ) );
 
     // A file not matching the pinned record-name grammar serves no evidence
