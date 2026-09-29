@@ -490,7 +490,7 @@ TEST_CASE( "Pool replay answers recovered requests whose retry budget is exhaust
     REQUIRE( waitOn( rig.answered, 10'000 ) );
     REQUIRE( rig.answeredCount.load() == 1 );
     REQUIRE( rig.answeredIsError.load() );
-    CHECK( rig.answeredMessage.contains( QStringLiteral( "retries exhausted" ) ) );
+    CHECK( rig.answeredMessage.contains( QStringLiteral( "replay budget exhausted" ) ) );
     rig.pool.shutdown();
 }
 

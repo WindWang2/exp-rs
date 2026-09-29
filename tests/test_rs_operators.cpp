@@ -4010,6 +4010,9 @@ TEST_CASE("feature_stack validates scale/offset instead of fabricating dead band
 }
 
 TEST_CASE("feature_stack compares CRS semantically, not by WKT encoding", "[operators][rs][feature_stack][hardening16]") {
+    // CTest runs every case in its own process: register the GDAL drivers
+    // here rather than relying on an earlier case having done it.
+    ensureGdalInit();
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
 
