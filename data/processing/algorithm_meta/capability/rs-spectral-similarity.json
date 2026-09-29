@@ -138,7 +138,8 @@
     },
     "limitations" : 
     [
-      "Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class."
+      "Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class.",
+      "Pixels whose spectrum carries a declared NoData sentinel are unlabelled; the first declared finite sentinel on the used bands is honoured (-9999 when none is declared)."
     ],
     "modality" : 
     [

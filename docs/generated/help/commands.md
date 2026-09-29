@@ -9,29 +9,30 @@
 
 ## command.cartography.compose（command.cartography.compose）
 
-- 用途：将 MapSpec 草稿编译为打印版面，并生成质量报告。
-- 前提：制图工作台中已有完成的 MapSpec 草稿
-- 建议下一步：编译后运行“预检地图版面”确认质量
-- 相关主题：command.cartography.preflight、workbench.layout
+- 用途：把草拟的 MapSpec 编译为带质量报告的打印版面。
+- 前提：制图工作台存在有效模板草稿
+- 建议下一步：检查质量报告后执行预检
+- 相关主题：command.cartography.preflight
 
 ## command.cartography.export（command.cartography.export）
 
-- 用途：以原子方式导出版面为 png/pdf/svg，并生成 sha256 证据。
-- 前提：版面已通过预检
-- 相关主题：command.cartography.preflight、workbench.layout
+- 用途：以受控 DPI 导出版面并记录 sha256 证据。
+- 前提：预检通过
+- 建议下一步：保存导出证明用于追溯
+- 相关主题：command.cartography.preflight
 
 ## command.cartography.preflight（command.cartography.preflight）
 
-- 用途：对当前 MapSpec 草稿运行确定性预检，输出问题清单。
-- 前提：制图工作台中已有 MapSpec 草稿
-- 建议下一步：按预检报告执行“修复地图版面”
-- 相关主题：command.cartography.repair、command.cartography.compose
+- 用途：对当前 MapSpec 执行出图前预检并列出修复建议。
+- 前提：已存在编译后的版面草稿
+- 建议下一步：按建议修复后再次预检
+- 相关主题：command.cartography.compose、command.cartography.repair
 
 ## command.cartography.repair（command.cartography.repair）
 
-- 用途：对版面执行有界修复，并展示已应用/仍待处理的修复清单。
-- 前提：已运行过“预检地图版面”并存在问题项
-- 建议下一步：修复后再次预检，通过后执行导出
+- 用途：按预检建议自动修复 MapSpec 的常见问题。
+- 前提：预检产生了可修复项
+- 建议下一步：修复后重新预检并导出
 - 相关主题：command.cartography.preflight、command.cartography.export
 
 ## command.layer.addRaster（command.layer.addRaster）
@@ -138,6 +139,27 @@
 
 - 用途：缩小地图视图，查看更大范围。
 - 相关主题：command.map.zoomIn
+
+## command.mission.task.resume（command.mission.task.resume）
+
+- 用途：恢复选中的过期或已取消任务：重新绑定其引用后从断点继续，而不是重跑已完成的部分。
+- 前提：选中的任务处于可恢复（stale/canceled）状态；任务引用仍可解析
+- 建议下一步：在任务时间线中确认恢复后的执行进度
+- 相关主题：command.mission.task.retry、command.mission.timeline.show
+
+## command.mission.task.retry（command.mission.task.retry）
+
+- 用途：重试当前选中的失败或已取消的任务：沿用原任务参数在任务中心重新排队执行，不改写历史记录。
+- 前提：选中的任务处于 failed 或 canceled 状态；任务引用的输入数据仍然可用
+- 建议下一步：在任务时间线中查看新的执行记录
+- 相关主题：command.mission.task.resume、command.mission.timeline.show
+
+## command.mission.timeline.show（command.mission.timeline.show）
+
+- 用途：打开任务时间线面板：按时间轴查看任务执行、事件与状态迁移。
+- 前提：已打开包含任务运行记录的工程
+- 建议下一步：在时间线中选中一个任务节点查看其详情
+- 相关主题：command.mission.task.retry、command.mission.task.resume
 
 ## command.project.exit（command.project.exit）
 
@@ -298,12 +320,68 @@
 - 前提：已选中 DEM 栅格
 - 相关主题：operator.rs.terrain_analysis
 
+## command.teaching.labCockpit.show（command.teaching.labCockpit.show）
+
+- 用途：打开遥感实验学习工作台：课程首页、就绪度检查与分步引导。
+- 前提：当前账号处于教学场景（学生或教师）
+- 建议下一步：按课程首页的就绪度提示准备数据后开始引导步骤
+- 相关主题：command.mission.timeline.show
+
+## command.view.linkCenter（command.view.linkCenter）
+
+- 用途：在多个地图视图之间同步平移/缩放的中心与范围，一图移动、组内视图跟随。
+- 前提：已打开至少一个副视图或会话视图
+- 建议下一步：用“活动视图联动”把当前视图加入联动组
+- 相关主题：command.view.linkScale、command.view.linkGroupStatus
+
+## command.view.linkCursor（command.view.linkCursor）
+
+- 用途：在联动视图之间同步光标十字丝，跨 CRS 自动换算坐标。
+- 前提：至少两个视图已联动
+- 建议下一步：在任一联动视图内移动鼠标观察十字丝
+- 相关主题：command.view.linkCenter、command.workbench.visualAnalytics
+
+## command.view.linkGroupStatus（command.view.linkGroupStatus）
+
+- 用途：把活动视图加入/移出默认联动组。
+- 前提：存在活动视图
+- 建议下一步：移动当前视图，检查联动组内视图是否跟随
+- 相关主题：command.view.linkCenter、command.view.linkUnlinkAll
+
+## command.view.linkScale（command.view.linkScale）
+
+- 用途：在联动视图之间同步显示比例，保证判读比例一致。
+- 前提：已打开至少一个副视图或会话视图
+- 建议下一步：先用“联动视图中心”打开范围联动
+- 相关主题：command.view.linkCenter、command.view.linkCursor
+
+## command.view.linkUndo（command.view.linkUndo）
+
+- 用途：撤销活动视图上一次平移/缩放，回到上一个范围。
+- 前提：活动视图已有范围历史
+- 建议下一步：连续执行可逐步回退；重新平移可产生新历史
+- 相关主题：command.view.linkGroupStatus
+
+## command.view.linkUnlinkAll（command.view.linkUnlinkAll）
+
+- 用途：把所有视图移出所有联动组，恢复各自独立浏览。
+- 前提：存在已联动视图
+- 建议下一步：需要再次联动时重新勾选联动命令
+- 相关主题：command.view.linkGroupStatus、command.view.linkCenter
+
+## command.view.linkVisibility（command.view.linkVisibility）
+
+- 用途：按资产身份在不同视图之间同步图层可见性与透明度（同名不同源的图层不会误联）。
+- 前提：同一资产已加载到多个视图
+- 建议下一步：在图层树中切换可见性，观察其他视图同步
+- 相关主题：command.view.linkCenter
+
 ## command.workbench.cartography（command.workbench.cartography）
 
-- 用途：打开制图工作台，从模板排版地图布局，并执行预检、修复与导出。
-- 前提：工程中已有可排版的图层
-- 建议下一步：在制图工作台完成排版后执行“预检地图版面”
-- 相关主题：command.cartography.compose、command.cartography.preflight、workbench.layout
+- 用途：打开制图工作台：模板草拟、操作符派发与导出证明。
+- 前提：地图窗口存在可选图层
+- 建议下一步：从模板草拟开始编排地图版面
+- 相关主题：command.cartography.compose
 
 ## command.workbench.classify（command.workbench.classify）
 
@@ -314,21 +392,28 @@
 
 ## command.workbench.classifyStudio（command.workbench.classifyStudio）
 
-- 用途：打开交互式分类/变化工作室（D15），绑定 MissionContext 的输入与结果引用。
-- 前提：已通过数据管理器或图层选择好待分类数据
-- 建议下一步：在工作室中完成训练样本选择与分类执行
-- 相关主题：workbench.classify、workbench.classification
+- 用途：打开分类/变化检测工作台会话窗口。
+- 前提：存在分类或变化检测输入数据
+- 建议下一步：选择影像并启动分类流程
+- 相关主题：command.layer.addRaster
 
 ## command.workbench.datasetExperiment（command.workbench.datasetExperiment）
 
 - 用途：浏览数据集版本、样本、运行与指标对比。
 
+## command.workbench.experimentExplorationStudio（command.workbench.experimentExplorationStudio）
+
+- 用途：打开实验探索工作台：参数敏感性分析、空间对比、故障教学与首次分歧定位。
+- 前提：已有可用的实验运行记录或工作流产物
+- 建议下一步：选择一次运行查看其参数敏感度或分歧报告
+- 相关主题：command.mission.timeline.show
+
 ## command.workbench.georefDual（command.workbench.georefDual）
 
-- 用途：打开双画布联动的几何配准工作台（D14），采集 GCP 并将成果 Result 发布进 MissionContext。
-- 前提：工程中已有源影像与参考影像
-- 建议下一步：在双画布中采集 GCP 并求解变换
-- 相关主题：workbench.georef_i2i、workbench.georef_i2m
+- 用途：打开双窗口影像配准（Image to Map / Image to Image）。
+- 前提：已准备参考图或目标影像
+- 建议下一步：在源/目标窗口间刺点并求解变换
+- 相关主题：command.workbench.classifyStudio
 
 ## command.workbench.georefI2I（command.workbench.georefI2I）
 
@@ -344,10 +429,9 @@
 
 ## command.workbench.ir2Pipeline（command.workbench.ir2Pipeline）
 
-- 用途：打开 IR 2.0 节点图工作流设计器（D17），与 MissionContext/Agent 共享工作流身份。
-- 前提：已有可编排的数据处理步骤构思
-- 建议下一步：从算子库拖入节点并连线，运行完整工作流
-- 相关主题：command.workflow.new、command.workflow.run、command.workbench.operatorCatalog
+- 用途：打开 IR 2.0 流水线设计器，编排任务节点。
+- 建议下一步：从算子目录拖入节点开始编排
+- 相关主题：command.workbench.operatorCatalog
 
 ## command.workbench.model（command.workbench.model）
 
@@ -361,9 +445,9 @@
 
 ## command.workbench.operatorCatalog（command.workbench.operatorCatalog）
 
-- 用途：浏览与检索 rs: 算子目录：按名称/模态筛选，标记最近使用与收藏。
-- 建议下一步：找到目标算子后在工作台或工作流中调用它
-- 相关主题：command.workbench.visualAnalytics
+- 用途：打开 rs: 算子目录：按名称/模态搜索算子，管理最近使用与收藏。
+- 建议下一步：选择一个算子以创建单步工作流
+- 相关主题：command.workflow.new
 
 ## command.workbench.processingHistory（command.workbench.processingHistory）
 
@@ -375,9 +459,10 @@
 
 ## command.workbench.visualAnalytics（command.workbench.visualAnalytics）
 
-- 用途：打开可视化分析面板：有界采样的直方图、散点图与波段曲线，并支持联动筛选。
-- 前提：工程中已有栅格图层
-- 相关主题：workbench.map、command.workbench.operatorCatalog
+- 用途：打开可视化分析工作台：有界抽样的直方图、散点与波段曲线，并支持图表间联动刷选。
+- 前提：当前选择包含栅格图层
+- 建议下一步：刷新图表后拖选直方图范围过滤散点
+- 相关主题：command.view.linkCursor、command.workbench.cartography
 
 ## command.workflow.new（command.workflow.new）
 
@@ -413,4 +498,3 @@
 - 前提：工作流正在运行
 - 建议下一步：修正参数后可再次“运行全流程”
 - 相关主题：command.workflow.run
-

@@ -56,9 +56,19 @@ const std::string &cliCommandsSource()
 }
 
 /// Sub-string of @p text from @p marker to the first line that is exactly "}".
+/// Forward DECLARATIONS of the marker (terminated by ';' before any '{')
+/// are skipped so the scan lands on the definition.
 std::string functionBody( const std::string &text, const std::string &marker )
 {
-    const std::size_t at = text.find( marker );
+    std::size_t at = text.find( marker );
+    while ( at != std::string::npos )
+    {
+        const std::size_t semi = text.find( ';', at );
+        const std::size_t brace = text.find( '{', at );
+        if ( brace != std::string::npos && ( semi == std::string::npos || brace < semi ) )
+            break;
+        at = text.find( marker, at + marker.size() );
+    }
     if ( at == std::string::npos )
         return {};
     const std::size_t close = text.find( "\n}", at );
@@ -87,11 +97,13 @@ std::set<std::string> acceptedCommands()
     return out;
 }
 
-/// The body of dispatchCliCommand() — the DISPATCHED side.
+/// The body of dispatchCliCommandImpl() — the DISPATCHED side. Track 14
+/// (WP-F) turned dispatchCliCommand() into a thin exception boundary that
+/// forwards to the Impl; the `command == "x"` branches live in the Impl.
 const std::string &dispatchBody()
 {
     static const std::string body =
-        functionBody( cliCommandsSource(), "int dispatchCliCommand(" );
+        functionBody( cliCommandsSource(), "int dispatchCliCommandImpl(" );
     return body;
 }
 

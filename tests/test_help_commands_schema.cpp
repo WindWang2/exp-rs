@@ -29,6 +29,7 @@
 #include <QJsonParseError>
 #include <QSet>
 #include <QString>
+#include <QJsonValue>
 
 #ifndef CMAKE_SOURCE_DIR
 #define CMAKE_SOURCE_DIR "."

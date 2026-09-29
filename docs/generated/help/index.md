@@ -1,6 +1,6 @@
 # 帮助索引（自动生成）
 
-> 共 1819 个主题。
+> 共 2175 个主题。
 
 ## 未分类
 
@@ -28,6 +28,9 @@
 - `command.map.zoomFull` — command.map.zoomFull
 - `command.map.zoomIn` — command.map.zoomIn
 - `command.map.zoomOut` — command.map.zoomOut
+- `command.mission.task.resume` — command.mission.task.resume
+- `command.mission.task.retry` — command.mission.task.retry
+- `command.mission.timeline.show` — command.mission.timeline.show
 - `command.project.exit` — command.project.exit
 - `command.project.importLayer` — command.project.importLayer
 - `command.project.new` — command.project.new
@@ -54,10 +57,19 @@
 - `command.rs.spectralIndex` — command.rs.spectralIndex
 - `command.rs.temporal` — command.rs.temporal
 - `command.rs.terrain` — command.rs.terrain
+- `command.teaching.labCockpit.show` — command.teaching.labCockpit.show
+- `command.view.linkCenter` — command.view.linkCenter
+- `command.view.linkCursor` — command.view.linkCursor
+- `command.view.linkGroupStatus` — command.view.linkGroupStatus
+- `command.view.linkScale` — command.view.linkScale
+- `command.view.linkUndo` — command.view.linkUndo
+- `command.view.linkUnlinkAll` — command.view.linkUnlinkAll
+- `command.view.linkVisibility` — command.view.linkVisibility
 - `command.workbench.cartography` — command.workbench.cartography
 - `command.workbench.classify` — command.workbench.classify
 - `command.workbench.classifyStudio` — command.workbench.classifyStudio
 - `command.workbench.datasetExperiment` — command.workbench.datasetExperiment
+- `command.workbench.experimentExplorationStudio` — command.workbench.experimentExplorationStudio
 - `command.workbench.georefDual` — command.workbench.georefDual
 - `command.workbench.georefI2I` — command.workbench.georefI2I
 - `command.workbench.georefI2M` — command.workbench.georefI2M
@@ -145,6 +157,7 @@
 - `diagnostic.operator.already_running` — 算子已在运行
 - `diagnostic.operator.cancelled` — 算子已取消
 - `diagnostic.operator.computation_error` — 计算错误
+- `diagnostic.operator.corrupt_artifact_data` — 持久化工件损坏（摘要/框架校验失败）
 - `diagnostic.operator.device_unavailable` — 推理设备不可用
 - `diagnostic.operator.directory_not_found` — 目录不存在
 - `diagnostic.operator.external_process_failed` — 外部进程失败
@@ -162,6 +175,7 @@
 - `diagnostic.operator.otb_error` — OTB 错误
 - `diagnostic.operator.out_of_range` — 参数超出范围
 - `diagnostic.operator.qgis_processing_error` — QGIS 处理错误
+- `diagnostic.operator.resource_budget_exceeded` — 执行资源预算耗尽（无可用降级步骤）
 - `diagnostic.operator.runtime_provider_failed` — 运行时提供者失败
 - `diagnostic.operator.type_mismatch` — 参数类型不匹配
 - `diagnostic.operator.unknown` — 未知算子错误
@@ -525,17 +539,62 @@
 
 ## 错误与诊断
 
+- `diagnostic.env.data_dir_missing` — SICNU_DATA_DIR 指向的目录不存在
+- `diagnostic.env.data_dir_unresolved` — 未定位到运行时数据目录
+- `diagnostic.env.gdal_data_missing` — GDAL_DATA 指向的目录不存在
+- `diagnostic.env.gdal_driver_missing` — 缺少必需的 GDAL 驱动
+- `diagnostic.env.gdal_drivers_empty` — GDAL 驱动注册表为空
+- `diagnostic.env.platform_plugin_missing` — 未找到 Qt 平台插件目录
+- `diagnostic.env.proj_db_missing` — 找不到 proj.db
+- `diagnostic.env.proj_db_unusable` — PROJ 坐标解析失败
+- `diagnostic.env.ssl_library_missing` — 未找到可加载的 SSL 运行库
+- `diagnostic.env.temp_not_writable` — 临时目录不可写
+- `diagnostic.env.temp_unresolved` — 系统临时目录无法解析
+- `diagnostic.env.unicode_path_failed` — 中文路径读写失败
 - `diagnostic.harness.acquisition_dates_missing` — 缺少获取日期
+- `diagnostic.harness.autonomy_agent_mode_required` — 需要 Agent 模式（科研域执行）
+- `diagnostic.harness.autonomy_course_cap` — 达到课程自治上限
+- `diagnostic.harness.autonomy_downgraded` — 自治动作已降级
+- `diagnostic.harness.autonomy_lab_student_execution` — 实验课学生不可执行
+- `diagnostic.harness.autonomy_level_too_low` — 能力等级低于要求
+- `diagnostic.harness.autonomy_mode_ceiling` — 会话模式封顶
+- `diagnostic.harness.autonomy_override_denied` — 自治覆盖被拒绝
+- `diagnostic.harness.autonomy_unknown_capability` — 未知的自治能力标识
+- `diagnostic.harness.band_identity_mismatch` — 波段角色不匹配
+- `diagnostic.harness.baseline_no_zero_doppler_master` — 主影像缺少零多普勒元数据
+- `diagnostic.harness.baseline_no_zero_doppler_slave` — 从影像缺少零多普勒元数据
+- `diagnostic.harness.baseline_state_interpolation_failed` — 轨道状态向量插值失败
 - `diagnostic.harness.categorical_mismatch` — 类别体系不一致
 - `diagnostic.harness.complex_bands_required` — 需要复数波段输入
+- `diagnostic.harness.coregistration_failed` — 配准失败
 - `diagnostic.harness.dataset_not_found` — 数据集未找到
 - `diagnostic.harness.dates_not_ascending` — 日期未按升序排列
+- `diagnostic.harness.dem_crs_mismatch` — DEM 坐标系与影像不一致
+- `diagnostic.harness.dem_extent_insufficient` — DEM 范围不足
+- `diagnostic.harness.dem_grid_unsupported` — DEM 网格形式不受支持
 - `diagnostic.harness.fact_conflict` — 事实冲突
+- `diagnostic.harness.grid_crs_missing` — 输入缺少 CRS
 - `diagnostic.harness.io_error` — 输入/输出错误
+- `diagnostic.harness.network_inversion_epoch_limit` — 反演历元数超限
+- `diagnostic.harness.network_inversion_pair_limit` — 反演配对数超限
+- `diagnostic.harness.network_inversion_pattern_blowup` — 时序反演解算发散
+- `diagnostic.harness.network_inversion_rank_deficient` — 反演矩阵秩亏
 - `diagnostic.harness.nondeterministic_chain` — 链路包含非确定性步骤
+- `diagnostic.harness.numeric_domain_chain` — 数值域链冲突
+- `diagnostic.harness.orbit_epoch_mismatch` — 轨道历元不匹配
+- `diagnostic.harness.orbit_segment_invalid` — 轨道弧段无效
+- `diagnostic.harness.output_identity_mismatch` — 输出身份不匹配
 - `diagnostic.harness.output_path_collision` — 输出路径冲突
+- `diagnostic.harness.pair_graph_disconnected` — 配对图不连通
 - `diagnostic.harness.resource_over_budget` — 资源超出预算
+- `diagnostic.harness.scene_truth_invalid` — 场景真值无效
+- `diagnostic.harness.temporal_calendar_conflict` — 时间日历冲突
 - `diagnostic.harness.temporal_misalignment` — 时间基准不对齐
+- `diagnostic.harness.topo_phase_metadata_missing` — 地形相位元数据缺失
+- `diagnostic.harness.topo_phase_orbit_coverage` — 轨道覆盖不足以去地形相位
+- `diagnostic.harness.unwrap_provider_failed` — 外部解缠 provider 执行失败
+- `diagnostic.harness.unwrap_provider_invalid_output` — 外部解缠 provider 输出无效
+- `diagnostic.harness.unwrap_provider_timeout` — 外部解缠 provider 超时
 - `diagnostic.harness.unwrap_provider_unavailable` — 相位解缠提供者不可用
 - `diagnostic.harness.wavelength_incompatible` — 波长不兼容
 - `diagnostic.operator.policy_refused` — 算子被策略拒绝执行
@@ -643,9 +702,12 @@
 - `operator.io.doctor` — Data Doctor
 - `operator.io.inspect` — Inspect Dataset
 - `operator.io.make_cog` — Make COG
+- `operator.io.metadata_patch` — Patch Metadata
 - `operator.io.reproject` — Reproject Raster
+- `operator.io.subdatasets` — Subdataset Inventory
 - `operator.io.translate` — Translate Raster
 - `operator.io.vector_convert` — Convert Vector
+- `operator.io.verify_dataset` — Verify Dataset
 - `operator.io.warp` — Warp Raster
 - `parameter.io.build_overviews.input` — input
 - `parameter.io.build_overviews.levels` — levels
@@ -680,19 +742,29 @@
 - `parameter.io.cube_window.catalog` — catalog
 - `parameter.io.cube_window.mirrorDirectory` — mirrorDirectory
 - `parameter.io.cube_window.output` — output
+- `parameter.io.cube_window.window` — window
 - `parameter.io.doctor.includeStatistics` — includeStatistics
 - `parameter.io.doctor.input` — input
 - `parameter.io.inspect.includeStatistics` — includeStatistics
 - `parameter.io.inspect.input` — input
+- `parameter.io.make_cog.blocksize` — blocksize
 - `parameter.io.make_cog.creationOptions` — creationOptions
+- `parameter.io.make_cog.deflateLevel` — deflateLevel
+- `parameter.io.make_cog.deterministic` — deterministic
 - `parameter.io.make_cog.input` — input
 - `parameter.io.make_cog.output` — output
+- `parameter.io.make_cog.overviews` — overviews
 - `parameter.io.make_cog.preset` — preset
+- `parameter.io.metadata_patch.input` — input
+- `parameter.io.metadata_patch.patches` — patches
 - `parameter.io.reproject.input` — input
 - `parameter.io.reproject.output` — output
 - `parameter.io.reproject.resampling` — resampling
 - `parameter.io.reproject.srcCrsOverride` — srcCrsOverride
 - `parameter.io.reproject.targetCrs` — targetCrs
+- `parameter.io.subdatasets.input` — input
+- `parameter.io.subdatasets.maxEntries` — maxEntries
+- `parameter.io.subdatasets.select` — select
 - `parameter.io.translate.bands` — bands
 - `parameter.io.translate.creationOptions` — creationOptions
 - `parameter.io.translate.driver` — driver
@@ -709,6 +781,8 @@
 - `parameter.io.vector_convert.output` — output
 - `parameter.io.vector_convert.targetCrs` — targetCrs
 - `parameter.io.vector_convert.where` — where
+- `parameter.io.verify_dataset.allowMissingManifest` — allowMissingManifest
+- `parameter.io.verify_dataset.input` — input
 - `parameter.io.warp.bounds` — bounds
 - `parameter.io.warp.creationOptions` — creationOptions
 - `parameter.io.warp.input` — input
@@ -794,9 +868,12 @@
 
 - `operator.rs.ace` — ACE Detector
 - `operator.rs.band_math` — Band Math
+- `operator.rs.cem_detection` — CEM Detector
+- `operator.rs.endmember_analysis` — Endmember Analysis
 - `operator.rs.endmember_extraction` — Endmember Extraction (PPI)
 - `operator.rs.evi` — Enhanced Vegetation Index (EVI)
 - `operator.rs.library_select` — Library Select
+- `operator.rs.local_rx_anomaly` — Local (Dual-Window) RX Anomaly Detection
 - `operator.rs.matched_filter` — Matched Filter
 - `operator.rs.mndwi` — Modified Normalized Difference Water Index (MNDWI)
 - `operator.rs.mnf` — MNF (Minimum Noise Fraction)
@@ -804,13 +881,19 @@
 - `operator.rs.ndbi` — Normalized Difference Built-up Index (NDBI)
 - `operator.rs.ndvi` — Normalized Difference Vegetation Index (NDVI)
 - `operator.rs.ndwi` — Normalized Difference Water Index (NDWI)
+- `operator.rs.osp_detection` — OSP Detector
 - `operator.rs.rx_anomaly` — RX Anomaly Detection
 - `operator.rs.savi` — Soil-Adjusted Vegetation Index (SAVI)
+- `operator.rs.sparse_unmixing` — Sparse Unmixing (L1 + Non-negative)
 - `operator.rs.spectral_band_select` — Spectral Band Select
 - `operator.rs.spectral_derivative` — Spectral Derivative
 - `operator.rs.spectral_index` — Spectral Index
 - `operator.rs.spectral_resample` — Spectral Resampling
+- `operator.rs.spectral_similarity` — SID-SAM Hybrid Similarity
+- `operator.rs.spectral_spatial_fuse` — Spectral-Spatial Fuse
 - `operator.rs.spectral_unmixing` — Linear Spectral Unmixing
+- `operator.rs.tcimf_detection` — TCIMF Detector
+- `parameter.rs.ace.background` — background
 - `parameter.rs.ace.input` — input
 - `parameter.rs.ace.libraryMaterials` — libraryMaterials
 - `parameter.rs.ace.libraryPath` — libraryPath
@@ -820,6 +903,21 @@
 - `parameter.rs.band_math.expression` — expression
 - `parameter.rs.band_math.input` — input
 - `parameter.rs.band_math.output` — output
+- `parameter.rs.cem_detection.background` — background
+- `parameter.rs.cem_detection.input` — input
+- `parameter.rs.cem_detection.libraryMaterials` — libraryMaterials
+- `parameter.rs.cem_detection.libraryPath` — libraryPath
+- `parameter.rs.cem_detection.loading` — loading
+- `parameter.rs.cem_detection.output` — output
+- `parameter.rs.cem_detection.target` — target
+- `parameter.rs.cem_detection.targetRef` — targetRef
+- `parameter.rs.endmember_analysis.angleMatrix` — angleMatrix
+- `parameter.rs.endmember_analysis.endmembersRef` — endmembersRef
+- `parameter.rs.endmember_analysis.mergeAngleDegrees` — mergeAngleDegrees
+- `parameter.rs.endmember_analysis.output` — output
+- `parameter.rs.endmember_analysis.ppiCounts` — ppiCounts
+- `parameter.rs.endmember_analysis.requireFullCoverage` — requireFullCoverage
+- `parameter.rs.endmember_analysis.sensor` — sensor
 - `parameter.rs.endmember_extraction.endmembersOut` — endmembersOut
 - `parameter.rs.endmember_extraction.input` — input
 - `parameter.rs.endmember_extraction.nEndmembers` — nEndmembers
@@ -837,6 +935,15 @@
 - `parameter.rs.library_select.sensor` — sensor
 - `parameter.rs.library_select.wavelengthMax` — wavelengthMax
 - `parameter.rs.library_select.wavelengthMin` — wavelengthMin
+- `parameter.rs.local_rx_anomaly.covariance` — covariance
+- `parameter.rs.local_rx_anomaly.innerWindow` — innerWindow
+- `parameter.rs.local_rx_anomaly.input` — input
+- `parameter.rs.local_rx_anomaly.loading` — loading
+- `parameter.rs.local_rx_anomaly.minSamples` — minSamples
+- `parameter.rs.local_rx_anomaly.outerWindow` — outerWindow
+- `parameter.rs.local_rx_anomaly.output` — output
+- `parameter.rs.local_rx_anomaly.qualityOut` — qualityOut
+- `parameter.rs.matched_filter.background` — background
 - `parameter.rs.matched_filter.input` — input
 - `parameter.rs.matched_filter.libraryMaterials` — libraryMaterials
 - `parameter.rs.matched_filter.libraryPath` — libraryPath
@@ -870,6 +977,14 @@
 - `parameter.rs.ndwi.input` — input
 - `parameter.rs.ndwi.nir` — nir
 - `parameter.rs.ndwi.output` — output
+- `parameter.rs.osp_detection.input` — input
+- `parameter.rs.osp_detection.interference` — interference
+- `parameter.rs.osp_detection.interferenceRef` — interferenceRef
+- `parameter.rs.osp_detection.libraryMaterials` — libraryMaterials
+- `parameter.rs.osp_detection.libraryPath` — libraryPath
+- `parameter.rs.osp_detection.output` — output
+- `parameter.rs.osp_detection.target` — target
+- `parameter.rs.osp_detection.targetRef` — targetRef
 - `parameter.rs.rx_anomaly.input` — input
 - `parameter.rs.rx_anomaly.output` — output
 - `parameter.rs.savi.input` — input
@@ -877,6 +992,19 @@
 - `parameter.rs.savi.output` — output
 - `parameter.rs.savi.red` — red
 - `parameter.rs.savi.scale` — scale
+- `parameter.rs.sparse_unmixing.bands` — bands
+- `parameter.rs.sparse_unmixing.collinearAngleDegrees` — collinearAngleDegrees
+- `parameter.rs.sparse_unmixing.endmembers` — endmembers
+- `parameter.rs.sparse_unmixing.endmembersRef` — endmembersRef
+- `parameter.rs.sparse_unmixing.errorOut` — errorOut
+- `parameter.rs.sparse_unmixing.input` — input
+- `parameter.rs.sparse_unmixing.lambda` — lambda
+- `parameter.rs.sparse_unmixing.libraryMaterials` — libraryMaterials
+- `parameter.rs.sparse_unmixing.libraryPath` — libraryPath
+- `parameter.rs.sparse_unmixing.maxIterations` — maxIterations
+- `parameter.rs.sparse_unmixing.output` — output
+- `parameter.rs.sparse_unmixing.sumToOnePenalty` — sumToOnePenalty
+- `parameter.rs.sparse_unmixing.tolerance` — tolerance
 - `parameter.rs.spectral_band_select.bands` — bands
 - `parameter.rs.spectral_band_select.excludeRanges` — excludeRanges
 - `parameter.rs.spectral_band_select.input` — input
@@ -903,6 +1031,21 @@
 - `parameter.rs.spectral_resample.output` — output
 - `parameter.rs.spectral_resample.sourceWavelengths` — sourceWavelengths
 - `parameter.rs.spectral_resample.wavelengths` — wavelengths
+- `parameter.rs.spectral_similarity.bands` — bands
+- `parameter.rs.spectral_similarity.form` — form
+- `parameter.rs.spectral_similarity.input` — input
+- `parameter.rs.spectral_similarity.libraryMaterials` — libraryMaterials
+- `parameter.rs.spectral_similarity.libraryPath` — libraryPath
+- `parameter.rs.spectral_similarity.output` — output
+- `parameter.rs.spectral_similarity.refs` — refs
+- `parameter.rs.spectral_similarity.refsRef` — refsRef
+- `parameter.rs.spectral_similarity.scoreOut` — scoreOut
+- `parameter.rs.spectral_spatial_fuse.beta` — beta
+- `parameter.rs.spectral_spatial_fuse.input` — input
+- `parameter.rs.spectral_spatial_fuse.method` — method
+- `parameter.rs.spectral_spatial_fuse.output` — output
+- `parameter.rs.spectral_spatial_fuse.radius` — radius
+- `parameter.rs.spectral_spatial_fuse.sigmaRange` — sigmaRange
 - `parameter.rs.spectral_unmixing.bands` — bands
 - `parameter.rs.spectral_unmixing.endmembers` — endmembers
 - `parameter.rs.spectral_unmixing.endmembersRef` — endmembersRef
@@ -912,6 +1055,16 @@
 - `parameter.rs.spectral_unmixing.libraryPath` — libraryPath
 - `parameter.rs.spectral_unmixing.method` — method
 - `parameter.rs.spectral_unmixing.output` — output
+- `parameter.rs.tcimf_detection.background` — background
+- `parameter.rs.tcimf_detection.input` — input
+- `parameter.rs.tcimf_detection.interference` — interference
+- `parameter.rs.tcimf_detection.interferenceRef` — interferenceRef
+- `parameter.rs.tcimf_detection.libraryMaterials` — libraryMaterials
+- `parameter.rs.tcimf_detection.libraryPath` — libraryPath
+- `parameter.rs.tcimf_detection.loading` — loading
+- `parameter.rs.tcimf_detection.output` — output
+- `parameter.rs.tcimf_detection.target` — target
+- `parameter.rs.tcimf_detection.targetRef` — targetRef
 
 ## raster
 
@@ -952,8 +1105,11 @@
 - `operator.rs.atmospheric_dos1` — Atmospheric Correction DOS1
 - `operator.rs.atmospheric_dos2` — Atmospheric Correction DOS2
 - `operator.rs.atmospheric_quac` — Atmospheric Correction QUAC
+- `operator.rs.brdf_normalization` — BRDF Normalization
 - `operator.rs.dn_to_radiance` — DN to Radiance
 - `operator.rs.radiometric_calibration` — Radiometric Calibration
+- `operator.rs.radiometric_qa` — Radiometric QA Flags
+- `operator.rs.solar_geometry` — Solar Geometry
 - `parameter.rs.atmospheric_correction.airmass` — airmass
 - `parameter.rs.atmospheric_correction.band` — band
 - `parameter.rs.atmospheric_correction.bias` — bias
@@ -977,6 +1133,16 @@
 - `parameter.rs.atmospheric_dos2.output` — output
 - `parameter.rs.atmospheric_quac.input` — input
 - `parameter.rs.atmospheric_quac.output` — output
+- `parameter.rs.brdf_normalization.f_geo` — f_geo
+- `parameter.rs.brdf_normalization.f_vol` — f_vol
+- `parameter.rs.brdf_normalization.input` — input
+- `parameter.rs.brdf_normalization.output` — output
+- `parameter.rs.brdf_normalization.ref_relative_azimuth` — ref_relative_azimuth
+- `parameter.rs.brdf_normalization.ref_view_zenith` — ref_view_zenith
+- `parameter.rs.brdf_normalization.sun_azimuth` — sun_azimuth
+- `parameter.rs.brdf_normalization.sun_zenith` — sun_zenith
+- `parameter.rs.brdf_normalization.view_azimuth` — view_azimuth
+- `parameter.rs.brdf_normalization.view_zenith` — view_zenith
 - `parameter.rs.dn_to_radiance.band` — band
 - `parameter.rs.dn_to_radiance.bias` — bias
 - `parameter.rs.dn_to_radiance.gain` — gain
@@ -988,6 +1154,19 @@
 - `parameter.rs.radiometric_calibration.metadata_path` — metadata_path
 - `parameter.rs.radiometric_calibration.output` — output
 - `parameter.rs.radiometric_calibration.unit` — unit
+- `parameter.rs.radiometric_qa.cloud_mask` — cloud_mask
+- `parameter.rs.radiometric_qa.input` — input
+- `parameter.rs.radiometric_qa.mask_flag` — mask_flag
+- `parameter.rs.radiometric_qa.output` — output
+- `parameter.rs.radiometric_qa.qa_radsat_band` — qa_radsat_band
+- `parameter.rs.radiometric_qa.qa_radsat_bits` — qa_radsat_bits
+- `parameter.rs.radiometric_qa.saturation_level` — saturation_level
+- `parameter.rs.solar_geometry.date` — date
+- `parameter.rs.solar_geometry.input` — input
+- `parameter.rs.solar_geometry.latitude` — latitude
+- `parameter.rs.solar_geometry.longitude` — longitude
+- `parameter.rs.solar_geometry.utc_time` — utc_time
+- `parameter.rs.solar_geometry.write_metadata` — write_metadata
 
 ## enhancement
 
@@ -1038,6 +1217,7 @@
 - `parameter.rs.image_fusion.output` — output
 - `parameter.rs.image_fusion.pan` — pan
 - `parameter.rs.image_fusion.panWeight` — panWeight
+- `parameter.rs.image_fusion.qualityReport` — qualityReport
 - `parameter.rs.image_fusion.redIdx` — redIdx
 - `parameter.rs.pca.input` — input
 - `parameter.rs.pca.numComponents` — numComponents
@@ -1131,10 +1311,14 @@
 - `operator.rs.temporal_harmonic_breaks` — Temporal Harmonic Breaks (Joint Seasonal-Trend Change)
 - `operator.rs.temporal_harmonic_fit` — Temporal Harmonic Fit
 - `operator.rs.temporal_index_series` — Temporal Index Series
+- `operator.rs.temporal_model_select` — Temporal Model Select (Per-Segment Order + Breaks)
 - `operator.rs.temporal_monitor` — Temporal Monitor
 - `operator.rs.temporal_phenology` — Temporal Phenology Metrics
+- `operator.rs.temporal_phenology_multi` — Temporal Phenology Multi (Auto Cycles + Quality Flags)
 - `operator.rs.temporal_region_features` — Temporal Region Features (ML Table)
 - `operator.rs.temporal_regularize` — Temporal Regularize (Regular Calendar)
+- `operator.rs.temporal_sar_fusion` — Temporal Optical+SAR Feature Fusion
+- `operator.rs.temporal_seasonal_breaks` — Temporal Seasonal Breaks (Attribution + CI)
 - `operator.rs.temporal_sen_trend` — Temporal Sen Trend
 - `operator.rs.temporal_smooth` — Temporal Smoothing
 - `operator.rs.temporal_summary` — Temporal Summary
@@ -1224,6 +1408,7 @@
 - `parameter.rs.temporal_breakpoints.band` — band
 - `parameter.rs.temporal_breakpoints.band_role` — band_role
 - `parameter.rs.temporal_breakpoints.collection` — collection
+- `parameter.rs.temporal_breakpoints.compute_ci` — compute_ci
 - `parameter.rs.temporal_breakpoints.duplicate_policy` — duplicate_policy
 - `parameter.rs.temporal_breakpoints.maxBreaks` — maxBreaks
 - `parameter.rs.temporal_breakpoints.minImprovement` — minImprovement
@@ -1284,6 +1469,7 @@
 - `parameter.rs.temporal_gap_fill.max_gap_days` — max_gap_days
 - `parameter.rs.temporal_gap_fill.method` — method
 - `parameter.rs.temporal_gap_fill.output` — output
+- `parameter.rs.temporal_gap_fill.provenance_output` — provenance_output
 - `parameter.rs.temporal_gap_fill.scenes` — scenes
 - `parameter.rs.temporal_gap_fill.tile_size` — tile_size
 - `parameter.rs.temporal_harmonic_breaks.apply_qa_masking` — apply_qa_masking
@@ -1305,7 +1491,9 @@
 - `parameter.rs.temporal_harmonic_fit.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_harmonic_fit.band` — band
 - `parameter.rs.temporal_harmonic_fit.band_role` — band_role
+- `parameter.rs.temporal_harmonic_fit.ci_level` — ci_level
 - `parameter.rs.temporal_harmonic_fit.collection` — collection
+- `parameter.rs.temporal_harmonic_fit.compute_ci` — compute_ci
 - `parameter.rs.temporal_harmonic_fit.duplicate_policy` — duplicate_policy
 - `parameter.rs.temporal_harmonic_fit.harmonics` — harmonics
 - `parameter.rs.temporal_harmonic_fit.minObservations` — minObservations
@@ -1322,6 +1510,21 @@
 - `parameter.rs.temporal_index_series.output` — output
 - `parameter.rs.temporal_index_series.scenes` — scenes
 - `parameter.rs.temporal_index_series.tile_size` — tile_size
+- `parameter.rs.temporal_model_select.apply_qa_masking` — apply_qa_masking
+- `parameter.rs.temporal_model_select.band` — band
+- `parameter.rs.temporal_model_select.band_role` — band_role
+- `parameter.rs.temporal_model_select.collection` — collection
+- `parameter.rs.temporal_model_select.cvFolds` — cvFolds
+- `parameter.rs.temporal_model_select.duplicate_policy` — duplicate_policy
+- `parameter.rs.temporal_model_select.maxBreaks` — maxBreaks
+- `parameter.rs.temporal_model_select.maxHarmonics` — maxHarmonics
+- `parameter.rs.temporal_model_select.minImprovement` — minImprovement
+- `parameter.rs.temporal_model_select.minSegmentDays` — minSegmentDays
+- `parameter.rs.temporal_model_select.output` — output
+- `parameter.rs.temporal_model_select.penalty` — penalty
+- `parameter.rs.temporal_model_select.robust` — robust
+- `parameter.rs.temporal_model_select.scenes` — scenes
+- `parameter.rs.temporal_model_select.tile_size` — tile_size
 - `parameter.rs.temporal_monitor.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_monitor.band` — band
 - `parameter.rs.temporal_monitor.band_role` — band_role
@@ -1343,12 +1546,27 @@
 - `parameter.rs.temporal_phenology.duplicate_policy` — duplicate_policy
 - `parameter.rs.temporal_phenology.minValidPerSeason` — minValidPerSeason
 - `parameter.rs.temporal_phenology.output` — output
+- `parameter.rs.temporal_phenology.provenance` — provenance
 - `parameter.rs.temporal_phenology.scenes` — scenes
 - `parameter.rs.temporal_phenology.season2EndDoy` — season2EndDoy
 - `parameter.rs.temporal_phenology.season2StartDoy` — season2StartDoy
 - `parameter.rs.temporal_phenology.seasonEndDoy` — seasonEndDoy
 - `parameter.rs.temporal_phenology.seasonStartDoy` — seasonStartDoy
 - `parameter.rs.temporal_phenology.tile_size` — tile_size
+- `parameter.rs.temporal_phenology_multi.apply_qa_masking` — apply_qa_masking
+- `parameter.rs.temporal_phenology_multi.band` — band
+- `parameter.rs.temporal_phenology_multi.band_role` — band_role
+- `parameter.rs.temporal_phenology_multi.collection` — collection
+- `parameter.rs.temporal_phenology_multi.crossingFraction` — crossingFraction
+- `parameter.rs.temporal_phenology_multi.duplicate_policy` — duplicate_policy
+- `parameter.rs.temporal_phenology_multi.maxCyclesPerYear` — maxCyclesPerYear
+- `parameter.rs.temporal_phenology_multi.maxGapFraction` — maxGapFraction
+- `parameter.rs.temporal_phenology_multi.minCoverage` — minCoverage
+- `parameter.rs.temporal_phenology_multi.minPeakFraction` — minPeakFraction
+- `parameter.rs.temporal_phenology_multi.minValidPerSeason` — minValidPerSeason
+- `parameter.rs.temporal_phenology_multi.output` — output
+- `parameter.rs.temporal_phenology_multi.scenes` — scenes
+- `parameter.rs.temporal_phenology_multi.tile_size` — tile_size
 - `parameter.rs.temporal_region_features.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_region_features.band` — band
 - `parameter.rs.temporal_region_features.band_role` — band_role
@@ -1379,13 +1597,38 @@
 - `parameter.rs.temporal_regularize.output` — output
 - `parameter.rs.temporal_regularize.scenes` — scenes
 - `parameter.rs.temporal_regularize.tile_size` — tile_size
+- `parameter.rs.temporal_sar_fusion.grid_tolerance` — grid_tolerance
+- `parameter.rs.temporal_sar_fusion.optical` — optical
+- `parameter.rs.temporal_sar_fusion.output` — output
+- `parameter.rs.temporal_sar_fusion.sar` — sar
+- `parameter.rs.temporal_sar_fusion.tile_size` — tile_size
+- `parameter.rs.temporal_seasonal_breaks.alpha` — alpha
+- `parameter.rs.temporal_seasonal_breaks.apply_qa_masking` — apply_qa_masking
+- `parameter.rs.temporal_seasonal_breaks.band` — band
+- `parameter.rs.temporal_seasonal_breaks.band_role` — band_role
+- `parameter.rs.temporal_seasonal_breaks.bootstrap_resamples` — bootstrap_resamples
+- `parameter.rs.temporal_seasonal_breaks.bootstrap_seed` — bootstrap_seed
+- `parameter.rs.temporal_seasonal_breaks.ci_level` — ci_level
+- `parameter.rs.temporal_seasonal_breaks.collection` — collection
+- `parameter.rs.temporal_seasonal_breaks.compute_ci` — compute_ci
+- `parameter.rs.temporal_seasonal_breaks.duplicate_policy` — duplicate_policy
+- `parameter.rs.temporal_seasonal_breaks.harmonics` — harmonics
+- `parameter.rs.temporal_seasonal_breaks.maxBreaks` — maxBreaks
+- `parameter.rs.temporal_seasonal_breaks.minImprovement` — minImprovement
+- `parameter.rs.temporal_seasonal_breaks.minSegmentDays` — minSegmentDays
+- `parameter.rs.temporal_seasonal_breaks.output` — output
+- `parameter.rs.temporal_seasonal_breaks.robust` — robust
+- `parameter.rs.temporal_seasonal_breaks.scenes` — scenes
+- `parameter.rs.temporal_seasonal_breaks.tile_size` — tile_size
 - `parameter.rs.temporal_sen_trend.alpha` — alpha
 - `parameter.rs.temporal_sen_trend.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_sen_trend.band` — band
 - `parameter.rs.temporal_sen_trend.band_role` — band_role
 - `parameter.rs.temporal_sen_trend.collection` — collection
+- `parameter.rs.temporal_sen_trend.compute_ci` — compute_ci
 - `parameter.rs.temporal_sen_trend.duplicate_policy` — duplicate_policy
 - `parameter.rs.temporal_sen_trend.output` — output
+- `parameter.rs.temporal_sen_trend.provenance` — provenance
 - `parameter.rs.temporal_sen_trend.scenes` — scenes
 - `parameter.rs.temporal_sen_trend.tile_size` — tile_size
 - `parameter.rs.temporal_smooth.apply_qa_masking` — apply_qa_masking
@@ -1398,10 +1641,12 @@
 - `parameter.rs.temporal_smooth.method` — method
 - `parameter.rs.temporal_smooth.moving_average_window` — moving_average_window
 - `parameter.rs.temporal_smooth.output` — output
+- `parameter.rs.temporal_smooth.provenance` — provenance
 - `parameter.rs.temporal_smooth.robust_iterations` — robust_iterations
 - `parameter.rs.temporal_smooth.scenes` — scenes
 - `parameter.rs.temporal_smooth.tile_size` — tile_size
 - `parameter.rs.temporal_smooth.window` — window
+- `parameter.rs.temporal_smooth.window_days` — window_days
 - `parameter.rs.temporal_summary.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_summary.band` — band
 - `parameter.rs.temporal_summary.band_role` — band_role
@@ -1417,6 +1662,7 @@
 - `parameter.rs.temporal_trend.collection` — collection
 - `parameter.rs.temporal_trend.duplicate_policy` — duplicate_policy
 - `parameter.rs.temporal_trend.output` — output
+- `parameter.rs.temporal_trend.provenance` — provenance
 - `parameter.rs.temporal_trend.scenes` — scenes
 - `parameter.rs.temporal_trend.tile_size` — tile_size
 
@@ -1572,16 +1818,31 @@
 - `parameter.rs.supervised_classification.modelOut` — modelOut
 - `parameter.rs.supervised_classification.output` — output
 - `parameter.rs.supervised_classification.probabilityOutput` — probabilityOutput
+- `parameter.rs.supervised_classification.rejectThreshold` — rejectThreshold
 - `parameter.rs.supervised_classification.scale` — scale
 - `parameter.rs.supervised_classification.seed` — seed
 - `parameter.rs.supervised_classification.testSplit` — testSplit
 - `parameter.rs.supervised_classification.training` — training
+- `parameter.rs.supervised_classification.uncertaintyMeasure` — uncertaintyMeasure
+- `parameter.rs.supervised_classification.uncertaintyOutput` — uncertaintyOutput
 
 ## composition
 
 - `operator.rs.mosaic` — Raster Mosaic
+- `operator.rs.quality_mosaic` — Quality Mosaic
 - `parameter.rs.mosaic.inputs` — inputs
 - `parameter.rs.mosaic.output` — output
+- `parameter.rs.quality_mosaic.balancing` — balancing
+- `parameter.rs.quality_mosaic.bandCount` — bandCount
+- `parameter.rs.quality_mosaic.blending` — blending
+- `parameter.rs.quality_mosaic.inputs` — inputs
+- `parameter.rs.quality_mosaic.method` — method
+- `parameter.rs.quality_mosaic.output` — output
+- `parameter.rs.quality_mosaic.overviews` — overviews
+- `parameter.rs.quality_mosaic.provenance` — provenance
+- `parameter.rs.quality_mosaic.qualityWeights` — qualityWeights
+- `parameter.rs.quality_mosaic.reportOutput` — reportOutput
+- `parameter.rs.quality_mosaic.seamline` — seamline
 
 ## obia
 
@@ -1699,19 +1960,39 @@
 - `parameter.rs.zonal_stats.vector` — vector
 - `parameter.rs.zonal_stats.zoneField` — zoneField
 
+## geometric
+
+- `operator.rs.register_images` — Image Registration
+- `operator.rs.stack_register` — Stack Registration
+- `parameter.rs.register_images.maxDim` — maxDim
+- `parameter.rs.register_images.metric` — metric
+- `parameter.rs.register_images.output` — output
+- `parameter.rs.register_images.reference` — reference
+- `parameter.rs.register_images.reportPath` — reportPath
+- `parameter.rs.register_images.resampling` — resampling
+- `parameter.rs.register_images.source` — source
+- `parameter.rs.stack_register.observations` — observations
+- `parameter.rs.stack_register.reference` — reference
+- `parameter.rs.stack_register.reportPath` — reportPath
+- `parameter.rs.stack_register.scenes` — scenes
+
 ## sar
 
 - `operator.rs.sar_backscatter` — SAR Backscatter Conversion
 - `operator.rs.sar_calibrate` — SAR Radiometric Calibration
 - `operator.rs.sar_change` — SAR Change Detection
 - `operator.rs.sar_coregister` — SAR Coregistration
+- `operator.rs.sar_coregister_local` — SAR Local Coregistration
 - `operator.rs.sar_displacement` — InSAR LOS Displacement
 - `operator.rs.sar_dualpol_features` — SAR Dual-Pol Features
 - `operator.rs.sar_geocode` — SAR Range-Doppler Geocode
 - `operator.rs.sar_interferogram` — SAR Interferogram
+- `operator.rs.sar_network_inversion` — InSAR Network Inversion
+- `operator.rs.sar_pair_network` — InSAR Pair Network
 - `operator.rs.sar_phase_filter` — InSAR Phase Filter
 - `operator.rs.sar_polsar_decompose` — PolSAR Decomposition
 - `operator.rs.sar_ratio` — SAR Ratio / Log-Ratio
+- `operator.rs.sar_remove_topographic_phase` — InSAR Topographic Phase Removal
 - `operator.rs.sar_speckle` — SAR Speckle Filter
 - `operator.rs.sar_temporal_events` — SAR Temporal Events
 - `operator.rs.sar_temporal_stats` — SAR Temporal Statistics
@@ -1733,6 +2014,7 @@
 - `parameter.rs.sar_backscatter.toCalibration` — toCalibration
 - `parameter.rs.sar_calibrate.band` — band
 - `parameter.rs.sar_calibrate.calibrationA` — calibrationA
+- `parameter.rs.sar_calibrate.calibrationLut` — calibrationLut
 - `parameter.rs.sar_calibrate.incidenceDeg` — incidenceDeg
 - `parameter.rs.sar_calibrate.input` — input
 - `parameter.rs.sar_calibrate.noiseLinear` — noiseLinear
@@ -1765,6 +2047,17 @@
 - `parameter.rs.sar_coregister.searchRadius` — searchRadius
 - `parameter.rs.sar_coregister.slave` — slave
 - `parameter.rs.sar_coregister.slaveBand` — slaveBand
+- `parameter.rs.sar_coregister_local.master` — master
+- `parameter.rs.sar_coregister_local.masterBand` — masterBand
+- `parameter.rs.sar_coregister_local.medianRadius` — medianRadius
+- `parameter.rs.sar_coregister_local.minPeakRatio` — minPeakRatio
+- `parameter.rs.sar_coregister_local.offsetFieldOutput` — offsetFieldOutput
+- `parameter.rs.sar_coregister_local.output` — output
+- `parameter.rs.sar_coregister_local.patchSize` — patchSize
+- `parameter.rs.sar_coregister_local.patchStride` — patchStride
+- `parameter.rs.sar_coregister_local.searchRadius` — searchRadius
+- `parameter.rs.sar_coregister_local.slave` — slave
+- `parameter.rs.sar_coregister_local.slaveBand` — slaveBand
 - `parameter.rs.sar_displacement.band` — band
 - `parameter.rs.sar_displacement.input` — input
 - `parameter.rs.sar_displacement.output` — output
@@ -1789,6 +2082,23 @@
 - `parameter.rs.sar_interferogram.output` — output
 - `parameter.rs.sar_interferogram.slave` — slave
 - `parameter.rs.sar_interferogram.slaveBand` — slaveBand
+- `parameter.rs.sar_network_inversion.displacementInputs` — displacementInputs
+- `parameter.rs.sar_network_inversion.displacementOutput` — displacementOutput
+- `parameter.rs.sar_network_inversion.epochTemporalYears` — epochTemporalYears
+- `parameter.rs.sar_network_inversion.maskStrategy` — maskStrategy
+- `parameter.rs.sar_network_inversion.maxPatterns` — maxPatterns
+- `parameter.rs.sar_network_inversion.pairWeights` — pairWeights
+- `parameter.rs.sar_network_inversion.pairs` — pairs
+- `parameter.rs.sar_network_inversion.rmsOutput` — rmsOutput
+- `parameter.rs.sar_network_inversion.velocityOutput` — velocityOutput
+- `parameter.rs.sar_pair_network.allowDisconnected` — allowDisconnected
+- `parameter.rs.sar_pair_network.maxPerpendicularM` — maxPerpendicularM
+- `parameter.rs.sar_pair_network.maxTemporalDays` — maxTemporalDays
+- `parameter.rs.sar_pair_network.minPerpendicularM` — minPerpendicularM
+- `parameter.rs.sar_pair_network.outputFile` — outputFile
+- `parameter.rs.sar_pair_network.referenceIdx` — referenceIdx
+- `parameter.rs.sar_pair_network.scenes` — scenes
+- `parameter.rs.sar_pair_network.strategy` — strategy
 - `parameter.rs.sar_phase_filter.alpha` — alpha
 - `parameter.rs.sar_phase_filter.band` — band
 - `parameter.rs.sar_phase_filter.input` — input
@@ -1812,6 +2122,15 @@
 - `parameter.rs.sar_ratio.outputType` — outputType
 - `parameter.rs.sar_ratio.polarizations` — polarizations
 - `parameter.rs.sar_ratio.sensor` — sensor
+- `parameter.rs.sar_remove_topographic_phase.band` — band
+- `parameter.rs.sar_remove_topographic_phase.dem` — dem
+- `parameter.rs.sar_remove_topographic_phase.demBand` — demBand
+- `parameter.rs.sar_remove_topographic_phase.interferogram` — interferogram
+- `parameter.rs.sar_remove_topographic_phase.masterOrbitStates` — masterOrbitStates
+- `parameter.rs.sar_remove_topographic_phase.output` — output
+- `parameter.rs.sar_remove_topographic_phase.slaveOrbitStates` — slaveOrbitStates
+- `parameter.rs.sar_remove_topographic_phase.topoPhaseOutput` — topoPhaseOutput
+- `parameter.rs.sar_remove_topographic_phase.wavelengthUm` — wavelengthUm
 - `parameter.rs.sar_speckle.band` — band
 - `parameter.rs.sar_speckle.companionScenes` — companionScenes
 - `parameter.rs.sar_speckle.dampingFactor` — dampingFactor
@@ -1885,6 +2204,9 @@
 - `parameter.rs.sar_unwrap.input` — input
 - `parameter.rs.sar_unwrap.output` — output
 - `parameter.rs.sar_unwrap.provider` — provider
+- `parameter.rs.sar_unwrap.providerArgs` — providerArgs
+- `parameter.rs.sar_unwrap.providerBin` — providerBin
+- `parameter.rs.sar_unwrap.providerTimeoutSec` — providerTimeoutSec
 - `parameter.rs.sar_unwrap.qualityBand` — qualityBand
 - `parameter.rs.sar_unwrap.qualityInput` — qualityInput
 
@@ -1892,6 +2214,9 @@
 
 - `operator.rs.terrain_analysis` — Terrain Analysis
 - `operator.rs.terrain_flow` — Terrain Flow
+- `operator.rs.terrain_landform` — Terrain Landform
+- `operator.rs.terrain_solar` — Terrain Solar
+- `operator.rs.terrain_viewshed` — Terrain Viewshed
 - `parameter.rs.terrain_analysis.cellSize` — cellSize
 - `parameter.rs.terrain_analysis.input` — input
 - `parameter.rs.terrain_analysis.nodata` — nodata
@@ -1900,11 +2225,45 @@
 - `parameter.rs.terrain_analysis.sunAzimuth` — sunAzimuth
 - `parameter.rs.terrain_analysis.sunElevation` — sunElevation
 - `parameter.rs.terrain_analysis.zFactor` — zFactor
+- `parameter.rs.terrain_flow.include_segments` — include_segments
 - `parameter.rs.terrain_flow.input` — input
 - `parameter.rs.terrain_flow.nodata` — nodata
 - `parameter.rs.terrain_flow.output` — output
 - `parameter.rs.terrain_flow.pour_points` — pour_points
 - `parameter.rs.terrain_flow.product` — product
+- `parameter.rs.terrain_flow.threshold` — threshold
+- `parameter.rs.terrain_landform.flat_radius` — flat_radius
+- `parameter.rs.terrain_landform.flat_slope_deg` — flat_slope_deg
+- `parameter.rs.terrain_landform.flat_thresh_deg` — flat_thresh_deg
+- `parameter.rs.terrain_landform.inner_radius` — inner_radius
+- `parameter.rs.terrain_landform.input` — input
+- `parameter.rs.terrain_landform.nodata` — nodata
+- `parameter.rs.terrain_landform.outer_radius` — outer_radius
+- `parameter.rs.terrain_landform.output` — output
+- `parameter.rs.terrain_landform.product` — product
+- `parameter.rs.terrain_landform.radii` — radii
+- `parameter.rs.terrain_landform.search_radius` — search_radius
+- `parameter.rs.terrain_solar.day_of_year` — day_of_year
+- `parameter.rs.terrain_solar.end_hour` — end_hour
+- `parameter.rs.terrain_solar.input` — input
+- `parameter.rs.terrain_solar.latitude` — latitude
+- `parameter.rs.terrain_solar.nodata` — nodata
+- `parameter.rs.terrain_solar.output` — output
+- `parameter.rs.terrain_solar.product` — product
+- `parameter.rs.terrain_solar.start_hour` — start_hour
+- `parameter.rs.terrain_solar.step_hours` — step_hours
+- `parameter.rs.terrain_solar.sun_track` — sun_track
+- `parameter.rs.terrain_viewshed.curvature` — curvature
+- `parameter.rs.terrain_viewshed.input` — input
+- `parameter.rs.terrain_viewshed.nodata` — nodata
+- `parameter.rs.terrain_viewshed.observer` — observer
+- `parameter.rs.terrain_viewshed.observer_height` — observer_height
+- `parameter.rs.terrain_viewshed.observers` — observers
+- `parameter.rs.terrain_viewshed.output` — output
+- `parameter.rs.terrain_viewshed.product` — product
+- `parameter.rs.terrain_viewshed.radius` — radius
+- `parameter.rs.terrain_viewshed.refraction_k` — refraction_k
+- `parameter.rs.terrain_viewshed.target_height` — target_height
 
 ## masking
 
@@ -1943,4 +2302,3 @@
 ## 制图
 
 - `workbench.layout` — 打印布局
-

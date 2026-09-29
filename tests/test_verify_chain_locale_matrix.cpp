@@ -44,6 +44,7 @@
 #include <vector>
 
 #include <algorithm>
+#include <QJsonObject>
 
 using namespace sicnu::grader;
 using namespace sicnu::preflight;

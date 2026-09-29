@@ -25,6 +25,7 @@
 #include <QJsonObject>
 #include <QStringList>
 #include <QVector>
+#include <QJsonValue>
 
 #include <functional>
 
