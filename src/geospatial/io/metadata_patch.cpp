@@ -248,6 +248,43 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
     }
   }
 
+  // ---- Phase 1b: finalize-manifest pre-flight (#1391) --------------------
+  // Phase 4 refreshes the manifest digest AFTER the bytes change in place.
+  // A manifest that EXISTS but cannot be parsed/typed would strand the
+  // patched bytes under the stale digest forever (re-patching fails the
+  // same way, and verifyDataset reports a permanent mismatch) — refuse
+  // BEFORE the mutation instead. An absent manifest is fine (Phase 4
+  // degrades to a warning; there is no digest to strand).
+  try
+  {
+    Json::Value manifest = readFinalizeManifest( path );
+    // Type every field Phase 4 will read: a foreign-typed member must fail
+    // HERE, not after the patch.
+    (void)manifest["producer"].asString();
+    (void)manifest["driver"].asString();
+    (void)manifest["shape"]["width"].asInt();
+    (void)manifest["shape"]["height"].asInt();
+    (void)manifest["shape"]["band_count"].asInt();
+    (void)manifest["shape"]["dtype"].asString();
+    (void)manifest["crs"].asString();
+    for ( const Json::Value &option : manifest["creation_options"] )
+      (void)option.asString();
+  }
+  catch ( const GeoError &error )
+  {
+    if ( error.code() != ErrorCode::NotFound )
+      throw GeoError( ErrorCode::InvalidMetadata,
+                      "patch: a finalize manifest exists but cannot be read; refusing to patch in place "
+                      "(patched bytes would keep the stale digest). Repair or remove the manifest first." );
+  }
+  catch ( const std::exception & )
+  {
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    "patch: a finalize manifest exists but is malformed (foreign-typed fields); refusing "
+                    "to patch in place (patched bytes would keep the stale digest). Repair or remove the "
+                    "manifest first." );
+  }
+
   // ---- Phase 2: open for update (capability gate) and apply ---------------
   CPLErrorStateBackuper errorState;
   CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
@@ -342,8 +379,7 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
   // ---- Phase 4: provenance continuity -------------------------------------
   // A finalize manifest binds the digest to the pre-patch bytes; refresh it
   // so verifyDataset keeps telling the truth after the patch.
-  try
-  {
+  auto refreshManifest = [ & ]() {
     Json::Value manifest = readFinalizeManifest( path );
     FinalizeManifestFields fields;
     fields.producer = manifest["producer"].asString();
@@ -374,24 +410,41 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
     manifest["patches"] = history;
     writeFinalizeManifest( path, manifest );
     report.manifestUpdated = true;
-  }
-  catch ( const GeoError &error )
+  };
+  // True = terminal (refreshed, or nothing to refresh); false = possibly
+  // transient (digest read / manifest write IoError): one retry.
+  auto attemptRefresh = [ & ]() -> bool {
+    try
+    {
+      refreshManifest();
+      return true;
+    }
+    catch ( const GeoError &error )
+    {
+      // Absent manifest: nothing to refresh — patches still succeeded.
+      if ( error.code() == ErrorCode::NotFound )
+      {
+        report.warnings.push_back( "no finalize manifest present; digest provenance not refreshed" );
+        return true;
+      }
+      return false;
+    }
+    catch ( const std::exception & )
+    {
+      // Foreign-typed JSON cannot normally reach here after the Phase-1b
+      // pre-flight; treat like a transient failure and retry once.
+      return false;
+    }
+  };
+  if ( !attemptRefresh() && !attemptRefresh() )
   {
-    // Absent manifest: nothing to refresh — patches still succeeded. Any
-    // other manifest problem leaves the OLD digest in place, which
-    // verifyDataset will report as a digest mismatch (fail-closed), so name
-    // the situation honestly.
-    if ( error.code() == ErrorCode::NotFound )
-      report.warnings.push_back( "no finalize manifest present; digest provenance not refreshed" );
-    else
-      report.warnings.push_back( "finalize manifest present but unreadable; stale digest kept and will "
-                                 "report as a mismatch — verify with io:verify_dataset" );
-  }
-  catch ( const std::exception & )
-  {
-    // Foreign-typed JSON values must never escape past an applied patch.
-    report.warnings.push_back( "finalize manifest malformed; stale digest kept and will report as a "
-                                "mismatch — verify with io:verify_dataset" );
+    // Escalate instead of stranding the patched bytes under the stale
+    // digest (#1391): the patch IS applied and read-back verified, but
+    // honest provenance could not be restored. Re-running the same patch
+    // is idempotent and typically repairs once the transient cause clears.
+    throw GeoError( ErrorCode::IoError,
+                    "patch: bytes applied and verified, but the finalize manifest could not be refreshed "
+                    "— the sidecar still carries the pre-patch digest; re-run the same patch to repair" );
   }
 
   report.applied = true;

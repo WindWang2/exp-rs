@@ -282,6 +282,31 @@ bool renameReplaceQuiet( const std::string &from, const std::string &to )
 #endif
 }
 
+/// Backs up @p targetPath under @p backupPath WITHOUT moving the target
+/// aside (#1391): a hardlink gives the old bytes a second name while the
+/// target keeps its directory entry, so the publishStagedFile rename that
+/// follows swaps it atomically — a crash at ANY point leaves the target
+/// present (old bytes before the rename lands, new bytes after). The
+/// move-aside discipline this replaces parked the previous good file at
+/// .bak first, leaving a window where the target was ABSENT and nothing
+/// healed it (the C++ rollback never runs on a crash; sweepOrphans does
+/// not sweep .bak). Falls back to move-aside on filesystems without
+/// hardlink support (FAT, some network/FUSE mounts): the old, narrower
+/// guarantee — refused silence.
+bool backupInPlace( const std::string &targetPath, const std::string &backupPath )
+{
+  removeFileQuiet( backupPath );
+#ifdef _WIN32
+  if ( ::CreateHardLinkW( sicnu::portable::wideFromUtf8( backupPath ).c_str(),
+                          sicnu::portable::wideFromUtf8( targetPath ).c_str(), nullptr ) )
+    return true;
+#else
+  if ( ::link( targetPath.c_str(), backupPath.c_str() ) == 0 )
+    return true;
+#endif
+  return renameReplaceQuiet( targetPath, backupPath );
+}
+
 bool removeFileQuiet( const std::string &path )
 {
   if ( !fileExists( path ) )
@@ -391,8 +416,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     if ( hadTarget[i] )
     {
       const std::string backup = targetSidecars[i] + ".bak";
-      removeFileQuiet( backup );
-      if ( !renameReplaceQuiet( targetSidecars[i], backup ) )
+      if ( !backupInPlace( targetSidecars[i], backup ) )
         cleanup( targetSidecars[i] ); // cannot protect the old member: refuse
     }
     try
@@ -405,11 +429,13 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     }
     published.push_back( targetSidecars[i] );
   }
-  // Main file last, with the same backup discipline as the sidecars (#791).
+  // Main file last, with the same backup discipline as the sidecars (#791):
+  // backupInPlace keeps the old main's directory entry alive across the
+  // whole swap, so the crash window where the main is absent is closed
+  // (#1391) — the atomic rename below is the ONLY moment the entry flips.
   if ( hadMainTarget )
   {
-    removeFileQuiet( mainBackup );
-    if ( !renameReplaceQuiet( targetMainPath, mainBackup ) )
+    if ( !backupInPlace( targetMainPath, mainBackup ) )
       cleanup( targetMainPath ); // cannot protect the old main file: refuse
   }
   try
@@ -486,8 +512,7 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
     if ( hadTarget[i] )
     {
       const std::string backup = live[i].second + ".bak";
-      removeFileQuiet( backup );
-      if ( !renameReplaceQuiet( live[i].second, backup ) )
+      if ( !backupInPlace( live[i].second, backup ) )
         cleanup( live[i].second );
     }
     try
