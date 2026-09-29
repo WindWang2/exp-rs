@@ -2098,7 +2098,17 @@ sicnu::data::Result<void> ExperimentStore::savePromotionRecord( const PromotionR
                                             QStringLiteral( "store is read-only" ) ) );
     if ( record.promotionId.isEmpty() || record.runId.isEmpty() )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.promotion_invalid" ),
-                                            QStringLiteral( "promotion record requires promotion_id + run_id" ) ) );
+                                           QStringLiteral( "promotion record requires promotion_id + run_id" ) ) );
+    // #1390: the verdict/decision pair must be internally consistent — a
+    // direct savePromotionRecord caller bypasses PromotionEvaluator::record,
+    // so the store itself refuses an approved-but-ineligible record.
+    if ( record.decision == QStringLiteral( "approved" )
+         && record.verdict != QStringLiteral( "eligible" ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.promotion_invalid" ),
+                                            QStringLiteral( "cannot persist decision=approved with "
+                                                            "verdict=%1 (the evidence contradicts the "
+                                                            "approval)" )
+                                                                .arg( record.verdict ) ) );
 
     // #1173: conflict check + insert inside BEGIN IMMEDIATE. The previous
     // SELECT-then-INSERT OR REPLACE could silently REPLACE concurrent approval

@@ -238,6 +238,15 @@ Result<QString> PromotionEvaluator::record( const PromotionRequest &request,
     if ( !evaluation )
         return Result<QString>::failure( evaluation.diagnostics() );
 
+    // #1390: approving requires eligibility. decision and verdict are
+    // persisted as independent fields, so without this guard a record with
+    // verdict="ineligible", decision="approved" could enter the store —
+    // a promotion the recorded evidence itself contradicts.
+    if ( decision == QStringLiteral( "approved" ) && !evaluation.value().eligible )
+        return Result<QString>::failure( promotionError(
+            QStringLiteral( "cannot approve a promotion the recorded evidence marks "
+                            "ineligible (missing evidence or failed criteria)" ) ) );
+
     PromotionRecord record;
     record.promotionId = ExperimentId::generate().toString();
     record.runId = request.runId;

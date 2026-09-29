@@ -54,54 +54,88 @@ sicnu::data::Result<void> DatasetStore::saveSplitManifest( const SplitManifest &
     if ( manifest.datasetVersionId().isEmpty() )
         return Result::failure( storeDiag( QStringLiteral( "dataset.split_invalid" ),
                                            QStringLiteral( "manifest carries no dataset version" ) ) );
+    const QString fingerprint = splitManifestFingerprint( manifest );
+    const QString json = jsonToText( manifest.toJson() );
+
+    // #1390: existence check + insert ride ONE transaction (BEGIN IMMEDIATE,
+    // same shape as saveQaReport below). The previous check-then-insert
+    // without a transaction raced across connections: two writers saving
+    // the same manifest_id both missed the existence SELECT and the loser
+    // surfaced as a raw store_write_failed PRIMARY KEY error instead of the
+    // write-once contract's typed dataset.conflict / idempotent path.
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
     {
         // Dangling manifests are refused: a stored split always resolves to
         // a version (derived evidence about nothing is not evidence).
         StoreStmt version( m_impl->db, QStringLiteral(
             "SELECT 1 FROM dataset_versions WHERE id=?" ) );
         if ( !version )
+        {
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                                version.error( m_impl->db ) ) );
+        }
         version.bind( 1, manifest.datasetVersionId() );
         if ( !version.stepRow() )
+        {
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
                                                QStringLiteral( "version %1 does not exist" )
                                                    .arg( manifest.datasetVersionId() ) ) );
+        }
     }
-
-    const QString fingerprint = splitManifestFingerprint( manifest );
-    const QString json = jsonToText( manifest.toJson() );
-
-    StoreStmt existing( m_impl->db, QStringLiteral(
-        "SELECT fingerprint FROM split_manifests WHERE manifest_id=?" ) );
-    if ( !existing )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           existing.error( m_impl->db ) ) );
-    existing.bind( 1, manifest.manifestId() );
-    if ( existing.stepRow() )
     {
-        if ( existing.text( 0 ) != fingerprint )
-            return Result::failure( storeDiag(
-                QStringLiteral( "dataset.conflict" ),
-                QStringLiteral( "split manifest %1 already exists with different content" )
-                    .arg( manifest.manifestId() ) ) );
-        return Result::success(); // idempotent re-save of identical content
+        StoreStmt existing( m_impl->db, QStringLiteral(
+            "SELECT fingerprint FROM split_manifests WHERE manifest_id=?" ) );
+        if ( !existing )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               existing.error( m_impl->db ) ) );
+        }
+        existing.bind( 1, manifest.manifestId() );
+        if ( existing.stepRow() )
+        {
+            const QString stored = existing.text( 0 );
+            m_impl->rollback();
+            if ( stored != fingerprint )
+                return Result::failure( storeDiag(
+                    QStringLiteral( "dataset.conflict" ),
+                    QStringLiteral( "split manifest %1 already exists with different content" )
+                        .arg( manifest.manifestId() ) ) );
+            return Result::success(); // idempotent re-save of identical content
+        }
     }
-
-    StoreStmt insert( m_impl->db, QStringLiteral(
-        "INSERT INTO split_manifests(manifest_id, dataset_version_id, fingerprint,"
-        " json, created_ms) VALUES(?,?,?,?,?)" ) );
-    if ( !insert )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           insert.error( m_impl->db ) ) );
-    insert.bind( 1, manifest.manifestId() );
-    insert.bind( 2, manifest.datasetVersionId() );
-    insert.bind( 3, fingerprint );
-    insert.bind( 4, json );
-    insert.bind( 5, QDateTime::currentMSecsSinceEpoch() );
-    if ( !insert.step() )
+    {
+        StoreStmt insert( m_impl->db, QStringLiteral(
+            "INSERT INTO split_manifests(manifest_id, dataset_version_id, fingerprint,"
+            " json, created_ms) VALUES(?,?,?,?,?)" ) );
+        if ( !insert )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               insert.error( m_impl->db ) ) );
+        }
+        insert.bind( 1, manifest.manifestId() );
+        insert.bind( 2, manifest.datasetVersionId() );
+        insert.bind( 3, fingerprint );
+        insert.bind( 4, json );
+        insert.bind( 5, QDateTime::currentMSecsSinceEpoch() );
+        if ( !insert.step() )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               insert.error( m_impl->db ) ) );
+        }
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           QStringLiteral( "commit transaction failed" ) ) );
+    }
     return Result::success();
 }
 

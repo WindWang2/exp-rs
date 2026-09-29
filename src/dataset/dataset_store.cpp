@@ -108,13 +108,37 @@ bool DatasetStore::open( const QString &dbPath, QString *errorOut )
         return false;
     }
 
-    // Safe creation: IF NOT EXISTS on every object; an existing schema stamp
-    // is never rewritten by open (that would mask a foreign/older store).
+    // Schema gate BEFORE DDL (#1390): read-only forward tolerance must not
+    // mutate a newer store via CREATE TABLE IF NOT EXISTS / index creation
+    // — the same discipline ExperimentStore::open already follows. Only
+    // ds_meta (the gate's own carrier) is created up front.
     if ( !m_impl->exec(
              "CREATE TABLE IF NOT EXISTS ds_meta("
              "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
-             errorOut ) ||
-         !m_impl->exec(
+             errorOut ) )
+    {
+        close();
+        return false;
+    }
+    QString existing;
+    {
+        QMutexLocker lock( &m_impl->mutex );
+        Stmt stmt( db, QStringLiteral( "SELECT value FROM ds_meta WHERE key='schema_version'" ) );
+        if ( stmt && stmt.stepRow() )
+            existing = stmt.text( 0 );
+    }
+    if ( !existing.isEmpty() && existing != QLatin1String( kDatasetStoreSchemaVersion ) )
+    {
+        // Forward tolerance: newer schema → read-only (writes fail). The
+        // remaining DDL is SKIPPED — this binary does not understand the
+        // newer layout and must not add its own objects to it.
+        m_impl->readOnly = true;
+        return true;
+    }
+
+    // Safe creation: IF NOT EXISTS on every object; an existing schema stamp
+    // is never rewritten by open (that would mask a foreign/older store).
+    if ( !m_impl->exec(
              "CREATE TABLE IF NOT EXISTS datasets("
              "id TEXT PRIMARY KEY, name TEXT NOT NULL,"
              "description TEXT NOT NULL DEFAULT '',"
@@ -248,13 +272,8 @@ bool DatasetStore::open( const QString &dbPath, QString *errorOut )
         return false;
     }
 
-    QString existing;
-    {
-        QMutexLocker lock( &m_impl->mutex );
-        Stmt stmt( db, QStringLiteral( "SELECT value FROM ds_meta WHERE key='schema_version'" ) );
-        if ( stmt && stmt.stepRow() )
-            existing = stmt.text( 0 );
-    }
+    // Empty stamp on a fresh store (the gate above already returned for a
+    // newer foreign stamp).
     if ( existing.isEmpty() )
     {
         if ( !m_impl->exec(
@@ -268,11 +287,6 @@ bool DatasetStore::open( const QString &dbPath, QString *errorOut )
             close();
             return false;
         }
-    }
-    else if ( existing != QLatin1String( kDatasetStoreSchemaVersion ) )
-    {
-        // Forward tolerance: newer schema → read-only (writes fail).
-        m_impl->readOnly = true;
     }
     return true;
 }
