@@ -23,7 +23,11 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
+#include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -240,10 +244,64 @@ private:
     std::string mError;
 };
 #else
+#if !defined( F_SETNOSIGPIPE )
+/// Suppresses SIGPIPE for writes on THIS thread only. A worker that crashes
+/// mid-request leaves the host writing into a pipe with no reader; the
+/// kernel then raises a thread-directed SIGPIPE whose default action killed
+/// the whole host process (the crash-isolation contract inverted). The
+/// process-wide disposition is deliberately left alone (library code): the
+/// signal is blocked for the duration of the write and a SIGPIPE raised by
+/// it is consumed before the mask is restored, so EPIPE surfaces as a typed
+/// write failure instead.
+class ScopedSigpipeSuppression
+{
+public:
+    ScopedSigpipeSuppression()
+    {
+        sigemptyset( &mPipeSet );
+        sigaddset( &mPipeSet, SIGPIPE );
+        mBlocked = pthread_sigmask( SIG_BLOCK, &mPipeSet, &mOldSet ) == 0;
+        sigset_t pending;
+        sigemptyset( &pending );
+        mWasPending = mBlocked && sigpending( &pending ) == 0 && sigismember( &pending, SIGPIPE ) == 1;
+    }
+    ~ScopedSigpipeSuppression()
+    {
+        if ( !mBlocked )
+            return;
+        if ( mRaised && !mWasPending )
+        {
+            const timespec zero { 0, 0 };
+            while ( sigtimedwait( &mPipeSet, nullptr, &zero ) == -1 && errno == EINTR )
+            {
+            }
+        }
+        pthread_sigmask( SIG_SETMASK, &mOldSet, nullptr );
+    }
+    void noteEpipe() { mRaised = true; }
+    ScopedSigpipeSuppression( const ScopedSigpipeSuppression & ) = delete;
+    ScopedSigpipeSuppression &operator=( const ScopedSigpipeSuppression & ) = delete;
+
+private:
+    sigset_t mPipeSet;
+    sigset_t mOldSet;
+    bool mBlocked = false;
+    bool mWasPending = false;
+    bool mRaised = false;
+};
+#endif
+
 class IpcHandleStreamPosix : public IIpcStream
 {
 public:
-    IpcHandleStreamPosix( int readFd, int writeFd ) : mRead( readFd ), mWrite( writeFd ) {}
+    IpcHandleStreamPosix( int readFd, int writeFd ) : mRead( readFd ), mWrite( writeFd )
+    {
+#if defined( F_SETNOSIGPIPE )
+        // Darwin: per-descriptor opt-out; EPIPE is returned instead of a
+        // process-killing SIGPIPE when the worker end is gone.
+        ::fcntl( mWrite, F_SETNOSIGPIPE, 1 );
+#endif
+    }
     ~IpcHandleStreamPosix() override { close(); }
 
     int readSome( char *data, size_t cap, int timeoutMs ) override
@@ -287,6 +345,9 @@ public:
             error = "handle stream closed";
             return false;
         }
+#if !defined( F_SETNOSIGPIPE )
+        ScopedSigpipeSuppression sigpipeGuard;
+#endif
         size_t written = 0;
         while ( written < len )
         {
@@ -311,6 +372,14 @@ public:
                 pollfd pfd { mWrite, POLLOUT, 0 };
                 ::poll( &pfd, 1, 100 );
                 continue;
+            }
+            if ( n < 0 && errno == EPIPE )
+            {
+#if !defined( F_SETNOSIGPIPE )
+                sigpipeGuard.noteEpipe();
+#endif
+                error = "write: pipe broken (peer exited)";
+                return false;
             }
             error = n == 0 ? "write wrote 0 bytes"
                            : std::string( "write failed: " ) + std::strerror( errno );
