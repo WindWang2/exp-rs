@@ -136,3 +136,29 @@
 ## R2.5 边界声明（沿用 R1）
 
 白名单：`src/verify|verify_adapters|grader|preflight|suitability|science_context`、`tests/` 对应文件、`.planning/verify-chain-r4/`。白名单外改动一律拒绝并记账。零新功能方向（铁律同 R1）。
+
+## R3.1 实测基线（2026-09-29）
+
+- origin/master = `cf2d41647e`（"fix(tests): restore closing brace lost in the #1377 union splice"）；R2 基线 `a726d17a62` 以来 **+129 提交**（自 R2 合并 e338398748 起为 +91；本地 master eac910dff9 落后 origin 713 提交，与本轨分析窗口无关）。R2 分支（PR #1370）已 MERGED。
+- 本轮分支：`hardening/r4-verify-chain-r3`（基于 cf2d41647e，无 merge 需求——R2 已在 master 祖先中）。
+- 注意 master HEAD 本身即一次 union splice 断裂修复（#1377），冲突残留陷阱在本仓持续复发（本轨 R2 修过一例、Track 11 修过一例）。
+
+## R3.2 漂移审计（129 提交逐面实测）
+
+| 面 | 实测 | 对本轨的含义 |
+|---|---|---|
+| 六模块 src（verify/verify_adapters/grader/preflight/suitability/science_context） | 仅 1 提交（94757d67bd sicnu_grader PIC 修复，构建设置无 API 变化） | R1 的 72 头 API_AUDIT、13 产出点、失效接缝清单**继续有效**（头文件计数复核 72 = 11+5+8+12+21+15 不变） |
+| R2 的 29 处 TEST_PREFIX 收口 | 全部健在（grader/suitability/preflight/verifier/science_context_broker 抽查 + 源码级全枚举复核） | R2 修复未被 129 提交冲掉 |
+| tests/CMakeLists.txt | +352/-137 行；21 个新增测试文件 | **R2 盲区缺陷类复发**：Track 8（agent-harness R4）新增 7 个套件裸注册，其中 2 个二进制名匹配 D6（FORWARD）、1 个用例名撞关键词（REVERSE） |
+| 'tr' was not declared（R2 跨域披露） | 已被 i18n 轨道修复（data_manager_panel.cpp 现为 QObject::tr） | 披露项销账 |
+| r4:: 门载体 | test_operator_preflight_refusals 等五套件以 foreach 通道注册，TEST_PREFIX r4:: 健在 | r4:: 门保留；同时暴露 census FORWARD 枚举盲区（见 R3.3） |
+
+## R3.3 本轮核心增量（为什么有第三轮）
+
+1. **门禁盲区缺陷类复发（白名单内，机械修复）**：Track 8 新增套件裸注册——`test_verifier_robustness_r4`（10 例，名含 "verif"）、`test_grounding_evidence_r4`（13 例，名含 "evidence"）逃逸 D6 FORWARD；`test_harness_adversarial_matrix`（"stays verifiable" 撞 "verif"）构成 REVERSE 撞名。修复 = 3 行 `TEST_PREFIX "<target>::"`（R2 同款模式；Track 8 自身宽正则门 `ctest -R "harness|verifier|grounding|evidence|..."` 与钉前缀兼容——前缀含这些子串，选择集只增不减）。
+2. **census FORWARD 枚举盲区（守卫加固）**：v2 靠单行 `add_executable(`/`sicnu_add_*(` grep 枚举 FORWARD 目标，foreach 通道（`add_executable(${_var})`，即 r4:: 五套件的注册方式）完全不可见——未来 foreach + D6 域名 + 非关键词用例名可同时逃逸 FORWARD 与 REVERSE。v3 把 FORWARD 改为**人口推导**（内建 discovery 文件枚举），BUILD-GAP 检查保留 CMakeLists 枚举（_NOT_BUILT 信号，D-R2-5）。
+3. **构建口径**：R2 后 master 测试面膨胀，全量构建 8576 边；本轨维持 R2 决策口径——**D6 域目标闭包人口**（53 CMakeLists 域目标 + 5 foreach r4:: 目标，3382 边）上 census 全绿；全量口径的源码级撞词扫描（33 目标/58 用例，较 R2 的 ~189 口径收敛因正则不同）随 PR 披露不代修。
+
+## R3.4 边界声明（沿用 R1/R2）
+
+白名单：`src/verify|verify_adapters|grader|preflight|suitability|science_context`、`tests/` 对应文件、`.planning/verify-chain-r4/`。白名单外改动一律拒绝并记账。零新功能方向（铁律同 R1/R2）。本轮**零 src/ 改动**（六模块无漂移即无修复），改动全部落在 tests/CMakeLists.txt 与 .planning/verify-chain-r4/。

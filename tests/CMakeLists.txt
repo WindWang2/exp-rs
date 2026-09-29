@@ -10169,19 +10169,19 @@ sicnu_link_jsoncpp(test_harness_error)
 # — Track 8 R4 WP-A: model-authored plan layer of the LLM failure matrix —
 # adversarial pins + new contracts (type confusion, duplicate outputs,
 # step bound). See .planning/agent-harness-r4/PLAN.md.
-sicnu_add_test(test_harness_adversarial_matrix)
+sicnu_add_test(test_harness_adversarial_matrix TEST_PREFIX "test_harness_adversarial_matrix::")
 sicnu_link_jsoncpp(test_harness_adversarial_matrix)
 
 # — Track 8 R4 WP-B/WP-C/WP-D/WP-E: adversarial hardening lanes —
 # verifier robustness, ledger completeness, grounding/evidence oracle,
 # session-checkpoint recovery pressure. See .planning/agent-harness-r4/PLAN.md.
-sicnu_add_test(test_verifier_robustness_r4)
+sicnu_add_test(test_verifier_robustness_r4 TEST_PREFIX "test_verifier_robustness_r4::")
 sicnu_link_jsoncpp(test_verifier_robustness_r4)
 
 sicnu_add_test(test_context_ledger_completeness_r4)
 sicnu_link_jsoncpp(test_context_ledger_completeness_r4)
 
-sicnu_add_test(test_grounding_evidence_r4)
+sicnu_add_test(test_grounding_evidence_r4 TEST_PREFIX "test_grounding_evidence_r4::")
 sicnu_link_jsoncpp(test_grounding_evidence_r4)
 
 sicnu_add_test(test_runloop_recovery_r4)

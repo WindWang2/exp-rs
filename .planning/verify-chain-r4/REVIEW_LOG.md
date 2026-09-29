@@ -66,3 +66,21 @@ NIT-3 处置说明：`scenePassportJson` 的 pixelSize 仅取 10.0（整数可�
 | F9 | P3 | Spec | "文档化合同"表述偏强（合同仅在生产源码注释） | 措辞改"生产合同注释"（EVIDENCE/测试注释/PR 同步） |
 
 **结论：SHIP-WITH-FIXES → 全部 P1/P2/P3 已整改**（F1 以"事实修正 + census v2 反向断言"落地；非域 189 例前缀卫生披露给他域，本轨不越界代修）。整改后复验：census v2 ALL GREEN（前向 + 反向 + r4:: 强制），ctest 双轮见 R2-6。
+
+## R3 独立评审（2026-09-29，只读 subagent，3.40M tokens / 69 工具调用 / 23 分钟）
+
+评审对象：78249bf29f..a31ee878dd（4 提交，基线 cf2d41647e）。评审员独立复算了全部可复算声称（census 复跑、ctest -N 人口、discovery 逐格 grep、/tmp 独立枚举、foreach 反例构造、三套件直跑、矩阵复跑），并以构造反例实证 v3 强于 v2（foreach 风格 D6 名目标：v3 FAIL 可见 / v2 双盲零输出）。
+
+| # | 级别 | 发现 | 处置 |
+|---|---|---|---|
+| F1 | P1 | 漂移量标签 "713 提交" 归属错误：R2 基线 a726d17a62..cf2d41647e 实为 129（自 R2 合并 91）；713 是本地 master 落后 origin 的数字。分析窗口本身正确（129 窗口复算全部成立），纯标签错误 | **已修**：BASELINE R3.1/R3.2/表格、EVIDENCE R3.1、ledger 表头改 129 并注明 713 的真实含义 |
+| F2 | P2 | EVIDENCE R3.4 人口阶梯分解不成立：共有套件逐格比对零变化，"+24 = 23 + 1 关键词撞名例随前缀化进入人口"，无"既有套件增长/evidence_seam 扩容" | **已修**：按评审复算改写 |
+| F3 | P2 | 披露数 33/58 不可复算（脚本未归档）且与评审员宽口径 85/176 不一致 | **已修**：归档 `source_level_collision_scan.sh`（严格关联下界 33 目标/57 用例，方法注明），EVIDENCE R3.6.1 改为区间披露（57 下界 / 评审宽口径 176 / 无关联上界 490 含已前缀），处置不变 |
+| F4 | P3 | grounding 13 例中 2 例名含 "verification" 修复前已被关键词误选，"13 例逃逸" 不精确 | **已修**：表格精化为 11 完全逃逸 + 2 关键词误选 |
+| F5 | P3 | "Track 8 新增 7 个套件" 计数松：test_agent_loop_resume 系 #1201 既有 | **已修**：改 6 个并注明 |
+| F6 | P3 | v3 BUILD-GAP 对 allowlist 未建目标静默零输出，allowlist 漂移不可观测 | **已修**：补可见性行（"not built (allowlisted: exempt)"），复跑 ×2 全绿且行可见 |
+| F7 | P3 | 脚本头 "every registration channel" 对 maxdepth-2 布局过claim | **已修**：注释限定 build 根与 tests/ 布局 |
+| F8 | P3 | 残余结构盲区未点名：foreach + D6 名 + 未入构建人口的套件在闭包口径下双盲（全量口径可检出） | **已修**：脚本头 "Residual blind spot" 段落明示，闭包/全量两口径关系写明 |
+| F9 | P3 | ledger R3-3 闭包构成描述不准（58 巧合一致但构成写错） | **已修**：账本 R3-9 勘误行（append-only） |
+
+总裁决：FIX → 1 P1 + 2 P2 + 6 P3 全部同轮整改完毕，census 复跑 ×2 全绿。评审同时确认：门与代码本身（3 行 TEST_PREFIX + census v3）经全部机械复算与反例实证成立，越界轴/白名单/零新方向全部通过。
