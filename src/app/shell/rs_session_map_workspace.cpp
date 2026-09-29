@@ -110,6 +110,13 @@ void RsSessionMapWorkspace::removeLayer( QgsMapLayer *layer )
   if ( !layer || !m_layerTree )
     return;
 
+  // #1389: settle BEFORE detaching the layer — the R2 contract hands the
+  // layer back to the caller (who deletes it), and an in-flight canvas
+  // render still holds the layer instance. Same discipline as
+  // QgisDisplayManager::removeLayer's #779 settle: no-op when idle.
+  if ( m_canvas )
+    m_canvas->stopRenderingAndSettle();
+
   QgsLayerTreeLayer *node = m_layerTree->findLayer( layer->id() );
   if ( node )
   {
