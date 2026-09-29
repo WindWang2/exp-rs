@@ -86,7 +86,7 @@ const std::vector<IntentSpec> &specs()
           { "optical", "hyperspectral", "sar" },
           {},
           {},
-          "rs:change_detect" },
+          "rs:change_detection" },
         { "sar_change",
           {},
           { "sar" },

@@ -245,7 +245,7 @@ inline PlanDraft FakePlanner::plan( const PlanRequest &request )
     if ( draft.intent == "ndvi" )
         operatorId = "rs:ndvi";
     else if ( draft.intent == "change" )
-        operatorId = "rs:change_detect";
+        operatorId = "rs:change_detection";
     else if ( draft.intent == "classify" )
         operatorId = "rs:classify";
 
