@@ -3,6 +3,7 @@
 #include "operators/runtime/model_publish.h"
 
 #include "operators/framework/rs_operator_error.h"
+#include "platform/portable.h"
 #include "runtime/observability/fault_point.h"
 
 #include <QDateTime>
@@ -83,7 +84,14 @@ bool pathIsCaseInsensitive( const QString &existingPath )
 
 std::string canonicalPublishFenceKey( const QString &finalPath )
 {
-  QString key = QDir::cleanPath( QFileInfo( finalPath ).absoluteFilePath() );
+  // #1388(a): platform-true absolutization FIRST. The previous anchor
+  // (QFileInfo::absoluteFilePath → QDir::currentPath) knows only the
+  // current drive's CWD on Windows, so drive-relative spellings
+  // ("C:out\model.onnx") folded onto the DRIVE ROOT and
+  // rooted-but-driveless spellings ("\out\...") anchored at whatever
+  // drive the process happened to be on — false merges and fence misses.
+  QString key = QDir::cleanPath(
+    QString::fromStdString( sicnu::portable::absolutePathUtf8( finalPath.toStdString() ) ) );
   QString cursor = key;
   QString tail;
   for ( ;; )
@@ -103,7 +111,39 @@ std::string canonicalPublishFenceKey( const QString &finalPath )
     cursor.truncate( slash );
   }
   key = tail.isEmpty() ? cursor : cursor + tail;
-  if ( pathIsCaseInsensitive( cursor ) )
+  // #1388(b): derive the case-fold decision from the filesystem that will
+  // GOVERN the leaf name, not from one arbitrary ancestor. Probe a real
+  // directory entry on that filesystem: the target itself when it already
+  // exists, else a CHILD of the deepest existing ancestor (an entry inside
+  // it lives on the fs that will hold the published leaf — a mount
+  // boundary at the ancestor itself cannot mislead the probe), falling
+  // back to the ancestor's own name when it has no children. No observable
+  // entry means the miss direction stays conservative: two spellings keep
+  // distinct fences, never a false merge of distinct files.
+  QString probePath;
+  if ( QFileInfo( key ).exists() )
+  {
+    probePath = key;
+  }
+  else
+  {
+    QString ancestor = QFileInfo( key ).path();
+    while ( ancestor.size() > 1 && !QFileInfo( ancestor ).exists() )
+    {
+      const int slash = ancestor.lastIndexOf( QLatin1Char( '/' ) );
+      if ( slash <= 0 )
+        break;
+      ancestor.truncate( slash < 1 ? 1 : slash );
+    }
+    if ( QFileInfo( ancestor ).exists() )
+    {
+      const QDir dir( ancestor );
+      const QStringList entries =
+        dir.entryList( QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot );
+      probePath = entries.isEmpty() ? ancestor : dir.filePath( entries.front() );
+    }
+  }
+  if ( !probePath.isEmpty() && pathIsCaseInsensitive( probePath ) )
     key = key.toLower();
   return key.toStdString();
 }

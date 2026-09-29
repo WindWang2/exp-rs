@@ -125,6 +125,40 @@ inline std::string pathToUtf8( const std::filesystem::path &path )
 #endif
 }
 
+/// Platform-true absolutization of a possibly-relative path (#1388).
+/// Windows resolves through GetFullPathNameW so drive-relative spellings
+/// ("C:out\file") anchor at the PER-DRIVE current directory and
+/// rooted-but-driveless spellings ("\out\file") anchor at the CURRENT
+/// DRIVE — an anchor derived from QDir::currentPath() knows only the
+/// current drive's CWD and silently mis-anchors both families. POSIX
+/// keeps the plain getcwd anchor. On any resolution failure the caller's
+/// spelling is returned unchanged (never a synthesized wrong anchor).
+inline std::string absolutePathUtf8( const std::string &utf8 )
+{
+#if defined( _WIN32 )
+  const std::wstring wide = wideFromUtf8( utf8 );
+  const DWORD size = ::GetFullPathNameW( wide.c_str(), 0, nullptr, nullptr );
+  if ( size > 0 )
+  {
+    std::wstring resolved( static_cast<std::size_t>( size ), L'\0' );
+    const DWORD written =
+      ::GetFullPathNameW( wide.c_str(), size, resolved.data(), nullptr );
+    if ( written > 0 && written < size )
+    {
+      resolved.resize( static_cast<std::size_t>( written ) );
+      return utf8FromWide( resolved );
+    }
+  }
+  return utf8;
+#else
+  std::error_code ec;
+  const std::filesystem::path absolute = std::filesystem::absolute( pathFromUtf8( utf8 ), ec );
+  if ( ec )
+    return utf8;
+  return pathToUtf8( absolute );
+#endif
+}
+
 /// Environment lookup returning UTF-8 bytes; a missing variable yields an
 /// empty string (callers keep their own missing-value semantics). Windows
 /// reads through GetEnvironmentVariableW — never the ACP getenv — so a

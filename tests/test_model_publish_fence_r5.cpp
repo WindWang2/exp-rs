@@ -152,6 +152,51 @@ TEST_CASE( "One artifact under many spellings holds ONE publish fence",
     }
 }
 
+TEST_CASE( "Fence key absolutizes through the platform anchor, never a bare clean (#1388)",
+           "[runtime][publish][fence][r5]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // A relative spelling anchored at a DIFFERENT cwd must still name the
+    // same artifact as the absolute spelling (the fence key derives from
+    // the platform-true absolutization; the drive-relative Windows family
+    // — "C:out\model.onnx" / "\out\model.onnx" — exercises the same seam
+    // on the MSVC lane).
+    const QString abs = dir.filePath( QStringLiteral( "anchored.tif" ) );
+    const std::string absKey = canonicalPublishFenceKey( abs );
+    {
+        ScopedCwd cwd( dir.path() );
+        CHECK( canonicalPublishFenceKey( QStringLiteral( "anchored.tif" ) ) == absKey );
+        CHECK( canonicalPublishFenceKey( QStringLiteral( "./anchored.tif" ) ) == absKey );
+    }
+    // And from an UNRELATED cwd the relative spelling names a DIFFERENT
+    // artifact (no accidental cross-anchor false merge).
+    {
+        ScopedCwd cwd( QDir::temp().path() );
+        CHECK( canonicalPublishFenceKey( QStringLiteral( "anchored.tif" ) ) != absKey );
+    }
+
+    // The case-fold probe follows the GOVERNING filesystem: a sibling
+    // entry in the target directory is the observable, so on a
+    // case-insensitive location two spellings of a not-yet-existing
+    // artifact fold to ONE fence even though the artifact itself does not
+    // exist yet.
+    QFile sibling( dir.filePath( QStringLiteral( "sibling.dat" ) ) );
+    REQUIRE( sibling.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    sibling.write( "x" );
+    sibling.close();
+    const bool caseInsensitive = isCaseInsensitiveLocation( dir.path() );
+    const std::string upperKey =
+        canonicalPublishFenceKey( dir.filePath( QStringLiteral( "ARTIFACT.bin" ) ) );
+    const std::string lowerKey =
+        canonicalPublishFenceKey( dir.filePath( QStringLiteral( "artifact.bin" ) ) );
+    if ( caseInsensitive )
+        CHECK( upperKey == lowerKey );
+    else
+        CHECK( upperKey != lowerKey );
+}
+
 TEST_CASE( "A throwing constructor releases the canonical slot for ALL spellings",
            "[runtime][publish][fence][r5]" )
 {
