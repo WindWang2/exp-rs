@@ -1,5 +1,6 @@
 // tests/test_vector_overlay_crs_transform.cpp
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_translate_exception.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <qgsapplication.h>
@@ -11,6 +12,8 @@
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
 #include <qgsexception.h>
+#include <qgswkbtypes.h>
+
 
 #include "processing/providers/qgis_algorithms/algorithms/native/native_difference.h"
 #include "processing/providers/qgis_algorithms/algorithms/native/native_intersection.h"
@@ -60,23 +63,27 @@ class RunnableAlg : public A {
     using A::processAlgorithm;
 };
 
-// Stand-in for the QgsProcessingAlgorithm::run convenience wrapper this
-// file was written against: execute processAlgorithm, store the result
-// map, and report success through ok. QgsProcessingException PROPAGATES
-// after flagging ok false - the #1043 contract test observes the typed
-// exception while the other cases assert on the flag.
-template <typename Alg>
-static void runProcessingAlgorithm( Alg &alg, const QVariantMap &params,
+// QgsException is not a std::exception: without a translator Catch reports
+// an escaping processing error as "Unknown exception" and hides the message.
+CATCH_TRANSLATE_EXCEPTION( const QgsException &e )
+{
+  return e.what().toStdString();
+}
+
+// Executes a CREATED algorithm instance through the public
+// QgsProcessingAlgorithm::run() (prepare -> process -> postProcess). The
+// instance must come from create(): that is what runs initAlgorithm(), so
+// the parameter definitions exist — calling processAlgorithm() directly on
+// an uninitialized prototype threw (no parameter definitions) before any
+// geometry work ran. catchExceptions=false: run() swallows
+// QgsProcessingException by default; the #1043 contract test observes the
+// typed exception, the other cases assert on the ok flag.
+static void runProcessingAlgorithm( QgsProcessingAlgorithm &alg, const QVariantMap &params,
                                     QgsProcessingContext &context, QgsProcessingFeedback *feedback,
                                     QVariantMap &results, bool &ok )
 {
-  try {
-    results = alg.processAlgorithm( params, context, feedback );
-    ok = true;
-  } catch ( const QgsProcessingException & ) {
-    ok = false;
-    throw;
-  }
+  ok = false;
+  results = alg.run( params, context, feedback, &ok, QVariantMap(), /*catchExceptions=*/false );
 }
 
 TEST_CASE("Vector overlay algorithms transform geometries across different CRSs (#304)", "[processing][vector][crs]") {
@@ -104,7 +111,7 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
 
         bool ok = false;
         QVariantMap res;
-        runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+        runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
         REQUIRE(ok);
         REQUIRE(res.contains(QStringLiteral("OUTPUT")));
         auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
@@ -129,7 +136,7 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
 
         bool ok = false;
         QVariantMap res;
-        runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+        runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
         REQUIRE(ok);
         REQUIRE(res.contains(QStringLiteral("OUTPUT")));
         auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
@@ -153,7 +160,7 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
 
         bool ok = false;
         QVariantMap res;
-        runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+        runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
         REQUIRE(ok);
         REQUIRE(res.contains(QStringLiteral("OUTPUT")));
         auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
@@ -178,7 +185,7 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
 
         bool ok = false;
         QVariantMap res;
-        runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+        runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
         REQUIRE(ok);
         REQUIRE(res.contains(QStringLiteral("OUTPUT")));
         auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
@@ -198,7 +205,7 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
 
         bool ok = false;
         QVariantMap res;
-        runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+        runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
         REQUIRE(ok);
         REQUIRE(res.contains(QStringLiteral("OUTPUT")));
         auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
@@ -218,7 +225,7 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
 
         bool ok = false;
         QVariantMap res;
-        runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+        runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
         REQUIRE(ok);
         REQUIRE(res.contains(QStringLiteral("OUTPUT")));
         auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
@@ -240,7 +247,7 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
 
         bool ok = false;
         QVariantMap res;
-        runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+        runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
         REQUIRE(ok);
         REQUIRE(res.contains(QStringLiteral("OUTPUT")));
         auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
@@ -303,7 +310,7 @@ TEST_CASE("VectorMergeAlgorithm refuses unwritable features instead of dropping 
         // exception, so this test observes it through the documented knob.
         {
             QVariantMap ignored;
-            runProcessingAlgorithm(proto, params, context, &feedback, ignored, ok);
+            runProcessingAlgorithm(*alg, params, context, &feedback, ignored, ok);
         }
         FAIL("expected QgsProcessingException for features the sink cannot store");
     } catch (const QgsProcessingException &e) {
@@ -332,7 +339,7 @@ TEST_CASE("VectorMergeAlgorithm refuses unwritable features instead of dropping 
     params2[QStringLiteral("OUTPUT")] = QStringLiteral("memory:");
     bool ok2 = false;
     QVariantMap res2;
-    runProcessingAlgorithm(proto, params2, context, &feedback, res2, ok2);
+    runProcessingAlgorithm(*alg, params2, context, &feedback, res2, ok2);
     REQUIRE(ok2);
     auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res2[QStringLiteral("OUTPUT")].toString()));
     REQUIRE(outLayer != nullptr);
@@ -375,7 +382,7 @@ TEST_CASE("VectorDissolveAlgorithm unions groups once and keeps every group (#10
 
     bool ok = false;
     QVariantMap res;
-    runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+    runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
     REQUIRE(ok);
     auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
     REQUIRE(outLayer != nullptr);
@@ -403,14 +410,21 @@ TEST_CASE("VectorMergeAlgorithm accepts every geometry class into an Unknown-cla
     // types the sink as Unknown (Geometry-typed memory layer, generic GPKG
     // geometry table) — such sinks legally store every class, and master
     // accepted this merge before the guard existed.
+    //
+    // A memory layer can never be Unknown-TYPED (QgsMemoryProvider::isValid
+    // is mWkbType != Unknown, so "Geometry?..." yields an invalid layer), but
+    // a GeometryCollection layer is valid and its geometry CLASS is Unknown
+    // (QgsWkbTypes::geometryType(GeometryCollection) == Unknown) — exactly
+    // the exempt sink class the #1043 guard must let through.
     std::unique_ptr<QgsVectorLayer> anyLayer(new QgsVectorLayer(
-        "Geometry?crs=EPSG:4326&field=name:string", "merge_any", "memory"));
+        "GeometryCollection?crs=EPSG:4326&field=name:string", "merge_any", "memory"));
     REQUIRE(anyLayer->isValid());
     QgsFeature pg(anyLayer->fields());
     pg.setAttribute("name", "pg");
-    pg.setGeometry(QgsGeometry::fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"));
+    pg.setGeometry(QgsGeometry::fromWkt("GEOMETRYCOLLECTION(POLYGON((0 0, 1 0, 1 1, 0 1, 0 0)))"));
     QgsFeatureList pgList{pg};
     REQUIRE(anyLayer->dataProvider()->addFeatures(pgList));
+    REQUIRE(QgsWkbTypes::geometryType(anyLayer->wkbType()) == Qgis::GeometryType::Unknown);
 
     std::unique_ptr<QgsVectorLayer> pointLayer(new QgsVectorLayer(
         "Point?crs=EPSG:4326&field=name:string", "merge_pt3", "memory"));
@@ -436,7 +450,7 @@ TEST_CASE("VectorMergeAlgorithm accepts every geometry class into an Unknown-cla
 
     bool ok = false;
     QVariantMap res;
-    runProcessingAlgorithm(proto, params, context, &feedback, res, ok);
+    runProcessingAlgorithm(*alg, params, context, &feedback, res, ok);
     REQUIRE(ok);
     auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
     REQUIRE(outLayer != nullptr);

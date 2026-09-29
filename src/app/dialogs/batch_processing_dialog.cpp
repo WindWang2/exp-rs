@@ -99,6 +99,15 @@ bool isBatchableRsOperator( const AlgorithmDescriptor &desc )
 
   for ( const auto &in : desc.inputs )
   {
+    // Spectral reference-input operators (unmixing, SAM, detection,
+    // similarity — rs_spectral_reference_input.h) need EXACTLY ONE of
+    // inline spectra / a table ref / libraryPath. JSON-schema "required"
+    // cannot express that group, so each member is declared optional and
+    // the operator looked default-runnable; per-file batch substitution
+    // can never supply the reference, so it is not batchable. libraryPath
+    // is the group's always-present member.
+    if ( in.name == "libraryPath" )
+      return false;
     if ( in.name == mainInput || in.name.rfind( "output", 0 ) == 0 )
       continue;
     if ( in.required && in.defaultValue.empty() )

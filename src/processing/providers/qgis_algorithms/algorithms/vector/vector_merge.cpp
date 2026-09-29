@@ -11,6 +11,9 @@
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
 #include <qgswkbtypes.h>
+#include <qgsgeometrycollection.h>
+
+#include <memory>
 
 const QString VectorMergeAlgorithm::INPUT_LAYERS = QStringLiteral( "INPUT_LAYERS" );
 const QString VectorMergeAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
@@ -97,6 +100,19 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
                     g.transform( ct );
                 }
                 catch ( const QgsCsException & ) {}
+            }
+            // A GeometryCollection sink is the Unknown-CLASS sink the #1043
+            // guard below exempts, but providers still store only collection
+            // geometries in it (the memory provider refuses a bare Point).
+            // Wrap a non-collection member into a one-part collection so
+            // "stores every class" holds for what the sink actually accepts.
+            if ( !g.isNull()
+                 && QgsWkbTypes::flatType( sinkWkbType ) == Qgis::WkbType::GeometryCollection
+                 && QgsWkbTypes::flatType( g.wkbType() ) != Qgis::WkbType::GeometryCollection )
+            {
+                auto collection = std::make_unique<QgsGeometryCollection>();
+                collection->addGeometry( g.constGet()->clone() );
+                g = QgsGeometry( std::move( collection ) );
             }
             outFeat.setGeometry( g );
             const QgsAttributes inAttrs = feat.attributes();
