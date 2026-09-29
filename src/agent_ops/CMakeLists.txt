@@ -27,7 +27,7 @@ add_library(Sicnu::agent_ops ALIAS sicnu_agent_ops)
 target_include_directories(sicnu_agent_ops PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
 target_link_libraries(sicnu_agent_ops PUBLIC
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   sicnu_agentbench
   sicnu_autonomy
   sicnu_repair_planner

@@ -2,6 +2,8 @@
 
 #include "cli_batch_runner.h"
 
+#include "platform/durable_sidecar.h"
+
 #include "agent/tool_catalog/surface_redaction.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -104,45 +106,38 @@ void writeResultIndex( const std::string &path, const std::vector<TaskRecord> &r
 {
     if ( path.empty() )
         return;
-    const std::string tmp = path + ".tmp";
+    // R6: the single sidecar write authority — O_EXCL temp (no shared fixed
+    // "<path>.tmp" two concurrent batch runs could interleave on), fsync
+    // gate, atomic publish. Readers never observe a partial index; a torn
+    // write can never be renamed over the previous run's records.
+    std::string payload;
+    for ( const TaskRecord &record : records )
     {
-        std::ofstream out( tmp, std::ios::binary | std::ios::trunc );
-        if ( !out )
-        {
-            if ( callbacks.log )
-                callbacks.log( "error", "cannot write result index: " + tmp );
-            return;
-        }
-        for ( const TaskRecord &record : records )
-        {
-            Json::Value line( Json::objectValue );
-            line["index"] = record.index;
-            line["id"] = record.id;
-            // The operator id is caller input echoed back — through the same
-            // redaction boundary as error text (a crafted id can carry a
-            // credential shape; legit ids pass through unchanged).
-            line["operator"] = redactText( record.operatorId );
-            line["status"] = record.status;
-            line["exit_code"] = record.exitCode;
-            if ( !record.error.empty() )
-                line["error"] = record.error; // redacted at setError()
-            line["duration_ms"] = static_cast<Json::Int64>( record.durationMs );
-            Json::StreamWriterBuilder builder;
-            builder["indentation"] = "";
-            out << Json::writeString( builder, line ) << "\n";
-        }
+        Json::Value line( Json::objectValue );
+        line["index"] = record.index;
+        line["id"] = record.id;
+        // The operator id is caller input echoed back — through the same
+        // redaction boundary as error text (a crafted id can carry a
+        // credential shape; legit ids pass through unchanged).
+        line["operator"] = redactText( record.operatorId );
+        line["status"] = record.status;
+        line["exit_code"] = record.exitCode;
+        if ( !record.error.empty() )
+            line["error"] = record.error; // redacted at setError()
+        line["duration_ms"] = static_cast<Json::Int64>( record.durationMs );
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "";
+        payload += Json::writeString( builder, line );
+        payload += '
+';
     }
-    // Atomic swap: readers never observe a partial index.
-    std::error_code ec;
-    std::filesystem::rename( tmp, path, ec );
-    if ( ec )
-    {
-        std::filesystem::remove( tmp, ec );
-        if ( callbacks.log )
-            callbacks.log( "error", "cannot publish result index " + path + ": " + ec.message() );
-    }
-}
 
+    const sicnu::platform::sidecar::WriteResult result =
+        sicnu::platform::sidecar::write( { path, payload, "" } );
+    if ( !result && callbacks.log )
+        callbacks.log( "error", std::string( "cannot publish result index " ) + path + ": " +
+                                    result.error );
+}
 int aggregateExitCode( const std::vector<TaskRecord> &records, bool cancelled )
 {
     if ( cancelled )

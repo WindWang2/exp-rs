@@ -94,11 +94,9 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
-    # sicnu_agent's run-summary/verification seam references agent_loop
-    # symbols (sicnu_agent_loop is a static lib nobody links transitively).
-    # WHOLE_ARCHIVE beats the linker's archive-ordering discard (CMake
-    # orders the .a before the .so, where its objects look unneeded).
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+    # sicnu_agent_loop rides the sicnu_agent edge with WHOLE_ARCHIVE already
+    # applied (src/agent/CMakeLists.txt) — adding it here a second time,
+    # with a different link feature, is a hard CMake >= 3.24 error.
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -429,6 +427,23 @@ set_target_properties(test_platform_portability PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_platform_portability)
+
+# R6: the single sidecar write authority (src/platform/durable_sidecar).
+# Light lane like test_platform_portability: Catch2 + sicnu_platform only —
+# no Qt/QGIS/GDAL — so the crash-window matrix runs on every platform lane.
+add_executable(test_platform_durable_sidecar test_platform_durable_sidecar.cpp)
+target_link_libraries(test_platform_durable_sidecar PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::Platform
+)
+target_include_directories(test_platform_durable_sidecar PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_platform_durable_sidecar PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_platform_durable_sidecar)
 
 # Cross-platform R2: static-evidence source contract (reads the repo's own
 # sources; same lane as test_platform_portability).
@@ -913,7 +928,7 @@ target_link_libraries(test_lab_chains PRIVATE
   # does not carry on this base (its missing agent_loop dependency is the
   # #1335 P0-3 root cause) — link agent_loop directly so the 34 cases can
   # run at all. Redundant (harmless) once #1335 lands.
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   sicnu_operators
 )
 if(TARGET jsoncpp)
@@ -5542,7 +5557,7 @@ if(TARGET qgis_app_classify)
     qgis_core
     qgis_analysis
     qgis_app_classify
-   sicnu_agent_loop)
+   $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>)
   target_include_directories(test_global_help_tips PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/app
@@ -10090,13 +10105,13 @@ target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 if(NOT WIN32)
 # Surface-11: batch manifest runner (unit level, no CLI binary needed).
 sicnu_add_test(test_cli_batch_manifest)
-target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk sicnu_agent_loop)
+target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>)
 
 sicnu_add_test(test_cli_commands_json)
 # Track 14: sicnu_agent (reached PRIVATELY through sicnu_plugins_framework)
 # references agent_loop symbols; the executable link must name the archive
 # itself. Same link-graph class as open PR #1335 - rebase note in the PR body.
-target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework sicnu_agent_loop)
+target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>)
 # 8.0: data identity / data cache check tests drive the CLI against an
 # in-test loopback range server (shared fixture with the io suites).
 target_sources(test_cli_commands_json PRIVATE support/http_range_server.cpp)
@@ -10317,7 +10332,7 @@ sicnu_link_jsoncpp(test_contract_platform_9)
 add_executable(test_agent_loop_core test_agent_loop_core.cpp)
 target_link_libraries(test_agent_loop_core PRIVATE
   Catch2::Catch2WithMain
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 sicnu_discover_tests(test_agent_loop_core)
 
@@ -10326,7 +10341,7 @@ sicnu_discover_tests(test_agent_loop_core)
 add_executable(test_agent_loop_journal_durability test_agent_loop_journal_durability.cpp)
 target_link_libraries(test_agent_loop_journal_durability PRIVATE
   Catch2::Catch2WithMain
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 sicnu_discover_tests(test_agent_loop_journal_durability)
 
@@ -10334,7 +10349,7 @@ sicnu_discover_tests(test_agent_loop_journal_durability)
 add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
 target_link_libraries(test_agent_loop_seams PRIVATE
   Catch2::Catch2WithMain
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 sicnu_discover_tests(test_agent_loop_seams)
 
@@ -10342,7 +10357,7 @@ sicnu_discover_tests(test_agent_loop_seams)
 add_executable(test_agent_loop_modes test_agent_loop_modes.cpp)
 target_link_libraries(test_agent_loop_modes PRIVATE
   Catch2::Catch2WithMain
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 sicnu_discover_tests(test_agent_loop_modes)
 
@@ -10350,7 +10365,7 @@ sicnu_discover_tests(test_agent_loop_modes)
 add_executable(test_agent_loop_e2e test_agent_loop_e2e.cpp)
 target_link_libraries(test_agent_loop_e2e PRIVATE
   Catch2::Catch2WithMain
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 sicnu_discover_tests(test_agent_loop_e2e)
 
@@ -10358,7 +10373,7 @@ sicnu_discover_tests(test_agent_loop_e2e)
 add_executable(test_agent_loop_resume test_agent_loop_resume.cpp)
 target_link_libraries(test_agent_loop_resume PRIVATE
   Catch2::Catch2WithMain
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 sicnu_discover_tests(test_agent_loop_resume)
 
@@ -10397,7 +10412,7 @@ target_link_libraries(test_agent_session_adapter PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   qgis_core
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   sicnu_agent
   sicnu_processing
   GDAL::GDAL
@@ -13013,7 +13028,7 @@ foreach( r4_agent_link_target IN ITEMS
     test_spatial_contracts
     test_trace_contract
     test_verification_metamorphic_11 )
-  target_link_libraries( ${r4_agent_link_target} PRIVATE sicnu_agent_loop sicnu_agent_ops )
+  target_link_libraries( ${r4_agent_link_target} PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop> sicnu_agent_ops )
 endforeach()
 
 # E-16: `origin/master` ships 25 unparseable `data/**/*.json` files, landed by
@@ -14027,7 +14042,7 @@ target_link_libraries(test_workbench_full_shell_lifecycle PRIVATE
   # PR #1335 (pending): resolve sicnu_agent's agent_loop/OpsDriver undefineds
   # at final link — the parity-r4 track carries the same explicit links as
   # its own suites until the central fix merges.
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   Sicnu::agent_ops
 )
 target_include_directories(test_workbench_full_shell_lifecycle PRIVATE
@@ -14589,7 +14604,7 @@ target_link_libraries(test_teaching_cockpit_authority_r4 PRIVATE
   # sicnu_agent.so does not carry its agent_loop dependency on this base
   # (#1335 P0-3); the harness seams reference its types — link directly.
   # Redundant (harmless) once #1335 lands.
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 target_include_directories(test_teaching_cockpit_authority_r4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 set_target_properties(test_teaching_cockpit_authority_r4 PROPERTIES
@@ -14608,7 +14623,7 @@ target_link_libraries(test_teaching_credential_paths_r4 PRIVATE
   Catch2::Catch2WithMain
   sicnu_agent
   # Same agent_loop gap as above (#1335 P0-3) — see the comment there.
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   Qt6::Core
 )
 sicnu_link_jsoncpp(test_teaching_credential_paths_r4)
@@ -14701,7 +14716,7 @@ target_link_libraries(test_parity_async_late_arrival_r4 PRIVATE
   sicnu_processing
   # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
   # resolve them at final link here until the central fix merges.
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   Sicnu::agent_ops
 )
 target_include_directories(test_parity_async_late_arrival_r4 PRIVATE
@@ -14807,7 +14822,7 @@ target_link_libraries(test_parity_restore_failsafe_r4 PRIVATE
   sicnu_processing
   # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
   # resolve them at final link here until the central fix merges.
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   Sicnu::agent_ops
 )
 target_include_directories(test_parity_restore_failsafe_r4 PRIVATE
@@ -14838,7 +14853,7 @@ target_link_libraries(test_parity_stress_r4 PRIVATE
   sicnu_processing
   # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
   # resolve them at final link here until the central fix merges.
-  sicnu_agent_loop
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   Sicnu::agent_ops
 )
 target_include_directories(test_parity_stress_r4 PRIVATE

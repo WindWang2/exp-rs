@@ -13,6 +13,7 @@
 #include <QJsonDocument>
 #include <QMap>
 #include <QSaveFile>
+#include "platform/durable_sidecar.h"
 #include <QSet>
 #include <QTextStream>
 
@@ -136,12 +137,11 @@ QString submissionDigest( const QString &path, qint64 *bytesOut )
 /// summary next to the graded CSV.
 bool atomicWrite( const QString &path, const QByteArray &text )
 {
-    QSaveFile out( path );
-    if ( !out.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-        return false;
-    if ( out.write( text ) != text.size() )
-        return false;
-    return out.commit();
+    // R6: the single sidecar write authority — temp + fsync + atomic publish.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( text.constData(), static_cast<std::size_t>( text.size() ) ), "" } );
+    return static_cast<bool>( result );
 }
 
 QString htmlEscape( const QString &text )

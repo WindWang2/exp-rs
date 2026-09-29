@@ -179,27 +179,18 @@ SidecarResult writeCompileSidecar( const std::string &outputPath,
   SidecarResult result;
   result.path = outputPath + ".compile.json";
 
-  const QString sidecarPath = QString::fromStdString( result.path );
-  QSaveFile file( sidecarPath );
-  if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) )
+  // R6: the single sidecar write authority (temp + fsync + atomic publish +
+  // verify read-back) replaces the QSaveFile lane; short-write/cancel
+  // semantics now come from the authority's typed statuses.
+  const std::string body = canonicalJson( projection ) + "
+";
+  const sicnu::platform::sidecar::WriteResult write =
+    sicnu::platform::sidecar::write( { result.path, body, "" } );
+  if ( !write )
   {
-    result.error = "cannot open sidecar for writing: " + result.path;
-    return result;
-  }
-  const QByteArray body = QByteArray::fromStdString( canonicalJson( projection ) + "\n" );
-  if ( file.write( body ) != body.size() )
-  {
-    file.cancelWriting();
-    result.error = "short write on sidecar: " + result.path;
-    return result;
-  }
-  if ( !file.commit() )
-  {
-    result.error = "sidecar commit failed: " + result.path;
+    result.error = "sidecar publish failed: " + result.path + " (" + write.error + ")";
     return result;
   }
   result.written = true;
   return result;
-}
-
 } // namespace sicnu::agent::harness::projection

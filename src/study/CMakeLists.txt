@@ -32,6 +32,8 @@ target_link_libraries(sicnu_study
     Sicnu::experiment
   PRIVATE
     GDAL::GDAL # raster reading for the spatial difference adapter only
+    # R6: sidecar-class writes route through the platform durable-sidecar authority.
+    Sicnu::Platform
 )
 
 # Same science-core layer guard as sicnu_experiment: no GUI, no network.

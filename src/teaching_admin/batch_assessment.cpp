@@ -9,6 +9,7 @@
 #include <QMutex>
 #include <QSet>
 #include <QSaveFile>
+#include "platform/durable_sidecar.h"
 #include <algorithm>
 #include <cstring>
 #include <thread>
@@ -59,14 +60,23 @@ bool saveCheckpointAtomic( const QString &path, const QString &configDigest, int
         { QStringLiteral( "rows" ), rowsArr },
     } );
     const QByteArray bytes = QJsonDocument( doc ).toJson( QJsonDocument::Indented );
-    QSaveFile sf( path );
-    if ( !sf.open( QIODevice::WriteOnly ) )
-        return false;
-    if ( sf.write( bytes ) != bytes.size() )
-        return false;
-    return sf.commit();
+    // R6: the single sidecar write authority — temp + fsync + atomic publish;
+    // a torn checkpoint can no longer be renamed over the resume state.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+    return static_cast<bool>( result );
 }
 
+/// Shared atomic byte write for every batch artifact (checkpoint, JSON and
+/// CSV reports) — one QSaveFile lane replaced by the R6 sidecar authority.
+bool writeBytesAtomically( const QString &path, const QByteArray &bytes )
+{
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+    return static_cast<bool>( result );
+}
 /// Loads checkpoint rows whose config digest matches the current run. A
 /// missing/corrupt/foreign checkpoint degrades to "no adopted rows" (fresh
 /// start) — best-effort durability, never a wrong grade.
@@ -493,15 +503,8 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
     const QString jsonPath = outPrefix + QStringLiteral( ".json" );
     const QString csvPath = outPrefix + QStringLiteral( ".csv" );
 
-    {
-        QSaveFile sf( jsonPath );
-        if ( !sf.open( QIODevice::WriteOnly ) )
-            return false;
-        if ( sf.write( jsonBytes ) != jsonBytes.size() )
-            return false;
-        if ( !sf.commit() )
-            return false;
-    }
+    if ( !writeBytesAtomically( jsonPath, jsonBytes ) )
+        return false;
 
     QString csv;
     csv += QStringLiteral( "student_id,lab_id,score,verdict,status,message,missing_evidence,grader_digest,top_deduction,unavailable_reason,rubric_version,lab_version,software_version\r\n" );
@@ -552,21 +555,11 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
         csv += esc( row.softwareVersion ) + QStringLiteral( "\r\n" );
     }
 
-    {
-        QSaveFile sf( csvPath );
-        if ( !sf.open( QIODevice::WriteOnly ) )
-            return false;
-        // Real UTF-8 BOM as BYTES: a QStringLiteral "\xEF\xBB\xBF" would hold
-        // code points U+00EF/U+00BB/U+00BF and toUtf8() would double-encode
-        // them (C3 AF …) — a BOM no spreadsheet recognizes.
-        const QByteArray bytes =
-          QByteArrayLiteral( "\xEF\xBB\xBF" ) + csv.toUtf8();
-        if ( sf.write( bytes ) != bytes.size() )
-            return false;
-        if ( !sf.commit() )
-            return false;
-    }
-    return true;
+    // Real UTF-8 BOM as BYTES: a QStringLiteral "ï»¿" would hold
+    // code points U+00EF/U+00BB/U+00BF and toUtf8() would double-encode
+    // them (C3 AF ...) — a BOM no spreadsheet recognizes.
+    if ( !writeBytesAtomically( csvPath, QByteArrayLiteral( "ï»¿" ) + csv.toUtf8() ) )
+        return false;    return true;
 }
 
 QJsonObject regradeTraceability( const BatchAssessmentReport &report )

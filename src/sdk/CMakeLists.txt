@@ -52,6 +52,9 @@ target_include_directories( sicnu_sdk
 target_link_libraries( sicnu_sdk
   PUBLIC
     jsoncpp
+    # R6: plugin index/discovery caches write through the platform
+    # durable-sidecar authority (Qt/GDAL-free leaf, SDK-safe).
+    Sicnu::Platform
 )
 target_compile_features( sicnu_sdk PUBLIC cxx_std_20 )
 

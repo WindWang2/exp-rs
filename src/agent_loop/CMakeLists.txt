@@ -16,6 +16,9 @@ add_library( sicnu_agent_loop STATIC
 )
 
 target_include_directories( sicnu_agent_loop PUBLIC ${CMAKE_SOURCE_DIR}/src )
+# R6: the journal write path routes through the platform durable-sidecar
+# authority (replacing its hand-rolled copy of the #1097 pattern).
+target_link_libraries( sicnu_agent_loop PUBLIC Sicnu::Platform )
 
 set_target_properties( sicnu_agent_loop PROPERTIES
     CXX_STANDARD 20

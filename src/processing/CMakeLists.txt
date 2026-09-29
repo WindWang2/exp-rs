@@ -301,6 +301,8 @@ target_link_libraries(sicnu_processing PUBLIC
     qgis_core
     GDAL::GDAL
     sicnu_operators_core
+    # R6: sidecar-class writes route through the platform durable-sidecar authority.
+    Sicnu::Platform
 )
 # Sicnu::data is linked PRIVATE here: output_committer (in this target) is the
 # only consumer of data headers from sicnu_processing. Downstream targets that

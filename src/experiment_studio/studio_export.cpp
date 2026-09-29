@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include "platform/durable_sidecar.h"
 #include <QSaveFile>
 #include <QTextStream>
 
@@ -122,29 +123,20 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
 
 Result<void> writeStudioExportJson( const StudioExportBundle &bundle, const QString &path )
 {
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly ) )
-    {
-        return Result<void>::failure(
-            studioError( QStringLiteral( "experiment_studio.export_write_failed" ),
-                         QStringLiteral( "cannot open %1" ).arg( path ) ) );
-    }
     const QByteArray bytes = QJsonDocument( bundle.toJson() ).toJson( QJsonDocument::Indented );
-    if ( file.write( bytes ) != bytes.size() )
+    // R6: the single sidecar write authority — temp + fsync + atomic publish.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+    if ( !result )
     {
         return Result<void>::failure(
             studioError( QStringLiteral( "experiment_studio.export_write_failed" ),
-                         QStringLiteral( "short write to %1" ).arg( path ) ) );
-    }
-    if ( !file.commit() )
-    {
-        return Result<void>::failure(
-            studioError( QStringLiteral( "experiment_studio.export_write_failed" ),
-                         QStringLiteral( "commit failed for %1" ).arg( path ) ) );
+                         QStringLiteral( "cannot publish %1: %2" )
+                             .arg( path, QString::fromUtf8( result.error.c_str() ) ) ) );
     }
     return Result<void>::success();
 }
-
 Result<StudioExportBundle> readStudioExportJson( const QString &path )
 {
     QFile file( path );

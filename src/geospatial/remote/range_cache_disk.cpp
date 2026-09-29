@@ -384,6 +384,11 @@ bool RangeDiskBlockStore::readBlock( const std::string &basis, std::uint64_t blo
   return true;
 }
 
+// R6 exemption note: this is a CACHE lane (loss degrades to a miss, never to
+// lost user state), with a deliberate 9.0 lock-scope design (I/O outside the
+// accounting lock) and its own digest format. It does NOT migrate to the
+// platform::sidecar authority; state sidecars (JSON metadata, indexes,
+// checkpoints) do.
 void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t blockIndex,
                                     const unsigned char *data, std::size_t size )
 {

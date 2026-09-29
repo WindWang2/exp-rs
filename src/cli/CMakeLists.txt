@@ -70,6 +70,8 @@ target_link_libraries(sicnu_cli_batch PUBLIC
     sicnu_agent
     sicnu_operators
     sicnu_processing
+    # R6: result index writes through the platform durable-sidecar authority.
+    Sicnu::Platform
 )
 if(TARGET jsoncpp)
     target_link_libraries(sicnu_cli_batch PUBLIC jsoncpp)

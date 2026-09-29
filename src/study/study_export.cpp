@@ -9,7 +9,9 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include "platform/durable_sidecar.h"
 #include <QSaveFile>
+#include "platform/durable_sidecar.h"
 
 #include <cmath>
 
@@ -535,20 +537,18 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
 Result<void> writeStudyReport( const StudyReport &report, const QString &path )
 {
     const QJsonDocument document( report.toJson() );
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) )
+    const QByteArray bytes = document.toJson( QJsonDocument::Indented );
+    // R6: the single sidecar write authority — temp + fsync + atomic publish.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+    if ( !result )
         return Result<void>::failure( exportError(
             QStringLiteral( "study.report_write_failed" ),
-            QStringLiteral( "cannot open %1 for writing: %2" )
-                .arg( path, file.errorString() ) ) );
-    file.write( document.toJson( QJsonDocument::Indented ) );
-    if ( !file.commit() )
-        return Result<void>::failure( exportError(
-            QStringLiteral( "study.report_write_failed" ),
-            QStringLiteral( "cannot commit %1: %2" ).arg( path, file.errorString() ) ) );
+            QStringLiteral( "cannot publish %1: %2" )
+                .arg( path, QString::fromUtf8( result.error.c_str() ) ) ) );
     return Result<void>::success();
 }
-
 Result<QVector<SpatialDifferenceSummary>> summarizeStudyOutputs(
     experiment::ExperimentStore &store, experiment::MatrixLedger &ledger,
     const ParameterStudySpec &spec, const QVector<StudyPoint> &points,

@@ -10,6 +10,7 @@
 
 #include "geospatial/util/atomic_fs.h"
 #include "platform/portable.h"
+#include "platform/durable_sidecar.h"
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QtGlobal>
@@ -67,13 +68,6 @@ QString WorkflowCheckpointManager::saveCheckpoint( const WorkflowRun &run, const
   const QString runId = QString::fromStdString( runIdRaw );
   const QString finalPath = QDir( dir ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( runId ) );
 
-  // Unique per-save tmp name: concurrent saves of the same run can never
-  // interleave writes on a shared tmp file.
-  static std::atomic<uint64_t> s_tmpCounter{ 0 };
-  const QString tmpPath = finalPath + QStringLiteral( ".tmp.%1.%2" )
-                             .arg( QCoreApplication::applicationPid() )
-                             .arg( QString::number( s_tmpCounter.fetch_add( 1 ) ) );
-
   const Json::Value root = run.toJson();
   Json::StreamWriterBuilder writerBuilder;
   writerBuilder["indentation"] = "  ";
@@ -93,57 +87,28 @@ QString WorkflowCheckpointManager::saveCheckpoint( const WorkflowRun &run, const
     return QString();
   }
 
-  QFile file( tmpPath );
-  if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
+  // Injected write/publish failures (Verification 7.0 fault matrix) keep
+  // their armed names and their externally-visible contract: nothing is
+  // promoted, the previous checkpoint stays intact. They fire BEFORE the
+  // authority runs so the real publish never races the fault.
+  const bool writeFault = SICNU_FAULT_POINT( "workflow_checkpoint.write" );
+  const bool publishFault = SICNU_FAULT_POINT( "workflow_checkpoint.publish" );
+  if ( writeFault || publishFault )
     return QString();
 
-  const qint64 written = file.write( jsonStr.data(), static_cast<qint64>( jsonStr.size() ) );
-  if ( written != static_cast<qint64>( jsonStr.size() ) || !file.flush() )
-  {
-    file.close();
-    QFile::remove( tmpPath );
-    return QString(); // a truncated payload must never be promoted
-  }
-  // Injected write failure (Verification 7.0 fault matrix): same cleanup as a
-  // short write — the tmp file is removed and nothing is promoted.
-  if ( SICNU_FAULT_POINT( "workflow_checkpoint.write" ) )
-  {
-    file.close();
-    QFile::remove( tmpPath );
+  // R6: the single sidecar write authority — O_EXCL temp, fsync/FlushFileBuffers
+  // gate (the old Windows lane relied on flush() alone: rename-atomic but the
+  // bytes were not required to be on the device before the rename), atomic
+  // replace, best-effort directory fsync. The old hand-rolled tmp+rename
+  // (and its QIODevice::Text CRLF translation on Windows — the reader opens
+  // Text mode and never sees the difference) is gone.
+  const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+    { finalPath.toUtf8().constData(), jsonStr, "" } );
+  if ( !result )
     return QString();
-  }
 
-  const int fd = file.handle();
-#if defined( Q_OS_UNIX )
-  if ( fd >= 0 )
-    ::fsync( fd );
-#endif
-  file.close();
-
-  // Atomic replace: std::filesystem::rename maps to rename(2) on POSIX and
-  // MoveFileEx(MOVEFILE_REPLACE_EXISTING) on Windows, both of which replace
-  // an existing destination in one step - no remove/rename window in which
-  // the previous checkpoint could be lost.
-  // Injected rename failure (test-only arming): same cleanup as a real
-  // cross-device/locked-target failure.
-  const bool renameFault = SICNU_FAULT_POINT( "workflow_checkpoint.publish" );
-  std::error_code renameError;
-  if ( !renameFault )
-  {
-    std::filesystem::rename( std::filesystem::path( tmpPath.toStdWString() ),
-                             std::filesystem::path( finalPath.toStdWString() ),
-                             renameError );
-  }
-  if ( renameFault || renameError )
-  {
-    QFile::remove( tmpPath );
-    return QString();
-  }
-
-  fsyncDirectory( dir );
   return finalPath;
 }
-
 std::unique_ptr<WorkflowRun> WorkflowCheckpointManager::loadCheckpoint( const QString &filePath, QString *error )
 {
   QFile file( filePath );

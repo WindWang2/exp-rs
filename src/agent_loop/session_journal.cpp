@@ -55,92 +55,21 @@ std::atomic<unsigned long long> &stagingCounter()
 
 bool writeFileAtomic( const fs::path &target, const std::string &body, std::string &error )
 {
-    const fs::path directory = target.parent_path();
-
-    // Unique staging claim (the atomic_fs #1097 pattern): pid + per-process
-    // counter + random_device entropy, and the name is CLAIMED with
-    // O_EXCL/CREATE_NEW before any bytes are written. The previous
-    // "<name>.tmp" was shared by every publisher of the same target — two
-    // concurrent saves truncated and interleaved each other's bytes, renamed
-    // the file out from under a peer (publish failed with ENOENT), or
-    // published a torn document. The pid+counter prefix alone would still
-    // collide across processes forked from the same counter state (or pid
-    // reuse after a crash), so the entropy + exclusive claim is the part
-    // that makes the name safe on shared session directories.
-    static thread_local std::mt19937_64 stagingRng{
-      std::random_device{}() ^
-      ( static_cast<std::uint64_t>( sicnu::portable::pid() ) << 1 ) };
-    const std::string stagingBase = sicnu::portable::pathToUtf8( target.filename() ) + "." +
-                                    std::to_string( sicnu::portable::pid() ) + "." +
-                                    std::to_string( stagingCounter()++ );
-    fs::path temp;
-    bool claimed = false;
-    constexpr int kMaxStagingAttempts = 64;
-    for ( int attempt = 0; attempt < kMaxStagingAttempts && !claimed; ++attempt )
+    // R6: the single sidecar write authority (platform/durable_sidecar.h)
+    // owns the whole sequence this function used to re-implement — the
+    // atomic_fs #1097 staging claim, the fsync-before-rename durability
+    // gate, the single-replace publish (no remove-then-rename window), and
+    // the best-effort directory fsync. Same externally-visible contract:
+    // old-or-new complete journal, never a torn or missing one.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { sicnu::portable::pathToUtf8( target ), body, "" } );
+    if ( !result )
     {
-        temp = directory / sicnu::portable::pathFromUtf8(
-          stagingBase + "." + std::to_string( stagingRng() ) + ".tmp" );
-        claimed = sicnu::portable::claimExclusiveUtf8( sicnu::portable::pathToUtf8( temp ) );
-    }
-    if ( !claimed )
-    {
-        error = "cannot allocate a staging file next to " +
-                sicnu::portable::pathToUtf8( target );
+        error = result.error;
         return false;
     }
-    {
-        std::ofstream out( temp, std::ios::binary | std::ios::trunc );
-        if ( !out )
-        {
-            // The claim created an empty staged file: a failed open must not
-            // strand it in the session directory.
-            std::error_code cleanup;
-            fs::remove( temp, cleanup );
-            error = "cannot open temp file " + sicnu::portable::pathToUtf8( temp );
-            return false;
-        }
-        out.write( body.data(), static_cast< std::streamsize >( body.size() ) );
-        out.flush();
-        if ( !out )
-        {
-            std::error_code cleanup;
-            fs::remove( temp, cleanup );
-            error = "cannot write temp file " + sicnu::portable::pathToUtf8( temp );
-            return false;
-        }
-    }
-    // Durability gate: the bytes must reach the device before the rename
-    // commits the directory entry, or a crash can publish empty/garbage
-    // content that survives the crash.
-    if ( !sicnu::portable::syncFileUtf8( sicnu::portable::pathToUtf8( temp ) ) )
-    {
-        error = "cannot flush temp file " + sicnu::portable::pathToUtf8( temp );
-        std::error_code cleanup;
-        fs::remove( temp, cleanup );
-        return false;
-    }
-    // Publish with a single atomic replace. POSIX rename(2) and MSVC's
-    // std::filesystem::rename (MoveFileExW with MOVEFILE_REPLACE_EXISTING)
-    // both replace an existing target. The previous remove-then-rename turned
-    // the publish into a window where the journal did not exist at all — a
-    // crash between the two calls destroyed the audit trail it exists to
-    // protect.
-    std::error_code ec;
-    fs::rename( temp, target, ec );
-    if ( ec )
-    {
-        std::error_code cleanup;
-        fs::remove( temp, cleanup );
-        error = "cannot publish " + sicnu::portable::pathToUtf8( target ) + ": " + ec.message();
-        return false;
-    }
-    // Narrow the crash window for the directory entry itself (best-effort —
-    // some filesystems refuse directory fsync; the file fsync above is the
-    // correctness gate).
-    sicnu::portable::syncDirectoryBestEffortUtf8( sicnu::portable::pathToUtf8( target ) );
     return true;
 }
-
 Json::Value entryToJson( const JournalEntry &entry )
 {
     Json::Value doc( Json::objectValue );

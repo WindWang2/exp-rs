@@ -24,6 +24,9 @@ target_link_libraries(qgis_analysis PUBLIC
     Qt6::Core
     # #1174: classification/OBIA polygonize publish routes through atomic_fs.
     Sicnu::Geospatial
+    # R6: the classification metadata sidecar writes through the platform
+    # durable-sidecar authority (single sidecar write path).
+    Sicnu::Platform
 )
 
 # qgsleastsquares.cpp (helmert/projective) uses GSL LU/SVD.

@@ -13,6 +13,12 @@
  * embedded into `MissionContext::metadata` by mission_timeline_bridge so the
  * existing D18 dual-write carries it inside .qgs/.qgz.
  *
+ * IMPORT-ONLY (ADR 0166, issue #1394): this store exposes NO write API. The
+ * legacy `<stem>.mission-timeline.json` sidecar is read for migration into
+ * the authority document and never written; the former
+ * saveMissionTimelineToSidecar export (zero production callers, a second
+ * write path waiting to be used) was removed in R6.
+ *
  * Qt Core only (QSaveFile / QJsonDocument); no QGIS, no Widgets.
  ***************************************************************************/
 #pragma once
@@ -28,11 +34,6 @@ namespace sicnu::app
 /// ".mission-timeline.json").
 QString missionTimelineSidecarPathForProject( const QString &projectFilePath );
 
-/// Atomic write. Returns false (with @p error) on any I/O or commit failure;
-/// a failed commit cancels the temp file so no truncated artifact survives.
-bool saveMissionTimelineToSidecar( const QString &projectFilePath,
-                                   const MissionTimeline &timeline,
-                                   QString *error = nullptr );
 
 /// Read back. A missing sidecar returns true with @p loaded == false.
 bool loadMissionTimelineFromSidecar( const QString &projectFilePath,

@@ -1,5 +1,7 @@
 #include "app/workbench/mission_context_store.h"
 
+#include "platform/durable_sidecar.h"
+
 #include <QDomDocument>
 #include <QDomElement>
 #include <QDir>
@@ -41,28 +43,24 @@ bool saveMissionContextToSidecar( const QString &projectFilePath, const MissionC
         toWrite.projectRef = projectFilePath;
 
     const QJsonObject doc = missionContextToJson( toWrite );
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-    {
-        if ( error )
-            *error = QStringLiteral( "cannot open sidecar for write: %1" ).arg( path );
-        return false;
-    }
     // #1170: compact — the authority is rewritten on every mission:advance
     // and every project save; Indented doubled the bytes rotated through
     // last-good for no reader benefit.
     const QByteArray bytes = QJsonDocument( doc ).toJson( QJsonDocument::Compact );
-    if ( file.write( bytes ) != bytes.size() )
+
+    // R6: the single sidecar write authority — temp + fsync + atomic publish.
+    // The old QSaveFile lane was rename-atomic but never fsynced: a power
+    // loss could commit the directory entry for bytes still in cache, and
+    // the last-good snapshot would then be the recovery channel one full
+    // generation behind instead of at most one.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+    if ( !result )
     {
         if ( error )
-            *error = QStringLiteral( "short write to sidecar: %1" ).arg( path );
-        file.cancelWriting();
-        return false;
-    }
-    if ( !file.commit() )
-    {
-        if ( error )
-            *error = QStringLiteral( "commit failed for sidecar: %1" ).arg( path );
+            *error = QStringLiteral( "sidecar publish failed (%1): %2" )
+                         .arg( path, QString::fromUtf8( result.error.c_str() ) );
         return false;
     }
     return true;

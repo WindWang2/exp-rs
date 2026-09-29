@@ -148,6 +148,10 @@ vendor/
 !.planning/cli-surface-r4/
 .planning/cli-surface-r4/*
 !.planning/cli-surface-r4/*.md
+# R6 persistence/sidecar/atomicity track planning notes (markdown only).
+!.planning/r6-persistence-sidecar-atomicity/
+.planning/r6-persistence-sidecar-atomicity/*
+!.planning/r6-persistence-sidecar-atomicity/*.md
 !.planning/cartography-platform-7/
 !.planning/dataset-experiment-7/
 !.planning/geospatial-data-fabric-8/

@@ -45,6 +45,8 @@ target_link_libraries(sicnu_teaching_admin
     # sicnu.lab-pack/1: pack validation delegates to the Qt-free shared leaf
     # (ONE parser/validator shared with sicnu::agent) — no second pack truth.
     sicnu_lab_pack
+    # R6: sidecar-class writes route through the platform durable-sidecar authority.
+    Sicnu::Platform
 )
 
 foreach(SICNU_TA_FORBIDDEN_LINK Qt6::Widgets qgis_gui Qt6::Network Sicnu::app)

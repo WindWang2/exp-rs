@@ -252,6 +252,8 @@ add_library(sicnu_agent SHARED
 
 target_link_libraries(sicnu_agent PUBLIC
   Qt6::Core
+  # R6: harness sidecar writers route through the platform authority.
+  Sicnu::Platform
   Qt6::Network
   Qt6::Widgets
   # mission_tools.h takes/returns QDomDocument across the MissionAuthority
@@ -281,7 +283,11 @@ target_link_libraries(sicnu_agent PUBLIC
   # VerificationReport::aggregate (the #1335 link-graph repair; three
   # parallel-track copies of this one entry were converged here by the R5
   # core/platform track now that #1335 has landed).
-  sicnu_agent_loop
+  # WHOLE_ARCHIVE lives on THIS edge (R6 master-unblock): CMake >= 3.24
+  # refuses the same link item arriving with two different link features,
+  # and tests/CMakeLists.txt's sicnu_add_test used to add a second
+  # WHOLE_ARCHIVE occurrence next to this plain one. One edge, one feature.
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
   # RS14-15 Explainable Workflow: explain core + live adapters (registry
   # knowledge, workflow projection) behind the explain:step tool surface.
   Sicnu::explain_adapters
