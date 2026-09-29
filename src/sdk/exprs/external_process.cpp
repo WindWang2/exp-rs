@@ -520,15 +520,12 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     ExternalProcessResult result;
     const auto startTime = std::chrono::steady_clock::now();
 
-    std::string programError;
-    if ( !validateArgv( request.argv, programError ) )
-    {
-        result.error = programError;
-        return result;
-    }
-
     // Workspace effect policy (#757): identical gate to POSIX, refuses
     // BEFORE anything is spawned.
+    // The policy gate runs BEFORE program validation (#1380): a relative
+    // argv[0] containing ".." is a path fragment, and validateArgv would
+    // otherwise probe it against the HOST cwd and report "not executable"
+    // instead of the typed policy refusal.
     {
         const std::string escape = workspaceEffectEscape( request );
         if ( !escape.empty() )
@@ -537,6 +534,13 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             result.error = "workspace_escape (E5005): " + escape;
             return result;
         }
+    }
+
+    std::string programError;
+    if ( !validateArgv( request.argv, programError ) )
+    {
+        result.error = programError;
+        return result;
     }
 
     // Command line (argv-only: no shell anywhere in this path).
@@ -992,17 +996,14 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     ExternalProcessResult result;
     const auto startTime = std::chrono::steady_clock::now();
 
-    std::string programError;
-    if ( !validateArgv( request.argv, programError ) )
-    {
-        result.error = programError;
-        return result;
-    }
-
     // Workspace effect policy (#757): refuses BEFORE spawning anything when
     // a resolved effect escapes SICNU_MCP_WORKSPACE (or the declared extra
     // roots). Manifest constants cannot bypass it — the resolved values are
     // what get checked.
+    // The policy gate runs BEFORE program validation (#1380): a relative
+    // argv[0] containing ".." is a path fragment, and validateArgv would
+    // otherwise probe it against the HOST cwd and report "not executable"
+    // instead of the typed policy refusal.
     {
         const std::string escape = workspaceEffectEscape( request );
         if ( !escape.empty() )
@@ -1011,6 +1012,13 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             result.error = "workspace_escape (E5005): " + escape;
             return result;
         }
+    }
+
+    std::string programError;
+    if ( !validateArgv( request.argv, programError ) )
+    {
+        result.error = programError;
+        return result;
     }
 
     int stdoutPipe[2] = { -1, -1 };

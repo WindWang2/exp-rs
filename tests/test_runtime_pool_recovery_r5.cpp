@@ -452,13 +452,29 @@ TEST_CASE( "A restart whose listen fails drains the node instead of stranding it
     // the restart lambda fails: sicnu_pool_<pid>_<id>_<restartCount>.
     // handleWorkerLoss increments restartCount before arming the timer, so
     // the restart uses the post-crash value.
-    QLocalServer squatter;
+    // A live QLocalServer cannot squat the name on POSIX: the pool's
+    // PythonIpcServer::listen() calls QLocalServer::removeServer() first,
+    // which unlinks a squatter's socket file and then binds successfully.
+    // A NON-EMPTY DIRECTORY at the socket path survives removeServer()
+    // (unlink cannot remove a directory), so the restart's bind/rename
+    // genuinely fails.
     const QString socketName = QStringLiteral( "sicnu_pool_%1_%2_%3" )
                                    .arg( QCoreApplication::applicationPid() )
                                    .arg( node->id )
                                    .arg( node->restartCount + 1 );
-    INFO( "squatting socket: " << socketName.toStdString() );
-    REQUIRE( squatter.listen( socketName ) );
+    const QString squatPath = QDir::tempPath() + QLatin1Char( '/' ) + socketName;
+    INFO( "squatting socket path: " << squatPath.toStdString() );
+    QFile::remove( squatPath );
+    REQUIRE( QDir().mkpath( squatPath ) );
+    {
+        QFile pin( squatPath + QStringLiteral( "/pin" ) );
+        REQUIRE( pin.open( QIODevice::WriteOnly ) );
+    }
+    struct SquatCleanup
+    {
+        QString path;
+        ~SquatCleanup() { QDir( path ).removeRecursively(); }
+    } squatCleanup{ squatPath };
 
     ::kill( static_cast<pid_t>( firstPid ), SIGKILL );
 

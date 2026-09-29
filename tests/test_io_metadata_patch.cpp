@@ -22,6 +22,7 @@ using Catch::Approx;
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <string>
 
@@ -297,6 +298,13 @@ TEST_CASE( "a malformed finalize manifest refuses the patch BEFORE any bytes cha
   // digest as a mere warning (permanent digest_mismatch, no repair path —
   // re-patching failed the same way).
   const std::string manifestPath = record.finalPath + ".sicnu-manifest.json";
+  std::string goodManifest;
+  {
+    std::ifstream in( manifestPath, std::ios::binary );
+    REQUIRE( in );
+    goodManifest.assign( std::istreambuf_iterator<char>( in ), std::istreambuf_iterator<char>() );
+  }
+  REQUIRE_FALSE( goodManifest.empty() );
   {
     std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
     out << R"({"producer": 12345, "shape": {"width": 4}})"; // producer is not a string
@@ -327,5 +335,11 @@ TEST_CASE( "a malformed finalize manifest refuses the patch BEFORE any bytes cha
   const char *unit = GDALGetMetadataItem( GDALGetRasterBand( verify, 1 ), "UNITTYPE", nullptr );
   CHECK( ( unit == nullptr || std::string( unit ) != "degC" ) );
   GDALClose( verify );
+  // The corrupted manifest carries no digest, so restore the pre-corruption
+  // manifest: its digest must still match the (untouched) bytes.
+  {
+    std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
+    out << goodManifest;
+  }
   CHECK( verifyDataset( record.finalPath ).verified );
 }
