@@ -13,6 +13,9 @@
 #include <QAction>
 #include <QApplication>
 #include <QLabel>
+#include <QFile>
+#include <QTextStream>
+#include <QTemporaryDir>
 #include <QSplitter>
 
 #include "support/qt_lifecycle.h"
@@ -101,13 +104,42 @@ TEST_CASE( "I2M GCP tools disabled until source open", "[georef][dual][tools]" )
   REQUIRE_FALSE( add->isEnabled() );
 }
 
+namespace
+{
+// 300x300 CRS-less ASCII grid anchored at (0,0) with 1-unit cells: covers the
+// picked map coordinates below without any CRS transform in between.
+QString writeAsciiGrid( const QString &path )
+{
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Text ) );
+  QTextStream out( &file );
+  constexpr int kSize = 300;
+  out << "ncols " << kSize << "\nnrows " << kSize
+      << "\nxllcorner 0\nyllcorner 0\ncellsize 1\nNODATA_value -9999\n";
+  for ( int row = 0; row < kSize; ++row )
+  {
+    for ( int col = 0; col < kSize; ++col )
+      out << ( ( row + col ) % 7 ) << ( col + 1 < kSize ? " " : "\n" );
+  }
+  return path;
+}
+} // namespace
+
 TEST_CASE( "I2I dual-canvas GCP pick arms both tools and appends pair", "[georef][dual][gcp]" )
 {
   QgsGeoreferencerMainWindow w( nullptr, nullptr );
   auto *add = w.findChild<QAction *>( QStringLiteral( "rsGeorefAddPointAction" ) );
   REQUIRE( add != nullptr );
-  // Bypass layer gate for unit test of pick/commit path.
-  add->setEnabled( true );
+  // Real Warp + Base layers: since #1005 a pick with no loaded layer fails
+  // closed (never becomes a GCP), so the pick/commit path needs both open.
+  // CRS-less grids keep canvas picks == layer coordinates.
+  QTemporaryDir rasters;
+  REQUIRE( rasters.isValid() );
+  const QString warpPath = writeAsciiGrid( rasters.filePath( QStringLiteral( "warp.asc" ) ) );
+  const QString basePath = writeAsciiGrid( rasters.filePath( QStringLiteral( "base.asc" ) ) );
+  REQUIRE( w.loadSourceRaster( warpPath ) );
+  REQUIRE( w.loadReferenceRaster( basePath ) );
+  REQUIRE( add->isEnabled() ); // the gate opened on its own
   add->setChecked( true );
   REQUIRE( w.srcCanvas() != nullptr );
   REQUIRE( w.dstCanvas() != nullptr );

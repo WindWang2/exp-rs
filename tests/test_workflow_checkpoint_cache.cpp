@@ -92,6 +92,10 @@ WorkflowDocument chain( int steps )
 
 bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 20000 )
 {
+    // ctest runs each case in its own process: without an application the
+    // loop below has no dispatcher, so neither the queued quit nor the timeout
+    // ever fires and the case spins until the ctest timeout.
+    ensureApp();
     if ( coordinator.hasCompleted() )
         return true; // synchronous completion (empty document) inside startRun/resume
     QSignalSpy spy( &coordinator, &PipelineRunCoordinator::pipelineCompleted );
@@ -1242,6 +1246,7 @@ WorkflowDocument subflowParentDoc()
 
 TEST_CASE( "A subflow instance runs as expanded nodes and resumes as cache hits", "[d17][workflow][engine][composition]" )
 {
+    ensureApp();
     const QString dir = scratchDir( QStringLiteral( "subflow-e2e" ) );
     QString checkpointFile;
     {
@@ -1642,6 +1647,7 @@ TEST_CASE( "Checkpoint resume never crashes and never fabricates success under m
 
 TEST_CASE( "IR and provenance parsers are robust under byte mutation", "[d17][workflow][fuzz]" )
 {
+    ensureApp();
     const QByteArray irBytes = QJsonDocument( WorkflowIR::toJson( chain( 3 ) ) ).toJson();
 
     PipelineRunCoordinator coordinator;

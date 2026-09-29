@@ -3,6 +3,7 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include <QPointer>
 #include <QApplication>
 #include <QMainWindow>
 #include <QPaintEvent>
@@ -95,6 +96,22 @@ void triggerAction( QMenu *menu, const QString &text )
 bool fuzzyEquals( double a, double b, double epsilon = 0.01 )
 {
   return std::abs( a - b ) < epsilon;
+}
+
+// Per-case teardown: close AND destroy the designer, then drop the layout
+// from the project while the application is fully alive. A leaked designer
+// kept its item widgets (and their expression-context scopes) bound to the
+// layout until exitQgis() destroyed QgsProject::instance() at run end, which
+// crashed inside ~QgsExpressionContextScope when a case ran on its own.
+void closeDesigner( QgsLayoutDesignerDialog *designer, QgsPrintLayout *layout )
+{
+  QPointer<QgsLayoutDesignerDialog> guard( designer ); // WA_DeleteOnClose-safe
+  designer->close();
+  QApplication::processEvents();
+  delete guard.data();
+  QApplication::processEvents();
+  QgsProject::instance()->layoutManager()->removeLayout( layout );
+  QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
 }
 } // namespace
 
@@ -189,8 +206,7 @@ TEST_CASE( "LayoutDesigner: QgsLayoutDesignerDialog lifecycle and item creation"
   QApplication::processEvents();
 
   // Close and destroy
-  designer->close();
-  QApplication::processEvents();
+  closeDesigner( designer, layout );
 }
 
 // ---------------------------------------------------------------------------
@@ -288,8 +304,7 @@ TEST_CASE( "LayoutDesigner: selection shows type widget and inspector edits reac
   QApplication::processEvents();
   REQUIRE( fuzzyEquals( label->positionWithUnits().x(), newX ) );
 
-  designer->close();
-  QApplication::processEvents();
+  closeDesigner( designer, layout );
 }
 
 TEST_CASE( "LayoutDesigner: switching selection writes only to the new item; delete is safe",
@@ -348,8 +363,7 @@ TEST_CASE( "LayoutDesigner: switching selection writes only to the new item; del
   // Touching the designer afterwards stays safe.
   triggerAction( designer->viewMenu(), QStringLiteral( "Zoom to Page" ) );
 
-  designer->close();
-  QApplication::processEvents();
+  closeDesigner( designer, layout );
 }
 
 TEST_CASE( "LayoutDesigner: multi-selection batch edits apply to all selected items",
@@ -395,8 +409,7 @@ TEST_CASE( "LayoutDesigner: multi-selection batch edits apply to all selected it
   for ( QgsLayoutItemLabel *label : labels )
     REQUIRE( fuzzyEquals( label->itemOpacity(), 1.0 ) );
 
-  designer->close();
-  QApplication::processEvents();
+  closeDesigner( designer, layout );
 }
 
 TEST_CASE( "LayoutDesigner: page properties panel opens from the Layout menu",
@@ -416,8 +429,7 @@ TEST_CASE( "LayoutDesigner: page properties panel opens from the Layout menu",
   triggerAction( designer->layoutMenu(), QStringLiteral( "Page Properties..." ) );
   REQUIRE( designer->window()->findChild<QgsLayoutPagePropertiesWidget *>() != nullptr );
 
-  designer->close();
-  QApplication::processEvents();
+  closeDesigner( designer, layout );
 }
 
 TEST_CASE( "LayoutDesigner: map item gets its dedicated property widget",
@@ -445,6 +457,5 @@ TEST_CASE( "LayoutDesigner: map item gets its dedicated property widget",
   REQUIRE( qobject_cast<QgsLayoutMapWidget *>(
                designer->window()->findChild<QgsLayoutMapWidget *>() ) != nullptr );
 
-  designer->close();
-  QApplication::processEvents();
+  closeDesigner( designer, layout );
 }
