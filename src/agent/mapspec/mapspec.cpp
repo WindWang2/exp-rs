@@ -22,6 +22,22 @@ bool isConstraintKind( const std::string &kind );
 
 namespace {
 
+/// True when a spec-controlled identifier is path-shaped and could escape
+/// the directories it is spliced into (#1381). Ids are flat identifiers:
+/// separators (both platforms' flavors) and the dot/dotdot specials are
+/// the escape vocabulary — anything else is inert as a path component.
+bool identifierEscapesPath( const std::string &s )
+{
+  if ( s == "." || s == ".." )
+    return true;
+  for ( const char ch : s )
+  {
+    if ( ch == '/' || ch == '\\' || static_cast<unsigned char>( ch ) < 0x20 || ch == 0x7f )
+      return true;
+  }
+  return false;
+}
+
 struct CollectionInfo
 {
   const char *name;
@@ -601,6 +617,8 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
   if ( !spec.isMember( "layout_name" ) || !spec["layout_name"].isString() ||
        spec["layout_name"].asString().empty() )
     problems.push_back( "missing non-empty string field 'layout_name'" );
+  else if ( identifierEscapesPath( spec["layout_name"].asString() ) )
+    problems.push_back( "layout_name must be a flat identifier (no path separators, '.', or '..')" );
 
   // Platform 8.0 (v5): output declarations. Validation-only surface —
   // compilation never auto-exports; cartography:compose and the harness map
@@ -711,6 +729,15 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       if ( id.empty() )
       {
         problems.push_back( std::string( info->name ) + ": every item needs a string id" );
+        continue;
+      }
+      // Ids reach path construction (chart/colorbar session files) as flat
+      // identifiers — anything path-shaped is a traversal attempt, not an
+      // id (#1381).
+      if ( identifierEscapesPath( id ) )
+      {
+        problems.push_back( std::string( info->name ) + ": item id '" + id +
+                            "' must be a flat identifier (no path separators, '.', or '..')" );
         continue;
       }
       if ( !allIds.insert( id ).second )

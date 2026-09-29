@@ -10,6 +10,7 @@
 #include "agent/cartography/cartography_tools.h"
 #include "agent/cartography/cartography_operators.h"
 #include "agent/cartography/chart_registry.h"
+#include "agent/cartography/export.h"
 #include "agent/cartography/registry.h"
 #include "agent/contracts/spatial_contracts.h"
 #include "agent/mapspec/mapspec.h"
@@ -69,6 +70,61 @@ Json::Value minimalSpec( const std::string &layoutName = "bench-map" )
 }
 
 } // namespace
+
+TEST_CASE( "MapSpec validation rejects path-shaped layout names and ids (#1381)", "[mapspec][validation]" )
+{
+  // layout_name with traversal content never reaches path construction.
+  Json::Value escape = minimalSpec( "x/../../../../home/.config/evil" );
+  REQUIRE_FALSE( validateMapSpec( escape ).empty() );
+
+  escape = minimalSpec( "..\\..\\windows-evil" );
+  REQUIRE_FALSE( validateMapSpec( escape ).empty() );
+
+  // Item ids are flat identifiers too — a hostile chart id must not be
+  // spliceable into the session chart file path.
+  Json::Value spec = minimalSpec();
+  Json::Value chart( Json::objectValue );
+  chart["id"] = "chart/../../evil";
+  Json::Value chartRect( Json::arrayValue );
+  chartRect.append( 1 );
+  chartRect.append( 1 );
+  chartRect.append( 10 );
+  chartRect.append( 10 );
+  chart["rect_mm"] = chartRect;
+  spec["charts"].append( chart );
+  const auto problems = validateMapSpec( spec );
+  REQUIRE_FALSE( problems.empty() );
+  bool flagged = false;
+  for ( const auto &problem : problems )
+    flagged = flagged || problem.find( "flat identifier" ) != std::string::npos;
+  CHECK( flagged );
+
+  // Legal names (CJK, spaces, inner dots, dashes) stay valid.
+  CHECK( validateMapSpec( minimalSpec( "海陆分布 基准图 v1.2" ) ).empty() );
+
+  // The compiler-side guard itself: every path-capable byte collapses, so
+  // a sanitized stem can never traverse regardless of what reaches compile.
+  const QString hostile = QStringLiteral( "x/../../\\..\\..:evil" );
+  const QString stem = sicnu::agent::cartography::sanitizeFileStem( hostile, QStringLiteral( "layout" ) );
+  CHECK_FALSE( stem.isEmpty() );
+  CHECK( !stem.contains( QLatin1Char( '/' ) ) );
+  CHECK( !stem.contains( QLatin1Char( '\\' ) ) );
+  CHECK( !stem.contains( QLatin1Char( ':' ) ) );
+  // Path-shape specials all collapsed to inert characters.
+  for ( const QChar ch : stem )
+  {
+    const ushort u = ch.unicode();
+    const bool keep = ( u >= 'a' && u <= 'z' ) || ( u >= 'A' && u <= 'Z' ) ||
+                      ( u >= '0' && u <= '9' ) || u == '_' || u == '-' || u == '.' || u == ' ';
+    CHECK( keep );
+  }
+  CHECK( sicnu::agent::cartography::sanitizeFileStem( QStringLiteral( "..." ), QStringLiteral( "layout" ) )
+         == QStringLiteral( "layout" ) );
+  CHECK( sicnu::agent::cartography::sanitizeFileStem( QStringLiteral( "  " ), QStringLiteral( "layout" ) )
+         == QStringLiteral( "layout" ) );
+  CHECK( sicnu::agent::cartography::sanitizeFileStem( QStringLiteral( "海陆分布 v1" ), QStringLiteral( "layout" ) )
+         == QStringLiteral( "_____ v1" ) );
+}
 
 TEST_CASE( "MapSpec document model: make/append/validate", "[mapspec]" )
 {

@@ -71,6 +71,14 @@ struct MapExportResult
 std::vector<std::string> validateMapExportRequest( const QgsPrintLayout *layout,
                                                    const MapExportRequest &request );
 
+/// Bare, filesystem-safe file/dir stem for splicing spec-controlled names
+/// (layout_name, item ids) into paths: characters outside [A-Za-z0-9._- ]
+/// collapse to '_', length caps at 64, and empty/'.'/'..'-shaped results
+/// fall back to the caller-provided fallback. Path separators never
+/// survive, so a sanitized stem cannot traverse (#1381: spec ids are
+/// identifiers, never path fragments).
+QString sanitizeFileStem( const QString &raw, const QString &fallback );
+
 /// Executes an atomic governed export. Never throws; failures are reported
 /// in the result. `layout` must outlive the call only.
 MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest &request );
