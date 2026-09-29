@@ -1397,10 +1397,34 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         QFile::remove( tempProbPath );
       if ( !tempUncPath.isEmpty() )
         QFile::remove( tempUncPath );
+      // Name the member that failed: the group error carries the failing
+      // TARGET path, which maps back onto its role so callers (and the UI)
+      // can tell a probability/uncertainty failure from a label failure.
+      const std::string what = ex.what();
+      std::vector<std::pair<std::string, QString>> roles;
+      if ( writeUnc )
+        roles.emplace_back( config.uncertaintyOutput.toStdString(), QStringLiteral( "uncertainty raster" ) );
+      if ( writeProb )
+        roles.emplace_back( config.probabilityOutput.toStdString(), QStringLiteral( "probability raster" ) );
+      roles.emplace_back( config.outputRaster.toStdString(), QStringLiteral( "label raster" ) );
+      QString failedRole;
+      size_t bestLength = 0;
+      for ( const auto &role : roles )
+      {
+        if ( !role.first.empty() && role.first.size() > bestLength
+             && what.find( role.first ) != std::string::npos )
+        {
+          failedRole = role.second;
+          bestLength = role.first.size();
+        }
+      }
       result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
       result.errorMessage =
-        QStringLiteral( "Failed to finalize classification outputs: %1" )
-          .arg( QString::fromUtf8( ex.what() ) );
+        failedRole.isEmpty()
+          ? QStringLiteral( "Failed to finalize classification outputs: %1" )
+              .arg( QString::fromUtf8( ex.what() ) )
+          : QStringLiteral( "Failed to finalize classification outputs (%1): %2" )
+              .arg( failedRole, QString::fromUtf8( ex.what() ) );
       return result;
     }
   }
