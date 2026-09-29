@@ -51,5 +51,15 @@ private:
     QLabel *m_leftPreview = nullptr;
     QLabel *m_rightPreview = nullptr;
 
+    // Deletion tripwires for the BORROWED project layers baked into the
+    // preview jobs' QgsMapSettings (#1389 follow-up): the dialog is modal,
+    // but queued layer removals can still fire inside exec()'s event loop —
+    // willBeDeleted settles the affected preview render first.
+    QMetaObject::Connection m_leftDeletionConn;
+    QMetaObject::Connection m_rightDeletionConn;
+
     void startPreviewRender(QgsRasterLayer *layer, bool isLeft);
+    void watchRenderLayer(QgsRasterLayer *layer, bool isLeft);
+    //! Blocking-cancel both preview jobs (the ~ComparisonDialog idiom).
+    void settlePreviewJobs();
 };

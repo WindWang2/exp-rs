@@ -37,6 +37,7 @@
 #include <QDomDocument>
 #include <QGestureEvent>
 #include <QGraphicsView>
+#include <QSet>
 #include <QTimer>
 
 class QWheelEvent;
@@ -1000,6 +1001,32 @@ class GUI_EXPORT QgsMapCanvas : public QGraphicsView, public QgsExpressionContex
      */
     void stopRenderingAndSettle();
 
+    /**
+     * Registers an application-level render job (e.g. a snapshot render owned
+     * by a map tool or dialog) whose QgsMapSettings retain raw QgsMapLayer
+     * pointers. Ownership stays with the registrant; registration only lets
+     * stopRenderingAndSettle() (and the canvas destructor) wind the job's
+     * background threads down BEFORE a layer removal path destroys the layers
+     * the job may still be drawing. The job's finished() handler is delivered
+     * synchronously by that settle (a parallel job's blocking cancel emits
+     * finished() on the canceling thread), so the owner cleans up its own
+     * state; it must unregister in that handler. The settle-once semantics
+     * are verified for QgsMapRendererParallelJob; other job subclasses'
+     * blocking cancel() differ and are unverified here.
+     * \see unregisterExternalRenderJob()
+     * \see stopRenderingAndSettle()
+     */
+    void registerExternalRenderJob( QgsMapRendererJob *job ) SIP_SKIP;
+
+    /**
+     * Removes \a job from the external-render-job registry (see
+     * registerExternalRenderJob()). Call when the job finishes or is taken
+     * over by its owner's cancellation path; a destroyed job is pruned
+     * automatically.
+     * \see registerExternalRenderJob()
+     */
+    void unregisterExternalRenderJob( QgsMapRendererJob *job ) SIP_SKIP;
+
     //! called to read map canvas settings from project
     void readProject( const QDomDocument & );
 
@@ -1476,6 +1503,11 @@ class GUI_EXPORT QgsMapCanvas : public QGraphicsView, public QgsExpressionContex
 
     QList<QgsMapRendererQImageJob *> mPreviewJobs;
 
+    //! Application-level render jobs (map tools, dialogs) whose settings hold
+    //! raw layer pointers; settled by stopRenderingAndSettle() and the dtor
+    //! before those layers can be destroyed (#1389 swipe compare snapshot).
+    QSet<QgsMapRendererJob *> mExternalRenderJobs;
+
     //! lock the scale, so zooming can be performed using magnication
     bool mScaleLocked = false;
 
@@ -1589,6 +1621,11 @@ class GUI_EXPORT QgsMapCanvas : public QGraphicsView, public QgsExpressionContex
     void startPreviewJobs();
     void stopPreviewJobs();
     void schedulePreviewJob( int number );
+
+    //! Blocking-cancels every registered external render job (see
+    //! registerExternalRenderJob()). Jobs whose owner handled finished() have
+    //! already unregistered themselves and been deleteLater'd by the owner.
+    void settleExternalRenderJobs() SIP_SKIP;
 
     /**
      * Returns TRUE if a pan operation is in progress

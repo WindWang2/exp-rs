@@ -132,6 +132,13 @@ RsObiaMainWindow::~RsObiaMainWindow()
   // task silently ran to completion. cancelActiveTask() cancels the task and
   // restores the cursor before member teardown destroys the progress dialog.
   cancelActiveTask();
+
+  // WP-D settle-before-detach (#1389): wind down the canvas render and any
+  // registered external job while the session layers are still alive, so
+  // store-layer destruction below never races a render thread — independent
+  // of Qt child destruction order.
+  if ( mCanvas )
+    mCanvas->stopRenderingAndSettle();
 }
 
 // ---------------------------------------------------------------------------

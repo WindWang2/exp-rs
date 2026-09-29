@@ -4963,6 +4963,30 @@ target_include_directories(test_swipe_map_tool PRIVATE
 )
 sicnu_discover_tests(test_swipe_map_tool)
 
+# Render-job settlement oracles (#1389, R6): deterministic race tests for
+# layer removal vs. in-flight render jobs (swipe compare snapshot, canvas
+# external-job registry, workspace settle-before-detach, willBeDeleted
+# tripwires) plus preview-overwrite / session-switch churn.
+add_executable(test_render_job_settlement_r6 test_render_job_settlement_r6.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/map_tools/swipe_map_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
+)
+target_link_libraries(test_render_job_settlement_r6 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_render_job_settlement_r6 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_render_job_settlement_r6)
+
 # Measure map tool tests (#318)
 add_executable(test_measure_tool test_measure_tool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/map_tools/measure_tool.cpp
@@ -7634,6 +7658,7 @@ sicnu_discover_tests(test_data_source_providers)
 # QGIS Display Manager tests — independent QGIS layer instances per Data Asset
 qt_add_executable(test_qgis_display_manager
   test_qgis_display_manager.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/map_tools/swipe_map_tool.cpp
 )
 target_link_libraries(test_qgis_display_manager PRIVATE
   Catch2::Catch2WithMain
@@ -14486,6 +14511,9 @@ if(TARGET test_surface_protocol)
 endif()
 if(TARGET test_swipe_map_tool)
   set_target_properties(test_swipe_map_tool PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_render_job_settlement_r6)
+  set_target_properties(test_render_job_settlement_r6 PROPERTIES AUTOMOC ON)
 endif()
 if(TARGET test_temporal_scene_model)
   set_target_properties(test_temporal_scene_model PROPERTIES AUTOMOC ON)

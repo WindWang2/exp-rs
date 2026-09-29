@@ -123,6 +123,14 @@ QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *paren
 
 QgsGeorefShellWindow::~QgsGeorefShellWindow()
 {
+  // WP-D settle-before-detach (#1389): settle both canvases (own render +
+  // registered external jobs) while the session layers are alive, so store
+  // destruction can't race a render thread regardless of child order.
+  if ( mSrcCanvas )
+    mSrcCanvas->stopRenderingAndSettle();
+  if ( mDstCanvas )
+    mDstCanvas->stopRenderingAndSettle();
+
   // #1093a: map-coords dialogs own a QgsGeorefDataPoint whose SRC marker lives
   // in mSrcCanvas's scene. QObject tears down children in creation order, so
   // canvases die first and free the marker; the dialog then deletes the data

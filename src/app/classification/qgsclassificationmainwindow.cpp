@@ -337,6 +337,12 @@ QgsClassificationMainWindow::~QgsClassificationMainWindow()
   // Note: setMapTool(nullptr) is a no-op in QgsMapCanvas; use unsetMapTool.
   if ( m_canvas )
   {
+    // WP-D settle-before-detach (#1389): stop the canvas render + every
+    // registered external job (e.g. a compare snapshot) NOW, while the
+    // session layers are alive — not implicitly via ~QgsMapCanvas, which
+    // only precedes store-layer destruction if the canvas happens to be
+    // created before the workspace.
+    m_canvas->stopRenderingAndSettle();
     if ( QgsMapTool *tool = m_canvas->mapTool() )
       m_canvas->unsetMapTool( tool );
     m_canvas->setLayers( QList<QgsMapLayer *>() );
@@ -640,6 +646,19 @@ void QgsClassificationMainWindow::removeSessionLayer( QgsMapLayer *layer )
   if ( !m_sessionMap )
     return;
   m_sessionMap->removeLayer( layer );
+}
+
+void QgsClassificationMainWindow::replacePreviewLayer( QgsRasterLayer *layer )
+{
+  if ( m_previewLayer )
+  {
+    // Workspace removal settles any in-flight canvas render before the
+    // delete; the session canvas cannot still be drawing the old preview.
+    removeSessionLayer( m_previewLayer );
+    delete m_previewLayer;
+    m_previewLayer = nullptr;
+  }
+  m_previewLayer = layer;
 }
 
 void QgsClassificationMainWindow::setupDocks()
@@ -2277,12 +2296,7 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
 
   // --- Invalidate downstream classification state from previous image (#406) ---
   // Remove stale preview layer
-  if ( m_previewLayer )
-  {
-    removeSessionLayer( m_previewLayer );
-    delete m_previewLayer;
-    m_previewLayer = nullptr;
-  }
+  replacePreviewLayer( nullptr );
   // Reset pre-loaded model backend, scaler, and path to prevent stale model reuse on new raster (#428)
   m_loadedBackend.reset();
   m_loadedScaler = RsFeatureScaler();
@@ -2606,7 +2620,7 @@ void QgsClassificationMainWindow::applyClassification()
         QStringLiteral( "gdal" ) );
       if ( classLayer->isValid() )
       {
-        m_previewLayer = classLayer;
+        replacePreviewLayer( classLayer );
         addSessionLayer( classLayer, true );
       }
       else
@@ -2803,13 +2817,7 @@ void QgsClassificationMainWindow::applyPreview()
         QStringLiteral( "gdal" ) );
       if ( previewLayer->isValid() )
       {
-        if ( m_previewLayer )
-        {
-          removeSessionLayer( m_previewLayer );
-          delete m_previewLayer;
-          m_previewLayer = nullptr;
-        }
-        m_previewLayer = previewLayer;
+        replacePreviewLayer( previewLayer );
         addSessionLayer( previewLayer, true );
       }
       else
@@ -2989,7 +2997,7 @@ long QgsClassificationMainWindow::startPostProcessTask(
             QStringLiteral( "gdal" ) );
           if ( resultLayer->isValid() )
           {
-            m_previewLayer = resultLayer;
+            replacePreviewLayer( resultLayer );
             addSessionLayer( resultLayer, true );
           }
           else

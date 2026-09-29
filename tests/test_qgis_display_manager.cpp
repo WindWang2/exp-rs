@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QtTest>
 
 #include "vector_test_fixtures.h"
 #include <QMap>
@@ -14,6 +15,10 @@
 #include <gdal.h>
 
 #include <vector>
+
+#include <atomic>
+#include <chrono>
+#include <semaphore>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -26,6 +31,7 @@
 #include <qgsvectorlayer.h>
 
 #include "app/display/qgis_display_manager.h"
+#include "app/map_tools/swipe_map_tool.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 
@@ -1075,4 +1081,152 @@ TEST_CASE("Removing a Display Layer during an active canvas render settles first
   CHECK(layerStore.count() == 0);
   CHECK(layerTree.findLayers().isEmpty());
   CHECK(dataManager.leaseCount(assetId) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// #1389 R6: the swipe tool's compare render is a canvas-external job whose
+// QgsMapSettings hold a RAW layer pointer. DisplayManager::removeLayer must
+// settle it (canvas external-job registry) before the store destroys the
+// layer. Deterministic via a blocking renderer seam — no sleeps.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Control block parking a worker thread inside render() until released or
+/// canceled (the deterministic "job holds the layer" point). Held by
+/// shared_ptr from BOTH the layer and the renderer: the store's removal
+/// destroys the layer, and the willBeDeleted-triggered settle (firing from
+/// ~QgsRasterLayer, after the derived class is gone) must still find every
+/// structure the parked worker touches; the cancel flag must additionally
+/// stay readable after the layer is gone so the test can prove settlement.
+
+struct SwipeRenderGate
+{
+  std::atomic_bool entered{ false };
+  std::atomic_bool canceledDuringRender{ false };
+  std::counting_semaphore<> enteredSemaphore{ 0 };
+  std::counting_semaphore<> releaseGate{ 0 };
+
+  bool waitEntered( int timeoutMs = 10000 )
+  {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds( timeoutMs );
+    while ( std::chrono::steady_clock::now() < deadline )
+    {
+      if ( enteredSemaphore.try_acquire_for( std::chrono::milliseconds( 5 ) ) )
+        return true;
+    }
+    return entered.load();
+  }
+};
+using SharedSwipeRenderGate = std::shared_ptr<SwipeRenderGate>;
+
+class SwipeBlockingRenderer : public QgsMapLayerRenderer
+{
+  public:
+    SwipeBlockingRenderer( const QString &layerId, const SharedSwipeRenderGate &gate )
+        : QgsMapLayerRenderer( layerId ), mGate( gate ) {}
+
+    ~SwipeBlockingRenderer() override { mGate->releaseGate.release(); }
+
+    QgsFeedback *feedback() const override { return &mFeedback; }
+
+    bool render() override
+    {
+      mGate->entered.store( true );
+      mGate->enteredSemaphore.release();
+      while ( !mGate->releaseGate.try_acquire_for( std::chrono::milliseconds( 5 ) ) )
+      {
+        if ( mFeedback.isCanceled() )
+        {
+          mGate->canceledDuringRender.store( true );
+          return false;
+        }
+      }
+      return true;
+    }
+
+  private:
+    SharedSwipeRenderGate mGate;
+    mutable QgsFeedback mFeedback;
+};
+
+/// Minimal raster layer handing the blocking renderer to the render job;
+/// adopted into the display view so removeLayer exercises the real path.
+/// The source is a real (tiny) GeoTIFF: the raster prepare pipeline needs an
+/// initialized renderer, which an invalid layer never builds.
+class SwipeBlockingLayer : public QgsRasterLayer
+{
+  public:
+    SwipeBlockingLayer()
+        : QgsRasterLayer( syntheticSample( QStringLiteral( "samples/r6_swipe_blocking.tif" ) ),
+                          QStringLiteral( "r6-swipe-compare" ) )
+        , mGate( std::make_shared<SwipeRenderGate>() )
+    {
+      setValid( isValid() );
+      setCrs( QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) ) );
+    }
+
+    QgsMapLayerRenderer *createMapRenderer( QgsRenderContext & ) override
+    {
+      return new SwipeBlockingRenderer( id(), mGate );
+    }
+
+    QgsRectangle extent() const override { return QgsRectangle( 0.0, 0.0, 10.0, 10.0 ); }
+
+    SwipeRenderGate *gate() { return mGate.get(); }
+    SharedSwipeRenderGate gateShared() { return mGate; }
+
+  private:
+    SharedSwipeRenderGate mGate;
+};
+
+} // namespace
+
+TEST_CASE( "Removing a Display Layer settles the swipe tool's registered compare job first (#1389)",
+           "[qgis_display_manager][r6][settlement]" ) {
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  canvas.resize(320, 240);
+  canvas.setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")));
+  canvas.setExtent(QgsRectangle(-1, -1, 11, 11));
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewId =
+      createView(displayManager, canvas, layerTree, layerStore);
+  const sicnu::data::AssetId assetId = registerRaster(dataManager);
+
+  // A blocking-seam layer becomes the Display Layer: adoptLayer registers it
+  // with the manager so removeLayer goes through the production settle path.
+  auto *compareLayer = new SwipeBlockingLayer();
+  layerStore.addMapLayer(compareLayer);
+  const auto adopted = displayManager.adoptLayer(viewId, assetId, compareLayer);
+  REQUIRE(adopted);
+
+  SwipeMapTool tool(&canvas);
+  tool.setCompareLayer(compareLayer);
+  tool.activate(); // single deterministic render trigger
+
+  const SharedSwipeRenderGate gate = compareLayer->gateShared();
+  REQUIRE(compareLayer->gate()->waitEntered());
+  REQUIRE(tool.hasPendingCompareRender());
+
+  // The store removal inside removeLayer destroys the layer while the swipe
+  // worker is parked INSIDE it. The settle (canvas external-job registry)
+  // must join that worker first — the removal blocks until cancellation was
+  // observed, and only then is the layer destroyed.
+  const auto removed = displayManager.removeLayer(adopted.value());
+  REQUIRE(removed);
+
+  REQUIRE(gate->canceledDuringRender.load());
+  REQUIRE_FALSE(tool.hasPendingCompareRender());
+  CHECK(layerStore.count() == 0);
+  CHECK(layerTree.findLayers().isEmpty());
+  CHECK(dataManager.leaseCount(assetId) == 0);
+
+  QTest::qWait(50); // any late finished/deleteLater callbacks
+  REQUIRE_FALSE(tool.hasPendingCompareRender());
+  tool.deactivate();
 }

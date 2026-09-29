@@ -263,6 +263,14 @@ QgsMapCanvas::QgsMapCanvas( QWidget *parent )
 
 QgsMapCanvas::~QgsMapCanvas()
 {
+  // Settle app-level external render jobs (map tools, dialogs) FIRST: their
+  // owners are children/side objects deleted below, and their finished()
+  // handlers must observe a usable canvas while they drop their job pointers.
+  // Waiting for the worker threads here also means the non-blocking cancel in
+  // a tool destructor below can never leave workers drawing layers that are
+  // already being destroyed at shutdown (#1389).
+  settleExternalRenderJobs();
+
   if ( mMapTool )
   {
     mMapTool->deactivate();
@@ -1465,11 +1473,51 @@ void QgsMapCanvas::stopRendering()
   stopPreviewJobs();
 }
 
+void QgsMapCanvas::registerExternalRenderJob( QgsMapRendererJob *job )
+{
+  if ( !job )
+    return;
+  mExternalRenderJobs.insert( job );
+  connect( job, &QObject::destroyed, this, [this, job] { mExternalRenderJobs.remove( job ); } );
+}
+
+void QgsMapCanvas::unregisterExternalRenderJob( QgsMapRendererJob *job )
+{
+  if ( !job )
+    return;
+  disconnect( job, &QObject::destroyed, this, nullptr );
+  mExternalRenderJobs.remove( job );
+}
+
+void QgsMapCanvas::settleExternalRenderJobs()
+{
+  if ( mExternalRenderJobs.isEmpty() )
+    return;
+
+  // Iterate a copy: an active job's blocking cancel() emits finished()
+  // synchronously on this thread, and the owner's handler unregisters (and
+  // deleteLater()s) the job while we are looping.
+  const QSet<QgsMapRendererJob *> jobs = mExternalRenderJobs;
+  for ( QgsMapRendererJob *job : jobs )
+  {
+    if ( !mExternalRenderJobs.contains( job ) )
+      continue;
+    // NOTE: signals are intentionally NOT blocked here — unlike the canvas's
+    // own jobs (deleted right after a whileBlocking cancel), an external job
+    // stays owned by its registrant, whose finished() handler must run to
+    // drop its pointer before the caller destroys layers.
+    job->cancel();
+  }
+}
+
 void QgsMapCanvas::stopRenderingAndSettle()
 {
   // Not safe to call from canvas render callbacks (renderComplete /
   // mapCanvasRefreshed handlers): this deletes mJob, which may still be on
   // the caller's stack there.
+  // External jobs first: their owners' finished() handlers may touch canvas
+  // state, so wind them down before the canvas's own bookkeeping changes.
+  settleExternalRenderJobs();
   mRefreshTimer->stop();
   mRefreshScheduled = false;
   mRefreshAfterJob = false;
