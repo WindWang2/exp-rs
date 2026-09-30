@@ -29,7 +29,16 @@
 
 namespace sicnu::workflow
 {
-class WorkflowDocument;
+// `struct`, matching workflow_ir_v2.h's definition: MSVC decorates the
+// elaborated type kind of the FIRST declaration it saw (U = struct, V =
+// class) into a function's mangled name, so a `class` forward declaration
+// here gives this translation unit a different mangled
+// projectWorkflowDocument than every TU that included workflow_ir_v2.h
+// first — LNK2019 on sicnu_geo_rs.exe (Tier 3 Windows) with the symbol
+// plainly defined and already on the link line. POSIX never decorates the
+// kind and links it happily, so only Windows observes this. Pinned by
+// tests/test_portability_source_contract.cpp.
+struct WorkflowDocument;
 struct WorkflowDefinition;
 struct StepDef;
 }
