@@ -2,6 +2,7 @@
 #include "session_journal.h"
 
 #include "platform/portable.h"
+#include "platform/durable_sidecar.h"
 
 #include <json/reader.h>
 #include <json/writer.h>
