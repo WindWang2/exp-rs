@@ -224,7 +224,7 @@ bool RsClassificationPipeline::loadModelSidecarFull( const QString &modelPath,
   if ( scalerVal.isObject() && !out.scaler.fromJson( scalerVal.toObject() ) )
     return false;
 
-  for ( const QJsonValue &v : root.value( QStringLiteral( "classes" ) ).toArray() )
+  for ( const auto &v : root.value( QStringLiteral( "classes" ) ).toArray() )
   {
     const QJsonObject c = v.toObject();
     const QColor color( c.value( QStringLiteral( "color" ) ).toString() );
@@ -232,7 +232,7 @@ bool RsClassificationPipeline::loadModelSidecarFull( const QString &modelPath,
       out.classColors.insert( c.value( QStringLiteral( "id" ) ).toInt(), color );
   }
 
-  for ( const QJsonValue &v : root.value( QStringLiteral( "features" ) ).toArray() )
+  for ( const auto &v : root.value( QStringLiteral( "features" ) ).toArray() )
   {
     if ( v.isDouble() )
       out.bandIndices.append( v.toInt() );
