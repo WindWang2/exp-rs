@@ -15176,9 +15176,13 @@ endif()
 # models/*/model.json must stay byte-identical to scripts/gen_model_library.py
 # output (the SPEC is the stale side historically — disk-newer manifests were
 # lost to a regenerate once already). Skipped where no interpreter exists.
-find_package(Python3 QUIET COMPONENTS Interpreter)
-if(Python3_Interpreter_FOUND)
+# Interpreter policy (TEST_INFRA.md #730): use the build-pinned Python_EXECUTABLE,
+# NOT a FindPython3 rediscovery. CTestCustom.cmake pins PYTHONHOME/PYTHONPATH to
+# the interpreter sicnu_configure_test_harness_env discovered; running a
+# different FindPython3 interpreter under that pin fails with
+# "AssertionError: SRE module mismatch" (hostedtoolcache python vs system).
+if(Python_EXECUTABLE)
   add_test(NAME test_model_library_generator_parity
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_model_library.py --check)
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_model_library.py --check)
   sicnu_set_test_env(test_model_library_generator_parity)
 endif()
