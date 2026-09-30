@@ -486,7 +486,12 @@ TEST_CASE( "observer slots may re-enter the coordinator from runStateChanged (#8
     } ) );
     // By terminal time at least one post-registration drain ran on some
     // thread; the slot's synchronous re-entrant queries must have completed.
-    REQUIRE( reentered.load() );
+    // Bounded (#1392): "by terminal time" is a scheduling statement, not a
+    // guarantee — the drain is a worker thread, so the slot can still be in
+    // flight when the run completes. Waiting for the observation (30 s
+    // budget, same helper as the case above) turns the assertion into one on
+    // the invariant instead of on thread interleaving.
+    REQUIRE( waitForCondition9( [&] { return reentered.load(); } ) );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
