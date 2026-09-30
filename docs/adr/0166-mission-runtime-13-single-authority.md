@@ -86,6 +86,22 @@ workflow durable IR, or the D18 MissionContext value model.
 - A corrupt or future-version authority fails closed: the project still
   opens, the mission block refuses to persist, and the artifact survives for
   recovery.
+- **One sidecar write API.** The dual write above is only "one write path" if
+  the path itself is singular, so every sidecar-class durable write converges
+  on `sicnu::platform::sidecar::write()` / `read()`
+  (`src/platform/durable_sidecar.h`): prepare → validate → write temp →
+  durability boundary → publish → last-good rotation → verify. Callers keep
+  their own schema/version gates — this layer is content-agnostic — and choose
+  their last-good policy per artifact. Writers that still hand-rolled their
+  own temp naming, fsync gate or atomic replace (the agent session journal,
+  the tile-loop checkpoint, the scratch digest sidecar, the published marker,
+  the classification metadata sidecars) now route through it, and
+  `tests/test_portability_source_contract.cpp` pins the convergence so a
+  deleted call fails the build. Two sanctioned durability layers exist and
+  nothing else: `platform::sidecar` for one-file metadata, `geo::atomic_fs`
+  for dataset groups. Cache and content lanes (the range cache, the
+  content-addressed artifact pool, tile payloads, rolling trace logs) are
+  explicitly exempt — loss degrades to a miss, never to lost user state.
 - Gates (`test_mission_runtime_persistence`, `test_mission_tools`,
   `test_mission_runtime_parity`, `test_mission_runtime_scale`) compile the
   real sources; the parity gate also substitutes for the compiler on the

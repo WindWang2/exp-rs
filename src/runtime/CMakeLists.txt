@@ -30,7 +30,12 @@ set_target_properties(sicnu_runtime PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 find_package(Threads REQUIRED)
-target_link_libraries(sicnu_runtime PUBLIC Threads::Threads)
+target_link_libraries(sicnu_runtime PUBLIC Threads::Threads
+    # R6: the chunk family's state sidecars (tile checkpoints, scratch digest
+    # sidecars, the published marker) publish through the single sidecar
+    # write authority in src/platform/durable_sidecar.h.
+    Sicnu::Platform
+)
 # Mirrors the sicnu_workflow install contract so packaging keeps shipping the
 # runtime next to the other shared libraries.
 install(TARGETS sicnu_runtime

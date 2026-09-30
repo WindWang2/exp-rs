@@ -164,6 +164,32 @@ TEST_CASE( "durable sidecar authority stays stage-write -> file sync -> atomic p
     repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/agent_loop/session_journal.cpp" );
   REQUIRE_FALSE( journal.empty() );
   REQUIRE( journal.find( "sicnu::platform::sidecar::write(" ) != std::string::npos );
+
+  // ADR 0166 / issue #1394 item 2: ONE sidecar write API. Every state-sidecar
+  // writer in the repo routes here; the remaining runtime-chunk writers named
+  // in the issue (tile_run_contract's checkpoint, scratch_registry's digest
+  // sidecar, resumable_tile_run's published marker) must not keep a private
+  // temp/publish lane. Call-shaped needles: a comment mentioning the API is
+  // not enough (mutation: delete the call, keep the comment → red).
+  const char *const consumers[] = {
+    "src/runtime/chunk/tile_checkpoint.cpp",
+    "src/runtime/chunk/scratch_registry.cpp",
+    "src/runtime/chunk/resumable_tile_run.cpp",
+  };
+  for ( const char *consumer : consumers )
+  {
+    const std::string source = repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, consumer );
+    REQUIRE_FALSE( source.empty() );
+    INFO( "consumer: " << consumer );
+    REQUIRE( source.find( "sicnu::platform::sidecar::write(" ) != std::string::npos );
+    // No private publish lane survives in these writers: neither a
+    // hand-rolled temp name for the target nor a raw std::filesystem::rename
+    // onto it.
+    REQUIRE( source.find( "path + \".tmp.\"" ) == std::string::npos );
+    REQUIRE( source.find( "+ \".tmp\";" ) == std::string::npos );
+    REQUIRE( source.find( "::rename( sicnu::portable::pathFromUtf8( tmp )" )
+             == std::string::npos );
+  }
 }
 
 TEST_CASE( "path-valued environment reads enter through envUtf8",

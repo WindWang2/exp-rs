@@ -3,11 +3,13 @@
 #include "fsync_compat.h"
 
 #include "memory_planner.h" // saturatingAdd (F-A-14)
+#include "platform/durable_sidecar.h" // R6: the single sidecar write authority
 #include "platform/portable.h" // UTF-8 <-> fs::path boundary (ACP-safe on Windows)
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -124,10 +126,21 @@ void ScratchLease::sealDigest() const
     in.read( buffer.data(), buffer.size() );
     if ( static_cast<std::size_t>( in.gcount() ) != buffer.size() )
         return;
-    std::ofstream out( sicnu::portable::pathFromUtf8( sidecarPath( m_impl->path ) ),
-                       std::ios::binary | std::ios::trunc );
-    out << std::hex << fnv1a( buffer.data(), buffer.size() ) << "\n"
-        << std::dec << size << "\n";
+    std::string hexDigest;
+    {
+        std::ostringstream os;
+        os << std::hex << fnv1a( buffer.data(), buffer.size() ) << "\n"
+           << std::dec << size << "\n";
+        hexDigest = os.str();
+    }
+
+    // R6: route the digest sidecar through the single sidecar write authority
+    // (unique tmp + fsync + atomic publish). No last-good rotation (""): the
+    // digest is a derived cache — verifyDigest() fails closed without it and
+    // the tile is simply recomputed — and a rotated snapshot would strand a
+    // second file the finalize() rename below does not own.
+    static_cast< void >( sicnu::platform::sidecar::write(
+      { sidecarPath( m_impl->path ), hexDigest, "" } ) );
 }
 
 const std::string &ScratchLease::finalize() const

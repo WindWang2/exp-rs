@@ -2,6 +2,7 @@
 #include "resumable_tile_run.h"
 #include "fsync_compat.h"
 
+#include "platform/durable_sidecar.h" // R6: the single sidecar write authority
 #include "platform/portable.h" // UTF-8 <-> fs::path boundary (ACP-safe on Windows)
 
 #include "runtime/observability/execution_telemetry.h"
@@ -221,32 +222,20 @@ void ResumableTileRun::writeMarker() const
 {
     if ( SICNU_FAULT_POINT( "exec11.marker" ) )
         throw std::runtime_error( "resumable tile run: injected marker failure" );
-    const std::string tmp = m_markerPath + ".tmp";
-    {
-        std::ofstream out( sicnu::portable::pathFromUtf8( tmp ),
-                           std::ios::binary | std::ios::trunc );
-        if ( !out )
-            throw std::runtime_error( "resumable tile run: cannot open marker tmp " + tmp );
-        out << kJournalHeaderVersion << ' ' << m_identityKey << '\n';
-        out.flush();
-        if ( !out )
-        {
-            out.close();
-            std::error_code removeEc;
-            std::filesystem::remove( sicnu::portable::pathFromUtf8( tmp ), removeEc );
-            throw std::runtime_error( "resumable tile run: marker tmp short write" );
-        }
-    }
-    std::error_code renameEc;
-    std::filesystem::rename( sicnu::portable::pathFromUtf8( tmp ),
-                             sicnu::portable::pathFromUtf8( m_markerPath ), renameEc );
-    if ( renameEc )
-    {
-        std::error_code removeEc;
-        std::filesystem::remove( sicnu::portable::pathFromUtf8( tmp ), removeEc );
-        throw std::runtime_error( "resumable tile run: marker rename failed ("
-                                  + renameEc.message() + ")" );
-    }
+    // R6: the single sidecar write authority (unique tmp + fsync + atomic
+    // publish) owns the temp naming and durability ordering hand-rolled here.
+    // No last-good rotation (""): markerMatches() must never resurrect a
+    // marker that wipeState() deliberately deleted — a lost marker only costs
+    // an idempotent re-publish, never a wrong resume.
+    const std::string payload = std::string( 1, kJournalHeaderVersion ) + ' '
+                                + m_identityKey + "\n";
+    const sicnu::platform::sidecar::WriteResult result =
+        sicnu::platform::sidecar::write( { m_markerPath, payload, "" } );
+    if ( !result )
+        throw std::runtime_error( "resumable tile run: marker write failed ("
+                                  + std::string( sicnu::platform::sidecar::writeStatusName(
+                                      result.status ) )
+                                  + ": " + result.error + ")" );
 }
 
 void ResumableTileRun::wipeState( bool includeMarker ) const

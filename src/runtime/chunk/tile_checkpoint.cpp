@@ -1,6 +1,6 @@
 // tile_checkpoint.cpp — see tile_checkpoint.h.
 #include "tile_checkpoint.h"
-#include "fsync_compat.h"
+#include "platform/durable_sidecar.h" // R6: the single sidecar write authority
 #include "platform/portable.h"
 
 #include <cstddef>
@@ -47,11 +47,16 @@ std::uint64_t payloadDigestOf( const TileCheckpoint &checkpoint )
     return digest;
 }
 
-void fsyncPath( const std::string &path, bool directory )
+/// Staged-name stem of a target: "<filename>" minus its last extension, the
+/// same split the sidecar authority applies when it claims a staged temp.
+/// Mirrors platform::sidecar::claimStagedPath so remove()'s residue sweep
+/// matches the names the authority actually leaves behind.
+std::string stagedStemOf( const std::string &path )
 {
-    // Fail-closed for files: a checkpoint that did not leave the Windows
-    // cache must not claim durability (#1228 / #1186).
-    fsyncPathCompat( path, directory );
+    const std::string filename =
+        portable::pathToUtf8( portable::pathFromUtf8( path ).filename() );
+    const std::size_t dot = filename.rfind( '.' );
+    return dot == std::string::npos ? filename : filename.substr( 0, dot );
 }
 } // namespace
 
@@ -74,59 +79,17 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
     file.fileDigest = 0;
     file.fileDigest = tileCheckpointHash( &file, offsetof( TileCheckpointFile, fileDigest ) );
 
-    // Unique tmp in the same directory (rename stays on one volume), then
-    // fsync file + dir, then atomic replace — the checkpoint family.
-    // Unique per CALL (F-A-15): pid alone collides for two threads saving
-    // the same path concurrently — the counter makes each attempt distinct.
-    static std::atomic<unsigned long long> saveCounter{ 0 };
-    const std::string tmp = path + ".tmp." + std::to_string( portable::pid() ) + "."
-                            + std::to_string( saveCounter.fetch_add( 1 ) );
-    {
-        std::ofstream out( portable::pathFromUtf8( tmp ), std::ios::binary | std::ios::trunc );
-        if ( !out )
-            return false;
-        out.write( reinterpret_cast<const char *>( &file ), sizeof( file ) );
-        out.write( checkpoint.scratchRunId.data(),
-                   static_cast<std::streamsize>( checkpoint.scratchRunId.size() ) );
-        out.flush();
-        if ( !out )
-        {
-            out.close();
-            std::error_code removeEc;
-            std::filesystem::remove( portable::pathFromUtf8( tmp ), removeEc );
-            return false;
-        }
-    }
-    try
-    {
-        fsyncPath( tmp, /*directory=*/false );
-    }
-    catch ( const std::exception & )
-    {
-        std::error_code removeEc;
-        std::filesystem::remove( portable::pathFromUtf8( tmp ), removeEc );
-        return false; // fail-closed: undurable checkpoint must not publish
-    }
-    std::error_code ec;
-    std::filesystem::rename( portable::pathFromUtf8( tmp ), portable::pathFromUtf8( path ), ec );
-    if ( ec )
-    {
-        std::error_code removeEc;
-        std::filesystem::remove( portable::pathFromUtf8( tmp ), removeEc );
-        return false;
-    }
-    if ( auto dir = portable::pathFromUtf8( path ).parent_path(); !dir.empty() )
-    {
-        try
-        {
-            fsyncPath( portable::pathToUtf8( dir ), /*directory=*/true );
-        }
-        catch ( const std::exception & )
-        {
-            // Directory fsync is best-effort across volumes.
-        }
-    }
-    return true;
+    // R6: the single sidecar write authority (unique tmp claimed in the
+    // target directory -> fsync -> atomic publish -> parent-directory sync)
+    // owns the "checkpoint family" durability this writer used to hand-roll.
+    // No last-good rotation (""): a refused checkpoint must stay
+    // indistinguishable from "no checkpoint" so the task restarts clean.
+    std::string payload( reinterpret_cast<const char *>( &file ), sizeof( file ) );
+    payload.append( checkpoint.scratchRunId );
+
+    const sicnu::platform::sidecar::WriteResult written = sicnu::platform::sidecar::write(
+      { path, std::move( payload ), "" } );
+    return static_cast<bool>( written );
 }
 
 std::optional<TileCheckpoint> TileCheckpointWriter::load(
@@ -182,26 +145,53 @@ std::optional<TileCheckpoint> TileCheckpointWriter::load(
     return checkpoint;
 }
 
+/// True when @p leaf is a staged temp the sidecar authority would leave for a
+/// target whose staged stem is @p stem: "<stem>.<pid>.<ctr>.<rng>.tmp<ext>".
+/// Never matches the target itself, and never a sibling sharing the stem.
+bool isAuthorityStagedLeaf( const std::string &leaf, const std::string &stem )
+{
+    if ( leaf.rfind( stem + ".", 0 ) != 0 )
+        return false;
+    const std::string head = leaf.substr( stem.size() + 1 );
+    const std::size_t tmpAt = head.find( ".tmp" );
+    if ( tmpAt == std::string::npos )
+        return false;
+    int fields = 1;
+    for ( const char c : head.substr( 0, tmpAt ) )
+    {
+        if ( c == '.' )
+        {
+            ++fields;
+            continue;
+        }
+        if ( c < '0' || c > '9' )
+            return false;
+    }
+    return fields == 3; // pid.counter.rng
+}
+
 void TileCheckpointWriter::remove( const std::string &path )
 {
     std::error_code ec;
     std::filesystem::remove( portable::pathFromUtf8( path ), ec );
-    // Best-effort tmp sweep from a crashed save in the same directory.
+    // Best-effort staged-residue sweep from a crashed save in the same
+    // directory. R6: save() stages through the sidecar authority, whose
+    // staged name is "<stem>.<pid>.<ctr>.<rng>.tmp<ext>" (the extension is
+    // kept), so the sweep follows that shape — the "<name>.tmp.*" family this
+    // writer produced before convergence can no longer be left behind.
     // Names are compared as UTF-8 bytes on both sides (path::string() would
     // be ACP on Windows and never match the narrow base name).
+    const std::string stem = stagedStemOf( path );
     for ( const auto &entry : std::filesystem::directory_iterator(
               portable::pathFromUtf8( path ).parent_path(), ec ) )
     {
         if ( ec )
             break;
         const auto name = portable::pathToUtf8( entry.path().filename() );
-        if ( name.rfind( portable::pathToUtf8( portable::pathFromUtf8( path ).filename() ) +
-                             ".tmp.",
-                         0 ) == 0 )
-        {
-            std::error_code removeEc;
-            std::filesystem::remove( entry.path(), removeEc );
-        }
+        if ( !isAuthorityStagedLeaf( name, stem ) )
+            continue;
+        std::error_code removeEc;
+        std::filesystem::remove( entry.path(), removeEc );
     }
 }
 
