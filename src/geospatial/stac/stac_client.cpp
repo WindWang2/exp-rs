@@ -499,6 +499,7 @@ StacClient::SearchRequest StacClient::buildSearchRequest( const StacSearchQuery 
   }
   if ( !query.sortBy.empty() )
     appendParam( params, "sortby", query.sortBy );
+  const std::string url = mRoot + "/search" + ( params.empty() ? "" : "?" + params );
   // GET pages record their EQUIVALENT canonical body so a POST rel=next
   // (merge:true) can merge into the original filters — the query string
   // alone cannot survive a POST continuation.
@@ -528,7 +529,7 @@ StacClient::SearchRequest StacClient::buildSearchRequest( const StacSearchQuery 
   }
   if ( query.limit > 0 )
     canonicalBody["limit"] = query.limit;
-  return { "GET", mRoot + "/search" + ( params.empty() ? "" : "?" + params ), canonicalBody };
+  return { "GET", url, canonicalBody };
 }
 
 StacPage StacClient::search( const StacSearchQuery &query ) const
