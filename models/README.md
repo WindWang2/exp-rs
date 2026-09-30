@@ -202,11 +202,22 @@ template: download the ONNX weights into the model directory, set
 `artifact.path` (and ideally `checksum`), and verify with
 `spatial:list_models` (`readiness: ready`) and `rs:infer` (execution).
 
-The hand-written v1-era manifests `sam-building` and `yolo-buildings` were
-retired (R6 source-of-truth convergence): they were superseded by the
-generator-produced `sam-buildings-hr` and `yolo-building-detection` and were
-the only two manifests outside the generator's output. The v1 schema section
-above stays for backward-compatible parsing of user-provided manifests.
+### Legacy hand-written templates (kept, not generated)
+
+`models/sam-building` and `models/yolo-buildings` are v1-era hand-written
+manifests that predate the generator. They are superseded by the
+generator-produced `sam-buildings-hr` (polygon SAM extraction) and
+`yolo-building-detection` (detection), and no code or test references them
+(the model tests build their own temp manifests). They are deliberately kept
+and NOT listed in the generator's SPEC table:
+
+- deleting shipped catalog entries is a user-visible catalog change — an
+  existing project may select these directory names, and the catalog resolves
+  by directory, not by generator membership;
+- `gen_model_library.py --check` only compares the manifests it PRODUCES, so
+  keeping them costs no parity drift.
+
+New work should use the generator-produced equivalents above.
 
 Resolution order for the catalog root: `$SICNU_MODELS_DIR`, `<cwd>/models`,
 `<application dir>/../models`.

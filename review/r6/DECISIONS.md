@@ -78,10 +78,13 @@ Deliberately NOT touched (classified non-drift or out of scope):
   regenerated; all 24 generator manifests now byte-identical to disk (verified; the
   regen is a no-op).
 - `models/sam-building` + `models/yolo-buildings` (v1-era, disk-only, zero
-  code/test references; tests build their own temp manifests): **deleted** as
-  superseded by `sam-buildings-hr` / `yolo-building-detection`. `model_catalog.h`
-  doc-comment example and `models/README.md` updated; the v1 schema section stays
-  (backward-compat parsing of user manifests).
+  code/test references; tests build their own temp manifests): **kept and
+  marked legacy** (superseded by the generator-produced `sam-buildings-hr` /
+  `yolo-building-detection`). Reversed the initial delete: removing shipped
+  catalog entries is a user-visible catalog change (the catalog resolves by
+  directory name), while `gen_model_library.py --check` only compares the
+  manifests the generator PRODUCES, so keeping them costs no parity drift.
+  `models/README.md` carries the legacy note; new work uses the equivalents.
 - Gate: `gen_model_library.py --check` + ctest `test_model_library_generator_parity`
   (skipped where no interpreter).
 
