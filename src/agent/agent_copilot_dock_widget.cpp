@@ -152,6 +152,13 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
            this, &AgentCopilotDockWidget::onContentTokenReceived );
   connect( m_client, &LlmStreamingClient::toolCallParsed,
            this, &AgentCopilotDockWidget::onToolCallParsed );
+  // #1395 (agent-harness-r4 review #10): a streamed tool call the client
+  // REFUSES (truncated arguments, unparseable arguments, missing name,
+  // oversized accumulation) used to be silent for the session — the user saw a
+  // turn with no tool run and no reason while the inspector reported zero
+  // errors. The transport now reports every refusal; the dock is its consumer.
+  connect( m_client, &LlmStreamingClient::malformedToolCall,
+           this, &AgentCopilotDockWidget::onMalformedToolCall );
   connect( m_client, &LlmStreamingClient::finished,
            this, &AgentCopilotDockWidget::onLlmFinished );
   connect( m_client, &LlmStreamingClient::errorOccurred,
@@ -293,7 +300,15 @@ void AgentCopilotDockWidget::updateRunInspector()
     m_runInspector.taskLabel->setText( taskText );
 
   if ( m_runInspector.callsLabel )
-    m_runInspector.callsLabel->setText( QString( tr( "Calls: %1" ) ).arg( m_toolCallCards.size() ) );
+  {
+    QString callsText = QString( tr( "Calls: %1" ) ).arg( m_toolCallCards.size() );
+    if ( m_refusedToolCallCount > 0 )
+    {
+      callsText += QStringLiteral( " (%1 refused by the transport, never run)" )
+                   .arg( m_refusedToolCallCount );
+    }
+    m_runInspector.callsLabel->setText( callsText );
+  }
 
   int errorCount = m_lastError.isEmpty() ? 0 : 1;
   if ( m_runInspector.errorsLabel )
@@ -405,6 +420,7 @@ void AgentCopilotDockWidget::onClearClicked()
   m_submittedPipelineIds.clear();
   m_currentRunStage.clear();
   m_lastError.clear();
+  m_refusedToolCallCount = 0;
   m_runRepairAttempts = 0;
   m_runStartTime = QDateTime();
   m_toolCallCards.clear();
@@ -479,6 +495,7 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
   m_submittedTaskIds.clear();
   m_submittedPipelineIds.clear();
   m_lastError.clear();
+  m_refusedToolCallCount = 0;
   m_runRepairAttempts = 0;
   m_runStartTime = QDateTime::currentDateTimeUtc();
   m_toolCallCards.clear();
@@ -566,6 +583,34 @@ void AgentCopilotDockWidget::onReasoningTokenReceived( const QString &text )
     m_currentReasoningLabel->setVisible( true );
     m_currentReasoningLabel->setText( tr( "<b>Reasoning:</b><br/>%1" ).arg( m_accumulatedReasoning.toHtmlEscaped() ) );
   }
+}
+
+void AgentCopilotDockWidget::onMalformedToolCall( const QJsonObject &detail )
+{
+  // The transport refuses a tool call it cannot hand over and says why
+  // (llm_streaming_client.cpp emits {reason, finish_reason?, name?, error?}).
+  // The client never executes tool calls, so a refusal is a fact about the
+  // stream, not a run failure: the model may re-issue the call. It must still
+  // be VISIBLE — a silently dropped call leaves the user staring at a turn
+  // that produced no work, and the run inspector reporting zero errors.
+  ++m_refusedToolCallCount;
+
+  QString reason = detail.value( QStringLiteral( "reason" ) ).toString();
+  if ( reason.isEmpty() )
+    reason = tr( "unknown reason" );
+  else
+    reason = reason.toHtmlEscaped();
+  const QString name = detail.value( QStringLiteral( "name" ) ).toString();
+  const QString finish = detail.value( QStringLiteral( "finish_reason" ) ).toString();
+
+  QString text = tr( "Refused a streamed tool call: %1" ).arg( reason );
+  if ( !name.isEmpty() )
+    text += QLatin1Char( ' ' ) + tr( "(tool: %1)" ).arg( name.toHtmlEscaped() );
+  if ( !finish.isEmpty() )
+    text += QLatin1Char( ' ' ) + tr( "[finish_reason=%1]" ).arg( finish.toHtmlEscaped() );
+
+  appendRefusalNotice( text );
+  updateRunInspector();
 }
 
 void AgentCopilotDockWidget::onContentTokenReceived( const QString &text )
@@ -861,6 +906,26 @@ void AgentCopilotDockWidget::appendErrorMessage( const QString &errorMsg )
   }
 }
 
+void AgentCopilotDockWidget::appendRefusalNotice( const QString &text )
+{
+  // Own card (not the streaming content label): a refusal outlives — and must
+  // not be overwritten by — the answer tokens that keep arriving after it.
+  if ( !m_chatContainer || !m_chatLayout )
+    return;
+
+  auto *card = new QFrame( m_chatContainer );
+  card->setObjectName( QStringLiteral( "refusalNotice" ) );
+  card->setFrameShape( QFrame::StyledPanel );
+  auto *layout = new QVBoxLayout( card );
+
+  auto *label = new QLabel( text, card );
+  label->setObjectName( QStringLiteral( "RefusalNoticeLabel" ) );
+  label->setWordWrap( true );
+  layout->addWidget( label );
+
+  m_chatLayout->addWidget( card );
+}
+
 QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
 {
   auto *card = new QFrame( m_chatContainer );
@@ -1030,6 +1095,8 @@ QString AgentCopilotDockWidget::runInspectorSummary() const
   parts.append( QStringLiteral( "stage=%1" ).arg( m_currentRunStage.isEmpty() ? QStringLiteral( "-" ) : m_currentRunStage ) );
   parts.append( QStringLiteral( "tasks=%1" ).arg( m_submittedTaskIds.size() ) );
   parts.append( QStringLiteral( "calls=%1" ).arg( m_toolCallCards.size() ) );
+  if ( m_refusedToolCallCount > 0 )
+    parts.append( QStringLiteral( "refused=%1" ).arg( m_refusedToolCallCount ) );
   if ( !m_lastError.isEmpty() )
     parts.append( QStringLiteral( "error=%1" ).arg( m_lastError ) );
   return parts.join( QStringLiteral( " | " ) );
