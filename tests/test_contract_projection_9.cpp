@@ -173,6 +173,16 @@ const std::vector<AllowEntry> kAllowedDeadParams = {
     // composition of the shared model-task runner.
     { "rs:change", "inputA", "dynamic input/bands key composition (model-task runner)" },
     { "rs:change", "inputB", "dynamic input/bands key composition (model-task runner)" },
+    // Fabric 10.0 adapters: run() parses the whole query through the shared
+    // intent parser sicnu::geo::fabricIntentFromJson (src/geospatial/fabric —
+    // outside the operators scan root), so every non-direct schema param is
+    // read there, not in the operator TU. The adapters read only their own
+    // execution knobs directly (bandIndex/chunkWindow/mirrorDirectory/
+    // maxBytes/output via the params:: helpers).
+    { "io:catalog_search", "*", "query params read via fabricIntentFromJson (geospatial fabric)" },
+    { "io:cube_plan", "*", "query params read via fabricIntentFromJson (geospatial fabric)" },
+    { "io:cube_window", "*", "query params read via fabricIntentFromJson (geospatial fabric)" },
+    { "io:cache_prefetch", "*", "query params read via fabricIntentFromJson (geospatial fabric)" },
 };
 
 const std::vector<AllowEntry> kAllowedUnresolved = {
