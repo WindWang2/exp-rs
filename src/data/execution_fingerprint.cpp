@@ -19,6 +19,11 @@
 #include <mutex>
 #include "platform/portable.h"
 
+// jsoncpp read-only adapter for the canonicalizer (#1387): Json::Value's
+// inspection API is header-only, so consuming a jsoncpp tree (no writing)
+// needs no jsoncpp linkage from the data layer.
+#include <json/value.h>
+
 namespace sicnu::data
 {
 
@@ -184,6 +189,57 @@ QByteArray canonicalizeJsonValue( const QJsonValue &val )
 QByteArray canonicalizeJsonRfc8785( const QJsonObject &obj )
 {
   return canonicalizeJsonValue( obj );
+}
+
+namespace
+{
+// jsoncpp → Qt tree conversion for the canonicalizer adapter. Integers ride
+// through QJsonValue's double: the serializer's qint64-exact path then prints
+// every integral value that survived the conversion exactly (magnitudes below
+// 2^53), so page counts, DPI, versions and schema versions do not gain a
+// spurious ".0"; only integers >= 2^53 could lose low bits (documented on the
+// declaration). KEY ORDER never leaks through: the serializer sorts by UTF-16
+// code unit in the Qt tree, and jsoncpp's own UTF-8-byte ordering is erased by
+// the conversion.
+QJsonValue jsoncppToQt( const Json::Value &value )
+{
+  if ( value.isNull() )
+    return QJsonValue::Null;
+  if ( value.isBool() )
+    return QJsonValue( value.asBool() );
+  if ( value.isIntegral() )
+  {
+    // One path for every jsoncpp integral type (int/uint/int64/uint64):
+    // asDouble() is exact for magnitudes below 2^53 — which covers page
+    // counts, DPI, versions, schema versions — and QJsonValue stores it as a
+    // double for the serializer's qint64-exact integer printing.
+    return QJsonValue( value.asDouble() );
+  }
+  if ( value.isDouble() )
+    return QJsonValue( value.asDouble() );
+  if ( value.isString() )
+    return QJsonValue( QString::fromStdString( value.asString() ) );
+  if ( value.isArray() )
+  {
+    QJsonArray arr;
+    for ( const Json::Value &item : value )
+      arr.append( jsoncppToQt( item ) );
+    return arr;
+  }
+  if ( value.isObject() )
+  {
+    QJsonObject obj;
+    for ( const std::string &key : value.getMemberNames() )
+      obj.insert( QString::fromStdString( key ), jsoncppToQt( value[ key ] ) );
+    return obj;
+  }
+  return QJsonValue::Null;
+}
+} // namespace
+
+QByteArray canonicalizeJsonRfc8785( const Json::Value &value )
+{
+  return canonicalizeJsonValue( jsoncppToQt( value ) );
 }
 
 ExecutionFingerprint makeExecutionFingerprint( const QString &algorithmId,

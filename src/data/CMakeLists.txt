@@ -108,6 +108,12 @@ target_link_libraries(sicnu_data
   # PRIVATE keeps the foundation out of the data layer's public interface
   # (headers stay Qt-only, no GUI/QtNetwork dependency is added).
     sicnu_geospatial
+  # jsoncpp adapter overload of canonicalizeJsonRfc8785 (#1387): the platform's
+  # ONE canonical serializer reached from the jsoncpp side (harness projection
+  # digest, cartography export manifest digest). jsoncpp's read API is
+  # out-of-line in libjsoncpp, hence the PRIVATE link; the public interface
+  # stays Qt-only (the overload takes a forward-declared Json::Value).
+    jsoncpp
 )
 
 get_target_property(SICNU_DATA_DIRECT_LINKS sicnu_data LINK_LIBRARIES)
