@@ -308,9 +308,16 @@ int WorkflowCheckpointManager::electCheckpoints( const QString &directoryPath )
     bool isResumeGhost = false;
   };
   QMultiMap<QString, Candidate> byLineage;
+  // R6: exclude authority-staged temps ("checkpoint_<id>.<pid>.<n>.<rng>.tmp.json")
+  // — the old "<name>.json.tmp.*" shape never matched this glob, and a crash
+  // residue must not appear as a checkpoint candidate before the sweep runs.
   const QStringList entries = dir.entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
                                              QDir::Files );
+  QStringList realCheckpoints;
   for ( const QString &entry : entries )
+    if ( !entry.endsWith( QStringLiteral( ".tmp.json" ) ) )
+      realCheckpoints.append( entry );
+  for ( const QString &entry : realCheckpoints )
   {
     // Exact prefix/suffix stripping: QString::remove would strip EVERY
     // occurrence, collapsing distinct runIds (e.g. "checkpoint_a" and "a")

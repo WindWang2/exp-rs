@@ -14,7 +14,7 @@
 //     so a spatially clustered match set cannot produce high per-point
 //     confidence (Oracle #2).
 //   - A schema-versioned JSON report ("exp_rs_registration_quality/1")
-//     written atomically (QSaveFile) for sidecar consumption.
+//     written atomically (platform sidecar authority) for sidecar consumption.
 #pragma once
 
 #include "registration_types.h"
@@ -83,7 +83,7 @@ class RegistrationQuality {
     toJson(const RegistrationQualityReport& report, const ResidualVectorField& field,
            const QString& status, const QString& reason);
 
-    /// Atomic JSON sidecar write (QSaveFile: temp + rename in directory).
+    /// Atomic JSON sidecar write (temp + fsync + rename in directory).
     /// Returns false on any open/write/commit failure without leaving a
     /// partial file.
     static bool writeReportAtomic(const QString& filePath, const QJsonObject& doc);

@@ -14,7 +14,8 @@
 // Layering: the projection is a pure function of (IR, analysis, repairs,
 // refusals). It never touches the execution plane's files (src/workflow/**
 // stays untouched), never mutates engine-owned metadata keys, and its own
-// writes are QSaveFile-atomic beside the artifact with a typed failure that
+// writes are atomically published beside the artifact (platform sidecar
+// authority: temp + fsync + rename) with a typed failure that
 // never corrupts the artifact.
 //
 // Determinism: same compile inputs -> byte-identical projection (jsoncpp's
@@ -27,9 +28,6 @@
 
 #include "workflow_analysis.h"
 #include "workflow_ir.h"
-
-namespace QSaveFileHelper {
-}
 
 namespace sicnu::agent::harness::projection {
 
@@ -68,7 +66,7 @@ std::string projectionDigest( const Json::Value &projection );
 Json::Value attachToWorkflowJson( const Json::Value &workflowDef,
                                   const Json::Value &projection );
 
-/// Writes `<output>.compile.json` beside an artifact (QSaveFile atomic).
+/// Writes `<output>.compile.json` beside an artifact (atomic publish).
 /// A failed write never touches the artifact and is reported honestly.
 struct SidecarResult
 {

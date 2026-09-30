@@ -541,3 +541,8 @@ data/labs/_tmp/
 !.planning/r5-model-runtime-workers/
 .planning/r5-model-runtime-workers/*
 !.planning/r5-model-runtime-workers/*.md
+
+# R6 local build/run scratch logs (evidence distilled into .planning/).
+r6_*.log
+r6_*.txt
+r6_dev.cmd

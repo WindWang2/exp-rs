@@ -24,7 +24,7 @@
 //                                  checks, expectations, run identity, and
 //                                  the quality summary for the artifact.
 //
-// All writes follow the engine's own convention: QSaveFile (atomic
+// All writes follow the engine's own convention: atomic sidecar publish
 // write+rename) beside the artifact, best-effort with a typed error result —
 // a failed sidecar write never corrupts the artifact and never flips a
 // verdict by itself, but it is reported honestly in the run document.

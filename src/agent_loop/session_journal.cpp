@@ -241,6 +241,11 @@ bool SessionJournal::save( const std::string &directory, std::string *error ) co
     journalWrite.bytes = jsonToString( doc );
     journalWrite.lastGoodSuffix = "";
     journalWrite.maxBytes = kJournalWriteCapBytes;
+    // Verify read-back off (WP-I): the journal is the largest payload on
+    // this path (up to the 64 MiB cap) — a read-back would double peak I/O
+    // and memory per save. Torn-write detection here is the load-side
+    // fail-closed reader, not the write-side verify gate.
+    journalWrite.verifyReadBack = false;
     const sicnu::platform::sidecar::WriteResult result =
       sicnu::platform::sidecar::write( journalWrite );
     if ( !result )

@@ -150,6 +150,7 @@ bool publishStaged( const std::string &stagedPath, const std::string &targetPath
   if ( attrs != INVALID_FILE_ATTRIBUTES && ( attrs & FILE_ATTRIBUTE_READONLY ) )
     ::SetFileAttributesW( target.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY );
 
+  const DWORD replaceError = ::GetLastError();
   if ( attrs != INVALID_FILE_ATTRIBUTES &&
        ::ReplaceFileW( target.c_str(), staged.c_str(), nullptr,
                        REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr ) )
@@ -161,7 +162,11 @@ bool publishStaged( const std::string &stagedPath, const std::string &targetPath
   {
     return true;
   }
-  error = "publish failed (" + lastOsError() + ")";
+  // Carry both reasons: the ReplaceFileW attempt failed first (attrs may
+  // have been INVALID), then the MoveFileExW fallback failed with the error
+  // that actually refused the publish.
+  error = "publish failed (replace_error=" + std::to_string( replaceError ) +
+          ", " + lastOsError() + ")";
   return false;
 #else
   if ( ::rename( stagedPath.c_str(), targetPath.c_str() ) == 0 )
@@ -195,16 +200,18 @@ ReadOutcome readWholeFile( const std::string &path, std::size_t maxBytes, std::s
 {
   std::error_code ec;
   const std::filesystem::path fsPath = sicnu::portable::pathFromUtf8( path );
-  const bool exists = std::filesystem::exists( fsPath, ec );
-  if ( !exists )
-    return ReadOutcome::Missing;
+  // Check the error code FIRST: filesystem::exists(p, ec) returns false when
+  // the status query itself fails (denied traversal, broken chain), so
+  // testing !exists alone would swallow the error and report Missing —
+  // fail-open ("fresh state") for an existing-but-unstatable sidecar.
+  std::filesystem::exists( fsPath, ec );
   if ( ec )
   {
-    // An existing-but-unstatable file (e.g. traversal denied) is NOT "fresh
-    // state" — reporting Missing here would fail open.
     error = "stat failed: " + ec.message();
     return ReadOutcome::Unreadable;
   }
+  if ( !std::filesystem::exists( fsPath ) )
+    return ReadOutcome::Missing;
 
   std::string statError;
   if ( !fileSizeAtMost( path, maxBytes, statError ) )

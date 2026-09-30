@@ -13,7 +13,8 @@
 // observational evidence, and consumers must survive additive evolution.
 // A SPEC reader refuses unknown fields because there a typo changes meaning.
 //
-// Persistence: atomic (Qt QSaveFile — staged temp + rename on commit). For a
+// Persistence: atomic (platform sidecar authority — staged temp + fsync +
+// rename on commit). For a
 // fixed input the bytes are stable (tests pin generatedAtUtc).
 #pragma once
 

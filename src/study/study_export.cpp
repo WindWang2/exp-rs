@@ -10,7 +10,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include "platform/durable_sidecar.h"
-#include "platform/durable_sidecar.h"
 
 #include <cmath>
 
