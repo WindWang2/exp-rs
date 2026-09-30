@@ -11,6 +11,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/framework/algorithm_engine.h"
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "jobs/job_types.h"
 
 #include <QObject>
@@ -157,8 +158,8 @@ TEST_CASE( "TaskCenter resource budget holds a second heavy task until the first
             while ( cur > prev && !maxInFlight.compare_exchange_weak( prev, cur ) )
             {
             }
-            while ( !release.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            sicnu_test::waitUntil( [&] { return release.load(); }, 30000,
+                                   [] { return "rb_inproc gate never released"; } );
             --inFlight;
             Json::Value result( Json::objectValue );
             result["output"] = "/tmp/rb.tif";
@@ -228,8 +229,8 @@ TEST_CASE( "TaskCenter resource budget never-starve: a single task launches even
         "rb_starve:task",
         [&release]( const sicnu::jobs::JobRequest &,
                     sicnu::operators::RSOperatorContext & ) {
-            while ( !release.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            sicnu_test::waitUntil( [&] { return release.load(); }, 30000,
+                                   [] { return "rb_starve gate never released"; } );
             Json::Value result( Json::objectValue );
             result["output"] = "/tmp/rbs.tif";
             return result;

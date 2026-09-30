@@ -4,6 +4,7 @@
 // contract, write-gate backpressure (real thread), and leak-report lifecycle
 // isolation between governors.
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 
 #include "runtime/exec/execution_governor.h"
 
@@ -226,11 +227,14 @@ TEST_CASE( "Write gate: exact-cap admits, oversized writes escape only when idle
     {
         BoundedWriteGate::Reservation holder( gate, 100 );
         REQUIRE( gate.outstandingBytes() == 100 );
-        started.wait();
-        // The waiter cannot fit while 100/100 is outstanding: give it a beat,
-        // then release and require completion well inside the timeout.
-        std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
-        REQUIRE( done.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready );
+        // Bounded (#1392): the waiter sets started as its first statement.
+        REQUIRE( started.wait_for( std::chrono::seconds( 5 ) ) == std::future_status::ready );
+        // The waiter cannot fit while 100/100 is outstanding: bounded
+        // negative-observation window (fail fast if it completes early).
+        CHECK_FALSE( sicnu_test::waitUntil(
+            [&] { return done.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready; },
+            100,
+            [] { return "waiter completed although 100/100 bytes were outstanding"; } ) );
     } // holder releases → waiter proceeds
     REQUIRE( waiter.get() == 50 );
     REQUIRE( gate.outstandingBytes() == 0 );

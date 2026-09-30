@@ -23,6 +23,10 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include "support/qt_lifecycle.h"
+#include "support/exprs_test_env.h"
+#include "support/qsettings_redirect.h"
+
 #include "app/widgets/raster_layer_combo.h"
 #include "app/widgets/rs_empty_state_widget.h"
 #include "app/widgets/rs_result_summary.h"
@@ -73,27 +77,8 @@ QgsApplication *ensureApp()
   return app;
 }
 
-class FastExitListener : public Catch::EventListenerBase
-{
-  public:
-    using Catch::EventListenerBase::EventListenerBase;
-    void testRunEnded( const Catch::TestRunStats &stats ) override
-    {
-      const bool ok = !stats.aborting && stats.totals.testCases.failed == 0;
-      QgsApplication::exitQgis();
-      std::fprintf( stderr, "\n%s: %u/%u assertions, %u/%u test cases\n",
-                    ok ? "ALL TESTS PASSED" : "TESTS FAILED",
-                    static_cast<unsigned>( stats.totals.assertions.passed ),
-                    static_cast<unsigned>( stats.totals.assertions.passed
-                                           + stats.totals.assertions.failed ),
-                    static_cast<unsigned>( stats.totals.testCases.passed ),
-                    static_cast<unsigned>( stats.totals.testCases.passed
-                                           + stats.totals.testCases.failed ) );
-      std::fflush( stderr );
-      std::_Exit( ok ? 0 : 1 );
-    }
-};
-CATCH_REGISTER_LISTENER( FastExitListener )
+exprs_test::QSettingsUserRootRedirect qsettingsRedirect;
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 quint32 stressSeed()
 {

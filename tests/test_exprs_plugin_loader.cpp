@@ -1,5 +1,6 @@
 // tests/test_exprs_plugin_loader.cpp — native loading with a real fixture .so
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 
 #include "exprs/plugin_discovery.h"
 #include "exprs/plugin_host_runtime.h"
@@ -1866,8 +1867,8 @@ TEST_CASE( "concurrent installOrUpgrade on the same id refuses the second",
     PluginRegistry::PluginUpgradeOptions slow;
     slow.migrateState = [&]( const std::string & ) {
         inMigration.store( true );
-        while ( !releaseMigration.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        sicnu_test::waitUntil( [&] { return releaseMigration.load(); }, 30000,
+                               [] { return "migration gate never released"; } );
         return true;
     };
 

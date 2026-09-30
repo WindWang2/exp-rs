@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# chain_gate_census.sh — Track 16 gate-integrity census (v3, R3).
+# chain_gate_census.sh — Track 16 gate-integrity census (v3, R3; +section 5
+# tier-ownership census from the R6 track, #1392 WP-E/K).
 #
 # Defect class pinned here (R2 finding): a Catch2 suite registered without a
 # TEST_PREFIX produces bare English ctest case names, so name-based track
@@ -146,6 +147,44 @@ if [ "$r4" -lt 1 ]; then
     echo "r4:: GATE LOST — operator oracle cases no longer selectable"
     overall=1
 fi
+
+# --- 5. Tier ownership (R6, #1392): every case carries a cost-tier label ---
+# sicnu_discover_tests injects `LABELS FAST` as the default; audited
+# minutes-scale clusters override with SLOW, the 20min+ sessions carry
+# LONG_RUN. The stock Catch2 discovery emits one set_tests_properties per
+# case, so per-file "add_test count == LABELS-bearing property lines" proves
+# full ownership WITHIN THE DISCOVERY FUNNEL. Scope (review P2, R6): the ~28
+# bare add_test script lanes outside the funnel run unlabeled in both CI
+# tiers by design — label-less tests cannot match `-LE` exclusions — and
+# their properties live in CTestTestfile.cmake, not here; they stay
+# hand-countable and are NOT covered by this check.
+printf '%s\n' "--- 5. tier ownership ---"
+unlabeled=0
+labeled_total=0
+fast_n=0 slow_n=0 longrun_n=0
+while read -r f; do
+    [ -f "$f" ] || continue
+    t=$(basename "$f" | sed -E 's/-[a-f0-9]+_tests\.cmake$//')
+    total=$(grep -c '^add_test(' "$f")
+    # Every case's property line carries `LABELS <tier(s)>`; count property
+    # COMMANDS (lines) mentioning LABELS — one per case by construction.
+    withlabel=$(grep -c 'LABELS' "$f")
+    labeled_total=$((labeled_total + withlabel))
+    fast_n=$((fast_n + $(grep -o 'LABELS[^A-Z_]*FAST' "$f" | wc -l)))
+    slow_n=$((slow_n + $(grep -o 'SLOW' "$f" | wc -l)))
+    longrun_n=$((longrun_n + $(grep -o 'LONG_RUN' "$f" | wc -l)))
+    if [ "$total" -gt "$withlabel" ]; then
+        echo "TIER: $t has $total cases but only $withlabel LABELS-bearing property lines (FAIL)"
+        unlabeled=$((unlabeled + 1))
+        overall=1
+    fi
+done < <(find "$BUILD_DIR" -maxdepth 2 -name '*_tests.cmake' 2>/dev/null | sort)
+if [ "$unlabeled" -eq 0 ]; then
+    echo "TIER: all discovery-funnel cases carry a cost-tier label (population: $labeled_total labeled cases; bare script lanes excluded by design)"
+else
+    echo "TIER: $unlabeled target(s) with unlabeled cases — every case must have explicit tier ownership"
+fi
+echo "TIER distribution: FAST=$fast_n SLOW=$slow_n LONG_RUN=$longrun_n"
 
 if [ "$overall" -eq 0 ]; then
     echo "GATE CENSUS: ALL GREEN"

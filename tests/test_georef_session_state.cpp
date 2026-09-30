@@ -15,8 +15,11 @@ namespace {
   {
     if ( !QCoreApplication::instance() )
       static QApplication app( argc, argv );
+    // Binary-unique app name: test_crs_picker_persists used to share
+    // "SicnuRsTest/GeorefTest", so parallel one-case-per-process runs of the
+    // two binaries cleared each other's conf file mid-assertion (#1392 WP-J).
     QCoreApplication::setOrganizationName( QStringLiteral( "SicnuRsTest" ) );
-    QCoreApplication::setApplicationName( QStringLiteral( "GeorefTest" ) );
+    QCoreApplication::setApplicationName( QStringLiteral( "GeorefSessionStateTest" ) );
   }
 }
 

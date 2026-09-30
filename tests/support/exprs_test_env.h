@@ -7,9 +7,25 @@
 #include <filesystem>
 #include <string>
 
-#include "exprs/plugin_snapshot.h" // snapshotOwnerPid(): cross-platform pid
+#ifndef _WIN32
+#include <unistd.h> // getpid
+#else
+#include <process.h> // _getpid
+#endif
 
 namespace exprs_test {
+
+/// Cross-platform pid, resolved locally so NO sdk dependency (header or
+/// link) is imposed on consumers: the isolation helpers here are included by
+/// parity/shell targets whose include path and link set carry no sicnu_sdk.
+inline long localPid()
+{
+#ifdef _WIN32
+    return static_cast<long>( ::_getpid() );
+#else
+    return static_cast<long>( ::getpid() );
+#endif
+}
 
 /// Process-unique scratch root: ctest's PRE_TEST discovery runs each case as
 /// its own process (often two in parallel under ctest -j2); a shared fixed
@@ -19,7 +35,7 @@ inline std::string scratchRoot( const char *leaf )
 {
     return ( std::filesystem::temp_directory_path()
              / ( std::string( leaf ) + "."
-                 + std::to_string( exprs::snapshotOwnerPid() ) ) )
+                 + std::to_string( localPid() ) ) )
         .generic_string();
 }
 
@@ -86,5 +102,6 @@ struct UserRootRedirect
     UserRootRedirect( const UserRootRedirect & ) = delete;
     UserRootRedirect &operator=( const UserRootRedirect & ) = delete;
 };
+
 
 } // namespace exprs_test

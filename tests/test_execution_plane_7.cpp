@@ -21,6 +21,7 @@
 #include "processing/framework/worker_execution_route.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "jobs/job_types.h"
 #include "operators/rs/rs_operators_init.h"
 
@@ -379,8 +380,9 @@ TEST_CASE( "Temp-disk and VRAM budgets hold oversized candidates but never starv
                                          sicnu::operators::RSOperatorContext &ctx ) {
         if ( req.algorithmId == "ep7:diskhog" )
         {
-            while ( !releaseHog.load() && !ctx.isCancelled() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+            sicnu_test::waitUntil(
+                [&] { return releaseHog.load() || ctx.isCancelled(); }, 30000,
+                [] { return "ep7:diskhog gate never released nor cancelled"; } );
         }
         return Json::Value();
     } );
@@ -442,8 +444,9 @@ TEST_CASE( "Queued cancel under admission hold resolves immediately and truthful
     engine.clearExecutors();
     engine.registerExecutor( "ep7:", []( const sicnu::jobs::JobRequest &,
                                          sicnu::operators::RSOperatorContext &ctx ) {
-        while ( !releaseJob.load() && !ctx.isCancelled() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        sicnu_test::waitUntil(
+            [&] { return releaseJob.load() || ctx.isCancelled(); }, 30000,
+            [] { return "ep7:holder gate never released nor cancelled"; } );
         return Json::Value();
     } );
 

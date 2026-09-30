@@ -33,8 +33,10 @@ namespace
     }
     // QSettings() with default ctor requires org/app names to actually
     // persist to disk — set them every call (idempotent).
+    // Binary-unique app name: see test_georef_session_state.cpp — the shared
+    // "SicnuRsTest/GeorefTest" conf raced under parallel ctest (#1392 WP-J).
     QCoreApplication::setOrganizationName( QStringLiteral( "SicnuRsTest" ) );
-    QCoreApplication::setApplicationName( QStringLiteral( "GeorefTest" ) );
+    QCoreApplication::setApplicationName( QStringLiteral( "CrsPickerPersistsTest" ) );
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }
 }

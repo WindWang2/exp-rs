@@ -5,6 +5,7 @@
 // and zero staged residue after injected member failure and cancellation.
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <json/json.h>
@@ -536,8 +537,10 @@ TEST_CASE( "one member failure stops the run with zero residue",
             : m_artifact( std::move( artifact ) ), m_aForwards( aForwards ) {}
         cv::Mat infer( const cv::Mat & ) override
         {
-          while ( m_aForwards->load() == 0 )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+          // Deadline-bounded (#1392): if the ensemble never routes a forward
+          // to member A, fail fast instead of spinning to the harness timeout.
+          sicnu_test::waitUntil( [&] { return m_aForwards->load() != 0; }, 30000,
+                                 [] { return "member A never received a forward pass"; } );
           throw std::runtime_error( "injected member failure (out of memory)" );
         }
         std::string framework() const override { return "failfw-b"; }
@@ -666,8 +669,10 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
 
   // Cancel from a watchdog once the first forward pass has happened.
   std::thread watchdog( [ & ]() {
-    while ( forwards.load() == 0 )
-      std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    // Deadline-bounded: if the first forward never lands, cancel anyway so
+    // the run unwinds and the assertions below report the real state.
+    sicnu_test::waitUntil( [&] { return forwards.load() != 0; }, 30000,
+                           [] { return "no forward pass observed before watchdog cancel"; } );
     cancelFlag.store( true );
   } );
   bool cancelled = false;

@@ -21,6 +21,7 @@
 #include <thread>
 
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -51,6 +52,8 @@ void ensureQtApp()
 }
 
 /// Long-running operator that polls the cooperative cancel flag.
+std::atomic<bool> g_cancelTestEntered{ false };
+
 class SlowOperator : public RSOperator
 {
 public:
@@ -69,6 +72,7 @@ public:
 
     Json::Value run( const Json::Value &, RSOperatorContext &context ) override
     {
+        g_cancelTestEntered.store( true );
         for ( int i = 0; i < 1'000'000; ++i )
         {
             context.throwIfCancelled();
@@ -108,12 +112,10 @@ TEST_CASE( "WorkflowRuntime::requestCancel aborts a running operator step", "[wo
     const std::string sessionId = runtime.open( "wf:cancel_test" );
     REQUIRE_FALSE( sessionId.empty() );
 
-    std::atomic<bool> started{ false };
     std::string runError;
     bool threw = false;
 
     std::thread runner( [&]() {
-        started.store( true );
         try
         {
             runtime.runStep( sessionId, "slow" );
@@ -125,10 +127,10 @@ TEST_CASE( "WorkflowRuntime::requestCancel aborts a running operator step", "[wo
         }
     } );
 
-    // Wait for the step to actually start, then cancel it.
-    while ( !started.load() )
-        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-    std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+    // Wait until the operator is inside its run loop, then cancel: no
+    // admission race, no fixed sleep (#1392).
+    REQUIRE( sicnu_test::waitUntil( [] { return g_cancelTestEntered.load(); }, 5000,
+                                    [] { return "SlowOperator never entered its run loop"; } ) );
     runtime.requestCancel( sessionId );
 
     runner.join();
@@ -232,9 +234,17 @@ struct CancelCoordinatorFixture
             prefix + ":second",
             [counter]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
                 counter->fetch_add( 1 );
+                // Deadline-bounded (#1392): throwIfCancelled is the only
+                // healthy exit; the deadline turns a broken cancel pipeline
+                // into a fast typed failure instead of a hang.
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
                 for ( ;; )
                 {
                     ctx.throwIfCancelled();
+                    if ( std::chrono::steady_clock::now() > deadline )
+                        throw sicnu::operators::RSOperatorError(
+                            sicnu::operators::ErrorCode::Cancelled,
+                            "cancel never delivered within 60s" );
                     std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
                 }
                 return Json::Value( Json::objectValue );

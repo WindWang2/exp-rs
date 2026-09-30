@@ -57,6 +57,17 @@ function(sicnu_discover_tests NAME)
   if(ENABLE_SANITIZERS)
     list(APPEND _discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
   endif()
+  # Tier ownership (R6 WP-E, #1392): every discovered case carries a cost-tier
+  # label. Default is FAST (the tier-1 signal lane); callers override with
+  # SLOW / LONG_RUN for the minute-scale and 20min+ clusters so
+  # `ctest -LE "SLOW|LONG_RUN"` selects a genuinely fast suite and the census
+  # gate (section 5 of .planning/verify-chain-r4/chain_gate_census.sh) can
+  # verify that every case in the build tree has explicit tier ownership.
+  # The default is injected only when the caller passed no LABELS, so an
+  # explicit label always wins.
+  if(NOT "LABELS" IN_LIST SDT_UNPARSED_ARGUMENTS)
+    list(APPEND _discovery_props "LABELS" "${SICNU_DEFAULT_TEST_LABEL}")
+  endif()
   if(SDT_UNPARSED_ARGUMENTS)
     # Remaining args are a flat list of key/value test properties
     # (RUN_SERIAL TRUE, ...) — unchanged behavior for existing callers.
@@ -75,6 +86,15 @@ function(sicnu_discover_tests NAME)
     ${_dl_paths}
     PROPERTIES ${_discovery_props})
 endfunction()
+
+# Cost-tier label vocabulary (R6 WP-E), upper-case per the LONG_RUN
+# convention documented in TEST_INFRA.md:
+#   FAST     — default tier-1 signal lane (every case without an explicit label)
+#   SLOW     — minutes-scale (TIMEOUT >= 300 s), still required coverage
+#   LONG_RUN — 20 min+ full-scale sessions (existing documented lane)
+# CI tier 1 selects with `ctest -LE "SLOW|LONG_RUN"`; tier 2 (sanitizer)
+# runs the full population.
+set(SICNU_DEFAULT_TEST_LABEL "FAST")
 
 # Helper function to add a test executable. Extra args (TIMEOUT n,
 # RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
@@ -320,7 +340,9 @@ catch_discover_tests(test_sample_fixtures
   DISCOVERY_MODE PRE_TEST
   TEST_PREFIX "sample_fixtures: "
   ${_sf_dl_paths}
-  PROPERTIES ${_sf_discovery_props}
+  # Tier label (R6 WP-E): this call bypasses sicnu_discover_tests, so the
+  # FAST default is not injected — label explicitly.
+  PROPERTIES ${_sf_discovery_props} LABELS FAST
 )
 
 
@@ -444,7 +466,7 @@ sicnu_discover_tests(test_portability_source_contract)
 
 # Offline classroom deployment (goal D7): the offline gate refuses remote
 # requests without any network attempt — typed error + GDAL cloud deny.
-sicnu_add_test(test_offline_mode TIMEOUT 300)
+sicnu_add_test(test_offline_mode TIMEOUT 300 LABELS SLOW)
 sicnu_add_io_test(test_io_product_registry)
 sicnu_add_io_test(test_io_probe)
 sicnu_add_io_test(test_adversarial_m3)
@@ -3464,7 +3486,7 @@ sicnu_discover_tests(test_gdal_multiband_block_stream)
 # Performance benchmarks (Phase B of the perf/architecture goal). Runnable via
 # ctest (small sizes) or directly with SICNU_BENCH_LARGE=1 for nightly profiling.
 # Uses the standard sicnu_add_test link set (operators + task_center + resource_monitor).
-sicnu_add_test(test_perf_benchmarks TIMEOUT 300 RUN_SERIAL TRUE)
+sicnu_add_test(test_perf_benchmarks TIMEOUT 300 RUN_SERIAL TRUE LABELS SLOW)
 
 # Execution & Data Plane 3.0 benchmark harness (Phase A of the execution-data-
 # plane-3 epic): in-process workloads through TaskCenter/JobEngine/operators
@@ -3473,7 +3495,7 @@ sicnu_add_test(test_perf_benchmarks TIMEOUT 300 RUN_SERIAL TRUE)
 # The remote-source fixtures (tests/support/mini_cog_server.h) use plain
 # blocking POSIX sockets; Windows lane skips these two targets (see REVIEW_LOG).
 if(NOT WIN32)
-sicnu_add_test(test_execution_benchmarks TIMEOUT 600 RUN_SERIAL TRUE)
+sicnu_add_test(test_execution_benchmarks TIMEOUT 600 RUN_SERIAL TRUE LABELS SLOW)
 endif()
 
 # Phase B chunk execution graph contracts (Qt-free; links sicnu_runtime only).
@@ -3488,7 +3510,7 @@ target_link_libraries(test_external_memory_10 PRIVATE sicnu_runtime)
 # LSEE 10.0 scale & failure matrix (fan-out joins at 10^6 logical tiles under
 # SICNU_LSEE10_STRESS, scratch storms, checkpoint restart, poison-task
 # convergence). Drives the real TaskCenter/JobEngine singletons: serial.
-sicnu_add_test(test_large_scale_execution_10 TIMEOUT 900 RUN_SERIAL TRUE)
+sicnu_add_test(test_large_scale_execution_10 TIMEOUT 900 RUN_SERIAL TRUE LABELS SLOW)
 
 # Phase D artifact identity store (Phase D of the epic). SQLite link for the
 # schema-guard test's direct DB surgery; sicnu_data keeps its own PRIVATE link.
@@ -3566,7 +3588,7 @@ target_link_libraries(test_experiment_debugger PRIVATE
 #   ctest -LE LONG_RUN   # fast local/PR loop
 #   ctest -L LONG_RUN    # periodic full-scale session
 # both stay explainable in `ctest -N -V`.
-sicnu_add_test(test_mlops9_scale TEST_SPEC "~[longrun]" TIMEOUT 900 RUN_SERIAL TRUE)
+sicnu_add_test(test_mlops9_scale TEST_SPEC "~[longrun]" TIMEOUT 900 RUN_SERIAL TRUE LABELS SLOW)
 if(NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE MATCHES "^Debug$")
   # Debug (+sanitizer) instrumentation pays ~3x per single-row transaction
   # and the full 100k seed blew the wall-time budget (#1363). Debug asserts
@@ -3763,7 +3785,7 @@ sicnu_discover_tests(test_experiment_capsule TIMEOUT 120)
 # Foundation 5.0 dataset composition/label QA + the 100k metadata scale
 # contract (goal §20/§37/§46/§52). RUN_SERIAL: the 100k benchmark should not
 # compete with other tests for memory.
-sicnu_add_test(test_dataset_quality_scale TIMEOUT 600)
+sicnu_add_test(test_dataset_quality_scale TIMEOUT 600 LABELS SLOW)
 target_link_libraries(test_dataset_quality_scale PRIVATE Sicnu::dataset SQLite::SQLite3)
 set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
 
@@ -3772,7 +3794,7 @@ set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
 # lookup, with a structured JSON perf report emitted to
 # SICNU_PERF_EVIDENCE_DIR. RUN_SERIAL: the benchmark should not compete for
 # memory.
-sicnu_add_test(test_data_foundation_scale TIMEOUT 900 RUN_SERIAL TRUE
+sicnu_add_test(test_data_foundation_scale TIMEOUT 900 RUN_SERIAL TRUE LABELS SLOW
   ENVIRONMENT "SICNU_PERF_EVIDENCE_DIR=${CMAKE_BINARY_DIR}/test-artifacts")
 target_link_libraries(test_data_foundation_scale PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
 set_property(TARGET test_data_foundation_scale PROPERTY RUN_SERIAL TRUE)
@@ -13800,7 +13822,8 @@ catch_discover_tests(test_teaching_cockpit_smoke
   DISCOVERY_MODE PRE_TEST
   TEST_PREFIX "teaching_cockpit_smoke: "
   ${_smoke_dl_paths}
-  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  # Tier label (R6 WP-E): bypasses sicnu_discover_tests — label explicitly.
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS FAST
 )
 # ── Teacher Authoring & Assessment Console (Catch2 + Sicnu::teaching_admin) ──
 function(sicnu_add_teaching_admin_test NAME)
@@ -13903,7 +13926,8 @@ catch_discover_tests(test_teaching_foundation_e2e
   DISCOVERY_MODE PRE_TEST
   TEST_PREFIX "teaching_foundation_e2e: "
   ${_e2e_dl_paths}
-  PROPERTIES ${_e2e_discovery_props}
+  # Tier label (R6 WP-E): bypasses sicnu_discover_tests — label explicitly.
+  PROPERTIES ${_e2e_discovery_props} LABELS FAST
 )
 
 # ── Workbench/Project lifecycle shell track (completion/workbench-project-lifecycle-shell-fixtures) ──

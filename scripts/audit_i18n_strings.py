@@ -376,6 +376,22 @@ def main() -> int:
         for k, floor in spec.get("floors", {}).items():
             if totals.get(k, 0) < floor:
                 failures.append(f"{k}={totals.get(k, 0)} < floor {floor} (extraction surface regressed)")
+        # Per-file caps (R6 WP-H, #1392): `allow` maps a repo-relative path to
+        # the maximum nonui_zh count that file may carry. The global ceiling
+        # alone fails without saying WHERE a new string landed; a file cap
+        # localizes the regression and ratchets independently — a migration
+        # burn-down lowers the cap in the same PR that removes the strings,
+        # and a legitimate domain-data addition requires a visible cap bump.
+        # Paths not listed fall under the global ceiling only.
+        for path, cap in spec.get("allow", {}).items():
+            actual = next(
+                (r["counts"].get("nonui_zh", 0) for r in results
+                 if Path(r["file"]).as_posix() == str(path)),
+                None)
+            if actual is None:
+                failures.append(f"allow: {path} is not in the audited file list")
+            elif actual > cap:
+                failures.append(f"nonui_zh[{path}]={actual} > file cap {cap}")
         for k in ("hard_zh", "hard_en", "fmt_concat", "tr_zh_source"):
             if totals.get(k, 0) > base.get(k, 0):
                 failures.append(f"{k}={totals.get(k, 0)} > phase0 baseline {base.get(k)}")

@@ -9,6 +9,7 @@
 // identity ONNX fixture; synthetic rasters <= 512 px, except the sparse
 // 100k x 100k logical-extent case which never materializes pixels.
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "operators/framework/model_catalog.h"
@@ -458,8 +459,10 @@ TEST_CASE( "cancel between batches lands with bounded delay and no output", "[mo
 
   // Cancel from another thread after the first tile completes.
   std::thread canceler( [ & ] {
-    while ( guard.script->completed.load() < 1 )
-      std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    // Deadline-bounded: if the first tile never completes, cancel anyway so
+    // run() unwinds and the failure surfaces at the assertion, not a hang.
+    sicnu_test::waitUntil( [&] { return guard.script->completed.load() >= 1; }, 30000,
+                           [] { return "first tile never completed before cancel"; } );
     cancelFlag.store( true );
   } );
 

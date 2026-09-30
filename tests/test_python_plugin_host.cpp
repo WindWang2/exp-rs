@@ -1,6 +1,7 @@
 // test_python_plugin_host.cpp — headless Python Plugin Host seam tests (ADR 0023)
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 #include <catch2/catch_approx.hpp>
 
 #include "python_plugin_host.h"
@@ -396,10 +397,10 @@ TEST_CASE( "SharedMemorySegment: uint8 dtype round-trips correctly", "[python][s
 TEST_CASE( "SharedMemorySegment: no /dev/shm leak after a read round-trip and detach",
            "[python][shm][lifetime]" )
 {
-  // Snapshot any pre-existing sicnu_shm_* entries so the assertion is robust
-  // to other tests running concurrently in the same /dev/shm.
-  const auto baseline = QDir( QStringLiteral( "/dev/shm" ) )
-                          .entryList( QStringList() << QStringLiteral( "sicnu_shm_*" ) );
+  // Assert on THIS process's own segment names only (#1392 WP-J): the old
+  // whole-namespace baseline diff false-failed when a parallel case in
+  // another process owned a live sicnu_shm_* segment. The key is a uuid, so
+  // checking its (and its semaphore's) absence is exact and collision-free.
 
   sicnu::data::DataManager dataManager;
   PythonPluginHost host( 2 );
@@ -442,24 +443,20 @@ TEST_CASE( "SharedMemorySegment: no /dev/shm leak after a read round-trip and de
   seg.detach();
 
   // Give the kernel/Python side a brief moment to settle any close/unlink.
+  const QString ownShm = seg.nativeKey();
+  const QString ownSem = QStringLiteral( "sem.%1" ).arg( ownShm );
   for ( int attempt = 0; attempt < 40; ++attempt )
   {
-    const auto now = QDir( QStringLiteral( "/dev/shm" ) )
-                       .entryList( QStringList() << QStringLiteral( "sicnu_shm_*" ) );
-    // Subtract entries that existed before this test ran.
-    auto remaining = now;
-    for ( const QString &b : baseline )
-      remaining.removeAll( b );
-    if ( remaining.isEmpty() )
+    const auto now = QDir( QStringLiteral( "/dev/shm" ) ).entryList();
+    if ( !now.contains( ownShm ) && !now.contains( ownSem ) )
       break;
     QThread::msleep( 25 );
   }
 
-  auto after = QDir( QStringLiteral( "/dev/shm" ) )
-                 .entryList( QStringList() << QStringLiteral( "sicnu_shm_*" ) );
-  for ( const QString &b : baseline )
-    after.removeAll( b );
-  REQUIRE( after.isEmpty() );
+  const auto after = QDir( QStringLiteral( "/dev/shm" ) ).entryList();
+  INFO( "leaked /dev/shm entries: " << ownShm << ", " << ownSem );
+  REQUIRE_FALSE( after.contains( ownShm ) );
+  REQUIRE_FALSE( after.contains( ownSem ) );
 }
 
 // ---------------------------------------------------------------------------
@@ -540,11 +537,15 @@ TEST_CASE( "SharedMemorySegment: N distinct segments on N workers read concurren
     } );
   }
 
-  while ( completedCount.load() < N )
-  {
-    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
-    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-  }
+  // Deadline-bounded (#1392): each request carries its own 15 s await budget,
+  // so a bound slightly above N*15s catches a wedged host instead of spinning.
+  REQUIRE( sicnu_test::waitUntil(
+      [&] { return completedCount.load() >= N; }, 60000,
+      [ &completedCount ] {
+          return "shm.read completions " + std::to_string( completedCount.load() ) + "/" +
+                 std::to_string( N );
+      },
+      [] { QCoreApplication::processEvents( QEventLoop::AllEvents, 50 ); } ) );
   for ( auto &t : threads ) t.join();
 
   for ( int i = 0; i < N; ++i )
