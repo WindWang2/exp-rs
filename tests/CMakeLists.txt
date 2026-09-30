@@ -14569,6 +14569,30 @@ sicnu_add_teaching_admin_test(test_teaching_batch_r4)
 # fixture/pack asset consistency through the SAME inventory entry.
 sicnu_add_teaching_admin_test(test_teaching_authoring_failures_r4)
 
+# #1387 digest-authority convergence — the cross-path parity lock: the ONE
+# canonical serializer reached through the Qt authority (A), the
+# teaching-admin fork (B, now a delegate) and the jsoncpp-family adapter (C)
+# must hash one fixed document to one golden hex. Links sicnu_data directly
+# (the authority) on top of the teaching-admin profile, plus jsoncpp for the
+# C-side tree.
+add_executable(test_canonical_digest_parity test_canonical_digest_parity.cpp)
+target_link_libraries(test_canonical_digest_parity PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching_admin
+  sicnu_data
+  Qt6::Core
+)
+target_include_directories(test_canonical_digest_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_link_jsoncpp(test_canonical_digest_parity)
+set_target_properties(test_canonical_digest_parity PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_canonical_digest_parity TEST_PREFIX "test_canonical_digest_parity::")
+
 # hardening/r4-teaching-lab (Track 12): transcript parity residuals +
 # session-family failure paths (restore byte-stability, order invariance,
 # partial-failure integrity, concurrency == sequential replay).
