@@ -29,9 +29,16 @@ class QLabel;
 namespace sicnu::explain
 {
 struct StepExplanation;
-class IOperatorKnowledge;
-class IAuthoredGuidance;
-class IExecutionEvidence;
+// `struct`, matching the interface definitions in explanation_sources.h /
+// authored_guidance.h. These are the same elaborated-type-kind hazard that
+// produced the Tier 3 Windows LNK2019 for WorkflowDocument: MSVC decorates
+// the first-seen kind into the mangled name, so a `class` forward
+// declaration that disagrees with the definition only breaks the Windows
+// link, and only when one of these crosses a TU boundary by value. Pinned
+// by tests/test_portability_source_contract.cpp.
+struct IOperatorKnowledge;
+struct IAuthoredGuidance;
+struct IExecutionEvidence;
 } // namespace sicnu::explain
 
 namespace sicnu::app
