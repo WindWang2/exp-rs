@@ -155,7 +155,7 @@ TEST_CASE( "durable sidecar authority stays stage-write -> file sync -> atomic p
   // (a crash there destroyed the audit trail the journal exists to keep).
   REQUIRE( source.find( "removeQuiet( request.targetPath" ) == std::string::npos );
   // Staging names are unique (pid/counter/rng), never the shared "<name>.tmp".
-  REQUIRE( source.find( "filename() + "".tmp"" ) == std::string::npos );
+  REQUIRE( source.find( "+ \".tmp\"" ) == std::string::npos );
   REQUIRE( source.find( "stagingCounter" ) != std::string::npos );
 
   // Every sidecar consumer routes through the authority: the journal keeps

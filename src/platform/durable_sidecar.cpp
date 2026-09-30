@@ -204,7 +204,7 @@ ReadOutcome readWholeFile( const std::string &path, std::size_t maxBytes, std::s
   // the status query itself fails (denied traversal, broken chain), so
   // testing !exists alone would swallow the error and report Missing —
   // fail-open ("fresh state") for an existing-but-unstatable sidecar.
-  std::filesystem::exists( fsPath, ec );
+  static_cast< void >( std::filesystem::exists( fsPath, ec ) );
   if ( ec )
   {
     error = "stat failed: " + ec.message();
