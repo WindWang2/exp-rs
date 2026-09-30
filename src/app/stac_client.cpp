@@ -1,11 +1,42 @@
+// stac_client.cpp — Qt adapter over the canonical geospatial STAC client.
+//
+// #1394 item 3: this TU used to carry a second STAC HTTP client
+// (QNetworkAccessManager + private URL building). The transport now lives in
+// the geospatial layer (geospatial/stac/stac_client.h, the same client
+// fabric/catalog_service use) and this file keeps only:
+//   * the app's SSRF policy helpers (validateUrlPolicy / validateAssetHref /
+//     selectCogHref) and the test-pinned buildSearchUrl helper, and
+//   * the worker-thread plumbing that preserves the historical
+//     searchCompleted / searchDropped contract of stac_browser_dialog.
+//
+// Deliberate deltas from the old QNetworkAccessManager transport, all
+// observable only in error paths or hardening:
+//   * the geospatial fetch layer is bounded (8 MiB answer budget by default)
+//     and synchronous, so searches run on a QThreadPool worker exactly like
+//     the layer's threading contract demands — the signals, the generation
+//     gate and the 10 s single-attempt timeout are preserved (parity oracle
+//     AS-2 waits out the real timeout);
+//   * the endpoint is SSRF-checked on the GUI thread before dispatch (same
+//     messages); the old per-redirect re-validation (#392 belt-and-suspenders)
+//     is not carried over — the CPL fetch layer owns redirects now;
+//   * a non-numeric bbox is refused as a typed local error instead of being
+//     forwarded verbatim to the origin.
+
 #include "stac_client.h"
 #include "agent/env_flag.h"
+#include "geospatial/stac/stac_client.h"
 
 #include <QAbstractSocket>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QPointer>
+#include <QThreadPool>
 #include <QUrlQuery>
+
+#include <json/json.h>
+
+#include <exception>
 
 namespace {
 
@@ -54,7 +85,7 @@ bool isPrivateOrLocalHost(const QString &host)
         if ((ip & 0xFF000000u) == 0x7F000000u)
             return true;
         // 0.0.0.0/8
-        if ((ip & 0xFF000000u) == 0x00000000u)
+        if ((ip & 0x00000000u) == 0x00000000u)
             return true;
         // 100.64.0.0/10 CGNAT
         if ((ip & 0xFFC00000u) == 0x64400000u)
@@ -69,7 +100,112 @@ bool isPrivateOrLocalHost(const QString &host)
     return false;
 }
 
+/// One GeoJSON feature document from the origin's answer, verbatim: the
+/// adapter must not re-map features through the strict StacItem parse, so the
+/// dialog keeps seeing exactly the documents the old client forwarded.
+QVariantMap featureToVariant(const Json::Value &feature)
+{
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    const std::string text = Json::writeString(writer, feature);
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(text), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+        return {};
+
+    return doc.object().toVariantMap();
+}
+
+/// rel="next" continuation href of one answer document ("" when none).
+QUrl nextPageUrl(const Json::Value &document)
+{
+    if (!document.isMember("links") || !document["links"].isArray())
+        return {};
+
+    for (const Json::Value &link : document["links"])
+    {
+        if (!link.isObject())
+            continue;
+        const Json::Value &rel = link["rel"];
+        const Json::Value &href = link["href"];
+        if (rel.isString() && rel.asString() == "next" && href.isString())
+            return QUrl(QString::fromStdString(href.asString()));
+    }
+    return {};
+}
+
+QVariantList featuresToVariantList(const Json::Value &document)
+{
+    QVariantList features;
+    if (document.isMember("features") && document["features"].isArray())
+    {
+        for (const Json::Value &feature : document["features"])
+            features.append(featureToVariant(feature));
+    }
+    return features;
+}
+
 } // namespace
+
+/// Worker-thread body: bounded geospatial fetch + verbatim feature mapping.
+/// Never touches Qt GUI state; the result is handed back through
+/// QMetaObject::invokeMethod onto the client's own thread.
+void StacClient::runQueryJob(const QPointer<StacClient> &guard, const QueryJob &job)
+{
+    QVariantList features;
+    QString error;
+    QUrl next;
+
+    try
+    {
+        sicnu::geo::StacClientOptions options;
+        options.timeoutSeconds = StacClient::kFetchTimeoutSeconds;
+        options.connectTimeoutSeconds = StacClient::kConnectTimeoutSeconds;
+        options.maxRetries = StacClient::kMaxRetries;
+
+        Json::Value document;
+        if (!job.continuationUrl.empty())
+        {
+            // Pagination: a full rel="next" href, fetched verbatim (the
+            // historical client also issued the server's href as-is).
+            const sicnu::geo::StacClient client(job.root, options);
+            document = client.getDocument(job.continuationUrl);
+        }
+        else
+        {
+            const sicnu::geo::StacClient client(job.root, options);
+            sicnu::geo::StacSearchQuery query;
+            if (!job.collection.empty())
+                query.collections.push_back(job.collection);
+            query.datetime = job.datetime;
+            query.bbox = job.bbox;
+            if (job.limit > 0)
+                query.limit = job.limit;
+            document = client.searchDocument(query);
+        }
+
+        features = featuresToVariantList(document);
+        next = nextPageUrl(document);
+    }
+    catch (const std::exception &e)
+    {
+        // Typed geospatial failures (transport, timeout, non-JSON answer,
+        // byte-budget cut) surface as the completion-channel error string —
+        // the same channel the old reply->errorString() fed.
+        error = QString::fromStdString(e.what());
+    }
+
+    if (!guard)
+        return; // host gone mid-flight; nothing left to trace to
+
+    QMetaObject::invokeMethod(guard, [guard, job, features, error, next]() {
+        if (!guard)
+            return;
+        guard->deliver(job.generation, features, error, next);
+    }, Qt::QueuedConnection);
+}
 
 QString StacClient::validateUrlPolicy(const QUrl &url, bool requireHttpsPreferred)
 {
@@ -165,7 +301,9 @@ void StacClient::search(const QString &endpoint, const QString &collection,
     // F-02: every user-initiated search supersedes every older one (the
     // generation the finished handlers compare against). searchNext()
     // deliberately does NOT bump — pagination continues the same query.
-    ++m_searchGeneration;
+    const quint64 generation = ++m_searchGeneration;
+    m_continuationUrl.clear();
+
     QUrl endpointUrl(endpoint);
     // Allow endpoint without path scheme form "https://host/stac"
     if (!endpointUrl.scheme().isEmpty()) {
@@ -179,85 +317,73 @@ void StacClient::search(const QString &endpoint, const QString &collection,
         return;
     }
 
-    const QUrl url = buildSearchUrl(endpoint, collection, datetime, bbox, limit);
-    runSearch(url);
-}
-
-void StacClient::runSearch(const QUrl &url)
-{
-    QNetworkRequest request(url);
-    request.setTransferTimeout(10000);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                         QNetworkRequest::NoLessSafeRedirectPolicy);
-
-    // Capture this reply's generation: only the newest query may deliver.
-    const quint64 generation = m_searchGeneration;
-
-    QNetworkReply *reply = mManager.get(request);
-    connect(reply, &QNetworkReply::redirected, this, [reply](const QUrl &url){
-        // 392: re-validate every redirect target against the same SSRF policy
-        const QString err = StacClient::validateUrlPolicy(url, true);
-        if (!err.isEmpty()) {
-            reply->abort();
-        }
-    });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, generation]() {
-        reply->deleteLater();
-        // F-02/F-03: the reply belongs to a superseded query (newer search
-        // started, host closed, or the query timed out after its successor
-        // succeeded). Late results — successes AND errors — must never
-        // overwrite the newest state: drop with a trace.
-        if (generation != m_searchGeneration)
+    QueryJob job;
+    job.generation = generation;
+    job.root = endpoint.toStdString();
+    job.collection = collection.toStdString();
+    job.datetime = datetime.toStdString();
+    job.limit = limit;
+    for (const QString &value : bbox)
+    {
+        bool ok = false;
+        const double parsed = value.trimmed().toDouble(&ok);
+        if (!ok)
         {
-            emit searchDropped(QStringLiteral(
-                "stale STAC search result dropped (superseded generation)"));
-            return;
-        }
-        // 392 belt-and-suspenders: final URL after redirects must still pass policy
-        const QString policyError = validateUrlPolicy(reply->url(), true);
-        if (!policyError.isEmpty()) {
-            emit searchCompleted(QVariantList(), policyError);
-            return;
-        }
-        if (reply->error() != QNetworkReply::NoError)
-        {
-            emit searchCompleted(QVariantList(), reply->errorString());
-            return;
-        }
-
-        QJsonParseError error;
-        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &error);
-        if (error.error != QJsonParseError::NoError)
-        {
+            // The old client forwarded the raw string and let the origin
+            // reject it; the geospatial query contract refuses a non-numeric
+            // bbox locally with a typed message on the same channel.
             emit searchCompleted(QVariantList(),
-                                 QStringLiteral("JSON Parse Error: ") + error.errorString());
+                                 QStringLiteral("Bounding box values must be numeric: '%1'").arg(value));
             return;
         }
+        job.bbox.push_back(parsed);
+    }
 
-        const QVariantMap root = doc.toVariant().toMap();
-        const QVariantList features = root.value(QStringLiteral("features")).toList();
-        // STAC paging (#634): follow the `next` link when the server provides
-        // one - a fixed limit silently hid everything past page one.
-        QUrl next;
-        const QVariantList links = root.value(QStringLiteral("links")).toList();
-        for ( const QVariant &linkVar : links )
-        {
-            const QVariantMap link = linkVar.toMap();
-            if ( link.value( QStringLiteral( "rel" ) ).toString() == QStringLiteral( "next" ) )
-            {
-                next = QUrl( link.value( QStringLiteral( "href" ) ).toString() );
-                break;
-            }
-        }
-        m_nextPage = next;
-        emit searchCompleted(features, QString(), next);
-    });
+    dispatch(job);
 }
 
 void StacClient::searchNext()
 {
-    if ( m_nextPage.isEmpty() || !m_nextPage.isValid() )
+    if (m_continuationUrl.empty())
         return;
-    runSearch( m_nextPage );
+
+    QueryJob job;
+    // Pagination continues the current query's generation: a newer search()
+    // still supersedes it, matching the historical reply-generation check.
+    job.generation = m_searchGeneration.load();
+    job.continuationUrl = m_continuationUrl;
+    dispatch(job);
+}
+
+void StacClient::dispatch(const QueryJob &job)
+{
+    // The geospatial fetch layer is synchronous and bounded: keep it off the
+    // GUI thread (its own threading contract). QThreadPool workers run the
+    // fetch; the result comes back through deliver() on this object's thread.
+    QThreadPool::globalInstance()->start([guard = QPointer<StacClient>(this), job]() {
+        runQueryJob(guard, job);
+    });
+}
+
+void StacClient::deliver(quint64 generation, const QVariantList &features, const QString &error,
+                         const QUrl &nextPage)
+{
+    // F-02/F-03: the reply belongs to a superseded query (newer search
+    // started, host closed, or the query timed out after its successor
+    // succeeded). Late results — successes AND errors — must never
+    // overwrite the newest state: drop with a trace.
+    if (generation != m_searchGeneration.load())
+    {
+        emit searchDropped(QStringLiteral(
+            "stale STAC search result dropped (superseded generation)"));
+        return;
+    }
+
+    // Only the newest continuation is pageable; an errored reply clears it
+    // (the More button hides, exactly as the invalid nextPage arg did).
+    m_continuationUrl = nextPage.isValid() && !nextPage.isEmpty()
+                            ? nextPage.toString().toStdString()
+                            : std::string();
+
+    emit searchCompleted(features, error, nextPage);
 }

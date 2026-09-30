@@ -2,13 +2,38 @@
 #define STAC_CLIENT_H
 
 #include <QObject>
+#include <QPointer>
 #include <QVariantMap>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
+#include <atomic>
+#include <string>
+#include <vector>
+
+/// \brief Qt signals/slots facade over the canonical geospatial STAC client
+/// (sicnu::geo::StacClient, geospatial/stac/stac_client.h — the one client
+/// fabric/catalog_service already use).
+///
+/// #1394 item 3: the app used to carry its OWN STAC HTTP client
+/// (QNetworkAccessManager plus private URL building); that duplicate is gone.
+/// Every network call now rides the geospatial client on a worker thread
+/// (the geospatial fetch layer is synchronous and bounded; its header
+/// requires UI callers to stay off the GUI thread) and the results are
+/// delivered through the historical signals below.
+///
+/// Preserved behavior of stac_browser_dialog:
+///  * searchCompleted(features, error, nextPage) — the origin's VERBATIM
+///    feature documents (the adapter never re-maps them through the strict
+///    StacItem parse), plus the rel="next" continuation URL;
+///  * searchDropped(reason) — a finished reply whose query generation was
+///    superseded (a newer search started, the host dialog closed) never
+///    reaches the completion channel, and the drop stays observable;
+///  * search() validates the endpoint against the SSRF policy synchronously
+///    (same messages as before; SICNU_STAC_ALLOW_PRIVATE still gates private
+///    hosts), and pagination (searchNext) continues the same generation.
 class StacClient : public QObject
 {
     Q_OBJECT
@@ -67,17 +92,47 @@ public:
                 int limit = 50);
 
 private:
-    QNetworkAccessManager mManager;
+    /// One dispatched search/pagination job. Everything the worker thread
+    /// needs; the geospatial client itself is constructed on the worker (the
+    /// layer is synchronous and must not run on the GUI thread).
+    struct QueryJob
+    {
+        quint64 generation = 0;
+        std::string root;             ///< STAC API root (search requests)
+        std::string collection;       ///< "" = no collections filter
+        std::string datetime;         ///< "" = no temporal filter
+        std::vector<double> bbox;     ///< 4 or 6 values; empty = unfiltered
+        int limit = 0;
+        std::string continuationUrl;  ///< non-empty = plain GET of this URL
+    };
 
-private:
-    QUrl m_nextPage;
+    /// Runs @p job on a QThreadPool worker and delivers the result through
+    /// the generation-checked completion channel.
+    void dispatch(const QueryJob &job);
+    /// Worker-thread body (bounded geospatial fetch + verbatim feature
+    /// mapping); hands the outcome back onto the client's own thread.
+    static void runQueryJob(const QPointer<StacClient> &guard, const QueryJob &job);
+    /// GUI-thread side: generation gate + signal emission.
+    void deliver(quint64 generation, const QVariantList &features, const QString &error,
+                 const QUrl &nextPage);
+
     /// Monotonic query generation (same shape as RsScanPool's generation
     /// token, DECISIONS D-1): every user-initiated search supersedes every
     /// older one; superseded replies are dropped with a trace.
-    /// Unsigned: this counter lives for the process lifetime.
-    quint64 m_searchGeneration = 0;
+    /// Unsigned: this counter lives for the process lifetime. Atomic: written
+    /// by the GUI thread, read by the finishing workers.
+    std::atomic<quint64> m_searchGeneration{0};
 
-    void runSearch(const QUrl &url);
+    /// rel="next" href of the last delivered page ("" when none). Only the
+    /// GUI thread touches it; workers read their captured job instead.
+    std::string m_continuationUrl;
+
+    /// Bounded fetch budget matched to the historical client: the whole
+    /// request (not just the connection) dies at 10 s, single attempt — the
+    /// parity oracle AS-2 waits out that real timeout.
+    static constexpr int kFetchTimeoutSeconds = 10;
+    static constexpr int kConnectTimeoutSeconds = 5;
+    static constexpr int kMaxRetries = 0;
 };
 
 #endif // STAC_CLIENT_H

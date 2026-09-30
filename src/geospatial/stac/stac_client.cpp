@@ -424,7 +424,7 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
   return page;
 }
 
-StacPage StacClient::search( const StacSearchQuery &query ) const
+StacClient::SearchRequest StacClient::buildSearchRequest( const StacSearchQuery &query ) const
 {
   query.validate();
 
@@ -470,7 +470,7 @@ StacPage StacClient::search( const StacSearchQuery &query ) const
       sort.append( sortField );
       body["sortby"] = sort;
     }
-    return executeSearch( "POST", mRoot + "/search", body );
+    return { "POST", mRoot + "/search", body };
   }
 
   std::string params;
@@ -499,7 +499,6 @@ StacPage StacClient::search( const StacSearchQuery &query ) const
   }
   if ( !query.sortBy.empty() )
     appendParam( params, "sortby", query.sortBy );
-  const std::string url = mRoot + "/search" + ( params.empty() ? "" : "?" + params );
   // GET pages record their EQUIVALENT canonical body so a POST rel=next
   // (merge:true) can merge into the original filters — the query string
   // alone cannot survive a POST continuation.
@@ -529,7 +528,24 @@ StacPage StacClient::search( const StacSearchQuery &query ) const
   }
   if ( query.limit > 0 )
     canonicalBody["limit"] = query.limit;
-  return executeSearch( "GET", url, canonicalBody );
+  return { "GET", mRoot + "/search" + ( params.empty() ? "" : "?" + params ), canonicalBody };
+}
+
+StacPage StacClient::search( const StacSearchQuery &query ) const
+{
+  const SearchRequest request = buildSearchRequest( query );
+  return executeSearch( request.method, request.url, request.body );
+}
+
+Json::Value StacClient::searchDocument( const StacSearchQuery &query ) const
+{
+  const SearchRequest request = buildSearchRequest( query );
+  return fetchDocument( request.method, request.url, request.body );
+}
+
+Json::Value StacClient::getDocument( const std::string &absoluteUrl ) const
+{
+  return fetchDocument( "GET", absoluteUrl, Json::Value() );
 }
 
 StacPage StacClient::nextPage( const StacPage &page ) const
