@@ -440,9 +440,9 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
         const QStringList fields = stem.split( QLatin1Char( '.' ) );
         if ( fields.size() < 5 )
           continue; // checkpoint_<runId> + at least pid.ctr.rng
-        const QString pidField = fields.at( fields.size() - 3 );
-        const QString ctrField = fields.at( fields.size() - 2 );
-        const QString rngField = fields.at( fields.size() - 1 );
+        const QString &pidField = fields.at( fields.size() - 3 );
+        const QString &ctrField = fields.at( fields.size() - 2 );
+        const QString &rngField = fields.at( fields.size() - 1 );
         bool pidOk = false, ctrOk = false, rngOk = false;
         const qlonglong pidValue = pidField.toLongLong( &pidOk );
         ctrField.toLongLong( &ctrOk );

@@ -263,7 +263,7 @@ std::vector<std::string> PluginDiscovery::defaultRoots( const std::string &appDi
 #else
         const char separator = ':';
 #endif
-        std::string text( extra );
+        const std::string &text = extra;
         size_t start = 0;
         while ( start <= text.size() )
         {

@@ -897,7 +897,7 @@ bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsC
 
   outDefs.clear();
   const QJsonArray classesArray = rootObj[QStringLiteral( "classes" )].toArray();
-  for ( const QJsonValue &val : classesArray )
+  for ( const auto &val : classesArray )
   {
     if ( !val.isObject() )
       continue;

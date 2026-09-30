@@ -417,11 +417,14 @@ TEST_CASE( "concurrent writers always leave a complete artifact", "[platform][si
         request.targetPath = target;
         request.bytes = payload;
         request.verifyReadBack = false;
-        sicnu::platform::sidecar::WriteResult r = write( request );
-        if ( !r )
+        // The result cannot shadow the round counter `r`: inside a lambda
+        // GCC folds the for-init declaration and the loop body into one
+        // scope and rejects the redeclaration outright.
+        sicnu::platform::sidecar::WriteResult result = write( request );
+        if ( !result )
         {
           std::lock_guard<std::mutex> lock( errorMutex );
-          writerErrors.push_back( r.error );
+          writerErrors.push_back( result.error );
           ++writerFailures;
         }
       }

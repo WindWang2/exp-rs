@@ -50,7 +50,7 @@ Result<StudioExportBundle> StudioExportBundle::fromJson( const QJsonObject &json
     StudioExportBundle b;
     b.studyId = json.value( QStringLiteral( "study_id" ) ).toString();
     const QJsonArray runs = json.value( QStringLiteral( "run_ids" ) ).toArray();
-    for ( const QJsonValue &v : runs )
+    for ( const auto &v : runs )
         b.runIds.append( v.toString() );
     b.studyReport = json.value( QStringLiteral( "study_report" ) ).toObject();
     b.faultTeaching = json.value( QStringLiteral( "fault_teaching" ) ).toObject();
@@ -58,7 +58,7 @@ Result<StudioExportBundle> StudioExportBundle::fromJson( const QJsonObject &json
     b.designer = json.value( QStringLiteral( "designer" ) ).toObject();
     b.runMatrix = json.value( QStringLiteral( "run_matrix" ) ).toObject();
     const QJsonArray caps = json.value( QStringLiteral( "capsule_refs" ) ).toArray();
-    for ( const QJsonValue &v : caps )
+    for ( const auto &v : caps )
         b.capsuleRefs.append( v.toString() );
     b.csvRunTable = json.value( QStringLiteral( "csv_run_table" ) ).toString();
     return Result<StudioExportBundle>::success( b );
@@ -70,7 +70,7 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
     QTextStream ts( &out );
     ts << "point_id,replicate_index,run_id,status,seed,error_summary,output_asset_path\n";
     const QJsonArray table = studyReportJson.value( QStringLiteral( "run_table" ) ).toArray();
-    for ( const QJsonValue &v : table )
+    for ( const auto &v : table )
     {
         const QJsonObject r = v.toObject();
         auto esc = []( const QString &s ) {

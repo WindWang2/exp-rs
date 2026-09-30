@@ -769,7 +769,7 @@ TEST_CASE( "a reopened project reconciles its run authority before any surface r
     // No surface may report it as Running afterwards.
     const QJsonObject projection = missionTimelineProjectionJson( reopened.timeline, 32, 0 );
     const QJsonArray tasks = projection.value( QStringLiteral( "tasks" ) ).toArray();
-    for ( const QJsonValue &v : tasks )
+    for ( const auto &v : tasks )
     {
         if ( v.toObject().value( QStringLiteral( "id" ) ).toString() == QLatin1String( "ana-1" ) )
             CHECK( v.toObject().value( QStringLiteral( "status" ) ).toString()

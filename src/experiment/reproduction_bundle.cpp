@@ -179,7 +179,7 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         report.warnings.append( QStringLiteral( "run %1 not found" ).arg( runId ) );
         return report;
     }
-    const ExperimentRun run = *runRecord;
+    const ExperimentRun &run = *runRecord;
 
     QDir dir( options.outputDir );
     if ( !dir.mkpath( QStringLiteral( "." ) ) )
@@ -488,7 +488,7 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
     {
         const QJsonObject manifestJson =
             QJsonDocument::fromJson( version->manifestJson().toUtf8() ).object();
-        for ( const QJsonValue &asset :
+        for ( const auto &asset :
               manifestJson.value( QStringLiteral( "source_assets" ) ).toArray() )
         {
             if ( asset.toObject().value( QStringLiteral( "revision" ) ).toInteger() <= 0 )
