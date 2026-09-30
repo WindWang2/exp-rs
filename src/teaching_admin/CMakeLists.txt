@@ -45,6 +45,10 @@ target_link_libraries(sicnu_teaching_admin
     # sicnu.lab-pack/1: pack validation delegates to the Qt-free shared leaf
     # (ONE parser/validator shared with sicnu::agent) — no second pack truth.
     sicnu_lab_pack
+    # #1387: json_util.h delegates digest canonicalization to the platform
+    # authority canonicalizeJsonRfc8785 (ONE serializer for every digest
+    # path — curriculum/labSpec/rules/pack/release-report bytes included).
+    sicnu_data
 )
 
 foreach(SICNU_TA_FORBIDDEN_LINK Qt6::Widgets qgis_gui Qt6::Network Sicnu::app)
