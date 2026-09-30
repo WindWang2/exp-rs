@@ -161,6 +161,15 @@ gates account for that.
    lanes (python/pi/i18n/edit/D16) run unlabeled in BOTH tiers by design
    (label-less tests cannot match `-LE` exclusions) and remain
    hand-countable. `ctest -N -V` shows all labels.
+   The Catch2 `[tier1]` / `[e2e]` source tags (48 suites) are documentation
+   only and are NOT the selection mechanism: a tag selects through Catch2's
+   own `-` filter inside one binary, so it cannot express a ctest-wide
+   exclusion, and a tag scan is not machine-auditable the way a LABELS
+   property is. #1392 asked for "exclude e2e" — measured on the tier-1 lane,
+   the e2e-tagged cases are seconds-scale (the whole 8210-case suite finishes
+   in 23 min at `-j4`), so excluding them buys nothing and would drop the
+   E2E contract out of the required signal lane. The cost tiers above carry
+   the exclusion instead.
 5. **Shared-host timing evidence**: perf contracts measure multiple passes
    and assert on the median (see `test_workspace_catalog.cpp`). When quoting
    timings in a budget discussion, record build type, sanitizer state, and
