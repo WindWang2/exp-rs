@@ -1074,7 +1074,7 @@ void AgentCopilotDockWidget::onMalformedToolCall( const QJsonObject &detail )
                            name.isEmpty() ? QString() : QStringLiteral( ": %1" ).arg( name ) );
   if ( m_currentContentLabel )
   {
-    m_currentContentLabel->setText( QStringLiteral( "<font color='orange'>%1</font>" )
+    m_currentContentLabel->setText( tr( "<font color='orange'>%1</font>" )
                                       .arg( notice.toHtmlEscaped() ) );
   }
   setRunStage( tr( "Tool call dropped" ) );

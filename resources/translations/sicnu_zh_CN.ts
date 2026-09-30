@@ -20953,6 +20953,18 @@ Capsule reference: %1</source>
         <source>&lt;font color='red'&gt;Error: %1&lt;/font&gt;</source>
         <translation>&lt;font color='red'&gt;错误: %1&lt;/font&gt;</translation>
     </message>
+    <message>
+        <source>Malformed tool call dropped (%1)%2</source>
+        <translation>工具调用格式错误，已丢弃（%1）%2</translation>
+    </message>
+    <message>
+        <source>Tool call dropped</source>
+        <translation>工具调用已丢弃</translation>
+    </message>
+    <message>
+        <source>&lt;font color='orange'&gt;%1&lt;/font&gt;</source>
+        <translation>&lt;font color='orange'&gt;%1&lt;/font&gt;</translation>
+    </message>
 </context>
 <context>
     <name>CartographyDock</name>
