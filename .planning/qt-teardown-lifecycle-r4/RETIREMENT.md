@@ -46,3 +46,19 @@ Rolling counts: **退役 27 / 语义保留 4 / 保留 0** (31/31 adjudicated). R
 
 Lowercase `_exit(` sites in `tests/` (~20 Windows-only `#ifdef _WIN32` main tails, e.g. `tests/sicnu_test_main.cpp:54`, plus fork-child `::_exit(` in `tests/helper_external_process.cpp` / `tests/fixtures/isolation_plugin/`) are NOT part of this adjudication: the measured Linux baseline (§BASELINE 6) is the uppercase `_Exit(` family. The Windows tails mask teardown on Windows exactly as the retired defense did on Linux and are hereby **named as a follow-up track candidate** (they are inert on this Linux CI path).
 
+## Residual re-evaluation (2026-10-01, #1395)
+
+Sites discovered after the 31-row adjudication (the count may grow, never shrink). All are the retired `FastExitListener` shape — a Catch listener that reports the run and leaves via `std::_Exit` before any static destructor runs. Verdicts:
+
+| file:line | family | root cause | verdict | condition / reason |
+|---|---|---|---|---|
+| tests/test_parity_stress_r4.cpp:93 | atexit | A-1 | 保留 | full QGIS shell (sicnu_geo_rs_shell) link set; retire with the qt_lifecycle.h TeardownListener only after a double-run proof (the #1342 acceptance bar) on a lane that can link this binary — no host here has a built `sicnu_geo_rs_shell`. |
+| tests/test_parity_restore_failsafe_r4.cpp:78 | atexit | A-1 | 保留 | same link set / same proof requirement. |
+| tests/test_parity_selection_authority_r4.cpp:90 | atexit | A-1 | 保留 | same link set / same proof requirement. |
+| tests/test_parity_state_mirror_r4.cpp:98 | atexit | A-1 | 保留 | same link set / same proof requirement. |
+| tests/test_parity_async_late_arrival_r4.cpp:96 | atexit | A-1 | 保留 | NEW site (not in the original residual list, same family). Plain `QApplication` app, so the shared listener's `QgsApplication::exitQgis()` step needs a guard check before this file can be retired. |
+| tests/test_perf_operator_observatory.cpp:88 | atexit | A-1 | 保留 | prints no run summary; RUN_SERIAL RSS memory-guard suite. Same proof requirement; note the listener also drops the stderr marker the retired ok-variant listeners printed. |
+| tests/test_view_link.cpp:102 | atexit | A-4 (re-opened) | 保留 | Deliberately re-armed by #1414 (2026-09-29): with one-case-per-process ctest the canvas/project cases still crash in glibc atexit cleanup (QGIS thread-local PROJ context) AFTER the assertions pass. #1414 documented it in the main() comment. Consequence: row 31's 退役 verdict no longer matches the code, so `test_teardown_retirement_gate_r4` ("Retirement gate: RETIREMENT.md 退役 rows are _Exit-free") is RED on master — a 4th Tier-1 failure beyond the io family. Retirement requires the #1414 per-process exit crash to be fixed at the root (ordered teardown that survives one-case-per-process), not a verdict edit. Owner: view-link track. |
+
+Retirement recipe for every 保留 row (once a lane can build the binary): delete the `FastExitListener`, `#include "support/qt_lifecycle.h"`, register `CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )`, keep the app HEAP-owned, then flip the verdict to 退役 with the double-run evidence.
+
