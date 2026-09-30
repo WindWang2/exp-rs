@@ -304,7 +304,7 @@ void AgentCopilotDockWidget::updateRunInspector()
     QString callsText = QString( tr( "Calls: %1" ) ).arg( m_toolCallCards.size() );
     if ( m_refusedToolCallCount > 0 )
     {
-      callsText += QStringLiteral( " (%1 refused by the transport, never run)" )
+      callsText += tr( " (%1 refused by the transport, never run)" )
                    .arg( m_refusedToolCallCount );
     }
     m_runInspector.callsLabel->setText( callsText );
