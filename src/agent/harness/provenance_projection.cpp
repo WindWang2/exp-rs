@@ -1,13 +1,14 @@
 // src/agent/harness/provenance_projection.cpp
 #include "provenance_projection.h"
 
+#include "data/execution_fingerprint.h"
 #include "workflow_facts.h"
 
 #include <QFile>
 #include <QIODevice>
 #include <QSaveFile>
 
-#include <json/writer.h>
+#include <json/value.h>
 
 #include <QCryptographicHash>
 #include <QString>
@@ -21,15 +22,6 @@ namespace sicnu::agent::harness::projection {
 namespace {
 
 Json::Value emptyObject() { return Json::Value( Json::objectValue ); }
-
-/// Deterministic compact serialization (sorted members via jsoncpp).
-std::string canonicalJson( const Json::Value &value )
-{
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "";
-  builder["commentStyle"] = "None";
-  return Json::writeString( builder, value );
-}
 
 } // namespace
 
@@ -143,8 +135,13 @@ Json::Value compilerProjection( const WorkflowIr &ir, const IrAnalysis &analysis
 
 std::string projectionDigest( const Json::Value &projection )
 {
+  // ONE canonical serializer (#1387): the platform authority
+  // canonicalizeJsonRfc8785, reached through its jsoncpp adapter — the same
+  // bytes that identify experiment parameters and dataset manifests. The
+  // digest stays 16 bytes wide (32 hex chars): a projection-sidecar token,
+  // not a content digest.
   const QByteArray digest = QCryptographicHash::hash(
-    QByteArray::fromStdString( canonicalJson( projection ) ), QCryptographicHash::Sha256 );
+    sicnu::data::canonicalizeJsonRfc8785( projection ), QCryptographicHash::Sha256 );
   return QString::fromLatin1( digest.left( 16 ).toHex() ).toStdString();
 }
 
@@ -186,7 +183,10 @@ SidecarResult writeCompileSidecar( const std::string &outputPath,
     result.error = "cannot open sidecar for writing: " + result.path;
     return result;
   }
-  const QByteArray body = QByteArray::fromStdString( canonicalJson( projection ) + "\n" );
+  // The sidecar IS the projection through the ONE canonical serializer
+  // (#1387) — the same bytes the digest covers, so a reader can recompute.
+  const QByteArray body =
+    sicnu::data::canonicalizeJsonRfc8785( projection ) + QByteArrayLiteral( "\n" );
   if ( file.write( body ) != body.size() )
   {
     file.cancelWriting();

@@ -1,6 +1,8 @@
 // src/agent/cartography/export_manifest.cpp
 #include "export_manifest.h"
 
+#include "data/execution_fingerprint.h"
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -18,19 +20,6 @@ namespace {
 std::string sha256OfBytes( const QByteArray &bytes )
 {
     return std::string( QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex().constData() );
-}
-
-/// Canonical JSON: jsoncpp's StreamWriter in compact mode. Json::Value
-/// object members iterate in sorted-name order, so the serialization of two
-/// equal payloads is byte-identical regardless of insertion order.
-std::string canonicalJson( const Json::Value &value )
-{
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    builder["commentStyle"] = "None";
-    builder["precision"] = 17;
-    const std::string serialized = Json::writeString( builder, value );
-    return serialized;
 }
 
 bool isHexDigest( const std::string &value )
@@ -87,7 +76,9 @@ Json::Value ExportManifest::payloadToJson() const
 
 std::string ExportManifest::digest() const
 {
-    return sha256OfBytes( QByteArray::fromStdString( canonicalJson( payloadToJson() ) ) );
+    // The ONE canonical serializer (#1387) — same bytes as every other
+    // platform digest (experiment identity, capsule, dataset fingerprints).
+    return sha256OfBytes( sicnu::data::canonicalizeJsonRfc8785( payloadToJson() ) );
 }
 
 Json::Value ExportManifest::toJson() const
@@ -155,7 +146,7 @@ bool verifyExportManifestDigest( const Json::Value &document )
                                  "provenance", "structural_digest", "page_count", "pages" } )
         payload[member] = document.get( member, Json::Value() );
     const std::string recomputed =
-        sha256OfBytes( QByteArray::fromStdString( canonicalJson( payload ) ) );
+        sha256OfBytes( sicnu::data::canonicalizeJsonRfc8785( payload ) );
     return recomputed == document["manifest_digest"].asString();
 }
 
@@ -181,7 +172,7 @@ bool writeExportManifest( const std::string &directory, const std::string &base_
         return fail( QStringLiteral( "cannot create manifest directory '%1'" ).arg( dir.path() ) );
 
     Json::Value document = manifest.toJson();
-    const std::string serialized = canonicalJson( document );
+    const QByteArray serialized = sicnu::data::canonicalizeJsonRfc8785( document );
     const QString finalPath =
       dir.filePath( QString::fromStdString( base_name + "." + format + ".manifest.json" ) );
 
@@ -191,8 +182,7 @@ bool writeExportManifest( const std::string &directory, const std::string &base_
     if ( !temp.open() )
         return fail( QStringLiteral( "cannot create a temporary manifest in '%1'" ).arg( dir.path() ) );
     const QString tempPath = temp.fileName();
-    const QByteArray payloadBytes( serialized.c_str(), static_cast<qsizetype>( serialized.size() ) );
-    if ( temp.write( payloadBytes ) != payloadBytes.size() )
+    if ( temp.write( serialized ) != serialized.size() )
         return fail( QStringLiteral( "short write on the temporary manifest" ) );
     if ( !temp.flush() )
         return fail( QStringLiteral( "cannot flush the temporary manifest" ) );
