@@ -85,3 +85,33 @@ TEST_CASE( "Legacy error codes normalize into the stable taxonomy", "[harness][e
   CHECK( weird.code == "EXECUTION_FAILED" );
   CHECK( weird.details["legacy_code"].asString() == "WIBBLE" );
 }
+
+// R6 convergence (#1394 item 4): the surface projection legs. The CLI and
+// MCP/agent adapters must derive their published wire forms from the ONE
+// internal table — these pins freeze the derivations so the two surfaces
+// cannot drift apart again.
+TEST_CASE( "Surface projection legs: session refusal -> CLI exit code", "[harness][errors]" )
+{
+  CHECK( cliExitCodeForSessionRefusal( "MISSING_ARGS" ) == 2 );
+  CHECK( cliExitCodeForSessionRefusal( "UNKNOWN_SESSION" ) == 2 );
+  CHECK( cliExitCodeForSessionRefusal( "AUTONOMY_LEVEL_TOO_LOW" ) == 2 );
+  CHECK( cliExitCodeForSessionRefusal( "CORRUPTED_OR_MISSING_JOURNAL" ) == 2 );
+  CHECK( cliExitCodeForSessionRefusal( "RESUME_REJECTED" ) == 2 );
+  CHECK( cliExitCodeForSessionRefusal( "SEAMS_UNAVAILABLE" ) == 5 );
+  // Unknown refusal: the legacy generic value, unchanged.
+  CHECK( cliExitCodeForSessionRefusal( "SOMETHING_ELSE" ) == 1 );
+}
+
+TEST_CASE( "Surface projection legs: legacy spatial code -> MCP tools/call code",
+           "[harness][errors]" )
+{
+  // The MCP wire vocabulary (R5 #1375) — moved verbatim from the
+  // SpatialToolResult boundary; outputs pinned identical.
+  CHECK( mcpToolCodeForLegacy( "local_file_not_found" ) == "DATA_IO" );
+  CHECK( mcpToolCodeForLegacy( "GDAL_OPEN_FAILED" ) == "DATA_IO" );
+  CHECK( mcpToolCodeForLegacy( "PROVIDER_OPEN_FAILED" ) == "DATA_IO" );
+  CHECK( mcpToolCodeForLegacy( "MODEL_NOT_FOUND" ) == "MODEL_NOT_READY" );
+  // Unknown legacy codes pass through unchanged.
+  CHECK( mcpToolCodeForLegacy( "INVALID_PARAMETER" ) == "INVALID_PARAMETER" );
+  CHECK( mcpToolCodeForLegacy( "SOMETHING_NEW" ) == "SOMETHING_NEW" );
+}

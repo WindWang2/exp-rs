@@ -7,6 +7,7 @@
 #include "help/help_registry.h"
 
 #include "agent_ops/ops_driver.h"
+#include "agent/harness/harness_error.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "experiment/bridge/workflow_experiment_adapter.h"
 #include "core/sicnu_logging.h"
@@ -2883,20 +2884,13 @@ QVariantMap McpServer::handleSpatialToolCall(const QString &toolId, const QVaria
     if (!result.success)
     {
         // Preserve the existing message contract; callers that ignore `data`
-        // still see the same human-readable text. Codes are normalized to the
-        // structured taxonomy at this boundary (#644): the spatial tools'
-        // lowercase io codes (local_file_not_found, gdal_open_failed,
-        // provider_open_failed) map to DATA_IO, MODEL_NOT_FOUND to
-        // MODEL_NOT_READY; SpatialToolResult::retryable is forwarded instead
-        // of being dropped.
-        QString errorCode = QString::fromStdString(result.errorCode);
-        const QString upper = errorCode.toUpper();
-        if (upper == QStringLiteral("LOCAL_FILE_NOT_FOUND")
-            || upper == QStringLiteral("GDAL_OPEN_FAILED")
-            || upper == QStringLiteral("PROVIDER_OPEN_FAILED"))
-            errorCode = QStringLiteral("DATA_IO");
-        else if (upper == QStringLiteral("MODEL_NOT_FOUND"))
-            errorCode = QStringLiteral("MODEL_NOT_READY");
+        // still see the same human-readable text. Codes are normalized to
+        // the structured vocabulary at this boundary (#644); the legacy-code
+        // alias mapping lives ONCE in harness_error (R6 #1394 item 4) so it
+        // cannot drift from the harness envelope's alias leg.
+        // SpatialToolResult::retryable is forwarded instead of being dropped.
+        const QString errorCode = QString::fromStdString(
+            sicnu::agent::harness::mcpToolCodeForLegacy( result.errorCode ) );
         throw McpToolError(QString::fromStdString(toolId.toStdString() + ": " + result.error),
                            errorCode,
                            QString::fromStdString(result.errorCategory),

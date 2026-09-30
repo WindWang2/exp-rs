@@ -21,6 +21,12 @@
   Not in scope: writes, transactions, auth flows (CPL owns credentials), and
   any governance decision — items project onto canonical metadata / temporal
   series through the adapter seam, ownership stays with the callers.
+
+  R6 STAC convergence (#1394 item 3): this client is the single data /
+  transport authority for STAC search. The app-side Qt object
+  (src/app/stac_client.* ) is a thin signal adapter over THIS class — the
+  egress policy, href safety, COG/vsicurl selection, request building,
+  pagination continuations, timeouts and retries live here, once.
  ***************************************************************************/
 
 #ifndef SICNU_GEOSPATIAL_STAC_CLIENT_H
@@ -35,6 +41,7 @@
 
 #include <cstdint>
 #include <chrono>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -78,6 +85,15 @@ struct StacClientOptions
     /// the historical behavior; the fetcher itself stays synchronous and
     /// bounded, concurrency is only the number of in-flight item fetches).
     int maxConcurrency = 1;
+
+    /// R6 STAC convergence (#1394 item 3): opt-in SSRF egress policy. When
+    /// true, EVERY url this client fetches (root, search pages, rel=next
+    /// continuations, collections, item documents) must pass the shared
+    /// egress policy (egressPolicyError — private/loopback/link-local hosts
+    /// refused unless SICNU_STAC_ALLOW_PRIVATE=1). Default false: the
+    /// fabric/CLI surfaces keep their exact historical behavior; the UI
+    /// adapter turns this on (the policy used to live only there).
+    bool blockPrivateNetworks = false;
 
     // --- 9.0 M4: bounded client-side response cache (opt-in) --------------
     /// Caches search/collection item-page ANSWERS in memory, keyed by
@@ -150,6 +166,18 @@ std::vector<StacSeriesEntry> buildTemporalSeries( const std::vector<StacItem> &i
 /// reporting (8.0).
 StacSeries buildTemporalSeriesDetailed( const std::vector<StacItem> &items );
 
+/// One bounded page request (the exact (method, url, body) triple the
+/// transport executes). R6 convergence: building the request and executing
+/// it are separate steps so the synchronous search()/nextPage() and the
+/// detached async variant run the IDENTICAL request through one code path.
+struct StacRequest
+{
+    std::string method;         ///< "GET" or "POST"
+    std::string url;            ///< absolute http(s) URL; empty = nothing to do
+    Json::Value body;           ///< POST body (GET: the canonical body used
+                                ///< for cache keys / POST-merge continuations)
+};
+
 class StacClient
 {
   public:
@@ -166,6 +194,55 @@ class StacClient
     /// Fetches the next page using the page's continuation descriptor.
     /// Returns an empty page when there is none.
     StacPage nextPage( const StacPage &page ) const;
+
+    /// GET /search URL for the query's core filters (bbox/datetime/
+    /// collections/ids/limit/sortby as query parameters). Single home of the
+    /// URL shape — the UI adapter reuses it verbatim instead of keeping a
+    /// second query-string builder.
+    static std::string buildSearchUrl( const std::string &root, const StacSearchQuery &query );
+
+    /// Builds (validates) the request for a search page without executing it.
+    /// Throws GeoError(InvalidArgument) for an unusable query shape — before
+    /// anything hits the network.
+    StacRequest buildSearchRequest( const StacSearchQuery &query ) const;
+
+    /// Builds the continuation request for a page. Returns an empty request
+    /// (url empty) when the page has no rel=next; throws GeoError when a POST
+    /// continuation carries no body (broken origin — never an unfiltered
+    /// re-search).
+    StacRequest buildNextRequest( const StacPage &page ) const;
+
+    /// Callback for requestPageDetached: one invocation, from the fetching
+    /// thread. errorText is empty on success; page is valid only then.
+    using PageCallback = std::function<void( StacPage page, const std::string &errorText )>;
+
+    /// Runs one bounded page request on a detached worker thread. The
+    /// transport, bounds, typed errors and egress policy are EXACTLY the
+    /// synchronous path's — only the scheduling differs. The callback fires
+    /// exactly once from the worker thread; the CALLER owns cross-thread
+    /// marshalling (the Qt adapter does the UI-thread hop). Destroying the
+    /// caller is safe: the worker owns a private client copy.
+    /// Detached-on-exit caveat: a fetch still in flight when the process
+    /// exits is abandoned (bounded by the timeout budget, same as CPL).
+    void requestPageDetached( const StacRequest &request, const PageCallback &onDone ) const;
+
+    // --- shared href/egress safety (R6 convergence: single home) ----------
+    /// SSRF egress verdict for an outgoing http(s) url: "" when fetchable,
+    /// otherwise a stable human-readable refusal. Private / loopback /
+    /// link-local hosts are refused unless SICNU_STAC_ALLOW_PRIVATE=1
+    /// (repo env-flag semantics: "1"/"true"/"yes"/"on"). Migrated verbatim
+    /// from the UI client — this is now the ONLY copy of the policy.
+    static std::string egressPolicyError( const std::string &url );
+
+    /// Asset href validation before any /vsicurl/ prefixing or fetch: no
+    /// pre-formed /vsi* paths, absolute http(s) only, then the egress
+    /// policy. "" when acceptable, else the stable reason.
+    static std::string validateAssetHref( const std::string &href );
+
+    /// /vsicurl/ form of the item's first usable COG asset (asset-key order;
+    /// ".tif" href or "image/tiff" media type), after validateAssetHref.
+    /// Empty when the item has no usable COG asset.
+    static std::string selectCogVsicurlHref( const Json::Value &stacItemFeature );
 
     /// Paged crawl bounded by options.maxItems (truncatedByLimit reports a
     /// stop-before-exhaustion truthfully).
@@ -229,6 +306,9 @@ class StacClient
     StacPage executeSearch( const std::string &method, const std::string &url,
                             const Json::Value &body ) const;
     HttpFetchOptions fetchOptions() const;
+    /// Throws GeoError(PermissionDenied) when the egress policy is enabled
+    /// for this client and @p url refuses. No-op otherwise.
+    void assertEgressAllowed( const std::string &url ) const;
 
     struct QueryCacheEntry
     {

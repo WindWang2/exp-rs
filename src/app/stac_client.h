@@ -2,13 +2,37 @@
 #define STAC_CLIENT_H
 
 #include <QObject>
-#include <QVariantMap>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
+#include <QVariantList>
 #include <QJsonObject>
 #include <QString>
 #include <QUrl>
 
+#include <memory>
+
+namespace sicnu::geo
+{
+class StacClient;
+struct StacPage;
+struct StacRequest;
+}
+
+/// Thin Qt/UI adapter over the domain STAC transport (R6 convergence,
+/// #1394 item 3). ALL transport and data logic — request building, egress
+/// policy, pagination continuations, timeouts, retries, JSON document
+/// fetching — lives in sicnu::geo::StacClient (src/geospatial/stac/); this
+/// object only marshals between that bounded synchronous/detached domain
+/// world and Qt signals on the object's thread, and keeps the late-arrival
+/// landing policy (generation stamp + searchDropped trace) the UI relies on.
+///
+/// The public Qt-facing API is unchanged from the pre-convergence client so
+/// stac_browser_dialog and its tests churn zero.
+///
+/// Threading: the adapter must live on the main (GUI) thread — it is created
+/// by the dialog there, and results are marshalled through the application
+/// object's event loop. The domain fetch itself runs on a detached domain
+/// worker (sicnu::geo::StacClient::requestPageDetached); a finished result
+/// whose generation was superseded is dropped with a searchDropped trace,
+/// never delivered (F-02/F-03 parity contract, unchanged).
 class StacClient : public QObject
 {
     Q_OBJECT
@@ -23,7 +47,11 @@ signals:
     void searchDropped(const QString &reason);
 
 public:
-    explicit StacClient(QObject *parent = nullptr) : QObject(parent) {}
+    explicit StacClient(QObject *parent = nullptr);
+    ~StacClient() override;
+
+    StacClient(const StacClient &) = delete;
+    StacClient &operator=(const StacClient &) = delete;
 
     static QUrl buildSearchUrl(const QString &endpoint, const QString &collection,
                                const QString &datetime, const QStringList &bbox,
@@ -34,22 +62,24 @@ public:
      *
      * Prefers https. Blocks private / loopback / link-local hosts unless
      * SICNU_STAC_ALLOW_PRIVATE=1. Returns empty string when OK, else an error.
+     * Delegates to sicnu::geo::StacClient::egressPolicyError — the single
+     * home of the policy.
      */
     static QString validateUrlPolicy(const QUrl &url, bool requireHttpsPreferred = true);
 
     /**
      * \brief Validate an asset href before prefixing /vsicurl/.
-     * Allows only http/https schemes (https preferred).
+     * Allows only http/https schemes (https preferred). Delegates to
+     * sicnu::geo::StacClient::validateAssetHref.
      */
     static QString validateAssetHref(const QString &href);
 
     /**
      * \brief Return the /vsicurl/ URL of the item's COG asset, or empty.
      *
-     * Selects the first asset (in asset-key order) whose href ends with
-     * ".tif" or whose type is image/tiff, validates the href with
-     * validateAssetHref, and prefixes /vsicurl/. Returns empty when the
-     * item has no usable COG asset.
+     * Delegates to sicnu::geo::StacClient::selectCogVsicurlHref (first asset
+     * in asset-key order whose href ends with ".tif" or whose type is
+     * image/tiff, validated, prefixed /vsicurl/).
      */
     static QString selectCogHref(const QJsonObject &stacItemFeature);
 
@@ -60,24 +90,28 @@ public:
     /// F-04: invalidate every in-flight search (host dialog closed). Late
     /// replies are dropped with a searchDropped trace instead of mutating
     /// hidden state.
-    void cancelInFlight() { ++m_searchGeneration; }
+    void cancelInFlight();
 
     void search(const QString &endpoint, const QString &collection,
                 const QString &datetime, const QStringList &bbox,
                 int limit = 50);
 
 private:
-    QNetworkAccessManager mManager;
+    /// One delivered page fetch (shared with the domain worker).
+    struct PageDelivery;
 
-private:
-    QUrl m_nextPage;
-    /// Monotonic query generation (same shape as RsScanPool's generation
-    /// token, DECISIONS D-1): every user-initiated search supersedes every
-    /// older one; superseded replies are dropped with a trace.
-    /// Unsigned: this counter lives for the process lifetime.
-    quint64 m_searchGeneration = 0;
+    /// Domain transport for @p endpoint, creating (and caching) it on first
+    /// use. Throws sicnu::geo::GeoError for an unusable endpoint.
+    sicnu::geo::StacClient &domainClientFor(const QString &endpoint);
 
-    void runSearch(const QUrl &url);
+    /// Dispatches one bounded page request on the domain's detached worker;
+    /// the completion is marshalled back onto this object's thread.
+    void launchPageFetch(const sicnu::geo::StacRequest &request);
+
+    /// GUI-thread landing: generation check, drop trace, signal emission.
+    void deliverPage(const std::shared_ptr<PageDelivery> &delivery);
+
+    std::unique_ptr<class StacClientPrivate> d;
 };
 
 #endif // STAC_CLIENT_H

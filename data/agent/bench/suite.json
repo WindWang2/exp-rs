@@ -100,5 +100,5 @@
   "description": "RS14 starter pack: 24 goal-level agent benchmark cases across six task families, plus 4 recorded-trajectory replays.",
   "schema": "sicnu.agentbench.suite/v1",
   "suite_id": "rs14-agent-bench-core",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

@@ -11,7 +11,8 @@
   "steps": [
     {
       "input": {
-        "labels": "work://case/labels.gpkg"
+        "method": "rf",
+        "training": "work://case/labels.gpkg"
       },
       "on_failure": "abort",
       "payload": {
@@ -19,7 +20,7 @@
         "output_path": "work://case/model.json"
       },
       "tokens": 120,
-      "tool": "rs:train_classifier"
+      "tool": "rs:supervised_classification"
     },
     {
       "input": {

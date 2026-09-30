@@ -8,11 +8,13 @@
 #include <QJsonDocument>
 
 #include "agent/tools/workflow_orchestrator_tool.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "workflow/contract_checker.h"
 #include "workflow/workflow_ir_v2.h"
 #include "workflow/workflow_repair_engine.h"
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSet>
 #include <QJsonValue>
 
 using namespace sicnu::agent::tools;
@@ -120,9 +122,9 @@ TEST_CASE( "Change detection, fusion and classification intents each compile", "
         const char *terminalOperator;
     };
     const Case cases[] = {
-        { "Detect change between two bi-temporal scenes", "rs:threshold" },
-        { "Pansharpen fusion of GF-1 pan and ms", "rs:gs_fusion" },
-        { "Supervised land cover classification of the scene", "rs:random_forest_classify" },
+        { "Detect change between two bi-temporal scenes", "rs:threshold_raster" },
+        { "Pansharpen fusion of GF-1 pan and ms", "rs:fusion_gram_schmidt" },
+        { "Supervised land cover classification of the scene", "rs:supervised_classification" },
     };
     for ( const Case &testCase : cases )
     {
@@ -176,7 +178,7 @@ TEST_CASE( "Agent self-heals a CRS mismatch from a PROJ error log", "[d17][workf
     REQUIRE( WorkflowIR::validateSemantics( healed.workflow ) );
     bool reprojectPresent = false;
     for ( const NodeFact &node : healed.workflow.nodes )
-        if ( node.operatorId == QLatin1String( "rs:reproject" ) )
+        if ( node.operatorId == QLatin1String( "gdal:reproject" ) )
             reprojectPresent = true;
     REQUIRE( reprojectPresent );
 }
@@ -214,4 +216,66 @@ TEST_CASE( "Unknown error logs produce a typed no-op heal", "[d17][workflow][age
     REQUIRE_FALSE( result.isSuccess );
     REQUIRE( result.injectedRepairRules.isEmpty() );
     REQUIRE( result.workflow == broken ); // untouched on no-op
+}
+
+TEST_CASE( "Compiled chains only name registered operators (source-of-truth)", "[d17][workflow][agent]" )
+{
+    const char *goals[] = {
+        "Extract water bodies using NDWI water index",
+        "Calibrate GF-1 image and compute NDVI index",
+        "Detect change between two bi-temporal scenes",
+        "Pansharpen fusion of GF-1 pan and ms",
+        "Supervised land cover classification of the scene",
+    };
+    // The demo planner and the repair rule table must only emit ids the live
+    // registry serves (WP-B/R6 convergence).
+    QSet<QString> registered;
+    for ( const std::string &name : sicnu::operators::RSOperatorRegistry::instance().operatorNames() )
+        registered.insert( QString::fromStdString( name ) );
+    REQUIRE( registered.size() > 100 ); // sanity: the builtin chain ran
+
+    for ( const char *goal : goals )
+    {
+        AutonomousCompileRequest request;
+        request.userNaturalLanguageGoal = QString::fromLatin1( goal );
+        request.sensorType = QStringLiteral( "GF-1" );
+        const AutonomousCompileResult result = WorkflowOrchestratorTool::compileGoalToWorkflow( request );
+        REQUIRE( result.isSuccess );
+        for ( const NodeFact &n : result.workflow.nodes )
+        {
+            INFO( "goal: " << goal << " node: " << n.nodeId.toStdString()
+                       << " op: " << n.operatorId.toStdString() );
+            REQUIRE( registered.contains( n.operatorId ) );
+        }
+    }
+
+    // The closed repair rule table likewise injects only registered adapters.
+    const WorkflowDocument healed = [] {
+        WorkflowDocument def;
+        NodeFact src;
+        src.nodeId = QStringLiteral( "src" );
+        src.operatorId = QStringLiteral( "rs:test_op" );
+        src.outputPorts = QVector<PortFact>{ PortFact{ QStringLiteral( "output" ), QStringLiteral( "Raster" ),
+                                                       QStringLiteral( "EPSG:4326" ), QStringLiteral( "BOA" ),
+                                                       10.0, 10.0, 1, false } };
+        NodeFact consumer;
+        consumer.nodeId = QStringLiteral( "consumer" );
+        consumer.operatorId = QStringLiteral( "rs:test_op" );
+        consumer.inputPorts = QVector<PortFact>{ PortFact{ QStringLiteral( "input" ), QStringLiteral( "Raster" ),
+                                                           QStringLiteral( "EPSG:32649" ), QStringLiteral( "BOA" ),
+                                                           10.0, 10.0, 1, true } };
+        def.nodes = { src, consumer };
+        def.edges = { EdgeFact{ QStringLiteral( "e" ), QStringLiteral( "src" ), QStringLiteral( "output" ),
+                                QStringLiteral( "consumer" ), QStringLiteral( "input" ) } };
+        const RepairPlan plan = WorkflowRepairEngine::inferRepairs( def );
+        REQUIRE( plan.suggestedActions.size() == 1 );
+        return WorkflowRepairEngine::applyRepairPlan( def, plan );
+    }();
+    for ( const NodeFact &n : healed.nodes )
+    {
+        if ( !n.nodeId.startsWith( QLatin1String( "adapter_" ) ) )
+            continue; // the synthetic fixture nodes carry a placeholder op id
+        INFO( "adapter: " << n.nodeId.toStdString() );
+        REQUIRE( registered.contains( n.operatorId ) );
+    }
 }

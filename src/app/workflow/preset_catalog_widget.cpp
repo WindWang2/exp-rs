@@ -69,14 +69,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s1;
     s1.id = "landsat_import_t1";
     s1.title = "T1 Image Import";
-    s1.operatorId = "gdal:import";
+    s1.operatorId = "rs:landsat_import";
     s1.artifactOnSuccess = "t1_raster";
     s1.uiMeta = { 80.0, 100.0 };
 
     StepDef s2;
     s2.id = "landsat_import_t2";
     s2.title = "T2 Image Import";
-    s2.operatorId = "gdal:import";
+    s2.operatorId = "rs:landsat_import";
     s2.artifactOnSuccess = "t2_raster";
     s2.uiMeta = { 80.0, 300.0 };
 
@@ -134,14 +134,15 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s1;
     s1.id = "dem_import";
     s1.title = "DEM Data Import";
-    s1.operatorId = "gdal:import";
+    s1.operatorId = "io:translate";
     s1.artifactOnSuccess = "dem_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "slope_calc";
     s2.title = "Slope Computation";
-    s2.operatorId = "gdal:slope";
+    s2.operatorId = "rs:terrain_analysis";
+    s2.params["product"] = "slope";
     s2.artifactOnSuccess = "slope_raster";
     s2.uiMeta = { 400.0, 80.0 };
     s2.uiMeta.portAddToMap["slope_raster"] = true;
@@ -155,7 +156,8 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s3;
     s3.id = "hillshade_render";
     s3.title = "Hillshade";
-    s3.operatorId = "gdal:hillshade";
+    s3.operatorId = "rs:terrain_analysis";
+    s3.params["product"] = "hillshade";
     s3.artifactOnSuccess = "hillshade_raster";
     s3.uiMeta = { 400.0, 260.0 };
     s3.uiMeta.portAddToMap["hillshade_raster"] = true;
@@ -187,7 +189,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s1;
     s1.id = "image_import";
     s1.title = "High-Resolution Image Import";
-    s1.operatorId = "gdal:import";
+    s1.operatorId = "io:translate";
     s1.artifactOnSuccess = "image_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
@@ -241,7 +243,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s1;
     s1.id = "landsat_import";
     s1.title = "Landsat Data Import";
-    s1.operatorId = "gdal:import";
+    s1.operatorId = "rs:landsat_import";
     s1.artifactOnSuccess = "image_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
@@ -332,7 +334,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s1;
     s1.id = "carto_import";
     s1.title = "Input Raster";
-    s1.operatorId = "gdal:import";
+    s1.operatorId = "io:translate";
     s1.artifactOnSuccess = "carto_raster";
     s1.uiMeta = { 100.0, 150.0 };
 

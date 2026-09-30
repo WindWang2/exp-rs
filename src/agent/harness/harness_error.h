@@ -148,4 +148,29 @@ Json::Value errorEnvelope( const HarnessError &error );
 /// the harness surface.
 HarnessError normalizeLegacyError( const std::string &legacyCode, const std::string &message );
 
+// --- Surface projection legs (R6 convergence, #1394 item 4) ---------------
+//
+// The code table in harness_error.cpp is THE internal error semantics model
+// (code + category + retry class). Each agent/CLI surface adapter derives
+// its published wire form from that one table through the legs below — no
+// surface keeps a private semantics copy that can drift. The surfaces
+// publish different wire vocabularies BY CONTRACT (CLI: E-n:SYMBOL +
+// CliErrorDetails, docs/headless/README.md; MCP/agent: {success:false,
+// error:{...}} / isError:true results) — those published shapes are
+// unchanged; only their shared derivation is converged here.
+
+/// CLI leg for the OpsDriver session refusal vocabulary (errorDoc codes:
+/// MISSING_ARGS, SEAMS_UNAVAILABLE, INDETERMINATE_STATE, AUTONOMY_*, ...).
+/// Single home of the refusal -> published-exit-code mapping; the `session`
+/// command reads this instead of a private if-chain. Unknown refusals -> 1
+/// (GenericError), unchanged.
+int cliExitCodeForSessionRefusal( const std::string &sessionErrorCode );
+
+/// MCP leg: the tools/call wire code for a legacy spatial-tool code (the
+/// MCP surface's structured vocabulary, R5 #1375). Single home — mcp_server
+/// reads this at the SpatialToolResult boundary; normalizeLegacyError stays
+/// the harness/pi envelope's alias leg. Unknown legacy codes pass through
+/// unchanged.
+std::string mcpToolCodeForLegacy( const std::string &legacyCode );
+
 } // namespace sicnu::agent::harness

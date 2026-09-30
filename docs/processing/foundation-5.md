@@ -55,8 +55,9 @@ model: same values, one owner).
   (retrospective monitoring); a baseline-window variant is future work.
 - ISODATA and logistic-regression classifiers are documented deferrals;
   max-likelihood classification is covered by NormalBayes.
-- `rs:resample`/`rs:align`/`rs:rasterize`/`rs:zonal_stats` remain future
-  work: they wrap or extend the `gdal:` seam and the vector boundary and
-  need their own grid-target contract decision (ADR-worthy).
+- Registered since this note was written: `rs:resample`/`rs:align` (grid
+  seam, `rs_grid_operators.h`) and `rs:rasterize`/`rs:zonal_stats` (vector
+  boundary). The grid-target contract decision landed as the
+  grid-harmonization seam (`grid-and-radiometric-policy.md` §1.3).
 - `rs:clump` is deliberately absent: it is `rs:connected_components` under
   GIS naming; the alias is documented instead of a second implementation.

@@ -21,7 +21,7 @@
         "output_path": "work://case/aligned.tif"
       },
       "tokens": 120,
-      "tool": "rs:co_register"
+      "tool": "rs:align"
     },
     {
       "input": {
@@ -35,7 +35,7 @@
         "output_path": "work://case/change.tif"
       },
       "tokens": 120,
-      "tool": "rs:change_detect"
+      "tool": "rs:change_detection"
     },
     {
       "evidence": "change-map",

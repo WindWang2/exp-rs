@@ -1,6 +1,6 @@
 {
   "allowed_tools": [
-    "rs:train_classifier",
+    "rs:supervised_classification",
     "rs:classify",
     "harness:verify"
   ],

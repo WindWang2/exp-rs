@@ -54,14 +54,22 @@ qint64 tierWorkingSetBytes( const QVector<ConcurrencyTier> &tiers, const Workflo
 
 double WorkflowCostEstimator::operatorComplexity( const QString &operatorId )
 {
-    // Closed coefficient table. Deterministic; unknown ops default to 1.0.
-    if ( operatorId == QLatin1String( "rs:import_raster" ) )
-        return 0.5;
+    // Closed coefficient table over registered operator ids. Deterministic;
+    // unknown ops default to 1.0.
+    if ( operatorId == QLatin1String( "rs:landsat_import" )
+         || operatorId == QLatin1String( "rs:sentinel2_import" )
+         || operatorId == QLatin1String( "rs:modis_import" )
+         || operatorId == QLatin1String( "rs:cn_product_import" )
+         || operatorId == QLatin1String( "rs:gaofen_import" )
+         || operatorId == QLatin1String( "rs:zy3_import" )
+         || operatorId == QLatin1String( "rs:hj_import" ) )
+        return 0.5; // product import / staging
     if ( operatorId == QLatin1String( "rs:spectral_index" ) )
         return 2.0;
-    if ( operatorId == QLatin1String( "rs:spatial_filter" ) )
+    if ( operatorId == QLatin1String( "opencv:gaussian_blur" ) )
         return 9.0; // k x k convolution
-    if ( operatorId == QLatin1String( "rs:reproject" ) )
+    if ( operatorId == QLatin1String( "gdal:reproject" ) || operatorId == QLatin1String( "io:reproject" )
+         || operatorId == QLatin1String( "io:warp" ) )
         return 6.0;
     if ( operatorId == QLatin1String( "rs:resample" ) )
         return 4.0;
@@ -69,11 +77,11 @@ double WorkflowCostEstimator::operatorComplexity( const QString &operatorId )
         return 1.0;
     if ( operatorId == QLatin1String( "rs:atmospheric_correction" ) )
         return 3.0;
-    if ( operatorId == QLatin1String( "rs:threshold" ) )
+    if ( operatorId == QLatin1String( "rs:threshold_raster" ) )
         return 1.0;
-    if ( operatorId == QLatin1String( "rs:gs_fusion" ) )
+    if ( operatorId == QLatin1String( "rs:fusion_gram_schmidt" ) )
         return 12.0;
-    if ( operatorId == QLatin1String( "rs:whittaker_smooth" ) )
+    if ( operatorId == QLatin1String( "rs:temporal_smooth" ) )
         return 5.0;
     return 1.0;
 }

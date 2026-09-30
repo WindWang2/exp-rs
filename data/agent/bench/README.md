@@ -34,6 +34,22 @@ suite report's `pack_digest`) and the reference evaluation digest for
 `optical/ndvi-basic` — after ANY content change, rerun the generator, then
 update the pinned fingerprints and `suite.json.version` in the SAME commit.
 
+## Tool vocabulary
+
+`allowed_tools` teach real agents, so every operator-family id in the pack
+(`rs:*`, `gdal:*`, `io:*`, `opencv:*`, `otb:*`) must resolve in the live
+`RSOperatorRegistry` — pinned by a test in `tests/test_agentbench_corpus.cpp`
+(since v1.1.0, R6). Three documented exemptions, all deliberate:
+
+- `harness:verify` — the closed verify seam; not an operator.
+- `model:run_inference` / `model:run_ensemble_vram` / `map:export_geotiff` —
+  bench-internal fictitious tools of the `model` / `map_delivery` families;
+  the fake harness treats them as opaque strings and no real tool or operator
+  carries these ids.
+- `rs:forbidden_augment` — the recorded-rogue probe. It must stay OFF the
+  real registry (a wandering agent must not be able to actually call it);
+  the pin asserts its absence.
+
 ## Adding a case
 
 1. Add a spec row in the generator; rerun it.

@@ -82,9 +82,9 @@ TEST_CASE( "CRS mismatch alone injects exactly one reproject adapter", "[d17][wo
     const RepairPlan plan = WorkflowRepairEngine::inferRepairs( def );
     REQUIRE( plan.requiresRepair );
     REQUIRE( plan.suggestedActions.size() == 1 );
-    REQUIRE( plan.suggestedActions[0].insertOperatorId == QStringLiteral( "rs:reproject" ) );
+    REQUIRE( plan.suggestedActions[0].insertOperatorId == QStringLiteral( "gdal:reproject" ) );
     REQUIRE( plan.suggestedActions[0].ruleId == QStringLiteral( "rule_crs_auto_reproject" ) );
-    REQUIRE( plan.suggestedActions[0].adapterParameters["target_crs"].toString() == QStringLiteral( "EPSG:32649" ) );
+    REQUIRE( plan.suggestedActions[0].adapterParameters["dstCrs"].toString() == QStringLiteral( "EPSG:32649" ) );
     REQUIRE( plan.suggestedActions[0].adapterParameters["resampling"].toString() == QStringLiteral( "bilinear" ) );
 
     const WorkflowDocument healed = WorkflowRepairEngine::applyRepairPlan( def, plan );
@@ -183,10 +183,38 @@ TEST_CASE( "Resolution gap injects a resample adapter with target cell size", "[
     const RepairPlan plan = WorkflowRepairEngine::inferRepairs( def );
     REQUIRE( plan.suggestedActions.size() == 1 );
     REQUIRE( plan.suggestedActions[0].insertOperatorId == QStringLiteral( "rs:resample" ) );
-    REQUIRE( plan.suggestedActions[0].adapterParameters["target_resolution_x"].toDouble() == 10.0 );
-    REQUIRE( plan.suggestedActions[0].adapterParameters["target_resolution_y"].toDouble() == 10.0 );
+    REQUIRE( plan.suggestedActions[0].adapterParameters["resolution"].toDouble() == 10.0 );
+    REQUIRE( plan.suggestedActions[0].adapterParameters["resampling"].toString() == QStringLiteral( "bilinear" ) );
 
     REQUIRE( WorkflowRepairEngine::inspectContracts( WorkflowRepairEngine::applyRepairPlan( def, plan ) ).isEmpty() );
+}
+
+TEST_CASE( "DataTypeMismatch is reported but has no closed-form repair", "[d17][workflow][repair]" )
+{
+    // No registered operator performs dtype conversion, so the violation is
+    // surfaced without an auto-action (same policy as DimensionMismatch).
+    WorkflowDocument def;
+    def.nodes = {
+        makeNode( QStringLiteral( "table_src" ), {},
+                  { port( QStringLiteral( "output" ), QStringLiteral( "Table" ), QStringLiteral( "*" ),
+                          QStringLiteral( "BOA" ), 10.0, 10.0, 1 ) } ),
+        makeNode( QStringLiteral( "raster_consumer" ),
+                  { port( QStringLiteral( "input" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
+                          QStringLiteral( "BOA" ), 10.0, 10.0, 1, true ) },
+                  {} ),
+    };
+    def.edges = { EdgeFact{ QStringLiteral( "e_dtype" ), QStringLiteral( "table_src" ), QStringLiteral( "output" ),
+                            QStringLiteral( "raster_consumer" ), QStringLiteral( "input" ) } };
+
+    auto violations = WorkflowRepairEngine::inspectContracts( def );
+    REQUIRE( violations.size() == 1 );
+    REQUIRE( violations[0].mismatchType == ContractMismatchType::DataTypeMismatch );
+
+    const RepairPlan plan = WorkflowRepairEngine::inferRepairs( def );
+    REQUIRE( plan.requiresRepair );
+    REQUIRE( plan.violations.size() == 1 );
+    REQUIRE( plan.suggestedActions.isEmpty() );
+    REQUIRE( WorkflowRepairEngine::applyRepairPlan( def, plan ) == def ); // identity — nothing to inject
 }
 
 TEST_CASE( "Wildcard facts and clean pipelines produce no violations", "[d17][workflow][repair]" )
@@ -224,7 +252,7 @@ TEST_CASE( "Compound break (CRS + resolution + radiometric) cascades in rule ord
 
     const RepairPlan plan = WorkflowRepairEngine::inferRepairs( broken );
     REQUIRE( plan.suggestedActions.size() == 4 ); // reproject, resample, calibration, atmosphere
-    REQUIRE( plan.suggestedActions[0].insertOperatorId == QStringLiteral( "rs:reproject" ) );
+    REQUIRE( plan.suggestedActions[0].insertOperatorId == QStringLiteral( "gdal:reproject" ) );
     REQUIRE( plan.suggestedActions[1].insertOperatorId == QStringLiteral( "rs:resample" ) );
     REQUIRE( plan.suggestedActions[2].insertOperatorId == QStringLiteral( "rs:radiometric_calibration" ) );
     REQUIRE( plan.suggestedActions[3].insertOperatorId == QStringLiteral( "rs:atmospheric_correction" ) );

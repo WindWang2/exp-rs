@@ -18,8 +18,8 @@ void pushCrsAction( QVector<RepairAction> &actions, const ContractViolation &vio
 {
     RepairAction action;
     action.ruleId = QStringLiteral( "rule_crs_auto_reproject" );
-    action.insertOperatorId = QStringLiteral( "rs:reproject" );
-    action.adapterParameters = QJsonObject{ { "target_crs", targetCrs }, { "resampling", QStringLiteral( "bilinear" ) } };
+    action.insertOperatorId = QStringLiteral( "gdal:reproject" );
+    action.adapterParameters = QJsonObject{ { "dstCrs", targetCrs }, { "resampling", QStringLiteral( "bilinear" ) } };
     action.targetEdgeId = violation.edgeId;
     actions.append( action );
 }
@@ -50,27 +50,23 @@ void pushRadiometricActions( QVector<RepairAction> &actions, const ContractViola
 void pushResolutionAction( QVector<RepairAction> &actions, const ContractViolation &violation,
                            const QString &expectedSpec )
 {
-    // expectedSpecification is "XxY" (see contract_checker.cpp).
+    // expectedSpecification is "XxY" (see contract_checker.cpp). rs:resample
+    // takes one square-cell "resolution"; a non-square expectation has no
+    // closed-form adapter, so no action is emitted.
     const QStringList parts = expectedSpec.split( QLatin1Char( 'x' ) );
     if ( parts.size() != 2 )
+        return;
+    bool xOk = false;
+    bool yOk = false;
+    const double x = parts[0].toDouble( &xOk );
+    const double y = parts[1].toDouble( &yOk );
+    if ( !xOk || !yOk || !( x > 0.0 ) || !qFuzzyCompare( x, y ) )
         return;
     RepairAction action;
     action.ruleId = QStringLiteral( "rule_resolution_resample" );
     action.insertOperatorId = QStringLiteral( "rs:resample" );
-    action.adapterParameters = QJsonObject{ { "target_resolution_x", parts[0].toDouble() },
-                                            { "target_resolution_y", parts[1].toDouble() },
+    action.adapterParameters = QJsonObject{ { "resolution", x },
                                             { "resampling", QStringLiteral( "bilinear" ) } };
-    action.targetEdgeId = violation.edgeId;
-    actions.append( action );
-}
-
-void pushDataTypeAction( QVector<RepairAction> &actions, const ContractViolation &violation,
-                         const QString &targetType )
-{
-    RepairAction action;
-    action.ruleId = QStringLiteral( "rule_data_type_convert" );
-    action.insertOperatorId = QStringLiteral( "rs:convert_dtype" );
-    action.adapterParameters = QJsonObject{ { "target_data_type", targetType } };
     action.targetEdgeId = violation.edgeId;
     actions.append( action );
 }
@@ -99,8 +95,7 @@ RepairPlan WorkflowRepairEngine::inferRepairs( const WorkflowDocument &def )
                 pushResolutionAction( plan.suggestedActions, violation, violation.expectedSpecification );
                 break;
             case ContractMismatchType::DataTypeMismatch:
-                pushDataTypeAction( plan.suggestedActions, violation, violation.expectedSpecification );
-                break;
+                break; // no closed rule: no registered dtype-conversion operator
             case ContractMismatchType::DimensionMismatch:
                 break; // no closed rule (not emitted today)
         }

@@ -483,7 +483,7 @@ struct ModelEnsembleContract
  * and are not shipped with the repository.
  */
 struct ModelInfo {
-  std::string name;        ///< Unique id, e.g. "sam-building"
+  std::string name;        ///< Unique id, e.g. "sam-buildings-hr"
   // --- Platform 4.0 identity (manifest `id` / `model_version` / `license` /
   // `source` / `manifest_version`). All optional; absent fields keep the
   // documented defaults, so every v1/v2/v3 manifest parses unchanged.

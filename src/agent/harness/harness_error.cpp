@@ -2,7 +2,10 @@
 #include "harness_error.h"
 
 #include "harness_actions.h"
+#include "sdk/exprs/exit_codes.h"
 
+#include <cctype>
+#include <string_view>
 #include <utility>
 
 namespace sicnu::agent::harness {
@@ -259,6 +262,49 @@ HarnessError normalizeLegacyError( const std::string &legacyCode, const std::str
   Json::Value details( Json::objectValue );
   details["legacy_code"] = legacyCode;
   return HarnessError::make( error_codes::kExecutionFailed, message, details );
+}
+
+// --- Surface projection legs (single homes — see harness_error.h) ----------
+
+int cliExitCodeForSessionRefusal( const std::string &code )
+{
+  // The OpsDriver errorDoc refusal vocabulary → published exit code. Moved
+  // verbatim from the `session` command (whose outputs are pinned by
+  // test_cli_agent_ops): argument/unknown-vocabulary refusals, the autonomy
+  // gate family and the journal-verdict family ("unknown is never
+  // resumable") all mean "the session/journal state refuses this operation"
+  // → exit 2; an unavailable execution seam is a missing dependency → 5.
+  if ( code == "MISSING_ARGS" || code == "UNKNOWN_MODE" || code == "UNKNOWN_SESSION" ||
+       code == "UNKNOWN_ACTION" || code == "NO_SESSION" || code == "INVALID_ARGS" ||
+       code.find( "AUTONOMY" ) != std::string::npos )
+    return exprs::exitCodeValue( exprs::ExitCode::ValidationFailure );
+  if ( code == "SEAMS_UNAVAILABLE" )
+    return exprs::exitCodeValue( exprs::ExitCode::MissingDependency );
+  if ( code == "SUBMITTED_RUN_EXISTS" || code == "DUPLICATE_SUBMIT_REFUSED" ||
+       code == "RESUME_PAST_PLAN_SEAM" || code == "SESSION_RESUMABLE_USE_RESUME" ||
+       code == "SESSION_GOAL_MISMATCH" || code == "CORRUPTED_OR_MISSING_JOURNAL" ||
+       code == "INDETERMINATE_STATE" || code == "EMPTY_SESSION" ||
+       code == "RESUME_REJECTED" )
+    return exprs::exitCodeValue( exprs::ExitCode::ValidationFailure );
+  return exprs::exitCodeValue( exprs::ExitCode::GenericError );
+}
+
+std::string mcpToolCodeForLegacy( const std::string &legacyCode )
+{
+  // The spatial tools' lowercase io codes map to the MCP surface's DATA_IO
+  // vocabulary and MODEL_NOT_FOUND to MODEL_NOT_READY (the taxonomy code the
+  // harness envelope also lands on). Moved verbatim from mcp_server's
+  // SpatialToolResult boundary (#644) so the alias exists exactly once.
+  std::string upper;
+  upper.reserve( legacyCode.size() );
+  for ( const char c : legacyCode )
+    upper += static_cast<char>( std::toupper( static_cast<unsigned char>( c ) ) );
+  if ( upper == "LOCAL_FILE_NOT_FOUND" || upper == "GDAL_OPEN_FAILED" ||
+       upper == "PROVIDER_OPEN_FAILED" )
+    return "DATA_IO";
+  if ( upper == "MODEL_NOT_FOUND" )
+    return error_codes::kModelNotReady;
+  return legacyCode;
 }
 
 } // namespace sicnu::agent::harness

@@ -162,17 +162,17 @@ PACK.append(("optical-ndvi-transient", case(
 PACK.append(("optical-redundant-ndvi", case(
     "optical/redundant-ndvi", "optical", "NDVI delivery (redundancy probe)",
     "Deliver NDVI once. Repeated identical computation is waste and is scored.",
-    NDVI_TOOLS + ["rs:pan_sharpen"],
+    NDVI_TOOLS + ["gdal:pansharpen"],
     [inv("sci-verdict", "verdict_is", SCI, ERR, evidence_id="ndvi-raster", verdict="PASS"),
      inv("proc-budget", "budget_within", PROC, WARN)],
     [ev("ndvi-raster", "raster", ["mean", "crs"], "work://case/ndvi.tif")],
-    2, budget(8, 6000), redundant=["rs:pan_sharpen"]),
+    2, budget(8, 6000), redundant=["gdal:pansharpen"]),
     script("optical/redundant-ndvi", NDVI_STEPS + [NDVI_STEPS[0]], NDVI_EXPLAIN), None))
 
 # --------------------------------------------------------- classification
-CLS_TOOLS = ["rs:train_classifier", "rs:classify", "harness:verify"]
+CLS_TOOLS = ["rs:supervised_classification", "rs:classify", "harness:verify"]
 CLS_STEPS = [
-    step("rs:train_classifier", {"labels": "work://case/labels.gpkg"}, {"model_id": "rf-7", "output_path": "work://case/model.json"}),
+    step("rs:supervised_classification", {"training": "work://case/labels.gpkg", "method": "rf"}, {"model_id": "rf-7", "output_path": "work://case/model.json"}),
     step("rs:classify", {"model": "work://case/model.json"}, {"output_path": "work://case/classes.tif", "fields": {"accuracy": 0.87, "classes": 5}}),
     step("harness:verify", {}, {"verdict": "PASS", "output_path": "work://case/classes.tif", "fields": {"accuracy": 0.87}}, evidence="classified-map"),
 ]
@@ -215,10 +215,10 @@ PACK.append(("classification-inefficient-recorded", case(
     2, budget(8, 6000)), None, "recorded-inefficient"))
 
 # ----------------------------------------------------------------- change
-CH_TOOLS = ["rs:co_register", "rs:change_detect", "harness:verify"]
+CH_TOOLS = ["rs:align", "rs:change_detection", "harness:verify"]
 CH_STEPS = [
-    step("rs:co_register", {"pair": ["t1", "t2"]}, {"output_path": "work://case/aligned.tif"}),
-    step("rs:change_detect", {"input": "work://case/aligned.tif"}, {"output_path": "work://case/change.tif", "fields": {"change_score": 0.31}}),
+    step("rs:align", {"pair": ["t1", "t2"]}, {"output_path": "work://case/aligned.tif"}),
+    step("rs:change_detection", {"input": "work://case/aligned.tif"}, {"output_path": "work://case/change.tif", "fields": {"change_score": 0.31}}),
     step("harness:verify", {}, {"verdict": "PASS", "output_path": "work://case/change.tif", "fields": {"change_score": 0.31}}, evidence="change-map"),
 ]
 CH_EXPLAIN = "Co-registered the pair and detected change; evidence change-map."
@@ -228,7 +228,7 @@ PACK.append(("change-bi-temporal-basic", case(
     "Co-register two dates and deliver a change map.",
     CH_TOOLS,
     [inv("sci-verdict", "verdict_is", SCI, ERR, evidence_id="change-map", verdict="PASS"),
-     inv("proc-order", "step_order", PROC, ERR, steps=["rs:co_register", "rs:change_detect"]),
+     inv("proc-order", "step_order", PROC, ERR, steps=["rs:align", "rs:change_detection"]),
      inv("proc-claim", "claim_consistent", PROC, ERR)],
     [ev("change-map", "raster", ["change_score"], "work://case/change.tif")],
     3, budget(10, 8000)), script("change/bi-temporal-basic", CH_STEPS, CH_EXPLAIN), None))
@@ -263,9 +263,9 @@ PACK.append(("change-order-recorded", case(
     3, budget(10, 8000)), None, "recorded-change-clean"))
 
 # --------------------------------------------------------------- temporal
-TMP_TOOLS = ["temporal:smooth", "temporal:gap_fill", "harness:verify"]
+TMP_TOOLS = ["rs:temporal_smooth", "rs:temporal_gap_fill", "harness:verify"]
 TMP_STEPS = [
-    step("temporal:smooth", {"series": "work://case/ndvi-series"}, {"output_path": "work://case/smooth.tif", "fields": {"nodata_fraction": 0.02, "notes": "season profile"}}),
+    step("rs:temporal_smooth", {"series": "work://case/ndvi-series"}, {"output_path": "work://case/smooth.tif", "fields": {"nodata_fraction": 0.02, "notes": "season profile"}}),
     step("harness:verify", {}, {"verdict": "PASS", "output_path": "work://case/smooth.tif", "fields": {"nodata_fraction": 0.02}}, evidence="smooth-series"),
 ]
 TMP_EXPLAIN = "Smoothed the seasonal NDVI series; evidence smooth-series."
@@ -308,7 +308,7 @@ PACK.append(("temporal-gap-fill-transient", case(
      inv("proc-claim", "claim_consistent", PROC, ERR)],
     [ev("smooth-series", "raster", ["nodata_fraction"])],
     3, budget(8, 6000), faults=[fault("transient_failure", 0)]),
-    script("temporal/gap-fill-transient", [dict(TMP_STEPS[0], tool="temporal:gap_fill", on_failure="retry_once"), TMP_STEPS[0], TMP_STEPS[1]], TMP_EXPLAIN), None))
+    script("temporal/gap-fill-transient", [dict(TMP_STEPS[0], tool="rs:temporal_gap_fill", on_failure="retry_once"), TMP_STEPS[0], TMP_STEPS[1]], TMP_EXPLAIN), None))
 
 # ------------------------------------------------------------------ model
 MDL_TOOLS = ["model:run_inference", "harness:verify"]
@@ -429,7 +429,7 @@ TRACES = {
         True, "completed"),
     "recorded-change-clean": trace(
         "change/bi-temporal-basic", "rec-change-001",
-        [tstep(0, "rs:co_register", True), tstep(1, "rs:change_detect", True, payload={"change_score": 0.31}),
+        [tstep(0, "rs:align", True), tstep(1, "rs:change_detection", True, payload={"change_score": 0.31}),
          tstep(2, "harness:verify", True, payload={"verdict": "PASS", "fields": {"change_score": 0.31}})],
         [{"id": "change-map", "kind": "raster", "fields": {"change_score": 0.31}, "verdict": "PASS"}],
         "Co-registered and detected change.",
@@ -467,7 +467,7 @@ def main():
     suite = {
         "schema": SCHEMA_SUITE,
         "suite_id": "rs14-agent-bench-core",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "description": "RS14 starter pack: 24 goal-level agent benchmark cases across six task families, plus 4 recorded-trajectory replays.",
         "cases": suite_entries,
     }

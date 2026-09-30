@@ -2,7 +2,7 @@
   "allowed_tools": [
     "rs:ndvi",
     "harness:verify",
-    "rs:pan_sharpen"
+    "gdal:pansharpen"
   ],
   "case_id": "optical/redundant-ndvi",
   "description": "NDVI delivery (redundancy probe)",
@@ -44,7 +44,7 @@
   ],
   "minimal_steps": 2,
   "redundant_tools": [
-    "rs:pan_sharpen"
+    "gdal:pansharpen"
   ],
   "resource_budget": {
     "max_retries": 1,

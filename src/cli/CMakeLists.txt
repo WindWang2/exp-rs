@@ -47,6 +47,9 @@ target_include_directories(sicnu_cli_agent_ops PUBLIC
 target_link_libraries(sicnu_cli_agent_ops PUBLIC
     Qt6::Core
     Sicnu::agent_ops
+    # R6 convergence (#1394 item 4): the session refusal -> exit-code leg
+    # lives in the internal error model (sicnu_agent/harness_error).
+    sicnu_agent
     sicnu_sdk
 )
 if(TARGET jsoncpp)

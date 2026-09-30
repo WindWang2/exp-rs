@@ -42,7 +42,7 @@
       },
       "success": true,
       "tokens": 90,
-      "tool": "rs:train_classifier"
+      "tool": "rs:supervised_classification"
     },
     {
       "index": 2,

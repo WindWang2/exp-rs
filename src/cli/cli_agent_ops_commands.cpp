@@ -8,6 +8,7 @@
 
 #include "cli_commands.h"
 
+#include "agent/harness/harness_error.h"
 #include "agent_ops/ops_driver.h"
 #include "exprs/exit_codes.h"
 
@@ -181,20 +182,13 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
     // "unknown is never resumable" family (INDETERMINATE_STATE) belongs to
     // the SAME typed family as the corrupted journal — scripts can rely on
     // exit 2 meaning "the session/journal state refuses this operation".
-    int exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError );
-    if ( error == "MISSING_ARGS" || error == "UNKNOWN_MODE" || error == "UNKNOWN_SESSION" ||
-         error == "UNKNOWN_ACTION" || error == "NO_SESSION" || error == "INVALID_ARGS" ||
-         error.find( "AUTONOMY" ) != std::string::npos )
-        exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
-    else if ( error == "SEAMS_UNAVAILABLE" )
-        exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency );
-    else if ( error == "SUBMITTED_RUN_EXISTS" || error == "DUPLICATE_SUBMIT_REFUSED" ||
-              error == "RESUME_PAST_PLAN_SEAM" || error == "SESSION_RESUMABLE_USE_RESUME" ||
-              error == "SESSION_GOAL_MISMATCH" || error == "CORRUPTED_OR_MISSING_JOURNAL" ||
-              error == "INDETERMINATE_STATE" || error == "EMPTY_SESSION" ||
-              error == "RESUME_REJECTED" )
-        exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
-    return io.finish( false, "session", doc, exitCode, {}, error );
+    // R6 convergence (#1394 item 4): the refusal -> exit-code mapping lives
+    // ONCE in the internal error model (harness_error), not in a private
+    // CLI if-chain. The stop_reason CANCELLED/PAUSED holds above stay
+    // user-initiated-exit-4 here.
+    return io.finish( false, "session", doc,
+                      sicnu::agent::harness::cliExitCodeForSessionRefusal( error ), {},
+                      error );
 }
 
 } // namespace sicnu::cli

@@ -3,6 +3,9 @@
   "operatorId": "rs:qa_mask",
   "purpose": "从产品 QA 波段解译云、云影、雪等类别：支持 Landsat QA_PIXEL 位标志、Sentinel-2 SCL 类别码与通用位掩码三种来源，输出 UInt8 二值掩膜（1 = 掩掉）。",
   "whenToUse": "光谱指数与变化检测之前剔除云污染像元；在预处理流程中位于大气校正之前（如 lab.preprocess.optical 流程）。",
+  "assumptions": [
+    "QA 波段语义以产品自带的 quality 层为准：Landsat QA_PIXEL 的位定义随 Collection 版本固定，Sentinel-2 SCL 的类别码由 ESA 定义；source=auto 依赖波段角色烙印的正确性。"
+  ],
   "prerequisitesNote": [
     "输入栅格须携带 QA 波段（产品堆栈烙印 SICNU_BAND_ROLE=scene_classification/qa），或用 qa_band 显式指定 1-based 波段号。"
   ],
@@ -23,10 +26,17 @@
       "misconfigurationConsequence": "位选错时该掩的不掩、不该掩的反被掩；bits=0 直接报参数错误。"
     }
   ],
-  "stateNarrative": { "before": "DN", "after": "Mask" },
+  "stateNarrative": {
+    "before": "DN",
+    "after": "Mask"
+  },
   "skipConsequence": {
     "summary": "云与云影像元混入指数与变化统计，直方图被大气污染扭曲。",
-    "downstreamRoles": ["光谱指数", "变化检测", "时序合成"]
+    "downstreamRoles": [
+      "光谱指数",
+      "变化检测",
+      "时序合成"
+    ]
   },
   "references": [
     {

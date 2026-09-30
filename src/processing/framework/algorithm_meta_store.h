@@ -19,7 +19,7 @@ namespace sicnu::processing {
  * the descriptors the AtomicAlgorithmRegistry already serves.
  */
 struct AlgorithmMetaEntry {
-  std::string id;       ///< Algorithm id, e.g. "rs:inference"
+  std::string id;       ///< Algorithm id, e.g. "rs:infer"
   std::string task;     ///< Task family: segmentation | classification | ...
   std::string input;    ///< Primary input contract, e.g. "raster"
   std::string output;   ///< Primary output contract, e.g. "polygon"

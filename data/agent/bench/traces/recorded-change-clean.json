@@ -29,7 +29,7 @@
       "payload": {},
       "success": true,
       "tokens": 90,
-      "tool": "rs:co_register"
+      "tool": "rs:align"
     },
     {
       "index": 1,
@@ -39,7 +39,7 @@
       },
       "success": true,
       "tokens": 90,
-      "tool": "rs:change_detect"
+      "tool": "rs:change_detection"
     },
     {
       "index": 2,

@@ -21,9 +21,24 @@
       "misconfigurationConsequence": "手工填错源波长会把吸收特征搬到错误的谱位置，重采样结果与目标传感器响应系统性错配。"
     }
   ],
+  "stateNarrative": {
+    "before": "",
+    "after": ""
+  },
   "skipConsequence": {
     "summary": "波段网格不匹配时，高光谱数据无法与光谱库或多光谱产品逐波段对齐比较。",
-    "downstreamRoles": ["光谱库匹配", "跨传感器对比"]
+    "downstreamRoles": [
+      "光谱库匹配",
+      "跨传感器对比"
+    ]
   },
+  "references": [
+    {
+      "title": "Clark & Roush, Reflectance spectroscopy: Quantitative analysis techniques for remote sensing applications",
+      "kind": "paper",
+      "locator": "Journal of Geophysical Research, 89(B7):6329-6340, 1984",
+      "note": "光谱重采样与谱特征分析的定量方法学出处。"
+    }
+  ],
   "teachingNote": "只改波段（波长）网格，不改辐射状态：输入是反射率输出仍是反射率，输入是辐亮度输出仍是辐亮度；本步骤不定义状态转换，其正确性取决于波长元数据的完整性。"
 }
