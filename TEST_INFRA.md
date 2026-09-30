@@ -165,3 +165,20 @@ gates account for that.
    and assert on the median (see `test_workspace_catalog.cpp`). When quoting
    timings in a budget discussion, record build type, sanitizer state, and
    host load — a single Debug number on a loaded host is not attribution.
+6. **Per-process scratch directories** (`tests/support/process_scratch.h`,
+   R6, #1392): tier 1 runs `ctest -j4`, i.e. every case is its own process
+   running alongside three others, so a fixture directory derived from
+   `temp_directory_path()` with a literal name is shared across processes,
+   and each case's opening `remove_all()` deletes its siblings' fixtures
+   mid-write. #1414 hit this in `test_io_canonical_metadata`; the tier-1
+   `-j4` lane surfaced it in `test_io_multidim` (three cases share the
+   `"cube9"` scratch name) and `test_quality_mosaic_operator` (one fixed dir
+   shared by four cases). Use
+   `sicnu_test::processScratchDir( "<prefix>", "<case-name>" )` for any
+   `temp_directory_path()` / `QDir::tempPath()` fixture: it keys the root on
+   the process id and removes it at process exit, so parallel cases cannot
+   touch each other's files and a crashed run leaves nothing behind. Keep the
+   per-case `name` component — a single process running several cases (a
+   plain `./test_x`, or any `-j1` lane) still needs one directory per case.
+   The ~85 remaining fixed-path sites are a burn-down backlog, not a
+   licence to add more.
