@@ -12162,6 +12162,9 @@ target_link_libraries(test_workflow_durability_13 PRIVATE
   Qt6::Core
   Qt6::Network
   jsoncpp
+  # workflow_checkpoint.cpp publishes through the sidecar authority (ADR 0166),
+  # so the light lane links it directly.
+  Sicnu::Platform
 )
 target_include_directories(test_workflow_durability_13 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -12187,6 +12190,8 @@ target_link_libraries(test_workflow_run_lock_r4 PRIVATE
   Qt6::Core
   Qt6::Network
   jsoncpp
+  # Same sidecar-authority link as the durability_13 light lane above.
+  Sicnu::Platform
 )
 target_include_directories(test_workflow_run_lock_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
