@@ -858,10 +858,10 @@ bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsC
     // that stayed JSON-prefixed. The last-good copy the authority rotated
     // after the previous successful save is the recovery channel; consult
     // it before giving up.
+    const std::string lastGoodPath = std::string( sidecarPath.toUtf8().constData() ) +
+                                    sicnu::platform::sidecar::kDefaultLastGoodSuffix;
     const sicnu::platform::sidecar::ReadResult lastGood =
-      sicnu::platform::sidecar::read(
-        sidecarPath.toUtf8().constData() + sicnu::platform::sidecar::kDefaultLastGoodSuffix,
-        "" );
+      sicnu::platform::sidecar::read( lastGoodPath, "" );
     if ( lastGood.source == sicnu::platform::sidecar::ReadSource::Main )
       doc = QJsonDocument::fromJson(
         QByteArray( lastGood.bytes.data(),
