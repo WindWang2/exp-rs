@@ -9,6 +9,11 @@ target_include_directories(sicnu_platform PUBLIC
   $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>
   $<INSTALL_INTERFACE:include>
 )
+# Consumers of the write authority include shared libraries (sicnu_runtime,
+# qgis_analysis, sicnu_workflow, ...). Without PIC on this static archive the
+# thread_local RNG in claimStagedPath() produces a TLS-offset relocation the
+# linker refuses when placing it into a shared object.
+set_target_properties(sicnu_platform PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # sicnu_sdk carries Sicnu::Platform in its installed export set; the
 # authority must be exported alongside it or the SDK package config
