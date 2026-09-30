@@ -430,6 +430,45 @@ TEST_CASE( "Session switch churn: canvas/workspace teardown mid-render, then reo
   }
 }
 
+TEST_CASE( "Repeated canvas settles leave no external-job residue and the compare render re-arms (#1389)",
+           "[lifecycle][r6][settlement][idempotence]" )
+{
+  ensureApp();
+  QgsMapCanvas canvas;
+  configureCanvas( canvas );
+
+  auto layer = std::make_unique<BlockingRenderLayer>( QStringLiteral( "rearm" ) );
+
+  SwipeMapTool tool( &canvas );
+  tool.setCompareLayer( layer.get() );
+  tool.activate();
+  REQUIRE( layer->gate()->waitEntered() );
+  REQUIRE( tool.hasPendingCompareRender() );
+
+  // The settle joins the parked worker; the owner's handler drops the job.
+  canvas.stopRenderingAndSettle();
+  REQUIRE( layer->gate()->canceledDuringRender.load() );
+  REQUIRE_FALSE( tool.hasPendingCompareRender() );
+
+  // Idempotent: once the registry is empty the settle is a no-op — every
+  // existing removal path (display manager, session workspace, window close)
+  // pays nothing when no external job is registered.
+  canvas.stopRenderingAndSettle();
+  REQUIRE_FALSE( tool.hasPendingCompareRender() );
+
+  // The registry was pruned, not poisoned: a fresh compare render registers
+  // again and the next settle still joins it before the layer can die.
+  tool.setCompareLayer( layer.get() );
+  REQUIRE( layer->gate()->waitEntered() );
+  REQUIRE( tool.hasPendingCompareRender() );
+  canvas.stopRenderingAndSettle();
+  REQUIRE_FALSE( tool.hasPendingCompareRender() );
+
+  layer.reset();
+  QTest::qWait( 50 );
+  tool.deactivate();
+}
+
 // WP-J: measurement (recorded in the PR, not CI-gated as an absolute time
 // budget). The R6 settle additions must not add per-operation work when no
 // external job is registered: settleExternalRenderJobs() early-returns on an

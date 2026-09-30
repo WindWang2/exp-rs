@@ -4979,6 +4979,12 @@ target_link_libraries(test_render_job_settlement_r6 PRIVATE
   Qt6::Test
   qgis_core
   qgis_gui
+  # rs_session_map_workspace.h includes display/qgis_display_manager.h and uses
+  # its demandable identifiers, so that companion body must come from the link
+  # closure (build-wiring Rule 11): the embedded workspace TU alone cannot
+  # provide it, and the gate rejects the target until a linked target compiles
+  # qgis_display_manager.cpp.
+  Sicnu::qgis_display
 )
 target_include_directories(test_render_job_settlement_r6 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
