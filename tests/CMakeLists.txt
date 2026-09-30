@@ -94,11 +94,6 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
-    # sicnu_agent's run-summary/verification seam references agent_loop
-    # symbols (sicnu_agent_loop is a static lib nobody links transitively).
-    # WHOLE_ARCHIVE beats the linker's archive-ordering discard (CMake
-    # orders the .a before the .so, where its objects look unneeded).
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -689,10 +684,6 @@ target_link_libraries(test_tool_call_dispatcher PRIVATE
   sicnu_task_center
   sicnu_workflow_runtime
   sicnu_operators
-  # sicnu_agent.so arrives transitively; its verification seam needs the
-  # agent_loop symbols resolved at final link time. WHOLE_ARCHIVE beats the
-  # linker's archive-ordering discard (CMake orders the .a before the .so).
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
 )
 sicnu_link_jsoncpp(test_tool_call_dispatcher)
 target_include_directories(test_tool_call_dispatcher PRIVATE
@@ -2857,8 +2848,6 @@ target_link_libraries(test_output_verifier PRIVATE
   Qt6::Core
   qgis_core
   sicnu_agent
-  # sicnu_agent's verification seam resolves agent_loop symbols at final link.
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
   GDAL::GDAL
 )
 target_include_directories(test_output_verifier PRIVATE
@@ -7985,9 +7974,6 @@ sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
-  # sicnu_agent's verification seam resolves agent_loop symbols at final
-  # link; WHOLE_ARCHIVE beats archive-ordering discard.
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
 )
 # R4 WP-G: the corpus-driven SSE cases consume jsoncpp (adversarial_corpus.h).
 sicnu_link_jsoncpp(test_llm_streaming_client)
