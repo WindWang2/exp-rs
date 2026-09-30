@@ -21,6 +21,9 @@
         window, no unsynced publish).
     C4  path-valued environment reads go through envUtf8 at the boundaries
         this track converged (workspace sandbox root, curriculum root).
+    C5  a forward declaration keeps the definition's elaborated type kind
+        (class/struct) — MSVC decorates the FIRST-seen kind into the mangled
+        name, so a mismatch is a Windows-only LNK2019 (see C5's body).
 
   Nothing here links QGIS/Qt/GDAL — the whole suite builds in the lightest
   lane, next to test_platform_portability.
@@ -28,9 +31,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -61,6 +66,58 @@ bool sourcesAvailable()
                          + "/src/platform/portable.h",
                        std::ios::binary );
   return static_cast<bool>( probe );
+}
+
+std::string trimCopy( const std::string &text )
+{
+  const std::size_t begin = text.find_first_not_of( " \t\r\n" );
+  if ( begin == std::string::npos )
+    return std::string();
+  const std::size_t end = text.find_last_not_of( " \t\r\n" );
+  return text.substr( begin, end - begin + 1 );
+}
+
+/// The line with its trailing `// ...` comment removed.
+std::string codeOf( std::string line )
+{
+  const std::size_t comment = line.find( "//" );
+  if ( comment != std::string::npos )
+    line.erase( comment );
+  return trimCopy( line );
+}
+
+/// Elaborated type specifier (`struct`/`class`) that `text` uses for the
+/// first declaration of `type`, or an empty string when there is none.
+/// `forwardDeclaration` selects between `<kind> <type>;` and a definition
+/// (`<kind> <type>` followed by `final`, a base list, the body's `{`, or
+/// nothing because the brace sits on the next line).
+std::string elaboratedKindOf( const std::string &text, const std::string &type,
+                              bool forwardDeclaration )
+{
+  std::istringstream in( text );
+  std::string line;
+  while ( std::getline( in, line ) )
+  {
+    const std::string code = codeOf( std::move( line ) );
+    for ( const char *kind : { "struct", "class" } )
+    {
+      const std::string prefix = std::string( kind ) + " " + type;
+      if ( code.rfind( prefix, 0 ) != 0 )
+        continue;
+      const std::string rest = trimCopy( code.substr( prefix.size() ) );
+      if ( forwardDeclaration )
+      {
+        if ( rest == ";" )
+          return kind;
+      }
+      else if ( rest.empty() || rest.rfind( "final", 0 ) == 0
+                || rest.rfind( ":", 0 ) == 0 || rest.rfind( "{", 0 ) == 0 )
+      {
+        return kind;
+      }
+    }
+  }
+  return std::string();
 }
 
 } // namespace
@@ -338,4 +395,74 @@ TEST_CASE( "publish clears a stale read-only attribute on Windows before replaci
   INFO( "readonlyClear=" << readonlyClear << " replaceCall=" << replaceCall );
   REQUIRE( readonlyClear < replaceCall );
   REQUIRE( source.find( "SetFileAttributesW", publish ) != std::string::npos );
+}
+
+TEST_CASE( "cross-TU forward declarations keep the definition's elaborated type kind",
+           "[portability][contract][static][mangle]" )
+{
+  if ( !sourcesAvailable() )
+    return;
+
+  struct CrossTUBoundary
+  {
+    const char *forwardHeader;
+    const char *definitionHeader;
+    const char *type;
+    const char *kind;
+  };
+
+  // MSVC decorates the elaborated type kind of the FIRST declaration it saw
+  // (U = struct, V = class) into a function's mangled name. A forward
+  // declaration that disagrees with the definition therefore hands two
+  // translation units two DIFFERENT mangled names for the SAME type, and a
+  // symbol that is plainly defined and already on the link line fails with
+  // LNK2019. GCC and Clang never decorate the kind, so every lane except
+  // Tier 3 Windows links it happily and sees nothing.
+  //
+  // Tier 3 hit exactly this on sicnu_geo_rs.exe:
+  // src/explain/adapters/workflow_projection.h forward-declared
+  // `class sicnu::workflow::WorkflowDocument` while src/workflow/workflow_ir_v2.h
+  // defines it as `struct`, so the definition mangled V while the caller
+  // (src/app/workbench/step_explanation_section.cpp, which sees the struct
+  // first) expected U — C4099 "first seen using 'class' now seen using
+  // 'struct'" in one vcxproj and the mirror-image warning in the other was
+  // the whole root cause. The three explain source interfaces carry the same
+  // disagreement: their C4099 warnings were already in the Tier 3 log
+  // without (yet) costing a link, and each is one by-value parameter away
+  // from doing so.
+  //
+  // The definition's own kind is the authority: the forward declaration has
+  // to match it, not the other way round.
+  const CrossTUBoundary boundaries[] = {
+    { "src/explain/adapters/workflow_projection.h", "src/workflow/workflow_ir_v2.h",
+      "WorkflowDocument", "struct" },
+    { "src/app/workbench/step_explanation_panel.h", "src/explain/explanation_sources.h",
+      "IOperatorKnowledge", "struct" },
+    { "src/app/workbench/step_explanation_panel.h", "src/explain/authored_guidance.h",
+      "IAuthoredGuidance", "struct" },
+    { "src/app/workbench/step_explanation_panel.h", "src/explain/explanation_sources.h",
+      "IExecutionEvidence", "struct" },
+  };
+
+  for ( const CrossTUBoundary &boundary : boundaries )
+  {
+    const std::string forward =
+      repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, boundary.forwardHeader );
+    const std::string definition =
+      repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, boundary.definitionHeader );
+    REQUIRE_FALSE( forward.empty() );
+    REQUIRE_FALSE( definition.empty() );
+
+    const std::string forwardKind =
+      elaboratedKindOf( forward, boundary.type, true );
+    INFO( boundary.forwardHeader << " forward-declares " << boundary.type );
+    REQUIRE_FALSE( forwardKind.empty() );
+    REQUIRE( forwardKind == boundary.kind );
+
+    const std::string definitionKind =
+      elaboratedKindOf( definition, boundary.type, false );
+    INFO( boundary.definitionHeader << " defines " << boundary.type );
+    REQUIRE_FALSE( definitionKind.empty() );
+    REQUIRE( definitionKind == boundary.kind );
+  }
 }
