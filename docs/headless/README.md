@@ -99,6 +99,14 @@ scripts can match errors without parsing prose. Unknown-subcommand errors
 carry the full valid vocabulary in `error_details.expected`
 (e.g. `create|inspect|validate|...`).
 
+This contract is stable: the fields above never change shape. The
+agent/MCP surface uses a different error envelope
+(`{success:false,error:{code,category,…}}`, the HarnessError taxonomy); the
+two are bridged by additive adapters, never by converging this table — the
+rationale, the mapping, and the deprecation-gated path to a future
+`api_version` 4.0 envelope are recorded in
+[docs/adr/0178-cli-error-contract-vs-agent-envelope-adapter.md](../adr/0178-cli-error-contract-vs-agent-envelope-adapter.md).
+
 ## Examples
 
 ```bash

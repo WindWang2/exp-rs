@@ -126,6 +126,9 @@ private:
     /// rel="next" href of the last delivered page ("" when none). Only the
     /// GUI thread touches it; workers read their captured job instead.
     std::string m_continuationUrl;
+    /// Root of the active query — pagination continuations fetch against the
+    /// same root the search started from.
+    std::string m_root;
 
     /// Bounded fetch budget matched to the historical client: the whole
     /// request (not just the connection) dies at 10 s, single attempt — the

@@ -303,6 +303,7 @@ void StacClient::search(const QString &endpoint, const QString &collection,
     // deliberately does NOT bump — pagination continues the same query.
     const quint64 generation = ++m_searchGeneration;
     m_continuationUrl.clear();
+    m_root = endpoint.toStdString();
 
     QUrl endpointUrl(endpoint);
     // Allow endpoint without path scheme form "https://host/stac"
@@ -351,6 +352,7 @@ void StacClient::searchNext()
     // Pagination continues the current query's generation: a newer search()
     // still supersedes it, matching the historical reply-generation check.
     job.generation = m_searchGeneration.load();
+    job.root = m_root;
     job.continuationUrl = m_continuationUrl;
     dispatch(job);
 }
