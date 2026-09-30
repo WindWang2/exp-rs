@@ -1061,8 +1061,12 @@ TEST_CASE( "TaskCenter - OBIA-style batch holds under RSS pressure then drains t
         // Ramp RSS up as tasks pile in; once it crosses the watermark the gate
         // closes and no further tasks launch until some finish and free memory.
         fakeRss.store( static_cast<unsigned int>( 40 + n * 25 ) );
-        while ( !releaseWorkers.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        // Deadline-bounded (#1392): a failed assertion in the case body would
+        // leave the gate closed and this executor waiting for a release that
+        // never comes, so the executor releases itself and the case's own
+        // assertions report the real state instead of the harness timeout.
+        sicnu_test::waitUntil( [&] { return releaseWorkers.load(); }, 60000,
+                               [] { return "obia_inproc:segment gate never released"; } );
         runningTasks.fetch_sub( 1 );
         // Free memory as tasks complete.
         fakeRss.store( static_cast<unsigned int>( 40 + runningTasks.load() * 25 ) );
@@ -1154,8 +1158,10 @@ TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
     engine.registerExecutor( "batch_disabled:task",
         [&releaseWorkers]( const sicnu::jobs::JobRequest &,
                            sicnu::operators::RSOperatorContext & ) {
-            while ( !releaseWorkers.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            // Deadline-bounded (#1392): see the obia_inproc note above.
+            sicnu_test::waitUntil(
+                [&] { return releaseWorkers.load(); }, 60000,
+                [] { return "batch_disabled:task gate never released"; } );
             Json::Value result( Json::objectValue );
             result["output"] = "/tmp/batch_disabled.tif";
             return result;
@@ -1376,8 +1382,11 @@ std::vector<long> saturateEngine(sicnu::TaskCenter &center, sicnu::jobs::JobEngi
         req.algorithmId = "callable:platform_blocker";
         ids.push_back(center.submitJob(
             req, [&release](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
-                while (!release.load() && !ctx.isCancelled())
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                // Deadline-bounded (#1392), cancel-aware: the escape hatch is
+                // preserved verbatim — a cancelled blocker must still leave.
+                sicnu_test::waitUntil(
+                    [&] { return release.load() || ctx.isCancelled(); }, 60000,
+                    [] { return "platform_blocker never released nor cancelled"; } );
                 return Json::Value(Json::objectValue);
             }));
     }

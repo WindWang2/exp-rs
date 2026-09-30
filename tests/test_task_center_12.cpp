@@ -1043,8 +1043,12 @@ TEST_CASE( "Transient auto-retry cancels the dead engine job (no zombie double r
             // Deliberately ignores the cancel flag: the engine's cancel
             // verdict must come from finishSuccess's flag check, not from
             // cooperative exit.
-            while ( !finishAttempt.load( std::memory_order_relaxed ) )
-                QThread::msleep( 10 );
+            // Deadline-bounded (#1392): the executor still never looks at the
+            // flag under test, but it no longer spins forever if the case that
+            // owns `finishAttempt` aborts before opening it.
+            sicnu_test::waitUntil(
+                [&] { return finishAttempt.load( std::memory_order_relaxed ); }, 60000,
+                [] { return "tc12:zombie never saw a finish attempt"; } );
         }
         return Json::Value();
     } );
