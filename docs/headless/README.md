@@ -105,7 +105,7 @@ agent/MCP surface uses a different error envelope
 two are bridged by additive adapters, never by converging this table — the
 rationale, the mapping, and the deprecation-gated path to a future
 `api_version` 4.0 envelope are recorded in
-[docs/adr/0178-cli-error-contract-vs-agent-envelope-adapter.md](../adr/0178-cli-error-contract-vs-agent-envelope-adapter.md).
+[docs/adr/0177-cli-error-contract-vs-agent-envelope-adapter.md](../adr/0177-cli-error-contract-vs-agent-envelope-adapter.md).
 
 ## Examples
 

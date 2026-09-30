@@ -1,4 +1,4 @@
-# ADR 0178: CLI error contract vs the agent/MCP error envelope — adapter first, versioned bump later
+# ADR 0177: CLI error contract vs the agent/MCP error envelope — adapter first, versioned bump later
 
 Status: accepted · Branch `fix/issue-1394-arch-leftovers` · Baseline `origin/master@1e28de8677` · Issue #1394 (item 4)
 
