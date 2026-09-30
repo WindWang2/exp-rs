@@ -1,6 +1,8 @@
 // src/agent/harness/provenance_projection.cpp
 #include "provenance_projection.h"
 
+#include "platform/durable_sidecar.h"
+
 #include "workflow_facts.h"
 
 #include <QFile>

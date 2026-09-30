@@ -1,6 +1,8 @@
 // src/agent/harness/context_checkpoint.cpp
 #include "context_checkpoint.h"
 
+#include "platform/durable_sidecar.h"
+
 #include "../spatial_tools/spatial_tool.h"
 
 #include <optional>
