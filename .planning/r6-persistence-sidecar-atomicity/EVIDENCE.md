@@ -24,6 +24,16 @@ Windows ReplaceFileW same-target transients — every observed failure is typed
 `publish failed`, invariants unconditional: zero torn reads, complete final
 artifact, zero temp residue).
 
+FINAL double-run (post final-review remediation, passes 3 & 4, identical):
+test_portability_source_contract 76/9 ×2 PASS; platform_durable_sidecar 68-69/14
+×2 PASS; mission_runtime_store 98/10 ×2; workflow_checkpoint_cache 1093-1257/45
+×2; fault_registry 31/9 ×2; class_table_widget 58/11 ×2; exprs_plugin_loader
+415/35 ×2; mlops9_evidence (bundle) 98/4 ×2; data_platform_surface (#1405) 154/9
+×2; study_e2e EXIT 0 ×2. Documented environment-native (pre-existing, code
+byte-identical to master): test_mission_context 10/11 (RO-dir POSIX semantics
+cannot be exercised on Windows), test_harness_evidence 7/9 (GDAL GTiff fixture
+verdict variance). test_cli_batch_manifest = POSIX-only lane (popen fixture).
+
 Crash-window matrix covered: WriteTemp/Durability/Publish/LastGood/Verify
 faults, torn-write payload override (verify gate catches), validation refusals
 (EmptyPath/TooLarge), read resilience (Main/LastGood/Missing/Corrupt, faulted

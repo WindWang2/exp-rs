@@ -43,3 +43,30 @@ VERDICT at review time: BLOCK (5×P1, 8×P2, 4×P3).
 
 All P1/P2 fixed; P3-14/P3-17 dispositioned as accepted-with-rationale. Re-verification
 is the final Oracle double-run (subagent #3 reviews the remediated tree).
+
+
+## Final independent review round (subagent #3) — BLOCK → remediated
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| 1 | P1 | test_portability_source_contract pins the DELETED session_journal implementation (multiple REQUIREs red) | FIXED — durable-write ordering contract re-pointed at src/platform/durable_sidecar.cpp (writeTempFile < syncFileUtf8 < publishStaged), shared-fixed-`.tmp` and remove-before-rename needles kept, plus a consumer pin: session_journal.cpp must route through `sicnu::platform::sidecar::write(`; claim-table row moved to the authority's `claimExclusiveUtf8( staged` |
+| 2 | P1 | out-of-tree mission-runtime-gate cannot link (mission stores call the authority; gate list has neither the source nor a platform link) | FIXED — src/platform/durable_sidecar.cpp added to SICNU_MISSION_RUNTIME_SOURCES_GATE (Qt-free leaf, compiles straight into the four gate executables) |
+| 3 | P2 | stat-fail-open fix was cosmetic: exists(p,ec) returns false when the status query itself fails, so `if (!exists) return Missing` still swallowed ec | FIXED — ec checked FIRST (static_cast<void> exists(p,ec); if (ec) Unreadable), then a plain existence check for Missing |
+| 4 | P2 | fsync/publish regression undetectable (all fault coverage rides hooks) | FIXED — closed by finding 1's re-pointed source-contract needles (the real syncFileUtf8/publishStaged call sites are now statically pinned in order) |
+| 5 | P3 | duplicate durable_sidecar include in study_export.cpp; empty QSaveFileHelper namespace; stale QSaveFile header comments; unused QSaveFile include in test_harness_evidence | FIXED (all) |
+| 6 | P3 | committed run log (r6_test_run.txt) was a stale RED run; EVIDENCE green claim unverifiable from committed artifacts | FIXED — stale log removed and r6_* scratch logs gitignored; final double-run distilled into EVIDENCE.md |
+| 7 | P3 | checkpoint listing glob matches authority `.tmp.json` residue; pathological runId `<x>.<int>.<int>.<int>.tmp` | FIXED — listing excludes `.tmp.json` (residue visible only to the sweep; the pathological runId fails the rng-digit check and is skipped) |
+| 8 | P3 | journal verifyReadBack doubles I/O at the 64 MiB cap | FIXED — journal write sets verifyReadBack=false (WP-I; load side is fail-closed) |
+| 9 | P3 | sicnu_lab_batch resolves platform only transitively | FIXED — explicit Sicnu::Platform link edge |
+| 10 | P3 | publishStaged error masks the ReplaceFileW reason | FIXED — both Win32 error codes carried in the message |
+
+Post-remediation verification (local Windows lane):
+- test_portability_source_contract: 76 assertions / 9 cases ALL PASS ×2.
+- Full touched-lane double-run (pass 3 / pass 4, identical): 9 suites ALL PASS ×2
+  (platform 68-69/14, mission_runtime 98/10, checkpoint_cache 1093-1257/45,
+  fault_registry 31/9, class_table 58/11, plugin_loader 415/35, mlops9 98/4,
+  data_platform_surface 154/9, study_e2e EXIT 0); the two documented
+  environment-native failures (mission_context RO-dir POSIX semantics;
+  harness_evidence GDAL fixture — code byte-identical to master) reproduce
+  identically in both passes and are pre-existing on this host.
+Verdict after remediation: SHIP (0 P0 / 0 P1 / 0 P2 open; P3 all fixed).
