@@ -10,6 +10,7 @@
 #include <string>
 
 #include "agent/harness/workflow_ir.h"
+#include "agent/harness/workflow_planner.h"
 
 using namespace sicnu::agent::harness;
 
@@ -259,6 +260,38 @@ TEST_CASE( "Closed vocabularies and derived ids are total and stable", "[workflo
 
   const Json::Value limits = irLimits();
   CHECK( limits["max_nodes"].asInt() == IrLimits::kMaxNodes );
+}
+
+// #1395 residual (agent-harness-r4 review #17): lowerIrToAgentPlan emits one
+// plan step per IR node and the plan it builds is handed straight to the
+// engine-JSON compiler — never re-read through readAgentPlan — so the plan
+// step bound that guards every wire document did not apply on this path.
+// Enforce it here: an IR that would lower into an oversized plan is refused.
+TEST_CASE( "Lowering bounds the plan it builds, on every path", "[workflow_ir]" )
+{
+  WorkflowIr ir;
+  HarnessError error;
+  REQUIRE( readWorkflowIr( minimalIr(), ir, error ) );
+
+  IrNode extra;
+  extra.id = "ndvi_extra";
+  extra.operatorId = "rs:spectral_index";
+  while ( static_cast<int>( ir.nodes.size() ) <= kMaxPlanSteps )
+    ir.nodes.push_back( extra );
+
+  AgentPlan plan;
+  HarnessError lowerError;
+  CHECK_FALSE( lowerIrToAgentPlan( ir, Json::Value( Json::objectValue ), plan, lowerError ) );
+  CHECK( lowerError.code == error_codes::kInvalidPlan );
+  CHECK( lowerError.summary == "Plan exceeds the step bound" );
+
+  // One node below the bound still lowers: the bound refuses, it does not clip.
+  WorkflowIr atBound;
+  REQUIRE( readWorkflowIr( minimalIr(), atBound, error ) );
+  while ( static_cast<int>( atBound.nodes.size() ) < kMaxPlanSteps )
+    atBound.nodes.push_back( extra );
+  CHECK( lowerIrToAgentPlan( atBound, Json::Value( Json::objectValue ), plan, lowerError ) );
+  CHECK( static_cast<int>( plan.steps.size() ) == kMaxPlanSteps );
 }
 
 TEST_CASE( "Canonical JSON round-trips through the reader", "[workflow_ir]" )
