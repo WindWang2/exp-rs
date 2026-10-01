@@ -20,6 +20,7 @@ add_library(sicnu_agent_ops STATIC
   operations_coordinator.cpp
   session_surface.cpp
   ops_driver.cpp
+  task_center_executor.cpp
 )
 
 add_library(Sicnu::agent_ops ALIAS sicnu_agent_ops)
@@ -31,6 +32,8 @@ target_link_libraries(sicnu_agent_ops PUBLIC
   sicnu_agentbench
   sicnu_autonomy
   sicnu_repair_planner
+  sicnu_task_center
+  Qt6::Core
 )
 
 set_target_properties(sicnu_agent_ops PROPERTIES

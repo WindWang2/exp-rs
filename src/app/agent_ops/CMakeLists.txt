@@ -5,6 +5,8 @@
 qt_add_library(sicnu_agent_ops_ui STATIC
   agent_ops_control_center_panel.cpp
   agent_ops_control_center_panel.h
+  agent_ops_control_center_dock.cpp
+  agent_ops_control_center_dock.h
   benchmark_store_writer.cpp
   benchmark_store_writer.h
 )

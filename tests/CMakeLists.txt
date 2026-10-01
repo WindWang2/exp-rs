@@ -10440,7 +10440,29 @@ target_link_libraries(test_agent_ops_core PRIVATE
   Catch2::Catch2WithMain
   sicnu_agent_ops
 )
-sicnu_discover_tests(test_agent_ops_core)
+sicnu_discover_tests(test_agent_ops_core TEST_PREFIX "test_agent_ops_core::")
+
+# Milestone 3: TaskCenterExecutor Seam & Admission Convergence
+add_executable(test_agent_ops_task_center_executor
+  test_agent_ops_task_center_executor.cpp
+)
+target_link_libraries(test_agent_ops_task_center_executor PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_ops
+  sicnu_agent_loop
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_processing
+  sicnu_workflow
+  sicnu_workflow_runtime
+  qgis_core
+  Qt6::Core
+)
+target_include_directories(test_agent_ops_task_center_executor PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_agent_ops_task_center_executor
+  TEST_PREFIX "test_agent_ops_task_center_executor::"
+  PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE
+)
 
 # Agent ops driver: per-session bookkeeping + reconcile + seam gate
 # (Qt-free core, Catch2 only).
@@ -13600,6 +13622,20 @@ target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificStat
 # Science Context Broker & Skill Router (Qt-free; Sicnu::ScienceContext).
 sicnu_add_sdk_test(test_science_context_broker TEST_PREFIX "test_science_context_broker::")
 target_link_libraries(test_science_context_broker PRIVATE Sicnu::ScienceContext)
+
+# 3. Science Context Concurrency & Cache Thread Safety
+add_executable(test_science_context_concurrency
+  test_science_context_concurrency.cpp
+)
+target_link_libraries(test_science_context_concurrency PRIVATE
+  Sicnu::ScienceContext
+  Catch2::Catch2WithMain
+)
+target_include_directories(test_science_context_concurrency PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_science_context_concurrency
+  TEST_PREFIX "test_science_context_concurrency::"
+  PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE
+)
 
 # Science context live-authority probes: broker + real ScientificRecipeRegistry
 # (in-repo pack via CMAKE_SOURCE_DIR) + real GDAL facts collector (io lane).
