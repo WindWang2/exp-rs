@@ -570,9 +570,25 @@ TEST_CASE( "pack manifests are in sync with gen_lab_packs.py (zero diff)",
   const std::string root = sourceRoot();
   REQUIRE( fs::exists( sicnu::labpack::pathFromUtf8( root + "/scripts/gen_lab_packs.py" ) ) );
   const std::string sink = "\"${TMPDIR:-/tmp}/lab_pack_gen_check_stdout.txt\"";
+  // Harness-pinned interpreter first (TEST_INFRA.md #730): the CTest env pins
+  // PYTHONHOME/PYTHONPATH to the build's Python_EXECUTABLE and exports it as
+  // SICNU_PYTHON_EXECUTABLE. Spawning a different python off PATH under that
+  // pin dies with "AssertionError: SRE module mismatch" at `import argparse`
+  // — an environment defect that must never be reported as manifest drift.
+  // PATH candidates remain the fallback for hosts with no pin (python3 first,
+  // then the Windows launcher name).
+  std::vector<std::string> candidates;
+  for ( const char *var : { "SICNU_PYTHON_EXECUTABLE", "PYTHONEXECUTABLE" } )
+  {
+    const char *value = std::getenv( var );
+    if ( value && *value && fs::exists( sicnu::labpack::pathFromUtf8( value ) ) )
+      candidates.emplace_back( value );
+  }
+  candidates.push_back( "python3" );
+  candidates.push_back( "python" );
   int rc = -1;
   bool started = false;
-  for ( const char *python : { "python3", "python" } )
+  for ( const std::string &python : candidates )
   {
     const std::string probe = std::string( python ) + " --version > " + sink + " 2>&1";
     if ( std::system( probe.c_str() ) == 0 )
