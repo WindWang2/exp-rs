@@ -27,7 +27,10 @@ namespace sicnu::grader {
 std::optional<std::string> canonicalizeJson( const Json::Value &value, GraderError &error );
 
 /// Strict parse: rejects trailing garbage; comments are refused (grading
-/// documents are produced by tools, not edited prose).
+/// documents are produced by tools, not edited prose). The comment refusal
+/// is enforced by this module, not by jsoncpp's `allowComments` flag: that
+/// flag only bites on jsoncpp 1.9.6+, so delegating to it would make the
+/// strictness of a grading document depend on the linked libjsoncpp minor.
 std::optional<Json::Value> parseJsonStrict( const std::string &text, GraderError &error );
 
 /// Shortest decimal form that round-trips back to the same double
