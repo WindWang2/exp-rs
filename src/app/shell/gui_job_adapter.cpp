@@ -40,9 +40,20 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
-    m_onSuccess = nullptr;
-    m_onFailure = nullptr;
-    m_onProgress = nullptr;
+    if ( m_onFailure )
+    {
+      auto fail = std::move( m_onFailure );
+      m_onSuccess = nullptr;
+      m_onFailure = nullptr;
+      m_onProgress = nullptr;
+      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ) );
+    }
+    else
+    {
+      m_onSuccess = nullptr;
+      m_onFailure = nullptr;
+      m_onProgress = nullptr;
+    }
   }
   else
   {
@@ -78,9 +89,20 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
-    m_onSuccess = nullptr;
-    m_onFailure = nullptr;
-    m_onProgress = nullptr;
+    if ( m_onFailure )
+    {
+      auto fail = std::move( m_onFailure );
+      m_onSuccess = nullptr;
+      m_onFailure = nullptr;
+      m_onProgress = nullptr;
+      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ) );
+    }
+    else
+    {
+      m_onSuccess = nullptr;
+      m_onFailure = nullptr;
+      m_onProgress = nullptr;
+    }
   }
   else
   {
@@ -115,9 +137,20 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
   m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
-    m_onSuccess = nullptr;
-    m_onFailure = nullptr;
-    m_onProgress = nullptr;
+    if ( m_onFailure )
+    {
+      auto fail = std::move( m_onFailure );
+      m_onSuccess = nullptr;
+      m_onFailure = nullptr;
+      m_onProgress = nullptr;
+      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ) );
+    }
+    else
+    {
+      m_onSuccess = nullptr;
+      m_onFailure = nullptr;
+      m_onProgress = nullptr;
+    }
   }
   else
   {

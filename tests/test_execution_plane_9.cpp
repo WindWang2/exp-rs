@@ -108,6 +108,13 @@ struct CoordinatorFixture9
         engine.setMaxWorkers( 2 );
         coordinator.setCheckpointDirectory( checkpointDir.path() );
     }
+
+    ~CoordinatorFixture9()
+    {
+        auto &engine = sicnu::jobs::JobEngine::instance();
+        engine.shutdownForTests();
+        coordinator.shutdownForTests();
+    }
 };
 
 WorkflowDefinition twoStepDefinition9( const std::string &prefix )
@@ -816,6 +823,7 @@ TEST_CASE( "explain dumps expose admission and run evidence (M7)",
         const auto snap = fx.coordinator.runForPipeline( pipelineId );
         return snap && snap->state() == WorkflowRunState::Completed;
     } ) );
+    fx.coordinator.drainPersists();
     // Data-driven coordinator dump AFTER the run finalized: its flock has
     // been released by finalizeRunLocked, so the count is deterministic.
     REQUIRE( fx.coordinator.explainDump().contains( QLatin1String( "runLocks held: 0" ) ) );

@@ -12,6 +12,7 @@
 #include <QStringList>
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -118,6 +119,14 @@ class WorkflowRunCoordinator : public QObject {
     /// loadCheckpoint (one-shot), still with no m_mutex held. Bounds concurrent
     /// runs()/runForPipeline of a different run against a delayed resume load.
     void setCheckpointLoadDelayForTests( int milliseconds );
+
+    /// Blocks caller until all in-flight background persistRun executions complete
+    /// and m_checkpointIoMutex is unlocked.
+    void drainPersists();
+
+    /// Test teardown helper: disconnects from TaskCenter, drains all in-flight persists
+    /// and queued notifications, and resets internal coordinator maps and sequence trackers.
+    void shutdownForTests();
 
   private:
     /// resumeRun body (#860 review A-F7): every exit path queues
@@ -259,6 +268,9 @@ class WorkflowRunCoordinator : public QObject {
     std::mutex m_checkpointIoMutex;
     std::atomic<int> m_checkpointIoDelayMs{ 0 };
     std::atomic<int> m_checkpointLoadDelayMs{ 0 };
+    std::atomic<int> m_inFlightPersists{ 0 };
+    mutable std::condition_variable m_persistCv;
+    mutable std::mutex m_persistCvMutex;
 };
 
 } // namespace workflow
