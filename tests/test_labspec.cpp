@@ -18,6 +18,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -35,6 +36,24 @@ namespace {
 QString labsRoot()
 {
     return QStringLiteral( CMAKE_SOURCE_DIR );
+}
+
+/// Interpreter that must run the generator (TEST_INFRA.md #730).
+/// The test harness pins PYTHONHOME/PYTHONPATH to the build's
+/// Python_EXECUTABLE and exports it as SICNU_PYTHON_EXECUTABLE. Spawning a
+/// different python3 off PATH runs the pinned stdlib with a mismatched _sre
+/// and dies with "AssertionError: SRE module mismatch" at `import argparse`
+/// — an environment defect that must never be reported as doc drift.
+/// Fall back to PATH only where no harness pin exists.
+QString generatorInterpreter()
+{
+    for ( const char *var : { "SICNU_PYTHON_EXECUTABLE", "PYTHONEXECUTABLE" } )
+    {
+        const QString exe = qEnvironmentVariable( var );
+        if ( !exe.isEmpty() && QFileInfo::exists( exe ) )
+            return exe;
+    }
+    return QStringLiteral( "python3" );
 }
 
 QList<lab::LabSpec> loadShippedLabs( lab::LabLoadResult *resultOut = nullptr )
@@ -163,7 +182,7 @@ TEST_CASE( "Generated lab documentation is in sync (zero diff)", "[labspec][drif
 {
     QProcess gen;
     gen.setWorkingDirectory( labsRoot() );
-    gen.setProgram( QStringLiteral( "python3" ) );
+    gen.setProgram( generatorInterpreter() );
     gen.setArguments( { labsRoot() + QStringLiteral( "/scripts/gen_lab_docs.py" ),
                         QStringLiteral( "--check" ) } );
     gen.start();
