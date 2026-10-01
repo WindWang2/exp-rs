@@ -9,6 +9,7 @@
 #include "dataset/dataset_types.h"
 #include "dataset/feature_table.h"
 #include "dataset/foundry_service.h"
+#include "dataset/label_schema.h"
 #include "dataset/sample.h"
 #include "dataset/sample_catalog.h"
 #include "dataset/split.h"
@@ -28,6 +29,11 @@ using namespace sicnu::experiment;
 
 namespace
 {
+
+/// Id of the label schema the whole chain references. A schema id must be a
+/// real UUID (LabelSchema::validate), so the fixture pins a fixed one and
+/// stores that vocabulary before any annotation is written.
+const QString kChainLabelSchemaId = QStringLiteral( "0b0b0b0b-1111-4222-8333-444444444444" );
 
 struct ChainFixture
 {
@@ -69,12 +75,32 @@ struct ChainFixture
         entry.refId = source.assetId;
         entry.role = QStringLiteral( "image" );
         manifest.entries().append( entry );
-        manifest.labelSchema().schemaId = QStringLiteral( "lc" );
+        manifest.labelSchema().schemaId = kChainLabelSchemaId;
         manifest.labelSchema().version = 1;
         // The fixture declares a schema CRS while its point samples carry no
         // per-sample CRS: the dataset:qa façade must then report the crs
         // category as unknown (#1037 F-1030-P2-crs-pass), never pass.
         manifest.schema().crs = QStringLiteral( "EPSG:32650" );
+
+        // A manifest holds a REFERENCE to a label schema, not its definition:
+        // consumers join labels through the persisted ontology, so the schema
+        // it points at has to exist in the store. Otherwise the schema-aware
+        // fail-fast gate in addAnnotation refuses every coded annotation with
+        // "label schema <id>@<version> not found" — the honest answer for a
+        // ghost reference, which is exactly what this fixture used to write.
+        LabelSchema schema;
+        schema.setSchemaId( manifest.labelSchema().schemaId );
+        schema.setVersion( manifest.labelSchema().version );
+        schema.setName( QStringLiteral( "D19 chain land cover" ) );
+        auto schemaClass = []( const QString &code ) {
+            LabelClass labelClass;
+            labelClass.setStableId( LabelSchemaId::generate().toString() );
+            labelClass.setCode( code );
+            return labelClass;
+        };
+        schema.classes() = { schemaClass( QStringLiteral( "water" ) ),
+                             schemaClass( QStringLiteral( "land" ) ) };
+        REQUIRE( datasetStore.saveLabelSchema( schema ).has_value() );
 
         REQUIRE( datasetStore.createDraftVersion( manifest ).has_value() );
 
@@ -114,7 +140,7 @@ struct ChainFixture
             ann.setTargetSampleId( sampleIds[i] );
             ann.setDatasetVersionId( versionId );
             ann.setRevision( 1 );
-            ann.setLabelSchemaId( QStringLiteral( "lc" ) );
+            ann.setLabelSchemaId( kChainLabelSchemaId );
             ann.setLabelSchemaVersion( 1 );
             ann.setClassCode( i % 2 == 0 ? QStringLiteral( "water" ) : QStringLiteral( "land" ) );
             ann.setSourceType( i == 0 ? AnnotationSourceType::Pseudo : AnnotationSourceType::Human );
@@ -167,7 +193,7 @@ BenchmarkDefinition makeBench( const ChainFixture &fx )
     def.setTaskFamily( BenchmarkTaskFamily::Classification );
     def.setDatasetVersionId( fx.versionId );
     def.setSplitManifestId( fx.splitId );
-    def.setLabelSchemaId( QStringLiteral( "lc" ) );
+    def.setLabelSchemaId( kChainLabelSchemaId );
     def.setLabelSchemaVersion( 1 );
     def.metricNames() = QStringList{ QStringLiteral( "overall_accuracy" ),
                                      QStringLiteral( "kappa" ), QStringLiteral( "macro_f1" ) };
@@ -432,8 +458,12 @@ TEST_CASE( "D19 hermetic LeaveOne*/Temporal configs pin as benchmark modes",
         {
             SplitInput input;
             input.sampleId = QStringLiteral( "x-%1" ).arg( i );
-            input.groupId = ( i < n / 2 ) ? QStringLiteral( "region-a" )
-                                          : QStringLiteral( "region-b" );
+            // THREE atomic groups. Whole-group methods (Temporal, grouped)
+            // hand every group to exactly one role, so a two-group body can
+            // never fill the three non-zero ratios of a temporal holdout —
+            // the engine refuses that degeneracy rather than emitting a
+            // manifest whose test pool is silently empty.
+            input.groupId = QStringLiteral( "region-%1" ).arg( i % 3 );
             input.classCode =
                 ( i % 2 == 0 ) ? QStringLiteral( "water" ) : QStringLiteral( "land" );
             input.year = 2023 + ( i % 3 );
@@ -483,7 +513,7 @@ TEST_CASE( "D19 hermetic LeaveOne*/Temporal configs pin as benchmark modes",
         def.setTaskFamily( BenchmarkTaskFamily::Classification );
         def.setDatasetVersionId( versionId );
         def.setSplitManifestId( split.manifestId() );
-        def.setLabelSchemaId( QStringLiteral( "lc" ) );
+        def.setLabelSchemaId( kChainLabelSchemaId );
         def.setLabelSchemaVersion( 1 );
         def.metricNames() = QStringList{ QStringLiteral( "overall_accuracy" ) };
         def.protocol().setDatasetVersionId( versionId );
