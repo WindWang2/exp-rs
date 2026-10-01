@@ -182,7 +182,17 @@ TEST_CASE("Surface projection invariants", "[surface_parity]")
         INFO("tool: " << tool.name);
         REQUIRE_FALSE(tool.name.empty());
         REQUIRE_FALSE(tool.description.empty());
-        REQUIRE(tool.family == surfaceToolFamily(tool.name));
+        // Family is the text before the ':' for every source except the
+        // meta-protocol table, whose rows always report "meta" — the one
+        // prefixed row (scientific:agent_session) included. That exception
+        // is the contract pinned by test_surface_snapshot.cpp's snapshot
+        // self-validation, so it is honoured here instead of being
+        // contradicted by the other parity gate.
+        const std::string expectedFamily =
+            tool.source == SurfaceToolSource::MetaProtocol
+                ? std::string("meta")
+                : surfaceToolFamily(tool.name);
+        REQUIRE(tool.family == expectedFamily);
         // Schema shape: our own meta/data-platform tables guarantee
         // {"type":"object"} with a properties object. Catalog-sourced schemas
         // are passed through exactly as the owning domain registered them
