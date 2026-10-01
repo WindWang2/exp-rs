@@ -649,7 +649,7 @@
       "name" : "get_tool_help"
     },
     {
-      "description" : "Read a bounded slice of a file artifact (raster sidecar, JSON result, CSV, log) produced by a tool execution. Returns the slice plus the whole-file sha256 and a nextOffset cursor for continuation \u2014 never inline large payloads in tool results; page through them here. Paths follow the server's workspace rule (absolute paths must stay inside SICNU_MCP_WORKSPACE when that variable is set).",
+      "description" : "Read a bounded slice of a file artifact (raster sidecar, JSON result, CSV, log) produced by a tool execution. Returns the slice plus the whole-file sha256 and a nextOffset cursor for continuation \u2014 never inline large payloads in tool results; page through them here. Paths follow the server's workspace rule (paths must stay inside the server workspace: SICNU_MCP_WORKSPACE, default the server's working directory).",
       "family" : "meta",
       "inputSchema" : 
       {
