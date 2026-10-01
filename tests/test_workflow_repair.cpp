@@ -134,6 +134,7 @@ TEST_CASE( "The repair rule table is closed, documented and risk-classed",
 TEST_CASE( "Grid mismatch auto-inserts rs:align onto the reference grid with evidence",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   WorkflowIr ir;
   HarnessError error;
   REQUIRE( readWorkflowIr( changeIr(), ir, error ) );
@@ -198,6 +199,7 @@ TEST_CASE( "Grid mismatch auto-inserts rs:align onto the reference grid with evi
 TEST_CASE( "CRS mismatch auto-inserts io:reproject with the reference CRS",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   WorkflowIr ir;
   HarnessError error;
   REQUIRE( readWorkflowIr( changeIr(), ir, error ) );
@@ -223,6 +225,7 @@ TEST_CASE( "CRS mismatch auto-inserts io:reproject with the reference CRS",
 TEST_CASE( "Repairs are deterministic: same input, byte-identical repaired IR",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = changeIr();
   WorkflowIr a;
   HarnessError error;
@@ -246,6 +249,7 @@ TEST_CASE( "Repairs are deterministic: same input, byte-identical repaired IR",
 TEST_CASE( "Radiometric repairs are prepared decisions, never silent insertions",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "intent": "ndvi",
@@ -277,6 +281,7 @@ TEST_CASE( "Radiometric repairs are prepared decisions, never silent insertions"
 TEST_CASE( "SAR DN calibration without coefficients is refused with missing facts",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "intent": "sar",
@@ -323,6 +328,7 @@ TEST_CASE( "SAR DN calibration without coefficients is refused with missing fact
 TEST_CASE( "Science-changing opportunities and dataset choices stay decisions",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   // Quality masks observed on an optical NDVI consumer: opportunity refusal.
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
@@ -368,6 +374,7 @@ TEST_CASE( "Science-changing opportunities and dataset choices stay decisions",
 TEST_CASE( "Repair without expectations.output_dir refuses instead of guessing paths",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = changeIr();
   doc.removeMember( "expectations" );
   WorkflowIr ir;
@@ -392,6 +399,7 @@ TEST_CASE( "Repair without expectations.output_dir refuses instead of guessing p
 TEST_CASE( "analyzeRepairAnalyze converges: repaired IR re-analyzes clean",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   WorkflowIr ir;
   HarnessError error;
   REQUIRE( readWorkflowIr( changeIr(), ir, error ) );
