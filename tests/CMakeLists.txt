@@ -12142,6 +12142,9 @@ foreach(_d17_embeds_coordinator
     test_workflow_checkpoint_cache
     test_d17_workflow_pipeline_e2e)
   target_compile_definitions(${_d17_embeds_coordinator} PRIVATE sicnu_workflow_EXPORTS)
+  # pipeline_run_coordinator.cpp publishes checkpoint/provenance through the
+  # sidecar authority (ADR 0166) -- same direct link as the light-lane suites.
+  target_link_libraries(${_d17_embeds_coordinator} PRIVATE Sicnu::Platform)
 endforeach()
 
 # --- Track 13 (workflow durability): Engine-2.0 lineage envelope, checkpoint
