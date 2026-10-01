@@ -4,7 +4,7 @@ Contract (from brief WP-B/WP-F): every call site gets exactly one verdict —
 `退役` (root cause fixed + defense removed + double-run green) / `保留` (root cause named, why-not-this-round, retirement condition) /
 `语义保留` (not an atexit-defense: semantic exit, documented). No verdict may just repeat the old comment; each row must add root-cause id (DECISIONS A-n), retirement condition, and verification commit.
 
-Baseline: 30 real call sites in 28 files + 1 leak point (`test_view_link.cpp:84`) = **31 adjudication rows**. Count can grow (new sites discovered), never shrink.
+Baseline: 30 real call sites in 28 files + 1 leak point (test_view_link.cpp, originally :84; the #1414 re-arm made it a real call site at :102) = **31 adjudication rows**. Count can grow (new sites discovered), never shrink.
 
 | # | file:line | family | root cause (A-n) | verdict | condition / reason | commit |
 |---|---|---|---|---|---|---|
@@ -38,7 +38,7 @@ Baseline: 30 real call sites in 28 files + 1 leak point (`test_view_link.cpp:84`
 | 28 | test_chunk_resume_11.cpp:115 | injection | — | 语义保留 | same | |
 | 29 | test_chunk_resume_11.cpp:128 | injection | — | 语义保留 | same | |
 | 30 | tests/support/offline_probe.h:254 | probe | — | 语义保留 | `_Exit(77)` = probe subprocess marker exit; used as inter-process contract, not teardown masking | |
-| 31 | test_view_link.cpp:84 (leak, no `_Exit` on master) | leak | A-4 | 退役 | NO listener (own main retained): scoped stack QgsApplication destroyed after exitQgis() and before glibc exit — production ordering (main.cpp:622-635 shape); commit 9c3bc4bb2; double-run green ×2 | 9c3bc4bb2 | #1319/#1335 precedent; retire via ordered teardown + heap-owned QgsApplication | |
+| 31 | test_view_link.cpp:102 | atexit | A-1/A-4 | 退役 | Re-adjudicated 2026-10-01: the 9c3bc4bb2 scoped-app retirement was re-armed by #1414 (CI one-case-per-process atexit crash); now retired at the root with the shared TeardownListener + heap-owned QgsApplication (support/qt_lifecycle.h) — deferred-delete drain → exitQgis() → delete app, all at testRunEnded before glibc exit() touches the Q_GLOBAL_STATIC cache guards (DECISIONS §6 chain). Local proof: all 10 cases green one-process-per-case, whole-suite green, 3 fully parallel per-case rounds green, both red variants (scoped ±exitQgis, no defense) also crash-free on the teardown-identical QGIS libs (USE_THREAD_LOCAL unset → QThreadStorage branch local + CI). Branch fix/view-link-exit-retirement; CI double-run is the behavioral proof | fix/view-link-exit-retirement | #1395 item 10; #1414 re-arm superseded | |
 
 Rolling counts: **退役 27 / 语义保留 4 / 保留 0** (31/31 adjudicated). Retirement floor (≥8) exceeded. Per-row double-run evidence in EVIDENCE.md §3.
 
