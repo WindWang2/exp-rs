@@ -216,6 +216,8 @@ private:
     /// releases the OS handles under the SAME exchange-winner discipline
     /// killProcess documents (exactly one closer — concurrent requesters can
     /// never double-close a recycled handle). True when death was confirmed.
+    /// POSIX ECHILD counts as confirmed: an auto-reaping embedding process
+    /// (SIGCHLD ignored) collects no status, but the child is gone.
     bool confirmProcessDeath();
     /// Shared timeout escalation: per-id cancel frame, bounded grace, then
     /// either direct kill (sole in-flight request) or poison (peers still

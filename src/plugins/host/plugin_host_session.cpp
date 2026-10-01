@@ -743,7 +743,16 @@ bool PluginHostProcessSession::confirmProcessDeath()
     if ( pid > 0 )
     {
         int status = 0;
-        dead = ::waitpid( pid, &status, WNOHANG ) == pid;
+        const pid_t probe = ::waitpid( pid, &status, WNOHANG );
+        // ECHILD: the embedding process auto-reaps its children (SIGCHLD
+        // ignored / SA_NOCLDWAIT — a disposition inherited across exec from
+        // some CI runners). The worker is GONE even though no exit status
+        // can be collected; external_process.cpp reports the same situation
+        // honestly. Treating it as "alive" pinned mProcessAlive true
+        // forever: isAlive() kept vouching for a dead worker, the proxy
+        // never entered recovery, and the restart counter never moved
+        // (restartCount=0 with the budget reported exhausted, CI on #1415).
+        dead = probe == pid || ( probe < 0 && errno == ECHILD );
     }
 #endif
     if ( !dead )
@@ -938,10 +947,22 @@ IpcChannel::Outcome PluginHostProcessSession::requestImpl(
     }
     else if ( outcome.status == IpcChannel::Outcome::Status::ChannelClosed && mProcessAlive )
     {
-        // Channel EOF while we believed the process lived: confirm death.
+        // Channel EOF is death evidence ON ITS OWN: the worker holds its IPC
+        // fds (3/4) for its entire lifetime, so a closed channel means the
+        // process is dead, dying, or unrecoverable. The waitpid(WNOHANG)
+        // probe inside confirmProcessDeath has an EOF-before-zombie window —
+        // the dying task closes its fds in exit_files BEFORE it becomes
+        // reapable in exit_notify, and under load that window stretches (the
+        // starved task is descheduled mid-exit). Trusting the probe here
+        // pinned mProcessAlive true: isAlive() kept reporting a dead worker
+        // as alive, the proxy spun on the dead channel and refused with
+        // "restart policy exhausted" WITHOUT ever calling respawn() —
+        // restartCount stayed 0 while the budget read exhausted (CI #1415).
+        // killProcess is ESRCH-safe and reaps via blocking waitpid — bounded,
+        // because the task is already committed to exit or is SIGKILLed here.
         confirmProcessDeath();
-        if ( !mProcessAlive )
-            killProcess( "confirmed dead after channel close" );
+        if ( mProcessAlive )
+            killProcess( "channel closed: worker dead or dying" );
     }
     return outcome;
 }
@@ -1004,10 +1025,12 @@ IpcChannel::Outcome PluginHostProcessSession::requestControlRawImpl(
     }
     else if ( outcome.status == IpcChannel::Outcome::Status::ChannelClosed && mProcessAlive )
     {
-        // Channel EOF while we believed the process lived: confirm death.
+        // Channel EOF is death evidence on its own — see the identical
+        // handler in requestImpl above (EOF-before-zombie window in the
+        // WNOHANG probe; CI #1415).
         confirmProcessDeath();
-        if ( !mProcessAlive )
-            killProcess( "confirmed dead after channel close" );
+        if ( mProcessAlive )
+            killProcess( "channel closed: worker dead or dying" );
     }
     return outcome;
 }

@@ -1433,6 +1433,13 @@ TEST_CASE( "restart exhaustion keeps the host alive and the state honest",
         INFO( "restartCount=" << restartCount << " maxRestarts="
                                   << policy.get( "maxRestarts", 0 ).asInt() );
         REQUIRE( restartCount >= 1 ); // at least one bounded respawn happened
+        // Honest liveness (the other half of "state honest"): the budget is
+        // spent, so the last worker's crash must be VISIBLE — a session that
+        // still claims alive here is the stuck-liveness bug from CI #1415
+        // (EOF-before-zombie window left isAlive() true for a dead worker).
+        const Json::Value &entry = snapshot[ "plugins" ][ kPluginId ];
+        REQUIRE( entry.isObject() );
+        CHECK( entry.get( "workerAlive", true ).asBool() == false );
     }
 
     // The reload path is the operator: after the policy exhausted, unload +
@@ -1447,6 +1454,71 @@ TEST_CASE( "restart exhaustion keeps the host alive and the state honest",
     REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
     REQUIRE( registry.loadedPluginIds().empty() );
 }
+
+#ifndef _WIN32
+TEST_CASE( "auto-reaped worker death still drives recovery and the restart counter",
+           "[hostprocess][crash][restart-exhaustion][p12][regression]" )
+{
+    // Regression for the CI failure on #1415 (restartCount=0 with the budget
+    // reported exhausted). Two environment-dependent paths pinned the
+    // session's liveness flag true for a DEAD worker, so the proxy never
+    // entered recovery and respawn() never incremented the counter:
+    //   1. EOF-before-zombie: a dying task closes its IPC fds (channel EOF)
+    //      in exit_files BEFORE it becomes reapable in exit_notify; under
+    //      load the window stretches, and waitpid(WNOHANG)==0 was trusted as
+    //      "still alive".
+    //   2. Auto-reap: when the embedding process ignores SIGCHLD (a
+    //      disposition inherited across exec from some CI runners), the
+    //      kernel reaps the worker instantly and waitpid() fails with
+    //      ECHILD — also treated as "still alive".
+    // Path 2 is forced DETERMINISTICALLY here by ignoring SIGCHLD for the
+    // duration of this case; the fix (ECHILD = dead, EOF = death evidence)
+    // must keep recovery — and the counter — working regardless.
+    struct SigchldAutoReapGuard
+    {
+        struct sigaction previous;
+        SigchldAutoReapGuard()
+        {
+            struct sigaction action = {};
+            action.sa_handler = SIG_IGN;
+            sigemptyset( &action.sa_mask );
+            action.sa_flags = SA_NOCLDWAIT;
+            ::sigaction( SIGCHLD, &action, &previous );
+        }
+        ~SigchldAutoReapGuard() { ::sigaction( SIGCHLD, &previous, nullptr ); }
+    } const sigchldGuard;
+
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // The crash kills the worker; with auto-reap no waitpid() status can
+    // EVER be collected for it. Pre-fix the session stayed "alive", the call
+    // spun on the dead channel and refused WITHOUT a respawn (restartCount
+    // stayed 0); post-fix exactly one bounded recovery runs.
+    Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+    REQUIRE( crash["__operatorError"].asBool() );
+    REQUIRE( crash["code"].asString() == "4002" ); // typed E6005 refusal
+
+    {
+        const Json::Value snapshot = stack.runtime->diagnosticsSnapshot();
+        const Json::Value &policy = snapshot[ "restartPolicy" ];
+        REQUIRE( policy.isObject() );
+        INFO( "restartCount=" << policy.get( "restartCount", 0 ).asInt() );
+        REQUIRE( policy.get( "restartCount", 0 ).asInt() >= 1 );
+    }
+
+    // Recovery was real, not just accounted: the respawned worker serves
+    // (the echo call recovers once more if the re-executed crash took the
+    // fresh worker down too).
+    Json::Value echo = runOperator( stack, "test:iso-echo", Json::Value() );
+    REQUIRE( echo["success"].asBool() );
+
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+    REQUIRE( registry.loadedPluginIds().empty() );
+}
+#endif
 
 TEST_CASE( "concurrent close of a live worker leaves no orphan entries",
            "[hostprocess][lifecycle][concurrency][p12]" )
