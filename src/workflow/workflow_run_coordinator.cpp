@@ -244,8 +244,24 @@ Json::Value substituteJsonPlaceholders( const Json::Value &value,
 
 WorkflowRunCoordinator &WorkflowRunCoordinator::instance()
 {
-    static WorkflowRunCoordinator s_instance;
-    return s_instance;
+    // Intentionally leaked (never destroyed): the DirectConnection to
+    // TaskCenter::taskUpdated runs onTaskUpdated on JobEngine worker threads,
+    // and TaskCenter anchors JobEngine's construction BEFORE its own
+    // (task_center.cpp, #1357 exit-phase family), so workers stay live until
+    // ~TaskCenter — which exit() calls only AFTER this static's destructor
+    // would run (TaskCenter is constructed first, e.g. via
+    // RsPipelineRunner::setCatalog, so it is destroyed later). A worker
+    // folding a late transition during/after member destruction wrote into
+    // the freed m_latestPersistSeq nodes: ASAN reports heap-use-after-free in
+    // capturePersistLocked from ~WorkflowRunCoordinator at exit(), and
+    // non-ASAN builds abort with glibc "corrupted double-linked list" /
+    // "tcache_thread_shutdown(): unaligned tcache chunk detected" AFTER all
+    // test assertions pass (R6 CI teardown aborts in test_pipeline_runner /
+    // the async agent-executor suite). Process-lifetime ownership removes
+    // the destruction race entirely — the same idiom as
+    // worker_execution_route.cpp's g_pool.
+    static WorkflowRunCoordinator *s_instance = new WorkflowRunCoordinator();
+    return *s_instance;
 }
 
 WorkflowRunCoordinator::WorkflowRunCoordinator()
@@ -257,6 +273,9 @@ WorkflowRunCoordinator::WorkflowRunCoordinator()
     processing::installExecutionEnvironmentPins();
 }
 
+// Never runs for the process-wide singleton (instance() leaks it on purpose —
+// see the comment there); kept for completeness should a non-singleton
+// instance ever be introduced.
 WorkflowRunCoordinator::~WorkflowRunCoordinator() = default;
 
 void WorkflowRunCoordinator::setCheckpointDirectory( const QString &directory )
