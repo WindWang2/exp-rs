@@ -159,6 +159,9 @@ TEST_CASE( "classification promotion maps raw values to class codes",
         const auto tips = fx.store.annotationsOfSample( sample.sampleId() );
         REQUIRE( tips.size() == 1 );
         promotedCodes.append( tips.first().classCode() );
+        // The class code is ontology-backed: the annotation names the schema
+        // that governs it, so a consumer can always resolve it.
+        CHECK( tips.first().labelSchemaId() == schema.schemaId() );
         // Provenance is mandatory: producing asset + source type.
         CHECK( sample.provenance().value( QStringLiteral( "producing_asset" ) )
                    .toObject()
@@ -203,6 +206,44 @@ TEST_CASE( "promotion refuses unmapped raw values and unknown classes",
         promoter.promoteClassification( fx.versionId, fx.source(), badRules, { known }, &schema );
     REQUIRE( !unknown.has_value() );
     CHECK( unknown.diagnostics().first().code == QStringLiteral( "dataset.promotion_unknown_class" ) );
+}
+
+TEST_CASE( "class-coded promotion without a schema is refused", "[promotion][classification]" )
+{
+    DraftFixture fx;
+    SamplePromoter promoter( fx.store );
+
+    QVector<ClassifiedRegion> regions;
+    ClassifiedRegion region;
+    region.rawValue = 1;
+    region.geometryWkt = QStringLiteral( "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))" );
+    regions.append( region );
+
+    // No target schema: no ontology can back the class code, so the promotion
+    // refuses rather than storing an annotation nothing can join.
+    const auto refused = promoter.promoteClassification(
+        fx.versionId, fx.source(), { { 1, QStringLiteral( "water" ) } }, regions );
+    REQUIRE( !refused.has_value() );
+    CHECK( refused.diagnostics().first().code ==
+           QStringLiteral( "dataset.promotion_schema_required" ) );
+
+    const auto schema = twoClassSchema();
+    const auto first = promoter.promoteClassification(
+        fx.versionId, fx.source(), { { 1, QStringLiteral( "water" ) } }, regions, &schema );
+    REQUIRE( first.has_value() );
+    // Persisting the governing vocabulary is idempotent: the second promotion
+    // succeeds instead of conflicting with its own schema.
+    const auto second = promoter.promoteClassification(
+        fx.versionId, fx.source(), { { 1, QStringLiteral( "water" ) } }, regions, &schema );
+    REQUIRE( second.has_value() );
+
+    // A pure-geometry annotation carries no class code and needs no schema.
+    AnnotationPromotion geometry;
+    geometry.targetSampleId = fx.samples.first().sampleId();
+    const auto geometryOk =
+        promoter.promoteAnnotations( fx.versionId, fx.source(), { geometry } );
+    REQUIRE( geometryOk.has_value() );
+    CHECK( geometryOk.value().annotationsWritten == 1 );
 }
 
 TEST_CASE( "promotion writes only into draft versions", "[promotion][immutability]" )
@@ -253,6 +294,27 @@ TEST_CASE( "segmentation and annotation promotion record provenance",
     const auto annotated = promoter.promoteAnnotations( fx.versionId, fx.source(), annotations, &schema );
     REQUIRE( annotated.has_value() );
     CHECK( annotated.value().annotationsWritten == 1 );
+
+    // Both the object's own annotation and this one name the governing
+    // ontology, so every stored class code stays resolvable.
+    const auto existingTips = fx.store.annotationsOfSample( existingId );
+    REQUIRE( existingTips.size() == 1 );
+    CHECK( existingTips.first().labelSchemaId() == schema.schemaId() );
+    CHECK( existingTips.first().classCode() == QStringLiteral( "water" ) );
+
+    const auto page = fx.store.samplesPage( fx.versionId, 0, 500 );
+    REQUIRE( page.has_value() );
+    int objectSamples = 0;
+    for ( const auto &sample : page.value().second )
+    {
+        if ( sample.kind() != SampleKind::Object )
+            continue;
+        ++objectSamples;
+        const auto segTips = fx.store.annotationsOfSample( sample.sampleId() );
+        REQUIRE( segTips.size() == 1 );
+        CHECK( segTips.first().labelSchemaId() == schema.schemaId() );
+    }
+    CHECK( objectSamples == 1 );
 
     // Annotation onto a sample that is not in the version is refused.
     AnnotationPromotion ghost;
