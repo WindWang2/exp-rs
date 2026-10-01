@@ -5,6 +5,7 @@
 
 #include "artifact_gc.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -674,7 +675,15 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     }
     persistRun( std::move( postSubmitPersist ) );
     if ( persistFinalize )
+    {
         persistRun( std::move( finalizePersist ) );
+        // The terminal checkpoint (and any history/ archive sweep) is durable
+        // now: release the run lock + reverse map only at this point, never
+        // inside finalizeRunLocked — releasing earlier reopens the window
+        // where a concurrent resume loads the stale non-terminal checkpoint
+        // and re-executes a finished run.
+        releaseRunOwnership( freshRunId );
+    }
     // The registration block may have folded fast transitions (even a full
     // finalize) while m_mutex was held — their notifications drain here,
     // outside the lock, before the pipeline id is handed to the caller.
@@ -720,6 +729,7 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     PersistRequest foldPersist;
     PersistRequest finalizePersist;
     bool persistFinalize = false;
+    std::string finalizedRunId; // runId of the finalized run, for the post-persist handover
     {
     std::lock_guard<std::mutex> lock( m_mutex );
 
@@ -782,11 +792,19 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
         finalizePersist = capturePersistLocked(
             run, run->state() == WorkflowRunState::Completed );
         persistFinalize = true;
+        finalizedRunId = run->runId();
     }
     }
     persistRun( std::move( foldPersist ) );
     if ( persistFinalize )
+    {
         persistRun( std::move( finalizePersist ) );
+        // Terminal checkpoint durable: release the run lock + reverse map only
+        // now (finalizeRunLocked keeps m_locksByRunId alive exactly this long)
+        // so a concurrent resumeRun cannot flock the run in the window while
+        // the stale non-terminal checkpoint is still what loadCheckpoint sees.
+        releaseRunOwnership( finalizedRunId );
+    }
     // Lifecycle-safe eventing (#860): the fold's m_mutex scope ENDS above;
     // every queued notification drains strictly OUTSIDE the lock. (The
     // in-lock drain variant self-deadlocks the non-recursive mutex — caught
@@ -831,14 +849,50 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
     // Checkpoint IO, ArtifactGC and archive run AFTER m_mutex drops via
     // persistRun (issue #931). The caller captures a PersistRequest with
     // sweepAndArchive when this run completed.
-    // The run is terminal: whoever acquires the run lock next may resume or
-    // reconcile it. (Erasing the shared_ptr releases the flock.)
-    m_locksByRunId.erase( run.runId() );
+    // The run lock is deliberately NOT released here: the terminal state
+    // above is in-memory only until the caller's persistRun lands. Releasing
+    // the flock inside this (m_mutex-held) roll-up lets a concurrent
+    // resumeRun acquire it in that window, load the still-stale
+    // non-terminal checkpoint, reconcile it to Interrupted and re-execute a
+    // run that already finished. The caller releases ownership via
+    // releaseRunOwnership once the terminal checkpoint is durable.
+    // m_runsByPipeline retains the (terminal) run for runs()/explainRun.
+    (void)pipelineId;
+}
+
+void WorkflowRunCoordinator::releaseRunOwnership( const std::string &runId )
+{
+    // Companion to finalizeRunLocked: the ownership record (run-lock
+    // shared_ptr + reverse pipeline map entry) is dropped here, AFTER the
+    // caller persisted the terminal checkpoint. The erase releases the flock
+    // (the shared_ptr is the last handle), so from this point on a
+    // concurrent resumeRun either refuses at the state wall (terminal
+    // checkpoint on disk) or with "No checkpoint for run" (Completed runs are
+    // archived by the finalize sweep). It must NOT be called with m_mutex
+    // held — it takes m_mutex itself, and the lock erase must be the point
+    // where the ownership handover becomes visible atomically.
+    std::lock_guard<std::mutex> lock( m_mutex );
+    m_locksByRunId.erase( runId ); // destructor releases the flock
     // #1097: drop the reverse map so a Failed/Canceled run can be resumed in
     // the same long-lived process (resume refuses "already tracked" otherwise).
-    // m_runsByPipeline retains history for runs()/explainRun.
-    m_pipelineByRunId.erase( run.runId() );
-    (void)pipelineId;
+    m_pipelineByRunId.erase( runId );
+}
+
+bool WorkflowRunCoordinator::finalizeInFlight( const std::string &runId ) const
+{
+    // True only for THIS process's finalize window: we hold the run lock (the
+    // map is only populated by locks this process acquired) and the tracked
+    // run has already reached its terminal state. releaseRunOwnership drops
+    // the lock right after the terminal checkpoint lands, so a resumer that
+    // observed the terminal state can wait for the handover instead of being
+    // refused for a transient in-memory-only window.
+    std::lock_guard<std::mutex> lock( m_mutex );
+    if ( m_locksByRunId.count( runId ) == 0 )
+        return false;
+    for ( const auto &entry : m_runsByPipeline )
+        if ( entry.second && entry.second->runId() == runId )
+            return isTerminalRunState( entry.second->state() );
+    return false;
 }
 
 WorkflowRunCoordinator::RecoveryReport WorkflowRunCoordinator::recoverAtStartup( bool autoResume )
@@ -924,7 +978,36 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
         WorkflowRunLock::lockPathForRun( checkpointDirectory(), runId ) );
     {
         QString heldByPid;
-        const WorkflowRunLock::TryResult acquired = runLock->tryAcquire( &heldByPid );
+        WorkflowRunLock::TryResult acquired = runLock->tryAcquire( &heldByPid );
+        if ( acquired != WorkflowRunLock::TryResult::Acquired )
+        {
+            // A finalize in flight in THIS process holds the run lock until
+            // its terminal checkpoint is durable (finalizeRunLocked keeps the
+            // lock; releaseRunOwnership drops it after persistRun). A resume
+            // that already observed the terminal state must not be refused
+            // for that transient in-memory-only window: wait, bounded, for
+            // the ownership handover, then re-evaluate at the state wall.
+            // A genuinely live run — or a holder in another process — still
+            // refuses immediately (no wait, no behavior change).
+            if ( acquired == WorkflowRunLock::TryResult::HeldByLiveOwner
+                 && heldByPid == QString::number( QCoreApplication::applicationPid() )
+                 && finalizeInFlight( runId ) )
+            {
+                const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + 10000;
+                while ( acquired != WorkflowRunLock::TryResult::Acquired
+                        && QDateTime::currentMSecsSinceEpoch() < deadline )
+                {
+                    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+                    acquired = runLock->tryAcquire( &heldByPid );
+                    // The handover already happened (or the lock moved to a
+                    // different owner): stop waiting and refuse like any
+                    // other blocked resumer instead of burning the deadline.
+                    if ( acquired != WorkflowRunLock::TryResult::Acquired
+                         && !finalizeInFlight( runId ) )
+                        break;
+                }
+            }
+        }
         if ( acquired != WorkflowRunLock::TryResult::Acquired )
         {
             if ( acquired == WorkflowRunLock::TryResult::HeldByLiveOwner )
@@ -1207,12 +1290,16 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             // Interrupted/Cancelling cannot transitionTo(Completed); force.
             if ( !run->transitionTo( target ) )
                 run->forceSetState( target );
-            m_locksByRunId.erase( runId ); // releases the run lock
             queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() );
             donePersist = capturePersistLocked(
                 run, run->state() == WorkflowRunState::Completed );
         }
         persistRun( std::move( donePersist ) );
+        // Terminal checkpoint durable: hand the run lock (and reverse map) to
+        // the next owner only now — erasing them inside the m_mutex block
+        // above would let a concurrent resume load the still-pending
+        // checkpoint and re-execute the finished lineage (#4171).
+        releaseRunOwnership( runId );
         drainRunNotifications();
         return 0; // success: nothing to execute; run is terminal
     }
@@ -1229,10 +1316,12 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
         PersistRequest failedResumePersist;
         {
             std::lock_guard<std::mutex> lock( m_mutex );
-            m_locksByRunId.erase( runId ); // releases the run lock
             failedResumePersist = capturePersistLocked( run );
         }
         persistRun( std::move( failedResumePersist ) );
+        // The refusal checkpoint is durable: only now may another owner take
+        // the run lock (an earlier erase exposes the stale pre-resume state).
+        releaseRunOwnership( runId );
         if ( error )
             *error = QStringLiteral( "Resume submission failed for run %1" )
                        .arg( QString::fromStdString( runId ) );
@@ -1243,6 +1332,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     // lineage and a second interruption resumes from the union of both
     // passes (its Completed step plans + artifacts are already inside).
     std::vector<PersistRequest> swapPersists;
+    bool swapFinalized = false;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         const auto it = m_runsByPipeline.find( pipelineId );
@@ -1371,6 +1461,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             if ( allTerminal && !isTerminalRunState( run->state() ) )
             {
                 finalizeRunLocked( pipelineId, *run );
+                swapFinalized = true;
                 swapPersists.push_back( capturePersistLocked(
                     run, run->state() == WorkflowRunState::Completed ) );
             }
@@ -1383,6 +1474,12 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     run->setAttempt( run->attempt() + 1 );
     for ( PersistRequest &persist : swapPersists )
         persistRun( std::move( persist ) );
+    if ( swapFinalized )
+    {
+        // Every step completed inside the missed window: the finalize persist
+        // above is durable, so the ownership handover happens only now.
+        releaseRunOwnership( runId );
+    }
     return pipelineId;
 }
 
@@ -1436,8 +1533,6 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
                 if ( !run->transitionTo( target ) )
                     run->forceSetState( target );
                 queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() );
-                m_locksByRunId.erase( run->runId() );
-                m_pipelineByRunId.erase( run->runId() ); // #1097: mirror finalizeRunLocked
                 finalizePersist = capturePersistLocked(
                     run, run->state() == WorkflowRunState::Completed );
                 didFinalize = true;
@@ -1446,6 +1541,12 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
         if ( didFinalize )
         {
             persistRun( std::move( finalizePersist ) );
+            // Terminal checkpoint durable: the ownership handover (run lock +
+            // reverse map) happens only now, never inside the m_mutex block
+            // above — an early erase lets a concurrent resumeRun flock the
+            // freed run while its stale non-terminal checkpoint is still what
+            // loadCheckpoint sees, re-executing a finished run (#4171).
+            releaseRunOwnership( run->runId() );
             drainRunNotifications();
         }
     }

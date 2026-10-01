@@ -189,11 +189,26 @@ class WorkflowRunCoordinator : public QObject {
     /// Last-writer-wins: a request whose seq is behind the run's latest
     /// issued seq is dropped unless it is the finalize sweep.
     void persistRun( PersistRequest request );
-    /// Terminal roll-up (state + notification + lock release). Called with
-    /// m_mutex held when the last step of a tracked run went terminal.
-    /// Checkpoint IO, ArtifactGC and archive run AFTER the lock drops via
-    /// persistRun (issue #931).
+    /// Terminal roll-up (state + notification). Called with m_mutex held when
+    /// the last step of a tracked run went terminal. Checkpoint IO, ArtifactGC
+    /// and archive run AFTER the lock drops via persistRun (issue #931) — and
+    /// so does the ownership release: the run lock stays held until the
+    /// terminal checkpoint is durable (releaseRunOwnership), otherwise a
+    /// concurrent resumeRun of the just-finalized run loads the still-stale
+    /// non-terminal checkpoint and re-executes a finished lineage.
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
+    /// Drops the ownership record for @p runId (run-lock shared_ptr + reverse
+    /// pipeline map entry). Must be called WITHOUT m_mutex held, and only
+    /// AFTER the run's terminal checkpoint has been persisted — this is the
+    /// atomic ownership handover point for the next resume/recovery owner.
+    void releaseRunOwnership( const std::string &runId );
+    /// True when THIS process still holds @p runId's run lock AND the tracked
+    /// run has already reached a terminal state — by construction the
+    /// finalize window (state flipped under m_mutex; the lock is dropped by
+    /// releaseRunOwnership only after the terminal checkpoint is durable).
+    /// A live run holding its lock is NOT in flight; neither is an
+    /// untracked runId (a holder in another process).
+    bool finalizeInFlight( const std::string &runId ) const;
     /// m_mutex-free directory read for call paths that already hold it.
     QString checkpointDirectoryLocked() const;
     QString checkpointPathLocked( const std::string &runId ) const;
