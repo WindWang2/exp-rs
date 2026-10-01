@@ -82,19 +82,24 @@ class TopKSelector
   public:
     explicit TopKSelector( std::size_t k ) : mK( k ) {}
 
-    void offer( AssetRecord record, std::uint64_t inputIndex )
+    // Rank from the caller's record (declared facts only); the full record is
+    // copied into the selector ONLY when retained (the first K, and any later
+    // replacement) — a walk over a million-record catalog must not copy per
+    // record. The rank's id is the one allocation ranking needs.
+    void offer( const AssetRecord &record, std::uint64_t inputIndex )
     {
         SelectionRank rank = rankOf( record, inputIndex );
         if ( mSelected.size() < mK )
         {
-            mSelected.push_back( { std::move( record ), std::move( rank ) } );
+            mSelected.push_back( { record, std::move( rank ) } );
             std::push_heap( mSelected.begin(), mSelected.end(), &worseFirst );
             return;
         }
         if ( mK > 0 && rankBetter( rank, mSelected.front().rank ) )
         {
             std::pop_heap( mSelected.begin(), mSelected.end(), &worseFirst );
-            mSelected.back() = { std::move( record ), std::move( rank ) };
+            mSelected.back().rank = std::move( rank );
+            mSelected.back().record = record;
             std::push_heap( mSelected.begin(), mSelected.end(), &worseFirst );
         }
     }
