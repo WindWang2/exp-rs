@@ -166,6 +166,13 @@ class QgsClassificationMainWindow : public QMainWindow
      * replace paths; keep alive for z-order shuffle re-add).
      */
     void removeSessionLayer( QgsMapLayer *layer );
+    /**
+     * Preview-overwrite discipline (#1389): settle-detach the previous
+     * preview layer (removeSessionLayer), delete it, then take ownership of
+     * \a layer. Never assign m_previewLayer directly — the previous layer
+     * would leak and stay rendered in the session workspace.
+     */
+    void replacePreviewLayer( QgsRasterLayer *layer );
 
     RsClassifySessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
     void applyWorkflowSnapshot( const RsClassifySessionState::WorkflowSnapshot &s );

@@ -113,7 +113,11 @@ SwipeMapTool::SwipeMapTool( QgsMapCanvas *canvas )
 
 SwipeMapTool::~SwipeMapTool()
 {
-    cancelRenderJob();
+    // Blocking settle: this destructor can run while layers are being torn
+    // down (canvas destruction, window close) — leaving the compare render's
+    // worker threads running past this point lets them dereference layers
+    // that die after we do (#1389).
+    settleRenderJob();
     if ( m_swipeItem )
     {
         delete static_cast<SwipeCanvasItem *>( m_swipeItem );
@@ -123,14 +127,28 @@ SwipeMapTool::~SwipeMapTool()
 
 void SwipeMapTool::setBaseLayer( QgsMapLayer *layer )
 {
+    if ( m_baseDeletionConn )
+    {
+        disconnect( m_baseDeletionConn );
+        m_baseDeletionConn = QMetaObject::Connection();
+    }
     m_baseLayer = layer;
+    if ( m_baseLayer )
+        m_baseDeletionConn = connect( m_baseLayer.data(), &QgsMapLayer::willBeDeleted, this, [this] { onBaseLayerWillBeDeleted(); } );
     m_snapshotDirty = true;
     updateSwipeItem();
 }
 
 void SwipeMapTool::setCompareLayer( QgsMapLayer *layer )
 {
+    if ( m_compareDeletionConn )
+    {
+        disconnect( m_compareDeletionConn );
+        m_compareDeletionConn = QMetaObject::Connection();
+    }
     m_compareLayer = layer;
+    if ( m_compareLayer )
+        m_compareDeletionConn = connect( m_compareLayer.data(), &QgsMapLayer::willBeDeleted, this, [this] { onCompareLayerWillBeDeleted(); } );
     m_snapshotDirty = true;
     updateSwipeItem();
 }
@@ -269,10 +287,61 @@ void SwipeMapTool::cancelRenderJob()
     if ( !m_renderJob )
         return;
     // Cancel any in-flight job; finished handler checks pointer identity.
+    // The job stays REGISTERED with the canvas: its workers keep winding
+    // down after cancelWithoutBlocking(), and every settle path (and the
+    // destroyed-prune) must still see it until it is truly idle — the
+    // handler's identity check already fails, so no state is touched
+    // (review R6 P2-1: unregistering here created an untracked orphan).
     disconnect( m_renderJob, nullptr, this, nullptr );
     m_renderJob->cancelWithoutBlocking();
     m_renderJob->deleteLater();
     m_renderJob = nullptr;
+}
+
+void SwipeMapTool::settleRenderJob()
+{
+    if ( !m_renderJob )
+        return;
+    // Blocking cancel: a parallel job's cancel() joins its worker threads and
+    // emits finished() synchronously on this thread; our handler then drops
+    // m_renderJob and unregisters. Returns only once no background thread can
+    // still touch the layer being destroyed (#1389).
+    m_renderJob->cancel();
+    // If the finished handler was severed (e.g. mid-cancelRenderJob), the job
+    // is idle now but still ours: detach it without re-canceling.
+    if ( m_renderJob )
+    {
+        disconnect( m_renderJob, nullptr, this, nullptr );
+        if ( mCanvas )
+            mCanvas->unregisterExternalRenderJob( m_renderJob );
+        m_renderJob->deleteLater();
+        m_renderJob = nullptr;
+    }
+}
+
+void SwipeMapTool::onBaseLayerWillBeDeleted()
+{
+    // The base layer is drawn by the canvas, not by our job, but settling is
+    // cheap and keeps both deletion tripwires symmetric.
+    settleRenderJob();
+    m_baseLayer.clear();
+}
+
+void SwipeMapTool::onCompareLayerWillBeDeleted()
+{
+    // Emitted as the first statement of the layer's destructor body: the
+    // instance is still fully intact, so joining our render threads here is
+    // safe. This is the backstop for deletion paths that bypass the canvas
+    // settle (which already cancels this job via the external-job registry).
+    settleRenderJob();
+    m_compareLayer.clear();
+    m_compareSnapshot = QImage();
+    m_snapshotDirty = false;
+    if ( m_swipeItem )
+    {
+        auto *item = static_cast<SwipeCanvasItem *>( m_swipeItem );
+        item->setSnapshot( m_compareSnapshot );
+    }
 }
 
 void SwipeMapTool::renderCompareSnapshot()
@@ -298,9 +367,17 @@ void SwipeMapTool::renderCompareSnapshot()
 
     auto *job = new QgsMapRendererParallelJob( settings );
     m_renderJob = job;
+    // The settings copy bakes a RAW QgsMapLayer* that the parallel job's
+    // worker threads dereference. Register with the canvas so every settle
+    // path (DisplayManager/session-workspace layer removal, project close,
+    // canvas destruction) blocks on this job before any layer dies (#1389);
+    // the willBeDeleted tripwires below catch any path that bypasses it.
+    mCanvas->registerExternalRenderJob( job );
     connect( job, &QgsMapRendererJob::finished, this, [this, job]() {
         if ( m_renderJob != job )
             return;
+        if ( mCanvas )
+            mCanvas->unregisterExternalRenderJob( job );
         m_compareSnapshot = job->renderedImage();
         m_snapshotDirty = false;
         m_renderJob = nullptr;

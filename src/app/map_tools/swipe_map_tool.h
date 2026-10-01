@@ -71,6 +71,10 @@ class SwipeMapTool : public QgsMapTool
     void setMouseFollow( bool follow ) { m_mouseFollow = follow; }
     bool mouseFollow() const { return m_mouseFollow; }
 
+    //! TRUE while a compare-snapshot render job is registered/live
+    //! (settlement oracle for tests and teardown asserts).
+    bool hasPendingCompareRender() const { return m_renderJob != nullptr; }
+
     void canvasMoveEvent( QgsMapMouseEvent *e ) override;
     void canvasPressEvent( QgsMapMouseEvent *e ) override;
     void canvasReleaseEvent( QgsMapMouseEvent *e ) override;
@@ -86,9 +90,25 @@ class SwipeMapTool : public QgsMapTool
     void updateSwipeItem();
     void renderCompareSnapshot();
     void cancelRenderJob();
+    //! Blocking cancel: joins the compare-render's background threads before
+    //! returning (a parallel job's cancel() emits finished() synchronously on
+    //! the calling thread, which drops m_renderJob via our handler).
+    void settleRenderJob();
+    void onBaseLayerWillBeDeleted();
+    void onCompareLayerWillBeDeleted();
 
     QPointer<QgsMapLayer> m_baseLayer;
     QPointer<QgsMapLayer> m_compareLayer;
+
+    //! Layer-deletion tripwires: any deletion path that reaches a raster or
+    //! vector layer (the types whose destructors emit willBeDeleted — store
+    //! removal, project clear, preview overwrite, direct delete) settles
+    //! this tool's in-flight compare render first, or a render thread
+    //! dereferences the dying layer (#1389). Mesh/point-cloud layers do not
+    //! emit the signal in this vendored tree; those rely on the canvas
+    //! external-job registry alone.
+    QMetaObject::Connection m_baseDeletionConn;
+    QMetaObject::Connection m_compareDeletionConn;
 
     double m_swipePosition = 0.5;
     Direction m_direction = Direction::Vertical;

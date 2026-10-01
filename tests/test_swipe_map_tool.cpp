@@ -3,6 +3,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QApplication>
+#include <QPointer>
 #include <QSignalSpy>
 
 #include <qgsmapcanvas.h>
@@ -114,4 +115,27 @@ TEST_CASE("SwipeMapTool emits swipePositionChanged", "[gui][swipe]") {
     tool.setSwipePosition(0.75);
     REQUIRE(spy.count() == 1);
     CHECK(spy.takeFirst().at(0).toDouble() == Catch::Approx(0.75));
+}
+
+// #1389 site 4: a QgsMapTool is not owned by the canvas that uses it, so the
+// raw m_swipeTool member in QgisDesktopWindow leaked one SwipeMapTool per
+// MainWindow. The production fix parents the tool to the canvas
+// (main_window_processing.cpp toggleSwipeTool). This test is the regression
+// guard: canvas destruction must take the tool with it, leaving nothing behind
+// to dangle into a session that is already gone.
+TEST_CASE("SwipeMapTool dies with its canvas and cannot leak per MainWindow (#1389)", "[gui][swipe][lifecycle]") {
+    ensureApp();
+
+    auto *canvas = new QgsMapCanvas();
+    // Exactly the production idiom: allocate, then parent to the canvas.
+    auto *tool = new SwipeMapTool(canvas);
+    tool->setParent(canvas);
+
+    QPointer<SwipeMapTool> guard(tool);
+    REQUIRE(guard);
+    CHECK(tool->parent() == canvas);
+
+    delete canvas; // window close / session teardown
+
+    CHECK(guard.isNull()); // no orphan tool survives the canvas
 }

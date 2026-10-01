@@ -90,6 +90,7 @@ void ComparisonDialog::setupUi()
 
 void ComparisonDialog::setLeftLayer(QgsRasterLayer *layer)
 {
+    watchRenderLayer(layer, true);
     m_leftLayer = layer;
     if (layer) {
         loadLayerToWidget(layer, true);
@@ -98,10 +99,49 @@ void ComparisonDialog::setLeftLayer(QgsRasterLayer *layer)
 
 void ComparisonDialog::setRightLayer(QgsRasterLayer *layer)
 {
+    watchRenderLayer(layer, false);
     m_rightLayer = layer;
     if (layer) {
         loadLayerToWidget(layer, false);
     }
+}
+
+void ComparisonDialog::watchRenderLayer(QgsRasterLayer *layer, bool isLeft)
+{
+    QMetaObject::Connection &conn = isLeft ? m_leftDeletionConn : m_rightDeletionConn;
+    if (conn)
+    {
+        disconnect(conn);
+        conn = QMetaObject::Connection();
+    }
+    if (!layer)
+        return;
+    conn = connect(layer, &QgsMapLayer::willBeDeleted, this, [this, layer, isLeft] {
+        // willBeDeleted fires as the first statement of the layer's
+        // destructor: the instance is still intact, so joining a preview
+        // render that is drawing it is safe. Without this, a queued layer
+        // removal inside exec()'s event loop would free a borrowed layer
+        // under a live render thread.
+        if (( isLeft ? m_leftJob : m_rightJob ) != nullptr)
+            settlePreviewJobs();
+    });
+}
+
+void ComparisonDialog::settlePreviewJobs()
+{
+    for ( QgsMapRendererParallelJob *job : { m_leftJob, m_rightJob } )
+    {
+        if ( !job )
+            continue;
+        // Same idiom as the destructor: cancel() emits finished()
+        // synchronously, the handler nulls the member and deleteLater()s;
+        // the explicit delete below drops any job whose handler was
+        // severed (a pending DeferredDelete dies with the object).
+        job->cancel();
+        job->waitForFinished();
+        delete job;
+    }
+    m_leftJob = m_rightJob = nullptr;
 }
 
 void ComparisonDialog::onBrowseLeft()
@@ -134,16 +174,7 @@ ComparisonDialog::~ComparisonDialog()
     // In-flight preview renders must be cancelled and drained before the
     // member job pointers die; destroying a RUNNING QgsMapRendererParallelJob
     // crashed (#634 follow-up).
-    for ( QgsMapRendererParallelJob *job : { m_leftJob, m_rightJob } )
-    {
-        if ( job )
-        {
-            job->cancel();
-            job->waitForFinished();
-            delete job;
-        }
-    }
-    m_leftJob = m_rightJob = nullptr;
+    settlePreviewJobs();
 }
 
 void ComparisonDialog::loadLayerToWidget(QgsRasterLayer *layer, bool isLeft)
@@ -169,8 +200,13 @@ void ComparisonDialog::startPreviewRender(QgsRasterLayer *layer, bool isLeft)
     QgsMapRendererParallelJob *&job = isLeft ? m_leftJob : m_rightJob;
     if (job)
     {
-        job->cancel();
-        job->deleteLater();
+        // Detach BEFORE cancel: cancel() emits finished() synchronously and
+        // the handler nulls the member through this same reference —
+        // touching `job` afterwards would dereference null (review R6 P1).
+        QgsMapRendererParallelJob *stale = job;
+        job = nullptr;
+        stale->cancel();
+        stale->deleteLater();
     }
     job = new QgsMapRendererParallelJob(mapSettings);
     job->setParent(this);
