@@ -33,6 +33,19 @@ void ensureGdal()
     std::call_once( once, [] { GDALAllRegister(); } );
 }
 
+/// Shared fixture directory, created on demand. A clean checkout (CI) has no
+/// build-rs14-passport directory, and one-case-per-process ctest runs every
+/// case in a fresh process — no earlier case is guaranteed to have made it,
+/// and GTiff cannot create a file under a missing parent (CPL "No such file
+/// or directory", identically on GDAL 3.8 and 3.13).
+std::string fixtureDir()
+{
+    const std::string dir = CMAKE_SOURCE_DIR + std::string( "/build-rs14-passport" );
+    std::error_code ec;
+    fs::create_directories( dir, ec );
+    return dir;
+}
+
 /// Writes a small 2-band Byte GeoTIFF with SICNU_* dataset + band metadata,
 /// UTM CRS and geotransform — a Landsat-like registered product.
 std::string writeDeclaredGeoTiff( const std::string &dir )
@@ -104,8 +117,7 @@ TEST_CASE( "collector projects declared GDAL metadata into facts and state",
            "[scientific_state][slice_f2]" )
 {
     ensureGdal();
-    const std::string path =
-        writeDeclaredGeoTiff( CMAKE_SOURCE_DIR + std::string( "/build-rs14-passport" ) );
+    const std::string path = writeDeclaredGeoTiff( fixtureDir() );
 
     std::string error;
     std::optional<DatasetFacts> facts = collectDatasetFacts( path, error );
@@ -156,8 +168,7 @@ TEST_CASE( "bare dataset projects honest unknowns and the FSM default",
            "[scientific_state][slice_f2]" )
 {
     ensureGdal();
-    const std::string path =
-        writeBareGeoTiff( CMAKE_SOURCE_DIR + std::string( "/build-rs14-passport" ) );
+    const std::string path = writeBareGeoTiff( fixtureDir() );
 
     std::string error;
     std::optional<DatasetFacts> facts = collectDatasetFacts( path, error );
@@ -208,7 +219,7 @@ TEST_CASE( "typed GDAL failure keeps code and bounded CPL detail",
     CHECK( legacy.find( "/definitely/not/here.tif" ) != std::string::npos );
 
     // Success resets the typed error channel.
-    const std::string dir = CMAKE_SOURCE_DIR + std::string( "/build-rs14-passport" );
+    const std::string dir = fixtureDir();
     const std::string okPath = ( fs::path( dir ) / "typed_ok.tif" ).string();
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     REQUIRE( driver );
@@ -227,8 +238,7 @@ TEST_CASE( "metadata cap drops are counted, never silent",
     // so items beyond it never reached MetadataItems and dropped() stayed 0
     // — exactly the >cap files where "truncation is never silent" matters.
     ensureGdal();
-    const std::string dir = CMAKE_SOURCE_DIR + std::string( "/build-rs14-passport" );
-    std::filesystem::create_directories( dir );
+    const std::string dir = fixtureDir();
     const std::string path = ( fs::path( dir ) / "capped.tif" ).string();
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     REQUIRE( driver );
