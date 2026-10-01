@@ -67,6 +67,33 @@ jsoncpp StreamWriterBuilder local survives in
 `workflow_planner.cpp` (writes the engine document that CARRIES the
 projection digest; not itself a digest input) — out of this track's scope.
 
+## Follow-up: the two remaining forks
+
+- **Plan-optimizer lineage digest** (`src/workflow/plan_optimizer.cpp`): the
+  node parameters ride into the SHA-256 lineage signature (workflow cache
+  keys, CSE, resume stamps), so this IS identity-relevant. Its Qt-Compact
+  local ("compact document == canonical") was byte-equivalent to A on the
+  current Qt (verified: `canonicalizeJsonRfc8785(doc) ==
+  QJsonDocument(doc).toJson(Compact)` on the fork-provoking fixture —
+  integer doubles, `-0`, exponent forms, escapes, non-BMP keys), so routing
+  it through A converges the SECOND implementation without moving any
+  signature value. `sicnu_workflow` gains a PRIVATE `sicnu_data` edge (no
+  cycle: the data layer links only leaves); every test target that compiles
+  `plan_optimizer.cpp` directly links `sicnu_data`, and the parity lock
+  gains path D.
+- **Contract-inventory snapshot writer**
+  (`src/contracts/tool/contract_inventory_main.cpp`): a jsoncpp
+  StreamWriterBuilder local, but NOT a digest input — the snapshot
+  (`contract_graph.snap.json`, `determinism_census.snap.json`) is
+  byte-compared by `--check`, never hashed, and generation and check share
+  the one function, so the gate is self-consistent. Its two-space
+  pretty-print is the documented human review surface ("review the diff as
+  a conscious contract update"); compacting it through A would destroy the
+  reviewable diff for zero digest-parity gain. Left as-is with an in-code
+  pointer to this ADR; no snapshot regeneration needed (or wanted — a
+  regeneration here would collide with the in-flight snapshot regeneration
+  in PR #1416).
+
 ## Consequences
 
 - **Digest VALUES change once** wherever a document carries a value whose
