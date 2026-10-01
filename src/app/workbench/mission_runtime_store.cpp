@@ -4,11 +4,12 @@
 
 #include "app/workbench/mission_runtime_store.h"
 
+#include "platform/durable_sidecar.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
-#include <QSaveFile>
 
 namespace sicnu::app
 {
@@ -50,24 +51,17 @@ bool readContextSidecarAt( const QString &path, MissionContext &out, QString *er
 
 bool writeBytesAtomically( const QString &path, const QByteArray &bytes, QString *error )
 {
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    // R6: the last-good snapshot and every sidecar byte write ride the single
+    // platform authority (temp + fsync + atomic publish) — the old QSaveFile
+    // lane was rename-atomic but not power-loss durable.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+    if ( !result )
     {
         if ( error )
-            *error = QStringLiteral( "cannot open for write: %1" ).arg( path );
-        return false;
-    }
-    if ( file.write( bytes ) != static_cast<qint64>( bytes.size() ) )
-    {
-        file.cancelWriting();
-        if ( error )
-            *error = QStringLiteral( "short write: %1" ).arg( path );
-        return false;
-    }
-    if ( !file.commit() )
-    {
-        if ( error )
-            *error = QStringLiteral( "commit failed: %1" ).arg( path );
+            *error = QStringLiteral( "write failed (%1): %2" )
+                         .arg( path, QString::fromUtf8( result.error.c_str() ) );
         return false;
     }
     return true;
@@ -366,7 +360,7 @@ bool saveMissionRuntime( const QString &projectFilePath, QDomDocument &projectDo
     // Rotate the last-known-good snapshot AFTER a successful commit: the
     // snapshot is exactly the last state the authority durably held. A failed
     // save leaves both the old sidecar and the old snapshot untouched (the
-    // write itself is QSaveFile-atomic).
+    // write itself is rename-atomic — platform::sidecar on this branch).
     if ( !projectFilePath.isEmpty() )
         rotateLastGood( projectFilePath );
 

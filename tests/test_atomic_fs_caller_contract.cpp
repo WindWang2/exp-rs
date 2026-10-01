@@ -17,9 +17,13 @@
      track landed: every staged publisher flushes staged bytes through
      atomic_fs::fsyncFile BEFORE the publish call (the crash window the
      runtime contract closes on the writeFileAtomic path must not reopen on
-     hand-rolled publish sites), and every session-journal staging failure
-     path cleans the claimed staged file. Same style as
-     test_portability_source_contract.cpp (relative-order source pins).
+     hand-rolled publish sites), and the session journal's staging failures
+     never leak the claimed staged file — since R6 (ADR 0166) that property
+     lives in the single sidecar write authority, so Part C pins the
+     authority-routed contract: the journal routes through
+     sicnu::platform::sidecar::write() and keeps no private staging lane,
+     and every authority failure path discards the staged file. Same style
+     as test_portability_source_contract.cpp (relative-order source pins).
  ***************************************************************************/
 
 #include "geospatial/util/atomic_fs.h"
@@ -490,7 +494,7 @@ TEST_CASE( "group publishers flush every staged member before the group publish"
 }
 
 // ============================================================================
-// Part C — session journal staging failure paths clean the claimed staged file
+// Part C — session journal staging failures clean the claimed staged file
 // ============================================================================
 
 TEST_CASE( "session journal: every staging failure path removes the claimed staged file",
@@ -498,39 +502,51 @@ TEST_CASE( "session journal: every staging failure path removes the claimed stag
 {
   if ( !sourcesAvailable() )
     return;
-  const std::string source =
-    repoSource( CMAKE_SOURCE_DIR, "src/agent_loop/session_journal.cpp" );
-  REQUIRE_FALSE( source.empty() );
 
-  // claimExclusiveUtf8 creates an EMPTY staged file up front. Every early
-  // return after the claim must remove it, or a failed save leaks an orphan
-  // staging file into the session directory (the exact residue class the
-  // atomic_fs contract's discardStaged path exists to prevent).
-  // The master-era paths ("cannot flush temp file", the rename-failure
-  // branch) already cleaned up — the same branch-bounded pin holds them so
-  // the whole failure lattice stays covered, not just this track's additions.
-  // Order within the branch is free (master cleans after the message, the
-  // r4 branches before): the pinned property is membership in the branch.
-  for ( const char *marker : { "cannot open temp file", "cannot write temp file",
-                               "cannot flush temp file" } )
-  {
-    const std::size_t at = source.find( marker );
-    INFO( "marker: " << marker << " at=" << at );
-    REQUIRE( at != std::string::npos );
-    // The cleanup must sit in THIS branch: after the PREVIOUS branch's
-    // "return false" (or the function start) and before this marker. A bare
-    // rfind resolves to the previous branch's cleanup when this branch's is
-    // deleted — review P1-2 mutation found exactly that blindness.
-    const std::size_t prevGiveUp = source.rfind( "return false", at );
-    const std::size_t branchStart = prevGiveUp == std::string::npos ? 0 : prevGiveUp;
-    const std::size_t cleanup = source.find( "fs::remove( temp, cleanup", branchStart );
-    const std::size_t giveUp = source.find( "return false", at );
-    INFO( "branchStart=" << branchStart << " cleanup=" << cleanup
-                         << " giveUp=" << giveUp );
-    REQUIRE( cleanup != std::string::npos );
-    REQUIRE( giveUp != std::string::npos );
-    REQUIRE( branchStart <= cleanup );
-    REQUIRE( cleanup < giveUp );
-    REQUIRE( at < giveUp );
-  }
+  // R6 (ADR 0166): the journal's hand-rolled staging lane (claim → write →
+  // fsync → publish, one cleanup branch per failure) was replaced by the
+  // single sidecar write authority. The residue property this case used to
+  // pin on the journal's own branches moved with the lane — the same
+  // re-pointing the final R6 review round applied to
+  // test_portability_source_contract. Pin BOTH halves so deleting either
+  // fails here: the journal routes through the authority and keeps no
+  // private staging lane, and the authority discards the claimed staged
+  // file on every failure path, typing an unremovable residue
+  // (StagedCleanupFailed) instead of leaking it.
+  const std::string journal =
+    repoSource( CMAKE_SOURCE_DIR, "src/agent_loop/session_journal.cpp" );
+  REQUIRE_FALSE( journal.empty() );
+  REQUIRE( journal.find( "sicnu::platform::sidecar::write(" ) != std::string::npos );
+  // No private staging lane survives in the journal: reintroducing a claim,
+  // a hand-named temp, or hand-rolled cleanup fails the pin.
+  REQUIRE( journal.find( "claimExclusiveUtf8" ) == std::string::npos );
+  REQUIRE( journal.find( "cannot open temp file" ) == std::string::npos );
+  REQUIRE( journal.find( "cannot write temp file" ) == std::string::npos );
+  REQUIRE( journal.find( "cannot flush temp file" ) == std::string::npos );
+  REQUIRE( journal.find( "fs::remove( temp" ) == std::string::npos );
+
+  const std::string authority =
+    repoSource( CMAKE_SOURCE_DIR, "src/platform/durable_sidecar.cpp" );
+  REQUIRE_FALSE( authority.empty() );
+
+  // The claim: O_EXCL staging through portable.h — without the exclusive
+  // claim a leaked temp is a shared-name collision, not inert residue.
+  REQUIRE( authority.find( "portable::claimExclusiveUtf8( staged" ) != std::string::npos );
+
+  // Every failure path after the claim discards the staged file. Count the
+  // discard branches (the WriteTemp/Durability/Publish fault phases plus
+  // their real counterparts, and the last-good rotation pass): deleting one
+  // fails the count, so the lattice stays pinned rather than a single
+  // representative branch.
+  const std::string discard = "if ( !removeQuiet( staged ) )";
+  std::size_t discards = 0;
+  for ( std::size_t at = authority.find( discard ); at != std::string::npos;
+        at = authority.find( discard, at + 1 ) )
+    ++discards;
+  INFO( "staged-discard branches: " << discards );
+  REQUIRE( discards >= 6 );
+
+  // An unremovable temp is typed, never silent — the other half of the
+  // "never leaks residue" property the journal lane used to own.
+  REQUIRE( authority.find( "WriteStatus::StagedCleanupFailed" ) != std::string::npos );
 }

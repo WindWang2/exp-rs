@@ -3,7 +3,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QSaveFile>
+#include "platform/durable_sidecar.h"
 
 #include <algorithm>
 #include <cmath>
@@ -224,14 +224,11 @@ bool RegistrationQuality::writeReportAtomic(const QString& filePath, const QJson
         return false;
     const QJsonDocument json(doc);
     const QByteArray payload = json.toJson(QJsonDocument::Indented);
-    QSaveFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly))
-        return false;
-    if (file.write(payload) != payload.size()) { // detect short writes too
-        file.cancelWriting();
-        return false;
-    }
-    return file.commit();
+    // R6: the single sidecar write authority — temp + fsync + atomic publish;
+    // the QSaveFile lane committed bytes that were never fsynced.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { filePath.toUtf8().constData(),
+        std::string( payload.constData(), static_cast<std::size_t>( payload.size() ) ), "" } );
+    return static_cast<bool>( result );
 }
-
 } // namespace sicnu::registration

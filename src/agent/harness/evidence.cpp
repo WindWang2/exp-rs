@@ -6,10 +6,11 @@
 
 #include <workflow/workflow_run.h>
 
+#include "platform/durable_sidecar.h"
+
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
-#include <QSaveFile>
 
 #include <json/reader.h>
 #include <json/writer.h>
@@ -44,22 +45,20 @@ SidecarResult atomicWrite( const std::string &path, const Json::Value &doc )
 {
   SidecarResult result;
   result.path = path;
-  QSaveFile file( QString::fromStdString( path ) );
-  if ( !file.open( QIODevice::WriteOnly ) )
-  {
-    result.error = "cannot open sidecar for write: " + path;
-    return result;
-  }
   const QByteArray bytes = QByteArray::fromStdString( compactJson( doc ) );
   if ( bytes.isEmpty() )
   {
     result.error = "refusing to write an empty sidecar: " + path;
     return result;
   }
-  file.write( bytes );
-  if ( !file.commit() )
+  // R6: the single sidecar write authority — O_EXCL temp, fsync gate, atomic
+  // publish, verify read-back (the old QSaveFile commit() never checked the
+  // bytes actually landed, and wrote no fsync at all).
+  const sicnu::platform::sidecar::WriteResult write = sicnu::platform::sidecar::write(
+    { path, std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+  if ( !write )
   {
-    result.error = "sidecar commit failed: " + path;
+    result.error = "sidecar publish failed: " + path + " (" + write.error + ")";
     return result;
   }
   result.written = true;

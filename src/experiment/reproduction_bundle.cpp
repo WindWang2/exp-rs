@@ -1,6 +1,8 @@
 // reproduction_bundle.cpp — bundle export + reproduction validation.
 #include "reproduction_bundle.h"
 
+#include "platform/durable_sidecar.h"
+
 #include "../dataset/dataset_manifest.h"
 #include "../dataset/dataset_store.h"
 
@@ -10,7 +12,6 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QSaveFile>
 #include <QTextStream>
 
 namespace sicnu::experiment
@@ -26,8 +27,8 @@ namespace
 // it unused.)
 
 /// Writes one bundle file + returns its checksum line content.
-/// Crash-durable (#1386): the member lands through QSaveFile (temp file in
-/// the same directory + atomic rename on commit), so a crash mid-write can
+/// Crash-durable (#1386): the member lands through the platform sidecar
+/// authority (temp + fsync + atomic rename), so a crash mid-write can
 /// never leave a truncated member in the bundle — the codebase's capsule
 /// export already follows this doctrine ("a failed write must leave the
 /// previous file intact"), and a bundle whose checksums.txt then verifies
@@ -35,23 +36,19 @@ namespace
 bool writeFileWithChecksum( const QString &path, const QByteArray &content, QString *errorOut,
                             QStringList *checksumLines, const QString &relativeName )
 {
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    // R6: the single sidecar write authority — temp + fsync + atomic publish
+    // (the QSaveFile lane was rename-atomic but never fsynced; a power loss
+    // could commit the directory entry for bytes still in cache).
+    const sicnu::platform::sidecar::WriteResult result =
+      sicnu::platform::sidecar::write(
+        { path.toUtf8().constData(),
+          std::string( content.constData(), static_cast<std::size_t>( content.size() ) ),
+          "" } );
+    if ( !result )
     {
         if ( errorOut )
-            *errorOut = QStringLiteral( "cannot write %1" ).arg( path );
-        return false;
-    }
-    if ( file.write( content ) != content.size() )
-    {
-        if ( errorOut )
-            *errorOut = QStringLiteral( "short write %1" ).arg( path );
-        return false;
-    }
-    if ( !file.commit() )
-    {
-        if ( errorOut )
-            *errorOut = QStringLiteral( "cannot commit %1" ).arg( path );
+            *errorOut = QStringLiteral( "cannot publish %1: %2" )
+                            .arg( path, QString::fromUtf8( result.error.c_str() ) );
         return false;
     }
     checksumLines->append( QString::fromUtf8(
@@ -182,7 +179,7 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         report.warnings.append( QStringLiteral( "run %1 not found" ).arg( runId ) );
         return report;
     }
-    const ExperimentRun run = *runRecord;
+    const ExperimentRun &run = *runRecord;
 
     QDir dir( options.outputDir );
     if ( !dir.mkpath( QStringLiteral( "." ) ) )
@@ -393,21 +390,25 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         return report;
 
     // checksums.txt is the bundle's integrity root: written through
-    // QSaveFile LAST and atomically (#1386) — QFile::flush() only drains
+    // atomic publish LAST (#1386; now with a real fsync — QFile::flush() only drains
     // Qt's buffer to the OS, so the previous in-place write could leave a
     // truncated table after a crash, failing the whole bundle on verify.
     {
         const QByteArray checksumBytes = checksums.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
-        QSaveFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
-        if ( !checksumFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        // R6: the integrity root publishes through the sidecar authority
+        // (temp + fsync + atomic publish) — still written LAST, after every
+        // member, exactly as #1386 ordered.
+        const sicnu::platform::sidecar::WriteResult checksumResult =
+          sicnu::platform::sidecar::write(
+            { dir.filePath( QStringLiteral( "checksums.txt" ) ).toUtf8().constData(),
+              std::string( checksumBytes.constData(),
+                           static_cast<std::size_t>( checksumBytes.size() ) ),
+              "" } );
+        if ( !checksumResult )
         {
-            report.warnings.append( QStringLiteral( "cannot write checksums.txt" ) );
-            return report;
-        }
-        if ( checksumFile.write( checksumBytes ) != checksumBytes.size()
-             || !checksumFile.commit() )
-        {
-            report.warnings.append( QStringLiteral( "cannot write checksums.txt atomically" ) );
+            report.warnings.append(
+                QStringLiteral( "cannot write checksums.txt atomically: %1" )
+                                 .arg( QString::fromUtf8( checksumResult.error.c_str() ) ) );
             report.ok = false;
             return report;
         }
@@ -487,7 +488,7 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
     {
         const QJsonObject manifestJson =
             QJsonDocument::fromJson( version->manifestJson().toUtf8() ).object();
-        for ( const QJsonValue &asset :
+        for ( const auto &asset :
               manifestJson.value( QStringLiteral( "source_assets" ) ).toArray() )
         {
             if ( asset.toObject().value( QStringLiteral( "revision" ) ).toInteger() <= 0 )

@@ -737,6 +737,9 @@ sicnu_feature_probe(SICNU_HAVE_QT6_QTYPES
 sicnu_feature_probes_report()
 sicnu_write_feature_probes_header("${CMAKE_BINARY_DIR}/sicnu_feature_probes.h")
 
+# R6: bottom-layer durability authority (Qt-free leaf; the single sidecar
+# write authority) — added before every consumer.
+add_subdirectory(src/platform)
 add_subdirectory(src/core)
 add_subdirectory(src/data)
 # RS14-05 Process-aware Experiment Grader (ADR 0174): pure C++20 + jsoncpp

@@ -37,4 +37,8 @@ set(SICNU_MISSION_RUNTIME_SOURCES_GATE
   ${SICNU_MISSION_SRC_ROOT}/src/agent/spatial_tools/spatial_tool_registry.cpp
   ${SICNU_MISSION_SRC_ROOT}/src/agent/contracts/spatial_contracts.cpp
   ${SICNU_MISSION_SRC_ROOT}/src/agent/harness/harness_actions.cpp
+  # R6: the mission stores write sidecars through the platform authority —
+  # the Qt-free leaf compiles straight into the gate executables (which link
+  # no sicnu_* libraries).
+  ${SICNU_MISSION_SRC_ROOT}/src/platform/durable_sidecar.cpp
 )

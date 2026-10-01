@@ -1,6 +1,8 @@
 // rs_post_process.cpp — Classification post-process pure operators.
 #include "rs_post_process.h"
 
+#include "platform/durable_sidecar.h"
+
 #include <gdal_alg.h>
 #include <gdal_priv.h>
 #include <ogr_api.h>
@@ -35,6 +37,10 @@ void setErr( QString *err, const QString &msg )
   if ( err )
     *err = msg;
 }
+
+// Single source of the <raster>.class.json schema version (R6: the reader
+// now enforces what the writer stamps).
+constexpr int kClassMetaDataSidecarVersion = 1;
 
 bool toLabels32S( const cv::Mat &src, cv::Mat &labels, QString *err )
 {
@@ -791,18 +797,27 @@ bool RsPostProcess::saveClassMetaData( const QString &rasterPath, const QHash<in
   }
 
   QJsonObject rootObj;
-  rootObj[QStringLiteral( "version" )] = 1;
+  rootObj[QStringLiteral( "version" )] = kClassMetaDataSidecarVersion;
   rootObj[QStringLiteral( "classes" )] = classesArray;
 
-  QFile file( sidecarPath );
-  if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+  // R6: the sidecar write authority (temp + fsync + atomic publish +
+  // .last-good rotation) — the old plain open+truncate write destroyed the
+  // metadata for a finished classification result on any kill mid-write.
+  const QByteArray bytes = QJsonDocument( rootObj ).toJson( QJsonDocument::Indented );
+
+  const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+    { sidecarPath.toUtf8().constData(),
+      std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ),
+      sicnu::platform::sidecar::kDefaultLastGoodSuffix } );
+  if ( !result )
   {
-    setErr( err, QStringLiteral( "Failed to open sidecar metadata file for writing: %1" ).arg( sidecarPath ) );
+    setErr( err, QStringLiteral( "Failed to persist sidecar metadata %1: %2 (%3)" )
+                   .arg( sidecarPath,
+                         QString::fromLatin1(
+                           sicnu::platform::sidecar::writeStatusName( result.status ) ),
+                         QString::fromUtf8( result.error.c_str() ) ) );
     return false;
   }
-
-  file.write( QJsonDocument( rootObj ).toJson( QJsonDocument::Indented ) );
-  file.close();
   return true;
 }
 
@@ -815,21 +830,43 @@ bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsC
   }
 
   const QString sidecarPath = rasterPath.endsWith( QStringLiteral( ".class.json" ) ) ? rasterPath : rasterPath + QStringLiteral( ".class.json" );
-  if ( !QFileInfo::exists( sidecarPath ) )
+
+  // R6: resolve main -> .last-good through the sidecar read authority, so a
+  // torn/lost main (previously a silent skip) recovers from the snapshot the
+  // authority rotated on the last successful save.
+  const sicnu::platform::sidecar::ReadResult read = sicnu::platform::sidecar::read(
+    sidecarPath.toUtf8().constData(), sicnu::platform::sidecar::kDefaultLastGoodSuffix );
+  if ( read.source == sicnu::platform::sidecar::ReadSource::Missing )
   {
     setErr( err, QStringLiteral( "Sidecar metadata file does not exist: %1" ).arg( sidecarPath ) );
     return false;
   }
-
-  QFile file( sidecarPath );
-  if ( !file.open( QIODevice::ReadOnly ) )
+  if ( read.source == sicnu::platform::sidecar::ReadSource::Corrupt )
   {
-    setErr( err, QStringLiteral( "Failed to open sidecar metadata file: %1" ).arg( sidecarPath ) );
+    setErr( err, QStringLiteral( "Sidecar metadata unreadable at %1 (%2)" )
+                   .arg( sidecarPath, QString::fromUtf8( read.error.c_str() ) ) );
     return false;
   }
 
-  const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
-  file.close();
+  QJsonDocument doc = QJsonDocument::fromJson(
+    QByteArray( read.bytes.data(), static_cast<int>( read.bytes.size() ) ) );
+
+  if ( !doc.isObject()
+       && read.source == sicnu::platform::sidecar::ReadSource::Main )
+  {
+    // The main READ fine (I/O level) but does not decode — e.g. a torn main
+    // that stayed JSON-prefixed. The last-good copy the authority rotated
+    // after the previous successful save is the recovery channel; consult
+    // it before giving up.
+    const std::string lastGoodPath = std::string( sidecarPath.toUtf8().constData() ) +
+                                    sicnu::platform::sidecar::kDefaultLastGoodSuffix;
+    const sicnu::platform::sidecar::ReadResult lastGood =
+      sicnu::platform::sidecar::read( lastGoodPath, "" );
+    if ( lastGood.source == sicnu::platform::sidecar::ReadSource::Main )
+      doc = QJsonDocument::fromJson(
+        QByteArray( lastGood.bytes.data(),
+                    static_cast<int>( lastGood.bytes.size() ) ) );
+  }
 
   if ( !doc.isObject() )
   {
@@ -838,6 +875,20 @@ bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsC
   }
 
   const QJsonObject rootObj = doc.object();
+
+  // Version gate (R6): the writer always stamped version:1; the reader never
+  // checked. Pre-versioning legacy files (field absent) load as version 1;
+  // anything else is a newer/foreign schema and is refused fail-closed.
+  const QJsonValue versionValue = rootObj.value( QStringLiteral( "version" ) );
+  if ( !versionValue.isUndefined() &&
+       ( !versionValue.isDouble() || versionValue.toInt() != kClassMetaDataSidecarVersion ) )
+  {
+    setErr( err, QStringLiteral( "Unsupported sidecar metadata version %1 at %2 (supported: %3)" )
+                   .arg( versionValue.toVariant().toString() )
+                   .arg( sidecarPath )
+                   .arg( kClassMetaDataSidecarVersion ) );
+    return false;
+  }
   if ( !rootObj.contains( QStringLiteral( "classes" ) ) || !rootObj[QStringLiteral( "classes" )].isArray() )
   {
     setErr( err, QStringLiteral( "Missing classes array in sidecar metadata: %1" ).arg( sidecarPath ) );
@@ -846,7 +897,7 @@ bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsC
 
   outDefs.clear();
   const QJsonArray classesArray = rootObj[QStringLiteral( "classes" )].toArray();
-  for ( const QJsonValue &val : classesArray )
+  for ( const auto &val : classesArray )
   {
     if ( !val.isObject() )
       continue;

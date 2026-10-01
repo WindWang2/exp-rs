@@ -13,6 +13,7 @@
 #include <sstream>
 
 #include "exprs/plugin_validator.h"
+#include "platform/durable_sidecar.h"
 #include "platform/portable.h"
 
 namespace exprs {
@@ -141,19 +142,12 @@ Json::Value loadIndex( const std::string &root )
 void storeIndex( const std::string &root, const Json::Value &index )
 {
     const std::string path = root + "/.exprs-manifest-index.json";
-    const std::string temp = path + ".tmp";
-    {
-        std::ofstream output( sicnu::portable::pathFromUtf8( temp ), std::ios::trunc );
-        if ( !output )
-            return;
-        Json::StyledWriter writer;
-        output << writer.write( index );
-    }
-    // Best-effort, as the unchecked std::rename it replaces: a failed swap
-    // keeps the stale index, which only costs a cache miss on the next scan.
-    std::error_code renameEc;
-    std::filesystem::rename( sicnu::portable::pathFromUtf8( temp ),
-                             sicnu::portable::pathFromUtf8( path ), renameEc );
+    // R6: the single sidecar write authority replaces the fixed shared
+    // "<path>.tmp" (two processes writing the same root interleaved on one
+    // temp name and could rename a torn index). Best-effort as before: a
+    // failed publish keeps the stale index, which only costs a cache miss.
+    Json::StyledWriter writer;
+    sicnu::platform::sidecar::write( { path, writer.write( index ), "" } );
 }
 
 // Parses a manifest from an embedded index value without touching the file.
@@ -269,7 +263,7 @@ std::vector<std::string> PluginDiscovery::defaultRoots( const std::string &appDi
 #else
         const char separator = ':';
 #endif
-        std::string text( extra );
+        const std::string &text = extra;
         size_t start = 0;
         while ( start <= text.size() )
         {

@@ -3,6 +3,9 @@
 
 #include <QApplication>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
@@ -143,6 +146,72 @@ TEST_CASE( "PostProcess: sidecar class.json metadata save and load round-trip", 
   REQUIRE( loadedDefs.value( 1 ).name() == "Water" );
   REQUIRE( loadedDefs.value( 2 ).name() == "Forest" );
   REQUIRE( loadedDefs.value( 1 ).color() == QColor( "#0000ff" ) );
+}
+
+TEST_CASE( "PostProcess: class.json sidecar rotates a last-good copy and recovers from it", "[classify][postprocess][r6]" )
+{
+  // R6: saveClassMetaData publishes through the durable sidecar authority
+  // (temp + fsync + atomic rename) and rotates <raster>.class.json.last-good;
+  // loadClassMetaData resolves main → last-good, so a lost/torn main costs
+  // the last committed generation instead of silently emptying the classes.
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+  const QString rasterPath = tempDir.filePath( "result_r6.tif" );
+
+  QHash<int, RsClassDef> defs;
+  defs.insert( 1, RsClassDef( 1, "Water", QColor( "#0000ff" ) ) );
+  QString err;
+  REQUIRE( RsPostProcess::saveClassMetaData( rasterPath, defs, &err ) );
+  REQUIRE( QFile::exists( rasterPath + ".class.json" ) );
+  REQUIRE( QFile::exists( rasterPath + ".class.json.last-good" ) );
+
+  // Simulate a lost main (the authority's inert-residue contract: no reader
+  // may mistake anything else for the main) and recover from last-good.
+  REQUIRE( QFile::remove( rasterPath + ".class.json" ) );
+  QHash<int, RsClassDef> recovered;
+  REQUIRE( RsPostProcess::loadClassMetaData( rasterPath, recovered, &err ) );
+  REQUIRE( recovered.size() == 1 );
+  REQUIRE( recovered.value( 1 ).name() == "Water" );
+}
+
+TEST_CASE( "PostProcess: class.json sidecar refuses a newer schema version fail-closed", "[classify][postprocess][r6]" )
+{
+  // R6: the reader now enforces the version the writer stamps. A future
+  // schema (written by a newer build) must refuse — never partially load and
+  // never save over the artifact.
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+  const QString rasterPath = tempDir.filePath( "result_future.tif" );
+  const QString sidecarPath = rasterPath + ".class.json";
+
+  QJsonDocument doc( QJsonObject{
+    { QStringLiteral( "version" ), 2 },
+    { QStringLiteral( "classes" ), QJsonArray{} },
+  } );
+  QFile out( sidecarPath );
+  REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+  out.write( doc.toJson( QJsonDocument::Indented ) );
+  out.close();
+
+  QHash<int, RsClassDef> loadedDefs;
+  QString err;
+  REQUIRE_FALSE( RsPostProcess::loadClassMetaData( rasterPath, loadedDefs, &err ) );
+  REQUIRE( loadedDefs.isEmpty() );
+  REQUIRE( err.contains( QStringLiteral( "version" ) ) );
+  // Pre-versioning legacy files (version field absent) load as version 1.
+  QJsonDocument legacy( QJsonObject{
+    { QStringLiteral( "classes" ), QJsonArray{ QJsonObject{
+        { QStringLiteral( "id" ), 3 },
+        { QStringLiteral( "name" ), QStringLiteral( "Legacy" ) },
+        { QStringLiteral( "color" ), QStringLiteral( "#808080" ) },
+    } } },
+  } );
+  REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+  out.write( legacy.toJson( QJsonDocument::Indented ) );
+  out.close();
+  REQUIRE( RsPostProcess::loadClassMetaData( rasterPath, loadedDefs, &err ) );
+  REQUIRE( loadedDefs.size() == 1 );
+  REQUIRE( loadedDefs.value( 3 ).name() == "Legacy" );
 }
 
 TEST_CASE( "PostProcess: loadClassMetaData returns false with empty out when sidecar absent", "[classify][postprocess]" )

@@ -10,7 +10,7 @@
 
 #include "runtime/observability/fault_point.h"
 
-#include "platform/portable.h"
+#include "platform/durable_sidecar.h"
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -37,20 +37,6 @@
 #include <functional>
 #include <optional>
 #include <type_traits>
-
-#ifdef Q_OS_WIN
-// _O_WRONLY/_O_BINARY for fsyncFile's Win32 branch live in fcntl.h (MSVC);
-// the POSIX branch below needs the same header for its own flags.
-// Build-unblock for master breakage (see open PR #1009's identical fix).
-#include <fcntl.h>
-#include <io.h>
-#include <share.h>
-#include <sys/stat.h>
-#include <windows.h>
-#else
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 
 namespace sicnu::workflow {
 namespace {
@@ -251,26 +237,6 @@ bool isContainedInDirectory( const QString &artifactPath, const QString &canonic
     );
 }
 
-/// Returns false when the flush itself failed — atomicWriteJson must not
-/// promote a file whose bytes never reached stable storage. Rides
-/// platform/portable.h's syncFileUtf8 (the single authority for the
-/// fsync/FlushFileBuffers branches; this file used to hand-roll a
-/// _wsopen_s/_commit + O_RDONLY-fsync copy, and the old QFile::encodeName
-/// spelling was locale-dependent rather than the UTF-8 the path convention
-/// mandates).
-bool fsyncFile( const QString &path )
-{
-    return sicnu::portable::syncFileUtf8( path.toStdString() );
-}
-
-void fsyncDirectory( const QString &path )
-{
-    // Best-effort by contract; the Windows branch used to be a silent no-op
-    // while the atomic publish lane flushed for real.
-    sicnu::portable::syncDirectoryBestEffortUtf8( path.toStdString(),
-                                                  /*pathIsDirectory=*/true );
-}
-
 /// Runs @p body on the coordinator's affinity thread when the caller lives on
 /// another one. onNodeFinished (and therefore every run-state mutation it
 /// performs) is delivered to that thread, so a public accessor reading the
@@ -328,63 +294,29 @@ auto invokeOnCoordinatorThread( const PipelineRunCoordinator *self, F &&body ) -
     }
 }
 
-/// Two-phase atomic write (DECISIONS D7): tmp -> flush -> fsync -> rename ->
-/// dir fsync. Returns the final path, empty on failure. The tmp name is
-/// unique per writer (pid + counter) so concurrent writes to the same target
-/// — e.g. two processes resuming one checkpoint path — cannot interleave
-/// their payloads on a shared tmp file. @p faultPoint (optional) arms the
-/// deterministic crash-between-write-and-rename injection: it routes through
-/// the REAL rename-failure branch (tmp removed, nothing promoted) exactly
-/// like a locked target or a cross-device rename error.
+/// Two-phase atomic write (DECISIONS D7), routed through the single sidecar
+/// write authority (R6, platform/durable_sidecar.h): O_EXCL staging claim in
+/// the target directory, fsync/FlushFileBuffers durability gate, atomic
+/// replace, best-effort directory fsync. Returns the final path, empty on
+/// failure. The reader (resumeOnAffinity) reads the main artifact directly,
+/// so last-good rotation stays disabled — the previous generation IS the
+/// last good. @p faultPoint (optional) arms the deterministic crash-at-publish
+/// injection: it fires BEFORE the authority runs, so the observable state is
+/// the real publish-failure branch — nothing promoted, the previous
+/// checkpoint intact, no staged residue.
 QString atomicWriteJson( const QString &path, const QJsonObject &document, const char *faultPoint = nullptr )
 {
-    static std::atomic<quint64> s_tmpCounter{ 0 };
-    const QString tmp = path + QStringLiteral( ".tmp.%1.%2" )
-                            .arg( QCoreApplication::applicationPid() )
-                            .arg( s_tmpCounter.fetch_add( 1 ) );
-    QFile file( tmp );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-        return {};
     const QByteArray bytes = QJsonDocument( document ).toJson( QJsonDocument::Indented );
-    // Writer honours the reader's cap: a document this build cannot re-read
-    // is refused rather than promoted into a poison checkpoint.
-    if ( bytes.size() > kMaxCheckpointDocumentBytes
-         || file.write( bytes ) != bytes.size() || !file.flush() )
-    {
-        file.close();
-        QFile::remove( tmp );
-        return {};
-    }
-    file.close();
-    if ( !fsyncFile( tmp ) )
-    {
-        QFile::remove( tmp );
-        return {};
-    }
     if ( faultPoint && SICNU_FAULT_POINT( faultPoint ) )
-    {
-        QFile::remove( tmp );
         return {};
-    }
-    // POSIX rename(2) atomically REPLACES the target (QFile::rename refuses
-    // when the destination exists) — exactly the two-phase commit semantics
-    // this checkpoint writer needs.
-#ifdef Q_OS_WIN
-    if ( !MoveFileExW( reinterpret_cast<const wchar_t *>( tmp.utf16() ),
-                       reinterpret_cast<const wchar_t *>( path.utf16() ),
-                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH ) )
-    {
-        QFile::remove( tmp );
+    // The writer honours the reader's cap through the authority's maxBytes:
+    // a document this build cannot re-read is refused (TooLarge) rather than
+    // promoted into a poison checkpoint.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+        { path.toUtf8().constData(), bytes.toStdString(), "",
+          static_cast<std::size_t>( kMaxCheckpointDocumentBytes ) } );
+    if ( !result )
         return {};
-    }
-#else
-    if ( ::rename( QFile::encodeName( tmp ).constData(), QFile::encodeName( path ).constData() ) != 0 )
-    {
-        QFile::remove( tmp );
-        return {};
-    }
-#endif
-    fsyncDirectory( QFileInfo( path ).absolutePath() );
     return path;
 }
 

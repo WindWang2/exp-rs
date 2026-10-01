@@ -7,7 +7,8 @@
  *
  *   authority  = the MissionContext document (sidecar `<stem>.mission.json`
  *                + `sicnuMissionContext` project-XML block, both written by
- *                the D18 store with QSaveFile atomicity), with the timeline
+ *                the D18 store through the platform sidecar authority —
+ *                temp + fsync + atomic publish), with the timeline
  *                embedded under metadata["mission_timeline"].
  *   legacy     = the Workbench 12.0 `<stem>.mission-timeline.json` sidecar.
  *                IMPORT-ONLY: read when the authority has no embedded
@@ -23,9 +24,11 @@
  *   - unknown/future embedded timeline schema_version → load refused;
  *   - corrupt authority with no last-good recovery → load refused, and the
  *     poisoned state can never be saved over the artifact;
- *   - a failed save never truncates (QSaveFile) and never touches legacy.
+ *   - a failed save never publishes a torn artifact (atomic rename) and
+ *     never touches legacy.
  *
- * Qt Core + Qt Xml only (QSaveFile / QDomDocument / QJsonDocument).
+ * Qt Core + Qt Xml only (QDomDocument / QJsonDocument; the durable byte
+ * write lives in platform/durable_sidecar.h).
  ***************************************************************************/
 #pragma once
 

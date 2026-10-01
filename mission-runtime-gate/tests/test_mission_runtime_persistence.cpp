@@ -126,6 +126,22 @@ QJsonObject sidecarDoc( const QString &projectPath )
 
 // ── O1: one authority, one write path ────────────────────────────────────
 
+namespace
+{
+// R6 (#1394): saveMissionTimelineToSidecar no longer exists - the legacy
+// 12.0 sidecar channel is import-only. Test fixtures that simulate a
+// 12.0-era project write the sidecar directly here.
+bool writeLegacyTimelineFixture( const QString &projectFilePath, const MissionTimeline &timeline )
+{
+    const QString path = missionTimelineSidecarPathForProject( projectFilePath );
+    QFile out( path );
+    if ( !out.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        return false;
+    return out.write( QJsonDocument( timeline.toJson() ).toJson( QJsonDocument::Compact ) )
+               != -1;
+}
+} // namespace
+
 TEST_CASE( "mission runtime save writes exactly one authority", "[mission][persistence]" )
 {
     QTemporaryDir dir;
@@ -251,7 +267,7 @@ TEST_CASE( "a tampered legacy sidecar never overrides the authority", "[mission]
     tampered.addTask( makeTask( QStringLiteral( "ghost-1" ), MissionStage::Publish,
                                 QStringLiteral( "Forged task" ), MissionTaskStatus::Succeeded ) );
     QString legacyErr;
-    REQUIRE( saveMissionTimelineToSidecar( project, tampered, &legacyErr ) );
+    REQUIRE( writeLegacyTimelineFixture( project, tampered ) );
 
     MissionRuntimeState loaded;
     REQUIRE( loadMissionRuntime( project, QDomDocument(), loaded, &err ) );
@@ -294,7 +310,7 @@ TEST_CASE( "a 12.0 project migrates its timeline exactly once", "[mission][persi
                               QStringLiteral( "Import scene" ), MissionTaskStatus::Succeeded ) );
     legacy.addTask( makeTask( QStringLiteral( "ana-1" ), MissionStage::Analyze,
                               QStringLiteral( "NDVI" ), MissionTaskStatus::Failed ) );
-    REQUIRE( saveMissionTimelineToSidecar( project, legacy, &err ) );
+    REQUIRE( writeLegacyTimelineFixture( project, legacy ) );
 
     MissionRuntimeState first;
     REQUIRE( loadMissionRuntime( project, QDomDocument(), first, &err ) );
@@ -753,7 +769,7 @@ TEST_CASE( "a reopened project reconciles its run authority before any surface r
     // No surface may report it as Running afterwards.
     const QJsonObject projection = missionTimelineProjectionJson( reopened.timeline, 32, 0 );
     const QJsonArray tasks = projection.value( QStringLiteral( "tasks" ) ).toArray();
-    for ( const QJsonValue &v : tasks )
+    for ( const auto &v : tasks )
     {
         if ( v.toObject().value( QStringLiteral( "id" ) ).toString() == QLatin1String( "ana-1" ) )
             CHECK( v.toObject().value( QStringLiteral( "status" ) ).toString()

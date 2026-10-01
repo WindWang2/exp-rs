@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "geospatial/util/atomic_fs.h"
+#include "platform/durable_sidecar.h" // R6: the single sidecar write authority
 
 #include <cpl_string.h>
 #include <gdal_priv.h>
@@ -152,11 +153,16 @@ bool RsClassificationPipeline::saveModelSidecarV2( const QString &modelPath,
     root.insert( QStringLiteral( "training" ), training );
   }
 
-  QFile f( sidecarPathForModel( modelPath ) );
-  if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-    return false;
-  f.write( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
-  return true;
+  // R6: the sidecar write authority (unique tmp -> fsync -> atomic publish ->
+  // .last-good rotation). The plain open+truncate write that used to sit here
+  // left the scaler/class metadata torn for a kill mid-write — a killed
+  // predict run lost the feature schema and the class palette at once.
+  const QByteArray bytes = QJsonDocument( root ).toJson( QJsonDocument::Compact );
+  const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+    { sidecarPathForModel( modelPath ).toUtf8().constData(),
+      std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ),
+      sicnu::platform::sidecar::kDefaultLastGoodSuffix } );
+  return static_cast<bool>( result );
 }
 
 bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
@@ -191,10 +197,20 @@ bool RsClassificationPipeline::loadModelSidecarFull( const QString &modelPath,
 {
   out = SidecarData();
 
-  QFile f( sidecarPathForModel( modelPath ) );
-  if ( !f.open( QIODevice::ReadOnly ) )
+  // R6: the sidecar read authority resolves main -> .last-good with a typed
+  // source, so a torn main (a kill mid-save used to leave one) recovers from
+  // the generation the last successful save rotated. Missing and Corrupt both
+  // stay a plain refusal — the schema/version gate below is unchanged.
+  const sicnu::platform::sidecar::ReadResult read = sicnu::platform::sidecar::read(
+    sidecarPathForModel( modelPath ).toUtf8().constData(),
+    sicnu::platform::sidecar::kDefaultLastGoodSuffix );
+  if ( read.source == sicnu::platform::sidecar::ReadSource::Missing
+       || read.source == sicnu::platform::sidecar::ReadSource::Corrupt )
+  {
     return false;
-  const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
+  }
+  const QJsonDocument doc = QJsonDocument::fromJson(
+    QByteArray( read.bytes.data(), static_cast<int>( read.bytes.size() ) ) );
   if ( !doc.isObject() )
     return false;
   const QJsonObject root = doc.object();
@@ -208,7 +224,7 @@ bool RsClassificationPipeline::loadModelSidecarFull( const QString &modelPath,
   if ( scalerVal.isObject() && !out.scaler.fromJson( scalerVal.toObject() ) )
     return false;
 
-  for ( const QJsonValue &v : root.value( QStringLiteral( "classes" ) ).toArray() )
+  for ( const auto &v : root.value( QStringLiteral( "classes" ) ).toArray() )
   {
     const QJsonObject c = v.toObject();
     const QColor color( c.value( QStringLiteral( "color" ) ).toString() );
@@ -216,7 +232,7 @@ bool RsClassificationPipeline::loadModelSidecarFull( const QString &modelPath,
       out.classColors.insert( c.value( QStringLiteral( "id" ) ).toInt(), color );
   }
 
-  for ( const QJsonValue &v : root.value( QStringLiteral( "features" ) ).toArray() )
+  for ( const auto &v : root.value( QStringLiteral( "features" ) ).toArray() )
   {
     if ( v.isDouble() )
       out.bandIndices.append( v.toInt() );

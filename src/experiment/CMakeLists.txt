@@ -59,6 +59,9 @@ target_link_libraries(sicnu_experiment
     Sicnu::dataset
   PRIVATE
     SQLite::SQLite3
+    # R6: reproduction-bundle members/checksums write through the platform
+    # durable-sidecar authority.
+    Sicnu::Platform
     # Unified trace + fault registry (Verification Platform 8.0): the store
     # commit seams emit exp.trace.v1 records and probe SICNU_FAULT_POINT.
     # PRIVATE keeps the science-core layer guards (no GUI/network) intact.

@@ -8,7 +8,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
-#include <QSaveFile>
 
 namespace sicnu::app
 {
@@ -28,49 +27,6 @@ QString missionTimelineSidecarPathForProject( const QString &projectFilePath )
         stem = info.fileName();
 
     return base + QLatin1Char( '/' ) + stem + QStringLiteral( ".mission-timeline.json" );
-}
-
-bool saveMissionTimelineToSidecar( const QString &projectFilePath,
-                                   const MissionTimeline &timeline,
-                                   QString *error )
-{
-    const QString path = missionTimelineSidecarPathForProject( projectFilePath );
-    if ( path.isEmpty() )
-    {
-        if ( error )
-            *error = QStringLiteral( "empty_project_path" );
-        return false;
-    }
-
-    const QByteArray bytes = QJsonDocument( timeline.toJson() ).toJson( QJsonDocument::Compact );
-
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly ) )
-    {
-        if ( error )
-            *error = QStringLiteral( "open_failed:%1" ).arg( file.errorString() );
-        return false;
-    }
-
-    const qint64 written = file.write( bytes );
-    if ( written != static_cast<qint64>( bytes.size() ) )
-    {
-        // Never leave a truncated artifact behind: cancelWriting() removes the
-        // temp file, so a later restore cannot silently read a half-mission.
-        file.cancelWriting();
-        if ( error )
-            *error = QStringLiteral( "short_write" );
-        return false;
-    }
-
-    if ( !file.commit() )
-    {
-        if ( error )
-            *error = QStringLiteral( "commit_failed:%1" ).arg( file.errorString() );
-        return false;
-    }
-
-    return true;
 }
 
 bool loadMissionTimelineFromSidecar( const QString &projectFilePath,

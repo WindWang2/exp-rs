@@ -36,6 +36,8 @@ target_link_libraries(sicnu_experiment_studio
   PUBLIC
     Qt6::Core
     Sicnu::study
+    # R6: sidecar-class writes route through the platform durable-sidecar authority.
+    Sicnu::Platform
 )
 
 foreach(SICNU_STUDIO_FORBIDDEN_LINK Qt6::Widgets qgis_gui Qt6::Network Sicnu::app)

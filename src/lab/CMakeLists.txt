@@ -14,6 +14,8 @@ target_include_directories(sicnu_lab_runtime PUBLIC
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
+# R6: session saves route through the platform durable-sidecar authority.
+target_link_libraries(sicnu_lab_runtime PUBLIC Sicnu::Platform)
 # Link jsoncpp the same way sicnu_jobs / sicnu_workflow do in this repo
 if(TARGET jsoncpp)
   target_link_libraries(sicnu_lab_runtime PUBLIC jsoncpp)

@@ -3,7 +3,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QSaveFile>
+#include "platform/durable_sidecar.h"
 #include <QTextStream>
 
 namespace sicnu::experiment_studio
@@ -50,7 +50,7 @@ Result<StudioExportBundle> StudioExportBundle::fromJson( const QJsonObject &json
     StudioExportBundle b;
     b.studyId = json.value( QStringLiteral( "study_id" ) ).toString();
     const QJsonArray runs = json.value( QStringLiteral( "run_ids" ) ).toArray();
-    for ( const QJsonValue &v : runs )
+    for ( const auto &v : runs )
         b.runIds.append( v.toString() );
     b.studyReport = json.value( QStringLiteral( "study_report" ) ).toObject();
     b.faultTeaching = json.value( QStringLiteral( "fault_teaching" ) ).toObject();
@@ -58,7 +58,7 @@ Result<StudioExportBundle> StudioExportBundle::fromJson( const QJsonObject &json
     b.designer = json.value( QStringLiteral( "designer" ) ).toObject();
     b.runMatrix = json.value( QStringLiteral( "run_matrix" ) ).toObject();
     const QJsonArray caps = json.value( QStringLiteral( "capsule_refs" ) ).toArray();
-    for ( const QJsonValue &v : caps )
+    for ( const auto &v : caps )
         b.capsuleRefs.append( v.toString() );
     b.csvRunTable = json.value( QStringLiteral( "csv_run_table" ) ).toString();
     return Result<StudioExportBundle>::success( b );
@@ -70,7 +70,7 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
     QTextStream ts( &out );
     ts << "point_id,replicate_index,run_id,status,seed,error_summary,output_asset_path\n";
     const QJsonArray table = studyReportJson.value( QStringLiteral( "run_table" ) ).toArray();
-    for ( const QJsonValue &v : table )
+    for ( const auto &v : table )
     {
         const QJsonObject r = v.toObject();
         auto esc = []( const QString &s ) {
@@ -122,29 +122,20 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
 
 Result<void> writeStudioExportJson( const StudioExportBundle &bundle, const QString &path )
 {
-    QSaveFile file( path );
-    if ( !file.open( QIODevice::WriteOnly ) )
-    {
-        return Result<void>::failure(
-            studioError( QStringLiteral( "experiment_studio.export_write_failed" ),
-                         QStringLiteral( "cannot open %1" ).arg( path ) ) );
-    }
     const QByteArray bytes = QJsonDocument( bundle.toJson() ).toJson( QJsonDocument::Indented );
-    if ( file.write( bytes ) != bytes.size() )
+    // R6: the single sidecar write authority — temp + fsync + atomic publish.
+    const sicnu::platform::sidecar::WriteResult result = sicnu::platform::sidecar::write(
+      { path.toUtf8().constData(),
+        std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ), "" } );
+    if ( !result )
     {
         return Result<void>::failure(
             studioError( QStringLiteral( "experiment_studio.export_write_failed" ),
-                         QStringLiteral( "short write to %1" ).arg( path ) ) );
-    }
-    if ( !file.commit() )
-    {
-        return Result<void>::failure(
-            studioError( QStringLiteral( "experiment_studio.export_write_failed" ),
-                         QStringLiteral( "commit failed for %1" ).arg( path ) ) );
+                         QStringLiteral( "cannot publish %1: %2" )
+                             .arg( path, QString::fromUtf8( result.error.c_str() ) ) ) );
     }
     return Result<void>::success();
 }
-
 Result<StudioExportBundle> readStudioExportJson( const QString &path )
 {
     QFile file( path );

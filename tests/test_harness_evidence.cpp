@@ -8,7 +8,6 @@
 
 #include <QFile>
 #include <QFileInfo>
-#include <QSaveFile>
 #include <QTemporaryDir>
 
 #include <json/json.h>

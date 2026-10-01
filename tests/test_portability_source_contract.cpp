@@ -185,20 +185,21 @@ TEST_CASE( "durability publishers open through the UTF-8 path boundary",
   }
 }
 
-TEST_CASE( "journal publish stays stage-write → file sync → atomic rename",
+TEST_CASE( "durable sidecar authority stays stage-write -> file sync -> atomic publish",
            "[portability][contract][static][durability]" )
 {
   if ( !sourcesAvailable() )
     return;
+  // R6: the single sidecar write authority owns the ordering contract the
+  // journal implementation used to pin directly. The durability gate sits
+  // between the staging write and the publishing rename.
   const std::string source =
-    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/agent_loop/session_journal.cpp" );
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/platform/durable_sidecar.cpp" );
   REQUIRE_FALSE( source.empty() );
 
-  // Ordering contract inside writeFileAtomic: the file-sync durability gate
-  // sits between the staging write and the publishing rename.
-  const std::size_t stagingWrite = source.find( "std::ofstream out( temp" );
-  const std::size_t syncGate = source.find( "sicnu::portable::syncFileUtf8" );
-  const std::size_t publish = source.find( "fs::rename( temp, target, ec )" );
+  const std::size_t stagingWrite = source.find( "writeTempFile( staged" );
+  const std::size_t syncGate = source.find( "portable::syncFileUtf8( staged" );
+  const std::size_t publish = source.find( "publishStaged( staged" );
   INFO( "stagingWrite=" << stagingWrite << " syncGate=" << syncGate
                         << " publish=" << publish );
   REQUIRE( stagingWrite != std::string::npos );
@@ -209,10 +210,62 @@ TEST_CASE( "journal publish stays stage-write → file sync → atomic rename",
 
   // The publish is a single atomic replace: no remove-before-rename window
   // (a crash there destroyed the audit trail the journal exists to keep).
-  REQUIRE( source.find( "fs::remove( target, ec );\n    fs::rename(" ) == std::string::npos );
-  // Staging names are unique (pid/counter), never the shared "<name>.tmp".
-  REQUIRE( source.find( "target.filename().string() + \".tmp\"" ) == std::string::npos );
+  REQUIRE( source.find( "removeQuiet( request.targetPath" ) == std::string::npos );
+  // Staging names are unique (pid/counter/rng), never the shared "<name>.tmp".
+  REQUIRE( source.find( "filename() + \".tmp\"" ) == std::string::npos );
   REQUIRE( source.find( "stagingCounter" ) != std::string::npos );
+
+  // Every sidecar consumer routes through the authority: the journal keeps
+  // no private write path of its own (R6 convergence).
+  const std::string journal =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/agent_loop/session_journal.cpp" );
+  REQUIRE_FALSE( journal.empty() );
+  REQUIRE( journal.find( "sicnu::platform::sidecar::write(" ) != std::string::npos );
+
+  // ADR 0166 / issue #1394 item 2: ONE sidecar write API. Every state-sidecar
+  // writer in the repo routes here; the remaining runtime-chunk writers named
+  // in the issue (tile_run_contract's checkpoint, scratch_registry's digest
+  // sidecar, resumable_tile_run's published marker) must not keep a private
+  // temp/publish lane, and neither may the two R6 track-5 lanes (the D17
+  // pipeline checkpoint/provenance writer and the lab session store).
+  // Call-shaped needles: a comment mentioning the API is not enough
+  // (mutation: delete the call, keep the comment → red).
+  const char *const consumers[] = {
+    "src/runtime/chunk/tile_checkpoint.cpp",
+    "src/runtime/chunk/scratch_registry.cpp",
+    "src/runtime/chunk/resumable_tile_run.cpp",
+    "src/workflow/pipeline_run_coordinator.cpp",
+    "src/lab/session_store.cpp",
+  };
+  for ( const char *consumer : consumers )
+  {
+    const std::string source = repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, consumer );
+    REQUIRE_FALSE( source.empty() );
+    INFO( "consumer: " << consumer );
+    REQUIRE( source.find( "sicnu::platform::sidecar::write(" ) != std::string::npos );
+    // No private publish lane survives in these writers: neither a
+    // hand-rolled temp name for the target nor a raw std::filesystem::rename
+    // onto it.
+    REQUIRE( source.find( "path + \".tmp.\"" ) == std::string::npos );
+    REQUIRE( source.find( "+ \".tmp\";" ) == std::string::npos );
+    REQUIRE( source.find( "::rename( sicnu::portable::pathFromUtf8( tmp )" )
+             == std::string::npos );
+  }
+
+  // Track-5 lane needles the generic patterns above cannot spell: the Qt
+  // lane's pid/counter temp naming and its platform publish syscalls, and
+  // the session store's retired writeFileSync staging helper (mutations:
+  // restore either hand-rolled lane → red).
+  const std::string coordinator =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/workflow/pipeline_run_coordinator.cpp" );
+  REQUIRE( coordinator.find( ".tmp.%1.%2" ) == std::string::npos );
+  REQUIRE( coordinator.find( "::rename( QFile::encodeName(" ) == std::string::npos );
+  REQUIRE( coordinator.find( "MoveFileExW" ) == std::string::npos );
+  const std::string sessionStore =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/lab/session_store.cpp" );
+  REQUIRE( sessionStore.find( "finalPath + \".tmp.\"" ) == std::string::npos );
+  REQUIRE( sessionStore.find( "writeFileSync" ) == std::string::npos );
+  REQUIRE( sessionStore.find( "std::filesystem::rename(" ) == std::string::npos );
 }
 
 TEST_CASE( "path-valued environment reads enter through envUtf8",
@@ -313,9 +366,10 @@ TEST_CASE( "atomic publish callers never hand-roll the staging claim",
     const char *required;
   };
   const Claim claims[] = {
-    // The journal's staging claim goes through the portable helper.
-    { "src/agent_loop/session_journal.cpp",
-      "sicnu::portable::claimExclusiveUtf8( sicnu::portable::pathToUtf8( temp ) )" },
+    // R6: the sidecar authority owns the O_EXCL staging claim; the journal
+    // consumer no longer stages names of its own.
+    { "src/platform/durable_sidecar.cpp",
+      "portable::claimExclusiveUtf8( staged" },
   };
   for ( const Claim &claim : claims )
   {

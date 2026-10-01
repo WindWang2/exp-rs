@@ -14,6 +14,7 @@
 #include "data/data_manager.h"
 #include "data/source_descriptor.h"
 #include "gdal/gdal_dataset_wrapper.h"
+#include "geospatial/util/atomic_fs.h"
 #include "runtime/observability/fault_point.h"
 #include "runtime/observability/trace.h"
 
@@ -183,21 +184,17 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
   // Always COPY into staging so a mid-group failure leaves the just-computed
   // temp in place for diagnosis (documented contract). Temps are removed only
   // after the full publish group succeeds.
-  auto stageTo = []( const QString &from, const QString &to ) -> bool {
-    return QFile::copy( from, to );
-  };
-
   const bool isInPlace = ( request.tempPath == request.stablePath )
     || ( !request.tempPath.isEmpty() && QFile::exists( request.tempPath )
          && QFileInfo( request.tempPath ).canonicalFilePath() == QFileInfo( request.stablePath ).canonicalFilePath() );
 
-  // Publish-then-swap (#617): stage each file at "<to>.new" and atomically
-  // rename it over the stable path. The old sequence removed the previous
-  // stable file BEFORE the replacement was in place, and its rollback deleted
-  // only the newly published names - a failure on pair 2/3 (or a failed
-  // registerSource after publish) destroyed the last good output entirely.
-  // On failure the .new staging files are removed and the previous stable
-  // files (renamed to ".old" during the swap) are restored.
+  // Publish-then-swap (#617): each pair's previous stable file moves to
+  // "<to>.old" and the replacement publishes in ONE atomic rename over the
+  // stable path. The old sequence removed the previous stable file BEFORE
+  // the replacement was in place, and its rollback deleted only the newly
+  // published names - a failure on pair 2/3 (or a failed registerSource
+  // after publish) destroyed the last good output entirely. On failure the
+  // ".old" backups of the previous stable files are restored.
   QStringList published;
   QStringList stagedOld;
   if ( !isInPlace )
@@ -205,9 +202,7 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
     bool publishOk = true;
     for ( const PublishPair &pair : publishes )
     {
-      const QString staging = pair.to + QStringLiteral( ".new" );
       const QString backup = pair.to + QStringLiteral( ".old" );
-      QFile::remove( staging );
       QFile::remove( backup );
       if ( SICNU_FAULT_POINT( "output_committer.publish" ) )
       {
@@ -223,15 +218,47 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
         publishOk = false;
         break;
       }
-      if ( !stageTo( pair.from, staging ) || !QFile::rename( staging, pair.to ) )
+      // R6 durability fix on the #617 flow: the temp is first copied into
+      // the STABLE directory ("<to>.new" — same volume as the target, so the
+      // rename below can never cross a device) and the copied bytes are
+      // fsynced BEFORE the one-step rename. The pre-R6 flow copied to
+      // "<to>.new" and renamed it (atomic on both platforms) but never
+      // fsynced: a power loss could commit the directory entry for bytes
+      // still in cache. Calling atomic_fs::publishStagedFile on the temp
+      // directly was rejected in review: on Windows its cross-volume
+      // MOVEFILE_COPY_ALLOWED fallback is a non-atomic copy ONTO the live
+      // target — after the .old rename above that would tear the stable
+      // output with no healer. The .old backup and the !publishOk rollback
+      // are unchanged (#617), as is the injected fault above.
+      const QString staging = pair.to + QStringLiteral( ".new" );
+      QFile::remove( staging );
+      if ( !QFile::copy( pair.from, staging ) )
       {
         publishOk = false;
-        // A failed cross-filesystem copy can leave a partial <stable>.new
-        // behind (cleanup only ran at the START of the next pair) — remove
-        // it so nothing half-written survives the failure (#703.4).
+        // Restore this pair's previous stable file if it was moved aside.
+        if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
+          QFile::rename( backup, pair.to );
+        break;
+      }
+      try
+      {
+        sicnu::geo::atomic_fs::fsyncFile( staging.toUtf8().constData() );
+      }
+      catch ( const sicnu::geo::GeoError & )
+      {
+        QFile::remove( staging );
+        publishOk = false;
+        if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
+          QFile::rename( backup, pair.to );
+        break;
+      }
+      if ( !QFile::rename( staging, pair.to ) )
+      {
+        // A failed rename can leave a partial "<to>.new" behind — remove it
+        // so nothing half-written survives (#703.4).
         if ( QFile::exists( staging ) )
           QFile::remove( staging );
-        // Restore this pair's previous stable file if it was moved aside.
+        publishOk = false;
         if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
           QFile::rename( backup, pair.to );
         break;

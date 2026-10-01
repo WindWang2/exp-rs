@@ -18,6 +18,7 @@
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_validator.h"
 #include "platform/portable.h"
+#include "platform/durable_sidecar.h"
 
 namespace {
 exprs::PluginState incompatibleStateFor( const std::string &pluginId,
@@ -2177,45 +2178,21 @@ void PluginRegistry::saveUserIndex() const
         std::error_code error;
         std::filesystem::create_directories( sicnu::portable::pathFromUtf8( parent ), error );
     }
-    // Hardening 15/20: the temp file is process-unique. The shared fixed
-    // "<index>.tmp" let two processes (GUI + CLI, or two CLIs) interleave
-    // ofstream writes into the SAME file; both then renamed a torn document
-    // over the index and the next load silently reset the user's disable set.
-    // In-process writers are serialized by gRegistryMutex; the pid suffix only
-    // separates processes, mirroring the per-pid staging idiom the package and
-    // snapshot code already use.
-    const std::uint32_t pid = sicnu::portable::pid();
-    const std::string temp = path + ".tmp." + std::to_string( pid );
-    {
-        std::ofstream output( sicnu::portable::pathFromUtf8( temp ), std::ios::trunc );
-        if ( !output )
-            return;
-        Json::Value root( Json::objectValue );
-        Json::Value disabled( Json::arrayValue );
-        for ( const std::string &id : mDisabledIds )
-            disabled.append( id );
-        root["disabled"] = disabled;
-        Json::StyledWriter writer;
-        output << writer.write( root );
-        output.close();
-        if ( !output.good() )
-        {
-            // A failed write (ENOSPC ...) must NOT be renamed over the real
-            // index — that would install a torn document and silently reset
-            // the user's disable set on next load.
-            std::error_code removeError;
-            std::filesystem::remove( sicnu::portable::pathFromUtf8( temp ), removeError );
-            return;
-        }
-    }
-    std::error_code renameError;
-    std::filesystem::rename( sicnu::portable::pathFromUtf8( temp ),
-                             sicnu::portable::pathFromUtf8( path ), renameError );
-    if ( renameError )
-    {
-        std::error_code removeError;
-        std::filesystem::remove( sicnu::portable::pathFromUtf8( temp ), removeError );
-    }
+    Json::Value root( Json::objectValue );
+    Json::Value disabled( Json::arrayValue );
+    for ( const std::string &id : mDisabledIds )
+        disabled.append( id );
+    root["disabled"] = disabled;
+    Json::StyledWriter writer;
+
+    // R6: the single sidecar write authority — O_EXCL temp, fsync gate,
+    // atomic publish. In-process writers are serialized by gRegistryMutex;
+    // cross-process publishers are separated by the O_EXCL staged names
+    // (replacing the Hardening 15/20 per-pid temp, whose rename could still
+    // publish a never-fsynced document on power loss).
+    sicnu::platform::sidecar::write( { path,
+                                       writer.write( root ),
+                                       "" /* no last-good: loadUserIndex tolerates absence */ } );
 }
 
 bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )
