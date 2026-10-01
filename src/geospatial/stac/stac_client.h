@@ -191,6 +191,19 @@ class StacClient
     /// automatically when the query extension (or intersects) is present.
     StacPage search( const StacSearchQuery &query ) const;
 
+    /// Raw bounded search answer — the origin's VERBATIM FeatureCollection
+    /// document, fetched with exactly the request construction of search()
+    /// but WITHOUT the strict per-item parse. Hosts that own their own item
+    /// mapping (the Qt STAC browser adapter, which forwards the origin's
+    /// feature documents untouched) use this; every parsing surface keeps
+    /// search().
+    Json::Value searchDocument( const StacSearchQuery &query ) const;
+
+    /// Raw bounded GET of an absolute URL against this root's fetch options
+    /// (same wall-clock and byte budgets as search()). Carries a full
+    /// continuation URL — e.g. a rel="next" href a raw caller already holds.
+    Json::Value getDocument( const std::string &absoluteUrl ) const;
+
     /// Fetches the next page using the page's continuation descriptor.
     /// Returns an empty page when there is none.
     StacPage nextPage( const StacPage &page ) const;
@@ -301,6 +314,17 @@ class StacClient
         const std::vector<std::string> &itemHrefs, int maxConcurrency = 0 ) const;
 
   private:
+    /// One built search request: method, absolute URL and (canonical) body.
+    /// Factored out of search() so the raw entry point (searchDocument)
+    /// issues byte-identical requests.
+    struct SearchRequest
+    {
+        std::string method;
+        std::string url;
+        Json::Value body;
+    };
+
+    SearchRequest buildSearchRequest( const StacSearchQuery &query ) const;
     Json::Value fetchDocument( const std::string &method, const std::string &url,
                               const Json::Value &body ) const;
     StacPage executeSearch( const std::string &method, const std::string &url,
