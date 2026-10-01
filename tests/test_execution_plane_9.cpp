@@ -478,9 +478,17 @@ TEST_CASE( "observer slots may re-enter the coordinator from runStateChanged (#8
         snapshot = fx.coordinator.runForPipeline( pipelineId );
         return snapshot && snapshot->state() == WorkflowRunState::Completed;
     } ) );
-    // By terminal time at least one post-registration drain ran on some
-    // thread; the slot's synchronous re-entrant queries must have completed.
-    REQUIRE( reentered.load() );
+    // The terminal STATE flips inside the fold (under m_mutex) but the
+    // terminal EMISSION is only drained after persistRun's checkpoint write
+    // + ArtifactGC sweep (#754: notifications mirror persisted transitions).
+    // On a fast host this poll could observe Completed and reach the old
+    // REQUIRE while the draining worker was still writing the checkpoint —
+    // reentered read false and the case flaked (CI Tier 1, 0.11 s). Wait
+    // for the observed emission itself; every queue site drains right after
+    // queueing, so the terminal notification always lands shortly after the
+    // state flip. Pre-fix (emit-under-lock) code still deadlocks on the
+    // first drain and fails by timeout, so the regression property holds.
+    REQUIRE( waitForCondition9( [&] { return reentered.load(); } ) );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -482,6 +482,14 @@ TEST_CASE( "Rapid short jobs: 10k submissions drain with no stranded tasks",
     engine.shutdownForTests();
     auto &center = TaskCenter::instance();
     center.resetResourceProfileLimits();
+    // This is a drain test, not an admission-control test: on a loaded host
+    // the 10k submit burst outruns the drain, the live count reaches the
+    // 4096-task pending bound and submitJob starts refusing with -1. Those
+    // phantom ids can never turn up in allTasks(), so the old loop burned
+    // the whole 10-minute deadline waiting for them (CI: 4971 == 10000
+    // after 603 s). Disable the bound (same reasoning as the ep8 scaling
+    // test) and assert every admission below.
+    center.setMaxPendingTasks( 0 );
 
     engine.clearExecutors();
     engine.registerExecutor( "ep7:", []( const sicnu::jobs::JobRequest &req,
@@ -499,7 +507,9 @@ TEST_CASE( "Rapid short jobs: 10k submissions drain with no stranded tasks",
     {
         sicnu::jobs::JobRequest r = ep7Request( "ep7:tiny" );
         r.params["i"] = i;
-        ids.push_back( center.submitJob( r ) );
+        const long id = center.submitJob( r );
+        REQUIRE( id > 0 ); // fail fast if admission ever refuses (see above)
+        ids.push_back( id );
     }
     REQUIRE( ids.size() == static_cast<size_t>( kJobs ) );
 
@@ -541,6 +551,7 @@ TEST_CASE( "Rapid short jobs: 10k submissions drain with no stranded tasks",
 
     engine.clearExecutors();
     center.clearCompletedTasks();
+    center.resetResourceProfileLimits(); // restore the 12.0 pending bound
     engine.shutdownForTests();
 }
 
