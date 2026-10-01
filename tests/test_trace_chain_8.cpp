@@ -29,6 +29,7 @@
 #include <chrono>
 #include <json/json.h>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "data/asset_types.h"
@@ -337,6 +338,19 @@ TEST_CASE( "trace: TaskCenter terminal transitions reach the chain with the "
     engine.registerExecutor( "trace8:instant",
                              []( const sicnu::jobs::JobRequest &,
                                  sicnu::operators::RSOperatorContext & ) {
+                                 // The chain's task_status duration is wall-clock
+                                 // MILLISECONDS (traceTaskSnapshot: QDateTime
+                                 // msecsTo × 1000). A truly instant job's
+                                 // pick→complete span is sub-millisecond
+                                 // (steady-clock execution_end ≈ 0.4 ms), so
+                                 // whether it crosses a ms boundary — and thus
+                                 // publishes durationUs > 0 or the "absent" 0 —
+                                 // is a host-speed coin flip (reproduced at
+                                 // ~3% locally). Hold the executor for 5 ms (the
+                                 // test_execution_plane_8 idiom) so the terminal
+                                 // record's duration is deterministically
+                                 // non-zero on every host.
+                                 std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
                                  Json::Value result;
                                  result["ok"] = true;
                                  return result;

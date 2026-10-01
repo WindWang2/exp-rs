@@ -592,6 +592,15 @@ TEST_CASE( "data scale: concurrent readers see consistent snapshots under mutati
     std::atomic<quint64> lastGeneration{ 0 };
 
     auto reader = [&]() {
+        // Per-reader generation watermark. The shared lastGeneration below is
+        // a MAX that all four readers advance: comparing a FRESH sample
+        // against it flags a stale-but-valid snapshot read — this reader
+        // sampled an older published generation that another reader already
+        // moved past — as a regression (reproduced at ~1% locally). The
+        // no-publication-regression invariant is per reader: currentSnapshot
+        // only moves forward, so one reader's samples never decrease. The
+        // shared max stays as the post-join progress floor below.
+        quint64 ownGeneration = 0;
         while ( !stop.load( std::memory_order_relaxed ) )
         {
             // Snapshot-served readers only (the thread-affinity contract):
@@ -626,9 +635,11 @@ TEST_CASE( "data scale: concurrent readers see consistent snapshots under mutati
             if ( probeId.isNull() != !one.has_value() && !probeId.isNull() )
                 readerErrors.fetch_add( 1, std::memory_order_relaxed );
             const quint64 generation = manager->catalogGeneration();
-            quint64 previous = lastGeneration.load( std::memory_order_relaxed );
-            if ( generation < previous )
+            if ( generation < ownGeneration )
                 readerErrors.fetch_add( 1, std::memory_order_relaxed );
+            if ( generation > ownGeneration )
+                ownGeneration = generation;
+            quint64 previous = lastGeneration.load( std::memory_order_relaxed );
             while ( generation > previous &&
                     !lastGeneration.compare_exchange_weak( previous, generation ) )
             {
