@@ -1906,10 +1906,31 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
             return; // task gone, or stale/duplicate record (catch-up vs listener)
     }
 
+    // The engine's startedAtMs is the ONLY authoritative "a worker actually
+    // started this job" stamp (#686): startTime must reflect it, never the
+    // enqueue timestamp seeded at submission. Latch it on the first record that
+    // carries it — BEFORE any terminal transition. A fast task whose Succeeded
+    // record is processed ahead of its Running record would otherwise keep
+    // startTime at the enqueue time, which precedes every parent's endTime and
+    // reads back as a spurious DAG ordering violation. startedAtMs is stamped
+    // once per job, so the guard makes this monotonic and idempotent across the
+    // Running/progress/Succeeded records (order-independent latch).
+    if ( record.startedAtMs > 0 )
+    {
+        QMutexLocker locker( &m_mutex );
+        auto it = m_tasks.find( taskId );
+        if ( it != m_tasks.end()
+             && ( !it->startTime.isValid()
+                  || it->startTime.toMSecsSinceEpoch() < record.startedAtMs ) )
+        {
+            it->startTime = QDateTime::fromMSecsSinceEpoch( record.startedAtMs, Qt::UTC );
+        }
+    }
+
     // The engine's Running record is the ONLY sanctioned source for the
     // caller-facing Running status: a worker actually picked the job
-    // (#686). Dispatching → Running here; startTime becomes the real
-    // worker start, not the enqueue timestamp.
+    // (#686). Dispatching → Running here. The run-start latch lives above so it
+    // survives terminal-record-first delivery and is not repeated here.
     if ( record.state == sicnu::jobs::JobState::Running )
     {
         bool flipped = false;
@@ -1921,8 +1942,6 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
                       || it->status == TaskStatus::Dispatching ) )
             {
                 setTaskStatusLocked( *it, TaskStatus::Running );
-                if ( record.startedAtMs > 0 )
-                    it->startTime = QDateTime::fromMSecsSinceEpoch( record.startedAtMs, Qt::UTC );
                 updatePipelineForTaskLocked( taskId );
                 queueTaskUpdatedLocked( taskId );
                 flipped = true;

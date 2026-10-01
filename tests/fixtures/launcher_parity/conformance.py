@@ -51,6 +51,33 @@ def write_stub(path, body):
     os.chmod(path, mode)
 
 
+def read_rec(rec_path, proc):
+    """Read the CLI stub's invocation record.
+
+    When the wrapper re-exits without a record (e.g. its ``[ -x cli ]`` guard
+    fired because the stub's exec bit did not stick on a given runner), the old
+    ``json.load(open(rec))`` raised an opaque ``FileNotFoundError`` that aborted
+    the whole scenario. Return a sentinel instead so the contract checks fail
+    cleanly, and dump the wrapper's own rc/stdout/stderr so the real cause is
+    visible in the CI log rather than a bare traceback.
+    """
+    try:
+        with open(rec_path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError) as exc:
+        print("  [diag] no CLI record %s (%s); wrapper rc=%d"
+              % (os.path.basename(rec_path), exc, proc.returncode))
+        for stream in ("stdout", "stderr"):
+            tail = (getattr(proc, stream, "") or "").strip()
+            if tail:
+                print("  [diag] wrapper %s: %s" % (stream, tail[-400:]))
+        # args is long enough for the index probes below; every value fails its
+        # equality check, so a missing record surfaces as contract failures.
+        return {"args": [None] * 10, "SICNU_OFFLINE": None,
+                "SICNU_LAB_RULES_DIR": None, "PROJ_DATA": None,
+                "GDAL_DATA": None, "QT_QPA_PLATFORM": None}
+
+
 # --------------------------------------------------------------------------
 # gen_samples.sh
 # --------------------------------------------------------------------------
@@ -222,7 +249,7 @@ def scenario_grade_all(repo):
         )
         check(proc.returncode == 0, "stub rc 0 → wrapper 0 (got %d)"
               % proc.returncode)
-        doc = json.load(open(rec))
+        doc = read_rec(rec, proc)
         csv_target = os.path.join(subs, "grades.csv")
         check(doc["args"] == ["--offline", "lab", "--lab", "ndvi_basics",
                               "--batch", subs, "--csv", csv_target],
@@ -246,7 +273,7 @@ def scenario_grade_all(repo):
         )
         check(proc.returncode == 1, "stub rc 1 → wrapper 1 (got %d)"
               % proc.returncode)
-        doc = json.load(open(rec))
+        doc = read_rec(rec, proc)
         check(doc["args"][3] == "terrain_slope" and doc["args"][7] == csv2,
               "explicit lab + csv forwarded")
         check(doc["args"][-2:] == ["--json", "--html"],

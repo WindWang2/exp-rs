@@ -15,6 +15,7 @@
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
@@ -253,6 +254,12 @@ TEST_CASE( "100k catalog + 10k runs: batch ingest, cursor paging, indexed "
     const QByteArray evidenceDir = qgetenv( "SICNU_PERF_EVIDENCE_DIR" );
     if ( !evidenceDir.isEmpty() )
     {
+        // The evidence directory is provided via env but is not guaranteed to
+        // exist yet (nothing in CMake pre-creates it); under one-case-per-process
+        // ctest no sibling test races to make it first. Create it here so the
+        // write is self-sufficient and this benchmark fails on a real I/O error,
+        // not on a missing directory.
+        QDir().mkpath( QString::fromUtf8( evidenceDir ) );
         const QString path = QString::fromUtf8( evidenceDir ) +
                              QStringLiteral( "/data-foundation-perf.json" );
         QFile file( path );
