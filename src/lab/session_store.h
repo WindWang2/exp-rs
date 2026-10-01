@@ -3,12 +3,12 @@
   Durable storage for LabSessions (ADR 0174).
 
   Layout: <root>/<labId>/<studentId>-<seq>.session.json, canonical bytes
-  (see session_state). Persistence mirrors the WorkflowCheckpointManager
-  discipline: unique per-save tmp name, fsync, std::filesystem::rename
-  (rename(2) / MoveFileEx-REPLACE_EXISTING — atomic old-or-new, never a
-  half-written session). Loads are fail-closed: corrupt payloads, foreign
-  schema generations and spec-fingerprint drift are typed refusals, never
-  silently adopted.
+  (see session_state). Persistence routes through the single sidecar write
+  authority (platform/durable_sidecar.h): unique O_EXCL staging claim,
+  fsync / FlushFileBuffers durability gate, atomic replace publish —
+  old-or-new, never a half-written session. Loads are fail-closed:
+  corrupt payloads, foreign schema generations and spec-fingerprint
+  drift are typed refusals, never silently adopted.
 ***************************************************************************/
 
 #ifndef SICNU_LAB_SESSION_STORE_H

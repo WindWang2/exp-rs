@@ -4,24 +4,14 @@
 
 #include "session_store.h"
 
+#include "platform/durable_sidecar.h"
 #include "platform/portable.h"
 
 #include <algorithm>
-#include <atomic>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
 #include <memory>
 #include <sstream>
-
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <unistd.h>
-#else
-#include <process.h>
-#include <windows.h>
-#endif
 
 #include <filesystem>
 #include <sys/types.h>
@@ -76,76 +66,6 @@ bool sessionPathFromId( const std::string &rootDir, const std::string &sessionId
   return true;
 }
 
-bool writeFileSync( const std::string &path, const std::string &bytes, std::string &error )
-{
-#if !defined(_WIN32)
-  const int fd = ::open( path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644 );
-  if ( fd < 0 )
-  {
-    error = std::string( "cannot open for write: " ) + std::strerror( errno );
-    return false;
-  }
-  std::size_t written = 0;
-  while ( written < bytes.size() )
-  {
-    const ssize_t n = ::write( fd, bytes.data() + written, bytes.size() - written );
-    if ( n < 0 )
-    {
-      if ( errno == EINTR )
-        continue;
-      error = std::string( "write failed: " ) + std::strerror( errno );
-      ::close( fd );
-      return false;
-    }
-    written += static_cast<std::size_t>( n );
-  }
-  if ( ::fsync( fd ) != 0 )
-  {
-    error = std::string( "fsync failed: " ) + std::strerror( errno );
-    ::close( fd );
-    return false;
-  }
-  ::close( fd );
-  return true;
-#else
-  // path strings hold UTF-8 bytes; open through the fs::path overload so a
-  // non-ASCII store directory survives the Windows ANSI code page.
-  std::ofstream out( sicnu::portable::pathFromUtf8( path ),
-                     std::ios::binary | std::ios::trunc );
-  if ( !out.good() )
-  {
-    error = "cannot open for write";
-    return false;
-  }
-  out.write( bytes.data(), static_cast<std::streamsize>( bytes.size() ) );
-  out.flush();
-  if ( !out.good() )
-  {
-    error = "short write";
-    return false;
-  }
-  out.close();
-  if ( out.fail() )
-  {
-    error = "close failed";
-    return false;
-  }
-  // Windows counterpart of fsync(2) above: the tmp file must reach stable
-  // storage before rename() publishes it, or a crash can lose a save the
-  // caller was told succeeded (the documented old-or-new contract). The
-  // flush rides platform/portable.h's syncFileUtf8 — the single authority
-  // for the reopen+FlushFileBuffers branch.
-  sicnu::portable::SyncFailure failure = sicnu::portable::SyncFailure::OpenFailed;
-  std::uint64_t osError = 0;
-  if ( sicnu::portable::syncFileUtf8( path, &failure, &osError ) )
-    return true;
-  error = failure == sicnu::portable::SyncFailure::OpenFailed
-            ? "cannot reopen tmp file for flush: " + std::to_string( osError )
-            : "FlushFileBuffers failed: " + std::to_string( osError );
-  return false;
-#endif
-}
-
 std::unique_ptr<Json::CharReader> makeStrictReader()
 {
   // Same hardening discipline as the plugin manifests: a depth bomb is a
@@ -185,8 +105,6 @@ LabResult<LabSession> loadFromPath( const std::string &path )
       { LabDiag{ "lab.session.corrupt", path + ": " + error } } );
   return sessionFromJson( doc );
 }
-
-std::atomic<uint64_t> s_tmpCounter{ 0 };
 
 } // namespace
 
@@ -298,26 +216,17 @@ LabResult<> LabSessionStore::save( const LabSession &session )
                                             "cannot create store directory: " + ec.message() } } );
 
   const std::string bytes = sessionToCanonicalBytes( session );
-  // Unique per-save tmp name: concurrent saves of the same session can never
-  // interleave on a shared tmp file (WorkflowCheckpointManager discipline).
-  const std::uint32_t pid = sicnu::portable::pid();
-  const std::string tmpPath = finalPath + ".tmp." + std::to_string( pid ) + "." +
-                              std::to_string( s_tmpCounter.fetch_add( 1 ) );
-  std::string error;
-  if ( !writeFileSync( tmpPath, bytes, error ) )
-  {
-    std::filesystem::remove( sicnu::portable::pathFromUtf8( tmpPath ), ec );
-    return LabResult<>::failure( { LabDiag{ "lab.session.io", error } } );
-  }
-  // rename(2) / MoveFileEx(REPLACE_EXISTING): atomic replace, old-or-new.
-  std::filesystem::rename( sicnu::portable::pathFromUtf8( tmpPath ),
-                           sicnu::portable::pathFromUtf8( finalPath ), ec );
-  if ( ec )
-  {
-    std::filesystem::remove( sicnu::portable::pathFromUtf8( tmpPath ), ec );
-    return LabResult<>::failure( { LabDiag{ "lab.session.io",
-                                            "rename failed: " + ec.message() } } );
-  }
+  // R6: the single sidecar write authority owns the sequence this used to
+  // hand-roll — the unique O_EXCL staging claim (concurrent saves of one
+  // session can never interleave on a shared tmp file), the fsync /
+  // FlushFileBuffers durability gate, and the atomic replace publish
+  // (old-or-new). The load path reads the main artifact directly, so
+  // last-good rotation stays disabled — the previous generation IS the
+  // last good.
+  const sicnu::platform::sidecar::WriteResult result =
+    sicnu::platform::sidecar::write( { finalPath, bytes, "" } );
+  if ( !result )
+    return LabResult<>::failure( { LabDiag{ "lab.session.io", result.error } } );
   return LabResult<>::success();
 }
 
