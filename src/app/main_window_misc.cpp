@@ -241,6 +241,14 @@ void QgisDesktopWindow::showLabCockpit()
         m_labCockpitDock->raise();
     }
 }
+
+void QgisDesktopWindow::showTeachingAdmin()
+{
+    if ( m_teachingAdminDock ) {
+        m_teachingAdminDock->show();
+        m_teachingAdminDock->raise();
+    }
+}
 namespace
 {
 // Shell layout contract version. Bumped whenever a layout change makes old
