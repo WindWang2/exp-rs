@@ -6,6 +6,7 @@
 // must fabricate nothing.
 #include <catch2/catch_test_macros.hpp>
 
+#include "teaching_admin/script_adapters.h"
 #include "teaching_admin_dock.h"
 
 #include <QApplication>
@@ -61,17 +62,24 @@ void pumpUntil( const std::function<bool()> &predicate, int timeoutMs )
 }
 
 /// Writes a slow (sleeping) grader stub that mirrors the sicnu.lab.grade/1
-/// transcript + exit contract, for cancel-window testing. Empty string when
-/// no python3 host.
+/// transcript + exit contract, for cancel-window testing. The stub is exec'd
+/// directly (SICNU_GEO_RS_CLI names the script), so its shebang picks the
+/// host: resolve the harness-pinned interpreter exactly like the adapters do
+/// (SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE, else PATH python3) — a bare
+/// "python3" on PATH may be a DIFFERENT interpreter than the one
+/// PYTHONHOME/PYTHONPATH describe, and then the stub dies at `import re`
+/// ("SRE module mismatch", master run 36568313972). Empty string when no
+/// python3 host exists at all.
 QString writeSlowGraderStub( const QTemporaryDir &dir, int sleepSeconds )
 {
-    const QString python = QStandardPaths::findExecutable( QStringLiteral( "python3" ) );
-    if ( python.isEmpty() )
+    const QString python = sicnu::teaching_admin::resolveDefaultPythonInterpreter();
+    if ( python == QLatin1String( "python3" ) && QStandardPaths::findExecutable( python ).isEmpty() )
         return QString();
     const QString path = QDir( dir.path() ).filePath( QStringLiteral( "slow_grader.py" ) );
     QFile script( path );
     REQUIRE( script.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
-    script.write( QByteArray( "#!/usr/bin/env python3\nimport json, os, sys, time\n"
+    script.write( QByteArray( "#!" ) + python.toLocal8Bit() + QByteArray( "\n"
+                              "import json, os, sys, time\n"
                               "time.sleep( " )
                     + QByteArray::number( sleepSeconds ) + QByteArray( ")\n"
                     "args = sys.argv[1:]\n"
