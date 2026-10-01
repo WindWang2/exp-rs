@@ -16,6 +16,13 @@
     truncated (conservative, truthful). This layer additionally slices the
     body to the budget — CPL's enforcement turned out to be unreliable for
     plain 200 answers in the vendored build.
+  * A budget abort CPLHTTPFetch records as a hard CPLError(CE_Failure)
+    ("Maximum file size exceeded") in the process-global CPL error state,
+    which survives the fetch. A handled condition must not leave that state
+    dirty: GDALOpenEx's per-driver loop returns null while a non-warning
+    error is pending, so the leftover error would abort the very open a
+    /vsirangecache/ handle is being served for (GDAL 3.8 lane — see
+    fetchImpl's sizeGuard branch).
  ***************************************************************************/
 
 #include "geospatial/remote/http_fetch.h"
@@ -264,6 +271,23 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
     // when the origin announced them; the body is partial by design.
     fetch.sizeGuardHit = true;
     fetch.truncated = true;
+    // The budget abort is a HANDLED condition here — but CPLHTTPFetch still
+    // recorded it as a hard CPLError(CE_Failure, "Maximum file size
+    // exceeded") in the process-global CPL error state, and that state is not
+    // ours to leave dirty. GDAL's GDALOpenEx driver loop aborts the whole
+    // open as soon as a non-warning error is pending when a driver's Open()
+    // returns null ("if (CPLGetLastErrorNo() != 0 && CPLGetLastErrorType() >
+    // CE_Warning) return nullptr"): on GDAL 3.8 (ubuntu-latest ships 3.8.4 +
+    // libcurl 8.5) the leftover error trips that check inside the very open
+    // our /vsirangecache/ handler is serving — the range-ignoring origin
+    // whose probe answer exceeds the 1 KiB probe budget makes GDALOpenEx
+    // return null with "Maximum file size exceeded" as the last CPL error,
+    // and RasterReader::open surfaces it as "Cannot open raster". Verified
+    // against GDAL 3.8.4: clearing the state here makes the same open
+    // succeed; GDAL 3.13 tolerates the stale error, which is why the suite
+    // only ever went red on the 3.8 lane. Clear it where the condition is
+    // fully interpreted, so no caller can inherit it.
+    CPLErrorReset();
   }
   else if ( !timedOut &&
        ( curlCodeInStatus ||

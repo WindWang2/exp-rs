@@ -172,8 +172,11 @@ class RemoteRangeCache
     /// a zero blockSize/budget.
     static void install( const RangeCacheConfig &config = {} );
 
-    /// Removes the handler and drops every cached byte. After uninstall the
-    /// prefix stops resolving.
+    /// Drops every cached byte and clears the installed() state. On GDAL
+    /// >= 3.9 the handler is deregistered and the prefix stops resolving;
+    /// on GDAL < 3.9 (no VSIFileManager::RemoveHandler) the prefix keeps
+    /// resolving but installed() still reports false and a later install()
+    /// reuses the still-registered handler.
     static void uninstall();
 
     static bool installed();
