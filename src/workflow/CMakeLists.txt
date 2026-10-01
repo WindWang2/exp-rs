@@ -78,6 +78,13 @@ endif()
 # leaf); sicnu_runtime itself never links back into workflow — no cycle.
 target_link_libraries(sicnu_workflow PUBLIC sicnu_runtime)
 
+# #1387 digest-authority convergence: plan_optimizer.cpp's lineage signatures
+# canonicalize node parameters through the ONE canonical serializer in
+# sicnu_data. PRIVATE: no workflow header exposes the data layer. No cycle —
+# sicnu_data links only leaves (Qt6::Core, GDAL, sicnu_runtime,
+# sicnu_geospatial, jsoncpp).
+target_link_libraries(sicnu_workflow PRIVATE sicnu_data)
+
 # Deliberately NO link from sicnu_workflow itself to task_center/processing/
 # agent: task_center PUBLIC-links sicnu_workflow, so adding the reverse edge
 # would form a cycle. workflow_runtime.cpp's ExecutionPlane/OutputVerifier

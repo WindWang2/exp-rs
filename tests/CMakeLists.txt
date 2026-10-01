@@ -12011,11 +12011,14 @@ sicnu_add_d17_test(test_workflow_dag_analysis
 )
 
 # --- Package B2: subflow composition (WP2)
+# (sicnu_data: plan_optimizer.cpp canonicalizes parameters through the #1387
+# digest authority — every target compiling that TU links it.)
 sicnu_add_d17_test(test_workflow_composition
   SOURCES ${D17_ENGINE_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+  LIBS sicnu_data
 )
 
 # --- Package C: contract checker + repair engine
@@ -12030,6 +12033,7 @@ sicnu_add_d17_test(test_workflow_cost_estimator
   SOURCES ${D17_ENGINE_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+  LIBS sicnu_data
 )
 
 # --- D18: IR2 port→param mapping + registry executor honesty (#1002/#1006)
@@ -12044,7 +12048,7 @@ sicnu_add_d17_test(test_ir2_port_param_mapping
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_registry_node_executor.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
-  LIBS Qt6::Widgets Qt6::Test Qt6::Network jsoncpp sicnu_operators
+  LIBS Qt6::Widgets Qt6::Test Qt6::Network jsoncpp sicnu_operators sicnu_data
 )
 
 # --- Package E: run coordinator + checkpoints
@@ -12057,7 +12061,7 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
-  LIBS Qt6::Widgets Qt6::Test Qt6::Network
+  LIBS Qt6::Widgets Qt6::Test Qt6::Network sicnu_data
 )
 
 # --- Package F: canvas
@@ -12098,7 +12102,7 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
     ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
-  LIBS Qt6::Widgets Qt6::Test Qt6::Network jsoncpp
+  LIBS Qt6::Widgets Qt6::Test Qt6::Network jsoncpp sicnu_data
 )
 
 # Targets that compile pipeline_run_coordinator.cpp directly (instead of
@@ -14571,11 +14575,17 @@ sicnu_add_teaching_admin_test(test_teaching_authoring_failures_r4)
 
 # #1387 digest-authority convergence — the cross-path parity lock: the ONE
 # canonical serializer reached through the Qt authority (A), the
-# teaching-admin fork (B, now a delegate) and the jsoncpp-family adapter (C)
-# must hash one fixed document to one golden hex. Links sicnu_data directly
-# (the authority) on top of the teaching-admin profile, plus jsoncpp for the
-# C-side tree.
-add_executable(test_canonical_digest_parity test_canonical_digest_parity.cpp)
+# teaching-admin fork (B, now a delegate), the jsoncpp-family adapter (C)
+# and the plan-optimizer lineage digest (D, now a delegate) must hash one
+# fixed document to one golden hex. Links sicnu_data directly (the
+# authority) on top of the teaching-admin profile, plus jsoncpp for the
+# C-side tree. The D path compiles plan_optimizer.cpp + workflow_ir_v2.cpp
+# directly (the D17 pattern) so the lock exercises the real lineage code
+# without linking the sicnu_workflow shared library.
+add_executable(test_canonical_digest_parity test_canonical_digest_parity.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_ir_v2.cpp
+)
 target_link_libraries(test_canonical_digest_parity PRIVATE
   Catch2::Catch2WithMain
   Sicnu::teaching_admin

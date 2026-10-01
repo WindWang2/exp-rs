@@ -12,6 +12,11 @@
 //   C — the jsoncpp copy-paste family (harness projection digest, cartography
 //       export manifest digest, workflow-explain byte accounting), now the
 //       authority's jsoncpp adapter overload.
+//   D — the plan-optimizer lineage digest (workflow cache keys, CSE, resume
+//       stamps): node parameters canonicalized through a Qt-Compact local
+//       ("compact document == canonical"), now a direct call into A. The
+//       local was byte-equivalent to A on the current Qt, so no signature
+//       value moves — what converges is the SECOND implementation.
 //
 // Oracle discipline: the canonical bytes AND the digest of the fixed
 // document are pinned as golden constants here (determinism by re-hash, not
@@ -45,6 +50,7 @@
 
 #include "data/execution_fingerprint.h"
 #include "teaching_admin/json_util.h"
+#include "workflow/plan_optimizer.h"
 
 using sicnu::data::canonicalizeJsonRfc8785;
 
@@ -171,6 +177,20 @@ TEST_CASE( "canonical digest parity: every path hashes the same bytes",
     // C — the jsoncpp-family adapter.
     const std::string digestC = sha256Hex( canonicalizeJsonRfc8785( fixtureJsoncpp() ) );
     CHECK( digestC == digestA );
+
+    // D — the plan-optimizer lineage path: the node signature of a parentless
+    // node is SHA-256( operatorId \x1f canonical(params) ); its parameters
+    // must canonicalize to the same bytes as every other path.
+    sicnu::workflow::NodeFact node;
+    node.nodeId = QStringLiteral( "n1" );
+    node.operatorId = QStringLiteral( "rs:test_op" );
+    node.parameters = doc;
+    const QString lineage = node.operatorId + QLatin1Char( '\x1f' )
+        + QString::fromUtf8( canonical );
+    const std::string digestD =
+        sicnu::workflow::WorkflowPlanOptimizer::computeNodeSignature( node, {}, {} )
+            .toStdString();
+    CHECK( digestD == sha256Hex( lineage.toUtf8() ) );
 
     // The pinned golden: one fixed document, one canonical byte string.
     const QByteArray golden =
