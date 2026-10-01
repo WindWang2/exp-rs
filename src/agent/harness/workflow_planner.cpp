@@ -268,6 +268,24 @@ bool lowerIrToAgentPlan( const WorkflowIr &ir, const Json::Value &resolvedSlotPa
     return false;
   }
 
+  // R4 residual (#1395, agent-harness-r4 review #17): lowering emits exactly
+  // one plan step per IR node and the resulting plan is handed straight to
+  // compilePlanToWorkflowJson — it is never re-read through readAgentPlan, so
+  // the plan step bound that guards every wire document (kMaxPlanSteps) never
+  // applied here. Enforce it on this path too: a runaway IR cannot lower into
+  // an unbounded plan on any route (the IR document reader has its own
+  // kMaxNodes bound; a recipe plan arrives through readAgentPlan's 4096-step
+  // bound, so this changes nothing that was legal before).
+  if ( static_cast<int>( ir.nodes.size() ) > kMaxPlanSteps )
+  {
+    Json::Value details( Json::objectValue );
+    details["nodes"] = static_cast<Json::Int>( ir.nodes.size() );
+    details["bound"] = kMaxPlanSteps;
+    error = HarnessError::make( error_codes::kInvalidPlan,
+                                "Plan exceeds the step bound", details );
+    return false;
+  }
+
   const std::string outputDir = ir.expectations.get( "output_dir", "" ).asString();
 
   plan = AgentPlan{};

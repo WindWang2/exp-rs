@@ -338,6 +338,21 @@ TEST_CASE( "a type-confused class-value domain is a structured rejection, "
     CHECK( terminatesStructured(
         [&] { return verifyArtifact( raster, expectations ); }, result, threw ) );
     CHECK_FALSE( threw );
+
+    // #1395 residual (review #15): the rejection is attributed to the
+    // DECLARATION. The old comparison folded a non-numeric member into
+    // "unexpected_value", blaming the raster for a domain that can never match.
+    bool declarationRejected = false;
+    for ( const VerificationCheck &check : result.checks )
+    {
+      if ( check.check == "class_values" && !check.passed
+           && check.details.isMember( "reason" )
+           && check.details["reason"].asString() == "class_values members must be numeric" )
+      {
+        declarationRejected = true;
+      }
+    }
+    CHECK( declarationRejected );
 }
 
 // — parse seam: deep nesting is a refusal —————————————————————————————

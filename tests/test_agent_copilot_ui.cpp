@@ -443,6 +443,45 @@ TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[ag
   CHECK( terminal );
 }
 
+// #1395 (agent-harness-r4 review #10): LlmStreamingClient reports every
+// streamed tool call it refuses; the dock is the consumer. A refusal must be
+// visible in the run inspector — the old silent drop left the user with a turn
+// that produced no work and an inspector reporting zero errors.
+TEST_CASE( "A transport-refused tool call is visible in the run inspector",
+           "[agent][ui][refusal]" )
+{
+  ensureQtApp();
+  wireRegistryFallback();
+
+  DataManager dataMgr;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
+
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "refused=" ) ) );
+
+  QJsonObject detail;
+  detail[QStringLiteral( "reason" )] = QStringLiteral( "truncated" );
+  detail[QStringLiteral( "finish_reason" )] = QStringLiteral( "length" );
+  detail[QStringLiteral( "name" )] = QStringLiteral( "rs:band_math" );
+  REQUIRE( QMetaObject::invokeMethod( &dock, "onMalformedToolCall",
+                                      Qt::QueuedConnection,
+                                      Q_ARG( QJsonObject, detail ) ) );
+
+  bool counted = false;
+  for ( int i = 0; i < 400 && !counted; ++i )
+  {
+    QCoreApplication::processEvents();
+    counted = dock.runInspectorSummary().contains( QStringLiteral( "refused=1" ) );
+    if ( !counted )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  INFO( "inspector: " << dock.runInspectorSummary().toStdString() );
+  CHECK( counted );
+
+  // The refusal is a stream fact, not a run failure: the run stays open.
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "stage=Failed" ) ) );
+}
+
 TEST_CASE( "InteractionToolRegistry handler returns error after service destruction", "[agent][interaction][lifecycle]" )
 {
   ensureQtApp();

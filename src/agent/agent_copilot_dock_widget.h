@@ -83,6 +83,10 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 
     void onReasoningTokenReceived( const QString &text );
     void onContentTokenReceived( const QString &text );
+    /// Consumes LlmStreamingClient::malformedToolCall (#1395 / agent-harness-r4
+    /// review #10): a streamed tool call the transport refused. Never fails the
+    /// run — the refusal is a fact about the stream, and must be visible.
+    void onMalformedToolCall( const QJsonObject &detail );
     void onToolCallParsed( const QJsonObject &toolCallJson );
     /// Observability for tool calls the streaming client refused (bad JSON,
     /// missing name, oversized payload): non-fatal notice, the run continues.
@@ -102,6 +106,9 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     void updateToolCallCard( const QString &toolCallId, const QString &statusText, const QString &detailText );
     void appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson = QJsonObject() );
     void appendErrorMessage( const QString &errorMsg );
+    /// Non-fatal notice card for a transport-refused tool call. Kept out of the
+    /// streaming content label so later answer tokens cannot overwrite it.
+    void appendRefusalNotice( const QString &text );
     /// Shared rejection tail: surface the reason in the chat and emit an error
     /// result payload.
     void handleToolCallRejection( const QString &errorMsg, const QJsonObject &toolCallJson = QJsonObject() );
@@ -167,6 +174,10 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     QSet<long> m_submittedPipelineIds;
     QString m_currentRunStage;
     QString m_lastError;
+    /// Streamed tool calls the transport refused (truncated/unparseable
+    /// arguments, missing name, oversized) — surfaced per run so a silently
+    /// dropped call is visible in the inspector (#1395).
+    int m_refusedToolCallCount = 0;
     int m_runRepairAttempts = 0;
     QDateTime m_runStartTime;
 

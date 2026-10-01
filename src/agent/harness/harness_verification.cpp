@@ -363,17 +363,38 @@ ArtifactVerification verifyArtifact( const std::string &path,
                     noDataFraction <= expectations.maxNodataFraction,
                     error_codes::kOutputInvalid, "info", fractions );
 
-          if ( expectations.classValues.isArray() && !expectations.classValues.empty() &&
-               !uniqueOverflow && expectations.classValues.size() <= kMaxClassProbeUnique )
+          // R4 residual (#1395, agent-harness-r4 review #15): a non-numeric
+          // member in the declared class domain is a structural lie by the
+          // CALLER. Letting it reach the probe comparison reports it as
+          // "unexpected_value" — the raster is blamed for the plan's own
+          // mistake. Reject the declaration instead: one honest failing check
+          // that names the contract, never a throw on asDouble().
+          const bool classDomainDeclared = expectations.classValues.isArray()
+                                           && !expectations.classValues.empty()
+                                           && expectations.classValues.size() <= kMaxClassProbeUnique;
+          const bool classDomainTypeConfused =
+            classDomainDeclared
+            && std::any_of( expectations.classValues.begin(),
+                            expectations.classValues.end(),
+                            []( const Json::Value &allowed ) {
+                              return !allowed.isNumeric();
+                            } );
+          if ( classDomainTypeConfused )
+          {
+            Json::Value details;
+            details["reason"] = "class_values members must be numeric";
+            details["declared"] = expectations.classValues;
+            addCheck( result.checks, "class_values", false, error_codes::kOutputInvalid,
+                      "error", details );
+          }
+          else if ( classDomainDeclared && !uniqueOverflow )
           {
             bool allKnown = true;
             for ( double value : unique )
             {
-              // R4 (type confusion): a non-numeric member in the declared
-              // class domain is a structural lie by the caller, not a
-              // runtime fault — it can never match a probed value, and it
-              // must not throw (asDouble on a string/object member does).
-              // Numeric members compare on the documented tolerance.
+              // R4 (type confusion): a numeric member that cannot be reached
+              // never matches a probed value — compare on the documented
+              // tolerance only.
               const bool found = std::any_of(
                 expectations.classValues.begin(), expectations.classValues.end(),
                 [ value ]( const Json::Value &allowed ) {
