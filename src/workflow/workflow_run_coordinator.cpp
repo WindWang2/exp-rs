@@ -617,7 +617,10 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     const long pipelineId = center.submitPipeline( def, autoLoad );
     if ( pipelineId < 0 )
     {
-        run->setErrorMessage( "Pipeline contains no dispatchable operator steps" );
+        if ( center.isShuttingDown() )
+            run->setErrorMessage( "Pipeline submission refused: application is shutting down" );
+        else
+            run->setErrorMessage( "Pipeline submission refused: TaskCenter queue full or no dispatchable operator steps" );
         run->transitionTo( WorkflowRunState::Failed );
         PersistRequest failedPersist;
         {

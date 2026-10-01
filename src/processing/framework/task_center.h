@@ -781,6 +781,7 @@ private:
     {
         unsigned long long epoch = 0;
         int priority = 1;
+        int latencyRank = 1; ///< 0 = Interactive, 1 = Background, 2 = Batch (R7 FM-6)
         long taskId = 0;
         unsigned long long serial = 0;
     };
@@ -789,6 +790,7 @@ private:
         bool operator()( const ReadyEntry &a, const ReadyEntry &b ) const
         {
             if ( a.priority != b.priority ) return a.priority > b.priority;
+            if ( a.latencyRank != b.latencyRank ) return a.latencyRank > b.latencyRank;
             if ( a.epoch != b.epoch ) return a.epoch > b.epoch;
             if ( a.taskId != b.taskId ) return a.taskId > b.taskId;
             return a.serial > b.serial;
@@ -812,6 +814,7 @@ private:
     /// 12.0 D1: aging promotion interval (0 = off). Set from
     /// SICNU_TASK_AGING_MS (default 5000) in resetResourceProfileLimits.
     unsigned int m_agingIntervalMs = 5000;
+    std::chrono::steady_clock::time_point m_lastAgingSweepStamp;
     /// 12.0 D3: pending bound (0 = unbounded). SICNU_TASK_MAX_PENDING, else 4096.
     unsigned int m_maxPendingTasks = 4096;
     /// 12.0 D4: cancel watchdog timeout (0 = off).

@@ -122,6 +122,17 @@ TaskCenter::AdmissionDims TaskCenter::parseAdmissionDims( const Json::Value &exe
     return dims;
 }
 
+static inline int latencyRankForClass( sicnu::LatencyClass lc )
+{
+    switch ( lc )
+    {
+    case sicnu::LatencyClass::Interactive: return 0;
+    case sicnu::LatencyClass::Background:  return 1;
+    case sicnu::LatencyClass::Batch:       return 2;
+    }
+    return 1;
+}
+
 sicnu::ResourceRequest TaskCenter::AdmissionDims::toResourceRequest() const
 {
     sicnu::ResourceRequest request;
@@ -489,6 +500,7 @@ void TaskCenter::shutdownForTests()
         m_admissionPass = 0;
         m_manualQueued.clear();
         m_liveTaskCount = 0;
+        m_lastAgingSweepStamp = {};
         m_armedCancelDeadlines = 0;
         m_armedCancelTaskIds.clear();
         m_nextTaskId = 1;
@@ -2344,7 +2356,8 @@ void TaskCenter::pushReadyCandidateLocked( long taskId )
     it->effectivePriority = effective;
     const unsigned long long serial = ++m_nextReadySerial;
     m_readySerial[taskId] = serial;
-    m_readyHeap.push( ReadyEntry{ 0, effective, taskId, serial } );
+    const int latencyRank = latencyRankForClass( it->latencyClass );
+    m_readyHeap.push( ReadyEntry{ 0, effective, latencyRank, taskId, serial } );
 }
 
 void TaskCenter::dropReadyCandidateLocked( long taskId )
@@ -2373,6 +2386,15 @@ void TaskCenter::applyAgingSweepLocked()
     if ( m_agingIntervalMs == 0 )
         return;
     const auto now = std::chrono::steady_clock::now();
+    // R7 FM-8: Debounce aging sweeps under rapid burst admissions to eliminate O(N^2) scans.
+    if ( m_lastAgingSweepStamp != std::chrono::steady_clock::time_point{} )
+    {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>( now - m_lastAgingSweepStamp ).count();
+        if ( elapsed < static_cast<long long>( std::min<unsigned int>( 50, m_agingIntervalMs ) ) )
+            return;
+    }
+    m_lastAgingSweepStamp = now;
+
     // m_readySerial keys = the live candidate set (stale heap entries share
     // the taskId key; each live candidate is visited once). Collect first —
     // the sweep mutates m_readySerial.
@@ -2390,9 +2412,10 @@ void TaskCenter::applyAgingSweepLocked()
         task.effectivePriority = effective;
         const unsigned long long serial = ++m_nextReadySerial;
         m_readySerial[taskId] = serial;
+        const int latencyRank = latencyRankForClass( task.latencyClass );
         // Epoch 0: the promoted candidate rejoins ahead of same-priority
         // entries rotated by per-candidate gate holds — it waited longest.
-        m_readyHeap.push( ReadyEntry{ 0, effective, taskId, serial } );
+        m_readyHeap.push( ReadyEntry{ 0, effective, latencyRank, taskId, serial } );
         ++promoted;
     }
     if ( promoted > 0 )
@@ -2960,15 +2983,23 @@ void TaskCenter::flushPendingLaunches()
             QMutexLocker reLock( &m_mutex );
             if ( m_tasks.contains( launch.taskId ) )
             {
-                if ( m_tasks[launch.taskId].status == TaskStatus::Canceled )
+                if ( m_tasks[launch.taskId].status == TaskStatus::Canceled
+                     || m_tasks[launch.taskId].status == TaskStatus::Cancelling )
                 {
-                    // Canceled while submit was in-flight: drop the pre-registration —
-                    // the task is terminal, so the job's terminal record would
-                    // otherwise leave an orphan mapping behind (review L P3).
+                    // R7 FM-2: Canceled or cancel-requested while submit was in-flight:
+                    // cancel the newly submitted engine job and drop the pre-registration.
                     // JobEngine::cancel is deferred outside m_mutex to prevent
                     // self-deadlock when JobEngine::cancel invokes onJobRecord (Issue #851).
                     m_taskByJobId.remove( submittedId );
                     jobToCancel = submittedId;
+                    if ( m_tasks[launch.taskId].status == TaskStatus::Cancelling )
+                    {
+                        // Ensure the task reaches terminal Canceled since JobEngine::cancel
+                        // won't deliver a record if mapping is removed.
+                        setTaskStatusLocked( m_tasks[launch.taskId], TaskStatus::Canceled );
+                        m_tasks[launch.taskId].endTime = QDateTime::currentDateTimeUtc();
+                        queueTaskUpdatedLocked( launch.taskId );
+                    }
                 }
                 else
                 {
@@ -3599,21 +3630,18 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         processNextQueuedTasks();
         }
     }
+    // R7 FM-3: Dispatch pending cancellations to free worker slots in JobEngine
+    // BEFORE flushing pending launches (such as retries or newly unblocked tasks).
+    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                            QStringLiteral( "Job no longer known to the engine; task canceled after upstream failure." ) );
     flushPendingLaunches();
     flushPendingSignals();
     if ( autoRetried )
     {
-        // The re-dispatch is staged + flushed; no terminal bookkeeping. The
-        // dead attempt's job still needs its cancel dispatched (lock-free
-        // engine call), exactly like the terminal paths below.
-        dispatchPendingCancels( handlesToCancel, jobCancelTargets,
-                                QStringLiteral( "Job no longer known to the engine; task canceled after upstream failure." ) );
         return;
     }
 
     unlinkScratchOutputs( scratchPathsToUnlink );
-    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
-                            QStringLiteral( "Job no longer known to the engine; task canceled after upstream failure." ) );
 
     fireTaskCompletionCallbacks( taskId );
     for ( long id : cascadeCanceledIds )
@@ -3669,12 +3697,12 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason, TaskCance
 
         processNextQueuedTasks();
     }
+    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                            QStringLiteral( "Job no longer known to the engine; task canceled." ) );
     flushPendingLaunches();
     flushPendingSignals();
 
     unlinkScratchOutputs( scratchPathsToUnlink );
-    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
-                            QStringLiteral( "Job no longer known to the engine; task canceled." ) );
 
     fireTaskCompletionCallbacks( taskId );
     for ( long id : cascadeCanceledIds )
@@ -3704,13 +3732,13 @@ bool TaskCenter::cancelTask( long taskId, TaskCancelReason reason )
 
         processNextQueuedTasks();
     }
+    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                            QStringLiteral( "Job no longer known to the engine; task canceled." ),
+                            reason );
     flushPendingLaunches();
     flushPendingSignals();
 
     unlinkScratchOutputs( scratchPathsToUnlink );
-    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
-                            QStringLiteral( "Job no longer known to the engine; task canceled." ),
-                            reason );
 
     for ( long id : cascadeCanceledIds )
         fireTaskCompletionCallbacks( id );

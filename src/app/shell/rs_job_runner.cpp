@@ -37,8 +37,18 @@ QString watchTask( long taskId,
                    RsJobRunner::FinishedFn onFinished,
                    QObject *context )
 {
-  if ( taskId <= 0 || !onFinished )
+  if ( !onFinished )
     return {};
+
+  if ( taskId <= 0 )
+  {
+    RsJobFinish fin;
+    fin.taskId = taskId;
+    fin.state = JobState::Failed;
+    fin.error = QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" );
+    onFinished( fin );
+    return {};
+  }
 
   auto *lifetime = context ? context
                            : static_cast<QObject *>(
