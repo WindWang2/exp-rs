@@ -519,6 +519,15 @@ TEST_CASE( "diagnose_run fails typed on unknown runs and never invents repairs",
            "[harness9][diagnose]" )
 {
   auto tool = SpatialToolRegistry::instance().find( "harness:diagnose_run" );
+  if ( !tool )
+  {
+    // Builtin tools install explicitly (MCP server, tool catalog); this
+    // process has no host that did. registerBuiltinTools() is idempotent
+    // (once-per-process guard), so the retry after it is safe — same idiom
+    // as the test_platform8 mapspec surface.
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    tool = SpatialToolRegistry::instance().find( "harness:diagnose_run" );
+  }
   REQUIRE( tool.has_value() );
 
   Json::Value input;
