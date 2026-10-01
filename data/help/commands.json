@@ -1239,5 +1239,23 @@
       "引导",
       "lab cockpit"
     ]
+  },
+  {
+    "id": "command.teaching.adminConsole.show",
+    "purpose": "打开教师授课与作业评估中控台：课程编排、实验包校验与批量自动评分。",
+    "prerequisites": [
+      "当前账号处于教学管理员或教师角色"
+    ],
+    "suggestedNextAction": "选择实验包进行就绪度预检或执行学生作业批量自动评分",
+    "related": [
+      "command.teaching.labCockpit.show"
+    ],
+    "keywords": [
+      "教学管理",
+      "评分",
+      "作业批改",
+      "课程编排",
+      "teaching admin"
+    ]
   }
 ]

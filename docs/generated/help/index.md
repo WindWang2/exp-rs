@@ -57,6 +57,7 @@
 - `command.rs.spectralIndex` — command.rs.spectralIndex
 - `command.rs.temporal` — command.rs.temporal
 - `command.rs.terrain` — command.rs.terrain
+- `command.teaching.adminConsole.show` — command.teaching.adminConsole.show
 - `command.teaching.labCockpit.show` — command.teaching.labCockpit.show
 - `command.view.linkCenter` — command.view.linkCenter
 - `command.view.linkCursor` — command.view.linkCursor

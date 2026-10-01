@@ -809,4 +809,13 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         d.handler = [window] { window->showLabCockpit(); };
         registry->registerCommand( d );
     }
+
+    // ── Teacher Authoring & Assessment Console (append-only) ──────────────
+    {
+        RS_CMD( d, "teaching.adminConsole.show", QObject::tr( "Teacher Authoring & Assessment Console" ),
+                QObject::tr( "Opens the Teacher Authoring & Assessment Console: course authoring, lab packs, batch assessment." ),
+                "teaching_admin", QObject::tr( "Teaching" ) );
+        d.handler = [window] { window->showTeachingAdmin(); };
+        registry->registerCommand( d );
+    }
 }
