@@ -18,16 +18,17 @@
 
 #include "qgis_gui.h"
 #include "qgscoordinatereferencesystem.h"
+#include "qgslayertree.h"
+#include "qgsmapcanvas.h"
+#include "qgsmapoverviewcanvas.h"
 
 #include <QObject>
+#include <QPointer>
 #include <QStringList>
 
-class QgsMapCanvas;
 class QgsMapLayer;
-class QgsMapOverviewCanvas;
 class QgsLayerTreeGroup;
 class QgsLayerTreeNode;
-class QgsLayerTree;
 
 /**
  * \ingroup gui
@@ -99,6 +100,7 @@ class GUI_EXPORT QgsLayerTreeMapCanvasBridge : public QObject
     void nodeVisibilityChanged();
     void nodeCustomPropertyChanged( QgsLayerTreeNode *node, const QString &key );
     void layersAdded( const QList<QgsMapLayer *> &layers );
+    void layersWillBeRemoved( const QStringList &layerIds );
 
   private:
     //! Fill canvasLayers and overviewLayers lists from node and its descendants
@@ -106,9 +108,12 @@ class GUI_EXPORT QgsLayerTreeMapCanvasBridge : public QObject
 
     void deferredSetCanvasLayers();
 
-    QgsLayerTree *mRoot = nullptr;
-    QgsMapCanvas *mCanvas = nullptr;
-    QgsMapOverviewCanvas *mOverviewCanvas = nullptr;
+    //! Drops the layer-tree nodes of the given (about to be removed) layer ids
+    void dropStaleLayerNodes( const QStringList &layerIds );
+
+    QPointer<QgsLayerTree> mRoot;
+    QPointer<QgsMapCanvas> mCanvas;
+    QPointer<QgsMapOverviewCanvas> mOverviewCanvas;
 
     bool mPendingCanvasUpdate = false;
 

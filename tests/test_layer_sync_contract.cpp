@@ -110,11 +110,45 @@ TEST_CASE( "Layer sync: removing a layer leaves no stale tree node or canvas lay
     bridge.setCanvasLayers();
     REQUIRE( canvas.layers().size() == 1 );
 
-    fx.project->removeMapLayer( layer->id() );
+    // removeMapLayer destroys the layer it owns; capture the id first so the
+    // post-removal assertions never touch freed memory.
+    const QString layerId = layer->id();
+    fx.project->removeMapLayer( layerId );
     bridge.setCanvasLayers();
 
-    CHECK( countLayerNodes( root, layer->id() ) == 0 ); // no stale tree node
+    CHECK( countLayerNodes( root, layerId ) == 0 ); // no stale tree node
     CHECK( canvas.layers().isEmpty() );                 // no stale canvas layer
+}
+
+TEST_CASE( "Layer sync: bridge drops the tree node and refreshes the canvas on project removal",
+           "[layer_sync][removal]" )
+{
+    SyncFixture fx;
+    QgsMapCanvas canvas;
+    QgsLayerTree *root = fx.project->layerTreeRoot();
+    QgsLayerTreeMapCanvasBridge bridge( root, &canvas );
+    bridge.setAutoSetupOnFirstLayer( false );
+
+    QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=epsg:4326" ),
+                                                QStringLiteral( "auto_drop" ), QStringLiteral( "memory" ) );
+    REQUIRE( layer->isValid() );
+    fx.project->addMapLayer( layer, false );
+    // Nested in a group: the node's parent is not the root, so the bridge must
+    // remove the node through its owning group.
+    QgsLayerTreeGroup *group = root->addGroup( QStringLiteral( "nested group" ) );
+    group->addLayer( layer );
+    bridge.setCanvasLayers();
+    REQUIRE( canvas.layers().size() == 1 );
+
+    // No explicit setCanvasLayers() afterwards: the project (its layer store)
+    // destroys removed layers but never removes their tree nodes, so the
+    // bridge must react to layersWillBeRemoved itself — otherwise the stale
+    // node and the ghost canvas layer survive until someone syncs by hand.
+    const QString layerId = layer->id();
+    fx.project->removeMapLayer( layerId );
+
+    CHECK( countLayerNodes( root, layerId ) == 0 ); // node dropped synchronously
+    CHECK( canvas.layers().isEmpty() );             // canvas refreshed without a manual sync
 }
 
 TEST_CASE( "Layer sync: removing layer during canvas rendering is race-free (#779, #796)",
