@@ -1,8 +1,10 @@
 // src/operators/runtime/python_worker_provider.h — Platform 7.0 Python
 // worker inference provider contract. The worker is an OUT-OF-PROCESS
-// interpreter (default "python3") running the manifest's
-// runtime.provider.worker_script, speaking the shared exp-rs-infer/1 wire
-// document (provider_wire.h) as newline-delimited JSON over stdin/stdout:
+// interpreter (default: the stack's own — the interpreter the
+// SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE pins describe, else "python3")
+// running the manifest's runtime.provider.worker_script, speaking the shared
+// exp-rs-infer/1 wire document (provider_wire.h) as newline-delimited JSON
+// over stdin/stdout:
 //
 //   → on startup the worker prints one line: {"protocol":"exp-rs-infer/1","event":"ready"}
 //   → per inference the runtime writes one request line
@@ -27,7 +29,8 @@ void registerPythonWorkerProvider( ModelRuntimeRegistry &registry );
 
 /// Interpreter policy for manifest-declared workers (review P1-6). A model
 /// manifest is data, so it must not pick an arbitrary program to execute:
-///   * empty -> the default "python3";
+///   * empty -> the stack's own interpreter (SICNU_PYTHON_EXECUTABLE /
+///     PYTHONEXECUTABLE, else "python3");
 ///   * a bare command name must be a Python launcher
 ///     (python, python3, python3.N, pythonw, py — optional ".exe");
 ///   * a path is accepted only when it canonicalizes to an interpreter the
