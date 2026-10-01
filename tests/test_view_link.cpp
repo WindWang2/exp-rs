@@ -5,12 +5,14 @@
 // propagation, automatic detach on viewAboutToBeRemoved, and the reentrancy
 // contract (propagation never echoes back).
 #include <catch2/catch_session.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include "support/qt_lifecycle.h"
 
 // Ordered teardown at testRunEnded replaces the retired std::_Exit tail.
 CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
-#include <catch2/catch_test_macros.hpp>
 
 #include "app/shell/view_link_controller.h"
 #include "app/visualanalytics/va_cursor_probe.h"
@@ -40,8 +42,6 @@ CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 #include <gdal.h>
 
-#include <cstdio>
-#include <cstdlib>
 #include <functional>
 
 using sicnu::app::ViewLinkController;
@@ -51,6 +51,8 @@ using sicnu::display::DisplayLayerId;
 using sicnu::display::DisplayViewId;
 using sicnu::display::DisplayViewSpec;
 using sicnu::display::QgisDisplayManager;
+
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -98,21 +100,19 @@ int main( int argc, char *argv[] )
 {
     // Heap-owned QgsApplication with GUI enabled (QT_QPA_PLATFORM=offscreen
     // carries it); QgsMapCanvas aborts without the QGIS singletons.
-    // Retirement history: the #1319 leak fix moved the app to scoped storage,
-    // and when canvas/project cases still crashed in glibc atexit cleanup
-    // (QGIS thread-local PROJ context) under one-case-per-process ctest, a
-    // std::_Exit tail skipped static destruction entirely. That tail is now
-    // retired (#1392 WP-I): the registered TeardownListener runs the ordered
-    // teardown at testRunEnded — drain deferred deletes, exitQgis() while the
-    // thread-local PROJ context is alive (the qgsapplication.cpp
-    // invalidateCaches contract), delete the app — and returning normally
-    // from main, surviving glibc exit(), is the retirement assertion itself.
-    QgsApplication *app = new QgsApplication( argc, argv, true );
+    // Retired per the shared teardown contract (support/qt_lifecycle.h, the
+    // same pattern as test_workbench_full_shell_lifecycle /
+    // test_twincanvas_sync): the TeardownListener runs the production exit
+    // ordering at testRunEnded — drain deferred deletes, exitQgis() (which
+    // invalidates the CRS/transform/ellipsoid caches while the thread-local
+    // PROJ context is still alive, the qgsapplication.cpp invalidateCaches
+    // contract), then delete the app — all BEFORE glibc exit() destroys the
+    // Q_GLOBAL_STATIC cache guards. That ordering is the root fix for the
+    // atexit crash family, so the process survives static destruction on its own
+    // and no std::_Exit defense is needed.
+    sicnu::test::qtlifecycle::heapQgsApplication( argc, argv, true );
     QgsApplication::initQgis();
-    const int result = Catch::Session().run( argc, argv );
-    std::fflush( stdout );
-    std::fflush( stderr );
-    return result;
+    return Catch::Session().run( argc, argv );
 }
 
 TEST_CASE( "view link propagates extents across linked views",
