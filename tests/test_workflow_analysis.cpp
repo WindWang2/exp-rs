@@ -124,6 +124,7 @@ TEST_CASE( "New compiler error codes joined the closed taxonomy", "[workflow_ana
 TEST_CASE( "A healthy NDVI plan analyzes clean against observed optical facts",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   WorkflowIr ir;
   HarnessError error;
   REQUIRE( readWorkflowIr( healthyNdviIr(), ir, error ) );
@@ -139,6 +140,7 @@ TEST_CASE( "A healthy NDVI plan analyzes clean against observed optical facts",
 TEST_CASE( "Unknown operators, missing params and unwired ports are typed errors",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "nodes": [
@@ -161,6 +163,7 @@ TEST_CASE( "Unknown operators, missing params and unwired ports are typed errors
 TEST_CASE( "CRS and grid conflicts are repairable errors on shared-grid consumers",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   // change_difference demands one shared grid (ADR 0098).
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
@@ -188,6 +191,7 @@ TEST_CASE( "CRS and grid conflicts are repairable errors on shared-grid consumer
 
 TEST_CASE( "CRS mismatch between inputs is a typed repairable error", "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "intent": "change",
@@ -214,6 +218,7 @@ TEST_CASE( "CRS mismatch between inputs is a typed repairable error", "[workflow
 TEST_CASE( "DN into a reflectance kernel is a warn-class radiometry finding (contract)",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   // The spectral_index family grades DN as warn (degraded), not invalid —
   // the analysis must mirror the contract, not invent an error.
   WorkflowIr ir;
@@ -236,6 +241,7 @@ TEST_CASE( "DN into a reflectance kernel is a warn-class radiometry finding (con
 TEST_CASE( "Warn-class radiometry degrades to a warning, unknown facts skip the check",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   // The spectral_index family warns on DN but accepts TOA.
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
@@ -267,6 +273,7 @@ TEST_CASE( "Warn-class radiometry degrades to a warning, unknown facts skip the 
 TEST_CASE( "Missing band roles are non-repairable errors; wavelength conflicts are typed",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   WorkflowIr ir;
   HarnessError error;
   REQUIRE( readWorkflowIr( healthyNdviIr(), ir, error ) );
@@ -315,6 +322,7 @@ TEST_CASE( "Missing band roles are non-repairable errors; wavelength conflicts a
 
 TEST_CASE( "Modality mismatch is an error on observed facts", "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   WorkflowIr ir;
   HarnessError error;
   REQUIRE( readWorkflowIr( healthyNdviIr(), ir, error ) );
@@ -332,6 +340,7 @@ TEST_CASE( "Modality mismatch is an error on observed facts", "[workflow_analysi
 
 TEST_CASE( "Categorical inputs are refused by continuous kernels", "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   WorkflowIr ir;
   HarnessError error;
   REQUIRE( readWorkflowIr( healthyNdviIr(), ir, error ) );
@@ -347,6 +356,7 @@ TEST_CASE( "Categorical inputs are refused by continuous kernels", "[workflow_an
 TEST_CASE( "Resource over-budget and output path collisions are document-level errors",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "inputs": [ { "name": "primary", "ref": "asset-3" } ],
@@ -374,6 +384,7 @@ TEST_CASE( "Resource over-budget and output path collisions are document-level e
 TEST_CASE( "Stochastic operators under deterministic expectations warn, not fail",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   // rs:spectral_index is not stochastic; use the declared-determinism route.
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
@@ -398,6 +409,7 @@ TEST_CASE( "Stochastic operators under deterministic expectations warn, not fail
 TEST_CASE( "Analysis is deterministic: two runs, byte-identical documents",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "intent": "change",
@@ -424,6 +436,7 @@ TEST_CASE( "Analysis is deterministic: two runs, byte-identical documents",
 TEST_CASE( "Model seam operators demand a model id and honor recorded contracts",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "inputs": [ { "name": "primary", "ref": "asset-3" } ],
@@ -474,6 +487,7 @@ TEST_CASE( "Model seam operators demand a model id and honor recorded contracts"
 TEST_CASE( "Assumed-only numeric domains degrade SAR findings to warnings",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   // A producer inherits an assumed numeric_domain downstream; the consumer's
   // SAR calibration finding must be a WARNING, never an error grounded in a
   // heuristic (review A-5).
@@ -526,6 +540,7 @@ TEST_CASE( "Duplicate input port bindings are rejected at read time",
 TEST_CASE( "Object-shaped grid facts (the real inspect shapes) are compared",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "intent": "change",
@@ -584,6 +599,7 @@ TEST_CASE( "Object-shaped grid facts (the real inspect shapes) are compared",
 TEST_CASE( "Declared facts conflicting with observations become FACT_CONFLICT warnings",
            "[workflow_analysis]" )
 {
+  loadHarnessKnowledge();
   Json::Value doc = parse( R"({
     "kind": "workflow_ir", "schema_version": "1.0",
     "intent": "ndvi",
