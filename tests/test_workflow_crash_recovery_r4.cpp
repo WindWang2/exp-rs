@@ -97,6 +97,20 @@ bool eventually( const std::function<bool()> &predicate, int timeoutMs = 15000 )
     return predicate();
 }
 
+/// Staged-temp residue across BOTH checkpoint writer families: the classic
+/// "checkpoint_<id>.json.tmp.<pid>.<ctr>" shape this branch writes, and the
+/// sidecar authority's "checkpoint_<id>.<pid>.<ctr>.<rng>.tmp.json" shape
+/// (#1417). Both are disposable crash residue — never promoted, never
+/// electable as a checkpoint — that recovery must sweep.
+int tmpResidueCountAll( const QString &dir )
+{
+    return QDir( dir )
+        .entryList( QStringList{ QStringLiteral( "checkpoint_*.json.tmp.*" ),
+                                 QStringLiteral( "checkpoint_*.tmp.json" ) },
+                    QDir::Files )
+        .size();
+}
+
 /// Waits until the run tracked for @a pipelineId reaches a terminal state.
 std::shared_ptr<WorkflowRun> runToTerminal( WorkflowRunCoordinator &coordinator, long pipelineId )
 {
@@ -323,11 +337,23 @@ TEST_CASE( "IP-2b: kill at a later commit boundary keeps the longer committed pr
     INFO( "committed at kill: " << committedAtKill.join( QLatin1Char( ',' ) ).toStdString() );
     REQUIRE( committedAtKill.contains( QStringLiteral( "step1" ) ) );
     REQUIRE_FALSE( committedAtKill.contains( QStringLiteral( "step3" ) ) ); // blocked, never done
-    REQUIRE( injector.tmpResidueCount() == 0 );
+    // NO kill-time residue assertion here: this boundary can land inside the
+    // previous step's checkpoint fold persist — TaskCenter dispatches step3
+    // when step2's job completes, while the fold's atomic publish may still be
+    // between its staged-temp write and its rename. A writer SIGKILLed in that
+    // window legitimately leaves its staged temp behind (IP-3 asserts
+    // residue == 1 for exactly that window); the temp is never promoted and
+    // never electable as a checkpoint. Recovery sweeping it is asserted below.
 
     auto &coordinator = WorkflowRunCoordinator::instance();
     const auto report = coordinator.recoverAtStartup( false );
     REQUIRE( report.interruptedRuns == 1 );
+
+    // Recovery swept whatever staged temp the killed writer left: the run is
+    // unowned (the kernel released its flock at SIGKILL), so no residue of
+    // either writer family survives — and the journal still parses.
+    REQUIRE( tmpResidueCountAll( fx.scratch.path() ) == 0 );
+    REQUIRE( injector.checkpointLoads( runId ) );
 
     const auto step1Runs = registerCountingExecutor( prefix + ":step1", fx.outDir(), prefix, 1,
                                                      false );
