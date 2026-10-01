@@ -2,6 +2,7 @@
 #include "grader_json.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -125,6 +126,45 @@ bool appendCanonical( const Json::Value &value, std::string &out, GraderError &e
     return false;
 }
 
+/// True when the text carries a JSON comment (`//` or `/*` outside a string
+/// literal). jsoncpp's own `allowComments = false` is not a dependable guard:
+/// jsoncpp 1.9.5 strips comment tokens inside objects/arrays regardless of
+/// the setting (upstream fixed that in 1.9.6 via
+/// OurReader::readTokenSkippingComments), and Ubuntu 24.04 — the CI image —
+/// ships exactly that 1.9.5, so a commented grading document would parse
+/// there while a 1.9.6+ libjsoncpp refuses it. The refusal is therefore the
+/// grader's own and version-independent. A bare `/` is never a legal JSON
+/// token, so anything else the scanner rejects falls through to the reader's
+/// own syntax error.
+bool hasJsonComment( const std::string &text )
+{
+    bool inString = false;
+    bool escaped = false;
+    for ( std::size_t index = 0; index < text.size(); ++index ) {
+        const char ch = text[index];
+        if ( inString ) {
+            if ( escaped ) {
+                escaped = false;
+            } else if ( ch == '\\' ) {
+                escaped = true;
+            } else if ( ch == '"' ) {
+                inString = false;
+            }
+            continue;
+        }
+        if ( ch == '"' ) {
+            inString = true;
+            escaped = false;
+            continue;
+        }
+        if ( ch != '/' )
+            continue;
+        if ( index + 1 < text.size() && ( text[index + 1] == '/' || text[index + 1] == '*' ) )
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 std::optional<std::string> canonicalNumber( double value, GraderError &error )
@@ -165,6 +205,14 @@ std::optional<std::string> canonicalizeJson( const Json::Value &value, GraderErr
 
 std::optional<Json::Value> parseJsonStrict( const std::string &text, GraderError &error )
 {
+    // Comments are refused here, not delegated to the reader: jsoncpp's
+    // allowComments = false only bites on 1.9.6+, and the linked libjsoncpp
+    // must not move the doctrine (see hasJsonComment).
+    if ( hasJsonComment( text ) ) {
+        error = makeError( GraderErrorCode::InvalidJson,
+                           "invalid JSON: comments are not allowed in grading documents" );
+        return std::nullopt;
+    }
     Json::CharReaderBuilder builder;
     builder["collectComments"] = false;
     builder["failIfExtra"] = true;

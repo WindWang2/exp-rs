@@ -153,6 +153,27 @@ TEST_CASE( "parseJsonStrict refuses trailing garbage and comments", "[grader][sc
     CHECK_FALSE( parseJsonStrict( "{ /* no comments */ }", err ).has_value() );
     CHECK( err.code == GraderErrorCode::InvalidJson );
 
+    // Same refusal for a line comment, for a comment placed between members,
+    // and for one inside an array — jsoncpp 1.9.5 (Ubuntu 24.04) strips
+    // comments inside objects/arrays regardless of `allowComments`, so these
+    // positions are what silently regressed before the guard existed.
+    err = {};
+    CHECK_FALSE( parseJsonStrict( "{ // no comments\n}", err ).has_value() );
+    CHECK( err.code == GraderErrorCode::InvalidJson );
+
+    err = {};
+    CHECK_FALSE( parseJsonStrict( R"({"a":1, /* c */ "b":2})", err ).has_value() );
+    CHECK( err.code == GraderErrorCode::InvalidJson );
+
+    err = {};
+    CHECK_FALSE( parseJsonStrict( R"([ /* c */ 1 ])", err ).has_value() );
+    CHECK( err.code == GraderErrorCode::InvalidJson );
+
+    // A slash pair inside a string literal is payload, not a comment: the
+    // guard must not reject the URLs grading documents legitimately carry.
+    err = {};
+    CHECK( parseJsonStrict( R"({"source":"https://data.example/obs/*.tif"})", err ).has_value() );
+
     err = {};
     CHECK_FALSE( parseJsonStrict( "not json", err ).has_value() );
 }
