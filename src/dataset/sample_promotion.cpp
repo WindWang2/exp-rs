@@ -88,6 +88,31 @@ VoidResult SamplePromoter::requireKnownClasses( const QSet<QString> &codes,
     return VoidResult::success();
 }
 
+VoidResult SamplePromoter::requireOntology( const QSet<QString> &codes,
+                                            const LabelSchema *schema ) const
+{
+    if ( codes.isEmpty() )
+        return VoidResult::success();
+    if ( !schema )
+    {
+        QStringList listed;
+        for ( const QString &code : codes )
+            listed.append( code );
+        return failure( QStringLiteral( "dataset.promotion_schema_required" ),
+                        QStringLiteral( "class codes (%1) require the governing label"
+                                        " schema to be recorded on the annotation" )
+                            .arg( listed.join( QLatin1String( ", " ) ) ) );
+    }
+    // Persist the vocabulary the codes were validated against: the store
+    // resolves an annotation's class code through label_schemas, so a
+    // re-save of identical content is the idempotent path (a differing
+    // re-save of the same (id, version) conflicts, which is honest).
+    const auto saved = m_store->saveLabelSchema( *schema );
+    if ( !saved )
+        return VoidResult::failure( saved.diagnostics() );
+    return VoidResult::success();
+}
+
 SampleRecord SamplePromoter::baseSample( const DatasetVersionId &version, SampleKind kind,
                                          const PromotionSource &source ) const
 {
@@ -116,7 +141,8 @@ SampleRecord SamplePromoter::baseSample( const DatasetVersionId &version, Sample
 }
 
 AnnotationRecord SamplePromoter::baseAnnotation( const DatasetVersionId &version,
-                                                 const PromotionSource &source ) const
+                                                 const PromotionSource &source,
+                                                 const LabelSchema *schema ) const
 {
     AnnotationRecord annotation;
     annotation.setAnnotationId( AnnotationId::generate().toString() );
@@ -126,6 +152,14 @@ AnnotationRecord SamplePromoter::baseAnnotation( const DatasetVersionId &version
     annotation.setSourceType( source.annotationSource );
     annotation.sourceDetail() = source.sourceDetail;
     annotation.setReason( QStringLiteral( "pipeline promotion" ) );
+    // Class identity is ontology-backed: the governing schema is stamped so
+    // the stored annotation resolves against label_schemas (the store refuses
+    // a class code it cannot resolve).
+    if ( schema )
+    {
+        annotation.setLabelSchemaId( schema->schemaId() );
+        annotation.setLabelSchemaVersion( schema->version() );
+    }
     return annotation;
 }
 
@@ -160,6 +194,12 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteClassification(
     auto known = requireKnownClasses( mappedCodes, targetSchema );
     if ( !known )
         return failAs<PromotionReport>( known.diagnostics() );
+
+    // Every mapped code is written, so the ontology must be resolvable for
+    // all of them (persisted + stamped onto each annotation).
+    auto ontology = requireOntology( mappedCodes, targetSchema );
+    if ( !ontology )
+        return failAs<PromotionReport>( ontology.diagnostics() );
 
     // Every region raw value must have a rule — collect the gaps first so the
     // refusal lists them all (nothing silently dropped).
@@ -197,7 +237,7 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteClassification(
         assetRef.role = QStringLiteral( "label" );
         sample.sourceAssets().append( assetRef );
 
-        AnnotationRecord annotation = baseAnnotation( version, source );
+        AnnotationRecord annotation = baseAnnotation( version, source, targetSchema );
         annotation.setTargetSampleId( sample.sampleId() );
         annotation.setClassCode( ruleMap.value( region.rawValue ) );
         annotation.setGeometryWkt( region.geometryWkt );
@@ -264,6 +304,12 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteSegmentation(
     if ( !known )
         return failAs<PromotionReport>( known.diagnostics() );
 
+    // Only class-coded objects produce an annotation; that annotation names
+    // the ontology, which must therefore be resolvable.
+    auto ontology = requireOntology( codes, targetSchema );
+    if ( !ontology )
+        return failAs<PromotionReport>( ontology.diagnostics() );
+
     PromotionReport report;
     QVector<SampleRecord> samples;
     QVector<AnnotationRecord> annotations;
@@ -291,7 +337,7 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteSegmentation(
         samples.append( sample );
         if ( !object.classCode.isEmpty() )
         {
-            AnnotationRecord annotation = baseAnnotation( version, source );
+            AnnotationRecord annotation = baseAnnotation( version, source, targetSchema );
             annotation.setTargetSampleId( sample.sampleId() );
             annotation.setClassCode( object.classCode );
             annotation.setGeometryWkt( object.geometryWkt );
@@ -351,6 +397,12 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteAnnotations(
     if ( !known )
         return failAs<PromotionReport>( known.diagnostics() );
 
+    // A class-coded annotation names its ontology; pure-geometry promotion
+    // (no codes) writes without one.
+    auto ontology = requireOntology( codes, targetSchema );
+    if ( !ontology )
+        return failAs<PromotionReport>( ontology.diagnostics() );
+
     // Every target sample must already exist in the version.
     for ( const auto &item : annotationsIn )
     {
@@ -365,7 +417,7 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteAnnotations(
     PromotionReport report;
     for ( const auto &item : annotationsIn )
     {
-        AnnotationRecord annotation = baseAnnotation( version, source );
+        AnnotationRecord annotation = baseAnnotation( version, source, targetSchema );
         annotation.setTargetSampleId( item.targetSampleId );
         annotation.setClassCode( item.classCode );
         annotation.setGeometryWkt( item.geometryWkt );

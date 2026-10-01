@@ -13,8 +13,10 @@
 //     missing values (nothing is silently dropped).
 //   - Provenance is mandatory: every promoted sample carries the producing
 //     asset ref + workflow provenance; every promoted annotation carries its
-//     AnnotationSourceType (human/field/pseudo/model-assisted…) and, for
-//     model-derived labels, the model identity block.
+//     AnnotationSourceType (human/field/pseudo/model-assisted…), for
+//     model-derived labels the model identity block, and — whenever it
+//     carries a class code — the governing LabelSchema (id + version), which
+//     is persisted so the store can always resolve that code.
 //   - Writes go only into DRAFT versions (the store refuses otherwise;
 //     committed versions stay immutable).
 //   - The promoter writes; it never executes anything and never resamples
@@ -163,10 +165,18 @@ class SamplePromoter
     sicnu::data::Result<void> requireDraftVersion( const DatasetVersionId &version ) const;
     sicnu::data::Result<void> requireKnownClasses( const QSet<QString> &codes,
                                                    const LabelSchema *schema ) const;
+    /// Persists the ontology that governs @p codes so every annotation this
+    /// promotion writes can name it (the store refuses a class-coded
+    /// annotation whose schema does not resolve). An empty @p codes set is a
+    /// pure-geometry promotion and needs neither; class codes with no schema
+    /// to govern them are refused instead of written un-joinable.
+    sicnu::data::Result<void> requireOntology( const QSet<QString> &codes,
+                                               const LabelSchema *schema ) const;
     SampleRecord baseSample( const DatasetVersionId &version, SampleKind kind,
                             const PromotionSource &source ) const;
     AnnotationRecord baseAnnotation( const DatasetVersionId &version,
-                                     const PromotionSource &source ) const;
+                                     const PromotionSource &source,
+                                     const LabelSchema *schema ) const;
 
     DatasetStore *m_store = nullptr;
 };
