@@ -2070,15 +2070,19 @@ void RemoteRangeCache::install( const RangeCacheConfig &config )
     g_store->updateConfig( config ); // blockSize change drops entries
     // 9.0 M3: the disk layer follows the config (empty directory = off).
     RangeDiskBlockStore::configure( config.diskDirectory, config.diskMaxBytes );
-    if ( !s_handlerInstalled )
+    // Registration is gated on the PHYSICAL handler pointer, not the
+    // lifecycle flag: on GDAL < 3.9 the handler cannot be deregistered, so
+    // an uninstall()->install() cycle must reuse the still-registered
+    // handler instead of handing GDAL a second one (InstallHandler just
+    // overwrites the prefix entry there — the old pointer would leak).
+    // GDAL owns the handler from InstallHandler() on (RemoveHandler deletes
+    // it, and uninstall() nulls our pointer then).
+    if ( cachedHandler() == nullptr )
     {
-      // Register exactly once per install cycle: re-registering while
-      // installed would hand GDAL a second (or deleted) handler instance.
-      // GDAL owns the handler from here on (RemoveHandler deletes it).
       cachedHandler() = new RangeCacheFilesystemHandler();
       VSIFileManager::InstallHandler( kRangeCachePrefix, cachedHandler() );
-      s_handlerInstalled = true;
     }
+    s_handlerInstalled = true;
   }
   ensureGdalRegistered();
 }
@@ -2097,16 +2101,17 @@ void RemoteRangeCache::uninstall()
   // use-after-free).
   cachedHandler() = nullptr;
   g_store->dropAll();
-  s_handlerInstalled = false;
   RangeDiskBlockStore::clear();
 #else
-  // GDAL < 3.9 has no RemoveHandler: the prefix cannot be deregistered, so
-  // uninstall only drops the bytes and KEEPS the handler installed/registered
-  // (reporting installed()==false while /vsirangecache/ still resolves, or
-  // re-registering a fresh handler per cycle, would leak and lie).
+  // GDAL < 3.9 has no RemoveHandler: the handler STAYS registered with GDAL
+  // (the prefix cannot be deregistered), so we keep the cachedHandler()
+  // pointer alive and a later install() reuses it instead of leaking a
+  // duplicate registration. The lifecycle flag is still cleared below so
+  // installed() reports the caller-facing state truthfully.
   g_store->dropAll();
   RangeDiskBlockStore::clear();
 #endif
+  s_handlerInstalled = false;
 }
 
 bool RemoteRangeCache::installed()

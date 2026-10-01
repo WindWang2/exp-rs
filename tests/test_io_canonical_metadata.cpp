@@ -6,6 +6,7 @@
 
 #include "geospatial/metadata/canonical_metadata.h"
 #include "geospatial/crs/crs_policy.h"
+#include "geospatial/util/gdal_compat.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -284,8 +285,17 @@ TEST_CASE( "inspectVector describes GeoJSON layers cheaply", "[io][metadata]" )
   CHECK( layer.geometryTypeName.find( "Point" ) != std::string::npos );
   REQUIRE( layer.fields.size() == 2 );
   CHECK( layer.fields[0].name == "name" );
+  // The reader probes extent cheap-only (GetExtent bForce=FALSE): hasExtent
+  // reports whether the driver could answer without a full scan. GeoJSON
+  // only records the extent while parsing since GDAL 3.9
+  // (OGRGeoJSONReader::ExtentRead), and this fixture has no top-level
+  // "bbox", so the cheap answer is version-dependent by design.
+#if SICNU_GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 9, 0 )
   CHECK( layer.hasExtent );
   CHECK( layer.minX == Approx( 117.2 ).margin( 1e-6 ) );
+#else
+  CHECK_FALSE( layer.hasExtent );
+#endif
 }
 
 TEST_CASE( "inspection failures are structured, not silent", "[io][metadata]" )
