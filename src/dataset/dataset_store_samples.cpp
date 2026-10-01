@@ -8,6 +8,7 @@
 // that makes version references meaningful.
 #include "dataset_store_impl.h"
 
+#include "../data/execution_fingerprint.h"
 #include "../data/query_cursor.h"
 #include "annotation.h"
 #include "label_schema.h"
@@ -20,6 +21,26 @@ namespace sicnu::dataset
 
 namespace
 {
+
+/// Content digest of a label schema row (#1387): the ONE canonical form of
+/// the parsed document — never the stored text bytes, which would bind the
+/// digest to whichever serializer wrote the row. An unparsable row keeps the
+/// raw-bytes digest: its content IS its bytes, and "different bytes ⇒
+/// different digest" must survive there too (rows written by
+/// DatasetStore::saveLabelSchema always parse).
+QString labelSchemaRowDigest( const QString &storedText )
+{
+    const QJsonObject document = textToJson( storedText );
+    if ( document.isEmpty() && storedText != QLatin1String( "{}" ) )
+    {
+        return QString::fromUtf8(
+            QCryptographicHash::hash( storedText.toUtf8(), QCryptographicHash::Sha256 ).toHex() );
+    }
+    return QString::fromUtf8(
+        QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785( document ),
+                                  QCryptographicHash::Sha256 )
+            .toHex() );
+}
 
 /// Loads the version status while the caller holds the mutex; nullopt when
 /// the version row does not exist (or is corrupt — fail-conservative).
@@ -132,10 +153,10 @@ QVector<QPair<quint64, QString>> DatasetStore::labelSchemaVersions( const QStrin
     {
         // Content digest of the stored document (change detection without a
         // dedicated column; the document is immutable per (id, version)).
-        const QString json = stmt.text( 1 );
-        const QString digest = QString::fromUtf8(
-            QCryptographicHash::hash( json.toUtf8(), QCryptographicHash::Sha256 ).toHex() );
-        versions.append( qMakePair( quint64( stmt.i64( 0 ) ), digest ) );
+        // Canonicalizing the PARSED document (#1387) keeps the digest bound
+        // to content, not to the stored bytes' serializer.
+        versions.append( qMakePair( quint64( stmt.i64( 0 ) ),
+                                    labelSchemaRowDigest( stmt.text( 1 ) ) ) );
     }
     return versions;
 }

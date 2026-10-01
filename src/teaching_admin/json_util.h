@@ -12,15 +12,25 @@
 #include <QString>
 #include <QStringList>
 
+#include "data/execution_fingerprint.h"
 #include "lab_pack/lab_pack.h"
 
 #include <string>
 
 namespace sicnu::teaching_admin {
 
+/// Canonical JSON for digests — DELEGATES to the platform authority
+/// (sicnu::data::canonicalizeJsonRfc8785, #1387): curriculum / labSpec /
+/// rules / pack digests and the release-report digest hash exactly the
+/// bytes that identity experiment parameters, capsules and dataset
+/// manifests. The local Qt-Compact + sortKeys pair it replaces formatted
+/// numbers differently (Qt double text, int/double typing) and left key
+/// sorting to the caller, so equal content could digest differently by
+/// path. sortKeys() below remains for deterministic OUTPUT documents
+/// (human-readable ordering), never for digest bytes.
 inline QByteArray canonicalJsonBytes( const QJsonObject &obj )
 {
-    return QJsonDocument( obj ).toJson( QJsonDocument::Compact );
+    return sicnu::data::canonicalizeJsonRfc8785( obj );
 }
 
 inline QString sha256Hex( const QByteArray &bytes )

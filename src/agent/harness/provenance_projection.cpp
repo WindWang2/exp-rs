@@ -2,13 +2,13 @@
 #include "provenance_projection.h"
 
 #include "platform/durable_sidecar.h"
-
+#include "data/execution_fingerprint.h"
 #include "workflow_facts.h"
 
 #include <QFile>
 #include <QIODevice>
 
-#include <json/writer.h>
+#include <json/value.h>
 
 #include <QCryptographicHash>
 #include <QString>
@@ -22,15 +22,6 @@ namespace sicnu::agent::harness::projection {
 namespace {
 
 Json::Value emptyObject() { return Json::Value( Json::objectValue ); }
-
-/// Deterministic compact serialization (sorted members via jsoncpp).
-std::string canonicalJson( const Json::Value &value )
-{
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "";
-  builder["commentStyle"] = "None";
-  return Json::writeString( builder, value );
-}
 
 } // namespace
 
@@ -144,8 +135,13 @@ Json::Value compilerProjection( const WorkflowIr &ir, const IrAnalysis &analysis
 
 std::string projectionDigest( const Json::Value &projection )
 {
+  // ONE canonical serializer (#1387): the platform authority
+  // canonicalizeJsonRfc8785, reached through its jsoncpp adapter — the same
+  // bytes that identify experiment parameters and dataset manifests. The
+  // digest stays 16 bytes wide (32 hex chars): a projection-sidecar token,
+  // not a content digest.
   const QByteArray digest = QCryptographicHash::hash(
-    QByteArray::fromStdString( canonicalJson( projection ) ), QCryptographicHash::Sha256 );
+    sicnu::data::canonicalizeJsonRfc8785( projection ), QCryptographicHash::Sha256 );
   return QString::fromLatin1( digest.left( 16 ).toHex() ).toStdString();
 }
 
@@ -183,7 +179,8 @@ SidecarResult writeCompileSidecar( const std::string &outputPath,
   // R6: the single sidecar write authority (temp + fsync + atomic publish +
   // verify read-back) replaces the QSaveFile lane; short-write/cancel
   // semantics now come from the authority's typed statuses.
-  const std::string body = canonicalJson( projection ) + "\n";
+  const std::string body =
+    sicnu::data::canonicalizeJsonRfc8785( projection ).toStdString() + "\n";
   const sicnu::platform::sidecar::WriteResult write =
     sicnu::platform::sidecar::write( { result.path, body, "" } );
   if ( !write )

@@ -1,7 +1,9 @@
 // src/agent/harness/workflow_explain.cpp
 #include "workflow_explain.h"
 
-#include <json/writer.h>
+#include "data/execution_fingerprint.h"
+
+#include <json/value.h>
 
 #include <algorithm>
 
@@ -15,14 +17,6 @@ std::string clampZh( const std::string &text, Json::Value &truncatedKeys, const 
     return text;
   truncatedKeys.append( key );
   return text.substr( 0, ExplainLimits::kMaxTextChars );
-}
-
-std::string canonicalJson( const Json::Value &value )
-{
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "";
-  builder["commentStyle"] = "None";
-  return Json::writeString( builder, value );
 }
 
 /// Cause ordering: run failures first, then errors, then warnings-as-causes
@@ -240,7 +234,10 @@ Json::Value explainDecisionChain( const ExplainRequest &request )
   // Serialized-budget accounting: report honestly when the document exceeds
   // the declared budget (content is NOT cut mid-structure — the cap is a
   // declared bound, measured and reported, and callers can page causes).
-  const int serializedBytes = static_cast<int>( canonicalJson( out ).size() );
+  // Measured over the ONE canonical serializer (#1387) so the byte count is
+  // the document's canonical size, compiler-independent.
+  const int serializedBytes =
+    static_cast<int>( sicnu::data::canonicalizeJsonRfc8785( out ).size() );
   out["serialized_bytes"] = serializedBytes;
   if ( serializedBytes > ExplainLimits::kMaxTextBytes )
     out["over_budget"] = true;

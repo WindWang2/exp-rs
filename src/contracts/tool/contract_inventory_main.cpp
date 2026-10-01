@@ -29,6 +29,12 @@
 
 namespace {
 
+// Deterministic snapshot writer — deliberately NOT the #1387 digest
+// authority (canonicalizeJsonRfc8785): the snapshot is byte-compared, never
+// hashed, so it is not a digest input; and the two-space pretty-print is the
+// documented human review surface ("review the diff as a conscious contract
+// update"). Generation and --check use this same function, so the gate is
+// self-consistent. See ADR 0178.
 std::string canonicalJson( const Json::Value &root )
 {
     Json::StreamWriterBuilder b;

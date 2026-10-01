@@ -16,6 +16,8 @@
 #include <QJsonArray>
 #include <QDebug>
 
+#include "../data/execution_fingerprint.h"
+
 #include "leakage_audit.h"
 #include "split.h"
 
@@ -236,8 +238,17 @@ sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &
                                            QStringLiteral( "split manifest %1 is not stored" )
                                                .arg( report.splitManifestId() ) ) );
 
+    // The stored row keeps the Compact text (stored text may stay Compact);
+    // the DIGEST input is the ONE canonical form (#1387) — the same bytes
+    // splitManifestFingerprint hashes, so identical report content has one
+    // digest regardless of which serializer produced the row. NOTE: this
+    // re-values every digest (old rows keep their Qt-Compact-era digest), so
+    // an identical re-save across the change inserts one new row next to the
+    // old one — append-only history makes that harmless (latest-wins reads
+    // see identical content), and no reader keys content by this digest.
     const QString json = jsonToText( report.toJson() );
-    const QString digest = contentDigest( json );
+    const QString digest = contentDigest(
+        QString::fromUtf8( sicnu::data::canonicalizeJsonRfc8785( report.toJson() ) ) );
 
     StoreStmt insert( m_impl->db, QStringLiteral(
         "INSERT OR IGNORE INTO leakage_reports(split_manifest_id, report_digest,"

@@ -32,6 +32,11 @@
 #include <optional>
 #include <string>
 
+namespace Json
+{
+  class Value; // jsoncpp read-only forward declaration (json/value.h)
+}
+
 namespace sicnu::data
 {
 
@@ -140,6 +145,19 @@ struct TaggedDerivationInput
 /// bytes may differ from a strict JCS serializer. Self-consistent hashing is
 /// what the cache relies on; cross-implementation byte equality is not claimed.
 QByteArray canonicalizeJsonRfc8785( const QJsonObject &obj );
+
+/// The ONE canonical serializer for the platform, reached from the jsoncpp
+/// side (#1387): converts @p value to Qt JSON and delegates to the QJsonObject
+/// overload above, so every digest path — experiment identity, capsules,
+/// dataset fingerprints, teaching-admin curriculum/pack digests, the harness
+/// projection digest, the cartography export manifest digest — canonicalizes
+/// through the same code. The conversion is the ONLY adaptation: jsoncpp's
+/// numeric taxonomy (int/uint/int64/uint64/real) narrows to QJsonValue's
+/// double, so integers with magnitude >= 2^53 can lose their low bits here
+/// (they survive losslessly only inside the qint64-exact path of the
+/// serializer); keys sort by UTF-16 code unit in BOTH trees, so equal
+/// documents yield equal bytes on either side.
+QByteArray canonicalizeJsonRfc8785( const Json::Value &value );
 
 /// Build a fingerprint from the components. @a parameters is normalized (sorted
 /// by key) before hashing so parameter-map insertion order does not affect the

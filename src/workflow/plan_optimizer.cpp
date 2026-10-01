@@ -1,10 +1,11 @@
 // src/workflow/plan_optimizer.cpp — SHA-256 lineage, DNE, CSE (D17)
 #include "workflow/plan_optimizer.h"
 
+#include "data/execution_fingerprint.h"
+
 #include <QCryptographicHash>
 #include <QHash>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QSet>
 #include <QStringList>
 
@@ -12,12 +13,6 @@
 
 namespace sicnu::workflow {
 namespace {
-
-QString canonicalJson( const QJsonObject &object )
-{
-    // QJsonObject iterates keys in sorted order; compact document == canonical.
-    return QString::fromUtf8( QJsonDocument( object ).toJson( QJsonDocument::Compact ) );
-}
 
 QVector<QString> parentsOf( const WorkflowDocument &def, const QString &nodeId )
 {
@@ -47,7 +42,11 @@ QString WorkflowPlanOptimizer::computeNodeSignature( const NodeFact &node,
 {
     QString lineage = node.operatorId;
     lineage += QLatin1Char( '\x1f' );
-    lineage += canonicalJson( node.parameters );
+    // The ONE canonical serializer (#1387): the parameters ride into the
+    // SHA-256 lineage digest, so they canonicalize through the digest
+    // authority — byte-equivalent to the Qt-Compact local it replaces on the
+    // current Qt, so no signature value changes.
+    lineage += QString::fromUtf8( sicnu::data::canonicalizeJsonRfc8785( node.parameters ) );
     if ( !incomingPorts.isEmpty() )
     {
         // Port-sensitive lineage (#1077): each incoming edge contributes
