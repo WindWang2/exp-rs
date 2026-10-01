@@ -50,6 +50,13 @@ struct CoordinatorFixture
 
         coordinator.setCheckpointDirectory( checkpointDir.path() );
     }
+
+    ~CoordinatorFixture()
+    {
+        auto &engine = sicnu::jobs::JobEngine::instance();
+        engine.shutdownForTests();
+        coordinator.shutdownForTests();
+    }
 };
 
 WorkflowDefinition twoStepDefinition( const std::string &prefix )

@@ -257,7 +257,10 @@ WorkflowRunCoordinator::WorkflowRunCoordinator()
     processing::installExecutionEnvironmentPins();
 }
 
-WorkflowRunCoordinator::~WorkflowRunCoordinator() = default;
+WorkflowRunCoordinator::~WorkflowRunCoordinator()
+{
+    shutdownForTests();
+}
 
 void WorkflowRunCoordinator::setCheckpointDirectory( const QString &directory )
 {
@@ -413,6 +416,26 @@ void WorkflowRunCoordinator::persistRun( PersistRequest request )
     if ( !request.run || request.runId.empty() )
         return;
 
+    struct InFlightGuard
+    {
+        std::atomic<int> &counter;
+        std::condition_variable &cv;
+        std::mutex &cvMutex;
+        InFlightGuard( std::atomic<int> &c, std::condition_variable &v, std::mutex &m )
+            : counter( c ), cv( v ), cvMutex( m )
+        {
+            counter.fetch_add( 1, std::memory_order_acq_rel );
+        }
+        ~InFlightGuard()
+        {
+            if ( counter.fetch_sub( 1, std::memory_order_acq_rel ) == 1 )
+            {
+                std::lock_guard<std::mutex> lock( cvMutex );
+                cv.notify_all();
+            }
+        }
+    } guard( m_inFlightPersists, m_persistCv, m_persistCvMutex );
+
     // One-shot test delay AFTER m_mutex dropped so a concurrent
     // runForPipeline / resumeRun of a different run stays live (#931).
     const int delayMs = m_checkpointIoDelayMs.exchange( 0 );
@@ -442,6 +465,42 @@ void WorkflowRunCoordinator::persistRun( PersistRequest request )
                 + QStringLiteral( "checkpoint_%1.json" ).arg( QString::fromStdString( request.runId ) ),
             request.directory );
     }
+}
+
+void WorkflowRunCoordinator::drainPersists()
+{
+    std::unique_lock<std::mutex> lock( m_persistCvMutex );
+    m_persistCv.wait( lock, [this]() {
+        return m_inFlightPersists.load( std::memory_order_acquire ) == 0;
+    } );
+    std::lock_guard<std::mutex> io( m_checkpointIoMutex );
+}
+
+void WorkflowRunCoordinator::shutdownForTests()
+{
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        if ( m_connected )
+        {
+            disconnect( &TaskCenter::instance(), &TaskCenter::taskUpdated,
+                        this, &WorkflowRunCoordinator::onTaskUpdated );
+            m_connected = false;
+        }
+    }
+
+    drainPersists();
+    drainRunNotifications();
+
+    std::lock_guard<std::mutex> lock( m_mutex );
+    m_runsByPipeline.clear();
+    m_pipelineByRunId.clear();
+    m_resuming.clear();
+    m_locksByRunId.clear();
+    m_latestPersistSeq.clear();
+    m_pendingRunNotifications.clear();
+    m_checkpointDir.clear();
+    m_checkpointIoDelayMs.store( 0 );
+    m_checkpointLoadDelayMs.store( 0 );
 }
 
 long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad )
