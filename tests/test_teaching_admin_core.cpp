@@ -1492,7 +1492,7 @@ TEST_CASE( "verifyOfflineBundle flags a broken version pin", "[teaching_admin][o
     }
 
     // expected matches declared → ok
-    const auto okRun = verifyOfflineBundle( repo.path(), bundle.path(), QStringLiteral( "python3" ),
+    const auto okRun = verifyOfflineBundle( repo.path(), bundle.path(), resolveDefaultPythonInterpreter(),
                                             QStringLiteral( "v2026.09" ) );
     REQUIRE( okRun.verifiable );
     REQUIRE( okRun.ok );
@@ -1500,7 +1500,7 @@ TEST_CASE( "verifyOfflineBundle flags a broken version pin", "[teaching_admin][o
     REQUIRE( okRun.manifestSchema == QLatin1String( "sicnu.offline_bundle/2" ) );
 
     // expected differs → typed failed verification, never a silent pass
-    const auto mismatch = verifyOfflineBundle( repo.path(), bundle.path(), QStringLiteral( "python3" ),
+    const auto mismatch = verifyOfflineBundle( repo.path(), bundle.path(), resolveDefaultPythonInterpreter(),
                                                QStringLiteral( "vOLD" ) );
     REQUIRE( mismatch.verifiable );
     REQUIRE_FALSE( mismatch.ok );
@@ -1518,8 +1518,8 @@ TEST_CASE( "foundry drift check reuses gen_lab_packs.py --check contract",
     QTemporaryDir repo;
     REQUIRE( repo.isValid() );
     REQUIRE( QDir( repo.path() ).mkpath( QStringLiteral( "scripts" ) ) );
-    const QString python = QStandardPaths::findExecutable( QStringLiteral( "python3" ) );
-    if ( python.isEmpty() )
+    const QString python = resolveDefaultPythonInterpreter();
+    if ( python == QLatin1String( "python3" ) && QStandardPaths::findExecutable( python ).isEmpty() )
     {
         WARN( "python3 not available; skipping foundry drift adapter test" );
         return;
@@ -1561,6 +1561,70 @@ TEST_CASE( "foundry drift check reuses gen_lab_packs.py --check contract",
         REQUIRE_FALSE( missing.ran );
         REQUIRE( missing.summary == QLatin1String( "foundry_script_missing" ) );
     }
+}
+
+// The harness pins the interpreter through the environment: PYTHONHOME and
+// PYTHONPATH describe the CMake-configured one (cmake/SicnuTestEnv.cmake,
+// TEST_INFRA.md #730), and src/operators/runtime/python_worker_provider.cpp
+// (#1431) resolves SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE for exactly
+// that reason. An adapter that names no interpreter must run THAT
+// interpreter, not whatever PATH offers: a bare "python3" on PATH may be a
+// different version than PYTHONHOME describes, and then the child inherits a
+// foreign stdlib (PYTHONPATH wins over the home stdlib in sys.path), loads
+// one version's `re` with another version's `_sre` and dies at `import re`
+// ("SRE module mismatch") before any script line runs — every adapter call
+// then fails without a transcript.
+TEST_CASE( "script adapters default to the harness-pinned interpreter",
+           "[teaching_admin][offline]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    REQUIRE( QDir( dir.path() ).mkpath( QStringLiteral( "scripts" ) ) );
+
+    // Stand-in for the pinned interpreter: records that it was launched, then
+    // execs the real one so the adapter contract still runs to completion.
+    const QString marker = dir.filePath( QStringLiteral( "interpreter-used.marker" ) );
+    const QString pinned = dir.filePath( QStringLiteral( "pinned-python3" ) );
+    QString realPython = QString::fromUtf8( qgetenv( "SICNU_PYTHON_EXECUTABLE" ) );
+    if ( realPython.isEmpty() )
+        realPython = QString::fromUtf8( qgetenv( "PYTHONEXECUTABLE" ) );
+    if ( realPython.isEmpty() )
+        realPython = QStringLiteral( "python3" );
+    {
+        QFile f( pinned );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        f.write( "#!/bin/sh\n" );
+        f.write( "printf '%s\\n' \"$0\" >> \"" + marker.toUtf8() + "\"\n" );
+        f.write( "exec \"" + realPython.toUtf8() + "\" \"$@\"\n" );
+        f.close();
+        REQUIRE( f.setPermissions( QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                                   | QFile::ReadGroup | QFile::ExeGroup
+                                   | QFile::ReadOther | QFile::ExeOther ) );
+    }
+    {
+        QFile f( QDir( dir.path() ).filePath( QStringLiteral( "scripts/gen_lab_packs.py" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( "import sys\nprint('packs in sync')\nsys.exit(0)\n" ) );
+    }
+
+    const QByteArray savedExec = qgetenv( "SICNU_PYTHON_EXECUTABLE" );
+    qputenv( "SICNU_PYTHON_EXECUTABLE", pinned.toUtf8() );
+    // No interpreter argument: the default must resolve to the pin.
+    const auto check = checkLabPackDrift( dir.path() );
+    if ( savedExec.isNull() )
+        qunsetenv( "SICNU_PYTHON_EXECUTABLE" );
+    else
+        qputenv( "SICNU_PYTHON_EXECUTABLE", savedExec );
+
+    REQUIRE( check.ran );
+    REQUIRE( check.inSync );
+    REQUIRE( check.driftFiles.isEmpty() );
+    // Pre-fix the default launched PATH's python3: this shim never ran, the
+    // marker stayed absent, and only the adapter's typed failure showed up.
+    REQUIRE( QFileInfo::exists( marker ) );
+    QFile markerFile( marker );
+    REQUIRE( markerFile.open( QIODevice::ReadOnly | QIODevice::Text ) );
+    CHECK( QString::fromUtf8( markerFile.readLine() ).trimmed() == pinned );
 }
 
 TEST_CASE( "gradeViaCli against a real grader CLI when one is provided",

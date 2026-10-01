@@ -11,7 +11,7 @@ namespace sicnu::teaching_admin {
 
 struct ScriptRunRequest
 {
-    QString program;          ///< python3 / bash / absolute tool
+    QString program;          ///< harness-pinned python3 / bash / absolute tool
     QStringList arguments;
     QString workingDirectory;
     int timeoutMs = 120000;
@@ -34,8 +34,22 @@ struct ScriptRunResult
 /// for semantics — callers parse known JSON/exit contracts.
 ScriptRunResult runScript( const ScriptRunRequest &req );
 
+/// The stack's own Python: SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE when
+/// the harness (or a deployment) pins one, else "python3". The test harness
+/// exports PYTHONHOME/PYTHONPATH describing its CMake-configured interpreter
+/// (cmake/SicnuTestEnv.cmake, TEST_INFRA.md #730), and
+/// src/python/isolated/python_worker_process.cpp resolves the same pins for
+/// exactly that reason. A bare "python3" is merely whatever PATH offers:
+/// when that is a DIFFERENT interpreter than PYTHONHOME describes, the child
+/// inherits a foreign stdlib — PYTHONPATH wins over the home stdlib in
+/// sys.path, so the script loads one version's `re` package with another
+/// version's `_sre` extension and dies at `import re` ("SRE module mismatch")
+/// before it can emit any transcript. Same fix and priority order as
+/// #1431 (python worker provider).
+QString resolveDefaultPythonInterpreter();
+
 /// Adapter: gen_lab_packs.py → structured result.
-ScriptRunResult runGenLabPacks( const QString &repoRoot, const QString &pythonExe = QStringLiteral( "python3" ) );
+ScriptRunResult runGenLabPacks( const QString &repoRoot, const QString &pythonExe = resolveDefaultPythonInterpreter() );
 
 /// Adapter: verify_bundle_manifest.py <bundleDir>.
 struct BundleVerifyResult
@@ -53,7 +67,7 @@ struct BundleVerifyResult
 };
 
 BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &bundleDir,
-                                        const QString &pythonExe = QStringLiteral( "python3" ),
+                                        const QString &pythonExe = resolveDefaultPythonInterpreter(),
                                         const QString &expectedVersion = QString() );
 
 /// Read-only look at a bundle's manifest.json (no subprocess): schema id,
@@ -96,11 +110,11 @@ struct PackDriftCheck
 };
 
 PackDriftCheck checkLabPackDrift( const QString &repoRoot,
-                                  const QString &pythonExe = QStringLiteral( "python3" ) );
+                                  const QString &pythonExe = resolveDefaultPythonInterpreter() );
 
 /// Adapter: run_classroom_batch.py
 ScriptRunResult runClassroomBatch( const QString &repoRoot, const QString &cliPath, const QString &labId,
                                    const QString &submissionsDir, const QString &outPrefix, int jobs = 2,
-                                   int timeoutSec = 120, const QString &pythonExe = QStringLiteral( "python3" ) );
+                                   int timeoutSec = 120, const QString &pythonExe = resolveDefaultPythonInterpreter() );
 
 } // namespace sicnu::teaching_admin

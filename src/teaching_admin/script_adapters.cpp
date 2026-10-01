@@ -11,6 +11,32 @@
 
 namespace sicnu::teaching_admin {
 
+/// A caller that names no interpreter means "this stack's own Python".
+/// The harness pins that interpreter through the environment: PYTHONHOME and
+/// PYTHONPATH describe the CMake-configured one (cmake/SicnuTestEnv.cmake,
+/// TEST_INFRA.md #730), and src/python/isolated/python_worker_process.cpp
+/// resolves SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE for exactly that
+/// reason. A bare "python3" is merely whatever PATH offers: when that is a
+/// DIFFERENT interpreter than PYTHONHOME describes, the child inherits a
+/// stdlib it was never built against — PYTHONPATH wins over the home stdlib
+/// in sys.path, so it loads one version's `re` package and another version's
+/// `_sre` extension and dies at `import re` ("SRE module mismatch") before
+/// any script line runs (master run 36568313972: the teaching admin dock
+/// cancel smoke graded 0 of 20 rows this way). Resolve the same pin here so
+/// every adapter IS the interpreter the environment describes. With no pin
+/// set the behaviour falls through to "python3", unchanged.
+QString resolveDefaultPythonInterpreter()
+{
+    static const char *const kPins[] = { "SICNU_PYTHON_EXECUTABLE", "PYTHONEXECUTABLE" };
+    for ( const char *pin : kPins )
+    {
+        const QString value = qEnvironmentVariable( pin ).trimmed();
+        if ( !value.isEmpty() && QFileInfo::exists( value ) )
+            return value;
+    }
+    return QStringLiteral( "python3" );
+}
+
 QJsonObject ScriptRunResult::toJson() const
 {
     return QJsonObject{
