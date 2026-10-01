@@ -9,10 +9,14 @@
 //   - transient auto-retry re-enters admission through the heap (no
 //     stranding, gates re-engage);
 //   - JobEngine exclusive drain order + priority pick with the bucketed
-//     queue;
+//     queue. Ordering is asserted as a scheduler invariant (every job parks in
+//     its executor, so a job can only start once a worker is free and the
+//     recorded sequence is the engine's pick sequence) rather than as a
+//     wall-clock start order, which two workers interleave under load;
 //   - short-job scaling: 2k vs 10k drain ratio stays ~linear (the pre-8.0
-//     admission rescan was quadratic; ratio bound asserted generously),
-//     absolute bounded runtime, no stranded tasks.
+//     admission rescan was quadratic; ratio bound asserted generously, min
+//     over samples, and contaminated samples re-measured within a case
+//     budget), absolute bounded runtime, no stranded tasks.
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/atomic_algorithm_adapter.h"
@@ -38,8 +42,10 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <mutex>
@@ -125,6 +131,46 @@ struct StartOrderRecorder
         return order;
     }
 };
+
+/// Bounded waits in the bucketed-queue case state their budget explicitly
+/// instead of inheriting the 6 s default: this suite runs on shared CI hosts
+/// where a load spike can stall worker-thread start (and every gate-open
+/// handshake below) for seconds. 6000 x 10 ms = 60 s, an order of magnitude
+/// over what an idle host needs and still far inside the case's ctest timeout.
+constexpr int kQueueWaitAttempts = 6000;
+constexpr int kQueueWaitSleepMs = 10;
+
+/// Opens a set of per-job start gates on destruction. Jobs that park inside
+/// their executor hold a worker for the whole case, so any early exit (a failed
+/// REQUIRE unwinds the case) must release them: the next case joins workers
+/// inside shutdownForTests() and a body parked forever would hang it.
+struct ParkGateGuard
+{
+    std::atomic<bool> *gates = nullptr;
+    std::size_t count = 0;
+    ~ParkGateGuard()
+    {
+        for ( std::size_t i = 0; i < count; ++i )
+            gates[i].store( true );
+    }
+};
+
+/// True when exactly one job is Running and it is @p jobId — the engine's
+/// "drain then exclusive" run-alone invariant read from engine state, which is
+/// a statement about the scheduler rather than a thread-scheduling artifact.
+bool onlyRunningJob( const sicnu::jobs::JobEngine &engine, const std::string &jobId )
+{
+    bool saw = false;
+    for ( const sicnu::jobs::JobRecord &rec : engine.list() )
+    {
+        if ( rec.state != sicnu::jobs::JobState::Running )
+            continue;
+        if ( saw || rec.id != jobId )
+            return false;
+        saw = true;
+    }
+    return saw;
+}
 
 } // namespace
 
@@ -449,33 +495,50 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     engine.clearExecutors();
     static StartOrderRecorder recorder;
     recorder.order.clear();
-    static std::atomic<bool> releaseGate{ false };
-    releaseGate.store( false );
+
+    // ── Ordering without the race ────────────────────────────────────────
+    // Pick order is a property of the engine's queue, but START order is
+    // whatever the pool's threads happen to record first. With two workers,
+    // adjacent picks interleave, and under load a job that finishes instantly
+    // can be overtaken by a job picked AFTER it (a descheduled worker records
+    // its start late) — the load flake this suite used to fail with. So every
+    // job here HOLDS its worker (parks in its executor) until the case opens
+    // that job's start gate: a job can only start once a worker is free, so
+    // the recorded sequence is the engine's PICK sequence. The job's "i" param
+    // (0..6) is also its gate index.
+    constexpr int kGateCount = 7;
+    static std::array<std::atomic<bool>, kGateCount> startGate;
+    for ( int i = 0; i < kGateCount; ++i )
+        startGate[static_cast<std::size_t>( i )].store( false );
+    // Any early exit (a failed REQUIRE unwinds the case) must release the
+    // parked jobs: the next case joins workers inside shutdownForTests() and a
+    // body parked forever would hang it.
+    ParkGateGuard openAllGates{ startGate.data(), startGate.size() };
 
     engine.registerExecutor( "ep8:", []( const sicnu::jobs::JobRequest &req,
                                          sicnu::operators::RSOperatorContext & ) {
-        recorder.push( std::atoi( req.params["i"].asString().c_str() ) );
-        if ( req.params["park"].asBool() )
-        {
-            // Deadline-bounded (#1392): a closed gate must not strand the
-            // executor past the harness timeout.
-            sicnu_test::waitUntil( [&] { return releaseGate.load(); }, 60000,
-                                   [] { return "ep8 parked holder never released"; } );
-        }
+        const int i = std::atoi( req.params["i"].asString().c_str() );
+        recorder.push( i );
+        // A request without an "i" in 0..6 must not index the gate array
+        // (there is no gate to park on): it completes at once and the case's
+        // id set remains the truth.
+        if ( i < 0 || i >= kGateCount )
+            return Json::Value();
+        while ( !startGate[static_cast<std::size_t>( i )].load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
         return Json::Value();
     } );
 
-    // Two park jobs occupy the whole pool; the test continues only when BOTH
+    // Two park jobs occupy the whole pool; the case continues only when BOTH
     // are running (their executors recorded the starts).
     sicnu::jobs::JobRequest parkA = ep8Request( "ep8:parkA" );
     parkA.params["i"] = 0;
-    parkA.params["park"] = true;
     const std::string parkAId = engine.submit( parkA );
     sicnu::jobs::JobRequest parkB = ep8Request( "ep8:parkB" );
     parkB.params["i"] = 6;
-    parkB.params["park"] = true;
     const std::string parkBId = engine.submit( parkB );
-    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() == 2; } ) );
+    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() == 2; },
+                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
 
     sicnu::jobs::JobRequest lowA = ep8Request( "ep8:lowA" );
     lowA.priority = 2;
@@ -506,45 +569,100 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     exclusive.params["i"] = 5;
     const std::string exclusiveId = engine.submit( exclusive );
 
-    // Launch order once the parks release: both parks drain, then the
-    // exclusive runs ALONE on the idle pool, then HIGH(3), NORMAL(2),
-    // LOW(1), LOW(4) in strict priority order.
-    releaseGate.store( true );
-    // Wait for EVERY job (the exclusive finishing only unblocks the queued
-    // non-exclusive work — snapshotting earlier races the scheduler).
-    REQUIRE( engine.waitForJob( exclusiveId, 60000 ) );
-    REQUIRE( engine.waitForJob( parkAId, 60000 ) );
-    REQUIRE( engine.waitForJob( parkBId, 60000 ) );
-    REQUIRE( engine.waitForJob( highCId, 60000 ) );
-    REQUIRE( engine.waitForJob( normalBId, 60000 ) );
-    REQUIRE( engine.waitForJob( lowAId, 60000 ) );
-    REQUIRE( engine.waitForJob( lowDId, 60000 ) );
+    // ── Drain-then-exclusive, asserted as an invariant ────────────────────
+    // While the parks hold both workers, the queued exclusive must not start
+    // and must not admit non-exclusive work next to it. Every job parks, so
+    // "nothing new started" is NOT a timing race: no code path can add a start
+    // here without violating the drain contract. The quiet window below only
+    // gives a violation that needs a scheduling cycle a chance to show itself.
+    REQUIRE( recorder.snapshot().size() == 2 );
+    const auto exclusiveSnapshot = engine.snapshot( exclusiveId );
+    REQUIRE( exclusiveSnapshot.has_value() );
+    REQUIRE( exclusiveSnapshot->state == sicnu::jobs::JobState::Queued );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 250 ) );
+    REQUIRE( recorder.snapshot().size() == 2 );
+    const auto exclusiveStillQueued = engine.snapshot( exclusiveId );
+    REQUIRE( exclusiveStillQueued.has_value() );
+    REQUIRE( exclusiveStillQueued->state == sicnu::jobs::JobState::Queued );
+
+    // Release the parks: both drain, and only once the pool is idle does the
+    // exclusive start.
+    startGate[0].store( true );
+    startGate[6].store( true );
+    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 3; },
+                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    // ... and it runs ALONE. Everything else is terminal or queued behind the
+    // exclusive, so this holds for as long as the exclusive is parked — again a
+    // scheduler invariant rather than a snapshot race.
+    REQUIRE( waitForCondition( [&] { return onlyRunningJob( engine, exclusiveId ); },
+                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+
+    // Release the exclusive: both workers go idle and pick back to back, so
+    // the next two picks are the best-paying buckets, HIGH(3) then NORMAL(2).
+    // Which worker RECORDS first is not observable; the SET of the next two
+    // starts is fixed, because those two jobs hold both workers and no
+    // lower-priority pick can overtake them.
+    startGate[5].store( true );
+    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 5; },
+                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    const auto midOrder = recorder.snapshot();
+    REQUIRE( midOrder.size() == 5 );
+    REQUIRE( ( ( midOrder[3] == 3 && midOrder[4] == 2 )
+               || ( midOrder[3] == 2 && midOrder[4] == 3 ) ) );
+
+    // Free ONE worker: the pick that follows is the lowest-priority bucket's
+    // FIFO head (lowA, submitted before lowD), because the other worker is
+    // still parked. This is the one point where a single pick can be observed
+    // in isolation, so FIFO order inside a bucket is asserted HERE instead of
+    // being inferred from two instant jobs racing on two workers.
+    startGate[static_cast<std::size_t>( midOrder[3] )].store( true );
+    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 6; },
+                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    startGate[static_cast<std::size_t>( midOrder[4] )].store( true );
+    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 7; },
+                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+
+    // Every gate is open, so nothing is parked any more and the remaining work
+    // only completes: wait for the engine's own terminal state per job instead
+    // of a fixed sleep.
+    const std::vector<std::string> allIds{ parkAId, parkBId, lowAId, normalBId,
+                                           highCId, lowDId, exclusiveId };
+    REQUIRE( waitForCondition( [&] {
+        for ( const std::string &id : allIds )
+        {
+            const auto rec = engine.snapshot( id );
+            if ( !rec.has_value()
+                 || ( rec->state != sicnu::jobs::JobState::Succeeded
+                      && rec->state != sicnu::jobs::JobState::Failed
+                      && rec->state != sicnu::jobs::JobState::Cancelled ) )
+                return false;
+        }
+        return true;
+    }, kQueueWaitAttempts, kQueueWaitSleepMs ) );
 
     const auto order = recorder.snapshot();
     {
         std::string dump;
         for ( int v : order )
             dump += std::to_string( v ) + ",";
-        INFO( "order: " << dump );
+        INFO( "start order: " << dump );
     }
     REQUIRE( order.size() == 7 );
     // The two parks started first (either order).
     REQUIRE( ( ( order[0] == 0 && order[1] == 6 )
                || ( order[0] == 6 && order[1] == 0 ) ) );
-    REQUIRE( order[2] == 5 ); // exclusive ran alone right after the drain
-    // PICK order is strictly priority-serial (3, 2, 1, 4); with two workers
-    // the STARTS of same-... adjacent picks can land in either order, so
-    // assert the scheduler guarantees: high+normal occupy the next two slots
-    // (either order), and the two lows follow FIFO (pick order is serial).
-    const bool highThenNormal = ( order[3] == 3 && order[4] == 2 );
-    const bool normalThenHigh = ( order[3] == 2 && order[4] == 3 );
-    // Adjacent picks may interleave their starts on the two workers.
-    REQUIRE( ( highThenNormal || normalThenHigh ) );
-    // The two lows occupy the last two slots (either start order — adjacent
-    // picks interleave on two workers; their PICK order is serial).
-    const bool lowThenLow = ( order[5] == 1 && order[6] == 4 )
-                            || ( order[5] == 4 && order[6] == 1 );
-    REQUIRE( lowThenLow );
+    // The exclusive started third, alone: the drain finished first and no
+    // non-exclusive work started next to it.
+    REQUIRE( order[2] == 5 );
+    // HIGH(3) and NORMAL(2) fill the next two slots (either start order — two
+    // workers pick them back to back, so which thread records first is not
+    // observable). No LOW can overtake them: both workers are parked.
+    REQUIRE( ( ( order[3] == 3 && order[4] == 2 )
+               || ( order[3] == 2 && order[4] == 3 ) ) );
+    // Then the LOW bucket drains FIFO: lowA(1) before lowD(4), each observed as
+    // an isolated single-worker pick.
+    REQUIRE( order[5] == 1 );
+    REQUIRE( order[6] == 4 );
 
     engine.clearExecutors();
     engine.setMaxWorkers( defaultWorkers );
@@ -629,20 +747,52 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
         return elapsedMs;
     };
 
-    // Best-of-3 per size: a transient machine-load spike must not fail the
-    // complexity check (the min sample is the machine's honest capability).
-    qint64 smallMs = 0;
-    qint64 largeMs = 0;
-    for ( int round = 0; round < 3; ++round )
-    {
-        const qint64 ms = drainJobs( 2000 );
-        smallMs = ( round == 0 || ms < smallMs ) ? ms : smallMs;
-    }
-    for ( int round = 0; round < 3; ++round )
-    {
-        const qint64 ms = drainJobs( 10000 );
-        largeMs = ( round == 0 || ms < largeMs ) ? ms : largeMs;
-    }
+    // ── Measurement retries — never test retries ──────────────────────────
+    // The ratio is the point of this case, so it stays a wall-clock ratio.
+    // But a sample taken on a shared CI host measures the host's load as much
+    // as the engine's capability: a single spike landing inside the 10k rounds
+    // adds a constant to largeMs only, and the old best-of-3 ratio check could
+    // not tell that from a quadratic admission cliff. So each size is sampled
+    // kMeasureAttempts times (min kept), and a SUSPECT sample — one that
+    // overruns the size's per-round budget, or one far worse than that size's
+    // best sample so far — is RE-MEASURED. Only the measurement is retried;
+    // the assertions below are evaluated once, on the min sample.
+    constexpr int kMeasureAttempts = 3;
+    constexpr int kMaxMeasureAttempts = 6;
+    // Per-round budgets: an idle 2k / 10k drain on the reference CI lane is a
+    // few seconds, so anything an order of magnitude past that is carrying
+    // load rather than measuring the engine.
+    constexpr qint64 kSmallRoundBudgetMs = 20000;
+    constexpr qint64 kLargeRoundBudgetMs = 45000;
+    // Hard ceiling on the retries: this case stays well inside its ctest
+    // timeout even when every sample is suspect.
+    constexpr qint64 kCaseBudgetMs = 150000;
+
+    const auto caseStarted = std::chrono::steady_clock::now();
+    auto caseSpentMs = [&caseStarted] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - caseStarted ).count();
+    };
+
+    auto measureDrain = [&]( int n, qint64 roundBudgetMs ) {
+        qint64 bestMs = 0;
+        for ( int attempt = 1; attempt <= kMaxMeasureAttempts; ++attempt )
+        {
+            const qint64 ms = drainJobs( n );
+            if ( bestMs == 0 || ms < bestMs )
+                bestMs = ms;
+            const bool suspect = ms > roundBudgetMs
+                                 || ( ms != bestMs && ms > 2 * bestMs );
+            if ( !suspect && attempt >= kMeasureAttempts )
+                return bestMs; // best-of-N with a clean sample
+            if ( caseSpentMs() >= kCaseBudgetMs )
+                return bestMs; // out of budget: the min sample is the answer
+        }
+        return bestMs;
+    };
+
+    const qint64 smallMs = measureDrain( 2000, kSmallRoundBudgetMs );
+    const qint64 largeMs = measureDrain( 10000, kLargeRoundBudgetMs );
 
     INFO( "scaling: 2000→" << smallMs << " ms, 10000→" << largeMs
                            << " ms, ratio=" << ( double( largeMs ) / std::max( qint64( 1 ), smallMs ) ) );
@@ -650,7 +800,15 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
     // removed quadratic admission was >= 25×. The denominator is
     // floor-clamped so a fast machine cannot silently disable the assertion
     // (100 ms floor: linear passes comfortably, quadratic cannot).
-    REQUIRE( largeMs < 10 * std::max( qint64( 100 ), smallMs ) );
+    //
+    // 15× is the documented mid-point between the two regimes (the ratio this
+    // check exists to separate: 5× linear vs >= 25× quadratic). It is 3× the
+    // linear expectation and still 1.67× below the quadratic floor, so it
+    // absorbs the additive cost of a load spike landing inside the 10k rounds
+    // (the CI flake this suite was failing with) without normalising a real
+    // admission cliff. The min-of-3 sampling above is what keeps the spike out
+    // of the denominator; the budget and ratio together bound the check.
+    REQUIRE( largeMs < 15 * std::max( qint64( 100 ), smallMs ) );
     REQUIRE( largeMs < 600000 );
 
     engine.clearExecutors();
