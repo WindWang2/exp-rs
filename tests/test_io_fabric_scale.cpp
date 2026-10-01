@@ -65,6 +65,26 @@ std::uint64_t peakRssBytes()
 #endif
 }
 
+/// Bytes the process CURRENTLY has allocated (0 when unsupported). Under the
+/// sanitizer tier this is ASan's own allocator counter; the plain peak-RSS
+/// observable cannot see the difference between freed-but-quarantined and
+/// retained there. Detection is compile-time (GCC defines __SANITIZE_ADDRESS__,
+/// Clang exposes __has_feature); libasan exports the accessor but GCC's
+/// runtime does not ship sanitizer/allocator_interface.h, so declare it.
+#if defined( __SANITIZE_ADDRESS__ ) || ( defined( __has_feature ) && __has_feature( address_sanitizer ) )
+#define SICNU_FABRIC_SCALE_ASAN 1
+extern "C" unsigned long __sanitizer_get_current_allocated_bytes();
+#endif
+
+std::uint64_t retainedHeapBytes()
+{
+#ifdef SICNU_FABRIC_SCALE_ASAN
+  return static_cast<std::uint64_t>( __sanitizer_get_current_allocated_bytes() );
+#else
+  return 0;
+#endif
+}
+
 std::string writeConstantScene( const std::string &path, int size, double value )
 {
   sicnu::geo::RasterWriter writer =
@@ -125,6 +145,12 @@ TEST_CASE( "planning over a 100k-record catalog adds O(selected) memory, not O(c
   const std::string dir = scratchDir( "planmem" );
   const std::string scene = writeConstantScene( dir + "/scene.tif", 64, 1.0 );
 
+  // Retention baseline BEFORE the catalog exists: planFabric consumes the
+  // caller's catalog (single owner — the walk keeps only the selector's K
+  // records), so the honest memory observable is what planning retains over
+  // this baseline, never a peak that still contains the (now freed) catalog.
+  const std::uint64_t retainedBaseline = retainedHeapBytes();
+
   const int catalogSize = 100000;
   std::vector<AssetRecord> records;
   records.reserve( static_cast<std::size_t>( catalogSize ) );
@@ -147,6 +173,7 @@ TEST_CASE( "planning over a 100k-record catalog adds O(selected) memory, not O(c
   const FabricPlan plan = planFabric( std::move( intent ), options );
 
   const std::uint64_t afterPlan = peakRssBytes();
+  const std::uint64_t retainedAfterPlan = retainedHeapBytes();
   REQUIRE( plan.cost().catalogMatches == static_cast<std::uint64_t>( catalogSize ) );
   REQUIRE( plan.selectedAssets().size() == 8 );
   CHECK( plan.cost().catalogMatchesTruncated );
@@ -155,9 +182,28 @@ TEST_CASE( "planning over a 100k-record catalog adds O(selected) memory, not O(c
   // catalog. The plan JSON (what an agent inspects) stays bounded.
   CHECK( plan.toJson()["selectedAssets"].size() == 8 );
 
-  if ( peakRssBytes() == 0 )
+  if ( peakRssBytes() == 0 && retainedHeapBytes() == 0 )
   {
     FAIL( "peak RSS unsupported — memory contract not measurable here" );
+  }
+  else if ( retainedHeapBytes() != 0 )
+  {
+    // Sanitizer tier: ru_maxrss is a process high-water mark and ASan's
+    // default 256 MiB quarantine keeps freed chunks resident, so an RSS delta
+    // over the walk measures the page-at-a-time record CHURN (all of it
+    // freed), not residency — on this exact shape the walk churns ~198 MiB
+    // of transient copies through quarantine while retaining ~5 KiB. The
+    // contract asserted is retention: the plan KEEPS its 8 selected scenes
+    // and never a copy of the 100k-record catalog (the walk consumes it).
+    // Current-allocated-bytes is the allocator's own residency counter,
+    // measured against the pre-catalog baseline — a real O(catalog) copy
+    // retained by the plan lands tens of MiB in this delta, the bounded
+    // plan a few KiB of selector + scaffolding.
+    const std::uint64_t retainedDelta = retainedAfterPlan - retainedBaseline;
+    INFO( "retained " << retainedDelta << " bytes; peak RSS delta "
+                      << ( afterPlan - beforePlan )
+                      << " bytes (quarantine-inflated churn)" );
+    CHECK( retainedDelta < 1024ull * 1024 );
   }
   else
   {

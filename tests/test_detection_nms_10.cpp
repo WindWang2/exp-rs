@@ -152,26 +152,68 @@ TEST_CASE( "F-OPS-5: dedup at the max_detections budget completes bounded (100k 
 {
   // 100,000 mutually disjoint boxes — the finding's reproduction shape. The
   // dense pass needs ~5×10⁹ IoU comparisons here; the grid pass a handful per
-  // candidate. No wall-clock gate (host-load fragile): the contract asserted
-  // is completion plus exact output (all boxes kept, deterministic order).
+  // candidate. A fixed wall-clock ceiling is host-load fragile: on the
+  // sanitized Debug tier the healthy grid pass itself runs ~4.4 s and a slow
+  // shared runner lands it near a 10 s ceiling, while the dense scan the gate
+  // must catch is ~25 min on that same tier. So the gate is calibrated: warm
+  // up the SAME pass over a small field of the same shape (per-box cost is
+  // representative), project it to the 100k budget with generous slack, and
+  // bound the budget run by that deadline. The measured separation between
+  // the grid pass and the dense scan at this size is ~350×; the 8× slack
+  // absorbs the n log n structural factor between 10k and 100k candidates
+  // (measured ~1.4×) plus load spikes, so each side keeps an order of
+  // magnitude of margin. The contract asserted is completion plus exact
+  // output (all boxes kept, deterministic order) inside that deadline.
   constexpr std::size_t kCount = 100000;
-  std::vector<DetectionBox> boxes;
-  boxes.reserve( kCount );
-  for ( std::size_t i = 0; i < kCount; ++i )
+  constexpr std::size_t kCalibrationCount = 10000;   // same shape, 1/10th
+  constexpr long long kSlack = 8;
+  constexpr long long kDeadlineFloorNs = 100000000LL;   // 100 ms noise floor
+
+  const auto disjointField = []( std::size_t count ) {
+    std::vector<DetectionBox> boxes;
+    boxes.reserve( count );
+    for ( std::size_t i = 0; i < count; ++i )
+    {
+      const float x = static_cast<float>( ( i % 1000 ) * 400 );
+      const float y = static_cast<float>( ( i / 1000 ) * 400 );
+      boxes.push_back( box( x, y, 100.0f, 100.0f, 0, 0.5f ) );
+    }
+    return boxes;
+  };
+
+  // Warm-up (one-time code-path and allocator-region costs) then the
+  // calibration run the deadline is projected from.
   {
-    const float x = static_cast<float>( ( i % 1000 ) * 400 );
-    const float y = static_cast<float>( ( i / 1000 ) * 400 );
-    boxes.push_back( box( x, y, 100.0f, 100.0f, 0, 0.5f ) );
+    std::vector<DetectionBox> warmup = disjointField( kCalibrationCount );
+    dedupDetections( warmup, 0.45 );
+    REQUIRE( warmup.size() == kCalibrationCount );
   }
+  std::vector<DetectionBox> calibration = disjointField( kCalibrationCount );
+  const auto calibrationStart = std::chrono::steady_clock::now();
+  dedupDetections( calibration, 0.45 );
+  const auto calibrationNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now() - calibrationStart )
+                                .count();
+  REQUIRE( calibration.size() == kCalibrationCount );
+
+  const double perBoxNs = static_cast<double>( calibrationNs ) /
+                          static_cast<double>( kCalibrationCount );
+  const long long deadlineNs =
+    std::max<long long>( kDeadlineFloorNs,
+                         static_cast<long long>( perBoxNs * static_cast<double>( kCount ) ) *
+                           kSlack );
+
+  std::vector<DetectionBox> boxes = disjointField( kCount );
   const auto started = std::chrono::steady_clock::now();
   dedupDetections( boxes, 0.45 );
-  const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+  const auto elapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
                            std::chrono::steady_clock::now() - started )
                            .count();
   REQUIRE( boxes.size() == kCount );
-  // Generous load-independent guard: if the grid regressed to a dense scan,
-  // this 10 s ceiling blows past the minute mark on the same hardware.
-  REQUIRE( elapsedMs < 10000 );
+  INFO( "dedup at the budget took " << elapsedNs / 1000000 << " ms; calibrated deadline "
+         << deadlineNs / 1000000 << " ms (" << static_cast<long long>( perBoxNs )
+         << " ns/box x " << kCount << " x " << kSlack << ")" );
+  REQUIRE( elapsedNs < deadlineNs );
 }
 
 TEST_CASE( "F-OPS-5: NMS honours a mid-pass cancel predicate with a typed Cancelled error",
