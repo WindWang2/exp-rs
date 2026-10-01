@@ -511,6 +511,61 @@ TEST_CASE( "resume state matrix: terminal verdicts are refused with their specif
     REQUIRE( wallRun->state() == WorkflowRunState::Completed );
 }
 
+TEST_CASE( "a resume storm racing a completing run never resurrects a Completed lineage",
+           "[workflow][cancel][r5][coordinator][recovery]" )
+{
+    CancelCoordinatorFixture fx;
+    auto &coordinator = WorkflowRunCoordinator::instance();
+    const std::string prefix = "wf5matrixrace";
+
+    const auto firstRuns = CancelCoordinatorFixture::registerFastFirst( prefix );
+    // Second step completes instantly (payload only) so the whole run
+    // finalizes within milliseconds — the resume race has to win the window
+    // between the in-memory terminal flip and the durable checkpoint, not a
+    // wide open door.
+    sicnu::jobs::JobEngine::instance().registerExecutor(
+        prefix + ":second",
+        []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+            return Json::Value( Json::objectValue );
+        } );
+
+    const long pipelineId =
+        coordinator.startTrackedPipeline( CancelCoordinatorFixture::twoStepDefinition( prefix ),
+                                          /*autoLoad=*/false );
+    REQUIRE( pipelineId > 0 );
+    const auto liveRun = coordinator.runForPipeline( pipelineId );
+    REQUIRE( liveRun );
+    const std::string runId = liveRun->runId();
+
+    // Hammer resumeRun from a second thread across the run's whole lifetime:
+    // live (ownership flock), finalizing (lock held until the terminal
+    // checkpoint is durable), and terminal (state wall / archived checkpoint).
+    // A Completed lineage is NEVER resumable, so every attempt must refuse.
+    std::atomic<bool> stop{ false };
+    std::atomic<int> successes{ 0 };
+    QString stormError;
+    std::thread storm( [&]() {
+        while ( !stop.load() )
+        {
+            QString err;
+            const long resumed = coordinator.resumeRun( runId, &err );
+            if ( resumed >= 0 )
+                successes.fetch_add( 1 );
+            stormError = err;
+        }
+    } );
+
+    const auto snapshot = CancelCoordinatorFixture::runToTerminal( coordinator, pipelineId );
+    REQUIRE( snapshot );
+    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
+    stop.store( true );
+    storm.join();
+
+    INFO( stormError.toStdString() );
+    REQUIRE( successes.load() == 0 );  // no resume resurrected a Completed run
+    REQUIRE( firstRuns->load() == 1 ); // and the first step never re-executed
+}
+
 TEST_CASE( "cancelRun cannot resurrect or re-terminal a completed run",
            "[workflow][cancel][r4][coordinator]" )
 {
