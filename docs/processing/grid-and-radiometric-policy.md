@@ -147,7 +147,7 @@ different on purpose** (audited 2026-09-10, no silent inconsistency):
   (declared or detected) with an interpolated kernel is a **typed refusal**
   (`rs_grid_operators.cpp`), tested in `tests/test_grid_operators.cpp`.
   Pass `resample=near` (or `mode`) explicitly to proceed.
-- `gdal:warp` and the gdal_tools CLI wrappers are the QGIS-compatibility
+- `io:warp` and the gdal_tools QGIS-compatibility wrappers are the
   seam: GDAL itself silently honours the requested kernel, so the wrapper
   **downgrades to nearest with a logged warning** when the source declares
   categorical (`gdal_operator_utils.h`) — refusing there would break

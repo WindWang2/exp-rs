@@ -279,6 +279,46 @@ TEST_CASE( "readAgentPlan rejects a torn compiler provenance block",
   CHECK( !readAgentPlan( tornIrDoc, plan, error ) );
 }
 
+TEST_CASE( "readAgentPlan refuses a non-numeric class domain declaration",
+           "[workflow_planner][verification][r6]" )
+{
+  // agent-harness R4 item 15, declaration-side closure: verification probes
+  // only numeric class-domain members, so a declaration carrying a string or
+  // object member can never verify — refuse it at the read seam instead of
+  // letting it fail opaquely at run time.
+  loadHarnessKnowledge();
+  HarnessError error;
+
+  const char *base = R"({
+    "kind": "execution_plan", "schema_version": "2.0",
+    "plan_id": "plan-class-domain-1", "intent": "classify",
+    "steps": [ { "id": "s1", "operator_id": "rs:classify",
+                 "params": { "model": "/m.json", "input": "/x.tif" } } ],
+    "verification": { "expectations": { "class_values": [1, 2] } }
+  })";
+
+  Json::Value goodDoc = parse( base );
+  AgentPlan plan;
+  REQUIRE( readAgentPlan( goodDoc, plan, error ) );
+
+  Json::Value stringMember = parse( base );
+  stringMember["verification"]["expectations"]["class_values"][1] = "urban";
+  CHECK( !readAgentPlan( stringMember, plan, error ) );
+  CHECK( error.code == "INVALID_PLAN" );
+
+  Json::Value objectMember = parse( base );
+  objectMember["verification"]["expectations"]["class_values"][0] = Json::Value( Json::objectValue );
+  CHECK( !readAgentPlan( objectMember, plan, error ) );
+
+  Json::Value notArray = parse( base );
+  notArray["verification"]["expectations"]["class_values"] = "1,2,3";
+  CHECK( !readAgentPlan( notArray, plan, error ) );
+
+  Json::Value notObject = parse( base );
+  notObject["verification"]["expectations"] = "expectations";
+  CHECK( !readAgentPlan( notObject, plan, error ) );
+}
+
 TEST_CASE( "Slot wiring lowers to grounded paths; ungrounded slots refuse honestly",
            "[workflow_planner]" )
 {

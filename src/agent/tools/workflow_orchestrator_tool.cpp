@@ -99,6 +99,17 @@ void sensorProfile( const QString &sensor, int *bands, double *res, QString *crs
     }
 }
 
+// Import operator per sensor family — the same partition sensorProfile()
+// uses, so compiled chains only ever name registered operators.
+QString importOperatorFor( const QString &sensor )
+{
+    if ( sensor.startsWith( QLatin1String( "Landsat" ) ) )
+        return QStringLiteral( "rs:landsat_import" );
+    if ( sensor.startsWith( QLatin1String( "Sentinel" ) ) )
+        return QStringLiteral( "rs:sentinel2_import" );
+    return QStringLiteral( "rs:gaofen_import" ); // GF-1 and the default family
+}
+
 bool goalMentions( const QString &goal, std::initializer_list<const char *> keywords )
 {
     for ( const char *keyword : keywords )
@@ -157,7 +168,7 @@ AutonomousCompileResult WorkflowOrchestratorTool::compileGoalToWorkflow( const A
         // Water extraction: import -> calibrate -> atmosphere -> NDWI -> threshold.
         result.workflow = chain(
             QStringLiteral( "wf_orch_water" ), goal, request.sensorType,
-            { { QStringLiteral( "node_import" ), QStringLiteral( "rs:import_raster" ), QStringLiteral( "Import" ),
+            { { QStringLiteral( "node_import" ), importOperatorFor( request.sensorType ), QStringLiteral( "Import" ),
                 QJsonObject{ { "sensor", request.sensorType } }, {}, outPort( crs, QStringLiteral( "DN" ), res, bands ), false },
               { QStringLiteral( "node_calib" ), QStringLiteral( "rs:radiometric_calibration" ), QStringLiteral( "Calibrate" ),
                 QJsonObject{ { "method", QStringLiteral( "linear" ) } }, inPort( crs, QStringLiteral( "DN" ), res, bands ),
@@ -168,7 +179,7 @@ AutonomousCompileResult WorkflowOrchestratorTool::compileGoalToWorkflow( const A
               { QStringLiteral( "node_ndwi" ), QStringLiteral( "rs:spectral_index" ), QStringLiteral( "NDWI" ),
                 QJsonObject{ { "index", QStringLiteral( "NDWI" ) } }, inPort( crs, QStringLiteral( "BOA" ), res, bands ),
                 outPort( crs, QStringLiteral( "Index" ), res, 1 ) },
-              { QStringLiteral( "node_threshold" ), QStringLiteral( "rs:threshold" ), QStringLiteral( "Water threshold" ),
+              { QStringLiteral( "node_threshold" ), QStringLiteral( "rs:threshold_raster" ), QStringLiteral( "Water threshold" ),
                 QJsonObject{ { "threshold", 0.0 } }, inPort( crs, QStringLiteral( "Index" ), res, 1 ),
                 maskOut( crs, res ) } } );
         result.textualExplanation = QStringLiteral( "water extraction chain: import -> calibration -> "
@@ -181,7 +192,7 @@ AutonomousCompileResult WorkflowOrchestratorTool::compileGoalToWorkflow( const A
         // Calibrate + index: import -> calibration -> atmosphere -> NDVI.
         result.workflow = chain(
             QStringLiteral( "wf_orch_ndvi" ), goal, request.sensorType,
-            { { QStringLiteral( "node_import" ), QStringLiteral( "rs:import_raster" ), QStringLiteral( "Import" ),
+            { { QStringLiteral( "node_import" ), importOperatorFor( request.sensorType ), QStringLiteral( "Import" ),
                 QJsonObject{ { "sensor", request.sensorType } }, {}, outPort( crs, QStringLiteral( "DN" ), res, bands ), false },
               { QStringLiteral( "node_calib" ), QStringLiteral( "rs:radiometric_calibration" ), QStringLiteral( "Calibrate" ),
                 QJsonObject{ { "method", QStringLiteral( "linear" ) } }, inPort( crs, QStringLiteral( "DN" ), res, bands ),
@@ -200,13 +211,13 @@ AutonomousCompileResult WorkflowOrchestratorTool::compileGoalToWorkflow( const A
     {
         result.workflow = chain(
             QStringLiteral( "wf_orch_change" ), goal, request.sensorType,
-            { { QStringLiteral( "node_import" ), QStringLiteral( "rs:import_raster" ), QStringLiteral( "Import pair" ),
+            { { QStringLiteral( "node_import" ), importOperatorFor( request.sensorType ), QStringLiteral( "Import pair" ),
                 QJsonObject{ { "sensor", request.sensorType }, { "pair", true } }, {},
                 outPort( crs, QStringLiteral( "BOA" ), res, bands ), false },
-              { QStringLiteral( "node_cva" ), QStringLiteral( "rs:change_vector" ), QStringLiteral( "CVA" ),
+              { QStringLiteral( "node_cva" ), QStringLiteral( "rs:change_cva" ), QStringLiteral( "CVA" ),
                 QJsonObject{}, inPort( crs, QStringLiteral( "BOA" ), res, bands ),
                 outPort( crs, QStringLiteral( "Index" ), res, 1 ) },
-              { QStringLiteral( "node_threshold" ), QStringLiteral( "rs:threshold" ), QStringLiteral( "Change mask" ),
+              { QStringLiteral( "node_threshold" ), QStringLiteral( "rs:threshold_raster" ), QStringLiteral( "Change mask" ),
                 QJsonObject{ { "threshold", 0.15 } }, inPort( crs, QStringLiteral( "Index" ), res, 1 ),
                 maskOut( crs, res ) } } );
         result.textualExplanation = QStringLiteral( "change detection chain: import -> CVA -> threshold" );
@@ -217,13 +228,13 @@ AutonomousCompileResult WorkflowOrchestratorTool::compileGoalToWorkflow( const A
     {
         result.workflow = chain(
             QStringLiteral( "wf_orch_fusion" ), goal, request.sensorType,
-            { { QStringLiteral( "node_import" ), QStringLiteral( "rs:import_raster" ), QStringLiteral( "Import pan+ms" ),
+            { { QStringLiteral( "node_import" ), importOperatorFor( request.sensorType ), QStringLiteral( "Import pan+ms" ),
                 QJsonObject{ { "sensor", request.sensorType }, { "pair", QStringLiteral( "pan_ms" ) } }, {},
                 outPort( crs, QStringLiteral( "DN" ), res, bands ), false },
               { QStringLiteral( "node_calib" ), QStringLiteral( "rs:radiometric_calibration" ), QStringLiteral( "Calibrate" ),
                 QJsonObject{ { "method", QStringLiteral( "linear" ) } }, inPort( crs, QStringLiteral( "DN" ), res, bands ),
                 outPort( crs, QStringLiteral( "Radiance" ), res, bands ) },
-              { QStringLiteral( "node_fusion" ), QStringLiteral( "rs:gs_fusion" ), QStringLiteral( "Gram-Schmidt" ),
+              { QStringLiteral( "node_fusion" ), QStringLiteral( "rs:fusion_gram_schmidt" ), QStringLiteral( "Gram-Schmidt" ),
                 QJsonObject{}, inPort( crs, QStringLiteral( "Radiance" ), res, bands ),
                 outPort( crs, QStringLiteral( "Radiance" ), res / 2.0, bands ) } } );
         result.textualExplanation = QStringLiteral( "fusion chain: import -> calibration -> GS fusion" );
@@ -234,13 +245,13 @@ AutonomousCompileResult WorkflowOrchestratorTool::compileGoalToWorkflow( const A
     {
         result.workflow = chain(
             QStringLiteral( "wf_orch_classify" ), goal, request.sensorType,
-            { { QStringLiteral( "node_import" ), QStringLiteral( "rs:import_raster" ), QStringLiteral( "Import" ),
+            { { QStringLiteral( "node_import" ), importOperatorFor( request.sensorType ), QStringLiteral( "Import" ),
                 QJsonObject{ { "sensor", request.sensorType } }, {}, outPort( crs, QStringLiteral( "BOA" ), res, bands ), false },
-              { QStringLiteral( "node_features" ), QStringLiteral( "rs:spatial_filter" ), QStringLiteral( "Feature smoothing" ),
-                QJsonObject{ { "kernel", QStringLiteral( "gaussian" ) } }, inPort( crs, QStringLiteral( "BOA" ), res, bands ),
+              { QStringLiteral( "node_features" ), QStringLiteral( "opencv:gaussian_blur" ), QStringLiteral( "Feature smoothing" ),
+                QJsonObject{ { "kernelSize", 5 }, { "sigma", 1.0 } }, inPort( crs, QStringLiteral( "BOA" ), res, bands ),
                 outPort( crs, QStringLiteral( "BOA" ), res, bands ) },
-              { QStringLiteral( "node_rf" ), QStringLiteral( "rs:random_forest_classify" ), QStringLiteral( "Random forest" ),
-                QJsonObject{ { "trees", 100 } }, inPort( crs, QStringLiteral( "BOA" ), res, bands ),
+              { QStringLiteral( "node_rf" ), QStringLiteral( "rs:supervised_classification" ), QStringLiteral( "Random forest" ),
+                QJsonObject{ { "method", QStringLiteral( "rf" ) } }, inPort( crs, QStringLiteral( "BOA" ), res, bands ),
                 PortFact{ QStringLiteral( "output" ), QStringLiteral( "Raster" ), crs, QStringLiteral( "Categorical" ), res, res, 1, false } } } );
         result.textualExplanation = QStringLiteral( "classification chain: import -> smoothing -> random forest" );
         return result;

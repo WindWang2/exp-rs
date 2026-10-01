@@ -1,7 +1,7 @@
 {
   "allowed_tools": [
-    "temporal:smooth",
-    "temporal:gap_fill",
+    "rs:temporal_smooth",
+    "rs:temporal_gap_fill",
     "harness:verify"
   ],
   "case_id": "temporal/gap-fill-transient",

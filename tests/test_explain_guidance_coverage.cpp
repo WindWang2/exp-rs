@@ -26,6 +26,7 @@
 #include <json/json.h>
 
 #include <filesystem>
+#include <fstream>
 #include <set>
 #include <string>
 #include <vector>
@@ -90,6 +91,41 @@ TEST_CASE( "corpus covers at least fifteen live operators across four families",
       families.insert( facts->group );
   }
   CHECK( families.size() >= 4 );
+}
+
+TEST_CASE( "every corpus entry carries the full canonical optional keyset",
+           "[explain][guidance][coverage][r6]" )
+{
+  // The loader treats every optional key as optional, so lean files load
+  // clean and the gaps persist invisibly (they did, for 6 of 16 files, until
+  // the R6 completion pass). Once complete, the corpus is pinned: an entry
+  // missing an authored key — or carrying an unknown one, which the loader
+  // already refuses — is drift, not style. `role` stays deliberately absent
+  // everywhere: the shipped corpus is generic-only (guidance README).
+  const std::set<std::string> requiredKeys = { "schema", "operatorId", "purpose" };
+  const std::set<std::string> authoredKeys = {
+    "whenToUse", "prerequisitesNote", "assumptions", "parameterRationale",
+    "stateNarrative", "skipConsequence", "references", "teachingNote",
+  };
+  for ( const auto &entry : std::filesystem::directory_iterator( SICNU_EXPLAIN_GUIDANCE_DIR ) )
+  {
+    if ( !entry.is_regular_file() || entry.path().extension() != ".json" )
+      continue;
+    CAPTURE( entry.path().filename().string() );
+    Json::Value doc;
+    Json::CharReaderBuilder builder;
+    std::ifstream in( entry.path() );
+    std::string errors;
+    REQUIRE( Json::parseFromStream( builder, in, &doc, &errors ) );
+    for ( const std::string &key : requiredKeys )
+      CHECK( doc.isMember( key ) );
+    for ( const std::string &key : authoredKeys )
+    {
+      INFO( "key: " << key );
+      CHECK( doc.isMember( key ) );
+    }
+    CHECK_FALSE( doc.isMember( "role" ) ); // generic-only corpus convention
+  }
 }
 
 TEST_CASE( "every corpus operator id and parameter name exists in the live registry",

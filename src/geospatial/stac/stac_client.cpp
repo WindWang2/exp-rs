@@ -19,9 +19,12 @@ namespace fs = std::filesystem;
 
 #include <algorithm>
 #include <atomic>
-#include <map>
-#include <set>
 #include <cctype>
+#include <cstdint>
+#include <cstdlib>
+#include <map>
+#include <memory>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -199,6 +202,237 @@ bool containsIgnoreCase( const std::string &haystack, const std::string &needle 
   return false;
 }
 
+bool endsWithIgnoreCase( const std::string &haystack, const std::string &suffix )
+{
+  if ( haystack.size() < suffix.size() )
+    return false;
+  return std::equal( suffix.begin(), suffix.end(), haystack.end() - suffix.size(),
+                     [] ( char a, char b ) {
+                       return std::tolower( static_cast<unsigned char>( a ) ) ==
+                              std::tolower( static_cast<unsigned char>( b ) );
+                     } );
+}
+
+/// SICNU_* boolean env flag with the repo's shared semantics
+/// ("1"/"true"/"yes"/"on", case-insensitive, trimmed) — the Qt-free twin of
+/// src/agent/env_flag.h so the policy cannot drift between surfaces.
+bool sicnuEnvFlagEnabled( const char *name )
+{
+  const char *raw = std::getenv( name );
+  if ( raw == nullptr )
+    return false;
+  std::string value;
+  for ( const char *c = raw; *c; ++c )
+  {
+    if ( *c == ' ' || *c == '\t' )
+      continue;
+    value += static_cast<char>( std::tolower( static_cast<unsigned char>( *c ) ) );
+  }
+  return value == "1" || value == "true" || value == "yes" || value == "on";
+}
+
+/// Strict dotted-quad IPv4 parse (no short forms — safer than inet_aton).
+bool parseIpv4( const std::string &text, std::uint32_t &out )
+{
+  std::uint32_t value = 0;
+  int octets = 0;
+  std::size_t i = 0;
+  while ( i < text.size() )
+  {
+    if ( octets == 4 )
+      return false;
+    std::uint32_t octet = 0;
+    int digits = 0;
+    while ( i < text.size() && std::isdigit( static_cast<unsigned char>( text[i] ) ) )
+    {
+      octet = octet * 10 + static_cast<unsigned char>( text[i] - '0' );
+      if ( octet > 255 )
+        return false;
+      ++i;
+      ++digits;
+    }
+    if ( digits == 0 )
+      return false;
+    value = ( value << 8 ) | octet;
+    ++octets;
+    if ( i < text.size() )
+    {
+      if ( text[i] != '.' )
+        return false;
+      ++i;
+    }
+  }
+  if ( octets != 4 )
+    return false;
+  out = value;
+  return true;
+}
+
+/// IPv6 literal parse (one optional "::" compression, optional embedded
+/// IPv4 tail "::ffff:192.168.0.1") into 16 network-order bytes.
+bool parseIpv6( const std::string &text, unsigned char out[16] )
+{
+  const std::size_t cc = text.find( "::" );
+  if ( cc != std::string::npos && text.find( "::", cc + 2 ) != std::string::npos )
+    return false; // at most one compression
+  const std::string head = cc == std::string::npos ? text : text.substr( 0, cc );
+  const std::string tail = cc == std::string::npos ? std::string() : text.substr( cc + 2 );
+
+  std::uint16_t groups[8] = {};
+  int headCount = 0;
+  int tailCount = 0;
+
+  // Parses one colon-separated section into @p groups_ from @p offset.
+  // The tail section may end in a dotted-quad (two groups).
+  auto parseSection = [ & ] ( const std::string &section, std::uint16_t *groups_, int &count,
+                              bool allowV4Tail ) {
+    if ( section.empty() )
+      return true;
+    std::size_t pos = 0;
+    while ( true )
+    {
+      if ( count >= 8 )
+        return false;
+      const std::size_t colon = section.find( ':', pos );
+      const std::string token = colon == std::string::npos ? section.substr( pos )
+                                                           : section.substr( pos, colon - pos );
+      if ( allowV4Tail && colon == std::string::npos && token.find( '.' ) != std::string::npos )
+      {
+        std::uint32_t v4 = 0;
+        if ( !parseIpv4( token, v4 ) )
+          return false;
+        groups_[count++] = static_cast<std::uint16_t>( v4 >> 16 );
+        if ( count >= 8 )
+          return false;
+        groups_[count++] = static_cast<std::uint16_t>( v4 & 0xFFFFu );
+        return true;
+      }
+      if ( token.empty() || token.size() > 4 )
+        return false;
+      std::uint32_t group = 0;
+      for ( const char c : token )
+      {
+        if ( !std::isxdigit( static_cast<unsigned char>( c ) ) )
+          return false;
+        const std::uint32_t digit = c <= '9' ? static_cast<std::uint32_t>( c - '0' )
+                                             : static_cast<std::uint32_t>( ( c | 0x20 ) - 'a' + 10 );
+        group = group * 16 + digit;
+      }
+      groups_[count++] = static_cast<std::uint16_t>( group );
+      if ( colon == std::string::npos )
+        return true;
+      pos = colon + 1;
+    }
+  };
+
+  if ( !parseSection( head, groups, headCount, false ) )
+    return false;
+  if ( !parseSection( tail, groups + headCount, tailCount, true ) )
+    return false;
+
+  const int total = headCount + tailCount;
+  if ( cc == std::string::npos )
+  {
+    if ( total != 8 )
+      return false; // full form must hold exactly 8 groups
+  }
+  else if ( total > 7 )
+  {
+    return false; // "::" must replace at least one group
+  }
+  else
+  {
+    // Move the tail groups to the END: the compressed run fills the middle.
+    for ( int i = 0; i < tailCount; ++i )
+    {
+      groups[7 - i] = groups[headCount + tailCount - 1 - i];
+      groups[headCount + tailCount - 1 - i] = 0;
+    }
+  }
+
+  for ( int i = 0; i < 8; ++i )
+  {
+    out[i * 2] = static_cast<unsigned char>( groups[i] >> 8 );
+    out[i * 2 + 1] = static_cast<unsigned char>( groups[i] & 0xFF );
+  }
+  return true;
+}
+
+/// The SSRF private-host verdict (migrated verbatim from the UI client's
+/// QHostAddress-based check, now Qt-free): loopback, RFC 1918/CGNAT,
+/// link-local, unique-local and 0.0.0.0(/8) are refused. Non-literal names
+/// pass (DNS rebinding residual risk accepted, as before).
+bool isPrivateOrLocalHost( std::string host )
+{
+  if ( host.empty() )
+    return true;
+
+  // Strip brackets and port (ResourceUri keeps the authority verbatim).
+  if ( !host.empty() && host.front() == '[' )
+  {
+    const std::size_t close = host.find( ']' );
+    host = close == std::string::npos ? host.substr( 1 ) : host.substr( 1, close - 1 );
+  }
+  else if ( host.find( ':' ) != std::string::npos && host.find( ':' ) == host.rfind( ':' ) )
+  {
+    host = host.substr( 0, host.find( ':' ) ); // host:port
+  }
+
+  std::string lowered;
+  lowered.reserve( host.size() );
+  for ( const char c : host )
+    lowered += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+  if ( lowered == "localhost" || lowered.size() > 10 && lowered.compare( lowered.size() - 10, 10, ".localhost" ) == 0 )
+    return true;
+  if ( lowered == "metadata.google.internal" )
+    return true;
+
+  std::uint32_t v4 = 0;
+  if ( parseIpv4( host, v4 ) )
+  {
+    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 link-local,
+    // 127.0.0.0/8 loopback, 0.0.0.0/8, 100.64.0.0/10 CGNAT.
+    if ( ( v4 & 0xFF000000u ) == 0x0A000000u )
+      return true;
+    if ( ( v4 & 0xFFF00000u ) == 0xAC100000u )
+      return true;
+    if ( ( v4 & 0xFFFF0000u ) == 0xC0A80000u )
+      return true;
+    if ( ( v4 & 0xFFFF0000u ) == 0xA9FE0000u )
+      return true;
+    if ( ( v4 & 0xFF000000u ) == 0x7F000000u )
+      return true;
+    if ( ( v4 & 0xFF000000u ) == 0x00000000u )
+      return true;
+    if ( ( v4 & 0xFFC00000u ) == 0x64400000u )
+      return true;
+    return false;
+  }
+
+  unsigned char v6[16] = {};
+  if ( parseIpv6( host, v6 ) )
+  {
+    // Loopback ::1
+    bool loopback = true;
+    for ( int i = 0; i < 15; ++i )
+      loopback = loopback && v6[i] == 0;
+    loopback = loopback && v6[15] == 1;
+    if ( loopback )
+      return true;
+    // Link-local fe80::/10
+    if ( v6[0] == 0xFE && ( v6[1] & 0xC0 ) == 0x80 )
+      return true;
+    // Unique local fc00::/7
+    if ( ( v6[0] & 0xFE ) == 0xFC )
+      return true;
+    return false;
+  }
+
+  // Not a literal IP — allow by name (DNS rebinding residual risk accepted
+  // for MVP; hostname "localhost" already handled above).
+  return false;
+}
+
 } // namespace
 
 void StacSearchQuery::validate() const
@@ -223,6 +457,100 @@ StacClient::StacClient( std::string root, const StacClientOptions &options )
     details["root"] = uri.display();
     throw GeoError( ErrorCode::InvalidArgument, "StacClient: root must be a remote http(s) URL", details );
   }
+  assertEgressAllowed( mRoot );
+}
+
+// --- shared href/egress safety (single home — see stac_client.h) ----------
+
+void StacClient::assertEgressAllowed( const std::string &url ) const
+{
+  if ( !mOptions.blockPrivateNetworks )
+    return;
+  const std::string error = egressPolicyError( url );
+  if ( error.empty() )
+    return;
+  Json::Value details;
+  details["url"] = ResourceUri::parse( url ).display();
+  throw GeoError( ErrorCode::PermissionDenied, error, details );
+}
+
+std::string StacClient::egressPolicyError( const std::string &url )
+{
+  const ResourceUri uri = ResourceUri::parse( url );
+  if ( uri.kind != ResourceKind::RemoteHttp )
+  {
+    // Distinguish an unusable URL from a deliberate non-http scheme so the
+    // refusal texts stay stable for the UI adapter (historical strings).
+    const std::size_t schemeEnd = url.find( "://" );
+    if ( schemeEnd == std::string::npos || schemeEnd == 0 )
+      return "Invalid URL";
+    std::string scheme = url.substr( 0, schemeEnd );
+    for ( char &c : scheme )
+      c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+    if ( scheme == "http" || scheme == "https" )
+      return "Invalid URL"; // http(s) spelling ResourceUri rejected (no host, ...)
+    return "URL scheme must be http or https";
+  }
+  if ( !sicnuEnvFlagEnabled( "SICNU_STAC_ALLOW_PRIVATE" ) && isPrivateOrLocalHost( uri.host ) )
+    return "Private / loopback / link-local STAC hosts are blocked "
+           "(set SICNU_STAC_ALLOW_PRIVATE=1 to allow)";
+  return "";
+}
+
+std::string StacClient::validateAssetHref( const std::string &href )
+{
+  if ( href.empty() )
+    return "Empty asset href";
+
+  // Reject GDAL VSI paths that could already encode schemes
+  if ( href.front() == '/' && containsIgnoreCase( href, "/vsi" ) )
+    return "Pre-formed VSI paths are not accepted as asset hrefs";
+
+  const ResourceUri uri = ResourceUri::parse( href );
+  if ( uri.kind != ResourceKind::RemoteHttp )
+  {
+    const std::size_t schemeEnd = href.find( "://" );
+    if ( schemeEnd != std::string::npos && schemeEnd > 0 )
+    {
+      std::string scheme = href.substr( 0, schemeEnd );
+      for ( char &c : scheme )
+        c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+      if ( scheme != "http" && scheme != "https" )
+        return "Asset href scheme must be http or https (got '" + scheme + "')";
+    }
+    return "Asset href must be an absolute http(s) URL";
+  }
+
+  // SSRF policy applies to asset hrefs too (private hosts, bad schemes,
+  // pre-formed VSI paths are all rejected here).
+  return egressPolicyError( href );
+}
+
+std::string StacClient::selectCogVsicurlHref( const Json::Value &stacItemFeature )
+{
+  if ( !stacItemFeature.isObject() )
+    return {};
+  const Json::Value &assets = stacItemFeature["assets"];
+  if ( !assets.isObject() )
+    return {};
+
+  // Asset-key order (jsoncpp members are std::map-ordered, exactly the order
+  // the UI's QJsonObject iteration produced).
+  for ( const std::string &key : assets.getMemberNames() )
+  {
+    const Json::Value &asset = assets[key];
+    if ( !asset.isObject() )
+      continue;
+    const std::string href = asset["href"].isString() ? asset["href"].asString() : std::string();
+    const std::string type = asset["type"].isString() ? asset["type"].asString() : std::string();
+    const bool cogLike = endsWithIgnoreCase( href, ".tif" ) || containsIgnoreCase( type, "image/tiff" );
+    if ( !cogLike )
+      continue;
+    if ( !validateAssetHref( href ).empty() )
+      continue; // unusable asset — the documented contract is "no USABLE COG asset"
+    return "/vsicurl/" + href;
+  }
+  return {};
 }
 
 HttpFetchOptions StacClient::fetchOptions() const
@@ -239,6 +567,7 @@ HttpFetchOptions StacClient::fetchOptions() const
 Json::Value StacClient::fetchDocument( const std::string &method, const std::string &url,
                                        const Json::Value &body ) const
 {
+  assertEgressAllowed( url );
   if ( method == "POST" )
   {
     HttpFetchOptions options = fetchOptions();
@@ -424,7 +753,38 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
   return page;
 }
 
-StacPage StacClient::search( const StacSearchQuery &query ) const
+std::string StacClient::buildSearchUrl( const std::string &root, const StacSearchQuery &query )
+{
+  std::string params;
+  if ( !query.bbox.empty() )
+  {
+    std::vector<std::string> parts;
+    for ( const double value : query.bbox )
+    {
+      std::ostringstream text;
+      text << value;
+      parts.push_back( text.str() );
+    }
+    appendParam( params, "bbox", joinEncoded( parts ) );
+  }
+  if ( !query.datetime.empty() )
+    appendParam( params, "datetime", query.datetime );
+  if ( !query.collections.empty() )
+    appendParam( params, "collections", joinEncoded( query.collections ) );
+  if ( !query.ids.empty() )
+    appendParam( params, "ids", joinEncoded( query.ids ) );
+  if ( query.limit > 0 )
+  {
+    std::ostringstream text;
+    text << query.limit;
+    appendParam( params, "limit", text.str() );
+  }
+  if ( !query.sortBy.empty() )
+    appendParam( params, "sortby", query.sortBy );
+  return trimSlash( root ) + "/search" + ( params.empty() ? "" : "?" + params );
+}
+
+StacRequest StacClient::buildSearchRequest( const StacSearchQuery &query ) const
 {
   query.validate();
 
@@ -470,36 +830,9 @@ StacPage StacClient::search( const StacSearchQuery &query ) const
       sort.append( sortField );
       body["sortby"] = sort;
     }
-    return executeSearch( "POST", mRoot + "/search", body );
+    return StacRequest{ "POST", mRoot + "/search", body };
   }
 
-  std::string params;
-  if ( !query.bbox.empty() )
-  {
-    std::vector<std::string> parts;
-    for ( const double value : query.bbox )
-    {
-      std::ostringstream text;
-      text << value;
-      parts.push_back( text.str() );
-    }
-    appendParam( params, "bbox", joinEncoded( parts ) );
-  }
-  if ( !query.datetime.empty() )
-    appendParam( params, "datetime", query.datetime );
-  if ( !query.collections.empty() )
-    appendParam( params, "collections", joinEncoded( query.collections ) );
-  if ( !query.ids.empty() )
-    appendParam( params, "ids", joinEncoded( query.ids ) );
-  if ( query.limit > 0 )
-  {
-    std::ostringstream text;
-    text << query.limit;
-    appendParam( params, "limit", text.str() );
-  }
-  if ( !query.sortBy.empty() )
-    appendParam( params, "sortby", query.sortBy );
-  const std::string url = mRoot + "/search" + ( params.empty() ? "" : "?" + params );
   // GET pages record their EQUIVALENT canonical body so a POST rel=next
   // (merge:true) can merge into the original filters — the query string
   // alone cannot survive a POST continuation.
@@ -529,13 +862,19 @@ StacPage StacClient::search( const StacSearchQuery &query ) const
   }
   if ( query.limit > 0 )
     canonicalBody["limit"] = query.limit;
-  return executeSearch( "GET", url, canonicalBody );
+  return StacRequest{ "GET", buildSearchUrl( mRoot, query ), canonicalBody };
 }
 
-StacPage StacClient::nextPage( const StacPage &page ) const
+StacPage StacClient::search( const StacSearchQuery &query ) const
+{
+  const StacRequest request = buildSearchRequest( query );
+  return executeSearch( request.method, request.url, request.body );
+}
+
+StacRequest StacClient::buildNextRequest( const StacPage &page ) const
 {
   if ( !page.hasMore() )
-    return StacPage{};
+    return StacRequest{};
   if ( page.nextMethod == "POST" )
   {
     // rel=next POST links: with "merge": true the continuation body is a
@@ -556,9 +895,63 @@ StacPage StacClient::nextPage( const StacPage &page ) const
     {
       merged = page.nextBody;
     }
-    return executeSearch( "POST", page.nextHref, merged );
+    return StacRequest{ "POST", page.nextHref, merged };
   }
-  return executeSearch( "GET", page.nextHref, Json::Value() );
+  return StacRequest{ "GET", page.nextHref, Json::Value() };
+}
+
+StacPage StacClient::nextPage( const StacPage &page ) const
+{
+  if ( !page.hasMore() )
+    return StacPage{};
+  const StacRequest request = buildNextRequest( page );
+  return executeSearch( request.method, request.url, request.body );
+}
+
+void StacClient::requestPageDetached( const StacRequest &request, const PageCallback &onDone ) const
+{
+  if ( !onDone )
+    return;
+  if ( request.url.empty() )
+  {
+    onDone( StacPage{}, std::string() );
+    return;
+  }
+  // The worker owns a PRIVATE client (root + options copied before the
+  // thread starts): no lifetime coupling to the caller, no shared mutable
+  // state. The bounded response cache is per-instance and is deliberately
+  // NOT shared across detached fetches.
+  std::shared_ptr<StacClient> worker;
+  try
+  {
+    worker = std::make_shared<StacClient>( mRoot, mOptions );
+  }
+  catch ( const GeoError &error )
+  {
+    onDone( StacPage{}, error.what() );
+    return;
+  }
+  std::thread(
+    [ worker, request, onDone ]() {
+      try
+      {
+        StacPage page = worker->executeSearch( request.method, request.url, request.body );
+        onDone( std::move( page ), std::string() );
+      }
+      catch ( const GeoError &error )
+      {
+        onDone( StacPage{}, error.what() );
+      }
+      catch ( const std::exception &error )
+      {
+        onDone( StacPage{}, error.what() );
+      }
+      catch ( ... )
+      {
+        onDone( StacPage{}, "StacClient: unknown fetch failure" );
+      }
+    } )
+    .detach();
 }
 
 StacSearchAllResult StacClient::searchAll( const StacSearchQuery &query ) const
@@ -598,14 +991,18 @@ StacSearchAllResult StacClient::searchAll( const StacSearchQuery &query ) const
 
 Json::Value StacClient::collections() const
 {
-  return httpFetchJson( mRoot + "/collections", fetchOptions() );
+  const std::string url = mRoot + "/collections";
+  assertEgressAllowed( url );
+  return httpFetchJson( url, fetchOptions() );
 }
 
 Json::Value StacClient::collection( const std::string &collectionId ) const
 {
   if ( collectionId.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "StacClient: collection id must not be empty" );
-  return httpFetchJson( mRoot + "/collections/" + urlEncodeValue( collectionId ), fetchOptions() );
+  const std::string url = mRoot + "/collections/" + urlEncodeValue( collectionId );
+  assertEgressAllowed( url );
+  return httpFetchJson( url, fetchOptions() );
 }
 
 StacPage StacClient::collectionItems( const std::string &collectionId,

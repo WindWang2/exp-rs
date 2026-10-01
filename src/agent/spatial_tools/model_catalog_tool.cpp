@@ -21,7 +21,7 @@ std::string ModelCatalogTool::description() const
          "local weight paths. Supports automated multi-criteria ranking by "
          "input band roles, sensor, spatial resolution, and GPU/VRAM hardware "
          "constraints to assist Pi in selecting optimal models before "
-         "rs:inference. gpu_available defaults to the platform's own CUDA "
+         "rs:infer. gpu_available defaults to the platform's own CUDA "
          "detection when the argument is omitted.";
 }
 

@@ -7,6 +7,10 @@
     "输入与掩膜必须同 CRS：同 CRS 下的网格差异可自动按最近邻对齐，CRS 不一致不会被自动纠正。",
     "没有 NoData 定义的输入波段必须提供 no_data 值。"
   ],
+  "assumptions": [
+    "掩膜的判定语义取自 rs:qa_mask 的输出约定：1 表示掩掉；用其他上游掩膜时，作者需自行保证该约定成立。",
+    "同 CRS 下网格差异的最近邻对齐适用于整数掩膜；连续型权重场不适用该语义。"
+  ],
   "parameterRationale": [
     {
       "parameter": "mask",
@@ -24,10 +28,24 @@
       "misconfigurationConsequence": "关闭后网格不一致会直接失败；对连续量掩膜用最近邻则会引入取样误差。"
     }
   ],
-  "stateNarrative": { "before": "", "after": "" },
+  "stateNarrative": {
+    "before": "",
+    "after": ""
+  },
   "skipConsequence": {
     "summary": "云与无效像元不置 NoData，指数直方图、分类样本与变化检测统计全部被污染。",
-    "downstreamRoles": ["光谱指数", "变化检测"]
+    "downstreamRoles": [
+      "光谱指数",
+      "变化检测"
+    ]
   },
+  "references": [
+    {
+      "title": "Grid & Radiometric Policy（仓库内处理策略文档）",
+      "kind": "doc",
+      "locator": "docs/processing/grid-and-radiometric-policy.md",
+      "note": "掩膜对齐（apply_mask 的最近邻策略）与 NoData 语义的权威约定。"
+    }
+  ],
   "teachingNote": "本步骤是辐射状态的恒等变换：DN、TOA、BOA 原样保留，只把掩掉像元替换为 NoData，因此 before/after 留空表示不做状态转换；输出保留波段角色，下游算子仍可按角色解析波段。"
 }

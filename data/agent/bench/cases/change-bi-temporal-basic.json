@@ -1,7 +1,7 @@
 {
   "allowed_tools": [
-    "rs:co_register",
-    "rs:change_detect",
+    "rs:align",
+    "rs:change_detection",
     "harness:verify"
   ],
   "case_id": "change/bi-temporal-basic",
@@ -39,8 +39,8 @@
       "kind": "step_order",
       "params": {
         "steps": [
-          "rs:co_register",
-          "rs:change_detect"
+          "rs:align",
+          "rs:change_detection"
         ]
       },
       "severity": "error"

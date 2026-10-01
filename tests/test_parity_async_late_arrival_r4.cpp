@@ -22,6 +22,7 @@
 // (SICNU_STAC_ALLOW_PRIVATE=1, set before any request) so completion order
 // is scriptable. The shell faces use the #1312 full-shell fixture pattern.
 #include <catch2/catch_test_macros.hpp>
+#include <cstdio>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
@@ -136,11 +137,29 @@ class StacHttpStub : public QTcpServer
 
     /// Deliver a STAC FeatureCollection body as the response for the
     /// @p index-th parked request (insertion order). -1 = the last one.
+    /// Deliver a STAC FeatureCollection body to the parked request whose
+    /// stored request bytes contain @p needle. Park order is not
+    /// deterministic over the domain transport (each detached fetch connects
+    /// on its own worker), so scripted deliveries route by request content.
+    bool respondMatching( const QByteArray &needle, const QVariantList &features )
+    {
+      for ( QTcpSocket *socket : m_order )
+        if ( m_requests.value( socket ).contains( needle ) )
+          return deliver( socket, features );
+      return false;
+    }
+
     bool respond( int index, const QVariantList &features )
     {
       QTcpSocket *socket = pickSocket( index );
       if ( !socket )
         return false;
+      return deliver( socket, features );
+    }
+
+  private:
+    bool deliver( QTcpSocket *socket, const QVariantList &features )
+    {
       QJsonObject root;
       root.insert( QStringLiteral( "features" ), QJsonArray::fromVariantList( features ) );
       root.insert( QStringLiteral( "links" ), QJsonArray() );
@@ -154,7 +173,7 @@ class StacHttpStub : public QTcpServer
       return true;
     }
 
-  private:
+  public:
     QTcpSocket *pickSocket( int index ) const
     {
       if ( m_order.isEmpty() )
@@ -171,10 +190,23 @@ class StacHttpStub : public QTcpServer
 QVariantList featureList( const QString &idPrefix, int count )
 {
   QVariantList features;
+  // Minimal but VALID STAC Items: the domain transport (R6 convergence)
+  // validates each feature as an Item (type/id/properties.datetime) before
+  // the adapter hands the raw document to the UI.
   for ( int i = 0; i < count; ++i )
   {
     QVariantMap feature;
+    feature.insert( QStringLiteral( "type" ), QStringLiteral( "Feature" ) );
     feature.insert( QStringLiteral( "id" ), QStringLiteral( "%1-%2" ).arg( idPrefix ).arg( i ) );
+    feature.insert( QStringLiteral( "properties" ),
+                    QVariantMap{ { QStringLiteral( "datetime" ),
+                                   QStringLiteral( "2026-01-01T00:00:00Z" ) } } );
+    QVariantMap asset;
+    asset.insert( QStringLiteral( "href" ),
+                  QStringLiteral( "https://assets.example.com/%1.tif" ).arg( idPrefix ) );
+    QVariantMap assets;
+    assets.insert( QStringLiteral( "data" ), asset );
+    feature.insert( QStringLiteral( "assets" ), assets );
     features.append( feature );
   }
   return features;
@@ -299,12 +331,19 @@ TEST_CASE( "AS-1: stale STAC reply finishing late cannot overwrite the newer sea
   QTest::qWaitForWindowExposed( &dialog );
 
   // Query A parks on the server; query B parks behind it. Release B (the
-  // NEWER search) first, then let A finish late.
+  // NEWER search) first, then let A finish late. The two searches differ by
+  // collection so deliveries route by request content — park order is not
+  // deterministic over the domain transport.
+  const QList<QLineEdit *> edits = dialog.findChildren<QLineEdit *>();
+  REQUIRE( edits.size() >= 2 ); // endpoint, collection, [datetime, bbox]
+  REQUIRE( edits[0] == dialog.findChild<QLineEdit *>() ); // trigger helper uses the endpoint edit
+  edits[1]->setText( QStringLiteral( "older-set" ) );
   triggerDialogSearch( dialog, stub.endpoint() );
+  edits[1]->setText( QStringLiteral( "newer-set" ) );
   triggerDialogSearch( dialog, stub.endpoint() );
-  // QNetworkAccessManager opens one TCP connection per in-flight reply; let
-  // both connects complete before scripting the deliveries (event-loop
-  // plumbing, not race timing).
+  // Each detached fetch opens its own connection; let both connects
+  // complete before scripting the deliveries (event-loop plumbing, not
+  // race timing).
   for ( int i = 0; i < 50 && stub.parkedCount() < 2; ++i )
     QTest::qWait( 50 );
   REQUIRE( stub.parkedCount() == 2 );
@@ -318,8 +357,8 @@ TEST_CASE( "AS-1: stale STAC reply finishing late cannot overwrite the newer sea
                            loop.quit();
                        } );
   REQUIRE( conn );
-  REQUIRE( stub.respond( 1, featureList( "newer", 3 ) ) ); // B first
-  REQUIRE( stub.respond( 0, featureList( "older", 7 ) ) ); // A finishes late
+  REQUIRE( stub.respondMatching( "newer-set", featureList( "newer", 3 ) ) ); // B first
+  REQUIRE( stub.respondMatching( "older-set", featureList( "older", 7 ) ) ); // A finishes late
   loop.exec();
   QObject::disconnect( conn );
   QApplication::processEvents();
@@ -358,14 +397,16 @@ TEST_CASE( "AS-2: superseded query's timeout error never reaches the completion 
   QSignalSpy dropped( &client, &StacClient::searchDropped );
   REQUIRE( dropped.isValid() );
 
-  client.search( stub.endpoint().toString(), QString(), QString(), {}, 10 );
-  client.search( stub.endpoint().toString(), QString(), QString(), {}, 10 );
+  // The searches differ by collection so the winner can be routed by
+  // request content rather than park order.
+  client.search( stub.endpoint().toString(), QStringLiteral( "older-set" ), QString(), {}, 10 );
+  client.search( stub.endpoint().toString(), QStringLiteral( "newer-set" ), QString(), {}, 10 );
   for ( int i = 0; i < 50 && stub.parkedCount() < 2; ++i )
     QTest::qWait( 50 );
   REQUIRE( stub.parkedCount() == 2 );
 
-  // The NEWER query (index 1) answers first and wins the completion channel.
-  REQUIRE( stub.respond( 1, featureList( "winner", 2 ) ) );
+  // The NEWER query answers first and wins the completion channel.
+  REQUIRE( stub.respondMatching( "newer-set", featureList( "winner", 2 ) ) );
   for ( int i = 0; i < 50 && done.count() < 1; ++i )
     QTest::qWait( 50 );
   REQUIRE( done.count() == 1 );

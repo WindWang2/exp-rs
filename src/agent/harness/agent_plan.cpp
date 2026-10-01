@@ -165,7 +165,43 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
   if ( doc.isMember( "outputs" ) && doc["outputs"].isArray() )
     plan.outputs = doc["outputs"];
   if ( doc.isMember( "verification" ) && doc["verification"].isObject() )
-    plan.verification = doc["verification"];
+  {
+    const Json::Value &verification = doc["verification"];
+    // A non-numeric member in the declared class domain is a structural lie
+    // by the caller: verification probes only numeric members, so such a
+    // declaration can never verify and must not pass the read seam silently
+    // (agent-harness R4 item 15, closed here at the declaration side).
+    if ( verification.isMember( "expectations" ) )
+    {
+      const Json::Value &expectations = verification["expectations"];
+      if ( !expectations.isObject() )
+      {
+        error = HarnessError::make( error_codes::kInvalidPlan,
+                                    "verification.expectations must be an object" );
+        return false;
+      }
+      if ( expectations.isMember( "class_values" ) )
+      {
+        const Json::Value &classValues = expectations["class_values"];
+        if ( !classValues.isArray() )
+        {
+          error = HarnessError::make( error_codes::kInvalidPlan,
+                                      "verification.expectations.class_values must be an array" );
+          return false;
+        }
+        for ( const Json::Value &value : classValues )
+        {
+          if ( !value.isNumeric() )
+          {
+            error = HarnessError::make( error_codes::kInvalidPlan,
+                                        "verification.expectations.class_values members must be numeric" );
+            return false;
+          }
+        }
+      }
+    }
+    plan.verification = verification;
+  }
   if ( doc.isMember( "map_output" ) )
     plan.mapOutput = doc["map_output"];
   // Harness 8.0 (Area E): identity pins + cleanup policy. Shape/vocabulary

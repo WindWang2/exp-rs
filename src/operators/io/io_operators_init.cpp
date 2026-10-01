@@ -28,6 +28,13 @@ REGISTER_RS_OPERATOR( IoDoctorOperator, "io:doctor" )
 REGISTER_RS_OPERATOR( IoSubdatasetsOperator, "io:subdatasets" )
 REGISTER_RS_OPERATOR( IoMetadataPatchOperator, "io:metadata_patch" )
 REGISTER_RS_OPERATOR( IoVerifyDatasetOperator, "io:verify_dataset" )
+// Fabric/family tools were explicit-add-only since landing, which understated
+// the macro shape other tooling greps; the macro list mirrors the explicit
+// list 17/17 like every other family.
+REGISTER_RS_OPERATOR( IoCatalogSearchOperator, "io:catalog_search" )
+REGISTER_RS_OPERATOR( IoCubePlanOperator, "io:cube_plan" )
+REGISTER_RS_OPERATOR( IoCubeWindowOperator, "io:cube_window" )
+REGISTER_RS_OPERATOR( IoCachePrefetchOperator, "io:cache_prefetch" )
 
 void initBuiltinIoOperators()
 {

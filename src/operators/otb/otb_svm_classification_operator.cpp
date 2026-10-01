@@ -54,7 +54,7 @@ Json::Value OtbSvmClassificationOperator::metadata() const {
     meta["prerequisites"].append("Input raster must overlap the training vector layer.");
     meta["prerequisites"].append("Vector layer must contain a numeric/text field with class labels.");
     meta["workflowHints"].append("Compute image statistics first and pass via 'stats' for better normalization.");
-    meta["workflowHints"].append("Use otb:image_classifier to apply the trained model to new imagery.");
+    meta["workflowHints"].append("Applying a trained model to new imagery in-repo: use rs:supervised_classification predict-only (modelIn) with a matching method and band set; this operator only trains the OTB/LibSVM model.");
     meta["limitations"].append("Training time grows with image size and number of samples.");
     return meta;
 }

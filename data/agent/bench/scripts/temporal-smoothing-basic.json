@@ -22,7 +22,7 @@
         "output_path": "work://case/smooth.tif"
       },
       "tokens": 120,
-      "tool": "temporal:smooth"
+      "tool": "rs:temporal_smooth"
     },
     {
       "evidence": "smooth-series",

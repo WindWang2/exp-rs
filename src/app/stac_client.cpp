@@ -1,161 +1,164 @@
+// stac_client.cpp — thin Qt adapter over the domain STAC transport
+// (R6 convergence, #1394 item 3: src/geospatial/stac/stac_client.* is the
+// single data/transport authority; this file only marshals Qt signals).
 #include "stac_client.h"
-#include "agent/env_flag.h"
 
-#include <QAbstractSocket>
-#include <QHostAddress>
+#include "geospatial/stac/stac_client.h"
+
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonParseError>
-#include <QUrlQuery>
+#include <QPointer>
+
+#include <sstream>
+#include <string>
+#include <utility>
+
+using sicnu::geo::StacClientOptions;
+using sicnu::geo::StacPage;
+using sicnu::geo::StacRequest;
+using sicnu::geo::StacSearchQuery;
 
 namespace {
 
-bool isPrivateOrLocalHost(const QString &host)
+/// jsoncpp -> QVariant bridge for one STAC feature document. The UI reads
+/// the raw Item document (id/properties/assets/links) exactly as the
+/// pre-convergence QNAM path delivered it — the raw document is the truth,
+/// not the projected StacItem.
+QVariant stacJsonToVariant(const Json::Value &value)
 {
-    if (host.isEmpty())
-        return true;
-
-    const QString h = host.toLower();
-    if (h == QLatin1String("localhost") || h.endsWith(QLatin1String(".localhost")))
-        return true;
-    if (h == QLatin1String("metadata.google.internal"))
-        return true;
-
-    QHostAddress addr(host);
-    if (addr.isNull()) {
-        // Not a literal IP — allow by name (DNS rebinding residual risk accepted for MVP).
-        // Hostname "localhost" already handled above.
-        return false;
-    }
-
-    if (addr.isLoopback())
-        return true;
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    // Qt6: isLinkLocal covers fe80::/10 and 169.254.0.0/16
-    if (addr.isLinkLocal())
-        return true;
-#endif
-
-    if (addr.protocol() == QAbstractSocket::IPv4Protocol) {
-        const quint32 ip = addr.toIPv4Address();
-        // 10.0.0.0/8
-        if ((ip & 0xFF000000u) == 0x0A000000u)
-            return true;
-        // 172.16.0.0/12
-        if ((ip & 0xFFF00000u) == 0xAC100000u)
-            return true;
-        // 192.168.0.0/16
-        if ((ip & 0xFFFF0000u) == 0xC0A80000u)
-            return true;
-        // 169.254.0.0/16 link-local
-        if ((ip & 0xFFFF0000u) == 0xA9FE0000u)
-            return true;
-        // 127.0.0.0/8 (also covered by isLoopback, but be explicit)
-        if ((ip & 0xFF000000u) == 0x7F000000u)
-            return true;
-        // 0.0.0.0/8
-        if ((ip & 0xFF000000u) == 0x00000000u)
-            return true;
-        // 100.64.0.0/10 CGNAT
-        if ((ip & 0xFFC00000u) == 0x64400000u)
-            return true;
-    } else if (addr.protocol() == QAbstractSocket::IPv6Protocol) {
-        // Unique local fc00::/7
-        const Q_IPV6ADDR v6 = addr.toIPv6Address();
-        if ((v6[0] & 0xFE) == 0xFC)
-            return true;
-    }
-
-    return false;
+    if (!value.isObject() && !value.isArray())
+        return {};
+    Json::StreamWriterBuilder writerBuilder;
+    writerBuilder["indentation"] = "";
+    const std::string text = Json::writeString(writerBuilder, value);
+    QJsonParseError parseError{};
+    const QJsonDocument doc = QJsonDocument::fromJson(
+        QByteArray(text.data(), static_cast<int>(text.size())), &parseError);
+    if (parseError.error != QJsonParseError::NoError)
+        return {};
+    return doc.toVariant();
 }
 
 } // namespace
 
-QString StacClient::validateUrlPolicy(const QUrl &url, bool requireHttpsPreferred)
+// ---------------------------------------------------------------------------
+// Delivery state shared between the adapter and the detached domain worker.
+// The worker owns a shared_ptr copy, so a finished fetch never dereferences
+// a dead adapter; landing happens only through the QPointer-guarded hop.
+// ---------------------------------------------------------------------------
+struct StacClient::PageDelivery
 {
-    if (!url.isValid() || url.scheme().isEmpty() || url.host().isEmpty())
-        return QStringLiteral("Invalid URL");
+    quint64 generation = 0;
+    bool ok = false;
+    QString errorText;
+    std::unique_ptr<StacPage> page;
+};
 
-    const QString scheme = url.scheme().toLower();
-    if (scheme != QLatin1String("https") && scheme != QLatin1String("http"))
-        return QStringLiteral("URL scheme must be http or https");
+class StacClientPrivate
+{
+public:
+    /// Late-arrival landing policy: every user-initiated search supersedes
+    /// every older one; superseded deliveries are dropped with a trace.
+    /// Unsigned: this counter lives for the process lifetime (F-02, same
+    /// shape as RsScanPool's generation token, DECISIONS D-1).
+    quint64 searchGeneration = 0;
 
-    // Prefer https: file://, ftp://, etc. already rejected. Plain http is allowed
-    // for public hosts; private/lab HTTP is gated with the private-host flag below.
-    Q_UNUSED(requireHttpsPreferred);
+    /// Cached domain transport (rebuilt when the endpoint changes). Shared
+    /// ownership: an in-flight detached fetch keeps it alive even if the
+    /// adapter dies first.
+    std::shared_ptr<sicnu::geo::StacClient> domain;
+    std::string domainRoot;
 
-    if (!envFlagEnabled("SICNU_STAC_ALLOW_PRIVATE")) {
-        if (isPrivateOrLocalHost(url.host()))
-            return QStringLiteral(
-                "Private / loopback / link-local STAC hosts are blocked "
-                "(set SICNU_STAC_ALLOW_PRIVATE=1 to allow)");
+    /// The page that produced the current results — its continuation
+    /// descriptor feeds searchNext() (#634).
+    std::unique_ptr<StacPage> lastPage;
+
+    /// Transport budget: the pre-convergence client used a 10 s transfer
+    /// timeout, a 5 s connect budget and exactly one attempt (no retries);
+    /// those semantics are carried over verbatim onto the domain options.
+    /// The SSRF egress policy is enforced HERE (it used to live in this
+    /// client); SICNU_STAC_ALLOW_PRIVATE=1 stays the operator opt-out.
+    static StacClientOptions transportOptions()
+    {
+        StacClientOptions options;
+        options.timeoutSeconds = 10;
+        options.connectTimeoutSeconds = 5;
+        options.maxRetries = 0;
+        options.blockPrivateNetworks = true;
+        return options;
     }
+};
 
-    return {};
-}
-
-QString StacClient::validateAssetHref(const QString &href)
+StacClient::StacClient(QObject *parent)
+    : QObject(parent)
+    , d(std::make_unique<StacClientPrivate>())
 {
-    if (href.isEmpty())
-        return QStringLiteral("Empty asset href");
-
-    // Reject GDAL VSI paths that could already encode schemes
-    if (href.startsWith(QLatin1Char('/')) && href.contains(QStringLiteral("/vsi"), Qt::CaseInsensitive))
-        return QStringLiteral("Pre-formed VSI paths are not accepted as asset hrefs");
-
-    const QUrl url(href);
-    if (!url.isValid() || url.scheme().isEmpty())
-        return QStringLiteral("Asset href must be an absolute http(s) URL");
-
-    const QString scheme = url.scheme().toLower();
-    if (scheme != QLatin1String("https") && scheme != QLatin1String("http"))
-        return QStringLiteral("Asset href scheme must be http or https (got '%1')").arg(scheme);
-
-    return validateUrlPolicy(url, /*requireHttpsPreferred=*/true);
 }
 
-QString StacClient::selectCogHref(const QJsonObject &stacItemFeature)
-{
-    const QJsonObject assets = stacItemFeature.value(QStringLiteral("assets")).toObject();
-
-    QString cogHref;
-    for (auto it = assets.constBegin(); it != assets.constEnd(); ++it) {
-        const QJsonObject asset = it.value().toObject();
-        const QString href = asset.value(QStringLiteral("href")).toString();
-        if (href.endsWith(QStringLiteral(".tif"), Qt::CaseInsensitive) ||
-            asset.value(QStringLiteral("type")).toString().contains(QStringLiteral("image/tiff"))) {
-            cogHref = href;
-            break;
-        }
-    }
-
-    if (cogHref.isEmpty())
-        return {};
-
-    // SSRF policy applies to asset hrefs too (private hosts, bad schemes,
-    // pre-formed VSI paths are all rejected here).
-    if (!validateAssetHref(cogHref).isEmpty())
-        return {};
-
-    return QStringLiteral( "/vsicurl/" ) + cogHref;
-}
+StacClient::~StacClient() = default;
 
 QUrl StacClient::buildSearchUrl(const QString &endpoint, const QString &collection,
                                 const QString &datetime, const QStringList &bbox,
                                 int limit)
 {
-    QUrl url(endpoint + QStringLiteral("/search"));
-    QUrlQuery query;
+    StacSearchQuery query;
     if (!collection.isEmpty())
-        query.addQueryItem(QStringLiteral("collections"), collection);
-    if (!datetime.isEmpty())
-        query.addQueryItem(QStringLiteral("datetime"), datetime);
-    if (!bbox.isEmpty())
-        query.addQueryItem(QStringLiteral("bbox"), bbox.join(QStringLiteral(",")));
-    if (limit > 0)
-        query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
-    url.setQuery(query);
-    return url;
+        query.collections.push_back(collection.toStdString());
+    query.datetime = datetime.toStdString();
+    for (const QString &value : bbox)
+    {
+        bool ok = false;
+        const double number = value.toDouble(&ok);
+        if (ok)
+            query.bbox.push_back(number);
+    }
+    query.limit = limit;
+    return QUrl(QString::fromStdString(
+        sicnu::geo::StacClient::buildSearchUrl(endpoint.toStdString(), query)));
+}
+
+QString StacClient::validateUrlPolicy(const QUrl &url, bool requireHttpsPreferred)
+{
+    Q_UNUSED(requireHttpsPreferred);
+    if (!url.isValid() || url.scheme().isEmpty() || url.host().isEmpty())
+        return QStringLiteral("Invalid URL");
+    return QString::fromStdString(
+        sicnu::geo::StacClient::egressPolicyError(
+            url.toString(QUrl::FullyEncoded).toStdString()));
+}
+
+QString StacClient::validateAssetHref(const QString &href)
+{
+    return QString::fromStdString(
+        sicnu::geo::StacClient::validateAssetHref(href.toStdString()));
+}
+
+QString StacClient::selectCogHref(const QJsonObject &stacItemFeature)
+{
+    const QJsonDocument doc(stacItemFeature);
+    const QByteArray text = doc.toJson(QJsonDocument::Compact);
+    const std::string parseText(text.constData(), static_cast<std::size_t>(text.size()));
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    builder["collectComments"] = false;
+    std::string parseErrors;
+    std::istringstream stream(parseText);
+    if (!Json::parseFromStream(builder, stream, &parsed, &parseErrors))
+        return {};
+    return QString::fromStdString(sicnu::geo::StacClient::selectCogVsicurlHref(parsed));
+}
+
+sicnu::geo::StacClient &StacClient::domainClientFor(const QString &endpoint)
+{
+    const std::string root = endpoint.toStdString();
+    if (!d->domain || d->domainRoot != root)
+    {
+        d->domain = std::make_shared<sicnu::geo::StacClient>(
+            root, StacClientPrivate::transportOptions());
+        d->domainRoot = root;
+    }
+    return *d->domain;
 }
 
 void StacClient::search(const QString &endpoint, const QString &collection,
@@ -165,99 +168,129 @@ void StacClient::search(const QString &endpoint, const QString &collection,
     // F-02: every user-initiated search supersedes every older one (the
     // generation the finished handlers compare against). searchNext()
     // deliberately does NOT bump — pagination continues the same query.
-    ++m_searchGeneration;
-    QUrl endpointUrl(endpoint);
+    ++d->searchGeneration;
+
     // Allow endpoint without path scheme form "https://host/stac"
-    if (!endpointUrl.scheme().isEmpty()) {
-        const QString policyError = validateUrlPolicy(endpointUrl, /*requireHttpsPreferred=*/true);
-        if (!policyError.isEmpty()) {
-            emit searchCompleted(QVariantList(), policyError);
-            return;
-        }
-    } else {
-        emit searchCompleted(QVariantList(), QStringLiteral("STAC endpoint must be an absolute http(s) URL"));
+    const QUrl endpointUrl(endpoint);
+    if (endpointUrl.scheme().isEmpty())
+    {
+        emit searchCompleted(QVariantList(),
+                             QStringLiteral("STAC endpoint must be an absolute http(s) URL"));
+        return;
+    }
+    const QString policyError = validateUrlPolicy(endpointUrl, /*requireHttpsPreferred=*/true);
+    if (!policyError.isEmpty())
+    {
+        emit searchCompleted(QVariantList(), policyError);
         return;
     }
 
-    const QUrl url = buildSearchUrl(endpoint, collection, datetime, bbox, limit);
-    runSearch(url);
-}
-
-void StacClient::runSearch(const QUrl &url)
-{
-    QNetworkRequest request(url);
-    request.setTransferTimeout(10000);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                         QNetworkRequest::NoLessSafeRedirectPolicy);
-
-    // Capture this reply's generation: only the newest query may deliver.
-    const quint64 generation = m_searchGeneration;
-
-    QNetworkReply *reply = mManager.get(request);
-    connect(reply, &QNetworkReply::redirected, this, [reply](const QUrl &url){
-        // 392: re-validate every redirect target against the same SSRF policy
-        const QString err = StacClient::validateUrlPolicy(url, true);
-        if (!err.isEmpty()) {
-            reply->abort();
-        }
-    });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, generation]() {
-        reply->deleteLater();
-        // F-02/F-03: the reply belongs to a superseded query (newer search
-        // started, host closed, or the query timed out after its successor
-        // succeeded). Late results — successes AND errors — must never
-        // overwrite the newest state: drop with a trace.
-        if (generation != m_searchGeneration)
-        {
-            emit searchDropped(QStringLiteral(
-                "stale STAC search result dropped (superseded generation)"));
-            return;
-        }
-        // 392 belt-and-suspenders: final URL after redirects must still pass policy
-        const QString policyError = validateUrlPolicy(reply->url(), true);
-        if (!policyError.isEmpty()) {
-            emit searchCompleted(QVariantList(), policyError);
-            return;
-        }
-        if (reply->error() != QNetworkReply::NoError)
-        {
-            emit searchCompleted(QVariantList(), reply->errorString());
-            return;
-        }
-
-        QJsonParseError error;
-        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &error);
-        if (error.error != QJsonParseError::NoError)
+    StacSearchQuery query;
+    if (!collection.isEmpty())
+        query.collections.push_back(collection.toStdString());
+    query.datetime = datetime.toStdString();
+    for (const QString &value : bbox)
+    {
+        bool ok = false;
+        const double number = value.toDouble(&ok);
+        if (!ok)
         {
             emit searchCompleted(QVariantList(),
-                                 QStringLiteral("JSON Parse Error: ") + error.errorString());
+                                 QStringLiteral("Bounding box values must be numbers "
+                                                "(min_lon,min_lat,max_lon,max_lat)"));
             return;
         }
+        query.bbox.push_back(number);
+    }
+    query.limit = limit; // 0 = origin default (no limit param), as before
 
-        const QVariantMap root = doc.toVariant().toMap();
-        const QVariantList features = root.value(QStringLiteral("features")).toList();
-        // STAC paging (#634): follow the `next` link when the server provides
-        // one - a fixed limit silently hid everything past page one.
-        QUrl next;
-        const QVariantList links = root.value(QStringLiteral("links")).toList();
-        for ( const QVariant &linkVar : links )
-        {
-            const QVariantMap link = linkVar.toMap();
-            if ( link.value( QStringLiteral( "rel" ) ).toString() == QStringLiteral( "next" ) )
-            {
-                next = QUrl( link.value( QStringLiteral( "href" ) ).toString() );
-                break;
-            }
-        }
-        m_nextPage = next;
-        emit searchCompleted(features, QString(), next);
-    });
+    try
+    {
+        const StacRequest request = domainClientFor(endpoint).buildSearchRequest(query);
+        launchPageFetch(request);
+    }
+    catch (const sicnu::geo::GeoError &error)
+    {
+        emit searchCompleted(QVariantList(), QString::fromUtf8(error.what()));
+    }
 }
 
 void StacClient::searchNext()
 {
-    if ( m_nextPage.isEmpty() || !m_nextPage.isValid() )
+    if (!d->lastPage || !d->lastPage->hasMore())
         return;
-    runSearch( m_nextPage );
+    try
+    {
+        const StacRequest request = domainClientFor(
+            QString::fromStdString(d->domainRoot)).buildNextRequest(*d->lastPage);
+        launchPageFetch(request);
+    }
+    catch (const sicnu::geo::GeoError &error)
+    {
+        emit searchCompleted(QVariantList(), QString::fromUtf8(error.what()));
+    }
+}
+
+void StacClient::cancelInFlight()
+{
+    ++d->searchGeneration;
+}
+
+void StacClient::launchPageFetch(const StacRequest &request)
+{
+    auto delivery = std::make_shared<PageDelivery>();
+    delivery->generation = d->searchGeneration;
+    auto domain = d->domain; // shared: the fetch outlives the adapter safely
+    QPointer<StacClient> guard(this);
+
+    domain->requestPageDetached(
+        request,
+        [delivery, domain, guard](StacPage page, const std::string &errorText) {
+            delivery->ok = errorText.empty();
+            delivery->errorText = QString::fromUtf8(errorText.c_str());
+            if (delivery->ok)
+                delivery->page = std::make_unique<StacPage>(std::move(page));
+            // One marshalled hop onto the application thread; dropped
+            // silently when the adapter (and its UI) are already gone.
+            if (QCoreApplication *app = QCoreApplication::instance())
+            {
+                QMetaObject::invokeMethod(app, [guard, delivery]() {
+                    if (guard)
+                        guard->deliverPage(delivery);
+                });
+            }
+        });
+}
+
+void StacClient::deliverPage(const std::shared_ptr<PageDelivery> &delivery)
+{
+    // F-02/F-03: the delivery belongs to a superseded query (newer search
+    // started, host closed, or the query timed out after its successor
+    // succeeded). Late results — successes AND errors — must never
+    // overwrite the newest state: drop with a trace.
+    if (delivery->generation != d->searchGeneration)
+    {
+        emit searchDropped(QStringLiteral(
+            "stale STAC search result dropped (superseded generation)"));
+        return;
+    }
+    if (!delivery->ok)
+    {
+        emit searchCompleted(QVariantList(), delivery->errorText);
+        return;
+    }
+
+    d->lastPage = std::move(delivery->page);
+
+    QVariantList features;
+    features.reserve(static_cast<int>(d->lastPage->items.size()));
+    for (const sicnu::geo::StacItem &item : d->lastPage->items)
+        features.append(stacJsonToVariant(item.raw));
+
+    // STAC paging (#634): offer the continuation when the server provides a
+    // `next` link (resolved absolute by the domain transport).
+    const QUrl nextPage = d->lastPage->hasMore()
+                              ? QUrl(QString::fromStdString(d->lastPage->nextHref))
+                              : QUrl();
+    emit searchCompleted(features, QString(), nextPage);
 }

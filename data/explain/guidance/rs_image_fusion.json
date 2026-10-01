@@ -28,9 +28,30 @@
       "misconfigurationConsequence": "不写报告就无从发现所选方法的光谱畸变超限，低质量融合悄悄进入制图。"
     }
   ],
+  "stateNarrative": {
+    "before": "",
+    "after": ""
+  },
   "skipConsequence": {
     "summary": "空间分辨率停留在多波段数据级别，细小地物的解译与制图精度受限。",
-    "downstreamRoles": ["目视解译", "制图"]
+    "downstreamRoles": [
+      "目视解译",
+      "制图"
+    ]
   },
+  "references": [
+    {
+      "title": "Laben & Brower, Process for enhancing the spatial resolution of multispectral imagery using pan-sharpening (Gram-Schmidt)",
+      "kind": "paper",
+      "locator": "US Patent 6,011,875, Eastman Kodak, 2000",
+      "note": "gram_schmidt 融合方法的出处，亦是本算子光谱畸变最小的默认推荐依据。"
+    },
+    {
+      "title": "Vivone et al., A Critical Comparison Among Pansharpening Algorithms",
+      "kind": "paper",
+      "locator": "IEEE Transactions on Geoscience and Remote Sensing, 53(5):2565-2586, 2015",
+      "note": "各融合方法光谱/空间保真对比；qualityReport 的 ERGAS/CC/SSIM 指标属于该评估体系。"
+    }
+  ],
   "teachingNote": "融合不定义新的辐射状态：输出沿用输入的辐射语义，但 brovey/ihs 等方法会轻微重塑光谱幅度，定量反演前建议用 qualityReport 检查光谱失真守卫。"
 }

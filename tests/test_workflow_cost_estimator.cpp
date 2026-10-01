@@ -43,11 +43,11 @@ WorkflowDocument redundantWorkflow()
 {
     WorkflowDocument def;
     def.nodes = {
-        node( "input_raster", "rs:import_raster" ),
-        node( "filter_a", "rs:spatial_filter", QJsonObject{ { "kernel", QStringLiteral( "gaussian" ) } } ),
-        node( "filter_b", "rs:spatial_filter", QJsonObject{ { "kernel", QStringLiteral( "gaussian" ) } } ),
+        node( "input_raster", "rs:gaofen_import" ),
+        node( "filter_a", "opencv:gaussian_blur", QJsonObject{ { "kernel", QStringLiteral( "gaussian" ) } } ),
+        node( "filter_b", "opencv:gaussian_blur", QJsonObject{ { "kernel", QStringLiteral( "gaussian" ) } } ),
         node( "sink_ndvi", "rs:spectral_index", QJsonObject{ { "index", QStringLiteral( "NDVI" ) } } ),
-        node( "dead_branch_1", "rs:threshold", QJsonObject{ { "threshold", 0.2 } } ),
+        node( "dead_branch_1", "rs:threshold_raster", QJsonObject{ { "threshold", 0.2 } } ),
         node( "dead_branch_2", "rs:recode", QJsonObject{ { "table", 1 } } ),
     };
     def.edges = {
@@ -79,7 +79,7 @@ TEST_CASE( "Node signature matches an externally precomputed SHA-256", "[d17][wo
 
 TEST_CASE( "Signatures are deterministic, parameter-sensitive and parent-order-insensitive", "[d17][workflow][optimizer]" )
 {
-    const NodeFact n = node( "child", "rs:spatial_filter", QJsonObject{ { "kernel", QStringLiteral( "mean" ) } } );
+    const NodeFact n = node( "child", "opencv:gaussian_blur", QJsonObject{ { "kernel", QStringLiteral( "mean" ) } } );
 
     QMap<QString, QString> parentsA;
     parentsA.insert( QStringLiteral( "pa" ), QStringLiteral( "aaaa" ) );
@@ -154,7 +154,7 @@ TEST_CASE( "Dead node elimination and CSE on the redundant fixture", "[d17][work
 TEST_CASE( "Optimize is a no-op when every node feeds the sink", "[d17][workflow][optimizer]" )
 {
     WorkflowDocument def;
-    def.nodes = { node( "a", "rs:import_raster" ), node( "b", "rs:threshold" ) };
+    def.nodes = { node( "a", "rs:gaofen_import" ), node( "b", "rs:threshold_raster" ) };
     def.edges = { edge( "a", "b" ) };
 
     OptimizationReport report;
@@ -171,7 +171,7 @@ TEST_CASE( "Legal distinct-port parallel edges survive optimization untouched", 
     // <= 1), neither produced by a merge. The optimizer must preserve both.
     WorkflowDocument def;
     def.nodes = {
-        node( "src", "rs:import_raster" ),
+        node( "src", "rs:gaofen_import" ),
         node( "sink", "rs:stack_bands" ),
     };
     NodeFact &sink = def.nodes.last();
@@ -225,7 +225,7 @@ TEST_CASE( "Flops and peak RSS on the 1000x1000x4 analytic pipeline", "[d17][wor
     //   widest tier = 1 -> PeakRSS = 16 MiB + 64 MiB overhead = 80 MiB
     WorkflowDocument def;
     def.nodes = {
-        node( "input_raster", "rs:import_raster" ),
+        node( "input_raster", "rs:gaofen_import" ),
         node( "calib", "rs:radiometric_calibration" ),
         node( "index", "rs:spectral_index" ),
     };
@@ -265,9 +265,9 @@ TEST_CASE( "Oversized working sets degrade recommended parallelism to 1", "[d17]
     // arithmetic: nothing is allocated.
     WorkflowDocument def;
     def.nodes = {
-        node( "input_raster", "rs:import_raster" ),
-        node( "branch_a", "rs:spatial_filter" ),
-        node( "branch_b", "rs:spatial_filter" ),
+        node( "input_raster", "rs:gaofen_import" ),
+        node( "branch_a", "opencv:gaussian_blur" ),
+        node( "branch_b", "opencv:gaussian_blur" ),
     };
     def.edges = { edge( "input_raster", "branch_a" ), edge( "input_raster", "branch_b" ) };
 
@@ -294,5 +294,5 @@ TEST_CASE( "Oversized working sets degrade recommended parallelism to 1", "[d17]
 TEST_CASE( "Unknown operators default to complexity 1.0", "[d17][workflow][cost]" )
 {
     REQUIRE( WorkflowCostEstimator::operatorComplexity( QStringLiteral( "rs:totally_unknown" ) ) == 1.0 );
-    REQUIRE( WorkflowCostEstimator::operatorComplexity( QStringLiteral( "rs:spatial_filter" ) ) == 9.0 );
+    REQUIRE( WorkflowCostEstimator::operatorComplexity( QStringLiteral( "opencv:gaussian_blur" ) ) == 9.0 );
 }

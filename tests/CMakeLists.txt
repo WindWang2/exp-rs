@@ -94,11 +94,14 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
-    # sicnu_agent's run-summary/verification seam references agent_loop
-    # symbols (sicnu_agent_loop is a static lib nobody links transitively).
-    # WHOLE_ARCHIVE beats the linker's archive-ordering discard (CMake
-    # orders the .a before the .so, where its objects look unneeded).
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+    # (R6 #1394 item 1) The former "$<LINK_LIBRARY:WHOLE_ARCHIVE,
+    # sicnu_agent_loop>" here and on test_tool_call_dispatcher /
+    # test_output_verifier / test_llm_streaming_client was retired with
+    # evidence: #1335/#1366 gave sicnu_agent a PUBLIC sicnu_agent_loop link,
+    # so the loop's PIC objects are embedded in and exported by
+    # libsicnu_agent.so. Each site was removed, relinked and run green (no
+    # undefined references at link or load). Do not re-add without a
+    # link-graph change.
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -689,10 +692,6 @@ target_link_libraries(test_tool_call_dispatcher PRIVATE
   sicnu_task_center
   sicnu_workflow_runtime
   sicnu_operators
-  # sicnu_agent.so arrives transitively; its verification seam needs the
-  # agent_loop symbols resolved at final link time. WHOLE_ARCHIVE beats the
-  # linker's archive-ordering discard (CMake orders the .a before the .so).
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
 )
 sicnu_link_jsoncpp(test_tool_call_dispatcher)
 target_include_directories(test_tool_call_dispatcher PRIVATE
@@ -2857,8 +2856,6 @@ target_link_libraries(test_output_verifier PRIVATE
   Qt6::Core
   qgis_core
   sicnu_agent
-  # sicnu_agent's verification seam resolves agent_loop symbols at final link.
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
   GDAL::GDAL
 )
 target_include_directories(test_output_verifier PRIVATE
@@ -7441,7 +7438,7 @@ add_executable(test_stac_client
 target_link_libraries(test_stac_client PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Qt6::Network
+  Sicnu::Geospatial
 )
 target_include_directories(test_stac_client PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8016,9 +8013,6 @@ sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
-  # sicnu_agent's verification seam resolves agent_loop symbols at final
-  # link; WHOLE_ARCHIVE beats archive-ordering discard.
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
 )
 # R4 WP-G: the corpus-driven SSE cases consume jsoncpp (adversarial_corpus.h).
 sicnu_link_jsoncpp(test_llm_streaming_client)
@@ -9858,7 +9852,7 @@ sicnu_add_dialog_test(test_m2_batch_b_dialogs
   ${CMAKE_SOURCE_DIR}/src/app/classification/rs_accuracy_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/classification/rs_accuracy_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classifier_load_dialog.cpp
-  EXTRA_LIBS GDAL::GDAL Qt6::Network qgis_analysis
+  EXTRA_LIBS GDAL::GDAL Sicnu::Geospatial qgis_analysis
 )
 
 # Milestone 3 RsEmptyStateWidget Unit Tests
@@ -10315,6 +10309,12 @@ sicnu_discover_tests(test_teacher_credential)
 # registry, operator x-rs-contract facts, and the closed intent vocabulary.
 sicnu_add_test(test_capability_drift)
 sicnu_link_jsoncpp(test_capability_drift)
+
+# R6 source-of-truth gates (operator registration parity, recipe operator
+# ids, living-docs surface ids) — full registry stack needed for the live
+# RSOperatorRegistry authority.
+sicnu_add_test(test_source_truth_gates)
+sicnu_link_jsoncpp(test_source_truth_gates)
 
 
 # Contract Platform 9.0: mechanical implementation↔schema projection guard
@@ -12115,6 +12115,7 @@ sicnu_add_d17_test(test_workflow_agent_tools
     ${CMAKE_SOURCE_DIR}/src/workflow/contract_checker.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_repair_engine.cpp
     ${CMAKE_SOURCE_DIR}/src/agent/tools/workflow_orchestrator_tool.cpp
+  LIBS sicnu_operators
 )
 
 # --- Package I: end-to-end (labs corpus needs the LabSpec loader -> jsoncpp)
@@ -13702,6 +13703,7 @@ add_executable(test_agentbench_corpus test_agentbench_corpus.cpp)
 target_link_libraries(test_agentbench_corpus PRIVATE
   Catch2::Catch2WithMain
   sicnu_agentbench
+  sicnu_operators
 )
 sicnu_link_jsoncpp(test_agentbench_corpus)
 target_include_directories(test_agentbench_corpus PRIVATE
@@ -15202,4 +15204,19 @@ sicnu_add_test(test_model_publish_fence_r5 TIMEOUT 180 RUN_SERIAL TRUE TEST_PREF
 target_link_libraries(test_model_publish_fence_r5 PRIVATE sicnu_operators)
 if(TARGET jsoncpp)
   target_link_libraries(test_model_publish_fence_r5 PRIVATE jsoncpp)
+endif()
+
+# R6 model-manifest generator parity gate: the committed manifests under
+# models/*/model.json must stay byte-identical to scripts/gen_model_library.py
+# output (the SPEC is the stale side historically — disk-newer manifests were
+# lost to a regenerate once already). Skipped where no interpreter exists.
+# Interpreter policy (TEST_INFRA.md #730): use the build-pinned Python_EXECUTABLE,
+# NOT a FindPython3 rediscovery. CTestCustom.cmake pins PYTHONHOME/PYTHONPATH to
+# the interpreter sicnu_configure_test_harness_env discovered; running a
+# different FindPython3 interpreter under that pin fails with
+# "AssertionError: SRE module mismatch" (hostedtoolcache python vs system).
+if(Python_EXECUTABLE)
+  add_test(NAME test_model_library_generator_parity
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_model_library.py --check)
+  sicnu_set_test_env(test_model_library_generator_parity)
 endif()

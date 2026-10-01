@@ -9,17 +9,21 @@ the checksum filled in — weights are never committed.
 """
 import json
 import os
+import sys
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 
 
-def input_contract(band_roles, temporal_length=0, name=""):
+def input_contract(band_roles, temporal_length=0, name="", width=0, height=0):
     c = {"dtype": "float32", "layout": "NCHW", "band_roles": band_roles}
     if name:
         c["name"] = name
     if temporal_length:
         c["temporal_length"] = temporal_length
         c["temporal_collapse"] = "channels"
+    if width and height:
+        c["width"] = width
+        c["height"] = height
     return c
 
 
@@ -29,6 +33,7 @@ def manifest(
     gpu=False, vram=0, temporal_length=0, polarizations=None,
     uncertainty=None, accuracy=-1.0, radiometric_state="", source="",
     mask_threshold=-1.0, batch=2, inputs=None, tensor_names=None,
+    input_size=None, resize="", detection=None, extra_identity=None,
 ):
     tiling = tiling or {"supported": True, "tile_size": 256, "overlap": 32, "batch_size": batch}
     m = {
@@ -51,8 +56,10 @@ def manifest(
                     "from the reference, place beside the manifest, fill path + "
                     "sha256 checksum",
         },
-        "input": input_contract(band_roles, temporal_length),
-        "preprocess": preprocess,
+        "input": input_contract(band_roles, temporal_length,
+                                width=(input_size or (0, 0))[0],
+                                height=(input_size or (0, 0))[1]),
+        "preprocess": dict(preprocess, resize=resize) if resize else preprocess,
         "tiling": tiling,
         "output": {
             "type": output,
@@ -84,6 +91,11 @@ def manifest(
         del m["output"]["classes"]
     if tensor_names:
         m["output"]["tensor_names"] = tensor_names
+    if detection:
+        m["output"]["detection"] = detection
+    if extra_identity:
+        for key, value in extra_identity:
+            m[key] = value
     if uncertainty:
         m["output"]["uncertainty"] = uncertainty
     if not m["output"].get("classes") and not tensor_names and not uncertainty:
@@ -112,6 +124,15 @@ MEAN_STD_RGB = {
 }
 NONE_PREP = {"normalize": "none"}
 
+# ImageNet-derived statistics with a 4th NIR channel — matches the 4-band
+# (red, green, blue, nir) input of the high-resolution landcover model.
+MEAN_STD_RGB_NIR = {
+    "normalize": "mean_std",
+    "mean": [0.485, 0.456, 0.406, 0.552],
+    "std": [0.229, 0.224, 0.225, 0.231],
+    "scale": 1.0,
+}
+
 MODELS = [
     # --- buildings ---
     manifest("unet-buildings-s2", "segmentation", "raster",
@@ -121,6 +142,12 @@ MODELS = [
              ["red", "green", "blue", "nir"], ["optical"], MEAN_STD_S2_4B,
              {"supported": True, "tile_size": 256, "overlap": 32, "batch_size": 2},
              classes=["background", "building"], accuracy=0.91,
+             extra_identity=[
+                 ("id", "rs/unet-buildings-s2"),
+                 ("model_version", "1.0.0"),
+                 ("license", "unspecified"),
+                 ("source", "https://github.com/template/unet-buildings-s2"),
+             ],
              source="https://github.com/template/unet-buildings-s2"),
     manifest("sam-buildings-hr", "segmentation", "polygon",
              "SAM-family prompt-free building extraction for high-resolution "
@@ -294,9 +321,25 @@ MODELS = [
              "YOLO-family ship detection on Sentinel-2 / high-resolution "
              "coastal scenes.",
              ["ship", "yolo", "detection"], ["Sentinel-2", "GF-2"], [0.8, 10.0],
-             ["red", "green", "blue", "nir"], ["optical"], LINEAR_255,
+             ["red", "green", "blue", "nir"], ["optical"],
+             dict(LINEAR_255, resize="to_input"),
              {"supported": True, "tile_size": 640, "overlap": 96, "batch_size": 4},
              classes=["ship"], accuracy=0.87,
+             input_size=(640, 640),
+             detection={
+                 "layout": "xywh_objectness",
+                 "tensor_layout": "auto",
+                 "conf_threshold": 0.25,
+                 "nms_iou": 0.45,
+                 "max_detections": 100000,
+                 "classes": ["ship"],
+             },
+             extra_identity=[
+                 ("id", "rs/yolo-ship-detection"),
+                 ("model_version", "1.0.0"),
+                 ("license", "unspecified"),
+                 ("source", "https://github.com/template/yolo-ship"),
+             ],
              source="https://github.com/template/yolo-ship"),
     manifest("yolo-airplane-detection", "detection", "vector",
              "Airplane detection on high-resolution airport imagery.",
@@ -338,7 +381,7 @@ MODELS = [
              "imagery (windowed attention encoder).",
              ["landcover", "swin", "transformer"], ["WorldView-3", "GF-2"],
              [0.3, 2.0], ["red", "green", "blue", "nir"], ["optical"],
-             MEAN_STD_RGB,
+             MEAN_STD_RGB_NIR,
              {"supported": True, "tile_size": 512, "overlap": 64, "batch_size": 1},
              gpu=True, vram=6144,
              classes=["background", "built-up", "vegetation", "water", "bare"],
@@ -351,6 +394,11 @@ MODELS = [
              [10.0, 30.0], ["red", "green", "blue", "nir"], ["optical"],
              MEAN_STD_S2_4B,
              {"supported": True, "tile_size": 224, "overlap": 28, "batch_size": 4},
+             extra_identity=[
+                 ("id", "rs/ssl-embedding-encoder"),
+                 ("model_version", "1.0.0"),
+                 ("license", "unspecified"),
+             ],
              source="https://github.com/template/ssl-encoder"),
     manifest("temporal-siamese-crop-change", "change_detection", "raster",
              "Temporal crop-change detection: named before/after inputs, each "
@@ -372,7 +420,35 @@ MODELS = [
 ]
 
 
+def _generated_manifests():
+    """(name, serialized-json) for every generator-produced manifest."""
+    for m in MODELS:
+        yield m["name"], json.dumps(m, indent=2, ensure_ascii=False) + "\n"
+
+
 def main():
+    check_only = "--check" in sys.argv
+    if check_only:
+        drift = []
+        count = 0
+        for name, want in _generated_manifests():
+            count += 1
+            path = os.path.join(MODELS_DIR, name, "model.json")
+            if not os.path.exists(path):
+                drift.append(f"{name}: manifest missing on disk")
+                continue
+            with open(path, "r", encoding="utf-8") as handle:
+                disk = handle.read()
+            if disk != want:
+                drift.append(f"{name}: manifest differs from generator output")
+        if drift:
+            for line in drift:
+                print("MODEL-MANIFEST DRIFT:", line)
+            print("run: python3 scripts/gen_model_library.py  (then commit the regenerated manifests)")
+            return 1
+        print(f"model manifests: {count} byte-identical to generator output")
+        return 0
+
     written = []
     for m in MODELS:
         d = os.path.join(MODELS_DIR, m["name"])
@@ -388,4 +464,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

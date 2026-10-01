@@ -38,6 +38,18 @@
       "to" : "io:build_overviews"
     },
     {
+      "from" : "io:cache_prefetch",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:cache_prefetch"
+    },
+    {
+      "from" : "io:catalog_search",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:catalog_search"
+    },
+    {
       "from" : "io:clip",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/io.json",
@@ -48,6 +60,18 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/io.json",
       "to" : "io:convert_format"
+    },
+    {
+      "from" : "io:cube_plan",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:cube_plan"
+    },
+    {
+      "from" : "io:cube_window",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:cube_window"
     },
     {
       "from" : "io:doctor",
@@ -2318,6 +2342,18 @@
       "to" : "io:build_overviews"
     },
     {
+      "from" : "io:cache_prefetch",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "io:cache_prefetch"
+    },
+    {
+      "from" : "io:catalog_search",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "io:catalog_search"
+    },
+    {
       "from" : "io:clip",
       "kind" : "scientific_contract_for",
       "origin" : "src/contracts/scientific_contract.cpp",
@@ -2328,6 +2364,18 @@
       "kind" : "scientific_contract_for",
       "origin" : "src/contracts/scientific_contract.cpp",
       "to" : "io:convert_format"
+    },
+    {
+      "from" : "io:cube_plan",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "io:cube_plan"
+    },
+    {
+      "from" : "io:cube_window",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "io:cube_window"
     },
     {
       "from" : "io:doctor",
@@ -8414,6 +8462,35 @@
     {
       "attributes" : 
       [
+        "catalog",
+        "chunkWindow",
+        "maxBytes",
+        "mirrorDirectory"
+      ],
+      "id" : "io:cache_prefetch",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "assetRole",
+        "bounds",
+        "catalog",
+        "cloudCoverMax",
+        "limit",
+        "maxItems",
+        "platform",
+        "temporalEndUtc",
+        "temporalStartUtc"
+      ],
+      "id" : "io:catalog_search",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "bounds",
         "creationOptions",
         "input",
@@ -8433,6 +8510,31 @@
         "output"
       ],
       "id" : "io:convert_format",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "catalog",
+        "executionBudgetBytes",
+        "sceneBudget"
+      ],
+      "id" : "io:cube_plan",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bandIndex",
+        "bandRole",
+        "catalog",
+        "mirrorDirectory",
+        "output",
+        "window"
+      ],
+      "id" : "io:cube_window",
       "kind" : "operator",
       "origin" : "src/operators/io/io_operators_init.cpp"
     },
