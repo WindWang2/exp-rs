@@ -106,6 +106,12 @@ struct WorkspaceCatalog::Impl
             "CREATE INDEX IF NOT EXISTS idx_assets_kind_state ON assets(kind, state);"
             "CREATE INDEX IF NOT EXISTS idx_assets_collection ON assets(parent_collection_id);"
             "CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(display_name);"
+            // The default listing is ORDER BY updated_ms DESC, asset_id; without
+            // this index every page() sorts the whole table (O(N log N) per call),
+            // which is what tipped the 100k paging gate over budget on loaded
+            // CI runners. createSchema() re-runs on every open (idempotent), so
+            // existing catalogs gain the index on next open — no migration needed.
+            "CREATE INDEX IF NOT EXISTS idx_assets_updated ON assets(updated_ms DESC, asset_id);"
             "CREATE TABLE IF NOT EXISTS aliases("
             "  path TEXT PRIMARY KEY,"
             "  asset_id TEXT NOT NULL);"
