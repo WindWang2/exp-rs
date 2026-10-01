@@ -362,6 +362,71 @@ TEST_CASE( "manifest with a foreign interpreter is refused at acquire", "[models
   CHECK( error.find( "not allowed" ) != std::string::npos );
 }
 
+// The harness pins the worker interpreter through the environment: PYTHONHOME
+// and PYTHONPATH describe the CMake-configured one (cmake/SicnuTestEnv.cmake,
+// TEST_INFRA.md #730) and src/python/isolated/python_worker_process.cpp
+// resolves SICNU_PYTHON_EXECUTABLE for the same reason. A manifest that names
+// no interpreter must launch THAT interpreter — not whatever PATH offers.
+// Resolving "python3" from PATH instead makes the child inherit a stdlib it
+// was never built against: PYTHONPATH wins over the home stdlib in sys.path,
+// so the worker loads one version's `re` package and another version's `_sre`
+// extension and dies at `import re` ("SRE module mismatch") before the ready
+// line — every python worker session then fails to start.
+TEST_CASE( "a manifest with no interpreter launches the harness-pinned one",
+           "[models][python][security]" )
+{
+  ( void )ensureApp();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+
+  // Stand-in for the pinned interpreter: records that it was launched, then
+  // execs the real one so the wire handshake still completes.
+  const QString marker = dir.filePath( QStringLiteral( "interpreter-used.marker" ) );
+  const QString pinned = dir.filePath( QStringLiteral( "pinned-python3" ) );
+  QString realPython = QString::fromUtf8( qgetenv( "SICNU_PYTHON_EXECUTABLE" ) );
+  if ( realPython.isEmpty() )
+    realPython = QString::fromUtf8( qgetenv( "PYTHONEXECUTABLE" ) );
+  if ( realPython.isEmpty() )
+    realPython = QStringLiteral( "python3" );
+  {
+    QFile f( pinned );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Text ) );
+    f.write( "#!/bin/sh\n" );
+    f.write( "printf '%s\\n' \"$0\" >> \"" + marker.toUtf8() + "\"\n" );
+    f.write( "exec \"" + realPython.toUtf8() + "\" \"$@\"\n" );
+    f.close();
+    REQUIRE( f.setPermissions( QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                               | QFile::ReadGroup | QFile::ExeGroup
+                               | QFile::ReadOther | QFile::ExeOther ) );
+  }
+
+  const std::string script =
+    ( QFileInfo( __FILE__ ).absolutePath() + QStringLiteral( "/data/py_worker_fake.py" ) )
+      .toStdString();
+  ModelInfo model = makeWorkerModel( dir, script, "pinned-interp.bin" );
+
+  const QByteArray savedExec = qgetenv( "SICNU_PYTHON_EXECUTABLE" );
+  qputenv( "SICNU_PYTHON_EXECUTABLE", pinned.toUtf8() );
+  std::string error;
+  const auto session =
+    ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
+  if ( savedExec.isNull() )
+    qunsetenv( "SICNU_PYTHON_EXECUTABLE" );
+  else
+    qputenv( "SICNU_PYTHON_EXECUTABLE", savedExec );
+
+  INFO( "acquire error: " << error );
+  REQUIRE( session );
+  // Pre-fix the provider launched PATH's python3: this shim never ran, the
+  // marker stayed absent, and the worker died before the ready line.
+  REQUIRE( QFileInfo::exists( marker ) );
+  QFile markerFile( marker );
+  REQUIRE( markerFile.open( QIODevice::ReadOnly | QIODevice::Text ) );
+  CHECK( QString::fromUtf8( markerFile.readLine() ).trimmed() == pinned );
+  CHECK( session->backendName() == "python_worker" );
+  CHECK( session->deviceName() == pinned.toStdString() );
+}
+
 TEST_CASE( "manifest worker_script must stay inside the manifest directory", "[models][python][security]" )
 {
   QTemporaryDir root;

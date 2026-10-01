@@ -546,12 +546,38 @@ class PythonWorkerSession final : public IModelRuntime
     std::atomic<bool> m_permanentlyDead{ false };
 };
 
+/// A manifest that names no interpreter means "this stack's own Python".
+/// The harness pins that interpreter through the environment: PYTHONHOME and
+/// PYTHONPATH describe the CMake-configured one (cmake/SicnuTestEnv.cmake,
+/// TEST_INFRA.md #730), and src/python/isolated/python_worker_process.cpp
+/// resolves SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE for exactly that
+/// reason. A bare "python3" is merely whatever PATH offers: when that is a
+/// DIFFERENT interpreter than PYTHONHOME describes, the child inherits a
+/// stdlib it was never built against — PYTHONPATH wins over the home stdlib
+/// in sys.path, so it loads one version's `re` package and another version's
+/// `_sre` extension and dies at `import re` ("SRE module mismatch") before it
+/// can print the ready line. That death lands on the acquire path as a
+/// handshake timeout, i.e. every session fails to start. Resolve the same pin
+/// here so the worker IS the interpreter the environment describes.
+std::string resolveDefaultWorkerInterpreter()
+{
+  static const char *const kPins[] = { "SICNU_PYTHON_EXECUTABLE", "PYTHONEXECUTABLE" };
+  for ( const char *pin : kPins )
+  {
+    const QString value = qEnvironmentVariable( pin ).trimmed();
+    if ( !value.isEmpty() && QFileInfo::exists( value ) )
+      return value.toStdString();
+  }
+  return std::string( "python3" );
+}
+
 ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,
                                          const ModelHardwareCapabilities &,
                                          std::string *errorMessage )
 {
   const std::string interpreter =
-    model.runtime.provider.interpreter.empty() ? "python3" : model.runtime.provider.interpreter;
+    model.runtime.provider.interpreter.empty() ? resolveDefaultWorkerInterpreter()
+                                               : model.runtime.provider.interpreter;
   // Review P1-6: the manifest may not choose an arbitrary program, and the
   // worker script must live inside the manifest directory.
   std::string policyError;
