@@ -491,7 +491,12 @@ TEST_CASE( "stale reconciliation closes dead executions from checkpoint evidence
     // idempotency — the runs are terminal now, so nothing is stale anymore.
     REQUIRE( monitor->reconcileStaleRuns().isEmpty() );
 
-    for ( const auto &run : fx.experimentStore.listRuns().value().second )
+    // Hoist the listRuns() result: iterating a member chain of a call
+    // temporary in the range initializer ends the temporary's scope before
+    // the loop body reads it (stack-use-after-scope under ASan).
+    const auto listedRuns = fx.experimentStore.listRuns();
+    REQUIRE( listedRuns.has_value() );
+    for ( const auto &run : listedRuns.value().second )
     {
         if ( run.executionRef() == failedRef )
             REQUIRE( run.status() == RunStatus::Failed );

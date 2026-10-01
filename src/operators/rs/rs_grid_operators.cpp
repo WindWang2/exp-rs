@@ -40,7 +40,11 @@ bool isExactPickKernel( const std::string &kernel )
 sicnu::geo::ConvertProgress makeProgress( RSOperatorContext &context, double from, double to )
 {
     sicnu::geo::ConvertProgress progress;
-    progress.report = [ & ]( double fraction, const std::string &message ) {
+    // The lambda is stored in the returned std::function and invoked later
+    // from inside GDAL's progress callback — it must not capture this frame's
+    // by-value parameters (from/to) by reference (stack-use-after-return).
+    // context outlives the callback (operator's run() scope owns both).
+    progress.report = [ &context, from, to ]( double fraction, const std::string &message ) {
         context.reportProgress( from + ( to - from ) * fraction, message );
     };
     return progress;

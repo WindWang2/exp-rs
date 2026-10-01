@@ -110,10 +110,13 @@ TEST_CASE( "Layer sync: removing a layer leaves no stale tree node or canvas lay
     bridge.setCanvasLayers();
     REQUIRE( canvas.layers().size() == 1 );
 
-    fx.project->removeMapLayer( layer->id() );
+    // removeMapLayer destroys the layer it owns; capture the id first so the
+    // post-removal assertions never touch freed memory.
+    const QString layerId = layer->id();
+    fx.project->removeMapLayer( layerId );
     bridge.setCanvasLayers();
 
-    CHECK( countLayerNodes( root, layer->id() ) == 0 ); // no stale tree node
+    CHECK( countLayerNodes( root, layerId ) == 0 ); // no stale tree node
     CHECK( canvas.layers().isEmpty() );                 // no stale canvas layer
 }
 
