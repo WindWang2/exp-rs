@@ -17,6 +17,7 @@
 
 #include "qgsgui.h"
 #include "qgslayertree.h"
+#include "qgslayertreegroup.h"
 #include "qgslayertreeutils.h"
 #include "qgsmapcanvas.h"
 #include "qgsmaplayer.h"
@@ -27,6 +28,8 @@
 #include "qgssettingsregistrycore.h"
 #include "qgsvectorlayer.h"
 
+#include <QPointer>
+#include <QSet>
 #include <QString>
 
 #include "moc_qgslayertreemapcanvasbridge.cpp"
@@ -45,11 +48,22 @@ QgsLayerTreeMapCanvasBridge::QgsLayerTreeMapCanvasBridge( QgsLayerTree *root, Qg
 
   connect( QgsProject::instance(), &QgsProject::layersAdded, this, &QgsLayerTreeMapCanvasBridge::layersAdded );
 
+  // The project (its layer store) destroys removed layers but never touches
+  // the layer tree: a node left behind keeps serving the dead layer's id and
+  // the canvas keeps the ghost layer. Drop the nodes and refresh the canvas
+  // here, before the layer objects are destroyed (id-based overload only —
+  // the layer pointers are about to die).
+  connect( QgsProject::instance(), qOverload<const QStringList &>( &QgsProject::layersWillBeRemoved ),
+            this, &QgsLayerTreeMapCanvasBridge::layersWillBeRemoved );
+
   setCanvasLayers();
 }
 
 void QgsLayerTreeMapCanvasBridge::setCanvasLayers()
 {
+  if ( !mRoot || !mCanvas )
+    return;
+
   QList<QgsMapLayer *> canvasLayers, overviewLayers, allLayerOrder;
 
   if ( mRoot->hasCustomLayerOrder() )
@@ -58,7 +72,7 @@ void QgsLayerTreeMapCanvasBridge::setCanvasLayers()
     for ( const QgsMapLayer *layer : customOrderLayers )
     {
       QgsLayerTreeLayer *nodeLayer = mRoot->findLayer( layer->id() );
-      if ( nodeLayer )
+      if ( nodeLayer && nodeLayer->layer() )
       {
         if ( !nodeLayer->layer()->isSpatial() )
           continue;
@@ -203,15 +217,55 @@ void QgsLayerTreeMapCanvasBridge::layersAdded( const QList<QgsMapLayer *> &layer
   {
     if ( l )
     {
-      connect( l, &QgsMapLayer::dataSourceChanged, this, [this, l] {
-        if ( l->isValid() && l->isSpatial() && mAutoSetupOnFirstLayer && !mHasValidLayersLoaded )
+      // Capture the layer through a QPointer and read the canvas through the
+      // QPointer member: the connection is torn down when either sender or
+      // receiver dies, but never keep dereferencing raw pointers captured
+      // from a signal that may outlive its objects.
+      const QPointer<QgsMapLayer> layer = l;
+      connect( l, &QgsMapLayer::dataSourceChanged, this, [this, layer] {
+        if ( layer && layer->isValid() && layer->isSpatial() && mAutoSetupOnFirstLayer && !mHasValidLayersLoaded )
         {
           mHasValidLayersLoaded = true;
           // if we are moving from zero valid layers to non-zero VALID layers, let's zoom to those data
-          mCanvas->zoomToProjectExtent();
+          if ( mCanvas )
+            mCanvas->zoomToProjectExtent();
         }
         deferredSetCanvasLayers();
       } );
     }
+  }
+}
+
+void QgsLayerTreeMapCanvasBridge::layersWillBeRemoved( const QStringList &layerIds )
+{
+  dropStaleLayerNodes( layerIds );
+
+  // Refresh synchronously: the doomed layers are destroyed right after this
+  // signal, so a deferred refresh could let the canvas (and observers) see a
+  // removed layer in between.
+  setCanvasLayers();
+}
+
+void QgsLayerTreeMapCanvasBridge::dropStaleLayerNodes( const QStringList &layerIds )
+{
+  if ( !mRoot || layerIds.isEmpty() )
+    return;
+
+  const QSet<QString> removedIds( layerIds.constBegin(), layerIds.constEnd() );
+
+  // Snapshot first: removeChildNode() deletes the node it takes, and each
+  // node object appears exactly once in findLayers(), so deleting one cannot
+  // invalidate the walk. Duplicates (a layer registered twice, which the
+  // tree tolerates temporarily) are all dropped.
+  const QList<QgsLayerTreeLayer *> layerNodes = mRoot->findLayers();
+  for ( QgsLayerTreeLayer *layerNode : layerNodes )
+  {
+    if ( !removedIds.contains( layerNode->layerId() ) )
+      continue;
+
+    // A layer node's parent is always a group (the root itself is one), so
+    // the removal goes through the owning group.
+    if ( QgsLayerTreeGroup *parentGroup = qobject_cast<QgsLayerTreeGroup *>( layerNode->parent() ) )
+      parentGroup->removeChildNode( layerNode );
   }
 }
