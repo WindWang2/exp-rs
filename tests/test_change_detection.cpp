@@ -26,6 +26,37 @@
 #if defined(__linux__) || defined(__APPLE__)
 #include <sys/resource.h>
 #endif
+#if defined(__linux__)
+#include <fstream>
+#include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
+// AddressSanitizer feature test (GCC defines __SANITIZE_ADDRESS__; Clang
+// defines __has_feature(address_sanitizer)).
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#define SICNU_TEST_ADDRESS_SANITIZER 1
+#endif
+
+// __sanitizer_purge_allocator() drains ASan's quarantine and free lists back
+// to the OS, which makes a resident-RSS reading meaningful under ASan. Clang's
+// sanitizer/common_interface.h declares it; GCC's libasan exports the symbol
+// but (through GCC 16) ships no declaring header, so declare it weak — the
+// purge is skipped on runtimes that lack the symbol.
+#if defined(SICNU_TEST_ADDRESS_SANITIZER)
+#if defined(__has_include)
+#if __has_include(<sanitizer/common_interface.h>)
+#include <sanitizer/common_interface.h>
+#define SICNU_TEST_ASAN_PURGE 1
+#endif
+#endif
+#if !defined(SICNU_TEST_ASAN_PURGE) && defined(__GNUC__)
+extern "C" void __sanitizer_purge_allocator() __attribute__((weak));
+#define SICNU_TEST_ASAN_PURGE 1
+#define SICNU_TEST_ASAN_PURGE_WEAK 1
+#endif
+#endif
 
 using namespace ChangeDetection;
 using Catch::Approx;
@@ -421,6 +452,58 @@ TEST_CASE("ChangeDetection madChange computes Chi-Square distance for multi-band
 
 namespace {
 
+#if defined(__linux__) || defined(__APPLE__)
+/// Process peak RSS (high-water mark) in KiB via getrusage ru_maxrss.
+double madPeakRssKiB()
+{
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+#if defined(__APPLE__)
+    return static_cast<double>(usage.ru_maxrss) / 1024.0; // macOS: bytes -> KiB
+#else
+    return static_cast<double>(usage.ru_maxrss); // Linux: KiB
+#endif
+}
+
+/// Current resident RSS in KiB (Linux /proc/self/statm; macOS task_info).
+/// Unlike ru_maxrss this is not monotonic, so after an allocator purge it
+/// reports memory the process still retains right now.
+double madCurrentRssKiB()
+{
+#if defined(__linux__)
+    std::ifstream statm("/proc/self/statm");
+    long pagesTotal = 0, pagesResident = 0;
+    statm >> pagesTotal >> pagesResident;
+    return static_cast<double>(pagesResident) *
+           (static_cast<double>(::sysconf(_SC_PAGESIZE)) / 1024.0);
+#else
+    task_basic_info_64_data_t info;
+    mach_msg_type_number_t count = TASK_BASIC_INFO_64_COUNT;
+    if (task_info(mach_task_self(), TASK_BASIC_INFO_64,
+                  reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS)
+        return 0.0;
+    return static_cast<double>(info.resident_size) / 1024.0;
+#endif
+}
+
+/// Drain the ASan quarantine/free lists when the runtime supports it.
+/// Returns true when a purge was actually issued (no-op otherwise).
+bool madPurgeAllocator()
+{
+#if defined(SICNU_TEST_ASAN_PURGE_WEAK)
+    if (&__sanitizer_purge_allocator == nullptr)
+        return false;
+    __sanitizer_purge_allocator();
+    return true;
+#elif defined(SICNU_TEST_ASAN_PURGE)
+    __sanitizer_purge_allocator();
+    return true;
+#else
+    return false;
+#endif
+}
+#endif // __linux__ || __APPLE__
+
 /// Synthesize a deterministic before/after MAD pair: @p bands bands, a smooth
 /// gradient background, a changed region (x in [width/4, width/2]) in the
 /// after image, and NaN sprinkled on every 97th pixel of every band (which
@@ -541,10 +624,22 @@ TEST_CASE("MAD streaming peak memory is independent of raster size", "[processin
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
 
-    const auto runOver = [&](int width, int height) {
-        const QString beforePath = tmp.path() + "/mem_before.tif";
-        const QString afterPath = tmp.path() + "/mem_after.tif";
-        writeMadTestPair(beforePath, afterPath, width, height, 3);
+    // Synthesize fixtures for BOTH sizes up front, outside the measured
+    // window. writeMadTestPair allocates full-scene O(N) write buffers (two
+    // 16 MiB blocks at 2048x2048) and churns the GDAL block cache on the
+    // write path. Measured inside the window, that churn — not the streaming
+    // pipeline — dominated the RSS delta and made the bound below flap:
+    // under ASan the freed blocks linger in the allocator quarantine, which
+    // the ru_maxrss high-water mark cannot distinguish from live memory.
+    const QString smallBefore = tmp.path() + "/mem_small_before.tif";
+    const QString smallAfter = tmp.path() + "/mem_small_after.tif";
+    const QString largeBefore = tmp.path() + "/mem_large_before.tif";
+    const QString largeAfter = tmp.path() + "/mem_large_after.tif";
+    writeMadTestPair(smallBefore, smallAfter, 256, 256, 3);
+    writeMadTestPair(largeBefore, largeAfter, 2048, 2048, 3);
+
+    const auto runScene = [&](const QString &beforePath, const QString &afterPath,
+                              int width, int height) {
         GdalDatasetWrapper beforeDs, afterDs;
         REQUIRE(beforeDs.open(beforePath));
         REQUIRE(afterDs.open(afterPath));
@@ -552,36 +647,49 @@ TEST_CASE("MAD streaming peak memory is independent of raster size", "[processin
         REQUIRE(out.size() == static_cast<size_t>(width) * height);
     };
 
-    const auto peakRssKiB = []() -> double {
-        struct rusage usage;
-        getrusage(RUSAGE_SELF, &usage);
-#if defined(__APPLE__)
-        return static_cast<double>(usage.ru_maxrss) / 1024.0; // macOS: bytes -> KiB
-#else
-        return static_cast<double>(usage.ru_maxrss); // Linux: KiB
-#endif
-    };
+    // Small run first (baseline); it also brings the GDAL block cache and the
+    // allocator arenas to steady state so one-time mapping costs do not land
+    // inside the measured window.
+    runScene(smallBefore, smallAfter, 256, 256);
+    madPurgeAllocator();
+    const double rssBefore = madPeakRssKiB();
+    [[maybe_unused]] const double liveBefore = madCurrentRssKiB();
 
-    // Small run first (baseline), then a run with 64x the pixels.
-    runOver(256, 256);
-    const double rssBefore = peakRssKiB();
-    runOver(2048, 2048);
-    const double rssAfter = peakRssKiB();
+    // Then a run with 64x the pixels.
+    runScene(largeBefore, largeAfter, 2048, 2048);
+    const double rssAfter = madPeakRssKiB();
 
     // ru_maxrss is a process high-water mark, so the delta is the growth the
     // large run caused. A full-scene O(N*bands) MAD would add hundreds of MiB
     // at 3 bands (e.g. the X_mat/Y_mat doubles alone); the streaming pipeline
-    // stays within a few tile buffers and the bands^2 state.
+    // stays within a few tile buffers, the bands^2 state and the 16 MiB
+    // output vector this driver collects.
     INFO("peak RSS before: " << rssBefore << " KiB, after: " << rssAfter << " KiB");
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    // Sanitizer redzones and quarantine inflate every tile buffer, so the
-    // same streaming pipeline legitimately peaks higher; the size
-    // independence contract still holds at the relaxed bound.
-    constexpr double kPeakGrowthLimitKiB = 224.0 * 1024.0; // growth < 224 MiB
+#if defined(SICNU_TEST_ADDRESS_SANITIZER)
+    // ASan's primary allocator retains freed blocks in a quarantine (default
+    // quarantine_size_mb=256) that RSS cannot distinguish from live memory,
+    // and GDAL's per-block tile churn cycles enough small allocations through
+    // it to fill it. The bound therefore adds the default quarantine capacity
+    // to the plain bound; a full-scene O(N) regression still trips it because
+    // the legacy buffers alone exceed 300 MiB at this scene size.
+    constexpr double kPeakGrowthLimitKiB = (128.0 + 256.0) * 1024.0; // growth < 384 MiB
 #else
     constexpr double kPeakGrowthLimitKiB = 128.0 * 1024.0; // growth < 128 MiB
 #endif
     CHECK(rssAfter - rssBefore < kPeakGrowthLimitKiB);
+
+#if defined(SICNU_TEST_ASAN_PURGE)
+    // Retained-memory check with the quarantine drained: after a purge the
+    // large run may keep only the (capped) GDAL block cache, the bands^2
+    // state and allocator metadata — nothing proportional to the scene. This
+    // catches genuine leaks/retention with a tight bound that the peak
+    // high-water mark cannot enforce under ASan.
+    if (madPurgeAllocator()) {
+        const double liveAfter = madCurrentRssKiB();
+        INFO("live RSS before: " << liveBefore << " KiB, after: " << liveAfter << " KiB");
+        CHECK(liveAfter - liveBefore < 64.0 * 1024.0); // retained growth < 64 MiB
+    }
+#endif
 #else
     SUCCEED("RSS measurement requires Linux or macOS; no-op elsewhere");
 #endif
