@@ -20,6 +20,8 @@
 #include "operators/rs/rs_quality_mosaic_operator.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "support/process_scratch.h"
+
 #include <json/json.h>
 
 #include <QDir>
@@ -50,7 +52,13 @@ struct Fixture
     static Fixture make()
     {
         Fixture f;
-        f.dir = QDir::tempPath() + QStringLiteral( "/exp_rs_qmosaic_test" );
+        // Per-process (#1392): four cases in this binary used to share one
+        // fixed /tmp directory, and tier 1 runs ctest with -j4, so two of
+        // them rewrote each other's fixtures mid-run ("Cannot publish mosaic
+        // output ... mosaic.tif"). One private tree per process keeps every
+        // parallel case deterministic.
+        f.dir = QString::fromStdString(
+            sicnu_test::processScratchDir( "exp_rs_qmosaic_test", "fixture" ) );
         QDir().mkpath( f.dir );
         const QString crs = [] {
             OGRSpatialReference srs;

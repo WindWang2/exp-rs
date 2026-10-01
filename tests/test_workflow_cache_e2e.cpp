@@ -10,6 +10,7 @@
 // leaves an on-disk checkpoint; a fresh CLI process lists the interrupted
 // run, resumes it, and the completed steps are NOT re-executed.
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -1239,9 +1240,18 @@ TEST_CASE( "A cancelled step never seeds the execution cache; only a real comple
                 out.open( QIODevice::WriteOnly | QIODevice::Truncate );
                 out.write( "cancelled-step-bytes\n" );
                 out.close();
+                // Deadline-bounded (#1392): throwIfCancelled is the only
+                // healthy exit; the deadline turns a broken cancel pipeline
+                // into a fast typed failure instead of a hang.
+                const auto parkDeadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
                 for ( ;; )
                 {
                     ctx.throwIfCancelled();
+                    if ( std::chrono::steady_clock::now() > parkDeadline )
+                        throw sicnu::operators::RSOperatorError(
+                            sicnu::operators::ErrorCode::Cancelled,
+                            "cancel never delivered within 60s" );
                     std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
                 }
                 return Json::Value( Json::objectValue );

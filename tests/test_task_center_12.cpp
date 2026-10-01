@@ -27,6 +27,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/algorithm_descriptor.h"
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "runtime/observability/execution_telemetry.h"
@@ -204,14 +205,13 @@ TEST_CASE( "Aging promotes a starved low-priority task over fresh high work",
     // (independent review P1).
     center.setAgingIntervalMs( 50 );
 
-    std::atomic<bool> release{ false };
+    sicnu_test::TestGate release;
     engine.clearExecutors();
     engine.registerExecutor( "tc12:", [&release]( const JobRequest &req,
                                                   sicnu::operators::RSOperatorContext & ) {
         if ( req.algorithmId == "tc12:blocker" )
         {
-            while ( !release.load( std::memory_order_relaxed ) )
-                QThread::msleep( 5 );
+            release.wait();
             return Json::Value();
         }
         // High fillers consume real wall-clock time so the queued low task
@@ -242,7 +242,8 @@ TEST_CASE( "Aging promotes a starved low-priority task over fresh high work",
         highs.push_back( h );
     }
 
-    release.store( true );
+    release.open();
+    CHECK(!release.timedOut());
     REQUIRE( waitForStatus( low, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
     for ( long h : highs )
         REQUIRE( waitForStatus( h, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
@@ -344,7 +345,7 @@ TEST_CASE( "Cancel watchdog finalizes a task whose worker never reports",
     center.shutdownForTests();
     center.setCancelWatchdogMs( 150 );
 
-    std::atomic<bool> hangRelease{ false };
+    sicnu_test::TestGate hangRelease;
     engine.clearExecutors();
     engine.registerExecutor( "tc12:", [&hangRelease]( const JobRequest &req,
                                                       sicnu::operators::RSOperatorContext & ) {
@@ -352,8 +353,9 @@ TEST_CASE( "Cancel watchdog finalizes a task whose worker never reports",
         {
             // Simulates a hung worker: never observes the cancel flag, never
             // returns until the test releases it (after the watchdog fired).
-            while ( !hangRelease.load( std::memory_order_relaxed ) )
-                QThread::msleep( 10 );
+            // The gate's deadline keeps a failed assertion upstream from
+            // hanging the whole binary until the harness timeout.
+            hangRelease.wait();
         }
         return Json::Value();
     } );
@@ -369,9 +371,10 @@ TEST_CASE( "Cancel watchdog finalizes a task whose worker never reports",
                                           std::chrono::milliseconds( 10 ) );
     REQUIRE( info.status == TaskStatus::Canceled );
     REQUIRE( info.errorMessage.contains( QStringLiteral( "watchdog" ),
-                                       Qt::CaseInsensitive ) );
+                                         Qt::CaseInsensitive ) );
 
-    hangRelease.store( true );
+    hangRelease.open();
+    CHECK(!hangRelease.timedOut());
     engine.clearExecutors();
     center.resetResourceProfileLimits();
     center.shutdownForTests();
@@ -391,12 +394,11 @@ TEST_CASE( "Weight admission holds non-interactive candidates at the reserve",
     center.setInteractiveReservePercent( 25 );
     auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
 
-    std::atomic<bool> release{ false };
+    sicnu_test::TestGate release;
     engine.clearExecutors();
     engine.registerExecutor( "w12:", [&release]( const JobRequest &,
                                                  sicnu::operators::RSOperatorContext & ) {
-        while ( !release.load( std::memory_order_relaxed ) )
-            QThread::msleep( 5 );
+        release.wait();
         return Json::Value();
     } );
 
@@ -425,7 +427,8 @@ TEST_CASE( "Weight admission holds non-interactive candidates at the reserve",
     const auto held = center.getTaskInfo( extra );
     REQUIRE( ( held.status == TaskStatus::Queued || held.status == TaskStatus::WaitingResource ) );
 
-    release.store( true );
+    release.open();
+    CHECK(!release.timedOut());
     REQUIRE( waitForStatus( heavy, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
     REQUIRE( waitForStatus( live, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
     // Never-starve: once the heavy task drains, the held candidate launches.
@@ -553,10 +556,18 @@ TEST_CASE( "Fault points drive the real dispatch-failure and lost-record paths",
         fault::ArmedFault armed( { "taskcenter.jobrecord", fault::Mode::Always, 0, {} } );
         const long stranded = center.submitJob( tc12Request( "tc12:slow" ) );
         REQUIRE( stranded > 0 );
-        // Give the engine a moment to pick up the job and emit (dropped)
-        // records; the executor keeps the job Running well past the watchdog
-        // deadline so cancel lands on a live job → Cancelling → watchdog.
-        QThread::msleep( 300 );
+        // Wait for the engine to pick the job up (bounded, #1392): the
+        // executor keeps it alive well past the watchdog deadline so cancel
+        // lands on a live job → Cancelling → watchdog. Picked-up is visible
+        // as the task leaving Queued; with the record fault swallowing
+        // Running it settles in Dispatching.
+        REQUIRE( sicnu_test::waitUntil(
+            [&] { return center.getTaskInfo( stranded ).status != TaskStatus::Queued; },
+            5000,
+            [&] {
+                return "tc12:slow status enum=" + std::to_string(
+                    static_cast<int>( center.getTaskInfo( stranded ).status ) );
+            } ) );
         const auto mid = center.getTaskInfo( stranded );
         REQUIRE( !sicnu::isTerminalStatus( mid.status ) );
         REQUIRE( center.cancelTask( stranded ) );
@@ -617,12 +628,11 @@ TEST_CASE( "Explicit latency-class override wins over the source lane map",
     auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
     auto &plane = sicnu::processing::ExecutionPlane::instance();
 
-    std::atomic<bool> release{ false };
+    sicnu_test::TestGate release;
     engine.clearExecutors();
     engine.registerExecutor( "l12:", [&release]( const JobRequest &,
                                                  sicnu::operators::RSOperatorContext & ) {
-        while ( !release.load( std::memory_order_relaxed ) )
-            QThread::msleep( 5 );
+        release.wait();
         return Json::Value();
     } );
 
@@ -665,7 +675,8 @@ TEST_CASE( "Explicit latency-class override wins over the source lane map",
     const auto held = center.getTaskInfo( plainHandle.taskId() );
     REQUIRE( ( held.status == TaskStatus::Queued || held.status == TaskStatus::WaitingResource ) );
 
-    release.store( true );
+    release.open();
+    CHECK(!release.timedOut());
     REQUIRE( waitForStatus( heavy, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
     REQUIRE( waitForStatus( forcedHandle.taskId(), { TaskStatus::Completed, TaskStatus::Failed },
                             15000 ) );
@@ -693,12 +704,11 @@ TEST_CASE( "CPU-thread admission cap holds a saturating candidate", "[tc12][cpu]
     center.setCpuThreadLimit( 4 );
     auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
 
-    std::atomic<bool> release{ false };
+    sicnu_test::TestGate release;
     engine.clearExecutors();
     engine.registerExecutor( "c12:", [&release]( const JobRequest &,
                                                  sicnu::operators::RSOperatorContext & ) {
-        while ( !release.load( std::memory_order_relaxed ) )
-            QThread::msleep( 5 );
+        release.wait();
         return Json::Value();
     } );
 
@@ -714,11 +724,22 @@ TEST_CASE( "CPU-thread admission cap holds a saturating candidate", "[tc12][cpu]
     const long second = center.submitJob( tc12Request( "c12:wide" ), nullptr, {}, true,
                                           TaskPriority::Normal, {} );
     REQUIRE( second > 0 );
-    QThread::msleep( 100 ); // let an admission pass evaluate the candidate
+    // Bounded observation window (#1392): give admission a real chance to
+    // evaluate the candidate (it must NOT be dispatched), failing fast — and
+    // naming the status — if it ever launches.
+    CHECK_FALSE( sicnu_test::waitUntil(
+        [&] {
+            const auto st = center.getTaskInfo( second ).status;
+            return st == TaskStatus::Running || st == TaskStatus::Dispatching
+                   || st == TaskStatus::Completed || st == TaskStatus::Failed;
+        },
+        100,
+        [] { return "c12:wide candidate was dispatched despite exceeding the CPU budget"; } ) );
     const auto held = center.getTaskInfo( second );
     REQUIRE( ( held.status == TaskStatus::Queued || held.status == TaskStatus::WaitingResource ) );
 
-    release.store( true );
+    release.open();
+    CHECK(!release.timedOut());
     REQUIRE( waitForStatus( first, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
     // Never-starve: once the first drains, the held candidate launches.
     REQUIRE( waitForStatus( second, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
@@ -741,12 +762,11 @@ TEST_CASE( "admissionSnapshot mirrors the idle never-starve rule", "[tc12][snaps
     center.setInteractiveReservePercent( 25 );
     auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
 
-    std::atomic<bool> release{ false };
+    sicnu_test::TestGate release;
     engine.clearExecutors();
     engine.registerExecutor( "s12:", [&release]( const JobRequest &,
                                                  sicnu::operators::RSOperatorContext & ) {
-        while ( !release.load( std::memory_order_relaxed ) )
-            QThread::msleep( 5 );
+        release.wait();
         return Json::Value();
     } );
 
@@ -774,7 +794,8 @@ TEST_CASE( "admissionSnapshot mirrors the idle never-starve rule", "[tc12][snaps
     REQUIRE( !busySnap.wouldAdmit );
     REQUIRE( !busySnap.reason.isEmpty() );
 
-    release.store( true );
+    release.open();
+    CHECK(!release.timedOut());
     REQUIRE( waitForStatus( holder, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
 
     registry.unregisterAdapter( "s12:huge" );
@@ -812,13 +833,12 @@ TEST_CASE( "#1159: the cancel-deadline scan stays bounded to armed candidates",
 
     // One hung task whose cancel deadline must still fire promptly through
     // the armed index while the terminal tail sits in the same map.
-    std::atomic<bool> hangRelease{ false };
+    sicnu_test::TestGate hangRelease;
     engine.registerExecutor( "tc12:", [&hangRelease]( const JobRequest &req,
                                                       sicnu::operators::RSOperatorContext & ) {
         if ( req.algorithmId == "tc12:hang2" )
         {
-            while ( !hangRelease.load( std::memory_order_relaxed ) )
-                QThread::msleep( 10 );
+            hangRelease.wait();
         }
         return Json::Value();
     } );
@@ -846,7 +866,8 @@ TEST_CASE( "#1159: the cancel-deadline scan stays bounded to armed candidates",
             ++stillTerminal;
     REQUIRE( stillTerminal >= kTerminalTail );
 
-    hangRelease.store( true );
+    hangRelease.open();
+    CHECK(!hangRelease.timedOut());
     engine.clearExecutors();
     center.resetResourceProfileLimits();
     center.shutdownForTests();
@@ -875,8 +896,8 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
     center.setGlobalConcurrencyLimit( 2 );
     center.setAgingIntervalMs( 0 ); // no promotion: only the heap can schedule
 
-    std::atomic<bool> releaseChildren{ false };
-    std::atomic<bool> releaseOwners{ false };
+    sicnu_test::TestGate releaseChildren;
+    sicnu_test::TestGate releaseOwners;
     std::atomic<bool> lateSubmitted{ false };
     std::atomic<bool> lateRan{ false };
     // No Catch2 assertions off the test thread: failures ride this flag and
@@ -932,14 +953,12 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
         }
         if ( req.algorithmId == "tc12:ownerB" )
         {
-            while ( !releaseOwners.load( std::memory_order_relaxed ) )
-                QThread::msleep( 10 );
+            releaseOwners.wait();
             return Json::Value();
         }
         if ( req.algorithmId == "tc12:child" )
         {
-            while ( !releaseChildren.load( std::memory_order_relaxed ) )
-                QThread::msleep( 10 );
+            releaseChildren.wait();
             return Json::Value();
         }
         if ( req.algorithmId == "tc12:late" )
@@ -976,11 +995,13 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
 
     // Free the transient budget: with a healthy heap the late child launches
     // on the very next admission pass; with the drop it can never run.
-    releaseChildren.store( true );
+    releaseChildren.open();
 
     // ownerA returns after its bounded lateRan wait; both owners then finish.
     REQUIRE( waitForStatus( ownerA, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
-    releaseOwners.store( true );
+    releaseOwners.open();
+    CHECK(!releaseChildren.timedOut());
+    CHECK(!releaseOwners.timedOut());
     REQUIRE( waitForStatus( ownerB, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
 
     // The proof: the late child must have RUN. A join-cancel of a
@@ -1022,8 +1043,12 @@ TEST_CASE( "Transient auto-retry cancels the dead engine job (no zombie double r
             // Deliberately ignores the cancel flag: the engine's cancel
             // verdict must come from finishSuccess's flag check, not from
             // cooperative exit.
-            while ( !finishAttempt.load( std::memory_order_relaxed ) )
-                QThread::msleep( 10 );
+            // Deadline-bounded (#1392): the executor still never looks at the
+            // flag under test, but it no longer spins forever if the case that
+            // owns `finishAttempt` aborts before opening it.
+            sicnu_test::waitUntil(
+                [&] { return finishAttempt.load( std::memory_order_relaxed ); }, 60000,
+                [] { return "tc12:zombie never saw a finish attempt"; } );
         }
         return Json::Value();
     } );

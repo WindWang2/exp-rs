@@ -33,6 +33,8 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include "support/qt_lifecycle.h"
+
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -75,20 +77,13 @@ using sicnu::testing::perf::Sample;
 
 namespace
 {
-// Full QGIS/TaskCenter teardown at process exit is a destruction-order
-// minefield on this link set (same atexit segfault class test_layout_tools
-// documents): report the results, then leave via _Exit before any static
-// destructor runs.
-class FastExitListener : public Catch::EventListenerBase
-{
-  public:
-    using Catch::EventListenerBase::EventListenerBase;
-    void testRunEnded( const Catch::TestRunStats &stats ) override
-    {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-    }
-};
-CATCH_REGISTER_LISTENER( FastExitListener )
+// The FastExitListener(_Exit) that used to live here — "report results, then
+// leave before any static destructor runs" (same atexit segfault class
+// test_layout_tools documents) — is retired: TeardownListener runs the
+// ordered teardown (drain deferred deletes -> exitQgis -> delete app) at
+// testRunEnded, and surviving glibc exit() is the retirement assertion
+// (#1392 WP-I).
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 } // namespace
 
 namespace

@@ -26,6 +26,10 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include "support/qt_lifecycle.h"
+#include "support/exprs_test_env.h"
+#include "support/qsettings_redirect.h"
+
 #include "main_window.h"
 #include "processing/framework/task_center.h"
 #include "widgets/progress_dialog.h"
@@ -78,26 +82,34 @@ QApplication *ensureApp()
   return static_cast<QApplication *>( QCoreApplication::instance() );
 }
 
-class FastExitListener : public Catch::EventListenerBase
+exprs_test::QSettingsUserRootRedirect qsettingsRedirect;
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
+
+// Narrow, evidence-backed residual guard (#1392 WP-I, re-adjudicate on
+// CI-like stacks): the QGIS/PROJ static-teardown segment IS retired — the
+// TeardownListener above runs the ordered teardown and this host survives
+// it. What still crashes here is a THIRD-PARTY atexit finalizer downstream:
+// gdb shows SIGSEGV in pthread_mutex_lock (libc) called from
+// libnvidia-glcore via libopencv_dnn's __cxa_finalize, AFTER
+// "ALL TESTS PASSED" — i.e. the OpenCV DNN NVIDIA-backend teardown on
+// hosts with an NVIDIA driver. It is deterministic here (rc=139 twice on
+// both binaries) and cannot be adjudicated from a driver-less CI
+// environment, so the exit guard stays, narrowed to run AFTER the ordered
+// teardown (registration order = listener order) so only the third-party
+// atexit segment is skipped. Real failures still exit non-zero.
+class ExitAfterTeardown : public Catch::EventListenerBase
 {
   public:
     using Catch::EventListenerBase::EventListenerBase;
     void testRunEnded( const Catch::TestRunStats &stats ) override
     {
-      const bool ok = !stats.aborting && stats.totals.testCases.failed == 0;
-      std::fprintf( stderr, "\n%s: %u/%u assertions, %u/%u test cases\n",
-                    ok ? "ALL TESTS PASSED" : "TESTS FAILED",
-                    static_cast<unsigned>( stats.totals.assertions.passed ),
-                    static_cast<unsigned>( stats.totals.assertions.passed
-                                           + stats.totals.assertions.failed ),
-                    static_cast<unsigned>( stats.totals.testCases.passed ),
-                    static_cast<unsigned>( stats.totals.testCases.passed
-                                           + stats.totals.testCases.failed ) );
+      std::fflush( stdout );
       std::fflush( stderr );
-      std::_Exit( ok ? 0 : 1 );
+      std::_Exit( (!stats.aborting && stats.totals.testCases.failed == 0) ? 0 : 1 );
     }
 };
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( ExitAfterTeardown )
+
 
 // ---------------------------------------------------------------------------
 // Loopback STAC stub: records arriving requests, lets the test release

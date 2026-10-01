@@ -5,6 +5,11 @@
 // propagation, automatic detach on viewAboutToBeRemoved, and the reentrancy
 // contract (propagation never echoes back).
 #include <catch2/catch_session.hpp>
+
+#include "support/qt_lifecycle.h"
+
+// Ordered teardown at testRunEnded replaces the retired std::_Exit tail.
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/shell/view_link_controller.h"
@@ -76,30 +81,38 @@ struct DataManager
     }
 };
 
+/// Waits (bounded, event-loop friendly) until @p done turns true.
+bool waitFor( const std::function<bool()> &done, int cycles = 500 )
+{
+    for ( int i = 0; i < cycles && !done(); ++i )
+    {
+        QApplication::processEvents();
+        QThread::msleep( 10 );
+    }
+    return done();
+}
+
 } // namespace
 
 int main( int argc, char *argv[] )
 {
-    // A scoped QgsApplication with GUI enabled (QT_QPA_PLATFORM=offscreen
+    // Heap-owned QgsApplication with GUI enabled (QT_QPA_PLATFORM=offscreen
     // carries it); QgsMapCanvas aborts without the QGIS singletons.
-    // Track 2 R4 retirement of the #1319 leak: the app is now DESTROYED on
-    // scope exit — after exitQgis() invalidated the CRS/transform/ellipsoid
-    // caches while the thread-local PROJ context is still alive (the
-    // qgsapplication.cpp invalidateCaches contract), and BEFORE glibc
-    // exit() would otherwise tear the QApplication down after the
-    // Q_GLOBAL_STATIC cache guards (the captured SIGSEGV chain:
-    // ~QApplicationPrivate::cleanupThreadData -> ~QgsProjContext ->
-    // removeFromCacheObjectsBelongingToCurrentThread -> null cache lock).
-    QgsApplication app( argc, argv, true );
+    // Retirement history: the #1319 leak fix moved the app to scoped storage,
+    // and when canvas/project cases still crashed in glibc atexit cleanup
+    // (QGIS thread-local PROJ context) under one-case-per-process ctest, a
+    // std::_Exit tail skipped static destruction entirely. That tail is now
+    // retired (#1392 WP-I): the registered TeardownListener runs the ordered
+    // teardown at testRunEnded — drain deferred deletes, exitQgis() while the
+    // thread-local PROJ context is alive (the qgsapplication.cpp
+    // invalidateCaches contract), delete the app — and returning normally
+    // from main, surviving glibc exit(), is the retirement assertion itself.
+    QgsApplication *app = new QgsApplication( argc, argv, true );
     QgsApplication::initQgis();
     const int result = Catch::Session().run( argc, argv );
-    // Canvas/project cases still crashed in glibc atexit cleanup (QGIS
-    // thread-local PROJ context) once ctest ran them one case per process,
-    // after every assertion had passed. Skip static destruction entirely,
-    // like test_workbench_full_shell_lifecycle / test_twincanvas_sync.
     std::fflush( stdout );
     std::fflush( stderr );
-    std::_Exit( result );
+    return result;
 }
 
 TEST_CASE( "view link propagates extents across linked views",
@@ -131,19 +144,20 @@ TEST_CASE( "view link propagates extents across linked views",
 
     a.setExtent( QgsRectangle( 0, 0, 100, 100 ) );
     a.setExtent( QgsRectangle( 10, 10, 90, 90 ) );
-    QThread::msleep( 80 ); // throttle window (16 ms) + propagation
-    QApplication::processEvents();
+    // Propagation crosses the real 16 ms throttle: wait for the observed
+    // state instead of a fixed 80 ms sleep (#1392 WP-C).
+    CHECK( waitFor( [&] { return b.extent() == a.extent(); }, 500 ) );
 
-    CHECK( b.extent() == a.extent() );
     CHECK_FALSE( c.extent() == a.extent() );
     CHECK( controller.stats().appliedSyncCount >= 1 );
 
     // Unlinking B stops its propagation; A still linked to nothing else.
     controller.setLinked( viewB, false );
     a.setExtent( QgsRectangle( 20, 20, 80, 80 ) );
-    QThread::msleep( 80 );
-    QApplication::processEvents();
-    CHECK_FALSE( b.extent() == a.extent() );
+    // Bounded negative-observation window (#1392): give the throttle a real
+    // chance to propagate (fail fast if the unlink leaked), then assert B
+    // never followed.
+    CHECK_FALSE( waitFor( [&] { return b.extent() == a.extent(); }, 16 ) );
 }
 
 TEST_CASE( "view link detaches removed views automatically",
@@ -235,17 +249,6 @@ sicnu::data::AssetId registerRasterAsset( sicnu::data::DataManager &data,
     return registered.assetId;
 }
 
-/// Waits (bounded, event-loop friendly) until @p done turns true.
-bool waitFor( const std::function<bool()> &done, int cycles = 500 )
-{
-    for ( int i = 0; i < cycles && !done(); ++i )
-    {
-        QApplication::processEvents();
-        QThread::msleep( 10 );
-    }
-    return done();
-}
-
 } // namespace
 
 TEST_CASE( "view link groups propagate independently", "[view_link][linked11]" )
@@ -279,8 +282,8 @@ TEST_CASE( "view link groups propagate independently", "[view_link][linked11]" )
     CHECK( controller.linkGroup( viewA ) == QStringLiteral( "terrain" ) );
 
     a.setExtent( QgsRectangle( 0, 0, 100, 100 ) );
-    QThread::msleep( 80 ); // throttle window (16 ms) + propagation
-    QApplication::processEvents();
+    // Wait for the observed state across the real throttle (#1392 WP-C).
+    CHECK( waitFor( [&] { return b.extent() == a.extent(); }, 500 ) );
 
     // Group "terrain" followed A; group "spectral" is untouched.
     CHECK( b.extent() == a.extent() );
@@ -288,16 +291,15 @@ TEST_CASE( "view link groups propagate independently", "[view_link][linked11]" )
     CHECK_FALSE( d.extent() == a.extent() );
 
     c.setExtent( QgsRectangle( 500, 500, 700, 700 ) );
-    QThread::msleep( 80 );
-    QApplication::processEvents();
+    CHECK( waitFor( [&] { return d.extent() == c.extent(); }, 500 ) );
     CHECK( d.extent() == c.extent() );
     CHECK_FALSE( b.extent() == c.extent() );
 
     // A one-pass propagation terminates: no ping-pong after settling.
+    // Bounded no-change observation (#1392): pump through one full throttle
+    // window and assert the sync count stayed flat.
     const auto settled = controller.stats().appliedSyncCount;
-    QApplication::processEvents();
-    QThread::msleep( 40 );
-    QApplication::processEvents();
+    CHECK_FALSE( waitFor( [&] { return controller.stats().appliedSyncCount != settled; }, 16 ) );
     CHECK( controller.stats().appliedSyncCount == settled );
 }
 
@@ -465,8 +467,9 @@ TEST_CASE( "removing a view mid-flight does not crash the link controllers",
     CHECK_FALSE( layerLinks.views().contains( viewA ) );
     CHECK( links.activeView().isNull() );
     a->deleteLater();
-    QApplication::processEvents();
-    QThread::msleep( 40 );
+    // Deterministic deferred-delete flush (#1392): process the DeferredDelete
+    // queue instead of sleeping across a timer tick.
+    QApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
     QApplication::processEvents();
 
     // The surviving view keeps working.

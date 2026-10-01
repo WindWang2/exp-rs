@@ -141,11 +141,53 @@ gates account for that.
    seed (~2500 s+ measured basis: 12.27 ms/run Debug × 2) and would exceed
    the longrun registration's 2400 s TIMEOUT. No sanitizer LONG_RUN lane
    exists; if one is added, raise that TIMEOUT with attribution data.
-4. **LONG_RUN label**: ctest tests registered with `LABELS LONG_RUN` are the
-   periodic full-scale lane. `ctest -LE LONG_RUN` is the fast local/PR loop;
-   `ctest -L LONG_RUN` is the full-scale session. Labels are visible and
-   auditable in `ctest -N -V`.
+4. **Cost-tier labels** (R6, #1392): every discovered ctest case carries one,
+   injected as the default `FAST` by `sicnu_discover_tests` unless a
+   registration overrides it. Vocabulary (upper-case, per the LONG_RUN
+   precedent):
+   - `FAST` — the tier-1 signal lane; a bare/fast `ctest` selection.
+   - `SLOW` — audited minutes-scale clusters (benchmarks/scale suites,
+     TIMEOUT >= 300 s); still required coverage, run by tier 2 and by
+     explicit `ctest -L SLOW` sessions.
+   - `LONG_RUN` — 20 min+ full-scale sessions (`ctest -L LONG_RUN`).
+   Tier-1 CI and the fast local/PR loop select with `ctest -LE "SLOW|LONG_RUN"`;
+   tier 2 (sanitizer) runs everything EXCEPT `LONG_RUN` — the 2400 s
+   full-scale session is a deliberate CI exclusion (review P1, R6): master's
+   unfiltered lanes never completed inside GitHub's 360-min job cap, so the
+   session ran only by queue luck; run it explicitly via `ctest -L LONG_RUN`.
+   Coverage audit scope: the census gate
+   (`.planning/verify-chain-r4/chain_gate_census.sh`, section 5) FAILs any
+   DISCOVERY-FUNNEL case without a label; the ~28 bare `add_test` script
+   lanes (python/pi/i18n/edit/D16) run unlabeled in BOTH tiers by design
+   (label-less tests cannot match `-LE` exclusions) and remain
+   hand-countable. `ctest -N -V` shows all labels.
+   The Catch2 `[tier1]` / `[e2e]` source tags (48 suites) are documentation
+   only and are NOT the selection mechanism: a tag selects through Catch2's
+   own `-` filter inside one binary, so it cannot express a ctest-wide
+   exclusion, and a tag scan is not machine-auditable the way a LABELS
+   property is. #1392 asked for "exclude e2e" — measured on the tier-1 lane,
+   the e2e-tagged cases are seconds-scale (the whole 8210-case suite finishes
+   in 23 min at `-j4`), so excluding them buys nothing and would drop the
+   E2E contract out of the required signal lane. The cost tiers above carry
+   the exclusion instead.
 5. **Shared-host timing evidence**: perf contracts measure multiple passes
    and assert on the median (see `test_workspace_catalog.cpp`). When quoting
    timings in a budget discussion, record build type, sanitizer state, and
    host load — a single Debug number on a loaded host is not attribution.
+6. **Per-process scratch directories** (`tests/support/process_scratch.h`,
+   R6, #1392): tier 1 runs `ctest -j4`, i.e. every case is its own process
+   running alongside three others, so a fixture directory derived from
+   `temp_directory_path()` with a literal name is shared across processes,
+   and each case's opening `remove_all()` deletes its siblings' fixtures
+   mid-write. #1414 hit this in `test_io_canonical_metadata`; the tier-1
+   `-j4` lane surfaced it in `test_io_multidim` (three cases share the
+   `"cube9"` scratch name) and `test_quality_mosaic_operator` (one fixed dir
+   shared by four cases). Use
+   `sicnu_test::processScratchDir( "<prefix>", "<case-name>" )` for any
+   `temp_directory_path()` / `QDir::tempPath()` fixture: it keys the root on
+   the process id and removes it at process exit, so parallel cases cannot
+   touch each other's files and a crashed run leaves nothing behind. Keep the
+   per-case `name` component — a single process running several cases (a
+   plain `./test_x`, or any `-j1` lane) still needs one directory per case.
+   The ~85 remaining fixed-path sites are a burn-down backlog, not a
+   licence to add more.

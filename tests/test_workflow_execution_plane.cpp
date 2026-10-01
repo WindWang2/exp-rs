@@ -25,6 +25,7 @@
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_runtime.h"
 #include "workflow/workflow_types.h"
+#include "support/bounded_wait.h"
 
 using namespace sicnu::workflow;
 using namespace sicnu::operators;
@@ -86,7 +87,10 @@ public:
   }
 };
 
-// Slow operator that polls cancellation
+// Slow operator that polls cancellation. The entry flag lets the cancel test
+// request cancellation from a deterministic mid-run point instead of racing
+// admission with a fixed sleep (#1392).
+std::atomic<bool> g_planeEntered{false};
 class SlowPlaneOperator : public RSOperator
 {
 public:
@@ -97,6 +101,7 @@ public:
   Json::Value schema() const override { return Json::Value(Json::objectValue); }
   Json::Value run(const Json::Value &, RSOperatorContext &ctx) override
   {
+    g_planeEntered.store(true);
     for (int i = 0; i < 1000000; ++i)
     {
       ctx.throwIfCancelled();
@@ -268,12 +273,11 @@ TEST_CASE("WorkflowRuntime via ExecutionPlane is cancellable (Fake slow operator
   const std::string sid = rt.open("wf:plane_cancel");
   REQUIRE_FALSE(sid.empty());
 
-  std::atomic<bool> started{false};
   std::string runError;
   bool threw = false;
+  g_planeEntered.store(false);
 
   std::thread runner([&]() {
-    started.store(true);
     try {
       rt.runStep(sid, "slow");
     } catch (const std::exception &e) {
@@ -282,10 +286,10 @@ TEST_CASE("WorkflowRuntime via ExecutionPlane is cancellable (Fake slow operator
     }
   });
 
-  while (!started.load())
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  // Give the ExecutionPlane task a moment to be admitted/running
-  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  // Wait for the operator to enter its run loop, then cancel mid-run: no
+  // admission race, no fixed sleep (#1392).
+  REQUIRE(sicnu_test::waitUntil([&] { return g_planeEntered.load(); }, 5000,
+                                [] { return "SlowPlaneOperator never entered its run loop"; }));
   rt.requestCancel(sid);
   runner.join();
 
@@ -307,15 +311,16 @@ TEST_CASE("WorkflowRuntime via ExecutionPlane is cancellable (Fake slow operator
   rt2.registerDefinition(d);
   const std::string sid2 = rt2.open("wf:plane_cancel");
   REQUIRE_FALSE(sid2.empty());
-  std::atomic<bool> started2{false};
   std::string err2;
   bool threw2 = false;
+  g_planeEntered.store(false);
   std::thread r2([&]() {
-    started2.store(true);
     try { rt2.runStep(sid2, "slow"); } catch (const std::exception &e) { threw2 = true; err2 = e.what(); }
   });
-  while (!started2.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  // Same deterministic mid-run cancel for the synchronous fallback path: wait
+  // until the operator is inside its loop before requesting cancellation.
+  REQUIRE(sicnu_test::waitUntil([&] { return g_planeEntered.load(); }, 5000,
+                                [] { return "SlowPlaneOperator (fallback) never entered its run loop"; }));
   rt2.requestCancel(sid2);
   r2.join();
   REQUIRE(threw2);

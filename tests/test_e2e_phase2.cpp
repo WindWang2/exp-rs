@@ -17,6 +17,7 @@
 #include "operators/gdal/gdal_operator_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "workflow/workflow_runtime.h"
 
 #include <QCoreApplication>
@@ -621,10 +622,11 @@ TEST_CASE("Tier 1 - Subsystem: Cooperative job cancellation hook", "[e2e][tier1]
         }
     );
 
-    // Wait until started
-    while (!runningStarted.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
+    // Wait until started — bounded (#1392): if the job never dispatches (engine
+    // shutdown, leaked gates from an earlier case) this fails fast with
+    // diagnostics instead of spinning until the harness timeout.
+    REQUIRE(sicnu_test::waitUntil([&runningStarted] { return runningStarted.load(); }, 10000,
+                                  [] { return "callable:cancellable job never started running"; }));
 
     REQUIRE(engine.cancel(jobId));
     engine.waitUntilIdleForTests(3000);

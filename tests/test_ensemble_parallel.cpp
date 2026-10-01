@@ -5,6 +5,7 @@
 // and zero staged residue after injected member failure and cancellation.
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <json/json.h>
@@ -536,8 +537,10 @@ TEST_CASE( "one member failure stops the run with zero residue",
             : m_artifact( std::move( artifact ) ), m_aForwards( aForwards ) {}
         cv::Mat infer( const cv::Mat & ) override
         {
-          while ( m_aForwards->load() == 0 )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+          // Deadline-bounded (#1392): if the ensemble never routes a forward
+          // to member A, fail fast instead of spinning to the harness timeout.
+          sicnu_test::waitUntil( [&] { return m_aForwards->load() != 0; }, 30000,
+                                 [] { return "member A never received a forward pass"; } );
           throw std::runtime_error( "injected member failure (out of memory)" );
         }
         std::string framework() const override { return "failfw-b"; }
@@ -618,10 +621,15 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
   // forward pass; the main thread then cancels — so the abort provably lands
   // INSIDE a running member (its next tile boundary), not at worker entry.
   std::atomic<int> forwards{ 0 };
+  std::atomic<bool> cancelFlag{ false };
+
+  RSOperatorContext context;
+  context.setCancelFlag( &cancelFlag );
+
   ModelRuntimeRegistry::instance().registerProvider(
     "cancfw-a",
-    [ &forwards ]( const ModelInfo &model, const ModelHardwareCapabilities &,
-                   std::string *error ) -> ModelRuntimePtr {
+    [ &forwards, &cancelFlag ]( const ModelInfo &model, const ModelHardwareCapabilities &,
+                                 std::string *error ) -> ModelRuntimePtr {
       if ( model.resolvedArtifactPath.empty() )
       {
         if ( error )
@@ -630,11 +638,22 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
       }
       struct Counting final : IModelRuntime
       {
-        Counting( std::string artifact, std::atomic<int> *forwards )
-            : m_artifact( std::move( artifact ) ), m_forwards( forwards ) {}
+        Counting( std::string artifact, std::atomic<int> *forwards,
+                  std::atomic<bool> *cancel )
+            : m_artifact( std::move( artifact ) ), m_forwards( forwards ), m_cancel( cancel ) {}
         cv::Mat infer( const cv::Mat &blob ) override
         {
           m_forwards->fetch_add( 1 );
+          // Cancel from inside the first forward pass (#1392): the flag must
+          // land after a forward has provably started and before the run can
+          // finish, which a watchdog thread polling a shared counter can only
+          // arrange by luck — this fixture's two members are fast enough that
+          // the whole run used to complete inside the watchdog's poll window,
+          // leaving `cancelled == false` and both output artifacts on disk.
+          // Setting it here makes the abort land at a member's next tile
+          // boundary, which is what the case asserts, on every run.
+          if ( m_forwards->load() == 1 )
+            m_cancel->store( true );
           cv::Mat out = blob.clone();
           out.convertTo( out, CV_32F, 2.0 );
           return out;
@@ -645,8 +664,9 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
         std::string artifactPath() const override { return m_artifact; }
         std::string m_artifact;
         std::atomic<int> *m_forwards;
+        std::atomic<bool> *m_cancel;
       };
-      return std::make_shared<Counting>( model.resolvedArtifactPath, &forwards );
+      return std::make_shared<Counting>( model.resolvedArtifactPath, &forwards, &cancelFlag );
     } );
   const ScaleProviderGuard guardB( "cancfw-b", 0.5, false );
   QTemporaryDir dir;
@@ -660,16 +680,7 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
   request.inputPath = input.toStdString();
   request.outputPath = output.toStdString();
   request.modelReference = "ens-cancel";
-  RSOperatorContext context;
-  std::atomic<bool> cancelFlag{ false };
-  context.setCancelFlag( &cancelFlag );
 
-  // Cancel from a watchdog once the first forward pass has happened.
-  std::thread watchdog( [ & ]() {
-    while ( forwards.load() == 0 )
-      std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-    cancelFlag.store( true );
-  } );
   bool cancelled = false;
   try
   {
@@ -681,7 +692,6 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
     if ( !cancelled )
       WARN( "unexpected error: " + error.message() );
   }
-  watchdog.join();
   CHECK( cancelled );
   CHECK( forwards.load() >= 1 ); // the abort was mid-member, not pre-run
 

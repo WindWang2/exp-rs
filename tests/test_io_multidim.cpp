@@ -6,6 +6,8 @@
 #include "geospatial/multidim/multidim_view.h"
 #include "geospatial/gdal_guard.h"
 
+#include "support/process_scratch.h"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
@@ -24,11 +26,12 @@ namespace
 {
 std::string scratch( const std::string &name )
 {
-  const fs::path dir = fs::temp_directory_path() / "sicnu_io_test_multidim" / name;
-  std::error_code ec;
-  fs::remove_all( dir, ec ); // idempotent suites: start from a clean scratch
-  fs::create_directories( dir );
-  return dir.string();
+  // Per-process (#1392): three cases in this binary share the "cube9"
+  // scratch name, and tier 1 runs ctest with -j4, i.e. those cases are
+  // separate processes at the same time. A fixed tree let one case's
+  // remove_all delete another's netCDF mid-write ("Cannot open
+  // multidimensional store").
+  return sicnu_test::processScratchDir( "sicnu_io_test_multidim", name );
 }
 
 bool netCdfAvailable()

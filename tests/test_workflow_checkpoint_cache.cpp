@@ -5,6 +5,8 @@
 // set after resume (1..4), and the atomic-write protocol (no .tmp residue,
 // parseable document). Executors are injected test doubles.
 #include <catch2/catch_test_macros.hpp>
+
+#include "support/bounded_wait.h"
 #include <QApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -420,6 +422,14 @@ TEST_CASE( "#1158: a cancel racing a resume is never swallowed into Succeeded no
     REQUIRE( coordinator.startRun( chain( 3 ), dir ) );
     REQUIRE( waitForCompleted( coordinator ) );
 
+    // Bounded phase-1 bias (#1392, kept as a fixed window deliberately):
+    // requestCancel() is two-phase (pipeline_run_coordinator.cpp:745) — the
+    // phase-1 flag lands lock-free, but the call only RETURNS after the
+    // phase-2 hop drains on the affinity thread, which is parked until the
+    // pump below. The refusal under test keys on the PHASE-1 flag, and
+    // RunState is private, so a deterministic wait is impossible without a
+    // production seam; the resume itself fails closed if the flag has not
+    // landed, so a missed window fails the test rather than corrupting it.
     std::thread canceler( [&coordinator] { coordinator.requestCancel(); } );
     QThread::msleep( 50 ); // phase 1 lands; phase 2 waits for the pump
     QString error;
@@ -2006,8 +2016,12 @@ TEST_CASE( "requestCancel during a whole-file hash returns promptly and cancels 
     // affinity thread is (about to be) inside the whole-file hash.
     std::atomic<qint64> cancelMs{ -1 };
     QThread *canceller = QThread::create( [&coordinator, &ready, &cancelMs]() {
-        while ( !ready.load( std::memory_order_acquire ) )
-            QThread::yieldCurrentThread();
+        // Deadline-bounded (#1392): if the executor never reports ready, the
+        // canceller proceeds anyway and the assertions below report the real
+        // run state instead of this thread spinning into the harness timeout.
+        sicnu_test::waitUntil(
+            [&] { return ready.load( std::memory_order_acquire ); }, 60000,
+            [] { return "big-artifact executor never signalled ready"; } );
         QThread::msleep( 50 ); // let the hash get deep into the file
         const qint64 started = QDateTime::currentMSecsSinceEpoch();
         coordinator.requestCancel();
@@ -2064,7 +2078,11 @@ TEST_CASE( "A foreign-thread destruction mid-run drains without racing the owner
 
     std::atomic<bool> destroyed{ false };
     QThread *killer = QThread::create( [&coordinator, &destroyed]() {
-        QThread::msleep( 60 ); // mid-run: nodes dispatched, completions queued
+        // Destroy at a deterministic mid-run point (#1392): observed running,
+        // not a fixed 60 ms guess that raced dispatch on slow machines.
+        sicnu_test::waitUntil(
+            [&coordinator] { return coordinator->isRunning(); }, 10000,
+            [] { return "coordinator never entered running state for mid-run destroy"; } );
         delete coordinator;    // foreign-thread destruction
         destroyed.store( true );
     } );

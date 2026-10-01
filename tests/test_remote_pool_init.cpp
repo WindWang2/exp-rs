@@ -9,6 +9,7 @@
 // the runner gives every case a fresh process and therefore a genuine
 // first use — the state the race in #1047 corrupted.
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 
 #include "data/providers/gdal_runtime.h"
 #include "data/providers/remote_source_cache.h"
@@ -190,9 +191,14 @@ TEST_CASE( "RemoteDatasetPool clear waits for leases and drops cached handles",
         cleared = true;
     } );
 
-    while ( !entered.load() )
-        std::this_thread::yield();
-    std::this_thread::sleep_for( std::chrono::milliseconds( 150 ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] { return entered.load(); }, 5000,
+        [] { return "clearer thread never entered"; } ) );
+    // Bounded observation window (#1392): the outstanding lease must keep
+    // blocking clear(); fail fast if it ever completes, never hang.
+    CHECK_FALSE( sicnu_test::waitUntil(
+        [&] { return cleared.load(); }, 150,
+        [] { return "clear() completed despite the outstanding lease"; } ) );
     CHECK_FALSE( cleared.load() ); // outstanding lease still blocks clear()
 
     held = RemoteDatasetLease{};

@@ -7,6 +7,7 @@
 #include <opencv2/core.hpp>
 
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/task_center.h"
 #include "rs_classifier_normalbayes.h"
@@ -82,8 +83,10 @@ class BlockingPostProcessTask final : public RsPostProcessTask
     bool run() override
     {
       mStarted.store( true );
-      while ( !mRelease.load() )
-        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+      // Deadline-bounded (#1392): an assertion failure upstream must not strand
+      // this task spinning until the harness timeout.
+      sicnu_test::waitUntil( [this] { return mRelease.load(); }, 30000,
+                             [] { return "gated test task never released"; } );
       return true;
     }
 
@@ -166,8 +169,10 @@ class BlockingCrossValidationTask final : public TestCvTask
     bool run() override
     {
       mStarted.store( true );
-      while ( !mRelease.load() )
-        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+      // Deadline-bounded (#1392): an assertion failure upstream must not strand
+      // this task spinning until the harness timeout.
+      sicnu_test::waitUntil( [this] { return mRelease.load(); }, 30000,
+                             [] { return "gated test task never released"; } );
       return true;
     }
 

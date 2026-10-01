@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
@@ -533,8 +534,8 @@ TEST_CASE( "prune never touches queued or running records", "[job]" )
     ~ReleaseOnExit() { flag.store( true ); }
   } releaseGuard{release};
   auto blocking = [&release]( const JobRequest &, RSOperatorContext & ) {
-    while ( !release.load() )
-      std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    sicnu_test::waitUntil( [&] { return release.load(); }, 30000,
+                           [] { return "callable:prune-block gate never released"; } );
     Json::Value r( Json::objectValue );
     r["ok"] = true;
     return r;
@@ -1383,11 +1384,15 @@ TEST_CASE( "dynamic maxWorkers adjustment under load", "[job][concurrency]" )
     ids.push_back( eng.submit(
       req,
       [&release]( const JobRequest &, RSOperatorContext &ctx ) {
-        while ( !release.load() )
-        {
+        sicnu_test::waitUntil( [&] { return release.load() || ctx.isCancelled(); }, 30000,
+                               [] { return "callable:dyn_workers gate never released"; } );
+        // Oracle preservation (review P2): the original loop only ever
+        // exited via throwIfCancelled on the cancel path, surfacing an
+        // unexpected cancel as JobState::Cancelled (and failing the
+        // Succeeded assertions below). Returning normally on cancel would
+        // let a "maxWorkers shrink cancels running jobs" regression pass.
+        if ( !release.load() )
           ctx.throwIfCancelled();
-          std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-        }
         return Json::Value( Json::objectValue );
       } ) );
   }

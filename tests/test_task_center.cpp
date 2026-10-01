@@ -7,6 +7,7 @@
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
+#include "support/bounded_wait.h"
 
 #include <QObject>
 
@@ -435,17 +436,19 @@ TEST_CASE("TaskCenter - Running cancellation waits for the worker terminal state
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();
     std::atomic_bool started = false;
-    std::atomic_bool releaseWorker = false;
+    // Bounded release gate (#1392): opens itself after its budget, so an
+    // assertion failure before open() can no longer strand the worker in a
+    // spin that hung until the harness timeout and masked the real failure.
+    sicnu_test::TestGate releaseGate;
 
     sicnu::jobs::JobRequest request;
     request.algorithmId = "callable:cancel-lifecycle";
     request.source = "task_panel";
     const long taskId = sicnu::TaskCenter::instance().submitJob(
         request,
-        [&started, &releaseWorker](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+        [&started, &releaseGate](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
             started.store(true);
-            while (!releaseWorker.load())
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            releaseGate.wait();
             return Json::Value(Json::objectValue);
         });
 
@@ -457,7 +460,8 @@ TEST_CASE("TaskCenter - Running cancellation waits for the worker terminal state
     // Running) until the worker's terminal record arrives.
     REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Cancelling);
 
-    releaseWorker.store(true);
+    releaseGate.open();
+    CHECK(!releaseGate.timedOut());
     engine.waitUntilIdleForTests();
     for (int attempt = 0; attempt < 200
                       && sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Cancelling;
@@ -606,10 +610,10 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
     std::atomic<int> maxCli{ 0 };
     std::atomic<int> inFlightInproc{ 0 };
     std::atomic<int> maxInproc{ 0 };
-    std::atomic<bool> releaseWorkers{ false };
+    sicnu_test::TestGate releaseGate;
 
     auto holdExecutor = []( std::atomic<int> &inFlight, std::atomic<int> &maxSeen,
-                            std::atomic<bool> &release ) {
+                            const sicnu_test::TestGate &release ) {
         return [&inFlight, &maxSeen, &release]( const sicnu::jobs::JobRequest &,
                                                 sicnu::operators::RSOperatorContext & ) {
             const int cur = ++inFlight;
@@ -617,8 +621,7 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
             while ( cur > prev && !maxSeen.compare_exchange_weak( prev, cur ) )
             {
             }
-            while ( !release.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            release.wait();
             --inFlight;
             Json::Value result( Json::objectValue );
             result["output"] = "/tmp/throttle.tif";
@@ -626,8 +629,8 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
         };
     };
 
-    engine.registerExecutor( "throttle_cli:task", holdExecutor( inFlightCli, maxCli, releaseWorkers ) );
-    engine.registerExecutor( "throttle_inproc:task", holdExecutor( inFlightInproc, maxInproc, releaseWorkers ) );
+    engine.registerExecutor( "throttle_cli:task", holdExecutor( inFlightCli, maxCli, releaseGate ) );
+    engine.registerExecutor( "throttle_inproc:task", holdExecutor( inFlightInproc, maxInproc, releaseGate ) );
 
     // Enqueue three CLI tasks — only 1 may run at a time.
     QList<long> cliIds;
@@ -676,7 +679,8 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
     CHECK( maxCli.load() <= 1 );
     CHECK( maxInproc.load() <= 2 );
 
-    releaseWorkers.store( true );
+    releaseGate.open();
+    CHECK(!releaseGate.timedOut());
     engine.waitUntilIdleForTests();
     for ( int attempt = 0; attempt < 200; ++attempt )
     {
@@ -750,7 +754,8 @@ TEST_CASE( "TaskCenter - event-driven wait condition sub-millisecond wakeup late
         wokenUp.store( info.status == sicnu::TaskStatus::Completed );
     } );
 
-    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    // No bias sleep needed: waitForTask returns the terminal record
+    // immediately when the mark has already landed (task_center.cpp:4354).
     center.markTaskCompleted( taskId );
 
     waiter.join();
@@ -766,8 +771,8 @@ TEST_CASE( "TaskCenter - priority-aware scheduler preempts lower priority queued
 
     center.setGlobalConcurrencyLimit( 1 );
 
-    std::atomic<bool> releaseFirst{ false };
     std::atomic<bool> firstRunning{ false };
+    sicnu_test::TestGate releaseGate;
     std::vector<std::string> launchOrder;
     std::mutex orderMutex;
 
@@ -778,8 +783,7 @@ TEST_CASE( "TaskCenter - priority-aware scheduler preempts lower priority queued
 
     engine.registerExecutor( "priority:blocker", [&]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
         firstRunning.store( true );
-        while ( !releaseFirst.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        releaseGate.wait();
         recordLaunch( "blocker" );
         Json::Value res( Json::objectValue );
         res["output"] = "/tmp/blocker.tif";
@@ -816,7 +820,8 @@ TEST_CASE( "TaskCenter - priority-aware scheduler preempts lower priority queued
     REQUIRE( lowId > 0 );
     REQUIRE( highId > 0 );
 
-    releaseFirst.store( true );
+    releaseGate.open();
+    CHECK(!releaseGate.timedOut());
 
     center.waitForTask( highId, std::chrono::seconds( 5 ) );
     center.waitForTask( lowId, std::chrono::seconds( 5 ) );
@@ -883,11 +888,10 @@ TEST_CASE( "TaskCenter - RSS watermark holds queued tasks then releases on compl
     std::atomic<unsigned int> fakeRss{ 50 }; // below the 100 MB watermark
     center.setRssSampler( [&fakeRss]() { return fakeRss.load(); } );
 
-    std::atomic<bool> releaseWorkers{ false };
-    auto holdExecutor = [&releaseWorkers]( const sicnu::jobs::JobRequest &,
-                                           sicnu::operators::RSOperatorContext & ) {
-        while ( !releaseWorkers.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    sicnu_test::TestGate releaseGate;
+    auto holdExecutor = [&releaseGate]( const sicnu::jobs::JobRequest &,
+                                        sicnu::operators::RSOperatorContext & ) {
+        releaseGate.wait();
         Json::Value result( Json::objectValue );
         result["output"] = "/tmp/mem_throttle.tif";
         return result;
@@ -913,7 +917,16 @@ TEST_CASE( "TaskCenter - RSS watermark holds queued tasks then releases on compl
     fakeRss.store( 100 );
     long id3 = center.enqueueTask( QStringLiteral( "mem_inproc:task" ), {}, false,
                                    sicnu::TaskPriority::Normal, {}, true );
-    std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) ); // let any pending dispatch settle
+    // Wait for admission to settle deterministically instead of a fixed 30 ms:
+    // WaitingResource is the steady state under the watermark (dispatch either
+    // already landed or never will).
+    REQUIRE( sicnu_test::waitUntil(
+        [&] { return center.getTaskInfo( id3 ).status == sicnu::TaskStatus::WaitingResource; },
+        5000,
+        [&] {
+            return "task id3 status enum=" +
+                   std::to_string( static_cast<int>( center.getTaskInfo( id3 ).status ) );
+        } ) );
     // Admission-held (RSS watermark) tasks surface explicitly as
     // WaitingResource instead of silently Queued.
     REQUIRE( center.getTaskInfo( id3 ).status == sicnu::TaskStatus::WaitingResource );
@@ -922,7 +935,8 @@ TEST_CASE( "TaskCenter - RSS watermark holds queued tasks then releases on compl
     // re-enter processNextQueuedTasks, which now sees low pressure and launches
     // the third task, which then also runs to completion.
     fakeRss.store( 50 );
-    releaseWorkers.store( true );
+    releaseGate.open();
+    CHECK(!releaseGate.timedOut());
 
     for ( int attempt = 0; attempt < 400; ++attempt )
     {
@@ -965,12 +979,11 @@ TEST_CASE( "TaskCenter - memory limit 0 disables the RSS gate",
     std::atomic<unsigned int> fakeRss{ 999999 }; // would block if the gate were on
     center.setRssSampler( [&fakeRss]() { return fakeRss.load(); } );
 
-    std::atomic<bool> releaseWorkers{ false };
+    sicnu_test::TestGate releaseGate;
     engine.registerExecutor( "mem_disabled:task",
-        [&releaseWorkers]( const sicnu::jobs::JobRequest &,
-                           sicnu::operators::RSOperatorContext & ) {
-            while ( !releaseWorkers.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        [&releaseGate]( const sicnu::jobs::JobRequest &,
+                        sicnu::operators::RSOperatorContext & ) {
+            releaseGate.wait();
             Json::Value result( Json::objectValue );
             result["output"] = "/tmp/mem_disabled.tif";
             return result;
@@ -999,7 +1012,8 @@ TEST_CASE( "TaskCenter - memory limit 0 disables the RSS gate",
             ++running;
     CHECK( running == 3 );
 
-    releaseWorkers.store( true );
+    releaseGate.open();
+    CHECK(!releaseGate.timedOut());
     engine.waitUntilIdleForTests();
     // The engine is idle, but the per-task terminal transition can lag the
     // m_running==0 observation when several workers finish near-simultaneously
@@ -1047,8 +1061,12 @@ TEST_CASE( "TaskCenter - OBIA-style batch holds under RSS pressure then drains t
         // Ramp RSS up as tasks pile in; once it crosses the watermark the gate
         // closes and no further tasks launch until some finish and free memory.
         fakeRss.store( static_cast<unsigned int>( 40 + n * 25 ) );
-        while ( !releaseWorkers.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        // Deadline-bounded (#1392): a failed assertion in the case body would
+        // leave the gate closed and this executor waiting for a release that
+        // never comes, so the executor releases itself and the case's own
+        // assertions report the real state instead of the harness timeout.
+        sicnu_test::waitUntil( [&] { return releaseWorkers.load(); }, 60000,
+                               [] { return "obia_inproc:segment gate never released"; } );
         runningTasks.fetch_sub( 1 );
         // Free memory as tasks complete.
         fakeRss.store( static_cast<unsigned int>( 40 + runningTasks.load() * 25 ) );
@@ -1140,8 +1158,10 @@ TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
     engine.registerExecutor( "batch_disabled:task",
         [&releaseWorkers]( const sicnu::jobs::JobRequest &,
                            sicnu::operators::RSOperatorContext & ) {
-            while ( !releaseWorkers.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            // Deadline-bounded (#1392): see the obia_inproc note above.
+            sicnu_test::waitUntil(
+                [&] { return releaseWorkers.load(); }, 60000,
+                [] { return "batch_disabled:task gate never released"; } );
             Json::Value result( Json::objectValue );
             result["output"] = "/tmp/batch_disabled.tif";
             return result;
@@ -1362,8 +1382,11 @@ std::vector<long> saturateEngine(sicnu::TaskCenter &center, sicnu::jobs::JobEngi
         req.algorithmId = "callable:platform_blocker";
         ids.push_back(center.submitJob(
             req, [&release](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
-                while (!release.load() && !ctx.isCancelled())
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                // Deadline-bounded (#1392), cancel-aware: the escape hatch is
+                // preserved verbatim — a cancelled blocker must still leave.
+                sicnu_test::waitUntil(
+                    [&] { return release.load() || ctx.isCancelled(); }, 60000,
+                    [] { return "platform_blocker never released nor cancelled"; } );
                 return Json::Value(Json::objectValue);
             }));
     }
@@ -1403,10 +1426,14 @@ TEST_CASE("TaskCenter - submitJob shares admission with the engine: Running mean
             return Json::Value(Json::objectValue);
         });
     REQUIRE(extra > 0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    // Bounded negative-observation window (#1392): the extra task must NOT run
+    // while the blockers hold both workers. Same 150 ms observation budget as
+    // the old fixed sleep, but fails fast (and names the state) on violation.
+    CHECK_FALSE(sicnu_test::waitUntil(
+        [&extraRan] { return extraRan.load(); }, 150,
+        [] { return "extra task executed while both workers were held by blockers"; }));
     const auto st = center.getTaskInfo(extra).status;
     REQUIRE(st != sicnu::TaskStatus::Running); // Queued/WaitingResource/Dispatching at most
-    REQUIRE_FALSE(extraRan.load());
 
     release.store(true);
     waitForTerminalStatus(center, extra);

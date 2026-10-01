@@ -34,6 +34,7 @@
 #include "data/data_manager.h"
 #include "data/execution_fingerprint.h"
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -249,8 +250,9 @@ TEST_CASE( "waitForTask refuses to park a worker thread and returns a truthful s
     engine.registerExecutor( "ep9:park",
                              [&]( const sicnu::jobs::JobRequest &,
                                   sicnu::operators::RSOperatorContext & ) {
-                                 while ( !releasePark.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releasePark.load(); }, 30000,
+                                     [] { return "ep9:park gate never released (waiter test)"; } );
                                  return Json::Value();
                              } );
 
@@ -324,8 +326,10 @@ TEST_CASE( "owner reaching terminal cancels its orphaned owned children (I9 join
                                   sicnu::operators::RSOperatorContext &ctx ) {
                                  // Cooperative cancellation: exit when the
                                  // join-rule cancel flag lands.
-                                 while ( !releaseChild.load() && !ctx.isCancelled() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releaseChild.load() || ctx.isCancelled(); },
+                                     30000,
+                                     [] { return "ep9:orphanchild gate never released nor cancelled"; } );
                                  return Json::Value();
                              } );
 
@@ -377,15 +381,17 @@ TEST_CASE( "cancelling a running owner cancels its owned children immediately",
                              [&]( const sicnu::jobs::JobRequest &,
                                   sicnu::operators::RSOperatorContext & ) {
                                  center.submitJob( ep9Request( "ep9:owned" ) );
-                                 while ( !releaseAll.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releaseAll.load(); }, 30000,
+                                     [] { return "ep9:owner gate (releaseAll) never released"; } );
                                  return Json::Value();
                              } );
     engine.registerExecutor( "ep9:owned",
                              [&]( const sicnu::jobs::JobRequest &,
                                   sicnu::operators::RSOperatorContext & ) {
-                                 while ( !releaseAll.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releaseAll.load(); }, 30000,
+                                     [] { return "ep9:owned gate (releaseAll) never released"; } );
                                  return Json::Value();
                              } );
 
@@ -480,7 +486,12 @@ TEST_CASE( "observer slots may re-enter the coordinator from runStateChanged (#8
     } ) );
     // By terminal time at least one post-registration drain ran on some
     // thread; the slot's synchronous re-entrant queries must have completed.
-    REQUIRE( reentered.load() );
+    // Bounded (#1392): "by terminal time" is a scheduling statement, not a
+    // guarantee — the drain is a worker thread, so the slot can still be in
+    // flight when the run completes. Waiting for the observation (30 s
+    // budget, same helper as the case above) turns the assertion into one on
+    // the invariant instead of on thread interleaving.
+    REQUIRE( waitForCondition9( [&] { return reentered.load(); } ) );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -541,8 +552,9 @@ TEST_CASE( "resume swap closes the temporary run with a terminal broadcast (#876
     engine.registerExecutor( prefix + ":second",
                              []( const sicnu::jobs::JobRequest &,
                                  sicnu::operators::RSOperatorContext & ) {
-                                 while ( !releaseResumeStep.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releaseResumeStep.load(); }, 30000,
+                                     [] { return "ep9:second gate (releaseResumeStep) never released"; } );
                                  Json::Value r( Json::objectValue );
                                  r["output"] = "/tmp/ep9_ghost_second.tif";
                                  return r;
@@ -644,7 +656,13 @@ TEST_CASE( "catalog generation is strictly monotonic under concurrent reader chu
     // snapshot contract — the pre-9.0 affinity warning flagged exactly this).
     std::thread reader( [&] {
         quint64 last = generationAtStart;
-        while ( !stop.load( std::memory_order_relaxed ) )
+        // Deadline-bounded (#1392): a failed REQUIRE in the registration loop
+        // below must not strand this reader spinning until the harness
+        // timeout. The loop body stays the concurrent-read churn the case
+        // under test needs.
+        const auto readDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+        while ( !stop.load( std::memory_order_relaxed )
+                && std::chrono::steady_clock::now() < readDeadline )
         {
             const auto snap = dm.findByPath( QStringLiteral( "/tmp/ep9_gen_base.tif" ) );
             if ( snap.has_value() )
@@ -694,8 +712,9 @@ TEST_CASE( "pause/resume keep typed behavior on engine-dispatched tasks (#702)",
     engine.registerExecutor( "ep9:park3",
                              []( const sicnu::jobs::JobRequest &,
                                  sicnu::operators::RSOperatorContext & ) {
-                                 while ( !releasePark.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releasePark.load(); }, 30000,
+                                     [] { return "ep9:park3 gate never released"; } );
                                  return Json::Value();
                              } );
 
@@ -743,8 +762,9 @@ TEST_CASE( "explain dumps expose admission and run evidence (M7)",
     engine.registerExecutor( "ep9:holder7",
                              []( const sicnu::jobs::JobRequest &,
                                  sicnu::operators::RSOperatorContext & ) {
-                                 while ( !releaseHolder.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releaseHolder.load(); }, 30000,
+                                     [] { return "ep9:holder7 gate never released"; } );
                                  return Json::Value();
                              } );
     const long holder = center.submitJob( ep9Request( "ep9:holder7" ) );
@@ -871,8 +891,9 @@ TEST_CASE( "cancel storm: cancelling half a running drain converges with no stra
     engine.registerExecutor( "ep9:storm",
                              []( const sicnu::jobs::JobRequest &,
                                  sicnu::operators::RSOperatorContext & ) {
-                                 while ( !releaseAll.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releaseAll.load(); }, 30000,
+                                     [] { return "ep9:storm gate (releaseAll) never released"; } );
                                  return Json::Value();
                              } );
 
@@ -931,8 +952,9 @@ TEST_CASE( "admission structures stay bounded and correct at 100k logical tasks"
     engine.registerExecutor( "ep9:wall",
                              []( const sicnu::jobs::JobRequest &,
                                  sicnu::operators::RSOperatorContext & ) {
-                                 while ( !releaseHolder.load() )
-                                     std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+                                 sicnu_test::waitUntil(
+                                     [&] { return releaseHolder.load(); }, 30000,
+                                     [] { return "ep9:wall gate (releaseHolder) never released"; } );
                                  return Json::Value();
                              } );
     const long holder = center.submitJob( ep9Request( "ep9:wall" ) );

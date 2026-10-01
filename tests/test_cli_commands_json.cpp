@@ -8,6 +8,10 @@
 #include "support/offline_probe.h"
 
 #include <cstdio>
+#include <filesystem>
+#include <system_error>
+
+#include "support/exprs_test_env.h"
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -76,12 +80,22 @@ TEST_CASE( "unknown algorithms map to the missing-dependency exit code", "[cli][
 
 TEST_CASE( "workflow validate enforces the public schema", "[cli][json]" )
 {
-    // Write an invalid workflow and validate it through the CLI.
-    const char *path = "/tmp/exprs_cli_test_workflow.json";
+    // Write an invalid workflow and validate it through the CLI. Pid-unique
+    // path (#1392 WP-J): the fixed /tmp name is shared by every parallel
+    // one-case-per-process invocation of this binary.
+    const std::string path =
+        std::filesystem::temp_directory_path()
+        / ( "exprs_cli_test_workflow."
+            + std::to_string( exprs_test::localPid() ) + ".json" );
     {
         std::ofstream output( path, std::ios::trunc );
         output << R"({"schema_version": 1, "id": "t", "steps": []})";
     }
+    struct FileCleanup {
+        const std::string &p;
+        std::error_code ec;
+        ~FileCleanup() { std::filesystem::remove( p, ec ); }
+    } fileCleanup{ path };
     const auto result = runCli( std::string( "workflow validate " ) + path );
     REQUIRE( result.exitCode == 2 ); // exprs::ExitCode::ValidationFailure
 }

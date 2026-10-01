@@ -21,6 +21,7 @@
 #include "processing/framework/algorithm_descriptor.h"
 #include "processing/framework/task_center.h"
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -148,8 +149,12 @@ TEST_CASE( "Priority order holds through the ready heap under a single slot",
         recorder.push( std::atoi( req.params["i"].asString().c_str() ) );
         // The first job is the slot holder: park until released so the
         // remaining tasks queue behind admission.
-        while ( !releaseGate.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        // Deadline-bounded (#1392): an assertion between submit and release
+        // would leave this executor parked on a gate the case never opens, so
+        // the executor releases itself and the case's own assertions report
+        // the real state instead of spinning into the harness timeout.
+        sicnu_test::waitUntil( [&] { return releaseGate.load(); }, 60000,
+                               [] { return "ep8 gate never released"; } );
         return Json::Value();
     } );
 
@@ -225,8 +230,12 @@ TEST_CASE( "Cancelling an admission-held task leaves no stranded work",
     engine.registerExecutor( "ep8:", []( const sicnu::jobs::JobRequest &,
                                          sicnu::operators::RSOperatorContext & ) {
         ++runs;
-        while ( !releaseGate.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        // Deadline-bounded (#1392): an assertion between submit and release
+        // would leave this executor parked on a gate the case never opens, so
+        // the executor releases itself and the case's own assertions report
+        // the real state instead of spinning into the harness timeout.
+        sicnu_test::waitUntil( [&] { return releaseGate.load(); }, 60000,
+                               [] { return "ep8 gate never released"; } );
         return Json::Value();
     } );
 
@@ -292,8 +301,10 @@ TEST_CASE( "DAG chains drain in dependency order through parent promotion",
         // Only the ROOT parks; children complete immediately once launched.
         if ( std::atoi( req.params["i"].asString().c_str() ) == 0 )
         {
-            while ( !releaseGate.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+            // Deadline-bounded (#1392): a closed gate must not strand the
+            // executor past the harness timeout.
+            sicnu_test::waitUntil( [&] { return releaseGate.load(); }, 60000,
+                                   [] { return "ep8 root holder never released"; } );
         }
         return Json::Value();
     } );
@@ -446,8 +457,10 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
         recorder.push( std::atoi( req.params["i"].asString().c_str() ) );
         if ( req.params["park"].asBool() )
         {
-            while ( !releaseGate.load() )
-                std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+            // Deadline-bounded (#1392): a closed gate must not strand the
+            // executor past the harness timeout.
+            sicnu_test::waitUntil( [&] { return releaseGate.load(); }, 60000,
+                                   [] { return "ep8 parked holder never released"; } );
         }
         return Json::Value();
     } );
@@ -665,8 +678,12 @@ TEST_CASE( "Raising a resource limit admits held work without a task transition"
     releaseGate.store( false );
     engine.registerExecutor( "ep8:", []( const sicnu::jobs::JobRequest &,
                                          sicnu::operators::RSOperatorContext & ) {
-        while ( !releaseGate.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        // Deadline-bounded (#1392): an assertion between submit and release
+        // would leave this executor parked on a gate the case never opens, so
+        // the executor releases itself and the case's own assertions report
+        // the real state instead of spinning into the harness timeout.
+        sicnu_test::waitUntil( [&] { return releaseGate.load(); }, 60000,
+                               [] { return "ep8 gate never released"; } );
         return Json::Value();
     } );
 

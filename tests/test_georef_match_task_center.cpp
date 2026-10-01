@@ -5,6 +5,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/task_center.h"
+#include "support/bounded_wait.h"
 #include "app/georeferencer/rs_georeferencing_session.h"
 
 #include <chrono>
@@ -96,8 +97,10 @@ TEST_CASE( "Georef match Task Center cancel waits for worker exit",
     req,
     [workerStarted, release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
       workerStarted->store( true );
-      while ( !release->load() )
-        std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+      // Deadline-bounded (#1392): an assertion failure upstream must not
+      // strand this worker spinning until the harness timeout.
+      sicnu_test::waitUntil( [&] { return release->load(); }, 30000,
+                             [] { return "georef gate worker never released"; } );
       if ( ctx.isCancelled() )
       {
         throw sicnu::operators::RSOperatorError(

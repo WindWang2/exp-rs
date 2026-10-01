@@ -8,6 +8,7 @@
 #include <thread>
 #include "shell/gui_job_adapter.h"
 #include "jobs/job_engine.h"
+#include "support/bounded_wait.h"
 #include "operators/framework/rs_operator_context.h"
 #include "processing/framework/task_center.h"
 
@@ -38,8 +39,11 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
             req,
             [&started, &release](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
                 started.store(true);
-                while (!release.load() && !ctx.isCancelled())
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                // Deadline-bounded (#1392): a failed assertion before
+                // release.store(true) must not strand this worker.
+                sicnu_test::waitUntil(
+                    [&] { return release.load() || ctx.isCancelled(); }, 30000,
+                    [] { return "busy-gate worker never released nor cancelled"; } );
                 ctx.throwIfCancelled();
                 return Json::Value(Json::objectValue);
             },
@@ -204,8 +208,10 @@ TEST_CASE("GuiJobHandle - cancel stays busy until the worker truly stops (#696)"
         [&started, &release](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
             started.store(true);
             // Mirror a long GDAL write that only observes cancel cooperatively.
-            while (!release.load() && !ctx.isCancelled())
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            // Deadline-bounded (#1392): same failure-masking guard as above.
+            sicnu_test::waitUntil(
+                [&] { return release.load() || ctx.isCancelled(); }, 30000,
+                [] { return "slow_writer gate never released nor cancelled"; } );
             ctx.throwIfCancelled();
             return Json::Value(Json::objectValue);
         },
