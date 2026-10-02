@@ -60,7 +60,7 @@ Json::Value RsNdviOperator::executionEstimate() const {
 }
 
 Json::Value RsNdviOperator::run(const Json::Value& params, RSOperatorContext& context) {
-    return spectral_index_detail::runSpectralIndexCore("NDVI", params, context);
+    return spectral_index_detail::runSpectralIndexCore("NDVI", params, context, false, name());
 }
 
 // ============================================================================
@@ -114,7 +114,7 @@ Json::Value RsEviOperator::executionEstimate() const {
 }
 
 Json::Value RsEviOperator::run(const Json::Value& params, RSOperatorContext& context) {
-    return spectral_index_detail::runSpectralIndexCore("EVI", params, context);
+    return spectral_index_detail::runSpectralIndexCore("EVI", params, context, false, name());
 }
 
 // ============================================================================
@@ -164,7 +164,7 @@ Json::Value RsNdwiOperator::executionEstimate() const {
 }
 
 Json::Value RsNdwiOperator::run(const Json::Value& params, RSOperatorContext& context) {
-    return spectral_index_detail::runSpectralIndexCore("NDWI", params, context);
+    return spectral_index_detail::runSpectralIndexCore("NDWI", params, context, false, name());
 }
 
 // ============================================================================
@@ -217,7 +217,7 @@ Json::Value RsSaviOperator::executionEstimate() const {
 }
 
 Json::Value RsSaviOperator::run(const Json::Value& params, RSOperatorContext& context) {
-    return spectral_index_detail::runSpectralIndexCore("SAVI", params, context);
+    return spectral_index_detail::runSpectralIndexCore("SAVI", params, context, false, name());
 }
 
 // ============================================================================
@@ -268,7 +268,7 @@ Json::Value RsNdbiOperator::executionEstimate() const {
 }
 
 Json::Value RsNdbiOperator::run(const Json::Value& params, RSOperatorContext& context) {
-    return spectral_index_detail::runSpectralIndexCore("NDBI", params, context);
+    return spectral_index_detail::runSpectralIndexCore("NDBI", params, context, false, name());
 }
 
 // ============================================================================
@@ -318,7 +318,7 @@ Json::Value RsMndwiOperator::executionEstimate() const {
 }
 
 Json::Value RsMndwiOperator::run(const Json::Value& params, RSOperatorContext& context) {
-    return spectral_index_detail::runSpectralIndexCore("MNDWI", params, context);
+    return spectral_index_detail::runSpectralIndexCore("MNDWI", params, context, false, name());
 }
 
 } // namespace sicnu::operators::rs

@@ -318,6 +318,35 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
     opts.cleanupIterations = cleanupIterations;
     opts.outputPath = outputPath;
     opts.methodLabel = method;
+    opts.operatorId = "rs:change_detection";
+
+    Json::Value canonParams( Json::objectValue );
+    canonParams["before"] = beforePath;
+    canonParams["after"] = afterPath;
+    canonParams["output"] = outputPath;
+    canonParams["method"] = method;
+    canonParams["beforeBand"] = beforeBand;
+    canonParams["afterBand"] = afterBand;
+    canonParams["makeMask"] = opts.makeMask;
+    canonParams["kernelVersion"] = 1;
+    opts.canonicalParams = canonParams;
+
+    if ( params.isMember( "chunkedMode" ) )
+    {
+        const std::string m = params["chunkedMode"].asString();
+        if ( m == "pipeline" )
+            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+        else if ( m == "resumable" )
+            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+    }
+    if ( params.isMember( "resumeStateBase" ) && params["resumeStateBase"].isString() )
+    {
+        opts.resumeStateBase = params["resumeStateBase"].asString();
+    }
+    if ( params.isMember( "scratchRoot" ) && params["scratchRoot"].isString() )
+    {
+        opts.scratchRoot = params["scratchRoot"].asString();
+    }
 
     return runChangeStreaming(beforeDs, afterDs, width, height,
                               metricFromMethod(method), opts, context);

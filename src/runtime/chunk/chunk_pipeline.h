@@ -36,6 +36,11 @@
 #include <thread>
 #include <vector>
 
+namespace sicnu::runtime::exec
+{
+class ExecutionGovernor;
+}
+
 namespace sicnu::runtime::chunk
 {
 
@@ -90,6 +95,7 @@ class ChunkPipeline
         /// Bound: total events ≤ tiles/rate + O(stages) — telemetry can
         /// never outgrow the pipeline's own bounded memory.
         std::uint32_t telemetrySampleRate = 16;
+        exec::ExecutionGovernor *governor = nullptr; ///< Optional execution governor for dynamic throttling
     };
 
     ChunkPipeline( ProducerFn producer, std::vector<StageFn> stages, ConsumerFn consumer );
@@ -99,6 +105,8 @@ class ChunkPipeline
     /// Sets a cooperative cancel flag polled between tiles by every stage.
     void setCancelFlag( const std::atomic<bool> *flag ) { m_cancelFlag = flag; }
     void setProgressCallback( ProgressFn cb ) { m_progress = std::move( cb ); }
+    /// Attaches an ExecutionGovernor for dynamic RSS throttling in the producer loop.
+    void setGovernor( exec::ExecutionGovernor *governor ) { m_governor = governor; }
 
     /// Runs the pipeline to completion. Throws the first stage error
     /// (rethrows std::exception_ptr rethrowably), ChunkCancelled on cancel,
@@ -117,6 +125,7 @@ class ChunkPipeline
     std::vector<StageFn> m_stages;
     ConsumerFn m_consumer;
     Config m_config;
+    exec::ExecutionGovernor *m_governor = nullptr;
     const std::atomic<bool> *m_cancelFlag = nullptr;
     ProgressFn m_progress;
     std::atomic<size_t> m_completedTiles{ 0 };

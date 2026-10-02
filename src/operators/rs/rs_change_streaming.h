@@ -23,6 +23,7 @@
 #pragma once
 
 #include "operators/framework/rs_operator_context.h"
+#include "operators/framework/chunked_run.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <json/json.h>
@@ -30,6 +31,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <string>
 
 namespace sicnu::operators::rs {
@@ -66,6 +68,11 @@ struct StreamingMagnitudeStats
         m2 += d * ( static_cast<double>( v ) - mean );
         if ( v < minVal ) minVal = v;
         if ( v > maxVal ) maxVal = v;
+    }
+
+    double variance() const
+    {
+        return ( validCount > 0 ) ? ( m2 / static_cast<double>( validCount ) ) : 0.0;
     }
 
     double stddev() const
@@ -110,6 +117,14 @@ struct ChangeStreamingOptions
     std::string outputPath;
     /// Value reported in result["method"] (e.g. "difference", "mad").
     std::string methodLabel;
+
+    /// Optional chunked execution configuration
+    std::string operatorId;
+    Json::Value canonicalParams = Json::Value( Json::objectValue );
+    std::optional<sicnu::operators::ChunkedOutputCommitSpec> commitSpec;
+    sicnu::operators::ChunkedRunOptions::Mode executionMode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+    std::string resumeStateBase;
+    std::string scratchRoot;
 };
 
 /**

@@ -30,8 +30,14 @@
 #include "runtime/chunk/resumable_tile_run.h"
 #include "runtime/chunk/tile_run_contract.h"
 
+#include "data/asset_types.h"
+#include "data/derivation_record.h"
+
+#include <QString>
+
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,12 +46,29 @@ namespace Json
 class Value;
 }
 
+namespace sicnu
+{
+class OutputCommitter;
+}
+
 namespace sicnu::operators
 {
 
 /// Computes ONE tile's buffer: receives the tile spec (geometry incl. halo);
 /// returns exactly spec.bufferElementCount() floats (halo included).
 using ChunkTileKernel = std::function<std::vector<float>( const sicnu::runtime::chunk::TileSpec & )>;
+
+/// Transactional output publication specification bridging ChunkedRun to OutputCommitter.
+struct ChunkedOutputCommitSpec
+{
+    sicnu::OutputCommitter *committer = nullptr;
+    QString tempPath;
+    QString stablePath;
+    sicnu::data::AssetKind kind = sicnu::data::AssetKind::Raster;
+    sicnu::data::PersistencePolicy persistence = sicnu::data::PersistencePolicy::SessionTemporary;
+    bool autoLoad = false;
+    sicnu::data::DerivationRecord derivation;
+};
 
 struct ChunkedRunOptions
 {
@@ -73,6 +96,14 @@ struct ChunkedRunOptions
     /// Optional final publication callback (resumable mode): called once all
     /// tiles were sinked; must be atomic-rebuildable (.part → rename).
     std::function<void()> publish;
+
+    /// Optional OutputCommitter bridge for transactional atomic publish-then-swap
+    /// and DataManager asset registration.
+    std::optional<ChunkedOutputCommitSpec> commitSpec;
+
+    /// Sweep scratch tile directory (<scratchRoot>/rt-<identityKey>) on successful completion.
+    /// The .published marker remains intact for exactly-once bypass. Defaults to true.
+    bool cleanupScratchOnSuccess = true;
 };
 
 struct ChunkedRunResult
@@ -81,7 +112,10 @@ struct ChunkedRunResult
     std::uint64_t tilesComputed = 0;
     std::uint64_t tilesReused = 0; ///< verified disk attach (resumable mode)
     bool alreadyPublished = false; ///< PUBLISHED marker hit: zero kernel work
+    QString publishedAssetId;      ///< DataManager AssetId string on commit
 };
+
+using ChunkedRunSummary = ChunkedRunResult;
 
 /// Runs the chunked computation. @p sink receives every tile exactly once
 /// per execution, in index order (from verified disk on resume). Throws

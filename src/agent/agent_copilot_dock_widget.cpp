@@ -1127,23 +1127,6 @@ QJsonArray AgentCopilotDockWidget::pruneHistory( const QJsonArray &history )
   return pruned;
 }
 
-void AgentCopilotDockWidget::onMalformedToolCall( const QJsonObject &detail )
-{
-  // Non-fatal observability (agent-harness R4 item 10): the streaming client
-  // refused a tool call; the session and journal can now account for the
-  // drop on the interactive surface too. The run is NOT terminated.
-  const QString name = detail.value( QStringLiteral( "name" ) ).toString();
-  const QString reason = detail.value( QStringLiteral( "reason" ) ).toString();
-  QString notice = tr( "Malformed tool call dropped (%1)%2" )
-                     .arg( reason.isEmpty() ? QStringLiteral( "unknown reason" ) : reason,
-                           name.isEmpty() ? QString() : QStringLiteral( ": %1" ).arg( name ) );
-  if ( m_currentContentLabel )
-  {
-    m_currentContentLabel->setText( tr( "<font color='orange'>%1</font>" )
-                                      .arg( notice.toHtmlEscaped() ) );
-  }
-  setRunStage( tr( "Tool call dropped" ) );
-}
 
 void AgentCopilotDockWidget::onErrorOccurred( const QString &errorMsg )
 {

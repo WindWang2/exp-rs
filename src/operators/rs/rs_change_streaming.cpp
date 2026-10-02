@@ -476,112 +476,227 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
 
     // --- Magnitude write pass ----------------------------------------------
     const std::string magPath = opts.makeMask ? context.tempPath( ".tif" ) : opts.outputPath;
-    QString outErr;
-    GDALDatasetH outDs = createOutputTiff( QString::fromStdString( magPath ), width, height,
-                                           1, static_cast<int>( GDT_Float32 ),
-                                           beforeDs.geoTransform(), beforeDs.projection(), &outErr );
-    if ( !outDs )
+    const std::string writeTarget = opts.commitSpec ? opts.commitSpec->tempPath.toStdString() : magPath;
+
+    sicnu::runtime::chunk::TileRunPartition partition;
+    partition.rasterWidth = width;
+    partition.rasterHeight = height;
+    partition.tileWidth = tile;
+    partition.tileHeight = tile;
+    partition.halo = 0;
+    partition.bands = 1;
+
+    Json::Value canonParams = opts.canonicalParams;
+    if ( canonParams.empty() )
     {
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                               "Failed to create change magnitude raster: " +
-                                   outErr.toStdString() );
+        const char *bDesc = beforeDs.dataset() ? GDALGetDescription( reinterpret_cast<GDALDatasetH>( beforeDs.dataset() ) ) : "";
+        const char *aDesc = afterDs.dataset() ? GDALGetDescription( reinterpret_cast<GDALDatasetH>( afterDs.dataset() ) ) : "";
+        canonParams["before"] = bDesc ? bDesc : "";
+        canonParams["after"] = aDesc ? aDesc : "";
+        canonParams["output"] = opts.outputPath;
+        canonParams["method"] = opts.methodLabel;
+        canonParams["beforeBand"] = opts.beforeBand;
+        canonParams["afterBand"] = opts.afterBand;
+        canonParams["width"] = width;
+        canonParams["height"] = height;
+        canonParams["bands"] = bandCount;
+        canonParams["kernelVersion"] = 1;
     }
-    DatasetFileGuard magGuard{ outDs, magPath, false };
-    GDALRasterBandH outBand = GDALGetRasterBand( outDs, 1 );
-    if ( outBand )
-        GDALSetRasterNoDataValue( outBand, std::numeric_limits<double>::quiet_NaN() );
+
+    const std::string opId = opts.operatorId.empty()
+                                 ? ( "rs:change_" + opts.methodLabel )
+                                 : opts.operatorId;
+
+    GDALDatasetH outDs = nullptr;
+    GDALRasterBandH outBand = nullptr;
+
+    auto ensureOutDs = [&]() {
+        if ( !outDs )
+        {
+            QString outErr;
+            outDs = createOutputTiff( QString::fromStdString( writeTarget ), width, height,
+                                      1, static_cast<int>( GDT_Float32 ),
+                                      beforeDs.geoTransform(), beforeDs.projection(), &outErr );
+            if ( !outDs )
+            {
+                throw RSOperatorError( ErrorCode::FileNotWritable,
+                                       "Failed to create change magnitude raster: " +
+                                           outErr.toStdString() );
+            }
+            outBand = GDALGetRasterBand( outDs, 1 );
+            if ( outBand )
+                GDALSetRasterNoDataValue( outBand, std::numeric_limits<double>::quiet_NaN() );
+        }
+    };
 
     StreamingMagnitudeStats magStats;
     context.reportProgress( ( metric == ChangeMetric::Mad ) ? 0.7 : 0.5,
                             "Computing " + opts.methodLabel + " magnitude" );
 
-    for ( int y = 0; y < height; y += tile )
-    {
-        const int h = std::min( tile, height - y );
-        for ( int x = 0; x < width; x += tile )
+    sicnu::operators::ChunkTileKernel kernel = [&]( const sicnu::runtime::chunk::TileSpec &s ) -> std::vector<float> {
+        const int w = s.width;
+        const int h = s.height;
+        const size_t n = static_cast<size_t>( w ) * h;
+        std::vector<float> bBip( n * B );
+        std::vector<float> aBip( n * B );
+        std::vector<float> bScratch( n );
+        std::vector<float> tOut( s.bufferElementCount() );
+
+        if ( !readTileBip( beforeDs, afterDs, beforeBands, afterBands,
+                           s.xOffset, s.yOffset, w, h, bBip, aBip, bScratch ) )
         {
-            const int w = std::min( tile, width - x );
-            const size_t n = static_cast<size_t>( w ) * h;
-            context.throwIfCancelled();
-            if ( !readTileBip( beforeDs, afterDs, beforeBands, afterBands,
-                               x, y, w, h, beforeBip, afterBip, bandScratch ) )
-            {
-                throw RSOperatorError( ErrorCode::GdalError,
-                                       "Failed to read input tile at (" +
-                                           std::to_string( x ) + ", " + std::to_string( y ) + ")" );
-            }
+            throw RSOperatorError( ErrorCode::GdalError,
+                                   "Failed to read input tile at (" +
+                                       std::to_string( s.xOffset ) + ", " + std::to_string( s.yOffset ) + ")" );
+        }
 
-            switch ( metric )
+        switch ( metric )
+        {
+            case ChangeMetric::Mad:
+                ChangeDetection::madTransformTile( bBip.data(), aBip.data(),
+                                                   n, bandCount, madState, tOut.data() );
+                break;
+            case ChangeMetric::Cva:
             {
-                case ChangeMetric::Mad:
-                    ChangeDetection::madTransformTile( beforeBip.data(), afterBip.data(),
-                                                       n, bandCount, madState, tileOut.data() );
-                    break;
-                case ChangeMetric::Cva:
+                if ( !ChangeDetection::cvaMagnitudeBip( bBip.data(), aBip.data(),
+                                                        bandCount, n, tOut.data() ) )
                 {
-                    // CVA magnitude: a NaN delta in any band propagates to a
-                    // NaN pixel; otherwise sqrt(sum of squared deltas).
-                    // Shared BIP kernel (Foundation 4.0) — same definition as
-                    // the per-band cvaMagnitude, one NaN-policy owner.
-                    if ( !ChangeDetection::cvaMagnitudeBip( beforeBip.data(), afterBip.data(),
-                                                            bandCount, n, tileOut.data() ) )
-                    {
-                        throw RSOperatorError( ErrorCode::ComputationError,
-                                               "CVA magnitude failed on tile" );
-                    }
-                    break;
+                    throw RSOperatorError( ErrorCode::ComputationError,
+                                           "CVA magnitude failed on tile" );
                 }
-                case ChangeMetric::Difference:
-                    for ( size_t p = 0; p < n; ++p )
-                    {
-                        const float d = afterBip[p] - beforeBip[p];
-                        tileOut[p] = std::isnan( d ) ? nan : d;
-                    }
-                    break;
-                case ChangeMetric::AbsoluteDifference:
-                    // Legacy facade "difference" semantics: |after - before|
-                    // (non-negative change magnitude; a NaN delta propagates).
-                    for ( size_t p = 0; p < n; ++p )
-                    {
-                        const float d = afterBip[p] - beforeBip[p];
-                        tileOut[p] = std::isnan( d ) ? nan : std::fabs( d );
-                    }
-                    break;
-                case ChangeMetric::NormalizedDifference:
-                    for ( size_t p = 0; p < n; ++p )
-                    {
-                        tileOut[p] = MathUtils::safeDiv( afterBip[p] - beforeBip[p],
-                                                         afterBip[p] + beforeBip[p] );
-                    }
-                    break;
-                case ChangeMetric::Ratio:
-                    // #700: NaN for before <= 0 — negative `before` (water
-                    // after atmospheric correction) produced sign-flipped
-                    // "ratios" that Otsu reads as huge change; the log-ratio
-                    // metric clamps negatives, so stay consistent here.
-                    for ( size_t p = 0; p < n; ++p )
-                    {
-                        tileOut[p] = ( beforeBip[p] <= 0.0f )
-                                       ? nan
-                                       : afterBip[p] / beforeBip[p];
-                    }
-                    break;
+                break;
             }
+            case ChangeMetric::Difference:
+                for ( size_t p = 0; p < n; ++p )
+                {
+                    const float d = aBip[p] - bBip[p];
+                    tOut[p] = std::isnan( d ) ? nan : d;
+                }
+                break;
+            case ChangeMetric::AbsoluteDifference:
+                for ( size_t p = 0; p < n; ++p )
+                {
+                    const float d = aBip[p] - bBip[p];
+                    tOut[p] = std::isnan( d ) ? nan : std::fabs( d );
+                }
+                break;
+            case ChangeMetric::NormalizedDifference:
+                for ( size_t p = 0; p < n; ++p )
+                {
+                    tOut[p] = MathUtils::safeDiv( aBip[p] - bBip[p],
+                                                  aBip[p] + bBip[p] );
+                }
+                break;
+            case ChangeMetric::Ratio:
+                for ( size_t p = 0; p < n; ++p )
+                {
+                    tOut[p] = ( bBip[p] <= 0.0f )
+                                   ? nan
+                                   : aBip[p] / bBip[p];
+                }
+                break;
+        }
+        return tOut;
+    };
 
-            if ( GDALRasterIO( outBand, GF_Write, x, y, w, h, tileOut.data(),
-                               w, h, GDT_Float32, 0, 0 ) != CE_None )
+    auto sink = [&]( const sicnu::runtime::chunk::TilePayload &p ) {
+        ensureOutDs();
+        const int x = p.spec.xOffset;
+        const int y = p.spec.yOffset;
+        const int w = p.spec.width;
+        const int h = p.spec.height;
+        const size_t n = static_cast<size_t>( w ) * h;
+
+        if ( outBand && GDALRasterIO( outBand, GF_Write, x, y, w, h, p.pixels->data(),
+                                      w, h, GDT_Float32, 0, 0 ) != CE_None )
+        {
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "Failed to write change magnitude tile at (" +
+                                       std::to_string( x ) + ", " + std::to_string( y ) + ")" );
+        }
+        for ( size_t i = 0; i < n; ++i )
+            magStats.add( ( *p.pixels )[i] );
+    };
+
+    sicnu::operators::ChunkedRunOptions chunkOpts;
+    chunkOpts.mode = opts.executionMode;
+    chunkOpts.commitSpec = opts.commitSpec;
+    chunkOpts.cleanupScratchOnSuccess = true;
+    if ( !opts.resumeStateBase.empty() )
+        chunkOpts.resumeStateBase = opts.resumeStateBase;
+    if ( !opts.scratchRoot.empty() )
+        chunkOpts.scratchRoot = opts.scratchRoot;
+
+    chunkOpts.publish = [&]() {
+        if ( outDs )
+        {
+            GDALSetMetadataItem( outDs, "SICNU_CHANGE_METHOD", opts.methodLabel.c_str(), nullptr );
+            GDALSetMetadataItem( outDs, "SICNU_CHANGE_MEAN",
+                                 QString::number( magStats.mean, 'g', 10 ).toUtf8().constData(), nullptr );
+            GDALSetMetadataItem( outDs, "SICNU_CHANGE_STDDEV",
+                                 QString::number( magStats.stddev(), 'g', 10 ).toUtf8().constData(), nullptr );
+            GDALSetMetadataItem( outDs, "SICNU_CHANGE_MIN",
+                                 QString::number( magStats.minVal, 'g', 10 ).toUtf8().constData(), nullptr );
+            GDALSetMetadataItem( outDs, "SICNU_CHANGE_MAX",
+                                 QString::number( magStats.maxVal, 'g', 10 ).toUtf8().constData(), nullptr );
+            GDALClose( outDs );
+            outDs = nullptr;
+        }
+    };
+
+    struct OutDsGuard
+    {
+        GDALDatasetH &ds;
+        const std::string &path;
+        bool committed = false;
+        ~OutDsGuard()
+        {
+            if ( ds )
             {
-                throw RSOperatorError( ErrorCode::FileNotWritable,
-                                       "Failed to write change magnitude tile at (" +
-                                           std::to_string( x ) + ", " + std::to_string( y ) + ")" );
+                GDALClose( ds );
+                ds = nullptr;
             }
-            for ( size_t p = 0; p < n; ++p )
-                magStats.add( tileOut[p] );
+            if ( !committed && !path.empty() )
+            {
+                QFile::remove( QString::fromStdString( path ) );
+            }
+        }
+    } outGuard{ outDs, writeTarget, false };
+
+    sicnu::operators::ChunkedRunResult chunkRes = sicnu::operators::runChunkedOperator(
+        opId, canonParams, context, partition,
+        sicnu::runtime::chunk::TileRunDeterminism::BitExact,
+        kernel, sink, chunkOpts );
+
+    outGuard.committed = true;
+
+    if ( chunkRes.alreadyPublished )
+    {
+        if ( outDs )
+        {
+            GDALClose( outDs );
+            outDs = nullptr;
+        }
+        GdalDatasetWrapper pubDs;
+        if ( pubDs.open( QString::fromStdString( opts.outputPath ) ) && pubDs.dataset() )
+        {
+            auto dsH = reinterpret_cast<GDALDatasetH>( pubDs.dataset() );
+            const char *m = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MEAN", nullptr );
+            const char *s = GDALGetMetadataItem( dsH, "SICNU_CHANGE_STDDEV", nullptr );
+            if ( m ) magStats.mean = std::stod( m );
+            if ( s )
+            {
+                const double sd = std::stod( s );
+                magStats.validCount = ( sd > 0.0 ) ? 2 : 1;
+                // Welford invariant: variance() = m2 / validCount, so m2 = sd² × validCount
+                magStats.m2 = sd * sd * static_cast<double>( magStats.validCount );
+            }
+            const char *mn = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MIN", nullptr );
+            const char *mx = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MAX", nullptr );
+            if ( mn ) magStats.minVal = std::stod( mn );
+            if ( mx ) magStats.maxVal = std::stod( mx );
         }
     }
-    GDALClose( outDs );
-    magGuard.ds = nullptr;
-    magGuard.committed = true;
 
     // --- Non-mask path: the magnitude raster is the output. ----------------
     if ( !opts.makeMask )
@@ -589,8 +704,19 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         Json::Value result( Json::objectValue );
         result["output"] = opts.outputPath;
         result["method"] = opts.methodLabel;
-        result["mean"] = static_cast<float>( magStats.mean );
-        result["stddev"] = static_cast<float>( magStats.stddev() );
+        result["mean"] = magStats.mean;
+        result["stddev"] = magStats.stddev();
+        result["variance"] = magStats.variance();
+        result["min"] = magStats.minVal;
+        result["max"] = magStats.maxVal;
+        result["total_tiles"] = static_cast<Json::UInt64>( chunkRes.totalTiles );
+        result["tiles_computed"] = static_cast<Json::UInt64>( chunkRes.tilesComputed );
+        result["tiles_reused"] = static_cast<Json::UInt64>( chunkRes.tilesReused );
+        result["already_published"] = chunkRes.alreadyPublished;
+        if ( !chunkRes.publishedAssetId.isEmpty() )
+        {
+            result["published_asset_id"] = chunkRes.publishedAssetId.toStdString();
+        }
         context.reportProgress( 1.0, "Change detection complete" );
         return result;
     }
