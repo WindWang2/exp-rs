@@ -117,6 +117,34 @@ Json::Value runPrimitive( ChangeMetric metric, const std::string &label,
     opts.makeMask = false;
     opts.outputPath = outputPath;
     opts.methodLabel = label;
+    opts.operatorId = "rs:change_" + label;
+
+    Json::Value canonParams( Json::objectValue );
+    canonParams["before"] = beforePath;
+    canonParams["after"] = afterPath;
+    canonParams["output"] = outputPath;
+    canonParams["beforeBand"] = beforeBand;
+    canonParams["afterBand"] = afterBand;
+    canonParams["method"] = label;
+    canonParams["kernelVersion"] = 1;
+    opts.canonicalParams = canonParams;
+
+    if ( params.isMember( "chunkedMode" ) )
+    {
+        const std::string m = params["chunkedMode"].asString();
+        if ( m == "pipeline" )
+            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+        else if ( m == "resumable" )
+            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+    }
+    if ( params.isMember( "resumeStateBase" ) && params["resumeStateBase"].isString() )
+    {
+        opts.resumeStateBase = params["resumeStateBase"].asString();
+    }
+    if ( params.isMember( "scratchRoot" ) && params["scratchRoot"].isString() )
+    {
+        opts.scratchRoot = params["scratchRoot"].asString();
+    }
 
     return runChangeStreaming( beforeDs, afterDs, width, height, metric, opts, context );
 }

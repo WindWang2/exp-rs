@@ -7,6 +7,9 @@
 #include "runtime/chunk/memory_planner.h"
 #include "runtime/exec/execution_governor.h"
 
+#include "processing/framework/output_committer.h"
+#include <QFile>
+
 #include <json/json.h>
 #include <json/writer.h>
 
@@ -105,6 +108,9 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
     std::uint64_t done = 0;
     const std::uint64_t total = spec.partition.totalTiles();
 
+    std::optional<QString> publishedAssetId;
+    bool commitFailed = false;
+
     ResumableTileRun::Callbacks cb;
     cb.compute = [&kernel]( const TileSpec &tileSpec ) {
         std::vector<float> buffer = kernel( tileSpec );
@@ -117,15 +123,91 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
         context.reportProgress( static_cast<double>( done ) / static_cast<double>( total ),
                                 "chunked run" );
     };
-    cb.publish = options.publish ? options.publish : [] {};
+    cb.publish = [&]() {
+        if ( options.publish )
+        {
+            options.publish();
+        }
+        if ( options.commitSpec )
+        {
+            sicnu::AlgorithmOutputRequest req;
+            req.kind = options.commitSpec->kind;
+            req.tempPath = options.commitSpec->tempPath;
+            req.stablePath = options.commitSpec->stablePath;
+            req.persistence = options.commitSpec->persistence;
+            req.autoLoad = options.commitSpec->autoLoad;
+            req.derivation = options.commitSpec->derivation;
+
+            const auto commitResult = options.commitSpec->committer->commit( req );
+            if ( !commitResult )
+            {
+                commitFailed = true;
+                const QString diag = commitResult.diagnostics().isEmpty()
+                    ? QStringLiteral( "OutputCommitter commit failed" )
+                    : commitResult.diagnostics().first().message;
+                throw RSOperatorError( ErrorCode::FileNotWritable, diag.toStdString() );
+            }
+            publishedAssetId = commitResult.value().toString();
+        }
+    };
 
     ChunkedRunResult result;
     runWithChunkErrorTranslation( [&] {
-        const auto runResult = run.execute( cancel, cb );
-        result.totalTiles = runResult.totalTiles;
-        result.tilesComputed = runResult.tilesComputed;
-        result.tilesReused = runResult.tilesReused;
-        result.alreadyPublished = runResult.alreadyPublished;
+        try
+        {
+            const auto runResult = run.execute( cancel, cb );
+            result.totalTiles = runResult.totalTiles;
+            result.tilesComputed = runResult.tilesComputed;
+            result.tilesReused = runResult.tilesReused;
+            result.alreadyPublished = runResult.alreadyPublished;
+            if ( publishedAssetId )
+                result.publishedAssetId = *publishedAssetId;
+
+            if ( options.cleanupScratchOnSuccess )
+            {
+                run.cleanupAfterPublish();
+            }
+        }
+        catch ( const sicnu::runtime::chunk::ChunkCancelled & )
+        {
+            // Cooperative cancellation: leave journal and committed tiles intact for resume.
+            throw;
+        }
+        catch ( const RSOperatorError &e )
+        {
+            if ( e.code() == ErrorCode::Cancelled )
+            {
+                // Cooperative cancellation: leave journal and committed tiles intact for resume.
+                throw;
+            }
+            if ( commitFailed )
+            {
+                // Commit failure: leave scratch and temp in place for diagnosis.
+                throw;
+            }
+            // Abnormal non-resumable failure: sweep scratch and discard temporary outputs.
+            run.abandon();
+            if ( options.commitSpec && options.commitSpec->committer )
+            {
+                options.commitSpec->committer->discardTemporary( options.commitSpec->tempPath );
+            }
+            throw;
+        }
+        catch ( ... )
+        {
+            if ( cancel.cancelled() )
+            {
+                // Cooperative cancellation: leave journal and committed tiles intact for resume.
+                throw;
+            }
+            // Abnormal non-resumable failure: sweep scratch and discard temporary outputs.
+            run.abandon();
+            if ( options.commitSpec && options.commitSpec->committer )
+            {
+                options.commitSpec->committer->discardTemporary( options.commitSpec->tempPath );
+            }
+            throw;
+        }
         return 0;
     } );
     return result;
@@ -167,14 +249,56 @@ ChunkedRunResult runPipelineMode( const TileRunSpec &spec, RSOperatorContext &co
         context.reportProgress( fraction, "chunked run" );
     } );
 
-    runWithChunkErrorTranslation( [&pipeline] {
-        pipeline.run();
-        return 0;
-    } );
+    std::optional<QString> publishedAssetId;
+    bool commitFailed = false;
+
+    try
+    {
+        runWithChunkErrorTranslation( [&pipeline] {
+            pipeline.run();
+            return 0;
+        } );
+
+        if ( options.publish )
+        {
+            options.publish();
+        }
+        if ( options.commitSpec )
+        {
+            sicnu::AlgorithmOutputRequest req;
+            req.kind = options.commitSpec->kind;
+            req.tempPath = options.commitSpec->tempPath;
+            req.stablePath = options.commitSpec->stablePath;
+            req.persistence = options.commitSpec->persistence;
+            req.autoLoad = options.commitSpec->autoLoad;
+            req.derivation = options.commitSpec->derivation;
+
+            const auto commitResult = options.commitSpec->committer->commit( req );
+            if ( !commitResult )
+            {
+                commitFailed = true;
+                const QString diag = commitResult.diagnostics().isEmpty()
+                    ? QStringLiteral( "OutputCommitter commit failed" )
+                    : commitResult.diagnostics().first().message;
+                throw RSOperatorError( ErrorCode::FileNotWritable, diag.toStdString() );
+            }
+            publishedAssetId = commitResult.value().toString();
+        }
+    }
+    catch ( ... )
+    {
+        if ( !commitFailed && options.commitSpec && options.commitSpec->committer )
+        {
+            options.commitSpec->committer->discardTemporary( options.commitSpec->tempPath );
+        }
+        throw;
+    }
 
     ChunkedRunResult result;
     result.totalTiles = total;
     result.tilesComputed = total;
+    if ( publishedAssetId )
+        result.publishedAssetId = *publishedAssetId;
     return result;
 }
 
@@ -192,6 +316,16 @@ ChunkedRunResult runChunkedOperator(
     if ( !kernel || !sink )
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "chunked run: kernel and sink are required" );
+
+    if ( options.commitSpec )
+    {
+        if ( !options.commitSpec->committer )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "chunked run: OutputCommitter is null in ChunkedOutputCommitSpec" );
+        if ( options.commitSpec->tempPath.trimmed().isEmpty() || options.commitSpec->stablePath.trimmed().isEmpty() )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "chunked run: tempPath and stablePath must not be empty in ChunkedOutputCommitSpec" );
+    }
 
     const TileRunSpec spec = makeSpec( operatorId, canonicalParams, partition, determinism );
 

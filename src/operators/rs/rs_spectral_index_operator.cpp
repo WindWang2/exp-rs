@@ -157,7 +157,9 @@ namespace spectral_index_detail {
 Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                                  const Json::Value& params,
                                  RSOperatorContext& context,
-                                 bool allowIndexOverride) {
+                                 bool allowIndexOverride,
+                                 const std::string &operatorId,
+                                 const sicnu::operators::ChunkedRunOptions &options) {
     if (!params.isObject()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Operator parameters must be a JSON object");
@@ -446,17 +448,6 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         + "; dividing the participating bands by it");
     }
 
-    // Streaming execution (#664, ADR 0124 grade bit-exact): the raster is
-    // processed in horizontal row-blocks so only O(blockRows*width) of each
-    // participating band is resident, instead of full-raster buffers. Every
-    // index kernel is strictly element-wise, so block-wise invocation is
-    // bit-identical to a full-raster pass. (The scale regime is already
-    // resolved ONCE above — declared metadata or the bounded probe; a second
-    // sampled re-probe heuristic used to re-derive it here with hardcoded
-    // sentinel guesses and was removed as dead, divergent logic (#856).)
-    const int blockRows = std::max(1, std::min(256, height));
-    const size_t blockSize = static_cast<size_t>(width) * blockRows;
-
     // A (dataset, band) pair with the band's finite NoData sentinel resolved
     // once. Blocks read through it apply the same normalization the
     // full-raster path used (sentinel / non-finite -> NaN) and, for
@@ -482,16 +473,17 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             src.invScale = static_cast<float>(1.0 / numericScale);
         return src;
     };
-    auto readBlock = [&](const BandSource &src, int y0, int rows, float *buf) {
-        if (!src.ds->readBandWindow(src.band, 0, y0, width, rows, buf)) {
+
+    auto readTileBand = [&](const BandSource &src,
+                            const sicnu::runtime::chunk::TileSpec &spec,
+                            float *buf) {
+        if (!src.ds->readBandWindow(src.band, spec.xOffset, spec.yOffset,
+                                    spec.width, spec.height, buf)) {
             throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(src.band));
+                                  "Failed to read band " + std::to_string(src.band) +
+                                  " for tile " + std::to_string(spec.index));
         }
-        const size_t count = static_cast<size_t>(width) * rows;
-        // Single fused pass: sentinel normalization and (when #680 applies)
-        // scale normalization used to be two sweeps; both touch every sample
-        // exactly once, so one branchy pass does the same work with half the
-        // memory traffic. Values and NaN placement are identical.
+        const size_t count = static_cast<size_t>(spec.width) * spec.height;
         if (src.hasNodata) {
             const float nodataF = static_cast<float>(src.nodata);
             if (src.invScale != 1.0f) {
@@ -504,12 +496,12 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                 }
             } else {
                 for (size_t i = 0; i < count; ++i) {
-                    if (buf[i] == nodataF || !std::isfinite(buf[i]))
+                    const float v = buf[i];
+                    if (v == nodataF || !std::isfinite(v))
                         buf[i] = std::numeric_limits<float>::quiet_NaN();
                 }
             }
         } else if (src.invScale != 1.0f) {
-            // #680: normalize to unit reflectance; NaN'd nodata passes through.
             for (size_t i = 0; i < count; ++i) {
                 if (std::isfinite(buf[i]))
                     buf[i] *= src.invScale;
@@ -517,46 +509,142 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         }
     };
 
-    // Streaming output: tiles are written as they are computed so no
-    // full-raster buffer is ever resident (#647 contract: failures/cancel
-    // abandon() the partial file instead of leaving it at the output path).
-    GdalStreamingOutput output(QString::fromStdString(outputPath), width, height, 1,
-                               GDT_Float32, ds.geoTransform(), ds.projection());
-    if (!output.isOpen()) {
-        throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to create output raster: " + outputPath);
-    }
-    output.setNoDataValue(std::numeric_limits<double>::quiet_NaN());
+    const std::string effectiveOpId = !operatorId.empty()
+        ? operatorId
+        : (allowIndexOverride ? "rs:spectral_index" : ("rs:" + QString::fromStdString(defaultIndex).toLower().toStdString()));
 
-    // Generic row-block driver: reads each participating band's block, runs
-    // the element-wise branch kernel, and writes the result tile.
-    const auto streamBlocks = [&](const std::vector<BandSource> &sources,
-                                  const std::function<bool(const float *const *, float *, size_t)> &kernel) {
-        const size_t k = sources.size();
-        std::vector<std::vector<float>> in(k);
-        for (auto &buf : in)
-            buf.resize(blockSize);
-        std::vector<float> outBlk(blockSize);
-        std::vector<const float *> inPtr(k);
-        const int totalBlocks = (height + blockRows - 1) / blockRows;
-        int blockIndex = 0;
-        for (int y0 = 0; y0 < height; y0 += blockRows, ++blockIndex) {
-            context.throwIfCancelled();
-            const int rows = std::min(blockRows, height - y0);
-            const size_t n = static_cast<size_t>(width) * rows;
-            for (size_t s = 0; s < k; ++s)
-                readBlock(sources[s], y0, rows, in[s].data());
-            for (size_t s = 0; s < k; ++s)
-                inPtr[s] = in[s].data();
-            if (!kernel(inPtr.data(), outBlk.data(), n))
-                return false;
-            const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
-                                             blockIndex, totalBlocks};
-            if (!output.writeTile(1, tile, outBlk.data()))
-                return false;
-            context.reportProgress(0.1 + 0.7 * (static_cast<double>(blockIndex + 1) / totalBlocks),
-                                   "Computing " + indexName);
+    sicnu::operators::ChunkedRunOptions runOpts = options;
+    if (params.isMember("executionMode")) {
+        const std::string m = params["executionMode"].asString();
+        if (m == "pipeline")
+            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+        else if (m == "resumable")
+            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+    } else if (params.isMember("chunkedMode")) {
+        const std::string m = params["chunkedMode"].asString();
+        if (m == "pipeline")
+            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+        else if (m == "resumable")
+            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+    }
+    if (params.isMember("ramBudgetBytes") && params["ramBudgetBytes"].isUInt64()) {
+        runOpts.ramBudgetBytes = params["ramBudgetBytes"].asUInt64();
+    }
+    if (params.isMember("resumeStateBase") && params["resumeStateBase"].isString()) {
+        runOpts.resumeStateBase = params["resumeStateBase"].asString();
+    }
+    if (params.isMember("scratchRoot") && params["scratchRoot"].isString()) {
+        runOpts.scratchRoot = params["scratchRoot"].asString();
+    }
+
+    Json::Value canonicalParams(Json::objectValue);
+    canonicalParams["input"] = inputPath;
+    canonicalParams["output"] = outputPath;
+    canonicalParams["index"] = indexName;
+    canonicalParams["nir"] = nirBand;
+    canonicalParams["red"] = redBand;
+    canonicalParams["green"] = greenBand;
+    canonicalParams["blue"] = blueBand;
+    canonicalParams["swir"] = swirBand;
+    canonicalParams["swir2"] = swir2Band;
+    canonicalParams["rededge"] = redEdgeBand;
+    if (applyNumericScale) {
+        canonicalParams["numericScale"] = numericScale;
+    }
+    if (params.isMember("postfire") && params["postfire"].isString()) {
+        canonicalParams["postfire"] = params["postfire"].asString();
+    } else if (params.isMember("after") && params["after"].isString()) {
+        canonicalParams["postfire"] = params["after"].asString();
+    }
+    if (params.isMember("postNir")) canonicalParams["postNir"] = params["postNir"].asInt();
+    if (params.isMember("postSwir2")) canonicalParams["postSwir2"] = params["postSwir2"].asInt();
+
+    sicnu::runtime::chunk::TileRunPartition partition;
+    partition.rasterWidth = width;
+    partition.rasterHeight = height;
+    partition.tileWidth = 256;
+    partition.tileHeight = 256;
+    partition.halo = 0;
+    partition.bands = 1;
+
+    const QString writeTarget = runOpts.commitSpec
+        ? runOpts.commitSpec->tempPath
+        : QString::fromStdString(outputPath);
+
+    std::unique_ptr<GdalStreamingOutput> output;
+    auto ensureOutput = [&]() {
+        if (!output) {
+            output = std::make_unique<GdalStreamingOutput>(
+                writeTarget, width, height, 1,
+                GDT_Float32, ds.geoTransform(), ds.projection());
+            if (!output->isOpen()) {
+                throw RSOperatorError(ErrorCode::FileNotWritable,
+                                      "Failed to create output raster: " + writeTarget.toStdString());
+            }
+            output->setNoDataValue(std::numeric_limits<double>::quiet_NaN());
         }
+    };
+
+    auto userPublish = runOpts.publish;
+    runOpts.publish = [&]() {
+        if (output) {
+            QString closeErr;
+            if (!output->closeWithError(&closeErr)) {
+                throw RSOperatorError(ErrorCode::FileNotWritable,
+                                      "Failed to flush output raster: " + closeErr.toStdString());
+            }
+        }
+        if (userPublish) {
+            userPublish();
+        }
+    };
+
+    auto sink = [&](const sicnu::runtime::chunk::TilePayload &payload) {
+        ensureOutput();
+        const auto &spec = payload.spec;
+        GdalBlockStream::Tile tile;
+        tile.xOffset = spec.xOffset;
+        tile.yOffset = spec.yOffset;
+        tile.width = spec.width;
+        tile.height = spec.height;
+        tile.halo = spec.halo;
+        tile.bufferWidth = spec.bufferWidth;
+        tile.bufferHeight = spec.bufferHeight;
+        tile.index = spec.index;
+        tile.totalTiles = spec.totalTiles;
+        tile.rasterWidth = spec.rasterWidth;
+        tile.rasterHeight = spec.rasterHeight;
+        if (!output->writeTile(1, tile, payload.pixels->data())) {
+            throw RSOperatorError(ErrorCode::FileNotWritable,
+                                  "Failed to write tile " + std::to_string(spec.index));
+        }
+    };
+
+    ChunkedRunResult chunkResult;
+    const auto streamBlocks = [&](const std::vector<BandSource> &sources,
+                                  const std::function<bool(const float *const *, float *, size_t)> &kernel) -> bool {
+        const size_t k = sources.size();
+        ChunkTileKernel chunkKernel = [&](const sicnu::runtime::chunk::TileSpec &spec) -> std::vector<float> {
+            const size_t n = static_cast<size_t>(spec.width) * spec.height;
+            std::vector<std::vector<float>> in(k);
+            std::vector<const float *> inPtr(k);
+            for (size_t s = 0; s < k; ++s) {
+                in[s].resize(n);
+                readTileBand(sources[s], spec, in[s].data());
+                inPtr[s] = in[s].data();
+            }
+            std::vector<float> outBlk(n);
+            if (!kernel(inPtr.data(), outBlk.data(), n)) {
+                throw RSOperatorError(ErrorCode::ComputationError,
+                                      "Index kernel failed on tile " + std::to_string(spec.index));
+            }
+            return outBlk;
+        };
+
+        chunkResult = sicnu::operators::runChunkedOperator(
+            effectiveOpId, canonicalParams, context, partition,
+            sicnu::runtime::chunk::TileRunDeterminism::BitExact,
+            chunkKernel, sink, runOpts);
         return true;
     };
 
@@ -835,14 +923,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 
     context.throwIfCancelled();
     if (!ok) {
-        output.abandon();
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Spectral index computation failed");
-    }
-    QString closeError;
-    if (!output.closeWithError(&closeError)) {
-        throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to write output raster: " + closeError.toStdString());
     }
 
     ds.close();
@@ -857,6 +939,13 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // Provenance: how the numeric domain was resolved (once, dataset-level).
     result["numeric_domain"] =
         sicnu::processing::jsonValueFromQJson( numericDomain.toJson() );
+    result["total_tiles"] = static_cast<Json::UInt64>(chunkResult.totalTiles);
+    result["tiles_computed"] = static_cast<Json::UInt64>(chunkResult.tilesComputed);
+    result["tiles_reused"] = static_cast<Json::UInt64>(chunkResult.tilesReused);
+    result["already_published"] = chunkResult.alreadyPublished;
+    if (!chunkResult.publishedAssetId.isEmpty()) {
+        result["published_asset_id"] = chunkResult.publishedAssetId.toStdString();
+    }
     return result;
 }
 
@@ -865,7 +954,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
                                          RSOperatorContext& context) {
     return spectral_index_detail::runSpectralIndexCore("NDVI", params, context,
-                                                       /*allowIndexOverride=*/true);
+                                                       /*allowIndexOverride=*/true,
+                                                       name());
 }
 
 } // namespace sicnu::operators::rs

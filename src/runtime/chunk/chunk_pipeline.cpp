@@ -1,6 +1,7 @@
 // chunk_pipeline.cpp — see chunk_pipeline.h for the contract.
 #include "chunk_pipeline.h"
 
+#include "runtime/exec/execution_governor.h"
 #include "runtime/observability/execution_telemetry.h"
 
 #include <chrono>
@@ -44,7 +45,8 @@ ChunkPipeline::ChunkPipeline( ProducerFn producer, std::vector<StageFn> stages,
     : m_producer( std::move( producer ) ),
       m_stages( std::move( stages ) ),
       m_consumer( std::move( consumer ) ),
-      m_config( config )
+      m_config( config ),
+      m_governor( config.governor )
 {
 }
 
@@ -95,6 +97,13 @@ void ChunkPipeline::run()
             std::uint64_t produced = 0;
             while ( !cancelled() )
             {
+                if ( m_governor )
+                {
+                    m_governor->throttleWait( m_cancelFlag );
+                }
+                if ( cancelled() )
+                    break;
+
                 TilePayload p;
                 const Clock::time_point t0 = Clock::now();
                 if ( !m_producer( p ) )
