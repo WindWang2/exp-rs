@@ -4,6 +4,7 @@
 #include "scientific_state/asset_state_types.h"
 
 #include <algorithm>
+#include <mutex>
 #include <set>
 
 namespace sicnu::science_context {
@@ -64,6 +65,28 @@ std::string redactPathHint( const std::string &path )
     return path.substr( pos + 1 );
 }
 
+AssetStateProvider::AssetStateProvider( AssetStateProvider &&other ) noexcept
+{
+    std::lock_guard<std::mutex> lock( other.mMutex );
+    mResolver = std::move( other.mResolver );
+    mResolverAuthority = std::move( other.mResolverAuthority );
+    mCache = std::move( other.mCache );
+    mCatalogGeneration = other.mCatalogGeneration;
+}
+
+AssetStateProvider &AssetStateProvider::operator=( AssetStateProvider &&other ) noexcept
+{
+    if ( this != &other )
+    {
+        std::scoped_lock lock( mMutex, other.mMutex );
+        mResolver = std::move( other.mResolver );
+        mResolverAuthority = std::move( other.mResolverAuthority );
+        mCache = std::move( other.mCache );
+        mCatalogGeneration = other.mCatalogGeneration;
+    }
+    return *this;
+}
+
 void AssetStateProvider::setResolver( PassportResolver resolver )
 {
     mResolver = std::move( resolver );
@@ -71,21 +94,30 @@ void AssetStateProvider::setResolver( PassportResolver resolver )
 
 void AssetStateProvider::clearCache()
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mCache.clear();
+}
+
+void AssetStateProvider::clear()
+{
+    clearCache();
 }
 
 void AssetStateProvider::invalidate( const std::string &assetKey )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mCache.erase( assetKey );
 }
 
 void AssetStateProvider::invalidateAll()
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mCache.clear();
 }
 
 void AssetStateProvider::setCatalogGeneration( std::uint64_t generation )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     if ( generation != mCatalogGeneration )
     {
         mCatalogGeneration = generation;
@@ -138,13 +170,16 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
         return result;
     }
 
-    auto it = mCache.find( request.assetKey );
-    if ( it != mCache.end() )
     {
-        result.ok = true;
-        result.state = it->second;
-        result.summary = summarize( result.state );
-        return result;
+        std::lock_guard<std::mutex> lock( mMutex );
+        auto it = mCache.find( request.assetKey );
+        if ( it != mCache.end() )
+        {
+            result.ok = true;
+            result.state = it->second;
+            result.summary = summarize( result.state );
+            return result;
+        }
     }
 
     if ( !mResolver )
@@ -176,7 +211,10 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
                       claims.end() );
     }
 
-    mCache[request.assetKey] = resolvedState;
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        mCache[request.assetKey] = resolvedState;
+    }
     result.ok = true;
     result.state = resolvedState;
     result.summary = summarize( result.state );

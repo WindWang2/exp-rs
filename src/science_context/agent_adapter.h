@@ -18,6 +18,21 @@ namespace sicnu::science_context::agent_adapter {
 ScienceContextBroker &sharedBroker();
 void setSharedBrokerForTest( ScienceContextBroker *broker );
 
+/// RAII helper for overriding the shared broker in tests with guaranteed reset.
+struct ScopedSharedBrokerOverride
+{
+    explicit ScopedSharedBrokerOverride( ScienceContextBroker *broker );
+    ~ScopedSharedBrokerOverride();
+
+    ScopedSharedBrokerOverride( const ScopedSharedBrokerOverride & ) = delete;
+    ScopedSharedBrokerOverride &operator=( const ScopedSharedBrokerOverride & ) = delete;
+    ScopedSharedBrokerOverride( ScopedSharedBrokerOverride && ) = delete;
+    ScopedSharedBrokerOverride &operator=( ScopedSharedBrokerOverride && ) = delete;
+
+  private:
+    ScienceContextBroker *mPrevious = nullptr;
+};
+
 /// scientific:context — synthesize a bounded bundle.
 Json::Value scientificContext( const Json::Value &args );
 

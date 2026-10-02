@@ -3,6 +3,7 @@
 #include "science_context/bundle.h"
 #include <cstdint>
 #include <list>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -40,9 +41,8 @@ class ContextCache
     ContextCache() = default;
     ContextCache( const ContextCache & ) = delete;             // iterators into mLru
     ContextCache &operator=( const ContextCache & ) = delete;
-    // Move keeps every Entry::lruIt valid: list nodes transfer wholesale.
-    ContextCache( ContextCache && ) = default;
-    ContextCache &operator=( ContextCache && ) = default;
+    ContextCache( ContextCache &&other ) noexcept;
+    ContextCache &operator=( ContextCache &&other ) noexcept;
 
     /// Hard entry bound: inserting past it evicts the least-recently-used
     /// entry (the cache is a bounded projection, never a second store).
@@ -52,13 +52,14 @@ class ContextCache
     std::optional<ScientificContextBundle> get( const std::string &key );
     void invalidate( const std::string &key );
     void clear();
-    std::size_t size() const { return mEntries.size(); }
+    std::size_t size() const;
+    std::size_t capacity() const { return kMaxEntries; }
 
     // Hit/miss/eviction counters — observability for invalidation-cost
     // probes; never part of bundle bytes.
-    std::uint64_t hits() const { return mHits; }
-    std::uint64_t misses() const { return mMisses; }
-    std::uint64_t evictions() const { return mEvictions; }
+    std::uint64_t hits() const;
+    std::uint64_t misses() const;
+    std::uint64_t evictions() const;
 
   private:
     void evictOverflow();
@@ -68,6 +69,7 @@ class ContextCache
         ScientificContextBundle bundle;
         std::list<std::string>::iterator lruIt;
     };
+    mutable std::mutex mMutex;
     std::unordered_map<std::string, Entry> mEntries;
     std::list<std::string> mLru; ///< front = most recently used
     std::uint64_t mHits = 0;

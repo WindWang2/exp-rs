@@ -2,6 +2,7 @@
 #include "science_context/context_cache.h"
 
 #include <cstdint>
+#include <mutex>
 #include <sstream>
 
 namespace sicnu::science_context {
@@ -48,8 +49,33 @@ std::string makeCacheKey( const CacheKeyMaterial &material )
     return hex16( fnv1a64( oss.str() ) );
 }
 
+ContextCache::ContextCache( ContextCache &&other ) noexcept
+{
+    std::lock_guard<std::mutex> lock( other.mMutex );
+    mEntries = std::move( other.mEntries );
+    mLru = std::move( other.mLru );
+    mHits = other.mHits;
+    mMisses = other.mMisses;
+    mEvictions = other.mEvictions;
+}
+
+ContextCache &ContextCache::operator=( ContextCache &&other ) noexcept
+{
+    if ( this != &other )
+    {
+        std::scoped_lock lock( mMutex, other.mMutex );
+        mEntries = std::move( other.mEntries );
+        mLru = std::move( other.mLru );
+        mHits = other.mHits;
+        mMisses = other.mMisses;
+        mEvictions = other.mEvictions;
+    }
+    return *this;
+}
+
 void ContextCache::put( const std::string &key, const ScientificContextBundle &bundle )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     auto it = mEntries.find( key );
     if ( it != mEntries.end() )
     {
@@ -64,6 +90,7 @@ void ContextCache::put( const std::string &key, const ScientificContextBundle &b
 
 std::optional<ScientificContextBundle> ContextCache::get( const std::string &key )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     auto it = mEntries.find( key );
     if ( it == mEntries.end() )
     {
@@ -77,6 +104,7 @@ std::optional<ScientificContextBundle> ContextCache::get( const std::string &key
 
 void ContextCache::invalidate( const std::string &key )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     auto it = mEntries.find( key );
     if ( it == mEntries.end() )
         return;
@@ -86,8 +114,33 @@ void ContextCache::invalidate( const std::string &key )
 
 void ContextCache::clear()
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mEntries.clear();
     mLru.clear();
+}
+
+std::size_t ContextCache::size() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return mEntries.size();
+}
+
+std::uint64_t ContextCache::hits() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return mHits;
+}
+
+std::uint64_t ContextCache::misses() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return mMisses;
+}
+
+std::uint64_t ContextCache::evictions() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return mEvictions;
 }
 
 void ContextCache::evictOverflow()
