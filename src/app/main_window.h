@@ -319,6 +319,7 @@ public:
     void loadSampleData();
     void showGuidedWorkflows();
     void showLabCockpit();
+    void showTeachingAdmin();
     void options();
     void showProcessingToolbox();
     void showProcessingHistory();

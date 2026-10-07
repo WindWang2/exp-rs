@@ -660,6 +660,9 @@ void QgisDesktopWindow::setupMenu()
     tip( helpMenu->addAction( ic( "workflow" ), tr( "Undergraduate Lab Teaching Workbench" ),
                               this, &QgisDesktopWindow::showLabCockpit ),
          tr( "Undergraduate Lab Cockpit: course home, readiness, guided steps, feedback." ) );
+    tip( helpMenu->addAction( ic( "workflow" ), tr( "Teacher Authoring & Assessment Console" ),
+                              this, &QgisDesktopWindow::showTeachingAdmin ),
+         tr( "Teacher Authoring & Assessment Console: course authoring, lab packs, batch assessment." ) );
     helpMenu->addSeparator();
     tip( helpMenu->addAction( ic( "met_d_t_" ), tr( "Check Version" ),
                               this, &QgisDesktopWindow::checkVersion ),

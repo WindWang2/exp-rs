@@ -320,6 +320,13 @@
 - 前提：已选中 DEM 栅格
 - 相关主题：operator.rs.terrain_analysis
 
+## command.teaching.adminConsole.show（command.teaching.adminConsole.show）
+
+- 用途：打开教师授课与作业评估中控台：课程编排、实验包校验与批量自动评分。
+- 前提：当前账号处于教学管理员或教师角色
+- 建议下一步：选择实验包进行就绪度预检或执行学生作业批量自动评分
+- 相关主题：command.teaching.labCockpit.show
+
 ## command.teaching.labCockpit.show（command.teaching.labCockpit.show）
 
 - 用途：打开遥感实验学习工作台：课程首页、就绪度检查与分步引导。
