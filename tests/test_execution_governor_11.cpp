@@ -20,11 +20,16 @@
 #include <string>
 #include <thread>
 
+#include "runtime/chunk/chunk_pipeline.h"
+
 using namespace sicnu::runtime;
+using chunk::ChunkCancelled;
+using chunk::ChunkPipeline;
 using chunk::TileMemoryPlan;
 using chunk::TileMemoryRequest;
 using exec::AdmissionRefused;
 using exec::ExecutionGovernor;
+using exec::TileMemoryPool;
 
 namespace
 {
@@ -336,3 +341,436 @@ TEST_CASE( "Governor leak detection reports and counts (fail-closed record)",
     REQUIRE( report.find( "exp.diag.v1" ) != std::string::npos );
     REQUIRE( report.find( "execution.resource_leak" ) != std::string::npos );
 }
+
+// ============================================================================
+// Test Suite 1: RSS Watermark Throttling & Hysteresis
+// ============================================================================
+TEST_CASE( "RSS watermark throttling blocks at high watermark and unblocks at low watermark",
+           "[execution][governor][rss]" )
+{
+    std::atomic<std::uint64_t> mockRss{ 500 * 1024 * 1024 }; // 500 MB
+
+    ExecutionGovernor::Config cfg;
+    cfg.rssWatermarkBytes = 800 * 1024 * 1024;    // 800 MB high watermark
+    cfg.rssLowWatermarkBytes = 600 * 1024 * 1024; // 600 MB low watermark
+    cfg.rssSampler = [&] { return mockRss.load(); };
+    ExecutionGovernor gov( cfg );
+
+    SECTION( "Below high watermark: execution proceeds without blocking" )
+    {
+        mockRss.store( 500 * 1024 * 1024 );
+        REQUIRE_FALSE( gov.isWatermarkExceeded() );
+        REQUIRE( gov.currentRssBytes() == 500 * 1024 * 1024 );
+
+        // Must complete immediately without blocking
+        const auto t0 = std::chrono::steady_clock::now();
+        gov.throttleWait( nullptr, std::chrono::milliseconds( 5 ) );
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0 ).count();
+        REQUIRE( elapsedMs < 50 );
+    }
+
+    SECTION( "At or above high watermark: throttleWait blocks until RSS drops below low watermark" )
+    {
+        mockRss.store( 850 * 1024 * 1024 ); // Above high watermark
+        REQUIRE( gov.isWatermarkExceeded() );
+
+        std::atomic<bool> entered{ false };
+        std::atomic<bool> unblocked{ false };
+
+        std::thread waiter( [&] {
+            entered = true;
+            gov.throttleWait( nullptr, std::chrono::milliseconds( 5 ) );
+            unblocked = true;
+        } );
+
+        // Wait until waiter thread has entered throttleWait
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
+        while ( !entered && std::chrono::steady_clock::now() < deadline )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        REQUIRE( entered );
+
+        // Confirm thread remains blocked after settling
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+        REQUIRE_FALSE( unblocked.load() );
+
+        // Hysteresis test: drop RSS to 700 MB (below high watermark 800 MB, but ABOVE low watermark 600 MB)
+        mockRss.store( 700 * 1024 * 1024 );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+        REQUIRE_FALSE( unblocked.load() ); // Must still remain throttled!
+
+        // Drop RSS to 550 MB (below low watermark 600 MB)
+        mockRss.store( 550 * 1024 * 1024 );
+
+        waiter.join();
+        REQUIRE( unblocked.load() );
+        REQUIRE_FALSE( gov.isWatermarkExceeded() );
+    }
+
+    SECTION( "Default low watermark equals high watermark when rssLowWatermarkBytes is 0" )
+    {
+        ExecutionGovernor::Config defaultLowCfg;
+        defaultLowCfg.rssWatermarkBytes = 800 * 1024 * 1024;
+        defaultLowCfg.rssLowWatermarkBytes = 0; // Unset: defaults to high watermark
+        defaultLowCfg.rssSampler = [&] { return mockRss.load(); };
+        ExecutionGovernor govDefaultLow( defaultLowCfg );
+
+        mockRss.store( 850 * 1024 * 1024 );
+        REQUIRE( govDefaultLow.isWatermarkExceeded() );
+
+        std::atomic<bool> unblocked{ false };
+        std::thread waiter( [&] {
+            govDefaultLow.throttleWait( nullptr, std::chrono::milliseconds( 5 ) );
+            unblocked = true;
+        } );
+
+        std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+        REQUIRE_FALSE( unblocked.load() );
+
+        // Dropping directly below 800 MB unblocks immediately
+        mockRss.store( 790 * 1024 * 1024 );
+        waiter.join();
+        REQUIRE( unblocked.load() );
+    }
+
+    SECTION( "Disabled watermark (0) never throttles regardless of RSS" )
+    {
+        ExecutionGovernor::Config disabledCfg;
+        disabledCfg.rssWatermarkBytes = 0;
+        disabledCfg.rssSampler = [] { return 16ull * 1024 * 1024 * 1024; }; // 16 GB
+        ExecutionGovernor govDisabled( disabledCfg );
+
+        REQUIRE_FALSE( govDisabled.isWatermarkExceeded() );
+        REQUIRE_NOTHROW( govDisabled.throttleWait() );
+    }
+
+    SECTION( "Procfs default sampler smoke test" )
+    {
+        ExecutionGovernor gov( ExecutionGovernor::Config{} );
+#if defined( __linux__ )
+        REQUIRE( gov.currentRssBytes() > 0 );
+#endif
+        REQUIRE_FALSE( gov.isWatermarkExceeded() );
+    }
+}
+
+// ============================================================================
+// Test Suite 2: Cancellation During Throttle
+// ============================================================================
+TEST_CASE( "Cancellation during RSS throttle throws ChunkCancelled immediately",
+           "[execution][governor][cancel]" )
+{
+    ExecutionGovernor::Config cfg;
+    cfg.rssWatermarkBytes = 500 * 1024 * 1024;
+    cfg.rssSampler = [] { return 700 * 1024 * 1024; }; // Permanently above watermark
+    ExecutionGovernor gov( cfg );
+
+    SECTION( "Pre-set cancel flag throws ChunkCancelled on entry" )
+    {
+        std::atomic<bool> cancelFlag{ true };
+        REQUIRE_THROWS_AS( gov.throttleWait( &cancelFlag, std::chrono::milliseconds( 5 ) ),
+                           ChunkCancelled );
+    }
+
+    SECTION( "Cancel flag set while thread is actively blocked unblocks promptly" )
+    {
+        std::atomic<bool> cancelFlag{ false };
+        std::atomic<bool> entered{ false };
+        std::atomic<bool> caughtCancelled{ false };
+
+        std::thread waiter( [&] {
+            entered = true;
+            try
+            {
+                gov.throttleWait( &cancelFlag, std::chrono::milliseconds( 5 ) );
+            }
+            catch ( const ChunkCancelled & )
+            {
+                caughtCancelled = true;
+            }
+        } );
+
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
+        while ( !entered && std::chrono::steady_clock::now() < deadline )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        REQUIRE( entered );
+
+        std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+        REQUIRE_FALSE( caughtCancelled.load() );
+
+        // Signal cancellation
+        cancelFlag.store( true );
+
+        waiter.join();
+        REQUIRE( caughtCancelled.load() );
+    }
+
+    SECTION( "Cancel predicate overload throws ChunkCancelled" )
+    {
+        std::atomic<bool> stopSignal{ false };
+        std::thread waiter( [&] {
+            std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+            stopSignal.store( true );
+        } );
+
+        REQUIRE_THROWS_AS(
+            gov.throttleWait( [&] { return stopSignal.load(); }, std::chrono::milliseconds( 5 ) ),
+            ChunkCancelled );
+        waiter.join();
+    }
+}
+
+// ============================================================================
+// Test Suite 3: TileMemoryPool Bounding, Buffer Reuse, and Destructor Leak Detection
+// ============================================================================
+TEST_CASE( "TileMemoryPool enforces bounds, reuses buffers, and detects destructor leaks",
+           "[execution][governor][pool]" )
+{
+    SECTION( "Buffer allocation, recycling via custom deleter, and cache hits" )
+    {
+        TileMemoryPool::Config cfg;
+        cfg.maxAllocatedBytes = 1024 * 1024; // 1 MB
+        cfg.maxPoolBytes = 512 * 1024;      // 512 KB
+        TileMemoryPool pool( cfg );
+
+        REQUIRE( pool.allocatedBytes() == 0 );
+        REQUIRE( pool.pooledBytes() == 0 );
+        REQUIRE( pool.pooledCount() == 0 );
+
+        // Acquire 1024 floats = 4096 bytes
+        auto buf1 = pool.acquireBuffer( 1024 );
+        REQUIRE( buf1 != nullptr );
+        REQUIRE( buf1->size() == 1024 );
+        REQUIRE( pool.allocatedBytes() == 4096 );
+        REQUIRE( pool.pooledBytes() == 0 );
+        REQUIRE( pool.totalAllocations() == 1 );
+        REQUIRE( pool.poolMisses() == 1 );
+        REQUIRE( pool.poolHits() == 0 );
+
+        // Write verification pattern
+        ( *buf1 )[0] = 42.0f;
+        ( *buf1 )[1023] = 99.0f;
+
+        // Release buffer by dropping shared_ptr reference
+        buf1.reset();
+        REQUIRE( pool.allocatedBytes() == 0 );
+        REQUIRE( pool.pooledBytes() >= 4096 );
+        REQUIRE( pool.pooledCount() == 1 );
+
+        // Re-acquire buffer of same size: must hit cache and return zeroed buffer
+        auto buf2 = pool.acquireBuffer( 1024 );
+        REQUIRE( buf2 != nullptr );
+        REQUIRE( buf2->size() == 1024 );
+        REQUIRE( ( *buf2 )[0] == 0.0f ); // Recycled buffer must be sanitized/cleared
+        REQUIRE( pool.allocatedBytes() == 4096 );
+        REQUIRE( pool.pooledBytes() == 0 );
+        REQUIRE( pool.pooledCount() == 0 );
+        REQUIRE( pool.totalAllocations() == 2 );
+        REQUIRE( pool.poolHits() == 1 ); // Cache hit!
+        REQUIRE( pool.poolMisses() == 1 );
+    }
+
+    SECTION( "Active allocation cap blocks and respects never-starve rule" )
+    {
+        TileMemoryPool::Config cfg;
+        cfg.maxAllocatedBytes = 8192; // Space for exactly two 1024-float buffers (4096 B each)
+        TileMemoryPool pool( cfg );
+
+        auto buf1 = pool.acquireBuffer( 1024 );
+        auto buf2 = pool.acquireBuffer( 1024 );
+        REQUIRE( pool.allocatedBytes() == 8192 );
+
+        // Non-blocking tryAcquireBuffer returns nullptr when budget exhausted
+        auto buf3 = pool.tryAcquireBuffer( 1024 );
+        REQUIRE( buf3 == nullptr );
+
+        // Blocking acquire waits for release
+        std::atomic<bool> acquired{ false };
+        std::shared_ptr<std::vector<float>> waiterBuf;
+        std::thread waiter( [&] {
+            waiterBuf = pool.acquireBuffer( 1024 );
+            if ( waiterBuf )
+                acquired = true;
+        } );
+
+        std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+        REQUIRE_FALSE( acquired.load() );
+
+        // Release buf1 -> unblocks waiter
+        buf1.reset();
+        waiter.join();
+        REQUIRE( acquired.load() );
+        REQUIRE( pool.allocatedBytes() == 8192 );
+
+        // Never-starve rule: an idle pool (allocatedBytes == 0) admits an oversized tile
+        buf2.reset();
+        waiterBuf.reset();
+        // Wait for waiter's buffer to also be freed:
+        while ( pool.allocatedBytes() > 0 )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+
+        REQUIRE( pool.allocatedBytes() == 0 );
+        // Request 16384 bytes (> maxAllocatedBytes 8192): must succeed when idle
+        auto oversized = pool.acquireBuffer( 4096 ); // 4096 * 4 = 16384 bytes
+        REQUIRE( oversized != nullptr );
+        REQUIRE( pool.allocatedBytes() == 16384 );
+    }
+
+    SECTION( "Max pool bytes cap trims excess idle buffers to system heap" )
+    {
+        TileMemoryPool::Config cfg;
+        cfg.maxAllocatedBytes = 0; // Unbounded active
+        cfg.maxPoolBytes = 4096;   // Pool retains at most one 1024-float buffer
+        TileMemoryPool pool( cfg );
+
+        auto b1 = pool.acquireBuffer( 1024 );
+        auto b2 = pool.acquireBuffer( 1024 );
+
+        b1.reset(); // Pooled bytes = 4096, pooledCount = 1
+        REQUIRE( pool.pooledBytes() == 4096 );
+        REQUIRE( pool.pooledCount() == 1 );
+
+        b2.reset(); // Excess buffer exceeds maxPoolBytes -> deallocated to OS
+        REQUIRE( pool.pooledBytes() == 4096 );
+        REQUIRE( pool.pooledCount() == 1 );
+    }
+
+    SECTION( "ExecutionGovernor destructor detects leaked memory pool buffers" )
+    {
+        auto &tel = observability::ExecutionTelemetry::instance();
+        const auto leaksBefore = tel.counters()["resource_leaks_detected"];
+
+        std::shared_ptr<std::vector<float>> leakedBuffer;
+        {
+            ExecutionGovernor::Config cfg;
+            cfg.maxAllocatedBytes = 1024 * 1024;
+            ExecutionGovernor gov( cfg );
+
+            leakedBuffer = gov.memoryPool().acquireBuffer( 512 ); // 2048 bytes
+            REQUIRE( leakedBuffer != nullptr );
+            REQUIRE( gov.memoryPool().allocatedBytes() == 2048 );
+            REQUIRE( gov.hasOutstandingResources() ); // Must report true!
+            // gov destroyed with leakedBuffer still alive
+        }
+
+        // Leaked resource must trigger diagnostic report and telemetry increment
+        REQUIRE( tel.counters()["resource_leaks_detected"] == leaksBefore + 1 );
+        const std::string report = ExecutionGovernor::lastLeakReportJson();
+        REQUIRE( report.find( "exp.diag.v1" ) != std::string::npos );
+        REQUIRE( report.find( "execution.resource_leak" ) != std::string::npos );
+        REQUIRE( report.find( "memory pool outstanding" ) != std::string::npos );
+
+        // Reverse destruction safety: releasing buffer after governor died must not crash
+        REQUIRE_NOTHROW( leakedBuffer.reset() );
+        REQUIRE( leakedBuffer == nullptr );
+    }
+}
+
+// ============================================================================
+// Test Suite 4: Thread Safety Under High Concurrency
+// ============================================================================
+TEST_CASE( "TileMemoryPool maintains thread-safety and data integrity under concurrent acquire and release",
+           "[execution][governor][concurrency]" )
+{
+    TileMemoryPool::Config cfg;
+    cfg.maxAllocatedBytes = 64 * 1024; // 64 KB limit
+    cfg.maxPoolBytes = 32 * 1024;      // 32 KB pool limit
+    TileMemoryPool pool( cfg );
+
+    constexpr int kNumThreads = 6;
+    constexpr int kIterations = 100;
+    std::vector<std::thread> workers;
+    workers.reserve( kNumThreads );
+
+    std::atomic<bool> running{ true };
+    std::atomic<bool> canaryCorrupted{ false };
+    std::atomic<std::uint64_t> totalVerifiedBuffers{ 0 };
+
+    for ( int t = 0; t < kNumThreads; ++t )
+    {
+        workers.emplace_back( [&pool, t, &canaryCorrupted, &totalVerifiedBuffers] {
+            for ( int iter = 0; iter < kIterations; ++iter )
+            {
+                // Varying sizes: 128, 256, 512 floats
+                const std::size_t count = 128 * ( 1 + ( ( t + iter ) % 4 ) );
+                auto buf = pool.acquireBuffer( count );
+                if ( !buf )
+                    continue;
+
+                // Write thread-specific canary pattern
+                const float canary = static_cast<float>( ( t + 1 ) * 1000 + iter );
+                ( *buf )[0] = canary;
+                ( *buf )[count - 1] = canary;
+
+                std::this_thread::yield();
+
+                // Verify canary integrity (non-Catch2 inside worker thread to avoid OutputRedirect races)
+                if ( ( *buf )[0] != canary || ( *buf )[count - 1] != canary )
+                    canaryCorrupted.store( true, std::memory_order_relaxed );
+
+                totalVerifiedBuffers++;
+                // Buffer released upon loop iteration end
+            }
+        } );
+    }
+
+    for ( auto &w : workers )
+        w.join();
+
+    REQUIRE_FALSE( canaryCorrupted.load() );
+    REQUIRE( totalVerifiedBuffers.load() == static_cast<std::uint64_t>( kNumThreads * kIterations ) );
+    REQUIRE( pool.allocatedBytes() == 0 );
+    REQUIRE( pool.pooledBytes() <= cfg.maxPoolBytes );
+    REQUIRE( pool.totalAllocations() == pool.poolHits() + pool.poolMisses() );
+}
+
+// ============================================================================
+// Test Suite 5: ChunkPipeline Producer Throttling Integration
+// ============================================================================
+TEST_CASE( "ChunkPipeline integrates with ExecutionGovernor for producer throttling",
+           "[execution][governor][pipeline]" )
+{
+    std::atomic<std::uint64_t> mockRss{ 100 * 1024 * 1024 };
+
+    ExecutionGovernor::Config govCfg;
+    govCfg.rssWatermarkBytes = 200 * 1024 * 1024;
+    govCfg.rssLowWatermarkBytes = 150 * 1024 * 1024;
+    govCfg.rssSampler = [&] { return mockRss.load(); };
+    ExecutionGovernor gov( govCfg );
+
+    constexpr int kTotalTiles = 5;
+    std::atomic<int> tilesProduced{ 0 };
+    std::atomic<int> tilesConsumed{ 0 };
+
+    ChunkPipeline::Config pipeCfg;
+    pipeCfg.governor = &gov;
+    pipeCfg.queueCapacity = 2;
+
+    auto producer = [&]( chunk::TilePayload &p ) {
+        int idx = tilesProduced.fetch_add( 1 );
+        if ( idx >= kTotalTiles )
+            return false;
+        chunk::TileSpec spec;
+        spec.index = idx;
+        spec.totalTiles = kTotalTiles;
+        spec.width = 10;
+        spec.height = 10;
+        spec.bufferWidth = 10;
+        spec.bufferHeight = 10;
+        spec.bands = 1;
+        p = chunk::TilePayload( spec, std::make_shared<std::vector<float>>( 100, 1.0f ) );
+        return true;
+    };
+
+    auto consumer = [&]( chunk::TilePayload &&p ) {
+        tilesConsumed.fetch_add( 1 );
+        return true;
+    };
+
+    chunk::ChunkPipeline pipeline( producer, {}, consumer, pipeCfg );
+    pipeline.run();
+
+    REQUIRE( pipeline.completedTiles() == kTotalTiles );
+    REQUIRE( tilesConsumed.load() == kTotalTiles );
+}
+

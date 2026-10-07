@@ -3,6 +3,7 @@
  ***************************************************************************/
 #pragma once
 
+#include "operators/framework/chunked_run.h"
 #include "operators/framework/rs_operator.h"
 
 namespace sicnu::operators::rs {
@@ -82,7 +83,9 @@ Json::Value runSpectralIndexCore(
     const std::string &defaultIndex,
     const Json::Value &params,
     RSOperatorContext &context,
-    bool allowIndexOverride = false );
+    bool allowIndexOverride = false,
+    const std::string &operatorId = "",
+    const sicnu::operators::ChunkedRunOptions &options = {} );
 }
 
 } // namespace sicnu::operators::rs

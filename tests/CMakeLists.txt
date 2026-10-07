@@ -12485,6 +12485,102 @@ sicnu_add_test(test_chunk_adoption_11 TIMEOUT 300)
 target_link_libraries(test_chunk_adoption_11 PRIVATE sicnu_runtime)
 sicnu_add_test(test_execution_scale_fault_11 TIMEOUT 600)
 target_link_libraries(test_execution_scale_fault_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_chunked_fabric_e2e TIMEOUT 300)
+target_link_libraries(test_chunked_fabric_e2e PRIVATE sicnu_runtime)
+sicnu_add_test(test_chunked_operators_parity TIMEOUT 300)
+target_link_libraries(test_chunked_operators_parity PRIVATE sicnu_runtime)
+qt_add_executable(test_challenger_m3_2_harness test_challenger_m3_2_harness.cpp)
+target_link_libraries(test_challenger_m3_2_harness PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_data
+  sicnu_processing
+  sicnu_operators
+  sicnu_runtime
+)
+target_include_directories(test_challenger_m3_2_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_challenger_m3_2_harness PROPERTIES AUTOMOC ON)
+add_test(NAME "test_challenger_m3_2_harness" COMMAND test_challenger_m3_2_harness)
+
+qt_add_executable(test_challenger_m2_1_harness test_challenger_m2_1_harness.cpp)
+target_link_libraries(test_challenger_m2_1_harness PRIVATE
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow_runtime
+  sicnu_runtime
+)
+target_include_directories(test_challenger_m2_1_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_challenger_m2_1_harness PROPERTIES AUTOMOC ON)
+add_test(NAME "M2-Challenger: Empirical stress harness" COMMAND test_challenger_m2_1_harness)
+
+qt_add_executable(test_challenger_m2_2_harness test_challenger_m2_2_harness.cpp)
+target_link_libraries(test_challenger_m2_2_harness PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow_runtime
+  sicnu_runtime
+)
+target_include_directories(test_challenger_m2_2_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_challenger_m2_2_harness PROPERTIES AUTOMOC ON)
+add_test(NAME "M2-Challenger-2: Empirical stress harness" COMMAND test_challenger_m2_2_harness)
+
+qt_add_executable(test_challenger_m3_1_harness test_challenger_m3_1_harness.cpp)
+target_link_libraries(test_challenger_m3_1_harness PRIVATE
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow_runtime
+  sicnu_runtime
+)
+target_include_directories(test_challenger_m3_1_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_challenger_m3_1_harness PROPERTIES AUTOMOC ON)
+add_test(NAME "M3-Challenger: Empirical stress harness" COMMAND test_challenger_m3_1_harness)
 # ---- F15: large-scale mosaic, fusion & quality composite (mosaic-fusion-11) ----
 # Algorithm-layer tests: link sicnu_processing (+GDAL for fixture rasters and
 # OGR CRS oracles) without the full operator/agent chain.

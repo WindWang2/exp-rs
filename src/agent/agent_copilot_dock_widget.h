@@ -88,9 +88,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// run — the refusal is a fact about the stream, and must be visible.
     void onMalformedToolCall( const QJsonObject &detail );
     void onToolCallParsed( const QJsonObject &toolCallJson );
-    /// Observability for tool calls the streaming client refused (bad JSON,
-    /// missing name, oversized payload): non-fatal notice, the run continues.
-    void onMalformedToolCall( const QJsonObject &detail );
+
     void onLlmFinished();
     void onErrorOccurred( const QString &errorMsg );
     /// Terminal TaskCenter updates for watched tool-call tasks. Runs on the GUI
