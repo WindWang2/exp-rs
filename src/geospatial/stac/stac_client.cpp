@@ -382,7 +382,7 @@ bool isPrivateOrLocalHost( std::string host )
   lowered.reserve( host.size() );
   for ( const char c : host )
     lowered += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
-  if ( lowered == "localhost" || lowered.size() > 10 && lowered.compare( lowered.size() - 10, 10, ".localhost" ) == 0 )
+  if ( lowered == "localhost" || ( lowered.size() > 10 && lowered.compare( lowered.size() - 10, 10, ".localhost" ) == 0 ) )
     return true;
   if ( lowered == "metadata.google.internal" )
     return true;

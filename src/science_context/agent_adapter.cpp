@@ -7,6 +7,7 @@
 #include "recipes/recipe_registry.h"
 #include "scientific_state/asset_state_json.h"
 
+#include <mutex>
 #include <stdexcept>
 
 namespace sicnu::science_context::agent_adapter {
@@ -27,6 +28,7 @@ using ::sicnu::science_context::SynthesizeRequest;
 
 namespace {
 
+std::mutex gBrokerMutex;
 ScienceContextBroker *gTestBroker = nullptr;
 
 /// Process-default broker. Wired to the real recipe authority on first use:
@@ -98,6 +100,7 @@ sicnu::state::RemoteSensingAssetState passportFromArgs( const Json::Value &args 
 
 ScienceContextBroker &sharedBroker()
 {
+    std::lock_guard<std::mutex> lock( gBrokerMutex );
     if ( gTestBroker )
         return *gTestBroker;
     return defaultBroker();
@@ -105,7 +108,21 @@ ScienceContextBroker &sharedBroker()
 
 void setSharedBrokerForTest( ScienceContextBroker *broker )
 {
+    std::lock_guard<std::mutex> lock( gBrokerMutex );
     gTestBroker = broker;
+}
+
+ScopedSharedBrokerOverride::ScopedSharedBrokerOverride( ScienceContextBroker *broker )
+{
+    std::lock_guard<std::mutex> lock( gBrokerMutex );
+    mPrevious = gTestBroker;
+    gTestBroker = broker;
+}
+
+ScopedSharedBrokerOverride::~ScopedSharedBrokerOverride()
+{
+    std::lock_guard<std::mutex> lock( gBrokerMutex );
+    gTestBroker = mPrevious;
 }
 
 Json::Value scientificContext( const Json::Value &argsIn )

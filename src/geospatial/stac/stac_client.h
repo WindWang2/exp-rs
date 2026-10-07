@@ -314,17 +314,6 @@ class StacClient
         const std::vector<std::string> &itemHrefs, int maxConcurrency = 0 ) const;
 
   private:
-    /// One built search request: method, absolute URL and (canonical) body.
-    /// Factored out of search() so the raw entry point (searchDocument)
-    /// issues byte-identical requests.
-    struct SearchRequest
-    {
-        std::string method;
-        std::string url;
-        Json::Value body;
-    };
-
-    SearchRequest buildSearchRequest( const StacSearchQuery &query ) const;
     Json::Value fetchDocument( const std::string &method, const std::string &url,
                               const Json::Value &body ) const;
     StacPage executeSearch( const std::string &method, const std::string &url,

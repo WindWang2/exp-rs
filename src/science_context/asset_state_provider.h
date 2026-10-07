@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -44,12 +45,19 @@ struct AssetResolveResult
 class AssetStateProvider
 {
   public:
+    AssetStateProvider() = default;
+    AssetStateProvider( const AssetStateProvider & ) = delete;
+    AssetStateProvider &operator=( const AssetStateProvider & ) = delete;
+    AssetStateProvider( AssetStateProvider &&other ) noexcept;
+    AssetStateProvider &operator=( AssetStateProvider &&other ) noexcept;
+
     void setResolver( PassportResolver resolver );
     /// Bundle-provenance id of the wired resolver ("" when none wired).
     void setResolverAuthority( const std::string &authority ) { mResolverAuthority = authority; }
     const std::string &resolverAuthority() const { return mResolverAuthority; }
     bool hasResolver() const { return static_cast<bool>( mResolver ); }
     void clearCache();
+    void clear();
     void invalidate( const std::string &assetKey );
     void invalidateAll();
     void setCatalogGeneration( std::uint64_t generation );
@@ -60,6 +68,7 @@ class AssetStateProvider
   private:
     PassportResolver mResolver;
     std::string mResolverAuthority;
+    mutable std::mutex mMutex;
     mutable std::unordered_map<std::string, sicnu::state::RemoteSensingAssetState> mCache;
     std::uint64_t mCatalogGeneration = 0;
 };
