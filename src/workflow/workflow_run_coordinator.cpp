@@ -520,29 +520,34 @@ void WorkflowRunCoordinator::shutdownForTests()
     m_checkpointLoadDelayMs.store( 0 );
 }
 
-long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad )
+bool WorkflowRunCoordinator::parseBoundedWorkflowJson( const std::string &jsonText, Json::Value *root )
 {
     // #1154: the pipeline text is client-supplied through the unauthenticated
     // MCP run_workflow surface. jsoncpp's default builder does not bound its
     // recursion usefully — a deeply-nested string SIGSEGVs (MSVC) or throws
     // an escaping Json::LogicError (GCC terminate). A workflow document is
-    // shallow (steps + per-step params), so bound it explicitly and catch,
-    // returning the typed INVALID_PIPELINE the handler already promises.
+    // shallow (steps + per-step params), so bound it explicitly and catch:
+    // a depth bomb THROWS (Json::Exception), never returns false.
     Json::CharReaderBuilder builder;
     builder["stackLimit"] = 64;
-    Json::Value root;
     std::string errs;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     bool parsed = false;
     try
     {
-        parsed = reader->parse( jsonPipeline.c_str(), jsonPipeline.c_str() + jsonPipeline.length(), &root, &errs );
+        parsed = reader->parse( jsonText.data(), jsonText.data() + jsonText.size(), root, &errs );
     }
     catch ( const Json::Exception & )
     {
         parsed = false;
     }
-    if ( !parsed )
+    return parsed;
+}
+
+long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad )
+{
+    Json::Value root;
+    if ( !parseBoundedWorkflowJson( jsonPipeline, &root ) )
         return -1;
 
     WorkflowDefinition def;

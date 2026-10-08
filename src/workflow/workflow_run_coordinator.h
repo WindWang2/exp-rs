@@ -69,6 +69,15 @@ class WorkflowRunCoordinator : public QObject {
     /// error (the caller reports the expected shape).
     long startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
 
+    /// Parses client-supplied workflow JSON with the ONE bounded reader both
+    /// the tracked-pipeline submit path and the MCP run_workflow structural
+    /// gate must use (stackLimit 64, #1154): a depth bomb throws
+    /// Json::Exception instead of returning false, so the catch maps it to
+    /// "not parsed". Shared so the two call sites can never drift into
+    /// different dialects or bounds — the structural gate must only reject
+    /// what the submit path would reject anyway.
+    static bool parseBoundedWorkflowJson( const std::string &jsonText, Json::Value *root );
+
     /// Startup recovery (#697): mark non-terminal runs Interrupted (steps
     /// stuck Running/Cancelling reset to Pending) and optionally resubmit the
     /// remaining work. With @a autoResume false the runs stay resumable via

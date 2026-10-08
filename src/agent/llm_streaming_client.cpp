@@ -132,6 +132,17 @@ void LlmStreamingClient::cancel()
   }
 }
 
+void LlmStreamingClient::failStream( const QString &errorMessage )
+{
+  cancel();
+  if ( !m_finishedEmitted )
+  {
+    m_finishedEmitted = true;
+    emit errorOccurred( errorMessage );
+    emit finished();
+  }
+}
+
 void LlmStreamingClient::onReadyRead()
 {
   if ( !m_currentReply )
@@ -150,7 +161,12 @@ void LlmStreamingClient::onReadyRead()
     detail[QStringLiteral( "size" )] = static_cast<int>( m_buffer.size() );
     emit malformedToolCall( detail );
     m_buffer.clear();
-    cancel(); // stop pulling from the reply; the caller sees the refusal
+    // Fragments accumulated by a stream that just proved hostile are
+    // untrustworthy: drop them so no later fallback can emit a partial call.
+    m_toolCalls.clear();
+    failStream( QStringLiteral( "SSE stream refused: the unterminated line grew past the %1 MiB bound (%2 bytes buffered without a newline)" )
+                  .arg( kMaxSseLineChars / ( 1024 * 1024 ) )
+                  .arg( detail[QStringLiteral( "size" )].toInt() ) );
     return;
   }
 

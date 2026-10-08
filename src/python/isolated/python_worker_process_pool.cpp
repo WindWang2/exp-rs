@@ -18,6 +18,20 @@ namespace
 /// Error message carried by every recovered request the pool could NOT
 /// re-dispatch after exhausting its replay budget.
 constexpr auto kReplayBudgetExhausted = "Worker crashed; replay budget exhausted";
+/// Grace window for a socket EOF with NOTHING in flight: an exiting worker's
+/// socket close is usually observed before QProcess's finished(), so an
+/// instantaneous isRunning() check cannot distinguish "daemon dropped the
+/// connection but lives" from "worker exiting". One deferred re-check inside
+/// this window resolves the ambiguity without burning crash budget on clean
+/// exits.
+constexpr int kIdleDisconnectGraceMs = 250;
+/// A (re)spawned worker must complete its connect handshake within this
+/// window or its node is treated as lost — otherwise a worker that starts
+/// but never attaches (import hang) sits in limbo: alive, unacquirable, yet
+/// counted available. Deliberately AFTER the 5 s recovery-request watchdog
+/// so a recovery cycle's pending callers are answered before the node is
+/// recycled into the next cycle.
+constexpr int kRestartHandshakeTimeoutMs = 9000;
 } // namespace
 
 bool replayRecoveredRequest( PythonIpcServer *server,
@@ -247,7 +261,12 @@ int PythonWorkerProcessPool::availableWorkerCount() const
   int count = 0;
   for ( const WorkerNode *node : m_nodes )
   {
-    if ( node && !node->isBusy && node->worker && node->worker->isRunning() )
+    // Available == acquirable: a worker that runs but has no connected
+    // client refuses every send, so it must not count as capacity. The
+    // handshake watchdog recycles such nodes; until it fires, this count
+    // must not lie to capacity planning.
+    if ( node && !node->isBusy && node->worker && node->worker->isRunning()
+         && node->server && node->server->hasClient() )
     {
       count++;
     }
@@ -267,7 +286,9 @@ PoolHealthSnapshot PythonWorkerProcessPool::poolHealth() const
       if ( node->worker && node->worker->isRunning() )
       {
         snapshot.active++;
-        if ( !node->isBusy )
+        // Same acquirable semantics as availableWorkerCount: a running
+        // worker without a connected client is not usable capacity.
+        if ( !node->isBusy && node->server && node->server->hasClient() )
           snapshot.available++;
       }
     }
@@ -294,6 +315,7 @@ WorkerNode *PythonWorkerProcessPool::createWorkerNode( int id )
   bindNodeSignals( node );
 
   node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
+  armHandshakeWatchdog( node );
   return node;
 }
 
@@ -331,18 +353,65 @@ void PythonWorkerProcessPool::bindNodeSignals( WorkerNode *node )
                                    .arg( exitCode )
                                    .arg( live->server->inFlightCount() ) );
   } );
-  // Socket EOF with a STILL-RUNNING worker (daemon closed the connection but
-  // did not exit): same contract — the channel is dead even if no request
-  // happens to be in flight this instant, and every future send on it would
-  // silently fail. Recover the worker regardless of the in-flight count
-  // (completed final answers were already drained out of the count).
+  // Socket EOF: two worlds produce this signal and they need different
+  // responses. (a) Requests in flight on a dead channel — an unambiguous
+  // loss, recover now. (b) EOF with nothing in flight is ambiguous: either
+  // the daemon is alive and dropped the channel (a loss all the same — every
+  // future send on it would silently fail), or the worker is EXITING and its
+  // socket close simply beat QProcess's finished() notification: isRunning()
+  // is stale-true at this instant, and a loss cycle run on it burns crash
+  // budget on a clean exit (five clean exits retire a healthy node) plus a
+  // spurious workerCrashed. Defer one grace turn — an exiting worker's
+  // finished() lands well inside it and its lane owns the node (retirement
+  // when idle, loss when requests were in flight).
   connect( node->server, &PythonIpcServer::clientDisconnected, this, [this, id]() {
     WorkerNode *live = findNodeById( id );
     if ( !live || m_shuttingDown || live->isRestarting )
       return;
-    if ( live->worker && live->worker->isRunning() && live->server )
-      handleWorkerLoss( live, QStringLiteral( "worker disconnected — protocol EOF" ) );
+    if ( !live->worker || !live->server )
+      return;
+    if ( live->server->inFlightCount() > 0 )
+    {
+      handleWorkerLoss( live, QStringLiteral( "worker disconnected with %1 in-flight request(s) — protocol EOF" )
+                                   .arg( live->server->inFlightCount() ) );
+      return;
+    }
+    QTimer::singleShot( kIdleDisconnectGraceMs, this, [this, id]() {
+      if ( m_shuttingDown )
+        return;
+      WorkerNode *live = findNodeById( id );
+      if ( !live || live->isRestarting || !live->worker || !live->server )
+        return;
+      if ( live->server->hasClient() )
+        return; // a fresh connection replaced the lost one inside the grace
+      if ( live->worker->isRunning() )
+        handleWorkerLoss( live, QStringLiteral( "worker disconnected — protocol EOF" ) );
+      // else: the worker was exiting — workerFinished's lane owns the node.
+    } );
   } );
+}
+
+void PythonWorkerProcessPool::armHandshakeWatchdog( WorkerNode *node )
+{
+  if ( !node || !node->server )
+    return;
+  // Parented to THIS cycle's server so any earlier teardown (next loss
+  // cycle, resize, shutdown) kills the timer with it; the server-identity
+  // re-check at fire time closes the same-dispatcher-pass deleteLater
+  // window — the same discipline as the recovery-request watchdog.
+  QPointer<PythonIpcServer> myServer( node->server );
+  const int id = node->id;
+  auto *watchdog = new QTimer( node->server );
+  watchdog->setSingleShot( true );
+  connect( watchdog, &QTimer::timeout, this, [this, id, myServer]() {
+    WorkerNode *live = findNodeById( id );
+    if ( !myServer || !live || live->server != myServer || live->isRestarting )
+      return;
+    if ( live->server->hasClient() )
+      return; // handshake completed (possibly right at the deadline)
+    handleWorkerLoss( live, QStringLiteral( "worker handshake timeout — started but never connected" ) );
+  } );
+  watchdog->start( kRestartHandshakeTimeoutMs );
 }
 
 void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
@@ -490,6 +559,7 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
     }
     qInfo() << "Successfully auto-healed and restarted worker process id:" << id;
     emit workerRestarted( id );
+    armHandshakeWatchdog( node );
 
     if ( borrowed != m_pendingRecovery.end() && !borrowed->second->empty() )
     {

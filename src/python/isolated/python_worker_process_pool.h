@@ -107,6 +107,11 @@ class PythonWorkerProcessPool : public QObject
     /// is a worker retiring, not a channel failure.
     void handleWorkerLoss( WorkerNode *node, const QString &reason );
     void bindNodeSignals( WorkerNode *node );
+    /// Arms the one-shot connect-handshake watchdog for a freshly (re)spawned
+    /// worker: no client attached within the window means the node is treated
+    /// as lost (restart-or-retire) instead of parking in acquire-unavailable
+    /// limbo while still counting as available.
+    void armHandshakeWatchdog( WorkerNode *node );
     WorkerNode *findNodeById( int id ) const;
     /// Answers every recovered request with an explicit, per-cause typed
     /// error so callers never wait forever on a dead worker.

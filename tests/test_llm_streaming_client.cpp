@@ -8,12 +8,15 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QFile>
 #include <QSettings>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 using namespace sicnu::agent;
 using namespace sicnu::processing;
@@ -662,4 +665,71 @@ TEST_CASE( "corpus SSE samples behave exactly as their recorded contract "
       CHECK( found );
     }
   }
+}
+
+// — Robustness review 2026-10-02 (P1): the TRANSPORT lane of the line bound.
+// The seam test above proves parseSseLine refuses an oversized line; this
+// regression drives the real network path. The refusal used to cancel() the
+// reply and nothing else: abort() surfaces as OperationCanceledError (which
+// onReplyError deliberately skips) and the reply's finished() is dropped by
+// onReplyFinished's null-reply guard — so no client-level terminal signal
+// ever fired and the caller's turn hung forever. failStream() must emit
+// errorOccurred + finished after the refusal.
+TEST_CASE( "an oversized unterminated SSE line fails the whole turn on the "
+           "transport path", "[agent][client][r4][bounded][transport]" )
+{
+  ensureQtApp();
+
+  QTcpServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  const quint16 port = server.serverPort();
+
+  QObject::connect( &server, &QTcpServer::newConnection, &server, [&]()
+  {
+    QTcpSocket *socket = server.nextPendingConnection();
+    // Headers only: no Content-Length and no chunking, so the body length is
+    // "read until close" — and we never close and never send a newline. The
+    // 9 MiB write buffers inside QTcpSocket and flushes asynchronously; do
+    // NOT block on it: the reader that drains the loopback lives in this
+    // same thread's event loop.
+    socket->write( "HTTP/1.1 200 OK\r\n"
+                   "Content-Type: text/event-stream\r\n"
+                   "Cache-Control: no-cache\r\n\r\n" );
+    socket->write( QByteArray( "data: " ) + QByteArray( 9 * 1024 * 1024, 'x' ) );
+  } );
+
+  LlmProviderProfile profile;
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( port );
+  profile.modelName = QStringLiteral( "stub" );
+
+  LlmStreamingClient client;
+  client.setProfile( profile );
+
+  bool oversizedRefusal = false;
+  bool errorSeen = false;
+  bool finishedSeen = false;
+  QString errorText;
+  QObject::connect( &client, &LlmStreamingClient::malformedToolCall,
+                    [&]( const QJsonObject &detail )
+                    {
+                      oversizedRefusal = detail[QStringLiteral( "reason" )].toString() ==
+                                         QStringLiteral( "oversized_line" );
+                    } );
+  QObject::connect( &client, &LlmStreamingClient::errorOccurred,
+                    [&]( const QString &message ) { errorSeen = true; errorText = message; } );
+  QObject::connect( &client, &LlmStreamingClient::finished,
+                    [&]() { finishedSeen = true; } );
+
+  client.sendChatCompletion( QJsonArray() );
+
+  // Deadline-bounded pump: before the fix this loop ran the full deadline
+  // with all three flags false — the turn never terminated on its own.
+  const QDateTime deadline = QDateTime::currentDateTimeUtc().addSecs( 20 );
+  while ( !finishedSeen && QDateTime::currentDateTimeUtc() < deadline )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+
+  CHECK( oversizedRefusal );
+  CHECK( errorSeen );
+  CHECK( finishedSeen );
+  CHECK( errorText.contains( QStringLiteral( "bound" ) ) );
 }

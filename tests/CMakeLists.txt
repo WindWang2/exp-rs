@@ -8052,6 +8052,9 @@ sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
+  # Robustness regression: the oversized-line oracle serves a hostile SSE
+  # stream from a loopback QTcpServer (real transport, not the parse seam).
+  Qt6::Network
 )
 # R4 WP-G: the corpus-driven SSE cases consume jsoncpp (adversarial_corpus.h).
 sicnu_link_jsoncpp(test_llm_streaming_client)
@@ -10448,8 +10451,10 @@ add_executable(test_agent_ops_task_center_executor
 )
 target_link_libraries(test_agent_ops_task_center_executor PRIVATE
   Catch2::Catch2WithMain
+  # sicnu_agent_loop arrives via sicnu_agent_ops's PUBLIC WHOLE_ARCHIVE edge
+  # (#1394 one-edge-one-feature): a second plain item here is a hard CMake
+  # >= 3.24 generate error.
   sicnu_agent_ops
-  sicnu_agent_loop
   sicnu_task_center
   sicnu_jobs
   sicnu_processing
@@ -15388,6 +15393,10 @@ add_test(NAME test_i18n_migrated_translations
 # and the provider wire error contract. Append-only block; TEST_PREFIX keeps
 # every case selectable by `ctest -R`.
 # ---------------------------------------------------------------------------
+# POSIX-only: the fake-worker fixture and the recovery oracles drive process
+# control directly (unistd.h, pid_t, kill(..., SIGKILL)) — gate them out of
+# the Windows lane instead of porting the crash physics.
+if(NOT WIN32)
 add_executable(sicnu_fake_python_worker
   fixtures/fake_python_worker.cpp
 )
@@ -15427,6 +15436,7 @@ target_compile_definitions(test_runtime_pool_recovery_r5 PRIVATE
 add_dependencies(test_runtime_pool_recovery_r5 sicnu_fake_python_worker)
 set_target_properties(test_runtime_pool_recovery_r5 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_runtime_pool_recovery_r5 TEST_PREFIX "test_runtime_pool_recovery_r5::" TIMEOUT 300 RUN_SERIAL TRUE)
+endif()
 
 # R5 track 07: publish-fence path identity + detection-guard occupancy.
 sicnu_add_test(test_model_publish_fence_r5 TIMEOUT 180 RUN_SERIAL TRUE TEST_PREFIX "test_model_publish_fence_r5::")

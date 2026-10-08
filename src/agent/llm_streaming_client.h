@@ -103,6 +103,15 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
     /// reply-finished path never double-emit).
     void emitParsedToolCallOnce();
 
+    /// Declares the current stream failed and ends the turn: detaches the
+    /// reply (cancel()), then emits errorOccurred followed by finished —
+    /// unless a terminal pair already went out. cancel() on its own is
+    /// SILENT: abort() surfaces as OperationCanceledError (skipped by
+    /// onReplyError) and the reply's finished() is dropped by
+    /// onReplyFinished's null-reply guard, so a refusal that only cancels
+    /// leaves the caller waiting on a turn that will never signal again.
+    void failStream( const QString &errorMessage );
+
     struct ToolCallAccumulator
     {
       QString id;

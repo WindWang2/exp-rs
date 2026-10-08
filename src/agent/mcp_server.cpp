@@ -2543,28 +2543,14 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
             // uses (stackLimit 64, #1154) so this structural gate can only
             // reject what the submit path would reject anyway — never a
             // stricter dialect (jsoncpp accepts JSON comments).
-            Json::CharReaderBuilder builder;
-            builder["stackLimit"] = 64;
             Json::Value root;
-            std::string parseErrs;
-            std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
             const std::string pipelineBytes = pipelineJson.toStdString();
             // #1154: a depth bomb makes the bounded reader THROW
-            // (Json::Exception), never return false — catch it here so the
-            // structural gate stays a typed INVALID_PIPELINE, exactly like
-            // startTrackedPipelineJson.
-            bool parsed = false;
-            try
-            {
-                parsed = reader->parse(pipelineBytes.data(),
-                                       pipelineBytes.data() + pipelineBytes.size(),
-                                       &root, &parseErrs);
-            }
-            catch ( const Json::Exception & )
-            {
-                parsed = false;
-            }
-            if (!parsed || !root.isObject())
+            // (Json::Exception), never return false — the shared helper maps
+            // it to "not parsed" so the gate stays a typed INVALID_PIPELINE,
+            // exactly like startTrackedPipelineJson.
+            if (!sicnu::workflow::WorkflowRunCoordinator::parseBoundedWorkflowJson(pipelineBytes, &root)
+                || !root.isObject())
                 // The pipeline text is not a JSON object (malformed JSON, a
                 // bare array, a depth bomb): typed INVALID_PIPELINE, BEFORE
                 // containment. Scanning the raw text as a path would
