@@ -398,7 +398,7 @@ TEST_CASE( "boundary B05/B12: NFC/NFD and case variants are distinct byte paths"
     // Two DIFFERENT byte-strings that a normalizing or case-folding loader
     // would merge; both committed, both present, both pins honest.
     const QString nfd = QString::fromUtf8( "e\u0301clair.tif" ); // NFD
-    const QString nfc = QString::fromUtf8( "\xC3\xA9clair.tif" ); // NFC (É precomposed)
+    const QString nfc = QString::fromUtf8( "\xC3\xA9" "clair.tif" ); // NFC (É precomposed)
     REQUIRE( nfc != nfd );
     writeBytes( fx.root.filePath( nfd ), "nfd-bytes" );
     writeBytes( fx.root.filePath( nfc ), "nfc-bytes" );

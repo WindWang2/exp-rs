@@ -172,7 +172,9 @@ TEST_CASE( "repairMirror re-materializes broken entries from the source",
   {
     std::fstream file( chunks[1], std::ios::binary | std::ios::in | std::ios::out );
     file.seekg( 0, std::ios::end );
-    const auto size = file.tellg();
+    // streamoff, not the fpos tellg() returns: fpos - int is ambiguous
+    // on MSVC (C2666).
+    const std::streamoff size = static_cast<std::streamoff>( file.tellg() );
     file.seekp( size - 4 );
     char byte = 0;
     file.read( &byte, 1 );
@@ -456,7 +458,9 @@ TEST_CASE( "verifyMirror detects missing, tampered and orphan chunk files",
   {
     std::fstream file( tampered, std::ios::binary | std::ios::in | std::ios::out );
     file.seekg( 0, std::ios::end );
-    const auto size = file.tellg();
+    // streamoff, not the fpos tellg() returns: fpos - int is ambiguous
+    // on MSVC (C2666).
+    const std::streamoff size = static_cast<std::streamoff>( file.tellg() );
     REQUIRE( size > 16 );
     file.seekp( size - 8 );
     char byte = 0;

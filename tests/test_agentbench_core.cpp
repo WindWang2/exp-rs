@@ -59,8 +59,11 @@ TEST_CASE( "deterministicSerialize preserves array order and escapes strings", "
 	array.append( "a" );
 	array.append( Json::Value( "quote\"newline\n" ) );
 
+	// Not a raw string: MSVC mishandles this particular raw literal inside
+	// a macro argument (C2017/C3688); the escaped plain literal encodes the
+	// same bytes.
 	const std::string bytes = deterministicSerialize( array );
-	REQUIRE( bytes == R"(["b","a","quote\"newline\n"])" );
+	REQUIRE( bytes == "[\"b\",\"a\",\"quote\\\"newline\\n\"]" );
 }
 
 TEST_CASE( "deterministicSerialize maps non-finite doubles to null", "[agentbench]" )

@@ -2380,3 +2380,57 @@ TEST_CASE( "repeated failed hot reloads roll back without leaking handles or res
     REQUIRE( mappedFixtures == 0 );
 #endif
 }
+
+TEST_CASE( "a rewritten manifest index with a non-integral mtime is a cache miss (#1447)",
+           "[plugin][discovery][regression]" )
+{
+    // The index is a cache file anything on the machine can rewrite, so its
+    // fields are untrusted: a "mtime" that is not an integer must read as a
+    // cache miss (re-parse plugin.json), never throw out of asInt64() and
+    // kill the scan.
+    ScratchGuard scratch( "exprs_test_index_mtime" );
+    const std::string &root = scratch.path;
+    const std::string pluginDir = root + "/hello_plugin";
+    std::error_code ec;
+    std::filesystem::create_directories( pluginDir, ec );
+    writeManifest( pluginDir, kHelloEntrypoint, pluginAbiVersion() );
+
+    PluginDiscoveryOptions options;
+    options.roots = { root };
+    options.useCache = true;
+    PluginDiagnosticLog log;
+    const auto first = PluginDiscovery::scan( options, log );
+    REQUIRE( first.size() == 1 );
+    REQUIRE( first[0].manifest.id == "org.exprs.test.hello-plugin" );
+    const std::string indexPath = root + "/.exprs-manifest-index.json";
+    REQUIRE( std::filesystem::exists( indexPath, ec ) );
+
+    // Corrupt the cache the way a hostile/broken rewriter would: keep the
+    // "mtime" MEMBER but make its value a string.
+    std::string rewritten;
+    {
+        std::ifstream input( indexPath );
+        std::string line;
+        while ( std::getline( input, line ) )
+        {
+            const size_t marker = line.find( "\"mtime\"" );
+            if ( marker != std::string::npos )
+            {
+                const size_t colon = line.find( ':', marker );
+                if ( colon != std::string::npos )
+                    line = line.substr( 0, colon + 1 ) + " \"rewritten\",";
+            }
+            rewritten += line + "\n";
+        }
+    }
+    {
+        std::ofstream output( indexPath, std::ios::trunc );
+        output << rewritten;
+    }
+
+    PluginDiagnosticLog secondLog;
+    const auto second = PluginDiscovery::scan( options, secondLog );
+    REQUIRE( second.size() == 1 );
+    REQUIRE( second[0].manifest.id == "org.exprs.test.hello-plugin" );
+    REQUIRE( second[0].state == PluginState::Discovered );
+}

@@ -82,7 +82,7 @@ bool migrateStateSafely( const std::function<bool( const std::string & )> &fn,
 namespace exprs {
 
 namespace {
-// Recursive: locked public accessors (record/records/...) are also used
+// Recursive: locked public accessors (copyRecord/records/...) are also used
 // internally from paths that already hold the lock.
 std::recursive_mutex gRegistryMutex;
 bool gDestructing = false;
@@ -93,6 +93,32 @@ const LoadedPlugin *findLoaded( const std::vector<LoadedPlugin> &loaded,
     for ( const LoadedPlugin &entry : loaded )
     {
         if ( entry.pluginId == pluginId )
+            return &entry;
+    }
+    return nullptr;
+}
+
+/// Internal record lookup INTO mRecords — unlike the public record() (which
+/// hands out registry-retained snapshots, #943), the returned pointer is
+/// valid only while the caller holds gRegistryMutex and must never cross a
+/// refresh/scan that replaces the vector.
+const PluginRecord *findRecord( const std::vector<PluginRecord> &records,
+                                const std::string &pluginId )
+{
+    for ( const PluginRecord &entry : records )
+    {
+        if ( entry.id() == pluginId )
+            return &entry;
+    }
+    return nullptr;
+}
+
+PluginRecord *findRecord( std::vector<PluginRecord> &records,
+                          const std::string &pluginId )
+{
+    for ( PluginRecord &entry : records )
+    {
+        if ( entry.id() == pluginId )
             return &entry;
     }
     return nullptr;
@@ -236,7 +262,16 @@ const PluginRecord *PluginRegistry::record( const std::string &pluginId ) const
     for ( const PluginRecord &entry : mRecords )
     {
         if ( entry.id() == pluginId )
-            return &entry;
+        {
+            // #943: return a registry-RETAINED copy, not &entry — mRecords is
+            // replaced wholesale by the next refresh(), which used to dangle
+            // every pointer still held by a caller. Retention (never
+            // eviction) keeps such pointers valid for the registry's
+            // lifetime; only external read-only callers allocate here,
+            // internal paths resolve under the lock via findRecord().
+            mRecordSnapshots.push_back( std::make_shared<PluginRecord>( entry ) );
+            return mRecordSnapshots.back().get();
+        }
     }
     return nullptr;
 }
@@ -281,17 +316,6 @@ bool PluginRegistry::copyRecord( const std::string &pluginId, PluginRecord &out 
         }
     }
     return false;
-}
-
-PluginRecord *PluginRegistry::record( const std::string &pluginId )
-{
-    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    for ( PluginRecord &entry : mRecords )
-    {
-        if ( entry.id() == pluginId )
-            return &entry;
-    }
-    return nullptr;
 }
 
 std::vector<std::string> PluginRegistry::pluginIds() const
@@ -590,7 +614,7 @@ bool PluginRegistry::load( const std::string &pluginId )
 
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        PluginRecord *entry = record( pluginId );
+        PluginRecord *entry = findRecord( mRecords, pluginId );
         if ( !entry )
         {
             mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
@@ -725,7 +749,7 @@ bool PluginRegistry::load( const std::string &pluginId )
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         mDiagnostics.merge( localLog );
-        PluginRecord *entry = record( pluginId );
+        PluginRecord *entry = findRecord( mRecords, pluginId );
         const bool stillLoading = entry && entry->state == PluginState::Loading;
         if ( stillLoading )
         {
@@ -844,7 +868,7 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
     {
         {
             std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            if ( PluginRecord *entry = record( pluginId ) )
+            if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
                 entry->state = PluginState::Quiescing;
         }
         const int budget = timeoutMs > 0 ? timeoutMs : unloadTimeoutMs();
@@ -856,7 +880,7 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
             if ( mSink )
                 mSink->cancelPluginDrain( pluginId );
             std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            if ( PluginRecord *entry = record( pluginId ) )
+            if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
             {
                 if ( entry->state == PluginState::Quiescing )
                     entry->state = PluginState::Loaded;
@@ -879,7 +903,7 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
             mHostProcessLoaded.erase(
                 std::remove( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId ),
                 mHostProcessLoaded.end() );
-            if ( PluginRecord *entry = record( pluginId ) )
+            if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
                 entry->state = PluginState::Unloaded;
         }
         if ( mSink && !gDestructing )
@@ -923,14 +947,14 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
         {
             // In-flight load() dropped the lock after marking Loading: abort
             // so the loader will not publish Loaded on re-acquire (#928).
-            if ( PluginRecord *entry = record( pluginId ) )
+            if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
             {
                 if ( entry->state == PluginState::Loading )
                     entry->state = PluginState::Unloaded;
             }
             return false;
         }
-        if ( PluginRecord *entry = record( pluginId ) )
+        if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
             entry->state = PluginState::Quiescing;
     }
 
@@ -951,7 +975,7 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
             } ) != mLoaded.end();
         if ( stillLoaded )
         {
-            if ( PluginRecord *entry = record( pluginId ) )
+            if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
             {
                 if ( entry->state == PluginState::Quiescing )
                     entry->state = PluginState::Loaded;
@@ -984,7 +1008,7 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
             return true; // drained, then unloaded by a concurrent caller
         unloaded = std::move( *iterator );
         mLoaded.erase( iterator );
-        if ( PluginRecord *entry = record( pluginId ) )
+        if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
             entry->state = PluginState::Unloaded;
     }
     if ( mSink )
@@ -1066,7 +1090,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     std::string tempDirectory;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( pluginId );
+        const PluginRecord *entry = findRecord( mRecords, pluginId );
         if ( !entry )
         {
             mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
@@ -1256,7 +1280,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     bool ok = false;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( pluginId );
+        const PluginRecord *entry = findRecord( mRecords, pluginId );
         ok = entry
              && ( entry->state == PluginState::Validated || entry->state == PluginState::Unloaded
                   || entry->state == PluginState::Loaded );
@@ -1476,7 +1500,7 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
     // typed; the caller retries once the load settles.
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( id );
+        const PluginRecord *entry = findRecord( mRecords, id );
         if ( entry && entry->state == PluginState::Loading )
         {
             mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
@@ -1497,7 +1521,7 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
     // then report Upgraded while the old code keeps running. Refuse typed.
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( id );
+        const PluginRecord *entry = findRecord( mRecords, id );
         if ( entry && entry->directory != target )
         {
             mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
@@ -1615,11 +1639,11 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
             // restore outcome (a Failed here would misreport an intact
             // rollback as unrecoverable).
             std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            const PluginRecord *entry = record( id );
+            const PluginRecord *entry = findRecord( mRecords, id );
             return entry && entry->state == PluginState::Disabled;
         }
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( id );
+        const PluginRecord *entry = findRecord( mRecords, id );
         return entry && entry->state != PluginState::Broken
                && entry->state != PluginState::Incompatible
                && entry->state != PluginState::Blocked
@@ -1738,7 +1762,7 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
     bool ok = false;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( id );
+        const PluginRecord *entry = findRecord( mRecords, id );
         if ( wasLoaded )
             ok = entry
                  && ( entry->state == PluginState::Validated
@@ -1844,7 +1868,7 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     // invisible to isLoaded() but would publish into the deleted package.
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( pluginId );
+        const PluginRecord *entry = findRecord( mRecords, pluginId );
         if ( entry && entry->state == PluginState::Loading )
         {
             mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
@@ -1864,7 +1888,7 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
         PluginDiscovery::userPluginRoot() + "/" + pluginId;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const PluginRecord *entry = record( pluginId );
+        const PluginRecord *entry = findRecord( mRecords, pluginId );
         if ( entry && entry->directory != target )
         {
             mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
@@ -1971,7 +1995,7 @@ void PluginRegistry::unloadAll()
             ids.push_back( entry.pluginId );
         for ( const std::string &id : ids )
         {
-            if ( PluginRecord *entry = record( id ) )
+            if ( PluginRecord *entry = findRecord( mRecords, id ) )
                 entry->state = PluginState::Quiescing;
         }
     }
@@ -2022,7 +2046,7 @@ void PluginRegistry::unloadAll()
                     continue;
                 toUnload.push_back( std::move( *iterator ) );
                 mLoaded.erase( iterator );
-                if ( PluginRecord *entry = record( id ) )
+                if ( PluginRecord *entry = findRecord( mRecords, id ) )
                     entry->state = PluginState::Unloaded;
             }
         }
@@ -2038,7 +2062,7 @@ void PluginRegistry::unloadAll()
                     continue;
                 toUnload.push_back( std::move( *iterator ) );
                 mLoaded.erase( iterator );
-                if ( PluginRecord *entry = record( id ) )
+                if ( PluginRecord *entry = findRecord( mRecords, id ) )
                     entry->state = PluginState::Unloaded;
             }
         }
@@ -2073,10 +2097,9 @@ void PluginRegistry::unloadAll()
     }
     // cancelPluginDrain takes the runtime-host mutex — it must stay OUT of
     // the registry lock (#1156 AB-BA). The bookkeeping then happens in one
-    // pass while THIS thread holds gRegistryMutex: record() hands out a
-    // pointer into mRecords without holding the lock on the caller's side
-    // (#943), so the dereference and the state/diagnostic writes are only
-    // safe under the lock (a concurrent refresh() reallocates mRecords).
+    // pass while THIS thread holds gRegistryMutex: findRecord() resolves
+    // entries directly inside mRecords, whose pointers are only valid under
+    // the lock (a concurrent refresh() reallocates mRecords, #943).
     for ( const std::string &id : busyIds )
     {
         if ( mSink )
@@ -2086,7 +2109,7 @@ void PluginRegistry::unloadAll()
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         for ( const std::string &id : busyIds )
         {
-            PluginRecord *entry = record( id );
+            PluginRecord *entry = findRecord( mRecords, id );
             if ( !entry || entry->state != PluginState::Quiescing )
                 continue; // a concurrent unload() completed it in between
             entry->state = PluginState::Loaded;
@@ -2198,14 +2221,14 @@ void PluginRegistry::saveUserIndex() const
 bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    if ( !record( pluginId ) )
+    if ( !findRecord( mRecords, pluginId ) )
         return false;
     auto position = std::find( mDisabledIds.begin(), mDisabledIds.end(), pluginId );
     if ( enabled )
     {
         if ( position != mDisabledIds.end() )
             mDisabledIds.erase( position );
-        if ( PluginRecord *entry = record( pluginId ) )
+        if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
         {
             if ( entry->state == PluginState::Disabled )
                 entry->state = PluginState::Validated;
@@ -2215,7 +2238,7 @@ bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )
     {
         if ( position == mDisabledIds.end() )
             mDisabledIds.push_back( pluginId );
-        if ( PluginRecord *entry = record( pluginId ) )
+        if ( PluginRecord *entry = findRecord( mRecords, pluginId ) )
         {
             if ( entry->state == PluginState::Validated
                  || entry->state == PluginState::Unloaded
@@ -2250,7 +2273,7 @@ bool PluginRegistry::setUserDisabledIds( const std::vector<std::string> &ids )
 bool PluginRegistry::isEnabled( const std::string &pluginId ) const
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    const PluginRecord *entry = record( pluginId );
+    const PluginRecord *entry = findRecord( mRecords, pluginId );
     if ( !entry )
         return false;
     if ( entry->state == PluginState::Blocked )

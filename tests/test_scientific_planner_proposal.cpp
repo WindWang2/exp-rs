@@ -7,6 +7,8 @@
 
 #include <json/json.h>
 
+#include <algorithm>
+
 using namespace sicnu::planner;
 
 namespace

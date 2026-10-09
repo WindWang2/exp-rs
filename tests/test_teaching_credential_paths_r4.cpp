@@ -38,6 +38,29 @@ using namespace sicnu::agent::spatial_tools;
 namespace
 {
 
+// setenv/unsetenv are POSIX; MSVC provides _putenv_s (unsetting = empty
+// value, which std::getenv surfaces as the empty string — close enough for
+// presence probes that test the empty-string case explicitly).
+#ifdef _WIN32
+void setEnvValue( const char *name, const char *value )
+{
+    _putenv_s( name, value );
+}
+void unsetEnvValue( const char *name )
+{
+    _putenv_s( name, "" );
+}
+#else
+void setEnvValue( const char *name, const char *value )
+{
+    ::setenv( name, value, 1 );
+}
+void unsetEnvValue( const char *name )
+{
+    ::unsetenv( name );
+}
+#endif
+
 /// Save/restore the real host token around one test case so the binary can
 /// run on machines that legitimately export the variable.
 class TokenEnvGuard
@@ -48,16 +71,16 @@ class TokenEnvGuard
         if ( const char *old = std::getenv( kEnv ) )
             saved_ = old;
         if ( value )
-            ::setenv( kEnv, value, 1 );
+            setEnvValue( kEnv, value );
         else
-            ::unsetenv( kEnv );
+            unsetEnvValue( kEnv );
     }
     ~TokenEnvGuard()
     {
         if ( !saved_.empty() )
-            ::setenv( kEnv, saved_.c_str(), 1 );
+            setEnvValue( kEnv, saved_.c_str() );
         else
-            ::unsetenv( kEnv );
+            unsetEnvValue( kEnv );
     }
     TokenEnvGuard( const TokenEnvGuard & ) = delete;
     TokenEnvGuard &operator=( const TokenEnvGuard & ) = delete;

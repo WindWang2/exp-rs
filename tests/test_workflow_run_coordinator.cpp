@@ -23,6 +23,7 @@
 #include "data/artifact_store.h"
 #include "jobs/job_engine.h"
 #include "processing/framework/task_center.h"
+#include "runtime/observability/fault_registry.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
 
@@ -1088,4 +1089,74 @@ TEST_CASE( "delayed checkpoint load does not block runs() of another run (#944)"
     REQUIRE( resumeDone.load() );
     INFO( resumeErr.toStdString() );
     REQUIRE( pipelineId > 0 );
+}
+
+TEST_CASE( "failed terminal checkpoint save retains run ownership — resume refused by the flock (#1448)",
+           "[workflow][coordinator][recovery][ownership][fault]" )
+{
+    CoordinatorFixture fx;
+    const std::string prefix = "coord_termfail";
+
+    // One step already Completed with its artifact on disk: the resume
+    // derives a terminal Completed verdict with nothing left to execute and
+    // must persist that verdict before handing the run lock back.
+    const QString outPath = fx.checkpointDir.path()
+                            + QStringLiteral( "/%1_only.tif" ).arg( prefix.c_str() );
+    touchFile( outPath );
+
+    WorkflowDefinition def;
+    def.id = prefix + "_def";
+    StepDef only;
+    only.id = "only";
+    only.kind = StepKind::Operator;
+    only.operatorId = prefix + ":only";
+    only.params["output"] = outPath.toStdString();
+    def.steps.push_back( only );
+
+    Json::Value payload( Json::objectValue );
+    payload["output"] = outPath.toStdString();
+
+    WorkflowRun run;
+    run.setDefinition( def );
+    REQUIRE( run.setRunId( prefix + "_run" ) );
+    run.setStepPlans( { makePlan( "only", "Completed", outPath.toStdString(), payload,
+                                  prefix + ":only" ) } );
+    saveInterruptedCheckpoint( fx, run );
+
+    // Every checkpoint save fails from here on: the terminal verdict cannot
+    // become durable and the on-disk file stays Interrupted.
+    const sicnu::runtime::observability::fault::ArmedFault armed{
+        sicnu::runtime::observability::fault::FaultAction{
+            "workflow_checkpoint.write",
+            sicnu::runtime::observability::fault::Mode::Always, 1, "" }
+    };
+
+    QString err;
+    const long outcome = fx.coordinator.resumeRun( prefix + "_run", &err );
+    INFO( err.toStdString() );
+    REQUIRE( outcome == 0 ); // nothing to execute: derived terminal verdict
+
+    // The terminal save failed, so the stale non-terminal checkpoint is what
+    // any next owner would load — ownership (flock + maps) must be RETAINED,
+    // not released. A second resume is refused at the ownership wall;
+    // pre-fix it flocked the freed run and re-derived the verdict over the
+    // stale file.
+    QString refusal;
+    REQUIRE( fx.coordinator.resumeRun( prefix + "_run", &refusal ) == -1 );
+    REQUIRE( refusal.contains( QStringLiteral( "owned by a live process" ) ) );
+    REQUIRE( fx.coordinator.explainDump().contains( QStringLiteral( "runLocks held: 1" ) ) );
+
+    // Disk truth: still Interrupted (the failed save never promoted), and no
+    // history/ archive was created over the stale file.
+    QString loadErr;
+    // checkpoint_<runId>.json (WorkflowCheckpointManager naming); the
+    // coordinator's private path helper is not visible to tests.
+    const auto stale = WorkflowCheckpointManager().loadCheckpoint(
+        fx.checkpointDir.path() + QStringLiteral( "/checkpoint_%1_run.json" )
+              .arg( QString::fromStdString( prefix ) ), &loadErr );
+    REQUIRE( stale );
+    REQUIRE( stale->state() == WorkflowRunState::Interrupted );
+    REQUIRE_FALSE( QFile::exists( fx.checkpointDir.path()
+                                  + QStringLiteral( "/history/checkpoint_%1_run.json" )
+                                        .arg( prefix.c_str() ) ) );
 }

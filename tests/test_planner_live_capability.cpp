@@ -34,7 +34,11 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #ifndef CMAKE_SOURCE_DIR
 #define CMAKE_SOURCE_DIR "."
@@ -62,7 +66,11 @@ std::string writeMirrorDir( const std::string &name,
                             const std::vector<std::pair<std::string, Json::Value>> &documents )
 {
     const std::string dir = "/tmp/planner_live_" + name + "_"
+#ifdef _WIN32
+                            + std::to_string( static_cast<long>( _getpid() ) );
+#else
                             + std::to_string( static_cast<long>( ::getpid() ) );
+#endif
     std::filesystem::remove_all( dir );
     std::filesystem::create_directories( dir );
     for ( const auto &[fileName, array] : documents )

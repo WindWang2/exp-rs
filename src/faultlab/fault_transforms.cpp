@@ -90,6 +90,14 @@ std::uint32_t finiteCount( const BandSpec &band )
 FaultOutcome applyBandRoleSwap( FaultGrid &grid, const Json::Value &params,
                                  std::uint32_t /*seed*/ )
 {
+    // Type gate before asString(): jsoncpp throws on arrays/objects and
+    // silently stringifies numbers on newer versions — a malformed param must
+    // stay a typed refusal, never an exception or a coerced role (#1447).
+    if ( !params["role_a"].isString() || !params["role_b"].isString() )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "band_role_swap needs string parameters role_a and role_b" );
+    }
     const std::string roleA = params["role_a"].asString();
     const std::string roleB = params["role_b"].asString();
     if ( roleA == roleB )
@@ -112,6 +120,12 @@ FaultOutcome applyBandRoleSwap( FaultGrid &grid, const Json::Value &params,
 FaultOutcome applyOmitQualityMask( FaultGrid &grid, const Json::Value &params,
                                     std::uint32_t /*seed*/ )
 {
+    // Same type gate as band_role_swap: the optional role must be a string (#1447).
+    if ( params.isMember( "role" ) && !params["role"].isString() )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "omit_quality_mask role must be a string" );
+    }
     const std::string role = params.isMember( "role" ) ? params["role"].asString() : "qa";
     const int index = grid.bandIndexByRole( role );
     if ( index < 0 )
@@ -126,6 +140,13 @@ FaultOutcome applyOmitQualityMask( FaultGrid &grid, const Json::Value &params,
 FaultOutcome applyWrongScaleOffset( FaultGrid &grid, const Json::Value &params,
                                       std::uint32_t /*seed*/ )
 {
+    // Same type gate: a non-string role is a typed refusal, never an
+    // exception; gain is already numeric-gated below (#1447).
+    if ( !params["role"].isString() )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "wrong_scale_offset needs a string role" );
+    }
     const std::string role = params["role"].asString();
     if ( !isFiniteNumber( params["gain"] ) || params["gain"].asDouble() == 0.0 )
     {

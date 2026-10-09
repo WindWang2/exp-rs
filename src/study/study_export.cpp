@@ -637,7 +637,14 @@ Result<QVector<SpatialDifferenceSummary>> summarizeStudyOutputs(
         if ( QFileInfo( output ).absoluteFilePath()
              == QFileInfo( baselineOutput ).absoluteFilePath() )
             continue;
-        if ( !hasRecordedOutput( point ) )
+        const auto recorded = hasRecordedOutput( point );
+        if ( !recorded )
+            // Same rule as the baseline walks above: a failed ledger/store
+            // lookup must surface, not fold into "no record" — the skip below
+            // is only for points that verifiably recorded nothing (#1448).
+            return Result<QVector<SpatialDifferenceSummary>>::failure(
+                recorded.diagnostics() );
+        if ( !recorded.value() )
             continue; // no evidence to compare — never fabricated
         const auto summary = summarizer.summarize( baselineOutput, output );
         if ( !summary )

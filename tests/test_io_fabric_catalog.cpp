@@ -416,12 +416,14 @@ TEST_CASE( "a 6-value bbox filters on its horizontal slice — never silently sp
   // the very same query with its spatial arm intact.
   std::vector<AssetRecord> records;
   records.push_back( recordWith( "near", "2024-01-10T00:00:00Z", 5.0, true ) );   // [8,50,9,51]
-  AssetRecord far = recordWith( "far", "2024-01-11T00:00:00Z", 5.0, true );
-  far.minX = 0.0;
-  far.minY = 0.0;
-  far.maxX = 1.0;
-  far.maxY = 1.0;
-  records.push_back( far );
+  // Named farRecord: bare `far` collides with the legacy Windows `far`
+  // macro (expands empty on MSVC) — GCC-only upstream blind spot.
+  AssetRecord farRecord = recordWith( "far", "2024-01-11T00:00:00Z", 5.0, true );
+  farRecord.minX = 0.0;
+  farRecord.minY = 0.0;
+  farRecord.maxX = 1.0;
+  farRecord.maxY = 1.0;
+  records.push_back( farRecord );
   const CatalogService service = catalogServiceOverRecords( records );
 
   CatalogQuery bboxQuery;

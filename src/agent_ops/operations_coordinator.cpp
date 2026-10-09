@@ -3,6 +3,7 @@
 
 #include "agent_ops/repair_approval.h"
 
+#include <algorithm>
 #include <chrono>
 
 namespace sicnu::agent_ops {
@@ -51,6 +52,37 @@ OperationsCoordinator::OperationsCoordinator(Dependencies deps,
 {
 }
 
+void OperationsCoordinator::requestCancel()
+{
+    mCancelRequested.store(true);
+    // Also reach sessions already inside run()/resume(): the pre-launch
+    // check there cannot see a cancel that arrives afterwards, and a stop
+    // that never reaches the live loop would let it run to completion.
+    // ScientificAgentSession::requestCancel() is a cross-thread-safe atomic
+    // store (cooperative stop at the next stage boundary), so calling it
+    // under the registry lock cannot deadlock or re-enter. (#1451)
+    std::lock_guard<std::mutex> lock(mActiveSessionsMutex);
+    for (sicnu::agent_loop::ScientificAgentSession *session : mActiveSessions)
+        session->requestCancel();
+}
+
+OperationsCoordinator::ActiveSessionGuard::ActiveSessionGuard(
+    OperationsCoordinator &coordinator, sicnu::agent_loop::ScientificAgentSession *session)
+    : mCoordinator(coordinator), mSession(session)
+{
+    std::lock_guard<std::mutex> lock(mCoordinator.mActiveSessionsMutex);
+    mCoordinator.mActiveSessions.push_back(mSession);
+}
+
+OperationsCoordinator::ActiveSessionGuard::~ActiveSessionGuard()
+{
+    std::lock_guard<std::mutex> lock(mCoordinator.mActiveSessionsMutex);
+    mCoordinator.mActiveSessions.erase(
+        std::remove(mCoordinator.mActiveSessions.begin(), mCoordinator.mActiveSessions.end(),
+                    mSession),
+        mCoordinator.mActiveSessions.end());
+}
+
 std::string OperationsCoordinator::lastProjectedFindingsDigest() const
 {
     if (!mLastProjectedFindingsDigest.empty())
@@ -79,6 +111,11 @@ std::string OperationsCoordinator::verifyApprovalAgainstLastProjection(
 std::string OperationsCoordinator::armRepairApproval(const Json::Value &tokenDoc,
                                                      long long nowMs)
 {
+    // Fail closed on a malformed token BEFORE touching the digest: jsoncpp's
+    // asString() throws on a missing/non-string field, and a typed refusal is
+    // the contract, not an exception escaping the approval path. (#1451)
+    if (!tokenDoc["digest"].isString())
+        return "APPROVAL_MALFORMED";
     // Replay first: a token this coordinator already consumed by a launch
     // cannot arm again, whatever the current projection is — one approval
     // authorizes exactly one repair launch.
@@ -358,6 +395,10 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     sicnu::agent_loop::ScientificAgentSession session(policy, seams);
     if (mCancelRequested.load())
         session.requestCancel();
+    // Propagate a cancel that arrives while the loop runs (RAII: the
+    // registration ends with session.run()'s scope even if a seam throws,
+    // so propagation never dereferences a dead session). (#1451)
+    ActiveSessionGuard activeSessionGuard(*this, &session);
     // Crash-evidence checkpointing: with a journal directory configured, the
     // journal is flushed after EVERY append, so a hard kill at any stage
     // (not only at terminal) leaves a loadable prefix on disk. The reconciler
@@ -382,8 +423,10 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     // stale entry from a previous session must never be attributed here.
     mBridgedDiagnoser.resetLastDiagnostic();
 
-    // Note: pause is checked at launch (above); cancel remains the hard stop
-    // inside the loop. AgentLoop owns the state machine while it runs.
+    // Note: pause is checked at launch (above); cancel is the hard stop
+    // inside the loop and now also reaches a mid-run session through the
+    // active-session registration above. AgentLoop owns the state machine
+    // while it runs.
     const auto startedAt = std::chrono::steady_clock::now();
     auto result = session.run(request.session);
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -581,6 +624,9 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
     }
     if (mCancelRequested.load())
         resumed->requestCancel();
+    // Same in-flight cancel propagation as run(): a cancel arriving during
+    // the resumed leg must reach the live loop. (#1451)
+    ActiveSessionGuard activeSessionGuard(*this, &*resumed);
     mBridgedDiagnoser.resetLastDiagnostic();
 
     // Checkpoint the continued journal exactly like a fresh launch: a kill

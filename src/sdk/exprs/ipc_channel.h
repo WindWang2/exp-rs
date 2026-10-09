@@ -127,10 +127,14 @@ public:
     bool isOpen() const;
     /// Last protocol-level failure description ("" when none).
     std::string protocolFailure() const;
-    /// Negotiated peer protocol minor (from handshake responses; -1 = unset).
+    /// Negotiated peer protocol version (from handshake responses; -1 =
+    /// unset). Relaxed atomics: setPeerProtocol writes them once the
+    /// handshake answers while readers run on arbitrary threads — the old
+    /// unsynchronized int reads raced the write (#1449). The pair is a
+    /// diagnostic, never a transaction: readers sample member-by-member.
     void setPeerProtocol( int major, int minor );
-    int peerProtocolMajor() const { return mPeerMajor; }
-    int peerProtocolMinor() const { return mPeerMinor; }
+    int peerProtocolMajor() const { return mPeerMajor.load( std::memory_order_relaxed ); }
+    int peerProtocolMinor() const { return mPeerMinor.load( std::memory_order_relaxed ); }
 
     /// Lowers the frame cap (protocol 1.1 downward negotiation, e.g. from a
     /// peer quota's maxResponseBytes). Monotonic: a larger value is ignored.
@@ -197,8 +201,10 @@ private:
     std::atomic<uint32_t> mMaxSendFrameBytes;
     std::atomic<uint32_t> mMaxRecvFrameBytes;
     std::atomic<long long> mDroppedEvents{ 0 };
-    int mPeerMajor = -1;
-    int mPeerMinor = -1;
+    /// Peer protocol version, published via relaxed stores (see the
+    /// peerProtocolMajor/Minor accessors).
+    std::atomic<int> mPeerMajor{ -1 };
+    std::atomic<int> mPeerMinor{ -1 };
 };
 
 } // namespace exprs

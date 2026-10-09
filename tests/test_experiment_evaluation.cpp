@@ -758,6 +758,45 @@ TEST_CASE( "reproduction bundle filters secrets in environment.json at export bo
     CHECK_FALSE( envVars.contains( QStringLiteral( "AWS_SECRET_ACCESS_KEY" ) ) );
 }
 
+TEST_CASE( "portable bundle export refuses typed instead of stamping mode=portable",
+           "[experiment][bundle][issue1450]" )
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-portable" ) );
+    experiment.setName( QStringLiteral( "portable refusal" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-portable" ),
+                                 QStringLiteral( "exp-portable" ) );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions options;
+    options.outputDir = dir.filePath( QStringLiteral( "bundle_portable" ) );
+    options.mode = ReproductionBundleOptions::Mode::Portable;
+    options.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto report = exporter.exportRun( QStringLiteral( "run-portable" ), options );
+
+    // The request must fail before any file lands: a reference bundle stamped
+    // mode=portable would promise the import side payload bytes that do not
+    // exist (#1450).
+    REQUIRE_FALSE( report.ok );
+    CHECK( report.fileCount == 0 );
+    CHECK( report.bundlePath.isEmpty() );
+    REQUIRE( report.warnings.size() == 1 );
+    CHECK( report.warnings.first().contains( QStringLiteral( "portable" ) ) );
+    CHECK_FALSE( QFile::exists( QDir( options.outputDir ).filePath(
+        QStringLiteral( "manifest.json" ) ) ) );
+}
+
 TEST_CASE( "ExperimentStore upsertRun validation runs inside transaction",
            "[experiment][store][issue811]" )
 {

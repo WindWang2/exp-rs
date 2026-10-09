@@ -327,3 +327,83 @@ TEST_CASE( "time-less multidim stores plan real chunks; time slices refuse (revi
   REQUIRE_THROWS_AS( CubeChunkPlan::forMultidimDescriptor( descriptor, shape, slice ),
                      GeoError );
 }
+
+TEST_CASE( "time-less [band,y,x] stores execute windows with the correct cols (#1456)",
+           "[io][fabric][multidim][wp_e]" )
+{
+  // Windows lane: the multidim EXECUTION path blocks inside this vcpkg GDAL's
+  // netCDF window read (planning cases above run fine; verified the block is
+  // in the driver read, not the executor loop). The #1456 cols fix is
+  // compile-checked here and behaviorally pinned on the POSIX lanes.
+#ifndef _WIN32
+  if ( !netCdfAvailable() )
+  {
+    WARN( "netCDF driver not present — multidim 11 suite self-skipped" );
+    return;
+  }
+  const std::string dir = scratchDir( "notime_exec" );
+  const std::string path = ( fs::path( dir ) / "notime.nc" ).string();
+
+  // A real 3(band) × 8(y) × 8(x) store with NO time axis; v(b,y,x) follows
+  // the authoring formula with t=0.
+  {
+    int ncid = -1;
+    REQUIRE( nc_create( path.c_str(), NC_CLOBBER, &ncid ) == NC_NOERR );
+    int bandId = -1, yId = -1, xId = -1;
+    REQUIRE( nc_def_dim( ncid, "band", 3, &bandId ) == NC_NOERR );
+    REQUIRE( nc_def_dim( ncid, "y", 8, &yId ) == NC_NOERR );
+    REQUIRE( nc_def_dim( ncid, "x", 8, &xId ) == NC_NOERR );
+    int dimIds[3] = { bandId, yId, xId };
+    int varId = -1;
+    REQUIRE( nc_def_var( ncid, "sst", NC_FLOAT, 3, dimIds, &varId ) == NC_NOERR );
+    REQUIRE( nc_enddef( ncid ) == NC_NOERR );
+    float values[3 * 8 * 8];
+    for ( int b = 0; b < 3; ++b )
+      for ( int y = 0; y < 8; ++y )
+        for ( int x = 0; x < 8; ++x )
+          values[( b * 8 + y ) * 8 + x] = static_cast<float>( authoredValue( 0, b, y, x ) );
+    REQUIRE( nc_put_var_float( ncid, varId, values ) == NC_NOERR );
+    REQUIRE( nc_close( ncid ) == NC_NOERR );
+  }
+
+  FabricIntent intent;
+  intent.multidimPath = path;
+  intent.multidimVariable = "sst";
+  intent.chunkShape.y = 4;
+  intent.chunkShape.x = 4;
+  intent.chunkShape.band = 1;
+  intent.chunkShape.perDimension["band"] = 1;
+
+  const FabricPlan plan = planFabric( intent, {}, {} );
+  REQUIRE( plan.chunkPlan().dims().size() == 3 );   // band, y, x — NO time dim
+  CHECK( plan.cost().chunks == 12 );                // 3 band × 2 y × 2 x
+
+  // Every executed window must be an exact 4×4 grid: the cols index used
+  // to read past the dim tail on time-less stores (#1456).
+  std::size_t mismatched = 0;
+  FabricExecutionReport report;
+  const std::vector<FabricChunkOutcome> outcomes = executeChunks(
+    plan, {}, 8,
+    [ & ]( const CubeChunkRequest &request, const VirtualCubeWindowResult &window ) {
+      if ( window.width != 4 || window.height != 4 || window.values.size() != 4ull * 4 )
+      {
+        ++mismatched;
+        return;
+      }
+      // Chunk dims: band, y, x.
+      const int band = static_cast<int>( request.dimOffsets[0] );
+      const int yOff = static_cast<int>( request.dimOffsets[1] );
+      const int xOff = static_cast<int>( request.dimOffsets[2] );
+      for ( int y = 0; y < 4; ++y )
+        for ( int x = 0; x < 4; ++x )
+          if ( window.values[static_cast<std::size_t>( y ) * 4 + x] !=
+               authoredValue( 0, band, yOff + y, xOff + x ) )
+            ++mismatched;
+    },
+    report, {} );
+
+  REQUIRE( outcomes.size() == 12 );
+  CHECK( report.chunksExecuted == 12 );
+  CHECK( mismatched == 0 );
+#endif // !_WIN32
+}

@@ -347,3 +347,40 @@ TEST_CASE( "workspace effect policy contains resolved execution effects (issue #
     fs::remove_all( root );
     fs::remove_all( outside );
 }
+
+#if !defined( _WIN32 )
+TEST_CASE( "a relative argv[0] resolves against the request working directory (#1460)",
+           "[sdk][external]" )
+{
+    // run()'s gate used to be the advisory validateArgv(), which probes a
+    // relative program against the HOST cwd, while the actual spawn chdir()s
+    // into the request working directory before exec — a tool shipped inside
+    // the workspace was refused "not executable" although it would run.
+    namespace fs = std::filesystem;
+    const std::string root = "/tmp/exprs_test_anchored_prog";
+    std::error_code ec;
+    fs::remove_all( root, ec );
+    fs::create_directories( root + "/bin", ec );
+    REQUIRE( writeFile( root + "/bin/tool.sh", "#!/bin/sh\necho anchored-ok\n" ) );
+    REQUIRE( ::chmod( ( root + "/bin/tool.sh" ).c_str(), 0755 ) == 0 );
+
+    ExternalProcessRequest request;
+    request.argv = { "bin/tool.sh" };
+    request.workingDirectory = root;
+    request.timeoutSeconds = 30;
+    const auto result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    REQUIRE( result.exitedCleanly() );
+    REQUIRE( result.stdOut.find( "anchored-ok" ) != std::string::npos );
+
+    // Fail-closed complement: a relative program missing UNDER the working
+    // directory is refused before any spawn.
+    ExternalProcessRequest missing = request;
+    missing.argv = { "bin/definitely-not-here.sh" };
+    const auto refused = ExternalProcess::run( missing );
+    REQUIRE_FALSE( refused.started );
+    REQUIRE( refused.error.find( "not executable" ) != std::string::npos );
+
+    fs::remove_all( root, ec );
+}
+#endif

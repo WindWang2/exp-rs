@@ -54,28 +54,19 @@ void DataProviderRegistry::unregisterPlugin( const std::string &pluginId )
                     mEntries.end() );
 }
 
-const DataProviderRegistry::Entry *DataProviderRegistry::find(
+std::shared_ptr<exprs::IPluginDataProviderV1> DataProviderRegistry::find(
     const std::string &providerId ) const
 {
     std::lock_guard<std::mutex> lock( mMutex );
     for ( const Entry &entry : mEntries )
     {
         if ( entry.providerId == providerId )
-            return &entry;
-    }
-    return nullptr;
-}
-
-const DataProviderRegistry::Entry *DataProviderRegistry::findByScheme(
-    const std::string &scheme ) const
-{
-    std::lock_guard<std::mutex> lock( mMutex );
-    for ( const Entry &entry : mEntries )
-    {
-        for ( const std::string &candidate : entry.schemes )
         {
-            if ( !candidate.empty() && scheme.rfind( candidate, 0 ) == 0 )
-                return &entry;
+            // Shared handle (#1449): returning &entry would hand the caller a
+            // pointer into mEntries that the next unregisterPlugin() (or a
+            // re-registration's vector growth) invalidates the moment this
+            // method's lock releases.
+            return entry.provider;
         }
     }
     return nullptr;

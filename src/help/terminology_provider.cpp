@@ -48,6 +48,27 @@ QString slugify( const QString &en )
     return out;
 }
 
+// (review #1447) typed access: asCString() throws Json::LogicError on
+// non-string values. A present-but-mistyped field is reported and read as
+// missing (the caller's emptiness checks then reject the entry) instead of
+// aborting the whole load.
+QString readStringMember( const Json::Value &entry, const char *key, const QString &where,
+                          QStringList &errors )
+{
+    const Json::Value &field = entry[key];
+    if ( field.isNull() )
+        return QString();
+    if ( !field.isString() )
+    {
+        errors << QStringLiteral( "%1: '%2' must be a string" ).arg( where, QLatin1String( key ) );
+        return QString();
+    }
+    // asString(), not asCString(): glossary strings may embed NULs, which
+    // the c_str() view would silently truncate.
+    const std::string raw = field.asString();
+    return QString::fromUtf8( raw.c_str(), static_cast<int>( raw.size() ) );
+}
+
 } // namespace
 
 QString termDescriptorId( const QString &en )
@@ -89,10 +110,10 @@ TerminologyProvider::LoadResult TerminologyProvider::loadFromJson( const QByteAr
             continue;
         }
         TermEntry term;
-        term.en = QString::fromUtf8( entry.get( "en", "" ).asCString() );
-        term.zh = QString::fromUtf8( entry.get( "zh", "" ).asCString() );
-        term.definitionZh = QString::fromUtf8( entry.get( "definition_zh", "" ).asCString() );
-        term.category = QString::fromUtf8( entry.get( "category", "" ).asCString() );
+        term.en = readStringMember( entry, "en", where, result.errors );
+        term.zh = readStringMember( entry, "zh", where, result.errors );
+        term.definitionZh = readStringMember( entry, "definition_zh", where, result.errors );
+        term.category = readStringMember( entry, "category", where, result.errors );
         for ( const Json::Value &alias : entry.get( "alias", Json::nullValue ) )
         {
             if ( alias.isString() && strlen( alias.asCString() ) > 0 )
@@ -176,7 +197,11 @@ void TerminologyProvider::appendDescriptors( const QVector<TermEntry> &terms,
     for ( const TermEntry &term : terms )
     {
         HelpDescriptor d;
-        d.id = termDescriptorId( term.en );
+        // (review #1447) register under the dedup-suffixed id computed above:
+        // the bare slug collides for distinct en terms with equal slugs, so
+        // upsertDescriptor silently replaced the earlier term and related[]
+        // pointed at ids that were never registered.
+        d.id = idByEnLower.value( term.en.toLower() );
         d.kind = HelpKind::Concept;
         d.title = QStringLiteral( "%1（%2）" ).arg( term.zh, term.en );
         d.summary = term.definitionZh;

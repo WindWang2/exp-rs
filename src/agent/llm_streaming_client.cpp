@@ -99,6 +99,7 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const Q
   m_toolCalls.clear();
   m_finishedEmitted = false;
   m_lastFinishReason.clear();
+  ++m_streamGeneration;
 
   const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools );
 
@@ -208,9 +209,15 @@ void LlmStreamingClient::parseSseLine( const QString &line )
   {
     // A [DONE] token finalizes any accumulated tool call. emitParsedToolCallOnce
     // clears the accumulation, so the onReplyFinished fallback stays silent.
+    // The generation is captured BEFORE emitting: a direct-connected consumer
+    // may re-enter sendChatCompletion from toolCallParsed, which resets
+    // m_finishedEmitted for the NEW stream — without the generation check this
+    // handler would then emit a stray finished() while the re-entrant stream is
+    // still in flight (#1452).
+    const int generation = m_streamGeneration;
     emitParsedToolCallOnce();
 
-    if ( !m_finishedEmitted )
+    if ( !m_finishedEmitted && m_streamGeneration == generation )
     {
       m_finishedEmitted = true;
       emit finished();
@@ -308,7 +315,14 @@ void LlmStreamingClient::emitParsedToolCallOnce()
   if ( m_toolCalls.empty() )
     return;
 
-  for ( const auto &pair : m_toolCalls )
+  // #1452: a direct-connected consumer may re-enter sendChatCompletion from
+  // toolCallParsed/malformedToolCall, which clear()s m_toolCalls while this
+  // loop iterates it. Detach the accumulation first and emit from the local
+  // snapshot; a superseding stream keeps its own, clean accumulation.
+  const std::map<int, ToolCallAccumulator> pending = m_toolCalls;
+  m_toolCalls.clear();
+
+  for ( const auto &pair : pending )
   {
     const ToolCallAccumulator &accu = pair.second;
 
@@ -412,8 +426,6 @@ void LlmStreamingClient::emitParsedToolCallOnce()
 
     emit toolCallParsed( toolCallObj );
   }
-
-  m_toolCalls.clear();
 }
 
 void LlmStreamingClient::onReplyFinished()
@@ -423,6 +435,12 @@ void LlmStreamingClient::onReplyFinished()
   QNetworkReply *reply = m_currentReply;
   m_currentReply = nullptr;
   reply->deleteLater();
+
+  // Captured before any signal emission below: like the [DONE] path, this
+  // fallback may hand control to a consumer that re-enters sendChatCompletion
+  // (which resets m_finishedEmitted), and the superseded stream must not then
+  // emit a finished() owned by the new one (#1452).
+  const int generation = m_streamGeneration;
 
   if ( !m_buffer.isEmpty() )
   {
@@ -446,12 +464,12 @@ void LlmStreamingClient::onReplyFinished()
 
   if (reply->error() != QNetworkReply::NoError && reply->error() != QNetworkReply::OperationCanceledError)
   {
-    if (!m_finishedEmitted)
+    if (!m_finishedEmitted && m_streamGeneration == generation)
     {
       emit errorOccurred(reply->errorString());
     }
   }
-  if ( !m_finishedEmitted )
+  if ( !m_finishedEmitted && m_streamGeneration == generation )
   {
     m_finishedEmitted = true;
     emit finished();

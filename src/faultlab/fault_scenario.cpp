@@ -396,12 +396,15 @@ FaultResult<FaultScenario> loadFaultScenarioFile( const std::string &path )
     std::ostringstream buffer;
     buffer << stream.rdbuf();
 
+    // str() returns a fresh copy per call: three inline calls would hand the
+    // reader begin/end pointers into three different temporaries (#1447).
+    const std::string text = buffer.str();
+
     Json::Value doc;
     Json::CharReaderBuilder builder;
     std::string errors;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( buffer.str().data(), buffer.str().data() + buffer.str().size(), &doc,
-                         &errors ) )
+    if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &errors ) )
     {
         return makeError<FaultScenario>( "faultlab.scenario_malformed",
                                          "cannot parse scenario JSON: " + errors );

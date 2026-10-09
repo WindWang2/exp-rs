@@ -667,6 +667,62 @@ TEST_CASE( "corpus SSE samples behave exactly as their recorded contract "
   }
 }
 
+// — Robustness review #1452: a direct-connected consumer re-entering
+// sendChatCompletion from toolCallParsed used to clear() m_toolCalls while
+// emitParsedToolCallOnce was still iterating it (undefined behavior), and the
+// [DONE] handler then saw the re-entrant flag reset and emitted a stray
+// finished() for the superseded stream.
+TEST_CASE( "a consumer re-entering sendChatCompletion from the first "
+           "toolCallParsed still receives every parallel tool call (#1452)",
+           "[agent][client][lifecycle]" )
+{
+  ensureQtApp();
+
+  LlmProviderProfile profile;
+  // Unreachable by design: the re-entrant request only has to disturb client
+  // state synchronously, never to deliver anything (no event loop runs here).
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:1/v1" );
+  profile.modelName = QStringLiteral( "stub" );
+
+  LlmStreamingClient client;
+  client.setProfile( profile );
+
+  QList<QString> receivedIds;
+  int finishedCount = 0;
+  bool reEntered = false;
+  QObject::connect( &client, &LlmStreamingClient::toolCallParsed,
+                    [&]( const QJsonObject &toolCall )
+                    {
+                      receivedIds.append( toolCall[QStringLiteral( "id" )].toString() );
+                      // The dock pattern that triggered the bug: the FIRST
+                      // tool call synchronously starts the next turn.
+                      if ( !reEntered )
+                      {
+                        reEntered = true;
+                        client.sendChatCompletion( QJsonArray() );
+                      }
+                    } );
+  QObject::connect( &client, &LlmStreamingClient::finished, [&]() { ++finishedCount; } );
+
+  // Two PARALLEL tool calls (distinct streamed indices) finalized by [DONE].
+  client.parseSseLine( QStringLiteral(
+      "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 0, \"id\": \"call_a0\", "
+      "\"function\": {\"name\": \"rs_ndvi\", \"arguments\": \"{\\\"x\\\":1}\"}}]}}]}" ) );
+  client.parseSseLine( QStringLiteral(
+      "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 1, \"id\": \"call_a1\", "
+      "\"function\": {\"name\": \"rs_evi\", \"arguments\": \"{\\\"x\\\":2}\"}}]}}]}" ) );
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+  // The accumulation was detached before the first emit: the second call
+  // survives the re-entrant clear() and is still delivered.
+  REQUIRE( receivedIds.size() == 2 );
+  CHECK( receivedIds.contains( QStringLiteral( "call_a0" ) ) );
+  CHECK( receivedIds.contains( QStringLiteral( "call_a1" ) ) );
+  // The superseded stream must not report finished() while the re-entrant
+  // request is in flight: the new stream owns the terminal signal.
+  CHECK( finishedCount == 0 );
+}
+
 // — Robustness review 2026-10-02 (P1): the TRANSPORT lane of the line bound.
 // The seam test above proves parseSseLine refuses an oversized line; this
 // regression drives the real network path. The refusal used to cancel() the

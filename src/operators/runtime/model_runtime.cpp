@@ -18,6 +18,7 @@
 #include <opencv2/dnn.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <cctype>
 #include <cstdlib>
@@ -896,28 +897,44 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   }
   const std::string key = framework + "|" + device.toString() + "|" + identityComponent;
 
-  // Platform 7.0 admission: the acquisition reserves its manifest estimate on
-  // the resolved GPU device for the lifetime of the cache entry (bounded,
-  // deterministic, never a scheduler). Reservations on CPU are a no-op.
+  // #1455: the ledger holder names the SESSION INSTANCE this acquisition may
+  // load, never the bare model identity. A recycled corpse can stay held past
+  // the cache by an ensemble member (model_ensemble.cpp MemberRun.session),
+  // keeping its wrapper deleter pending arbitrarily long; under a shared
+  // identity key that late release erased the REPLACEMENT session's
+  // reservation — the ledger read 0 for a physically-occupied device and
+  // admitted past capacity. The per-acquisition ticket keeps every
+  // reserve/release pair disjoint; the identity prefix stays for
+  // observability.
+  static std::atomic<std::uint64_t> holderTicket{ 0 };
+  const std::string ledgerHolder =
+    identityComponent + "#" + std::to_string( holderTicket.fetch_add( 1 ) + 1 );
+
   const int estimateMb = model.runtime.estimatedVramMb;
-  if ( device.gpu && estimateMb > 0 )
-  {
+  // Platform 7.0 admission: the acquisition reserves its manifest estimate on
+  // the resolved GPU device for the session it is about to load (bounded,
+  // deterministic, never a scheduler). Reservations on CPU are a no-op.
+  // #1455: admission runs AFTER the cache lookup — a live cache hit serves a
+  // session whose booking already stands and must neither re-book nor be
+  // refused against it. On failure the lock is RELEASED and the typed reason
+  // lands in *errorMessage; the caller must return immediately.
+  const auto admit = [ & ]() {
+    if ( !( device.gpu && estimateMb > 0 ) )
+      return true;
     std::string admitWhy;
-    if ( !m_ledger->tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
-    {
-      // Memory-pressure valve: ONE bounded eviction pass over the sessions
-      // pinned to this device, then a single retry. No loops, no queueing.
-      evictDeviceLocked( device.cudaIndex );
-      if ( !m_ledger->tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
-      {
-        lock.unlock();
-        if ( errorMessage )
-          *errorMessage = "cannot honor device request '" + request.toString() + "' for model '"
-                            + model.name + "': device unavailable — " + admitWhy;
-        return nullptr;
-      }
-    }
-  }
+    if ( m_ledger->tryReserve( device.cudaIndex, estimateMb, ledgerHolder, &admitWhy ) )
+      return true;
+    // Memory-pressure valve: ONE bounded eviction pass over the sessions
+    // pinned to this device, then a single retry. No loops, no queueing.
+    evictDeviceLocked( device.cudaIndex );
+    if ( m_ledger->tryReserve( device.cudaIndex, estimateMb, ledgerHolder, &admitWhy ) )
+      return true;
+    lock.unlock();
+    if ( errorMessage )
+      *errorMessage = "cannot honor device request '" + request.toString() + "' for model '"
+                        + model.name + "': device unavailable — " + admitWhy;
+    return false;
+  };
 
   const auto cached = m_cache.find( key );
   if ( cached != m_cache.end() )
@@ -925,34 +942,30 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     // Track 13 crash recovery: a session that reports itself permanently
     // unavailable (its external worker died with the restart budget
     // exhausted) is a corpse — every forward it would run throws, forever.
-    // Recycle instead of serving, and do it BEFORE the admission reserve
-    // above could matter: the corpse is destroyed OUTSIDE the lock first,
-    // so its #1160 deleter releases the holder entry, and the fall-through
-    // below re-books the replacement through the normal admission path.
-    // (Releasing after re-booking would let the corpse's release erase the
-    // REPLACEMENT's reservation — the ledger would read 0 for a
-    // physically-occupied device and admit past capacity.)
+    // Recycle instead of serving: unbook the corpse's dead VRAM, destroy the
+    // corpse OUTSIDE the lock, then admit + load the replacement through the
+    // normal path. The corpse's #1160 deleter may stay pending arbitrarily
+    // long while an ensemble member holds the session; it releases a ticket
+    // disjoint from the replacement's (#1455), so no release ordering can
+    // ever erase the replacement's reservation.
     if ( cached->second.session && cached->second.session->permanentlyUnavailable() )
     {
       ModelRuntimePtr corpse = cached->second.session;
+      // #1455: permanentlyUnavailable means the external worker is gone for
+      // good — its VRAM is already physically free. Release the corpse's own
+      // ticket NOW so admission below judges the honest free amount; the
+      // corpse wrapper's release, whenever the last holder drops it, is an
+      // idempotent no-op against this disjoint ticket.
+      if ( cached->second.cudaIndex >= 0 && cached->second.reservedVramMb > 0 )
+        m_ledger->release( cached->second.cudaIndex, cached->second.reservedVramMb,
+                           cached->second.ledgerHolder );
       m_cache.erase( cached );
       ++m_evictions;
       lock.unlock();
-      corpse.reset(); // destroy the model, then release its holder entry
+      corpse.reset(); // destroy the model FIRST — never admit onto live VRAM
       lock.lock();
-      if ( device.gpu && estimateMb > 0 )
-      {
-        std::string admitWhy;
-        if ( !m_ledger->tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
-        {
-          lock.unlock();
-          if ( errorMessage )
-            *errorMessage = "cannot honor device request '" + request.toString()
-                              + "' for model '" + model.name + "': device unavailable — "
-                              + admitWhy;
-          return nullptr;
-        }
-      }
+      if ( !admit() )
+        return nullptr;
       ++m_cacheMisses;
       lock.unlock();
     }
@@ -967,6 +980,8 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   else
   {
     ++m_cacheMisses;
+    if ( !admit() )
+      return nullptr;
     lock.unlock();
   }
 
@@ -988,12 +1003,12 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   catch ( ... )
   {
     // The failed acquisition must return its reservation even when the
-    // factory throws — otherwise the identity stays reserved forever and
-    // every later acquire of this model is refused.
+    // factory throws — otherwise this session's ticket stays reserved forever
+    // and every later acquire of this model is refused.
     if ( device.gpu && estimateMb > 0 )
     {
       lock.lock();
-      m_ledger->release( device.cudaIndex, estimateMb, identityComponent );
+      m_ledger->release( device.cudaIndex, estimateMb, ledgerHolder );
       lock.unlock();
     }
     throw;
@@ -1005,7 +1020,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     if ( device.gpu && estimateMb > 0 )
     {
       lock.lock();
-      m_ledger->release( device.cudaIndex, estimateMb, identityComponent );
+      m_ledger->release( device.cudaIndex, estimateMb, ledgerHolder );
       lock.unlock();
     }
     if ( errorMessage )
@@ -1019,15 +1034,19 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // let ours be released, keeping the cache size invariant simple. Known
   // bound: if the raced entry died while we were loading, it is served once
   // more (one failed forward) and recycled by the NEXT acquire — reaping it
-  // here would race its #1160 ledger release against our own reservation.
+  // here would destroy a model under the registry lock; its #1160 deleter
+  // (#1455: a per-instance ticket) can never erase our reservation anyway.
   const auto raced = m_cache.find( key );
   if ( raced != m_cache.end() )
   {
     raced->second.lastUsed = ++m_useCounter;
     raced->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
-    // The raced entry and this acquisition share the same ledger holder
-    // identity (framework+device+digest) — our tryReserve re-asserted the
-    // entry's own reservation, so there is nothing to release here.
+    // #1455: the raced entry keeps its OWN ticket's booking; this
+    // acquisition's admission must unwind — the winner's session (whose
+    // wrapper owns the only surviving reservation for this key) is what the
+    // caller leaves with, so nothing of ours may stay booked.
+    if ( device.gpu && estimateMb > 0 )
+      m_ledger->release( device.cudaIndex, estimateMb, ledgerHolder );
     return raced->second.session;
   }
   CacheEntry entry;
@@ -1035,7 +1054,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   entry.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
   entry.cudaIndex = device.gpu ? device.cudaIndex : -1;
   entry.reservedVramMb = device.gpu ? std::max( 0, estimateMb ) : 0;
-  entry.ledgerHolder = identityComponent;
+  entry.ledgerHolder = ledgerHolder;
   // #1160: the reservation is tied to the SESSION's lifetime, not the
   // cache entry's. An ensemble holds MemberRun.session beyond eviction;
   // releasing the reservation on LRU drop while members still executed
@@ -1044,7 +1063,10 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // authority). The wrapper's deleter releases the ledger AFTER the
   // model is destroyed (never admitting onto still-occupied memory), and
   // the shared ledger pointer keeps the release safe even if the registry
-  // object itself is gone by then.
+  // object itself is gone by then. #1455: the holder is the per-instance
+  // ticket minted above, so this release can only ever unwind THIS
+  // session's booking — never a replacement admitted under the same model
+  // identity.
   if ( entry.cudaIndex >= 0 && entry.reservedVramMb > 0 && !entry.ledgerHolder.empty() )
   {
     const auto ledger = m_ledger;

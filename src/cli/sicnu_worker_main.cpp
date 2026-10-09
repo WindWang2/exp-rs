@@ -374,6 +374,22 @@ int main( int argc, char **argv )
             continue;
         }
 
+        // Same type gate as op/jobId above (#1449): parseFrame only proves the
+        // frame is v1 JSON, and jsoncpp's asString() throws on a non-string —
+        // a run frame whose algorithmId is not a string cannot name an
+        // operator, so answer with a typed error frame instead of letting the
+        // exception take the worker down.
+        if ( !frame["algorithmId"].isString() )
+        {
+            std::lock_guard<std::mutex> lock( stdoutMutex );
+            emitFrame( "error", jobId, [] {
+                Json::Value e;
+                e["message"] = "run frame: 'algorithmId' must be a string";
+                e["code"] = "unknownAlgorithm";
+                return e;
+            }() );
+            continue;
+        }
         const std::string algorithmId = frame["algorithmId"].asString();
         const Json::Value params = frame["params"];
         {

@@ -23,6 +23,12 @@
     error is pending, so the leftover error would abort the very open a
     /vsirangecache/ handle is being served for (GDAL 3.8 lane — see
     fetchImpl's sizeGuard branch).
+  * CPLHTTPFetch follows redirects UNCONDITIONALLY in this GDAL (3.12.4
+    hardcodes CURLOPT_FOLLOWLOCATION=1; no papszOptions key or config
+    option disables it — checked against the pinned GDAL source). A
+    first-hop egress check made before httpFetch therefore does NOT cover
+    redirect targets; closing that gap needs a transport-level change, not
+    an option string here (#1456, open).
  ***************************************************************************/
 
 #include "geospatial/remote/http_fetch.h"
