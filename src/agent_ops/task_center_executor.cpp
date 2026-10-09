@@ -61,7 +61,7 @@ sicnu::agent_loop::ExecutionStart TaskCenterExecutor::begin( const sicnu::agent_
         };
     }
 
-    // Step validation: operator ID and arguments
+    // Step validation: operator ID
     for ( const auto &step : plan.steps )
     {
         std::string opId;
@@ -82,14 +82,11 @@ sicnu::agent_loop::ExecutionStart TaskCenterExecutor::begin( const sicnu::agent_
                 .error = "INVALID_OPERATOR_ID"
             };
         }
-        if ( step.isMember( "arguments_invalid" ) && step[ "arguments_invalid" ].asBool() )
-        {
-            return ExecutionStart{
-                .runId = "",
-                .started = false,
-                .error = "INVALID_ARGUMENTS_JSON"
-            };
-        }
+        // No per-step "arguments_invalid" flag is checked here: no planner
+        // contract in this tree produces one (planners report invalid plans
+        // through PlanDraft.valid/error, which the session refuses before
+        // execute), so the former guard was unreachable from production.
+        // (#1451)
     }
 
     // Cyclic dependency check
@@ -140,6 +137,21 @@ sicnu::agent_loop::ExecutionStart TaskCenterExecutor::begin( const sicnu::agent_
         }
     }
 
+    // Fail closed on multi-step plans: this executor submits exactly ONE
+    // TaskCenter job per plan (the first step); letting a multi-step plan
+    // through would silently run only step 1 while poll() reports the
+    // single job's terminal state as the whole plan's outcome. Refuse with
+    // a typed code until a real multi-step submission path exists; the
+    // single-step path is unchanged. (#1451)
+    if ( plan.steps.size() > 1 )
+    {
+        return ExecutionStart{
+            .runId = "",
+            .started = false,
+            .error = "MULTI_STEP_PLAN_UNSUPPORTED"
+        };
+    }
+
     // Construct JobRequest with source="agent" to ensure LatencyClass::Interactive (rank 0)
     sicnu::jobs::JobRequest request;
     request.source = "agent";
@@ -166,10 +178,8 @@ sicnu::agent_loop::ExecutionStart TaskCenterExecutor::begin( const sicnu::agent_
     else
         request.params = Json::Value( Json::objectValue );
 
-    if ( plan.steps.size() > 1 )
-    {
-        request.params[ "plan_steps" ] = plan.steps;
-    }
+    // Single-step contract (see the MULTI_STEP_PLAN_UNSUPPORTED refusal
+    // above): only the plan identity rides along, never smuggled steps.
     request.params[ "plan_id" ] = plan.planId;
 
     const long taskId = sicnu::TaskCenter::instance().submitJob( request );

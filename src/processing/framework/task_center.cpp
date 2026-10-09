@@ -2997,6 +2997,7 @@ void TaskCenter::flushPendingLaunches()
         }
 
         bool mapped = false;
+        bool finalizeCanceled = false;
         std::string jobToCancel;
         {
             QMutexLocker reLock( &m_mutex );
@@ -3017,7 +3018,15 @@ void TaskCenter::flushPendingLaunches()
                         // won't deliver a record if mapping is removed.
                         setTaskStatusLocked( m_tasks[launch.taskId], TaskStatus::Canceled );
                         m_tasks[launch.taskId].endTime = QDateTime::currentDateTimeUtc();
+                        // Detached from the engine's record stream, so this seam is the
+                        // finalizer: mirror the sibling close-out paths
+                        // (dispatchPendingCancels / enforceCancelDeadlines) which also
+                        // settle the pipeline state and let completion callbacks fire —
+                        // without them a pipeline whose last task was canceled in the
+                        // submit window never reaches all-terminal and waiters strand (#1454).
+                        updatePipelineForTaskLocked( launch.taskId );
                         queueTaskUpdatedLocked( launch.taskId );
+                        finalizeCanceled = true;
                     }
                 }
                 else
@@ -3035,6 +3044,15 @@ void TaskCenter::flushPendingLaunches()
         if ( !jobToCancel.empty() )
         {
             sicnu::jobs::JobEngine::instance().cancel( jobToCancel );
+        }
+        if ( finalizeCanceled )
+        {
+            // Both take m_mutex internally (non-recursive), so they run outside the
+            // lock — same ordering as dispatchPendingCancels: signals first, then
+            // exactly-once callbacks (the detached mapping makes a late engine
+            // record a foreign-job no-op, so no one else can fire them).
+            flushPendingSignals();
+            fireTaskCompletionCallbacks( launch.taskId );
         }
         if ( mapped )
         {

@@ -18,6 +18,7 @@
 #include "geospatial/raster/raster_reader.h"
 
 #include <QDate>
+#include <QDebug>
 #include <QRegularExpression>
 
 #include <algorithm>
@@ -137,8 +138,12 @@ class TemporalCubeImpl final : public TemporalCube
     std::vector<float> readChunk( int x, int y, int width, int height,
                                   int tStart, int tCount ) override
     {
-        if ( !validSpatialWindow( x, y, width, height ) || tCount < 1 ||
-             tStart < 0 || tStart + tCount > sliceCount() )
+        // #1450: each bound is checked on its own — computing tStart + tCount
+        // first would overflow int for extreme requests and wrap the guard
+        // open. sliceCount() - tCount cannot overflow: tCount >= 1 is already
+        // established by short-circuit and sliceCount() >= 0.
+        if ( !validSpatialWindow( x, y, width, height ) || tCount < 1 || tStart < 0 ||
+             tStart > sliceCount() - tCount )
             return {};
 
         std::vector<float> out( static_cast<std::size_t>( tCount ) * width * height,
@@ -203,6 +208,8 @@ class TemporalCubeImpl final : public TemporalCube
         bool hasCloud = false;
         bool hasNoData = false;
         double noDataValue = 0.0;
+        QString path;                 ///< for diagnostics when a read fails
+        mutable bool readFailureLogged = false;
     };
     std::vector<SceneSource> mScenes;
 
@@ -366,8 +373,22 @@ class TemporalCubeImpl final : public TemporalCube
         {
             values = scene.reader.readWindow( bands, window );
         }
-        catch ( const std::exception & )
+        catch ( const std::exception &e )
         {
+            // #1467: the plane stays NaN (the explicit invalid marker for this
+            // node's pixels), but the failure itself must stay observable —
+            // count it and log the scene once instead of silently vanishing
+            // into a gap.
+            ++mSceneReadFailures;
+            if ( !scene.readFailureLogged )
+            {
+                scene.readFailureLogged = true;
+                qWarning().noquote() << QStringLiteral( "TemporalCube: window read failed for "
+                                                       "scene '%1' (failure #%2): %3" )
+                                            .arg( scene.path )
+                                            .arg( mSceneReadFailures )
+                                            .arg( QString::fromUtf8( e.what() ) );
+            }
             return; // typed read failure: this scene contributes no candidates
         }
         const std::size_t pixels = static_cast<std::size_t>( window.width ) * window.height;
@@ -388,6 +409,8 @@ class TemporalCubeImpl final : public TemporalCube
 
     mutable std::list<std::pair<TileKey, Tile>> mLru; // front = MRU
     mutable std::unordered_map<TileKey, LruIterator, TileKeyHash> mIndex;
+    /// #1467: scene-level window-read failures seen so far (diagnostics).
+    mutable int mSceneReadFailures = 0;
     std::size_t mMemoryBudget = 1024ull * 1024 * 1024;
 
     bool validSpatialWindow( int x, int y, int width, int height ) const
@@ -485,6 +508,7 @@ std::shared_ptr<TemporalCubeImpl> TemporalCubeImpl::open( const std::vector<QStr
         source.reader = std::move( reader );
         source.tDays = static_cast<double>( instant.toJulianDay() ) - epochJulian;
         source.hasCloud = meta.bandCount >= 2;
+        source.path = path;
         if ( meta.bands.empty() )
             return refuse( QStringLiteral( "TemporalCube: scene '%1' has no band metadata" )
                                .arg( path ) );

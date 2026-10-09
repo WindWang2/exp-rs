@@ -110,8 +110,15 @@ std::string provisionCommaLocaleUncached()
         if ( std::system( cmd.c_str() ) != 0 )
             return {};
     }
+    // POSIX localedef bootstrap: there is no localedef on Windows, so the
+    // whole helper is unreachable there — still, keep it compiling (the
+    // setenv call below is POSIX-only).
+#ifdef _WIN32
+    return {};
+#else
     setenv( "LOCPATH", dirText.c_str(), 1 );
     return tryLocale( "de_DE.UTF-8" ) ? std::string( "de_DE.UTF-8" ) : std::string();
+#endif
 }
 
 /// Anti-vacuity: the hostile locale must actually move a decimal point.

@@ -295,7 +295,16 @@ void DatasetStore::close()
 {
     if ( !m_impl )
         return;
-    sqlite3_close( m_impl->db );
+    {
+        // Quiesce before closing (#1457): every store operation holds this
+        // mutex while touching the connection, so an in-flight query must
+        // finish before the handle is closed and the Impl (mutex included)
+        // is deleted. close_v2 matches the Artifact/Governance store fix and
+        // degrades gracefully instead of leaking on a stale statement.
+        QMutexLocker lock( &m_impl->mutex );
+        if ( m_impl->db )
+            sqlite3_close_v2( m_impl->db );
+    }
     delete m_impl;
     m_impl = nullptr;
     m_storePath.clear();

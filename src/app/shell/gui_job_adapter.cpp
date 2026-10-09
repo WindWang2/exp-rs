@@ -46,7 +46,8 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
       m_onSuccess = nullptr;
       m_onFailure = nullptr;
       m_onProgress = nullptr;
-      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ) );
+      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ),
+            /*wasCanceled=*/false );
     }
     else
     {
@@ -95,7 +96,8 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
       m_onSuccess = nullptr;
       m_onFailure = nullptr;
       m_onProgress = nullptr;
-      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ) );
+      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ),
+            /*wasCanceled=*/false );
     }
     else
     {
@@ -143,7 +145,8 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
       m_onSuccess = nullptr;
       m_onFailure = nullptr;
       m_onProgress = nullptr;
-      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ) );
+      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ),
+            /*wasCanceled=*/false );
     }
     else
     {

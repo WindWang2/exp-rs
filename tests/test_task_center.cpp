@@ -1664,3 +1664,70 @@ TEST_CASE( "TaskCenter - In-flight cancellation during dispatch does not self-de
     engine.waitUntilIdleForTests();
 }
 
+TEST_CASE( "TaskCenter - cancel in the launch submit window settles the pipeline and fires the completion callback once (#1454)",
+           "[processing][task_center][cancellation][issue1454]" )
+{
+    auto &tc = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers( 2 );
+
+    // Long enough that the executor can never complete before the cancel lands,
+    // so every interleaving of the race below must end in Canceled.
+    engine.registerExecutor( "callable:ux1454_cancel_window",
+                             []( const sicnu::jobs::JobRequest &,
+                                 sicnu::operators::RSOperatorContext & ) {
+                                 std::this_thread::sleep_for( std::chrono::milliseconds( 200 ) );
+                                 return Json::Value( Json::objectValue );
+                             } );
+
+    // Single-step pipeline: canceling the root task's launch races the flush
+    // thread between job pre-registration and the post-submit remap. A cancel
+    // landing inside that window detaches the job mapping, so TaskCenter itself
+    // is the finalizer — the pipeline must still reach all-terminal and the
+    // completion callback must still fire exactly once (#1454).
+    for ( int i = 0; i < 20; ++i )
+    {
+        sicnu::workflow::WorkflowDefinition def;
+        def.id = "ux1454_cancel_window_pipeline";
+        def.title = "Cancel Window Pipeline";
+        sicnu::workflow::StepDef step;
+        step.id = "root";
+        step.title = "Root";
+        step.kind = sicnu::workflow::StepKind::Operator;
+        step.operatorId = "callable:ux1454_cancel_window";
+        def.steps = { step };
+
+        const long pipeId = tc.submitPipeline( def, /*autoLoad=*/false );
+        REQUIRE( pipeId > 0 );
+        const long stepTaskId = tc.getPipelineInfo( pipeId ).stepToTaskId["root"];
+        REQUIRE( stepTaskId > 0 );
+
+        std::atomic<int> completions{ 0 };
+        tc.addTaskCompletionCallback(
+            stepTaskId, [&completions]( const sicnu::AlgorithmTaskInfo & ) {
+                completions.fetch_add( 1 );
+            } );
+
+        tc.cancelTask( stepTaskId );
+
+        for ( int attempt = 0; attempt < 400
+                            && !tc.getPipelineInfo( pipeId ).isCompleted;
+              ++attempt )
+        {
+            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        }
+
+        const auto pipe = tc.getPipelineInfo( pipeId );
+        const auto info = tc.getTaskInfo( stepTaskId );
+        REQUIRE( sicnu::isTerminalStatus( info.status ) );
+        REQUIRE( info.status == sicnu::TaskStatus::Canceled );
+        REQUIRE( pipe.isCompleted );
+        REQUIRE( pipe.isFailed );
+        REQUIRE( completions.load() == 1 );
+    }
+    engine.waitUntilIdleForTests();
+    engine.clearExecutors();
+}
+

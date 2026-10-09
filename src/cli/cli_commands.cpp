@@ -1606,8 +1606,10 @@ int commandPlugin( QStringList args, const CliIO &io )
              && conformance["dataProviderTarget"].isString() )
         {
             const std::string target = conformance["dataProviderTarget"].asString();
-            const auto *entry = sicnu::plugins::DataProviderRegistry::instance().find( target );
-            if ( !entry )
+            // #1449: the registry returns a co-owning provider handle — a
+            // raw entry pointer would dangle on a concurrent unregister.
+            const auto provider = sicnu::plugins::DataProviderRegistry::instance().find( target );
+            if ( !provider )
             {
                 addCheck( "PT_PROVIDERS", false,
                           "declared provider is not registered after load: " + target );
@@ -1628,9 +1630,9 @@ int commandPlugin( QStringList args, const CliIO &io )
                     }
                 }
                 const Json::Value listed =
-                    entry->provider->discover( Json::Value( Json::objectValue ) );
-                const Json::Value meta = entry->provider->inspect( probeUri );
-                const Json::Value opened = entry->provider->open( probeUri );
+                    provider->discover( Json::Value( Json::objectValue ) );
+                const Json::Value meta = provider->inspect( probeUri );
+                const Json::Value opened = provider->open( probeUri );
                 // The data-provider proxy wraps worker answers in a
                 // {"result": ...} envelope; unwrapped failures are objects.
                 const bool ok = listed["result"].isArray() && meta["result"].isObject()

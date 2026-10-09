@@ -71,9 +71,16 @@ std::uint64_t peakRssBytes()
 /// retained there. Detection is compile-time (GCC defines __SANITIZE_ADDRESS__,
 /// Clang exposes __has_feature); libasan exports the accessor but GCC's
 /// runtime does not ship sanitizer/allocator_interface.h, so declare it.
-#if defined( __SANITIZE_ADDRESS__ ) || ( defined( __has_feature ) && __has_feature( address_sanitizer ) )
+// MSVC's legacy preprocessor cannot parse __has_feature inside a single
+// #if expression (C1012); the nested form below is portable.
+#if defined( __SANITIZE_ADDRESS__ )
 #define SICNU_FABRIC_SCALE_ASAN 1
 extern "C" unsigned long __sanitizer_get_current_allocated_bytes();
+#elif defined( __has_feature )
+#if __has_feature( address_sanitizer )
+#define SICNU_FABRIC_SCALE_ASAN 1
+extern "C" unsigned long __sanitizer_get_current_allocated_bytes();
+#endif
 #endif
 
 std::uint64_t retainedHeapBytes()

@@ -27,9 +27,37 @@ namespace exp_radiometric
       { RadiometricUnit::ToaReflectance, RadiometricUnit::BoaReflectance }, // 6S inversion
     };
 
-    QString layerSourcePath( const QgsRasterLayer *layer )
+    // #1450: fail-closed state for a present-but-unrecognized unit marker.
+    // Degrading it to DN would make DN→Radiance look lawful and allow double
+    // calibration of a layer that may already be calibrated, so no transition
+    // (identity excepted) is lawful out of this state. The public enum has no
+    // Unknown member; a scoped enum without a fixed underlying type holds any
+    // value of its enumerator range (0..7 here), so this file-local sentinel
+    // needs no header change.
+    constexpr RadiometricUnit kUnrecognizedUnit = static_cast<RadiometricUnit>( 5 );
+
+    /// The layer source when it is a plain local file path; empty for
+    /// provider URIs. #1467: layer->source() is a provider URI, not
+    /// necessarily a path — Qt resources (":/…"), GDAL subdataset
+    /// descriptors ("GTIFF_DIR:…", "HDF5:…"), and remote schemes
+    /// ("https://…", "WMS:…") must skip the GDALOpenEx metadata round-trip
+    /// instead of being opened. The only colon a local path may carry is a
+    /// Windows drive letter ("C:/…" / "C:\…"); anything else is a URI.
+    QString layerLocalFilePath( const QgsRasterLayer *layer )
     {
-      return layer ? layer->source() : QString();
+      if ( !layer )
+        return QString();
+      const QString source = layer->source();
+      const int colon = source.indexOf( QLatin1Char( ':' ) );
+      if ( colon < 0 )
+        return source; // POSIX / UNC / relative path
+      if ( colon != 1 || source.size() < 3 )
+        return QString();
+      const QChar afterColon = source.at( 2 );
+      if ( !source.at( 0 ).isLetter() ||
+           ( afterColon != QLatin1Char( '/' ) && afterColon != QLatin1Char( '\\' ) ) )
+        return QString();
+      return source;
     }
   } // namespace
 
@@ -52,6 +80,8 @@ namespace exp_radiometric
 
   QString RadiometricState::unitToString( RadiometricUnit unit )
   {
+    if ( unit == kUnrecognizedUnit )
+      return QStringLiteral( "UNKNOWN" );
     switch ( unit )
     {
       case RadiometricUnit::DigitalNumber:
@@ -71,6 +101,12 @@ namespace exp_radiometric
   RadiometricUnit RadiometricState::stringToUnit( const QString &str )
   {
     const QString normalized = str.trimmed().toUpper();
+    // An absent marker (empty after trim) is missing metadata, not a wrong
+    // one: the rawest interpretation stays lawful (ADR 0158).
+    if ( normalized.isEmpty() )
+      return RadiometricUnit::DigitalNumber;
+    if ( normalized == QLatin1String( "DIGITAL_NUMBER" ) )
+      return RadiometricUnit::DigitalNumber;
     if ( normalized == QLatin1String( "RADIANCE" ) )
       return RadiometricUnit::Radiance;
     if ( normalized == QLatin1String( "TOA_REFLECTANCE" ) )
@@ -79,9 +115,14 @@ namespace exp_radiometric
       return RadiometricUnit::BoaReflectance;
     if ( normalized == QLatin1String( "BRIGHTNESS_TEMPERATURE" ) )
       return RadiometricUnit::BrightnessTemperature;
-    // "DIGITAL_NUMBER" and any unrecognized marker degrade to the rawest
-    // interpretation (ADR 0158 fail-safe default).
-    return RadiometricUnit::DigitalNumber;
+    if ( normalized == QLatin1String( "UNKNOWN" ) )
+      return kUnrecognizedUnit;
+    // #1450: fail closed — a present-but-unrecognized marker must not
+    // degrade to DN, or DN→Radiance would look lawful and an already
+    // calibrated layer could be calibrated a second time. The unrecognized
+    // state admits no transition, so every preflight refuses until the
+    // marker is fixed.
+    return kUnrecognizedUnit;
   }
 
   RadiometricUnit RadiometricState::layerUnit( const QgsRasterLayer *layer )
@@ -95,7 +136,8 @@ namespace exp_radiometric
 
     // File-level fallback: GDAL DEFAULT-domain metadata item, so a state
     // written by a previous session (or another tool) is still honored.
-    const QString path = layerSourcePath( layer );
+    // Provider-URI sources are skipped (see layerLocalFilePath, #1467).
+    const QString path = layerLocalFilePath( layer );
     if ( !path.isEmpty() )
     {
       if ( GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_RASTER | GDAL_OF_READONLY,
@@ -134,7 +176,7 @@ namespace exp_radiometric
 
     // Best-effort persistence next to the data. The in-session custom
     // property is authoritative; a read-only dataset simply skips this.
-    const QString path = layerSourcePath( layer );
+    const QString path = layerLocalFilePath( layer );
     if ( !path.isEmpty() )
     {
       if ( GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_RASTER | GDAL_OF_UPDATE,

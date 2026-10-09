@@ -547,9 +547,33 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
     node->isRestarting = false;
     if ( !started )
     {
-      // The fresh worker never launched: answer any recovered requests with an
-      // error so their callers do not hang on a dead worker.
-      qWarning() << "Worker restart FAILED for id:" << id;
+      // The fresh worker never launched: dispose both allocations exactly as
+      // the listen-failure branch below does (#1384) — bindNodeSignals ran,
+      // so leaving the dead pair would keep the node unacquirable forever
+      // with no signal able to move it into another loss cycle. The node
+      // itself stays: a busy node is still owned by its adapter (DATAPY-3),
+      // and the budget step is refunded because nothing was restarted.
+      if ( node->server )
+      {
+        node->server->disconnect();
+        node->server->close();
+        node->server->deleteLater();
+        node->server = nullptr;
+      }
+      if ( node->worker )
+      {
+        node->worker->disconnect();
+        node->worker->deleteLater();
+        node->worker = nullptr;
+      }
+      if ( !wasBusy )
+        node->isBusy = false; // unowned: let shrink/acquire reclaim the slot
+      if ( node->crashBudgetLeft < kMaxWorkerCrashRestarts )
+        node->crashBudgetLeft++; // refund — the restart never launched
+      qWarning() << "Worker restart FAILED for id:" << id
+                 << "; node drained (server/worker disposed)";
+      // Answer any recovered requests with an error so their callers do not
+      // hang on a worker that will never exist.
       if ( borrowed != m_pendingRecovery.end() )
       {
         failPendingRequests( *borrowed->second, QStringLiteral( "Worker restart failed (process did not start)" ) );

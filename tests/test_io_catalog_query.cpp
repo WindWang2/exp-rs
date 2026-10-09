@@ -12,6 +12,7 @@
 
 using Catch::Approx;
 
+#include <algorithm>
 #include <string>
 #include <vector>
 

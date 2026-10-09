@@ -97,10 +97,13 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
     void onReplyError( QNetworkReply::NetworkError code );
 
   private:
-    /// Emits toolCallParsed for the accumulated tool call, then clears the
-    /// accumulation. No-op when no tool call is pending, so a stream that
-    /// ended with [DONE] emits exactly once (the [DONE] path and the
-    /// reply-finished path never double-emit).
+    /// Clears the accumulated tool calls, then emits one toolCallParsed per
+    /// valid call from the detached snapshot. Detaching first matters because
+    /// a direct-connected consumer may re-enter sendChatCompletion from the
+    /// signal, which would otherwise clear() the map mid-iteration (#1452).
+    /// No-op when no tool call is pending, so a stream that ended with [DONE]
+    /// emits exactly once (the [DONE] path and the reply-finished path never
+    /// double-emit).
     void emitParsedToolCallOnce();
 
     /// Declares the current stream failed and ends the turn: detaches the
@@ -127,6 +130,13 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
 
     std::map<int, ToolCallAccumulator> m_toolCalls;
     bool m_finishedEmitted = false;
+    /// Monotonic stream generation, bumped by every sendChatCompletion. The
+    /// terminal-state guards compare against the generation observed before
+    /// tool calls were emitted, so a re-entrant sendChatCompletion (the next
+    /// turn started from a direct-connected toolCallParsed slot) — which
+    /// resets m_finishedEmitted for the NEW stream — cannot make the
+    /// superseded stream emit a stray finished() (#1452).
+    int m_streamGeneration = 0;
     QString m_lastFinishReason;
 };
 

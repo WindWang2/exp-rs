@@ -384,19 +384,29 @@ void ScratchRegistry::unaccountLocked( const std::string &runId, std::uint64_t b
 void ScratchRegistry::releaseEntry( ScratchLease::Entry *entry )
 {
     const bool wasReleased = entry->released.exchange( true );
-    if ( !wasReleased && entry->registry.load( std::memory_order_acquire ) )
+    if ( !wasReleased )
     {
+        // #1449: the registry-liveness check and the accounting it gates must
+        // share ONE mutex. ~ScratchRegistry publishes registry=nullptr under
+        // m_mutex; deciding on a lock-free read first and locking second left
+        // a check-then-lock window in which the registry could detach (or
+        // begin dying) between the two. Re-verified under the lock, the
+        // release either sees a live registry and unaccounts atomically with
+        // respect to the detach, or sees the detachment and touches nothing.
         std::lock_guard<std::mutex> lock( m_mutex );
-        unaccountLocked( entry->runId, entry->bytes );
-        // Delete ONLY the provisional file: a finalized file may still be
-        // referenced by a disk-backed tile consumer and dies with the run
-        // sweep (or an explicit cleanup), never mid-stream.
-        if ( !entry->finalized.load() )
+        if ( entry->registry.load( std::memory_order_acquire ) )
         {
-            std::error_code ec;
-            std::filesystem::remove( sicnu::portable::pathFromUtf8( entry->path ), ec );
-            std::filesystem::remove(
-                sicnu::portable::pathFromUtf8( sidecarPath( entry->path ) ), ec );
+            unaccountLocked( entry->runId, entry->bytes );
+            // Delete ONLY the provisional file: a finalized file may still be
+            // referenced by a disk-backed tile consumer and dies with the run
+            // sweep (or an explicit cleanup), never mid-stream.
+            if ( !entry->finalized.load() )
+            {
+                std::error_code ec;
+                std::filesystem::remove( sicnu::portable::pathFromUtf8( entry->path ), ec );
+                std::filesystem::remove(
+                    sicnu::portable::pathFromUtf8( sidecarPath( entry->path ) ), ec );
+            }
         }
     }
     delete entry;

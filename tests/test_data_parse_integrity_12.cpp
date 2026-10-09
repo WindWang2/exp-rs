@@ -101,18 +101,12 @@ struct KnownBadFile
 
 const KnownBadFile *knownBadFiles( std::size_t &count )
 {
-    static const KnownBadFile kKnown[] = {
-        // --- Family A: duplicated-key prefix block (evil merge 43dcf19cd) ---
-        // All 19 capability files were repaired by later R3 merges; the
-        // gate's stale-allowlist assertion forced the pruning below (the
-        // entries lingered while the files already parsed cleanly).
-        // --- Family B: truncated to zero bytes (evil merge 4713528ef) ---
-        // The four rs-temporal-*.json files were deleted outright by later
-        // merges; there is nothing left to tolerate, so their entries went
-        // with them.
-    };
-    count = sizeof( kKnown ) / sizeof( kKnown[0] );
-    return kKnown;
+    // The authored defect set is fully repaired (see kMaxTolerated below);
+    // GCC tolerated the literal empty initializer as a zero-size array
+    // extension, MSVC rejects it (C2466) — an empty table is expressed
+    // without any array at all.
+    count = 0;
+    return nullptr;
 }
 
 /// The ceiling. Repairing a file cannot break this assertion; ADDING one does.

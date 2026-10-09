@@ -1587,3 +1587,23 @@ TEST_CASE( "missing worker binary fails fast with a typed diagnostic (hardening 
     }
     CHECK( typedFailure );
 }
+
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "record() snapshots stay valid across a refresh (issue #943)",
+           "[hostprocess]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    const PluginRecord *before = registry.record( kPluginId );
+    REQUIRE( before != nullptr );
+    const std::string idBefore = before->id();
+
+    registry.refresh();
+
+    // The refresh replaced mRecords wholesale; the pre-refresh pointer
+    // references a registry-RETAINED copy and must still dereference
+    // instead of dangling, while a fresh lookup still resolves the plugin.
+    CHECK( before->id() == idBefore );
+    CHECK( registry.record( kPluginId ) != nullptr );
+}

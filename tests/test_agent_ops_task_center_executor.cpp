@@ -481,18 +481,24 @@ TEST_CASE( "TC_BND_PLN_04_CyclicStepDependencies", "[agent_ops][boundary]" )
     CHECK( start.error == "CYCLIC_DEPENDENCY_DETECTED" );
 }
 
-TEST_CASE( "TC_BND_PLN_05_MalformedJsonArguments", "[agent_ops][boundary]" )
+TEST_CASE( "TC_BND_PLN_05_UnknownStepFlagDoesNotRefuse", "[agent_ops][boundary]" )
 {
+    TestCleaner cleaner;
+    TaskCenter::instance().setMaxPendingTasks( 0 );
     TaskCenterExecutor executor;
     PlanDraft plan;
     Json::Value step( Json::objectValue );
-    step[ "operator_id" ] = "op:test";
+    step[ "operator_id" ] = "mock:op";
+    // "arguments_invalid" was a fabricated validation flag no planner
+    // produces (planners refuse invalid plans through PlanDraft.valid /
+    // .error); with that dead guard removed, an unknown step key must not
+    // refuse an otherwise valid single-step plan.
     step[ "arguments_invalid" ] = true;
     plan.steps.append( step );
 
     const auto start = executor.begin( plan );
-    CHECK_FALSE( start.started );
-    CHECK( start.error == "INVALID_ARGUMENTS_JSON" );
+    CHECK( start.started );
+    CHECK( start.runId.rfind( "task-", 0 ) == 0 );
 }
 
 // ===========================================================================
@@ -546,4 +552,34 @@ TEST_CASE( "TC_BND_ID_05_LargeTaskIdBoundary", "[agent_ops][boundary]" )
     const std::string largeRunId = "task-2147483640";
     const long id = TaskCenterExecutor::parseTaskId( largeRunId );
     CHECK( id == 2147483640L );
+}
+
+TEST_CASE( "TC_BND_PLN_06_MultiStepPlanFailClosedRefusal", "[agent_ops][boundary]" )
+{
+    TaskCenterExecutor executor;
+    // This executor submits exactly one TaskCenter job per plan; a
+    // multi-step plan must be refused with a typed code instead of
+    // silently running only the first step and reporting the single
+    // job's terminal state as the whole plan's outcome. (#1451)
+    PlanDraft plan = makeTestPlan();
+    Json::Value second( Json::objectValue );
+    second[ "id" ] = "step-2";
+    second[ "operator_id" ] = "mock:op";
+    plan.steps.append( second );
+
+    const auto start = executor.begin( plan );
+    CHECK_FALSE( start.started );
+    CHECK( start.runId.empty() );
+    CHECK( start.error == "MULTI_STEP_PLAN_UNSUPPORTED" );
+}
+
+TEST_CASE( "TC_BND_PLN_07_SingleStepPlanStillStarts", "[agent_ops][boundary]" )
+{
+    TestCleaner cleaner;
+    TaskCenter::instance().setMaxPendingTasks( 0 );
+    TaskCenterExecutor executor;
+    const PlanDraft plan = makeTestPlan();
+    const auto start = executor.begin( plan );
+    CHECK( start.started );
+    CHECK( start.runId.rfind( "task-", 0 ) == 0 );
 }

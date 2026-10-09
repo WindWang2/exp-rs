@@ -38,7 +38,11 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+// unistd is only needed for sysconf(_SC_PAGESIZE) in residentBytes(); the
+// /proc read below never succeeds on Windows anyway.
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -215,7 +219,14 @@ qint64 residentBytes()
     const qint64 pages = fields.at( 1 ).toLongLong( &ok );
     if ( !ok )
         return -1;
-    return pages * static_cast<qint64>( sysconf( _SC_PAGESIZE ) );
+    // /proc never opens on Windows (the -1 above already fired), so the
+    // page size only has to compile there.
+#ifdef _WIN32
+    constexpr qint64 pageSize = 4096;
+#else
+    const qint64 pageSize = static_cast<qint64>( sysconf( _SC_PAGESIZE ) );
+#endif
+    return pages * pageSize;
 }
 
 /// Restores the process working directory on every exit path (including a

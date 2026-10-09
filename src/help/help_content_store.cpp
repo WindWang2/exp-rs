@@ -8,6 +8,8 @@
 #include <QFile>
 #include <QTextStream>
 
+#include <exception>
+
 namespace sicnu::help
 {
 namespace
@@ -55,7 +57,14 @@ void HelpContentStore::parseCommon( HelpDescriptor &d, const Json::Value &entry,
     d.relatedIds = readStringList( entry, "related" );
     d.diagnosticIds = readStringList( entry, "diagnostics" );
     d.docRefs = readStringList( entry, "docs" );
-    d.deprecated = entry.isMember( "deprecated" ) && entry["deprecated"].asBool();
+    // (review #1447) typed access: asBool() throws Json::LogicError on
+    // non-bool values; report the content bug instead of aborting the load.
+    // Absent or null stays "not deprecated" (asBool()'s null behavior).
+    const Json::Value &deprecated = entry["deprecated"];
+    if ( deprecated.isBool() )
+        d.deprecated = deprecated.asBool();
+    else if ( !deprecated.isNull() )
+        errors << QStringLiteral( "%1: 'deprecated' must be a boolean" ).arg( context );
     d.supersededBy = readString( entry, "supersededBy" );
 
     if ( entry.isMember( "algorithm" ) ) {
@@ -283,11 +292,23 @@ void HelpContentStore::loadJsonFile( const QString &path, HelpRegistry &out, QSt
     const QByteArray bytes = file.readAll();
 
     Json::CharReaderBuilder builder;
+    // (review #1447) help files are shallow (array → entry → payload object),
+    // so a small recursion bound still accepts everything real while keeping
+    // hostile deep nesting from eating stack. jsoncpp signals a stackLimit
+    // violation by throwing, so the parse must be guarded to surface it as a
+    // load error instead of crashing the caller.
+    builder["stackLimit"] = 64;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     Json::Value document;
     Json::String parseErrors;
-    if ( !reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &document, &parseErrors ) ) {
-        errors << QStringLiteral( "%1: %2" ).arg( path, QString::fromStdString( parseErrors ) );
+    try {
+        if ( !reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &document,
+                             &parseErrors ) ) {
+            errors << QStringLiteral( "%1: %2" ).arg( path, QString::fromStdString( parseErrors ) );
+            return;
+        }
+    } catch ( const std::exception &e ) {
+        errors << QStringLiteral( "%1: %2" ).arg( path, QString::fromStdString( e.what() ) );
         return;
     }
     parseDocument( document, out, errors, path );
