@@ -15,6 +15,21 @@ callbacks = {}
 loaded_plugins = {}
 algo_executors = {}
 
+
+def _proxy_recv_timeout_s():
+    # Bounded wait for host-UI proxy answers (#1462): an unanswered request
+    # (e.g. a version-skewed method the host bridge no longer knows, before
+    # it answered unknown-method errors) used to block recv() forever,
+    # wedging the daemon until the host's whole-request timeout. 120 s per
+    # recv is far above any legitimate UI round trip; override with
+    # SICNU_WORKER_PROXY_RECV_TIMEOUT_S (<=0 restores the unbounded wait).
+    raw = os.environ.get("SICNU_WORKER_PROXY_RECV_TIMEOUT_S", "")
+    try:
+        value = float(raw)
+        return value if value > 0 else None
+    except ValueError:
+        return 120.0
+
 # Worker protocol version (Python side). Bumped on incompatible message
 # changes; hosts compare against their own constant to gate, and older hosts
 # ignore the field (tolerant handshake, see docs/python/runtime.md).
@@ -90,7 +105,16 @@ class SicnuMapCanvasProxy:
                 _pending_proxy_lines.extend(remaining)
                 drained_queue = True
                 continue
-            data = self._s.recv(4096)
+            try:
+                self._s.settimeout(_proxy_recv_timeout_s())
+                data = self._s.recv(4096)
+            except socket.timeout:
+                sys.stderr.write(
+                    "WorkerDaemon: proxy canvas.get_state timed out waiting for the host\n"
+                )
+                break
+            finally:
+                self._s.settimeout(None)
             if not data:
                 break
             # Byte-accurate framing (#624): decode only COMPLETE lines so a
@@ -197,7 +221,16 @@ class SicnuPythonIface:
                 _pending_proxy_lines.extend(remaining)
                 drained_queue = True
                 continue
-            data = self._s.recv(4096)
+            try:
+                self._s.settimeout(_proxy_recv_timeout_s())
+                data = self._s.recv(4096)
+            except socket.timeout:
+                sys.stderr.write(
+                    "WorkerDaemon: proxy catalog.get_active_layer timed out waiting for the host\n"
+                )
+                break
+            finally:
+                self._s.settimeout(None)
             if not data:
                 break
             # Byte-accurate framing (#624): decode only COMPLETE lines so a

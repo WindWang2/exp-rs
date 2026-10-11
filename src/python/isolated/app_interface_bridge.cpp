@@ -495,6 +495,15 @@ void AppInterfaceBridge::handleIpcMessage( const QJsonObject &message )
     }
     return;
   }
+
+  // Unknown method: the request still gets a TYPED answer. Silence here
+  // left the worker's proxy waiting on a response that never came — one
+  // version-skewed call wedged the daemon until the host's whole-request
+  // timeout (#1462).
+  if ( m_ipcServer && msgId > 0 )
+  {
+    m_ipcServer->sendError( msgId, QStringLiteral( "unknown method: " ) + method );
+  }
 }
 
 ActiveLayerSummary AppInterfaceBridge::getActiveLayerSummary() const
