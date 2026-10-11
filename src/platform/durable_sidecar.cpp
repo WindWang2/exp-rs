@@ -150,21 +150,28 @@ bool publishStaged( const std::string &stagedPath, const std::string &targetPath
   if ( attrs != INVALID_FILE_ATTRIBUTES && ( attrs & FILE_ATTRIBUTE_READONLY ) )
     ::SetFileAttributesW( target.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY );
 
-  const DWORD replaceError = ::GetLastError();
-  if ( attrs != INVALID_FILE_ATTRIBUTES &&
-       ::ReplaceFileW( target.c_str(), staged.c_str(), nullptr,
-                       REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr ) )
+  // 0 = the replace was never attempted (no target to replace); any other
+  // value is captured directly under the FAILED ReplaceFileW call — reading
+  // GetLastError() before the call only ever saw the residue of the
+  // Get/SetFileAttributes pair above (#1462).
+  DWORD replaceError = 0;
+  if ( attrs != INVALID_FILE_ATTRIBUTES )
   {
-    return true;
+    if ( ::ReplaceFileW( target.c_str(), staged.c_str(), nullptr,
+                         REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr ) )
+    {
+      return true;
+    }
+    replaceError = ::GetLastError();
   }
   if ( ::MoveFileExW( staged.c_str(), target.c_str(),
                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH ) )
   {
     return true;
   }
-  // Carry both reasons: the ReplaceFileW attempt failed first (attrs may
-  // have been INVALID), then the MoveFileExW fallback failed with the error
-  // that actually refused the publish.
+  // Carry both reasons: the ReplaceFileW attempt failed first (0 when it
+  // was never attempted), then the MoveFileExW fallback failed with the
+  // error that actually refused the publish.
   error = "publish failed (replace_error=" + std::to_string( replaceError ) +
           ", " + lastOsError() + ")";
   return false;
