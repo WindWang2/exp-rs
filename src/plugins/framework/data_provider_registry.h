@@ -43,9 +43,13 @@ public:
     /// Unregisters every provider contributed by @p pluginId (unload path).
     void unregisterPlugin( const std::string &pluginId );
 
-    const Entry *find( const std::string &providerId ) const;
-    /// Finds the first provider claiming @p scheme ("mydb://..." style).
-    const Entry *findByScheme( const std::string &scheme ) const;
+    /// Finds a registered provider by id. The returned handle CO-OWNS the
+    /// provider: a raw pointer into the entry storage would dangle as soon
+    /// as this method releases its lock and a concurrent
+    /// unregisterPlugin()/re-registration erases or reallocates mEntries
+    /// (#1449). The handle stays callable even after the plugin is gone.
+    std::shared_ptr<exprs::IPluginDataProviderV1> find(
+        const std::string &providerId ) const;
     std::vector<Entry> providers() const;
     size_t count() const;
 

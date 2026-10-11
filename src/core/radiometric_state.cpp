@@ -40,9 +40,28 @@ namespace exp_radiometric
       // no transitions at all: identity only, fail closed.
     };
 
-    QString layerSourcePath( const QgsRasterLayer *layer )
+    /// The layer source when it is a plain local file path; empty for
+    /// provider URIs. #1467: layer->source() is a provider URI, not
+    /// necessarily a path — Qt resources (":/…"), GDAL subdataset
+    /// descriptors ("GTIFF_DIR:…", "HDF5:…"), and remote schemes
+    /// ("https://…", "WMS:…") must skip the GDALOpenEx metadata round-trip
+    /// instead of being opened. The only colon a local path may carry is a
+    /// Windows drive letter ("C:/…" / "C:\…"); anything else is a URI.
+    QString layerLocalFilePath( const QgsRasterLayer *layer )
     {
-      return layer ? layer->source() : QString();
+      if ( !layer )
+        return QString();
+      const QString source = layer->source();
+      const int colon = source.indexOf( QLatin1Char( ':' ) );
+      if ( colon < 0 )
+        return source; // POSIX / UNC / relative path
+      if ( colon != 1 || source.size() < 3 )
+        return QString();
+      const QChar afterColon = source.at( 2 );
+      if ( !source.at( 0 ).isLetter() ||
+           ( afterColon != QLatin1Char( '/' ) && afterColon != QLatin1Char( '\\' ) ) )
+        return QString();
+      return source;
     }
   } // namespace
 
@@ -99,7 +118,8 @@ namespace exp_radiometric
 
     // File-level fallback: GDAL DEFAULT-domain metadata item, so a state
     // written by a previous session (or another tool) is still honored.
-    const QString path = layerSourcePath( layer );
+    // Provider-URI sources are skipped (see layerLocalFilePath, #1467).
+    const QString path = layerLocalFilePath( layer );
     if ( !path.isEmpty() )
     {
       if ( GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_RASTER | GDAL_OF_READONLY,
@@ -138,7 +158,7 @@ namespace exp_radiometric
 
     // Best-effort persistence next to the data. The in-session custom
     // property is authoritative; a read-only dataset simply skips this.
-    const QString path = layerSourcePath( layer );
+    const QString path = layerLocalFilePath( layer );
     if ( !path.isEmpty() )
     {
       if ( GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_RASTER | GDAL_OF_UPDATE,

@@ -122,9 +122,10 @@ std::string IpcChannel::protocolFailure() const
 
 void IpcChannel::setPeerProtocol( int major, int minor )
 {
-    std::lock_guard<std::mutex> lock( mMutex );
-    mPeerMajor = major;
-    mPeerMinor = minor;
+    // Relaxed stores suffice: the values are written once and read as
+    // standalone diagnostics (see the accessors' comment).
+    mPeerMajor.store( major, std::memory_order_relaxed );
+    mPeerMinor.store( minor, std::memory_order_relaxed );
 }
 
 void IpcChannel::lowerFrameCap( uint32_t maxFrameBytes )
@@ -412,13 +413,16 @@ void IpcChannel::setEventSink( std::function<void( const Ipc::Envelope & )> sink
 {
     // Events arriving before a sink is installed are QUEUED and flushed
     // here: the worker.hello handshake races the launcher's registration
-    // (the reader thread starts in the channel constructor).
+    // (the reader thread starts in the channel constructor). The replay
+    // runs INSIDE the state lock: once mEventSink is visible the reader
+    // delivers newer events directly outside the lock, so replaying the
+    // queue without the lock let a later frame overtake the queued
+    // worker.hello and break the hello-first handshake ordering (#1449).
+    // Sink contract equals the reader path: never re-enter this channel.
+    std::lock_guard<std::mutex> lock( mMutex );
+    mEventSink = sink;
     std::vector<Ipc::Envelope> pending;
-    {
-        std::lock_guard<std::mutex> lock( mMutex );
-        mEventSink = sink;
-        pending.swap( mPendingEvents );
-    }
+    pending.swap( mPendingEvents );
     for ( const Ipc::Envelope &event : pending )
     {
         if ( sink )

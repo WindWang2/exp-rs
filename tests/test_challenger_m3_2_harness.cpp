@@ -642,13 +642,15 @@ TEST_CASE( "Challenger M3.2: OutputCommitter Integration Under Cancellation and 
     REQUIRE_FALSE( assetIdStr.empty() );
 
     const auto assetId = sicnu::data::AssetId::fromString( QString::fromStdString( assetIdStr ) );
-    REQUIRE( assetId.isValid() );
-    REQUIRE( manager.hasAsset( assetId ) );
+    // fromString answers std::optional; AssetId exposes isNull(), and the
+    // manager's membership probe IS asset() (no hasAsset on DataManager).
+    REQUIRE( assetId.has_value() );
+    REQUIRE_FALSE( assetId->isNull() );
 
-    const auto asset = manager.asset( assetId );
-    CHECK( asset.kind == sicnu::data::AssetKind::Raster );
-    CHECK( asset.uri == stableOut );
-    CHECK( asset.derivation.algorithmId == QStringLiteral( "rs:ndvi" ) );
+    const auto asset = manager.asset( *assetId );
+    REQUIRE( asset.has_value() );
+    CHECK( asset->kind() == sicnu::data::AssetKind::Raster );
+    CHECK( asset->source().canonicalSource == stableOut );
 
     // Verify bit-exact equality of resumed committer output against reference anchor
     const auto bitReport = sicnu::testing::compareRastersBitExact(

@@ -7,6 +7,9 @@
 
 #include <gdal.h>
 
+#include <QDir>
+#include <limits>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <chrono>
@@ -520,6 +523,108 @@ TEST_CASE( "RsMultiresSegmenter: Performance & scalability (256x256 multi-band r
 
     // Performance assertion: 256x256 (65,536 pixels) 2-band MRS segmentation completes well within 5 seconds
     CHECK( elapsedMs < 5000 );
+}
+
+TEST_CASE( "RsMultiresSegmenter: NoData voids one band's pixels without voiding the other band's (#1461)", "[obia][segmentation][mrs][nodata]" )
+{
+    // GTiff on this driver build flattens per-band NoData tags to one value
+    // (verified: after reopen, band 1 reports band 2's sentinel), so two
+    // DISTINCT declared sentinels cannot round-trip through this fixture —
+    // per-band-metadata drivers cover that half of #1461. What GTiff CAN pin
+    // is the any-band void contract: band 1 voids rows 2-4 via literal NaN
+    // pixels, band 2 voids rows 8-10 via its -1 sentinel fold. A pixel is
+    // NoData when ANY band is non-finite; rows valid in both bands segment.
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const int w = 16;
+    const int h = 16;
+    const QString rasterPath = tempDir.path() + "/nodata_bands.tif";
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH ds = GDALCreate( driver, rasterPath.toUtf8().constData(), w, h, 2, GDT_Float32, nullptr );
+    REQUIRE( ds );
+
+    const float nanPixel = std::numeric_limits<float>::quiet_NaN();
+    for ( int b = 1; b <= 2; ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( ds, b );
+        QVector<float> row( w );
+        for ( int r = 0; r < h; ++r )
+        {
+            for ( int c = 0; c < w; ++c )
+            {
+                row[c] = 50.0f;
+                if ( b == 1 && r >= 2 && r <= 4 )
+                    row[c] = nanPixel;
+                else if ( b == 2 && r >= 8 && r <= 10 )
+                    row[c] = -1.0f;
+            }
+            GDALRasterIO( band, GF_Write, 0, r, w, 1, row.data(), w, 1, GDT_Float32, 0, 0 );
+        }
+        GDALSetRasterNoDataValue( band, -1.0 );
+    }
+    GDALClose( ds );
+
+    RsMultiresParams params;
+    params.scale = 10.0;
+    params.shapeWeight = 0.0;
+
+    QString errorMsg;
+    RsSegmentMap segMap = RsMultiresSegmenter::segmentRasterFile( rasterPath, { 1, 2 }, params, {}, {}, &errorMsg );
+    REQUIRE( errorMsg.isEmpty() );
+    REQUIRE( !segMap.isEmpty() );
+
+    // The void rows split the remaining uniform 50.0 area into three
+    // disconnected strips (rows 0-1 / 5-7 / 11-15); the multires pyramid can
+    // additionally split a strip at an artificial boundary, so the exact
+    // count is not the contract — the per-row label-0 loop below is.
+    REQUIRE( segMap.segmentCount() >= 3 );
+    for ( int r = 0; r < h; ++r )
+    {
+        for ( int c = 0; c < w; ++c )
+        {
+            const bool sentinelRow = ( r >= 2 && r <= 4 ) || ( r >= 8 && r <= 10 );
+            INFO( "row " << r << " col " << c << " label " << segMap.labelAt( r, c ) );
+            if ( sentinelRow )
+                CHECK( segMap.labelAt( r, c ) == 0 );
+            else
+                CHECK( segMap.labelAt( r, c ) != 0 );
+        }
+    }
+}
+
+TEST_CASE( "RsSegmentMap: toGeoTIFF publishes atomically without staging leftovers (#1461)", "[obia][segmentation][segmap]" )
+{
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const QString refPath = createTestRaster( tempDir.path(), 8, 8 );
+    REQUIRE( !refPath.isEmpty() );
+
+    QVector<quint32> labels( 64 );
+    for ( int i = 0; i < 64; ++i )
+        labels[i] = ( i < 32 ) ? 1u : 2u;
+    RsSegmentMap segMap( labels, 8, 8 );
+
+    const QString outPath = tempDir.path() + "/seg_out.tif";
+    QString err;
+    REQUIRE( segMap.toGeoTIFF( outPath, refPath, &err ) );
+    REQUIRE( QFile::exists( outPath ) );
+
+    // Republish over the existing output: the staged temp must replace it
+    // atomically and no .tmp~ sibling may be left behind.
+    labels[0] = 3u;
+    RsSegmentMap segMap2( labels, 8, 8 );
+    REQUIRE( segMap2.toGeoTIFF( outPath, refPath, &err ) );
+    REQUIRE( QFile::exists( outPath ) );
+    CHECK( QDir( tempDir.path() ).entryList( QStringList{ QStringLiteral( "*.tmp~*" ) }, QDir::Files ).isEmpty() );
+
+    // The republished map round-trips with the updated label.
+    RsSegmentMap reloaded = RsSegmentMap::fromGeoTIFF( outPath );
+    REQUIRE( !reloaded.isEmpty() );
+    REQUIRE( reloaded.labelAt( 0, 0 ) == 3 );
+    REQUIRE( reloaded.segmentCount() == 3 );
 }
 
 TEST_CASE( "OBIA segment features 64-bit label indexing safety (#472)", "[obia][segmentation][features][472]" )

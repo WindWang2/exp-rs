@@ -44,6 +44,7 @@
 #include <json/json.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -58,10 +59,25 @@ class CancelToken
   public:
     CancelToken() : mState( std::make_shared<std::atomic<bool>>( false ) ) {}
     void cancel() { mState->store( true ); }
-    bool cancelled() const { return mState->load(); }
+    /// Aliases an EXTERNAL cooperative cancellation predicate (e.g. an
+    /// operator context's isCancelled): every cancelled() checkpoint
+    /// consults it, so a workflow-level cancel stops the walk without the
+    /// caller having to own this token (#1455). The predicate must outlive
+    /// the walk; copies of the token stay aliased (shared holder).
+    void aliasPredicate( std::function<bool()> predicate )
+    {
+      mPredicate = std::make_shared<std::function<bool()>>( std::move( predicate ) );
+    }
+    bool cancelled() const
+    {
+      if ( mState->load() )
+        return true;
+      return mPredicate && ( *mPredicate )();
+    }
 
   private:
     std::shared_ptr<std::atomic<bool>> mState;
+    std::shared_ptr<std::function<bool()>> mPredicate;
 };
 
 enum class CatalogBackendKind

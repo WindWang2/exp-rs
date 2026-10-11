@@ -173,6 +173,17 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
     const QString &runId, const ReproductionBundleOptions &options ) const
 {
     ReproductionBundleReport report;
+    if ( options.mode == ReproductionBundleOptions::Mode::Portable )
+    {
+        // Portable (capped payload copy into data/) is not implemented; a
+        // reference bundle stamped mode=portable would lie to the import side,
+        // which treats that manifest as a promise of bundled bytes. Refuse
+        // typed instead (#1450).
+        report.warnings.append(
+            QStringLiteral( "portable mode is not implemented; refusing to export a "
+                            "reference bundle stamped portable" ) );
+        return report;
+    }
     const auto runRecord = m_experimentStore.runById( runId );
     if ( !runRecord )
     {

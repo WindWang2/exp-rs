@@ -16,6 +16,7 @@
 
 #include <json/json.h>
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -279,4 +280,45 @@ TEST_CASE( "io:cache_prefetch refuses to masquerade without the range cache",
   CHECK( result["cacheHits"].asUInt64() == 2 );
   CHECK( result["plan"]["cost"]["scenes"].asUInt64() == 2 );
   sicnu::geo::RemoteRangeCache::uninstall();
+}
+
+TEST_CASE( "io fabric operators honor workflow cancellation (#1455)",
+           "[io][fabric][operators][cancel]" )
+{
+  // The io:* fabric family used to pass a NEVER-cancelled CancelToken into
+  // the fabric walks, so a cancelled workflow still ran the whole remote
+  // crawl. The token now aliases the operator context's predicate: a
+  // pre-cancelled workflow must fail typed at the walk's first checkpoint.
+  const std::string root = sceneTree( "cancelops" );
+  auto op = RSOperatorRegistry::instance().create( "io:catalog_search" );
+  REQUIRE( op );
+
+  Json::Value params;
+  params["catalog"] = root;
+  params["cloudCoverMax"] = 100.0;
+
+  RSOperatorContext context;
+  std::atomic<bool> cancelled{ true };
+  context.setCancelFlag( &cancelled );
+
+  bool typedRefusal = false;
+  try
+  {
+    static_cast<void>( op->run( params, context ) );
+  }
+  catch ( const RSOperatorError &error )
+  {
+    typedRefusal = true;
+    REQUIRE( error.code() == ErrorCode::Cancelled );
+    CHECK( std::string( error.what() ).find( "cancel" ) != std::string::npos );
+  }
+  REQUIRE( typedRefusal );
+
+  // The same context shape with cancellation OFF still serves the query —
+  // the alias must not invent refusals.
+  std::atomic<bool> notCancelled{ false };
+  RSOperatorContext live;
+  live.setCancelFlag( &notCancelled );
+  const Json::Value result = op->run( params, live );
+  CHECK( result["records"].size() == 2 );
 }

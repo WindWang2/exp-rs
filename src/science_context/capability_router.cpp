@@ -607,7 +607,11 @@ bool authoritySpecFromCandidate( const Json::Value &candidate, ResolvedSpec &spe
         for ( const auto &name : roles.getMemberNames() )
         {
             const Json::Value &minimum = roles[name];
-            if ( !minimum.isInt() && !minimum.isUInt() )
+            // isInt() is the convertibility check, not the storage type: an
+            // UInt beyond INT_MAX passes isUInt() yet makes asInt() throw
+            // Json::LogicError out of route(). Fail closed by skipping the
+            // candidate like any other malformed constraint (#1447).
+            if ( !minimum.isInt() )
                 return false;
             spec.requiredRoles.push_back( name );
             spec.roleMinima.push_back( minimum.asInt() );

@@ -16,6 +16,7 @@
 #include <sstream>
 #include <QFileInfo>
 #include <QPointer>
+#include <QSet>
 
 namespace sicnu::agent {
 
@@ -829,25 +830,39 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
       // their original entry shape (a pure-Qgs project still lists layers).
       if ( QgsProject::instance() )
       {
+        // Membership index over the catalog, built ONCE (#1452): the old
+        // per-layer linear scan of assets() was O(N*M) on large catalogs —
+        // the same shape McpServer::handleListLayers already indexes. Keyed
+        // by both the raw and the absolute form so membership is exactly
+        // sameSourcePath(a, b): a == b, or absoluteFilePath(a) ==
+        // absoluteFilePath(b) (an empty absolute never matches).
+        QSet<QString> catalogSourcesRaw;
+        QSet<QString> catalogSourcesAbsolute;
+        if ( dataManager )
+        {
+          const auto snapshots = dataManager->assets();
+          catalogSourcesRaw.reserve( static_cast<int>( snapshots.size() ) );
+          catalogSourcesAbsolute.reserve( static_cast<int>( snapshots.size() ) );
+          for ( const auto &snapshot : snapshots )
+          {
+            catalogSourcesRaw.insert( snapshot.source().canonicalSource );
+            const QString absolute =
+              QFileInfo( snapshot.source().canonicalSource ).absoluteFilePath();
+            if ( !absolute.isEmpty() )
+              catalogSourcesAbsolute.insert( absolute );
+          }
+        }
         QMap<QString, QgsMapLayer *> mapLayers = QgsProject::instance()->mapLayers();
         for ( auto it = mapLayers.begin(); it != mapLayers.end(); ++it )
         {
           QgsMapLayer *layer = it.value();
           if ( !layer )
             continue;
-          bool inCatalog = false;
-          if ( dataManager )
-          {
-            for ( const auto &snapshot : dataManager->assets() )
-            {
-              if ( sameSourcePath( snapshot.source().canonicalSource,
-                                   layer->source() ) )
-              {
-                inCatalog = true;
-                break;
-              }
-            }
-          }
+          const bool inCatalog =
+            catalogSourcesRaw.contains( layer->source() )
+            || ( !layer->source().isEmpty()
+                 && catalogSourcesAbsolute.contains(
+                      QFileInfo( layer->source() ).absoluteFilePath() ) );
           if ( inCatalog )
             continue;
           Json::Value l( Json::objectValue );

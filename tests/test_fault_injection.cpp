@@ -193,6 +193,7 @@ TEST_CASE( "completed run checkpoints archive with a bounded history",
     REQUIRE_FALSE( QFile::exists( dir.filePath( "checkpoint_hist-0.json" ) ) );
 }
 
+
 TEST_CASE( "a second process cannot own an actively locked run", "[fault][double_start]" )
 {
     QTemporaryDir dir;

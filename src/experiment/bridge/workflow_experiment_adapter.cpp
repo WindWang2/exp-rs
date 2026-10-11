@@ -20,6 +20,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QTemporaryFile>
 #include <QThread>
 #include <QtLogging>
 
@@ -53,6 +54,88 @@ QString WorkflowExperimentMonitor::checkpointPathFor( const QString &runId ) con
     // name WorkflowCheckpointManager archives under <dir>/history/.
     return m_coordinator.checkpointDirectory() + QDir::separator()
            + QStringLiteral( "checkpoint_%1.json" ).arg( runId );
+}
+
+bool WorkflowExperimentMonitor::prepare( const QString &experimentDbPath,
+                                        const QString &experimentId,
+                                        const QString &datasetDbPath, QString *error )
+{
+    Q_ASSERT( thread() == QThread::currentThread() );
+    if ( experimentDbPath.isEmpty() || experimentId.isEmpty() )
+    {
+        if ( error )
+            *error = QStringLiteral( "experiment db path and experiment id are required" );
+        return false;
+    }
+    // One experiment db per monitor (same contract as enable()): a second
+    // recording with a DIFFERENT path would silently record into the first
+    // db — refuse BEFORE the caller dispatches the run.
+    if ( !m_experimentDbPath.isEmpty() && m_experimentDbPath != experimentDbPath )
+    {
+        if ( error )
+            *error = QStringLiteral( "monitor already bound to experiment db %1" )
+                         .arg( m_experimentDbPath );
+        return false;
+    }
+    // Writability probe WITHOUT side effects: enable() (the commit) opens
+    // the store READWRITE|CREATE and writes the experiment row only after
+    // the recorded run is dispatched, so the common refusals must be
+    // decided here, before dispatch — a locked or read-only db file, a
+    // missing or unwritable parent directory. Nothing is created and no
+    // row is written: a pipeline rejected after prepare() leaves no
+    // experiment artifacts behind (#1448).
+    const QFileInfo dbInfo( experimentDbPath );
+    if ( dbInfo.exists() )
+    {
+        if ( !dbInfo.isReadable() || !dbInfo.isWritable() )
+        {
+            if ( error )
+                *error = QStringLiteral( "experiment db %1 is not readable+writable" )
+                             .arg( experimentDbPath );
+            return false;
+        }
+        // Permissions can lie (Windows ACLs, network shares) and a db
+        // locked by another process only refuses at open: probe the real
+        // handle and release it immediately. Opening for ReadWrite writes
+        // nothing, so an existing sqlite file is untouched.
+        QFile probe( experimentDbPath );
+        if ( !probe.open( QIODevice::ReadWrite ) )
+        {
+            if ( error )
+                *error = QStringLiteral( "experiment db %1 cannot be opened for writing: %2" )
+                             .arg( experimentDbPath, probe.errorString() );
+            return false;
+        }
+        probe.close();
+    }
+    else
+    {
+        const QDir parent = dbInfo.dir();
+        if ( !parent.exists() )
+        {
+            if ( error )
+                *error = QStringLiteral( "experiment db directory %1 does not exist" )
+                             .arg( parent.absolutePath() );
+            return false;
+        }
+        // Creating the db is part of enable()'s contract, but only on the
+        // commit side: probe that the parent would accept the create with
+        // a self-removing temporary file instead.
+        QTemporaryFile createProbe(
+            parent.filePath( QStringLiteral( "recording_probe_XXXXXX" ) ) );
+        if ( !createProbe.open() )
+        {
+            if ( error )
+                *error = QStringLiteral( "experiment db directory %1 is not writable: %2" )
+                             .arg( parent.absolutePath(), createProbe.errorString() );
+            return false;
+        }
+    }
+    // The dataset db is verification-ONLY in enable(): a store that fails
+    // to open disables pin verification and never refuses recording, so it
+    // is deliberately not probed here.
+    Q_UNUSED( datasetDbPath );
+    return true;
 }
 
 bool WorkflowExperimentMonitor::enable( const QString &experimentDbPath,

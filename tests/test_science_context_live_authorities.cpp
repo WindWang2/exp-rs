@@ -728,6 +728,38 @@ TEST_CASE( "operator presence gates capability status honestly",
     CHECK( countSurfaced );
 }
 
+TEST_CASE( "out-of-range band minimum skips the candidate instead of throwing",
+           "[science_context_live]" )
+{
+    // #1447: a uint minimum beyond INT_MAX used to pass the isUInt() guard
+    // and throw Json::LogicError from asInt() straight out of the router;
+    // it must fail closed like any other malformed constraint.
+    CapabilityFactsLookup overflow;
+    overflow.authority = "capability_knowledge.test";
+    overflow.entriesForIntent =
+        []( const std::string &intent ) -> std::vector<Json::Value> {
+        if ( intent != "ndvi" )
+            return {};
+        Json::Value entry( Json::objectValue );
+        entry["id"] = "rs:ndvi";
+        Json::Value roles( Json::objectValue );
+        roles["red"] = 1;
+        roles["nir"] = Json::Value( Json::UInt( 4294967295u ) );
+        entry["band_roles"] = roles;
+        return { entry };
+    };
+
+    CapabilityQuery q;
+    q.intent = "ndvi";
+    q.observedState =
+        observedStateFromPassport( makeOptical( "sr", "surface_reflectance", { "red", "nir" } ) );
+    q.facts = &overflow;
+    auto routed = routeCapabilities( q ); // must not throw
+    CHECK( routed.intentStatus == "unresolved" );
+    REQUIRE( !routed.entries.empty() );
+    CHECK( routed.entries[0].capabilityId == "unknown" );
+}
+
 TEST_CASE( "one impossible candidate does not block a servable goal",
            "[science_context_live]" )
 {

@@ -476,13 +476,17 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
                                             "[" + record.id + "] " + message );
                 },
                 [&callbacks]() { return callbacks.isCancelled ? callbacks.isCancelled() : false; } );
-            if ( result.isObject() && result.get( "success", true ).asBool() == false
-                 && result.isMember( "error" ) )
+            if ( result.isObject() && result.get( "success", true ).asBool() == false )
             {
+                // The adapter SAID it failed: book the failure even when the
+                // envelope carries no "error" member — requiring it folded
+                // failures without an error text into "ok" and the batch
+                // exited 0 (#1460).
                 record.status = "failed";
                 record.exitCode = 3; // ExecutionFailure
-                setError( record, result["error"].isString() ? result["error"].asString()
-                                                             : "execution failed" );
+                setError( record, result.isMember( "error" ) && result["error"].isString()
+                              ? result["error"].asString()
+                              : "execution failed" );
             }
             else if ( callbacks.isCancelled && callbacks.isCancelled() )
             {

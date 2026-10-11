@@ -125,8 +125,10 @@ class HttpRangeServer
     /// script slots (their arrival order is not deterministic).
     /// Lets tests stage DETERMINISTIC multi-fault sequences (500 → normal,
     /// 416 → normal, …) for retry/backoff coverage. Replaces any previous
-    /// script. Scripted entries drive the connection-handling arms; the
-    /// mid-body Truncated cut stays a construction-behavior arm.
+    /// script. Scripted entries drive the connection-handling arms AND the
+    /// mid-body Truncated cut (a scripted Truncated slot answers with the
+    /// announced length and 4 body bytes, exactly like the construction
+    /// behavior).
     void setFaultScript( const std::vector<ServerBehavior> &script );
 
     /// True when the transient ResetRanged fault has actually fired (lets

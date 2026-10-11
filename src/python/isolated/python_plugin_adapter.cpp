@@ -186,6 +186,13 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
         qWarning() << "PythonPluginAdapter: Timed out or failed to load plugin:" << m_packageName;
         if ( m_pool && m_workerNode )
         {
+            // Sever the crash/rebind connections BEFORE releasing the node
+            // (#1462): both lambdas capture this raw WorkerNode, and the
+            // connection context is the POOL — the adapter's dtor disconnect
+            // comes too late for the window where the pool shrinks and
+            // deletes the released node while this adapter still lives.
+            QObject::disconnect( m_workerCrashedConnection );
+            QObject::disconnect( m_restartRebindConnection );
             // #1384: a TIMEOUT is not an answer — the load RPC may still be
             // in flight. Retire it before releasing the node: otherwise the
             // pool's crash replay re-injects THIS plugin into whatever

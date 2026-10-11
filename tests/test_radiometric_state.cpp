@@ -218,3 +218,34 @@ TEST_CASE( "RadiometricState null layer fails safe", "[radiometric][state]" )
   REQUIRE_THROWS_AS( RadiometricState::validateBandPreflight( nullptr, U::BoaReflectance ),
                      RadiometricStateMismatchException );
 }
+
+TEST_CASE( "RadiometricState provider-URI sources skip the GDAL metadata preflight",
+           "[radiometric][state]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const std::string path = writeTinyGeotiff( dir, QStringLiteral( "uri_guard.tif" ) );
+  {
+    GDALDataset *ds = static_cast<GDALDataset *>(
+      GDALOpenEx( path.c_str(), GDAL_OF_RASTER | GDAL_OF_UPDATE, nullptr, nullptr, nullptr ) );
+    REQUIRE( ds != nullptr );
+    ds->SetMetadataItem( "SICNU_RADIOMETRIC_STATE", "RADIANCE", nullptr );
+    GDALClose( ds );
+  }
+
+  // Regression guard for the local-path branch: the plain file path still
+  // honors the persisted marker.
+  auto fileLayer = openLayer( path );
+  REQUIRE( RadiometricState::layerUnit( fileLayer.get() ) == U::Radiance );
+
+  // #1467: a GDAL subdataset descriptor addresses the very same file but is
+  // a provider URI, not a local path — the marker must not be read through
+  // it (and no open is attempted on the URI).
+  QgsRasterLayer subdataset( QStringLiteral( "GTIFF_DIR:1:" ) + QString::fromStdString( path ),
+                             QStringLiteral( "sub" ) );
+  REQUIRE( RadiometricState::layerUnit( &subdataset ) == U::DigitalNumber );
+
+  // Qt-resource sources are skipped the same way, with no open attempt.
+  QgsRasterLayer resource( QStringLiteral( ":/embedded/raster.tif" ), QStringLiteral( "res" ) );
+  REQUIRE( RadiometricState::layerUnit( &resource ) == U::DigitalNumber );
+}

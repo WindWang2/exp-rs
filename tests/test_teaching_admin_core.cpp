@@ -1859,6 +1859,95 @@ TEST_CASE( "batch checkpoint makes a cancelled run resumable with durable partia
     REQUIRE( mismatch.graded == 6 );
 }
 
+TEST_CASE( "checkpoint adoption re-grades a re-submitted artifact instead of the stale row",
+           "[teaching_admin][batch][checkpoint]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString submissions = makeStudentDirs( dir, 3 );
+    QTemporaryDir outDir;
+    REQUIRE( outDir.isValid() );
+    BatchAssessmentConfig cfg = batchCfgFor( submissions, QStringLiteral( "lab15" ) );
+    const QString checkpoint = QDir( outDir.path() ).filePath( QStringLiteral( "cp.json" ) );
+    cfg.checkpointPath = checkpoint;
+
+    const auto first = runBatchAssessment(
+        cfg, [&]( const SubmissionItem &item ) { return passRow( item, cfg ); } );
+    REQUIRE( first.graded == 3 );
+    REQUIRE( first.resumed == 0 );
+
+    // The durable rows carry the artifact identity they were graded against.
+    {
+        QFile cpFile( checkpoint );
+        REQUIRE( cpFile.open( QIODevice::ReadOnly ) );
+        const auto cp = QJsonDocument::fromJson( cpFile.readAll() ).object();
+        const auto rows = cp.value( QStringLiteral( "rows" ) ).toArray();
+        REQUIRE( rows.size() == 3 );
+        for ( const auto &v : rows )
+            REQUIRE_FALSE(
+              v.toObject().value( QStringLiteral( "artifact_stamp" ) ).toString().isEmpty() );
+    }
+
+    // Re-submission: same student, same file name, different bytes (and
+    // size) — the durable row for s002 must not be adopted over it.
+    {
+        QFile f( QDir( submissions ).filePath( QStringLiteral( "s002/a.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        f.write( QByteArray( "RESUBMITTED_V2" ) );
+    }
+
+    std::atomic<int> gradedCalls{ 0 };
+    const auto second = runBatchAssessment(
+        cfg,
+        [&]( const SubmissionItem &item ) {
+            gradedCalls.fetch_add( 1 );
+            return passRow( item, cfg );
+        } );
+    REQUIRE( second.resumed == 2 ); // only the untouched artifacts
+    REQUIRE( gradedCalls.load() == 1 ); // the re-submitted artifact re-grades
+    REQUIRE( second.graded == 3 );
+    REQUIRE( second.rows.size() == 3 );
+}
+
+TEST_CASE( "missing-evidence demotion happens before counting so graded matches the rows",
+           "[teaching_admin][batch]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QDir root( dir.path() );
+    REQUIRE( root.mkpath( QStringLiteral( "s01" ) ) );
+    QFile f( root.filePath( QStringLiteral( "s01/a.tif" ) ) );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "NO_EVIDENCE" ) );
+
+    BatchAssessmentConfig cfg = batchCfgFor( dir.path(), QStringLiteral( "lab15" ) );
+    const auto report = runBatchAssessment(
+        cfg,
+        [&]( const SubmissionItem &item ) {
+            BatchRowResult row;
+            row.studentId = item.studentId;
+            row.labId = cfg.labId;
+            row.artifactPath = item.path;
+            row.missingEvidence = true;
+            row.score = 0.0; // would-be silent zero — orchestrator rewrites
+            row.status = QStringLiteral( "fail" );
+            row.verdict = QStringLiteral( "fail" );
+            return row;
+        } );
+
+    // The published row is "unavailable"; the counters must describe that
+    // final row, not the pre-demotion "fail" (graded counted it before).
+    REQUIRE( report.rows.size() == 1 );
+    REQUIRE( report.rows.first().status == QLatin1String( "unavailable" ) );
+    REQUIRE( report.rows.first().verdict == QLatin1String( "unavailable" ) );
+    REQUIRE( report.graded == 0 );
+    REQUIRE( report.failed == 0 );
+    REQUIRE( report.missingEvidence == 1 );
+    // Missing evidence keeps its own counter; it is not also counted as
+    // grader-side unavailability.
+    REQUIRE( report.unavailable == 0 );
+}
+
 TEST_CASE( "batch scale oracle: 1000 mixed outcomes stay deterministic and durable",
            "[teaching_admin][batch][scale]" )
 {

@@ -46,13 +46,19 @@ sicnu::data::Result<double> boundedDouble( const QJsonObject &json, const QStrin
 }
 
 /// Parses an integral goal field from JSON without UB: the value must be a
-/// finite double in exact-integer range. Missing fields keep their default.
+/// finite double in exact-integer range. Missing fields keep their default;
+/// a wrong type (e.g. "10" as a string) is a typed failure exactly like
+/// boundedDouble — silently reading it as the default would drop a count
+/// the operator did give (#1466).
 sicnu::data::Result<qint64> boundedIntegral( const QJsonObject &json, const QString &key,
                                              qint64 defaultValue )
 {
     const QJsonValue value = json.value( key );
-    if ( !value.isDouble() )
+    if ( value.isUndefined() || value.isNull() )
         return sicnu::data::Result<qint64>::success( defaultValue );
+    if ( !value.isDouble() )
+        return sicnu::data::Result<qint64>::failure(
+            invalidGoal( QStringLiteral( "field '%1' must be a number" ).arg( key ) ) );
     const double raw = value.toDouble();
     if ( !std::isfinite( raw ) || raw < -kMaxExactIntegralDouble
          || raw > kMaxExactIntegralDouble )

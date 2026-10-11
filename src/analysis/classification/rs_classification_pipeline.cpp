@@ -804,15 +804,38 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   // Max class id drives output datatype: Byte only when all ids fit in 0..255.
   // Never silently clamp large class IDs into uint8.
   int maxClassId = 0;
+  bool maxClassIdKnown = false;
   for ( auto it = config.classColors.constBegin(); it != config.classColors.constEnd(); ++it )
+  {
     maxClassId = std::max( maxClassId, it.key() );
+    maxClassIdKnown = true;
+  }
   for ( int i = 0; i < config.trainY.rows; ++i )
+  {
     maxClassId = std::max( maxClassId, config.trainY.at<int>( i, 0 ) );
+    maxClassIdKnown = true;
+  }
   for ( int i = 0; i < config.testY.rows; ++i )
+  {
     maxClassId = std::max( maxClassId, config.testY.at<int>( i, 0 ) );
+    maxClassIdKnown = true;
+  }
+  // Predict-only with a missing/partial sidecar carries neither colors nor
+  // labels; the loaded model's persisted label space is the last remaining
+  // upper bound (#1461).
+  for ( int id : config.backend->classOrder() )
+  {
+    maxClassId = std::max( maxClassId, id );
+    maxClassIdKnown = true;
+  }
 
   GDALDataType outType = GDT_Byte;
-  if ( maxClassId > 65535 )
+  if ( !maxClassIdKnown )
+    // Unknown upper bound (predict-only, sidecar absent, backend discloses
+    // no label space): widen to Int32 rather than risk silently clamping
+    // class IDs > 255 into Byte (#1461).
+    outType = GDT_Int32;
+  else if ( maxClassId > 65535 )
     outType = GDT_Int32;
   else if ( maxClassId > 255 )
     outType = GDT_UInt16;

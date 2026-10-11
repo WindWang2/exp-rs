@@ -62,6 +62,19 @@ class WorkflowExperimentMonitor : public QObject
     WorkflowExperimentMonitor( const WorkflowExperimentMonitor & ) = delete;
     WorkflowExperimentMonitor &operator=( const WorkflowExperimentMonitor & ) = delete;
 
+    /// Pre-flight for enable(): decides every recording refusal that does
+    /// NOT need to write the experiment row — required arguments, the
+    /// one-db-per-monitor rebind contract, and a side-effect-free probe
+    /// that the experiment db is writable (locked or read-only file,
+    /// missing/unwritable parent directory). Recording surfaces call this
+    /// BEFORE dispatching the run the recording belongs to; enable()
+    /// remains the commit that opens the store and writes the row. The
+    /// pair closes the #1469 review window: a refused recording must
+    /// never leave an already-dispatched, unrecorded run running, and a
+    /// rejected pipeline must not leave an orphan experiment row (#1448).
+    bool prepare( const QString &experimentDbPath, const QString &experimentId,
+                  const QString &datasetDbPath, QString *error = nullptr );
+
     /// Opens the experiment store (creating the DB file when missing —
     /// callers pass an explicit path, so creation is an informed act) and
     /// idempotently ensures the target experiment. The monitor is bound to

@@ -84,21 +84,29 @@ public:
     /// Snapshot of every record under the registry lock (by value). Prefer
     /// pluginIds() + copyRecord() for callers that only need a subset — a
     /// full copy is fine for small registries / one-shot CLI dumps.
-    /// NEVER hold a reference/pointer into mRecords across refresh() (#943).
     std::vector<PluginRecord> records() const;
+
+    /// Read-only lookup of one record. #943: the pointer references a
+    /// registry-RETAINED copy, never the mRecords vector itself, so it stays
+    /// valid across refresh()/load()/unload() — all of which replace
+    /// mRecords wholesale. The data is a snapshot taken at call time;
+    /// re-query instead of holding the pointer across a mutation whose
+    /// result you need to observe.
     const PluginRecord *record( const std::string &pluginId ) const;
 
-    /// Plugin-platform 9.0: COPY accessors. record() hands out a pointer
-    /// into the mRecords vector WITHOUT holding the registry lock on the
-    /// caller's side, so a concurrent refresh (which reallocates the vector)
-    /// makes later dereferences a use-after-free. Gates that only need the
-    /// access declaration or the install directory must take copies through
-    /// these instead of holding the raw pointer. copyRecord() snapshots the
+    /// Plugin-platform 9.0: COPY accessors (#943). record() used to hand
+    /// out a pointer into the mRecords vector without holding the registry
+    /// lock on the caller's side, so a concurrent refresh() (which
+    /// reallocates the vector) made later dereferences use-after-free; it
+    /// now returns a registry-retained snapshot instead (the former mutable
+    /// record() overload was removed with it — mutating the registry goes
+    /// through the lifecycle operations only). These field-level copies
+    /// remain the cheaper door for gates that only need the access
+    /// declaration or the install directory, and copyRecord() snapshots the
     /// whole record under the lock for callers that need operators/tools.
     Json::Value accessDeclarationFor( const std::string &pluginId ) const;
     std::string pluginDirectoryFor( const std::string &pluginId ) const;
     bool copyRecord( const std::string &pluginId, PluginRecord &out ) const;
-    PluginRecord *record( const std::string &pluginId );
     std::vector<std::string> pluginIds() const;
     const PluginDiagnosticLog &diagnostics() const { return mDiagnostics; }
 
@@ -292,6 +300,13 @@ private:
 
     PluginRegistryOptions mOptions;
     std::vector<PluginRecord> mRecords;
+    /// Registry-retained record copies handed out by record() (#943): they
+    /// deliberately outlive every mRecords replacement so the pointers
+    /// callers hold can never dangle. Grows once per external record() call
+    /// (there is no production polling caller, and eviction would reintroduce
+    /// the dangling the retention exists to prevent). Guarded by
+    /// gRegistryMutex.
+    mutable std::vector<std::shared_ptr<const PluginRecord>> mRecordSnapshots;
     PluginDiagnosticLog mDiagnostics;
     PluginContributionSink *mSink = nullptr;
     HostProcessRuntime *mHostProcessRuntime = nullptr;

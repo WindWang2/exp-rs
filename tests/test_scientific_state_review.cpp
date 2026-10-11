@@ -9,6 +9,7 @@
   dataset), and metadata-cap truncation surfacing as a note.
  ***************************************************************************/
 
+#include <limits>
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -156,7 +157,7 @@ TEST_CASE( "metadata caps surface as an explicit note, never silently",
 TEST_CASE( "non-finite doubles are typed InvalidField, never a self-unreadable document",
            "[scientific_state][review2][p1_nonfinite]" )
 {
-    // RED on master: jsoncpp parses 1e+9999 into +inf, isNumeric() accepted
+    // RED on master: jsoncpp parses std::numeric_limits<double>::infinity() into +inf, isNumeric() accepted
     // it, and the state re-serialized it to a non-strict token that strict
     // parsers (and our own NaN->null re-read path) reject. Fail closed at
     // the reader instead.
@@ -164,7 +165,7 @@ TEST_CASE( "non-finite doubles are typed InvalidField, never a self-unreadable d
     const Json::Value doc = assetStateToJson( state );
 
     Json::Value mutated = doc;
-    mutated[ "geometry" ][ "pixel_size_x" ] = 1e+9999;
+    mutated[ "geometry" ][ "pixel_size_x" ] = std::numeric_limits<double>::infinity();
     RemoteSensingAssetState decoded;
     AssetStateError error;
     REQUIRE( !assetStateFromJson( mutated, decoded, error ) );
@@ -173,7 +174,7 @@ TEST_CASE( "non-finite doubles are typed InvalidField, never a self-unreadable d
 
     Json::Value mutatedNoData = doc;
     mutatedNoData[ "bands" ].append( Json::Value( Json::objectValue ) );
-    mutatedNoData[ "bands" ][ 0 ][ "no_data_value" ] = -1e+9999;
+    mutatedNoData[ "bands" ][ 0 ][ "no_data_value" ] = -std::numeric_limits<double>::infinity();
     RemoteSensingAssetState decodedBand;
     AssetStateError bandError;
     REQUIRE( !assetStateFromJson( mutatedNoData, decodedBand, bandError ) );

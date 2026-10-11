@@ -21,6 +21,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -583,7 +584,7 @@ TEST_CASE( "metric-record adapter honors the metrics schema version and refuses 
     SECTION( "non-finite numbers inside the record are typed refusals" )
     {
         Json::Value doc = metricRecordDoc();
-        doc["metrics"]["confusion_matrix"]["kappa"] = Json::Value( 1e999 );
+        doc["metrics"]["confusion_matrix"]["kappa"] = Json::Value( std::numeric_limits<double>::infinity() );
         const auto items = metricRecordToEvidence( doc, err );
         CHECK_FALSE( err.ok() );
     }

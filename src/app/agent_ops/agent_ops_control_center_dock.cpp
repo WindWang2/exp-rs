@@ -4,6 +4,7 @@
 #include "app/agent_ops/agent_ops_control_center_dock.h"
 
 #include <QCloseEvent>
+#include <QDateTime>
 #include <QMetaObject>
 #include <QThread>
 
@@ -118,7 +119,16 @@ void AgentOpsControlCenterDock::requestApproveRepair()
 {
     if (!m_pendingRepairApprovalToken.isNull())
     {
-        armRepairApproval(m_pendingRepairApprovalToken, 0);
+        // The verifier treats nowMs <= 0 as an unusable clock and fails
+        // closed (expired), so a zero clock could never arm an approval —
+        // arm at the real wall clock. (#1451)
+        const std::string error = armRepairApproval(
+            m_pendingRepairApprovalToken, QDateTime::currentMSecsSinceEpoch());
+        // The typed refusal must not vanish: qWarning reaches the
+        // application message log, so the operator sees why the approval
+        // did not arm. (#1451)
+        if (!error.empty())
+            qWarning("agent ops: repair approval not armed: %s", error.c_str());
     }
     emit approveRepairRequested();
 }

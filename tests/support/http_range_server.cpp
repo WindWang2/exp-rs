@@ -604,7 +604,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
 
 void HttpRangeServer::respond( SocketHandle client, int status, const std::string &statusText,
                                const std::map<std::string, std::string> &extraHeaders,
-                               const unsigned char *body, std::size_t bodySize, bool isHead, bool /*close*/ )
+                               const unsigned char *body, std::size_t bodySize, bool isHead, bool close )
 {
   std::string response = "HTTP/1.1 " + std::to_string( status ) + " " + statusText + "\r\n";
   if ( status >= 400 )
@@ -641,9 +641,15 @@ void HttpRangeServer::respond( SocketHandle client, int status, const std::strin
   }
   if ( isHead )
     return; // HEAD announces the entity length; no body is sent
-  mBytesServed.fetch_add( bodySize );
-  // Truncated behavior: announce the full body but reset mid-transfer.
-  const std::size_t effective = mBehavior == ServerBehavior::Truncated && bodySize > 8 ? 4 : bodySize;
+  // Truncated fault: announce the full body but cut it mid-transfer. The
+  // verdict comes from the CALLER's `close` argument (every body-carrying
+  // call site passes `behavior != Truncated`, where `behavior` is the
+  // script-aware effectiveBehavior()) — deciding from the mBehavior member
+  // here made setFaultScript-injected Truncated slots silently do nothing,
+  // and billing bodySize while sending 4 bytes over-counted the download
+  // accounting (#1468).
+  const std::size_t effective = !close && bodySize > 8 ? 4 : bodySize;
+  mBytesServed.fetch_add( effective );
   sent = 0;
   while ( sent < effective )
   {

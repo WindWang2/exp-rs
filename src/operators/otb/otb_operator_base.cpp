@@ -147,7 +147,15 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     };
     QElapsedTimer watchdog;
     watchdog.start();
-    const qint64 maxRuntimeMs = 60 * 60 * 1000; // OTB composites can be long
+    // 1 h default — OTB composites/mosaics can be long. An escape hatch for
+    // legitimately longer jobs via SICNU_OTB_MAX_RUNTIME_S (#1455): the
+    // hardcoded cap killed jobs whose runtime was simply larger than the
+    // guess and deleted their partial outputs. <=0 or unparseable keeps the
+    // default.
+    qint64 maxRuntimeMs = 60 * 60 * 1000;
+    const qint64 overrideSeconds = qEnvironmentVariableIntValue( "SICNU_OTB_MAX_RUNTIME_S" );
+    if ( overrideSeconds > 0 )
+        maxRuntimeMs = overrideSeconds * 1000;
 
     try {
     while (proc.state() == QProcess::Running) {
