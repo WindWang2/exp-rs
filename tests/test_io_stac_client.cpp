@@ -901,3 +901,298 @@ TEST_CASE( "a hostile merge link (string-typed) never aborts the pagination walk
   CHECK( result.items[2].id == "p3" );
   CHECK( !result.truncatedByLimit );
 }
+
+// --- #1456: redirect egress closure ---------------------------------------
+//
+// CPLHTTPFetch follows redirects unconditionally (pinned GDAL hardcodes
+// CURLOPT_FOLLOWLOCATION=1) and never surfaces the hops, so a first-hop
+// egress check cannot see where a 302 lands. These cases pin the
+// redirect-controlling transport: per-hop policy, scheme admission, hop
+// budget, Location resolution, method semantics and the byte budget.
+
+#include "geospatial/remote/http_fetch.h"
+
+#include <cstdlib>
+#include <map>
+
+namespace
+{
+
+/// RAII env override for SICNU_STAC_ALLOW_PRIVATE (the loopback fixture
+/// needs it; production code reads the variable per call, no caching).
+class ScopedEnvFlag
+{
+  public:
+    ScopedEnvFlag( const char *name, const char *value )
+      : mName( name ), mHadValue( std::getenv( name ) != nullptr )
+    {
+      if ( mHadValue )
+        mOldValue = std::getenv( name );
+#ifdef _WIN32
+      _putenv_s( name, value );
+#else
+      setenv( name, value, 1 );
+#endif
+    }
+    ~ScopedEnvFlag()
+    {
+#ifdef _WIN32
+      _putenv_s( mName.c_str(), mHadValue ? mOldValue.c_str() : "" );
+#else
+      if ( mHadValue )
+        setenv( mName.c_str(), mOldValue.c_str(), 1 );
+      else
+        unsetenv( mName.c_str() );
+#endif
+    }
+    ScopedEnvFlag( const ScopedEnvFlag & ) = delete;
+    ScopedEnvFlag &operator=( const ScopedEnvFlag & ) = delete;
+
+  private:
+    std::string mName;
+    bool mHadValue;
+    std::string mOldValue;
+};
+
+/// Route answering @p status with a Location header pointing at @p target.
+testsupport::StacRoute redirectRoute( int status, const std::string &target )
+{
+  testsupport::StacRoute route;
+  route.status = status;
+  route.contentType.clear();
+  route.headers["Location"] = target;
+  return route;
+}
+
+bool sawRequestTo( const std::vector<testsupport::StacRequestRecord> &requests,
+                   const std::string &path )
+{
+  for ( const auto &record : requests )
+  {
+    if ( record.path == path )
+      return true;
+  }
+  return false;
+}
+
+} // namespace
+
+TEST_CASE( "guarded fetch refuses a redirect hop the policy rejects (#1456)",
+           "[io][stac][client][egress]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/first", redirectRoute( 302, server.url() + "/private" ) );
+  testsupport::StacRoute privateTarget;
+  privateTarget.body = "{\"ok\": true}";
+  server.setRoute( "/private", privateTarget );
+
+  HttpFetchOptions options;
+  options.redirectGuard = []( const std::string &hopUrl ) {
+    return hopUrl.find( "/private" ) != std::string::npos
+             ? "private network targets are blocked"
+             : std::string();
+  };
+
+  bool refused = false;
+  try
+  {
+    static_cast<void>( httpFetchJson( server.url() + "/first", options ) );
+  }
+  catch ( const GeoError &e )
+  {
+    refused = true;
+    CHECK( e.code() == ErrorCode::PermissionDenied );
+    CHECK_THAT( e.what(), ContainsSubstring( "redirect hop 1" ) );
+    CHECK_THAT( e.what(), ContainsSubstring( "private network targets are blocked" ) );
+  }
+  REQUIRE( refused );
+
+  // The refused hop was never dispatched — the guard fired BEFORE the
+  // request, not after observing it.
+  const auto requests = server.requests();
+  REQUIRE( requests.size() == 1 );
+  CHECK( requests[0].path == "/first" );
+  CHECK( !sawRequestTo( requests, "/private" ) );
+}
+
+TEST_CASE( "guarded fetch follows an allowed redirect and parses the target (#1456)",
+           "[io][stac][client][egress]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/first", redirectRoute( 302, server.url() + "/public" ) );
+  testsupport::StacRoute publicTarget;
+  publicTarget.body = "{\"ok\": true}";
+  server.setRoute( "/public", publicTarget );
+
+  HttpFetchOptions options;
+  options.redirectGuard = []( const std::string & ) { return std::string(); };
+  const Json::Value parsed = httpFetchJson( server.url() + "/first", options );
+  CHECK( parsed["ok"].asBool() );
+
+  const auto requests = server.requests();
+  REQUIRE( requests.size() == 2 );
+  CHECK( requests[0].path == "/first" );
+  CHECK( requests[1].path == "/public" );
+
+  // A guard does not change plain answers: no redirect, one request.
+  testsupport::StacRoute plain;
+  plain.body = "{\"plain\": true}";
+  server.setRoute( "/plain", plain );
+  const Json::Value direct = httpFetchJson( server.url() + "/plain", options );
+  CHECK( direct["plain"].asBool() );
+
+  // Mechanism baseline: the UNGUARDED CPL transport follows the same 302
+  // internally (FOLLOWLOCATION is hardcoded in the pinned GDAL) — exactly
+  // the #1456 bypass shape, where policy saw the first hop only. The
+  // guarded transport above is what closes it; this check documents the
+  // un-guarded behavior so a future transport swap cannot silently change
+  // it either.
+  HttpFetchOptions unguarded;
+  const Json::Value followed = httpFetchJson( server.url() + "/first", unguarded );
+  CHECK( followed["ok"].asBool() );
+  CHECK( sawRequestTo( server.requests(), "/public" ) );
+}
+
+TEST_CASE( "guarded fetch resolves relative and absolute-path Location targets (#1456)",
+           "[io][stac][client][egress]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/dir/rel", redirectRoute( 302, "next.json" ) );
+  server.setRoute( "/dir/parent", redirectRoute( 302, "../root.json" ) );
+  server.setRoute( "/anywhere", redirectRoute( 302, "/abs.json" ) );
+  testsupport::StacRoute target;
+  target.body = "{\"ok\": true}";
+  server.setRoute( "/dir/next.json", target );
+  server.setRoute( "/root.json", target );
+  server.setRoute( "/abs.json", target );
+
+  HttpFetchOptions options;
+  options.redirectGuard = []( const std::string & ) { return std::string(); };
+  CHECK( httpFetchJson( server.url() + "/dir/rel", options )["ok"].asBool() );
+  CHECK( httpFetchJson( server.url() + "/dir/parent", options )["ok"].asBool() );
+  CHECK( httpFetchJson( server.url() + "/anywhere", options )["ok"].asBool() );
+
+  const auto requests = server.requests();
+  REQUIRE( requests.size() == 6 );
+  CHECK( requests[1].path == "/dir/next.json" );  // same-directory relative
+  CHECK( requests[3].path == "/root.json" );      // .. escapes the directory
+  CHECK( requests[5].path == "/abs.json" );       // absolute-path
+}
+
+TEST_CASE( "guarded fetch enforces the redirect hop budget (#1456)",
+           "[io][stac][client][egress]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  for ( int hop = 0; hop <= kMaxRedirectHops + 1; ++hop )
+    server.setRoute( "/r" + std::to_string( hop ),
+                     redirectRoute( 302, "/r" + std::to_string( hop + 1 ) ) );
+  testsupport::StacRoute end;
+  end.body = "{\"ok\": true}";
+  server.setRoute( "/end", end );
+
+  HttpFetchOptions options;
+  options.redirectGuard = []( const std::string & ) { return std::string(); };
+  bool refused = false;
+  try
+  {
+    static_cast<void>( httpFetchJson( server.url() + "/r0", options ) );
+  }
+  catch ( const GeoError &e )
+  {
+    refused = true;
+    CHECK( e.code() == ErrorCode::NetworkError );
+    CHECK_THAT( e.what(), ContainsSubstring( "redirect budget" ) );
+  }
+  REQUIRE( refused );
+  // One origin + kMaxRedirectHops followed hops — never more.
+  CHECK( static_cast<int>( server.requests().size() ) == kMaxRedirectHops + 1 );
+}
+
+TEST_CASE( "guarded fetch applies curl method semantics across redirects (#1456)",
+           "[io][stac][client][egress]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/submit302", redirectRoute( 302, server.url() + "/result" ) );
+  server.setRoute( "/submit307", redirectRoute( 307, server.url() + "/result" ) );
+  testsupport::StacRoute result;
+  result.body = "{\"ok\": true}";
+  server.setRoute( "/result", result );
+
+  HttpFetchOptions options;
+  options.redirectGuard = []( const std::string & ) { return std::string(); };
+  options.headers.push_back( "Content-Type: application/json" );
+  options.postBody = "{\"query\": true}";
+
+  // 302 after POST degrades to GET (the historical curl behavior the
+  // auto-following CPL transport had).
+  CHECK( httpFetchJson( server.url() + "/submit302", options )["ok"].asBool() );
+  // 307 replays the POST, body included.
+  CHECK( httpFetchJson( server.url() + "/submit307", options )["ok"].asBool() );
+
+  const auto requests = server.requests();
+  REQUIRE( requests.size() == 4 );
+  CHECK( requests[0].method == "POST" );
+  CHECK( requests[1].method == "GET" );
+  CHECK( requests[1].body.empty() );
+  CHECK( requests[2].method == "POST" );
+  CHECK( requests[3].method == "POST" );
+  CHECK_THAT( requests[3].body, ContainsSubstring( "\"query\"" ) );
+}
+
+TEST_CASE( "guarded fetch keeps the byte budget across the hop (#1456)",
+           "[io][stac][client][egress]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/big", redirectRoute( 302, server.url() + "/payload" ) );
+  testsupport::StacRoute payload;
+  payload.contentType = "application/json";
+  payload.body = std::string( 64 * 1024, 'a' );
+  server.setRoute( "/payload", payload );
+
+  HttpFetchOptions options;
+  options.redirectGuard = []( const std::string & ) { return std::string(); };
+  options.maxResponseBytes = 1024;
+  const HttpFetchResult fetch = httpFetchStatus( server.url() + "/big", options );
+  CHECK( fetch.reachedServer );
+  CHECK( fetch.sizeGuardHit );
+  CHECK( fetch.truncated );
+  CHECK( fetch.body.size() == 1024 );
+}
+
+TEST_CASE( "StacClient carries the egress policy onto redirect hops (#1456)",
+           "[io][stac][client][egress]" )
+{
+  // Loopback root needs the documented private-host override; the scheme
+  // admission of egressPolicyError does NOT depend on it, so the redirect
+  // hop below is still refused with blockPrivateNetworks armed.
+  ScopedEnvFlag allowPrivate( "SICNU_STAC_ALLOW_PRIVATE", "1" );
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/collections", redirectRoute( 302, "ftp://internal/host/catalog.json" ) );
+
+  StacClientOptions options;
+  options.blockPrivateNetworks = true;
+  StacClient client( server.url(), options );
+
+  bool refused = false;
+  try
+  {
+    static_cast<void>( client.collections() );
+  }
+  catch ( const GeoError &e )
+  {
+    refused = true;
+    CHECK( e.code() == ErrorCode::PermissionDenied );
+    CHECK_THAT( e.what(), ContainsSubstring( "scheme must be http or https" ) );
+    CHECK_THAT( e.what(), ContainsSubstring( "redirect hop 1" ) );
+  }
+  REQUIRE( refused );
+  // The smuggled target was never fetched.
+  CHECK( server.requests().size() == 1 );
+}

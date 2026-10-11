@@ -33,11 +33,13 @@
 
 #include <cpl_conv.h>
 #include <cpl_http.h>
+#include <curl/curl.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <cstdio>
+#include <mutex>
 #include <sstream>
 
 namespace sicnu::geo
@@ -125,10 +127,16 @@ bool contentTypeMatchesAcceptList( const HttpFetchResult &result,
   return false;
 }
 
-/// Shared bounded fetch. `throwHttpErrors` selects between the strict wrapper
-/// (typed errors for HTTP >= 400) and the raw variant used by revalidation.
-HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &options,
-                           bool throwHttpErrors )
+/// Shared URL admission of both transports: remote-spelling check, then the
+/// offline gate, then the canonical request target. One choke point, so the
+/// guarded path can never drift from the CPL path on what is fetchable.
+struct RemoteTarget
+{
+  ResourceUri uri;
+  std::string target;
+};
+
+RemoteTarget resolveRemoteTarget( const std::string &url )
 {
   const ResourceUri uri = ResourceUri::parse( url );
   const bool remoteSpelling =
@@ -140,14 +148,22 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
     details["url"] = uri.display();
     throw GeoError( ErrorCode::InvalidArgument, "httpFetch: not a remote http(s) resource", details );
   }
+  if ( offline::enabled() )
+    throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( uri.display() ) );
+  return RemoteTarget{ uri, uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl() };
+}
 
+/// Shared bounded fetch. `throwHttpErrors` selects between the strict wrapper
+/// (typed errors for HTTP >= 400) and the raw variant used by revalidation.
+HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &options,
+                           bool throwHttpErrors )
+{
   // Offline gate (goal D7): typed refusal before any request is dispatched.
   // This is the single HTTP choke point of the layer (ADR 0139), so STAC,
   // the remote validator and every future caller are covered here.
-  if ( offline::enabled() )
-    throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( uri.display() ) );
-  const std::string target =
-    uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
+  const RemoteTarget remote = resolveRemoteTarget( url );
+  const ResourceUri &uri = remote.uri;
+  const std::string &target = remote.target;
 
   ensureGdalRegistered();
 
@@ -320,6 +336,346 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
   return fetch;
 }
 
+// --- redirect-controlling transport (#1456) ------------------------------
+//
+// CPLHTTPFetch follows redirects unconditionally in the pinned GDAL
+// (CURLOPT_FOLLOWLOCATION is hardcoded; no papszOptions key or config option
+// disables it), and the caller never sees the intermediate hops — a
+// first-hop egress check therefore says nothing about where the transfer
+// ends up. When a caller declares a per-hop policy (HttpFetchOptions::
+// redirectGuard) the fetch runs here instead: libcurl directly, auto-follow
+// OFF, every Location hop resolved locally, policy-checked BEFORE dispatch,
+// and bounded by kMaxRedirectHops. Unguarded callers keep the CPL transport
+// above, byte for byte.
+
+/// libcurl global state: CPLHTTPFetch initializes libcurl globally already,
+/// but this layer must not depend on a GDAL call having happened first.
+std::once_flag &curlGlobalOnce()
+{
+  static std::once_flag flag;
+  return flag;
+}
+
+struct GuardedTransfer
+{
+  std::uintmax_t budget = 0;
+  std::uintmax_t totalBytes = 0;  ///< every body byte the origin sent
+  bool overBudget = false;        ///< the write callback aborted the transfer
+  std::vector<unsigned char> body;
+};
+
+size_t guardedBodySink( char *ptr, size_t size, size_t nmemb, void *userdata )
+{
+  GuardedTransfer *transfer = static_cast<GuardedTransfer *>( userdata );
+  const std::size_t chunk = size * nmemb;
+  transfer->totalBytes += chunk;
+  const std::uintmax_t kept = transfer->body.size();
+  if ( kept + chunk > transfer->budget )
+  {
+    // Same contract as CPL MAX_FILE_SIZE: abort the transfer but KEEP the
+    // in-budget prefix of this chunk (curl delivers large chunks; dropping
+    // the whole chunk would lose bytes CPL's guard preserves), and report
+    // it as a budget abort (not a transport failure).
+    const std::uintmax_t keep =
+      transfer->budget > kept ? transfer->budget - kept : 0;
+    const std::size_t prefix = static_cast<std::size_t>(
+      keep < chunk ? keep : chunk );
+    transfer->body.insert( transfer->body.end(), ptr, ptr + prefix );
+    transfer->overBudget = true;
+    return 0;
+  }
+  transfer->body.insert( transfer->body.end(), ptr, ptr + chunk );
+  return chunk;
+}
+
+size_t guardedHeaderSink( char *buffer, size_t size, size_t nmemb, void *userdata )
+{
+  auto *headers = static_cast<std::map<std::string, std::string> *>( userdata );
+  std::string line( buffer, size * nmemb );
+  while ( !line.empty() && ( line.back() == '\r' || line.back() == '\n' ) )
+    line.pop_back();
+  if ( line.empty() )
+    return size * nmemb;
+  if ( line[0] == ' ' || line[0] == '\t' )
+  {
+    // obs-fold continuation: append to the most recent header, if any.
+    if ( !headers->empty() )
+    {
+      std::string &value = headers->rbegin()->second;
+      if ( !value.empty() )
+        value += " ";
+      value += line.substr( 1 );
+    }
+    return size * nmemb;
+  }
+  const std::size_t colon = line.find( ':' );
+  if ( colon == std::string::npos || colon == 0 )
+    return size * nmemb; // status line ("HTTP/1.1 302 Found") or garbage
+  std::string name = toLower( line.substr( 0, colon ) );
+  std::string value = line.substr( colon + 1 );
+  while ( !value.empty() && ( value.front() == ' ' || value.front() == '\t' ) )
+    value.erase( value.begin() );
+  headers->emplace( name, value ); // first occurrence wins, as with CPL
+  return size * nmemb;
+}
+
+/// Scheme of an absolute URL, lowercased; "" when the string carries none.
+std::string urlSchemeOf( const std::string &url )
+{
+  const std::size_t colon = url.find( ':' );
+  if ( colon == std::string::npos || colon == 0 )
+    return std::string();
+  for ( std::size_t i = 0; i < colon; ++i )
+  {
+    const char c = url[i];
+    const bool schemeChar = std::isalnum( static_cast<unsigned char>( c ) ) || c == '+' ||
+                            c == '-' || c == '.';
+    if ( !schemeChar )
+      return std::string();
+  }
+  return toLower( url.substr( 0, colon ) );
+}
+
+/// RFC 3986 §5-style resolution of a Location reference against the URL the
+/// response came from — absolute, network-path ("//host/…"), absolute-path
+/// and same-directory relative forms, with a LEXICALLY bounded "./" ".."
+/// normalization (no filesystem access; the hop still faces the guard and
+/// the http(s) admission below).
+std::string resolveRedirectTarget( const std::string &base, const std::string &location )
+{
+  const std::string trimmed = location.substr( 0, location.find( '#' ) );
+  if ( trimmed.empty() )
+    return base;
+  if ( !urlSchemeOf( trimmed ).empty() )
+    return trimmed; // absolute
+  const std::string scheme = urlSchemeOf( base );
+  const std::size_t authorityAt = base.find( "://" );
+  if ( authorityAt == std::string::npos )
+    return trimmed; // defensive: malformed base, let admission refuse it
+  const std::size_t authorityEnd = base.find_first_of( "/?#", authorityAt + 3 );
+  const std::string authority =
+    base.substr( authorityAt + 3, authorityEnd == std::string::npos ? std::string::npos
+                                                                      : authorityEnd - authorityAt - 3 );
+  if ( !trimmed.empty() && trimmed.compare( 0, 2, "//" ) == 0 )
+    return scheme + ":" + trimmed; // network-path
+  const std::size_t baseQuery = base.find_first_of( "?#" );
+  const std::string basePath =
+    base.substr( authorityEnd == std::string::npos ? base.size() : authorityEnd,
+                 baseQuery == std::string::npos ? std::string::npos : baseQuery - ( authorityEnd == std::string::npos ? base.size() : authorityEnd ) );
+  std::string path;
+  if ( !trimmed.empty() && trimmed[0] == '/' )
+    path = trimmed; // absolute-path
+  else if ( !trimmed.empty() && trimmed[0] == '?' )
+    return scheme + "://" + authority + ( basePath.empty() ? "/" : basePath ) + trimmed;
+  else
+  {
+    // same-directory relative: everything after the last '/'
+    const std::size_t lastSlash = basePath.rfind( '/' );
+    path = basePath.substr( 0, lastSlash == std::string::npos ? 0 : lastSlash + 1 ) + trimmed;
+  }
+  // Lexical dot-segment removal (RFC 3986 §5.2.4), bounded.
+  std::vector<std::string> segments;
+  std::size_t cursor = 0;
+  int guard = 0;
+  while ( cursor <= path.size() && guard++ < 512 )
+  {
+    std::size_t next = path.find( '/', cursor );
+    if ( next == std::string::npos )
+      next = path.size();
+    const std::string segment = path.substr( cursor, next - cursor );
+    if ( segment == ".." )
+    {
+      if ( !segments.empty() )
+        segments.pop_back();
+    }
+    else if ( segment != "." )
+      segments.push_back( segment );
+    if ( next == path.size() )
+      break;
+    cursor = next + 1;
+  }
+  std::string normalized;
+  for ( const std::string &segment : segments )
+    normalized += ( normalized.empty() ? "" : "/" ) + segment;
+  if ( normalized.empty() || normalized[0] != '/' )
+    normalized = "/" + normalized;
+  return scheme + "://" + authority + normalized;
+}
+
+/// The redirect-controlling transport. Mirrors fetchImpl's contract (typed
+/// errors, budgets, truncation semantics, display URL) hop for hop.
+HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions &options,
+                                  bool throwHttpErrors )
+{
+  const RemoteTarget remote = resolveRemoteTarget( url );
+  const ResourceUri &uri = remote.uri;
+
+  std::call_once( curlGlobalOnce(), [] { curl_global_init( CURL_GLOBAL_DEFAULT ); } );
+
+  const std::uintmax_t budget =
+    options.maxResponseBytes == 0 ? kDefaultHttpMaxResponseBytes : options.maxResponseBytes;
+  std::string current = remote.target;
+  std::vector<std::string> hopChain;
+  // Method semantics mirror libcurl's auto-follow: 303 (and the historical
+  // 301/302 after a body-carrying request) degrades to GET; 307/308 replay
+  // the method and the body verbatim. The body travels as per-hop state so
+  // no hop ever re-sends what a redirect downgraded away.
+  std::string postBodyThisHop = options.postBody;
+  for ( int hop = 0;; ++hop )
+  {
+    // Policy sees EVERY hop — including the first, so the predicate is the
+    // single source of truth (the caller's own first-hop check, when it has
+    // one, fires earlier with the same verdict).
+    const std::string refusal = options.redirectGuard ? options.redirectGuard( current ) : std::string();
+    if ( !refusal.empty() )
+    {
+      Json::Value details;
+      details["url"] = uri.display();
+      details["hop"] = hop;
+      Json::Value chain( Json::arrayValue );
+      for ( const std::string &hopUrl : hopChain )
+        chain.append( hopUrl );
+      details["hop_chain"] = chain;
+      std::ostringstream message;
+      message << "httpFetch: egress policy refused the request";
+      if ( hop > 0 )
+        message << " at redirect hop " << hop;
+      message << ": " << refusal;
+      throw GeoError( ErrorCode::PermissionDenied, message.str(), details );
+    }
+    // Transport-level admission independent of policy: this layer speaks
+    // http(s) only; a Location naming another scheme is refused even when a
+    // caller-supplied guard would allow it.
+    const std::string scheme = urlSchemeOf( current );
+    if ( scheme != "http" && scheme != "https" )
+      throw GeoError( ErrorCode::NetworkError,
+                      "httpFetch: redirect target scheme must be http or https (got '" +
+                        ( scheme.empty() ? std::string( "none" ) : scheme ) + "')" );
+
+    CURL *handle = curl_easy_init();
+    if ( handle == nullptr )
+      throw GeoError( ErrorCode::NetworkError, "httpFetch: transport could not be initialized" );
+    GuardedTransfer transfer;
+    transfer.budget = budget;
+    std::map<std::string, std::string> headers;
+    struct curl_slist *requestHeaders = nullptr;
+    for ( const std::string &header : options.headers )
+    {
+      if ( !header.empty() )
+        requestHeaders = curl_slist_append( requestHeaders, header.c_str() );
+    }
+    if ( !options.range.empty() )
+      requestHeaders =
+        curl_slist_append( requestHeaders, ( "Range: " + options.range ).c_str() );
+    curl_easy_setopt( handle, CURLOPT_URL, current.c_str() );
+    curl_easy_setopt( handle, CURLOPT_FOLLOWLOCATION, 0L );
+    curl_easy_setopt( handle, CURLOPT_NOSIGNAL, 1L );
+    curl_easy_setopt( handle, CURLOPT_USERAGENT, "SICNU-Geo-HTTP/7.0" );
+    curl_easy_setopt( handle, CURLOPT_HTTPHEADER, requestHeaders );
+    if ( options.timeoutSeconds > 0 )
+      curl_easy_setopt( handle, CURLOPT_TIMEOUT, static_cast<long>( options.timeoutSeconds ) );
+    if ( options.connectTimeoutSeconds > 0 )
+      curl_easy_setopt( handle, CURLOPT_CONNECTTIMEOUT,
+                        static_cast<long>( options.connectTimeoutSeconds ) );
+    if ( !postBodyThisHop.empty() )
+    {
+      curl_easy_setopt( handle, CURLOPT_POSTFIELDSIZE,
+                        static_cast<long>( postBodyThisHop.size() ) );
+      curl_easy_setopt( handle, CURLOPT_COPYPOSTFIELDS, postBodyThisHop.c_str() );
+    }
+    curl_easy_setopt( handle, CURLOPT_WRITEFUNCTION, &guardedBodySink );
+    curl_easy_setopt( handle, CURLOPT_WRITEDATA, &transfer );
+    curl_easy_setopt( handle, CURLOPT_HEADERFUNCTION, &guardedHeaderSink );
+    curl_easy_setopt( handle, CURLOPT_HEADERDATA, &headers );
+
+    CURLcode code = curl_easy_perform( handle );
+    // Bounded retry of TRANSIENT transport failures only (resolve/connect/
+    // recv). A timed-out request already consumed the caller's whole
+    // wall-clock budget — retrying it would silently double the budget, so
+    // timeouts are final here.
+    int attemptsLeft = options.maxRetries > 0 ? options.maxRetries : 0;
+    while ( code != CURLE_OK && attemptsLeft > 0 && !transfer.overBudget &&
+            ( code == CURLE_COULDNT_RESOLVE_HOST || code == CURLE_COULDNT_CONNECT ||
+              code == CURLE_RECV_ERROR || code == CURLE_SEND_ERROR ) )
+    {
+      --attemptsLeft;
+      transfer = GuardedTransfer{};
+      transfer.budget = budget;
+      headers.clear();
+      code = curl_easy_perform( handle );
+    }
+    long status = 0;
+    curl_easy_getinfo( handle, CURLINFO_RESPONSE_CODE, &status );
+    std::string location;
+    const auto locationIt = headers.find( "location" );
+    if ( locationIt != headers.end() )
+      location = locationIt->second;
+    curl_slist_free_all( requestHeaders );
+    curl_easy_cleanup( handle );
+
+    if ( transfer.overBudget )
+    {
+      HttpFetchResult fetch;
+      fetch.displayUrl = uri.display();
+      fetch.httpStatus = static_cast<int>( status );
+      fetch.reachedServer = true; // an answer was streaming when the budget hit
+      fetch.headers = std::move( headers );
+      fetch.body = std::move( transfer.body );
+      fetch.sizeGuardHit = true;
+      fetch.truncated = true;
+      return fetch; // same HANDLED-condition doctrine as the CPL size guard
+    }
+    if ( code == CURLE_OPERATION_TIMEDOUT )
+      throw GeoError( ErrorCode::Timeout,
+                      "httpFetch: request exceeded its time budget: " + uri.display() );
+    if ( code != CURLE_OK )
+      throw GeoError( ErrorCode::NetworkError,
+                      std::string( "httpFetch: transport failure: " ) + curl_easy_strerror( code ) );
+
+    const bool redirectStatus =
+      status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
+    if ( redirectStatus && !location.empty() )
+    {
+      if ( hop >= kMaxRedirectHops )
+      {
+        Json::Value details;
+        details["hops"] = hop + 1;
+        throw GeoError( ErrorCode::NetworkError,
+                        "httpFetch: origin exceeded the redirect budget (" +
+                          std::to_string( kMaxRedirectHops ) + " hops)" );
+      }
+      current = resolveRedirectTarget( current, location );
+      hopChain.push_back( current );
+      if ( status == 303 || ( ( status == 301 || status == 302 ) && !postBodyThisHop.empty() ) )
+        postBodyThisHop.clear();
+      continue;
+    }
+    HttpFetchResult fetch;
+    fetch.displayUrl = uri.display();
+    fetch.httpStatus = static_cast<int>( status );
+    fetch.reachedServer = status > 0 || !headers.empty() || !transfer.body.empty();
+    fetch.headers = std::move( headers );
+    fetch.body = std::move( transfer.body );
+    // Exactly-budget bodies are reported truncated (header contract,
+    // conservative and truthful — same as the CPL path).
+    fetch.truncated = transfer.totalBytes >= budget && budget > 0;
+    if ( throwHttpErrors )
+    {
+      if ( fetch.httpStatus == 404 || fetch.httpStatus == 410 )
+        throw GeoError( ErrorCode::NotFound,
+                        "httpFetch: remote resource is gone: " + uri.display() );
+      if ( fetch.httpStatus >= 400 )
+      {
+        Json::Value details;
+        details["status"] = fetch.httpStatus;
+        throw GeoError( ErrorCode::NetworkError,
+                        "httpFetch: remote origin reported an error: " + uri.display(), details );
+      }
+    }
+    return fetch;
+  }
+}
+
 } // namespace
 
 std::string HttpFetchResult::headerValue( const std::string &lowerName ) const
@@ -345,17 +701,22 @@ Json::Value HttpFetchResult::toJson() const
 
 HttpFetchResult httpFetch( const std::string &url, const HttpFetchOptions &options )
 {
+  if ( options.redirectGuard )
+    return guardedFetchImpl( url, options, true );
   return fetchImpl( url, options, true );
 }
 
 HttpFetchResult httpFetchStatus( const std::string &url, const HttpFetchOptions &options )
 {
+  if ( options.redirectGuard )
+    return guardedFetchImpl( url, options, false );
   return fetchImpl( url, options, false );
 }
 
 Json::Value httpFetchJson( const std::string &url, const HttpFetchOptions &options )
 {
-  HttpFetchResult fetch = fetchImpl( url, options, true );
+  HttpFetchResult fetch = options.redirectGuard ? guardedFetchImpl( url, options, true )
+                                                : fetchImpl( url, options, true );
   if ( fetch.truncated )
     throw GeoError( ErrorCode::ResourceExhausted,
                     "httpFetchJson: response exceeded the byte budget: " + fetch.displayUrl );

@@ -30,6 +30,7 @@
 #include <json/json.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -40,6 +41,11 @@ namespace sicnu::geo
 /// Default response byte budget: 8 MiB covers STAC pages and validator
 /// probes; callers streaming real payloads must pass an explicit budget.
 inline constexpr std::uintmax_t kDefaultHttpMaxResponseBytes = 8ull * 1024 * 1024;
+
+/// Redirect hops a guarded fetch will follow before refusing (#1456): one
+/// origin plus this many Location hops. The bound keeps a redirect cycle
+/// from turning into an unbounded walk even when every hop passes policy.
+inline constexpr int kMaxRedirectHops = 5;
 
 struct HttpFetchOptions
 {
@@ -57,6 +63,18 @@ struct HttpFetchOptions
     /// Optional accepted media types for httpFetchJson() ("application/geo+json"
     /// style prefixes; a mismatch is a typed error, not a silent parse).
     std::vector<std::string> acceptContentTypes;
+    /// Per-hop egress verdict for redirects (#1456): return "" to allow the
+    /// hop, or a refusal reason (the fetch throws GeoError(PermissionDenied)
+    /// carrying it). When set, the fetch runs on a redirect-controlling
+    /// transport: server-driven auto-follow is disabled and EVERY Location
+    /// hop — resolved against the current URL, bounded to kMaxRedirectHops —
+    /// passes this guard before the request is dispatched. The guard also
+    /// sees hop 1, so the policy lives in exactly one predicate. CPLHTTPFetch
+    /// cannot serve this contract (the pinned GDAL follows redirects
+    /// unconditionally and never surfaces intermediate hops), which is why
+    /// the guarded path runs on libcurl directly. Unset → the historical
+    /// CPL transport, unchanged byte for byte.
+    std::function<std::string( const std::string &hopUrl )> redirectGuard;
 };
 
 struct HttpFetchResult
