@@ -33,7 +33,7 @@ std::string readSource( const std::string &relativePath )
   buffer << in.rdbuf();
   std::string text = buffer.str();
   // A Windows checkout stores CRLF; the needles below use plain newlines.
-  text.erase( std::remove( text.begin(), text.end(), '' ), text.end() );
+  text.erase( std::remove( text.begin(), text.end(), '\r' ), text.end() );
   return text;
 }
 

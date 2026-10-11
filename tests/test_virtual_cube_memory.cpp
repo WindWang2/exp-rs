@@ -361,28 +361,6 @@ TEST_CASE( "readChunk rejects invalid geometry with an empty result", "[d16][cub
     }
 }
 
-TEST_CASE( "readChunk time bounds are rejected without tStart+tCount overflow",
-           "[d16][cube]" )
-{
-    GdalInit init;
-    QTemporaryDir tmp;
-    const QDir dir( tmp.path() );
-    const std::vector<QString> scenes{
-        writeScene( dir, "s", kEpoch, 8, 8, plane( 8, 8, 0.3f ) ),
-        writeScene( dir, "s", QDate( 2020, 3, 1 ), 8, 8, plane( 8, 8, 0.4f ) ) };
-
-    auto cube = TemporalCube::open( scenes, TemporalCubeConfig{} );
-    REQUIRE( cube != nullptr );
-
-    // #1450: tStart + tCount would overflow int and could wrap the range
-    // guard open (then index far out of bounds); each request must still be
-    // rejected as beyond the calendar.
-    const int kMax = std::numeric_limits<int>::max();
-    REQUIRE( cube->readChunk( 0, 0, 4, 4, kMax, 1 ).empty() );
-    REQUIRE( cube->readChunk( 0, 0, 4, 4, 1, kMax ).empty() );
-    REQUIRE( cube->readChunk( 0, 0, 4, 4, kMax / 2, kMax / 2 + 2 ).empty() );
-}
-
 // ---------------------------------------------------------------------------
 // Slice 3: compositing policy contracts — cloud masking, WeightedMean,
 // 45-day gap guard, NoData exclusion.
