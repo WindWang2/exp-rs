@@ -114,3 +114,8 @@ scan race), ae91ad412(docs)。git diff --check 干净; origin/master 仍=47c6371
 - test_output_committer: 12/14 (2 预存, stash 基线同款失败)
 未验证: POSIX-only lane (test_fault_injection 全 suite, 本机 Windows 无法运行;
 本轨未改动其内容, archive 测试已迁出); Linux/macOS 平台行为未在本机验证
+
+## 终态
+- PR: https://github.com/WindWang2/exp-rs/pull/1470 (head 63ee3a437)
+- 7 commits (6 fix + 1 docs + 1 ledger), 26 files, +1223/-126
+- Oracle 达成: O1-O18 全部满足(见各轮); 跨会话续作入口: 本 worktree + 本账本
