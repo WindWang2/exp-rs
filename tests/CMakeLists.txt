@@ -5503,7 +5503,6 @@ sicnu_discover_tests(test_band_ratio)
 if(TARGET qgis_app_classify)
   add_executable(test_classification_task_center
     test_classification_task_center.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
@@ -5539,7 +5538,6 @@ if(TARGET qgis_app_classify)
   # tests need this list — do not add these .cpp files to qgis_app_classify.
   add_executable(test_classification_window
     test_classification_window.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
@@ -14095,6 +14093,32 @@ add_dependencies(test_teaching_admin_core test_teaching_fake_grader_cli)
 # output. New file (test_teaching_admin_core is concurrently modified by
 # PR #1469; keep the diff disjoint).
 sicnu_add_teaching_admin_test(test_teaching_admin_script_adapters_r8)
+
+# R8 (WP02): GuidedLabWorkspace fail-closed affordances, standalone twin of
+# the cockpit-smoke case — compiles only the workspace TU (Qt Widgets +
+# Sicnu::teaching), no qgis, so the contract is verifiable on light lanes.
+add_executable(test_guided_lab_workspace_r8
+  test_guided_lab_workspace_r8.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
+)
+target_link_libraries(test_guided_lab_workspace_r8 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_guided_lab_workspace_r8 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app/teaching
+)
+set_target_properties(test_guided_lab_workspace_r8 PROPERTIES
+  AUTOMOC ON
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_guided_lab_workspace_r8)
 
 # R8 (WP02/WP06): UI state-honesty source contracts (scan style, like
 # test_classification_window) — guided-workflow Next gating and the teaching

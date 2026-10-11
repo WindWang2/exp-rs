@@ -139,6 +139,12 @@ SequencingStamp parseSequencingStamp( const std::string &text )
         pos = 19;
     }
     if ( pos < text.size() && text[pos] == '.' ) {
+        // Fraction only after :SS (the documented grammar). A '.' at pos 16
+        // (minutes, no seconds) is ISO minute-fraction territory — a
+        // different instant than a fractional second — so refuse rather
+        // than misread (review finding: "08:00.9Z" graded as 08:00:00.9).
+        if ( pos == 16 )
+            return stamp;
         ++pos;
         int digits = 0;
         long long scale = 100000000; // first fractional digit is 1e8 ns

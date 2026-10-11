@@ -37,6 +37,8 @@
 
 #include <json/json.h>
 
+#include <memory>
+
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -817,4 +819,49 @@ TEST_CASE( "smoke: run button hands the operator real, absolutized prefill",
   REQUIRE( fs::path( input ).is_absolute() );
   REQUIRE( fs::path( input ).filename() == "landsat_sample.tif" );
   REQUIRE( input.find( "/data/samples/" ) != std::string::npos );
+}
+
+TEST_CASE( "smoke: fail-closed timeline disables validate/export affordances (r8)",
+           "[teaching][cockpit][smoke][r8]" )
+{
+  // WP02 (#1453-adjacent): the fail-closed branch used to disable
+  // run/submit/prev/next but leave "Validate & grade", "Export capsule" and
+  // the artifact edit armed — a stepless timeline (e.g. a lab whose doc
+  // failed to load) still offered grading affordances. All of them must die
+  // together with the navigation.
+  DockFixture fx( "failclosed_buttons" );
+  GuidedLabWorkspace ws;
+
+  auto *validateBtn =
+    ws.findChild<QPushButton *>( QStringLiteral( "labWorkspaceValidateButton" ) );
+  auto *exportBtn =
+    ws.findChild<QPushButton *>( QStringLiteral( "labWorkspaceExportButton" ) );
+  auto *artifactEdit =
+    ws.findChild<QLineEdit *>( QStringLiteral( "labWorkspaceArtifactEdit" ) );
+  REQUIRE( ( validateBtn && exportBtn && artifactEdit ) );
+
+  // A valid timeline arms every affordance.
+  Json::CharReaderBuilder rb;
+  std::unique_ptr<Json::CharReader> reader( rb.newCharReader() );
+  Json::Value spec;
+  std::string errors;
+  const std::string text = R"( { "id": "lab_r8_buttons", "title": "Buttons",
+    "steps": [ { "title": "Look", "title_zh": "观察", "description_zh": "看。" } ] } )";
+  REQUIRE( reader->parse( text.data(), text.data() + text.size(), &spec, &errors ) );
+  ws.setTimeline( sicnu::teaching::LabStepTimeline::fromLabSpec( spec ) );
+  CHECK( validateBtn->isEnabled() );
+  CHECK( exportBtn->isEnabled() );
+  CHECK( artifactEdit->isEnabled() );
+
+  // A stepless/fail-closed timeline disarms the whole affordance set.
+  ws.setTimeline( sicnu::teaching::LabStepTimeline{} );
+  CHECK_FALSE( validateBtn->isEnabled() );
+  CHECK_FALSE( exportBtn->isEnabled() );
+  CHECK_FALSE( artifactEdit->isEnabled() );
+
+  // Recovery: a later valid timeline re-arms them (no dead-end state).
+  ws.setTimeline( sicnu::teaching::LabStepTimeline::fromLabSpec( spec ) );
+  CHECK( validateBtn->isEnabled() );
+  CHECK( exportBtn->isEnabled() );
+  CHECK( artifactEdit->isEnabled() );
 }

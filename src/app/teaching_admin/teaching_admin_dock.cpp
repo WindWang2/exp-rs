@@ -407,45 +407,60 @@ void TeachingAdminDock::onRunBatch()
     m_batchCancelButton->setEnabled( true );
 
     const QString outPrefix = m_batchOutEdit->text();
-    m_batchThread = std::thread( [this, cfg, grader, outPrefix]() {
-        // Exception barrier: a throw leaving a std::thread function is
-        // std::terminate — the GUI must survive a failed batch.
-        try
-        {
-            sicnu::teaching_admin::BatchProgressFn progress =
-              [this]( int done, int processedTotal ) {
-                  QMetaObject::invokeMethod(
-                    this,
-                    [this, done, processedTotal]() {
-                        m_batchProgressLabel->setText(
-                          tr( "running %1 / %2" ).arg( done ).arg( processedTotal ) );
-                    },
-                    Qt::QueuedConnection );
-              };
-            const auto report =
-              runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
-            // A publish failure must be a TYPED failure, never a silent
-            // fake success (#1453/WP02): routing it through the same catch
-            // makes the console fail visibly and re-arm.
-            if ( !publishBatchOutputsAtomic( report, outPrefix ) )
-                throw std::runtime_error( "publishing batch outputs failed (unwritable out prefix)" );
-            QMetaObject::invokeMethod(
-              this,
-              [this, report, outPrefix]() { finishBatchOnUiThread( report.toJson(), outPrefix ); },
-              Qt::QueuedConnection );
-        }
-        catch ( const std::exception &e )
-        {
-            const QString what = QString::fromUtf8( e.what() );
-            QMetaObject::invokeMethod(
-              this, [this, what]() { failBatchOnUiThread( what ); }, Qt::QueuedConnection );
-        }
-        catch ( ... )
-        {
-            QMetaObject::invokeMethod(
-              this, [this]() { failBatchOnUiThread( QString() ); }, Qt::QueuedConnection );
-        }
-    } );
+    // Spawn barrier (review finding): a throwing std::thread constructor
+    // (resource exhaustion) must re-arm the console — otherwise no worker
+    // ever posts a completion callback and the run button stays disabled
+    // forever. The catch is non-const by std::thread's copy requirement.
+    try
+    {
+        m_batchThread = std::thread( [this, cfg, grader, outPrefix]() {
+            // Exception barrier: a throw leaving a std::thread function is
+            // std::terminate — the GUI must survive a failed batch.
+            try
+            {
+                sicnu::teaching_admin::BatchProgressFn progress =
+                  [this]( int done, int processedTotal ) {
+                      QMetaObject::invokeMethod(
+                        this,
+                        [this, done, processedTotal]() {
+                            m_batchProgressLabel->setText(
+                              tr( "running %1 / %2" ).arg( done ).arg( processedTotal ) );
+                        },
+                        Qt::QueuedConnection );
+                  };
+                const auto report =
+                  runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
+                // A publish failure must be a TYPED failure, never a silent
+                // fake success (#1453/WP02): routing it through the same catch
+                // makes the console fail visibly and re-arm.
+                if ( !publishBatchOutputsAtomic( report, outPrefix ) )
+                    throw std::runtime_error( "publishing batch outputs failed (unwritable out prefix)" );
+                QMetaObject::invokeMethod(
+                  this,
+                  [this, report, outPrefix]() { finishBatchOnUiThread( report.toJson(), outPrefix ); },
+                  Qt::QueuedConnection );
+            }
+            catch ( const std::exception &e )
+            {
+                const QString what = QString::fromUtf8( e.what() );
+                QMetaObject::invokeMethod(
+                  this, [this, what]() { failBatchOnUiThread( what ); }, Qt::QueuedConnection );
+            }
+            catch ( ... )
+            {
+                QMetaObject::invokeMethod(
+                  this, [this]() { failBatchOnUiThread( QString() ); }, Qt::QueuedConnection );
+            }
+        } );
+    }
+    catch ( ... )
+    {
+        m_batchCancelButton->setEnabled( false );
+        m_batchRunButton->setEnabled( true );
+        m_batchOutEdit->setEnabled( true );
+        m_batchProgressLabel->setText( tr( "batch failed (could not start worker thread)" ) );
+        appendLog( tr( "batch failed (could not start worker thread)" ) );
+    }
 }
 
 void TeachingAdminDock::onCancelBatch()

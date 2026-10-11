@@ -70,14 +70,17 @@ int ScientificRecipeRegistry::reload()
   }
 
   std::vector<fs::path> files;
-  for ( const auto &entry : fs::directory_iterator( dir, ec ) )
+  // Manual increment with the ec overload: the range-for's implicit ++ is
+  // the THROWING directory_iterator::operator++ — a directory deleted
+  // mid-scan would escape as filesystem_error through refreshRecipes and
+  // the default broker's static initialization (review finding on #1465).
+  for ( auto it = fs::directory_iterator( dir, ec ), end = fs::directory_iterator();
+        !ec && it != end; it.increment( ec ) )
   {
-    if ( ec )
-      break;
     // ec form: a stale/deleted entry must degrade to "skipped", never throw
     // out of the scan (#1465).
-    if ( entry.is_regular_file( ec ) && !ec && entry.path().extension() == ".json" )
-      files.push_back( entry.path() );
+    if ( it->is_regular_file( ec ) && !ec && it->path().extension() == ".json" )
+      files.push_back( it->path() );
     ec.clear();
   }
   std::sort( files.begin(), files.end() );

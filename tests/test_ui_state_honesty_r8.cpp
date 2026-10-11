@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -30,7 +31,10 @@ std::string readSource( const std::string &relativePath )
     return {};
   std::ostringstream buffer;
   buffer << in.rdbuf();
-  return buffer.str();
+  std::string text = buffer.str();
+  // A Windows checkout stores CRLF; the needles below use plain newlines.
+  text.erase( std::remove( text.begin(), text.end(), '' ), text.end() );
+  return text;
 }
 
 } // namespace
@@ -43,12 +47,12 @@ TEST_CASE( "guided workflow gates Next on the running job", "[ui_honesty][r8]" )
   // showStep: Next must be state-driven exactly like Run — disabled while
   // this step's job is in flight, re-armed by restoreButton's
   // updateStepDisplay() when the job lands.
-  CHECK( source.find( "m_nextButton->setEnabled( !m_jobHandle->isRunning() );" ) !=
+  CHECK( source.find( "m_nextButton->setEnabled(!m_jobHandle->isRunning());" ) !=
          std::string::npos );
 
   // onNextStep: the completion branch (workflow complete) must never run
   // while a job is still in flight.
-  CHECK( source.find( "if ( m_jobHandle->isRunning() )\n        return;" ) !=
+  CHECK( source.find( "if (m_jobHandle->isRunning())\n        return;" ) !=
          std::string::npos );
 }
 

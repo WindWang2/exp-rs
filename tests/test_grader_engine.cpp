@@ -395,6 +395,38 @@ TEST_CASE( "stage criteria: alternatives, minDistinct and orderedAfter sequencin
         REQUIRE( outcome.ok );
         CHECK( outcome.report.dimensions[0].criteria[0].status == OutcomeStatus::Earned );
     }
+
+    // Review finding (adversarial pass): a fraction directly after the
+    // MINUTES field ("08:30.5Z" — ISO 8601 minute-fraction, 08:30:30) is
+    // outside the parser's documented grammar (HH:MM[:SS[.frac]]). It must
+    // be REFUSED, never silently misread as fractional seconds after an
+    // absent :00 — a misread graded the exact wrong direction.
+    SECTION( "minute-fraction stamps are refused, not misread as seconds" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        // ISO instant of the prerequisite: 08:00:54 (minute fraction .9).
+        // Misread as 08:00:00.9, the old parse graded the LATER candidate
+        // as "after" — satisfied. Refused (indeterminate), the order is
+        // simply unprovable — the fail-safe verdict for out-of-grammar
+        // stamps.
+        addStage( evidence, "ev-pre", "preprocess", "Completed", "2026-09-23T08:00.900Z" );
+        addStage( evidence, "ev-train", "train", "Completed", "2026-09-23T08:00:10Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &c = outcome.report.dimensions[0].criteria[0];
+        CHECK( c.status == OutcomeStatus::Indeterminate );
+        CHECK( c.reasonCodes[0] == "grader:stage-order-unprovable" );
+    }
 }
 
 TEST_CASE( "metric criteria: bands, tolerance, linear window, range and ambiguity",

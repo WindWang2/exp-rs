@@ -150,7 +150,7 @@ void LabCockpitDock::wireSignals()
              if ( !plan.ok ) {
                for ( const auto &issue : plan.issuesZh )
                  m_workspace->appendFeedbackNote(
-                   QStringLiteral( "参数预填被拒绝: %1" ).arg(
+                   tr( "参数预填被拒绝: %1" ).arg(
                      QString::fromStdString( issue ) ) );
                return;
              }
@@ -482,14 +482,16 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
     if ( parsed.ok )
       layers.push_back( { sicnu::agent::autonomy::policy_sources::kCourse, parsed.policy } );
     else
-      policyIssues.push_back( "课程策略解析失败：课程层未生效（其余层照常，结果仍 fail-closed）" );
+      policyIssues.push_back(
+        tr( "课程策略解析失败：课程层未生效（其余层照常，结果仍 fail-closed）" ).toStdString() );
   }
   if ( labDoc.isObject() && labDoc.isMember( "autonomy" ) ) {
     auto parsed = sicnu::agent::autonomy::parseAutonomyPolicy( labDoc["autonomy"] );
     if ( parsed.ok )
       layers.push_back( { sicnu::agent::autonomy::policy_sources::kLabspec, parsed.policy } );
     else
-      policyIssues.push_back( "实验策略解析失败：实验层未生效（其余层照常，结果仍 fail-closed）" );
+      policyIssues.push_back(
+        tr( "实验策略解析失败：实验层未生效（其余层照常，结果仍 fail-closed）" ).toStdString() );
   }
   auto resolvedPolicy = sicnu::agent::autonomy::resolveEffectivePolicy( layers );
   auto autonomy = sicnu::teaching::AutonomyEffectiveDisplay::fromPolicyDoc(
@@ -497,7 +499,7 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
   for ( const auto &issue : policyIssues ) autonomy.issuesZh.push_back( issue );
   if ( !resolvedPolicy.hasLevel && resolvedPolicy.mode.empty() )
     autonomy.issuesZh.push_back(
-      "课程与实验均未声明自主策略：按 fail-closed L0 处理（不臆造默认策略）" );
+      tr( "课程与实验均未声明自主策略：按 fail-closed L0 处理（不臆造默认策略）" ).toStdString() );
   m_workspace->setAutonomy( autonomy );
 
   // The ref records which authorities were consulted, not a policy value:

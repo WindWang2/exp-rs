@@ -57,7 +57,9 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   m_runBtn = new QPushButton( tr( "Run / jump to operator" ), this );
   m_submitHumanBtn = new QPushButton( tr( "Submit manual evidence" ), this );
   m_validateBtn = new QPushButton( tr( "Validate & grade" ), this );
+  m_validateBtn->setObjectName( QStringLiteral( "labWorkspaceValidateButton" ) );
   m_exportBtn = new QPushButton( tr( "Export capsule / report" ), this );
+  m_exportBtn->setObjectName( QStringLiteral( "labWorkspaceExportButton" ) );
   nav->addWidget( m_prevBtn );
   nav->addWidget( m_nextBtn );
   nav->addWidget( m_runBtn );
@@ -243,11 +245,17 @@ void GuidedLabWorkspace::showCurrent()
     m_humanInput->setEnabled( false );
     // Fail-closed buttons: a stepless/fail-closed timeline (e.g. a canonical
     // lab whose doc failed to load) must never keep the previous lab's
-    // navigation or run affordances alive.
+    // navigation or run affordances alive. The grading affordances die with
+    // them (#1453/WP02): "Validate & grade" and "Export capsule" used to
+    // stay armed on a lab the registry marks out-of-scope, offering to
+    // grade and export against a session that does not exist.
     m_runBtn->setEnabled( false );
     m_submitHumanBtn->setEnabled( false );
     m_prevBtn->setEnabled( false );
     m_nextBtn->setEnabled( false );
+    m_validateBtn->setEnabled( false );
+    m_exportBtn->setEnabled( false );
+    m_artifactEdit->setEnabled( false );
     // The projection's refusal reasons belong on the student surface — a
     // bare "无步骤" without its reason is not honest feedback.
     if ( !m_tl.issuesZh.empty() ) {
@@ -274,6 +282,11 @@ void GuidedLabWorkspace::showCurrent()
   m_runBtn->setEnabled( !cur->operatorId.empty() || cur->humanRequired );
   m_prevBtn->setEnabled( m_tl.previous() != nullptr );
   m_nextBtn->setEnabled( m_tl.next() != nullptr );
+  // A live step re-arms the grading affordances the fail-closed branch
+  // disabled — no dead-end state after a failed lab replaced by a good one.
+  m_validateBtn->setEnabled( true );
+  m_exportBtn->setEnabled( true );
+  m_artifactEdit->setEnabled( true );
 }
 
 } // namespace sicnu::app::teaching
