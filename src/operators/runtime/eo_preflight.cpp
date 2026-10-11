@@ -3,6 +3,9 @@
 
 #include "operators/framework/rs_operator_error.h"
 #include "geospatial/metadata/canonical_metadata.h"
+// #1450: the single radiometric vocabulary (header-only) — the preflight
+// comparison routes through it instead of a parallel exact-string dialect.
+#include "core/radiometric_state.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +21,18 @@ namespace {
 std::string describeWindow( const sicnu::operators::ModelWavelengthWindowNm &w )
 {
   return "[" + std::to_string( w.minNm ) + ", " + std::to_string( w.maxNm ) + "] nm";
+}
+
+/// Radiometric-state comparison through the platform vocabulary (#1450):
+/// exact strings match trivially; known spelling variants of the same unit
+/// (case, "surface_reflectance" vs "boa_reflectance") match semantically;
+/// unknown tokens never match anything but themselves (fail closed).
+bool radiometricStatesMatch( const std::string &required, const std::string &declared )
+{
+  if ( required == declared )
+    return true;
+  return exp_radiometric::vocabulary::tokensEquivalent( QString::fromStdString( required ),
+                                                        QString::fromStdString( declared ) );
 }
 
 bool gsdOutsideRecommended( const ModelInfo &model, double gsd, std::string *why )
@@ -88,7 +103,7 @@ EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string 
             d["input_path"] = rasterPath;
             return d;
           }() );
-      if ( meta.radiometricState != model.eo.calibrationState )
+      if ( !radiometricStatesMatch( model.eo.calibrationState, meta.radiometricState ) )
         throw RSOperatorError(
           ErrorCode::InvalidInputData,
           "model requires radiometric state '" + model.eo.calibrationState
@@ -112,7 +127,7 @@ EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string 
       if ( meta.radiometricState.empty() )
         report.advisories.push_back( "calibration: model prefers '" + model.eo.calibrationState
                                      + "' but the input declares no radiometric state" );
-      else if ( meta.radiometricState != model.eo.calibrationState )
+      else if ( !radiometricStatesMatch( model.eo.calibrationState, meta.radiometricState ) )
         report.advisories.push_back( "calibration: model prefers '" + model.eo.calibrationState
                                      + "' but the input declares '" + meta.radiometricState + "'" );
       else

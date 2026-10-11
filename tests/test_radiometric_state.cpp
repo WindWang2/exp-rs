@@ -110,7 +110,7 @@ TEST_CASE( "RadiometricState string round-trip and fail-safe parse", "[radiometr
     const QString str = RadiometricState::unitToString( unit );
     CAPTURE( str );
     REQUIRE( RadiometricState::stringToUnit( str ) == unit );
-    REQUIRE( str == str.toUpper() ); // canonical form is uppercase
+    REQUIRE( str == str.toLower() ); // canonical production spelling is lowercase (#1450)
   }
 
   // Case-insensitive parsing.
