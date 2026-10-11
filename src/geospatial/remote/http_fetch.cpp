@@ -678,10 +678,30 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     // wall-clock budget — retrying it would silently double the budget, so
     // timeouts are final here.
     int attemptsLeft = options.maxRetries > 0 ? options.maxRetries : 0;
+    bool deadlineExhausted = false;
     while ( code != CURLE_OK && attemptsLeft > 0 && !transfer.overBudget &&
             ( code == CURLE_COULDNT_RESOLVE_HOST || code == CURLE_COULDNT_CONNECT ||
               code == CURLE_RECV_ERROR || code == CURLE_SEND_ERROR ) )
     {
+      // A retry draws from the SAME whole-request deadline: clamping each
+      // attempt to the remaining time (and stopping once none is left)
+      // keeps the tail attempt from outliving the contract.
+      if ( options.timeoutSeconds > 0 )
+      {
+        const long retryRemaining = static_cast<long>(
+          std::chrono::duration_cast<std::chrono::seconds>( deadline -
+                                                            std::chrono::steady_clock::now() )
+            .count() );
+        if ( retryRemaining <= 0 )
+        {
+          deadlineExhausted = true;
+          break;
+        }
+        curl_easy_setopt( handle, CURLOPT_TIMEOUT,
+                          retryRemaining < static_cast<long>( options.timeoutSeconds )
+                            ? retryRemaining
+                            : static_cast<long>( options.timeoutSeconds ) );
+      }
       --attemptsLeft;
       transfer = GuardedTransfer{};
       transfer.budget = budget;
@@ -709,7 +729,7 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
       fetch.truncated = true;
       return fetch; // same HANDLED-condition doctrine as the CPL size guard
     }
-    if ( code == CURLE_OPERATION_TIMEDOUT )
+    if ( code == CURLE_OPERATION_TIMEDOUT || deadlineExhausted )
       throw GeoError( ErrorCode::Timeout,
                       "httpFetch: request exceeded its time budget: " + uri.display() );
     if ( code != CURLE_OK )
