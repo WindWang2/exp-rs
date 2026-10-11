@@ -223,6 +223,36 @@ void registerNoopOperator()
     }
 }
 
+/// Blocks inside execute until the test releases the gate, so a recording
+/// commit failure can be observed against a pipeline that is
+/// deterministically still RUNNING (gate/barrier discipline — no
+/// sleep-guessed races).
+class GatedNoopOperator : public sicnu::operators::RSOperator
+{
+public:
+    static QSemaphore &releaseGate() { static QSemaphore gate; return gate; }
+    std::string name() const override { return "rs:mcp_gated_noop"; }
+    Json::Value run(const Json::Value &, sicnu::operators::RSOperatorContext &) override
+    {
+        releaseGate().acquire();
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/mcp_gated_noop.tif";
+        return result;
+    }
+};
+
+void registerGatedNoopOperator()
+{
+    sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+        "rs:mcp_gated_noop", []() { return std::make_unique<GatedNoopOperator>(); });
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    if (!registry.findAdapter("rs:mcp_gated_noop")) {
+        auto op = sicnu::operators::RSOperatorRegistry::instance().create("rs:mcp_gated_noop");
+        if (op)
+            registry.registerAdapter(std::make_shared<sicnu::processing::RsOperatorAdapter>(std::move(op)));
+    }
+}
+
 QString waitForTerminal(TestMcpServer &server, const QString &execId)
 {
     for (int attempt = 0; attempt < 400; ++attempt)
@@ -1252,6 +1282,136 @@ TEST_CASE( "McpServer run_workflow recording requires experiment_id and valid se
     }
     CHECK( threw );
 }
+
+TEST_CASE( "McpServer run_workflow recording handshake refuses truthfully",
+           "[agent][mcp][workflow][mlops8]" )
+{
+    registerNoopOperator();
+    registerGatedNoopOperator();
+    // Queued lifecycle delivery needs a QCoreApplication (event queue).
+    int appArgc = 1;
+    static char appArg0[] = "test_mcp_server";
+    static char *appArgv[] = { appArg0, nullptr };
+    if ( !QCoreApplication::instance() )
+        new QCoreApplication( appArgc, appArgv );
+    TestMcpServer server;
+    CheckpointEnvGuard checkpointGuard;
+    QTemporaryDir storeDir;
+
+    SECTION( "a rejected pipeline records nothing (#1448)" )
+    {
+        const QString dbPath = storeDir.filePath( QStringLiteral( "orphan.db" ) );
+        QVariantMap args;
+        // A valid JSON OBJECT with no steps passes the document parse and
+        // the recording prepare, then fails the submission gate — on the
+        // old enable-before-submit order this is what left an orphan
+        // experiment row behind.
+        args[QStringLiteral( "pipeline" )] = QStringLiteral( "{\"id\": \"orphan_pipeline\"}" );
+        args[QStringLiteral( "experiment_db" )] = dbPath;
+        args[QStringLiteral( "experiment_id" )] =
+            QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1101" );
+        bool threw = false;
+        try
+        {
+            server.testRunWorkflow( args );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            threw = true;
+            CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "pipeline rejected" ) ) );
+        }
+        REQUIRE( threw );
+        // prepare() is side-effect free: no experiment db file, no row, no
+        // orphan monitor binding (#1448: the old enable-before-submit order
+        // created both). The tracked-persist inside startTrackedPipelineJson
+        // may still leave a workflow-plane checkpoint before its TaskCenter
+        // submission fails — pre-existing master behavior, not the recording
+        // plane this gate owns.
+        CHECK( !QFile::exists( dbPath ) );
+    }
+
+    SECTION( "a commit-stage refusal rolls the dispatched pipeline back (#1469 review)" )
+    {
+        // Garbage bytes pass prepare()'s writability probe (a plain
+        // ReadWrite open succeeds on any writable file) but make the
+        // enable() COMMIT fail when sqlite rejects the file — a recording
+        // failure that can only surface AFTER the pipeline was dispatched.
+        QFile garbage( storeDir.filePath( QStringLiteral( "corrupt.db" ) ) );
+        REQUIRE( garbage.open( QIODevice::WriteOnly ) );
+        garbage.write( "this is not a sqlite database file" );
+        garbage.close();
+
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+            "id": "handshake_rollback",
+            "steps": [
+                {"id": "s1", "title": "gated", "operator": "rs:mcp_gated_noop", "params": {}}
+            ]
+        })" );
+        args[QStringLiteral( "experiment_db" )] = garbage.fileName();
+        args[QStringLiteral( "experiment_id" )] =
+            QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1102" );
+
+        bool threw = false;
+        try
+        {
+            server.testRunWorkflow( args );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            threw = true;
+            CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "recording refused" ) ) );
+            CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "rolled back" ) ) );
+        }
+        REQUIRE( threw );
+        // The pipeline WAS dispatched: its tracked checkpoint exists while
+        // the gated step is still RUNNING (the refusal happened mid-run,
+        // which is exactly the window the old order could not handle).
+        REQUIRE( checkpointGuard.checkpointCount() >= 1 );
+        // Release the gate AFTER the refusal (cancel was already requested
+        // inside the handler): the compensated run must reach a durable
+        // terminal Canceled state — no unrecorded execution keeps running.
+        GatedNoopOperator::releaseGate().release();
+        REQUIRE( checkpointGuard.waitDurableTerminal( QStringLiteral( "handshake_rollback" ),
+                                                      QStringLiteral( "Canceled" ) ) );
+    }
+
+    SECTION( "a prepare-stage refusal dispatches nothing" )
+    {
+        // First: one successful recorded run binds the monitor to db A.
+        QVariantMap ok;
+        ok[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+            "id": "bound_run",
+            "steps": [
+                {"id": "s1", "title": "first", "operator": "rs:mcp_noop", "params": {}}
+            ]
+        })" );
+        ok[QStringLiteral( "experiment_db" )] = storeDir.filePath( QStringLiteral( "a.db" ) );
+        ok[QStringLiteral( "experiment_id" )] =
+            QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1103" );
+        const QVariantMap submitted = server.testRunWorkflow( ok );
+        REQUIRE( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+        REQUIRE( !submitted.value( QStringLiteral( "experiment_run_id" ) ).toString().isEmpty() );
+        // Second: recording into a DIFFERENT db must refuse at prepare(),
+        // BEFORE any dispatch — exactly one tracked run exists afterwards.
+        QVariantMap rebind = ok;
+        rebind[QStringLiteral( "experiment_db" )] =
+            storeDir.filePath( QStringLiteral( "b.db" ) );
+        bool threw = false;
+        try
+        {
+            server.testRunWorkflow( rebind );
+        }
+        catch ( const std::runtime_error & )
+        {
+            threw = true;
+        }
+        REQUIRE( threw );
+        CHECK( checkpointGuard.checkpointCount() == 1 );
+        CHECK( !QFile::exists( storeDir.filePath( QStringLiteral( "b.db" ) ) ) );
+    }
+}
+
 
 TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][workflow]" )
 {
