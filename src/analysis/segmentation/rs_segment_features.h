@@ -83,12 +83,17 @@ class QGIS_ANALYSIS_EXPORT RsSegmentFeatures
     /// returns an empty map (the RsSimpleSegmenter sentinel convention —
     /// callers map it to their cancellation error).
     /// \a onProgress receives a [0,1] fraction across the extraction passes.
+    /// \a error, when non-null, receives the typed failure cause on return of
+    /// an empty map due to a raster read/band failure (#1461: read failures
+    /// used to be indistinguishable from cancellation and empty results).
+    /// Cancellation keeps the sentinel contract: empty map, *error untouched.
     static QMap<quint32, SegmentStat> extract(
         const QString &rasterPath,
         const RsSegmentMap &segMap,
         const QVector<int> &bandIndices,
         const std::function<bool()> &isCanceled = {},
-        const std::function<void( float )> &onProgress = {} );
+        const std::function<void( float )> &onProgress = {},
+        QString *error = nullptr );
 
 #ifdef SICNU_HAS_OPENCV
     /// Convert segment stats to a feature matrix (rows = segments, cols = features).

@@ -325,6 +325,48 @@ TEST_CASE( "segmentation and annotation promotion record provenance",
     CHECK( missing.diagnostics().first().code == QStringLiteral( "dataset.sample_not_found" ) );
 }
 
+TEST_CASE( "bounds-only segmentation objects keep their producing asset ref (#1449)",
+           "[promotion][segmentation]" )
+{
+    DraftFixture fx;
+    SamplePromoter promoter( fx.store );
+    const auto schema = twoClassSchema();
+
+    QVector<SegmentationObject> objects;
+    SegmentationObject bounded;
+    bounded.objectRef = QStringLiteral( "seg-bounds-only" );
+    bounded.classCode = QStringLiteral( "water" );
+    bounded.bounds = PixelWindow{ 4, 8, 16, 16 };
+    objects.append( bounded );
+    SegmentationObject withPolygon = bounded;
+    withPolygon.objectRef = QStringLiteral( "seg-with-polygon" );
+    withPolygon.geometryWkt = QStringLiteral( "POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))" );
+    objects.append( withPolygon );
+
+    const auto promoted =
+        promoter.promoteSegmentation( fx.versionId, fx.source(), objects, &schema );
+    REQUIRE( promoted.has_value() );
+    CHECK( promoted.value().samplesWritten == 2 );
+
+    // Provenance is mandatory (header contract): the producing asset ref
+    // rides on the sample even when the object carries bounds only — the
+    // geometryWkt gate used to drop it there.
+    const auto page = fx.store.samplesPage( fx.versionId, 0, 500 );
+    REQUIRE( page.has_value() );
+    int objectSamples = 0;
+    for ( const auto &sample : page.value().second )
+    {
+        if ( sample.kind() != SampleKind::Object )
+            continue;
+        ++objectSamples;
+        REQUIRE( sample.sourceAssets().size() == 1 );
+        CHECK( sample.sourceAssets().first().assetId == fx.source().assetId );
+        CHECK( sample.sourceAssets().first().revision == fx.source().revision );
+        CHECK( sample.sourceAssets().first().role == QStringLiteral( "segmentation" ) );
+    }
+    CHECK( objectSamples == 2 );
+}
+
 TEST_CASE( "pairs require event groups; temporal keeps missing observations",
            "[promotion][pair][temporal]" )
 {

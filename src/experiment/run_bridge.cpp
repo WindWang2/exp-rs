@@ -321,10 +321,11 @@ QString ExperimentRunBridge::resolveRunId( const QString &executionRef ) const
     const QStringList ids = lookup.value();
     if ( ids.isEmpty() )
         return QString();
-    // Store order is oldest-first; a ref with several recorded runs (repeat
-    // ingestion) belongs to the NEWEST recording — the one a re-attached
-    // execution would still be writing to.
-    return ids.last();
+    // The store scan is newest-first (created_ms DESC, run_id DESC); a ref
+    // with several recorded runs (repeat ingestion) belongs to the NEWEST
+    // recording — the one a re-attached execution would still be writing to.
+    // ids.last() predates the DESC flip and resolved the OLDEST match (#1458).
+    return ids.first();
 }
 
 Result<QString> ExperimentRunBridge::startFromEvent( const ExecutionEvent &event,

@@ -305,7 +305,13 @@ void ExperimentStore::close()
 {
     if ( !m_impl )
         return;
+    // Take the same mutex every query holds: closing the sqlite handle under
+    // an in-flight statement would crash its step loop (#1450). The mutex
+    // lives in m_impl, so release it before deleting — destroying a locked
+    // QMutex (via the locker) is undefined behavior.
+    QMutexLocker lock( &m_impl->mutex );
     sqlite3_close( m_impl->db );
+    lock.unlock();
     delete m_impl;
     m_impl = nullptr;
     m_storePath.clear();
@@ -1200,6 +1206,13 @@ sicnu::data::Result<ExperimentStore::RunCursorPage> ExperimentStore::listRunsByC
         page.nextCursor = sicnu::data::QueryCursor::encode(
             { experimentId, datasetVersionId, status, QString::number( createdMs ), runId } );
     }
+    if ( stmt.stepFailed() )
+        // A mid-scan step ERROR (CORRUPT/IOERR) must be checked BEFORE the
+        // exhaustion rule: a short page from a failed scan would clear the
+        // cursor and end the walk as "done", silently dropping the tail of
+        // the table (#1449).
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     if ( int( page.runs.size() ) < limit )
         page.nextCursor.clear(); // exhausted: the walk terminates cleanly
     return ResultT::success( page );
@@ -2233,9 +2246,6 @@ sicnu::data::Result<QVector<PromotionRecord>> ExperimentStore::promotionsForMode
     QVector<PromotionRecord> records;
     while ( stmt.stepRow() )
     {
-        if ( stmt.stepFailed() )
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
-                                                stmt.error( m_impl->db ) ) );
         const auto record = PromotionRecord::fromJson(
             QJsonDocument::fromJson( stmt.text( 0 ).toUtf8() ).object() );
         // Promotion evidence must answer for every row the store knows: a
@@ -2249,6 +2259,12 @@ sicnu::data::Result<QVector<PromotionRecord>> ExperimentStore::promotionsForMode
                     .arg( modelId ) ) );
         records.append( record.value() );
     }
+    // Checked AFTER the loop: inside it stepRow() has already returned ROW,
+    // so the old in-body test could never fire and a mid-scan step ERROR
+    // (CORRUPT/IOERR) silently truncated the promotion evidence (#1449).
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( records );
 }
 
@@ -2514,9 +2530,6 @@ sicnu::data::Result<QVector<BenchmarkResult>> ExperimentStore::benchmarkResultsF
     QVector<BenchmarkResult> rows;
     while ( stmt.stepRow() )
     {
-        if ( stmt.stepFailed() )
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
-                                                stmt.error( m_impl->db ) ) );
         const auto parsed = BenchmarkResult::fromJson( textToJson( stmt.text( 0 ) ) );
         // Same contract as promotionsForModel: unreadable stored results
         // refuse the listing instead of quietly vanishing from it.
@@ -2527,6 +2540,11 @@ sicnu::data::Result<QVector<BenchmarkResult>> ExperimentStore::benchmarkResultsF
                     .arg( benchmarkId ) ) );
         rows.append( parsed.value() );
     }
+    // Same repair as promotionsForModel: the check belongs after the loop,
+    // where a step ERROR (not ROW/DONE) is actually observable (#1449).
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( rows );
 }
 

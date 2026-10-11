@@ -11,6 +11,7 @@
 #include "geospatial/remote/offline_gate.h"
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/util/time_normalization.h"
+#include "platform/portable.h"
 
 #include <cpl_conv.h>
 #include <cpl_port.h>
@@ -406,7 +407,9 @@ Json::Value readJsonFile( const std::string &path )
        static_cast<std::uintmax_t>( statBuffer.st_size ) > kMaxCatalogJsonBytes )
     throw GeoError( ErrorCode::InvalidMetadata,
                     "readJsonFile: file exceeds the size cap; refusing to read: " + path );
-  std::ifstream in( path, std::ios::binary );
+  // Same path dialect as the fabric writers (mirror.cpp): a narrow open
+  // fails on non-ASCII catalog paths that VSI handles fine (#1456).
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in )
     throw GeoError( ErrorCode::OpenFailed, "readJsonFile: cannot open " + path );
   std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
@@ -425,9 +428,10 @@ bool isItemShape( const Json::Value &json )
          json["assets"].isObject();
 }
 
-// --- VSI path helpers (portable; std::filesystem is off the table here —
-// the host GCC 16 snapshot breaks its declaration through common include
-// orders, and GDAL VSI is the transport this layer already owns) ----------
+// --- VSI path helpers (portable; these helpers stay clear of
+// std::filesystem — the host GCC 16 snapshot breaks its declaration through
+// common include orders, and GDAL VSI is the transport this layer already
+// owns; stream reads open through pathFromUtf8 like mirror.cpp) ----------
 
 /// Lexical path cleanup: collapses '.'/'..' and duplicate separators.
 /// Purely textual — no filesystem access, no symlink resolution.

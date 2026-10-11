@@ -198,6 +198,22 @@ std::string wideToUtf8( const wchar_t *text )
     return utf8;
 }
 
+/// Drive-absolute or rooted program ("C:\\x", "\\\\srv\\share\\x", "\\x"):
+/// the spawn passes it through untouched, so every pre-spawn probe must too
+/// (never anchored at the working directory).
+bool isDriveAbsolute( const std::wstring &candidate )
+{
+    if ( candidate.empty() )
+        return false;
+    if ( candidate[0] == L'\\' )
+        return true; // rooted (also covers \\?\ and UNC after joins)
+    if ( candidate.size() < 3 )
+        return false;
+    const wchar_t drive = candidate[0];
+    const bool letter = ( drive >= L'a' && drive <= L'z' ) || ( drive >= L'A' && drive <= L'Z' );
+    return letter && candidate[1] == L':' && ( candidate[2] == L'\\' || candidate[2] == L'/' );
+}
+
 /// Resolves the spawn's application to an ABSOLUTE path with the current
 /// directory excluded from the search (#1380). When lpApplicationName is
 /// null, Windows re-parses the first command-line token and its search
@@ -213,17 +229,6 @@ std::wstring resolveWindowsProgram( const std::string &program,
                                     const std::string &workingDirectory )
 {
     const std::wstring wide = utf8ToWide( program );
-    const auto isDriveAbsolute = []( const std::wstring &candidate ) {
-        if ( candidate.empty() )
-            return false;
-        if ( candidate[0] == L'\\' )
-            return true; // rooted (also covers \\?\ and UNC after joins)
-        if ( candidate.size() < 3 )
-            return false;
-        const wchar_t drive = candidate[0];
-        const bool letter = ( drive >= L'a' && drive <= L'z' ) || ( drive >= L'A' && drive <= L'Z' );
-        return letter && candidate[1] == L':' && ( candidate[2] == L'\\' || candidate[2] == L'/' );
-    };
     if ( isDriveAbsolute( wide ) )
         return wide;
     if ( program.find( '/' ) != std::string::npos
@@ -439,9 +444,15 @@ bool drainPipe( HANDLE pipe, BoundedSink &sink )
     return false; // pipe closed (child exited)
 }
 
-} // namespace
-
-bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::string &error )
+/// run()'s pre-spawn gate (#1460): same checks as the advisory
+/// validateArgv(), except a RELATIVE program is probed where the spawn
+/// resolves it — anchored at the request's working directory
+/// (resolveWindowsProgram builds workingDirectory/program for
+/// CreateProcessW). validateArgv() deliberately keeps the host-cwd probe
+/// (its documented diagnostics contract); gating run() on that refused
+/// spawns that would have succeeded.
+bool validateArgvAnchored( const std::vector<std::string> &argv,
+                           const std::string &workingDirectory, std::string &error )
 {
     if ( argv.empty() || argv.front().empty() )
     {
@@ -505,7 +516,14 @@ bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::s
     }
     else
     {
-        const DWORD attributes = ::GetFileAttributesW( utf8ToWide( program ).c_str() );
+        // Mirror resolveWindowsProgram's anchoring decision (#1460): a
+        // relative program is probed under the child's working directory;
+        // without one the spawn inherits the host cwd, and so does the probe.
+        const std::string probe =
+            ( workingDirectory.empty() || isDriveAbsolute( utf8ToWide( program ) ) )
+                ? program
+                : workingDirectory + "/" + program;
+        const DWORD attributes = ::GetFileAttributesW( utf8ToWide( probe ).c_str() );
         if ( attributes == INVALID_FILE_ATTRIBUTES || ( attributes & FILE_ATTRIBUTE_DIRECTORY ) )
         {
             error = "program '" + program + "' is not an executable file";
@@ -513,6 +531,16 @@ bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::s
         }
     }
     return true;
+}
+
+} // namespace
+
+bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::string &error )
+{
+    // Advisory diagnostics (header contract): argv[0] as the PARENT sees it.
+    // No working directory here, so a relative program anchors at the host
+    // cwd exactly as before.
+    return validateArgvAnchored( argv, std::string(), error );
 }
 
 ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &request )
@@ -523,9 +551,9 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     // Workspace effect policy (#757): identical gate to POSIX, refuses
     // BEFORE anything is spawned.
     // The policy gate runs BEFORE program validation (#1380): a relative
-    // argv[0] containing ".." is a path fragment, and validateArgv would
-    // otherwise probe it against the HOST cwd and report "not executable"
-    // instead of the typed policy refusal.
+    // argv[0] containing ".." is a path fragment, and the program probe
+    // would otherwise report "not executable" instead of the typed policy
+    // refusal.
     {
         const std::string escape = workspaceEffectEscape( request );
         if ( !escape.empty() )
@@ -537,7 +565,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     }
 
     std::string programError;
-    if ( !validateArgv( request.argv, programError ) )
+    // Anchored gate (#1460): the probe resolves a relative argv[0] the way
+    // resolveWindowsProgram will at spawn time (request working directory,
+    // host cwd without one), not the advisory host-cwd probe validateArgv()
+    // reports on.
+    if ( !validateArgvAnchored( request.argv, request.workingDirectory, programError ) )
     {
         result.error = programError;
         return result;
@@ -935,6 +967,54 @@ bool drainFd( int fd, BoundedSink &sink )
 
 // workspaceEffectEscape moved to the shared section above
 
+/// run()'s pre-spawn gate (#1460): same checks as the advisory
+/// validateArgv(), except a RELATIVE program is probed where the spawn
+/// resolves it — the child chdir()s into the request's working directory
+/// before exec, so the probe anchors there too. validateArgv()
+/// deliberately keeps the host-cwd probe (its documented diagnostics
+/// contract); gating run() on that refused spawns that would have
+/// succeeded.
+bool validateArgvAnchored( const std::vector<std::string> &argv,
+                           const std::string &workingDirectory, std::string &error )
+{
+    if ( argv.empty() || argv.front().empty() )
+    {
+        error = "argv must start with a program name";
+        return false;
+    }
+    const std::string &program = argv.front();
+    if ( program.find( '/' ) == std::string::npos )
+    {
+        // Resolved via PATH at exec time; verify presence now for diagnostics.
+        const char *path = std::getenv( "PATH" );
+        const std::string searchPath = path ? path : "/usr/bin:/bin";
+        const auto executable = []( const std::string &candidate ) {
+            return ::access( candidate.c_str(), X_OK ) == 0;
+        };
+        if ( !programInSearchPath( program, searchPath, ':', executable ) )
+        {
+            error = "program '" + program + "' not found in PATH";
+            return false;
+        }
+    }
+    else
+    {
+        // The child chdir()s into workingDirectory before exec; probe the
+        // anchored path. Without a working directory the child inherits the
+        // host cwd, and so does the probe.
+        const std::string probe =
+            ( workingDirectory.empty() || PathPolicy::isAbsolute( program ) )
+                ? program
+                : workingDirectory + "/" + program;
+        if ( ::access( probe.c_str(), X_OK ) != 0 )
+        {
+            error = "program '" + program + "' is not executable";
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 bool programInSearchPath( const std::string &program, const std::string &searchPath,
@@ -963,32 +1043,10 @@ bool programInSearchPath( const std::string &program, const std::string &searchP
 
 bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::string &error )
 {
-    if ( argv.empty() || argv.front().empty() )
-    {
-        error = "argv must start with a program name";
-        return false;
-    }
-    const std::string &program = argv.front();
-    if ( program.find( '/' ) == std::string::npos )
-    {
-        // Resolved via PATH at exec time; verify presence now for diagnostics.
-        const char *path = std::getenv( "PATH" );
-        const std::string searchPath = path ? path : "/usr/bin:/bin";
-        const auto executable = []( const std::string &candidate ) {
-            return ::access( candidate.c_str(), X_OK ) == 0;
-        };
-        if ( !programInSearchPath( program, searchPath, ':', executable ) )
-        {
-            error = "program '" + program + "' not found in PATH";
-            return false;
-        }
-    }
-    else if ( ::access( program.c_str(), X_OK ) != 0 )
-    {
-        error = "program '" + program + "' is not executable";
-        return false;
-    }
-    return true;
+    // Advisory diagnostics (header contract): argv[0] as the PARENT sees it.
+    // No working directory here, so a relative program anchors at the host
+    // cwd exactly as before.
+    return validateArgvAnchored( argv, std::string(), error );
 }
 
 ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &request )
@@ -1001,9 +1059,9 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     // roots). Manifest constants cannot bypass it — the resolved values are
     // what get checked.
     // The policy gate runs BEFORE program validation (#1380): a relative
-    // argv[0] containing ".." is a path fragment, and validateArgv would
-    // otherwise probe it against the HOST cwd and report "not executable"
-    // instead of the typed policy refusal.
+    // argv[0] containing ".." is a path fragment, and the program probe
+    // would otherwise report "not executable" instead of the typed policy
+    // refusal.
     {
         const std::string escape = workspaceEffectEscape( request );
         if ( !escape.empty() )
@@ -1015,7 +1073,10 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     }
 
     std::string programError;
-    if ( !validateArgv( request.argv, programError ) )
+    // Anchored gate (#1460): the child chdir()s into the request's working
+    // directory before exec, so a relative argv[0] is probed there — not
+    // against the host cwd the advisory validateArgv() reports on.
+    if ( !validateArgvAnchored( request.argv, request.workingDirectory, programError ) )
     {
         result.error = programError;
         return result;

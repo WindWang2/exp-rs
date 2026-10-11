@@ -822,3 +822,110 @@ TEST_CASE( "an acquire fault at the model provider boundary fails truthfully "
   CHECK( catalog.unregister( "fault8-acquire-model" ) );
   CHECK( catalog.models().size() == before );
 }
+
+TEST_CASE( "#1455: recycling a zombie session still held by an ensemble member "
+           "keeps the replacement's device reservation",
+           "[models][pool][issue1455]" )
+{
+  RegistryReset reset;
+  auto &registry = ModelRuntimeRegistry::instance();
+
+  ModelHardwareCapabilities hw;
+  hw.cudaAvailable = true;
+  hw.cudaDeviceCount = 1;
+  hw.vramBudgetMb = 100;
+  const HardwarePin pin( hw );
+  registry.vramLedger().reset();
+  // 64 MiB: the standing 32 MiB reservation must leave room that an 80 MiB
+  // outsider cannot take even after the eviction valve frees the cached
+  // replacement — 100 MiB let the valve make room and admit it.
+  registry.vramLedger().setCapacity( 0, 64 );
+
+  // GPU session that dies for good on demand — the Track 13 "external worker
+  // gone, restart budget exhausted" shape the registry recycles on.
+  auto dead = std::make_shared<std::atomic<bool>>( false );
+  auto constructions = std::make_shared<std::atomic<int>>( 0 );
+  struct ZombieGpuSession final : IModelRuntime
+  {
+    ZombieGpuSession( std::shared_ptr<std::atomic<bool>> dead,
+                      std::shared_ptr<std::atomic<int>> constructions )
+        : m_dead( std::move( dead ) ), m_constructions( std::move( constructions ) )
+    {
+      m_constructions->fetch_add( 1 );
+    }
+    std::string framework() const override { return "zombiefw"; }
+    std::string backendName() const override { return "zombie-gpu-fake"; }
+    std::string deviceName() const override { return "cuda"; }
+    std::string artifactPath() const override { return "zombie-1455-fixture"; }
+    cv::Mat infer( const cv::Mat &blob ) override { return blob.clone(); }
+    bool permanentlyUnavailable() const override { return m_dead->load(); }
+    std::shared_ptr<std::atomic<bool>> m_dead;
+    std::shared_ptr<std::atomic<int>> m_constructions;
+  };
+  registry.registerProvider(
+    "zombiefw",
+    [ dead, constructions ]( const ModelInfo &, const ModelHardwareCapabilities &,
+                             std::string * ) -> ModelRuntimePtr {
+      return std::make_shared<ZombieGpuSession>( dead, constructions );
+    } );
+
+  QTemporaryDir dir;
+  const QString artifact = dir.filePath( QStringLiteral( "zombie-1455.bin" ) );
+  {
+    QFile f( artifact );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "weights-zombie-1455" ) );
+  }
+  ModelInfo model;
+  model.name = "zombie-1455";
+  model.id = "zombie-1455";
+  model.framework = "zombiefw";
+  model.readiness = ModelReadiness::Ready;
+  model.runtime.gpu = true;
+  model.runtime.estimatedVramMb = 32;
+  model.resolvedArtifactPath = artifact.toStdString();
+  model.contentDigest = "digest-zombie-1455";
+
+  std::string error;
+  auto held = registry.acquire( model, RequestedDevice::cuda( 0 ), &error );
+  REQUIRE( held );
+  CHECK( constructions->load() == 1 );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 32 );
+
+  // The worker dies for good while the ensemble member (model_ensemble.cpp
+  // MemberRun.session) still holds the shared_ptr — the corpse outlives its
+  // cache entry arbitrarily long.
+  dead->store( true );
+
+  auto replacement = registry.acquire( model, RequestedDevice::cuda( 0 ), &error );
+  REQUIRE( replacement );
+  INFO( "error: " << error );
+  CHECK( constructions->load() == 2 ); // the recycle rebuilt the session
+  CHECK( replacement != held );
+  CHECK( registry.cachedSessionCount() == 1 );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 32 );
+
+  // The member releases the corpse AFTER the replacement was booked: the
+  // corpse's late #1160 deleter must unwind only its own (#1455) ticket.
+  // Erasing the shared identity key here read reservedMb == 0 for a device
+  // the replacement physically occupies — the over-admission hole.
+  held.reset();
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 32 );
+  for ( const auto &state : registry.deviceReport() )
+    if ( state.index == 0 )
+    {
+      CHECK( state.reservedMb == 32 );
+      CHECK( state.holders == 1 );
+    }
+
+  // Over-admission refusal (an 80 MiB outsider against the standing 32 MiB)
+  // needs an ENFORCED capacity: on a GPU-less host the registry's device
+  // refresh resets capacity to 0 = unenforced (device_planner.cpp "never
+  // refused"), so that half is only runnable on a real CUDA lane. The
+  // ledger-identity regression this case pins (the ticket survival around
+  // held.reset()) is fully covered above without it.
+
+  replacement.reset();
+  registry.releaseAll();
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
+}

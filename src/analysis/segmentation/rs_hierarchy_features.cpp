@@ -32,10 +32,13 @@ RsFeatureMatrixResult RsHierarchyFeatures::buildFeatureMatrix(
         return result;
     }
 
-    const auto stats = RsSegmentFeatures::extract( rasterPath, segMap, bandIndices );
+    QString extractError;
+    const auto stats = RsSegmentFeatures::extract( rasterPath, segMap, bandIndices, {}, {}, &extractError );
     if ( stats.isEmpty() )
     {
-        result.errorMessage = QStringLiteral( "buildFeatureMatrix: feature extraction failed" );
+        result.errorMessage = extractError.isEmpty()
+                                  ? QStringLiteral( "buildFeatureMatrix: feature extraction was cancelled" )
+                                  : QStringLiteral( "buildFeatureMatrix: feature extraction failed — %1" ).arg( extractError );
         return result;
     }
 

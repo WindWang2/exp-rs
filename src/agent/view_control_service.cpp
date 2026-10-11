@@ -102,11 +102,11 @@ ViewControlService::ViewControlService( sicnu::display::QgisDisplayManager *disp
 
 ViewControlService::~ViewControlService()
 {
+  // The band belongs to the canvas scene: deleteLater (never a bare delete)
+  // keeps removal out of any in-progress scene iteration, and the QPointer
+  // guard makes this a no-op when the canvas died first (#1448).
   if ( m_roiRubberBand )
-  {
-    delete m_roiRubberBand;
-    m_roiRubberBand = nullptr;
-  }
+    m_roiRubberBand->deleteLater();
 }
 
 void ViewControlService::setDisplayManager( sicnu::display::QgisDisplayManager *dm )
@@ -118,9 +118,13 @@ void ViewControlService::setMapCanvas( QgsMapCanvas *canvas )
 {
   if ( m_canvas != canvas )
   {
+    // #1448: the old band lives in the OLD canvas's scene — hide it now so
+    // it stops painting immediately, and let deferred deletion reclaim it
+    // instead of a bare delete.
     if ( m_roiRubberBand )
     {
-      delete m_roiRubberBand;
+      m_roiRubberBand->hide();
+      m_roiRubberBand->deleteLater();
       m_roiRubberBand = nullptr;
     }
     m_canvas = canvas;
@@ -670,9 +674,12 @@ Json::Value ViewControlService::setRoi( const Json::Value &params )
       }
     }
 
+    // #1448: hide before the deferred delete so the replaced band cannot be
+    // painted once more by the refresh below.
     if ( m_roiRubberBand )
     {
-      delete m_roiRubberBand;
+      m_roiRubberBand->hide();
+      m_roiRubberBand->deleteLater();
       m_roiRubberBand = nullptr;
     }
     m_roiRubberBand = new QgsRubberBand( m_canvas, Qgis::GeometryType::Polygon );
@@ -697,9 +704,12 @@ Json::Value ViewControlService::clearRoi( const Json::Value & )
   return executeOnGuiThread( [&]() -> Json::Value {
     Json::Value result( Json::objectValue );
 
+    // #1448: hide before the deferred delete — the refresh below must not
+    // repaint a band awaiting deletion.
     if ( m_roiRubberBand )
     {
-      delete m_roiRubberBand;
+      m_roiRubberBand->hide();
+      m_roiRubberBand->deleteLater();
       m_roiRubberBand = nullptr;
     }
     m_lastRoiWkt.clear();

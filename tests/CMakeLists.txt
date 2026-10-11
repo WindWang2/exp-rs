@@ -420,7 +420,19 @@ sicnu_add_io_test(test_io_roundtrip_matrix)
 sicnu_add_io_test(test_io_cog)
 sicnu_add_io_test(test_io_stac)
 sicnu_add_io_test(test_io_multidim)
+# #1468: netcdf is an optional DRIVER dependency, but these suites link it
+# directly. A bare find_library leaves the NOTFOUND literal in
+# target_link_libraries and the io targets fail at LINK time with cryptic
+# errors — refuse at configure time with an actionable message instead.
 find_library(NETCDF_LIBRARY NAMES netcdf)
+if(NOT NETCDF_LIBRARY)
+  message(FATAL_ERROR
+    "netcdf not found, but test_io_multidim / test_io_roundtrip_matrix / "
+    "test_io_subdataset_inventory / test_io_fabric_multidim_11 link it "
+    "directly. Install the netcdf development package (libnetcdf-dev, "
+    "netcdf, or vcpkg port) or set NETCDF_LIBRARY to a found library, "
+    "then reconfigure.")
+endif()
 target_link_libraries(test_io_multidim PRIVATE ${NETCDF_LIBRARY})
 target_link_libraries(test_io_roundtrip_matrix PRIVATE ${NETCDF_LIBRARY})
 sicnu_add_io_test(test_io_products)
@@ -555,7 +567,6 @@ sicnu_add_io_test(test_io_cog_options)
 # write-back (validated, read-back verified, manifest continuity).
 sicnu_add_io_test(test_io_vector_interchange)
 sicnu_add_io_test(test_io_subdataset_inventory)
-find_library(NETCDF_LIBRARY NAMES netcdf)
 target_link_libraries(test_io_subdataset_inventory PRIVATE ${NETCDF_LIBRARY})
 sicnu_add_io_test(test_io_metadata_patch)
 # 11.0 GDAL version/capability matrix: feature detection, corrupt/truncated
@@ -593,8 +604,7 @@ endif()
 # 11.0 multidim planning/execution (netCDF-authored oracle, driver-gated).
 sicnu_add_io_test(test_io_fabric_multidim_11)
 target_include_directories(test_io_fabric_multidim_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-find_library(NETCDF_LIBRARY_11 NAMES netcdf)
-target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY_11})
+target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY})
 # 11.0 access-pattern-driven prefetch (WP F).
 sicnu_add_io_test(test_io_fabric_locality_11)
 target_include_directories(test_io_fabric_locality_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -638,9 +648,6 @@ sicnu_add_io_test(test_io_fabric_operators)
 target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
 sicnu_link_jsoncpp(test_io_fabric_operators)
-if(WIN32)
-  target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
-endif()
 
 # Geospatial I/O benchmark harness (Phase 15): run manually —
 #   benchmark_io --out benchmarks/io-foundation-4.json
@@ -3560,7 +3567,8 @@ target_link_libraries(test_dataset_version_migration PRIVATE Sicnu::dataset SQLi
 
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
-target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
+# removeSample fault-injection regression (#1457) arms the registry directly.
+target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3 sicnu_runtime)
 
 # Foundation 5.0 deterministic splits + leakage audit + patch generator
 # known-answer tests (ADR 0136, goal §19/§51).
@@ -12700,6 +12708,27 @@ target_include_directories(test_radiometric_state PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_radiometric_state)
+
+# R8 #1450: cross-module radiometric vocabulary contract — every
+# operator-written SICNU_RADIOMETRIC_STATE token pins against the single
+# platform vocabulary (EO + SAR + derived + manifest spellings). Links
+# sicnu_core (RadiometricState methods) and sicnu_processing (the writer
+# constants the contract pins).
+qt_add_executable(test_radiometric_vocabulary_contract
+  test_radiometric_vocabulary_contract.cpp
+)
+target_link_libraries(test_radiometric_vocabulary_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_core
+  sicnu_processing
+)
+target_include_directories(test_radiometric_vocabulary_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_radiometric_vocabulary_contract)
 
 # 6S-style LUT atmospheric correction: closed-form inversion truth, physics
 # invariants, DOS2 hand-worked arithmetic, sentinel discipline.

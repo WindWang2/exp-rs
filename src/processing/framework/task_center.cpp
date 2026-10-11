@@ -88,6 +88,26 @@ void unlinkScratchOutputs( const QStringList &paths )
     }
 }
 
+/// Per-task log ring (#1454): logBuffer had no truncation anywhere, so a
+/// chatty operator under frequent progress snapshots deep-copied an
+/// ever-growing QStringList on every queueTaskUpdatedLocked (O(n^2) copies
+/// and unbounded session memory). Keep the newest kTaskLogKeep lines,
+/// trimming in batches so the amortized append stays O(1); the marker line
+/// records each elision so the buffer stays honest evidence. All appends
+/// run under m_mutex.
+constexpr int kTaskLogKeep = 2000;
+constexpr int kTaskLogTrimAt = 2 * kTaskLogKeep;
+void appendTaskLogLocked( QStringList &buffer, const QString &message )
+{
+    buffer.append( message );
+    if ( buffer.size() > kTaskLogTrimAt )
+    {
+        const int excess = buffer.size() - kTaskLogKeep;
+        buffer.erase( buffer.begin(), buffer.begin() + excess );
+        buffer.prepend( QStringLiteral( "[%1 earlier log line(s) elided]" ).arg( excess ) );
+    }
+}
+
 } // namespace
 
 /// 12.0: parse descriptor agentMetadata.execution into AdmissionDims. Shared
@@ -400,7 +420,7 @@ void TaskCenter::shutdown()
             info.errorMessage = wasCancelling ? QStringLiteral( "Canceled during shutdown" )
                                               : QStringLiteral( "Canceled: application is shutting down" );
             info.endTime = QDateTime::currentDateTimeUtc();
-            info.logBuffer.append( info.errorMessage );
+            appendTaskLogLocked( info.logBuffer, info.errorMessage );
             m_taskFingerprints.remove( id );
             m_taskFingerprintParams.remove( id );
             m_taskChainedEdges.remove( id );
@@ -1678,7 +1698,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
         info.outputLayerPath = findOutputPathInParams( params );
 
-        info.logBuffer.append( QString( QStringLiteral( "[%1] Task queued with priority %2." ) )
+        appendTaskLogLocked( info.logBuffer, QString( QStringLiteral( "[%1] Task queued with priority %2." ) )
                                  .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ) )
                                  .arg( static_cast<int>( priority ) ) );
 
@@ -2718,7 +2738,7 @@ void TaskCenter::processNextQueuedTasks()
         setTaskStatusLocked( task, TaskStatus::Dispatching );
         if ( task.workerOriginated )
             traceTaskEvent( "admission", "transient_child", entry.taskId, task.algorithmId );
-        task.logBuffer.append(
+        appendTaskLogLocked( task.logBuffer,
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
             .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
             .arg( static_cast<int>( profile ) ) );
@@ -2760,7 +2780,7 @@ void TaskCenter::processNextQueuedTasks()
                 launch.executor = processing::makeIsolatedWorkerExecutor( task.algorithmId );
                 launch.hasExecutor = true;
                 launch.isolated = true;
-                task.logBuffer.append(
+                appendTaskLogLocked( task.logBuffer,
                     QStringLiteral( "[%1] Routed to an isolated worker process." )
                         .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) ) );
             }
@@ -2792,7 +2812,7 @@ void TaskCenter::processNextQueuedTasks()
         if ( it->status == TaskStatus::Queued )
         {
             setTaskStatusLocked( *it, TaskStatus::WaitingResource );
-            it->logBuffer.append( QStringLiteral( "Waiting for resources (admission held)." ) );
+            appendTaskLogLocked( it->logBuffer, QStringLiteral( "Waiting for resources (admission held)." ) );
             updatePipelineForTaskLocked( id );
             queueTaskUpdatedLocked( id );
         }
@@ -2826,7 +2846,7 @@ void TaskCenter::processNextQueuedTasks()
                  && it->autoDispatch && it->jobId.empty() )
             {
                 setTaskStatusLocked( *it, TaskStatus::WaitingResource );
-                it->logBuffer.append( QStringLiteral( "Waiting for resources (admission held)." ) );
+                appendTaskLogLocked( it->logBuffer, QStringLiteral( "Waiting for resources (admission held)." ) );
                 updatePipelineForTaskLocked( head.taskId );
                 queueTaskUpdatedLocked( head.taskId );
             }
@@ -2997,6 +3017,7 @@ void TaskCenter::flushPendingLaunches()
         }
 
         bool mapped = false;
+        bool finalizeCanceled = false;
         std::string jobToCancel;
         {
             QMutexLocker reLock( &m_mutex );
@@ -3017,7 +3038,15 @@ void TaskCenter::flushPendingLaunches()
                         // won't deliver a record if mapping is removed.
                         setTaskStatusLocked( m_tasks[launch.taskId], TaskStatus::Canceled );
                         m_tasks[launch.taskId].endTime = QDateTime::currentDateTimeUtc();
+                        // Detached from the engine's record stream, so this seam is the
+                        // finalizer: mirror the sibling close-out paths
+                        // (dispatchPendingCancels / enforceCancelDeadlines) which also
+                        // settle the pipeline state and let completion callbacks fire —
+                        // without them a pipeline whose last task was canceled in the
+                        // submit window never reaches all-terminal and waiters strand (#1454).
+                        updatePipelineForTaskLocked( launch.taskId );
                         queueTaskUpdatedLocked( launch.taskId );
+                        finalizeCanceled = true;
                     }
                 }
                 else
@@ -3035,6 +3064,15 @@ void TaskCenter::flushPendingLaunches()
         if ( !jobToCancel.empty() )
         {
             sicnu::jobs::JobEngine::instance().cancel( jobToCancel );
+        }
+        if ( finalizeCanceled )
+        {
+            // Both take m_mutex internally (non-recursive), so they run outside the
+            // lock — same ordering as dispatchPendingCancels: signals first, then
+            // exactly-once callbacks (the detached mapping makes a late engine
+            // record a foreign-job no-op, so no one else can fire them).
+            flushPendingSignals();
+            fireTaskCompletionCallbacks( launch.taskId );
         }
         if ( mapped )
         {
@@ -3083,7 +3121,7 @@ void TaskCenter::appendTaskLog( long taskId, const QString &message )
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
             return;
-        m_tasks[taskId].logBuffer.append( message );
+        appendTaskLogLocked( m_tasks[taskId].logBuffer, message );
         queueTaskLogLocked( taskId, message );
     }
     flushPendingSignals();
@@ -3121,7 +3159,7 @@ void TaskCenter::markTaskCompleted( long taskId,
         // one funnel for all terminal transitions.
         m_tasks[taskId].progressPercentage = 1.0;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
-        m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task completed successfully." ) )
+        appendTaskLogLocked( m_tasks[taskId].logBuffer, QString( QStringLiteral( "[%1] Task completed successfully." ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ) ) );
 
         if ( m_tasks[taskId].outputLayerPath.isEmpty() && !results.isEmpty() )
@@ -3264,7 +3302,7 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
             setTaskStatusLocked( info, TaskStatus::Cancelling );
             ensureWatchdogStartedLocked();
             jobCancelTargets.emplace_back( info.jobId, targetId );
-            info.logBuffer.append( isUserRoot
+            appendTaskLogLocked( info.logBuffer, isUserRoot
                                      ? QStringLiteral( "Cancellation requested by user." )
                                      : QStringLiteral( "Cancellation requested due to upstream parent task %1." ).arg( upstreamCause ) );
         }
@@ -3275,7 +3313,7 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
                                   ? QStringLiteral( "Task canceled" )
                                   : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause );
             info.endTime = QDateTime::currentDateTimeUtc();
-            info.logBuffer.append( isUserRoot
+            appendTaskLogLocked( info.logBuffer, isUserRoot
                                      ? QStringLiteral( "Task canceled by user." )
                                      : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause ) );
             cascadeCanceledIds.append( targetId );
@@ -3325,7 +3363,7 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
                     info.cancelReason = reason;
                 info.errorMessage = strandedReason;
                 info.endTime = QDateTime::currentDateTimeUtc();
-                info.logBuffer.append( strandedReason );
+                appendTaskLogLocked( info.logBuffer, strandedReason );
                 // Drop the listener map immediately — waiting for
                 // clearCompletedTasks leaked jobId→taskId for the lifetime of
                 // the terminal task entry.
@@ -3438,7 +3476,7 @@ void TaskCenter::enforceCancelDeadlines()
                                     "Cancel watchdog: no terminal worker record within %1 ms." )
                                     .arg( m_cancelWatchdogMs );
             info.endTime = QDateTime::currentDateTimeUtc();
-            info.logBuffer.append(
+            appendTaskLogLocked( info.logBuffer,
                 QString( QStringLiteral( "[%1] %2" ) )
                     .arg( info.endTime.toString( QStringLiteral( "hh:mm:ss" ) ),
                           info.errorMessage ) );
@@ -3586,7 +3624,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             // dropped when the task was staged/dispatched, so a fresh serial
             // is required or the retry would strand.
             pushReadyCandidateLocked( taskId );
-            info.logBuffer.append(
+            appendTaskLogLocked( info.logBuffer,
                 QString( QStringLiteral( "[%1] Transient failure — auto-retry %2/%3: %4" ) )
                     .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
                     .arg( info.autoRetryAttempts )
@@ -3625,13 +3663,13 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         traceTaskEvent( "terminal", "error", taskId, m_tasks[taskId].algorithmId, error.left( 120 ) );
         m_tasks[taskId].errorMessage = error;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
-        m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
+        appendTaskLogLocked( m_tasks[taskId].logBuffer, QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
         // 8.0 WP-D evidence: when this failure ends a retry sequence, the
         // record must say WHY the task was retried and why it stopped.
         if ( m_tasks[taskId].autoRetryAttempts > 0 )
         {
-            m_tasks[taskId].logBuffer.append(
+            appendTaskLogLocked( m_tasks[taskId].logBuffer,
                 QString( QStringLiteral( "[%1] Auto-retry budget exhausted after %2 transient failure attempt(s); failing permanently (operator errors and cancellations are never auto-retried)." ) )
                     .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ) )
                     .arg( m_tasks[taskId].autoRetryAttempts ) );
@@ -3702,7 +3740,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason, TaskCance
             m_tasks[taskId].cancelReason = cancelReason;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
-        m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] %2" ) )
+        appendTaskLogLocked( m_tasks[taskId].logBuffer, QString( QStringLiteral( "[%1] %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
         if ( !rootJobId.empty() )
             m_taskByJobId.remove( rootJobId );
@@ -3808,7 +3846,7 @@ bool TaskCenter::pauseTask( long taskId )
             QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
                                        Qt::QueuedConnection );
             setTaskStatusLocked( m_tasks[taskId], TaskStatus::Paused );
-            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
+            appendTaskLogLocked( m_tasks[taskId].logBuffer, QStringLiteral( "Task paused." ) );
             updatePipelineForTaskLocked( taskId );
             queueTaskUpdatedLocked( taskId );
             ok = true;
@@ -3835,7 +3873,7 @@ bool TaskCenter::resumeTask( long taskId )
                                            Qt::QueuedConnection );
             }
             setTaskStatusLocked( m_tasks[taskId], TaskStatus::Running );
-            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task resumed." ) );
+            appendTaskLogLocked( m_tasks[taskId].logBuffer, QStringLiteral( "Task resumed." ) );
             updatePipelineForTaskLocked( taskId );
             queueTaskUpdatedLocked( taskId );
             ok = true;
@@ -4209,7 +4247,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
 
             info.outputLayerPath = findOutputPathInParams( params );
 
-            info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
+            appendTaskLogLocked( info.logBuffer, QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
                                      .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
                                            QString::fromStdString( stepId ) ) );
 

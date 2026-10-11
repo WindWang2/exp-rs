@@ -325,14 +325,15 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteSegmentation(
         payload.bounds = object.bounds;
         sample.payload() = payload;
 
-        if ( !object.geometryWkt.isEmpty() )
-        {
-            SourceAssetRef assetRef;
-            assetRef.assetId = source.assetId;
-            assetRef.revision = source.revision;
-            assetRef.role = QStringLiteral( "segmentation" );
-            sample.sourceAssets().append( assetRef );
-        }
+        // Provenance is mandatory (header contract): a bounds-only object
+        // (geometryWkt empty) is still derived from the producing asset, so
+        // the source ref attaches unconditionally like promoteClassification
+        // (#1449) instead of only when a polygon was carried.
+        SourceAssetRef assetRef;
+        assetRef.assetId = source.assetId;
+        assetRef.revision = source.revision;
+        assetRef.role = QStringLiteral( "segmentation" );
+        sample.sourceAssets().append( assetRef );
 
         samples.append( sample );
         if ( !object.classCode.isEmpty() )

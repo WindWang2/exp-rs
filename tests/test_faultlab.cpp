@@ -1560,3 +1560,69 @@ TEST_CASE( "fault lab: scenario loader rejects out-of-width seeds instead of tru
         CHECK( result.value.fixtureSeed == 0u );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Regression — transform param type gates (#1447)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "fault lab: transforms refuse mistyped params with typed errors", "[faultlab]" )
+{
+    // asString() on an unvalidated param throws on arrays/objects (and
+    // silently stringifies numbers on newer jsoncpp); a malformed param must
+    // arrive as faultlab.fault_unsupported_params and leave the grid alone.
+    SECTION( "band_role_swap with a numeric role" )
+    {
+        FaultGrid grid = indexPairGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["role_a"] = 5;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( grid.bands[0].role == "red" );
+        CHECK( grid.bands[1].role == "nir" );
+    }
+    SECTION( "band_role_swap with an array role" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["role_b"] = Json::arrayValue;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "omit_quality_mask with a numeric role" )
+    {
+        FaultGrid grid = qualityMaskedGrid();
+        FaultSpec spec;
+        spec.familyId = "omit_quality_mask";
+        spec.params["role"] = 3;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( grid.bands.size() == 3 );
+    }
+    SECTION( "wrong_scale_offset with an array role" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = Json::arrayValue;
+        spec.params["gain"] = 2.0;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( grid.bands[0].samples[0] == Catch::Approx( 0.1 ) );
+    }
+    SECTION( "wrong_scale_offset with a string gain" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = "2";
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( grid.bands[0].samples[0] == Catch::Approx( 0.1 ) );
+    }
+}

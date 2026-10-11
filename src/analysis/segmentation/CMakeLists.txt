@@ -16,8 +16,10 @@ target_sources(qgis_analysis PRIVATE
     rs_roi_labeler.cpp
 )
 target_include_directories(qgis_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-# ToolPathManager (OTB discovery) lives under src/processing.
+# ToolPathManager (OTB discovery) lives under src/processing; math_utils and
+# other processing headers are included src-root relative (no ../../ escapes).
 target_include_directories(qgis_analysis PRIVATE ${CMAKE_SOURCE_DIR}/src/processing)
+target_include_directories(qgis_analysis PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(qgis_analysis PRIVATE sicnu_processing)
 # QColor is part of the public RsClassRaster / RsClassDef paint API (palette writeback).
 # Gui is already required transitively by classification headers that expose QColor.

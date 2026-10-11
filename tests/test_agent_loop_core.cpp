@@ -282,6 +282,58 @@ TEST_CASE( "journal appends monotonically and evicts oldest beyond the bound", "
     REQUIRE( journal.size() == 4 );
 }
 
+TEST_CASE( "journal eviction keeps the newest goal_normalization decision",
+           "[agent_loop][core]" )
+{
+    // The goal-consistency guard on resume rebuilds the session goal from
+    // the NEWEST goal_normalization decision — normally the session's FIRST
+    // entry, i.e. the first victim of a plain front-eviction (#1463).
+    SessionJournal journal( "sess-goal-pin", 4 );
+    DecisionRecord normalization = makeDecision( stages::kGoalNormalization, "goal pinned" );
+    normalization.inputs = Json::Value( Json::objectValue );
+    normalization.inputs["goal"] = "map flood extent";
+    journal.append( "decision", stages::kGoalNormalization, Json::Value( Json::objectValue ), 100,
+                    normalization );
+    for ( int i = 0; i < 10; ++i )
+        journal.append( "note", stages::kExecute, Json::Value( static_cast<Json::Int>( i ) ),
+                        200 + i );
+
+    // Bounded, but the normalization record survived the churn.
+    REQUIRE( journal.size() == 4 );
+    bool hasGoalRecord = false;
+    for ( const auto &entry : journal.entries() )
+    {
+        if ( entry.decision && entry.decision->stage == stages::kGoalNormalization
+             && entry.decision->inputs["goal"].asString() == "map flood extent" )
+            hasGoalRecord = true;
+    }
+    REQUIRE( hasGoalRecord );
+    REQUIRE( journal.entries().back().seq == 11 );
+
+    // A LATER normalization supersedes the pin (last write wins): only the
+    // newest one survives further churn.
+    DecisionRecord renormalized = makeDecision( stages::kGoalNormalization, "goal v2" );
+    renormalized.inputs = Json::Value( Json::objectValue );
+    renormalized.inputs["goal"] = "map flood extent v2";
+    journal.append( "decision", stages::kGoalNormalization, Json::Value( Json::objectValue ), 500,
+                    renormalized );
+    for ( int i = 0; i < 10; ++i )
+        journal.append( "note", stages::kExecute, Json::Value( static_cast<Json::Int>( i ) ),
+                        600 + i );
+    int normalizationCount = 0;
+    std::string lastGoal;
+    for ( const auto &entry : journal.entries() )
+    {
+        if ( entry.decision && entry.decision->stage == stages::kGoalNormalization )
+        {
+            ++normalizationCount;
+            lastGoal = entry.decision->inputs["goal"].asString();
+        }
+    }
+    CHECK( normalizationCount == 1 );
+    CHECK( lastGoal == "map flood extent v2" );
+}
+
 TEST_CASE( "journal carries decision records and round-trips them", "[agent_loop][core]" )
 {
     SessionJournal journal( "sess-dec" );

@@ -114,3 +114,40 @@ TEST_CASE( "Mahalanobis: pooled-covariance nearest class", "[classification][mah
     REQUIRE( out.at<int>( 0, 0 ) == 7 );
     REQUIRE( out.at<int>( 1, 0 ) == 42 );
 }
+
+// ─── R8 (#1461 P2): feature-dimension guard on the statistical backends ────
+// A predict matrix whose column count differs from the fitted model used to
+// over-read the class means (MinDistance) or throw a raw cv::Exception out
+// of predict (Mahalanobis) — KMeans got the guard in #405, these two did
+// not. Both must return an empty (typed-failure) mat instead.
+TEST_CASE( "Statistical backends refuse mismatched feature dimensions",
+           "[classification][min_distance][mahalanobis]" )
+{
+    cv::Mat X, y;
+    makeSeparable( X, y );
+
+    RsClassifierMinDistance md;
+    REQUIRE( md.fit( X, y ) );
+    RsClassifierMahalanobis mah;
+    REQUIRE( mah.fit( X, y ) );
+
+    // Too many columns: the accumulation loop would walk past the 1×bands
+    // class means (release-mode unchecked at<>()).
+    cv::Mat tooWide( 2, 5, CV_32F, cv::Scalar( 1.0f ) );
+    REQUIRE( md.predict( tooWide ).empty() );
+    REQUIRE( mah.predict( tooWide ).empty() );
+
+    // Too few columns: reverse over-read / gemm-dimension violation.
+    cv::Mat tooNarrow( 2, 1, CV_32F, cv::Scalar( 1.0f ) );
+    REQUIRE( md.predict( tooNarrow ).empty() );
+    REQUIRE( mah.predict( tooNarrow ).empty() );
+
+    // Matching dimension still predicts normally.
+    cv::Mat probes( 2, 2, CV_32F );
+    probes.at<float>( 0, 0 ) = 0.0f;
+    probes.at<float>( 0, 1 ) = 1.0f;
+    probes.at<float>( 1, 0 ) = 9.0f;
+    probes.at<float>( 1, 1 ) = 10.0f;
+    REQUIRE_FALSE( md.predict( probes ).empty() );
+    REQUIRE_FALSE( mah.predict( probes ).empty() );
+}

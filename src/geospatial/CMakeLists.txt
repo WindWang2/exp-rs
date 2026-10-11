@@ -77,6 +77,17 @@ target_link_libraries(sicnu_geospatial PUBLIC
     GDAL::GDAL
 )
 
+# Redirect-controlling egress transport (#1456): libcurl is already a
+# required top-level dependency (GDAL's own HTTP stack links it); the
+# guarded fetch uses it directly because CPLHTTPFetch follows redirects
+# unconditionally in the pinned GDAL and never surfaces the hops.
+if(TARGET CURL::libcurl)
+    target_link_libraries(sicnu_geospatial PUBLIC CURL::libcurl)
+else()
+    target_include_directories(sicnu_geospatial SYSTEM PUBLIC ${CURL_INCLUDE_DIRS})
+    target_link_libraries(sicnu_geospatial PUBLIC ${CURL_LIBRARIES})
+endif()
+
 # Product adapters parse Sentinel/Landsat XML with expat (already a global
 # dependency; GDAL does not re-export its own copy).
 find_package(EXPAT REQUIRED)

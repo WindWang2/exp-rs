@@ -7,6 +7,7 @@
 #include <json/reader.h>
 #include <json/writer.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -105,7 +106,28 @@ bool SessionJournal::append( const std::string &event, const std::string &stage,
     entry.decision = std::move( decision );
     mEntries.push_back( std::move( entry ) );
     while ( mEntries.size() > mMaxEntries )
-        mEntries.erase( mEntries.begin() );
+    {
+        // Size-capped eviction with ONE pin (#1463): resume's
+        // goal-consistency guard rebuilds the session goal from the NEWEST
+        // goal_normalization decision (journalledGoal, last write wins),
+        // and that record is normally the session's FIRST entry — exactly
+        // what a plain front-eviction drops first, silently disarming the
+        // spliced-session protection. The oldest normalization stays
+        // pinned unless a LATER one supersedes it; everything else evicts
+        // oldest-first as before.
+        auto victim = mEntries.begin();
+        if ( mEntries.size() > 1 && victim->decision
+             && victim->decision->stage == "goal_normalization" )
+        {
+            const bool superseded = std::any_of(
+                std::next( victim ), mEntries.end(), []( const JournalEntry & e ) {
+                    return e.decision && e.decision->stage == "goal_normalization";
+                } );
+            if ( !superseded )
+                ++victim;
+        }
+        mEntries.erase( victim );
+    }
     return true;
 }
 

@@ -70,19 +70,20 @@ int ScientificRecipeRegistry::reload()
   }
 
   std::vector<fs::path> files;
-  // Manual increment with the ec overload: the range-for's implicit ++ is
-  // the THROWING directory_iterator::operator++ — a directory deleted
-  // mid-scan would escape as filesystem_error through refreshRecipes and
-  // the default broker's static initialization (review finding on #1465).
-  for ( auto it = fs::directory_iterator( dir, ec ), end = fs::directory_iterator();
-        !ec && it != end; it.increment( ec ) )
+  // Error-code walk (#1463): the range-for form can only catch CONSTRUCTION
+  // failures — an increment error (a recipe file removed mid-scan) throws
+  // filesystem_error out of reload(), and the `if (ec) break` inside the
+  // loop body can never fire for it. Increment through the error_code
+  // overload instead; a scan race degrades to a recorded load problem plus
+  // the files collected so far, never an escaping throw.
+  for ( fs::directory_iterator it( dir, ec ), end; !ec && it != end; it.increment( ec ) )
   {
-    // ec form: a stale/deleted entry must degrade to "skipped", never throw
-    // out of the scan (#1465).
-    if ( it->is_regular_file( ec ) && !ec && it->path().extension() == ".json" )
+    std::error_code entryEc;
+    if ( it->is_regular_file( entryEc ) && !entryEc && it->path().extension() == ".json" )
       files.push_back( it->path() );
-    ec.clear();
   }
+  if ( ec )
+    mLoadProblems.push_back( "recipe directory scan interrupted: " + ec.message() );
   std::sort( files.begin(), files.end() );
 
   int loaded = 0;

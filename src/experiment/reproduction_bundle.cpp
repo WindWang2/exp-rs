@@ -173,6 +173,17 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
     const QString &runId, const ReproductionBundleOptions &options ) const
 {
     ReproductionBundleReport report;
+    if ( options.mode == ReproductionBundleOptions::Mode::Portable )
+    {
+        // Portable (capped payload copy into data/) is not implemented; a
+        // reference bundle stamped mode=portable would lie to the import side,
+        // which treats that manifest as a promise of bundled bytes. Refuse
+        // typed instead (#1450).
+        report.warnings.append(
+            QStringLiteral( "portable mode is not implemented; refusing to export a "
+                            "reference bundle stamped portable" ) );
+        return report;
+    }
     const auto runRecord = m_experimentStore.runById( runId );
     if ( !runRecord )
     {
@@ -423,10 +434,11 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
     const QString &bundleDir, const ReproductionHooks &hooks ) const
 {
     ReproductionValidation validation;
-    // The struct default is Impossible, so early exits must be tracked
-    // explicitly — an unmet check sets the flag, the default never counts
-    // as a verdict.
-    bool impossible = false;
+    // The struct default is Impossible, so an early exit must assign the
+    // verdict EXPLICITLY before returning — every bail-out below sets
+    // validation.level = Impossible (or appends its reason and lets the
+    // terminal logic decide); reaching the end is what upgrades the verdict
+    // to Exact/Partial. The default never counts as a decided verdict.
 
     // 0. Integrity first: verify checksums.txt against the bundle contents
     // BEFORE trusting any of the documents below (a tampered bundle must
@@ -502,7 +514,6 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
                 QStringLiteral( "source revision not pinned (revision = 0): identical working "
                                 "bytes at different upstream revisions share this identity" ) );
     }
-    Q_UNUSED( impossible );
     validation.reasons.append( QStringLiteral( "dataset version available, fingerprint match" ) );
 
     // 2. Model digest.

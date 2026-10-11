@@ -413,6 +413,16 @@ QgisDesktopWindow::~QgisDesktopWindow()
     m_appInterface.reset();
 #endif
     m_activeViewHost.reset();
+    // Drop the TaskCenter/temporal catalog pointers BEFORE the DataManager
+    // dies with the project context (#1454): a submit() in flight on a
+    // JobEngine thread reads m_catalog lock-free for the identity warm-up,
+    // and a destroyed DataManager would leave it dangling. TaskCenter is a
+    // process singleton that outlives this window; setCatalog(nullptr) is
+    // its documented release path. (Single-window assumption: if a second
+    // QgisDesktopWindow ever exists, the first window's close degrades the
+    // other's warm-up to null-catalog — a slowdown, not a crash.)
+    sicnu::TaskCenter::instance().setCatalog( nullptr );
+    sicnu::temporal::setWorkspaceCatalog( nullptr );
     m_projectContext.reset();
 }
 

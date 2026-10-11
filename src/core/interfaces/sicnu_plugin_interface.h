@@ -2,10 +2,11 @@
 #pragma once
 
 #include <QString>
-#include <QWidget>
 #include <QIcon>
 #include <QAction>
 #include <QList>
+
+class QWidget;
 
 class SicnuAppInterface;
 

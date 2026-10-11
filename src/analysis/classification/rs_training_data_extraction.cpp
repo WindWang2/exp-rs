@@ -3,6 +3,7 @@
 
 #include "rs_classification_utils.h"
 #include "rs_pixel_rasterizer.h"
+#include "sicnu_logging.h"
 
 #include <gdal_priv.h>
 #include <ogr_api.h>
@@ -471,6 +472,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   OGR_L_ResetReading( layer );
   OGRFeatureH feat = nullptr;
   bool cancelled = false;
+  int transformFailed = 0;
   while ( ( feat = OGR_L_GetNextFeature( layer ) ) != nullptr )
   {
     ++out.featuresRead;
@@ -497,10 +499,19 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
       if ( coordTrans )
       {
         clonedGeom = OGR_G_Clone( geom );
-        if ( OGR_G_Transform( clonedGeom, coordTrans ) == OGRERR_NONE )
+        // Fail closed (#1461): an untransformed geometry silently votes
+        // pixels in the wrong CRS (rs_roi_labeler discipline) — skip the
+        // sample and count it instead of falling back to the raw geometry.
+        if ( !clonedGeom
+             || OGR_G_Transform( clonedGeom, coordTrans ) != OGRERR_NONE )
         {
-          geomToUse = clonedGeom;
+          ++transformFailed;
+          if ( clonedGeom )
+            OGR_G_DestroyGeometry( clonedGeom );
+          OGR_F_Destroy( feat );
+          continue;
         }
+        geomToUse = clonedGeom;
       }
 
       const int wkbSize = OGR_G_WkbSize( geomToUse );
@@ -527,6 +538,15 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     out.error = RsTrainingDataResult::Error::Cancelled;
     out.errorMessage = QStringLiteral( "Cancelled" );
     return out;
+  }
+
+  // The skip count must stay visible (#1461): silent dropping was the bug.
+  if ( transformFailed > 0 )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QStringLiteral( "Skipped %1 of %2 training geometries whose reprojection to the raster CRS failed" )
+                      .arg( transformFailed )
+                      .arg( out.featuresRead ) );
   }
 
   GDALDataset *ds = openRaster( rasterPath, bands, out );
@@ -566,11 +586,12 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   {
     out.error = RsTrainingDataResult::Error::NoValidPixels;
     out.errorMessage =
-      QStringLiteral( "No valid training pixels extracted (featuresRead=%1, geometries=%2, raster=%3x%4)" )
+      QStringLiteral( "No valid training pixels extracted (featuresRead=%1, geometries=%2, raster=%3x%4, transformFailed=%5)" )
         .arg( out.featuresRead )
         .arg( geometries.size() )
         .arg( W )
-        .arg( H );
+        .arg( H )
+        .arg( transformFailed );
     GDALClose( ds );
     return out;
   }

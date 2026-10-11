@@ -533,7 +533,8 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
   {
     if ( path.trimmed().isEmpty() )
       continue;
-    QString lookupPath = path.trimmed();
+    // file:// scene inputs resolve through their local mapping (#1467).
+    QString lookupPath = QgsDataSourceResolver::localPath( path.trimmed() );
     const bool localScene = QgsDataSourceResolver::requiresLocalExistenceCheck( lookupPath );
     if ( localScene )
     {
@@ -652,6 +653,8 @@ void warmExecutionIdentityCache( sicnu::data::DataManager *dataManager,
     QString lookupPath = path.trimmed();
     if ( QgsDataSourceResolver::requiresLocalExistenceCheck( lookupPath ) )
     {
+      // file:// inputs canonicalize through their local mapping (#1467).
+      lookupPath = QgsDataSourceResolver::localPath( lookupPath );
       const QString canonical = QFileInfo( lookupPath ).canonicalFilePath();
       if ( !canonical.isEmpty() )
         lookupPath = canonical;

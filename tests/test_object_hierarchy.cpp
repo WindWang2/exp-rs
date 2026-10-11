@@ -9,6 +9,7 @@
 #include "analysis/segmentation/rs_hierarchy_features.h"
 #include "analysis/segmentation/rs_class_raster.h"
 #include "analysis/segmentation/rs_object_classify.h"
+#include "analysis/segmentation/rs_segment_features.h"
 #include "analysis/segmentation/rs_segment_map.h"
 #include "analysis/segmentation/rs_otb_segmenter.h"
 #include "analysis/segmentation/rs_majority_vote.h"
@@ -23,6 +24,7 @@
 #include <ogr_api.h>
 #include <ogr_spatialref.h>
 #include <cpl_conv.h>
+#include <limits>
 
 using Catch::Approx;
 
@@ -1005,4 +1007,65 @@ TEST_CASE( "ObjectClassify trains and predicts on synthetic matrix", "[hierarchy
     REQUIRE( r.segmentClasses.value( 2 ) == 1 );
     REQUIRE( r.segmentClasses.value( 4 ) == 2 );
 }
+
+// ─── R8 (#1461 P2): the scaler fit failure must surface as itself ──────────
+// A NaN in the TRAINING features used to be swallowed: scaler.fit returned
+// false, the unchecked return degraded the pipeline into a misleading
+// "backend training failed" (or worse, a backend fit on garbage transforms).
+TEST_CASE( "ObjectClassify refuses non-finite training features at the scaler",
+           "[hierarchy][classify][scaler]" )
+{
+    cv::Mat X( 4, 2, CV_32F );
+    X.at<float>( 0, 0 ) = 0; X.at<float>( 0, 1 ) = 0;
+    X.at<float>( 1, 0 ) = 0.1f; X.at<float>( 1, 1 ) = 0.1f;
+    X.at<float>( 2, 0 ) = 10; X.at<float>( 2, 1 ) = std::numeric_limits<float>::quiet_NaN();
+    X.at<float>( 3, 0 ) = 10.1f; X.at<float>( 3, 1 ) = 9.9f;
+    QVector<quint32> ids = { 1, 2, 3, 4 };
+    QMap<quint32, int> train;
+    train[1] = 1;
+    train[3] = 2; // the NaN row is a training row
+
+    RsClassifierSvm backend;
+    auto r = RsObjectClassify::classify( X, ids, train, backend, /*enableScaling*/ true );
+    REQUIRE_FALSE( r.ok );
+    REQUIRE( r.errorMessage.contains( QLatin1String( "scaler" ) ) );
+    REQUIRE_FALSE( r.errorMessage.contains( QLatin1String( "backend training failed" ) ) );
+}
 #endif
+
+// ---------------------------------------------------------------------------
+// R8 (#1461 P2): feature-extraction failure cause must be observable.
+// A bad band index / failed read used to return an empty map with no error
+// channel — indistinguishable from cancellation and from "no segments".
+// ---------------------------------------------------------------------------
+TEST_CASE( "SegmentFeatures reports the failure cause via the error channel",
+           "[hierarchy][features][error]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString raster = writeTinyRefRaster( tmp.path() );
+    auto fine = makeFineMap();
+
+    // Band 99 does not exist in the 1-band fixture: the typed cause must
+    // name the band, not vanish into an empty result.
+    QString err;
+    const auto stats = RsSegmentFeatures::extract( raster, fine, { 1, 99 }, {}, {}, &err );
+    REQUIRE( stats.isEmpty() );
+    REQUIRE( err.contains( QStringLiteral( "band 99" ) ) );
+    REQUIRE( err.contains( QStringLiteral( "does not exist" ) ) );
+
+    // Cancellation keeps the sentinel contract: empty map, error untouched.
+    QString cancelErr;
+    const auto cancelled = RsSegmentFeatures::extract(
+        raster, fine, { 1 }, [] { return true; }, {}, &cancelErr );
+    REQUIRE( cancelled.isEmpty() );
+    REQUIRE( cancelErr.isEmpty() );
+
+    // The same cause flows through the public hierarchy feature-matrix seam.
+    RsObjectHierarchy h;
+    REQUIRE( h.setLevels( { fine }, {} ) );
+    const auto r = RsHierarchyFeatures::buildFeatureMatrix( h, raster, 0, { 1, 99 } );
+    REQUIRE_FALSE( r.ok );
+    REQUIRE( r.errorMessage.contains( QStringLiteral( "band 99" ) ) );
+    REQUIRE( r.errorMessage.contains( QStringLiteral( "does not exist" ) ) );
+}

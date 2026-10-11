@@ -33,7 +33,8 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
             *errorMessage = QStringLiteral( "ROI polygon needs at least 3 points" );
         return false;
     }
-    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( rasterPath ) && !QFileInfo::exists( rasterPath ) )
+    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( rasterPath )
+         && !QFileInfo::exists( QgsDataSourceResolver::localPath( rasterPath ) ) )
     {
         if ( errorMessage )
             *errorMessage = QStringLiteral( "Raster not found: %1" ).arg( rasterPath );
@@ -41,7 +42,8 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
     }
 
     ensureGdalInit();
-    GDALDatasetH ds = GDALOpen( rasterPath.toUtf8().constData(), GA_ReadOnly );
+    // file:// sources are checked and opened through their local mapping (#1467).
+    GDALDatasetH ds = GDALOpen( QgsDataSourceResolver::localPath( rasterPath ).toUtf8().constData(), GA_ReadOnly );
     if ( !ds )
     {
         if ( errorMessage )

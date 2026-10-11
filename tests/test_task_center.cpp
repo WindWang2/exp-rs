@@ -258,6 +258,36 @@ TEST_CASE("TaskCenter - forwards operator log lines incrementally (delta notify)
     REQUIRE(log.contains(QStringLiteral("delta line three")));
 }
 
+TEST_CASE("TaskCenter - chatty task logs are ring-bounded (#1454)", "[processing][task_center]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.registerExecutor("test:log-cap", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+        Json::Value result(Json::objectValue);
+        result["output"] = "cap-done";
+        return result;
+    });
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "test:log-cap";
+    request.source = "task_panel";
+    const long taskId = sicnu::TaskCenter::instance().submitJob(request);
+    REQUIRE(taskId > 0);
+    waitForTerminalStatus( sicnu::TaskCenter::instance(), taskId );
+
+    // More lines than the ring's trim ceiling: the old buffer had NO
+    // truncation anywhere, so every queueTaskUpdatedLocked deep-copied an
+    // ever-growing QStringList (O(n^2) copies, unbounded session memory).
+    constexpr int kChatty = 6000;
+    for (int i = 0; i < kChatty; ++i)
+        sicnu::TaskCenter::instance().appendTaskLog(taskId, QStringLiteral("chatty %1").arg(i));
+
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    REQUIRE(info.logBuffer.size() <= 4000);   // bounded at the trim ceiling
+    CHECK(info.logBuffer.size() >= 2000);     // and keeps the recent window
+    CHECK(info.logBuffer.last() == QStringLiteral("chatty %1").arg(kChatty - 1));
+    CHECK(info.logBuffer.join('\n').contains(QStringLiteral("elided")));  // honest elision marker
+}
+
 TEST_CASE("TaskCenter - clearCompletedTasks also prunes the JobEngine records", "[processing][task_center][clear]") {
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();
@@ -1662,5 +1692,72 @@ TEST_CASE( "TaskCenter - In-flight cancellation during dispatch does not self-de
         REQUIRE( sicnu::isTerminalStatus( info.status ) );
     }
     engine.waitUntilIdleForTests();
+}
+
+TEST_CASE( "TaskCenter - cancel in the launch submit window settles the pipeline and fires the completion callback once (#1454)",
+           "[processing][task_center][cancellation][issue1454]" )
+{
+    auto &tc = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers( 2 );
+
+    // Long enough that the executor can never complete before the cancel lands,
+    // so every interleaving of the race below must end in Canceled.
+    engine.registerExecutor( "callable:ux1454_cancel_window",
+                             []( const sicnu::jobs::JobRequest &,
+                                 sicnu::operators::RSOperatorContext & ) {
+                                 std::this_thread::sleep_for( std::chrono::milliseconds( 200 ) );
+                                 return Json::Value( Json::objectValue );
+                             } );
+
+    // Single-step pipeline: canceling the root task's launch races the flush
+    // thread between job pre-registration and the post-submit remap. A cancel
+    // landing inside that window detaches the job mapping, so TaskCenter itself
+    // is the finalizer — the pipeline must still reach all-terminal and the
+    // completion callback must still fire exactly once (#1454).
+    for ( int i = 0; i < 20; ++i )
+    {
+        sicnu::workflow::WorkflowDefinition def;
+        def.id = "ux1454_cancel_window_pipeline";
+        def.title = "Cancel Window Pipeline";
+        sicnu::workflow::StepDef step;
+        step.id = "root";
+        step.title = "Root";
+        step.kind = sicnu::workflow::StepKind::Operator;
+        step.operatorId = "callable:ux1454_cancel_window";
+        def.steps = { step };
+
+        const long pipeId = tc.submitPipeline( def, /*autoLoad=*/false );
+        REQUIRE( pipeId > 0 );
+        const long stepTaskId = tc.getPipelineInfo( pipeId ).stepToTaskId["root"];
+        REQUIRE( stepTaskId > 0 );
+
+        std::atomic<int> completions{ 0 };
+        tc.addTaskCompletionCallback(
+            stepTaskId, [&completions]( const sicnu::AlgorithmTaskInfo & ) {
+                completions.fetch_add( 1 );
+            } );
+
+        tc.cancelTask( stepTaskId );
+
+        for ( int attempt = 0; attempt < 400
+                            && !tc.getPipelineInfo( pipeId ).isCompleted;
+              ++attempt )
+        {
+            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        }
+
+        const auto pipe = tc.getPipelineInfo( pipeId );
+        const auto info = tc.getTaskInfo( stepTaskId );
+        REQUIRE( sicnu::isTerminalStatus( info.status ) );
+        REQUIRE( info.status == sicnu::TaskStatus::Canceled );
+        REQUIRE( pipe.isCompleted );
+        REQUIRE( pipe.isFailed );
+        REQUIRE( completions.load() == 1 );
+    }
+    engine.waitUntilIdleForTests();
+    engine.clearExecutors();
 }
 

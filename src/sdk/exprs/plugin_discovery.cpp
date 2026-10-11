@@ -167,6 +167,11 @@ bool tryCachedManifest( const Json::Value &index, const std::string &dir,
     const Json::Value &entry = index[dir];
     if ( !entry.isObject() || !entry.isMember( "mtime" ) || !entry.isMember( "manifest" ) )
         return false;
+    // The index is a cache file anything on the machine can rewrite, so a
+    // non-integral "mtime" must read as a cache miss (re-parse below), not
+    // throw out of asInt64() and kill the scan (#1447).
+    if ( !entry["mtime"].isInt64() )
+        return false;
     if ( modificationTicks( manifestPath ) != entry["mtime"].asInt64() )
         return false;
     // Entries written before the fingerprint existed carry no "content"

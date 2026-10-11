@@ -5,6 +5,8 @@
 #include "core/qgsdatasourceresolver.h"
 
 #include <QString>
+#include <QFile>
+#include <QTemporaryDir>
 
 TEST_CASE( "QgsDataSourceResolver classifies local file paths as LocalFile", "[core][datasource_resolver]" )
 {
@@ -147,3 +149,66 @@ TEST_CASE( "QgsDataSourceResolver kindToString round-trips", "[core][datasource_
     CHECK( QgsDataSourceResolver::kindToString( QgsDataSourceKind::OgrConnectionString ) == QStringLiteral( "OgrConnectionString" ) );
     CHECK( QgsDataSourceResolver::kindToString( QgsDataSourceKind::RemoteUri ) == QStringLiteral( "RemoteUri" ) );
 }
+
+// ---------------------------------------------------------------------------
+// R8 (#1467): file:// URLs are local files in URI form. The LocalFile
+// classification must be deliberate, and the existence-check/open path must
+// go through localPath() — QFile::exists on the raw URL always fails, which
+// made agent tools reject file:///C:/a.tif inputs.
+// ---------------------------------------------------------------------------
+TEST_CASE( "QgsDataSourceResolver classifies file:// URLs as LocalFile", "[core][datasource_resolver]" )
+{
+    CHECK( QgsDataSourceResolver::classify( QStringLiteral( "file:///C:/data/a.tif" ) ) == QgsDataSourceKind::LocalFile );
+    CHECK( QgsDataSourceResolver::classify( QStringLiteral( "file:///tmp/a.tif" ) ) == QgsDataSourceKind::LocalFile );
+    CHECK( QgsDataSourceResolver::classify( QStringLiteral( "file://server/share/a.tif" ) ) == QgsDataSourceKind::LocalFile );
+    CHECK( QgsDataSourceResolver::classify( QStringLiteral( "FILE:///C:/data/a.tif" ) ) == QgsDataSourceKind::LocalFile );
+    // A colon-bearing POSIX filename is NOT a file URL — only the scheme
+    // spelling file:// is treated as a URI.
+    CHECK( QgsDataSourceResolver::classify( QStringLiteral( "file:backup.tif" ) ) == QgsDataSourceKind::LocalFile );
+    CHECK( QgsDataSourceResolver::requiresLocalExistenceCheck( QStringLiteral( "file:///C:/data/a.tif" ) ) );
+}
+
+TEST_CASE( "QgsDataSourceResolver localPath maps file URLs to openable paths", "[core][datasource_resolver]" )
+{
+    // Identity for plain paths (every kind except file://).
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "C:/data/a.tif" ) ) == QStringLiteral( "C:/data/a.tif" ) );
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "/vsimem/x.tif" ) ) == QStringLiteral( "/vsimem/x.tif" ) );
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "https://example.com/a.tif" ) ) == QStringLiteral( "https://example.com/a.tif" ) );
+
+    // Windows drive URL -> plain drive path (on Windows; QUrl keeps the
+    // leading slash on other platforms — both forms stay openable/fail-closed
+    // locally).
+#ifdef Q_OS_WIN
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///C:/data/a.tif" ) ) == QStringLiteral( "C:/data/a.tif" ) );
+#else
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///C:/data/a.tif" ) ) == QStringLiteral( "/C:/data/a.tif" ) );
+#endif
+    // POSIX URL -> plain POSIX path.
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///tmp/a.tif" ) ) == QStringLiteral( "/tmp/a.tif" ) );
+    // Percent escapes decode.
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///C:/my%20data/a.tif" ) ) == QStringLiteral( "C:/my data/a.tif" ) );
+    // Named authority -> UNC form (Windows share addressable by QFile/GDAL).
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://server/share/a.tif" ) ) == QStringLiteral( "//server/share/a.tif" ) );
+    // Scheme is case-insensitive.
+#ifdef Q_OS_WIN
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "FILE:///C:/data/a.tif" ) ) == QStringLiteral( "C:/data/a.tif" ) );
+#endif
+
+#ifdef Q_OS_WIN
+    // The defect this closes (#1467): the raw URL never exists, the mapped
+    // path does. QFile::exists must be given the mapping at every call site.
+    QTemporaryDir tmp;
+    if ( tmp.isValid() )
+    {
+        const QString probe = tmp.path() + QStringLiteral( "/probe.tif" );
+        QFile f( probe );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "x" );
+        f.close();
+        const QString asUrl = QStringLiteral( "file:///" ) + probe;
+        CHECK( !QFile::exists( asUrl ) );
+        CHECK( QFile::exists( QgsDataSourceResolver::localPath( asUrl ) ) );
+    }
+#endif
+}
+

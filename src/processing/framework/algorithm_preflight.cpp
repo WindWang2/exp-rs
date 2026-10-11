@@ -94,18 +94,20 @@ Json::Value probeRasterDataset( const std::string &path )
   info["path"] = path;
 
   const QString qpath = QString::fromStdString( path );
+  // file:// sources are checked and opened through their local mapping (#1467).
+  const QString qlocalPath = QgsDataSourceResolver::localPath( qpath );
   const bool requiresLocal = QgsDataSourceResolver::requiresLocalExistenceCheck( qpath );
 
   if ( requiresLocal )
   {
     std::error_code ec;
-    const bool exists = std::filesystem::exists( path, ec ) && !ec;
+    const bool exists = std::filesystem::exists( qlocalPath.toStdString(), ec ) && !ec;
     info["exists"] = exists;
     if ( !exists )
       return info;
 
     GdalDatasetWrapper ds;
-    if ( !ds.open( qpath ) )
+    if ( !ds.open( qlocalPath ) )
     {
       info["openError"] = ds.lastError().toStdString();
       return info;
@@ -274,7 +276,8 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       if ( QgsDataSourceResolver::requiresLocalExistenceCheck( qpath ) )
       {
         std::error_code ec;
-        info["exists"] = std::filesystem::exists( path, ec ) && !ec;
+        info["exists"] = std::filesystem::exists(
+          QgsDataSourceResolver::localPath( qpath ).toStdString(), ec ) && !ec;
       }
       else
       {
