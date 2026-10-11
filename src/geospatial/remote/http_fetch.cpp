@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <cstdio>
 #include <mutex>
@@ -388,9 +389,18 @@ size_t guardedBodySink( char *ptr, size_t size, size_t nmemb, void *userdata )
   return chunk;
 }
 
+/// Header collection state: the map plus the name of the most recently
+/// RECEIVED header (an obs-fold continuation appends there — rbegin() would
+/// be the alphabetically-largest key, not the latest arrival).
+struct GuardedHeaders
+{
+  std::map<std::string, std::string> map;
+  std::string lastName;
+};
+
 size_t guardedHeaderSink( char *buffer, size_t size, size_t nmemb, void *userdata )
 {
-  auto *headers = static_cast<std::map<std::string, std::string> *>( userdata );
+  auto *headers = static_cast<GuardedHeaders *>( userdata );
   std::string line( buffer, size * nmemb );
   while ( !line.empty() && ( line.back() == '\r' || line.back() == '\n' ) )
     line.pop_back();
@@ -398,13 +408,13 @@ size_t guardedHeaderSink( char *buffer, size_t size, size_t nmemb, void *userdat
     return size * nmemb;
   if ( line[0] == ' ' || line[0] == '\t' )
   {
-    // obs-fold continuation: append to the most recent header, if any.
-    if ( !headers->empty() )
+    // obs-fold continuation: append to the most recently received header.
+    const auto it = headers->map.find( headers->lastName );
+    if ( it != headers->map.end() )
     {
-      std::string &value = headers->rbegin()->second;
-      if ( !value.empty() )
-        value += " ";
-      value += line.substr( 1 );
+      if ( !it->second.empty() )
+        it->second += " ";
+      it->second += line.substr( 1 );
     }
     return size * nmemb;
   }
@@ -415,7 +425,8 @@ size_t guardedHeaderSink( char *buffer, size_t size, size_t nmemb, void *userdat
   std::string value = line.substr( colon + 1 );
   while ( !value.empty() && ( value.front() == ' ' || value.front() == '\t' ) )
     value.erase( value.begin() );
-  headers->emplace( name, value ); // first occurrence wins, as with CPL
+  headers->lastName = name;
+  headers->map.emplace( name, value ); // first occurrence wins, as with CPL
   return size * nmemb;
 }
 
@@ -434,6 +445,18 @@ std::string urlSchemeOf( const std::string &url )
       return std::string();
   }
   return toLower( url.substr( 0, colon ) );
+}
+
+/// Authority ([userinfo@]host[:port]) of an absolute URL; "" when absent.
+std::string urlAuthorityOf( const std::string &url )
+{
+  const std::size_t authorityAt = url.find( "://" );
+  if ( authorityAt == std::string::npos )
+    return std::string();
+  const std::size_t authorityEnd = url.find_first_of( "/?#", authorityAt + 3 );
+  return url.substr( authorityAt + 3, authorityEnd == std::string::npos
+                                       ? std::string::npos
+                                       : authorityEnd - authorityAt - 3 );
 }
 
 /// RFC 3986 §5-style resolution of a Location reference against the URL the
@@ -462,16 +485,22 @@ std::string resolveRedirectTarget( const std::string &base, const std::string &l
   const std::string basePath =
     base.substr( authorityEnd == std::string::npos ? base.size() : authorityEnd,
                  baseQuery == std::string::npos ? std::string::npos : baseQuery - ( authorityEnd == std::string::npos ? base.size() : authorityEnd ) );
+  // The reference splits into path and query BEFORE resolution: RFC 3986
+  // §5.2.4 removes dot segments from the PATH only, and a query carrying
+  // '/'-or-'.' text (signed-URL signatures do) must never be rewritten.
+  const std::size_t locQueryAt = trimmed.find( '?' );
+  const std::string locPath = locQueryAt == std::string::npos ? trimmed : trimmed.substr( 0, locQueryAt );
+  const std::string locQuery = locQueryAt == std::string::npos ? std::string() : trimmed.substr( locQueryAt );
   std::string path;
-  if ( !trimmed.empty() && trimmed[0] == '/' )
-    path = trimmed; // absolute-path
-  else if ( !trimmed.empty() && trimmed[0] == '?' )
-    return scheme + "://" + authority + ( basePath.empty() ? "/" : basePath ) + trimmed;
+  if ( !locPath.empty() && locPath[0] == '/' )
+    path = locPath; // absolute-path
+  else if ( locPath.empty() && !locQuery.empty() )
+    return scheme + "://" + authority + ( basePath.empty() ? "/" : basePath ) + locQuery;
   else
   {
     // same-directory relative: everything after the last '/'
     const std::size_t lastSlash = basePath.rfind( '/' );
-    path = basePath.substr( 0, lastSlash == std::string::npos ? 0 : lastSlash + 1 ) + trimmed;
+    path = basePath.substr( 0, lastSlash == std::string::npos ? 0 : lastSlash + 1 ) + locPath;
   }
   // Lexical dot-segment removal (RFC 3986 §5.2.4), bounded.
   std::vector<std::string> segments;
@@ -499,7 +528,7 @@ std::string resolveRedirectTarget( const std::string &base, const std::string &l
     normalized += ( normalized.empty() ? "" : "/" ) + segment;
   if ( normalized.empty() || normalized[0] != '/' )
     normalized = "/" + normalized;
-  return scheme + "://" + authority + normalized;
+  return scheme + "://" + authority + normalized + locQuery;
 }
 
 /// The redirect-controlling transport. Mirrors fetchImpl's contract (typed
@@ -515,12 +544,19 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
   const std::uintmax_t budget =
     options.maxResponseBytes == 0 ? kDefaultHttpMaxResponseBytes : options.maxResponseBytes;
   std::string current = remote.target;
+  std::string currentAuthority = urlAuthorityOf( current );
   std::vector<std::string> hopChain;
   // Method semantics mirror libcurl's auto-follow: 303 (and the historical
   // 301/302 after a body-carrying request) degrades to GET; 307/308 replay
   // the method and the body verbatim. The body travels as per-hop state so
   // no hop ever re-sends what a redirect downgraded away.
   std::string postBodyThisHop = options.postBody;
+  // The wall-clock budget is WHOLE-REQUEST (the header contract of the CPL
+  // TIMEOUT): every hop and every transient retry draws from one deadline
+  // instead of re-arming a full budget per dispatch.
+  const auto deadline =
+    std::chrono::steady_clock::now() +
+    std::chrono::seconds( options.timeoutSeconds > 0 ? options.timeoutSeconds : 0 );
   for ( int hop = 0;; ++hop )
   {
     // Policy sees EVERY hop — including the first, so the predicate is the
@@ -557,12 +593,27 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
       throw GeoError( ErrorCode::NetworkError, "httpFetch: transport could not be initialized" );
     GuardedTransfer transfer;
     transfer.budget = budget;
-    std::map<std::string, std::string> headers;
+    GuardedHeaders headers;
     struct curl_slist *requestHeaders = nullptr;
+    // libcurl's auto-follow strips Authorization on cross-host redirects;
+    // the manual hop loop must do the same or a redirected request would
+    // hand the caller's bearer token to whatever host the origin names.
+    // Compared against the PREVIOUS dispatch's authority, hop by hop.
+    const std::string hopAuthority = urlAuthorityOf( current );
+    const bool dropAuthorization = !currentAuthority.empty() && hopAuthority != currentAuthority;
+    currentAuthority = hopAuthority;
     for ( const std::string &header : options.headers )
     {
-      if ( !header.empty() )
-        requestHeaders = curl_slist_append( requestHeaders, header.c_str() );
+      if ( header.empty() )
+        continue;
+      if ( dropAuthorization )
+      {
+        const std::size_t colon = header.find( ':' );
+        if ( colon != std::string::npos &&
+             toLower( header.substr( 0, colon ) ) == "authorization" )
+          continue;
+      }
+      requestHeaders = curl_slist_append( requestHeaders, header.c_str() );
     }
     if ( !options.range.empty() )
       requestHeaders =
@@ -572,8 +623,41 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     curl_easy_setopt( handle, CURLOPT_NOSIGNAL, 1L );
     curl_easy_setopt( handle, CURLOPT_USERAGENT, "SICNU-Geo-HTTP/7.0" );
     curl_easy_setopt( handle, CURLOPT_HTTPHEADER, requestHeaders );
+    // Same proxy/CA posture as the CPL transport this guards against
+    // divergence from: CPLHTTPFetch honors the GDAL_HTTP_* options the
+    // application configures globally, and an egress-guarded fetch that
+    // silently bypassed the (often enforcement-point) proxy would be the
+    // opposite of hardening.
+    if ( const char *proxy = CPLGetConfigOption( "GDAL_HTTP_PROXY", nullptr );
+         proxy != nullptr && *proxy != '\0' )
+      curl_easy_setopt( handle, CURLOPT_PROXY, proxy );
+    if ( const char *proxyAuth = CPLGetConfigOption( "GDAL_HTTP_PROXYUSERPWD", nullptr );
+         proxyAuth != nullptr && *proxyAuth != '\0' )
+      curl_easy_setopt( handle, CURLOPT_PROXYUSERPWD, proxyAuth );
+    if ( const char *caInfo = CPLGetConfigOption( "GDAL_HTTP_CAINFO", nullptr );
+         caInfo != nullptr && *caInfo != '\0' )
+      curl_easy_setopt( handle, CURLOPT_CAINFO, caInfo );
+    if ( const char *caPath = CPLGetConfigOption( "GDAL_HTTP_CAPATH", nullptr );
+         caPath != nullptr && *caPath != '\0' )
+      curl_easy_setopt( handle, CURLOPT_CAPATH, caPath );
     if ( options.timeoutSeconds > 0 )
-      curl_easy_setopt( handle, CURLOPT_TIMEOUT, static_cast<long>( options.timeoutSeconds ) );
+    {
+      const long remaining = static_cast<long>(
+        std::chrono::duration_cast<std::chrono::seconds>( deadline -
+                                                          std::chrono::steady_clock::now() )
+          .count() );
+      if ( remaining <= 0 )
+      {
+        curl_slist_free_all( requestHeaders );
+        curl_easy_cleanup( handle );
+        throw GeoError( ErrorCode::Timeout,
+                        "httpFetch: request exceeded its time budget: " + uri.display() );
+      }
+      curl_easy_setopt( handle, CURLOPT_TIMEOUT,
+                        remaining < static_cast<long>( options.timeoutSeconds )
+                          ? remaining
+                          : static_cast<long>( options.timeoutSeconds ) );
+    }
     if ( options.connectTimeoutSeconds > 0 )
       curl_easy_setopt( handle, CURLOPT_CONNECTTIMEOUT,
                         static_cast<long>( options.connectTimeoutSeconds ) );
@@ -601,14 +685,14 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
       --attemptsLeft;
       transfer = GuardedTransfer{};
       transfer.budget = budget;
-      headers.clear();
+      headers = GuardedHeaders{}; // fresh map AND fresh last-name for the fold
       code = curl_easy_perform( handle );
     }
     long status = 0;
     curl_easy_getinfo( handle, CURLINFO_RESPONSE_CODE, &status );
     std::string location;
-    const auto locationIt = headers.find( "location" );
-    if ( locationIt != headers.end() )
+    const auto locationIt = headers.map.find( "location" );
+    if ( locationIt != headers.map.end() )
       location = locationIt->second;
     curl_slist_free_all( requestHeaders );
     curl_easy_cleanup( handle );
@@ -619,7 +703,7 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
       fetch.displayUrl = uri.display();
       fetch.httpStatus = static_cast<int>( status );
       fetch.reachedServer = true; // an answer was streaming when the budget hit
-      fetch.headers = std::move( headers );
+      fetch.headers = std::move( headers.map );
       fetch.body = std::move( transfer.body );
       fetch.sizeGuardHit = true;
       fetch.truncated = true;
@@ -653,8 +737,8 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     HttpFetchResult fetch;
     fetch.displayUrl = uri.display();
     fetch.httpStatus = static_cast<int>( status );
-    fetch.reachedServer = status > 0 || !headers.empty() || !transfer.body.empty();
-    fetch.headers = std::move( headers );
+    fetch.reachedServer = status > 0 || !headers.map.empty() || !transfer.body.empty();
+    fetch.headers = std::move( headers.map );
     fetch.body = std::move( transfer.body );
     // Exactly-budget bodies are reported truncated (header contract,
     // conservative and truthful — same as the CPL path).

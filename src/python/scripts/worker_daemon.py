@@ -109,6 +109,10 @@ class SicnuMapCanvasProxy:
                 self._s.settimeout(_proxy_recv_timeout_s())
                 data = self._s.recv(4096)
             except socket.timeout:
+                # Bounded wait (#1462): returns the SAME sentinel the pre-fix
+                # path produced after the host's whole-request timeout closed
+                # the socket - plugin code keeps reading it as "host did not
+                # answer" ({} here / None in activeLayer).
                 sys.stderr.write(
                     "WorkerDaemon: proxy canvas.get_state timed out waiting for the host\n"
                 )
@@ -225,6 +229,7 @@ class SicnuPythonIface:
                 self._s.settimeout(_proxy_recv_timeout_s())
                 data = self._s.recv(4096)
             except socket.timeout:
+                # Same bounded-wait sentinel doctrine as canvas.get_state.
                 sys.stderr.write(
                     "WorkerDaemon: proxy catalog.get_active_layer timed out waiting for the host\n"
                 )

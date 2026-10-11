@@ -74,6 +74,13 @@ struct HttpFetchOptions
     /// unconditionally and never surfaces intermediate hops), which is why
     /// the guarded path runs on libcurl directly. Unset → the historical
     /// CPL transport, unchanged byte for byte.
+    ///
+    /// Guarded-transport semantics kept at parity with the CPL path: the
+    /// wall-clock timeoutSeconds is a WHOLE-REQUEST budget shared by every
+    /// hop and retry; GDAL_HTTP_PROXY / GDAL_HTTP_PROXYUSERPWD /
+    /// GDAL_HTTP_CAINFO / GDAL_HTTP_CAPATH are honored per hop; and
+    /// Authorization headers are dropped on cross-host hops exactly as
+    /// libcurl's auto-follow would.
     std::function<std::string( const std::string &hopUrl )> redirectGuard;
 };
 
