@@ -10,6 +10,7 @@
 
 #include "../data/execution_fingerprint.h"
 #include "../data/query_cursor.h"
+#include "runtime/observability/fault_point.h"
 #include "annotation.h"
 #include "label_schema.h"
 #include "sample.h"
@@ -469,35 +470,61 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
     if ( *status != DatasetVersionStatus::Draft )
         return Result::failure( notDraft( versionId.toString() ) );
 
-    // #1171: the delete must take the sample's facet rows with it — every
-    // facet query reads sample_facets with no join to samples, so orphaned
-    // rows kept counting ghosts in facetDistribution / crossCounts / names
-    // forever (the write side guards orphans in setSampleFacets; the delete
-    // side never mirrored that).
-    StoreStmt facetStmt( m_impl->db, QStringLiteral(
-        "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
-    if ( !facetStmt )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           facetStmt.error( m_impl->db ) ) );
-    facetStmt.bind( 1, versionId.toString() );
-    facetStmt.bind( 2, sampleId.toString() );
-    if ( !facetStmt.step() )
+    // #1171 + #1457: the delete must take the sample's facet rows with it —
+    // every facet query reads sample_facets with no join to samples, so
+    // orphaned rows kept counting ghosts in facetDistribution / crossCounts /
+    // names forever. Both deletes run in ONE transaction (dataset_store.h:10):
+    // the base row goes first so a missing sample reports not_found with the
+    // facets untouched (rollback), and a failed facet delete rolls the base
+    // row back instead of leaving the #1171 half-applied state.
+    if ( !m_impl->begin( nullptr ) )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           facetStmt.error( m_impl->db ) ) );
+                                           QStringLiteral( "cannot begin transaction" ) ) );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "DELETE FROM samples WHERE dataset_version_id=? AND sample_id=?" ) );
     if ( !stmt )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                            stmt.error( m_impl->db ) ) );
+    }
     stmt.bind( 1, versionId.toString() );
     stmt.bind( 2, sampleId.toString() );
     if ( !stmt.step() )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            stmt.error( m_impl->db ) ) );
+    }
     if ( stmt.changes( m_impl->db ) != 1 )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
                                            QStringLiteral( "sample %1 not in version %2" )
                                                .arg( sampleId.toString(), versionId.toString() ) ) );
+    }
+    StoreStmt facetStmt( m_impl->db, QStringLiteral(
+        "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
+    if ( !facetStmt )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           facetStmt.error( m_impl->db ) ) );
+    }
+    facetStmt.bind( 1, versionId.toString() );
+    facetStmt.bind( 2, sampleId.toString() );
+    // Injected facet-delete failure (test-only arming): routes through the
+    // REAL failure branch — rollback — so the already-executed base-row
+    // delete is undone and the store keeps the sample whole (#1457).
+    if ( !facetStmt.step() || SICNU_FAULT_POINT( "dataset_store.remove_sample" ) )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           facetStmt.error( m_impl->db ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit failed" ) ) );
     return Result::success();
 }
 
