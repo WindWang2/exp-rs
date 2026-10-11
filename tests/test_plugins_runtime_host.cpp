@@ -343,3 +343,63 @@ TEST_CASE( "installManifestContributionsFor copies the record under the lock (is
                  "test:ext_echo-copy" )
              != nullptr );
 }
+
+TEST_CASE( "a different plugin cannot re-register an owned operator id (#1462)",
+           "[plugins][host][ownership]" )
+{
+    // Binary-path twin of installPluginOperator's manifest doctrine: first
+    // registration wins. Before the guard, plugin B re-registering A's
+    // operator overwrote the factory while the entry kept A's owner id —
+    // a silent hijack whose later revoke of A deleted B's registration.
+    auto &host = sicnu::plugins::PluginRuntimeHost::instance();
+    const std::string opId = "test:r8_owned_op";
+    const std::string ownerA = "org.test.r8-owner-a";
+    const std::string ownerB = "org.test.r8-owner-b";
+    struct RevokeAtEnd
+    {
+        ~RevokeAtEnd()
+        {
+            sicnu::plugins::PluginRuntimeHost::instance().revokePlugin( "org.test.r8-owner-a" );
+        }
+    } cleanup;
+
+    int callsA = 0;
+    int callsB = 0;
+    int callsA2 = 0;
+    auto factoryA = [&callsA]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+        ++callsA;
+        return nullptr;
+    };
+    auto factoryB = [&callsB]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+        ++callsB;
+        return nullptr;
+    };
+    auto factoryA2 = [&callsA2]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+        ++callsA2;
+        return nullptr;
+    };
+
+    REQUIRE( host.registerOperatorFactory( ownerA, opId, factoryA ) );
+
+    // The hijack attempt is refused, not silently accepted.
+    REQUIRE_FALSE( host.registerOperatorFactory( ownerB, opId, factoryB ) );
+
+    // The refusal left the owner's registration untouched: the entry still
+    // resolves to A's factory, and B's factory was never installed.
+    auto resolved = host.resolveOperatorFactory( opId );
+    REQUIRE( resolved != nullptr );
+    resolved();
+    // >= 1, not == 1: the registration machinery legitimately PROBES the
+    // factory while building descriptors; the discriminating facts are that
+    // B's factory never ran and A's did.
+    CHECK( callsA >= 1 );
+    CHECK( callsB == 0 );
+    CHECK( host.isPluginOperator( opId ) );
+
+    // The OWNER may re-register — the #755 reload path lands here.
+    REQUIRE( host.registerOperatorFactory( ownerA, opId, factoryA2 ) );
+    auto updated = host.resolveOperatorFactory( opId );
+    REQUIRE( updated != nullptr );
+    updated();
+    CHECK( callsA2 >= 1 );
+}

@@ -580,6 +580,19 @@ HttpFetchOptions StacClient::fetchOptions() const
   options.maxRetries = mOptions.maxRetries;
   options.maxResponseBytes = mOptions.maxResponseBytes;
   options.acceptContentTypes = { "json" };
+  if ( mOptions.blockPrivateNetworks )
+  {
+    // #1456: the policy must hold on EVERY redirect hop, not only the URLs
+    // this process typed. CPLHTTPFetch follows redirects internally (no
+    // option disables it in the pinned GDAL), so the fetch flips to the
+    // redirect-controlling transport with this per-hop verdict. assertEgress
+    // Allowed keeps firing first for hop 1 (stable refusal strings, URL
+    // details); this guard covers hops 2..kMaxRedirectHops with the same
+    // predicate.
+    options.redirectGuard = []( const std::string &hopUrl ) {
+      return StacClient::egressPolicyError( hopUrl );
+    };
+  }
   return options;
 }
 

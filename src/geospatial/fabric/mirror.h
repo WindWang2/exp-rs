@@ -60,7 +60,7 @@ struct MirrorOptions
     std::uint64_t maxBytes = 0;
     /// Chunks materialized per internal window (bounded memory).
     std::size_t chunkWindow = 64;
-    /// GeoTIFF creation: block size for mirrored chunks (tiles 256×256).
+    /// GeoTIFF creation: block size for mirrored chunks (tiles 256×256). Must be a positive multiple of 16 (GTiff tiling constraint); other values fail the chunk write typed.
     int blockSize = 256;
     /// Per-chunk read budget through the source reader (11.0; the previous
     /// hard-coded 256 MiB — same default, now declared).

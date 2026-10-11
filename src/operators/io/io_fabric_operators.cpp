@@ -100,6 +100,18 @@ Json::Value recordsJson( const sicnu::geo::CatalogService::SearchAllResult &resu
 
 } // namespace
 
+/// Wires workflow cancellation into the fabric walks (#1455): the io:*
+/// operators used to pass a NEVER-cancelled CancelToken, so remote STAC
+/// crawls / plans / prefetches ignored the workflow's cooperative cancel.
+/// The token's checkpoints poll the operator context's predicate instead —
+/// the same ContextProgress doctrine io_operators.cpp applies to Convert.
+sicnu::geo::CancelToken contextCancelToken( RSOperatorContext &context )
+{
+  sicnu::geo::CancelToken token;
+  token.aliasPredicate( [ &context ] { return context.isCancelled(); } );
+  return token;
+}
+
 std::string IoCatalogSearchOperator::description() const
 {
   return "Query a catalog (local STAC tree, remote STAC API) with one filter vocabulary: "
@@ -147,7 +159,7 @@ Json::Value IoCatalogSearchOperator::run( const Json::Value &params, RSOperatorC
                                       options );
     // The shared intent parser IS the query parser (one vocabulary).
     const sicnu::geo::CatalogQuery query = sicnu::geo::fabricIntentFromJson( params ).query;
-    const sicnu::geo::CancelToken cancel;
+    const sicnu::geo::CancelToken cancel = contextCancelToken( context );
     const sicnu::geo::CatalogService::SearchAllResult result = service.searchAll( query, cancel );
     Json::Value out;
     out["backend"] = sicnu::geo::catalogBackendKindName( service.info().kind );
@@ -197,7 +209,7 @@ Json::Value IoCubePlanOperator::run( const Json::Value &params, RSOperatorContex
 {
   return fabricGuarded( [ & ] {
     const sicnu::geo::FabricIntent intent = intentFrom( params );
-    const sicnu::geo::CancelToken cancel;
+    const sicnu::geo::CancelToken cancel = contextCancelToken( context );
     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
     context.reportProgressForced( 1.0, "cube plan complete" );
     return plan.toJson();
@@ -253,7 +265,7 @@ Json::Value IoCubeWindowOperator::run( const Json::Value &params, RSOperatorCont
     if ( !intent.hasWindow )
       throw sicnu::geo::GeoError( sicnu::geo::ErrorCode::InvalidArgument,
                                   "io:cube_window needs a window{x,y,w,h} object" );
-    const sicnu::geo::CancelToken cancel;
+    const sicnu::geo::CancelToken cancel = contextCancelToken( context );
     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
 
     sicnu::geo::VirtualCubeReadOptions readOptions;
@@ -338,7 +350,7 @@ Json::Value IoCachePrefetchOperator::run( const Json::Value &params, RSOperatorC
   return fabricGuarded( [ & ] {
     using namespace sicnu::operators::params;
     const sicnu::geo::FabricIntent intent = intentFrom( params );
-    const sicnu::geo::CancelToken cancel;
+    const sicnu::geo::CancelToken cancel = contextCancelToken( context );
     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
 
     sicnu::geo::PrefetchOptions options;

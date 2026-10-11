@@ -335,3 +335,63 @@ TEST_CASE( "Errors in the index are redacted", "[cli_batch]" )
     REQUIRE_FALSE( text.find( "hunter2" ) != std::string::npos );
     std::remove( index.c_str() );
 }
+
+// ---------------------------------------------------------------------------
+// #1460: an adapter envelope that says success=false WITHOUT an "error"
+// member is a failure, not an ok. The runner used to require the member,
+// booked such failures as "ok", and the batch exited 0.
+// ---------------------------------------------------------------------------
+#include "processing/framework/atomic_algorithm_registry.h"
+
+namespace
+{
+
+class FailSilentlyAdapter : public sicnu::processing::AtomicAlgorithmAdapter
+{
+  public:
+    std::string algorithmId() const override { return "rs:r8_fail_silent"; }
+    sicnu::processing::AlgorithmDescriptor descriptor() const override
+    {
+        sicnu::processing::AlgorithmDescriptor descriptor;
+        descriptor.id = "rs:r8_fail_silent";
+        descriptor.displayName = "R8 fail-silent fixture";
+        return descriptor;
+    }
+    Json::Value execute( const Json::Value &, sicnu::processing::ProgressCallback,
+                         std::function<bool()> ) override
+    {
+        Json::Value result( Json::objectValue );
+        result["success"] = false; // failed — and deliberately NO "error" member
+        return result;
+    }
+};
+
+struct AdapterGuard
+{
+    AdapterGuard()
+    {
+        sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter(
+            std::make_shared<FailSilentlyAdapter>() );
+    }
+    ~AdapterGuard()
+    {
+        sicnu::processing::AtomicAlgorithmRegistry::instance().unregisterAdapter( "rs:r8_fail_silent" );
+    }
+};
+
+} // namespace
+
+TEST_CASE( "Run: success=false without an error member is booked failed (#1460)", "[cli_batch]" )
+{
+    using namespace sicnu::cli::batch;
+    AdapterGuard guard;
+
+    const Outcome outcome = runManifest( manifestWithOperators( { "rs:r8_fail_silent" } ),
+                                         Options{}, silentCallbacks() );
+    REQUIRE( outcome.records.size() == 1 );
+    REQUIRE( outcome.records[0].status == "failed" );
+    REQUIRE( outcome.records[0].exitCode == 3 ); // ExecutionFailure
+    REQUIRE( outcome.records[0].error == "execution failed" );
+    REQUIRE_FALSE( outcome.cancelled );
+    REQUIRE( outcome.exitCode == 3 );
+}

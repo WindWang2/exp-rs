@@ -375,16 +375,6 @@ bool PluginRuntimeHost::isPluginOperator( const std::string &operatorId ) const
     return mOperators.count( operatorId ) > 0;
 }
 
-const exprs::ManifestOperator *PluginRuntimeHost::manifestOperator(
-    const std::string &operatorId ) const
-{
-    std::lock_guard<std::mutex> lock( mMutex );
-    auto iterator = mOperators.find( operatorId );
-    if ( iterator == mOperators.end() )
-        return nullptr;
-    return &iterator->second.manifest;
-}
-
 bool PluginRuntimeHost::registerOperatorFactory(
     const std::string &pluginId, const std::string &operatorId,
     std::function<std::unique_ptr<sicnu::operators::RSOperator>()> factory )
@@ -435,6 +425,17 @@ bool PluginRuntimeHost::registerOperatorFactory(
             std::make_shared<PluginOperatorAdapter>( std::move( descriptor ), pluginId, factory,
                                                      nullptr ) );
         return true;
+    }
+    if ( entry->second.pluginId != pluginId )
+    {
+        // First registration wins — the doctrine installPluginOperator's
+        // manifest path already applies. Before this guard the take-over
+        // below overwrote the factory while the entry kept the FIRST
+        // plugin's owner id: plugin B silently hijacked A's operator, and
+        // revoking A later deleted B's registration (#1462). The OWNER may
+        // re-register (the #755 reload path lands here after unload revoked
+        // nothing of the entry); a different plugin is refused.
+        return false;
     }
     entry->second.factory = factory;
     // Lease-holding wrapper for the direct RSOperatorRegistry path (#747):

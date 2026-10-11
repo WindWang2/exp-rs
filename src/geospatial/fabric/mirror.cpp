@@ -1223,9 +1223,16 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
           chunkBand.hasNoData = metadata.bands[0].hasNoData;
           chunkBand.noDataValue = metadata.bands[0].noDataValue;
           chunkBand.noDataIsNaN = metadata.bands[0].noDataIsNaN;
+          // The declared knob drives the tiles (#1456): MirrorOptions::
+          // blockSize (default 256, matching its doc) was never read while
+          // the writer hardcoded 64x64. Chunk identity is token+geometry
+          // (block size is storage detail), so already-mirrored chunks stay
+          // valid; new ones honor the declared size.
+          const int blockSize = options.blockSize > 0 ? options.blockSize : 256;
           RasterWriter writer = RasterWriter::create(
             stagedPath, sourceWindow.width, sourceWindow.height, { chunkBand },
-            { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
+            { "GTiff", { "TILED=YES", "BLOCKXSIZE=" + std::to_string( blockSize ),
+                         "BLOCKYSIZE=" + std::to_string( blockSize ) }, true } );
           // Real georeferencing: the chunk sits at its source extent in the
           // asset's own grid (a plain pixel grid would make mirrored chunks
           // un-geolocatable to direct consumers).

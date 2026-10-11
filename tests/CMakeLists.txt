@@ -420,7 +420,19 @@ sicnu_add_io_test(test_io_roundtrip_matrix)
 sicnu_add_io_test(test_io_cog)
 sicnu_add_io_test(test_io_stac)
 sicnu_add_io_test(test_io_multidim)
+# #1468: netcdf is an optional DRIVER dependency, but these suites link it
+# directly. A bare find_library leaves the NOTFOUND literal in
+# target_link_libraries and the io targets fail at LINK time with cryptic
+# errors — refuse at configure time with an actionable message instead.
 find_library(NETCDF_LIBRARY NAMES netcdf)
+if(NOT NETCDF_LIBRARY)
+  message(FATAL_ERROR
+    "netcdf not found, but test_io_multidim / test_io_roundtrip_matrix / "
+    "test_io_subdataset_inventory / test_io_fabric_multidim_11 link it "
+    "directly. Install the netcdf development package (libnetcdf-dev, "
+    "netcdf, or vcpkg port) or set NETCDF_LIBRARY to a found library, "
+    "then reconfigure.")
+endif()
 target_link_libraries(test_io_multidim PRIVATE ${NETCDF_LIBRARY})
 target_link_libraries(test_io_roundtrip_matrix PRIVATE ${NETCDF_LIBRARY})
 sicnu_add_io_test(test_io_products)
@@ -555,7 +567,6 @@ sicnu_add_io_test(test_io_cog_options)
 # write-back (validated, read-back verified, manifest continuity).
 sicnu_add_io_test(test_io_vector_interchange)
 sicnu_add_io_test(test_io_subdataset_inventory)
-find_library(NETCDF_LIBRARY NAMES netcdf)
 target_link_libraries(test_io_subdataset_inventory PRIVATE ${NETCDF_LIBRARY})
 sicnu_add_io_test(test_io_metadata_patch)
 # 11.0 GDAL version/capability matrix: feature detection, corrupt/truncated
@@ -593,8 +604,7 @@ endif()
 # 11.0 multidim planning/execution (netCDF-authored oracle, driver-gated).
 sicnu_add_io_test(test_io_fabric_multidim_11)
 target_include_directories(test_io_fabric_multidim_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-find_library(NETCDF_LIBRARY_11 NAMES netcdf)
-target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY_11})
+target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY})
 # 11.0 access-pattern-driven prefetch (WP F).
 sicnu_add_io_test(test_io_fabric_locality_11)
 target_include_directories(test_io_fabric_locality_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -638,9 +648,6 @@ sicnu_add_io_test(test_io_fabric_operators)
 target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
 sicnu_link_jsoncpp(test_io_fabric_operators)
-if(WIN32)
-  target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
-endif()
 
 # Geospatial I/O benchmark harness (Phase 15): run manually —
 #   benchmark_io --out benchmarks/io-foundation-4.json

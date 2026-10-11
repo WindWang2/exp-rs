@@ -59,9 +59,6 @@ public:
     /// operator (validated record present).
     bool isPluginOperator( const std::string &operatorId ) const;
 
-    /// Manifest declaration for a plugin operator (nullptr when unknown).
-    const exprs::ManifestOperator *manifestOperator( const std::string &operatorId ) const;
-
     /// Host-process runtime snapshot (worker liveness/generation/quota per
     /// plugin) for the conformance kit and doctor surfaces. Null when the
     /// runtime is not installed (SICNU_PLUGIN_HOST_PROCESS=off).
