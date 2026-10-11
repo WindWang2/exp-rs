@@ -42,6 +42,26 @@ class QgsProcessingFeedback;
 /// (omitted when empty).
 QVariantMap mcpStatusForTask(const sicnu::AlgorithmTaskInfo &info);
 
+/// Bounded insert with fair eviction for the server's request-tracking
+/// maps: the JUST-INSERTED entry must survive (an in-flight request has to
+/// stay cancellable; a live progress subscription must stay subscribed).
+/// QHash's begin() is arbitrary bucket order, so evicting begin() can hit
+/// the newest entry; the victim is any OTHER entry when one exists (#1452).
+/// Header-inline so the regression test compiles against the same code.
+template<typename Hash>
+void insertBoundedKeepingNewest(Hash &map, const typename Hash::key_type &key,
+                                typename Hash::mapped_type value, qsizetype limit)
+{
+    map.insert(key, std::move(value));
+    while (map.size() > limit)
+    {
+        auto victim = map.begin();
+        if (victim.key() == key && map.size() > 1)
+            victim = std::next(victim);
+        map.erase(victim);
+    }
+}
+
 class StdinReader : public QThread
 {
     Q_OBJECT

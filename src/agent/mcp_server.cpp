@@ -403,10 +403,24 @@ McpServer::~McpServer()
     {
         mReader->requestStop();
         mReader->quit();
-        if (!mReader->wait(1000) && mReader->isRunning())
+        if (!mReader->wait(1000))
         {
-            mReader->terminate();
-            mReader->wait(1000);
+            // The reader is parked in a blocking std::cin.getline that no
+            // cross-thread signal can unblock. QThread::terminate()
+            // (TerminateThread) could kill it mid-read while it holds the
+            // CRT stdin stream lock or a heap lock, leaving every later
+            // std::cin/std::cout user in this process deadlocked or worse
+            // (#1452). Abandon it instead: QThread has no detach(), so the
+            // object is deliberately released from the parent chain and
+            // NEVER deleted (deleting a running QThread is fatal) — the
+            // parked reader is inert (a line arriving after shutdown is
+            // discarded with its receiver disconnected) and the thread dies
+            // with the process.
+            qWarning("McpServer: stdin reader parked in a blocking read; "
+                     "abandoning it instead of terminating");
+            mReader->setParent(nullptr);
+            mReader->disconnect();
+            mReader = nullptr;
         }
     }
 }
@@ -983,10 +997,11 @@ void McpServer::handleRequest(const QVariantMap &request)
                 if ( executionId && !id.toString().isEmpty() )
                 {
                     // JSON-RPC 2.0 request ids may be numbers OR strings —
-                    // both must be cancellable (#644). Keep the map bounded.
-                    m_cancelledRequestTasks.insert( id.toString(), executionId->taskId() );
-                    while ( m_cancelledRequestTasks.size() > 1024 )
-                        m_cancelledRequestTasks.erase( m_cancelledRequestTasks.begin() );
+                    // both must be cancellable (#644). Keep the map bounded;
+                    // the eviction preserves the JUST-INSERTED in-flight
+                    // request (#1452), mirroring the progress map below.
+                    insertBoundedKeepingNewest( m_cancelledRequestTasks, id.toString(),
+                                                executionId->taskId(), 1024 );
 
                     // Surface-11 progress subscription: a client requesting
                     // _meta.progressToken (MCP 2024-11-05) receives
@@ -997,21 +1012,15 @@ void McpServer::handleRequest(const QVariantMap &request)
                                                        .value( QStringLiteral( "progressToken" ) );
                     if ( progressToken.isValid() && !progressToken.isNull() )
                     {
-                        m_progressSubscriptions.insert(
-                            executionId->taskId(),
+                        // Bounded like the cancel map; unsubscribed on the
+                        // terminal notification. The eviction preserves the
+                        // JUST-INSERTED live subscription (#1452).
+                        insertBoundedKeepingNewest(
+                            m_progressSubscriptions, executionId->taskId(),
                             ProgressSubscription{
                                 progressToken,
-                                sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) } );
-                        while ( m_progressSubscriptions.size() > 256 )
-                        {
-                            // Evict some OTHER entry — QHash order is
-                            // arbitrary and begin() may be the newest caller.
-                            auto victim = m_progressSubscriptions.begin();
-                            if ( victim.key() == executionId->taskId()
-                                 && m_progressSubscriptions.size() > 1 )
-                                victim = std::next( victim );
-                            m_progressSubscriptions.erase( victim );
-                        }
+                                sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) },
+                            256 );
                     }
                 }
             }

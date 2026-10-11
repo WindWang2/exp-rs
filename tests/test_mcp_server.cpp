@@ -42,6 +42,7 @@
 #include "dataset/dataset_types.h"
 #include "experiment/experiment_store.h"
 #include <QThread>
+#include <QSemaphore>
 #include <QTimer>
 #include <gdal_priv.h>
 #include <ogrsf_frmts.h>
@@ -1412,6 +1413,49 @@ TEST_CASE( "McpServer run_workflow recording handshake refuses truthfully",
     }
 }
 
+TEST_CASE( "McpServer bounded request maps keep the newest in-flight entry",
+           "[agent][mcp][unit]" )
+{
+    // The cancel map's eviction must never remove the JUST-INSERTED entry:
+    // past the 1024-entry bound an in-flight request would otherwise become
+    // uncancellable (#1452). QHash's begin() is arbitrary bucket order, so
+    // the invariant is only guaranteed by keeping the newest on purpose —
+    // pinned here deterministically instead of probabilistically through
+    // 1025 live tool calls.
+    QHash<QString, long> cancelMap;
+    for ( int i = 0; i < 2000; ++i )
+    {
+        insertBoundedKeepingNewest( cancelMap, QStringLiteral( "rpc-%1" ).arg( i ),
+                                    static_cast<long>( i ), 1024 );
+        // The invariant, checked at EVERY insert: bounded, and the newest
+        // in-flight request is still cancellable.
+        REQUIRE( cancelMap.size() <= 1024 );
+        REQUIRE( cancelMap.contains( QStringLiteral( "rpc-%1" ).arg( i ) ) );
+    }
+    REQUIRE( cancelMap.size() == 1024 );
+
+    // Degenerate limit: with one slot the eviction can only take the OLDER
+    // key — deterministic whatever QHash's bucket order is.
+    QHash<QString, long> single;
+    insertBoundedKeepingNewest( single, QStringLiteral( "first" ), 1, 1 );
+    REQUIRE( single.size() == 1 );
+    insertBoundedKeepingNewest( single, QStringLiteral( "second" ), 2, 1 );
+    REQUIRE( single.size() == 1 );
+    CHECK( single.contains( QStringLiteral( "second" ) ) );
+    CHECK( single.value( QStringLiteral( "second" ) ) == 2 );
+    CHECK( !single.contains( QStringLiteral( "first" ) ) );
+
+    // The progress map rides the same rule with a different key/value type.
+    QHash<long, long> progressMap;
+    for ( long i = 0; i < 300; ++i )
+    {
+        insertBoundedKeepingNewest( progressMap, i, i * 2, 256 );
+        REQUIRE( progressMap.size() <= 256 );
+        REQUIRE( progressMap.contains( i ) );
+    }
+    REQUIRE( progressMap.size() == 256 );
+    CHECK( progressMap.value( 299 ) == 598 );
+}
 
 TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][workflow]" )
 {
@@ -1790,6 +1834,60 @@ TEST_CASE( "MCP sandbox is default-deny when SICNU_MCP_WORKSPACE is unset", "[ag
                                              { { QStringLiteral( "path" ), QStringLiteral( "notes.txt" ) } } );
         CHECK_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
         CHECK( toolText( result ).contains( QStringLiteral( "project notes" ) ) );
+    }
+
+    SECTION( "artifact_read paging terminates at EOF (no infinite next page)" )
+    {
+        const QString bin =
+            writeFile( project.filePath( QStringLiteral( "page.bin" ) ), "0123456789" );
+        REQUIRE( !bin.isEmpty() );
+
+        // Walk every page with a small length: the loop must TERMINATE. Each
+        // response's next_offset (when present) strictly advances, and the
+        // page that consumes the last byte reports truncated=false with NO
+        // next_offset (#1452: offset==sizeBytes must not re-prompt a page).
+        qint64 offset = 0;
+        int pages = 0;
+        while ( true )
+        {
+            const QVariantMap result = callTool(
+                server, 100 + pages, QStringLiteral( "artifact_read" ),
+                { { QStringLiteral( "path" ), QStringLiteral( "page.bin" ) },
+                  { QStringLiteral( "offset" ), offset },
+                  { QStringLiteral( "length" ), 3 } } );
+            REQUIRE_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
+            const QVariantMap page = QJsonDocument::fromJson( toolText( result ).toUtf8() )
+                                          .object()
+                                          .toVariantMap();
+            ++pages;
+            // 10 bytes at 3 per page: 4 pages are enough; more = a spin.
+            REQUIRE( pages <= 4 );
+            if ( !page.value( QStringLiteral( "truncated" ) ).toBool() )
+            {
+                CHECK( !page.contains( QStringLiteral( "next_offset" ) ) );
+                break;
+            }
+            const qint64 next = page.value( QStringLiteral( "next_offset" ) ).toLongLong();
+            REQUIRE( next > offset );
+            offset = next;
+        }
+        REQUIRE( pages == 4 );
+
+        // The EOF follow-up (offset == sizeBytes) is a clean EMPTY page:
+        // length 0, truncated false, no next_offset — a paging client that
+        // asks once more cannot be told to ask again forever.
+        const QVariantMap eofResult = callTool(
+            server, 200, QStringLiteral( "artifact_read" ),
+            { { QStringLiteral( "path" ), QStringLiteral( "page.bin" ) },
+              { QStringLiteral( "offset" ), 10 },
+              { QStringLiteral( "length" ), 3 } } );
+        REQUIRE_FALSE( eofResult.value( QStringLiteral( "isError" ) ).toBool() );
+        const QVariantMap eofPage = QJsonDocument::fromJson( toolText( eofResult ).toUtf8() )
+                                         .object()
+                                         .toVariantMap();
+        CHECK( eofPage.value( QStringLiteral( "length" ) ).toInt() == 0 );
+        CHECK_FALSE( eofPage.value( QStringLiteral( "truncated" ) ).toBool() );
+        CHECK( !eofPage.contains( QStringLiteral( "next_offset" ) ) );
     }
 
     SECTION( "execution entry points reject outside paths without any configuration" )
