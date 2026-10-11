@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <QFile>
@@ -93,6 +94,14 @@ class MiniCogServer
             const int fd = ::accept( m_listenFd, nullptr, nullptr );
             if ( fd < 0 )
                 return; // listener closed → stop
+            // Bound a silent client (#1468): one stalled connection pinned
+            // the accept thread inside serveConnection's recv() forever, so
+            // ~MiniCogServer's join hung to the ctest timeout. A 30 s
+            // receive window turns that into the ordinary n <= 0 exit (same
+            // shape http_range_server's bounded receive fixed).
+            timeval recvTimeout{};
+            recvTimeout.tv_sec = 30;
+            ::setsockopt( fd, SOL_SOCKET, SO_RCVTIMEO, &recvTimeout, sizeof( recvTimeout ) );
             serveConnection( fd );
             ::close( fd );
         }
