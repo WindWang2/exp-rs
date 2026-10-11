@@ -10,10 +10,13 @@
 #include "dataset/dataset_store.h"
 #include "dataset/label_schema.h"
 #include "dataset/sample.h"
+#include "runtime/observability/fault_registry.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+
+#include <sqlite3.h>
 
 #include <limits>
 
@@ -470,6 +473,123 @@ TEST_CASE( "label schemas are immutable per (id, version)", "[dataset][label][st
     const auto loaded = store.labelSchema( schema.schemaId(), 1 );
     REQUIRE( loaded.has_value() );
     CHECK( loaded.value() == schema );
+}
+
+TEST_CASE( "removeSample is transactional: a failed facet delete rolls the sample back",
+           "[dataset][sample][store][faults]" )
+{
+    // #1457: the facet DELETE and the base-row DELETE used to run as two bare
+    // statements — a failed second delete left the #1171 half-state (facets
+    // gone, sample still counting). The fault point routes through the REAL
+    // failure branch (rollback), proving both deletes now ride one
+    // transaction.
+    QTemporaryDir dir;
+    QString versionId;
+    DatasetStore store;
+    makeStoreWithDraftVersion( store, dir, &versionId );
+    const DatasetVersionId vid =
+        DatasetVersionId::fromString( versionId ).value_or( DatasetVersionId{} );
+
+    SampleRecord sample = makePatchSample( versionId );
+    sample.setSampleId( SampleId::generate().toString() );
+    REQUIRE( store.addSamples( QVector<SampleRecord>{ sample } ).has_value() );
+    const SampleId sid = SampleId::fromString( sample.sampleId() ).value_or( SampleId{} );
+    REQUIRE( store.setSampleFacets( vid, sid,
+                                    { { QStringLiteral( "region" ),
+                                        QStringLiteral( "north" ) } } )
+                 .has_value() );
+
+    {
+        sicnu::runtime::observability::fault::ArmedFault fault(
+            { "dataset_store.remove_sample",
+              sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+        const auto failed = store.removeSample( vid, sid );
+        CHECK( !failed.has_value() );
+        CHECK( failed.diagnostics().first().code ==
+               QStringLiteral( "dataset.store_write_failed" ) );
+    }
+
+    // The rollback kept the sample WHOLE: base row and facets both survive
+    // (the old order deleted facets first, so this exact failure used to
+    // strip provenance while keeping the row).
+    const auto reloaded = store.sampleById( vid, sid );
+    REQUIRE( reloaded.has_value() );
+    CHECK( reloaded.value().sampleId() == sample.sampleId() );
+    const auto kept = store.facetDistribution( vid, QStringLiteral( "region" ), 10 );
+    REQUIRE( kept.has_value() );
+    CHECK( kept->total == 1 );
+    REQUIRE( kept->values.size() == 1 );
+    CHECK( kept->values.first().first == QStringLiteral( "north" ) );
+
+    // Disarmed, the same removal completes and takes the facets with it —
+    // no ghost counts afterwards (#1171).
+    REQUIRE( store.removeSample( vid, sid ).has_value() );
+    CHECK_FALSE( store.sampleById( vid, sid ).has_value() );
+    const auto after = store.facetDistribution( vid, QStringLiteral( "region" ), 10 );
+    REQUIRE( after.has_value() );
+    CHECK( after->total == 0 );
+    CHECK( after->values.isEmpty() );
+}
+
+TEST_CASE( "saveLabelSchema resolves a competing first write idempotently or typed",
+           "[dataset][label][store]" )
+{
+    // #1457: the old SELECT-then-INSERT raced cross-connection; a competing
+    // writer that won the PK surfaced as a bare dataset.store_write_failed.
+    // The single-statement upsert now resolves the competitor's row by
+    // CANONICAL content (#1387): same document (any serializer spelling) is
+    // idempotent, different content is the typed dataset.conflict.
+    QTemporaryDir dir;
+    QString versionId;
+    DatasetStore store;
+    makeStoreWithDraftVersion( store, dir, &versionId );
+
+    LabelSchema schema;
+    schema.setSchemaId( QStringLiteral( "0e0e0e0e-1111-4222-8333-444444444444" ) );
+    schema.setVersion( 1 );
+    LabelClass labelClass;
+    labelClass.setStableId( QStringLiteral( "0f0f0f0f-1111-4222-8333-444444444444" ) );
+    labelClass.setCode( QStringLiteral( "water" ) );
+    schema.classes().append( labelClass );
+
+    // The competitor wins the row through a RAW connection — exactly what a
+    // second process saving the same vocabulary looks like to this store —
+    // writing the SAME document with a different key order (Qt's serializer
+    // sorts keys; this spelling deliberately does not).
+    const QString competitorJson = QStringLiteral(
+        "{\"version\":1,\"classes\":[{\"code\":\"water\","
+        "\"stable_id\":\"0f0f0f0f-1111-4222-8333-444444444444\"}],"
+        "\"schema_id\":\"0e0e0e0e-1111-4222-8333-444444444444\","
+        "\"schema_version\":1}" );
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( dir.filePath( QStringLiteral( "datasets.db" ) ).toUtf8().constData(),
+                                  &raw, SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *stmt = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw,
+                                     "INSERT INTO label_schemas(schema_id, version, json, created_ms)"
+                                     " VALUES('0e0e0e0e-1111-4222-8333-444444444444', 1, ?, 0)",
+                                     -1, &stmt, nullptr ) == SQLITE_OK );
+        sqlite3_bind_text( stmt, 1, competitorJson.toUtf8().constData(), -1, SQLITE_TRANSIENT );
+        REQUIRE( sqlite3_step( stmt ) == SQLITE_DONE );
+        sqlite3_finalize( stmt );
+        sqlite3_close( raw );
+    }
+
+    // Same canonical content: idempotent success, and the stored competitor
+    // row is what reads back.
+    CHECK( store.saveLabelSchema( schema ).has_value() );
+    const auto loaded = store.labelSchema( schema.schemaId(), 1 );
+    REQUIRE( loaded.has_value() );
+    CHECK( loaded.value() == schema );
+
+    // Genuinely different content at the same (id, version): the typed
+    // conflict, never a bare write failure.
+    LabelSchema mutated = schema;
+    mutated.classes().first().setDisplayName( QStringLiteral( "Water" ) );
+    const auto conflict = store.saveLabelSchema( mutated );
+    CHECK( !conflict.has_value() );
+    CHECK( conflict.diagnostics().first().code == QStringLiteral( "dataset.conflict" ) );
 }
 
 // --- Track 13 R4 WP-D: ontology ingest is fail-fast -------------------------

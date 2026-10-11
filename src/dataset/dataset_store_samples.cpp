@@ -86,28 +86,17 @@ sicnu::data::Result<void> DatasetStore::saveLabelSchema( const LabelSchema &sche
 
     const QString json = jsonToText( schema.toJson() );
     // Published vocabularies are immutable: identical re-save is idempotent,
-    // a differing re-save of the same (id, version) is a conflict.
-    {
-        StoreStmt existing( m_impl->db, QStringLiteral(
-            "SELECT json FROM label_schemas WHERE schema_id=? AND version=?" ) );
-        if ( !existing )
-            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               existing.error( m_impl->db ) ) );
-        existing.bind( 1, schema.schemaId() );
-        existing.bind( 2, qint64( schema.version() ) );
-        if ( existing.stepRow() )
-        {
-            if ( existing.text( 0 ) == json )
-                return Result::success();
-            return Result::failure( storeDiag(
-                QStringLiteral( "dataset.conflict" ),
-                QStringLiteral( "label schema %1@%2 already exists with different content" )
-                    .arg( schema.schemaId() )
-                    .arg( schema.version() ) ) );
-        }
-    }
+    // a differing re-save of the same (id, version) is a conflict. The check
+    // and the insert are ONE statement (#1457): the old SELECT-then-INSERT
+    // was a cross-connection TOCTOU — the losing writer of a dual-process
+    // first-save hit the PK and surfaced as a bare store_write_failed
+    // instead of the typed conflict path (the shape #1390 fixed for
+    // saveSplitManifest). ON CONFLICT DO NOTHING makes the race impossible;
+    // changes()==0 means a competing row exists and the content comparison
+    // below decides idempotent vs conflict.
     StoreStmt insert( m_impl->db, QStringLiteral(
-        "INSERT INTO label_schemas(schema_id, version, json, created_ms) VALUES(?,?,?,?)" ) );
+        "INSERT INTO label_schemas(schema_id, version, json, created_ms) VALUES(?,?,?,?)"
+        " ON CONFLICT(schema_id, version) DO NOTHING" ) );
     if ( !insert )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                            insert.error( m_impl->db ) ) );
@@ -118,7 +107,32 @@ sicnu::data::Result<void> DatasetStore::saveLabelSchema( const LabelSchema &sche
     if ( !insert.step() )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            insert.error( m_impl->db ) ) );
-    return Result::success();
+    if ( insert.changes( m_impl->db ) == 1 )
+        return Result::success(); // first write won; the row is ours
+
+    StoreStmt existing( m_impl->db, QStringLiteral(
+        "SELECT json FROM label_schemas WHERE schema_id=? AND version=?" ) );
+    if ( !existing )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           existing.error( m_impl->db ) ) );
+    existing.bind( 1, schema.schemaId() );
+    existing.bind( 2, qint64( schema.version() ) );
+    if ( !existing.stepRow() || existing.stepFailed() )
+        // Cannot normally happen (the upsert just reported the row); treat
+        // as a store fault rather than guessing idempotence.
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           existing.error( m_impl->db ) ) );
+    // Canonical-content identity (#1387): the competing row may have been
+    // written by a different serializer spelling of the SAME document — the
+    // digest helper canonicalizes the parsed form, so only a genuinely
+    // different vocabulary reports a conflict.
+    if ( labelSchemaRowDigest( existing.text( 0 ) ) == labelSchemaRowDigest( json ) )
+        return Result::success();
+    return Result::failure( storeDiag(
+        QStringLiteral( "dataset.conflict" ),
+        QStringLiteral( "label schema %1@%2 already exists with different content" )
+            .arg( schema.schemaId() )
+            .arg( schema.version() ) ) );
 }
 
 std::optional<LabelSchema> DatasetStore::labelSchema( const QString &schemaId,
