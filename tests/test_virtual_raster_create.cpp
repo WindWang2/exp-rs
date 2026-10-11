@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
@@ -349,6 +350,71 @@ TEST_CASE( "Relocating an input keeps the virtual asset resolvable",
   const std::optional<AssetSnapshot> snapshot = manager.asset( created.value() );
   REQUIRE( snapshot.has_value() );
   CHECK( snapshot->state() == AssetState::Ready );
+}
+
+TEST_CASE( "A failed dependent-VRT rewrite warns and never signals a reload",
+           "[virtual_raster][create][relocate][failure]" )
+{
+  // #1457/WP11: the old rewrite opened the VRT with WriteOnly (TRUNCATING the
+  // previous file) and ignored write()'s return — a full disk left a torn
+  // VRT that assetChanged then told displays to reload. The sidecar publish
+  // (temp+fsync+rename) can no longer tear the target; a failed publish must
+  // surface as a warning diagnostic and must NOT emit assetChanged for the
+  // dependent.
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const QString originalPath = stageDem( dir, QStringLiteral( "orig-fail.tif" ) );
+  const AssetId a = registerRaster( manager, originalPath );
+  const AssetId b = registerRaster( manager, stageDem( dir, QStringLiteral( "b-fail.tif" ) ) );
+
+  const Result<AssetId> created = manager.createVirtualRaster(
+    recipeFor( { BandRef{ a, 1 }, BandRef{ b, 1 } } ) );
+  REQUIRE( created );
+  const QString vrtPath = manager.asset( created.value() )->source().canonicalSource;
+
+  // Make the publish deterministically fail on every platform: a directory
+  // sitting AT the target path blocks the final rename (Windows and POSIX
+  // alike refuse to rename a file over a directory).
+  REQUIRE( QFile::remove( vrtPath ) );
+  REQUIRE( QDir().mkpath( vrtPath ) );
+
+  int dependentChangeEvents = 0;
+  QObject::connect( &manager, &DataManager::assetChanged,
+                    [&]( AssetId emitted ) {
+                      if ( emitted == created.value() )
+                        ++dependentChangeEvents;
+                    } );
+
+  const QString movedPath = dir.filePath( QStringLiteral( "moved-fail.tif" ) );
+  REQUIRE( QFile::rename( originalPath, movedPath ) );
+  SourceDescriptor replacement;
+  replacement.providerKey = QStringLiteral( "gdal" );
+  replacement.canonicalSource = movedPath;
+  const Result<RelocateResult> relocated =
+    manager.relocate( RelocateRequest{ a, replacement } );
+
+  // The relocation itself still succeeds (the input moved fine); the failed
+  // dependent rewrite is a WARNING on the result, not a failure.
+  REQUIRE( relocated );
+  bool sawVrtWarning = false;
+  for ( const Diagnostic &diagnostic : relocated.value().diagnostics )
+  {
+    if ( diagnostic.code == QStringLiteral( "relocate.dependent_vrt_write_failed" ) )
+      sawVrtWarning = true;
+  }
+  CHECK( sawVrtWarning );
+
+  // No reload signal for the dependent: displays must not be pointed at a
+  // publish that did not land.
+  CHECK( dependentChangeEvents == 0 );
+
+  // The blocked target was never replaced by a torn file.
+  CHECK( QFileInfo( vrtPath ).isDir() );
+
+  // Cleanup so QTemporaryDir can reap the tree.
+  QDir( vrtPath ).removeRecursively();
 }
 
 TEST_CASE( "A chained virtual raster (virtual of virtual) registers and links",

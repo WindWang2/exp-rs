@@ -31,6 +31,7 @@
 #include "providers/wmts_source_provider.h"
 #include "providers/xyz_source_provider.h"
 #include "virtual_raster_preflight.h"
+#include "platform/durable_sidecar.h"
 
 namespace sicnu::data
 {
@@ -64,17 +65,17 @@ Diagnostic wrongThreadDiagnostic()
 /// not spam the log — the first occurrence carries the diagnostic, later
 /// ones stay quiet. (#903 used a nonexistent qWarningOnce macro; this is
 /// the same dedup semantics with QAtomicInt.)
-void checkLeaseReaderAffinity( const QObject *manager )
+void checkLeaseReaderAffinity( const QObject *manager, const char *container = "lease records" )
 {
   if ( QThread::currentThread() == manager->thread() )
     return;
   static QAtomicInt s_fired;
   if ( s_fired.testAndSetOrdered( 0, 1 ) )
     qWarning( "DataManager: live-container reader called from thread %p off "
-              "the manager's owning thread %p (lease records are not "
+              "the manager's owning thread %p (%s are not "
               "snapshot-served; marshal to the owner thread, #703/A-F2)",
               static_cast<const void *>( QThread::currentThread() ),
-              static_cast<const void *>( manager->thread() ) );
+              static_cast<const void *>( manager->thread() ), container );
 }
 
 /// Builds the diagnostics for refusing to remove a leased asset, shared by
@@ -765,18 +766,26 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
     if ( xml.isEmpty() )
       continue;
 
-    QFile vrtFile( dependentIt->snapshot.source().canonicalSource );
-    if ( vrtFile.open( QIODevice::WriteOnly | QIODevice::Text ) )
+    // Publish through the single sidecar write authority (#1457/WP09+WP11):
+    // the old QFile path truncated the previous VRT on open and ignored the
+    // write() return, so a full disk left a torn file that assetChanged then
+    // told displays to reload. temp+fsync+rename keeps the old file intact
+    // on failure; assetChanged fires only after a verified publish.
+    const QByteArray xmlBytes = xml.toUtf8();
+    const sicnu::platform::sidecar::WriteResult published =
+      sicnu::platform::sidecar::write(
+        { dependentIt->snapshot.source().canonicalSource.toUtf8().constData(),
+          std::string( xmlBytes.constData(), static_cast<std::size_t>( xmlBytes.size() ) ),
+          "" } );
+    if ( published )
     {
-      vrtFile.write( xml.toUtf8() );
-      vrtFile.close();
       emit assetChanged( dependentId );
     }
     else
     {
       relocateDiagnostics.append( Diagnostic{
         QStringLiteral( "relocate.dependent_vrt_write_failed" ),
-        QStringLiteral( "Failed to rewrite dependent virtual raster VRT: %1" )
+        QStringLiteral( "Failed to rewrite dependent virtual raster VRT atomically: %1" )
           .arg( dependentIt->snapshot.source().canonicalSource ),
         DiagnosticSeverity::Warning
       } );
@@ -1256,7 +1265,11 @@ Result<void> DataManager::addStrongDependency( AssetId dependent, AssetId input 
 
 QVector<AssetId> DataManager::strongDependenciesOf( AssetId id ) const
 {
-  Q_ASSERT( QThread::currentThread() == thread() );
+  // Live-container reader (#703/A-F2 shape): the release-noop Q_ASSERT left
+  // off-affinity calls racing dependencyEdges silently; warn through the same
+  // once-only channel the lease readers use so the violation is visible in
+  // release builds too (#1457).
+  checkLeaseReaderAffinity( this, "dependency edges" );
   QVector<AssetId> inputs;
   for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
   {
@@ -1268,7 +1281,7 @@ QVector<AssetId> DataManager::strongDependenciesOf( AssetId id ) const
 
 QVector<AssetId> DataManager::strongDependentsOf( AssetId id ) const
 {
-  Q_ASSERT( QThread::currentThread() == thread() );
+  checkLeaseReaderAffinity( this, "dependency edges" );
   QVector<AssetId> dependents;
   for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
   {
