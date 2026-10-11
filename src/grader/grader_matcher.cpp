@@ -50,6 +50,167 @@ std::vector<const GradeEvidenceItem *> satisfyingStageEvidence( const std::strin
     return satisfying;
 }
 
+/// A parsed sequencing stamp: the UTC instant a recordedAtUtc string
+/// denotes, plus a sub-second tiebreaker. #1464: ISO-8601 legally spells
+/// one instant several ways ('.500Z' vs 'Z', '+08:00' vs 'Z', numeric
+/// offsets), and byte order disagrees with chronological order exactly
+/// there ('.' 0x2E and '+' 0x2B sort before 'Z' 0x5A) — sequencing must
+/// compare instants, not strings. A stamp that fails to parse is exactly a
+/// missing one (the order cannot be proven or disproven → indeterminate),
+/// so legacy evidence documents with free-text stamps stay loadable and
+/// never receive a byte-order verdict.
+struct SequencingStamp
+{
+    long long epochSeconds = 0;
+    long long nanoseconds = 0;
+    bool valid = false;
+
+    bool atOrBefore( const SequencingStamp &other ) const
+    {
+        return epochSeconds < other.epochSeconds ||
+               ( epochSeconds == other.epochSeconds && nanoseconds <= other.nanoseconds );
+    }
+};
+
+bool stampDigits( const std::string &text, std::size_t pos, int count )
+{
+    if ( pos + static_cast<std::size_t>( count ) > text.size() )
+        return false;
+    for ( int i = 0; i < count; ++i ) {
+        const char c = text[pos + static_cast<std::size_t>( i )];
+        if ( c < '0' || c > '9' )
+            return false;
+    }
+    return true;
+}
+
+int stampNumber( const std::string &text, std::size_t pos, int count )
+{
+    int value = 0;
+    for ( int i = 0; i < count; ++i )
+        value = value * 10 + ( text[pos + static_cast<std::size_t>( i )] - '0' );
+    return value;
+}
+
+/// Days from a civil (year, month, day) date, proleptic Gregorian — the
+/// same Qt-free shape scientific_state's asset_state_resolver uses.
+long long stampDaysFromCivil( int year, int month, int day )
+{
+    year -= month <= 2;
+    const int era = ( year >= 0 ? year : year - 399 ) / 400;
+    const unsigned yoe = static_cast<unsigned>( year - era * 400 );
+    const unsigned doy = ( 153u * static_cast<unsigned>( month + ( month > 2 ? -3 : 9 ) ) + 2u ) / 5u +
+                          static_cast<unsigned>( day ) - 1u;
+    const unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return static_cast<long long>( era ) * 146097 + static_cast<long long>( doe ) - 719468;
+}
+
+/// Closed ISO-8601 subset: YYYY-MM-DD('T'|' ')HH:MM[:SS[.frac]]
+/// [Z|z|±HH[:MM]|±HHMM]. Naive stamps (no zone) are read as UTC — the
+/// grader's contract has always declared UTC. More than 9 fractional
+/// digits refuses: silently truncating them would equate distinct
+/// instants. No trailing content after the zone is accepted.
+SequencingStamp parseSequencingStamp( const std::string &text )
+{
+    SequencingStamp stamp;
+    if ( text.size() < 16 )
+        return stamp;
+    if ( !stampDigits( text, 0, 4 ) || text[4] != '-' ||
+         !stampDigits( text, 5, 2 ) || text[7] != '-' ||
+         !stampDigits( text, 8, 2 ) )
+        return stamp;
+    if ( ( text[10] != 'T' && text[10] != ' ' ) ||
+         !stampDigits( text, 11, 2 ) || text[13] != ':' ||
+         !stampDigits( text, 14, 2 ) )
+        return stamp;
+    const int year = stampNumber( text, 0, 4 );
+    const int month = stampNumber( text, 5, 2 );
+    const int day = stampNumber( text, 8, 2 );
+    const int hour = stampNumber( text, 11, 2 );
+    const int minute = stampNumber( text, 14, 2 );
+    int second = 0;
+    long long nanoseconds = 0;
+    std::size_t pos = 16;
+
+    if ( text.size() > 16 && text[16] == ':' ) {
+        if ( !stampDigits( text, 17, 2 ) )
+            return stamp;
+        second = stampNumber( text, 17, 2 );
+        pos = 19;
+    }
+    if ( pos < text.size() && text[pos] == '.' ) {
+        ++pos;
+        int digits = 0;
+        long long scale = 100000000; // first fractional digit is 1e8 ns
+        while ( pos < text.size() && text[pos] >= '0' && text[pos] <= '9' ) {
+            if ( digits >= 9 )
+                return stamp;
+            nanoseconds += ( text[pos] - '0' ) * scale;
+            scale /= 10;
+            ++digits;
+            ++pos;
+        }
+        if ( digits == 0 )
+            return stamp;
+    }
+
+    long long offsetSeconds = 0;
+    if ( pos < text.size() ) {
+        const char zone = text[pos];
+        if ( zone == 'Z' || zone == 'z' ) {
+            ++pos;
+        } else if ( zone == '+' || zone == '-' ) {
+            ++pos;
+            int offsetHours = 0;
+            int offsetMinutes = 0;
+            if ( !stampDigits( text, pos, 2 ) )
+                return stamp;
+            offsetHours = stampNumber( text, pos, 2 );
+            pos += 2;
+            if ( pos < text.size() && text[pos] == ':' ) {
+                ++pos;
+                if ( !stampDigits( text, pos, 2 ) )
+                    return stamp;
+                offsetMinutes = stampNumber( text, pos, 2 );
+                pos += 2;
+            } else if ( stampDigits( text, pos, 2 ) ) {
+                offsetMinutes = stampNumber( text, pos, 2 );
+                pos += 2;
+            }
+            if ( offsetHours > 23 || offsetMinutes > 59 )
+                return stamp;
+            offsetSeconds = static_cast<long long>( offsetHours ) * 3600 + offsetMinutes * 60;
+            if ( zone == '-' )
+                offsetSeconds = -offsetSeconds;
+        } else {
+            return stamp;
+        }
+    }
+    if ( pos != text.size() )
+        return stamp;
+
+    // Calendar validation: month first (the table index), then month length
+    // with the leap-year rule, then wall-clock ranges.
+    if ( month < 1 || month > 12 )
+        return stamp;
+    static const int kDaysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    int maxDay = kDaysInMonth[month - 1];
+    if ( month == 2 && ( ( year % 4 == 0 && year % 100 != 0 ) || year % 400 == 0 ) )
+        maxDay = 29;
+    if ( day < 1 || day > maxDay )
+        return stamp;
+    if ( hour > 23 || minute > 59 || second > 59 )
+        return stamp;
+
+    stamp.epochSeconds = stampDaysFromCivil( year, month, day ) * 86400 +
+                         static_cast<long long>( hour ) * 3600 +
+                         static_cast<long long>( minute ) * 60 +
+                         static_cast<long long>( second ) - offsetSeconds;
+    stamp.nanoseconds = nanoseconds;
+    stamp.valid = true;
+    return stamp;
+}
+
 /// Sequencing check shared by criteria and requiredStages: does some
 /// candidate evidence for `key` record at/after every orderedAfter target?
 /// Returns earned/order-violated/order-unprovable.
@@ -81,11 +242,13 @@ SequenceVerdict checkSequencing( const std::string &key,
     }
 
     // ∃ candidate evidence for `key` recorded at/after EVERY prerequisite.
-    // Every needed stamp must be present; a missing stamp cannot prove or
-    // disprove the declared order.
+    // Every needed stamp must be present; a missing (or unparseable) stamp
+    // cannot prove or disprove the declared order. Stamps compare as the
+    // instants they denote — timezone-equivalent, fraction-aware (#1464).
     bool sawMissingStamp = false;
     for ( const GradeEvidenceItem *candidate : candidates ) {
-        if ( candidate->recordedAtUtc.empty() ) {
+        const SequencingStamp candidateStamp = parseSequencingStamp( candidate->recordedAtUtc );
+        if ( !candidateStamp.valid ) {
             sawMissingStamp = true;
             continue;
         }
@@ -93,11 +256,12 @@ SequenceVerdict checkSequencing( const std::string &key,
         for ( const auto &prereq : prerequisites ) {
             bool afterThis = false;
             for ( const GradeEvidenceItem *before : prereq ) {
-                if ( before->recordedAtUtc.empty() ) {
+                const SequencingStamp beforeStamp = parseSequencingStamp( before->recordedAtUtc );
+                if ( !beforeStamp.valid ) {
                     sawMissingStamp = true;
                     continue;
                 }
-                if ( before->recordedAtUtc <= candidate->recordedAtUtc ) {
+                if ( beforeStamp.atOrBefore( candidateStamp ) ) {
                     afterThis = true;
                     break;
                 }

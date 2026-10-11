@@ -343,11 +343,32 @@ FaultOutcome applyTrainTestSpatialLeakage( FaultGrid &grid, const Json::Value &p
                              "train_test_spatial_leakage mode '" + mode +
                                  "' is outside the closed vocabulary {duplicate, relocate}" );
     }
+    // The declared optional cell_size feeds the leakage observable's binning
+    // (fault_observables.cpp reads extras["leakage_cell_size"]). It used to
+    // be accepted but never read — an inert parameter misleads scenario
+    // authors (#1464). Same type gate shape as nodata_as_data's fill_value:
+    // an unusable value is a typed refusal, never a silent default.
+    double cellSize = 0.0;
+    const bool hasCellSize = params.isMember( "cell_size" );
+    if ( hasCellSize )
+    {
+        if ( !isFiniteNumber( params["cell_size"] ) || params["cell_size"].asDouble() <= 0.0 )
+        {
+            return errorOutcome( "faultlab.fault_unsupported_params",
+                                 "train_test_spatial_leakage cell_size must be a finite "
+                                 "positive number" );
+        }
+        cellSize = params["cell_size"].asDouble();
+    }
     if ( !grid.extras.isMember( "samples" ) || !grid.extras["samples"].isArray() )
     {
         return errorOutcome( "faultlab.fault_unsafe_target",
                              "train_test_spatial_leakage needs a fixture with sample points" );
     }
+    // All refusals are past: publish the declared bin size onto the faulted
+    // grid so the observable measures leakage at the scenario's own scale.
+    if ( hasCellSize )
+        grid.extras["leakage_cell_size"] = cellSize;
     Json::Value &samples = grid.extras["samples"];
 
     if ( mode == "duplicate" )
