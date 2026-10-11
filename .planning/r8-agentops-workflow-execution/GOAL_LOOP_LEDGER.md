@@ -84,3 +84,33 @@ QSet 等价/detach 顺序/ring 无新锁/流式 digest 兼容/pin 终止性。 |
 - recipe scan race / committer 注册失败分支: 结构性修复, 无确定性公共 API 注入面,
   以代码审查证据支撑(测试文件注明)
 - E2 offset==sizeBytes: master 语义疑似已正确(truncated=false 无 next_offset), 测试钉住
+
+第8轮 | 测试执行与修正: mcp handshake 3 sections 全绿(33 断言); 期间修 2 处测试自身
+问题: (a) 断言越界 — startTrackedPipelineJson 在 TaskCenter 提交失败前已持久化
+checkpoint(master 既有形态, 非 recording 面契约) → 断言收窄到 "db 不创建";
+(b) em10 测试在 finalize 前未关闭 sidecar ifstream → Windows rename 失败 → verify
+false, 加作用域修复; archive 测试从 POSIX-only 的 test_fault_injection 迁移到
+test_fault_matrix(本机可验证)。detach→abandon 编译修复(QThread 无 detach)。
+基线归属(stash 双向验证): mcp "avoids / and $HOME"+"symlinks P1-3"、committer
+"vector provider"+"#617" 在未打补丁 master 上同样失败 → 本机 Windows 环境预存,
+非本轨回归。 | 全部新测试绿; 预存失败已归属 | per-cluster 提交
+
+第9轮 | 6 commits: 3305166e7(A recording 握手), f8bf2dbd3(E maps/EOF/list_layers/
+abandon), d9e599d5f(B committer/log ring/affinity/catalog), e7e4f77a0(C typed
+fallback/IO 出锁/流式 digest/archive swap), f2e492087(D journal pin/containment/
+scan race), ae91ad412(docs)。git diff --check 干净; origin/master 仍=47c6371f3
+(无需 rebase); 提交后全量重建 7 targets rc=0 | 通过 | 终跑 7 suites + push + PR
+
+## 测试证据(命令与结果)
+构建: cmake --build build-r8 --target <t> -j 4 (MSVC 2022/Ninja/Qt 6.8.0, build-r8)
+运行: build-r8\<t>.exe (Catch2 v3.7.1), PATH 含 Qt/qca/kc bin
+- test_mcp_server: 30 cases 28 pass(2 预存环境失败, stash 基线同款失败);
+  新增 handshake/bounded/EOF 全绿 ×2 轮
+- test_agent_loop_core: 16/16 ×2 (journal pin 绿)
+- test_agentbench_trace: 12/12 ×2 (containment 矩阵绿)
+- test_task_center: 33/33 ×2 (log ring 绿)
+- test_external_memory_10: 10/10 ×2 (2MiB 流式差分绿)
+- test_fault_matrix: 13/13 ×2 (archive swap 绿)
+- test_output_committer: 12/14 (2 预存, stash 基线同款失败)
+未验证: POSIX-only lane (test_fault_injection 全 suite, 本机 Windows 无法运行;
+本轨未改动其内容, archive 测试已迁出); Linux/macOS 平台行为未在本机验证
