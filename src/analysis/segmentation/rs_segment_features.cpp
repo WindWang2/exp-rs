@@ -1,6 +1,6 @@
 // rs_segment_features.cpp — Phase 10B Task 10B.1
 #include "rs_segment_features.h"
-#include "../../processing/algorithms/math_utils.h"
+#include "processing/algorithms/math_utils.h"
 #include "sicnu_logging.h"
 
 #include <gdal.h>
@@ -11,12 +11,24 @@
 #include <numeric>
 #include <vector>
 
+namespace
+{
+/// Sets the typed failure cause exactly once; later failures do not overwrite
+/// the first attribution (#1461 error-channel discipline).
+void setExtractError( QString *error, const QString &message )
+{
+    if ( error && error->isEmpty() )
+        *error = message;
+}
+} // namespace
+
 QMap<quint32, RsSegmentFeatures::SegmentStat>
 RsSegmentFeatures::extract( const QString &rasterPath,
                             const RsSegmentMap &segMap,
                             const QVector<int> &bandIndices,
                             const std::function<bool()> &isCanceled,
-                            const std::function<void( float )> &onProgress )
+                            const std::function<void( float )> &onProgress,
+                            QString *error )
 {
     QMap<quint32, SegmentStat> result;
     if ( isCanceled && isCanceled() )
@@ -25,6 +37,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     if ( segMap.isEmpty() || bandIndices.isEmpty() )
     {
         SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "Feature extraction: empty segment map or band indices" );
+        setExtractError( error, QStringLiteral( "empty segment map or band index list" ) );
         return result;
     }
 
@@ -36,6 +49,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     if ( !ds )
     {
         SICNU_LOG_ERROR( SicnuLogTags::Segmentation, QString( "Failed to open raster for feature extraction: %1" ).arg( rasterPath ) );
+        setExtractError( error, QStringLiteral( "cannot open raster %1: %2" )
+                                     .arg( rasterPath, QString::fromUtf8( CPLGetLastErrorMsg() ) ) );
         return result;
     }
     std::unique_ptr<void, decltype(&GDALClose)> dsGuard( ds, &GDALClose );
@@ -53,6 +68,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
         if ( !band )
         {
+            setExtractError( error, QStringLiteral( "band %1 does not exist in %2 (%3 bands)" )
+                                         .arg( bandIndices[b] )
+                                         .arg( rasterPath )
+                                         .arg( GDALGetRasterCount( ds ) ) );
             return result;
         }
         int pbSuccess = 0;
@@ -86,6 +105,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                                        bandBuf.data(), w, rows, GDT_Float32, 0, 0 );
             if ( err != CE_None )
             {
+                setExtractError( error, QStringLiteral( "valid-mask read failed on band %1 at row %2: %3" )
+                                             .arg( bandIndices[b] )
+                                             .arg( r0 )
+                                             .arg( QString::fromUtf8( CPLGetLastErrorMsg() ) ) );
                 return result;
             }
             const size_t blockPixels = static_cast<size_t>( rows ) * w;
@@ -224,6 +247,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                                    bandBuf.data(), w, rows, GDT_Float32, 0, 0 );
         if ( err != CE_None )
         {
+            setExtractError( error, QStringLiteral( "spectral read failed on band %1 at row %2: %3" )
+                                         .arg( bandIndices[b] )
+                                         .arg( r0 )
+                                         .arg( QString::fromUtf8( CPLGetLastErrorMsg() ) ) );
             return result;
         }
         // Accumulate spectral stats for this band
@@ -252,24 +279,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             acc->minVal[b] = std::min( acc->minVal[b], static_cast<double>( v ) );
             acc->maxVal[b] = std::max( acc->maxVal[b], static_cast<double>( v ) );
         }
-        // Count valid pixels per segment (only once, on first band)
-        if ( b == 0 )
-        {
-            if ( useVector )
-            {
-                for ( size_t segId = 1; segId < accVec.size(); ++segId )
-                {
-                    // count will be incremented in loop above per pixel? We missed count increment.
-                    // To avoid double counting, we counted via sum loop? Actually we need count per segment = number of valid pixels.
-                    // We already have not incremented count; do it now via scanning validMask+labels once.
-                    // Instead of per-pixel increment in band loop (which would double), we compute after.
-                }
-            }
-        }
         }
     }
-    // Fix count: single scan over validMask+labels (since per-band loop did not increment count)
-    // Reset counts then recompute
+    // Valid-pixel count per segment: single scan over validMask+labels (the
+    // per-band accumulation above deliberately does not touch acc.count).
     if ( useVector )
     {
         for ( auto &acc : accVec ) acc.count = 0;
@@ -296,10 +309,14 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     // (fuzz-verified over 857 randomized segment maps: chunked == full).
     if ( onProgress ) onProgress( 0.6f );
     bool glcmReadFailed = false;
+    QString glcmReadError; // captured at the failing read, not read back later
     for ( int b = 0; b < nBands; ++b )
     {
         if ( glcmReadFailed )
         {
+            setExtractError( error, QStringLiteral( "GLCM chunk read failed on band %1: %2" )
+                                         .arg( bandIndices[b] )
+                                         .arg( glcmReadError ) );
             return result;
         }
         if ( isCanceled && isCanceled() )
@@ -331,6 +348,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                                                  chunkBuf.data(), w, readRows, GDT_Float32, 0, 0 );
                 if ( err != CE_None )
                 {
+                    if ( glcmReadError.isEmpty() )
+                        glcmReadError = QString::fromUtf8( CPLGetLastErrorMsg() );
                     glcmReadFailed = true;
                     return;
                 }
@@ -429,6 +448,14 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                 processSegment( segId, box );
             }
         }
+    }
+    // A failure on the LAST band would otherwise fall through and publish
+    // partial GLCM stats as if complete.
+    if ( glcmReadFailed )
+    {
+        setExtractError( error, QStringLiteral( "GLCM chunk read failed: %1" )
+                                     .arg( glcmReadError ) );
+        return result;
     }
 
     // Build final stats

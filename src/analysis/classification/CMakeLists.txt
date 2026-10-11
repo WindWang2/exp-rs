@@ -16,6 +16,8 @@ target_sources(qgis_analysis PRIVATE
     rs_feature_schema.cpp
 )
 target_include_directories(qgis_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# math_utils (accuracy assessment stats) is included src-root relative.
+target_include_directories(qgis_analysis PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 # Phase 10A Task 10.6 — Jeffries-Matusita separability uses OpenCV core
 # (cv::Mat, cv::calcCovarMatrix, cv::determinant). When OpenCV is absent
