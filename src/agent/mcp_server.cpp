@@ -2625,28 +2625,10 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
             pins.hasSeed = true;
         }
         recordingRequested = true;
-        // Enable BEFORE submission: the coordinator emits transitions the
-        // moment the pipeline is dispatched, so the signal connection (and
-        // the experiment row) must already exist when the terminal
-        // transition fires. recordSubmission() below then binds this
-        // specific run to the recording.
-        if (!m_experimentMonitor)
-            m_experimentMonitor = std::make_unique<sicnu::experiment::WorkflowExperimentMonitor>(
-                sicnu::workflow::WorkflowRunCoordinator::instance());
-        QString recordError;
-        if (!m_experimentMonitor->enable(
-                experimentDb,
-                arguments.value(QStringLiteral("experiment_id")).toString().trimmed(),
-                arguments.value(QStringLiteral("experiment_name")).toString(),
-                arguments.value(QStringLiteral("experiment_objective")).toString(),
-                arguments.value(QStringLiteral("dataset_db")).toString().trimmed(), &recordError)) {
-            SICNU_LOG_ERROR(SicnuLogTags::MCP,
-                            QStringLiteral("run_workflow recording refused: %1").arg(recordError));
-            throw McpToolError(QStringLiteral("run_workflow: experiment recording refused: ")
-                                   + recordError,
-                               QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
-                               QStringLiteral("validation"));
-        }
+        // The monitor itself is enabled only AFTER the tracked submission
+        // below succeeds (#1448): enable() writes the experiment row, and a
+        // rejected pipeline must leave nothing behind — the INVALID_PIPELINE
+        // message below promises "nothing submitted or recorded".
     }
 
     // Tracked submission (#697): MCP workflows persist checkpoints per step
@@ -2665,13 +2647,39 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
             QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
 
     if (recordingRequested) {
+        // Enable AFTER the submission gate (#1448): enable() opens the
+        // experiment store and writes the experiment row, so it must not run
+        // while the pipeline can still be rejected above — a refused pipeline
+        // must not leave an orphan experiment record. The recording stays
+        // complete for the accepted path: the Running transition is
+        // broadcast before this point, and recordSubmission() below drives
+        // the bridge synchronously with the same snapshot; only later
+        // transitions rely on the queued connection made here.
+        if (!m_experimentMonitor)
+            m_experimentMonitor = std::make_unique<sicnu::experiment::WorkflowExperimentMonitor>(
+                sicnu::workflow::WorkflowRunCoordinator::instance());
+        QString recordError;
+        if (!m_experimentMonitor->enable(
+                experimentDb,
+                arguments.value(QStringLiteral("experiment_id")).toString().trimmed(),
+                arguments.value(QStringLiteral("experiment_name")).toString(),
+                arguments.value(QStringLiteral("experiment_objective")).toString(),
+                arguments.value(QStringLiteral("dataset_db")).toString().trimmed(), &recordError)) {
+            SICNU_LOG_ERROR(SicnuLogTags::MCP,
+                            QStringLiteral("run_workflow recording refused: %1").arg(recordError));
+            throw McpToolError(QStringLiteral("run_workflow: experiment recording refused: ")
+                                   + recordError,
+                               QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
+                               QStringLiteral("validation"));
+        }
         // Record the submission SYNCHRONOUSLY with its own pins: the run id
         // is known the moment the tracked submit returns, so identity pins
         // are part of the record from the first transition — immune to
         // queued-signal reordering or later submissions of the same
-        // workflow. The queued Running signal then lands as an idempotent
-        // duplicate; later transitions flow through the signal path (this
-        // run only).
+        // workflow. The Running broadcast went out before the monitor
+        // connected (enable runs after the submission gate, #1448), so this
+        // synchronous event is the authoritative Running record; later
+        // transitions flow through the signal path (this run only).
         const auto run = sicnu::workflow::WorkflowRunCoordinator::instance()
                              .runForPipeline(pipelineId);
         if (!run)
@@ -2695,6 +2703,32 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
                                QStringLiteral("validation"));
         }
         recordedExperimentRunId = recorded.value();
+
+        // #1448 catch-up: the coordinator folds task transitions on worker
+        // threads (DirectConnection), so a fast pipeline can already be
+        // terminal when the monitor's queued connection was only just made
+        // inside enable() — that emission happened before the connect and is
+        // lost. A terminal run here is exactly that window: record the
+        // current aggregate directly (content-identical to the lost
+        // delivery, and any queued duplicate is idempotent — the same
+        // pattern as the CLI's flushRecording). A non-terminal run needs
+        // nothing: later transitions flow through the connection just made.
+        if (sicnu::workflow::isTerminalRunState(run->state())) {
+            const auto caughtUp = m_experimentMonitor->recordAggregateState(*run);
+            if (!caughtUp) {
+                const QString failureMessage =
+                    caughtUp.diagnostics().isEmpty()
+                        ? QStringLiteral("recording failed without a diagnostic")
+                        : caughtUp.diagnostics().first().message;
+                SICNU_LOG_ERROR(SicnuLogTags::MCP,
+                                QStringLiteral("run_workflow recording catch-up failed: %1")
+                                    .arg(failureMessage));
+                throw McpToolError(
+                    QStringLiteral("run_workflow: experiment recording catch-up failed: ")
+                        + failureMessage,
+                    QStringLiteral("EXPERIMENT_RECORDING_REFUSED"), QStringLiteral("validation"));
+            }
+        }
     }
 
     QVariantMap result;

@@ -44,14 +44,43 @@ QString batchConfigDigest( const BatchAssessmentConfig &cfg )
     return sha256Hex( canonicalJsonBytes( batchConfigDigestInput( cfg ) ) );
 }
 
+/// Artifact identity for checkpoint adoption: mtime + size, taken when a row
+/// is graded. A cheap stat proxy (not a content digest) — resume is a fast
+/// path, so it only has to catch re-submissions; the encoding can later be
+/// swapped for a digest without touching the checkpoint schema (#1448).
+/// Empty when the artifact is gone (unverifiable → re-grade on resume).
+QString artifactStamp( const QString &path )
+{
+    const QFileInfo info( path );
+    if ( !info.exists() )
+        return QString();
+    return QString::number( info.lastModified().toMSecsSinceEpoch() ) + QLatin1Char( ':' )
+         + QString::number( info.size() );
+}
+
+/// A durable checkpoint row plus the artifact identity it was graded
+/// against. Checkpoints from older builds carry no stamp and fail closed to
+/// re-grading — adoption without identity verification would publish a
+/// stale grade over a re-submitted artifact (#1448).
+struct DurableRow
+{
+    BatchRowResult row;
+    QString artifactStamp;
+};
+
 /// Atomically rewrite the checkpoint (temp + rename) from @p rows — always
 /// the full, index-ordered set, so the file is never a partial document.
 bool saveCheckpointAtomic( const QString &path, const QString &configDigest, int total,
-                           const QVector<BatchRowResult> &rows )
+                           const QVector<DurableRow> &rows )
 {
     QJsonArray rowsArr;
-    for ( const auto &row : rows )
-        rowsArr.append( row.toJson() );
+    for ( const auto &entry : rows )
+    {
+        QJsonObject rowJson = entry.row.toJson();
+        if ( !entry.artifactStamp.isEmpty() )
+            rowJson.insert( QStringLiteral( "artifact_stamp" ), entry.artifactStamp );
+        rowsArr.append( rowJson );
+    }
     const QJsonObject doc = sortKeys( QJsonObject{
         { QStringLiteral( "schema" ), kBatchCheckpointSchema },
         { QStringLiteral( "config_digest" ), configDigest },
@@ -79,7 +108,7 @@ bool writeBytesAtomically( const QString &path, const QByteArray &bytes )
 /// Loads checkpoint rows whose config digest matches the current run. A
 /// missing/corrupt/foreign checkpoint degrades to "no adopted rows" (fresh
 /// start) — best-effort durability, never a wrong grade.
-QVector<BatchRowResult> loadCheckpointRows( const QString &path, const QString &configDigest )
+QVector<DurableRow> loadCheckpointRows( const QString &path, const QString &configDigest )
 {
     QFile f( path );
     if ( !f.open( QIODevice::ReadOnly ) )
@@ -89,7 +118,7 @@ QVector<BatchRowResult> loadCheckpointRows( const QString &path, const QString &
         return {};
     if ( doc.value( QStringLiteral( "config_digest" ) ).toString() != configDigest )
         return {};
-    QVector<BatchRowResult> rows;
+    QVector<DurableRow> rows;
     const QJsonArray arr = doc.value( QStringLiteral( "rows" ) ).toArray();
     rows.reserve( arr.size() );
     // Adopt only rows whose status is in the orchestrator's own vocabulary:
@@ -103,10 +132,13 @@ QVector<BatchRowResult> loadCheckpointRows( const QString &path, const QString &
     };
     for ( const auto &v : arr )
     {
-        BatchRowResult row = BatchRowResult::fromJson( v.toObject() );
-        if ( !kKnownStatuses.contains( row.status ) || row.studentId.isEmpty() )
+        const QJsonObject rowJson = v.toObject();
+        DurableRow entry;
+        entry.row = BatchRowResult::fromJson( rowJson );
+        if ( !kKnownStatuses.contains( entry.row.status ) || entry.row.studentId.isEmpty() )
             continue;
-        rows.append( row );
+        entry.artifactStamp = rowJson.value( QStringLiteral( "artifact_stamp" ) ).toString();
+        rows.append( entry );
     }
     return rows;
 }
@@ -304,6 +336,9 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     // char, NOT vector<bool>: workers write distinct flags concurrently, and
     // vector<bool> packs several flags into one word (lost updates).
     std::vector<char> filled( static_cast<std::size_t>( processLimit ), 0 );
+    // Artifact identity per slot, published under the checkpoint mutex with
+    // its row so the durable checkpoint always carries both (#1448).
+    std::vector<QString> stampSlot( static_cast<std::size_t>( processLimit ) );
 
     // Restart: adopt durable rows from a matching checkpoint. Only rows that
     // went through the callable are checkpointed, and adoption requires the
@@ -311,22 +346,31 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     // re-graded, never disguised as finished.
     if ( !cfg.checkpointPath.isEmpty() )
     {
-        const QVector<BatchRowResult> durable =
+        const QVector<DurableRow> durable =
           loadCheckpointRows( cfg.checkpointPath, batchConfigDigest( cfg ) );
-        QHash<QString, BatchRowResult> byKey;
-        for ( const auto &row : durable )
-            byKey.insert( row.studentId + QLatin1Char( '\n' ) + row.artifactPath, row );
+        QHash<QString, DurableRow> byKey;
+        for ( const auto &entry : durable )
+            byKey.insert( entry.row.studentId + QLatin1Char( '\n' ) + entry.row.artifactPath,
+                          entry );
         for ( int i = 0; i < processLimit; ++i )
         {
             const QString key = items[i].studentId + QLatin1Char( '\n' ) + items[i].path;
             const auto it = byKey.constFind( key );
-            if ( it != byKey.constEnd() )
-            {
-                rowSlot[static_cast<std::size_t>( i )] = it.value();
-                filled[static_cast<std::size_t>( i )] = true;
-                report.resumed += 1;
-                byKey.erase( it );
-            }
+            if ( it == byKey.constEnd() )
+                continue;
+            // Adoption also requires the artifact to still be what was
+            // graded: a re-submission after the checkpoint re-grades instead
+            // of publishing the stale row. No recorded stamp (older
+            // checkpoint) or a missing artifact fails closed to re-grading
+            // (#1448).
+            const QString stamp = artifactStamp( items[i].path );
+            if ( stamp.isEmpty() || stamp != it.value().artifactStamp )
+                continue;
+            rowSlot[static_cast<std::size_t>( i )] = it.value().row;
+            stampSlot[static_cast<std::size_t>( i )] = stamp;
+            filled[static_cast<std::size_t>( i )] = true;
+            report.resumed += 1;
+            byKey.erase( it );
         }
     }
 
@@ -340,10 +384,11 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
         // Rewrite from the slots (index-ordered) under the lock: durable
         // partial results, never a torn or reordered document.
         QMutexLocker locker( &checkpointMutex );
-        QVector<BatchRowResult> durable;
+        QVector<DurableRow> durable;
         for ( int i = 0; i < processLimit; ++i )
             if ( filled[static_cast<std::size_t>( i )] )
-                durable.append( rowSlot[static_cast<std::size_t>( i )] );
+                durable.append( DurableRow{ rowSlot[static_cast<std::size_t>( i )],
+                                            stampSlot[static_cast<std::size_t>( i )] } );
         saveCheckpointAtomic( cfg.checkpointPath, batchConfigDigest( cfg ), discovered, durable );
     };
     auto worker = [&]() {
@@ -383,6 +428,9 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 row.softwareVersion = cfg.softwareVersion;
             if ( row.artifactPath.isEmpty() )
                 row.artifactPath = items[i].path;
+            // Stamp after the callable so the checkpoint records the
+            // artifact as it was read, not as it was discovered (#1448).
+            const QString stamp = artifactStamp( items[i].path );
             {
                 // Publish under the checkpoint mutex: checkpointAll() reads
                 // ALL slots while holding it, so the writers must take it
@@ -390,6 +438,7 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 // with a sibling worker's snapshot and can tear a QString).
                 QMutexLocker locker( &checkpointMutex );
                 rowSlot[static_cast<std::size_t>( i )] = row;
+                stampSlot[static_cast<std::size_t>( i )] = stamp;
                 filled[static_cast<std::size_t>( i )] = true;
                 newlyDone = doneRows.fetch_add( 1 ) + 1;
             }
@@ -448,6 +497,18 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
             row.softwareVersion = cfg.softwareVersion;
         }
 
+        // Missing evidence must never look like a silent zero. The rewrite
+        // runs BEFORE classification so the counters describe the published
+        // rows: a row demoted to "unavailable" must not be counted as
+        // graded (#1448).
+        if ( row.missingEvidence && row.score == 0.0 && row.verdict == QLatin1String( "fail" ) )
+        {
+            row.verdict = QStringLiteral( "unavailable" );
+            row.status = QStringLiteral( "unavailable" );
+            if ( row.message.isEmpty() )
+                row.message = QStringLiteral( "missing evidence — not a silent zero" );
+        }
+
         if ( row.status == QLatin1String( "corrupted" ) )
             report.corrupted += 1;
         else if ( row.status == QLatin1String( "pass" ) || row.status == QLatin1String( "fail" ) )
@@ -466,15 +527,6 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
 
         if ( row.missingEvidence )
             report.missingEvidence += 1;
-
-        // Missing evidence must never look like a silent zero
-        if ( row.missingEvidence && row.score == 0.0 && row.verdict == QLatin1String( "fail" ) )
-        {
-            row.verdict = QStringLiteral( "unavailable" );
-            row.status = QStringLiteral( "unavailable" );
-            if ( row.message.isEmpty() )
-                row.message = QStringLiteral( "missing evidence — not a silent zero" );
-        }
 
         report.rows.push_back( row );
     }

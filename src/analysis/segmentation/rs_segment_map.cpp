@@ -10,6 +10,8 @@
 
 #include <cmath>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace
 {
 
@@ -156,14 +158,21 @@ bool RsSegmentMap::toGeoTIFF( const QString &path, const QString &refPath, QStri
         return false;
     }
 
+    // Stage beside the target and publish atomically (#1461): a failed or
+    // interrupted write must never destroy a previous good output at the
+    // final path (rs_class_raster / rs_post_process discipline).
+    const QString tempPath = path + QStringLiteral( ".tmp~%1" ).arg( reinterpret_cast<quintptr>( this ) );
+
     char **papszOptions = nullptr;
     papszOptions = CSLSetNameValue( papszOptions, "COMPRESS", "LZW" );
-    GDALDatasetH dstDs = GDALCreate( driver, path.toUtf8().constData(),
+    GDALDatasetH dstDs = GDALCreate( driver, tempPath.toUtf8().constData(),
                                      mWidth, mHeight, 1, GDT_UInt32, papszOptions );
     CSLDestroy( papszOptions );
 
     if ( !dstDs )
     {
+        // A failed Create can still leave a partial staged file behind.
+        removeIncompleteOutput( tempPath );
         if ( error )
             *error = QStringLiteral( "Cannot create output: %1" ).arg( path );
         GDALClose( srcDs );
@@ -196,12 +205,29 @@ bool RsSegmentMap::toGeoTIFF( const QString &path, const QString &refPath, QStri
             if ( error )
                 *error = QStringLiteral( "RasterIO write failed at row %1" ).arg( r );
             GDALClose( dstDs );
-            removeIncompleteOutput( path );
+            removeIncompleteOutput( tempPath );
             return false;
         }
     }
 
     GDALClose( dstDs );
+
+    // Durability gate (atomic_fs.h contract): flush the staged bytes before
+    // the rename commits the directory entry; publish via ReplaceFileW /
+    // MoveFileExW on Windows so a locked target fails closed (#1178 / #1461).
+    try
+    {
+        sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
+        sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), path.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError &ex )
+    {
+        removeIncompleteOutput( tempPath );
+        if ( error )
+            *error = QStringLiteral( "Cannot finalize output: %1 (%2)" )
+                        .arg( path, QString::fromUtf8( ex.what() ) );
+        return false;
+    }
 
     SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation,
                        QStringLiteral( "Segment map written: %1 (%2x%3, NoData=0)" )

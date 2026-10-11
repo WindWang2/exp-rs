@@ -33,7 +33,11 @@
 #include <json/json.h>
 
 #include <memory>
+// POSIX-only include kept for the non-Windows lanes; nothing in this TU
+// needs it on Windows (pid assertions go through QCoreApplication).
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <string>
 
 using namespace sicnu::workflow;
@@ -354,9 +358,12 @@ TEST_CASE( "lock acquisition in a nonexistent directory creates it; a read-only 
     }
 
     // Read-only directory: refusal is the typed Error branch, not a crash.
-    // (Skipped for root, which bypasses directory permissions.)
+    // (Skipped for root, which bypasses directory permissions — a POSIX
+    // concept; Windows has no uid-0 bypass.)
+#ifndef _WIN32
     if ( ::geteuid() == 0 )
         return;
+#endif
     const QString readonly = parent.path() + QStringLiteral( "/ro" );
     REQUIRE( QDir().mkpath( readonly ) );
     REQUIRE( QFile::setPermissions(

@@ -1,6 +1,5 @@
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
-#include <cstdlib>
 #include <vector>
 #include <string>
 
@@ -51,7 +50,18 @@ int main( int argc, char *argv[] )
     ? Catch::Session().run( argc, argv )
     : Catch::Session().run( static_cast<int>( utf8Argv.size() - 1 ), utf8Argv.data() );
 
-  _exit( result );
+  // Return normally; never _exit. _exit skipped the atexit/static-destructor
+  // chain, so every Windows run of every Catch2WithMain consumer leaked its
+  // pid-keyed scratch trees (processScratchDir's atexit guard,
+  // UserRootRedirect/QSettingsUserRootRedirect globals) and killed the
+  // FileTraceSink writer thread mid-flush (#1468; named as teardown masking
+  // in .planning/qt-teardown-lifecycle-r4/RETIREMENT.md). Those cleanups are
+  // unreachable by symbol from this TU, so the atexit chain run by a normal
+  // return IS the cleanup path. Qt/QGIS teardown already ran in controlled
+  // order at testRunEnded (support/qt_lifecycle.h), the same ordering after
+  // which src/app/main.cpp also returns normally on Windows — the "do not
+  // _Exit anywhere" contract applies to _exit equally.
+  return result;
 #else
   return Catch::Session().run( argc, argv );
 #endif

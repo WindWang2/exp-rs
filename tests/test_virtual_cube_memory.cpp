@@ -209,6 +209,9 @@ TEST_CASE( "Open refuses scenes with unparseable dates, mismatched grids, or an 
 // /tmp is tmpfs on this host) and are removed after the case.
 // ---------------------------------------------------------------------------
 
+// Peak-RSS redline oracle: ru_maxrss is POSIX-only, so the whole slice is
+// compiled out on Windows (the correctness oracles below still run there).
+#ifndef _WIN32
 #include <sys/resource.h>
 
 namespace
@@ -331,6 +334,7 @@ TEST_CASE( "Out-of-core chunk reads stay under the 1.5 GB peak-RSS redline",
     INFO( "peak RSS bytes: " << peak );
     REQUIRE( peak < 1536ull * 1024 * 1024 );
 }
+#endif // !_WIN32
 
 TEST_CASE( "readChunk rejects invalid geometry with an empty result", "[d16][cube]" )
 {
@@ -355,6 +359,28 @@ TEST_CASE( "readChunk rejects invalid geometry with an empty result", "[d16][cub
         REQUIRE( cube->extractPixelSeries( -1, 0 ).empty() );
         REQUIRE( cube->extractPixelSeries( 0, 16 ).empty() );
     }
+}
+
+TEST_CASE( "readChunk time bounds are rejected without tStart+tCount overflow",
+           "[d16][cube]" )
+{
+    GdalInit init;
+    QTemporaryDir tmp;
+    const QDir dir( tmp.path() );
+    const std::vector<QString> scenes{
+        writeScene( dir, "s", kEpoch, 8, 8, plane( 8, 8, 0.3f ) ),
+        writeScene( dir, "s", QDate( 2020, 3, 1 ), 8, 8, plane( 8, 8, 0.4f ) ) };
+
+    auto cube = TemporalCube::open( scenes, TemporalCubeConfig{} );
+    REQUIRE( cube != nullptr );
+
+    // #1450: tStart + tCount would overflow int and could wrap the range
+    // guard open (then index far out of bounds); each request must still be
+    // rejected as beyond the calendar.
+    const int kMax = std::numeric_limits<int>::max();
+    REQUIRE( cube->readChunk( 0, 0, 4, 4, kMax, 1 ).empty() );
+    REQUIRE( cube->readChunk( 0, 0, 4, 4, 1, kMax ).empty() );
+    REQUIRE( cube->readChunk( 0, 0, 4, 4, kMax / 2, kMax / 2 + 2 ).empty() );
 }
 
 // ---------------------------------------------------------------------------

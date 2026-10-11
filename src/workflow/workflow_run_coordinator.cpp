@@ -241,6 +241,50 @@ Json::Value substituteJsonPlaceholders( const Json::Value &value,
     return value;
 }
 
+/// --- Failed terminal-checkpoint saves (#1448 / #1450) --------------------
+/// RunIds whose TERMINAL checkpoint save failed. While a failure is on
+/// record, releaseRunOwnership must NOT hand the run lock back: the on-disk
+/// checkpoint still shows a non-terminal state, so the next resumeRun would
+/// flock the run, load the stale file and re-execute a finished lineage.
+/// persistRun records a failed terminal save here (a later successful save
+/// of the same run heals the retention); shutdownForTests clears the set.
+/// Guarded by its own leaf mutex on purpose: persistRun records with the
+/// checkpoint IO mutex held while releaseRunOwnership consults with m_mutex
+/// held — reusing either coordinator mutex would impose an order between
+/// the two where none is needed.
+std::mutex &terminalSaveRetentionMutex()
+{
+    static std::mutex m;
+    return m;
+}
+
+std::set<std::string> &terminalSaveRetentions()
+{
+    static std::set<std::string> s;
+    return s;
+}
+
+void noteTerminalSaveOutcome( const std::string &runId, bool durable )
+{
+    std::lock_guard<std::mutex> lock( terminalSaveRetentionMutex() );
+    if ( durable )
+        terminalSaveRetentions().erase( runId );
+    else
+        terminalSaveRetentions().insert( runId );
+}
+
+bool terminalSaveRetentionActive( const std::string &runId )
+{
+    std::lock_guard<std::mutex> lock( terminalSaveRetentionMutex() );
+    return terminalSaveRetentions().count( runId ) > 0;
+}
+
+void clearTerminalSaveRetentions()
+{
+    std::lock_guard<std::mutex> lock( terminalSaveRetentionMutex() );
+    terminalSaveRetentions().clear();
+}
+
 } // namespace
 
 WorkflowRunCoordinator &WorkflowRunCoordinator::instance()
@@ -469,11 +513,38 @@ void WorkflowRunCoordinator::persistRun( PersistRequest request )
     // Best-effort persistence: a failed save never aborts the pipeline — the
     // run keeps executing; recovery then treats it as Interrupted (the state
     // on disk simply lags). Finalize still writes even when superseded so
-    // ArtifactGC / archive see a terminal checkpoint.
+    // ArtifactGC / archive see a terminal checkpoint. The one fail-closed
+    // exception (#1448 / #1450) is the TERMINAL save below.
+    bool durable = true; // a superseded skip is covered by the newer capture
     if ( !superseded || request.sweepAndArchive )
-        m_checkpoints.saveCheckpoint( *request.run, request.directory );
+    {
+        const QString saved = m_checkpoints.saveCheckpoint( *request.run, request.directory );
+        durable = !saved.isEmpty();
+        if ( durable )
+            noteTerminalSaveOutcome( request.runId, true );
+        else if ( isTerminalRunState( request.run->state() ) )
+        {
+            // #1448 / #1450: the run is terminal in memory but the save
+            // failed, so the checkpoint on disk still shows a non-terminal
+            // state. Record the failure — releaseRunOwnership then keeps the
+            // flock held (resume is refused at the ownership wall) instead of
+            // handing the run to a resumer that would re-execute a finished
+            // lineage over the stale file. Non-terminal saves stay
+            // best-effort and unrecorded, exactly as before.
+            noteTerminalSaveOutcome( request.runId, false );
+            qWarning( "WorkflowRunCoordinator: terminal checkpoint save FAILED for run %s — "
+                      "run ownership retained; resume refused until a durable checkpoint exists",
+                      request.runId.c_str() );
+        }
+    }
 
-    if ( request.sweepAndArchive && request.run->state() == WorkflowRunState::Completed )
+    // The completed-run sweep/archive runs only over a DURABLE terminal
+    // checkpoint (#1448 / #1450): after a failed save the live file still
+    // holds the stale non-terminal state, and archiving it would move the
+    // run's only recovery record out of the checkpoint directory (every
+    // later load skips history — an unrecoverable run).
+    if ( request.sweepAndArchive && durable
+         && request.run->state() == WorkflowRunState::Completed )
     {
         ArtifactGC gc;
         gc.sweepRun( *request.run, /*retainFinalOutputs=*/true );
@@ -518,6 +589,9 @@ void WorkflowRunCoordinator::shutdownForTests()
     m_checkpointDir.clear();
     m_checkpointIoDelayMs.store( 0 );
     m_checkpointLoadDelayMs.store( 0 );
+    // File-scope retention set (#1448 / #1450) must not leak a "terminal
+    // save failed" verdict into the next test's releaseRunOwnership.
+    clearTerminalSaveRetentions();
 }
 
 bool WorkflowRunCoordinator::parseBoundedWorkflowJson( const std::string &jsonText, Json::Value *root )
@@ -935,6 +1009,21 @@ void WorkflowRunCoordinator::releaseRunOwnership( const std::string &runId )
     // archived by the finalize sweep). It must NOT be called with m_mutex
     // held — it takes m_mutex itself, and the lock erase must be the point
     // where the ownership handover becomes visible atomically.
+    // #1448 / #1450: a recorded terminal-save failure vetoes the release.
+    // The handover premise ("AFTER the terminal checkpoint has been
+    // persisted") is exactly what failed — releasing now would let the next
+    // resumeRun flock the run and load the still-stale non-terminal
+    // checkpoint. Keeping the record holds the flock for this process's
+    // lifetime: resume is refused at the ownership wall, and after exit the
+    // kernel releases the lock so the next startup's recovery reconciles the
+    // stale state before anyone resumes.
+    if ( terminalSaveRetentionActive( runId ) )
+    {
+        qWarning( "WorkflowRunCoordinator: run %s terminal checkpoint is not durable — "
+                  "ownership retained (flock held); resume refused",
+                  runId.c_str() );
+        return;
+    }
     std::lock_guard<std::mutex> lock( m_mutex );
     m_locksByRunId.erase( runId ); // destructor releases the flock
     // #1097: drop the reverse map so a Failed/Canceled run can be resumed in

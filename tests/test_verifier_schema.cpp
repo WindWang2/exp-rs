@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -762,7 +763,7 @@ TEST_CASE( "the canonical seal refuses non-finite bodies and non-hex spec digest
         Json::Value hostile = report.toCanonicalJson();
         Json::Value evidence( Json::objectValue );
         evidence["source"] = "grid:out.tif";
-        evidence["observed"]["nodataFraction"] = Json::Value( 1e999 );
+        evidence["observed"]["nodataFraction"] = Json::Value( std::numeric_limits<double>::infinity() );
         evidence["expected"] = Json::Value( Json::objectValue );
         hostile["checks"][0]["evidence"] = evidence;
         VerificationReport parsed;

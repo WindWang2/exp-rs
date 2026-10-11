@@ -813,8 +813,10 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
                   sourceIndexOf( "x", request.dimOffsets[leadingDims + ( hasTimeDim ? 2 : 1 )] );
                 const std::size_t rows =
                   static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + ( hasTimeDim ? 1 : 0 )], 1 ) );
+                // x sits after time only when time exists; a hard +2 reads
+                // past the dim tail on [band,y,x] stores (#1456).
                 const std::size_t cols =
-                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + 2], 1 ) );
+                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + ( hasTimeDim ? 2 : 1 )], 1 ) );
 
                 const std::uint64_t windowBytes = static_cast<std::uint64_t>( rows ) * cols * 8;
                 if ( bytesSpent + windowBytes > plan.intent().executionBudgetBytes )

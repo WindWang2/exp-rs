@@ -20,7 +20,19 @@ Json::Value parseText( const std::string &text, std::string &errors )
     builder["stackLimit"] = 1000;
     Json::Value parsed;
     std::stringstream stream( text );
-    Json::parseFromStream( builder, stream, &parsed, &errors );
+    // The reader can THROW (e.g. a nesting bomb trips the stack limit as a
+    // Json::Exception); mirror files are content, and the refusal must stay
+    // typed — an escaping exception would take the whole projection down
+    // instead of failing it closed (same discipline as grader_json) (#1450).
+    try
+    {
+        Json::parseFromStream( builder, stream, &parsed, &errors );
+    }
+    catch ( const Json::Exception &exception )
+    {
+        parsed = Json::Value();
+        errors = std::string( "unparseable mirror document: " ) + exception.what();
+    }
     return parsed;
 }
 

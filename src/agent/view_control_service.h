@@ -3,6 +3,7 @@
 
 #include <json/json.h>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QThread>
 #include <memory>
@@ -95,7 +96,11 @@ private:
   sicnu::data::DataManager *m_dataManager = nullptr;
   QString m_activeLayerName;
 
-  QgsRubberBand *m_roiRubberBand = nullptr;
+  // The ROI band parents itself into the canvas scene on construction, so the
+  // canvas owns its lifetime, not this service. QPointer nulls itself when
+  // the scene destroys the band, so a canvas that dies first cannot leave a
+  // dangling pointer behind for the disposal sites in the .cpp (#1448).
+  QPointer<QgsRubberBand> m_roiRubberBand;
   QString m_lastRoiWkt;
   QString m_lastRoiCrs;
 };

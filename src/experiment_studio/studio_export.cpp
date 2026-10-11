@@ -40,8 +40,12 @@ Result<StudioExportBundle> StudioExportBundle::fromJson( const QJsonObject &json
 {
     const QString schema = json.value( QStringLiteral( "schema" ) ).toString();
     const QString docType = json.value( QStringLiteral( "document_type" ) ).toString();
+    // Fail-closed on EITHER identity mismatch, the same rule as
+    // StudyReport::fromJson: the old && only refused when BOTH were foreign,
+    // so a stale schema riding the known document_type imported as current
+    // (#1448).
     if ( schema != QString::fromUtf8( kStudioExportSchema )
-         && docType != QStringLiteral( "sicnu.experiment_studio.export/1" ) )
+         || docType != QStringLiteral( "sicnu.experiment_studio.export/1" ) )
     {
         return Result<StudioExportBundle>::failure(
             studioError( QStringLiteral( "experiment_studio.export_schema_mismatch" ),
