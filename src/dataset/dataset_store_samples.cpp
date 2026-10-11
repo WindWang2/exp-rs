@@ -279,12 +279,17 @@ sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesP
     {
         StoreStmt count( m_impl->db, QStringLiteral(
             "SELECT COUNT(*) FROM samples WHERE dataset_version_id=?" ) );
-        if ( count )
-        {
-            count.bind( 1, versionId.toString() );
-            if ( count.stepRow() )
-                total = count.i64( 0 );
-        }
+        // The count feeds pagination math: a failed prepare/step must refuse
+        // the page instead of reporting total=0 as a clean empty result
+        // (#1448 — count fail-open was the last silent-total path here).
+        if ( !count )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        count.bind( 1, versionId.toString() );
+        if ( !count.stepRow() || count.stepFailed() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        total = count.i64( 0 );
     }
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM samples WHERE dataset_version_id=? ORDER BY roword LIMIT ? OFFSET ?" ) );
@@ -305,6 +310,13 @@ sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesP
                                                parsed.diagnostics().first().message ) );
         records.append( parsed.value() );
     }
+    // Checked AFTER the loop: inside it stepRow() has already returned ROW,
+    // so an in-body test could never fire — a mid-scan ERROR (CORRUPT/IOERR)
+    // silently truncated the page as success (#1448/#1457, same repair as
+    // ExperimentStore::listRunsByCursor).
+    if ( stmt.stepFailed() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
     return Result::success( qMakePair( total, records ) );
 }
 
@@ -348,8 +360,10 @@ sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCur
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                                count.error( m_impl->db ) ) );
         count.bind( 1, versionId.toString() );
-        if ( count.stepRow() )
-            page.total = count.i64( 0 );
+        if ( !count.stepRow() || count.stepFailed() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        page.total = count.i64( 0 );
     }
 
     StoreStmt stmt( m_impl->db, cursor.isEmpty()
@@ -391,6 +405,12 @@ sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCur
         page.nextCursor = sicnu::data::QueryCursor::encode(
             { versionId.toString(), QString::number( roword ), sampleId } );
     }
+    if ( stmt.stepFailed() )
+        // Checked BEFORE the exhaustion rule: a mid-scan step ERROR
+        // (CORRUPT/IOERR) must not clear the cursor and end the walk as
+        // "done" — that would silently drop the tail of the table (#1448).
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
     if ( int( page.samples.size() ) < limit )
         page.nextCursor.clear(); // exhausted: the walk terminates cleanly
     return Result::success( page );

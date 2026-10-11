@@ -20,6 +20,7 @@
 #include <QJsonObject>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QFile>
 
 #include <sqlite3.h>
 
@@ -776,6 +777,91 @@ TEST_CASE( "keyset sample cursor pages deep versions exactly once and fails "
     CHECK( empty->total == 0 );
     CHECK( empty->samples.isEmpty() );
     CHECK( empty->nextCursor.isEmpty() );
+}
+
+TEST_CASE( "a corrupted sample page fails the scans typed, never a short page",
+           "[dataset][store][corruption]" )
+{
+    // #1448/#1457 (dataset side): a mid-scan SQLITE_CORRUPT used to fold into
+    // loop exit and return a short page as success; the count block used to
+    // fold its failure into total=0. Both must now surface as
+    // dataset.store_query_failed.
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "corrupt-scan.db" ) );
+    DatasetVersionId versionId;
+    {
+        DatasetStore store;
+        REQUIRE( store.open( dbPath ) );
+        const DatasetId datasetId = DatasetId::generate();
+        REQUIRE( store.createDataset( datasetId, QStringLiteral( "corrupt" ) ).has_value() );
+        versionId = DatasetVersionId::generate();
+        DatasetManifest manifest = makeManifest( datasetId.toString(), versionId.toString() );
+        REQUIRE( store.createDraftVersion( manifest ).has_value() );
+
+        // Enough payload mass that the samples table spans many pages, so a
+        // poisoned page deep in the file belongs to sample storage (page 1
+        // and the small catalog tables stay intact — the open path and the
+        // datasets listing must keep working).
+        constexpr int kSamples = 1500;
+        QVector<SampleRecord> batch;
+        batch.reserve( kSamples );
+        for ( int i = 0; i < kSamples; ++i )
+        {
+            SampleRecord sample;
+            sample.setSampleId( SampleId::generate().toString() );
+            sample.setDatasetVersionId( versionId.toString() );
+            sample.setKind( SampleKind::Point );
+            PointSample point;
+            point.x = i;
+            point.y = -i;
+            sample.payload() = point;
+            batch.append( sample );
+        }
+        REQUIRE( store.addSamples( batch ).has_value() );
+        // Fold the WAL so the main file carries every row (poisoning the -wal
+        // instead would be a different failure than the one under test).
+        REQUIRE( store.checkpointForBackup() );
+    }
+
+    // Overwrite the headers of a BAND of deep pages (60%..90% into the file,
+    // page-aligned; SQLite default page size 4096) with an invalid page type.
+    // A single poisoned page is layout-dependent (row-width jitter from id
+    // length and timestamps moves b-tree pages between runs): the band
+    // guarantees every walk through that region — table pages and PK index
+    // pages alike — meets an invalid page and fails with SQLITE_CORRUPT
+    // instead of returning its earlier rows as a finished walk. Page 1 and
+    // the early catalog tables stay intact so open() and listDatasets keep
+    // working.
+    QFile dbFile( dbPath );
+    REQUIRE( dbFile.open( QIODevice::ReadWrite ) );
+    const qint64 size = dbFile.size();
+    REQUIRE( size > 5 * 4096 );
+    const qint64 firstPage = ( ( size * 3 / 5 ) / 4096 ) * 4096;
+    const qint64 lastPage = ( size * 9 / 10 ) / 4096 * 4096;
+    for ( qint64 offset = firstPage; offset < lastPage; offset += 4096 )
+    {
+        REQUIRE( dbFile.seek( offset ) );
+        REQUIRE( dbFile.write( QByteArray( 8, '\xff' ) ) == 8 );
+    }
+    dbFile.close();
+
+    DatasetStore store;
+    REQUIRE( store.open( dbPath ) );
+    const auto cursorPage = store.samplesPageCursor( versionId, QString(), 500 );
+    REQUIRE_FALSE( cursorPage.has_value() );
+    CHECK( cursorPage.diagnostics().first().code ==
+           QStringLiteral( "dataset.store_query_failed" ) );
+
+    const auto offsetPage = store.samplesPage( versionId, 0, 500 );
+    REQUIRE_FALSE( offsetPage.has_value() );
+    CHECK( offsetPage.diagnostics().first().code ==
+           QStringLiteral( "dataset.store_query_failed" ) );
+
+    // The datasets catalog itself is intact: its listing (count + scan, both
+    // now typed) still answers.
+    const auto listing = store.listDatasets( 0, 50 );
+    REQUIRE( listing.has_value() );
+    CHECK( listing->first >= 1 );
 }
 
 TEST_CASE( "QA reports persist as append-only audit evidence",
