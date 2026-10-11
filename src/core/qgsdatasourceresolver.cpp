@@ -17,6 +17,8 @@
 
 #include "qgsdatasourceresolver.h"
 
+#include <QUrl>
+
 QgsDataSourceKind QgsDataSourceResolver::classify( const QString &source )
 {
   if ( source.isEmpty() )
@@ -25,6 +27,12 @@ QgsDataSourceKind QgsDataSourceResolver::classify( const QString &source )
   // 2. GDAL VSI path: anything starting with /vsi (covers /vsimem/, /vsizip/, /vsicurl/, /vsis3/, /vsigs/, /vsiaz/, /vsicurl_streaming/, etc.)
   if ( source.startsWith( QStringLiteral( "/vsi" ), Qt::CaseInsensitive ) )
     return QgsDataSourceKind::GdalVirtualPath;
+
+  // 2b. file:// URL: a local file in URI form (#1467). Classified
+  // deliberately (not by the LocalFile fallback) so the intent is visible;
+  // an existence check / open must go through localPath().
+  if ( source.startsWith( QStringLiteral( "file://" ), Qt::CaseInsensitive ) )
+    return QgsDataSourceKind::LocalFile;
 
   // 3. Windows drive path: ^[A-Za-z]:[\\/] or ^[A-Za-z]:$  (must precede OGR check to avoid "C:/..." being misclassified)
   if ( source.size() >= 2 && source.at( 0 ).isLetter() && source.at( 1 ) == QLatin1Char( ':' ) )
@@ -60,6 +68,32 @@ QgsDataSourceKind QgsDataSourceResolver::classify( const QString &source )
 bool QgsDataSourceResolver::requiresLocalExistenceCheck( const QString &source )
 {
   return classify( source ) == QgsDataSourceKind::LocalFile;
+}
+
+QString QgsDataSourceResolver::localPath( const QString &source )
+{
+  if ( !source.startsWith( QStringLiteral( "file://" ), Qt::CaseInsensitive ) )
+    return source;
+
+  // TolerantMode: hand-typed URLs with unencoded spaces stay mappable (the
+  // scheme is still verified below, so only file:// inputs ever get here).
+  const QUrl url( source, QUrl::TolerantMode );
+  if ( !url.isValid() || url.scheme().compare( QStringLiteral( "file" ), Qt::CaseInsensitive ) != 0 )
+    return source; // malformed: caller's existence check fails closed as before
+
+  // file://<authority>/<path>: an empty authority denotes the local machine
+  // (QUrl::toLocalFile decodes percent escapes; note it rejects
+  // file://localhost on non-Windows, so that spelling is mapped explicitly);
+  // any other authority becomes the UNC form //authority/path so Windows
+  // shares stay addressable by QFile/QFileInfo/GDAL.
+  const QString local = url.toLocalFile();
+  if ( !local.isEmpty() )
+    return local;
+  if ( url.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0 )
+    return url.path( QUrl::FullyDecoded );
+  if ( !url.host().isEmpty() && !url.path().isEmpty() )
+    return QStringLiteral( "//" ) + url.host() + url.path();
+  return source;
 }
 
 QString QgsDataSourceResolver::kindToString( QgsDataSourceKind kind )

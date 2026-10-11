@@ -88,13 +88,15 @@ bool GdalDatasetWrapper::open(const QString &path)
     close();
     m_lastError.clear();
 
-    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( path ) && !QFile::exists( path ) )
+    // file:// sources are checked and opened through their local mapping (#1467).
+    const QString resolvedPath = QgsDataSourceResolver::localPath( path );
+    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( path ) && !QFile::exists( resolvedPath ) )
     {
         m_lastError = QStringLiteral( "File not found: %1" ).arg( path );
         return false;
     }
 
-    m_dataset = GDALOpen(path.toUtf8().constData(), GA_ReadOnly);
+    m_dataset = GDALOpen(resolvedPath.toUtf8().constData(), GA_ReadOnly);
     if (!m_dataset) {
         const char *msg = CPLGetLastErrorMsg();
         m_lastError = msg ? QString::fromUtf8(msg) : QStringLiteral("Unknown GDAL error");

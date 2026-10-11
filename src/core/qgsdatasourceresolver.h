@@ -65,6 +65,17 @@ class CORE_EXPORT QgsDataSourceResolver
     //! Whether a plain local-filesystem existence check (QFileInfo/std::filesystem) is appropriate for this source. True ONLY for LocalFile.
     static bool requiresLocalExistenceCheck( const QString &source );
 
+    //! The local filesystem path a LocalFile-classified source refers to:
+    //! identity for plain paths, and the decoded path for file:// URLs
+    //! (file:///C:/a.tif → C:/a.tif; file://host/share → //host/share so
+    //! Windows shares stay addressable). Non-local sources are returned
+    //! unchanged — callers that cannot consume them must not open them.
+    //! Existence checks and open calls on a LocalFile source must go through
+    //! this mapping, never the raw source string (#1467: agent tools used to
+    //! QFile::exists-reject file:///C:/a.tif because the LocalFile fallback
+    //! classified the URL while the check tested the raw string).
+    static QString localPath( const QString &source );
+
     //! Human-readable name for diagnostics
     static QString kindToString( QgsDataSourceKind kind );
 };

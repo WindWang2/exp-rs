@@ -28,9 +28,12 @@ SpatialToolResult openRaster( const std::string &path, GDALDatasetUniquePtr &ds 
   if ( path.empty() )
     return SpatialToolResult::failure( "Missing raster path", "INVALID_PARAMETER", "validation" );
   if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) &&
-       !QFileInfo::exists( QString::fromStdString( path ) ) )
+       !QFileInfo::exists( QgsDataSourceResolver::localPath( QString::fromStdString( path ) ) ) )
     return SpatialToolResult::failure( "Raster file not found: " + path, "NOT_FOUND", "io", false );
-  ds.reset( GDALDataset::Open( path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY ) );
+  // file:// inputs are opened through their local mapping (#1467).
+  ds.reset( GDALDataset::Open(
+    QgsDataSourceResolver::localPath( QString::fromStdString( path ) ).toStdString().c_str(),
+    GDAL_OF_RASTER | GDAL_OF_READONLY ) );
   if ( !ds )
     return SpatialToolResult::failure( "GDAL could not open raster: " + path, "IO_ERROR", "io", false );
   return SpatialToolResult::ok( Json::Value( Json::objectValue ) );
@@ -313,10 +316,13 @@ class SampleFeaturesTool final : public SpatialTool
       limit = std::clamp( limit, 1, kMaxSampleFeatures );
 
       if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) &&
-           !QFileInfo::exists( QString::fromStdString( path ) ) )
+           !QFileInfo::exists( QgsDataSourceResolver::localPath( QString::fromStdString( path ) ) ) )
         return SpatialToolResult::failure( "Vector file not found: " + path, "NOT_FOUND", "io", false );
 
-      GDALDatasetUniquePtr ds( GDALDataset::Open( path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
+      // file:// inputs are opened through their local mapping (#1467).
+      GDALDatasetUniquePtr ds( GDALDataset::Open(
+        QgsDataSourceResolver::localPath( QString::fromStdString( path ) ).toStdString().c_str(),
+        GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
       if ( !ds )
         return SpatialToolResult::failure( "GDAL could not open vector: " + path, "IO_ERROR", "io", false );
       OGRLayer *layer = ds->GetLayer( 0 );

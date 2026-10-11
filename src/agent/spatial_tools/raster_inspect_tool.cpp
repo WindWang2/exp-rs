@@ -203,10 +203,13 @@ SpatialToolResult RasterInspectTool::execute( const Json::Value &input )
   if ( path.empty() )
     return SpatialToolResult::failure( "Missing required parameter: path" );
 
-  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) && !QFileInfo::exists( QString::fromStdString( path ) ) )
+  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) )
+       && !QFileInfo::exists( QgsDataSourceResolver::localPath( QString::fromStdString( path ) ) ) )
     return SpatialToolResult::failure( "Raster file not found: " + path, "local_file_not_found", "io", false );
 
-  GDALDatasetUniquePtr ds( GDALDataset::Open( path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY ) );
+  // file:// inputs are opened through their local mapping (#1467).
+  const std::string openPath = QgsDataSourceResolver::localPath( QString::fromStdString( path ) ).toStdString();
+  GDALDatasetUniquePtr ds( GDALDataset::Open( openPath.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY ) );
   if ( !ds )
     return SpatialToolResult::failure( "GDAL could not open raster: " + path, "gdal_open_failed", "io", false );
 
