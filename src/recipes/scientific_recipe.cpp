@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <memory>
 #include <sstream>
 
@@ -42,10 +43,25 @@ bool parseRecipeJson( const std::string &text, Json::Value &out, std::string *er
   builder["stackLimit"] = 256;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   std::string errors;
-  if ( !reader->parse( text.data(), text.data() + text.size(), &out, &errors ) )
+  // jsoncpp signals a stackLimit violation by THROWING out of parse()
+  // rather than returning false (the passport parser documents and catches
+  // exactly this shape, asset_state_json.cpp). The registry is a directory
+  // scanner over untrusted files, and refreshRecipes is reached from the
+  // default broker's static initialization — the throw must die here as a
+  // typed parse failure (#1465).
+  try
+  {
+    if ( !reader->parse( text.data(), text.data() + text.size(), &out, &errors ) )
+    {
+      if ( error )
+        *error = errors;
+      return false;
+    }
+  }
+  catch ( const std::exception &e )
   {
     if ( error )
-      *error = errors;
+      *error = e.what();
     return false;
   }
   return true;

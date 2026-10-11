@@ -45,7 +45,8 @@ std::string makeCacheKey( const CacheKeyMaterial &material )
         << '|' << material.maxCapabilities << '|' << material.maxOpenQuestions
         << '|' << material.maxAssets
         << '|' << ( material.determinismRequired ? '1' : '0' )
-        << '|' << material.capabilityAuthority << '|' << material.capabilityRevision;
+        << '|' << material.capabilityAuthority << '|' << material.capabilityRevision
+        << '|' << material.failureDigest;
     return hex16( fnv1a64( oss.str() ) );
 }
 

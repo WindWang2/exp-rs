@@ -31,6 +31,12 @@ struct CacheKeyMaterial
     // Capability facts authority ("" when the router runs on its builtin table).
     std::string capabilityAuthority;
     std::uint64_t capabilityRevision = 0;
+    // Sorted, deduped resolve-failure markers ("asset_resolve_failed:<err>[:<detail>]").
+    // #1465: the typed failure reason is part of the bundle's identity — a
+    // resolver_unavailable → asset_not_found change must not be answered
+    // from a cached bundle that still carries the stale reason. Empty when
+    // every asset resolved (the common case; digests alone key it).
+    std::string failureDigest;
 };
 
 std::string makeCacheKey( const CacheKeyMaterial &material );
