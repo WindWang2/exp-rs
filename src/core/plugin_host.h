@@ -15,6 +15,19 @@ namespace sicnu::python::isolated {
     class PythonPluginHost;
 }
 
+// Q_OBJECT static data members (staticMetaObject) are NOT covered by
+// WINDOWS_EXPORT_ALL_SYMBOLS; exe consumers (test_plugin_host_allowlist)
+// fail to link without an explicit export. Linux exports by default.
+#if defined( _WIN32 )
+#if defined( sicnu_core_EXPORTS )
+#define SICNU_CORE_EXPORT __declspec( dllexport )
+#else
+#define SICNU_CORE_EXPORT __declspec( dllimport )
+#endif
+#else
+#define SICNU_CORE_EXPORT
+#endif
+
 /**
  * @brief GUI-free unified owner of C++ and Python plugin lifecycles.
  *
@@ -22,7 +35,7 @@ namespace sicnu::python::isolated {
  * out-of-process process pool execution via PythonPluginHost (Python).
  * Operates headlessly using SicnuAppInterface facade without raw GUI widgets.
  */
-class PluginHost : public QObject
+class SICNU_CORE_EXPORT PluginHost : public QObject
 {
     Q_OBJECT
 

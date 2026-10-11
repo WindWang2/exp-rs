@@ -638,7 +638,12 @@ TEST_CASE( "local items resolve relative hrefs lexically with containment",
   StacClient client( "https://stac.example.com" ); // root unused for local resolution
   StacAsset image = item.assets.at( "image" );
   const std::string resolved = client.resolveAssetHref( item, image );
-  CHECK( resolved == dir + "/items/scene.tif" );
+  // Canonicalized on both sides: the resolver answers the long form while
+  // temp_directory_path() on this host returns the 8.3 short profile form.
+  std::error_code canonEc;
+  const std::string expected = std::filesystem::weakly_canonical(
+    std::filesystem::path( dir ) / "items" / "scene.tif", canonEc ).string();
+  CHECK( resolved == expected );
 
   // A relative href escaping the item directory is refused — never a guess.
   StacAsset escape;
@@ -900,4 +905,29 @@ TEST_CASE( "a hostile merge link (string-typed) never aborts the pagination walk
   CHECK( result.items[1].id == "p2" );
   CHECK( result.items[2].id == "p3" );
   CHECK( !result.truncatedByLimit );
+}
+
+TEST_CASE( "the egress policy judges IPv4-mapped IPv6 literals by their embedded v4 (#1456)",
+           "[io][stac][egress]" )
+{
+  // ::ffff:a.b.c.d must face the SAME private-range verdict as its dotted
+  // spelling — before #1456 the v6 form slipped past the v4 policy.
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::ffff:10.0.0.5]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::ffff:172.31.255.1]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::ffff:192.168.1.7]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::ffff:127.0.0.1]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::ffff:169.254.169.254]/latest/meta-data" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::ffff:100.64.0.1]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::ffff:0.0.0.1]/stac" ).empty() );
+
+  // Dotted spellings keep their historical verdict (shared v4 policy).
+  CHECK_FALSE( StacClient::egressPolicyError( "https://10.0.0.5/stac" ).empty() );
+
+  // The v6 spellings of PUBLIC hosts stay allowed, and the native v6
+  // verdicts are unchanged.
+  CHECK( StacClient::egressPolicyError( "https://[::ffff:8.8.8.8]/stac" ).empty() );
+  CHECK( StacClient::egressPolicyError( "https://[2001:db8::1]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[::1]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[fe80::1]/stac" ).empty() );
+  CHECK_FALSE( StacClient::egressPolicyError( "https://[fd12::1]/stac" ).empty() );
 }

@@ -20,7 +20,11 @@
 #include <QDir>
 #include <QElapsedTimer>
 
+// ru_maxrss redline oracle is POSIX-only; gate the include and the helper
+// (the single assertion using it is guarded at its site).
+#ifndef _WIN32
 #include <sys/resource.h>
+#endif
 
 #include <json/json.h>
 
@@ -196,12 +200,14 @@ struct CrossingTruth
     }
 };
 
+#ifndef _WIN32
 std::size_t peakRssBytes()
 {
     rusage usage;
     getrusage( RUSAGE_SELF, &usage );
     return static_cast<std::size_t>( usage.ru_maxrss ) * 1024ull;
 }
+#endif
 
 } // namespace
 
@@ -435,6 +441,8 @@ TEST_CASE( "Lab08 auto-grading reaches the 100-point baseline", "[d16][e2e][lab0
     }
     REQUIRE( total == 100 );
 
-    // Hardware redline for the whole grading flow.
+    // Hardware redline for the whole grading flow (POSIX-only oracle).
+#ifndef _WIN32
     REQUIRE( peakRssBytes() < 1536ull * 1024 * 1024 );
+#endif
 }

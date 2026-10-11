@@ -13,6 +13,7 @@
 #include "experiment/run_recorder.h"
 
 #include <QFile>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -501,4 +502,62 @@ TEST_CASE( "report assembly at the sweep cap stays within the UI budget",
     const qint64 capMs = timedReportAssemblyMs( 1000, 7 );
     WARN( "report assembly profile: 1000 points = " << capMs << " ms" );
     CHECK( capMs < 5000 ); // absolute teaching-study budget at the cap
+}
+
+TEST_CASE( "spatial comparison surfaces ledger lookup failures instead of skipping the point",
+           "[study][export][spatial][issue1448]" )
+{
+    // Regression (#1448): the per-point walk folded a FAILED runsForCell
+    // lookup into "point recorded nothing" and silently dropped the cell from
+    // the evidence. An empty pointId makes the typed ledger refusal
+    // deterministic without fault injection.
+    Fixture fix;
+    sicnu::experiment::Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-export" ) );
+    experiment.setName( QStringLiteral( "export" ) );
+    experiment.setCreatedAtUtc( frozenTime() );
+    REQUIRE( fix.store.upsertExperiment( experiment ).has_value() );
+
+    ParameterStudySpec spec;
+    spec.studyId = QStringLiteral( "export-spatial-refusal" );
+    spec.experimentId = QStringLiteral( "exp-export" );
+    spec.algorithmId = QStringLiteral( "rs:threshold_raster" );
+    spec.strategy = SamplingStrategy::OneAtATime;
+    spec.spatialComparison = true;
+
+    StudyPoint good;
+    good.pointId = QStringLiteral( "point-good" );
+    good.seed = 1;
+    QJsonObject metrics;
+    metrics.insert( QStringLiteral( "maskedPercent" ), 50.0 );
+    fix.recordRun( spec, good, metrics );
+
+    const QString outputDir = fix.dir.filePath( QStringLiteral( "spatial-outputs" ) );
+    REQUIRE( QDir().mkpath( outputDir + QStringLiteral( "/point-good" ) ) );
+    {
+        QFile out( outputDir + QStringLiteral( "/point-good/output.tif" ) );
+        REQUIRE( out.open( QIODevice::WriteOnly ) );
+        out.write( "stub", 4 );
+    }
+
+    QVector<StudyPoint> points;
+    points.append( good );
+    points.append( StudyPoint{} ); // empty pointId → ledger.runsForCell refuses typed
+
+    class StubSummarizer final : public ISpatialDifferenceSummarizer
+    {
+      public:
+        Result<SpatialDifferenceSummary> summarize( const QString &,
+                                                    const QString & ) const override
+        {
+            return Result<SpatialDifferenceSummary>::success( SpatialDifferenceSummary{} );
+        }
+    } summarizer;
+
+    const auto spatial = summarizeStudyOutputs( fix.store, fix.ledger, spec, points,
+                                                outputDir, summarizer );
+    REQUIRE( !spatial.has_value() );
+    REQUIRE( spatial.diagnostics().size() == 1 );
+    CHECK( spatial.diagnostics().first().code
+           == QStringLiteral( "experiment.matrix_invalid" ) );
 }

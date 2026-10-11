@@ -215,7 +215,9 @@ StageRecord readStageLedger( const std::string &finalPath )
     throw GeoError( ErrorCode::NotFound, "stage ledger missing for " + finalPath );
   if ( atomic_fs::fileSize( ledgerPath ) > kMaxLedgerBytes )
     throw GeoError( ErrorCode::InvalidMetadata, "stage ledger exceeds the size cap; refusing to read" );
-  std::ifstream file( ledgerPath, std::ios::binary );
+  // Same path dialect as writeLedger: a narrow open would fail on the very
+  // non-ASCII ledger paths the writer creates (#1456).
+  std::ifstream file( sicnu::portable::pathFromUtf8( ledgerPath ), std::ios::binary );
   if ( !file )
     throw GeoError( ErrorCode::IoError, "stage ledger: cannot open " + ledgerPath );
   std::string text( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );
