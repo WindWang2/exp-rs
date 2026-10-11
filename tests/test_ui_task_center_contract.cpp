@@ -77,7 +77,6 @@ TEST_CASE( "UI contract inventory: no direct JobEngine submit in migrated caller
 
   const QStringList submitCallers = {
     QStringLiteral( "src/app/dialogs/sicnu_algorithm_dialog.cpp" ),
-    QStringLiteral( "src/app/shell/rs_job_runner.cpp" ),
     QStringLiteral( "src/app/dialogs/raster_processing_dialog_base.cpp" ),
     QStringLiteral( "src/app/obia/rs_obia_main_window.cpp" ),
     QStringLiteral( "src/app/classification/qgsclassificationmainwindow.cpp" ),

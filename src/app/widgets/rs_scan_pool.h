@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace sicnu::app
@@ -36,6 +37,14 @@ class RsScanPool : public QObject
     /// Opens a new request generation, implicitly superseding every older
     /// one for the same owner (or globally if owner is null).
     quint64 nextGeneration( const void *owner = nullptr );
+
+    /// QObject-owner overload: same generation semantics, plus the pool
+    /// erases the owner's record when the object is destroyed. Without the
+    /// destroyed hook the raw-address map entry outlived its widget
+    /// forever — an unbounded leak that also pinned cancel()'s minLive low,
+    /// and a successor allocated at the same address inherited the dead
+    /// owner's generation record (#1453).
+    quint64 nextGeneration( const QObject *owner );
 
     /// Cancels one specific generation (e.g. its widget going away) without
     /// touching other widgets' in-flight scans.
@@ -60,6 +69,13 @@ class RsScanPool : public QObject
 
   private:
     RsScanPool();
+
+    /// QObject::destroyed payload is the dying owner itself — the exact key
+    /// to erase. UniqueConnection keeps one hook per owner across repeated
+    /// nextGeneration calls; DirectConnection is safe because owners
+    /// register from (and are destroyed on) the GUI thread.
+    void ownerDestroyed( QObject *owner );
+    void forgetOwner( const void *owner );
 
     QThreadPool m_pool;
     std::atomic<quint64> m_activeGeneration { 1 };

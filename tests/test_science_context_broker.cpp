@@ -870,3 +870,46 @@ TEST_CASE( "asset trims are counted in truncation metadata", "[science_context][
     CHECK( result.bundle.truncation.droppedAssets >= 9 );
     CHECK( result.bundle.truncation.truncated == true );
 }
+
+TEST_CASE( "a changed resolve-failure reason invalidates the cached bundle",
+           "[science_context][broker][r8]" )
+{
+    // #1465: the cache key used to bind the asset digests but NOT the typed
+    // resolve-failure reason, so a bundle synthesized while the resolver was
+    // unavailable kept serving "asset_resolve_failed:resolver_unavailable"
+    // after the real cause had changed (e.g. the resolver got wired and the
+    // asset is genuinely absent). The failure markers must be part of the
+    // key: same reason → cache hit; different reason → fresh synthesis.
+    ScienceContextBroker broker;
+    std::string reason = "resolver_unavailable";
+    broker.assets().setResolver(
+        [&reason]( const std::string & ) -> PassportResolution {
+            return PassportResolution{ std::nullopt, reason, "" };
+        } );
+    SynthesizeRequest req;
+    req.goal = "inspect";
+    req.assetKeys = { "flaky-asset" };
+
+    auto first = broker.synthesize( req );
+    REQUIRE_FALSE( first.cacheHit );
+    bool sawUnavailable = false;
+    for ( const auto &q : first.bundle.openQuestions )
+        sawUnavailable = sawUnavailable ||
+                         q.rfind( "asset_resolve_failed:resolver_unavailable", 0 ) == 0;
+    CHECK( sawUnavailable );
+
+    // The underlying cause changed: the cached bundle with the stale reason
+    // must NOT be replayed.
+    reason = "asset_not_found";
+    auto second = broker.synthesize( req );
+    CHECK_FALSE( second.cacheHit );
+    bool sawNotFound = false;
+    for ( const auto &q : second.bundle.openQuestions )
+        sawNotFound = sawNotFound || q.rfind( "asset_resolve_failed:asset_not_found", 0 ) == 0;
+    CHECK( sawNotFound );
+
+    // Stable reason: the failure bundle is cacheable (the fix keys failures
+    // in; it does not disable caching them).
+    auto third = broker.synthesize( req );
+    CHECK( third.cacheHit );
+}

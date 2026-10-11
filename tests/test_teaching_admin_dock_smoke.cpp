@@ -280,3 +280,61 @@ TEST_CASE( "dock batch cancel keeps completed rows and types the rest cancelled"
 
     qunsetenv( "SICNU_GEO_RS_CLI" );
 }
+
+TEST_CASE( "a failed batch re-arms the console instead of wedging it",
+           "[teaching_admin][dock][smoke][r8]" )
+{
+    // #1453/WP02: the worker's exception path used to never join/reset
+    // m_batchThread, so one failed batch left joinable() true forever and
+    // every later click was refused with a FALSE "a batch is already
+    // running". Publishing to an unwritable target now routes through the
+    // same typed failure path, and the console must come back armed.
+    ensureApp();
+    qputenv( "SICNU_GEO_RS_CLI", fakeGraderCliPath().toLocal8Bit() );
+
+    QTemporaryDir submissions;
+    REQUIRE( submissions.isValid() );
+    REQUIRE( QDir( submissions.path() ).mkdir( QStringLiteral( "s01" ) ) );
+    {
+        QFile good( QDir( submissions.path() ).filePath( QStringLiteral( "s01/a.tif" ) ) );
+        REQUIRE( good.open( QIODevice::WriteOnly ) );
+        good.write( QByteArray( "GOOD-scene" ) );
+    }
+
+    TeachingAdminDock dock;
+    auto *subs = dock.findChild<QLineEdit *>( QStringLiteral( "teachingAdminSubmissionsDir" ) );
+    auto *out = dock.findChild<QLineEdit *>( QStringLiteral( "teachingAdminBatchOut" ) );
+    auto *btn = dock.findChild<QPushButton *>( QStringLiteral( "teachingAdminBatchButton" ) );
+    auto *log = dock.findChild<QPlainTextEdit *>( QStringLiteral( "teachingAdminLog" ) );
+    REQUIRE( ( subs && out && btn && log ) );
+    subs->setText( submissions.path() );
+
+    // Phase 1 — the out prefix's parent directory does not exist: the
+    // atomic publish fails and the run must land in the TYPED failure path
+    // (a visible "batch failed"), never in a silent fake success.
+    const QString badPrefix =
+      QDir( submissions.path() ).filePath( QStringLiteral( "no_such_parent/batch" ) );
+    out->setText( badPrefix );
+    btn->click();
+    pumpUntil(
+      [&] { return log->toPlainText().contains( QLatin1String( "batch failed" ) ); }, 60000 );
+    REQUIRE( log->toPlainText().contains( QLatin1String( "batch failed" ) ) );
+    REQUIRE_FALSE( QFile::exists( badPrefix + QStringLiteral( ".json" ) ) );
+
+    // Phase 2 — the console is re-armed: a second batch with a writable
+    // prefix must actually run (the old wedge refused it with "already
+    // running").
+    QTemporaryDir outDir;
+    REQUIRE( outDir.isValid() );
+    const QString goodPrefix = QDir( outDir.path() ).filePath( QStringLiteral( "retry_batch" ) );
+    out->setText( goodPrefix );
+    btn->click();
+    pumpUntil(
+      [&] { return QFile::exists( goodPrefix + QStringLiteral( ".json" ) ); }, 60000 );
+    REQUIRE( QFile::exists( goodPrefix + QStringLiteral( ".json" ) ) );
+    pumpUntil(
+      [&] { return log->toPlainText().contains( QLatin1String( "\"graded\":1" ) ); }, 10000 );
+    REQUIRE( log->toPlainText().contains( QLatin1String( "\"graded\":1" ) ) );
+
+    qunsetenv( "SICNU_GEO_RS_CLI" );
+}

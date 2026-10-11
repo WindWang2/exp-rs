@@ -30,6 +30,33 @@ quint64 RsScanPool::nextGeneration( const void *owner )
     return gen;
 }
 
+quint64 RsScanPool::nextGeneration( const QObject *owner )
+{
+    // Derived-to-base pointer conversion routes every QObject-derived owner
+    // here; stack-address owners (tests) keep the const void* overload.
+    const quint64 gen = nextGeneration( static_cast<const void *>( owner ) );
+    if ( !owner )
+        return gen;
+    // One destroyed hook per owner: destroyed fires during ~QObject — after
+    // the derived destructor (VaDataSource/VaCursorProbe re-register inside
+    // theirs) — so the erase always lands last and a dead widget leaves no
+    // record behind (#1453).
+    QObject::connect( owner, &QObject::destroyed, this, &RsScanPool::ownerDestroyed,
+                      static_cast<Qt::ConnectionType>( Qt::UniqueConnection | Qt::DirectConnection ) );
+    return gen;
+}
+
+void RsScanPool::ownerDestroyed( QObject *owner )
+{
+    forgetOwner( static_cast<const void *>( owner ) );
+}
+
+void RsScanPool::forgetOwner( const void *owner )
+{
+    const std::lock_guard<std::mutex> lock( m_canceledMutex );
+    m_ownerActiveGeneration.erase( owner );
+}
+
 void RsScanPool::cancel( quint64 generation, const void *owner )
 {
     const std::lock_guard<std::mutex> lock( m_canceledMutex );

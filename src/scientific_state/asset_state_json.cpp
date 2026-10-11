@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace sicnu::state
@@ -154,6 +155,12 @@ bool claimKindFromString( const std::string &text, ClaimKind &out )
 {
     const auto match = [&text]( const char *candidate )
     {
+        // Length gate before the 3-arg form: a JSON string can carry an
+        // embedded NUL, and without it "known\0" matched the terminator
+        // (accepting an invalid token) while "known\0x" walked past the
+        // literal's end — OOB read on .rodata (#1465).
+        if ( text.size() != std::strlen( candidate ) )
+            return false;
         return std::equal( text.begin(), text.end(), candidate,
                            []( char a, char b ) { return std::tolower( static_cast<unsigned char>( a ) ) == b; } );
     };
@@ -182,6 +189,12 @@ bool assetKindFromString( const std::string &text, AssetKind &out )
 {
     const auto match = [&text]( const char *candidate )
     {
+        // Length gate before the 3-arg form: a JSON string can carry an
+        // embedded NUL, and without it "known\0" matched the terminator
+        // (accepting an invalid token) while "known\0x" walked past the
+        // literal's end — OOB read on .rodata (#1465).
+        if ( text.size() != std::strlen( candidate ) )
+            return false;
         return std::equal( text.begin(), text.end(), candidate,
                            []( char a, char b ) { return std::tolower( static_cast<unsigned char>( a ) ) == b; } );
     };
@@ -215,6 +228,12 @@ bool assetLifecycleFromString( const std::string &text, AssetLifecycle &out )
 {
     const auto match = [&text]( const char *candidate )
     {
+        // Length gate before the 3-arg form: a JSON string can carry an
+        // embedded NUL, and without it "known\0" matched the terminator
+        // (accepting an invalid token) while "known\0x" walked past the
+        // literal's end — OOB read on .rodata (#1465).
+        if ( text.size() != std::strlen( candidate ) )
+            return false;
         return std::equal( text.begin(), text.end(), candidate,
                            []( char a, char b ) { return std::tolower( static_cast<unsigned char>( a ) ) == b; } );
     };
@@ -248,6 +267,12 @@ bool modalityFromString( const std::string &text, Modality &out )
 {
     const auto match = [&text]( const char *candidate )
     {
+        // Length gate before the 3-arg form: a JSON string can carry an
+        // embedded NUL, and without it "known\0" matched the terminator
+        // (accepting an invalid token) while "known\0x" walked past the
+        // literal's end — OOB read on .rodata (#1465).
+        if ( text.size() != std::strlen( candidate ) )
+            return false;
         return std::equal( text.begin(), text.end(), candidate,
                            []( char a, char b ) { return std::tolower( static_cast<unsigned char>( a ) ) == b; } );
     };

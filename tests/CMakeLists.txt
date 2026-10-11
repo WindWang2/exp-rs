@@ -5511,7 +5511,6 @@ sicnu_discover_tests(test_band_ratio)
 if(TARGET qgis_app_classify)
   add_executable(test_classification_task_center
     test_classification_task_center.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
@@ -5547,7 +5546,6 @@ if(TARGET qgis_app_classify)
   # tests need this list — do not add these .cpp files to qgis_app_classify.
   add_executable(test_classification_window
     test_classification_window.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
@@ -10751,6 +10749,18 @@ target_link_libraries(test_faultlab PRIVATE
 )
 sicnu_discover_tests(test_faultlab)
 
+# R8 (#1464): closed param vocabulary honesty — declared params must be
+# consumed by their transform (cell_size was accepted-and-inert).
+add_executable(test_faultlab_params_r8 test_faultlab_params_r8.cpp)
+target_link_libraries(test_faultlab_params_r8 PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_faultlab
+)
+target_compile_definitions(test_faultlab_params_r8 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_faultlab_params_r8)
+
 # RS14-05 Process-aware Experiment Grader: engine/types/error/json/sha256
 # schema (sicnu_grader links jsoncpp PUBLIC).
 add_executable(test_grader_schema test_grader_schema.cpp)
@@ -13749,6 +13759,11 @@ target_link_libraries(test_scientific_state_fixtures PRIVATE Sicnu::ScientificSt
 sicnu_add_sdk_test(test_scientific_state_review)
 target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificState)
 
+# R8 (#1465): enum token parsers must refuse NUL-carrying tokens (the 3-arg
+# std::equal matcher read past C-string literal ends).
+sicnu_add_sdk_test(test_scientific_state_nul_tokens_r8)
+target_link_libraries(test_scientific_state_nul_tokens_r8 PRIVATE Sicnu::ScientificState)
+
 # Science Context Broker & Skill Router (Qt-free; Sicnu::ScienceContext).
 sicnu_add_sdk_test(test_science_context_broker TEST_PREFIX "test_science_context_broker::")
 target_link_libraries(test_science_context_broker PRIVATE Sicnu::ScienceContext)
@@ -14101,6 +14116,50 @@ target_compile_definitions(test_teaching_admin_core PRIVATE
 # The core suite spawns the fake grader CLI by path: make a target-scoped
 # build (no `all`) produce it too.
 add_dependencies(test_teaching_admin_core test_teaching_fake_grader_cli)
+
+# R8 (#1466): script adapter hardening — interpreter resolution must name a
+# real executable (Windows python fallback) and runScript must bound captured
+# output. New file (test_teaching_admin_core is concurrently modified by
+# PR #1469; keep the diff disjoint).
+sicnu_add_teaching_admin_test(test_teaching_admin_script_adapters_r8)
+
+# R8 (WP02): GuidedLabWorkspace fail-closed affordances, standalone twin of
+# the cockpit-smoke case — compiles only the workspace TU (Qt Widgets +
+# Sicnu::teaching), no qgis, so the contract is verifiable on light lanes.
+add_executable(test_guided_lab_workspace_r8
+  test_guided_lab_workspace_r8.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
+)
+target_link_libraries(test_guided_lab_workspace_r8 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_guided_lab_workspace_r8 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app/teaching
+)
+set_target_properties(test_guided_lab_workspace_r8 PROPERTIES
+  AUTOMOC ON
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_guided_lab_workspace_r8)
+
+# R8 (WP02/WP06): UI state-honesty source contracts (scan style, like
+# test_classification_window) — guided-workflow Next gating and the teaching
+# menu's registry projection.
+add_executable(test_ui_state_honesty_r8 test_ui_state_honesty_r8.cpp)
+target_link_libraries(test_ui_state_honesty_r8 PRIVATE
+  Catch2::Catch2WithMain
+)
+target_compile_definitions(test_ui_state_honesty_r8 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_ui_state_honesty_r8)
 
 # Offscreen widget smoke for the Teacher Authoring dock: compiles the dock TU
 # into the test (no QGIS, no app binary) and drives one real batch-grade

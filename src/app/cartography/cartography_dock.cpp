@@ -11,7 +11,6 @@
 #include "agent/cartography/registry.h"
 #include "operators/framework/rs_operator_registry.h"
 
-#include "../shell/rs_job_runner.h"
 
 #include <processing/framework/task_center.h>
 

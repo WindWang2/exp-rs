@@ -29,19 +29,25 @@ std::string ScientificRecipeRegistry::directory() const
 std::string ScientificRecipeRegistry::defaultDirectory() const
 {
   // Path-valued env: UTF-8 boundary + UTF-8 path decode (the narrow
-  // fs::is_directory(env) would decode ACP bytes on Windows).
+  // fs::is_directory(env) would decode ACP bytes on Windows). Every probe
+  // uses the ec form: reload() is reached from the default broker's static
+  // initialization (refreshRecipes), and a throwing filesystem_error there
+  // escapes the whole scan (#1465).
+  std::error_code ec;
   const std::string env = sicnu::portable::envUtf8( "SICNU_SCIENTIFIC_RECIPES_DIR" );
-  if ( !env.empty() && fs::is_directory( sicnu::portable::pathFromUtf8( env ) ) )
+  if ( !env.empty() && fs::is_directory( sicnu::portable::pathFromUtf8( env ), ec ) && !ec )
     return env;
 
-  const fs::path cwd = fs::current_path() / "data" / "agent" / "scientific_recipes";
-  if ( fs::is_directory( cwd ) )
+  ec.clear();
+  const fs::path cwd = fs::current_path( ec ) / "data" / "agent" / "scientific_recipes";
+  if ( !ec && fs::is_directory( cwd, ec ) && !ec )
     return cwd.string();
 
 #ifdef SICNU_SOURCE_DIR
+  ec.clear();
   const fs::path source =
     fs::path( SICNU_SOURCE_DIR ) / "data" / "agent" / "scientific_recipes";
-  if ( fs::is_directory( source ) )
+  if ( fs::is_directory( source, ec ) && !ec )
     return source.string();
 #endif
   return {};

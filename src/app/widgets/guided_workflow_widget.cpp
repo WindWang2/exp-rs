@@ -253,6 +253,13 @@ void GuidedWorkflowWidget::onStartWorkflow()
 void GuidedWorkflowWidget::onNextStep()
 {
     if (!m_workflowActive) return;
+    // #1453/WP02: a job for this step is still in flight — completing the
+    // workflow now would declare "Experiment complete!" for a run that may
+    // fail seconds later (and the inactive-workflow guard then suppresses
+    // that failure from this pane). The button is disabled during the run;
+    // this guard covers queued state updates that race the click.
+    if (m_jobHandle->isRunning())
+        return;
     if (m_currentWorkflowIndex < 0 || m_currentWorkflowIndex >= m_workflows.size()) return;
     const auto &wf = m_workflows[m_currentWorkflowIndex];
     if (m_currentStepIndex < 0 || m_currentStepIndex >= wf.steps.size()) return;
@@ -477,7 +484,13 @@ void GuidedWorkflowWidget::showStep(int index)
 
     // Update navigation buttons
     m_prevButton->setEnabled(index > 0);
-    m_nextButton->setEnabled(true);
+    // Next is state-driven exactly like Run (#1453/WP02): while this step's
+    // operator job is in flight, "Experiment complete!" must not be
+    // declarable — the completion branch below deactivates the workflow,
+    // and the inactive-workflow guard then suppresses the job's eventual
+    // failure message from this pane. restoreButton's updateStepDisplay()
+    // re-arms Next when the job lands.
+    m_nextButton->setEnabled(!m_jobHandle->isRunning());
     m_runButton->setEnabled(!step.isManual() && !m_jobHandle->isRunning());
 }
 

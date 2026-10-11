@@ -34,11 +34,14 @@
 //     item. Agreeing duplicates are one observation; citations list all
 //     contributing items in evidenceId-sorted order (stable tie-break).
 //   * SEQUENCING. `orderedAfter` is the only order the grader can see; it is
-//     carried by evidence `recordedAtUtc` (ISO-8601 UTC, lexicographic =
-//     chronological). A needed pair with an empty stamp cannot prove order →
-//     `indeterminate` (never a silent violation); stamps present but
-//     inverted → `not_earned`. Equal stamps satisfy the constraint (same-
-//     time records cannot be distinguished, and the grader does not guess).
+//     carried by evidence `recordedAtUtc` (ISO-8601, compared as the
+//     instants they denote — timezone-equivalent and fraction-aware, so
+//     '.500Z' / '+00:00' / '+08:00' spellings order correctly; naive stamps
+//     are read as UTC). A needed pair with an empty or unparseable stamp
+//     cannot prove order → `indeterminate` (never a silent violation);
+//     stamps present but inverted → `not_earned`. Equal instants satisfy the
+//     constraint (same-time records cannot be distinguished, and the grader
+//     does not guess).
 #pragma once
 
 #include "grader_types.h"

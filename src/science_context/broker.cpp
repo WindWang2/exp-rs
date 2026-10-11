@@ -258,6 +258,24 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     keyMat.capabilityAuthority =
         haveCapProvider ? capFacts->authority : std::string( "__builtin__" );
     keyMat.capabilityRevision = capRevision;
+    // #1465: the typed resolve-failure reasons are part of the cache
+    // identity. The asset digest covers resolved assets; a FAILED key
+    // contributed only "key@;" there, so two different failure reasons for
+    // the same key produced byte-identical digests — and a cached bundle
+    // kept replaying the stale marker (resolver_unavailable →
+    // asset_not_found). Sorted+deduped so the digest depends on the failure
+    // SET, not on iteration order; an errorDetail change also re-keys
+    // (honest: the detail is part of what the bundle says).
+    {
+        std::vector<std::string> failureMarkers = resolveFailures;
+        std::sort( failureMarkers.begin(), failureMarkers.end() );
+        failureMarkers.erase( std::unique( failureMarkers.begin(), failureMarkers.end() ),
+                              failureMarkers.end() );
+        std::string joined;
+        for ( const auto &marker : failureMarkers )
+            joined += marker + ';';
+        keyMat.failureDigest = std::move( joined );
+    }
     const std::string cacheKey = makeCacheKey( keyMat );
 
     if ( request.useCache )

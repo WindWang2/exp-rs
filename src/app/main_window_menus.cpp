@@ -657,11 +657,14 @@ void QgisDesktopWindow::setupMenu()
     tip( helpMenu->addAction( ic( "workflow" ), tr( "Guided Workflow" ),
                               this, &QgisDesktopWindow::showGuidedWorkflows ),
          tr( "Step-by-step guided experiment workflow." ) );
-    tip( helpMenu->addAction( ic( "workflow" ), tr( "Undergraduate Lab Teaching Workbench" ),
-                              this, &QgisDesktopWindow::showLabCockpit ),
+    // Teaching entries are the CommandRegistry projection (WP06/R8): both
+    // commands are registered in workbench/command_defs.cpp with rich
+    // commands.json descriptors (purpose, prerequisites, suggested next
+    // action) — a parallel QAction here left those unreachable from every
+    // UI surface and re-claimed the registry's shortcut ownership.
+    tip( addCmd( helpMenu, "teaching.labCockpit.show" ),
          tr( "Undergraduate Lab Cockpit: course home, readiness, guided steps, feedback." ) );
-    tip( helpMenu->addAction( ic( "workflow" ), tr( "Teacher Authoring & Assessment Console" ),
-                              this, &QgisDesktopWindow::showTeachingAdmin ),
+    tip( addCmd( helpMenu, "teaching.adminConsole.show" ),
          tr( "Teacher Authoring & Assessment Console: course authoring, lab packs, batch assessment." ) );
     helpMenu->addSeparator();
     tip( helpMenu->addAction( ic( "met_d_t_" ), tr( "Check Version" ),

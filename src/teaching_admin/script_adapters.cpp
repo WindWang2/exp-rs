@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QStandardPaths>
 #include <algorithm>
 
 namespace sicnu::teaching_admin {
@@ -23,8 +24,16 @@ namespace sicnu::teaching_admin {
 /// `_sre` extension and dies at `import re` ("SRE module mismatch") before
 /// any script line runs (master run 36568313972: the teaching admin dock
 /// cancel smoke graded 0 of 20 rows this way). Resolve the same pin here so
-/// every adapter IS the interpreter the environment describes. With no pin
-/// set the behaviour falls through to "python3", unchanged.
+/// every adapter IS the interpreter the environment describes.
+///
+/// Unpinned deployments (a packaged app, an MSVC build outside the harness):
+/// probe PATH for a real interpreter and return its ABSOLUTE path, the same
+/// candidate-list idea as python_worker_process.cpp. On Windows the order
+/// matters: "python3" there is usually the WindowsApps Store alias stub —
+/// findExecutable happily resolves it, and QProcess then fails to launch it,
+/// so real installs ("python" / "python.exe") are probed first (#1466). The
+/// bare "python3" survives only as the typed last resort when nothing real
+/// is discoverable (POSIX keeps it first: it is the canonical name there).
 QString resolveDefaultPythonInterpreter()
 {
     static const char *const kPins[] = { "SICNU_PYTHON_EXECUTABLE", "PYTHONEXECUTABLE" };
@@ -33,6 +42,18 @@ QString resolveDefaultPythonInterpreter()
         const QString value = qEnvironmentVariable( pin ).trimmed();
         if ( !value.isEmpty() && QFileInfo::exists( value ) )
             return value;
+    }
+#ifdef Q_OS_WIN
+    static const char *const kCandidates[] = { "python", "python.exe", "python3", "python3.exe" };
+#else
+    static const char *const kCandidates[] = { "python3", "python" };
+#endif
+    for ( const char *candidate : kCandidates )
+    {
+        const QString resolved =
+          QStandardPaths::findExecutable( QString::fromLatin1( candidate ) );
+        if ( !resolved.isEmpty() )
+            return resolved;
     }
     return QStringLiteral( "python3" );
 }
@@ -46,6 +67,10 @@ QJsonObject ScriptRunResult::toJson() const
         { QStringLiteral( "timed_out" ), timedOut },
         { QStringLiteral( "stdout_bytes" ), stdoutBytes.size() },
         { QStringLiteral( "stderr_bytes" ), stderrBytes.size() },
+        // Bounded-capture honesty (#1466): the reader must be able to tell a
+        // complete stream from a retained head.
+        { QStringLiteral( "stdout_truncated" ), stdoutTruncated },
+        { QStringLiteral( "stderr_truncated" ), stderrTruncated },
         { QStringLiteral( "error" ), error },
         // Include truncated stdout for JSON contracts (structured adapters only).
         { QStringLiteral( "stdout_utf8" ), QString::fromUtf8( stdoutBytes.left( 64 * 1024 ) ) },
@@ -71,14 +96,48 @@ ScriptRunResult runScript( const ScriptRunRequest &req )
         return out;
     }
     out.started = true;
+
+    // Bounded capture (#1466): drain both channels as data arrives instead
+    // of letting QProcess buffer the whole stream — waitForFinished pumps
+    // these signals while it waits. The retained HEAD feeds the JSON
+    // contracts (a truncated transcript fails its own parse, fail-closed);
+    // the truncated flags keep the loss observable in toJson().
+    qint64 stdoutTotal = 0;
+    qint64 stderrTotal = 0;
+    const auto drainStdout = [&]() {
+        const QByteArray chunk = proc.readAllStandardOutput();
+        stdoutTotal += chunk.size();
+        if ( out.stdoutBytes.size() < req.stdoutLimitBytes )
+            out.stdoutBytes.append(
+              chunk.left( req.stdoutLimitBytes - out.stdoutBytes.size() ) );
+    };
+    const auto drainStderr = [&]() {
+        const QByteArray chunk = proc.readAllStandardError();
+        stderrTotal += chunk.size();
+        if ( out.stderrBytes.size() < req.stderrLimitBytes )
+            out.stderrBytes.append(
+              chunk.left( req.stderrLimitBytes - out.stderrBytes.size() ) );
+    };
+    QObject::connect( &proc, &QProcess::readyReadStandardOutput,
+                      [ &drainStdout ]() { drainStdout(); } );
+    QObject::connect( &proc, &QProcess::readyReadStandardError,
+                      [ &drainStderr ]() { drainStderr(); } );
+    // Final drain + flags on every exit path: the last chunk can sit
+    // un-signalled, and the flags must describe the totals, not the head.
+    const auto finalizeOutput = [&]() {
+        drainStdout();
+        drainStderr();
+        out.stdoutTruncated = stdoutTotal > out.stdoutBytes.size();
+        out.stderrTruncated = stderrTotal > out.stderrBytes.size();
+    };
+
     if ( !proc.waitForFinished( req.timeoutMs ) )
     {
         proc.kill();
         proc.waitForFinished( 3000 );
         out.timedOut = true;
         out.exitCode = -1;
-        out.stdoutBytes = proc.readAllStandardOutput();
-        out.stderrBytes = proc.readAllStandardError();
+        finalizeOutput();
         out.error = QStringLiteral( "timeout" );
         return out;
     }
@@ -88,14 +147,12 @@ ScriptRunResult runScript( const ScriptRunRequest &req )
     {
         out.crashed = true;
         out.exitCode = -1;
-        out.stdoutBytes = proc.readAllStandardOutput();
-        out.stderrBytes = proc.readAllStandardError();
+        finalizeOutput();
         out.error = QStringLiteral( "process crashed abnormally" );
         return out;
     }
     out.exitCode = proc.exitCode();
-    out.stdoutBytes = proc.readAllStandardOutput();
-    out.stderrBytes = proc.readAllStandardError();
+    finalizeOutput();
     return out;
 }
 

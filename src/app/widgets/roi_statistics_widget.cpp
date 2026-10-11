@@ -55,8 +55,10 @@ RoiStatisticsWidget::~RoiStatisticsWidget()
     // #797: cancel the in-flight scan so the bounded pool stops reading GDAL
     // sources for a widget that is gone (results are dropped by QPointer
     // anyway; this ends the work itself). Pass this as the owner — matching
-    // nextGeneration()/isStale() — so the pool also erases this widget's
-    // owner entry instead of leaving the address as a dangling map key.
+    // nextGeneration()/isStale(). The owner record itself is erased by the
+    // pool's QObject::destroyed hook (rs_scan_pool, #1453), not by cancel
+    // (F-07: cancel keeps the record so the SP-2 canceled-stays-stale
+    // guarantee holds across cancel-set overflow).
     if ( m_scanGeneration )
         sicnu::app::RsScanPool::instance().cancel( m_scanGeneration, this );
 }

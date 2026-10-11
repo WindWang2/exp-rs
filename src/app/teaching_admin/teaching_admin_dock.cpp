@@ -31,6 +31,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <atomic>
+#include <stdexcept>
 
 namespace sicnu::app::teaching_admin {
 
@@ -174,6 +175,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
                 "Missing CLI ⇒ typed unavailable rows, never fabricated scores." ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onRunBatch );
         lay->addRow( btn );
+        m_batchRunButton = btn;
         m_batchCancelButton = new QPushButton( tr( "Cancel Batch" ) );
         m_batchCancelButton->setObjectName( QStringLiteral( "teachingAdminBatchCancelButton" ) );
         m_batchCancelButton->setEnabled( false );
@@ -371,6 +373,13 @@ void TeachingAdminDock::onRunBatch()
         return;
     }
 
+    // Arm the console state honestly for the run's duration (#1453/WP02):
+    // the run affordance and the out-prefix edit go inert — the batch reads
+    // the prefix once at start, so a mid-run edit must not be able to point
+    // the class summary at a different file than the one being written.
+    m_batchRunButton->setEnabled( false );
+    m_batchOutEdit->setEnabled( false );
+
     BatchAssessmentConfig cfg;
     cfg.labId = m_labIdEdit->text();
     cfg.submissionsDir = m_submissionsDirEdit->text();
@@ -398,51 +407,60 @@ void TeachingAdminDock::onRunBatch()
     m_batchCancelButton->setEnabled( true );
 
     const QString outPrefix = m_batchOutEdit->text();
-    m_batchThread = std::thread( [this, cfg, grader, outPrefix]() {
-        // Exception barrier: a throw leaving a std::thread function is
-        // std::terminate — the GUI must survive a failed batch.
-        try
-        {
-            sicnu::teaching_admin::BatchProgressFn progress =
-              [this]( int done, int processedTotal ) {
-                  QMetaObject::invokeMethod(
-                    this,
-                    [this, done, processedTotal]() {
-                        m_batchProgressLabel->setText(
-                          tr( "running %1 / %2" ).arg( done ).arg( processedTotal ) );
-                    },
-                    Qt::QueuedConnection );
-              };
-            const auto report =
-              runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
-            publishBatchOutputsAtomic( report, outPrefix );
-            QMetaObject::invokeMethod(
-              this,
-              [this, report]() { finishBatchOnUiThread( report.toJson() ); },
-              Qt::QueuedConnection );
-        }
-        catch ( const std::exception &e )
-        {
-            const QString what = QString::fromUtf8( e.what() );
-            QMetaObject::invokeMethod(
-              this, [this, what]() {
-                  m_batchProgressLabel->setText( tr( "batch failed: %1" ).arg( what ) );
-                  m_batchCancelButton->setEnabled( false );
-                  appendLog( tr( "batch failed: %1" ).arg( what ) );
-              },
-              Qt::QueuedConnection );
-        }
-        catch ( ... )
-        {
-            QMetaObject::invokeMethod(
-              this, [this]() {
-                  m_batchProgressLabel->setText( tr( "batch failed (unknown error)" ) );
-                  m_batchCancelButton->setEnabled( false );
-                  appendLog( tr( "batch failed (unknown error)" ) );
-              },
-              Qt::QueuedConnection );
-        }
-    } );
+    // Spawn barrier (review finding): a throwing std::thread constructor
+    // (resource exhaustion) must re-arm the console — otherwise no worker
+    // ever posts a completion callback and the run button stays disabled
+    // forever. The catch is non-const by std::thread's copy requirement.
+    try
+    {
+        m_batchThread = std::thread( [this, cfg, grader, outPrefix]() {
+            // Exception barrier: a throw leaving a std::thread function is
+            // std::terminate — the GUI must survive a failed batch.
+            try
+            {
+                sicnu::teaching_admin::BatchProgressFn progress =
+                  [this]( int done, int processedTotal ) {
+                      QMetaObject::invokeMethod(
+                        this,
+                        [this, done, processedTotal]() {
+                            m_batchProgressLabel->setText(
+                              tr( "running %1 / %2" ).arg( done ).arg( processedTotal ) );
+                        },
+                        Qt::QueuedConnection );
+                  };
+                const auto report =
+                  runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
+                // A publish failure must be a TYPED failure, never a silent
+                // fake success (#1453/WP02): routing it through the same catch
+                // makes the console fail visibly and re-arm.
+                if ( !publishBatchOutputsAtomic( report, outPrefix ) )
+                    throw std::runtime_error( "publishing batch outputs failed (unwritable out prefix)" );
+                QMetaObject::invokeMethod(
+                  this,
+                  [this, report, outPrefix]() { finishBatchOnUiThread( report.toJson(), outPrefix ); },
+                  Qt::QueuedConnection );
+            }
+            catch ( const std::exception &e )
+            {
+                const QString what = QString::fromUtf8( e.what() );
+                QMetaObject::invokeMethod(
+                  this, [this, what]() { failBatchOnUiThread( what ); }, Qt::QueuedConnection );
+            }
+            catch ( ... )
+            {
+                QMetaObject::invokeMethod(
+                  this, [this]() { failBatchOnUiThread( QString() ); }, Qt::QueuedConnection );
+            }
+        } );
+    }
+    catch ( ... )
+    {
+        m_batchCancelButton->setEnabled( false );
+        m_batchRunButton->setEnabled( true );
+        m_batchOutEdit->setEnabled( true );
+        m_batchProgressLabel->setText( tr( "batch failed (could not start worker thread)" ) );
+        appendLog( tr( "batch failed (could not start worker thread)" ) );
+    }
 }
 
 void TeachingAdminDock::onCancelBatch()
@@ -456,11 +474,15 @@ void TeachingAdminDock::onCancelBatch()
 
 
 
-void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson )
+void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QString &outPrefix )
 {
     if ( m_batchThread.joinable() )
         m_batchThread.join();
+    // Re-arm the console for the next run (#1453/WP02): the run affordance
+    // and the out-prefix edit were disabled for the run's duration.
     m_batchCancelButton->setEnabled( false );
+    m_batchRunButton->setEnabled( true );
+    m_batchOutEdit->setEnabled( true );
     const QString state =
       reportJson.value( QStringLiteral( "cancelled_early" ) ).toBool()
         ? tr( "cancelled (durable partial results published)" )
@@ -473,8 +495,9 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson )
     appendLog( QString::fromUtf8( QJsonDocument( reportJson ).toJson( QJsonDocument::Compact ) ) );
 
     // Class summary from the SAME published truth (the report on disk), not
-    // from a parallel in-memory copy.
-    QFile f( m_batchOutEdit->text() + QStringLiteral( ".json" ) );
+    // from a parallel in-memory copy — read from the prefix the run STARTED
+    // with, never from a (now impossible) mid-run edit of the field.
+    QFile f( outPrefix + QStringLiteral( ".json" ) );
     if ( f.open( QIODevice::ReadOnly ) )
     {
         sicnu::teaching_admin::BatchAssessmentReport report;
@@ -503,6 +526,24 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson )
         appendLog( QString::fromUtf8( QJsonDocument(
           sicnu::teaching_admin::buildClassSummary( report ) ).toJson( QJsonDocument::Compact ) ) );
     }
+}
+
+void TeachingAdminDock::failBatchOnUiThread( const QString &why )
+{
+    // The worker ran to completion (or died) on a typed failure: join it and
+    // re-arm the console. The old exception path only posted a label/log
+    // update — joinable() stayed true forever, so every later click was
+    // refused with a FALSE "a batch is already running", and the only way
+    // out was destroying the dock (#1453/WP02).
+    if ( m_batchThread.joinable() )
+        m_batchThread.join();
+    m_batchCancelButton->setEnabled( false );
+    m_batchRunButton->setEnabled( true );
+    m_batchOutEdit->setEnabled( true );
+    const QString text = why.isEmpty() ? tr( "batch failed (unknown error)" )
+                                       : tr( "batch failed: %1" ).arg( why );
+    m_batchProgressLabel->setText( text );
+    appendLog( text );
 }
 
 void TeachingAdminDock::onBuildFeedbackAndSummary()
