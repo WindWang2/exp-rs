@@ -770,13 +770,17 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
     // the old QFile path truncated the previous VRT on open and ignored the
     // write() return, so a full disk left a torn file that assetChanged then
     // told displays to reload. temp+fsync+rename keeps the old file intact
-    // on failure; assetChanged fires only after a verified publish.
+    // on failure; assetChanged fires only after a verified publish. The
+    // explicit cap keeps the sidecar-class 32 MiB default from silently
+    // narrowing VRT payloads: composed-band VRT XML sits far below this, but
+    // a runaway generator must still be refused instead of filling the disk.
     const QByteArray xmlBytes = xml.toUtf8();
+    constexpr std::size_t kVrtPublishCap = std::size_t( 256 ) * 1024 * 1024;
     const sicnu::platform::sidecar::WriteResult published =
       sicnu::platform::sidecar::write(
         { dependentIt->snapshot.source().canonicalSource.toUtf8().constData(),
           std::string( xmlBytes.constData(), static_cast<std::size_t>( xmlBytes.size() ) ),
-          "" } );
+          "", kVrtPublishCap } );
     if ( published )
     {
       emit assetChanged( dependentId );

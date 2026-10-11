@@ -824,21 +824,37 @@ TEST_CASE( "a corrupted sample page fails the scans typed, never a short page",
     }
 
     // Overwrite the headers of a BAND of deep pages (60%..90% into the file,
-    // page-aligned; SQLite default page size 4096) with an invalid page type.
-    // A single poisoned page is layout-dependent (row-width jitter from id
-    // length and timestamps moves b-tree pages between runs): the band
-    // guarantees every walk through that region — table pages and PK index
-    // pages alike — meets an invalid page and fails with SQLITE_CORRUPT
-    // instead of returning its earlier rows as a finished walk. Page 1 and
-    // the early catalog tables stay intact so open() and listDatasets keep
-    // working.
+    // page-aligned) with an invalid page type. A single poisoned page is
+    // layout-dependent (row-width jitter from id length and timestamps moves
+    // b-tree pages between runs): the band guarantees every walk through
+    // that region — table pages and PK index pages alike — meets an invalid
+    // page and fails with SQLITE_CORRUPT instead of returning its earlier
+    // rows as a finished walk. Page 1 and the early catalog tables stay
+    // intact so open() and listDatasets keep working. The page size is READ
+    // from the database (PRAGMA page_size) instead of assuming 4096 so the
+    // offsets stay aligned on any SQLite build.
+    qint64 pageSize = 4096;
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw,
+                                  SQLITE_OPEN_READONLY, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *pragma = nullptr;
+        if ( sqlite3_prepare_v2( raw, "PRAGMA page_size", -1, &pragma, nullptr ) == SQLITE_OK
+             && sqlite3_step( pragma ) == SQLITE_ROW )
+        {
+            pageSize = sqlite3_column_int64( pragma, 0 );
+        }
+        if ( pragma )
+            sqlite3_finalize( pragma );
+        sqlite3_close( raw );
+    }
     QFile dbFile( dbPath );
     REQUIRE( dbFile.open( QIODevice::ReadWrite ) );
     const qint64 size = dbFile.size();
-    REQUIRE( size > 5 * 4096 );
-    const qint64 firstPage = ( ( size * 3 / 5 ) / 4096 ) * 4096;
-    const qint64 lastPage = ( size * 9 / 10 ) / 4096 * 4096;
-    for ( qint64 offset = firstPage; offset < lastPage; offset += 4096 )
+    REQUIRE( size > 5 * pageSize );
+    const qint64 firstPage = ( ( size * 3 / 5 ) / pageSize ) * pageSize;
+    const qint64 lastPage = ( size * 9 / 10 ) / pageSize * pageSize;
+    for ( qint64 offset = firstPage; offset < lastPage; offset += pageSize )
     {
         REQUIRE( dbFile.seek( offset ) );
         REQUIRE( dbFile.write( QByteArray( 8, '\xff' ) ) == 8 );

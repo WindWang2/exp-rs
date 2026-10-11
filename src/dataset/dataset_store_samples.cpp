@@ -506,9 +506,13 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
     stmt.bind( 2, sampleId.toString() );
     if ( !stmt.step() )
     {
+        // Capture the sqlite error BEFORE rollback: a successful ROLLBACK
+        // resets the connection's error string (same ordering as
+        // commitVersionImpl) so the diagnostic would read "not an error".
+        const QString message = stmt.error( m_impl->db );
         m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           stmt.error( m_impl->db ) ) );
+                                           message ) );
     }
     if ( stmt.changes( m_impl->db ) != 1 )
     {
@@ -530,11 +534,16 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
     // Injected facet-delete failure (test-only arming): routes through the
     // REAL failure branch — rollback — so the already-executed base-row
     // delete is undone and the store keeps the sample whole (#1457).
-    if ( !facetStmt.step() || SICNU_FAULT_POINT( "dataset_store.remove_sample" ) )
+    // Evaluated exactly once: a NextN fault must not be consumed twice.
+    const bool injected = SICNU_FAULT_POINT( "dataset_store.remove_sample" );
+    if ( !facetStmt.step() || injected )
     {
+        const QString message =
+            injected ? QStringLiteral( "injected facet-delete fault" )
+                     : facetStmt.error( m_impl->db );
         m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           facetStmt.error( m_impl->db ) ) );
+                                           message ) );
     }
     if ( !m_impl->commit( nullptr ) )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
