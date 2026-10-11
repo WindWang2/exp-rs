@@ -886,6 +886,11 @@ add_subdirectory(src/science_context)
 add_subdirectory(src/agentbench)
 # Agent Operations & Recovery Control Center (compose authorities only).
 add_subdirectory(src/agent_ops)
+# Unified Scientific Verifier (RS14-10, ADR 0172): three-valued verification of
+# declared expectations. Qt-free and QGIS-free by design, so it stays usable
+# headless; must follow src/contracts (packs_builtin reads the registry) and
+# src/geospatial (the module compiles in the repo's single sha256 TU).
+add_subdirectory(src/verification)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)

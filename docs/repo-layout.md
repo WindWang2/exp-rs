@@ -83,6 +83,7 @@ Runtime resolvers try `refs/qgis` first, then legacy `qgis_ref` and install `sha
 | `src/runtime/` | Execution runtime: chunked tile pipeline (`chunk/`), GPU plane (`gpu/`), telemetry + fault registry (`observability/`), worker protocol (`worker/`). |
 | `src/dataset/` | Dataset foundation (ADR 0134/0136): SQLite store for datasets/versions/samples/splits, label schemas, fingerprints, leakage/fold audits. |
 | `src/experiment/` | Experiment foundation (ADR 0137/0138/0143): run identity/recording, metrics + evaluation, comparison, lineage + reproduction bundles, promotion. |
+| `src/verification/` | Unified Scientific Verifier (ADR 0172): three-valued verdicts (`Pass`/`Fail`/`Indeterminate`) over declared expectations, so unavailable evidence never reads as success. Qt-free, QGIS-free, I/O-free; providers answer `Found`/`Missing`/`Refused`. Seven check families, closed 18-code table, content-addressed specs/reports, pack composition, teaching + agent renderers. |
 | `src/sdk/` | Headless/plugin SDK (`exprs/`): plugin discovery/loader/registry with manifests/permissions/quotas, safe external-process spawn, IPC framing, CLI exit-code contract, workflow schema/builder. |
 
 ## Icons symlink
