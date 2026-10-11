@@ -15,6 +15,13 @@ struct ScriptRunRequest
     QStringList arguments;
     QString workingDirectory;
     int timeoutMs = 120000;
+    /// Bounded capture (#1466): retained head per stream, in the spirit of
+    /// ExternalProcess's stdout/stderr limits — a runaway child (a whole
+    /// classroom batch) must not be able to OOM the admin console through
+    /// unbounded QProcess buffers. Excess is drained and flagged, never
+    /// buffered whole.
+    int stdoutLimitBytes = 8 * 1024 * 1024;
+    int stderrLimitBytes = 1 * 1024 * 1024;
 };
 
 struct ScriptRunResult
@@ -23,8 +30,10 @@ struct ScriptRunResult
     bool timedOut = false;
     bool crashed = false; ///< child died abnormally (signal) — exitCode meaningless
     int exitCode = -1;
-    QByteArray stdoutBytes;
-    QByteArray stderrBytes;
+    QByteArray stdoutBytes;      ///< retained head of stdout (bounded by the request)
+    QByteArray stderrBytes;      ///< retained head of stderr (bounded by the request)
+    bool stdoutTruncated = false; ///< stdout exceeded stdoutLimitBytes (#1466)
+    bool stderrTruncated = false; ///< stderr exceeded stderrLimitBytes (#1466)
     QString error; ///< typed when process could not start
 
     QJsonObject toJson() const;
@@ -35,8 +44,12 @@ struct ScriptRunResult
 ScriptRunResult runScript( const ScriptRunRequest &req );
 
 /// The stack's own Python: SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE when
-/// the harness (or a deployment) pins one, else "python3". The test harness
-/// exports PYTHONHOME/PYTHONPATH describing its CMake-configured interpreter
+/// the harness (or a deployment) pins one; else a real executable discovered
+/// on PATH (per-OS candidate order — on Windows "python3" is usually the
+/// Store alias stub, so real installs win there), resolved to its absolute
+/// path; the bare "python3" name survives only as the last resort when
+/// nothing real is discoverable. The test harness exports
+/// PYTHONHOME/PYTHONPATH describing its CMake-configured interpreter
 /// (cmake/SicnuTestEnv.cmake, TEST_INFRA.md #730), and
 /// src/python/isolated/python_worker_process.cpp resolves the same pins for
 /// exactly that reason. A bare "python3" is merely whatever PATH offers:
@@ -45,7 +58,8 @@ ScriptRunResult runScript( const ScriptRunRequest &req );
 /// sys.path, so the script loads one version's `re` package with another
 /// version's `_sre` extension and dies at `import re` ("SRE module mismatch")
 /// before it can emit any transcript. Same fix and priority order as
-/// #1431 (python worker provider).
+/// #1431 (python worker provider); the PATH probe closes the Windows
+/// start_failed hole (#1466).
 QString resolveDefaultPythonInterpreter();
 
 /// Adapter: gen_lab_packs.py → structured result.

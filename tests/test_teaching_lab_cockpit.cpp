@@ -403,6 +403,73 @@ TEST_CASE( "12 corrupted session fail-closed", "[teaching][session][failclosed]"
   REQUIRE_FALSE( missing.ok );
 }
 
+TEST_CASE( "13 session save routes through the durable-sidecar authority",
+            "[teaching][session][r8]" )
+{
+  // #1466: saveToFile used to truncate the session file in place (ofstream
+  // trunc, no staging, no fsync) — a crash mid-write tore the student's
+  // progress file and the fail-closed reload lost the session. The write
+  // must now be a staged temp + fsync + atomic publish, and the directory
+  // must hold nothing but the published file afterwards (no temp residue).
+  auto s = LabSessionState::makeNew( "local/lab15", "undergraduate_rs", "lab15_data_inspection" );
+  REQUIRE( s.ok );
+  s.stepIndex = 3;
+  s.evidenceRefs.push_back( "human:step_2:33" );
+
+  const auto dir = fs::temp_directory_path() / "sicnu_teaching_session_sidecar_r8";
+  fs::remove_all( dir );
+  fs::create_directories( dir );
+  const auto path = ( dir / "session.json" ).string();
+
+  REQUIRE( s.saveToFile( path ) );
+
+  // Published bytes are exactly the serialization (content contract).
+  {
+    std::ifstream in( path, std::ios::binary );
+    REQUIRE( in.good() );
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    REQUIRE( buffer.str() == s.serialize() );
+  }
+  // No staged/temp residue next to the published file.
+  std::size_t files = 0;
+  for ( const auto &entry : fs::directory_iterator( dir ) )
+  {
+    ++files;
+    REQUIRE( entry.path().filename().string() == "session.json" );
+  }
+  REQUIRE( files == 1 );
+
+  // Round-trip through the sidecar read path.
+  auto loaded = LabSessionState::loadFromFile( path );
+  REQUIRE( loaded.ok );
+  REQUIRE( loaded.sessionId == s.sessionId );
+  REQUIRE( loaded.stepIndex == 3 );
+
+  // A torn main file still fails closed (parse refusal), never "recovered"
+  // into a wrong session.
+  {
+    std::ofstream out( path, std::ios::binary | std::ios::trunc );
+    out << "{\"schema\":\"sicnu.teaching.session/1\",\"session_i";
+  }
+  auto torn = LabSessionState::loadFromFile( path );
+  REQUIRE_FALSE( torn.ok );
+
+  // A save over an existing file replaces it atomically (same directory
+  // still holds exactly one file).
+  s.stepIndex = 4;
+  REQUIRE( s.saveToFile( path ) );
+  auto reloaded = LabSessionState::loadFromFile( path );
+  REQUIRE( reloaded.ok );
+  REQUIRE( reloaded.stepIndex == 4 );
+  files = 0;
+  for ( const auto &entry : fs::directory_iterator( dir ) )
+    ++files;
+  REQUIRE( files == 1 );
+
+  fs::remove_all( dir );
+}
+
 TEST_CASE( "13 offline mode readiness item", "[teaching][offline]" )
 {
   auto slice = parse( R"({

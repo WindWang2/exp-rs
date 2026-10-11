@@ -14090,6 +14090,12 @@ target_compile_definitions(test_teaching_admin_core PRIVATE
 # build (no `all`) produce it too.
 add_dependencies(test_teaching_admin_core test_teaching_fake_grader_cli)
 
+# R8 (#1466): script adapter hardening — interpreter resolution must name a
+# real executable (Windows python fallback) and runScript must bound captured
+# output. New file (test_teaching_admin_core is concurrently modified by
+# PR #1469; keep the diff disjoint).
+sicnu_add_teaching_admin_test(test_teaching_admin_script_adapters_r8)
+
 # R8 (WP02/WP06): UI state-honesty source contracts (scan style, like
 # test_classification_window) — guided-workflow Next gating and the teaching
 # menu's registry projection.

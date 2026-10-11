@@ -1,6 +1,7 @@
 #include "teaching/lab_session_state.h"
 
-#include <fstream>
+#include "platform/durable_sidecar.h"
+
 #include <sstream>
 
 namespace sicnu::teaching {
@@ -200,23 +201,28 @@ LabSessionState LabSessionState::deserialize( const std::string &bytes )
 bool LabSessionState::saveToFile( const std::string &path ) const
 {
   if ( !ok ) return false;
-  std::ofstream out( path, std::ios::binary | std::ios::trunc );
-  if ( !out ) return false;
-  out << serialize();
-  return static_cast<bool>( out );
+  // R6 single sidecar write authority (#1466): staged temp + fsync + atomic
+  // publish, same authority the batch side already routes through
+  // (batch_assessment.cpp). The old in-place ofstream truncation tore the
+  // student's progress file on a crash mid-write, and the fail-closed
+  // reload then lost the whole session.
+  const sicnu::platform::sidecar::WriteResult result =
+    sicnu::platform::sidecar::write( { path, serialize(), "" } );
+  return static_cast<bool>( result );
 }
 
 LabSessionState LabSessionState::loadFromFile( const std::string &path )
 {
-  std::ifstream in( path, std::ios::binary );
-  if ( !in ) {
+  // Sidecar read resolution (same authority as the write; oversize counts
+  // as unreadable, bounding the read that used to be an unbounded rdbuf).
+  const sicnu::platform::sidecar::ReadResult result =
+    sicnu::platform::sidecar::read( path, "" );
+  if ( result.source == sicnu::platform::sidecar::ReadSource::Missing ) {
     LabSessionState s;
     s.issuesZh.push_back( "无法读取会话文件" );
     return s;
   }
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return deserialize( ss.str() );
+  return deserialize( result.bytes );
 }
 
 } // namespace sicnu::teaching

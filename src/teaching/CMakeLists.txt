@@ -31,6 +31,10 @@ target_include_directories(sicnu_teaching
 target_link_libraries(sicnu_teaching
   PUBLIC
     Sicnu::autonomy
+    # R6/R8: session-file writes route through the platform durable-sidecar
+    # authority (lab_session_state save/load), like the batch side already
+    # does. std-only header — keeps this target Qt-free (#1466).
+    Sicnu::Platform
 )
 
 if(TARGET jsoncpp)
