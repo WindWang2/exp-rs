@@ -258,6 +258,36 @@ TEST_CASE("TaskCenter - forwards operator log lines incrementally (delta notify)
     REQUIRE(log.contains(QStringLiteral("delta line three")));
 }
 
+TEST_CASE("TaskCenter - chatty task logs are ring-bounded (#1454)", "[processing][task_center]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.registerExecutor("test:log-cap", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+        Json::Value result(Json::objectValue);
+        result["output"] = "cap-done";
+        return result;
+    });
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "test:log-cap";
+    request.source = "task_panel";
+    const long taskId = sicnu::TaskCenter::instance().submitJob(request);
+    REQUIRE(taskId > 0);
+    waitForTerminalStatus( sicnu::TaskCenter::instance(), taskId );
+
+    // More lines than the ring's trim ceiling: the old buffer had NO
+    // truncation anywhere, so every queueTaskUpdatedLocked deep-copied an
+    // ever-growing QStringList (O(n^2) copies, unbounded session memory).
+    constexpr int kChatty = 6000;
+    for (int i = 0; i < kChatty; ++i)
+        sicnu::TaskCenter::instance().appendTaskLog(taskId, QStringLiteral("chatty %1").arg(i));
+
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    REQUIRE(info.logBuffer.size() <= 4000);   // bounded at the trim ceiling
+    CHECK(info.logBuffer.size() >= 2000);     // and keeps the recent window
+    CHECK(info.logBuffer.last() == QStringLiteral("chatty %1").arg(kChatty - 1));
+    CHECK(info.logBuffer.join('\n').contains(QStringLiteral("elided")));  // honest elision marker
+}
+
 TEST_CASE("TaskCenter - clearCompletedTasks also prunes the JobEngine records", "[processing][task_center][clear]") {
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();

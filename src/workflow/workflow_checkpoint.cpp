@@ -227,10 +227,36 @@ bool WorkflowCheckpointManager::archiveCompletedRun( const QString &checkpointPa
   if ( !dir.mkpath( QStringLiteral( "history" ) ) )
     return false;
   const QString historyDir = dir.filePath( QStringLiteral( "history" ) );
+  // Sweep swap residue first (#1459): an interrupted swap can strand a
+  // "checkpoint_<runId>.json.old" that no other glob in this file matches
+  // (pruning uses checkpoint_*.json) — without this sweep it accumulates
+  // unboundedly across distinct runIds on platforms where the post-swap
+  // remove loses to an AV scanner.
+  {
+    const auto stale = QDir( historyDir ).entryList( QStringList{ QStringLiteral( "*.old" ) },
+                                                     QDir::Files );
+    for ( const QString &leftover : stale )
+      QFile::remove( QDir( historyDir ).filePath( leftover ) );
+  }
   const QString target = QDir( historyDir ).filePath( QFileInfo( checkpointPath ).fileName() );
-  QFile::remove( target );
-  if ( !source.rename( target ) )
+  // Publish-then-swap (#1178 family, #1459): the old remove-then-rename lost
+  // the previous archive entry whenever the rename failed after the remove
+  // (AV scan holding the fresh target, full disk). Park the previous entry
+  // at "<target>.old" first; on a failed rename it is restored, so the
+  // archive never ends up with FEWER entries than it started with.
+  const QString previous = target + QStringLiteral( ".old" );
+  QFile::remove( previous );
+  const bool hadPrevious = QFile::exists( target );
+  if ( hadPrevious && !QFile::rename( target, previous ) )
     return false;
+  if ( !source.rename( target ) )
+  {
+    if ( hadPrevious )
+      QFile::rename( previous, target );
+    return false;
+  }
+  if ( hadPrevious )
+    QFile::remove( previous );
 
   // Bound the archive: newest first, prune the rest.
   QDir history( historyDir );

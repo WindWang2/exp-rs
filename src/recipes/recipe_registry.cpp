@@ -64,13 +64,20 @@ int ScientificRecipeRegistry::reload()
   }
 
   std::vector<fs::path> files;
-  for ( const auto &entry : fs::directory_iterator( dir, ec ) )
+  // Error-code walk (#1463): the range-for form can only catch CONSTRUCTION
+  // failures — an increment error (a recipe file removed mid-scan) throws
+  // filesystem_error out of reload(), and the `if (ec) break` inside the
+  // loop body can never fire for it. Increment through the error_code
+  // overload instead; a scan race degrades to a recorded load problem plus
+  // the files collected so far, never an escaping throw.
+  for ( fs::directory_iterator it( dir, ec ), end; !ec && it != end; it.increment( ec ) )
   {
-    if ( ec )
-      break;
-    if ( entry.is_regular_file() && entry.path().extension() == ".json" )
-      files.push_back( entry.path() );
+    std::error_code entryEc;
+    if ( it->is_regular_file( entryEc ) && !entryEc && it->path().extension() == ".json" )
+      files.push_back( it->path() );
   }
+  if ( ec )
+    mLoadProblems.push_back( "recipe directory scan interrupted: " + ec.message() );
   std::sort( files.begin(), files.end() );
 
   int loaded = 0;

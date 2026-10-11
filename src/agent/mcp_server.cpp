@@ -403,10 +403,24 @@ McpServer::~McpServer()
     {
         mReader->requestStop();
         mReader->quit();
-        if (!mReader->wait(1000) && mReader->isRunning())
+        if (!mReader->wait(1000))
         {
-            mReader->terminate();
-            mReader->wait(1000);
+            // The reader is parked in a blocking std::cin.getline that no
+            // cross-thread signal can unblock. QThread::terminate()
+            // (TerminateThread) could kill it mid-read while it holds the
+            // CRT stdin stream lock or a heap lock, leaving every later
+            // std::cin/std::cout user in this process deadlocked or worse
+            // (#1452). Abandon it instead: QThread has no detach(), so the
+            // object is deliberately released from the parent chain and
+            // NEVER deleted (deleting a running QThread is fatal) — the
+            // parked reader is inert (a line arriving after shutdown is
+            // discarded with its receiver disconnected) and the thread dies
+            // with the process.
+            qWarning("McpServer: stdin reader parked in a blocking read; "
+                     "abandoning it instead of terminating");
+            mReader->setParent(nullptr);
+            mReader->disconnect();
+            mReader = nullptr;
         }
     }
 }
@@ -983,10 +997,11 @@ void McpServer::handleRequest(const QVariantMap &request)
                 if ( executionId && !id.toString().isEmpty() )
                 {
                     // JSON-RPC 2.0 request ids may be numbers OR strings —
-                    // both must be cancellable (#644). Keep the map bounded.
-                    m_cancelledRequestTasks.insert( id.toString(), executionId->taskId() );
-                    while ( m_cancelledRequestTasks.size() > 1024 )
-                        m_cancelledRequestTasks.erase( m_cancelledRequestTasks.begin() );
+                    // both must be cancellable (#644). Keep the map bounded;
+                    // the eviction preserves the JUST-INSERTED in-flight
+                    // request (#1452), mirroring the progress map below.
+                    insertBoundedKeepingNewest( m_cancelledRequestTasks, id.toString(),
+                                                executionId->taskId(), 1024 );
 
                     // Surface-11 progress subscription: a client requesting
                     // _meta.progressToken (MCP 2024-11-05) receives
@@ -997,21 +1012,15 @@ void McpServer::handleRequest(const QVariantMap &request)
                                                        .value( QStringLiteral( "progressToken" ) );
                     if ( progressToken.isValid() && !progressToken.isNull() )
                     {
-                        m_progressSubscriptions.insert(
-                            executionId->taskId(),
+                        // Bounded like the cancel map; unsubscribed on the
+                        // terminal notification. The eviction preserves the
+                        // JUST-INSERTED live subscription (#1452).
+                        insertBoundedKeepingNewest(
+                            m_progressSubscriptions, executionId->taskId(),
                             ProgressSubscription{
                                 progressToken,
-                                sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) } );
-                        while ( m_progressSubscriptions.size() > 256 )
-                        {
-                            // Evict some OTHER entry — QHash order is
-                            // arbitrary and begin() may be the newest caller.
-                            auto victim = m_progressSubscriptions.begin();
-                            if ( victim.key() == executionId->taskId()
-                                 && m_progressSubscriptions.size() > 1 )
-                                victim = std::next( victim );
-                            m_progressSubscriptions.erase( victim );
-                        }
+                                sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) },
+                            256 );
                     }
                 }
             }
@@ -2625,10 +2634,30 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
             pins.hasSeed = true;
         }
         recordingRequested = true;
-        // The monitor itself is enabled only AFTER the tracked submission
-        // below succeeds (#1448): enable() writes the experiment row, and a
-        // rejected pipeline must leave nothing behind — the INVALID_PIPELINE
-        // message below promises "nothing submitted or recorded".
+        // Recording handshake, stage 1 — PREPARE (#1469 review P1): decide
+        // every recording refusal that writes nothing (required ids, the
+        // one-db-per-monitor rebind contract, an unwritable/locked
+        // experiment db) BEFORE the pipeline is dispatched. enable() — the
+        // COMMIT that opens the store and writes the experiment row — runs
+        // only after the submission gate below, so a rejected pipeline
+        // leaves nothing recorded (#1448), and the prepare probe closes the
+        // common post-dispatch refusal window in which a workflow would
+        // already be running unrecorded.
+        if (!m_experimentMonitor)
+            m_experimentMonitor = std::make_unique<sicnu::experiment::WorkflowExperimentMonitor>(
+                sicnu::workflow::WorkflowRunCoordinator::instance());
+        QString recordError;
+        if (!m_experimentMonitor->prepare(
+                experimentDb,
+                arguments.value(QStringLiteral("experiment_id")).toString().trimmed(),
+                arguments.value(QStringLiteral("dataset_db")).toString().trimmed(), &recordError)) {
+            SICNU_LOG_ERROR(SicnuLogTags::MCP,
+                            QStringLiteral("run_workflow recording refused: %1").arg(recordError));
+            throw McpToolError(QStringLiteral("run_workflow: experiment recording refused: ")
+                                   + recordError,
+                               QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
+                               QStringLiteral("validation"));
+        }
     }
 
     // Tracked submission (#697): MCP workflows persist checkpoints per step
@@ -2647,44 +2676,70 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
             QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
 
     if (recordingRequested) {
-        // Enable AFTER the submission gate (#1448): enable() opens the
-        // experiment store and writes the experiment row, so it must not run
-        // while the pipeline can still be rejected above — a refused pipeline
-        // must not leave an orphan experiment record. The recording stays
-        // complete for the accepted path: the Running transition is
-        // broadcast before this point, and recordSubmission() below drives
-        // the bridge synchronously with the same snapshot; only later
-        // transitions rely on the queued connection made here.
-        if (!m_experimentMonitor)
-            m_experimentMonitor = std::make_unique<sicnu::experiment::WorkflowExperimentMonitor>(
-                sicnu::workflow::WorkflowRunCoordinator::instance());
-        QString recordError;
+        // Recording handshake, stage 2 — COMMIT (#1469 review P1, #1448):
+        // enable() opens the experiment store, writes the experiment row
+        // and binds the monitor. It runs only AFTER the submission gate
+        // above, so a rejected pipeline leaves no orphan experiment record
+        // and no monitor bound to a refused run. Every failure on this
+        // stage COMPENSATES by canceling the dispatched pipeline before
+        // the typed refusal leaves: without it, an unrecorded workflow
+        // keeps running behind a EXPERIMENT_RECORDING_REFUSED response and
+        // a caller retry duplicates its side effects.
+        auto refuseRecordingAndRollback = [pipelineId](const QString &stage,
+                                                       const QString &failureMessage) {
+            // Compensation: the pipeline is dispatched but recording is
+            // refused — tear it down before the typed refusal leaves, so no
+            // unrecorded execution keeps running and a caller retry cannot
+            // duplicate side effects. cancelRun returns false when the run
+            // already left the coordinator's registry (finished or
+            // untracked): fall back to the TaskCenter cancel so the
+            // pipeline is still addressed, and report the outcome
+            // truthfully either way.
+            const bool canceledByCoordinator =
+                sicnu::workflow::WorkflowRunCoordinator::instance().cancelRun(pipelineId);
+            const bool rolledBack = canceledByCoordinator
+                || sicnu::TaskCenter::instance().cancelPipeline(pipelineId);
+            SICNU_LOG_ERROR(
+                SicnuLogTags::MCP,
+                QStringLiteral("run_workflow recording failed at %1: %2 — dispatched pipeline %3")
+                    .arg(stage, failureMessage,
+                         rolledBack ? QStringLiteral("rolled back (cancel requested)")
+                                    : QStringLiteral("cancel not confirmed (already terminal?)")));
+            throw McpToolError(
+                QStringLiteral("run_workflow: experiment recording %1: %2; the dispatched "
+                               "pipeline %3")
+                    .arg(stage == QStringLiteral("refused") ? QStringLiteral("refused")
+                                                             : QStringLiteral("failed"),
+                         failureMessage,
+                         rolledBack ? QStringLiteral("was rolled back (cancel requested)")
+                                    : QStringLiteral("could not be confirmed canceled "
+                                                     "(already terminal)")),
+                QStringLiteral("EXPERIMENT_RECORDING_REFUSED"), QStringLiteral("validation"));
+        };
+        QString commitError;
         if (!m_experimentMonitor->enable(
                 experimentDb,
                 arguments.value(QStringLiteral("experiment_id")).toString().trimmed(),
                 arguments.value(QStringLiteral("experiment_name")).toString(),
                 arguments.value(QStringLiteral("experiment_objective")).toString(),
-                arguments.value(QStringLiteral("dataset_db")).toString().trimmed(), &recordError)) {
-            SICNU_LOG_ERROR(SicnuLogTags::MCP,
-                            QStringLiteral("run_workflow recording refused: %1").arg(recordError));
-            throw McpToolError(QStringLiteral("run_workflow: experiment recording refused: ")
-                                   + recordError,
-                               QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
-                               QStringLiteral("validation"));
+                arguments.value(QStringLiteral("dataset_db")).toString().trimmed(),
+                &commitError)) {
+            refuseRecordingAndRollback(QStringLiteral("refused"), commitError);
         }
         // Record the submission SYNCHRONOUSLY with its own pins: the run id
         // is known the moment the tracked submit returns, so identity pins
         // are part of the record from the first transition — immune to
         // queued-signal reordering or later submissions of the same
-        // workflow. The Running broadcast went out before the monitor
-        // connected (enable runs after the submission gate, #1448), so this
-        // synchronous event is the authoritative Running record; later
-        // transitions flow through the signal path (this run only).
+        // workflow. The Running transition was broadcast before enable()
+        // connected the monitor (the connection is made after dispatch on
+        // purpose), so this synchronous event is the authoritative Running
+        // record; later transitions flow through the signal path (this run
+        // only).
         const auto run = sicnu::workflow::WorkflowRunCoordinator::instance()
                              .runForPipeline(pipelineId);
         if (!run)
-            throw McpToolError(QStringLiteral("run_workflow: submitted pipeline is untracked"),
-                               QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
+            refuseRecordingAndRollback(QStringLiteral("failed"),
+                                       QStringLiteral("submitted pipeline is untracked"));
         const auto recorded = m_experimentMonitor->recordSubmission(*run, pins);
         if (!recorded) {
             // Result::failure(QVector<Diagnostic>) accepts an EMPTY vector,
@@ -2694,41 +2749,29 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
                 recorded.diagnostics().isEmpty()
                     ? QStringLiteral("recording failed without a diagnostic")
                     : recorded.diagnostics().first().message;
-            SICNU_LOG_ERROR(SicnuLogTags::MCP,
-                            QStringLiteral("run_workflow recording failed: %1")
-                                .arg(failureMessage));
-            throw McpToolError(QStringLiteral("run_workflow: experiment recording failed: ")
-                                   + failureMessage,
-                               QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
-                               QStringLiteral("validation"));
+            refuseRecordingAndRollback(QStringLiteral("failed"), failureMessage);
         }
-        recordedExperimentRunId = recorded.value();
-
-        // #1448 catch-up: the coordinator folds task transitions on worker
-        // threads (DirectConnection), so a fast pipeline can already be
-        // terminal when the monitor's queued connection was only just made
-        // inside enable() — that emission happened before the connect and is
-        // lost. A terminal run here is exactly that window: record the
-        // current aggregate directly (content-identical to the lost
-        // delivery, and any queued duplicate is idempotent — the same
-        // pattern as the CLI's flushRecording). A non-terminal run needs
-        // nothing: later transitions flow through the connection just made.
+        // #1448/#1469 catch-up: the coordinator folds task transitions on
+        // worker threads, so a fast pipeline can already be terminal by the
+        // time the monitor's queued connection was made inside enable() —
+        // that emission predates the connect and is lost, and the
+        // synchronous recordSubmission above writes the RUNNING snapshot.
+        // Record the current aggregate directly (content-identical to the
+        // lost delivery; any queued duplicate is idempotent). A non-terminal
+        // run needs nothing: later transitions flow through the connection.
         if (sicnu::workflow::isTerminalRunState(run->state())) {
             const auto caughtUp = m_experimentMonitor->recordAggregateState(*run);
             if (!caughtUp) {
-                const QString failureMessage =
+                const QString catchUpFailure =
                     caughtUp.diagnostics().isEmpty()
                         ? QStringLiteral("recording failed without a diagnostic")
                         : caughtUp.diagnostics().first().message;
-                SICNU_LOG_ERROR(SicnuLogTags::MCP,
-                                QStringLiteral("run_workflow recording catch-up failed: %1")
-                                    .arg(failureMessage));
-                throw McpToolError(
-                    QStringLiteral("run_workflow: experiment recording catch-up failed: ")
-                        + failureMessage,
-                    QStringLiteral("EXPERIMENT_RECORDING_REFUSED"), QStringLiteral("validation"));
+                refuseRecordingAndRollback(
+                    QStringLiteral("failed"),
+                    QStringLiteral("terminal-state catch-up: ") + catchUpFailure);
             }
         }
+        recordedExperimentRunId = recorded.value();
     }
 
     QVariantMap result;
