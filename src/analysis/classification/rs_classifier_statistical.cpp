@@ -2,6 +2,8 @@
 
 #include "rs_classifier_statistical.h"
 
+#include "sicnu_logging.h"
+
 #include <QDebug>
 
 #include <algorithm>
@@ -60,6 +62,16 @@ cv::Mat RsClassifierMinDistance::predict( const cv::Mat &X ) const
     cv::Mat out;
     if ( X.empty() || m_means.empty() )
         return out;
+    // Guard against heap over-read when the input feature dimension differs
+    // from the fitted class means (KMeans #405 discipline): the accumulation
+    // below reads both X and m_means per column via unchecked at<>().
+    if ( X.cols != m_means.front().cols )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                         QStringLiteral( "MinDistance::predict — feature dimension mismatch: input has %1 cols, model expects %2" )
+                           .arg( X.cols ).arg( m_means.front().cols ) );
+        return out;
+    }
     out.create( X.rows, 1, CV_32S );
     for ( int r = 0; r < X.rows; ++r )
     {
@@ -141,6 +153,17 @@ cv::Mat RsClassifierMahalanobis::predict( const cv::Mat &X ) const
     cv::Mat out;
     if ( X.empty() || m_means.empty() || m_pooledInverse.empty() )
         return out;
+    // Guard the diff·Σ⁻¹·diffᵀ product: with a mismatched feature dimension
+    // the diff loop over-reads the 1×bands class means (X.cols > model dim)
+    // or the gemm throws a raw cv::Exception out of the typed predict
+    // contract (KMeans #405 discipline).
+    if ( X.cols != m_pooledInverse.rows )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                         QStringLiteral( "Mahalanobis::predict — feature dimension mismatch: input has %1 cols, model expects %2" )
+                           .arg( X.cols ).arg( m_pooledInverse.rows ) );
+        return out;
+    }
     out.create( X.rows, 1, CV_32S );
     cv::Mat diff( 1, X.cols, CV_64F );
     for ( int r = 0; r < X.rows; ++r )

@@ -151,7 +151,7 @@ class AssessResultTool final : public SpatialTool
 
       const std::string targetPath = target.toStdString();
       if ( QgsDataSourceResolver::requiresLocalExistenceCheck( target ) &&
-           !QFileInfo::exists( target ) )
+           !QFileInfo::exists( QgsDataSourceResolver::localPath( target ) ) )
         return SpatialToolResult::failure( "Target not found: " + targetPath, "NOT_FOUND", "io", false );
 
       const Json::Value &expectations = input.get( "expectations", Json::Value( Json::objectValue ) );
@@ -160,7 +160,9 @@ class AssessResultTool final : public SpatialTool
       std::vector<Json::Value> checks;
 
       // ---- Raster path ---------------------------------------------------
-      GDALDatasetUniquePtr ds( GDALDataset::Open( targetPath.c_str(),
+      // file:// inputs are opened through their local mapping (#1467).
+      const std::string openPath = QgsDataSourceResolver::localPath( target ).toStdString();
+      GDALDatasetUniquePtr ds( GDALDataset::Open( openPath.c_str(),
                                                   GDAL_OF_RASTER | GDAL_OF_READONLY ) );
       if ( ds )
       {
@@ -268,7 +270,9 @@ class AssessResultTool final : public SpatialTool
       }
 
       // ---- Vector path ---------------------------------------------------
-      ds.reset( GDALDataset::Open( targetPath.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
+      ds.reset( GDALDataset::Open(
+        QgsDataSourceResolver::localPath( target ).toStdString().c_str(),
+        GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
       if ( ds )
       {
         OGRLayer *layer = ds->GetLayer( 0 );

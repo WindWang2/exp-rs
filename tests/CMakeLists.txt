@@ -12698,6 +12698,27 @@ target_include_directories(test_radiometric_state PRIVATE
 )
 sicnu_discover_tests(test_radiometric_state)
 
+# R8 #1450: cross-module radiometric vocabulary contract — every
+# operator-written SICNU_RADIOMETRIC_STATE token pins against the single
+# platform vocabulary (EO + SAR + derived + manifest spellings). Links
+# sicnu_core (RadiometricState methods) and sicnu_processing (the writer
+# constants the contract pins).
+qt_add_executable(test_radiometric_vocabulary_contract
+  test_radiometric_vocabulary_contract.cpp
+)
+target_link_libraries(test_radiometric_vocabulary_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_core
+  sicnu_processing
+)
+target_include_directories(test_radiometric_vocabulary_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_radiometric_vocabulary_contract)
+
 # 6S-style LUT atmospheric correction: closed-form inversion truth, physics
 # invariants, DOS2 hand-worked arithmetic, sentinel discipline.
 qt_add_executable(test_fast_6s_atmospheric

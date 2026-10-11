@@ -991,10 +991,11 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
 
     for (const auto& p : ordered) {
         const QString bandPath = rootDir.absoluteFilePath(p.second);
-        if ( QgsDataSourceResolver::requiresLocalExistenceCheck( bandPath ) && !QFileInfo::exists( bandPath ) )
+        if ( QgsDataSourceResolver::requiresLocalExistenceCheck( bandPath )
+             && !QFileInfo::exists( QgsDataSourceResolver::localPath( bandPath ) ) )
             continue;
         BandFile bf;
-        bf.path = bandPath;
+        bf.path = QgsDataSourceResolver::localPath( bandPath );
         bf.name = p.first;
         bf.wavelengthNm = landsatWavelength(p.first, oliLandsat);
         bf.fwhmNm = landsatFwhmNm(p.first, oliLandsat);

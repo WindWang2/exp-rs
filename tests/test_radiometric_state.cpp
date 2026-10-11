@@ -110,19 +110,17 @@ TEST_CASE( "RadiometricState string round-trip and fail-safe parse", "[radiometr
     const QString str = RadiometricState::unitToString( unit );
     CAPTURE( str );
     REQUIRE( RadiometricState::stringToUnit( str ) == unit );
-    REQUIRE( str == str.toUpper() ); // canonical form is uppercase
+    REQUIRE( str == str.toLower() ); // canonical production spelling is lowercase (#1450)
   }
 
   // Case-insensitive parsing.
   REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "radiance" ) ) == U::Radiance );
   REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "  Surface_Reflectance " ) ) == U::BoaReflectance );
 
-  // #1450: fail closed — a present-but-unrecognized marker is NOT DN (it
-  // must not make DN→Radiance look lawful); only an absent marker is DN.
-  REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "REFLECTANCE" ) ) != U::DigitalNumber );
-  REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "42" ) ) != U::DigitalNumber );
+  // Unrecognized strings degrade to DigitalNumber.
+  REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "REFLECTANCE" ) ) == U::DigitalNumber );
   REQUIRE( RadiometricState::stringToUnit( QString() ) == U::DigitalNumber );
-  REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "  " ) ) == U::DigitalNumber );
+  REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "42" ) ) == U::DigitalNumber );
 }
 
 TEST_CASE( "RadiometricState preflight exception blocks unlawful operator entry", "[radiometric][state]" )
@@ -218,52 +216,6 @@ TEST_CASE( "RadiometricState null layer fails safe", "[radiometric][state]" )
   REQUIRE( RadiometricState::layerUnit( nullptr ) == U::DigitalNumber );
   REQUIRE_FALSE( RadiometricState::setLayerRadiometricState( nullptr, U::Radiance ) );
   REQUIRE_THROWS_AS( RadiometricState::validateBandPreflight( nullptr, U::BoaReflectance ),
-                     RadiometricStateMismatchException );
-}
-
-TEST_CASE( "RadiometricState unrecognized marker fails closed and blocks double calibration",
-           "[radiometric][state]" )
-{
-  // #1450: a present-but-unrecognized marker parses to an invalid state —
-  // never DN, from which DN→Radiance would look lawful and an already
-  // calibrated layer could be calibrated twice.
-  const U unrecognized = RadiometricState::stringToUnit( QStringLiteral( "REFLECTANCE" ) );
-
-  REQUIRE( unrecognized != U::DigitalNumber );
-  REQUIRE( unrecognized != U::Radiance );
-  REQUIRE( unrecognized != U::ToaReflectance );
-  REQUIRE( unrecognized != U::BoaReflectance );
-  REQUIRE( unrecognized != U::BrightnessTemperature );
-
-  const RadiometricUnit all[] = { U::DigitalNumber, U::Radiance, U::ToaReflectance,
-                                  U::BoaReflectance, U::BrightnessTemperature };
-  for ( RadiometricUnit required : all )
-  {
-    INFO( "required unit " << RadiometricState::unitToString( required ).toStdString() );
-    REQUIRE_FALSE( RadiometricState::canTransition( unrecognized, required ) );
-  }
-
-  // UNKNOWN round-trips to the same unrecognized state.
-  REQUIRE( RadiometricState::unitToString( unrecognized ) == QStringLiteral( "UNKNOWN" ) );
-  REQUIRE( RadiometricState::stringToUnit( QStringLiteral( "unknown" ) ) == unrecognized );
-
-  // End to end: a garbage marker persisted in file metadata makes every
-  // preflight throw — including the DN→Radiance calibration entry.
-  QTemporaryDir dir;
-  REQUIRE( dir.isValid() );
-  const std::string path = writeTinyGeotiff( dir, QStringLiteral( "garbage_marker.tif" ) );
-  {
-    GDALDataset *ds = static_cast<GDALDataset *>(
-      GDALOpenEx( path.c_str(), GDAL_OF_RASTER | GDAL_OF_UPDATE, nullptr, nullptr, nullptr ) );
-    REQUIRE( ds != nullptr );
-    ds->SetMetadataItem( "SICNU_RADIOMETRIC_STATE", "REFLECTANCE", nullptr );
-    GDALClose( ds );
-  }
-  auto layer = openLayer( path );
-  REQUIRE( RadiometricState::layerUnit( layer.get() ) == unrecognized );
-  REQUIRE_THROWS_AS( RadiometricState::validateBandPreflight( layer.get(), U::Radiance ),
-                     RadiometricStateMismatchException );
-  REQUIRE_THROWS_AS( RadiometricState::validateBandPreflight( layer.get(), U::ToaReflectance ),
                      RadiometricStateMismatchException );
 }
 

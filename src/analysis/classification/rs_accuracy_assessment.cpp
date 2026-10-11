@@ -1,7 +1,7 @@
 // rs_accuracy_assessment.cpp — Phase 10A Task 10.9.
 
 #include "rs_accuracy_assessment.h"
-#include "../../processing/algorithms/math_utils.h"
+#include "processing/algorithms/math_utils.h"
 #include "sicnu_logging.h"
 
 #include <QSet>

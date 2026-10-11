@@ -235,10 +235,13 @@ SpatialToolResult VectorInspectTool::execute( const Json::Value &input )
   if ( maxFeatures < 0 )
     maxFeatures = 0;
 
-  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) && !QFileInfo::exists( QString::fromStdString( path ) ) )
+  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) )
+       && !QFileInfo::exists( QgsDataSourceResolver::localPath( QString::fromStdString( path ) ) ) )
     return SpatialToolResult::failure( "Vector file not found: " + path, "local_file_not_found", "io", false );
 
-  GDALDatasetUniquePtr ds( GDALDataset::Open( path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
+  // file:// inputs are opened through their local mapping (#1467).
+  const std::string openPath = QgsDataSourceResolver::localPath( QString::fromStdString( path ) ).toStdString();
+  GDALDatasetUniquePtr ds( GDALDataset::Open( openPath.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
   if ( !ds )
     return SpatialToolResult::failure( "OGR could not open vector dataset: " + path, "provider_open_failed", "io", false );
 

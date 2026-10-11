@@ -25,16 +25,20 @@ namespace exp_radiometric
       { RadiometricUnit::Radiance,     RadiometricUnit::BoaReflectance }, // DOS on radiance
       { RadiometricUnit::Radiance,     RadiometricUnit::BrightnessTemperature },
       { RadiometricUnit::ToaReflectance, RadiometricUnit::BoaReflectance }, // 6S inversion
+      // SAR family (#1450): raw counts calibrate to any backscatter state
+      // (rs:sar_calibrate → sigma0; backscatter domain conversion accepts
+      // sigma0/gamma0/beta0 targets), and the ellipsoid→calibrated→terrain-
+      // flattened chain only moves forward. Cross-family transitions into
+      // the optical chain stay unlawful.
+      { RadiometricUnit::DigitalNumber, RadiometricUnit::Beta0 },
+      { RadiometricUnit::DigitalNumber, RadiometricUnit::Sigma0 },
+      { RadiometricUnit::DigitalNumber, RadiometricUnit::Gamma0 },
+      { RadiometricUnit::Beta0, RadiometricUnit::Sigma0 },
+      { RadiometricUnit::Beta0, RadiometricUnit::Gamma0 },
+      { RadiometricUnit::Sigma0, RadiometricUnit::Gamma0 },
+      // Derived products (SarPairMetric / SarTexture / SpectralIndices) admit
+      // no transitions at all: identity only, fail closed.
     };
-
-    // #1450: fail-closed state for a present-but-unrecognized unit marker.
-    // Degrading it to DN would make DN→Radiance look lawful and allow double
-    // calibration of a layer that may already be calibrated, so no transition
-    // (identity excepted) is lawful out of this state. The public enum has no
-    // Unknown member; a scoped enum without a fixed underlying type holds any
-    // value of its enumerator range (0..7 here), so this file-local sentinel
-    // needs no header change.
-    constexpr RadiometricUnit kUnrecognizedUnit = static_cast<RadiometricUnit>( 5 );
 
     /// The layer source when it is a plain local file path; empty for
     /// provider URIs. #1467: layer->source() is a provider URI, not
@@ -80,49 +84,27 @@ namespace exp_radiometric
 
   QString RadiometricState::unitToString( RadiometricUnit unit )
   {
-    if ( unit == kUnrecognizedUnit )
-      return QStringLiteral( "UNKNOWN" );
-    switch ( unit )
-    {
-      case RadiometricUnit::DigitalNumber:
-        return QStringLiteral( "DIGITAL_NUMBER" );
-      case RadiometricUnit::Radiance:
-        return QStringLiteral( "RADIANCE" );
-      case RadiometricUnit::ToaReflectance:
-        return QStringLiteral( "TOA_REFLECTANCE" );
-      case RadiometricUnit::BoaReflectance:
-        return QStringLiteral( "SURFACE_REFLECTANCE" );
-      case RadiometricUnit::BrightnessTemperature:
-        return QStringLiteral( "BRIGHTNESS_TEMPERATURE" );
-    }
+    // #1450: the canonical production spelling (one vocabulary with the
+    // operators) instead of an FSM-private uppercase dialect.
+    const QString token = vocabulary::canonicalToken( unit );
+    if ( !token.isEmpty() )
+      return token;
     return QStringLiteral( "DIGITAL_NUMBER" );
   }
 
   RadiometricUnit RadiometricState::stringToUnit( const QString &str )
   {
-    const QString normalized = str.trimmed().toUpper();
     // An absent marker (empty after trim) is missing metadata, not a wrong
     // one: the rawest interpretation stays lawful (ADR 0158).
-    if ( normalized.isEmpty() )
+    RadiometricUnit unit = RadiometricUnit::DigitalNumber;
+    if ( !vocabulary::lookup( str, &unit ) )
+    {
+      // Any unrecognized PRESENT marker degrades to the rawest
+      // interpretation (ADR 0158 fail-safe default). Callers that must
+      // distinguish unknown from DN use vocabulary::isKnownToken().
       return RadiometricUnit::DigitalNumber;
-    if ( normalized == QLatin1String( "DIGITAL_NUMBER" ) )
-      return RadiometricUnit::DigitalNumber;
-    if ( normalized == QLatin1String( "RADIANCE" ) )
-      return RadiometricUnit::Radiance;
-    if ( normalized == QLatin1String( "TOA_REFLECTANCE" ) )
-      return RadiometricUnit::ToaReflectance;
-    if ( normalized == QLatin1String( "SURFACE_REFLECTANCE" ) )
-      return RadiometricUnit::BoaReflectance;
-    if ( normalized == QLatin1String( "BRIGHTNESS_TEMPERATURE" ) )
-      return RadiometricUnit::BrightnessTemperature;
-    if ( normalized == QLatin1String( "UNKNOWN" ) )
-      return kUnrecognizedUnit;
-    // #1450: fail closed — a present-but-unrecognized marker must not
-    // degrade to DN, or DN→Radiance would look lawful and an already
-    // calibrated layer could be calibrated a second time. The unrecognized
-    // state admits no transition, so every preflight refuses until the
-    // marker is fixed.
-    return kUnrecognizedUnit;
+    }
+    return unit;
   }
 
   RadiometricUnit RadiometricState::layerUnit( const QgsRasterLayer *layer )

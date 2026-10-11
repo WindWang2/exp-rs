@@ -144,7 +144,8 @@ OutputVerification OutputVerifier::verifyRaster( const QString &path )
     return report;
   }
 
-  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( path ) && !QFile::exists( path ) )
+  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( path )
+       && !QFile::exists( QgsDataSourceResolver::localPath( path ) ) )
   {
     addIssue( report, QStringLiteral( "File does not exist: %1" ).arg( path ) );
     return report;
@@ -153,7 +154,8 @@ OutputVerification OutputVerifier::verifyRaster( const QString &path )
   ensureGdalInit();
   CPLErrorReset();
 
-  GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(),
+  // file:// inputs are opened through their local mapping (#1467).
+  GDALDatasetH ds = GDALOpenEx( QgsDataSourceResolver::localPath( path ).toUtf8().constData(),
                                 GDAL_OF_RASTER | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
                                 nullptr, nullptr, nullptr );
   if ( !ds )
@@ -223,7 +225,8 @@ OutputVerification OutputVerifier::verifyVector( const QString &path )
     return report;
   }
 
-  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( path ) && !QFile::exists( path ) )
+  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( path )
+       && !QFile::exists( QgsDataSourceResolver::localPath( path ) ) )
   {
     addIssue( report, QStringLiteral( "File does not exist: %1" ).arg( path ) );
     return report;
@@ -232,7 +235,8 @@ OutputVerification OutputVerifier::verifyVector( const QString &path )
   ensureGdalInit();
   CPLErrorReset();
 
-  GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(),
+  // file:// inputs are opened through their local mapping (#1467).
+  GDALDatasetH ds = GDALOpenEx( QgsDataSourceResolver::localPath( path ).toUtf8().constData(),
                                 GDAL_OF_VECTOR | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
                                 nullptr, nullptr, nullptr );
   if ( !ds )

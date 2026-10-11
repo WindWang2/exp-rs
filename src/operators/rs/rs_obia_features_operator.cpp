@@ -134,14 +134,18 @@ Json::Value RsObiaFeaturesOperator::run(const Json::Value& params, RSOperatorCon
         bandIndices.append(b);
 
     context.reportProgress(0.05, "Extracting features");
+    QString extractError;
     const QMap<quint32, RsSegmentFeatures::SegmentStat> stats = RsSegmentFeatures::extract(
         QString::fromStdString(inputPath), segMap, bandIndices,
         [&context]() { return context.isCancelled(); },
-        [&context](float f) { context.reportProgress(0.05 + 0.9 * f, "Extracting features"); });
+        [&context](float f) { context.reportProgress(0.05 + 0.9 * f, "Extracting features"); },
+        &extractError);
     context.throwIfCancelled();
     if (stats.isEmpty())
         throw RSOperatorError(ErrorCode::ComputationError,
-                              "Feature extraction produced no segment statistics");
+                              std::string("Feature extraction produced no segment statistics") +
+                                  (extractError.isEmpty() ? std::string()
+                                                          : " — " + extractError.toStdString()));
 
     context.reportProgress(0.97, "Writing CSV");
     QFile csv(QString::fromStdString(outputPath));

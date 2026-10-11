@@ -55,7 +55,18 @@ RsObjectClassifyResult RsObjectClassify::classify(
   cv::Mat predX = X;
   if ( enableScaling )
   {
-    result.scaler.fit( trainX, scalingMethod );
+    // Fail closed on scaler fit (rs_classification_pipeline discipline): a
+    // non-finite training feature refuses here with the scaler-attributed
+    // diagnostic, instead of surfacing later as a misleading "backend
+    // training failed" (#1461).
+    if ( !result.scaler.fit( trainX, scalingMethod ) )
+    {
+      result.errorMessage = QStringLiteral(
+                                "classify: feature scaler fit failed — training features are empty, "
+                                "not CV_32F, or contain non-finite values (NoData/NaN/Inf leaked "
+                                "into the feature matrix)" );
+      return result;
+    }
     fitX = result.scaler.transform( trainX );
     predX = result.scaler.transform( X );
   }
