@@ -78,11 +78,20 @@ class TeachingAdminDock : public QWidget
     // button flips a flag the orchestrator checks before each item (completed
     // rows are kept, never-started rows are typed cancelled — never disguised
     // failures), and progress is the durable checkpoint's row count.
+    // Run button + out-prefix edit disable for the duration of a run (#1453/
+    // WP02): the run is armed exactly while a batch can actually start, and
+    // the summary reads the prefix the run STARTED with, never a mid-run edit.
+    QPushButton *m_batchRunButton = nullptr;
     QPushButton *m_batchCancelButton = nullptr;
     QLabel *m_batchProgressLabel = nullptr;
     std::atomic<bool> m_batchCancel{ false };
     std::thread m_batchThread;
-    void finishBatchOnUiThread( QJsonObject report );
+    void finishBatchOnUiThread( QJsonObject report, const QString &outPrefix );
+    /// Joins + re-arms the console after a failed batch. The worker's
+    /// exception path must land here too: joinable() staying true after a
+    /// failure used to wedge every later click behind a false "already
+    /// running" refusal (#1453/WP02).
+    void failBatchOnUiThread( const QString &why );
 };
 
 } // namespace sicnu::app::teaching_admin
