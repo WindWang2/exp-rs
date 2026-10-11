@@ -4,6 +4,7 @@
 #include "json_numbers.h"
 
 #include <algorithm>
+#include <cctype>
 #include <memory>
 #include <string>
 #include <utility>
@@ -90,16 +91,76 @@ bool isKnownVerdict( const std::string &verdict )
 
 bool pathInsideRoot( const std::string &path, const std::string &root )
 {
-	// Roots may carry a trailing slash; normalize so containment is judged on
-	// the meaningful prefix.
-	std::string normalized = root;
-	while ( normalized.size() > 1 && normalized.back() == '/' )
-		normalized.pop_back();
-	if ( path == normalized )
+	// Containment must be judged on the RESOLVED form (#1463): a raw prefix
+	// compare accepted "/ws/../etc" against the "/ws" root. Lexically
+	// collapse ".", ".." and duplicate separators on BOTH sides without
+	// touching the filesystem (a bench trace may reference paths that no
+	// longer exist), and fold case on Windows where the filesystem does.
+	const auto normalize = []( std::string raw ) {
+		bool absolute = !raw.empty() && ( raw[0] == '/' || raw[0] == '\\' );
+		std::vector<std::string> parts;
+		std::string current;
+		const auto pushPart = [ &parts ]( std::string part ) {
+			if ( part.empty() || part == "." )
+				return;
+			if ( part == ".." )
+			{
+				if ( !parts.empty() && parts.back() != ".." )
+					parts.pop_back();
+				return;
+			}
+			parts.push_back( std::move( part ) );
+		};
+		for ( const char c : raw )
+		{
+			if ( c == '/' || c == '\\' )
+			{
+				pushPart( std::move( current ) );
+				current.clear();
+			}
+			else
+			{
+				current.push_back( c );
+			}
+		}
+		pushPart( std::move( current ) );
+		std::string joined = absolute ? "/" : "";
+		for ( std::size_t i = 0; i < parts.size(); ++i )
+		{
+			if ( i > 0 )
+				joined += '/';
+			joined += parts[i];
+		}
+#ifdef _WIN32
+		std::transform( joined.begin(), joined.end(), joined.begin(),
+		                []( unsigned char c ) { return static_cast< char >( std::tolower( c ) ); } );
+#endif
+		return joined;
+	};
+	const std::string normalizedRoot = normalize( root );
+	if ( normalizedRoot.empty() )
+	{
+		// Degenerate root ("." or a dot-dot-collapsed prefix) normalizes to
+		// "" which would reject EVERY path — a verdict flip against the
+		// legacy rule for roots that carry no resolvable structure. Keep the
+		// legacy judgment for those; resolved containment applies to
+		// meaningful roots only (#1463).
+		std::string legacy = root;
+		while ( legacy.size() > 1 && legacy.back() == '/' )
+			legacy.pop_back();
+		if ( path == legacy )
+			return true;
+		if ( path.size() <= legacy.size() || path.compare( 0, legacy.size(), legacy ) != 0 )
+			return false;
+		return path[legacy.size()] == '/';
+	}
+	const std::string normalizedPath = normalize( path );
+	if ( normalizedPath == normalizedRoot )
 		return true;
-	if ( path.size() <= normalized.size() || path.compare( 0, normalized.size(), normalized ) != 0 )
+	if ( normalizedPath.size() <= normalizedRoot.size()
+	     || normalizedPath.compare( 0, normalizedRoot.size(), normalizedRoot ) != 0 )
 		return false;
-	return path[normalized.size()] == '/';
+	return normalizedPath[normalizedRoot.size()] == '/';
 }
 
 /// Top-level path-typed members of an object: key == "path" or key ends with

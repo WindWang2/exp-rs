@@ -463,3 +463,48 @@ TEST_CASE( "out-of-int64-range and trailing-slash probes (review pass 1)", "[age
 	REQUIRE( result.error.code == "agentbench.trace_invalid" );
 	CHECK( result.error.details["field"].asString() == "steps[0].tokens" );
 }
+
+TEST_CASE( "replay containment resolves dot-dot, separators and platform case",
+           "[agentbench][trace]" )
+{
+	// #1463: containment used to be a raw prefix compare — "/ws/../etc"
+	// counted as inside "/ws". Roots here are filesystem-style; scheme roots
+	// (work://…) go through the same normalizer on both sides.
+	Json::Value scopeRoots{Json::arrayValue};
+	scopeRoots.append( "/ws" );
+	scopeRoots.append( "work://case-42" ); // baseline doc paths stay inside
+	Json::Value extraInitial{Json::objectValue};
+	extraInitial["workspace_roots"] = scopeRoots;
+
+	auto run = [&]( const std::string &path ) {
+		const AgentCase agentCase = parseCase( deterministicSerialize( replayCaseDoc( extraInitial ) ) ).parsed.value();
+		Json::Value doc = traceDoc();
+		Json::Value evidence{Json::objectValue};
+		evidence["final_evidence"] = Json::Value( Json::arrayValue );
+		Json::Value entry{Json::objectValue};
+		entry["id"] = "probe";
+		entry["kind"] = "raster";
+		entry["path"] = path;
+		entry["fields"] = Json::Value( Json::objectValue );
+		evidence["final_evidence"].append( entry );
+		doc["final_evidence"] = evidence["final_evidence"];
+		return validateReplay( agentCase, parseDoc( doc ).parsed.value() );
+	};
+
+	// Plain containment still passes.
+	CHECK( run( "/ws/out/ndvi.tif" ).violations.empty() );
+	// A dot-dot escape is OUTSIDE even though the raw prefix matches.
+	CHECK( run( "/ws/../etc/passwd" ).violations.size() == 1 );
+	// Dot-dot collapse that STAYS inside is inside.
+	CHECK( run( "/ws/a/../b/result.tif" ).violations.empty() );
+	// Sibling directory with a longer shared prefix is outside.
+	CHECK( run( "/ws-evil/x.tif" ).violations.size() == 1 );
+	// Backslash separators are folded, not treated as literal characters.
+	CHECK( run( "\\ws\\out\\ndvi.tif" ).violations.empty() );
+	CHECK( run( "\\ws\\..\\etc\\passwd" ).violations.size() == 1 );
+#ifdef _WIN32
+	// Windows filesystems are case-insensitive: a case variant stays inside
+	// (and cannot be used to dodge the scope by re-casing the root).
+	CHECK( run( "/WS/OUT/ndvi.tif" ).violations.empty() );
+#endif
+}
