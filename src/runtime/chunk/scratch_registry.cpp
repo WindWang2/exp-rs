@@ -41,6 +41,50 @@ std::uint64_t fnv1a( const void *data, std::size_t size )
     return hash;
 }
 
+/// Streaming continuation of fnv1a over one chunk (#1459): lets sealDigest
+/// and verifyDigest hash arbitrarily large spills in a fixed-size buffer
+/// instead of reading the whole file into memory (a large low-memory tile
+/// spill must not create a full-file allocation spike — same discipline as
+/// the chunk plane's 1 MiB streaming fingerprint).
+std::uint64_t fnv1aContinue( const void *data, std::size_t size, std::uint64_t hash )
+{
+    const auto *bytes = static_cast<const std::uint8_t *>( data );
+    for ( std::size_t i = 0; i < size; ++i )
+    {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+/// Streams @p path through the digest in 1 MiB chunks. False (with @p hash /
+/// @p bytes untouched semantics: @p bytes reports what was READ) when the
+/// stream is short — the caller compares against the expected size and
+/// refuses to trust a torn read.
+bool streamFnv1a( const std::string &path, std::uint64_t &hash, std::uint64_t &bytesRead )
+{
+    std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
+    if ( !in )
+        return false;
+    std::vector<char> buffer( 1024 * 1024 );
+    std::uint64_t running = 1469598103934665603ull;
+    std::uint64_t total = 0;
+    while ( in )
+    {
+        in.read( buffer.data(), static_cast<std::streamsize>( buffer.size() ) );
+        const std::streamsize got = in.gcount();
+        if ( got <= 0 )
+            break;
+        running = fnv1aContinue( buffer.data(), static_cast<std::size_t>( got ), running );
+        total += static_cast<std::uint64_t>( got );
+    }
+    if ( in.bad() )
+        return false;
+    hash = running;
+    bytesRead = total;
+    return true;
+}
+
 std::string sidecarPath( const std::string &path )
 {
     return path + ".digest";
@@ -121,15 +165,17 @@ void ScratchLease::sealDigest() const
         std::filesystem::file_size( sicnu::portable::pathFromUtf8( m_impl->path ), ec );
     if ( ec )
         return;
-    std::vector<char> buffer( static_cast<std::size_t>( size ) );
-    std::ifstream in( sicnu::portable::pathFromUtf8( m_impl->path ), std::ios::binary );
-    in.read( buffer.data(), buffer.size() );
-    if ( static_cast<std::size_t>( in.gcount() ) != buffer.size() )
+    // Streaming digest (#1459): the old whole-file read allocated the entire
+    // spill in memory — a large low-memory tile created a full-file spike
+    // exactly when memory is scarcest. Same FNV over 1 MiB chunks.
+    std::uint64_t hash = 0;
+    std::uint64_t bytesRead = 0;
+    if ( !streamFnv1a( m_impl->path, hash, bytesRead ) || bytesRead != size )
         return;
     std::string hexDigest;
     {
         std::ostringstream os;
-        os << std::hex << fnv1a( buffer.data(), buffer.size() ) << "\n"
+        os << std::hex << hash << "\n"
            << std::dec << size << "\n";
         hexDigest = os.str();
     }
@@ -196,13 +242,13 @@ bool ScratchLease::verifyDigest() const
         std::filesystem::file_size( sicnu::portable::pathFromUtf8( m_impl->finalPath ), ec );
     if ( ec || size != expectedSize )
         return false;
-    std::vector<char> buffer( static_cast<std::size_t>( size ) );
-    std::ifstream content( sicnu::portable::pathFromUtf8( m_impl->finalPath ),
-                           std::ios::binary );
-    content.read( buffer.data(), buffer.size() );
-    if ( static_cast<std::size_t>( content.gcount() ) != buffer.size() )
+    // Streaming verify (#1459): no whole-file allocation on the reuse path
+    // either; a short/torn read fails closed (recompute the tile).
+    std::uint64_t hash = 0;
+    std::uint64_t bytesRead = 0;
+    if ( !streamFnv1a( m_impl->finalPath, hash, bytesRead ) || bytesRead != size )
         return false;
-    return fnv1a( buffer.data(), buffer.size() ) == expectedHash;
+    return hash == expectedHash;
 }
 
 void ScratchLease::Deleter::operator()( Entry *entry ) const

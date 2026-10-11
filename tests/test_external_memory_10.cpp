@@ -150,6 +150,48 @@ TEST_CASE( "ScratchLease finalize publishes durably and verifyDigest re-proves c
     REQUIRE_FALSE( lease.verifyDigest() );
 }
 
+TEST_CASE( "ScratchLease digest streams in chunks without changing the hash (#1459)",
+           "[scratch][lsee10]" )
+{
+    ScratchRegistry registry( { tempRoot( "digest-stream" ), 0 } );
+    auto lease = registry.acquire( "run-dig", "t", 64 );
+    // > 2 MiB so the 1 MiB streaming boundary is crossed at least twice —
+    // the old implementation read this whole file into one allocation.
+    std::string payload( 2 * 1024 * 1024 + 12345, '\0' );
+    for ( std::size_t i = 0; i < payload.size(); ++i )
+        payload[i] = static_cast< char >( ( i * 31 + 7 ) & 0xff );
+    {
+        std::ofstream out( lease.path(), std::ios::binary );
+        out.write( payload.data(), payload.size() );
+    }
+    lease.sealDigest();
+
+    // Reference FNV-1a 64 over the WHOLE buffer (the pre-streaming
+    // definition, computed in one pass here): the streamed digest must be
+    // byte-identical — streaming may change the allocation profile, never
+    // the hash.
+    std::uint64_t expected = 1469598103934665603ull;
+    for ( const char c : payload )
+    {
+        expected ^= static_cast< unsigned char >( c );
+        expected *= 1099511628211ull;
+    }
+    // Scoped: the ifstream handle must be CLOSED before finalize() renames
+    // the sidecar — Windows refuses to rename a file with an open handle
+    // (no FILE_SHARE_DELETE on the MSVC filebuf).
+    {
+        std::ifstream side( lease.path() + ".digest" );
+        std::string hex;
+        std::uint64_t sizeLine = 0;
+        side >> hex >> sizeLine;
+        REQUIRE( sizeLine == payload.size() );
+        REQUIRE( std::stoull( hex, nullptr, 16 ) == expected );
+    }
+
+    const std::string finalPath = lease.finalize();
+    REQUIRE( lease.verifyDigest() );
+}
+
 TEST_CASE( "DiskTileStore round-trips a payload and refuses corruption", "[scratch][lsee10][tilestore]" )
 {
     ScratchRegistry registry( { tempRoot( "tilestore" ), 0 } );

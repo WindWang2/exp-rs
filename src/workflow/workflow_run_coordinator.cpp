@@ -1397,6 +1397,10 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     // passes (its Completed step plans + artifacts are already inside).
     std::vector<PersistRequest> swapPersists;
     bool swapFinalized = false;
+    // Ghost checkpoints to unlink AFTER the coordinator lock drops (#1459):
+    // QFile::remove can stall on Windows AV scans, and filesystem IO under
+    // m_mutex blocks every tracked fold/resume against the #931 discipline.
+    QStringList ghostCheckpointsToUnlink;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         const auto it = m_runsByPipeline.find( pipelineId );
@@ -1503,7 +1507,9 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             // Interrupted run duplicating this resume (review P1). Its lock
             // is released with it — the ORIGINAL run's lock (held by this
             // resuming process) remains the ownership handle until finalize.
-            QFile::remove( checkpointPathLocked( ghostRunId ) );
+            // Deferred to post-unlock IO (#1459); still BEFORE the swap
+            // persists below, so a post-persist pass cannot recreate it.
+            ghostCheckpointsToUnlink.append( checkpointPathLocked( ghostRunId ) );
             // Releasing the shared_ptr releases the flock. The lock FILE is
             // never unlinked (workflow_run_lock.h: an unlink-while-held race
             // would reopen the ownership hole) — it stays as a ~40-byte
@@ -1531,6 +1537,10 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             }
         }
     }
+    // Ghost checkpoint IO, outside m_mutex (#1459) and still before the swap
+    // persists below.
+    for ( const QString &ghostCheckpoint : ghostCheckpointsToUnlink )
+        QFile::remove( ghostCheckpoint );
     // Lineage envelope (Track 13): the swapped-in original carries the whole
     // lineage under one runId; the explicit attempt counter records how many
     // resume attempts have run. Incremented BEFORE the persists below so the
