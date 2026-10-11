@@ -174,3 +174,35 @@ TEST_CASE( "listRecipes pages are bounded and deterministic", "[registry]" )
   const Json::Value huge = registry.listRecipes( 0, 100000 );
   REQUIRE( huge["page_size"].asInt() == ScientificRecipeRegistry::kMaxPageSize );
 }
+
+TEST_CASE( "Registry scans never throw on over-deep JSON", "[registry][negative][r8]" )
+{
+    // #1465: jsoncpp signals a stackLimit violation by THROWING out of
+    // parse() rather than returning false — the passport parser documents
+    // and catches exactly this shape (asset_state_json.cpp), but
+    // parseRecipeJson had no guard, so a crafted deep-JSON recipe escaped as
+    // Json::Exception through the registry scan (and through
+    // refreshRecipes, the static-init scan of the default broker).
+    const fs::path dir = fs::temp_directory_path() / "recipes_deep_r8";
+    fs::remove_all( dir );
+    fs::create_directories( dir );
+    {
+        std::string deep;
+        for ( int i = 0; i < 400; ++i )
+            deep += "{\"a\":";
+        deep += "1";
+        for ( int i = 0; i < 400; ++i )
+            deep += "}";
+        std::ofstream out( dir / "deep.json" );
+        out << deep;
+    }
+
+    ScientificRecipeRegistry registry;
+    registry.setDirectory( dir.string() );
+    // On the unguarded path this call THROWS (stackLimit 256 < depth 400);
+    // with the guard it must degrade to a typed load problem.
+    REQUIRE( registry.reload() == 0 );
+    REQUIRE( registry.status() == "unavailable" );
+    REQUIRE( registry.loadProblems().size() == 1 );
+    fs::remove_all( dir );
+}

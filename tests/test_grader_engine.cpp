@@ -292,6 +292,109 @@ TEST_CASE( "stage criteria: alternatives, minDistinct and orderedAfter sequencin
         CHECK( c.status == OutcomeStatus::Indeterminate );
         CHECK( c.reasonCodes[0] == "grader:stage-order-unprovable" );
     }
+
+    // The sections below pin #1464: recordedAtUtc stamps must order by the
+    // INSTANT they denote, not by raw bytes. ISO-8601 allows several legal
+    // spellings of the same instant ('.', '+', offsets), and byte order
+    // disagrees with chronological order exactly there ('.' 0x2E and '+'
+    // 0x2B sort before 'Z' 0x5A).
+    SECTION( "orderedAfter orders by instant across fractional-second spellings" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        // Chronologically the prerequisite (…00.500Z) is LATER than the
+        // candidate (…00Z): half a second after. Byte order says the
+        // opposite ('.' < 'Z'), so the old raw-string compare graded this
+        // Earned — the sequencing contract silently inverted.
+        addStage( evidence, "ev-pre", "preprocess", "Completed", "2026-09-23T08:00:00.500Z" );
+        addStage( evidence, "ev-train", "train", "Completed", "2026-09-23T08:00:00Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &c = outcome.report.dimensions[0].criteria[0];
+        CHECK( c.status == OutcomeStatus::NotEarned );
+        CHECK( c.reasonCodes[0] == "grader:stage-order-violated" );
+    }
+
+    SECTION( "orderedAfter treats timezone-offset stamps as their UTC instant" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        // 16:00:00+08:00 IS 08:00:00Z: equal instants, so the order is
+        // satisfied. Byte order compares "16…" > "08…" and graded this
+        // NotEarned — the same instant was read as two different times.
+        addStage( evidence, "ev-pre", "preprocess", "Completed", "2026-09-23T16:00:00+08:00" );
+        addStage( evidence, "ev-train", "train", "Completed", "2026-09-23T08:00:00Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.report.dimensions[0].criteria[0].status == OutcomeStatus::Earned );
+    }
+
+    SECTION( "unparseable recordedAtUtc stamps cannot prove order → indeterminate" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        // A free-text stamp is neither a missing stamp (indeterminate by
+        // contract) nor a parseable one: it must degrade to indeterminate,
+        // never to a byte-order verdict ("zzz" > "2026…" would read as a
+        // satisfied order).
+        addStage( evidence, "ev-pre", "preprocess", "Completed", "sometime yesterday, probably" );
+        addStage( evidence, "ev-train", "train", "Completed", "2026-09-23T08:00:00Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &c = outcome.report.dimensions[0].criteria[0];
+        CHECK( c.status == OutcomeStatus::Indeterminate );
+        CHECK( c.reasonCodes[0] == "grader:stage-order-unprovable" );
+    }
+
+    SECTION( "equal instants in different spellings still satisfy the order" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        // .5Z and .500Z denote the same half-second: equal instants satisfy
+        // (same-time records cannot be distinguished, and the grader does
+        // not guess).
+        addStage( evidence, "ev-pre", "preprocess", "Completed", "2026-09-23T08:00:00.5Z" );
+        addStage( evidence, "ev-train", "train", "Completed", "2026-09-23T08:00:00.500Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.report.dimensions[0].criteria[0].status == OutcomeStatus::Earned );
+    }
 }
 
 TEST_CASE( "metric criteria: bands, tolerance, linear window, range and ambiguity",

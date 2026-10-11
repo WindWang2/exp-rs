@@ -194,3 +194,38 @@ TEST_CASE( "RsScanPool: one widget's newer scan never invalidates another's",
   CHECK_FALSE( aObservedStale.load() );
   CHECK_FALSE( pool.isStale( genA, &widgetA ) );
 }
+
+TEST_CASE( "RsScanPool: a destroyed QObject owner's record is erased (#1453)",
+           "[scan_pool][behavior][r8]" )
+{
+  ensureApp();
+  auto &pool = RsScanPool::instance();
+
+  // The owner map used to have no destructor cleanup: a destroyed widget's
+  // entry survived forever, and the raw-address key made a successor at the
+  // same address inherit the dead owner's generation record. With the
+  // QObject destroyed hook, the record must be gone by the time ~QObject
+  // returns.
+  auto *owner = new QObject;
+  const quint64 gen1 = pool.nextGeneration( owner );
+  const quint64 gen2 = pool.nextGeneration( owner );
+  CHECK( pool.isStale( gen1, owner ) ); // superseded by gen2 while alive
+  delete owner;
+
+  // Dead owner: no record survives, so NEITHER generation is stale via a
+  // dangling supersede record (only an explicit cancel could stale them).
+  // The pointer VALUE is used purely as a map key — never dereferenced.
+  // Pre-fix, the leaked (owner → gen2) record kept classifying gen1 as
+  // stale even though its owner no longer exists.
+  CHECK_FALSE( pool.isStale( gen1, owner ) );
+  CHECK_FALSE( pool.isStale( gen2, owner ) );
+
+  // A successor allocated at the same address starts from a clean slate: its
+  // fresh generation is not stale, and the dead owner's numbers can no
+  // longer classify anything.
+  auto *successor = new QObject;
+  const quint64 gen3 = pool.nextGeneration( successor );
+  CHECK_FALSE( pool.isStale( gen3, successor ) );
+  CHECK( pool.isStale( gen2, successor ) ); // superseded by the successor's own scan
+  delete successor;
+}
