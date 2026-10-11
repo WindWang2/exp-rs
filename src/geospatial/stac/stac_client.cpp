@@ -358,6 +358,30 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
   return true;
 }
 
+/// The v4 private-range verdict, shared by dotted-quad literals and the v4
+/// embedded in IPv4-mapped IPv6 (::ffff:a.b.c.d) — one policy, two
+/// spellings: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+/// 169.254.0.0/16 link-local, 127.0.0.0/8 loopback, 0.0.0.0/8,
+/// 100.64.0.0/10 CGNAT.
+bool isPrivateIpv4( std::uint32_t v4 )
+{
+  if ( ( v4 & 0xFF000000u ) == 0x0A000000u )
+    return true;
+  if ( ( v4 & 0xFFF00000u ) == 0xAC100000u )
+    return true;
+  if ( ( v4 & 0xFFFF0000u ) == 0xC0A80000u )
+    return true;
+  if ( ( v4 & 0xFFFF0000u ) == 0xA9FE0000u )
+    return true;
+  if ( ( v4 & 0xFF000000u ) == 0x7F000000u )
+    return true;
+  if ( ( v4 & 0xFF000000u ) == 0x00000000u )
+    return true;
+  if ( ( v4 & 0xFFC00000u ) == 0x64400000u )
+    return true;
+  return false;
+}
+
 /// The SSRF private-host verdict (migrated verbatim from the UI client's
 /// QHostAddress-based check, now Qt-free): loopback, RFC 1918/CGNAT,
 /// link-local, unique-local and 0.0.0.0(/8) are refused. Non-literal names
@@ -389,29 +413,24 @@ bool isPrivateOrLocalHost( std::string host )
 
   std::uint32_t v4 = 0;
   if ( parseIpv4( host, v4 ) )
-  {
-    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 link-local,
-    // 127.0.0.0/8 loopback, 0.0.0.0/8, 100.64.0.0/10 CGNAT.
-    if ( ( v4 & 0xFF000000u ) == 0x0A000000u )
-      return true;
-    if ( ( v4 & 0xFFF00000u ) == 0xAC100000u )
-      return true;
-    if ( ( v4 & 0xFFFF0000u ) == 0xC0A80000u )
-      return true;
-    if ( ( v4 & 0xFFFF0000u ) == 0xA9FE0000u )
-      return true;
-    if ( ( v4 & 0xFF000000u ) == 0x7F000000u )
-      return true;
-    if ( ( v4 & 0xFF000000u ) == 0x00000000u )
-      return true;
-    if ( ( v4 & 0xFFC00000u ) == 0x64400000u )
-      return true;
-    return false;
-  }
+    return isPrivateIpv4( v4 );
 
   unsigned char v6[16] = {};
   if ( parseIpv6( host, v6 ) )
   {
+    // IPv4-mapped ::ffff:a.b.c.d (80 zero bytes + ffff): the embedded v4
+    // must face the same verdict as its dotted spelling, or the v6 form
+    // is an egress bypass (#1456).
+    bool ipv4Mapped = v6[10] == 0xFF && v6[11] == 0xFF;
+    for ( int i = 0; i < 10 && ipv4Mapped; ++i )
+      ipv4Mapped = v6[i] == 0;
+    if ( ipv4Mapped )
+    {
+      const std::uint32_t embedded =
+        ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
+        ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
+      return isPrivateIpv4( embedded );
+    }
     // Loopback ::1
     bool loopback = true;
     for ( int i = 0; i < 15; ++i )

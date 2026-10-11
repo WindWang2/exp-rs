@@ -135,10 +135,21 @@ void LocalWorkerPool::teardownWorker( std::unique_ptr<Worker> worker )
 {
     if ( !worker )
         return;
+    // QProcess must only be DRIVEN from its owning thread (#1454): this
+    // teardown also receives reclaimed FOREIGN idle workers (slot pressure,
+    // pool shutdown), whose process was created on another thread. The
+    // graceful shutdown request is sent only when running on the owner
+    // thread; a foreign teardown goes straight to the kill ladder — the
+    // worker is idle by construction here, so the hard kill loses nothing.
+    const bool ownerThreadHere =
+        !worker->ownerThread || worker->ownerThread == QThread::currentThreadId();
     if ( worker->process && worker->process->state() == QProcess::Running )
     {
-        workerWriteLine( *worker->process, sicnu::runtime::worker::makeShutdownRequest() );
-        worker->process->waitForFinished( 1000 );
+        if ( ownerThreadHere )
+        {
+            workerWriteLine( *worker->process, sicnu::runtime::worker::makeShutdownRequest() );
+            worker->process->waitForFinished( 1000 );
+        }
         if ( worker->process->state() == QProcess::Running )
         {
             // 8.0 WP-C: group/job-wide kill ladder (covers operator-spawned
@@ -289,10 +300,19 @@ void LocalWorkerPool::retireWorker( std::unique_ptr<Worker> worker )
         return;
     if ( worker->process )
     {
+        // Same affinity rule as teardownWorker (#1454): shutdown() retires
+        // the whole idle deque on the shutdown caller's thread, which may
+        // not be the process-owning thread of a foreign worker — the
+        // graceful request only goes out from the owner thread.
+        const bool ownerThreadHere =
+            !worker->ownerThread || worker->ownerThread == QThread::currentThreadId();
         if ( worker->process->state() == QProcess::Running )
         {
-            workerWriteLine( *worker->process, sicnu::runtime::worker::makeShutdownRequest() );
-            worker->process->waitForFinished( 3000 );
+            if ( ownerThreadHere )
+            {
+                workerWriteLine( *worker->process, sicnu::runtime::worker::makeShutdownRequest() );
+                worker->process->waitForFinished( 3000 );
+            }
             if ( worker->process->state() == QProcess::Running )
             {
                 worker->guard.terminateTree( *worker->process );

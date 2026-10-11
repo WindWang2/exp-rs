@@ -345,7 +345,9 @@ TEST_CASE( "CheckpointStateView projects the recorded workflow vocabulary",
     {
         // Non-object documents must load as unusable — jsoncpp's non-const
         // operator[] would throw here if objectness were not settled first.
-        adapters::CheckpointStateView arrayView( Json::Value( Json::arrayValue ) );
+        // Braces: with parens MSVC parses the argument as a parameter
+        // declaration (C2751) — GCC-only upstream blind spot.
+        adapters::CheckpointStateView arrayView{ Json::Value( Json::arrayValue ) };
         CHECK_FALSE( arrayView.state( "node/a/state" ).has_value() );
         adapters::CheckpointStateView stringView( Json::Value( "d17_pipeline_checkpoint" ) );
         CHECK_FALSE( stringView.state( "run/id" ).has_value() );

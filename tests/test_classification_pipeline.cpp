@@ -684,6 +684,90 @@ TEST_CASE(
 }
 
 TEST_CASE(
+  "Classification pipeline: predict-only without class colors never clamps large class ids (#1461)",
+  "[classify][pipeline][predict_only][dtype]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y, { 1, 2, 300 } );
+
+  const QString modelPath = tmp.path() + "/model.yml";
+  RsClassificationPipeline::Config cfg1 = baseConfig( srcPath, tmp.path() + "/out1.tif" );
+  cfg1.backend.reset( new RsClassifierNormalBayes );
+  cfg1.trainX = X;
+  cfg1.trainY = y;
+  cfg1.classColors[300] = QColor( "#0000cc" );
+  cfg1.modelSavePath = modelPath;
+  const RsClassificationPipelineResult res1 = RsClassificationPipeline::run( std::move( cfg1 ) );
+  INFO( res1.errorMessage.toStdString() );
+  REQUIRE( res1.ok );
+
+  // Predict-only with a pre-loaded backend and NO class colors: the output
+  // dtype must come from the model's persisted label space (the labels
+  // sidecar bound), not from an unknown maxClassId default of Byte.
+  {
+    const QString sidecarPath = RsClassificationPipeline::sidecarPathForModel( modelPath );
+    REQUIRE( QFile::exists( sidecarPath ) );
+    REQUIRE( QFile::remove( sidecarPath ) );
+
+    auto loadedBackend = std::make_unique<RsClassifierNormalBayes>();
+    REQUIRE( loadedBackend->load( modelPath ) );
+
+    RsClassificationPipeline::Config cfg2 = baseConfig( srcPath, tmp.path() + "/out2.tif" );
+    cfg2.classColors.clear();
+    cfg2.backend = std::move( loadedBackend );
+    cfg2.modelLoadPath = modelPath;
+
+    const RsClassificationPipelineResult res2 = RsClassificationPipeline::run( std::move( cfg2 ) );
+    INFO( res2.errorMessage.toStdString() );
+    REQUIRE( res2.ok );
+
+    GDALDataset *ds = static_cast<GDALDataset *>(
+      GDALOpen( ( tmp.path() + "/out2.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+    REQUIRE( ds != nullptr );
+    // The model's label space {1, 2, 300} bounds the dtype: UInt16, no clamp.
+    REQUIRE( ds->GetRasterBand( 1 )->GetRasterDataType() == GDT_UInt16 );
+    REQUIRE( readPixel( ds, 16, 28 ) == 300 );
+    GDALClose( ds );
+  }
+
+  // With the labels sidecar gone too (legacy model), even that bound is
+  // unknown: the output must widen to Int32 instead of risking a silent
+  // >255 clamp into Byte.
+  {
+    const QString labelsPath = modelPath + QStringLiteral( ".labels.json" );
+    const QString stampPath = modelPath + QStringLiteral( ".labels.required" );
+    REQUIRE( QFile::exists( labelsPath ) );
+    REQUIRE( QFile::remove( labelsPath ) );
+    REQUIRE( QFile::remove( stampPath ) );
+
+    auto loadedBackend = std::make_unique<RsClassifierNormalBayes>();
+    REQUIRE( loadedBackend->load( modelPath ) );
+
+    RsClassificationPipeline::Config cfg3 = baseConfig( srcPath, tmp.path() + "/out3.tif" );
+    cfg3.classColors.clear();
+    cfg3.backend = std::move( loadedBackend );
+    cfg3.modelLoadPath = modelPath;
+
+    const RsClassificationPipelineResult res3 = RsClassificationPipeline::run( std::move( cfg3 ) );
+    INFO( res3.errorMessage.toStdString() );
+    REQUIRE( res3.ok );
+
+    GDALDataset *ds = static_cast<GDALDataset *>(
+      GDALOpen( ( tmp.path() + "/out3.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+    REQUIRE( ds != nullptr );
+    REQUIRE( ds->GetRasterBand( 1 )->GetRasterDataType() == GDT_Int32 );
+    REQUIRE( readPixel( ds, 16, 28 ) == 300 );
+    GDALClose( ds );
+  }
+}
+
+TEST_CASE(
   "Classification pipeline: KMeans model sidecar persists and restores clusterRemap for predict-only mode (#410)",
   "[classify][pipeline][kmeans][sidecar]" )
 {

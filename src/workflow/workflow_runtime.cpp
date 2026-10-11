@@ -48,6 +48,16 @@ public:
   using std::runtime_error::runtime_error;
 };
 
+// Pre-dispatch plane infrastructure failure (submission rejected / invalid
+// handle): the task never reached the plane, so the caller MAY fall back to
+// the synchronous operator path. Typed on purpose (#1459): the old fallback
+// keyed on the "ExecutionPlane submit failed" message substring, and any
+// message drift would have silently changed fallback semantics.
+class PlaneSubmitRejected : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
 std::string jsonValueToArtifactString( const Json::Value &v )
 {
   if ( v.isString() )
@@ -258,26 +268,22 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
     {
       return runStepViaExecutionPlane( sessionId, stepId, step, params, sessionPtr, cancelFlagPtr );
     }
-    catch ( const PlaneTaskFailure & )
+      catch ( const PlaneTaskFailure & )
     {
       // A dispatched task failed, was cancelled, timed out, or failed
       // commit/verification — never silently re-run it synchronously.
       throw;
     }
-    catch ( const std::exception &e )
+    catch ( const PlaneSubmitRejected & )
     {
-      const std::string msg = e.what();
-      // Fallback only for pre-dispatch plane infrastructure failures
-      // (submission rejected / invalid handle). Everything after submission
-      // is typed as PlaneTaskFailure above.
-      if ( msg.find( "ExecutionPlane submit failed" ) != std::string::npos )
-      {
-        // fall through to sync
-      }
-      else
-      {
-        throw;
-      }
+      // Fallback ONLY for pre-dispatch plane infrastructure failures
+      // (submission rejected / invalid handle) — typed, so message drift
+      // can never silently change fallback semantics (#1459). Everything
+      // after submission is typed as PlaneTaskFailure above.
+    }
+    catch ( const std::exception & )
+    {
+      throw;
     }
   }
 
@@ -388,12 +394,14 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
   }
   catch ( const std::exception &e )
   {
-    throw std::runtime_error( std::string( "ExecutionPlane submit failed: " ) + e.what() );
+    // Typed so runStep's fallback decision never keys on this message's
+    // text (#1459).
+    throw PlaneSubmitRejected( std::string( "ExecutionPlane submit failed: " ) + e.what() );
   }
 
   if ( !handle.valid() || handle.taskId() <= 0 )
   {
-    throw std::runtime_error( "ExecutionPlane submit failed: invalid handle" );
+    throw PlaneSubmitRejected( "ExecutionPlane submit failed: invalid handle" );
   }
 
   const long taskId = handle.taskId();
@@ -595,7 +603,16 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       if ( !commitRan )
         throw PlaneTaskFailure( std::string( "Output commit timed out on the DataManager thread (" )
                                 + outputTempPath + ")" );
-      if ( !commitResult.has_value() || !*commitResult )
+      if ( !commitResult.has_value() )
+      {
+        // Split from the value check for honesty, not for a live bug: the
+        // old `!has_value() || !*commitResult` short-circuited before the
+        // deref, but reading commitResult-> below an explicit nullopt arm
+        // reads as if the optional were engaged — keep the arms separate so
+        // a future commit() that CAN return nullopt fails typed (#1459).
+        throw PlaneTaskFailure( std::string( "Output commit produced no result: " ) + outputTempPath );
+      }
+      if ( !*commitResult )
       {
         const QString diag = commitResult->diagnostics().isEmpty()
                                ? QStringLiteral( "OutputCommitter commit failed" )

@@ -23,6 +23,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -98,7 +99,11 @@ class OperationsCoordinator {
     const Dependencies &dependencies() const { return mDeps; }
 
     void requestPause() { mPauseRequested.store(true); }
-    void requestCancel() { mCancelRequested.store(true); }
+    /// Cancel also reaches sessions already inside run()/resume(): the
+    /// pre-launch check there races a cancel arriving mid-run, so the stop
+    /// propagates to the live loop's cooperative cancel flag (safe from any
+    /// thread). (#1451)
+    void requestCancel();
     void clearPause() { mPauseRequested.store(false); }
     /// Relaunch path: after a cancel was consumed or refused, the driver
     /// must be able to arm the coordinator for new work again.
@@ -175,9 +180,28 @@ class OperationsCoordinator {
     BridgedDiagnoser mBridgedDiagnoser;
     std::atomic<bool> mPauseRequested{false};
     std::atomic<bool> mCancelRequested{false};
+    // In-flight cancel propagation: while run()/resume() are inside
+    // session.run(), their live session is registered here so requestCancel()
+    // from another thread reaches the loop's cooperative cancel flag — the
+    // pre-launch check alone races any cancel arriving mid-run. Guarded by
+    // mActiveSessionsMutex: a registration brackets its session.run() exactly
+    // (RAII below), so propagation can never dereference a returned session.
+    std::mutex mActiveSessionsMutex;
+    std::vector<sicnu::agent_loop::ScientificAgentSession *> mActiveSessions;
+    /// Registers `session` for the remainder of the enclosing scope. RAII so
+    /// a throwing seam inside session.run() cannot leave a dangling entry.
+    struct ActiveSessionGuard {
+        ActiveSessionGuard(OperationsCoordinator &coordinator,
+                           sicnu::agent_loop::ScientificAgentSession *session);
+        ~ActiveSessionGuard();
+        OperationsCoordinator &mCoordinator;
+        sicnu::agent_loop::ScientificAgentSession *mSession;
+    };
     // Control/mutable state below is NOT atomic: approval arming and
     // lastResult (like run() itself) belong to the driver's coordinator
-    // thread; pause/cancel are safe to request cross-thread.
+    // thread; pause/cancel are safe to request cross-thread, and the active
+    // session registry they propagate through is the one mutex-guarded
+    // exception.
     const long long mInstanceId;
     struct ArmedApproval {
         Json::Value token;

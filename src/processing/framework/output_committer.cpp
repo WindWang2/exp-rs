@@ -282,12 +282,12 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
         QStringLiteral( "Failed to publish output to %1" )
           .arg( request.stablePath ) ) );
     }
-    // Full publish succeeded — consume temps (rename already did; copy left them).
-    for ( const PublishPair &pair : publishes )
-    {
-      if ( QFile::exists( pair.from ) )
-        QFile::remove( pair.from );
-    }
+    // Full publish succeeded. The COPY-mode temps are deliberately NOT
+    // consumed yet (#1454): registration below can still fail, and the
+    // header contract keeps the temp output in place for diagnosis on ANY
+    // failure — deleting it here left a failed registration with nothing to
+    // diagnose. They are removed after registration succeeds (see the
+    // commit-succeeded block below); rename-mode temps are already gone.
   }
 
   SourceDescriptor source;
@@ -356,6 +356,20 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
   // Commit succeeded: the pre-commit backups are no longer needed.
   for ( const QString &backup : stagedOld )
     QFile::remove( backup );
+
+  // Commit succeeded — NOW consume the COPY-mode temps left behind by the
+  // publish (#1454): every failure path (publish, registration) is past and
+  // kept its temps for diagnosis, so only success may clean them up. The
+  // rename-mode pairs' temps no longer exist. In-place commits never
+  // published (their "temp" IS the stable output) and are excluded.
+  if ( !isInPlace )
+  {
+    for ( const PublishPair &pair : publishes )
+    {
+      if ( QFile::exists( pair.from ) )
+        QFile::remove( pair.from );
+    }
+  }
 
   if ( request.autoLoad )
     emit displayRequested( registered.assetId );

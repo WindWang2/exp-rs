@@ -19,7 +19,6 @@
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
-#include <sstream>
 #include <string>
 
 #if defined( Q_OS_UNIX )
@@ -30,6 +29,37 @@
 namespace sicnu::workflow {
 
 namespace {
+
+/// Bounded parse for untrusted checkpoint bytes (#1154 family, review
+/// #1450). Checkpoint files reach loadCheckpoint and the election reader
+/// straight from disk at startup, so a planted or corrupt document must be
+/// REFUSED, not recursed into: jsoncpp's default builder bounds nothing
+/// usefully, and a nesting bomb SIGSEGVs (MSVC) or terminates via an
+/// escaping Json::LogicError (GCC). The 128 bound sits above every legal
+/// checkpoint: the submit-side gate caps client workflow JSON at depth 64
+/// (WorkflowRunCoordinator::parseBoundedWorkflowJson) and this document only
+/// adds the run envelope (definition / stepPlans wrappers) around those same
+/// param trees — the same sidecar/checkpoint bound verify_adapters/
+/// bounded_io uses. Sharing the coordinator helper directly is impossible
+/// from this layer: it compiles into sicnu_task_center, which links DOWN to
+/// this library (sicnu_workflow) — the reverse reference is the library
+/// cycle the build deliberately forbids.
+bool parseBoundedCheckpointJson( const QByteArray &data, Json::Value *root, std::string *errs )
+{
+  Json::CharReaderBuilder builder;
+  builder["stackLimit"] = 128;
+  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+  try
+  {
+    return reader->parse( data.constData(), data.constData() + data.size(), root, errs );
+  }
+  catch ( const Json::Exception &ex ) // a depth bomb throws instead of returning false
+  {
+    if ( errs )
+      *errs = ex.what();
+    return false;
+  }
+}
 
 } // namespace
 
@@ -121,11 +151,12 @@ std::unique_ptr<WorkflowRun> WorkflowCheckpointManager::loadCheckpoint( const QS
   const QByteArray data = file.readAll();
   file.close();
 
-  Json::CharReaderBuilder readerBuilder;
+  // #1154 / #1450: parse the buffered bytes through the bounded reader —
+  // the default builder's unbounded recursion crashed recovery on a planted
+  // deeply-nested checkpoint file.
   Json::Value root;
   std::string errs;
-  std::istringstream stream( data.toStdString() );
-  if ( !Json::parseFromStream( readerBuilder, stream, &root, &errs ) )
+  if ( !parseBoundedCheckpointJson( data, &root, &errs ) )
   {
     if ( error )
       *error = QStringLiteral( "Failed to parse checkpoint JSON: %1" ).arg( QString::fromStdString( errs ) );
@@ -196,10 +227,36 @@ bool WorkflowCheckpointManager::archiveCompletedRun( const QString &checkpointPa
   if ( !dir.mkpath( QStringLiteral( "history" ) ) )
     return false;
   const QString historyDir = dir.filePath( QStringLiteral( "history" ) );
+  // Sweep swap residue first (#1459): an interrupted swap can strand a
+  // "checkpoint_<runId>.json.old" that no other glob in this file matches
+  // (pruning uses checkpoint_*.json) — without this sweep it accumulates
+  // unboundedly across distinct runIds on platforms where the post-swap
+  // remove loses to an AV scanner.
+  {
+    const auto stale = QDir( historyDir ).entryList( QStringList{ QStringLiteral( "*.old" ) },
+                                                     QDir::Files );
+    for ( const QString &leftover : stale )
+      QFile::remove( QDir( historyDir ).filePath( leftover ) );
+  }
   const QString target = QDir( historyDir ).filePath( QFileInfo( checkpointPath ).fileName() );
-  QFile::remove( target );
-  if ( !source.rename( target ) )
+  // Publish-then-swap (#1178 family, #1459): the old remove-then-rename lost
+  // the previous archive entry whenever the rename failed after the remove
+  // (AV scan holding the fresh target, full disk). Park the previous entry
+  // at "<target>.old" first; on a failed rename it is restored, so the
+  // archive never ends up with FEWER entries than it started with.
+  const QString previous = target + QStringLiteral( ".old" );
+  QFile::remove( previous );
+  const bool hadPrevious = QFile::exists( target );
+  if ( hadPrevious && !QFile::rename( target, previous ) )
     return false;
+  if ( !source.rename( target ) )
+  {
+    if ( hadPrevious )
+      QFile::rename( previous, target );
+    return false;
+  }
+  if ( hadPrevious )
+    QFile::remove( previous );
 
   // Bound the archive: newest first, prune the rest.
   QDir history( historyDir );
@@ -254,11 +311,10 @@ QString electionGroupFor( const QString &filePath, const QString &legacyGroup, b
   if ( data.size() > kMaxCheckpointDocumentBytes )
     return legacyGroup; // oversized: same treatment as the corrupt case
 
-  Json::CharReaderBuilder readerBuilder;
+  // #1154 / #1450: same bounded reader as loadCheckpoint — the election
+  // pass runs over the same untrusted directory at startup.
   Json::Value root;
-  std::string errs;
-  std::istringstream stream( data.toStdString() );
-  if ( !Json::parseFromStream( readerBuilder, stream, &root, &errs ) || !root.isObject() )
+  if ( !parseBoundedCheckpointJson( data, &root, nullptr ) || !root.isObject() )
     return legacyGroup;
   if ( !root.isMember( "version" ) || !root["version"].isInt()
        || root["version"].asInt() < 2 )

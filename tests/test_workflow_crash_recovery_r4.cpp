@@ -774,3 +774,33 @@ TEST_CASE( "edge: a single-node DAG completes, archives, and leaves the world te
     // Completed runs archive to history/ — the durable terminal world.
     REQUIRE( QFile::exists( injector.archivedCheckpointPath( snapshot->runId() ) ) );
 }
+
+TEST_CASE( "a nesting-bomb checkpoint is refused by the bounded reader, not a crash (#1154)",
+           "[workflow][r4][checkpoint][corrupt]" )
+{
+    CrashFixture fx;
+
+    // A checkpoint document nested far past any legal shape (client workflow
+    // JSON is depth-capped at 64 at submit, and the checkpoint envelope adds
+    // only a few levels around those param trees). Pre-fix, loadCheckpoint
+    // parsed it with jsoncpp's default builder, whose unbounded recursion
+    // kills the process on a planted file (SIGSEGV on MSVC, escaping
+    // Json::LogicError on GCC). The bounded reader must REFUSE it.
+    const QString bombPath = QDir( fx.scratch.path() ).filePath(
+        QStringLiteral( "checkpoint_depthbomb.json" ) );
+    {
+        QFile f( bombPath );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        QByteArray bomb( 100000, '[' );
+        bomb += QByteArray( 100000, ']' );
+        f.write( bomb );
+    }
+
+    QString err;
+    REQUIRE( WorkflowCheckpointManager().loadCheckpoint( bombPath, &err ) == nullptr );
+    REQUIRE_FALSE( err.isEmpty() );
+
+    // The startup recovery pass (tmp sweep + election + load loop) skips the
+    // bomb as corrupt and reports nothing recovered — the process survives.
+    REQUIRE( WorkflowCheckpointManager().recoverInterruptedRuns( fx.scratch.path() ).empty() );
+}

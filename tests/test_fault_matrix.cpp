@@ -606,3 +606,35 @@ TEST_CASE( "fault matrix: governance-store commit failure rolls back and the "
     REQUIRE( round.has_value() );
     REQUIRE( round->assetId == asset.assetId );
 }
+
+TEST_CASE( "re-archiving over an existing history entry loses nothing (#1459)",
+           "[workflow][checkpoint][history]" )
+{
+    const auto writeBytes = []( const QString &path, const char *bytes ) {
+        QFile f( path );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( bytes );
+    };
+    QTemporaryDir dir;
+    const QString cp = dir.filePath( QStringLiteral( "checkpoint_swap.json" ) );
+    writeBytes( cp, "{\"v\":1}" );
+    REQUIRE( WorkflowCheckpointManager::archiveCompletedRun( cp, dir.path(), 50 ) );
+
+    // A fresh live checkpoint under the SAME name (e.g. a resume re-archiving
+    // its final state) archives over the existing history entry: the old
+    // remove-then-rename lost the previous entry when the rename failed; the
+    // publish-then-swap must replace it and clean its own backup.
+    writeBytes( cp, "{\"v\":2}" );
+    REQUIRE( WorkflowCheckpointManager::archiveCompletedRun( cp, dir.path(), 50 ) );
+
+    const auto history = QDir( dir.filePath( "history" ) )
+                             .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
+                                         QDir::Files );
+    REQUIRE( history.size() == 1 );
+    const auto residue = QDir( dir.filePath( "history" ) )
+                             .entryList( QStringList{ QStringLiteral( "*.old" ) }, QDir::Files );
+    CHECK( residue.isEmpty() );
+    QFile archived( dir.filePath( QStringLiteral( "history/checkpoint_swap.json" ) ) );
+    REQUIRE( archived.open( QIODevice::ReadOnly ) );
+    CHECK( archived.readAll().contains( "\"v\":2" ) );
+}

@@ -17,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <string>
 
 using namespace sicnu::grader;
@@ -736,7 +737,7 @@ TEST_CASE( "hostile documents are typed refusals, never exceptions", "[grader][s
         criterion["evidenceKey"] = "state";
         criterion["fact"] = Json::Value{ Json::objectValue };
         criterion["fact"]["requiredFacts"] = Json::Value{ Json::objectValue };
-        criterion["fact"]["requiredFacts"]["ratio"] = Json::Value( 1e999 );
+        criterion["fact"]["requiredFacts"]["ratio"] = Json::Value( std::numeric_limits<double>::infinity() );
         doc["dimensions"][0]["criteria"][0] = criterion;
         REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
         CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );

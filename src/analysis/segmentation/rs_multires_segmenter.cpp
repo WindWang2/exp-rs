@@ -698,11 +698,21 @@ RsSegmentMap RsMultiresSegmenter::segmentRasterFile(
             return RsSegmentMap();
         }
 
+        // Bands may declare different NoData sentinels (#1461): rewrite each
+        // band's own sentinel samples to NaN so the single-sentinel core
+        // voids them per band (the rs_otb_segmenter per-band convention)
+        // instead of honoring only whichever band declared first. The shared
+        // sentinel stays NaN — the core's non-finite check does the voiding.
         int hasNoData = 0;
-        double ndVal = GDALGetRasterNoDataValue( band, &hasNoData );
-        if ( hasNoData && std::isnan( nodata ) )
+        const double ndVal = GDALGetRasterNoDataValue( band, &hasNoData );
+        if ( hasNoData && std::isfinite( ndVal ) )
         {
-            nodata = static_cast<float>( ndVal );
+            const float sentinel = static_cast<float>( ndVal );
+            for ( float &v : bandBuffers[i] )
+            {
+                if ( std::abs( v - sentinel ) < 1e-6f )
+                    v = std::numeric_limits<float>::quiet_NaN();
+            }
         }
 
         bandPointers[i] = bandBuffers[i].data();

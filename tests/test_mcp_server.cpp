@@ -42,6 +42,7 @@
 #include "dataset/dataset_types.h"
 #include "experiment/experiment_store.h"
 #include <QThread>
+#include <QSemaphore>
 #include <QTimer>
 #include <gdal_priv.h>
 #include <ogrsf_frmts.h>
@@ -218,6 +219,36 @@ void registerNoopOperator()
     auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
     if (!registry.findAdapter("rs:mcp_noop")) {
         auto op = sicnu::operators::RSOperatorRegistry::instance().create("rs:mcp_noop");
+        if (op)
+            registry.registerAdapter(std::make_shared<sicnu::processing::RsOperatorAdapter>(std::move(op)));
+    }
+}
+
+/// Blocks inside execute until the test releases the gate, so a recording
+/// commit failure can be observed against a pipeline that is
+/// deterministically still RUNNING (gate/barrier discipline — no
+/// sleep-guessed races).
+class GatedNoopOperator : public sicnu::operators::RSOperator
+{
+public:
+    static QSemaphore &releaseGate() { static QSemaphore gate; return gate; }
+    std::string name() const override { return "rs:mcp_gated_noop"; }
+    Json::Value run(const Json::Value &, sicnu::operators::RSOperatorContext &) override
+    {
+        releaseGate().acquire();
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/mcp_gated_noop.tif";
+        return result;
+    }
+};
+
+void registerGatedNoopOperator()
+{
+    sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+        "rs:mcp_gated_noop", []() { return std::make_unique<GatedNoopOperator>(); });
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    if (!registry.findAdapter("rs:mcp_gated_noop")) {
+        auto op = sicnu::operators::RSOperatorRegistry::instance().create("rs:mcp_gated_noop");
         if (op)
             registry.registerAdapter(std::make_shared<sicnu::processing::RsOperatorAdapter>(std::move(op)));
     }
@@ -1253,6 +1284,179 @@ TEST_CASE( "McpServer run_workflow recording requires experiment_id and valid se
     CHECK( threw );
 }
 
+TEST_CASE( "McpServer run_workflow recording handshake refuses truthfully",
+           "[agent][mcp][workflow][mlops8]" )
+{
+    registerNoopOperator();
+    registerGatedNoopOperator();
+    // Queued lifecycle delivery needs a QCoreApplication (event queue).
+    int appArgc = 1;
+    static char appArg0[] = "test_mcp_server";
+    static char *appArgv[] = { appArg0, nullptr };
+    if ( !QCoreApplication::instance() )
+        new QCoreApplication( appArgc, appArgv );
+    TestMcpServer server;
+    CheckpointEnvGuard checkpointGuard;
+    QTemporaryDir storeDir;
+
+    SECTION( "a rejected pipeline records nothing (#1448)" )
+    {
+        const QString dbPath = storeDir.filePath( QStringLiteral( "orphan.db" ) );
+        QVariantMap args;
+        // A valid JSON OBJECT with no steps passes the document parse and
+        // the recording prepare, then fails the submission gate — on the
+        // old enable-before-submit order this is what left an orphan
+        // experiment row behind.
+        args[QStringLiteral( "pipeline" )] = QStringLiteral( "{\"id\": \"orphan_pipeline\"}" );
+        args[QStringLiteral( "experiment_db" )] = dbPath;
+        args[QStringLiteral( "experiment_id" )] =
+            QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1101" );
+        bool threw = false;
+        try
+        {
+            server.testRunWorkflow( args );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            threw = true;
+            CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "pipeline rejected" ) ) );
+        }
+        REQUIRE( threw );
+        // prepare() is side-effect free: no experiment db file, no row, no
+        // orphan monitor binding (#1448: the old enable-before-submit order
+        // created both). The tracked-persist inside startTrackedPipelineJson
+        // may still leave a workflow-plane checkpoint before its TaskCenter
+        // submission fails — pre-existing master behavior, not the recording
+        // plane this gate owns.
+        CHECK( !QFile::exists( dbPath ) );
+    }
+
+    SECTION( "a commit-stage refusal rolls the dispatched pipeline back (#1469 review)" )
+    {
+        // Garbage bytes pass prepare()'s writability probe (a plain
+        // ReadWrite open succeeds on any writable file) but make the
+        // enable() COMMIT fail when sqlite rejects the file — a recording
+        // failure that can only surface AFTER the pipeline was dispatched.
+        QFile garbage( storeDir.filePath( QStringLiteral( "corrupt.db" ) ) );
+        REQUIRE( garbage.open( QIODevice::WriteOnly ) );
+        garbage.write( "this is not a sqlite database file" );
+        garbage.close();
+
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+            "id": "handshake_rollback",
+            "steps": [
+                {"id": "s1", "title": "gated", "operator": "rs:mcp_gated_noop", "params": {}}
+            ]
+        })" );
+        args[QStringLiteral( "experiment_db" )] = garbage.fileName();
+        args[QStringLiteral( "experiment_id" )] =
+            QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1102" );
+
+        bool threw = false;
+        try
+        {
+            server.testRunWorkflow( args );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            threw = true;
+            CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "recording refused" ) ) );
+            CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "rolled back" ) ) );
+        }
+        REQUIRE( threw );
+        // The pipeline WAS dispatched: its tracked checkpoint exists while
+        // the gated step is still RUNNING (the refusal happened mid-run,
+        // which is exactly the window the old order could not handle).
+        REQUIRE( checkpointGuard.checkpointCount() >= 1 );
+        // Release the gate AFTER the refusal (cancel was already requested
+        // inside the handler): the compensated run must reach a durable
+        // terminal Canceled state — no unrecorded execution keeps running.
+        GatedNoopOperator::releaseGate().release();
+        REQUIRE( checkpointGuard.waitDurableTerminal( QStringLiteral( "handshake_rollback" ),
+                                                      QStringLiteral( "Canceled" ) ) );
+    }
+
+    SECTION( "a prepare-stage refusal dispatches nothing" )
+    {
+        // First: one successful recorded run binds the monitor to db A.
+        QVariantMap ok;
+        ok[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+            "id": "bound_run",
+            "steps": [
+                {"id": "s1", "title": "first", "operator": "rs:mcp_noop", "params": {}}
+            ]
+        })" );
+        ok[QStringLiteral( "experiment_db" )] = storeDir.filePath( QStringLiteral( "a.db" ) );
+        ok[QStringLiteral( "experiment_id" )] =
+            QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1103" );
+        const QVariantMap submitted = server.testRunWorkflow( ok );
+        REQUIRE( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+        REQUIRE( !submitted.value( QStringLiteral( "experiment_run_id" ) ).toString().isEmpty() );
+        // Second: recording into a DIFFERENT db must refuse at prepare(),
+        // BEFORE any dispatch — exactly one tracked run exists afterwards.
+        QVariantMap rebind = ok;
+        rebind[QStringLiteral( "experiment_db" )] =
+            storeDir.filePath( QStringLiteral( "b.db" ) );
+        bool threw = false;
+        try
+        {
+            server.testRunWorkflow( rebind );
+        }
+        catch ( const std::runtime_error & )
+        {
+            threw = true;
+        }
+        REQUIRE( threw );
+        CHECK( checkpointGuard.checkpointCount() == 1 );
+        CHECK( !QFile::exists( storeDir.filePath( QStringLiteral( "b.db" ) ) ) );
+    }
+}
+
+TEST_CASE( "McpServer bounded request maps keep the newest in-flight entry",
+           "[agent][mcp][unit]" )
+{
+    // The cancel map's eviction must never remove the JUST-INSERTED entry:
+    // past the 1024-entry bound an in-flight request would otherwise become
+    // uncancellable (#1452). QHash's begin() is arbitrary bucket order, so
+    // the invariant is only guaranteed by keeping the newest on purpose —
+    // pinned here deterministically instead of probabilistically through
+    // 1025 live tool calls.
+    QHash<QString, long> cancelMap;
+    for ( int i = 0; i < 2000; ++i )
+    {
+        insertBoundedKeepingNewest( cancelMap, QStringLiteral( "rpc-%1" ).arg( i ),
+                                    static_cast<long>( i ), 1024 );
+        // The invariant, checked at EVERY insert: bounded, and the newest
+        // in-flight request is still cancellable.
+        REQUIRE( cancelMap.size() <= 1024 );
+        REQUIRE( cancelMap.contains( QStringLiteral( "rpc-%1" ).arg( i ) ) );
+    }
+    REQUIRE( cancelMap.size() == 1024 );
+
+    // Degenerate limit: with one slot the eviction can only take the OLDER
+    // key — deterministic whatever QHash's bucket order is.
+    QHash<QString, long> single;
+    insertBoundedKeepingNewest( single, QStringLiteral( "first" ), 1, 1 );
+    REQUIRE( single.size() == 1 );
+    insertBoundedKeepingNewest( single, QStringLiteral( "second" ), 2, 1 );
+    REQUIRE( single.size() == 1 );
+    CHECK( single.contains( QStringLiteral( "second" ) ) );
+    CHECK( single.value( QStringLiteral( "second" ) ) == 2 );
+    CHECK( !single.contains( QStringLiteral( "first" ) ) );
+
+    // The progress map rides the same rule with a different key/value type.
+    QHash<long, long> progressMap;
+    for ( long i = 0; i < 300; ++i )
+    {
+        insertBoundedKeepingNewest( progressMap, i, i * 2, 256 );
+        REQUIRE( progressMap.size() <= 256 );
+        REQUIRE( progressMap.contains( i ) );
+    }
+    REQUIRE( progressMap.size() == 256 );
+    CHECK( progressMap.value( 299 ) == 598 );
+}
+
 TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][workflow]" )
 {
     TestMcpServer server;
@@ -1630,6 +1834,60 @@ TEST_CASE( "MCP sandbox is default-deny when SICNU_MCP_WORKSPACE is unset", "[ag
                                              { { QStringLiteral( "path" ), QStringLiteral( "notes.txt" ) } } );
         CHECK_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
         CHECK( toolText( result ).contains( QStringLiteral( "project notes" ) ) );
+    }
+
+    SECTION( "artifact_read paging terminates at EOF (no infinite next page)" )
+    {
+        const QString bin =
+            writeFile( project.filePath( QStringLiteral( "page.bin" ) ), "0123456789" );
+        REQUIRE( !bin.isEmpty() );
+
+        // Walk every page with a small length: the loop must TERMINATE. Each
+        // response's next_offset (when present) strictly advances, and the
+        // page that consumes the last byte reports truncated=false with NO
+        // next_offset (#1452: offset==sizeBytes must not re-prompt a page).
+        qint64 offset = 0;
+        int pages = 0;
+        while ( true )
+        {
+            const QVariantMap result = callTool(
+                server, 100 + pages, QStringLiteral( "artifact_read" ),
+                { { QStringLiteral( "path" ), QStringLiteral( "page.bin" ) },
+                  { QStringLiteral( "offset" ), offset },
+                  { QStringLiteral( "length" ), 3 } } );
+            REQUIRE_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
+            const QVariantMap page = QJsonDocument::fromJson( toolText( result ).toUtf8() )
+                                          .object()
+                                          .toVariantMap();
+            ++pages;
+            // 10 bytes at 3 per page: 4 pages are enough; more = a spin.
+            REQUIRE( pages <= 4 );
+            if ( !page.value( QStringLiteral( "truncated" ) ).toBool() )
+            {
+                CHECK( !page.contains( QStringLiteral( "next_offset" ) ) );
+                break;
+            }
+            const qint64 next = page.value( QStringLiteral( "next_offset" ) ).toLongLong();
+            REQUIRE( next > offset );
+            offset = next;
+        }
+        REQUIRE( pages == 4 );
+
+        // The EOF follow-up (offset == sizeBytes) is a clean EMPTY page:
+        // length 0, truncated false, no next_offset — a paging client that
+        // asks once more cannot be told to ask again forever.
+        const QVariantMap eofResult = callTool(
+            server, 200, QStringLiteral( "artifact_read" ),
+            { { QStringLiteral( "path" ), QStringLiteral( "page.bin" ) },
+              { QStringLiteral( "offset" ), 10 },
+              { QStringLiteral( "length" ), 3 } } );
+        REQUIRE_FALSE( eofResult.value( QStringLiteral( "isError" ) ).toBool() );
+        const QVariantMap eofPage = QJsonDocument::fromJson( toolText( eofResult ).toUtf8() )
+                                         .object()
+                                         .toVariantMap();
+        CHECK( eofPage.value( QStringLiteral( "length" ) ).toInt() == 0 );
+        CHECK_FALSE( eofPage.value( QStringLiteral( "truncated" ) ).toBool() );
+        CHECK( !eofPage.contains( QStringLiteral( "next_offset" ) ) );
     }
 
     SECTION( "execution entry points reject outside paths without any configuration" )
