@@ -15,6 +15,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <gdal.h>
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -508,4 +510,73 @@ TEST_CASE( "chunk execution is time-correct, budgeted, and reports skips",
     executed += outcome.ok ? 1 : 0;
   CHECK( executed == 2 );
   CHECK( starvedReport.budgetBreached );
+}
+
+
+TEST_CASE( "the mirror honors the declared blockSize knob (#1456)",
+           "[io][fabric][plan][mirror]" )
+{
+  // MirrorOptions::blockSize was never read: the writer hardcoded 64x64
+  // tiles whatever the caller declared. The mirrored chunks must now carry
+  // the declared block size.
+  const std::string dir = scratchDir( "mirror-blocksize" );
+  const std::string scene = dir + "/s0.tif";
+  {
+    RasterWriter writer = RasterWriter::create(
+      scene, 32, 32, { RasterBandSpec {} },
+      { "GTiff", { "TILED=YES", "BLOCKXSIZE=16", "BLOCKYSIZE=16" }, true } );
+    writer.setCrs( Crs::fromAuthid( "EPSG:4326" ) );
+    writer.setGeotransform( { 0.0, 1.0, 0.0, 32.0, 0.0, -1.0 } );
+    std::vector<double> raster( 32ull * 32 );
+    for ( std::size_t i = 0; i < raster.size(); ++i )
+      raster[i] = double( i % 251 );
+    writer.writeWindow( 1, { 0, 0, 32, 32 }, raster.data() );
+    writer.finalize();
+  }
+
+  FabricIntent intent;
+  intent.records = { sceneRecord( "s0", scene, "2024-01-01T00:00:00Z", 1.0 ) };
+  intent.sceneBudget = 2;
+  intent.grid.explicitGrid = true;
+  intent.grid.crs.valid = true;
+  intent.grid.crs.authid = "EPSG:4326";
+  intent.grid.scaleX = 1.0;
+  intent.grid.scaleY = 1.0;
+  intent.grid.minX = 0.0;
+  intent.grid.minY = 0.0;
+  intent.grid.maxX = 32.0;
+  intent.grid.maxY = 32.0;
+  intent.chunkShape = { 1, 16, 16, 1 };
+  intent.hasWindow = true;
+  intent.windowW = 16;
+  intent.windowH = 16;
+
+  const FabricPlan plan = planFabric( intent );
+  REQUIRE( plan.chunkPlan().chunkCountTotal() == 4 );
+
+  const std::string mirrorDir = dir + "/mirror-bs";
+  MirrorOptions mirrorOptions;
+  mirrorOptions.mirrorDirectory = mirrorDir;
+  mirrorOptions.blockSize = 32; // deliberately neither the old hardcode (64) nor the default (256)
+  const MirrorReport report = mirrorChunks( plan, mirrorOptions );
+  REQUIRE( report.mirrored == 4 );
+
+  // Every mirrored chunk is tiled at the DECLARED size.
+  const std::filesystem::path chunkDir = std::filesystem::path( mirrorDir ) / "chunks";
+  int inspected = 0;
+  for ( const auto &entry : std::filesystem::directory_iterator( chunkDir ) )
+  {
+    if ( entry.path().extension() != ".tif" )
+      continue;
+    GDALDatasetH handle = GDALOpen( entry.path().string().c_str(), GA_ReadOnly );
+    REQUIRE( handle != nullptr );
+    int blockX = 0;
+    int blockY = 0;
+    GDALGetBlockSize( GDALGetRasterBand( handle, 1 ), &blockX, &blockY );
+    GDALClose( handle );
+    CHECK( blockX == 32 );
+    CHECK( blockY == 32 );
+    ++inspected;
+  }
+  CHECK( inspected == 4 );
 }
