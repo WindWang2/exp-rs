@@ -114,6 +114,11 @@ target_link_libraries(sicnu_data
   # out-of-line in libjsoncpp, hence the PRIVATE link; the public interface
   # stays Qt-only (the overload takes a forward-declared Json::Value).
     jsoncpp
+  # R6/WP09 single write authority: relocate's dependent-VRT rewrite publishes
+  # through the sidecar write (temp+fsync+rename, read-back verify) instead of
+  # a truncating QFile; PRIVATE keeps the platform leaf out of the data
+  # layer's public interface (headers stay Qt-only).
+    Sicnu::Platform
 )
 
 get_target_property(SICNU_DATA_DIRECT_LINKS sicnu_data LINK_LIBRARIES)

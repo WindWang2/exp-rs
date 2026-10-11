@@ -35,8 +35,24 @@ class StoreStmt
     explicit operator bool() const { return m_stmt != nullptr; }
     sqlite3_stmt *get() const { return m_stmt; }
     QString error( sqlite3 *db ) const { return QString::fromUtf8( sqlite3_errmsg( db ) ); }
-    bool step() const { return sqlite3_step( m_stmt ) == SQLITE_DONE; }
-    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
+    bool step() const
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_DONE;
+    }
+    bool stepRow() const
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_ROW;
+    }
+    /// True when the last step()/stepRow() ended in an ERROR (not DONE/ROW):
+    /// SQLITE_CORRUPT/IOERR/BUSY mid-scan would otherwise fold into "no more
+    /// rows" and fail-closed readers would answer from a silently partial
+    /// result (#1448/#1457 — same contract as ExperimentStore::Stmt).
+    bool stepFailed() const
+    {
+        return m_lastRc != SQLITE_ROW && m_lastRc != SQLITE_DONE && m_lastRc != SQLITE_OK;
+    }
     int changes( sqlite3 *db ) const { return sqlite3_changes( db ); }
     void reset() { sqlite3_reset( m_stmt ); sqlite3_clear_bindings( m_stmt ); }
     void bind( int idx, const QString &v ) const
@@ -56,6 +72,7 @@ class StoreStmt
 
   private:
     sqlite3_stmt *m_stmt = nullptr;
+    mutable int m_lastRc = SQLITE_OK;
 };
 
 inline Diagnostic storeDiag( QString code, QString message )

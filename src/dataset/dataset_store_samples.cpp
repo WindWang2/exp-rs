@@ -10,6 +10,7 @@
 
 #include "../data/execution_fingerprint.h"
 #include "../data/query_cursor.h"
+#include "runtime/observability/fault_point.h"
 #include "annotation.h"
 #include "label_schema.h"
 #include "sample.h"
@@ -85,28 +86,17 @@ sicnu::data::Result<void> DatasetStore::saveLabelSchema( const LabelSchema &sche
 
     const QString json = jsonToText( schema.toJson() );
     // Published vocabularies are immutable: identical re-save is idempotent,
-    // a differing re-save of the same (id, version) is a conflict.
-    {
-        StoreStmt existing( m_impl->db, QStringLiteral(
-            "SELECT json FROM label_schemas WHERE schema_id=? AND version=?" ) );
-        if ( !existing )
-            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               existing.error( m_impl->db ) ) );
-        existing.bind( 1, schema.schemaId() );
-        existing.bind( 2, qint64( schema.version() ) );
-        if ( existing.stepRow() )
-        {
-            if ( existing.text( 0 ) == json )
-                return Result::success();
-            return Result::failure( storeDiag(
-                QStringLiteral( "dataset.conflict" ),
-                QStringLiteral( "label schema %1@%2 already exists with different content" )
-                    .arg( schema.schemaId() )
-                    .arg( schema.version() ) ) );
-        }
-    }
+    // a differing re-save of the same (id, version) is a conflict. The check
+    // and the insert are ONE statement (#1457): the old SELECT-then-INSERT
+    // was a cross-connection TOCTOU — the losing writer of a dual-process
+    // first-save hit the PK and surfaced as a bare store_write_failed
+    // instead of the typed conflict path (the shape #1390 fixed for
+    // saveSplitManifest). ON CONFLICT DO NOTHING makes the race impossible;
+    // changes()==0 means a competing row exists and the content comparison
+    // below decides idempotent vs conflict.
     StoreStmt insert( m_impl->db, QStringLiteral(
-        "INSERT INTO label_schemas(schema_id, version, json, created_ms) VALUES(?,?,?,?)" ) );
+        "INSERT INTO label_schemas(schema_id, version, json, created_ms) VALUES(?,?,?,?)"
+        " ON CONFLICT(schema_id, version) DO NOTHING" ) );
     if ( !insert )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                            insert.error( m_impl->db ) ) );
@@ -117,7 +107,32 @@ sicnu::data::Result<void> DatasetStore::saveLabelSchema( const LabelSchema &sche
     if ( !insert.step() )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            insert.error( m_impl->db ) ) );
-    return Result::success();
+    if ( insert.changes( m_impl->db ) == 1 )
+        return Result::success(); // first write won; the row is ours
+
+    StoreStmt existing( m_impl->db, QStringLiteral(
+        "SELECT json FROM label_schemas WHERE schema_id=? AND version=?" ) );
+    if ( !existing )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           existing.error( m_impl->db ) ) );
+    existing.bind( 1, schema.schemaId() );
+    existing.bind( 2, qint64( schema.version() ) );
+    if ( !existing.stepRow() || existing.stepFailed() )
+        // Cannot normally happen (the upsert just reported the row); treat
+        // as a store fault rather than guessing idempotence.
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           existing.error( m_impl->db ) ) );
+    // Canonical-content identity (#1387): the competing row may have been
+    // written by a different serializer spelling of the SAME document — the
+    // digest helper canonicalizes the parsed form, so only a genuinely
+    // different vocabulary reports a conflict.
+    if ( labelSchemaRowDigest( existing.text( 0 ) ) == labelSchemaRowDigest( json ) )
+        return Result::success();
+    return Result::failure( storeDiag(
+        QStringLiteral( "dataset.conflict" ),
+        QStringLiteral( "label schema %1@%2 already exists with different content" )
+            .arg( schema.schemaId() )
+            .arg( schema.version() ) ) );
 }
 
 std::optional<LabelSchema> DatasetStore::labelSchema( const QString &schemaId,
@@ -279,12 +294,17 @@ sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesP
     {
         StoreStmt count( m_impl->db, QStringLiteral(
             "SELECT COUNT(*) FROM samples WHERE dataset_version_id=?" ) );
-        if ( count )
-        {
-            count.bind( 1, versionId.toString() );
-            if ( count.stepRow() )
-                total = count.i64( 0 );
-        }
+        // The count feeds pagination math: a failed prepare/step must refuse
+        // the page instead of reporting total=0 as a clean empty result
+        // (#1448 — count fail-open was the last silent-total path here).
+        if ( !count )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        count.bind( 1, versionId.toString() );
+        if ( !count.stepRow() || count.stepFailed() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        total = count.i64( 0 );
     }
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM samples WHERE dataset_version_id=? ORDER BY roword LIMIT ? OFFSET ?" ) );
@@ -305,6 +325,13 @@ sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesP
                                                parsed.diagnostics().first().message ) );
         records.append( parsed.value() );
     }
+    // Checked AFTER the loop: inside it stepRow() has already returned ROW,
+    // so an in-body test could never fire — a mid-scan ERROR (CORRUPT/IOERR)
+    // silently truncated the page as success (#1448/#1457, same repair as
+    // ExperimentStore::listRunsByCursor).
+    if ( stmt.stepFailed() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
     return Result::success( qMakePair( total, records ) );
 }
 
@@ -348,8 +375,10 @@ sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCur
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                                count.error( m_impl->db ) ) );
         count.bind( 1, versionId.toString() );
-        if ( count.stepRow() )
-            page.total = count.i64( 0 );
+        if ( !count.stepRow() || count.stepFailed() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        page.total = count.i64( 0 );
     }
 
     StoreStmt stmt( m_impl->db, cursor.isEmpty()
@@ -391,6 +420,12 @@ sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCur
         page.nextCursor = sicnu::data::QueryCursor::encode(
             { versionId.toString(), QString::number( roword ), sampleId } );
     }
+    if ( stmt.stepFailed() )
+        // Checked BEFORE the exhaustion rule: a mid-scan step ERROR
+        // (CORRUPT/IOERR) must not clear the cursor and end the walk as
+        // "done" — that would silently drop the tail of the table (#1448).
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
     if ( int( page.samples.size() ) < limit )
         page.nextCursor.clear(); // exhausted: the walk terminates cleanly
     return Result::success( page );
@@ -449,35 +484,70 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
     if ( *status != DatasetVersionStatus::Draft )
         return Result::failure( notDraft( versionId.toString() ) );
 
-    // #1171: the delete must take the sample's facet rows with it — every
-    // facet query reads sample_facets with no join to samples, so orphaned
-    // rows kept counting ghosts in facetDistribution / crossCounts / names
-    // forever (the write side guards orphans in setSampleFacets; the delete
-    // side never mirrored that).
-    StoreStmt facetStmt( m_impl->db, QStringLiteral(
-        "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
-    if ( !facetStmt )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           facetStmt.error( m_impl->db ) ) );
-    facetStmt.bind( 1, versionId.toString() );
-    facetStmt.bind( 2, sampleId.toString() );
-    if ( !facetStmt.step() )
+    // #1171 + #1457: the delete must take the sample's facet rows with it —
+    // every facet query reads sample_facets with no join to samples, so
+    // orphaned rows kept counting ghosts in facetDistribution / crossCounts /
+    // names forever. Both deletes run in ONE transaction (dataset_store.h:10):
+    // the base row goes first so a missing sample reports not_found with the
+    // facets untouched (rollback), and a failed facet delete rolls the base
+    // row back instead of leaving the #1171 half-applied state.
+    if ( !m_impl->begin( nullptr ) )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           facetStmt.error( m_impl->db ) ) );
+                                           QStringLiteral( "cannot begin transaction" ) ) );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "DELETE FROM samples WHERE dataset_version_id=? AND sample_id=?" ) );
     if ( !stmt )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                            stmt.error( m_impl->db ) ) );
+    }
     stmt.bind( 1, versionId.toString() );
     stmt.bind( 2, sampleId.toString() );
     if ( !stmt.step() )
+    {
+        // Capture the sqlite error BEFORE rollback: a successful ROLLBACK
+        // resets the connection's error string (same ordering as
+        // commitVersionImpl) so the diagnostic would read "not an error".
+        const QString message = stmt.error( m_impl->db );
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           stmt.error( m_impl->db ) ) );
+                                           message ) );
+    }
     if ( stmt.changes( m_impl->db ) != 1 )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
                                            QStringLiteral( "sample %1 not in version %2" )
                                                .arg( sampleId.toString(), versionId.toString() ) ) );
+    }
+    StoreStmt facetStmt( m_impl->db, QStringLiteral(
+        "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
+    if ( !facetStmt )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           facetStmt.error( m_impl->db ) ) );
+    }
+    facetStmt.bind( 1, versionId.toString() );
+    facetStmt.bind( 2, sampleId.toString() );
+    // Injected facet-delete failure (test-only arming): routes through the
+    // REAL failure branch — rollback — so the already-executed base-row
+    // delete is undone and the store keeps the sample whole (#1457).
+    // Evaluated exactly once: a NextN fault must not be consumed twice.
+    const bool injected = SICNU_FAULT_POINT( "dataset_store.remove_sample" );
+    if ( !facetStmt.step() || injected )
+    {
+        const QString message =
+            injected ? QStringLiteral( "injected facet-delete fault" )
+                     : facetStmt.error( m_impl->db );
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           message ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit failed" ) ) );
     return Result::success();
 }
 

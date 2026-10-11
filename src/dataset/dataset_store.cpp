@@ -409,8 +409,15 @@ sicnu::data::Result<QPair<qint64, QVector<QVariantMap>>> DatasetStore::listDatas
     qint64 total = 0;
     {
         Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM datasets" ) );
-        if ( count && count.stepRow() )
-            total = count.i64( 0 );
+        // A failed count must refuse the listing: total=0 with a partial row
+        // set would read as "catalog is empty" to every caller (#1448).
+        if ( !count )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        if ( !count.stepRow() || count.stepFailed() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        total = count.i64( 0 );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT id, name, description, created_ms FROM datasets ORDER BY name, id"
@@ -430,6 +437,12 @@ sicnu::data::Result<QPair<qint64, QVector<QVariantMap>>> DatasetStore::listDatas
         row.insert( QStringLiteral( "created_ms" ), stmt.i64( 3 ) );
         rows.append( row );
     }
+    // After the loop, not inside: stepRow() returning ROW means an in-body
+    // check never fires — a mid-scan ERROR must fail the listing instead of
+    // returning a silently partial catalog page (#1448/#1457).
+    if ( stmt.stepFailed() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
     return Result::success( qMakePair( total, rows ) );
 }
 

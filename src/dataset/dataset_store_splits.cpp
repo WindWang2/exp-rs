@@ -413,6 +413,11 @@ sicnu::data::Result<QVector<DatasetStore::QaReportRecord>> DatasetStore::qaRepor
         record.report = parsed.value();
         records.append( record );
     }
+    // After the loop: a mid-scan ERROR (CORRUPT/IOERR) must refuse the audit
+    // history instead of returning a silently thinned one (#1448/#1457).
+    if ( stmt.stepFailed() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
     return Result::success( records );
 }
 
@@ -432,7 +437,15 @@ sicnu::data::Result<std::optional<DatasetStore::QaReportRecord>> DatasetStore::l
                                            stmt.error( m_impl->db ) ) );
     stmt.bind( 1, versionId.toString() );
     if ( !stmt.stepRow() )
+    {
+        // Distinguish "never audited" (clean DONE) from a failed lookup
+        // (BUSY/IOERR/CORRUPT): an error must not read as absent evidence
+        // (#1448).
+        if ( stmt.stepFailed() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               stmt.error( m_impl->db ) ) );
         return Result::success( std::nullopt ); // genuinely never audited
+    }
     QaReportRecord record;
     record.id = stmt.i64( 0 );
     record.splitManifestId = stmt.text( 1 );

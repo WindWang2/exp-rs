@@ -3567,7 +3567,8 @@ target_link_libraries(test_dataset_version_migration PRIVATE Sicnu::dataset SQLi
 
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
-target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
+# removeSample fault-injection regression (#1457) arms the registry directly.
+target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3 sicnu_runtime)
 
 # Foundation 5.0 deterministic splits + leakage audit + patch generator
 # known-answer tests (ADR 0136, goal §19/§51).
