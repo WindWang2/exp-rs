@@ -8,6 +8,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include "data/execution_fingerprint.h"
+
 #include <cmath>
 #include <limits>
 
@@ -332,8 +334,11 @@ sicnu::data::Result<SuitabilityGoal> SuitabilityGoal::fromJson( const QJsonObjec
 
 QString SuitabilityGoal::contentDigest() const
 {
-    const QJsonDocument document( toJson() );
-    const QByteArray canonical = document.toJson( QJsonDocument::Compact );
+    // #1450: single digest authority — RFC 8785 canonical JSON, the same
+    // serializer as execution/dataset fingerprints (see
+    // SuitabilityReport::contentDigest for why Qt's Compact dialect kept
+    // the digest unverifiable through the canonical path).
+    const QByteArray canonical = sicnu::data::canonicalizeJsonRfc8785( toJson() );
     return QString::fromLatin1(
         QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 ).toHex() );
 }
