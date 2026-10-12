@@ -32,6 +32,7 @@
 #include "providers/xyz_source_provider.h"
 #include "virtual_raster_preflight.h"
 #include "platform/durable_sidecar.h"
+#include "runtime/observability/fault_point.h"
 
 namespace sicnu::data
 {
@@ -776,14 +777,46 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
     // a runaway generator must still be refused instead of filling the disk.
     const QByteArray xmlBytes = xml.toUtf8();
     constexpr std::size_t kVrtPublishCap = std::size_t( 256 ) * 1024 * 1024;
-    const sicnu::platform::sidecar::WriteResult published =
+    sicnu::platform::sidecar::WriteResult published =
       sicnu::platform::sidecar::write(
         { dependentIt->snapshot.source().canonicalSource.toUtf8().constData(),
           std::string( xmlBytes.constData(), static_cast<std::size_t>( xmlBytes.size() ) ),
           "", kVrtPublishCap } );
-    if ( published )
+    // Test-only seam (#1473 review): convert a real Ok publish into the
+    // typed post-publish VerifyFailed status so the branch below is
+    // exercised deterministically — the sidecar's own write hook cannot be
+    // threaded through this internal call (same pattern as dataset_store
+    // injected faults).
+    if ( published.status == sicnu::platform::sidecar::WriteStatus::Ok
+         && SICNU_FAULT_POINT( "data_manager.dependent_vrt_verify" ) )
+    {
+      published.status = sicnu::platform::sidecar::WriteStatus::VerifyFailed;
+      published.error = "injected verify fault";
+    }
+    // VerifyFailed has ALREADY renamed the new bytes onto the target before
+    // read-back failed, so the dependent VRT path holds changed (suspect)
+    // bytes: assetChanged must fire — suppressing it leaves displays on the
+    // pre-relocate VRT while the file changed underneath (#1473 review).
+    // Pre-publish failures (EmptyPath/TooLarge/ClaimFailed/WriteFailed/
+    // DurabilityFailed/PublishFailed/StagedCleanupFailed) keep the old
+    // target intact: no reload, warning only, as before.
+    if ( published
+         || published.status == sicnu::platform::sidecar::WriteStatus::VerifyFailed )
     {
       emit assetChanged( dependentId );
+      if ( published.status == sicnu::platform::sidecar::WriteStatus::VerifyFailed )
+      {
+        relocateDiagnostics.append( Diagnostic{
+          QStringLiteral( "relocate.dependent_vrt_verify_failed" ),
+          QStringLiteral( "Dependent virtual raster VRT published but read-back verification "
+                          "failed — the target holds suspect bytes: %1" )
+            .arg( dependentIt->snapshot.source().canonicalSource ),
+          DiagnosticSeverity::Error
+        } );
+      }
+      // Note: this call site disables last-good rotation (suffix ""), so no
+      // LastGoodFailed status can surface here; VerifyFailed above is the
+      // only post-publish state this branch can observe.
     }
     else
     {
