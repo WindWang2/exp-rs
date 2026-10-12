@@ -1126,6 +1126,80 @@ TEST_CASE( "operator construct during fingerprint does not hold TaskCenter mutex
     center.shutdownForTests();
 }
 
+TEST_CASE( "the catalog seam is inert after the host destroys its DataManager (#1454)",
+           "[ep9][taskcenter][catalog][1454]" )
+{
+    ensureApp9();
+    // Same preamble the #930 cases use: the engine is reset BEFORE the
+    // TaskCenter singleton's first use, so a worker pool torn down mid-flight
+    // cannot take the shutdown path down with it.
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.setMaxWorkers( 2 );
+    engine.clearExecutors();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+    center.resetResourceProfileLimits();
+    center.setMaxAutoRetries( 0 );
+
+    auto &cache = sicnu::data::ExecutionResultCache::instance();
+    cache.clear();
+    cache.setEnabled( true ); // the fingerprint prepare path consults the catalog only when enabled
+
+    // Host misuse under test: the DataManager dies WITHOUT setCatalog(nullptr)
+    // or shutdown(). The seam must go inert — guarded pointer cleared by the
+    // destroyed() hook — instead of dereferencing the dead object from the
+    // next enqueue's warm/fingerprint snapshot.
+    {
+        sicnu::data::DataManager doomed;
+        center.setCatalog( &doomed );
+    }
+
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    registry.registerOperator( "ep9454:noop", [] { return std::make_unique<Ep930BitExactOperator>(); } );
+
+    const long taskId = center.enqueueTask( QStringLiteral( "ep9454:noop" ), {},
+                                            /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                                            {}, /*autoDispatch=*/false );
+    REQUIRE( taskId > 0 ); // warm skipped, task still admitted
+
+    // Rebinding a live catalog after the misuse works: the dead seam's
+    // guard was disconnected, the new one installed.
+    {
+        sicnu::data::DataManager fresh;
+        REQUIRE_NOTHROW( center.setCatalog( &fresh ) );
+        REQUIRE_NOTHROW( (void)center.enqueueTask( QStringLiteral( "ep9454:noop" ), {},
+                                                   /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                                                   {}, /*autoDispatch=*/false ) );
+    }
+
+    // R9 review P1 regression: shutdown() nulls the seam, so the guard must
+    // be severed BY HANDLE. Pre-fix, a catalog that died after
+    // shutdown()+setCatalog(B) ran its stale lambda and silently cleared B's
+    // seam — every later fingerprint degraded to "no catalog wired".
+    {
+        sicnu::data::DataManager doomed;
+        center.setCatalog( &doomed );
+        center.shutdownForTests(); // seam dropped, guard must be severed here
+    }
+    {
+        sicnu::data::DataManager replacement;
+        center.setCatalog( &replacement );
+        // The observable contract: the seam is still wired after the stale
+        // catalog's destruction, i.e. enqueue keeps taking the live-catalog
+        // path (no throw, no dangling dereference).
+        REQUIRE_NOTHROW( (void)center.enqueueTask( QStringLiteral( "ep9454:noop" ), {},
+                                                   /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                                                   {}, /*autoDispatch=*/false ) );
+    }
+
+    registry.unregisterOperator( "ep9454:noop" );
+    cache.setEnabled( false );
+    cache.clear();
+    center.setCatalog( nullptr );
+    center.shutdownForTests();
+}
+
 TEST_CASE( "cancelTask unlinks scratch outputs and does not leave them behind (#930)",
            "[ep9][taskcenter][lock][930]" )
 {
