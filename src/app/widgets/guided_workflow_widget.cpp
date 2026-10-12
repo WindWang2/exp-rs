@@ -377,6 +377,12 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
 
     m_runButton->setEnabled(false);
     m_runButton->setText( tr( "Running…" ) );
+    // showStep() evaluated isRunning() before this submission, so Next would
+    // stay visibly clickable for the whole job while onNextStep's guard
+    // silently drops every click (#1474 review). Disable it alongside Run;
+    // restoreButton's updateStepDisplay() re-arms it from the terminal
+    // callback — and the submission-rejected path below restores both.
+    m_nextButton->setEnabled(false);
 
     // True when the student is still in the workflow the job belongs to (the
     // session boundary may have switched the view to another experiment).

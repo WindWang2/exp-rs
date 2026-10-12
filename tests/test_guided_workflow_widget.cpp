@@ -261,6 +261,14 @@ TEST_CASE( "Shipped labs load through the same path the widget uses", "[widget][
 
 #include <QApplication>
 #include <QListWidget>
+#include <QPushButton>
+
+#include <jobs/job_engine.h>
+#include <operators/framework/rs_operator_context.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -524,4 +532,93 @@ TEST_CASE( "Positive control: a walkable lab completes end to end",
     QMetaObject::invokeMethod( &widget, "onNextStep" );
     REQUIRE( completedCount == 1 );
     REQUIRE( completedSteps == QVector<int>{ 0, 1, 2 } );
+}
+
+TEST_CASE( "Next stays disabled for the whole flight of an operator step's job",
+           "[widget][workflow][r9]" )
+{
+    // #1474 review: showStep() evaluated isRunning() before the submission,
+    // so Next remained visibly clickable while onNextStep's guard silently
+    // dropped every click. The button state must match the real task state:
+    // disabled at submission, re-armed from the terminal callback.
+    ensureWidgetApp();
+
+    // Deterministic in-flight window: a prefix executor (resolved ahead of
+    // RSOperatorRegistry) that blocks until released. No other test in this
+    // binary submits jobs, so resetting the engine is safe here.
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers( 2 );
+    std::atomic_bool release{ false };
+    engine.registerExecutor(
+        "rs:slow_probe_r9",
+        [&release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+            // Deadline-bounded gate: a failed assertion before release must
+            // not strand the engine worker (same guard shape as
+            // test_gui_job_adapter).
+            for ( int i = 0; i < 30000 && !release.load() && !ctx.isCancelled(); ++i )
+                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            ctx.throwIfCancelled();
+            return Json::Value( Json::objectValue );
+        } );
+
+    ScopedLabDir labs;
+    const QDir dir = labs.labsDir();
+    writeFile( dir, QStringLiteral( "lab94_async_next.lab.json" ), QStringLiteral( R"( {
+      "spec_version": 1,
+      "id": "lab94_async_next",
+      "title": "Async Next",
+      "title_zh": "异步下一步",
+      "objective": "next-button gating probe",
+      "steps": [
+        { "title": "M0", "title_zh": "手动0", "description_zh": "手动步骤。" },
+        { "title": "Op1", "title_zh": "算子1", "description_zh": "算子步骤。",
+          "operator_id": "rs:slow_probe_r9",
+          "params": { "probe": 1 } }
+      ]
+    } )" ) );
+
+    GuidedWorkflowWidget widget( nullptr );
+    REQUIRE( widget.loadErrorStrings().isEmpty() );
+    auto *list = widget.findChild<QListWidget *>();
+    REQUIRE( list != nullptr );
+    list->setCurrentRow( 0 );
+
+    // No object names are set on the buttons — match them by their labels.
+    QPushButton *nextButton = nullptr;
+    QPushButton *runButton = nullptr;
+    for ( auto *button : widget.findChildren<QPushButton *>() )
+    {
+        if ( button->text() == QStringLiteral( "Next Step" ) )
+            nextButton = button;
+        else if ( button->text().startsWith( QStringLiteral( "Run" ) ) )
+            runButton = button;
+    }
+    REQUIRE( nextButton != nullptr );
+    REQUIRE( runButton != nullptr );
+
+    QMetaObject::invokeMethod( &widget, "onStartWorkflow" );
+    QMetaObject::invokeMethod( &widget, "onNextStep" ); // manual step 0 → operator step 1
+    REQUIRE( nextButton->isEnabled() );
+    REQUIRE( runButton->isEnabled() );
+
+    QMetaObject::invokeMethod( &widget, "onRunStepAction" ); // submits the gated job
+    CHECK_FALSE( runButton->isEnabled() );
+    CHECK_FALSE( nextButton->isEnabled() ); // the review's finding
+
+    // Terminal callback restores both buttons (restoreButton →
+    // updateStepDisplay → showStep re-arms Next now that isRunning() is
+    // false).
+    release.store( true );
+    bool restored = false;
+    for ( int i = 0; i < 600 && !restored; ++i )
+    {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        restored = nextButton->isEnabled() && runButton->isEnabled();
+    }
+    CHECK( restored );
+
+    engine.clearExecutors();
 }
