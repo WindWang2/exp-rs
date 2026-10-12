@@ -43,7 +43,10 @@ class RsScanPool : public QObject
     /// destroyed hook the raw-address map entry outlived its widget
     /// forever — an unbounded leak that also pinned cancel()'s minLive low,
     /// and a successor allocated at the same address inherited the dead
-    /// owner's generation record (#1453).
+    /// owner's generation record (#1453). The erased record is itself the
+    /// tombstone: isStale() reads a missing owner as stale, so workers
+    /// still in flight for the destroyed owner stop instead of outliving
+    /// their cancel marker (#1474 review).
     quint64 nextGeneration( const QObject *owner );
 
     /// Cancels one specific generation (e.g. its widget going away) without
@@ -57,7 +60,15 @@ class RsScanPool : public QObject
         {
             const std::lock_guard<std::mutex> lock( m_canceledMutex );
             auto it = m_ownerActiveGeneration.find( owner );
-            if ( it != m_ownerActiveGeneration.end() && generation < it->second )
+            // A forgotten owner has no live anchor left: its record is gone
+            // (destroyed hook / forgetOwner) and cancel()'s bounded pruning
+            // may since have retired its cancel marker, after which nothing
+            // could ever classify its in-flight generations again. Fail
+            // closed: workers polling a destroyed owner read stale (#1474
+            // review).
+            if ( it == m_ownerActiveGeneration.end() )
+                return true;
+            if ( generation < it->second )
                 return true;
             return m_canceled.count( generation ) != 0;
         }

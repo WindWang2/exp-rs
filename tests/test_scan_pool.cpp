@@ -212,13 +212,14 @@ TEST_CASE( "RsScanPool: a destroyed QObject owner's record is erased (#1453)",
   CHECK( pool.isStale( gen1, owner ) ); // superseded by gen2 while alive
   delete owner;
 
-  // Dead owner: no record survives, so NEITHER generation is stale via a
-  // dangling supersede record (only an explicit cancel could stale them).
-  // The pointer VALUE is used purely as a map key — never dereferenced.
-  // Pre-fix, the leaked (owner → gen2) record kept classifying gen1 as
-  // stale even though its owner no longer exists.
-  CHECK_FALSE( pool.isStale( gen1, owner ) );
-  CHECK_FALSE( pool.isStale( gen2, owner ) );
+  // Dead owner: no record survives (#1453) — and the missing record is the
+  // tombstone (#1474 review): nothing is left that could ever classify the
+  // dead owner's generations as fresh (its cancel marker is prunable), so
+  // isStale fails closed. Workers still polling with the destroyed object's
+  // raw address must stop, not resume raster work. The pointer VALUE is
+  // used purely as a map key — never dereferenced.
+  CHECK( pool.isStale( gen1, owner ) );
+  CHECK( pool.isStale( gen2, owner ) );
 
   // A successor allocated at the same address starts from a clean slate: its
   // fresh generation is not stale, and the dead owner's numbers can no
@@ -228,4 +229,32 @@ TEST_CASE( "RsScanPool: a destroyed QObject owner's record is erased (#1453)",
   CHECK_FALSE( pool.isStale( gen3, successor ) );
   CHECK( pool.isStale( gen2, successor ) ); // superseded by the successor's own scan
   delete successor;
+}
+
+TEST_CASE( "RsScanPool: a destroyed owner's canceled generation survives cancel-set pruning",
+           "[scan_pool][behavior][r9]" )
+{
+  ensureApp();
+  auto &pool = RsScanPool::instance();
+
+  // The #1474 review scenario: a widget's destructor cancels its in-flight
+  // generation, ~QObject then erases the owner record, and a burst of later
+  // cancellations pushes the bounded cancel set past its 1,024-entry pruning
+  // threshold — the dead owner's marker is below every live floor and gets
+  // retired. The still-running worker polls with the destroyed object's raw
+  // address; the missing record must read stale, not let the scan resume.
+  // (Each Catch2 case runs in its own process via catch_discover_tests, so
+  // no earlier case can leave a record that pins pruning's minLive floor.)
+  auto *owner = new QObject;
+  const quint64 gen = pool.nextGeneration( owner );
+  pool.cancel( gen, owner ); // the destructor's cancel (#1453 pattern)
+  delete owner;              // destroyed hook erases the record
+
+  for ( int i = 0; i < 1100; ++i )
+  {
+    const quint64 later = pool.nextGeneration();
+    pool.cancel( later );
+  }
+
+  CHECK( pool.isStale( gen, owner ) );
 }
