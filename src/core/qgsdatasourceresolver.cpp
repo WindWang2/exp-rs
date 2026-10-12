@@ -82,15 +82,27 @@ QString QgsDataSourceResolver::localPath( const QString &source )
     return source; // malformed: caller's existence check fails closed as before
 
   // file://<authority>/<path>: an empty authority denotes the local machine
-  // (QUrl::toLocalFile decodes percent escapes; note it rejects
-  // file://localhost on non-Windows, so that spelling is mapped explicitly);
-  // any other authority becomes the UNC form //authority/path so Windows
-  // shares stay addressable by QFile/QFileInfo/GDAL.
+  // (QUrl::toLocalFile decodes percent escapes). "localhost" is the local
+  // machine too, but Qt folds EVERY nonempty hostname — localhost included —
+  // into toLocalFile's return as an SMB-style path (Qt 6.8, verified:
+  // file://localhost/C:/a.tif → //localhost/C:/a.tif on Windows and POSIX
+  // alike), which no local existence check can open. Strip the localhost
+  // authority first and let toLocalFile apply its platform drive-path
+  // handling to the bare path (#1472 review). Any OTHER authority becomes
+  // the UNC form //authority/path so Windows shares stay addressable by
+  // QFile/QFileInfo/GDAL.
+  if ( url.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0 )
+  {
+    QUrl localUrl = url;
+    localUrl.setHost( QString() );
+    const QString local = localUrl.toLocalFile();
+    if ( !local.isEmpty() )
+      return local;
+    return source; // degenerate "file://localhost": nothing mappable
+  }
   const QString local = url.toLocalFile();
   if ( !local.isEmpty() )
     return local;
-  if ( url.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0 )
-    return url.path( QUrl::FullyDecoded );
   if ( !url.host().isEmpty() && !url.path().isEmpty() )
     return QStringLiteral( "//" ) + url.host() + url.path();
   return source;
