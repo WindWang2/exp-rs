@@ -237,13 +237,13 @@ TEST_CASE( "a prefixed directory is a different record, never a wildcard match",
     options.policy.allowThirdPartyNative = true;
     registry.configure( options );
 
-    const PluginRecord *real = registry.record( kHelloId );
+    auto real = registry.record( kHelloId );
     REQUIRE( real != nullptr );
     REQUIRE( real->directory == fixture.pluginDir );
     REQUIRE( real->manifest.version == "1.0.0" );
     // The prefixed directory is its own record under its own id — and the
     // real id resolves to the real directory, not the impostor's.
-    const PluginRecord *other = registry.record( "org.exprs.test.other-plugin" );
+    auto other = registry.record( "org.exprs.test.other-plugin" );
     REQUIRE( other != nullptr );
     REQUIRE( other->directory == impostorDir );
 }
@@ -321,7 +321,7 @@ TEST_CASE( "a symlinked entrypoint file escaping the root is refused at "
 
     REQUIRE_FALSE( registry.load( kHelloId ) );
     REQUIRE_FALSE( registry.isLoaded( kHelloId ) );
-    const PluginRecord *after = registry.record( kHelloId );
+    auto after = registry.record( kHelloId );
     REQUIRE( after != nullptr );
     REQUIRE( after->state == PluginState::Failed );
     bool sawEscape = false;
