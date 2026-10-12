@@ -4,6 +4,7 @@
 #include "runtime/observability/fault_point.h"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 
 #include <sqlite3.h>
@@ -38,8 +39,17 @@ class Stmt
     ~Stmt() { if ( m_stmt ) sqlite3_finalize( m_stmt ); }
     explicit operator bool() const { return m_stmt != nullptr; }
     sqlite3_stmt *get() const { return m_stmt; }
-    bool step() const { return sqlite3_step( m_stmt ) == SQLITE_DONE; }
-    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
+    bool step() const { return ( m_lastRc = sqlite3_step( m_stmt ) ) == SQLITE_DONE; }
+    bool stepRow() const { return ( m_lastRc = sqlite3_step( m_stmt ) ) == SQLITE_ROW; }
+    /// True when the last step()/stepRow() ended in an ERROR (not DONE/ROW):
+    /// a mid-scan CORRUPT/IOERR otherwise folds into "no more rows" and
+    /// readers answer from a silently partial result (#1448/#1457 — same
+    /// contract as DatasetStore::StoreStmt).
+    bool stepFailed() const
+    {
+        return m_lastRc != SQLITE_ROW && m_lastRc != SQLITE_DONE && m_lastRc != SQLITE_OK;
+    }
+    QString error() const { return QString::fromUtf8( sqlite3_errmsg( m_db ) ); }
     void reset() { sqlite3_reset( m_stmt ); sqlite3_clear_bindings( m_stmt ); }
     void bind( int idx, const QString &v ) const
     {
@@ -57,6 +67,7 @@ class Stmt
   private:
     sqlite3 *m_db = nullptr;
     sqlite3_stmt *m_stmt = nullptr;
+    mutable int m_lastRc = SQLITE_OK;
 };
 } // namespace
 
@@ -147,10 +158,20 @@ struct WorkspaceCatalog::Impl
             al.bind( 1, a.assetId );
             while ( al.stepRow() )
                 a.aliases.append( al.text( 0 ) );
+            // Partial alias/tag hydration must be visible, not silent
+            // (#1448/#1457): identity decisions read these lists.
+            if ( al.stepFailed() )
+                qWarning( "catalog.alias_scan_failed: asset %s aliases are a SUBSET"
+                          " after sqlite error (%s)",
+                          qUtf8Printable( a.assetId ), qUtf8Printable( al.error() ) );
             Stmt tg( db, "SELECT tag FROM tags WHERE asset_id=?" );
             tg.bind( 1, a.assetId );
             while ( tg.stepRow() )
                 a.tags.append( tg.text( 0 ) );
+            if ( tg.stepFailed() )
+                qWarning( "catalog.tag_scan_failed: asset %s tags are a SUBSET after"
+                          " sqlite error (%s)",
+                          qUtf8Printable( a.assetId ), qUtf8Printable( tg.error() ) );
         }
         return a;
     }
@@ -182,6 +203,18 @@ bool WorkspaceCatalog::open( const QString &dbPath, QString *errorOut )
             if ( errorOut )
                 *errorOut = QStringLiteral( "catalog schema %1 is newer than supported" )
                                 .arg( v.text( 0 ) );
+            close();
+            return false;
+        }
+        // A failed schema probe must not fall through to createSchema():
+        // the version is UNKNOWN, and writing an older schema into a
+        // possibly-newer database corrupts it — fail closed instead
+        // (#1448/#1457: an unreadable store is an error, never a blank one).
+        if ( v && v.stepFailed() )
+        {
+            if ( errorOut )
+                *errorOut = QStringLiteral( "cannot read catalog schema version (%1)" )
+                                .arg( v.error() );
             close();
             return false;
         }
@@ -424,7 +457,15 @@ std::optional<CatalogAsset> WorkspaceCatalog::byId( const QString &assetId ) con
         return std::nullopt;
     s.bind( 1, assetId );
     if ( !s.stepRow() )
+    {
+        // "Not found" and "store broken" share the nullopt channel here —
+        // the difference must at least be visible (#1448/#1457).
+        if ( s.stepFailed() )
+            qWarning( "catalog.by_id_scan_failed: asset %s lookup ended with sqlite"
+                      " error (%s)",
+                      qUtf8Printable( assetId ), qUtf8Printable( s.error() ) );
         return std::nullopt;
+    }
     return m_impl->readAsset( s );
 }
 
@@ -444,7 +485,13 @@ std::optional<CatalogAsset> WorkspaceCatalog::byPath( const QString &path ) cons
         return std::nullopt;
     s.bind( 1, path );
     if ( !s.stepRow() )
+    {
+        if ( s.stepFailed() )
+            qWarning( "catalog.by_path_scan_failed: path %s lookup ended with sqlite"
+                      " error (%s)",
+                      qUtf8Printable( path ), qUtf8Printable( s.error() ) );
         return std::nullopt;
+    }
     return m_impl->readAsset( s );
 }
 
@@ -488,6 +535,14 @@ CatalogPage WorkspaceCatalog::page( const CatalogQuery &query, qint64 offset, qi
         if ( !query.textPrefix.isEmpty() ) { s.bind( idx++, prefix ); s.bind( idx++, prefix ); }
         if ( s.stepRow() )
             out.total = s.i64( 0 );
+        else if ( s.stepFailed() )
+        {
+            // Loud-subset contract (#1448/#1457): CatalogPage carries no
+            // error channel, so a failed COUNT or a mid-scan ERROR must not
+            // read as an empty/complete page without a trace.
+            qWarning( "catalog.page_count_failed: total stays 0 after sqlite error (%s)",
+                      qUtf8Printable( s.error() ) );
+        }
     }
     {
         Stmt s( m_impl->db, ( QString( "SELECT " SICNU_CATALOG_ASSET_COLS " FROM assets" ) + where +
@@ -503,6 +558,14 @@ CatalogPage WorkspaceCatalog::page( const CatalogQuery &query, qint64 offset, qi
         s.bind( idx++, clampedOffset );
         while ( s.stepRow() )
             out.items.append( m_impl->readAsset( s ) );
+        // A mid-scan sqlite ERROR ends stepRow() exactly like exhaustion:
+        // without this the page reads as complete (#1448/#1457).
+        if ( s.stepFailed() )
+        {
+            qWarning( "catalog.page_scan_failed: page items are a SUBSET after sqlite"
+                      " error (%s)",
+                      qUtf8Printable( s.error() ) );
+        }
     }
     return out;
 }
@@ -513,7 +576,13 @@ qint64 WorkspaceCatalog::count() const
         return 0;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     Stmt s( m_impl->db, "SELECT COUNT(*) FROM assets" );
-    return s.stepRow() ? s.i64( 0 ) : 0;
+    if ( s.stepRow() )
+        return s.i64( 0 );
+    // A broken count must not masquerade as an empty catalog (#1448/#1457).
+    if ( s.stepFailed() )
+        qWarning( "catalog.count_failed: count stays 0 after sqlite error (%s)",
+                  qUtf8Printable( s.error() ) );
+    return 0;
 }
 
 QString WorkspaceCatalog::schemaVersion() const
