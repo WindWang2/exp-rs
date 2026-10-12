@@ -111,11 +111,17 @@ QString resolveDefaultPythonInterpreter()
 #else
     static const char *const kCandidates[] = { "python3", "python" };
 #endif
+    QStringList tried;
     for ( const char *candidate : kCandidates )
     {
         const QString resolved =
           QStandardPaths::findExecutable( QString::fromLatin1( candidate ) );
-        if ( !resolved.isEmpty() && interpreterStarts( resolved ) )
+        // "python" and "python.exe" routinely resolve to the same file —
+        // probe each distinct path once per round.
+        if ( resolved.isEmpty() || tried.contains( resolved ) )
+            continue;
+        tried.append( resolved );
+        if ( interpreterStarts( resolved ) )
         {
             const QMutexLocker lock( &cacheMutex );
             cachedVerified = resolved;
@@ -291,7 +297,10 @@ BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &
         // Fail-closed (#1474 review): the transcript is a retained head, so
         // the parsed findings would be an arbitrary prefix of the verifier's
         // real output. The exit code stays the verdict; the transcript is
-        // refused rather than published as complete detail.
+        // refused rather than published as complete detail. (A simultaneous
+        // version_mismatch still wins the summary via the shared epilogue —
+        // that finding is derived locally from the manifest, not from the
+        // truncated transcript.)
         r.summary = QStringLiteral( "output_truncated" );
         return finalizeBundleVerify( r, bundleDir, expectedVersion );
     }

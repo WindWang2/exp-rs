@@ -60,7 +60,7 @@ class ScopedInterpreterEnv
     void prependPath( const QString &dir )
     {
         const QString merged = QDir::toNativeSeparators( dir ) + QDir::listSeparator()
-                               + QString::fromLocal8Bit( m_path );
+                               + QString::fromUtf8( m_path );
         qputenv( "PATH", merged.toUtf8() );
     }
 
@@ -252,6 +252,31 @@ TEST_CASE( "verifyOfflineBundle refuses to interpret a truncated transcript",
     REQUIRE( r.exitCode == 1 );
     CHECK( r.outputTruncated );
     CHECK( r.findings.isEmpty() );
+    CHECK( r.summary == QStringLiteral( "output_truncated" ) );
+    CHECK( r.toJson().value( QStringLiteral( "output_truncated" ) ).toBool() );
+}
+
+TEST_CASE( "verifyOfflineBundle reports truncation on the cannot-verify path too",
+           "[teaching_admin][script_adapters][r9]" )
+{
+    if ( !harnessInterpreterPinned() )
+    {
+        SUCCEED( "no pinned interpreter on this machine — live subprocess section skipped" );
+        return;
+    }
+    // The exit-2 branch used to publish the (possibly head-capped) stderr
+    // prefix as its summary; a truncated cannot-verify transcript must carry
+    // the typed marker instead of an arbitrary partial explanation.
+    QTemporaryDir repo;
+    REQUIRE( repo.isValid() );
+    writeFloodingScript(
+      repo, "verify_bundle_manifest.py",
+      QByteArray( "import sys\nsys.stderr.write('e' * (1024 * 1024 + 4096))\nsys.exit(2)\n" ) );
+
+    const BundleVerifyResult r = verifyOfflineBundle( repo.path(), repo.path() );
+    REQUIRE_FALSE( r.verifiable );
+    REQUIRE( r.exitCode == 2 );
+    CHECK( r.outputTruncated );
     CHECK( r.summary == QStringLiteral( "output_truncated" ) );
     CHECK( r.toJson().value( QStringLiteral( "output_truncated" ) ).toBool() );
 }
