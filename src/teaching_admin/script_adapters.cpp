@@ -6,11 +6,60 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMutex>
 #include <QProcess>
 #include <QStandardPaths>
 #include <algorithm>
 
 namespace sicnu::teaching_admin {
+
+namespace
+{
+
+/// "Found on PATH" must not mean "accepted": a PATH-resolved candidate is
+/// only trustworthy once it actually runs. On Windows the WindowsApps
+/// execution alias resolves like a real python.exe but launches, prints the
+/// Store nag and exits 9009 when no interpreter is installed — and it can
+/// shadow ANY candidate name, including "python" (#1474 review). A
+/// mismatched-stdlib interpreter dies at `import re` (the SRE failure this
+/// resolver exists to avoid, #1431). Probing `import re` rejects both
+/// shapes: launch ok but non-zero exit, or no launch at all.
+bool interpreterStarts( const QString &program )
+{
+    QProcess probe;
+    probe.start( program, QStringList{ QStringLiteral( "-c" ), QStringLiteral( "import re" ) } );
+    if ( !probe.waitForStarted( 3000 ) )
+        return false;
+    if ( !probe.waitForFinished( 10000 ) )
+    {
+        probe.kill();
+        probe.waitForFinished( 3000 );
+        return false;
+    }
+    return probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0;
+}
+
+// Version-pin epilogue shared by every transcript outcome of
+// verifyOfflineBundle: the manifest is metadata the teacher pinned at export
+// time. A mismatch is a typed failed verification — the digest authority
+// itself is unchanged (the canonical script).
+BundleVerifyResult finalizeBundleVerify( BundleVerifyResult r, const QString &bundleDir,
+                                         const QString &expectedVersion )
+{
+    const BundleManifestInfo manifest = inspectBundleManifest( bundleDir );
+    r.manifestSchema = manifest.schema;
+    r.bundleVersion = manifest.bundleVersion;
+    if ( !expectedVersion.isEmpty() && manifest.ok && manifest.bundleVersion != expectedVersion )
+    {
+        r.ok = false;
+        r.findings.append( QStringLiteral( "version_mismatch: declared %1, expected %2" )
+                             .arg( manifest.bundleVersion, expectedVersion ) );
+        r.summary = QStringLiteral( "version_mismatch" );
+    }
+    return r;
+}
+
+} // namespace
 
 /// A caller that names no interpreter means "this stack's own Python".
 /// The harness pins that interpreter through the environment: PYTHONHOME and
@@ -30,10 +79,13 @@ namespace sicnu::teaching_admin {
 /// probe PATH for a real interpreter and return its ABSOLUTE path, the same
 /// candidate-list idea as python_worker_process.cpp. On Windows the order
 /// matters: "python3" there is usually the WindowsApps Store alias stub —
-/// findExecutable happily resolves it, and QProcess then fails to launch it,
-/// so real installs ("python" / "python.exe") are probed first (#1466). The
-/// bare "python3" survives only as the typed last resort when nothing real
-/// is discoverable (POSIX keeps it first: it is the canonical name there).
+/// but "python" can resolve to the same stub, and the stub is only
+/// distinguishable by RUNNING it (it launches, prints the Store nag, exits
+/// 9009). Every candidate is therefore verified to actually start and load
+/// the stdlib before being accepted (#1474 review); unusable ones are
+/// skipped so a later real candidate still wins. The bare "python3" survives
+/// only as the typed last resort when nothing verifiable is discoverable
+/// (POSIX keeps python3 first: it is the canonical name there).
 QString resolveDefaultPythonInterpreter()
 {
     static const char *const kPins[] = { "SICNU_PYTHON_EXECUTABLE", "PYTHONEXECUTABLE" };
@@ -42,6 +94,17 @@ QString resolveDefaultPythonInterpreter()
         const QString value = qEnvironmentVariable( pin ).trimmed();
         if ( !value.isEmpty() && QFileInfo::exists( value ) )
             return value;
+    }
+    // One verified result per process: this resolver is re-evaluated as a
+    // default argument on every adapter call, and each probe round spawns a
+    // process per candidate. Failures are never cached — a PATH that gains a
+    // real interpreter mid-session must still be discovered.
+    static QMutex cacheMutex;
+    static QString cachedVerified;
+    {
+        const QMutexLocker lock( &cacheMutex );
+        if ( !cachedVerified.isEmpty() )
+            return cachedVerified;
     }
 #ifdef Q_OS_WIN
     static const char *const kCandidates[] = { "python", "python.exe", "python3", "python3.exe" };
@@ -52,8 +115,12 @@ QString resolveDefaultPythonInterpreter()
     {
         const QString resolved =
           QStandardPaths::findExecutable( QString::fromLatin1( candidate ) );
-        if ( !resolved.isEmpty() )
+        if ( !resolved.isEmpty() && interpreterStarts( resolved ) )
+        {
+            const QMutexLocker lock( &cacheMutex );
+            cachedVerified = resolved;
             return resolved;
+        }
     }
     return QStringLiteral( "python3" );
 }
@@ -179,6 +246,7 @@ QJsonObject BundleVerifyResult::toJson() const
         { QStringLiteral( "manifest_schema" ), manifestSchema },
         { QStringLiteral( "bundle_version" ), bundleVersion },
         { QStringLiteral( "findings" ), findingsArr },
+        { QStringLiteral( "output_truncated" ), outputTruncated },
     };
 }
 
@@ -200,6 +268,7 @@ BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &
     req.timeoutMs = 120000;
     const ScriptRunResult sr = runScript( req );
     r.exitCode = sr.exitCode;
+    r.outputTruncated = sr.stdoutTruncated || sr.stderrTruncated;
     if ( !sr.started || sr.timedOut || sr.crashed )
     {
         r.verifiable = false;
@@ -210,11 +279,22 @@ BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &
     if ( sr.exitCode == 2 )
     {
         r.verifiable = false;
-        r.summary = QString::fromUtf8( sr.stderrBytes.isEmpty() ? sr.stdoutBytes : sr.stderrBytes ).trimmed();
+        r.summary = r.outputTruncated
+                      ? QStringLiteral( "output_truncated" )
+                      : QString::fromUtf8( sr.stderrBytes.isEmpty() ? sr.stdoutBytes : sr.stderrBytes ).trimmed();
         return r;
     }
     r.verifiable = true;
     r.ok = ( sr.exitCode == 0 );
+    if ( r.outputTruncated )
+    {
+        // Fail-closed (#1474 review): the transcript is a retained head, so
+        // the parsed findings would be an arbitrary prefix of the verifier's
+        // real output. The exit code stays the verdict; the transcript is
+        // refused rather than published as complete detail.
+        r.summary = QStringLiteral( "output_truncated" );
+        return finalizeBundleVerify( r, bundleDir, expectedVersion );
+    }
     const QString text = QString::fromUtf8( sr.stdoutBytes ) + QStringLiteral( "\n" )
                          + QString::fromUtf8( sr.stderrBytes );
     const QStringList lines = text.split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
@@ -228,21 +308,7 @@ BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &
     }
     if ( r.summary.isEmpty() )
         r.summary = r.ok ? QStringLiteral( "verified_ok" ) : QStringLiteral( "verified_failed" );
-
-    // Version pin: the manifest is metadata the teacher pinned at export
-    // time. A mismatch is a typed failed verification — the digest authority
-    // itself is unchanged (the canonical script).
-    const BundleManifestInfo manifest = inspectBundleManifest( bundleDir );
-    r.manifestSchema = manifest.schema;
-    r.bundleVersion = manifest.bundleVersion;
-    if ( !expectedVersion.isEmpty() && manifest.ok && manifest.bundleVersion != expectedVersion )
-    {
-        r.ok = false;
-        r.findings.append( QStringLiteral( "version_mismatch: declared %1, expected %2" )
-                             .arg( manifest.bundleVersion, expectedVersion ) );
-        r.summary = QStringLiteral( "version_mismatch" );
-    }
-    return r;
+    return finalizeBundleVerify( r, bundleDir, expectedVersion );
 }
 
 BundleManifestInfo inspectBundleManifest( const QString &bundleDir )
@@ -345,6 +411,7 @@ QJsonObject PackDriftCheck::toJson() const
         { QStringLiteral( "in_sync" ), inSync },
         { QStringLiteral( "drift_files" ), QJsonArray::fromStringList( driftFiles ) },
         { QStringLiteral( "summary" ), summary },
+        { QStringLiteral( "output_truncated" ), outputTruncated },
     };
 }
 
@@ -373,6 +440,18 @@ PackDriftCheck checkLabPackDrift( const QString &repoRoot, const QString &python
     if ( sr.timedOut || sr.crashed )
     {
         check.summary = sr.timedOut ? QStringLiteral( "timeout" ) : sr.error;
+        return check;
+    }
+    check.outputTruncated = sr.stdoutTruncated || sr.stderrTruncated;
+    if ( check.outputTruncated )
+    {
+        // Fail-closed (#1474 review): the transcript is a retained head, so
+        // the DRIFT lines parsed out of it would be an arbitrary prefix —
+        // "drift detected (3 files)" would under-report a whole classroom.
+        // The exit code still decides inSync; the list itself is refused.
+        check.inSync = ( sr.exitCode == 0 );
+        check.summary = check.inSync ? QStringLiteral( "packs in sync (transcript truncated)" )
+                                     : QStringLiteral( "pack drift detected (transcript truncated)" );
         return check;
     }
     const QString text = QString::fromUtf8( sr.stdoutBytes ) + QStringLiteral( "\n" )
