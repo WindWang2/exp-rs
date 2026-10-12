@@ -107,6 +107,9 @@ void IpcChannel::closeLocked()
         mStream->close();
     mResponseCv.notify_all();
     mRequestCv.notify_all();
+    // Wake readers parked on the event-drain ordering gate and registration
+    // attempts waiting behind a drain: both must observe the closure.
+    mEventOrderCv.notify_all();
 }
 
 bool IpcChannel::isOpen() const
@@ -411,23 +414,74 @@ bool IpcChannel::sendEvent( const std::string &event, const Json::Value &params 
 
 void IpcChannel::setEventSink( std::function<void( const Ipc::Envelope & )> sink )
 {
-    // Events arriving before a sink is installed are QUEUED and flushed
+    // Events arriving before a sink is installed are QUEUED and replayed
     // here: the worker.hello handshake races the launcher's registration
     // (the reader thread starts in the channel constructor). The replay
-    // runs INSIDE the state lock: once mEventSink is visible the reader
-    // delivers newer events directly outside the lock, so replaying the
-    // queue without the lock let a later frame overtake the queued
-    // worker.hello and break the hello-first handshake ordering (#1449).
-    // Sink contract equals the reader path: never re-enter this channel.
-    std::lock_guard<std::mutex> lock( mMutex );
-    mEventSink = sink;
+    // runs OUTSIDE the state lock — a sink that re-enters channel APIs
+    // (close(), protocolFailure(), request()) used to self-deadlock on the
+    // non-recursive mMutex (PR #1469 review). Ordering is preserved by
+    // EventDeliveryPhase::Draining instead of the lock: while the replay
+    // is in flight the reader parks newer events on mEventOrderCv, so the
+    // queued worker.hello still reaches the sink first (#1449).
     std::vector<Ipc::Envelope> pending;
-    pending.swap( mPendingEvents );
-    for ( const Ipc::Envelope &event : pending )
     {
-        if ( sink )
-            sink( event );
+        std::unique_lock<std::mutex> lock( mMutex );
+        if ( mEventDeliveryPhase == EventDeliveryPhase::Draining
+             && mEventDrainOwner == std::this_thread::get_id() )
+        {
+        // Re-entrant registration from inside a replay callback: this
+        // thread IS the drain, so waiting for it to finish would
+        // self-deadlock. The call is REFUSED SILENTLY — no state changes, so
+        // the outer drain's ordering stays intact and the events keep
+        // flowing to the sink that is still replaying. That includes
+        // setEventSink(nullptr) from inside the callback: deregistration
+        // takes effect only after the drain ends (hosts register once per
+        // channel before traffic, so no production caller relies on it).
+        return;
     }
+    // A registration from another thread serializes behind an in-flight
+    // drain, so the queued events are never split between two sinks.
+        mEventOrderCv.wait( lock, [&] {
+            return mEventDeliveryPhase != EventDeliveryPhase::Draining || mClosed.load();
+        } );
+        mEventSink = sink;
+        pending.swap( mPendingEvents );
+        if ( pending.empty() )
+        {
+            mEventDeliveryPhase = EventDeliveryPhase::Live;
+            mEventOrderCv.notify_all();
+            return;
+        }
+        mEventDeliveryPhase = EventDeliveryPhase::Draining;
+        mEventDrainOwner = std::this_thread::get_id();
+    }
+    try
+    {
+        for ( const Ipc::Envelope &event : pending )
+        {
+            if ( sink ) // a null sink deregisters: queued events are dropped
+                sink( event );
+        }
+    }
+    catch ( ... )
+    {
+        // A throwing sink must not strand the reader in the Draining wait
+        // forever: publish Live, then propagate exactly like the old
+        // under-lock replay did (out of setEventSink, sink stays installed).
+        {
+            std::lock_guard<std::mutex> lock( mMutex );
+            mEventDeliveryPhase = EventDeliveryPhase::Live;
+            mEventDrainOwner = std::thread::id{};
+        }
+        mEventOrderCv.notify_all();
+        throw;
+    }
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        mEventDeliveryPhase = EventDeliveryPhase::Live;
+        mEventDrainOwner = std::thread::id{};
+    }
+    mEventOrderCv.notify_all();
 }
 
 void IpcChannel::setCancelSink( std::function<void( long long )> sink )
@@ -531,7 +585,7 @@ void IpcChannel::handleFrame( const std::string &payload )
     {
         std::function<void( const Ipc::Envelope & )> sink;
         {
-            std::lock_guard<std::mutex> lock( mMutex );
+            std::unique_lock<std::mutex> lock( mMutex );
             sink = mEventSink;
             if ( !sink )
             {
@@ -547,9 +601,28 @@ void IpcChannel::handleFrame( const std::string &payload )
                 mPendingEvents.push_back( std::move( envelope ) );
                 return;
             }
+            // Park this event while a pre-sink replay is draining: the
+            // queued worker.hello must reach the sink first (#1449). The
+            // cv wait releases mMutex, and close() during a drain wakes us
+            // through closeLocked()'s notify.
+            mEventOrderCv.wait( lock, [&] {
+                return mEventDeliveryPhase != EventDeliveryPhase::Draining
+                       || mClosed.load();
+            } );
+            if ( mClosed )
+                return;
+            // NOTE (R9 review): `sink` was copied before the wait. A SECOND
+            // setEventSink that lands inside that window takes over the
+            // delivery seam, and this event still goes to the snapshot we
+            // copied — the new sink never sees it (it is neither queued nor
+            // replayed). That stale-delivery window is pre-existing (the old
+            // under-lock replay had the same copy-then-call shape) and only
+            // reachable by registering twice; the single-registration
+            // contract (plugin_host_session registers once per channel) is
+            // unaffected. Re-validating mEventSink == sink here would add a
+            // lock round-trip to every live event for a case no caller hits.
         }
-        if ( sink )
-            sink( envelope );
+        sink( envelope );
         break;
     }
     }
