@@ -855,6 +855,15 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
                        traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
                        buildFreeList(), m_placementPolicy, &device, &deviceWhy ) )
   {
+    // R9 coalescing (PR #1469 review): BEFORE any eviction pass — a peer's
+    // in-flight load of the same identity may already hold the only ticket
+    // this request needs, and this refusal is an illusion created by that
+    // very load. Riding it evicts nothing and books no second ticket. When
+    // no compatible flight exists (or the peer's load failed and unwound
+    // its reservation), nullptr comes back with the lock held and the
+    // pressure valve below proceeds as before.
+    if ( ModelRuntimePtr ridden = rideInFlightOnRefusal( identityComponent, request, lock ) )
+      return ridden;
     // Platform 7.0 pressure valve on the RESOLUTION path: a GPU-fit refusal
     // may be recoverable by evicting cached sessions — ONE bounded pass over
     // the addressable devices, then a single resolution retry. A request the
@@ -917,7 +926,9 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // #1455: admission runs AFTER the cache lookup — a live cache hit serves a
   // session whose booking already stands and must neither re-book nor be
   // refused against it. On failure the lock is RELEASED and the typed reason
-  // lands in *errorMessage; the caller must return immediately.
+  // lands in *errorMessage (and admitReason, for the in-flight broadcast —
+  // #R9); the caller must return immediately.
+  std::string admitReason;
   const auto admit = [ & ]() {
     if ( !( device.gpu && estimateMb > 0 ) )
       return true;
@@ -929,15 +940,95 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     evictDeviceLocked( device.cudaIndex );
     if ( m_ledger->tryReserve( device.cudaIndex, estimateMb, ledgerHolder, &admitWhy ) )
       return true;
+    admitReason = "cannot honor device request '" + request.toString() + "' for model '"
+                  + model.name + "': device unavailable — " + admitWhy;
     lock.unlock();
     if ( errorMessage )
-      *errorMessage = "cannot honor device request '" + request.toString() + "' for model '"
-                        + model.name + "': device unavailable — " + admitWhy;
+      *errorMessage = admitReason;
     return false;
   };
 
   const auto cached = m_cache.find( key );
-  if ( cached != m_cache.end() )
+  if ( cached != m_cache.end() && cached->second.session
+       && !cached->second.session->permanentlyUnavailable() )
+  {
+    // Live cache hit: serve as before.
+    cached->second.lastUsed = ++m_useCounter;
+    cached->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+    ++m_cacheHits;
+    return cached->second.session;
+  }
+
+  // This thread intends to LOAD a new session for `key` (plain miss, or a
+  // corpse recycle). R9 in-flight coalescing (PR #1469 review): register as
+  // the loader, or wait for the peer already loading this key — a same-key
+  // peer must never take its own VRAM admission (false refusal while the
+  // identical session loads) nor pay a second factory call.
+  std::shared_ptr<InFlightLoad> flight;
+  for ( ;; )
+  {
+    const auto existing = m_inFlight.find( key );
+    if ( existing == m_inFlight.end() )
+    {
+      flight = std::make_shared<InFlightLoad>();
+      flight->identity = identityComponent;
+      flight->key = key;
+      flight->device = device;
+      m_inFlight.emplace( key, flight );
+      break; // this thread is the loader
+    }
+    flight = existing->second;
+    ++m_coalescedWaits;
+    flight->cv.wait( lock, [ &flight ] { return flight->done; } );
+    if ( !flight->session )
+    {
+      // Failure broadcast: the waiter receives the loader's own typed
+      // reason and does not silently re-attempt (a retry would re-pay the
+      // load the peer already failed).
+      lock.unlock();
+      if ( errorMessage )
+        *errorMessage = flight->error;
+      return nullptr;
+    }
+    const auto served = m_cache.find( key );
+    if ( served != m_cache.end() && served->second.session )
+    {
+      served->second.lastUsed = ++m_useCounter;
+      served->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+      ++m_cacheHits;
+      lock.unlock();
+      return served->second.session;
+    }
+    // The winner's entry was evicted before we woke (LRU churn under us):
+    // loop — become the loader (or wait on the next flight).
+  }
+  ++m_cacheMisses;
+
+  // Exception safety for the flight (R9 review): the loader registers above
+  // and publishes below; an unexpected throw in between (allocation in the
+  // cache insert, the LRU sweep, ledger bookkeeping — reachable under OOM)
+  // would leave done == false forever, parking every later same-key acquire
+  // on a cv that nobody notifies. The guard publishes a typed failure unless
+  // a normal path already did (finishInFlight is idempotent via `published`).
+  struct FlightGuard
+  {
+    ModelRuntimeRegistry *registry;
+    std::string key;
+    std::shared_ptr<InFlightLoad> flight;
+    ~FlightGuard()
+    {
+      registry->finishInFlight( key, flight, nullptr, "model session load aborted" );
+    }
+  } flightGuard{ this, key, flight };
+
+  // Re-resolve the corpse AFTER the wait loop: `cached` was taken before the
+  // cv.wait, which releases m_mutex — a concurrent LRU eviction or release()
+  // may have erased (or rehashed) that node, leaving the iterator dangling
+  // (R9 review P1: the corpse-recycle path then read a freed node's
+  // shared_ptr control block).
+  const auto corpseEntry = m_cache.find( key );
+  if ( corpseEntry != m_cache.end() && corpseEntry->second.session
+       && corpseEntry->second.session->permanentlyUnavailable() )
   {
     // Track 13 crash recovery: a session that reports itself permanently
     // unavailable (its external worker died with the restart budget
@@ -948,42 +1039,27 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     // long while an ensemble member holds the session; it releases a ticket
     // disjoint from the replacement's (#1455), so no release ordering can
     // ever erase the replacement's reservation.
-    if ( cached->second.session && cached->second.session->permanentlyUnavailable() )
-    {
-      ModelRuntimePtr corpse = cached->second.session;
-      // #1455: permanentlyUnavailable means the external worker is gone for
-      // good — its VRAM is already physically free. Release the corpse's own
-      // ticket NOW so admission below judges the honest free amount; the
-      // corpse wrapper's release, whenever the last holder drops it, is an
-      // idempotent no-op against this disjoint ticket.
-      if ( cached->second.cudaIndex >= 0 && cached->second.reservedVramMb > 0 )
-        m_ledger->release( cached->second.cudaIndex, cached->second.reservedVramMb,
-                           cached->second.ledgerHolder );
-      m_cache.erase( cached );
-      ++m_evictions;
-      lock.unlock();
-      corpse.reset(); // destroy the model FIRST — never admit onto live VRAM
-      lock.lock();
-      if ( !admit() )
-        return nullptr;
-      ++m_cacheMisses;
-      lock.unlock();
-    }
-    else
-    {
-      cached->second.lastUsed = ++m_useCounter;
-      cached->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
-      ++m_cacheHits;
-      return cached->second.session;
-    }
-  }
-  else
-  {
-    ++m_cacheMisses;
-    if ( !admit() )
-      return nullptr;
+    ModelRuntimePtr corpse = corpseEntry->second.session;
+    // #1455: permanentlyUnavailable means the external worker is gone for
+    // good — its VRAM is already physically free. Release the corpse's own
+    // ticket NOW so admission below judges the honest free amount; the
+    // corpse wrapper's release, whenever the last holder drops it, is an
+    // idempotent no-op against this disjoint ticket.
+    if ( corpseEntry->second.cudaIndex >= 0 && corpseEntry->second.reservedVramMb > 0 )
+      m_ledger->release( corpseEntry->second.cudaIndex, corpseEntry->second.reservedVramMb,
+                         corpseEntry->second.ledgerHolder );
+    m_cache.erase( key );
+    ++m_evictions;
     lock.unlock();
+    corpse.reset(); // destroy the model FIRST — never admit onto live VRAM
+    lock.lock();
   }
+  if ( !admit() )
+  {
+    finishInFlight( key, flight, nullptr, admitReason );
+    return nullptr;
+  }
+  lock.unlock();
 
   // Load outside the registry lock: weight parsing is slow and must not
   // block concurrent acquires of other models. The factory sees the RESOLVED
@@ -1011,6 +1087,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
       m_ledger->release( device.cudaIndex, estimateMb, ledgerHolder );
       lock.unlock();
     }
+    finishInFlight( key, flight, nullptr, "model session load threw" );
     throw;
   }
   if ( !session )
@@ -1023,8 +1100,10 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
       m_ledger->release( device.cudaIndex, estimateMb, ledgerHolder );
       lock.unlock();
     }
+    const std::string failure = error.empty() ? "failed to load model session" : error;
+    finishInFlight( key, flight, nullptr, failure );
     if ( errorMessage )
-      *errorMessage = error.empty() ? "failed to load model session" : error;
+      *errorMessage = failure;
     return nullptr;
   }
 
@@ -1036,6 +1115,9 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // more (one failed forward) and recycled by the NEXT acquire — reaping it
   // here would destroy a model under the registry lock; its #1160 deleter
   // (#1455: a per-instance ticket) can never erase our reservation anyway.
+  // (R9 note: same-key loads now coalesce through m_inFlight, so this is
+  // defense in depth for exotic paths — e.g. a releaseAll()-cleared flight
+  // racing a legacy loader.)
   const auto raced = m_cache.find( key );
   if ( raced != m_cache.end() )
   {
@@ -1047,7 +1129,10 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     // caller leaves with, so nothing of ours may stay booked.
     if ( device.gpu && estimateMb > 0 )
       m_ledger->release( device.cudaIndex, estimateMb, ledgerHolder );
-    return raced->second.session;
+    ModelRuntimePtr racedSession = raced->second.session;
+    lock.unlock();
+    finishInFlight( key, flight, racedSession, std::string() );
+    return racedSession;
   }
   CacheEntry entry;
   entry.lastUsed = ++m_useCounter;
@@ -1094,7 +1179,79 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     m_cache.erase( lru );
     ++m_evictions;
   }
+  lock.unlock();
+  // Broadcast the session to any same-key waiters (they ride THIS ticket —
+  // no second admission, no second load).
+  finishInFlight( key, flight, session, std::string() );
   return session;
+}
+
+void ModelRuntimeRegistry::finishInFlight( const std::string &key,
+                                           const std::shared_ptr<InFlightLoad> &flight,
+                                           ModelRuntimePtr session, const std::string &error )
+{
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    // Idempotent: the exception-safety scope guard may run after a normal
+    // path already published (double publish would resurrect a failed
+    // verdict over a good session).
+    if ( flight->published )
+      return;
+    // Only the flight that still owns the map slot may unregister it — a
+    // defensive identity check (the loader always owns it today).
+    const auto it = m_inFlight.find( key );
+    if ( it != m_inFlight.end() && it->second == flight )
+      m_inFlight.erase( it );
+    flight->session = std::move( session );
+    flight->error = error;
+    flight->done = true;
+    flight->published = true;
+  }
+  flight->cv.notify_all();
+}
+
+ModelRuntimePtr ModelRuntimeRegistry::rideInFlightOnRefusal( const std::string &identity,
+                                                            const RequestedDevice &request,
+                                                            std::unique_lock<std::mutex> &lock )
+{
+  // Caller holds m_mutex on a FAILED device resolution. Compatibility: same
+  // identity, GPU target (this refusal path exists only for GPU-demanding
+  // requests — CPU resolution never fails), and an explicit cuda:N only
+  // rides the flight loading exactly that index. Auto rides any GPU flight:
+  // that is the choice auto would have made with the ticket's free budget.
+  std::shared_ptr<InFlightLoad> flight;
+  for ( const auto &entry : m_inFlight )
+  {
+    const auto &candidate = entry.second;
+    if ( candidate->identity != identity || !candidate->device.gpu )
+      continue;
+    if ( request.kind == RequestedDevice::Kind::Cuda
+         && candidate->device.cudaIndex != request.cudaIndex )
+      continue;
+    flight = candidate;
+    break;
+  }
+  if ( !flight )
+    return nullptr; // lock stays held: caller proceeds to the valve/refusal
+  ++m_coalescedWaits;
+  flight->cv.wait( lock, [ &flight ] { return flight->done; } );
+  if ( !flight->session )
+    return nullptr; // peer's load failed and unwound its ticket: honest refusal
+  const auto served = m_cache.find( flight->key );
+  if ( served == m_cache.end() || !served->second.session )
+    return nullptr; // evicted mid-ride: the caller's refusal stands
+  // Same corpse gate the cache-hit path applies (#1455/Track 13): a session
+  // that reported itself permanently unavailable must never be handed out,
+  // even to a rider — every forward on it would throw forever. Refusing here
+  // (lock held) sends the caller down its own typed-refusal path.
+  if ( served->second.session->permanentlyUnavailable() )
+    return nullptr;
+  served->second.lastUsed = ++m_useCounter;
+  served->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+  ++m_cacheHits;
+  ModelRuntimePtr session = served->second.session;
+  lock.unlock();
+  return session; // ridden: one ticket, one load, two callers served
 }
 
 Json::Value ProviderSelectionReport::toJson() const
@@ -1334,6 +1491,7 @@ ModelRuntimeRegistry::PoolStats ModelRuntimeRegistry::poolStats() const
   stats.cacheHits = m_cacheHits;
   stats.cacheMisses = m_cacheMisses;
   stats.evictions = m_evictions;
+  stats.coalescedWaits = m_coalescedWaits;
   return stats;
 }
 
