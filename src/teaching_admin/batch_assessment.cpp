@@ -198,6 +198,18 @@ QJsonObject BatchAssessmentReport::toJson() const
                } );
     for ( const auto &row : sorted )
         rowsArr.append( row.toJson() );
+    // Refused files ride along in discovery order (already sorted): the
+    // accounting is part of the published outcome, so a class report can
+    // be audited for silent omissions (#1466).
+    QJsonArray skipsArr;
+    for ( const auto &skip : skippedFiles )
+    {
+        skipsArr.append( sortKeys( QJsonObject{
+            { QStringLiteral( "student_id" ), skip.studentId },
+            { QStringLiteral( "path" ), skip.path },
+            { QStringLiteral( "reason" ), skip.reason },
+        } ) );
+    }
     return sortKeys( QJsonObject{
         { QStringLiteral( "schema" ), schema },
         { QStringLiteral( "lab_id" ), labId },
@@ -211,6 +223,8 @@ QJsonObject BatchAssessmentReport::toJson() const
         { QStringLiteral( "cancelled_early" ), cancelledEarly },
         { QStringLiteral( "truncated" ), truncated },
         { QStringLiteral( "resumed" ), resumed },
+        { QStringLiteral( "skipped" ), skippedFiles.size() },
+        { QStringLiteral( "skipped_files" ), skipsArr },
         { QStringLiteral( "rubric_version" ), rubricVersion },
         { QStringLiteral( "lab_version" ), labVersion },
         { QStringLiteral( "software_version" ), softwareVersion },
@@ -253,6 +267,46 @@ static QString studentIdFromPath( const QString &path, const QString &root )
 
 QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir )
 {
+    return discoverSubmissions( submissionsDir, nullptr );
+}
+
+namespace {
+/// Null-safe refusal bookkeeping: the skip set itself is unchanged — only
+/// its visibility changes (#1466).
+void recordSkip( QVector<DiscoverySkip> *skipped, const QString &studentId,
+                 const QString &path, const QString &reason )
+{
+    if ( !skipped )
+        return;
+    DiscoverySkip skip;
+    skip.studentId = studentId;
+    skip.path = path;
+    skip.reason = reason;
+    skipped->append( skip );
+}
+
+/// First reserved substring the name trips on, for a specific refusal
+/// reason instead of a generic one.
+QString reservedNameReason( const QString &name )
+{
+    static const QList<QPair<const char *, const char *>> kReserved = {
+        { "batch", "reserved output name: contains 'batch'" },
+        { "summary", "reserved output name: contains 'summary'" },
+        { "feedback", "reserved output name: contains 'feedback'" },
+        { "grades", "reserved output name: contains 'grades'" },
+    };
+    for ( const auto &[needle, reason] : kReserved )
+    {
+        if ( name.contains( QLatin1String( needle ) ) )
+            return QString::fromLatin1( reason );
+    }
+    return QStringLiteral( "reserved output name" );
+}
+} // namespace
+
+QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
+                                             QVector<DiscoverySkip> *skipped )
+{
     QVector<SubmissionItem> items;
     QDir root( submissionsDir );
     if ( !root.exists() )
@@ -271,7 +325,16 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir )
                  || name.contains( QLatin1String( "batch" ) )
                  || name.contains( QLatin1String( "summary" ) )
                  || name.contains( QLatin1String( "feedback" ) ) )
+            {
+                // Teacher-side output sitting in a student folder (e.g. the
+                // console's feedback file for that student): not a
+                // submission, but the refusal is attributable and visible.
+                recordSkip( skipped, sub, fi.absoluteFilePath(),
+                            name.startsWith( QLatin1String( "grades" ) )
+                              ? QStringLiteral( "reserved output name: 'grades' prefix" )
+                              : reservedNameReason( name ) );
                 continue;
+            }
             SubmissionItem it;
             it.studentId = sub;
             it.path = fi.absoluteFilePath();
@@ -286,14 +349,23 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir )
     for ( const QFileInfo &fi : flat )
     {
         if ( fi.fileName().startsWith( QLatin1String( "grades" ) ) )
+        {
+            // The console's own gradebook beside the submissions.
+            recordSkip( skipped, QString(), fi.absoluteFilePath(),
+                        QStringLiteral( "reserved output name: 'grades' prefix" ) );
             continue;
+        }
         if ( fi.suffix() == QLatin1String( "csv" ) || fi.suffix() == QLatin1String( "json" ) )
         {
             // skip summary outputs sitting beside submissions
             if ( fi.fileName().contains( QLatin1String( "batch" ) )
                  || fi.fileName().contains( QLatin1String( "summary" ) )
                  || fi.fileName().contains( QLatin1String( "grades" ) ) )
+            {
+                recordSkip( skipped, QString(), fi.absoluteFilePath(),
+                            reservedNameReason( fi.fileName() ) );
                 continue;
+            }
         }
         SubmissionItem it;
         it.path = fi.absoluteFilePath();
@@ -308,6 +380,15 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir )
                        return a.studentId < b.studentId;
                    return a.path < b.path;
                } );
+    if ( skipped )
+    {
+        std::sort( skipped->begin(), skipped->end(),
+                   []( const DiscoverySkip &a, const DiscoverySkip &b ) {
+                       if ( a.studentId != b.studentId )
+                           return a.studentId < b.studentId;
+                       return a.path < b.path;
+                   } );
+    }
     return items;
 }
 
@@ -320,7 +401,7 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     report.labVersion = cfg.labVersion;
     report.softwareVersion = cfg.softwareVersion;
 
-    auto items = discoverSubmissions( cfg.submissionsDir );
+    auto items = discoverSubmissions( cfg.submissionsDir, &report.skippedFiles );
     const int discovered = items.size();
     report.total = discovered;
     // maxSubmissions >= 0 caps the processed count (0 = dry-run: nothing
@@ -566,31 +647,31 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
                        return a.studentId < b.studentId;
                    return a.artifactPath < b.artifactPath;
                } );
+    // Twin of csv_safe() in scripts/run_classroom_batch.py and
+    // csvSafeCell() in src/cli/lab_batch_runner.cpp: a leading =+-@TABCR
+    // gets an apostrophe prefix so spreadsheets open the cell as text.
+    auto esc = []( QString s ) {
+        s.replace( QLatin1Char( '"' ), QStringLiteral( "\"\"" ) );
+        if ( !s.isEmpty() )
+        {
+            switch ( s.at( 0 ).unicode() )
+            {
+                case '=':
+                case '+':
+                case '-':
+                case '@':
+                case '\t':
+                case '\r':
+                    s.prepend( QLatin1Char( '\'' ) );
+                    break;
+                default:
+                    break;
+            }
+        }
+        return QStringLiteral( "\"" ) + s + QStringLiteral( "\"" );
+    };
     for ( const auto &row : sorted )
     {
-        // Twin of csv_safe() in scripts/run_classroom_batch.py and
-        // csvSafeCell() in src/cli/lab_batch_runner.cpp: a leading =+-@TABCR
-        // gets an apostrophe prefix so spreadsheets open the cell as text.
-        auto esc = []( QString s ) {
-            s.replace( QLatin1Char( '"' ), QStringLiteral( "\"\"" ) );
-            if ( !s.isEmpty() )
-            {
-                switch ( s.at( 0 ).unicode() )
-                {
-                    case '=':
-                    case '+':
-                    case '-':
-                    case '@':
-                    case '\t':
-                    case '\r':
-                        s.prepend( QLatin1Char( '\'' ) );
-                        break;
-                    default:
-                        break;
-                }
-            }
-            return QStringLiteral( "\"" ) + s + QStringLiteral( "\"" );
-        };
         csv += esc( row.studentId ) + QLatin1Char( ',' );
         csv += esc( row.labId ) + QLatin1Char( ',' );
         csv += ( row.score < 0 ? QString() : QString::number( row.score ) ) + QLatin1Char( ',' );
@@ -604,6 +685,30 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
         csv += esc( row.rubricVersion ) + QLatin1Char( ',' );
         csv += esc( row.labVersion ) + QLatin1Char( ',' );
         csv += esc( row.softwareVersion ) + QStringLiteral( "\r\n" );
+    }
+    // Discovery refusals as typed rows (status="skipped"): the gradebook
+    // shows every student the console saw, including those whose ONLY file
+    // was refused — an explicit refusal instead of an invisible student
+    // (#1466). Not BatchRowResults: they never enter counters or the
+    // checkpoint, and the message carries the reason plus the file name so
+    // the row is self-contained without the JSON.
+    for ( const auto &skip : report.skippedFiles )
+    {
+        csv += esc( skip.studentId ) + QLatin1Char( ',' );   // student_id
+        csv += esc( report.labId ) + QLatin1Char( ',' );     // lab_id
+        csv += QLatin1Char( ',' );                           // score: none
+        csv += QLatin1Char( ',' );                           // verdict: none
+        csv += QStringLiteral( "\"skipped\"," );             // status
+        csv += esc( QStringLiteral( "%1 (%2)" )
+                      .arg( skip.reason, QFileInfo( skip.path ).fileName() ) )
+             + QLatin1Char( ',' );                           // message
+        csv += QStringLiteral( "0," );                       // missing_evidence
+        csv += QLatin1Char( ',' );                           // grader_digest
+        csv += QLatin1Char( ',' );                           // top_deduction
+        csv += QLatin1Char( ',' );                           // unavailable_reason
+        csv += esc( report.rubricVersion ) + QLatin1Char( ',' );
+        csv += esc( report.labVersion ) + QLatin1Char( ',' );
+        csv += esc( report.softwareVersion ) + QStringLiteral( "\r\n" );
     }
 
     // Real UTF-8 BOM as BYTES: a QStringLiteral "ï»¿" would hold

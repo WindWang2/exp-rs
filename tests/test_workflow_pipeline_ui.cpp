@@ -3,7 +3,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QGraphicsSceneMouseEvent>
+#include <memory>
 #include "app/workflow/pipeline_canvas_widget.h"
 #include "app/workflow/pipeline_scene.h"
 #include "app/workflow/pipeline_node_item.h"
@@ -645,4 +648,49 @@ TEST_CASE( "PipelineNodeItem bounding rect padding and port shape precision", "[
   QPainterPath inShape = inPort->shape();
   REQUIRE( !inShape.isEmpty() );
   REQUIRE( inShape.boundingRect().width() < 30.0 );
+}
+
+// R10-B P0-1: the save helper must be honest about write failures — the
+// old onSaveClicked streamed through std::ofstream without checking the
+// write and toasted "Succeeded" even when the bytes never landed.
+TEST_CASE( "PipelineEditorDock write helper reports write failures honestly",
+           "[workflow][dock][save]" )
+{
+  ensureApp();
+
+  WorkflowDefinition def;
+  def.id = "save_honesty";
+  def.title = "Save Honesty";
+
+  QTemporaryDir td;
+  REQUIRE( td.isValid() );
+
+  // Failure case 1: the target is a directory — open must fail and the
+  // error must say so (no silent success, no crash).
+  QString error;
+  CHECK_FALSE( writePipelineDefinitionFile( td.path(), def, &error ) );
+  CHECK( !error.isEmpty() );
+
+  // Success case: full round-trip through the same serializer the dock
+  // uses, so a regression in the bytes (empty file, truncation) fails here.
+  const QString okPath = td.path() + QStringLiteral( "/pipeline_save_r10.json" );
+  error.clear();
+  REQUIRE( writePipelineDefinitionFile( okPath, def, &error ) );
+  CHECK( error.isEmpty() );
+
+  QFile f( okPath );
+  REQUIRE( f.open( QIODevice::ReadOnly ) );
+  const QByteArray raw = f.readAll();
+  f.close();
+  CHECK( !raw.isEmpty() );
+
+  Json::Value root;
+  Json::CharReaderBuilder reader;
+  std::string parseErr;
+  std::unique_ptr<Json::CharReader> charReader( reader.newCharReader() );
+  REQUIRE( charReader->parse( raw.constData(), raw.constData() + raw.size(), &root, &parseErr ) );
+  WorkflowDefinition restored;
+  std::string defErr;
+  REQUIRE( workflowDefinitionFromJson( root, restored, defErr ) );
+  CHECK( restored.id == def.id );
 }

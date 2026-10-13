@@ -5,7 +5,8 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QAction>
-#include <fstream>
+#include <QFile>
+#include <QFileDevice>
 #include <iostream>
 
 #include "workflow_definition.h"
@@ -129,17 +130,21 @@ void PipelineEditorDock::onOpenClicked()
   if ( fileName.isEmpty() )
     return;
 
-  std::ifstream inFile( fileName.toStdString() );
-  if ( !inFile.is_open() )
+  QFile inFile( fileName );
+  if ( !inFile.open( QIODevice::ReadOnly ) )
   {
     QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open file: %1" ).arg( fileName ) );
     return;
   }
+  const QByteArray raw = inFile.readAll();
 
   Json::Value root;
   Json::CharReaderBuilder builder;
   std::string errs;
-  if ( !Json::parseFromStream( builder, inFile, &root, &errs ) )
+  // In-memory parse (Json::parseFromStream needs a std::istream; QFile is
+  // not one) — same pattern as src/agent/output_verifier.cpp.
+  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+  if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &root, &errs ) )
   {
     QMessageBox::warning( this, tr( "Parse Error" ), QString::fromStdString( errs ) );
     return;
@@ -168,21 +173,45 @@ void PipelineEditorDock::onSaveClicked()
   baseDef.title = "Exported Pipeline";
 
   WorkflowDefinition exported = mCanvasWidget->exportWorkflowDefinition( baseDef );
-  Json::Value root = workflowDefinitionToJson( exported );
 
-  std::ofstream outFile( fileName.toStdString() );
-  if ( !outFile.is_open() )
+  QString error;
+  if ( !writePipelineDefinitionFile( fileName, exported, &error ) )
   {
-    QMessageBox::warning( this, tr( "Error" ), tr( "Cannot write file: %1" ).arg( fileName ) );
+    QMessageBox::warning( this, tr( "Error" ), error );
     return;
   }
 
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "  ";
-  outFile << Json::writeString( builder, root );
-
   QMessageBox::information( this, tr( "Succeeded" ), tr( "Pipeline definition saved to: %1" ).arg( fileName ) );
   emit saveWorkflowRequested();
+}
+
+bool writePipelineDefinitionFile( const QString &path,
+                                  const sicnu::workflow::WorkflowDefinition &def,
+                                  QString *error )
+{
+  const Json::Value root = workflowDefinitionToJson( def );
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "  ";
+  const std::string bytes = Json::writeString( builder, root );
+
+  QFile outFile( path );
+  if ( !outFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+  {
+    if ( error )
+      *error = PipelineEditorDock::tr( "Cannot write file: %1" ).arg( path );
+    return false;
+  }
+  const qint64 written = outFile.write( bytes.data(), static_cast<qint64>( bytes.size() ) );
+  outFile.flush();
+  const QFile::FileError ferr = outFile.error();
+  outFile.close();
+  if ( written != static_cast<qint64>( bytes.size() ) || ferr != QFileDevice::NoError )
+  {
+    if ( error )
+      *error = PipelineEditorDock::tr( "Writing stopped before completion (disk full or target unavailable): %1" ).arg( path );
+    return false;
+  }
+  return true;
 }
 
 void PipelineEditorDock::onRunFullClicked()

@@ -411,6 +411,16 @@ void WorkflowSessionController::onRunClicked()
 
   const long taskId = sicnu::TaskCenter::instance().submitJob( req );
 
+  // A refused submission (taskId < 0) never produces a terminal callback,
+  // so arming the in-flight flag here would brick every entry the
+  // duplicate-submission guard now shares (runFullWorkflow/runUpToNode/
+  // onRunClicked). Fail closed to idle with a typed message instead.
+  if ( taskId < 0 )
+  {
+    m_panel->setFailed( tr( "Task submission refused" ) );
+    emit statusMessage( tr( "Task submission refused" ) );
+    return;
+  }
   m_runInFlight = true;
   m_pendingTaskId = taskId;
   m_pendingLoadToMap = m_panel->loadResultToMap();
@@ -418,7 +428,6 @@ void WorkflowSessionController::onRunClicked()
   emit stepStatusChanged( m_activeStepId, "running" );
   emit statusMessage( tr( "Running..." ) );
 
-  if ( taskId >= 0 )
   {
     const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     if ( info.status == sicnu::TaskStatus::Completed
@@ -434,6 +443,14 @@ void WorkflowSessionController::runFullWorkflow()
 {
   if ( m_activeSession.isEmpty() )
     return;
+  // One pipeline in flight at a time (duplicate-submission guard): a second
+  // startTrackedPipeline would overwrite m_activePipelineId and orphan the
+  // first run — Stop could then only cancel the latest.
+  if ( m_runInFlight )
+  {
+    emit statusMessage( tr( "A workflow run is already in flight — stop it before starting another" ) );
+    return;
+  }
 
   std::string definitionId;
   try
@@ -475,6 +492,13 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
 {
   if ( m_activeSession.isEmpty() || targetStepId.isEmpty() )
     return;
+  // Same duplicate-submission guard as runFullWorkflow: the partial-DAG
+  // pipeline shares m_activePipelineId with the full one.
+  if ( m_runInFlight )
+  {
+    emit statusMessage( tr( "A workflow run is already in flight — stop it before starting another" ) );
+    return;
+  }
 
   std::string definitionId;
   try

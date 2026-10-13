@@ -10,6 +10,17 @@
 
 namespace sicnu::workflow::gui {
 
+/// Serialize @p def as pipeline JSON and write it VERIFIED to @p path
+/// (QFile — Unicode-path safe, unlike std::ofstream). Returns false with a
+/// human-readable @p error when the file cannot be opened or the bytes do
+/// not fully land (disk full, target vanished mid-write). A save that
+/// reports success without checking the write is worse than a failed save
+/// (R10-B P0-1: onSaveClicked used to toast "Succeeded" on an unchecked
+/// ofstream).
+bool writePipelineDefinitionFile( const QString &path,
+                                  const sicnu::workflow::WorkflowDefinition &def,
+                                  QString *error = nullptr );
+
 class PipelineEditorDock : public QDockWidget
 {
   Q_OBJECT
