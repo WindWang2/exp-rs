@@ -411,6 +411,16 @@ void WorkflowSessionController::onRunClicked()
 
   const long taskId = sicnu::TaskCenter::instance().submitJob( req );
 
+  // A refused submission (taskId < 0) never produces a terminal callback,
+  // so arming the in-flight flag here would brick every entry the
+  // duplicate-submission guard now shares (runFullWorkflow/runUpToNode/
+  // onRunClicked). Fail closed to idle with a typed message instead.
+  if ( taskId < 0 )
+  {
+    m_panel->setFailed( tr( "Task submission refused" ) );
+    emit statusMessage( tr( "Task submission refused" ) );
+    return;
+  }
   m_runInFlight = true;
   m_pendingTaskId = taskId;
   m_pendingLoadToMap = m_panel->loadResultToMap();
@@ -418,7 +428,6 @@ void WorkflowSessionController::onRunClicked()
   emit stepStatusChanged( m_activeStepId, "running" );
   emit statusMessage( tr( "Running..." ) );
 
-  if ( taskId >= 0 )
   {
     const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     if ( info.status == sicnu::TaskStatus::Completed

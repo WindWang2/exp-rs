@@ -113,17 +113,32 @@ QVector<SkipEntry> skipEntries( const QJsonObject &doc )
     return out;
 }
 
-int csvSkippedRows( const QString &path )
+/// Count skip rows AND verify their column structure against the header —
+/// counting the "skipped" token alone would pass on a row with the wrong
+/// number of cells (R1 review P2).
+int csvSkippedRows( const QString &path, int expectedColumns )
 {
     QFile f( path );
     REQUIRE( f.open( QIODevice::ReadOnly ) );
     QTextStream in( &f );
+    // Skip the BOM the publisher writes as bytes.
+    if ( !in.atEnd() )
+        in.seek( 0 );
+    QString header = in.readLine();
+    REQUIRE( header.startsWith( QStringLiteral( "student_id," ) ) );
+    const int headerColumns = header.split( QLatin1Char( ',' ) ).size();
+    REQUIRE( headerColumns == expectedColumns );
+
     int count = 0;
     while ( !in.atEnd() )
     {
         const QString line = in.readLine();
-        if ( line.contains( QLatin1String( ",\"skipped\"," ) ) )
-            ++count;
+        if ( !line.contains( QLatin1String( ",\"skipped\"," ) ) )
+            continue;
+        ++count;
+        // Cell count must match the header; a quoted comma inside the
+        // reason text is not split (esc() doubles quotes, never commas).
+        REQUIRE( line.split( QLatin1Char( ',' ) ).size() == expectedColumns );
     }
     return count;
 }
@@ -172,7 +187,7 @@ TEST_CASE( "r10 discovery accounting: reserved-name files are refused visibly, n
 
     // The teacher's gradebook (CSV) carries the refusals as typed rows too —
     // a student visible only through a skip must not be invisible in Excel.
-    CHECK( csvSkippedRows( tree.outPrefix() + QStringLiteral( ".csv" ) ) == 2 );
+    CHECK( csvSkippedRows( tree.outPrefix() + QStringLiteral( ".csv" ), 13 ) == 2 );
 }
 
 TEST_CASE( "r10 discovery accounting: a skip-only student is an explicit refusal",
@@ -199,7 +214,7 @@ TEST_CASE( "r10 discovery accounting: a skip-only student is an explicit refusal
     CHECK( skips.front().studentId == QStringLiteral( "wang" ) );
     CHECK( skips.front().pathSuffix.endsWith( QLatin1String( "wang_feedback.json" ) ) );
     CHECK( !skips.front().reason.isEmpty() );
-    CHECK( csvSkippedRows( tree.outPrefix() + QStringLiteral( ".csv" ) ) == 1 );
+    CHECK( csvSkippedRows( tree.outPrefix() + QStringLiteral( ".csv" ), 13 ) == 1 );
 }
 
 TEST_CASE( "r10 discovery accounting: a clean class reports zero skips",
@@ -216,7 +231,7 @@ TEST_CASE( "r10 discovery accounting: a clean class reports zero skips",
     const QJsonObject doc = readJson( tree.outPrefix() + QStringLiteral( ".json" ) );
     CHECK( doc.value( QStringLiteral( "skipped" ) ).toInt() == 0 );
     CHECK( doc.value( QStringLiteral( "skipped_files" ) ).toArray().isEmpty() );
-    CHECK( csvSkippedRows( tree.outPrefix() + QStringLiteral( ".csv" ) ) == 0 );
+    CHECK( csvSkippedRows( tree.outPrefix() + QStringLiteral( ".csv" ), 13 ) == 0 );
 }
 
 TEST_CASE( "r10 discovery accounting: in-memory report carries the refusals",

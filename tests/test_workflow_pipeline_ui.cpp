@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QGraphicsSceneMouseEvent>
+#include <memory>
 #include "app/workflow/pipeline_canvas_widget.h"
 #include "app/workflow/pipeline_scene.h"
 #include "app/workflow/pipeline_node_item.h"
@@ -686,7 +687,8 @@ TEST_CASE( "PipelineEditorDock write helper reports write failures honestly",
   Json::Value root;
   Json::CharReaderBuilder reader;
   std::string parseErr;
-  REQUIRE( Json::parseString( raw.toStdString(), &root, &parseErr ) );
+  std::unique_ptr<Json::CharReader> charReader( reader.newCharReader() );
+  REQUIRE( charReader->parse( raw.constData(), raw.constData() + raw.size(), &root, &parseErr ) );
   WorkflowDefinition restored;
   std::string defErr;
   REQUIRE( workflowDefinitionFromJson( root, restored, defErr ) );

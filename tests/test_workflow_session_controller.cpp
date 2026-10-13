@@ -124,7 +124,9 @@ TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in
                       [&messages]( const QString &m ) { messages << m; });
 
     controller.runFullWorkflow();
-    if ( controller.isRunInFlight() )
+    // REQUIRE, not CHECK-in-if: a submission that never armed the guard
+    // would silently vacuate every assertion below.
+    REQUIRE( controller.isRunInFlight() );
     {
         const int pipelineBefore = controller.activePipelineId();
 
@@ -138,7 +140,7 @@ TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in
             if ( m.contains( QLatin1String( "already in flight" ) ) )
                 sawRefusal = true;
         }
-        CHECK( sawRefusal );
+        REQUIRE( sawRefusal );
 
         // Partial-DAG entry shares the guard.
         messages.clear();
@@ -151,9 +153,14 @@ TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in
             if ( m.contains( QLatin1String( "already in flight" ) ) )
                 sawRefusal = true;
         }
-        CHECK( sawRefusal );
+        REQUIRE( sawRefusal );
 
+        // The guard is recoverable, not a dead end: cancel re-arms submission.
         controller.cancelActiveRun();
-        CHECK_FALSE( controller.isRunInFlight() );
+        REQUIRE_FALSE( controller.isRunInFlight() );
+        controller.runFullWorkflow();
+        REQUIRE( controller.isRunInFlight() );
+        controller.cancelActiveRun();
+        REQUIRE_FALSE( controller.isRunInFlight() );
     }
 }

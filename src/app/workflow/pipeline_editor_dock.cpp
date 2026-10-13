@@ -141,7 +141,10 @@ void PipelineEditorDock::onOpenClicked()
   Json::Value root;
   Json::CharReaderBuilder builder;
   std::string errs;
-  if ( !Json::parseString( raw.toStdString(), &root, &errs ) )
+  // In-memory parse (Json::parseFromStream needs a std::istream; QFile is
+  // not one) — same pattern as src/agent/output_verifier.cpp.
+  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+  if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &root, &errs ) )
   {
     QMessageBox::warning( this, tr( "Parse Error" ), QString::fromStdString( errs ) );
     return;
