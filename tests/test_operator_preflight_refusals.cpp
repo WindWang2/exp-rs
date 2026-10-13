@@ -127,6 +127,68 @@ TEST_CASE( "zonal_stats refuses out-of-range bands, CRS-less rasters and empty v
     REQUIRE( threw );
 }
 
+// R10-A/A1-D2: the zonal_stats schema declares "bands" as a JSON array. A
+// scalar bands value used to fall through the isArray() fast path and
+// silently default to [1] — the capability catalog even advertises bands as
+// a scalar, so agents hit this regularly. A non-array bands value must be a
+// typed InvalidParameter, never a silent default.
+TEST_CASE( "zonal_stats refuses scalar bands values — the contract is an array (R10-A/A1-D2)",
+           "[r4][refusal][zonal][r10a]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    std::vector<float> v( 100, 1.0f );
+    const QString raster = writeFloatRaster( dir.filePath( "grid.tif" ), 10, 10, { v }, false, 0.0 );
+    const QString zones = writeZoneGeoJson( dir.filePath( "zones.geojson" ), "zone" );
+
+    const auto runWithBands = [&]( const Json::Value &bandsValue, const char *outName ) {
+        Json::Value p;
+        p["input"] = raster.toStdString();
+        p["vector"] = zones.toStdString();
+        p["output"] = dir.filePath( outName ).toStdString();
+        p["bands"] = bandsValue;
+        return runOperator( "rs:zonal_stats", p, dir.path().toStdString() );
+    };
+
+    // Integer scalar → typed refusal naming the array contract (RED on
+    // master: silently zoned band 1 only).
+    bool threw = false;
+    try
+    {
+        runWithBands( Json::Value( 2 ), "z_scalar.csv" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw = e.code() == ErrorCode::InvalidParameter;
+        INFO( "message: " << e.message() );
+        REQUIRE( e.message().find( "bands" ) != std::string::npos );
+        REQUIRE( e.message().find( "array" ) != std::string::npos );
+    }
+    REQUIRE( threw );
+
+    // String scalar ("1,2") → same typed refusal (RED on master: silently
+    // zoned band 1 only).
+    threw = false;
+    try
+    {
+        runWithBands( Json::Value( "1,2" ), "z_string.csv" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw = e.code() == ErrorCode::InvalidParameter;
+        INFO( "message: " << e.message() );
+        REQUIRE( e.message().find( "bands" ) != std::string::npos );
+        REQUIRE( e.message().find( "array" ) != std::string::npos );
+    }
+    REQUIRE( threw );
+
+    // Pin: the honest array form still runs and produces the CSV.
+    Json::Value bands( Json::arrayValue );
+    bands.append( 1 );
+    REQUIRE_NOTHROW( runWithBands( bands, "z_ok.csv" ) );
+    REQUIRE( QFile::exists( dir.filePath( "z_ok.csv" ) ) );
+}
+
 TEST_CASE( "apply_mask refuses undeclared-NoData bands without an explicit no_data",
            "[r4][refusal][mask]" )
 {

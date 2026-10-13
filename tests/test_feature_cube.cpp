@@ -135,6 +135,41 @@ TEST_CASE( "Feature cube contract rejects duplicate ids and missing bands",
     REQUIRE_FALSE( FeatureCubeContract::fromJson( wrongVersion, &parsed, &error ) );
 }
 
+// R10-A/PR-10: the version gate must be a typed isInt() check on the error
+// channel. A string "1" used to throw Json::LogicError out of asInt(), and
+// a fractional 1.9 used to truncate to 1 and parse unknown structures as
+// v1 — both must fail through the returned error string instead.
+TEST_CASE( "Feature cube contract refuses non-integer versions typed (R10-A/PR-10)",
+           "[features][contract][r10a]" )
+{
+    ensureApp();
+    FeatureCubeContract parsed;
+    QString error;
+
+    // String version → typed refusal, never Json::LogicError (RED on master).
+    Json::Value stringVersion = sampleContract( 1 ).toJson();
+    stringVersion["version"] = "1";
+    REQUIRE_FALSE( FeatureCubeContract::fromJson( stringVersion, &parsed, &error ) );
+    REQUIRE( error.contains( "version" ) );
+
+    // Fractional version → refused whole, not silently truncated to 1
+    // (RED on master: 1.9 truncated and the contract parsed as v1).
+    Json::Value fractionalVersion = sampleContract( 1 ).toJson();
+    fractionalVersion["version"] = 1.9;
+    REQUIRE_FALSE( FeatureCubeContract::fromJson( fractionalVersion, &parsed, &error ) );
+    REQUIRE( error.contains( "version" ) );
+
+    // Boolean version → refused as well (jsoncpp asBool would say true==1).
+    Json::Value boolVersion = sampleContract( 1 ).toJson();
+    boolVersion["version"] = true;
+    REQUIRE_FALSE( FeatureCubeContract::fromJson( boolVersion, &parsed, &error ) );
+    REQUIRE( error.contains( "version" ) );
+
+    // Pin: the honest integer version 1 still parses.
+    REQUIRE( FeatureCubeContract::fromJson( sampleContract( 1 ).toJson(), &parsed, &error ) );
+    REQUIRE( error.isEmpty() );
+}
+
 TEST_CASE( "Feature cube metadata persists through a GDAL dataset",
            "[features][persistence]" )
 {
