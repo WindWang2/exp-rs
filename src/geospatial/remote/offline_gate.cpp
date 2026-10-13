@@ -124,7 +124,8 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
         }
     };
 
-    if ( !parseSection( head, groups, headCount, false ) )
+    const bool headAllowV4Tail = ( cc == std::string::npos );
+    if ( !parseSection( head, groups, headCount, headAllowV4Tail ) )
         return false;
     if ( !parseSection( tail, groups + headCount, tailCount, true ) )
         return false;
@@ -313,6 +314,19 @@ bool isPrivateHost( const std::string &hostOrUrl )
                 ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
                 ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
             return isPrivateIpv4( embedded );
+        }
+
+        // IPv4-compatible ::a.b.c.d (96 zero bits)
+        bool ipv4Compatible = true;
+        for ( int i = 0; i < 12; ++i )
+            ipv4Compatible = ipv4Compatible && ( v6[i] == 0 );
+        if ( ipv4Compatible )
+        {
+            const std::uint32_t embedded =
+                ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
+                ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
+            if ( embedded > 1 )
+                return isPrivateIpv4( embedded );
         }
 
         bool loopback = true;

@@ -425,6 +425,13 @@ TEST_CASE( "offline::isPrivateHost identifies private, loopback and IPv4-mapped 
   CHECK( isPrivateHost( "/vsicurl/http://[::ffff:127.0.0.1]/data.tif" ) );
   CHECK( isPrivateHost( "/vsirangecache/http://[::ffff:169.254.169.254]/data.tif" ) );
 
+  // Uncompressed IPv4-mapped IPv6 (RFC 4291 §2.5.5.2) and IPv4-compatible (P0-1 regression)
+  CHECK( isPrivateHost( "http://[0:0:0:0:0:ffff:127.0.0.1]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[0:0:0:0:0:ffff:169.254.169.254]/meta" ) );
+  CHECK( isPrivateHost( "http://[0000:0000:0000:0000:0000:ffff:169.254.169.254]/meta" ) );
+  CHECK( isPrivateHost( "http://[::127.0.0.1]/data.tif" ) );
+  CHECK_FALSE( isPrivateHost( "http://[0:0:0:0:0:ffff:8.8.8.8]/data.tif" ) );
+
   // IPv4-mapped IPv6 public addresses must NOT be blocked
   CHECK_FALSE( isPrivateHost( "https://[::ffff:8.8.8.8]/stac" ) );
   CHECK_FALSE( isPrivateHost( "::ffff:8.8.8.8" ) );

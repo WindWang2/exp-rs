@@ -207,7 +207,9 @@ std::string normalizeSeparators( std::string text )
     if ( text[i] == '/' && !out.empty() && out.back() == '/' )
     {
       const bool schemeColon = out.size() >= 2 && out[out.size() - 2] == ':';
-      if ( out.size() == 1 || schemeColon )
+      const bool schemeDoubleSlash =
+        out.size() >= 3 && out[out.size() - 2] == '/' && out[out.size() - 3] == ':';
+      if ( out.size() == 1 || schemeColon || schemeDoubleSlash )
         out.push_back( '/' );
       continue;
     }

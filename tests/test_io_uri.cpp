@@ -348,4 +348,16 @@ TEST_CASE( "file:// URIs classify as local filesystem resources (Oracle-B1.1)",
   const ResourceUri uri6 = ResourceUri::parse( "file:///path/to/my%20data%20file.tif" );
   REQUIRE( uri6.kind == ResourceKind::LocalFile );
   REQUIRE( uri6.path == "/path/to/my data file.tif" );
+
+  // 7. Canonical roundtrip idempotency (P1-1 regression guard)
+  CHECK( uri1.canonical() == "file:///path/to/raster.tif" );
+  const ResourceUri roundtrip1 = ResourceUri::parse( uri1.canonical() );
+  CHECK( roundtrip1.kind == ResourceKind::LocalFile );
+  CHECK( roundtrip1.path == uri1.path );
+  CHECK_FALSE( roundtrip1.path.rfind( "//", 0 ) == 0 ); // Must NOT turn into UNC share!
+
+  CHECK( uri4.canonical() == "file:///C:/data/test.tif" );
+  const ResourceUri roundtrip4 = ResourceUri::parse( uri4.canonical() );
+  CHECK( roundtrip4.kind == ResourceKind::LocalFile );
+  CHECK( roundtrip4.path == uri4.path );
 }

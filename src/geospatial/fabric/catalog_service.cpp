@@ -737,7 +737,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
       if ( query.maxItems > 0 &&
-           page.offset + page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
+           page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
       {
         cappedByMax = true;
         break;
@@ -746,7 +746,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       {
         page.records.push_back( all[index] );
         if ( query.maxItems > 0 &&
-             page.offset + page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
+             page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
         {
           ++index;
           cappedByMax = index < all.size();
@@ -841,8 +841,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
       if ( query.maxItems > 0 &&
-           page.offset + static_cast<std::size_t>( fetched ) >=
-             static_cast<std::size_t>( query.maxItems ) )
+           page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
       {
         cappedByMaxItems = true;
         break;
@@ -866,8 +865,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
             page.items.push_back( item );
             ++fetched;
             if ( query.maxItems > 0 &&
-                 page.offset + static_cast<std::size_t>( fetched ) >=
-                   static_cast<std::size_t>( query.maxItems ) )
+                 page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
             {
               ++index;
               cappedByMaxItems = index < mLocal->itemFiles.size();

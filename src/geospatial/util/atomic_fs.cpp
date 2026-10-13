@@ -381,12 +381,16 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     // target first (it is the completeness marker), then the sidecars.
     // #791 review: a failed restore must NOT drop the backup — that would
     // destroy the last copy of the previous good file.
+    bool mainRestored = false;
     if ( hadMainTarget && fileExists( mainBackup ) )
     {
       removeFileQuiet( targetMainPath );
       if ( !renameReplaceQuiet( mainBackup, targetMainPath ) )
         restoreFailures.push_back( mainBackup + " -> " + targetMainPath );
+      else
+        mainRestored = true;
     }
+    std::vector<bool> sidecarsRestored( targetSidecars.size(), false );
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
     {
       const std::string backup = targetSidecars[i] + ".bak";
@@ -395,14 +399,16 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
         removeFileQuiet( targetSidecars[i] );
         if ( !renameReplaceQuiet( backup, targetSidecars[i] ) )
           restoreFailures.push_back( backup + " -> " + targetSidecars[i] );
+        else
+          sidecarsRestored[i] = true;
       }
     }
-    // Drop backup copies ONLY if the target was successfully restored or wasn't backed up
-    if ( fileExists( targetMainPath ) )
+    // Drop backup copies ONLY if the target was successfully restored (or wasn't backed up)
+    if ( !hadMainTarget || mainRestored )
       removeFileQuiet( mainBackup );
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
     {
-      if ( fileExists( targetSidecars[i] ) )
+      if ( !hadTarget[i] || sidecarsRestored[i] )
         removeFileQuiet( targetSidecars[i] + ".bak" );
     }
 
@@ -491,6 +497,7 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
       removeFileQuiet( done );
     // Restore backups for every member that had a prior target (main first
     // among restores when it is last in live, then dependents).
+    std::vector<bool> restored( live.size(), false );
     if ( !live.empty() )
     {
       const std::size_t mainIdx = live.size() - 1;
@@ -500,6 +507,8 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
         removeFileQuiet( live[mainIdx].second );
         if ( !renameReplaceQuiet( mainBackup, live[mainIdx].second ) )
           restoreFailures.push_back( mainBackup + " -> " + live[mainIdx].second );
+        else
+          restored[mainIdx] = true;
       }
       for ( std::size_t i = 0; i + 1 < live.size(); ++i )
       {
@@ -509,14 +518,16 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
           removeFileQuiet( live[i].second );
           if ( !renameReplaceQuiet( backup, live[i].second ) )
             restoreFailures.push_back( backup + " -> " + live[i].second );
+          else
+            restored[i] = true;
         }
       }
     }
-    // Drop backup copies ONLY if the target file was successfully restored or exists
-    for ( const auto &m : live )
+    // Drop backup copies ONLY if the target file was successfully restored or wasn't backed up
+    for ( std::size_t i = 0; i < live.size(); ++i )
     {
-      if ( fileExists( m.second ) )
-        removeFileQuiet( m.second + ".bak" );
+      if ( !hadTarget[i] || ( i < restored.size() && restored[i] ) )
+        removeFileQuiet( live[i].second + ".bak" );
     }
 
     Json::Value details;

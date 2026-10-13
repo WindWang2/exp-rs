@@ -6,6 +6,7 @@
 
 #include "geospatial/io/subdataset_inventory.h"
 
+#include "geospatial/gdal_guard.h"
 #include "geospatial/io/param_guard.h"
 #include "geospatial/util/resource_uri.h"
 
@@ -84,8 +85,8 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
   CPLErrorStateBackuper errorState;
   CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
   const std::string gdalPath = ResourceUri::toGdalPath( source );
-  GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
-  if ( !handle )
+  GDALDatasetH rawHandle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  if ( !rawHandle )
   {
     const char *lastError = CPLGetLastErrorMsg();
     Json::Value details;
@@ -96,13 +97,14 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
       details["gdal_error"] = lastError;
     throw GeoError( ErrorCode::OpenFailed, "subdataset inventory: cannot open source", details );
   }
+  GdalDatasetGuard handleGuard( rawHandle );
+  GDALDatasetH handle = rawHandle;
   CSLConstList subdatasets = GDALGetMetadata( handle, "SUBDATASETS" );
   SubdatasetInventory inventory;
   inventory.source = source;
   inventory.sourceDisplay = ResourceUri::parse( source ).display();
   if ( !subdatasets )
   {
-    GDALClose( handle );
     Json::Value details;
     details["display"] = inventory.sourceDisplay;
     throw GeoError( ErrorCode::InvalidArgument, "source carries no SUBDATASETS domain", details );
@@ -157,7 +159,6 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
   }
 
   inventory.truncated = declared > maxEntries;
-  GDALClose( handle );
   return inventory;
 }
 
