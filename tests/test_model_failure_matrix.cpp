@@ -929,3 +929,78 @@ TEST_CASE( "#1455: recycling a zombie session still held by an ensemble member "
   registry.releaseAll();
   CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
 }
+
+TEST_CASE( "in-flight model acquisition can be cancelled without hanging (#1455)",
+           "[models][registry][cancel]" )
+{
+  RegistryReset reset;
+  std::atomic<bool> loaderStarted{ false };
+  std::atomic<bool> blockLoader{ true };
+
+  ModelRuntimeRegistry::instance().registerProvider(
+    "slowfw",
+    [ &loaderStarted, &blockLoader ]( const ModelInfo &, const ModelHardwareCapabilities &,
+                                      std::string * ) -> ModelRuntimePtr {
+      loaderStarted.store( true );
+      while ( blockLoader.load() )
+      {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+      }
+      return nullptr;
+    } );
+
+  ModelInfo model;
+  model.name = "slow-model";
+  model.framework = "slowfw";
+  model.resolvedArtifactPath = "/dummy/slow.onnx";
+
+  // Thread 1: starts the load (becomes the flight loader)
+  std::thread loaderThread( [ &model ] {
+    std::string err;
+    ModelRuntimeRegistry::instance().acquire( model, &err );
+  } );
+
+  // Wait until the loader has actually started loading
+  while ( !loaderStarted.load() )
+  {
+    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+  }
+
+  // Thread 2: waiter coalesces on the in-flight load, but provides a cancelPredicate
+  std::atomic<bool> cancelFlag{ false };
+  const auto cancelPredicate = [ &cancelFlag ] { return cancelFlag.load(); };
+
+  std::atomic<bool> waiterReturned{ false };
+  std::string waiterError;
+  std::thread waiterThread( [ &model, &cancelPredicate, &waiterReturned, &waiterError ] {
+    ModelRuntimeRegistry::instance().acquire( model, &waiterError, cancelPredicate );
+    waiterReturned.store( true );
+  } );
+
+  // Let waiter coalesce onto flight
+  std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+  CHECK_FALSE( waiterReturned.load() );
+
+  // Cancel the waiter
+  const auto start = std::chrono::steady_clock::now();
+  cancelFlag.store( true );
+
+  // Waiter must return cleanly within < 500ms even though loader is still blocked
+  while ( !waiterReturned.load() )
+  {
+    if ( std::chrono::steady_clock::now() - start > std::chrono::milliseconds( 1000 ) )
+      break;
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - start ).count();
+
+  CHECK( waiterReturned.load() );
+  CHECK( elapsed < 500 );
+  CHECK( waiterError.find( "cancelled" ) != std::string::npos );
+
+  // Unblock the loader and join threads
+  blockLoader.store( false );
+  loaderThread.join();
+  waiterThread.join();
+}

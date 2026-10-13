@@ -437,12 +437,14 @@ class ModelRuntimeRegistry
     /// Acquire a session for the model, loading it on first use. The device
     /// comes from the manifest contract (runtime.device, default auto).
     /// @a errorMessage receives the load failure reason when nullptr is returned.
-    ModelRuntimePtr acquire( const ModelInfo &model, std::string *errorMessage = nullptr );
+    ModelRuntimePtr acquire( const ModelInfo &model, std::string *errorMessage = nullptr,
+                             const std::function<bool()> &cancelPredicate = {} );
 
     /// Acquire with an explicit device request (operator override), e.g.
     /// RequestedDevice::cpu() or cuda(1). Same session cache.
     ModelRuntimePtr acquire( const ModelInfo &model, const RequestedDevice &request,
-                             std::string *errorMessage = nullptr );
+                             std::string *errorMessage = nullptr,
+                             const std::function<bool()> &cancelPredicate = {} );
 
     /// Provider strategy: walk the model's provider chain — the primary
     /// framework first, then `runtime.framework_fallback` in declared order —
@@ -458,7 +460,8 @@ class ModelRuntimeRegistry
     ModelRuntimePtr acquireWithFallback( const ModelInfo &model,
                                          const RequestedDevice *explicitDevice,
                                          std::string *errorMessage = nullptr,
-                                         ProviderSelectionReport *report = nullptr );
+                                         ProviderSelectionReport *report = nullptr,
+                                         const std::function<bool()> &cancelPredicate = {} );
 
     /// Drop all cached sessions (running callers keep their shared_ptrs).
     void releaseAll();
@@ -593,7 +596,8 @@ class ModelRuntimeRegistry
     /// its own refusal — the peer's failed reservation is already unwound).
     ModelRuntimePtr rideInFlightOnRefusal( const std::string &identity,
                                            const RequestedDevice &request,
-                                           std::unique_lock<std::mutex> &lock );
+                                           std::unique_lock<std::mutex> &lock,
+                                           const std::function<bool()> &cancelPredicate = {} );
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, CacheEntry> m_cache;
