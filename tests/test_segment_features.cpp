@@ -238,15 +238,15 @@ TEST_CASE( "SegmentFeatures: multi-band NoData, NaN, and Inf pixels are excluded
     GDALRasterIO( band1, GF_Write, 0, 0, W, H, b1.data(), W, H, GDT_Float32, 0, 0 );
     GDALSetRasterNoDataValue( band1, -9999.0 );
 
-    // Band 2: sentinel = 0.0 (where 0.0 is NoData in band 2, but valid in band 1)
-    // Pixels: (100, 200, 300, 400) / (100, 200, 0.0, 400)
+    // Band 2: sentinel = -9999.0 (where pixel (1,2) is NoData in band 2, while valid 30.0 in band 1)
+    // Pixels: (100, 200, 300, 400) / (100, 200, -9999.0, 400)
     std::vector<float> b2 = {
         100.0f, 200.0f, 300.0f, 400.0f,
-        100.0f, 200.0f, 0.0f,   400.0f
+        100.0f, 200.0f, -9999.0f, 400.0f
     };
     GDALRasterBandH band2 = GDALGetRasterBand( ds, 2 );
     GDALRasterIO( band2, GF_Write, 0, 0, W, H, b2.data(), W, H, GDT_Float32, 0, 0 );
-    GDALSetRasterNoDataValue( band2, 0.0 );
+    GDALSetRasterNoDataValue( band2, -9999.0 );
     GDALClose( ds );
 
     // Single segment containing all pixels
@@ -259,7 +259,7 @@ TEST_CASE( "SegmentFeatures: multi-band NoData, NaN, and Inf pixels are excluded
     REQUIRE( err.isEmpty() );
     REQUIRE( stats.contains( 1 ) );
 
-    // Pixels at (0, 2) [b1=-9999], (0, 3) [b1=inf], (1, 2) [b2=0.0], (1, 3) [b1=nan] are invalid
+    // Pixels at (0, 2) [b1=-9999], (0, 3) [b1=inf], (1, 2) [b2=-9999], (1, 3) [b1=nan] are invalid
     // Valid pixels are: (0, 0) [10, 100], (0, 1) [20, 200], (1, 0) [10, 100], (1, 1) [20, 200]
     const auto &s = stats[1];
     REQUIRE( std::isfinite( s.mean[0] ) );
