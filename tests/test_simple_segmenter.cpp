@@ -252,9 +252,9 @@ TEST_CASE( "SimpleSegmenter: multi-band progress is scaled to the whole call", "
     REQUIRE( last == Approx( 1.0f ) );
 }
 
-TEST_CASE( "SimpleSegmenter: a single ±Inf pixel must not collapse the scene (Inf governance, R10-A/AN-5)", "[segmentation][simple][r10a]" )
+TEST_CASE( "SimpleSegmenter: a single +/-Inf pixel must not collapse the scene (Inf governance, R10-A/AN-5)", "[segmentation][simple][r10a]" )
 {
-    // Four 8-column staircases with one poisoned pixel: the ±Inf sample must
+    // Four 8-column staircases with one poisoned pixel: the +/-Inf sample must
     // be voided exactly like NaN (rs_multires_segmenter discipline). Today a
     // single +Inf folds into vmax, scale becomes 0, and the whole image
     // collapses into one segment — a silent, "valid-looking" output.

@@ -343,7 +343,7 @@ TEST_CASE( "SegmentFeatures: empty stats returns empty Mat", "[segmentation]" )
 }
 #endif
 
-TEST_CASE( "SegmentFeatures: ±Inf samples are excluded from per-segment statistics (Inf governance, R10-A/AN-8)", "[segmentation][r10a]" )
+TEST_CASE( "SegmentFeatures: +/-Inf samples are excluded from per-segment statistics (Inf governance, R10-A/AN-8)", "[segmentation][r10a]" )
 {
     // 8x4, two segments; one poisoned +Inf pixel inside segment 2. validMask
     // must treat non-finite like NaN/sentinel (rs_multires_segmenter
@@ -378,7 +378,7 @@ TEST_CASE( "SegmentFeatures: ±Inf samples are excluded from per-segment statist
 
     REQUIRE( stats.size() == 2 );
     const auto &s2 = stats[2];
-    REQUIRE( s2.area == 16 ); // area counts membership; validity governs stats
+    REQUIRE( s2.area == 15 ); // area counts VALID pixels: the Inf sample is voided
     REQUIRE( std::isfinite( s2.mean[0] ) );
     REQUIRE( std::isfinite( s2.stddev[0] ) );
     REQUIRE( std::isfinite( s2.min[0] ) );

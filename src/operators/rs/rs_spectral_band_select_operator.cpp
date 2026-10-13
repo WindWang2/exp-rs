@@ -187,8 +187,10 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
     {
         grid = requireGrid(ds, bandCount);
         gridRead = true;
-        const double minNm = params["wavelengthMin"].asDouble();
-        const double maxNm = params["wavelengthMax"].asDouble();
+        // Tolerant typed reads (R10-A/PR-8): numeric-string values pass
+        // schema validation; bare asDouble() would throw LogicError (#1447).
+        const double minNm = getDouble(params, "wavelengthMin", 0.0);
+        const double maxNm = getDouble(params, "wavelengthMax", 0.0);
         if (!(maxNm > minNm))
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "wavelengthMax must be greater than wavelengthMin");

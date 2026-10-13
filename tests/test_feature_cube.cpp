@@ -165,7 +165,10 @@ TEST_CASE( "Feature cube contract refuses non-integer versions typed (R10-A/PR-1
     REQUIRE_FALSE( FeatureCubeContract::fromJson( boolVersion, &parsed, &error ) );
     REQUIRE( error.contains( "version" ) );
 
-    // Pin: the honest integer version 1 still parses.
+    // Pin: the honest integer version 1 still parses (error is an in/out
+    // parameter that fromJson only WRITES on failure — clear the previous
+    // case's message before asserting emptiness).
+    error.clear();
     REQUIRE( FeatureCubeContract::fromJson( sampleContract( 1 ).toJson(), &parsed, &error ) );
     REQUIRE( error.isEmpty() );
 }

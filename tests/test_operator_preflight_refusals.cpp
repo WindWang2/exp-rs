@@ -132,7 +132,7 @@ TEST_CASE( "zonal_stats refuses out-of-range bands, CRS-less rasters and empty v
 // silently default to [1] — the capability catalog even advertises bands as
 // a scalar, so agents hit this regularly. A non-array bands value must be a
 // typed InvalidParameter, never a silent default.
-TEST_CASE( "zonal_stats refuses scalar bands values — the contract is an array (R10-A/A1-D2)",
+TEST_CASE( "zonal_stats refuses scalar bands values - the contract is an array (R10-A/A1-D2)",
            "[r4][refusal][zonal][r10a]" )
 {
     QTemporaryDir dir;

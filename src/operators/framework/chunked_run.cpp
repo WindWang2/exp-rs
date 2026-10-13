@@ -344,4 +344,67 @@ ChunkedRunResult runChunkedOperator(
     return runResumable( spec, context, kernel, sink, options );
 }
 
+namespace
+{
+
+/// jsoncpp 1.9.6 has no Value::typeName(); name the received shape for the
+/// typed parameter errors below.
+const char *jsonTypeName( const Json::Value &value )
+{
+    switch ( value.type() )
+    {
+        case Json::nullValue: return "null";
+        case Json::intValue:
+        case Json::uintValue: return "integer";
+        case Json::realValue: return "number";
+        case Json::stringValue: return "string";
+        case Json::booleanValue: return "boolean";
+        case Json::arrayValue: return "array";
+        case Json::objectValue: return "object";
+    }
+    return "unknown";
+}
+
+} // namespace
+
+bool parseChunkedModeValue( const Json::Value &value, const char *paramName,
+                            ChunkedRunOptions::Mode *mode )
+{
+    if ( value.isNull() )
+        return false;
+    if ( value.isBool() )
+    {
+        // Bool form normalizes explicitly (R10-A/PR-5): true = resumable
+        // (the crash-safe default), false = keep the default — a bool is
+        // never silently stringified into a non-matching pseudo-enum.
+        if ( value.asBool() )
+            *mode = ChunkedRunOptions::Mode::Resumable;
+        return true;
+    }
+    if ( value.isString() )
+    {
+        const std::string m = value.asString();
+        if ( m == "pipeline" )
+        {
+            *mode = ChunkedRunOptions::Mode::Pipeline;
+            return true;
+        }
+        if ( m == "resumable" )
+        {
+            *mode = ChunkedRunOptions::Mode::Resumable;
+            return true;
+        }
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               std::string( paramName )
+                                   + " must be \"pipeline\" or \"resumable\" (or a bool); got "
+                                     "string \""
+                                   + m + "\"" );
+    }
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           std::string( paramName )
+                               + " must be \"pipeline\" or \"resumable\" (or a bool); got "
+                                 "a non-string "
+                           + jsonTypeName( value ) + " value" );
+}
+
 } // namespace sicnu::operators

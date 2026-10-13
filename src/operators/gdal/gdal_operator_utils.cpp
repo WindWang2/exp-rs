@@ -5,6 +5,8 @@
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "geospatial/util/atomic_fs.h"
+
 #include <cpl_string.h>
 #include <gdal_rat.h>
 #include <QFile>
@@ -154,17 +156,29 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
 
     GDALWarpAppOptionsSetProgress(psOptions, gdalProgressCallback, &context);
 
-    context.logInfo(logLabel + " → " + outputPath);
+    // Staged atomic publication (#617 contract, R10-A/PR-2): GDALWarp writes
+    // beside the target and only a COMPLETED, fsynced result is renamed over
+    // it. Writing straight to outputPath truncated any pre-existing product
+    // and the failure branches' QFile::remove then destroyed what was there
+    // before the run — "no half output AND no destroyed old product".
+    // reservedStagedPathFor: GDAL drivers refuse an existing (pre-created)
+    // file, so the staged name is reserved, never pre-created.
+    const std::string stagedPath =
+        sicnu::geo::atomic_fs::reservedStagedPathFor(outputPath);
+    auto discardStagedQuietly = [&stagedPath]() {
+        try {
+            sicnu::geo::atomic_fs::discardStaged(stagedPath);
+        } catch (...) { /* cleanup must not mask the real error */ }
+    };
+
+    context.logInfo(logLabel + " → " + outputPath + " (staged)");
 
     int bUsageError = FALSE;
     GDALDatasetH hDstDS = nullptr;
     // #694: the handle must be closed exactly once. Null it after every close
-    // so the catch(...) safety net below can never double-close, and remember
-    // whether the warp actually completed: only then may the output be kept —
-    // an unexpected throw after a good warp must not delete the result.
-    bool warpCompleted = false;
+    // so the catch(...) safety net below can never double-close.
     try {
-        hDstDS = GDALWarp(outputPath.c_str(), nullptr, 1, &hSrcDS, psOptions, &bUsageError);
+        hDstDS = GDALWarp(stagedPath.c_str(), nullptr, 1, &hSrcDS, psOptions, &bUsageError);
         GDALWarpAppOptionsFree(psOptions);
 
         if (context.isCancelled()) {
@@ -172,7 +186,7 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
                 GDALClose(hDstDS);
                 hDstDS = nullptr;
             }
-            QFile::remove(QString::fromStdString(outputPath));
+            discardStagedQuietly();
             throw RSOperatorError(ErrorCode::Cancelled, logLabel + " cancelled");
         }
 
@@ -181,7 +195,7 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
                 GDALClose(hDstDS);
                 hDstDS = nullptr;
             }
-            QFile::remove(QString::fromStdString(outputPath));
+            discardStagedQuietly();
             throw RSOperatorError(ErrorCode::GdalError,
                                   logLabel + " failed for output: " + outputPath);
         }
@@ -190,7 +204,11 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
         const int outputHeight = GDALGetRasterYSize(hDstDS);
         GDALClose(hDstDS);
         hDstDS = nullptr;
-        warpCompleted = true;
+
+        // Durability gate before the rename commits the directory entry;
+        // publish fails closed when the target is locked (atomic_fs, #1178).
+        sicnu::geo::atomic_fs::fsyncFile(stagedPath);
+        sicnu::geo::atomic_fs::publishStagedFile(stagedPath, outputPath);
 
         context.reportProgress(1.0, logLabel + " complete");
         return {outputWidth, outputHeight};
@@ -199,9 +217,7 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
             GDALClose(hDstDS);
             hDstDS = nullptr;
         }
-        if (!warpCompleted) {
-            QFile::remove(QString::fromStdString(outputPath));
-        }
+        discardStagedQuietly();
         throw;
     }
 }

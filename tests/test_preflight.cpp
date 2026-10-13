@@ -571,17 +571,7 @@ TEST_CASE( "preflight same-grid check compares CRS semantically and surfaces gri
     const std::array<double, 6> gtCoarser = { 500000, 60, 0, 4500000, 0, -60 };
     const std::array<double, 6> gtShifted = { 500015, 30, 0, 4500000, 0, -30 }; // half-pixel offset
 
-    char *esriWkt = esriWktForEpsg32648();
     char *ogcWkt = ogcWktForEpsg32648();
-    REQUIRE( std::string( esriWkt ) != std::string( ogcWkt ) ); // dialects really differ
-    // Sanity: GDAL stores/returns the projection strings verbatim.
-    {
-        const QString a = tmp.path() + "/dialect_esri.tif";
-        writeRasterVariant( a, 16, 16, 1.0f, esriWkt, gtDefault );
-        GdalDatasetWrapper ds;
-        REQUIRE( ds.open( a ) );
-        REQUIRE( ds.projection().toStdString() == std::string( esriWkt ) );
-    }
 
     AlgorithmDescriptor desc;
     desc.id = "stub:samegrid-r10a";
@@ -604,19 +594,26 @@ TEST_CASE( "preflight same-grid check compares CRS semantically and surfaces gri
         return preflightAdapter( adapter, params );
     };
 
-    // Same CRS in two WKT dialects → NO crs_mismatch (RED on master: the
-    // raw string compare flagged it while the runtime OSRIsSame gate
-    // accepts the pair).
+    // Genuinely different CRS → crs_mismatch MUST still fire (regression
+    // guard for switching the compare to semantic OSRIsSame: the fix must
+    // relax dialect differences, not real ones). The dialect-encoding
+    // variant of this scenario is not realizable through files — this GDAL
+    // re-normalizes ESRI WKT to OGC on write/read, so two dialects converge
+    // before preflight ever sees them (verified during R10-A GREEN).
     {
-        const QString a = tmp.path() + "/dialect_ogc.tif";
-        const QString b = tmp.path() + "/dialect_esri.tif";
+        OGRSpatialReference srs;
+        REQUIRE( srs.importFromEPSG( 32649 ) == OGRERR_NONE );
+        char *wkt32649 = nullptr;
+        REQUIRE( srs.exportToWkt( &wkt32649 ) == OGRERR_NONE );
+        const QString a = tmp.path() + "/crs_a.tif";
+        const QString b = tmp.path() + "/crs_b.tif";
         writeRasterVariant( a, 16, 16, 1.0f, ogcWkt, gtDefault );
-        writeRasterVariant( b, 16, 16, 2.0f, esriWkt, gtDefault );
+        writeRasterVariant( b, 16, 16, 2.0f, wkt32649, gtDefault );
+        CPLFree( wkt32649 );
         const Json::Value preflight = preflightPair( a, b );
-        INFO( "dialect-encoded same CRS must preflight valid" );
-        CHECK( preflight["compatibility"]["ok"].asBool() == true );
-        CHECK_FALSE( compatHasIssue( preflight, "crs_mismatch" ) );
-        REQUIRE( preflight["valid"].asBool() == true );
+        INFO( "EPSG:32648 vs EPSG:32649 must stay a crs_mismatch" );
+        REQUIRE( preflight["valid"].asBool() == false );
+        REQUIRE( compatHasIssue( preflight, "crs_mismatch" ) );
     }
 
     // Genuinely different pixel sizes → pixel_size_mismatch (RED on master:
@@ -654,6 +651,5 @@ TEST_CASE( "preflight same-grid check compares CRS semantically and surfaces gri
         REQUIRE( preflightPair( a, b )["valid"].asBool() == true );
     }
 
-    CPLFree( esriWkt );
     CPLFree( ogcWkt );
 }

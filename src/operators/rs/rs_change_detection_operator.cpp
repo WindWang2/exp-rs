@@ -331,14 +331,11 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
     canonParams["kernelVersion"] = 1;
     opts.canonicalParams = canonParams;
 
+    // R10-A/PR-5: mode switches refuse non-enum shapes typed (bools
+    // normalize explicitly) — never a silent fallback to the default mode.
     if ( params.isMember( "chunkedMode" ) )
-    {
-        const std::string m = params["chunkedMode"].asString();
-        if ( m == "pipeline" )
-            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
-        else if ( m == "resumable" )
-            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
-    }
+        sicnu::operators::parseChunkedModeValue( params["chunkedMode"], "chunkedMode",
+                                                 &opts.executionMode );
     if ( params.isMember( "resumeStateBase" ) && params["resumeStateBase"].isString() )
     {
         opts.resumeStateBase = params["resumeStateBase"].asString();

@@ -57,10 +57,10 @@ TEST_CASE( "PixelIgnore: AnyBand vs AllBands", "[classify][ignore]" )
   REQUIRE_FALSE( opt.isIgnorePixel( noneBand, 3, hasNd, nd ) );
 }
 
-TEST_CASE( "PixelIgnore: non-finite ±Inf is ignored like NaN (Inf governance, R10-A/AN-1)", "[classify][ignore][r10a]" )
+TEST_CASE( "PixelIgnore: non-finite +/-Inf is ignored like NaN (Inf governance, R10-A/AN-1)", "[classify][ignore][r10a]" )
 {
   // Same !isfinite discipline as rs_multires_segmenter / rs_feature_scaler:
-  // a ±Inf sample (band-math divide-by-zero residue) must never reach
+  // a +/-Inf sample (band-math divide-by-zero residue) must never reach
   // training and must never be classified as a real class. Default options
   // (ignoreNaN = true) govern — Config.fitScaler is false by default, so
   // this check is the only finite gate on the default path.

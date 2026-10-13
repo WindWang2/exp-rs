@@ -1352,7 +1352,7 @@ TEST_CASE( "rs:infer typed-refuses hostile STAC item and link fields (R10-A/PR-9
 // on both the estimate and the run surfaces.
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "rs:infer refuses scalar bands values — the contract is an array (R10-A/A1-D2)",
+TEST_CASE( "rs:infer refuses scalar bands values - the contract is an array (R10-A/A1-D2)",
            "[models][operator8][r10a]" )
 {
   QTemporaryDir dir;
