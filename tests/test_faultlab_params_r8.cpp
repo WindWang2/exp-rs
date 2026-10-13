@@ -63,6 +63,23 @@ std::string readFileOrEmpty( const std::string &path )
     return buffer.str();
 }
 
+/// leakageGrid minus every sample in @p droppedRole — the fixture shape that
+/// makes each mode's target check refuse.
+FaultGrid leakageGridWithout( const char *droppedRole )
+{
+    FaultGrid grid = leakageGrid();
+    Json::Value filtered( Json::arrayValue );
+    for ( const auto &sample : grid.extras["samples"] )
+    {
+        if ( sample.isObject() && sample.isMember( "role" )
+             && sample["role"].asString() == droppedRole )
+            continue;
+        filtered.append( sample );
+    }
+    grid.extras["samples"] = filtered;
+    return grid;
+}
+
 } // namespace
 
 TEST_CASE( "train_test_spatial_leakage consumes cell_size, refusing invalid values",
@@ -115,6 +132,48 @@ TEST_CASE( "train_test_spatial_leakage consumes cell_size, refusing invalid valu
     const FaultOutcome plain = applyFault( untouched, withoutCell );
     REQUIRE( plain.ok );
     CHECK( untouched.extras["leakage_cell_size"].asDouble() == 4.0 );
+}
+
+TEST_CASE( "train_test_spatial_leakage refusals leave the grid unmutated",
+           "[faultlab][params][r9]" )
+{
+    // Fail-before-mutate (#1474 review): a transform rejected by a
+    // mode-specific target check must leave the fixture untouched. The
+    // declared cell_size used to be published before those checks ran, so a
+    // refused scenario still rewrote the observable's binning anchor.
+    SECTION( "duplicate: no train samples to clone" )
+    {
+        FaultGrid grid = leakageGridWithout( "train" );
+        const Json::Value pristineSamples = grid.extras["samples"];
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "duplicate";
+        spec.params["cell_size"] = 8.0;
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsafe_target" );
+        CHECK( grid.extras["leakage_cell_size"].asDouble() == 4.0 );
+        CHECK( grid.extras["samples"] == pristineSamples );
+    }
+
+    SECTION( "relocate: no test sample to move" )
+    {
+        FaultGrid grid = leakageGridWithout( "test" );
+        const Json::Value pristineSamples = grid.extras["samples"];
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "relocate";
+        spec.params["cell_size"] = 8.0;
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsafe_target" );
+        CHECK( grid.extras["leakage_cell_size"].asDouble() == 4.0 );
+        CHECK( grid.extras["samples"] == pristineSamples );
+    }
 }
 
 TEST_CASE( "every param declared by the fault registry is read by its transform",
