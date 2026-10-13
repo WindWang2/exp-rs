@@ -288,6 +288,31 @@ TEST_CASE( "rs:terrain_viewshed plane visibility, radius cut and curvature",
     const RunResult runG = runOperator( "rs:terrain_viewshed", geoParams );
     CHECK_FALSE( runG.ok );
     CHECK( runG.error.code() == ErrorCode::InvalidParameter );
+
+    // Refusal: explicit WKT2 GEOGCRS curvature also fails closed.
+    RsSyntheticRasterBuilder g2( 8, 8, 1 );
+    const char *wkt2Geog =
+        "GEOGCRS[\"WGS 84\",\n"
+        "    DATUM[\"World Geodetic System 1984\",\n"
+        "        ELLIPSOID[\"WGS 84\",6378137,298.257223563]],\n"
+        "    CS[ellipsoidal,2],\n"
+        "        AXIS[\"geodetic latitude (Lat)\",north],\n"
+        "        AXIS[\"geodetic longitude (Lon)\",east],\n"
+        "        UNIT[\"degree\",0.0174532925199433]]";
+    g2.withCrs( wkt2Geog );
+    g2.withGeoTransform( 0.0, 0.001, 0.0, -0.001 );
+    for ( int y = 0; y < 8; ++y )
+        for ( int x = 0; x < 8; ++x )
+            g2.withPixel( 1, x, y, 10.0f );
+    const QString geo2Path = g2.writeToDisk( dir.filePath( "geo_wkt2.tif" ) );
+    REQUIRE( !geo2Path.isEmpty() );
+    Json::Value geo2Params( params );
+    geo2Params["input"] = geo2Path.toStdString();
+    geo2Params["curvature"] = "true";
+    geo2Params["output"] = dir.filePath( "geo2_viewshed.tif" ).toStdString();
+    const RunResult runG2 = runOperator( "rs:terrain_viewshed", geo2Params );
+    CHECK_FALSE( runG2.ok );
+    CHECK( runG2.error.code() == ErrorCode::InvalidParameter );
 }
 
 TEST_CASE( "rs:terrain_solar shadow duration and hillshade series E2E",
@@ -339,6 +364,31 @@ TEST_CASE( "rs:terrain_solar shadow duration and hillshade series E2E",
     GdalDatasetWrapper seriesDs;
     REQUIRE( seriesDs.open( dir.filePath( "series.tif" ) ) );
     CHECK( seriesDs.bandCount() == 3 );
+
+    // Geographic DEM: cell size scaled via latitude cosine, doesn't explode.
+    constexpr double kCellDeg = 0.00027778; // ~30m
+    RsSyntheticRasterBuilder bg( kW, kH, 1 );
+    bg.withCrs( "EPSG:4326" );
+    bg.withGeoTransform( 116.0, kCellDeg, 40.0, -kCellDeg );
+    for ( int x = 0; x < kW; ++x )
+        bg.withPixel( 1, x, 0, 0.0f );
+    bg.withPixel( 1, 2, 0, 10.0f ); // 10m wall
+    const QString demGeoPath = bg.writeToDisk( dir.filePath( "wall_geo.tif" ) );
+    REQUIRE( !demGeoPath.isEmpty() );
+
+    Json::Value geoSolarParams( Json::objectValue );
+    geoSolarParams["input"] = demGeoPath.toStdString();
+    geoSolarParams["output"] = dir.filePath( "shadow_geo.tif" ).toStdString();
+    geoSolarParams["product"] = "shadow_duration";
+    geoSolarParams["sun_track"] = "90,45;90,45";
+    const RunResult runGeoSolar = runOperator( "rs:terrain_solar", geoSolarParams );
+    REQUIRE( runGeoSolar.ok );
+    GdalDatasetWrapper outGeoDs;
+    REQUIRE( outGeoDs.open( dir.filePath( "shadow_geo.tif" ) ) );
+    std::vector<float> fracGeo( static_cast<size_t>( kW ) * kH );
+    REQUIRE( outGeoDs.readBandData( 1, fracGeo.data(), kW, kH ) );
+    CHECK( fracGeo[1] == Catch::Approx( 1.0f ) );
+    CHECK( fracGeo[4] == Catch::Approx( 0.0f ) );
 }
 
 TEST_CASE( "rs:terrain_landform products E2E", "[terrain][landform][operator][e2e]" )
@@ -396,6 +446,25 @@ TEST_CASE( "rs:terrain_landform products E2E", "[terrain][landform][operator][e2
     const RunResult runL = runOperator( "rs:terrain_landform", lc );
     REQUIRE( runL.ok );
     CHECK( runL.json["classHistogram"]["0"].asUInt64() == kW * kH );
+
+    // Geographic plateau DEM: classified as flat/plains when cells are properly scaled
+    constexpr double kCellDegL = 0.00027778;
+    RsSyntheticRasterBuilder blg( kW, kH, 1 );
+    blg.withCrs( "EPSG:4326" );
+    blg.withGeoTransform( 116.0, kCellDegL, 40.0, -kCellDegL );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            blg.withPixel( 1, x, y, 42.0f );
+    const QString demGeoLPath = blg.writeToDisk( dir.filePath( "flat_geo.tif" ) );
+    REQUIRE( !demGeoLPath.isEmpty() );
+
+    Json::Value paramsGeoL( Json::objectValue );
+    paramsGeoL["input"] = demGeoLPath.toStdString();
+    paramsGeoL["output"] = dir.filePath( "geom_geo.tif" ).toStdString();
+    paramsGeoL["product"] = "geomorphon";
+    const RunResult runGeoL = runOperator( "rs:terrain_landform", paramsGeoL );
+    REQUIRE( runGeoL.ok );
+    CHECK( runGeoL.json["formHistogram"]["0"].asUInt64() == kW * kH );
 }
 
 TEST_CASE( "terrain operators surface Cancelled and leave no partial output",

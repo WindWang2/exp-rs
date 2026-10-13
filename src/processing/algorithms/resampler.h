@@ -24,7 +24,7 @@ enum class ResampleMethod {
 struct WarpOptions {
     ResampleMethod method{ResampleMethod::Bilinear};
     double noDataValue{-9999.0};
-    bool clampRange{true};
+    bool clampRange{false};
     double minValue{0.0};
     double maxValue{1.0};
 };
@@ -44,7 +44,7 @@ class Resampler {
                               double noDataValue);
 
     /// Full raster warp. Pixel centres are placed with GDAL geotransform
-    /// convention: world = (gt[0] + gt[1]*i, gt[3] + gt[5]*j).
+    /// convention: world = (gt[0] + gt[1]*(i + 0.5), gt[3] + gt[5]*(j + 0.5)).
     /// `inverseCoordMap` receives the DESTINATION world coordinate and must
     /// return the SOURCE world coordinate (the georeferenced inverse of the
     /// correction). Returns false on invalid buffers/sizes.

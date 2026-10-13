@@ -12,6 +12,9 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <ogr_spatialref.h>
+#include <cpl_conv.h>
+
 #include <QTemporaryDir>
 
 #include <catch2/catch_approx.hpp>
@@ -249,4 +252,48 @@ TEST_CASE( "rs:align publishes a lossless copy when grids already match",
     const std::vector<float> out = readBand( dir.filePath( "aligned.tif" ), 1, 4, 4 );
     for ( int i = 0; i < 16; ++i )
         CHECK( out[static_cast<size_t>( i )] == Catch::Approx( static_cast<float>( i ) ) );
+}
+
+TEST_CASE( "rs:align recognizes equivalent CRS across different WKT representations",
+           "[grid][align][crs]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    RsSyntheticRasterBuilder builder1( 4, 4, 1 );
+    builder1.withCrs( "EPSG:32650" );
+    builder1.withGeoTransform( 100.0, 5.0, 200.0, -5.0 );
+    for ( int y = 0; y < 4; ++y )
+        for ( int x = 0; x < 4; ++x )
+            builder1.withPixel( 1, x, y, static_cast<float>( 4 * y + x ) );
+    const QString refPath = builder1.writeToDisk( dir.filePath( "ref.tif" ) );
+
+    OGRSpatialReference srs;
+    srs.importFromEPSG( 32650 );
+    char *wkt2 = nullptr;
+    const char *options[] = { "FORMAT=WKT2_2019", nullptr };
+    srs.exportToWkt( &wkt2, options );
+    const QString wkt2Str = QString::fromUtf8( wkt2 );
+    CPLFree( wkt2 );
+
+    RsSyntheticRasterBuilder builder2( 4, 4, 1 );
+    builder2.withCrs( wkt2Str );
+    builder2.withGeoTransform( 100.0, 5.0, 200.0, -5.0 );
+    for ( int y = 0; y < 4; ++y )
+        for ( int x = 0; x < 4; ++x )
+            builder2.withPixel( 1, x, y, static_cast<float>( 4 * y + x ) );
+    const QString inputPath = builder2.writeToDisk( dir.filePath( "in.tif" ) );
+
+    REQUIRE( !refPath.isEmpty() );
+    REQUIRE( !inputPath.isEmpty() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:align" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["reference"] = refPath.toStdString();
+    params["output"] = dir.filePath( "aligned.tif" ).toStdString();
+    RSOperatorContext context;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, context ) );
+    CHECK( result["alreadyAligned"].asBool() == true );
 }

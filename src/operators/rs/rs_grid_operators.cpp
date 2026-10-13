@@ -10,6 +10,7 @@
 #include "operators/framework/rs_schema.h"
 #include "geospatial/convert/raster_convert.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "data/raster_grid_compat.h"
 
 #include <QString>
 
@@ -370,8 +371,8 @@ Json::Value RsAlignOperator::run(const Json::Value& params,
     const double minY = gt[3] + ref.height() * gt[5];
     const double maxX = gt[0] + ref.width() * gt[1];
 
-    const std::string refWkt = ref.projection().toStdString();
-    const bool sameCrs = src.projection().toStdString() == refWkt;
+    const QString refWkt = ref.projection();
+    const bool sameCrs = sicnu::data::isSameCrs(src.projection(), refWkt);
     const auto srcGt = src.geoTransform();
     const bool sameGrid = sameCrs && src.width() == ref.width() &&
                           src.height() == ref.height() &&
