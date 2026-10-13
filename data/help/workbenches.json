@@ -183,10 +183,6 @@
     }
   },
   {
-    "id": "workbench.geocorrection",
-    "aliasOf": "workbench.georef_i2m"
-  },
-  {
     "id": "workbench.classification",
     "aliasOf": "workbench.classify"
   }

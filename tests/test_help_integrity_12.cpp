@@ -442,7 +442,7 @@ TEST_CASE( "every registered workbench id resolves to a shipped help topic",
     const QStringList benchIds = {
         QStringLiteral( "classify" ),
         QStringLiteral( "georef-i2i" ),
-        QStringLiteral( "geocorrection" ),
+        QStringLiteral( "georef-i2m" ),
         QStringLiteral( "georef-dual" ),
         QStringLiteral( "classify-studio" ),
         QStringLiteral( "obia" ),
