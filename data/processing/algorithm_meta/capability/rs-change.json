@@ -121,11 +121,15 @@
       "parameters" : 
       [
         {
+          "array" : true,
+          "item_type" : "integer",
           "name" : "bandsA",
           "required" : false,
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "integer",
           "name" : "bandsB",
           "required" : false,
           "type" : "integer"

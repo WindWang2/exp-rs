@@ -105,6 +105,8 @@
           "type" : "enum"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "libraryMaterials",
           "required" : false,
           "type" : "string"
@@ -120,6 +122,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "refs",
           "required" : false,
           "type" : "string"

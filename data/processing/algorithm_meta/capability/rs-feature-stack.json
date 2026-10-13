@@ -82,6 +82,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "json",
           "name" : "features",
           "required" : true,
           "type" : "json"

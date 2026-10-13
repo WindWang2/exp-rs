@@ -41,6 +41,8 @@
 #include <QString>
 
 #include <algorithm>
+#include <map>
+#include <sstream>
 #include <cstdint>
 #include <fstream>
 #include <set>
@@ -769,4 +771,76 @@ TEST_CASE( "D8 fact sets: variant-declared intents overlay the base entry",
                          ( roles.isObject() && roles.isMember( "red_edge" ) );
     }
     CHECK( redEdgeOverlay );
+}
+
+TEST_CASE( "D8 array semantics: sidecar parameter rows carry the schema's array shape (R10-A/A1-D1)",
+           "[capability][d8][arrays][r10a]" )
+{
+    Bootstrap boot;
+
+    // Independent of the agent-side derivation path (whose parameter branch
+    // drops array/item_type — generator fix tracked in R10-A's
+    // INTERFACE_HANDOFF): compare each sidecar's io.parameters rows against
+    // the live operator schema() truth so the committed data cannot
+    // silently flatten arrays again.
+    for ( const std::string &id : boot.registrySet() )
+    {
+        auto op = sicnu::operators::RSOperatorRegistry::instance().create( id );
+        REQUIRE( op );
+        const Json::Value schema = op->schema();
+        if ( !schema.isObject() || !schema.isMember( "properties" ) ||
+             !schema["properties"].isObject() )
+          continue;
+
+        const QString sidecarPath = QString( kSourceDir ) +
+          "/data/processing/algorithm_meta/capability/" +
+          QString::fromStdString( id ).replace( ':', '-' ) + ".json";
+        QFile file( sidecarPath );
+        if ( !file.open( QIODevice::ReadOnly ) )
+          continue; // missing sidecars are the coverage gate's job, not ours
+
+        Json::CharReaderBuilder readerBuilder;
+        Json::Value doc;
+        std::string parseErrors;
+        std::istringstream stream( readFile( sidecarPath.toStdString() ) );
+        if ( !Json::parseFromStream( readerBuilder, stream, &doc, &parseErrors ) )
+          FAIL( id + ": sidecar does not parse: " + parseErrors );
+
+        std::map<std::string, const Json::Value *> rows;
+        const Json::Value &params = doc["capability"]["io"]["parameters"];
+        if ( params.isArray() )
+        {
+            for ( const Json::Value &row : params )
+            {
+                if ( row.isObject() && row.isMember( "name" ) && row["name"].isString() )
+                  rows[row["name"].asString()] = &row;
+            }
+        }
+
+        for ( const std::string &key : schema["properties"].getMemberNames() )
+        {
+            const Json::Value &prop = schema["properties"][key];
+            const bool schemaIsArray = prop.isObject() && prop.isMember( "type" ) &&
+              prop["type"].isString() && prop["type"].asString() == "array";
+            const auto it = rows.find( key );
+            if ( it == rows.end() )
+              continue; // not every schema property is surfaced as a row
+            const Json::Value &row = *it->second;
+            if ( schemaIsArray )
+            {
+                if ( !row.isMember( "array" ) || !row["array"].isBool() ||
+                     !row["array"].asBool() )
+                  FAIL( id + ": parameter '" + key +
+                        "' is an array in schema() but the sidecar row flattens it" );
+                if ( !row.isMember( "item_type" ) || !row["item_type"].isString() )
+                  FAIL( id + ": array parameter '" + key + "' lacks item_type" );
+            }
+            else if ( row.isMember( "array" ) && row["array"].isBool() &&
+                      row["array"].asBool() )
+            {
+                FAIL( id + ": sidecar marks '" + key +
+                      "' as an array but schema() says scalar" );
+            }
+        }
+    }
 }

@@ -80,6 +80,8 @@
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "endmembers",
           "required" : false,
           "type" : "string"
@@ -95,6 +97,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "libraryMaterials",
           "required" : false,
           "type" : "string"

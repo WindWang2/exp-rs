@@ -89,6 +89,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "piecewisePoints",
           "required" : false,
           "type" : "string"
