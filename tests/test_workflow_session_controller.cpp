@@ -6,6 +6,7 @@
 
 #include "app/shell/schema_form_builder.h"
 #include "app/shell/workflow_session_controller.h"
+#include "app/shell/task_panel_host.h"
 
 TEST_CASE( "WorkflowSessionController default state queries return clean initial values", "[workflow][shell][controller]" )
 {
@@ -101,4 +102,58 @@ TEST_CASE("SchemaFormBuilder round-trips array parameters as arrays (#595)", "[s
     REQUIRE(out["bands"].size() == 3);
     REQUIRE(out["bands"][0].asInt() == 1);
     REQUIRE(out["bands"][2].asInt() == 3);
+}
+
+// R10-B P1-1: runFullWorkflow/runUpToNode had no in-flight guard — a second
+// click submitted a SECOND tracked pipeline, overwrote activePipelineId and
+// orphaned the first run (Stop could only cancel the latest). Both entries
+// now refuse while m_runInFlight, mirroring onRunClicked.
+TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in flight",
+           "[workflow][shell][controller][r10b]" )
+{
+    WorkflowSessionController controller;
+    TaskPanelHost panel;
+    controller.bindPanel( &panel );
+    controller.registerBuiltins();
+
+    const QString sessionId = controller.openTool( QStringLiteral( "wf:vegetation_indices" ) );
+    REQUIRE( !sessionId.isEmpty() );
+
+    QStringList messages;
+    QObject::connect( &controller, &WorkflowSessionController::statusMessage,
+                      [&messages]( const QString &m ) { messages << m; });
+
+    controller.runFullWorkflow();
+    if ( controller.isRunInFlight() )
+    {
+        const int pipelineBefore = controller.activePipelineId();
+
+        // Second full submission: refused, id not overwritten, typed message.
+        controller.runFullWorkflow();
+        CHECK( controller.isRunInFlight() );
+        CHECK( controller.activePipelineId() == pipelineBefore );
+        bool sawRefusal = false;
+        for ( const QString &m : messages )
+        {
+            if ( m.contains( QLatin1String( "already in flight" ) ) )
+                sawRefusal = true;
+        }
+        CHECK( sawRefusal );
+
+        // Partial-DAG entry shares the guard.
+        messages.clear();
+        controller.runUpToNode( QStringLiteral( "step_that_does_not_matter" ) );
+        CHECK( controller.isRunInFlight() );
+        CHECK( controller.activePipelineId() == pipelineBefore );
+        sawRefusal = false;
+        for ( const QString &m : messages )
+        {
+            if ( m.contains( QLatin1String( "already in flight" ) ) )
+                sawRefusal = true;
+        }
+        CHECK( sawRefusal );
+
+        controller.cancelActiveRun();
+        CHECK_FALSE( controller.isRunInFlight() );
+    }
 }

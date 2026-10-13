@@ -773,7 +773,17 @@ void ExperimentStudioDock::compareSelectedSpatial()
 void ExperimentStudioDock::refreshSensitivity()
 {
     if ( m_lastStudyReport.isEmpty() )
-        applySyntheticRunMatrix();
+    {
+        // Honest empty state instead of silently substituting the synthetic
+        // demo: a refresh must never paint demo curves as if they were the
+        // user's study (the constructor still opens with the visible demo).
+        m_sensitivityLog->setPlainText(
+          tr( "No report loaded — open a live study or press 'Load NDVI/threshold "
+              "demo' to inspect the synthetic sample." ) );
+        m_lastSensitivityVm = QJsonObject();
+        rebuildChart();
+        return;
+    }
     const auto report = StudyReport::fromJson( m_lastStudyReport );
     if ( !report )
     {
@@ -932,7 +942,16 @@ void ExperimentStudioDock::loadFirstDivergenceDemo()
 void ExperimentStudioDock::exportBundle()
 {
     if ( m_lastStudyReport.isEmpty() )
-        applySyntheticRunMatrix();
+    {
+        // Honesty over convenience: exporting silently swapped in synthetic
+        // demo data whenever no study was loaded — a bundle the user never
+        // asked for. Refuse typed; the explicit demo button remains the way
+        // to export a demo bundle on purpose.
+        studyError( QStringLiteral( "experiment_studio.export_no_study" ),
+                    QStringLiteral( "no study report loaded — load a live study (or press the "
+                                    "demo button) before exporting" ) );
+        return;
+    }
     StudioExportBundle bundle;
     bundle.studyId = m_session.studyId;
     bundle.studyReport = m_lastStudyReport;

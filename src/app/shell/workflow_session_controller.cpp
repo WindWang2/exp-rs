@@ -434,6 +434,14 @@ void WorkflowSessionController::runFullWorkflow()
 {
   if ( m_activeSession.isEmpty() )
     return;
+  // One pipeline in flight at a time (duplicate-submission guard): a second
+  // startTrackedPipeline would overwrite m_activePipelineId and orphan the
+  // first run — Stop could then only cancel the latest.
+  if ( m_runInFlight )
+  {
+    emit statusMessage( tr( "A workflow run is already in flight — stop it before starting another" ) );
+    return;
+  }
 
   std::string definitionId;
   try
@@ -475,6 +483,13 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
 {
   if ( m_activeSession.isEmpty() || targetStepId.isEmpty() )
     return;
+  // Same duplicate-submission guard as runFullWorkflow: the partial-DAG
+  // pipeline shares m_activePipelineId with the full one.
+  if ( m_runInFlight )
+  {
+    emit statusMessage( tr( "A workflow run is already in flight — stop it before starting another" ) );
+    return;
+  }
 
   std::string definitionId;
   try
