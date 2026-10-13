@@ -46,9 +46,44 @@ bool parseIpv4( const std::string &text, std::uint32_t &out )
             return false;
         std::uint32_t octet = 0;
         int digits = 0;
-        while ( i < text.size() && std::isdigit( static_cast<unsigned char>( text[i] ) ) )
+        int base = 10;
+        if ( text[i] == '0' && i + 1 < text.size() && ( text[i + 1] == 'x' || text[i + 1] == 'X' ) )
         {
-            octet = octet * 10 + static_cast<unsigned char>( text[i] - '0' );
+            base = 16;
+            i += 2;
+        }
+        else if ( text[i] == '0' && i + 1 < text.size() && std::isdigit( static_cast<unsigned char>( text[i + 1] ) ) )
+        {
+            base = 8;
+            ++i;
+            digits = 1;
+        }
+        while ( i < text.size() )
+        {
+            const unsigned char c = static_cast<unsigned char>( text[i] );
+            int digit = -1;
+            if ( base == 16 )
+            {
+                if ( std::isdigit( c ) )
+                    digit = c - '0';
+                else if ( c >= 'a' && c <= 'f' )
+                    digit = c - 'a' + 10;
+                else if ( c >= 'A' && c <= 'F' )
+                    digit = c - 'A' + 10;
+            }
+            else if ( base == 8 )
+            {
+                if ( c >= '0' && c <= '7' )
+                    digit = c - '0';
+            }
+            else
+            {
+                if ( std::isdigit( c ) )
+                    digit = c - '0';
+            }
+            if ( digit < 0 )
+                break;
+            octet = octet * base + digit;
             if ( octet > 255 )
                 return false;
             ++i;
@@ -84,13 +119,13 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
     int tailCount = 0;
 
     auto parseSection = [ & ]( const std::string &section, std::uint16_t *groups_, int &count,
-                               bool allowV4Tail ) {
+                               int maxGroups, bool allowV4Tail ) {
         if ( section.empty() )
             return true;
         std::size_t pos = 0;
         while ( true )
         {
-            if ( count >= 8 )
+            if ( count >= maxGroups )
                 return false;
             const std::size_t colon = section.find( ':', pos );
             const std::string token = colon == std::string::npos ? section.substr( pos )
@@ -100,9 +135,9 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
                 std::uint32_t v4 = 0;
                 if ( !parseIpv4( token, v4 ) )
                     return false;
-                groups_[count++] = static_cast<std::uint16_t>( v4 >> 16 );
-                if ( count >= 8 )
+                if ( count + 2 > maxGroups )
                     return false;
+                groups_[count++] = static_cast<std::uint16_t>( v4 >> 16 );
                 groups_[count++] = static_cast<std::uint16_t>( v4 & 0xFFFFu );
                 return true;
             }
@@ -125,9 +160,11 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
     };
 
     const bool headAllowV4Tail = ( cc == std::string::npos );
-    if ( !parseSection( head, groups, headCount, headAllowV4Tail ) )
+    if ( !parseSection( head, groups, headCount, 8, headAllowV4Tail ) )
         return false;
-    if ( !parseSection( tail, groups + headCount, tailCount, true ) )
+    if ( headCount >= 7 && !tail.empty() )
+        return false;
+    if ( !parseSection( tail, groups + headCount, tailCount, 8 - headCount, true ) )
         return false;
 
     const int total = headCount + tailCount;
@@ -286,10 +323,17 @@ bool isPrivateHost( const std::string &hostOrUrl )
         host = host.substr( 0, host.find( ':' ) );
     }
 
+    const std::size_t pct = host.find( '%' );
+    if ( pct != std::string::npos )
+        host = host.substr( 0, pct );
+
     std::string lowered;
     lowered.reserve( host.size() );
     for ( const char c : host )
         lowered += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+
+    while ( !lowered.empty() && lowered.back() == '.' )
+        lowered.pop_back();
 
     if ( lowered.empty() )
         return true;
@@ -302,9 +346,35 @@ bool isPrivateHost( const std::string &hostOrUrl )
     if ( parseIpv4( host, v4 ) )
         return isPrivateIpv4( v4 );
 
+    if ( !host.empty() )
+    {
+        bool allDigits = true;
+        for ( const char c : host )
+        {
+            if ( !std::isdigit( static_cast<unsigned char>( c ) ) )
+            {
+                allDigits = false;
+                break;
+            }
+        }
+        if ( allDigits )
+        {
+            char *end = nullptr;
+            const unsigned long long val = std::strtoull( host.c_str(), &end, 10 );
+            if ( end == host.c_str() + host.size() && val <= 0xFFFFFFFFull )
+                return isPrivateIpv4( static_cast<std::uint32_t>( val ) );
+        }
+    }
+
     unsigned char v6[16] = {};
     if ( parseIpv6( host, v6 ) )
     {
+        bool unspecified = true;
+        for ( int i = 0; i < 16; ++i )
+            unspecified = unspecified && ( v6[i] == 0 );
+        if ( unspecified )
+            return true;
+
         bool ipv4Mapped = v6[10] == 0xFF && v6[11] == 0xFF;
         for ( int i = 0; i < 10 && ipv4Mapped; ++i )
             ipv4Mapped = ( v6[i] == 0 );

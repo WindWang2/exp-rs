@@ -365,11 +365,17 @@ RemoteSourceValidator RemoteSourceValidator::probe( const std::string &url,
   RemoteSourceValidator validator;
   const std::string requestUrl =
     uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
-  if ( options.blockPrivateNetworks && offline::isPrivateHost( requestUrl ) )
+  if ( options.blockPrivateNetworks )
   {
-    Json::Value details;
-    details["url"] = uri.display();
-    throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
+    if ( offline::isPrivateHost( requestUrl ) )
+    {
+      Json::Value details;
+      details["url"] = uri.display();
+      throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
+    }
+    fetchOptions.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+      return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
+    };
   }
   try
   {
@@ -420,6 +426,8 @@ RemoteSourceValidator RemoteSourceValidator::probe( const std::string &url,
   }
   catch ( const GeoError &error )
   {
+    if ( error.code() == ErrorCode::PermissionDenied )
+      throw;
     identity.state = RemoteSourceState::Offline;
     identity.lastError = ( std::string( error.code() == ErrorCode::Timeout ? "timeout: " : "offline: " ) +
                            error.what() )
@@ -443,13 +451,6 @@ RevalidationResult RemoteSourceValidator::revalidate( const RemoteValidatorOptio
     return result;
   }
 
-  if ( options.blockPrivateNetworks && offline::isPrivateHost( mRequestUrl ) )
-  {
-    Json::Value details;
-    details["url"] = mIdentity.url;
-    throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
-  }
-
   HttpFetchOptions fetchOptions;
   fetchOptions.timeoutSeconds = options.timeoutSeconds;
   fetchOptions.connectTimeoutSeconds = options.connectTimeoutSeconds;
@@ -458,6 +459,19 @@ RevalidationResult RemoteSourceValidator::revalidate( const RemoteValidatorOptio
     options.probeBytes == 0 ? 1 : std::min<std::uintmax_t>( options.probeBytes, 1024 * 1024 );
   fetchOptions.maxResponseBytes = probeBytes;
   fetchOptions.range = "bytes=0-" + std::to_string( probeBytes - 1 );
+
+  if ( options.blockPrivateNetworks )
+  {
+    if ( offline::isPrivateHost( mRequestUrl ) )
+    {
+      Json::Value details;
+      details["url"] = mIdentity.url;
+      throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
+    }
+    fetchOptions.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+      return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
+    };
+  }
 
   const std::string priorEtag = mIdentity.validator.etag;
   const std::string priorLastModified = mIdentity.validator.lastModified;
@@ -478,6 +492,8 @@ RevalidationResult RemoteSourceValidator::revalidate( const RemoteValidatorOptio
   }
   catch ( const GeoError &error )
   {
+    if ( error.code() == ErrorCode::PermissionDenied )
+      throw;
     // Transport failure: freshness is simply unprovable this round.
     mIdentity.state = RemoteSourceState::Offline;
     mIdentity.lastError = std::string( error.what() ).substr( 0, 256 );
