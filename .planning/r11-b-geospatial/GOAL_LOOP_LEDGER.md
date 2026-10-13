@@ -10,5 +10,6 @@
 | Epoch | 工作包 (WP) | 假设 / 目标 | 修改路径 | 执行指令 / 目标 | 退出码 | 负例证据 / 关键结果 | 下一步动作 |
 |---|---|---|---|---|---|---|---|
 | **E0** | 基线与环境侦察 | 独立 worktree 创建，CMake 预设 `dev-default` + Ninja 配置，跨进程构建租约互斥生效，targeted 构建验证通过。 | `.planning/r11-b-geospatial/*` | `cmake --preset dev-default -G Ninja` & `cmake --build build-dev --target test_io_fabric_catalog` | 0 | 成功生成 `test_io_fabric_catalog`，61 assertions in 8 test cases 全部 PASS。 | 进入 E1: WP-B3 Catalog 截断契约与死循环缺陷重现与修复。 |
-| **E1** | **WP-B3** (Catalog Truncation & Loop) | 1. `searchPage` 在 `mLocal` 和 `mMemory` 下达到 `maxItems` 时未能报告 `truncatedByCap = true`；<br>2. `searchAll` 在 local backend 遇到 `maxItems` 时陷入空页死循环至 100,000 次退出。 | `tests/test_io_fabric_catalog.cpp`, `src/geospatial/fabric/catalog_service.cpp` | TBD | TBD | TBD | TBD |
+| **E1** | **WP-B3** (Catalog Truncation & Loop) | 1. `searchPage` 在 `mLocal` 和 `mMemory` 下达到 `maxItems` 时未能报告 `truncatedByCap = true`；<br>2. `searchAll` 在 local backend 遇到 `maxItems` 时陷入空页死循环至 100,000 次退出。 | `tests/test_io_fabric_catalog.cpp`, `src/geospatial/fabric/catalog_service.cpp` | `cmake --build build-dev --target test_io_fabric_catalog --parallel 2` & `./build-dev/test_io_fabric_catalog` | 0 | **RED 阶段**：`in-memory` (3 == 2, truncatedByCap == false) 与 `local STAC` (catalog pagination failed to terminate, 100,000 loop ResourceExhausted) 严格复现。<br>**GREEN 阶段**：修复后 69 assertions in 8 test cases 连续两次 100% 全绿通过。 | 进入 E2: WP-B1 数据源资格矩阵与 `ResourceUri` 对 `file://` 原生解析及 Direct-Open 一致性。 |
+
 

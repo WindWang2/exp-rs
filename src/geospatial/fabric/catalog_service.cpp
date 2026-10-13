@@ -731,16 +731,35 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
     const std::vector<AssetRecord> &all = mMemory->records;
     const int pageSize = query.limit > 0 ? query.limit : mOptions.maxRecordsPerPage;
     std::size_t index = continuation.localOffset;
+    bool cappedByMax = false;
     for ( ; index < all.size() && page.records.size() < static_cast<std::size_t>( pageSize ); ++index )
     {
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
+      if ( query.maxItems > 0 &&
+           page.offset + page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
+      {
+        cappedByMax = true;
+        break;
+      }
       if ( recordPasses( all[index], query ) )
+      {
         page.records.push_back( all[index] );
+        if ( query.maxItems > 0 &&
+             page.offset + page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
+        {
+          ++index;
+          cappedByMax = index < all.size();
+          break;
+        }
+      }
       else
+      {
         ++page.clientFilteredOut;
+      }
     }
-    page.next.hasMore = index < all.size();
+    page.truncatedByCap = cappedByMax;
+    page.next.hasMore = !cappedByMax && ( index < all.size() );
     page.next.localOffset = index;
     return page;
   }
@@ -816,6 +835,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
     const int pageSize = query.limit > 0 ? query.limit : mOptions.maxRecordsPerPage;
     std::size_t index = continuation.localOffset;
     int fetched = 0;
+    bool cappedByMaxItems = false;
     for ( ; index < mLocal->itemFiles.size(); ++index )
     {
       if ( cancel.cancelled() )
@@ -823,7 +843,10 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       if ( query.maxItems > 0 &&
            page.offset + static_cast<std::size_t>( fetched ) >=
              static_cast<std::size_t>( query.maxItems ) )
+      {
+        cappedByMaxItems = true;
         break;
+      }
       if ( static_cast<int>( page.records.size() ) >= pageSize )
         break;
       try
@@ -842,6 +865,14 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
             page.records.push_back( std::move( record ) );
             page.items.push_back( item );
             ++fetched;
+            if ( query.maxItems > 0 &&
+                 page.offset + static_cast<std::size_t>( fetched ) >=
+                   static_cast<std::size_t>( query.maxItems ) )
+            {
+              ++index;
+              cappedByMaxItems = index < mLocal->itemFiles.size();
+              goto localScanFinished;
+            }
             break;
           case ItemVerdict::Unresolvable:
             ++page.unresolvable;
@@ -856,12 +887,14 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
         ++mLocal->unreadableFiles;   // one bad file never kills the walk
       }
     }
-    page.next.hasMore = index < mLocal->itemFiles.size();
+localScanFinished:
+    page.next.hasMore = !cappedByMaxItems && ( index < mLocal->itemFiles.size() );
     page.next.localOffset = index;
     // The walk bounds are honest: a page that consumed candidates up to
-    // (or past) the declared file cap reports the truncation.
+    // (or past) the declared file cap or maxItems reports the truncation.
     page.truncatedByCap =
-      static_cast<int>( mLocal->itemFiles.size() ) >= mOptions.localMaxFiles;
+      cappedByMaxItems ||
+      ( static_cast<int>( mLocal->itemFiles.size() ) >= mOptions.localMaxFiles );
     return page;
   }
 
@@ -889,10 +922,18 @@ CatalogService::SearchAllResult CatalogService::searchAll( const CatalogQuery &q
       result.records.push_back( page.records[i] );
       if ( i < page.items.size() )
         result.items.push_back( page.items[i] );
+      if ( query.maxItems > 0 &&
+           static_cast<int>( result.records.size() ) >= query.maxItems )
+      {
+        result.truncatedByCap = page.truncatedByCap || page.next.hasMore || ( i + 1 < page.records.size() );
+        return result;
+      }
     }
     result.clientFilteredOut += page.clientFilteredOut;
     result.unresolvable += page.unresolvable;
     continuation = page.next;
+    if ( page.truncatedByCap )
+      result.truncatedByCap = true;
     if ( !page.next.hasMore )
       return result;
     if ( ++guard > 100000 )   // loop backstop (bounds beats cleverness)

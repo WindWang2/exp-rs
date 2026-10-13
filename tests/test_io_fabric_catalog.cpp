@@ -201,7 +201,19 @@ TEST_CASE( "in-memory backend applies the full filter vocabulary with honest pag
   CHECK( stats["records"].asUInt64() == 1 );
   CHECK( stats["hasMore"].asBool() );
   CHECK( stats["unresolvable"].asUInt64() == 0 );
+
+  // maxItems on in-memory backend
+  CatalogQuery memCapped;
+  memCapped.maxItems = 2;
+  const CatalogService::SearchAllResult memCappedAll = service.searchAll( memCapped );
+  CHECK( memCappedAll.records.size() == 2 );
+  CHECK( memCappedAll.truncatedByCap );
+
+  const CatalogPage memCappedPage = service.searchPage( memCapped, {} );
+  CHECK( memCappedPage.records.size() == 2 );
+  CHECK( memCappedPage.truncatedByCap );
 }
+
 
 TEST_CASE( "cancellation stops an in-memory crawl with the typed error",
            "[io][fabric][catalog][cancel]" )
@@ -300,6 +312,17 @@ TEST_CASE( "local STAC trees serve through the same query vocabulary — link-fo
   CatalogQuery byPlatform;
   byPlatform.platformEquals = "S2A";
   CHECK( service.searchAll( byPlatform ).records.size() == 2 );
+
+  // maxItems capping on local backend: must report truncatedByCap and NOT enter infinite loop
+  CatalogQuery localCapped;
+  localCapped.maxItems = 1;
+  const CatalogService::SearchAllResult cappedResult = service.searchAll( localCapped );
+  CHECK( cappedResult.records.size() == 1 );
+  CHECK( cappedResult.truncatedByCap );
+
+  const CatalogPage cappedPage = service.searchPage( localCapped, {} );
+  CHECK( cappedPage.records.size() == 1 );
+  CHECK( cappedPage.truncatedByCap );
 
   // --- plain directory scan (no catalog.json) --------------------------
   const std::string plain = scratchDir( "plain" );
