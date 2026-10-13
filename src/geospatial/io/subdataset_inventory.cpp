@@ -83,12 +83,15 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
 
   CPLErrorStateBackuper errorState;
   CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
-  GDALDatasetH handle = GDALOpenEx( source.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  const std::string gdalPath = ResourceUri::toGdalPath( source );
+  GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !handle )
   {
     const char *lastError = CPLGetLastErrorMsg();
     Json::Value details;
     details["display"] = ResourceUri::parse( source ).display();
+    if ( gdalPath != source )
+      details["resolved_path"] = gdalPath;
     if ( lastError && *lastError )
       details["gdal_error"] = lastError;
     throw GeoError( ErrorCode::OpenFailed, "subdataset inventory: cannot open source", details );

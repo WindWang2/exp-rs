@@ -312,3 +312,40 @@ TEST_CASE( "credential query denylist covers the common signed-URL and"
     CHECK( displayed.find( "keep=1" ) != std::string::npos );
   }
 }
+
+TEST_CASE( "file:// URIs classify as local filesystem resources (Oracle-B1.1)",
+           "[io][uri][file_scheme]" )
+{
+  // 1. file:///path/to/raster.tif
+  const ResourceUri uri1 = ResourceUri::parse( "file:///path/to/raster.tif" );
+  REQUIRE( uri1.kind == ResourceKind::LocalFile );
+  REQUIRE( uri1.path == "/path/to/raster.tif" );
+  REQUIRE_FALSE( uri1.isRemote() );
+  REQUIRE( uri1.isLocalPayload() );
+
+  // 2. file://localhost/data/test.tif
+  const ResourceUri uri2 = ResourceUri::parse( "file://localhost/data/test.tif" );
+  REQUIRE( uri2.kind == ResourceKind::LocalFile );
+  REQUIRE( uri2.path == "/data/test.tif" );
+  REQUIRE( uri2.host == "localhost" );
+
+  // 3. file://server/share/test.tif (UNC mapping)
+  const ResourceUri uri3 = ResourceUri::parse( "file://server/share/test.tif" );
+  REQUIRE( uri3.kind == ResourceKind::LocalFile );
+  REQUIRE( uri3.path == "//server/share/test.tif" );
+
+  // 4. file:///C:/data/test.tif (Windows drive letter)
+  const ResourceUri uri4 = ResourceUri::parse( "file:///C:/data/test.tif" );
+  REQUIRE( uri4.kind == ResourceKind::LocalFile );
+  REQUIRE( uri4.path == "C:/data/test.tif" );
+
+  // 5. file://localhost/C:/data/test.tif
+  const ResourceUri uri5 = ResourceUri::parse( "file://localhost/C:/data/test.tif" );
+  REQUIRE( uri5.kind == ResourceKind::LocalFile );
+  REQUIRE( uri5.path == "C:/data/test.tif" );
+
+  // 6. Percent decoding: file:///path/to/my%20data%20file.tif
+  const ResourceUri uri6 = ResourceUri::parse( "file:///path/to/my%20data%20file.tif" );
+  REQUIRE( uri6.kind == ResourceKind::LocalFile );
+  REQUIRE( uri6.path == "/path/to/my data file.tif" );
+}

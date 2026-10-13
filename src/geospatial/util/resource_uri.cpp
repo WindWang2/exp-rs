@@ -422,6 +422,98 @@ ResourceUri ResourceUri::parse( const std::string &raw )
     return uri;
   }
 
+  // --- file:// (RFC 8089) ---
+  if ( startsWithIgnoreCase( raw, "file:" ) )
+  {
+    uri.scheme = "file";
+    std::string rest = raw.substr( 5 ); // past "file:"
+    const std::size_t hash = rest.find( '#' );
+    if ( hash != std::string::npos )
+    {
+      uri.fragment = rest.substr( hash + 1 );
+      rest = rest.substr( 0, hash );
+    }
+    const std::size_t question = rest.find( '?' );
+    if ( question != std::string::npos )
+    {
+      uri.query = rest.substr( question + 1 );
+      rest = rest.substr( 0, question );
+    }
+
+    std::string host;
+    std::string pathPart;
+    if ( startsWithIgnoreCase( rest, "//" ) )
+    {
+      std::string afterSlashes = rest.substr( 2 );
+      const std::size_t slash = afterSlashes.find( '/' );
+      std::string authority = slash == std::string::npos ? afterSlashes : afterSlashes.substr( 0, slash );
+      pathPart = slash == std::string::npos ? std::string() : afterSlashes.substr( slash );
+
+      // Check if authority is a Windows drive letter ("C:", "d:")
+      if ( hasWindowsDriveLetter( authority ) && authority.size() == 2 )
+      {
+        host.clear();
+        pathPart = authority + pathPart;
+      }
+      else
+      {
+        host = authority;
+      }
+    }
+    else
+    {
+      pathPart = rest;
+    }
+
+    std::string decodedPath;
+    percentDecode( pathPart, decodedPath );
+    decodedPath = normalizeSeparators( decodedPath );
+
+    std::string localPath;
+    if ( host.empty() || host == "localhost" || host == "127.0.0.1" )
+    {
+      // Strip leading slash before Windows drive letter ("/C:" -> "C:")
+      if ( decodedPath.size() >= 3 && decodedPath[0] == '/' &&
+           hasWindowsDriveLetter( decodedPath.substr( 1 ) ) )
+      {
+        localPath = decodedPath.substr( 1 );
+      }
+      else
+      {
+        localPath = decodedPath;
+      }
+    }
+    else
+    {
+      // Non-local host -> UNC path ("//host/path")
+      if ( !decodedPath.empty() && decodedPath[0] == '/' )
+        localPath = "//" + host + decodedPath;
+      else
+        localPath = "//" + host + "/" + decodedPath;
+    }
+
+    if ( localPath.empty() )
+    {
+      uri.kind = ResourceKind::Invalid;
+      uri.parseReason = "file URL with empty path";
+      return uri;
+    }
+
+    uri.host = host;
+    uri.path = localPath;
+
+    if ( isDirectoryUtf8( localPath ) )
+    {
+      uri.kind = looksLikeDirectoryProduct( localPath ) ? ResourceKind::DirectoryProduct
+                                                        : ResourceKind::LocalDirectory;
+    }
+    else
+    {
+      uri.kind = ResourceKind::LocalFile;
+    }
+    return uri;
+  }
+
   // --- http(s) ---
   if ( startsWithIgnoreCase( raw, "http://" ) || startsWithIgnoreCase( raw, "https://" ) )
   {
@@ -641,6 +733,24 @@ std::string ResourceUri::embeddedLocalPath() const
   if ( kind == ResourceKind::VsiVirtual && path.size() >= 2 )
     return path.substr( 1 ); // drop the leading '/' kept by the prefix strip
   return std::string();
+}
+
+std::string ResourceUri::gdalOpenTarget() const
+{
+  if ( scheme == "file" && !path.empty() )
+    return path;
+  return canonical();
+}
+
+std::string ResourceUri::toGdalPath( const std::string &source )
+{
+  if ( startsWithIgnoreCase( source, "file:" ) )
+  {
+    const ResourceUri uri = parse( source );
+    if ( uri.kind != ResourceKind::Invalid && !uri.path.empty() )
+      return uri.path;
+  }
+  return source;
 }
 
 bool ResourceUri::looksLikeDirectoryProduct( const std::string &path )
