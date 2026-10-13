@@ -802,22 +802,29 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   }
 
   // Max class id drives output datatype: Byte only when all ids fit in 0..255.
-  // Never silently clamp large class IDs into uint8.
+  // Never silently clamp large class IDs into uint8, and widen to signed Int32
+  // if negative class IDs / unclassified sentinels are present.
+  int minClassId = 0;
   int maxClassId = 0;
   bool maxClassIdKnown = false;
   for ( auto it = config.classColors.constBegin(); it != config.classColors.constEnd(); ++it )
   {
+    minClassId = std::min( minClassId, it.key() );
     maxClassId = std::max( maxClassId, it.key() );
     maxClassIdKnown = true;
   }
   for ( int i = 0; i < config.trainY.rows; ++i )
   {
-    maxClassId = std::max( maxClassId, config.trainY.at<int>( i, 0 ) );
+    const int id = config.trainY.at<int>( i, 0 );
+    minClassId = std::min( minClassId, id );
+    maxClassId = std::max( maxClassId, id );
     maxClassIdKnown = true;
   }
   for ( int i = 0; i < config.testY.rows; ++i )
   {
-    maxClassId = std::max( maxClassId, config.testY.at<int>( i, 0 ) );
+    const int id = config.testY.at<int>( i, 0 );
+    minClassId = std::min( minClassId, id );
+    maxClassId = std::max( maxClassId, id );
     maxClassIdKnown = true;
   }
   // Predict-only with a missing/partial sidecar carries neither colors nor
@@ -825,8 +832,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   // upper bound (#1461).
   for ( int id : config.backend->classOrder() )
   {
+    minClassId = std::min( minClassId, id );
     maxClassId = std::max( maxClassId, id );
     maxClassIdKnown = true;
+  }
+  if ( config.ignoreOptions.unclassifiedValue < 0 )
+  {
+    minClassId = std::min( minClassId, config.ignoreOptions.unclassifiedValue );
   }
 
   GDALDataType outType = GDT_Byte;
@@ -835,7 +847,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     // no label space): widen to Int32 rather than risk silently clamping
     // class IDs > 255 into Byte (#1461).
     outType = GDT_Int32;
-  else if ( maxClassId > 65535 )
+  else if ( minClassId < 0 || maxClassId > 65535 )
     outType = GDT_Int32;
   else if ( maxClassId > 255 )
     outType = GDT_UInt16;

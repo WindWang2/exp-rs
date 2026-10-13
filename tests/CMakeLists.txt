@@ -12025,8 +12025,29 @@ sicnu_add_test(test_gcp_manager)
 sicnu_add_test(test_geometric_transform)
 sicnu_add_test(test_tps_interpolator)
 sicnu_add_test(test_feature_matcher)
-sicnu_add_test(test_resampler)
-sicnu_add_test(test_pansharpening)
+qt_add_executable(test_resampler test_resampler.cpp)
+target_link_libraries(test_resampler PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_resampler PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_resampler)
+
+qt_add_executable(test_pansharpening test_pansharpening.cpp)
+target_link_libraries(test_pansharpening PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_pansharpening PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_pansharpening)
 
 # D14 Package G: dual-window georeferencing workbench (app sources compiled in).
 add_executable(test_georef_dual_window_workbench

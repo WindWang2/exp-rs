@@ -187,6 +187,56 @@ TEST_CASE(
 }
 
 TEST_CASE(
+  "Classification pipeline: negative unclassified/class id escalates output to signed Int32",
+  "[classify][pipeline][dtype]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y, { 1, 2, 3 } );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.ignoreOptions.writeOutputNodata = true;
+  cfg.ignoreOptions.unclassifiedValue = -1;
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( res.ok );
+
+  GDALDataset *outDs = static_cast<GDALDataset *>(
+    GDALOpen( ( tmp.path() + "/out.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( outDs != nullptr );
+  REQUIRE( outDs->GetRasterBand( 1 )->GetRasterDataType() == GDT_Int32 );
+  GDALClose( outDs );
+
+  // Even if writeOutputNodata is false, negative unclassified value must still
+  // widen to GDT_Int32 to prevent unclassified pixels from wrapping into 255.
+  RsClassificationPipeline::Config cfgNoNodata = baseConfig( srcPath, tmp.path() + "/out_no_nodata.tif" );
+  cfgNoNodata.backend.reset( new RsClassifierNormalBayes );
+  cfgNoNodata.trainX = X;
+  cfgNoNodata.trainY = y;
+  cfgNoNodata.ignoreOptions.writeOutputNodata = false;
+  cfgNoNodata.ignoreOptions.unclassifiedValue = -1;
+
+  const RsClassificationPipelineResult resNoNodata = RsClassificationPipeline::run( std::move( cfgNoNodata ) );
+  INFO( resNoNodata.errorMessage.toStdString() );
+  REQUIRE( resNoNodata.ok );
+
+  GDALDataset *outDsNoNodata = static_cast<GDALDataset *>(
+    GDALOpen( ( tmp.path() + "/out_no_nodata.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( outDsNoNodata != nullptr );
+  REQUIRE( outDsNoNodata->GetRasterBand( 1 )->GetRasterDataType() == GDT_Int32 );
+  GDALClose( outDsNoNodata );
+}
+
+TEST_CASE(
   "Classification pipeline: source NoData pixels map to unclassified class 0",
   "[classify][pipeline][nodata]" )
 {

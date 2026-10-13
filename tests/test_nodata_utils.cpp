@@ -81,13 +81,18 @@ TEST_CASE( "isNoDataValue matches exactly and never epsilon-drops near values",
     REQUIRE( isNoDataValue( 5.0f, 5.0f ) );
     REQUIRE_FALSE( isNoDataValue( 5.0f, 6.0f ) );
 
-    // NaN pixels are invalid under every sentinel.
+    // Non-finite (NaN and Inf) pixels are invalid under every sentinel.
     const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
     REQUIRE( isNoDataValue( nan, -9999.0f ) );
     REQUIRE( isNoDataValue( nan, nan ) );
     REQUIRE( isNoDataValue( nan, std::numeric_limits<float>::quiet_NaN() ) );
+    REQUIRE( isNoDataValue( inf, -9999.0f ) );
+    REQUIRE( isNoDataValue( -inf, -9999.0f ) );
+    REQUIRE( isNoDataValue( inf, nan ) );
+    REQUIRE( isNoDataValue( -inf, nan ) );
 
-    // Non-NaN values against the undeclared (NaN) sentinel are data.
+    // Finite non-sentinel values against the undeclared (NaN) sentinel are data.
     REQUIRE_FALSE( isNoDataValue( 0.0f, nan ) );
     REQUIRE_FALSE( isNoDataValue( -9999.0f, nan ) );
 }
