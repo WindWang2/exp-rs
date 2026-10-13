@@ -78,3 +78,47 @@ All changes strictly follow Karpathy's 4 core guidelines:
 - **Round 2 Status**: **APPROVED (0 P0 / 0 P1 / 2 P2)**.
   - P1 resolved in commit `930cc4af0e`.
   - All lifetime, threading, cross-platform, and transactional contracts verified.
+
+---
+
+## 5. PR Submission Status & Prepared Metadata
+
+- **Remote Push Status**: `NOT_VERIFIED` (Local token in `gh auth status` is expired for account `WindWang2`; HTTPS push prompts for credentials).
+- **Local Worktree & Branch**: Ready on `hardening/r11-d-qt-teaching-ux` at commit `149f8b751d`.
+- **Target Remote**: `origin/master` on `WindWang2/exp-rs`.
+
+### Prepared PR Metadata
+
+**Title**:
+```
+hardening(r11-d): 存量 Qt/QGIS 工作台、交互状态、实验教学与帮助 — correctness, reliability, performance and regressions
+```
+
+**Body Template**:
+```markdown
+## Summary
+
+Hardening for existing Qt 6 / QGIS workbench, interaction states, experimental teaching labs, teacher grading console, Experiment Studio, and F1 context help systems.
+
+All changes adhere strictly to Karpathy's 4 core guidelines:
+1. Think before coding: quarantined open PRs (#1475, #1476, #1477, #1478) and addressed unblocked issues.
+2. Simplicity first: minimal surgical diffs, no new frameworks or duplicate subsystems.
+3. Surgical changes: isolated C++20 / Qt 6 changes respecting existing coding conventions.
+4. Goal-driven verification: all changes backed by Catch2 reproducible RED -> GREEN x 2 unit tests under -j2.
+
+## Key Fixes
+- **WP-D8 (Issue #1465)**: Assign unique dedup-suffixed descriptor IDs to duplicate English / slug terms in `TerminologyProvider`; fail closed on missing embedded resources.
+- **WP-D1**: Add explicit user feedback in status bar for clipboard operations (`cutFeatures`, `copyFeatures`, `pasteFeatures`, `selectAll`); cache `selectedFeatureCount()` before feature deletion in `cutFeatures` so accurate count is reported.
+- **WP-D3**: Synchronize Ribbon Vector Editing tab digitizing tool buttons with `m_editingToolActions` and CommandRegistry via `RibbonController::addActionButton`, disabling digitizing tools when vector editing mode is disabled.
+- **WP-D4**: Transactional atomic saving (`writePipelineDefinitionFile`) using temporary file + backup + rename rollback, and Unicode-safe loading (`readPipelineDefinitionFile`) in `PipelineEditorDock`.
+- **WP-D5 / WP-D9**: Optimize matrix table batch population with update/sort gating and clean reset on store opening in `ExperimentStudioDock`; add defensive null checks for table items.
+
+## Verification
+- `test_help_core`: 2,156 / 2,156 passed (exit 0)
+- `test_i18n`: 401 / 401 passed (exit 0)
+- `test_workflow_pipeline_ui`: 135 / 135 passed (exit 0)
+- `test_experiment_studio_dock`: 65 / 65 passed (exit 0)
+- `sicnu_geo_rs_shell`: clean build under `-j2` (exit 0)
+- Independent review sign-off: 0 P0 / 0 P1 / 2 P2 (APPROVED)
+```
+
