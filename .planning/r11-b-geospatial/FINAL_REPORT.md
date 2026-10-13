@@ -107,4 +107,5 @@ An independent subagent conducted two rounds of adversarial review across `git d
   - `104ea1865f`: docs(ledger): record Epoch 4 completion for WP-B2
   - `d27d6d33ee`: fix(review-r1): resolve P0/P1/P2 findings from independent adversarial review round 1
 - **PR Title**: `fix(io): harden geospatial data fabric, URI direct-open, atomic rollback, and offline network boundaries`
-- **PR Status**: Ready for review and upstream merge into `master`.
+- **PR URL**: https://github.com/WindWang2/exp-rs/pull/1481
+- **PR Status**: Opened, quality gates passed, independent adversarial review PASS.
