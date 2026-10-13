@@ -353,3 +353,18 @@ TEST_CASE( "majorityFilter keeps a NoData (label 0) center as NoData (#700)", "[
   // Valid centers are still smoothed to the window mode.
   REQUIRE( dst.at<int>( 0, 0 ) == 5 );
 }
+
+TEST_CASE( "RsPostProcess::sieve does not swap labels of adjacent small patches (R10-A/AN-2)", "[postprocess][sieve][r10a]" )
+{
+  // Two adjacent 1-px patches of different classes: each patch's majority
+  // border neighbour is the OTHER patch. Replacement values must be computed
+  // on a working copy (gdal_sieve discipline) — frozen-original reads make
+  // the pair silently SWAP classes, which preserves per-class totals while
+  // corrupting the actual pixels (and every downstream polygon attribute).
+  cv::Mat src( 5, 5, CV_32SC1, cv::Scalar( 0 ) );
+  src.at<int>( 2, 2 ) = 1;
+  src.at<int>( 2, 3 ) = 2;
+  cv::Mat dst;
+  REQUIRE( RsPostProcess::sieve( src, dst, 4, 8 ) );
+  REQUIRE( dst.at<int>( 2, 2 ) == dst.at<int>( 2, 3 ) );
+}

@@ -11,6 +11,9 @@
 #include <cpl_conv.h>
 #include <QTemporaryDir>
 
+#include <cmath>
+#include <limits>
+
 using Catch::Approx;
 
 // ---------------------------------------------------------------------------
@@ -339,3 +342,50 @@ TEST_CASE( "SegmentFeatures: empty stats returns empty Mat", "[segmentation]" )
     REQUIRE( X.empty() );
 }
 #endif
+
+TEST_CASE( "SegmentFeatures: ±Inf samples are excluded from per-segment statistics (Inf governance, R10-A/AN-8)", "[segmentation][r10a]" )
+{
+    // 8x4, two segments; one poisoned +Inf pixel inside segment 2. validMask
+    // must treat non-finite like NaN/sentinel (rs_multires_segmenter
+    // discipline) — otherwise mean/stddev/min/max go Inf/NaN and the GLCM
+    // quantizer casts Inf to int (UB) before clamping.
+    constexpr int W = 8, H = 4;
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const QString path = tempDir.filePath( "test_inf_extract.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+
+    QVector<float> pixels( W * H );
+    for ( int r = 0; r < H; ++r )
+        for ( int c = 0; c < W; ++c )
+            pixels[r * W + c] = ( c < W / 2 ) ? 10.0f : 20.0f + r;
+    pixels[1 * W + 5] = std::numeric_limits<float>::infinity();
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    GDALRasterIO( band, GF_Write, 0, 0, W, H, pixels.data(), W, H, GDT_Float32, 0, 0 );
+    GDALClose( ds );
+
+    QVector<quint32> labels( W * H );
+    for ( int i = 0; i < W * H; ++i )
+        labels[i] = ( i % W < W / 2 ) ? 1u : 2u;
+    RsSegmentMap segMap( labels, W, H );
+
+    QVector<int> bandIndices = { 1 };
+    auto stats = RsSegmentFeatures::extract( path, segMap, bandIndices );
+
+    REQUIRE( stats.size() == 2 );
+    const auto &s2 = stats[2];
+    REQUIRE( s2.area == 16 ); // area counts membership; validity governs stats
+    REQUIRE( std::isfinite( s2.mean[0] ) );
+    REQUIRE( std::isfinite( s2.stddev[0] ) );
+    REQUIRE( std::isfinite( s2.min[0] ) );
+    REQUIRE( std::isfinite( s2.max[0] ) );
+    REQUIRE( std::isfinite( s2.glcmContrast[0] ) );
+    // Finite-only oracle: 15 valid samples — (20×4 + 21×3 + 22×4 + 23×4)/15.
+    REQUIRE( s2.mean[0] == Approx( 323.0 / 15.0 ).margin( 1e-6 ) );
+    REQUIRE( s2.min[0] == Approx( 20.0 ) );
+    REQUIRE( s2.max[0] == Approx( 23.0 ) );
+}

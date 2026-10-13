@@ -5,6 +5,7 @@
 // (≈ 0.75σ). Centre ordering is non-deterministic so we match each true mean
 // to the nearest learned centre.
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <opencv2/core.hpp>
 
 #include <limits>
@@ -124,4 +125,43 @@ TEST_CASE( "KMeans: same data trains bit-identical centers and labels [r14a]",
   REQUIRE( lb.rows == X.rows );
   for ( int i = 0; i < X.rows; ++i )
     REQUIRE( la.at<int>( i, 0 ) == lb.at<int>( i, 0 ) );
+}
+
+TEST_CASE( "KMeans: repeated fits of identical data agree (RNG seed discipline, R10-A/AN-4)",
+           "[classify][backend][r10a]" )
+{
+  // Four corners of the unit square, K=2: kmeans++ draws its first centre
+  // from OpenCV's thread-local global RNG. Without seeding, a second fit in
+  // the same process inherits an advanced RNG state and converges to the
+  // mirrored split — the pipeline's documented determinism policy is
+  // bypassed by its own backend. Every fit must be reproducible.
+  cv::Mat X( 4, 2, CV_32F );
+  const float corners[4][2] = { { 0.0f, 0.0f }, { 0.0f, 1.0f },
+                                { 1.0f, 0.0f }, { 1.0f, 1.0f } };
+  for ( int i = 0; i < 4; ++i )
+  {
+    X.at<float>( i, 0 ) = corners[i][0];
+    X.at<float>( i, 1 ) = corners[i][1];
+  }
+
+  cv::Mat first;
+  for ( int run = 0; run < 12; ++run )
+  {
+    RsClassifierKMeans clf( 2 );
+    REQUIRE( clf.fit( X, cv::Mat() ) );
+    const cv::Mat centers = clf.centers();
+    REQUIRE( centers.rows == 2 );
+    REQUIRE( centers.cols == 2 );
+    if ( run == 0 )
+    {
+      first = centers.clone();
+      continue;
+    }
+    for ( int r = 0; r < 2; ++r )
+      for ( int c = 0; c < 2; ++c )
+      {
+        CAPTURE( run, r, c );
+        REQUIRE( centers.at<float>( r, c ) == Catch::Approx( first.at<float>( r, c ) ).margin( 1e-6 ) );
+      }
+  }
 }

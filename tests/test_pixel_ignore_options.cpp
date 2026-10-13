@@ -56,3 +56,23 @@ TEST_CASE( "PixelIgnore: AnyBand vs AllBands", "[classify][ignore]" )
   REQUIRE( opt.isIgnorePixel( allBand, 3, hasNd, nd ) );
   REQUIRE_FALSE( opt.isIgnorePixel( noneBand, 3, hasNd, nd ) );
 }
+
+TEST_CASE( "PixelIgnore: non-finite ±Inf is ignored like NaN (Inf governance, R10-A/AN-1)", "[classify][ignore][r10a]" )
+{
+  // Same !isfinite discipline as rs_multires_segmenter / rs_feature_scaler:
+  // a ±Inf sample (band-math divide-by-zero residue) must never reach
+  // training and must never be classified as a real class. Default options
+  // (ignoreNaN = true) govern — Config.fitScaler is false by default, so
+  // this check is the only finite gate on the default path.
+  RsPixelIgnoreOptions opt;
+  REQUIRE( opt.ignoreNaN );
+  REQUIRE( opt.isIgnoreScalar( std::numeric_limits<double>::infinity(), false, 0.0 ) );
+  REQUIRE( opt.isIgnoreScalar( -std::numeric_limits<double>::infinity(), false, 0.0 ) );
+  REQUIRE_FALSE( opt.isIgnoreScalar( 100.0, false, 0.0 ) );
+
+  // Pixel-level form must agree for a multi-band pixel carrying an Inf band.
+  const float infBand[] = { std::numeric_limits<float>::infinity(), 1.f };
+  std::vector<bool> hasNd( 2, false );
+  std::vector<float> nd( 2, 0.f );
+  REQUIRE( opt.isIgnorePixel( infBand, 2, hasNd, nd ) );
+}
