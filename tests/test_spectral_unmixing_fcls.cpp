@@ -227,3 +227,34 @@ TEST_CASE("VCA endmember extraction recovers simplex vertices", "[spectral][unmi
                                                       EndmemberExtractionMethod::VertexComponentAnalysis,
                                                       nullptr));
 }
+
+TEST_CASE("FCLS and unmixing refuse non-finite and zero-norm endmembers", "[spectral][unmixing][guards]")
+{
+    const int bands = 4;
+    const int p = 3;
+    const std::vector<float> pixel = { 0.165f, 0.230f, 0.430f, 0.510f };
+
+    std::vector<float> nanEnds = kEndmembers;
+    nanEnds[0] = std::numeric_limits<float>::quiet_NaN();
+    exp_spectral::UnmixingResult resFcls;
+    QString err;
+    CHECK_FALSE(exp_spectral::SpectralUnmixing::unmixFcls(pixel.data(), 1, bands, nanEnds.data(), p, &resFcls, &err));
+    CHECK(err.contains("non-finite"));
+
+    std::vector<float> infEnds = kEndmembers;
+    infEnds[1] = std::numeric_limits<float>::infinity();
+    CHECK_FALSE(exp_spectral::SpectralUnmixing::unmixFcls(pixel.data(), 1, bands, infEnds.data(), p, &resFcls, &err));
+    CHECK(err.contains("non-finite"));
+
+    std::vector<float> zeroEnds = kEndmembers;
+    std::fill(zeroEnds.begin(), zeroEnds.begin() + bands, 0.0f);
+    CHECK_FALSE(exp_spectral::SpectralUnmixing::unmixFcls(pixel.data(), 1, bands, zeroEnds.data(), p, &resFcls, &err));
+    CHECK(err.contains("zero vector"));
+
+    ::SpectralUnmixing::UnmixResult resUnmix;
+    CHECK_FALSE(::SpectralUnmixing::unmix(pixel.data(), 1, bands, nanEnds.data(), p, &resUnmix, &err));
+    CHECK(err.contains("non-finite"));
+
+    CHECK_FALSE(::SpectralUnmixing::unmix(pixel.data(), 1, bands, zeroEnds.data(), p, &resUnmix, &err));
+    CHECK(err.contains("zero energy"));
+}

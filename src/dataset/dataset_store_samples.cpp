@@ -498,9 +498,13 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
         "DELETE FROM samples WHERE dataset_version_id=? AND sample_id=?" ) );
     if ( !stmt )
     {
+        // Capture the sqlite error BEFORE rollback: a successful ROLLBACK
+        // resets the connection's error string (same ordering as the step
+        // failure branch below) so the diagnostic would read "not an error".
+        const QString message = stmt.error( m_impl->db );
         m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           stmt.error( m_impl->db ) ) );
+                                           message ) );
     }
     stmt.bind( 1, versionId.toString() );
     stmt.bind( 2, sampleId.toString() );
@@ -525,9 +529,12 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
         "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
     if ( !facetStmt )
     {
+        // Same capture-before-rollback ordering: keep the prepare cause
+        // (damaged schema / refused DELETE) visible to the caller.
+        const QString message = facetStmt.error( m_impl->db );
         m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           facetStmt.error( m_impl->db ) ) );
+                                           message ) );
     }
     facetStmt.bind( 1, versionId.toString() );
     facetStmt.bind( 2, sampleId.toString() );

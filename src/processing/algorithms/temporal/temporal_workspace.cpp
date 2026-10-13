@@ -481,14 +481,20 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     if ( exclude.contains( path ) )
       continue;
     const QgsDataSourceKind kind = QgsDataSourceResolver::classify( path );
-    QString lookupPath = path;
+    // file:// inputs resolve through their local mapping before the
+    // existence check — classify() answers LocalFile for them, but
+    // QFileInfo on the raw URL always fails and used to end the step with
+    // "unidentifiable local input" (#1472 review; the same mapping the
+    // scenes loop below applies). Identity for every other spelling.
+    QString lookupPath = QgsDataSourceResolver::localPath( path );
     if ( kind == QgsDataSourceKind::LocalFile )
     {
-      if ( !QFileInfo( path ).isFile() )
-        return fail( QStringLiteral( "unidentifiable local input (missing file): %1" ).arg( path ) );
+      if ( !QFileInfo( lookupPath ).isFile() )
+        return fail( QStringLiteral( "unidentifiable local input (missing file): %1" )
+                       .arg( lookupPath ) );
       // Registered assets store a canonicalized source; compare canonically
       // so a symlinked/relative spelling still resolves (as lineage does).
-      const QString canonical = QFileInfo( path ).canonicalFilePath();
+      const QString canonical = QFileInfo( lookupPath ).canonicalFilePath();
       if ( !canonical.isEmpty() )
         lookupPath = canonical;
     }

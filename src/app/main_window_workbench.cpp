@@ -309,6 +309,10 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             QStringLiteral( "coregistr_tion" ),
             [this] { openGeorefDualWindow(); }, m_workbenchHost );
         bench->setWindowGetter( [this]() -> QWidget * { return m_georefDual; } );
+        // IWorkbench dirty contract: the window has no persistence of its
+        // own, so ANY collected GCP would be lost by a shutdown — the
+        // confirmWorkbenchShutdown prompt must see it (R10-B P1-2).
+        bench->setDirtyFn( [this] { return m_georefDual && m_georefDual->gcpTableRowCount() > 0; } );
         bench->setCloseFn( [this] {
             if ( !m_georefDual )
                 return true;

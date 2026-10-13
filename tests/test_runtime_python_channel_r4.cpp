@@ -285,6 +285,125 @@ TEST_CASE( "Channel errors surface as typed AwaitStatus values",
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #1462 — acquireWorker: bounded wait + atomic hand-out
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// A program + script pair whose spawned process STAYS ALIVE (the pool only
+/// hands out nodes whose worker isRunning), without needing real Python:
+///   POSIX   : /bin/sh  sleeper.sh   (sleep loop)
+///   Windows : cmd.exe  sleeper.bat  (ping loop; the pool appends
+///            "--socket <name>" which a .bat simply ignores via %*)
+/// The in-process fake worker below binds the node's IPC server, which is
+/// the remaining availability condition (hasClient()).
+#ifdef _WIN32
+const char *kSleeperInterpreter = "cmd.exe";
+// .bat: %* swallows the appended "--socket <name>" arguments.
+const char *kSleeperScriptBody =
+    "@echo off\r\n:loop\r\nping -n 6 127.0.0.1 >nul\r\ngoto loop\r\n";
+const char *kSleeperScriptName = "r4_sleeper.bat";
+#else
+const char *kSleeperInterpreter = "/bin/sh";
+const char *kSleeperScriptBody = "#!/bin/sh\nwhile true; do sleep 5; done\n";
+const char *kSleeperScriptName = "r4_sleeper.sh";
+#endif
+
+} // namespace
+
+TEST_CASE( "acquireWorker waits bounded and returns nullptr on timeout (#1462)",
+           "[runtime][python][r4][pool]" )
+{
+    // No worker is ever spawned: every node is unavailable, so the acquire
+    // must return nullptr after ITS timeout — the old 50×20 ms fixed spin
+    // (~1 s) ignored the caller's budget entirely.
+    PythonWorkerProcessPool pool( 2 );
+    // initialize may fail without a script; either way no node can gain a
+    // client, so nothing is acquirable below.
+    (void) pool.initialize( kSleeperInterpreter, QString() );
+
+    const auto started = std::chrono::steady_clock::now();
+    WorkerNode *node = pool.acquireWorker( 150 );
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - started )
+                               .count();
+    REQUIRE( node == nullptr );
+    // The bound is the caller's budget, not the old ~1000 ms floor: allow
+    // generous slack for a loaded host but reject the fixed 1 s spin.
+    CHECK( elapsedMs < 900 );
+    pool.shutdown();
+}
+
+TEST_CASE( "acquireWorker never hands the same node to two callers (#1462)",
+           "[runtime][python][r4][pool]" )
+{
+    ScriptFixture fixture;
+    const QString script = fixture.write( kSleeperScriptName, kSleeperScriptBody );
+
+    PythonWorkerProcessPool pool( 1 );
+    REQUIRE( pool.initialize( kSleeperInterpreter, script ) );
+
+    // Availability = running worker + connected client. The fake worker is
+    // the client; the socket name is the pool's deterministic
+    // sicnu_pool_<pid>_<id> scheme (id 1 = the first node).
+    QLocalSocket fakeWorker;
+    const QString serverName =
+        QStringLiteral( "sicnu_pool_%1_1" ).arg( QCoreApplication::applicationPid() );
+    fakeWorker.connectToServer( serverName );
+    WorkerNode *node = nullptr;
+    REQUIRE( waitUntil( [&] { return ( node = pool.acquireWorker() ) != nullptr; }, 15'000 ) );
+    REQUIRE( node != nullptr );
+    REQUIRE( node->server != nullptr );
+    pool.releaseWorker( node );
+
+    // Race detector: four threads contend for the ONE node, repeatedly. The
+    // #1462 defect was an unsynchronized check-then-mark, so two threads could
+    // both observe isBusy == false and both leave with the same node (two
+    // plugins crossing IPC channels on one worker).
+    constexpr int kRounds = 40;
+    constexpr int kThreads = 4;
+    std::atomic<int> doubleHandouts{ 0 };
+    std::atomic<int> served{ 0 };
+    for ( int round = 0; round < kRounds; ++round )
+    {
+        std::vector<std::atomic<WorkerNode *>> got( static_cast<size_t>( kThreads ) );
+        for ( auto &slot : got )
+            slot.store( nullptr );
+        std::vector<std::thread> acquirers;
+        for ( int t = 0; t < kThreads; ++t )
+        {
+            acquirers.emplace_back( [&, t] {
+                got[static_cast<size_t>( t )] = pool.acquireWorker( 200 );
+            } );
+        }
+        for ( std::thread &thread : acquirers )
+            thread.join();
+        WorkerNode *winner = nullptr;
+        int winners = 0;
+        for ( auto &slot : got )
+        {
+            if ( slot.load() )
+            {
+                winner = slot.load();
+                ++winners;
+            }
+        }
+        if ( winners > 1 )
+            ++doubleHandouts;
+        if ( winner )
+        {
+            ++served;
+            REQUIRE( winner == node ); // the only node in the pool
+            pool.releaseWorker( winner );
+        }
+    }
+    CHECK( doubleHandouts.load() == 0 );
+    CHECK( served.load() == kRounds ); // the node is reusable every round
+    fakeWorker.abort();
+    pool.shutdown();
+}
+
 TEST_CASE( "Pool crash reports carry the real exit classification and the captured stderr",
            "[runtime][python][r4]" )
 {

@@ -386,7 +386,7 @@ ResolvedCapabilities resolveDatasetCapabilities( const std::string &path )
     resolved.profileId = profile->id;
 
   QuietCplErrors quiet;
-  const std::string gdalPath = uri.canonical();
+  const std::string gdalPath = uri.gdalOpenTarget();
   GDALDatasetH dataset =
     GDALOpenEx( gdalPath.c_str(), GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
   if ( dataset == nullptr )

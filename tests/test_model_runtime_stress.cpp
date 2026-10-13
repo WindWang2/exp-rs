@@ -16,6 +16,7 @@
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <chrono>
 #include <numeric>
 #include <memory>
 #include <mutex>
@@ -404,4 +405,189 @@ TEST_CASE( "pool stress: the pressure valve never over-commits the ledger",
   const auto report = registry.deviceReport();
   REQUIRE_FALSE( report.empty() );
   CHECK( report.front().reservedMb <= report.front().capacityMb );
+}
+
+// --- R9 WP-D: same-key concurrent acquire coalescing -----------------------
+// PR #1469 review finding: a same-key cache miss held the registry lock only
+// until admission; the slow factory load ran UNLOCKED, so a second thread
+// acquiring the same model took its own admission (a false VRAM refusal when
+// the budget fits one session) and its own factory call (a duplicate weight
+// load). The contract under test: ONE load, ONE ledger ticket per key, and
+// waiters ride the loader's outcome — success or typed failure.
+
+namespace {
+
+/// Latch-controlled provider: every invocation counts, blocks until released,
+/// and (on demand) fails with an invocation-numbered error so broadcast vs.
+/// re-load is observable.
+struct LatchedProvider
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool released = false;
+    std::atomic<int> invocations{ 0 };
+    bool failEveryLoad = false;
+};
+
+void registerLatchedProvider( const std::string &framework, LatchedProvider &provider )
+{
+    ModelRuntimeRegistry::instance().registerProvider(
+        framework,
+        [ &provider, framework ]( const ModelInfo &model, const ModelHardwareCapabilities &,
+                       std::string *error ) -> ModelRuntimePtr {
+            const int invocation = provider.invocations.fetch_add( 1 ) + 1;
+            {
+                std::unique_lock<std::mutex> lock( provider.mutex );
+                provider.cv.wait( lock, [ &provider ] { return provider.released; } );
+            }
+            if ( provider.failEveryLoad )
+            {
+                if ( error )
+                    *error = "latched-failure-" + std::to_string( invocation );
+                return nullptr;
+            }
+            return std::make_shared<DeviceTaggedRuntime>( model.resolvedArtifactPath, framework,
+                                                          model.runtime.gpu
+                                                              ? "cuda:" + std::to_string( model.runtime.resolvedCudaIndex )
+                                                              : "cpu" );
+        },
+        ProviderTraits{ /*maxAddressableCudaIndex*/ 0 } );
+}
+
+void releaseLatchedProvider( LatchedProvider &provider )
+{
+    {
+        std::lock_guard<std::mutex> lock( provider.mutex );
+        provider.released = true;
+    }
+    provider.cv.notify_all();
+}
+
+/// Bounded spin until the loader thread is INSIDE the factory. A raw
+/// `while (invocations == 0) sleep(1ms)` would hang the suite forever if the
+/// loader died before entering it; this fails the case instead (R9 review).
+bool waitForLoadStart( LatchedProvider &provider, int attempts = 5000 )
+{
+    for ( int i = 0; i < attempts; ++i )
+    {
+        if ( provider.invocations.load() > 0 )
+            return true;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    }
+    return false;
+}
+
+} // namespace
+
+TEST_CASE( "same-key concurrent acquire: no false VRAM refusal, one ticket",
+           "[models][pool][concurrency]" )
+{
+    RegistryReset reset;
+    auto &registry = ModelRuntimeRegistry::instance();
+
+    // One GPU with 512 MiB; the model estimates 400 — fits ONCE, never twice.
+    ModelHardwareCapabilities hw;
+    hw.cudaAvailable = true;
+    hw.cudaRuntimeAvailable = true;
+    hw.cudaDeviceCount = 1;
+    hw.vramBudgetMb = 512;
+    hw.deviceTotalVramMb = { 512 };
+    hw.deviceFreeVramMb = { 512 };
+    const HardwarePin pin( hw );
+
+    LatchedProvider provider;
+    registerLatchedProvider( "coalescefw", provider );
+
+    QTemporaryDir dir;
+    ModelInfo model = stressModel( "coalesce-gpu", distinctArtifact( dir, "coalesce-gpu.onnx" ) );
+    model.framework = "coalescefw";
+    model.runtime.estimatedVramMb = 400;
+
+    ModelRuntimePtr first;
+    std::thread loader( [ & ] { first = registry.acquire( model ); } );
+    // Wait until the loader is INSIDE the factory (load in flight).
+    REQUIRE( waitForLoadStart( provider ) );
+
+    ModelRuntimePtr second;
+    std::string secondError;
+    std::thread peer( [ & ] { second = registry.acquire( model, &secondError ); } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+    releaseLatchedProvider( provider );
+    loader.join();
+    peer.join();
+
+    REQUIRE( first != nullptr );
+    // The peer must NOT be falsely refused ("device unavailable") while the
+    // identical session is being loaded, and must ride the same session.
+    REQUIRE( second != nullptr );
+    REQUIRE( secondError.empty() );
+    REQUIRE( second == first );
+    REQUIRE( provider.invocations.load() == 1 );
+    const auto report = registry.deviceReport();
+    REQUIRE_FALSE( report.empty() );
+    CHECK( report.front().reservedMb == 400 ); // one ticket, not two
+}
+
+TEST_CASE( "same-key concurrent acquire on cpu loads the weights once",
+           "[models][pool][concurrency]" )
+{
+    RegistryReset reset;
+    auto &registry = ModelRuntimeRegistry::instance();
+    LatchedProvider provider;
+    registerLatchedProvider( "coalescecpufw", provider );
+
+    QTemporaryDir dir;
+    ModelInfo model = stressModel( "coalesce-cpu", distinctArtifact( dir, "coalesce-cpu.onnx" ) );
+    model.framework = "coalescecpufw";
+    model.runtime.gpu = false; // CPU: admission is a no-op; the load still costs
+
+    ModelRuntimePtr first;
+    std::thread loader( [ & ] { first = registry.acquire( model ); } );
+    REQUIRE( waitForLoadStart( provider ) );
+
+    ModelRuntimePtr second;
+    std::thread peer( [ & ] { second = registry.acquire( model ); } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+    releaseLatchedProvider( provider );
+    loader.join();
+    peer.join();
+
+    REQUIRE( first != nullptr );
+    REQUIRE( second != nullptr );
+    REQUIRE( second == first );
+    // One factory call per key: the duplicate weight parse the raced-insert
+    // path used to pay is a coalesced wait now.
+    REQUIRE( provider.invocations.load() == 1 );
+}
+
+TEST_CASE( "a failed same-key load broadcasts its typed failure to waiters",
+           "[models][pool][concurrency]" )
+{
+    RegistryReset reset;
+    auto &registry = ModelRuntimeRegistry::instance();
+    LatchedProvider provider;
+    provider.failEveryLoad = true;
+    registerLatchedProvider( "coalescefailfw", provider );
+
+    QTemporaryDir dir;
+    ModelInfo model = stressModel( "coalesce-fail", distinctArtifact( dir, "coalesce-fail.onnx" ) );
+    model.framework = "coalescefailfw";
+    model.runtime.gpu = false;
+
+    std::string firstError;
+    std::thread loader( [ & ] { (void)registry.acquire( model, &firstError ); } );
+    REQUIRE( waitForLoadStart( provider ) );
+
+    std::string peerError;
+    std::thread peer( [ & ] { (void)registry.acquire( model, &peerError ); } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+    releaseLatchedProvider( provider );
+    loader.join();
+    peer.join();
+
+    REQUIRE( firstError.find( "latched-failure-1" ) != std::string::npos );
+    // The waiter receives the loader's OWN typed failure — it must not pay a
+    // second load attempt (which would surface as failure-2).
+    REQUIRE( peerError.find( "latched-failure-1" ) != std::string::npos );
+    REQUIRE( provider.invocations.load() == 1 );
 }

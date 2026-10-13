@@ -71,19 +71,21 @@ bool PythonWorkerProcessPool::initialize( const QString &pythonPath, const QStri
   m_scriptPath = scriptPath;
   m_shuttingDown = false;
 
+  int created = 0;
   for ( int i = 0; i < m_poolSize; ++i )
   {
     WorkerNode *node = createWorkerNode( m_nextWorkerId++ );
     if ( node )
     {
+      QMutexLocker lock( &m_nodesMutex );
       m_nodes.append( node );
+      ++created;
     }
   }
-  return !m_nodes.isEmpty();
+  return created > 0;
 }
 
-void PythonWorkerProcessPool::shutdown()
-{
+void PythonWorkerProcessPool::shutdown(){
   if ( m_shuttingDown )
     return;
   // A node lost during shutdown is an intended stop, not a channel failure:
@@ -103,7 +105,17 @@ void PythonWorkerProcessPool::shutdown()
   m_pendingRecovery.clear();
   for ( const auto &pending : survivors )
     failPendingRequests( *pending, QStringLiteral( "Worker pool is shutting down" ) );
-  for ( WorkerNode *node : m_nodes )
+  // Detach the node list first (#1462): the teardown below invokes request
+  // callbacks, which must never run under m_nodesMutex (they may re-enter
+  // the pool), and a concurrent acquireWorker must see an empty list rather
+  // than nodes mid-deletion.
+  QList<WorkerNode *> nodes;
+  {
+    QMutexLocker lock( &m_nodesMutex );
+    nodes = m_nodes;
+    m_nodes.clear();
+  }
+  for ( WorkerNode *node : nodes )
   {
     if ( node )
     {
@@ -128,48 +140,67 @@ void PythonWorkerProcessPool::shutdown()
       delete node;
     }
   }
-  m_nodes.clear();
 }
 
-WorkerNode *PythonWorkerProcessPool::acquireWorker()
+WorkerNode *PythonWorkerProcessPool::acquireWorker( int timeoutMs )
 {
   // processEvents() is only legal on the thread that owns the application
   // object; background callers must not spin the GUI event loop (#527).
-  const bool onMainThread = QThread::currentThread() == QCoreApplication::instance()->thread();
-  for ( int retry = 0; retry < 50; ++retry )
+  // A default-argument caller may run before any QCoreApplication exists
+  // (the pool is a plain QObject), so treat that as "not the main thread".
+  const bool onMainThread =
+      QCoreApplication::instance()
+      && QThread::currentThread() == QCoreApplication::instance()->thread();
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs > 0 ? timeoutMs : 0 );
+  for ( ;; )
   {
-    for ( WorkerNode *node : m_nodes )
-    {
-      if ( node && !node->isBusy && node->worker && node->worker->isRunning() && node->server && node->server->hasClient() )
+      QMutexLocker lock( &m_nodesMutex );
+      for ( WorkerNode *node : m_nodes )
       {
-        node->isBusy = true;
-        return node;
+        if ( node && !node->isBusy.load( std::memory_order_relaxed ) &&
+             !node->isRestarting.load( std::memory_order_acquire ) &&
+             node->worker && node->worker->isRunning() &&
+             node->server && node->server->hasClient() )
+        {
+          node->isBusy.store( true, std::memory_order_release );
+          return node;
+        }
       }
     }
+    if ( std::chrono::steady_clock::now() >= deadline )
+      return nullptr;
     if ( onMainThread )
       QCoreApplication::processEvents();
     std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
   }
-  return nullptr;
 }
 
 void PythonWorkerProcessPool::releaseWorker( WorkerNode *node )
 {
   if ( node )
   {
-    node->isBusy = false;
+    QMutexLocker lock( &m_nodesMutex );
+    node->isBusy.store( false, std::memory_order_release );
     // Dead-worker recycling: a worker that survived a full job cycle earns
     // back one crash-restart step (bounded by the budget it started with), so
     // a long-lived pool's nodes are not retired over transient crashes that
     // happened long ago. The cumulative restartCount stays untouched — it is
     // the health metric, not the budget.
-    if ( node->worker && node->worker->isRunning() && node->crashBudgetLeft < kMaxWorkerCrashRestarts )
-      node->crashBudgetLeft++;
+    if ( node->worker && node->worker->isRunning() )
+    {
+      int current = node->crashBudgetLeft.load( std::memory_order_relaxed );
+      while ( current < kMaxWorkerCrashRestarts &&
+              !node->crashBudgetLeft.compare_exchange_weak( current, current + 1, std::memory_order_release, std::memory_order_relaxed ) )
+      {
+      }
+    }
   }
 }
 
 int PythonWorkerProcessPool::activeWorkerCount() const
 {
+  QMutexLocker lock( &m_nodesMutex );
   int count = 0;
   for ( const WorkerNode *node : m_nodes )
   {
@@ -188,67 +219,81 @@ bool PythonWorkerProcessPool::setPoolSize( int newSize )
 
   if ( newSize > m_poolSize )
   {
-    // ── Grow: add new worker nodes ──
+    // ── Grow: add new worker nodes ── (createWorkerNode spawns processes —
+    // keep the slow part outside m_nodesMutex.)
+    QList<WorkerNode *> created;
     for ( int i = m_poolSize; i < newSize; ++i )
     {
       WorkerNode *node = createWorkerNode( m_nextWorkerId++ );
       if ( node )
-        m_nodes.append( node );
+        created.append( node );
     }
+    QMutexLocker lock( &m_nodesMutex );
+    m_nodes.append( created );
   }
   else if ( newSize < m_poolSize )
   {
     // ── Shrink: remove idle (non-busy) nodes from the tail ──
-    const int excessNodes = (std::max)( 0, static_cast<int>( m_nodes.size() ) - newSize );
-
-    // Upfront transactional check: ensure enough idle nodes exist before mutating
-    int availableIdle = 0;
-    for ( const WorkerNode *node : m_nodes )
+    QList<WorkerNode *> removed;
     {
-      if ( node && !node->isBusy && !node->isRestarting )
-        availableIdle++;
-    }
-    if ( availableIdle < excessNodes )
-      return false;
+      QMutexLocker lock( &m_nodesMutex );
+      const int excessNodes = (std::max)( 0, static_cast<int>( m_nodes.size() ) - newSize );
 
-    int toRemove = excessNodes;
-    for ( int i = m_nodes.size() - 1; i >= 0 && toRemove > 0; --i )
-    {
-      WorkerNode *node = m_nodes[i];
-      // Skip busy and mid-restart nodes — a pending restart timer still
-      // holds the id; removing the node makes the timer bail (#1095a).
-      if ( node && !node->isBusy && !node->isRestarting )
+      // Upfront transactional check: ensure enough idle nodes exist before mutating
+      int availableIdle = 0;
+      for ( const WorkerNode *node : m_nodes )
       {
-        // An idle node can still hold UNANSWERED requests (the owner released
-        // it while a response was in flight). Deleting the server would leak
-        // those callbacks mid-air; answer them typed instead. The same for a
-        // recovery entry already waiting on this node's backoff timer —
-        // without this the entry would be orphaned by the deletion (its
-        // watchdog dies with the server).
-        if ( node->server )
-        {
-          failPendingRequests( node->server->takeInFlightRequests(),
-                               QStringLiteral( "Worker removed during pool resize" ) );
-          node->server->disconnect();
-          node->server->close();
-          delete node->server;
-        }
-        const auto pendingEntry = m_pendingRecovery.find( node->id );
-        if ( pendingEntry != m_pendingRecovery.end() )
-        {
-          failPendingRequests( *pendingEntry->second, QStringLiteral( "Worker removed during pool resize" ) );
-          m_pendingRecovery.erase( pendingEntry );
-        }
-        if ( node->worker )
-        {
-          node->worker->disconnect();
-          node->worker->stopWorker();
-          delete node->worker;
-        }
-        delete node;
-        m_nodes.removeAt( i );
-        --toRemove;
+        if ( node && !node->isBusy && !node->isRestarting )
+          availableIdle++;
       }
+      if ( availableIdle < excessNodes )
+        return false;
+
+      int toRemove = excessNodes;
+      for ( int i = m_nodes.size() - 1; i >= 0 && toRemove > 0; --i )
+      {
+        WorkerNode *node = m_nodes[i];
+        // Skip busy and mid-restart nodes — a pending restart timer still
+        // holds the id; removing the node makes the timer bail (#1095a).
+        if ( node && !node->isBusy && !node->isRestarting )
+        {
+          removed.append( node );
+          m_nodes.removeAt( i );
+          --toRemove;
+        }
+      }
+    }
+    // Teardown runs OUTSIDE the lock: it answers in-flight request
+    // callbacks, which must never run under m_nodesMutex (#1462).
+    for ( WorkerNode *node : removed )
+    {
+      // An idle node can still hold UNANSWERED requests (the owner released
+      // it while a response was in flight). Deleting the server would leak
+      // those callbacks mid-air; answer them typed instead. The same for a
+      // recovery entry already waiting on this node's backoff timer —
+      // without this the entry would be orphaned by the deletion (its
+      // watchdog dies with the server).
+      if ( node->server )
+      {
+        failPendingRequests( node->server->takeInFlightRequests(),
+                             QStringLiteral( "Worker removed during pool resize" ) );
+        node->server->disconnect();
+        node->server->close();
+        delete node->server;
+      }
+      const auto pendingEntry = m_pendingRecovery.find( node->id );
+      if ( pendingEntry != m_pendingRecovery.end() )
+      {
+        failPendingRequests( *pendingEntry->second, QStringLiteral( "Worker removed during pool resize" ) );
+        m_pendingRecovery.erase( pendingEntry );
+      }
+      if ( node->worker )
+      {
+        node->worker->disconnect();
+        node->worker->stopWorker();
+        delete node->worker;
+      }
+      delete node;
     }
   }
 
@@ -258,6 +303,7 @@ bool PythonWorkerProcessPool::setPoolSize( int newSize )
 
 int PythonWorkerProcessPool::availableWorkerCount() const
 {
+  QMutexLocker lock( &m_nodesMutex );
   int count = 0;
   for ( const WorkerNode *node : m_nodes )
   {
@@ -276,6 +322,7 @@ int PythonWorkerProcessPool::availableWorkerCount() const
 
 PoolHealthSnapshot PythonWorkerProcessPool::poolHealth() const
 {
+  QMutexLocker lock( &m_nodesMutex );
   PoolHealthSnapshot snapshot;
   snapshot.total = m_nodes.size();
   for ( const WorkerNode *node : m_nodes )
@@ -314,13 +361,24 @@ WorkerNode *PythonWorkerProcessPool::createWorkerNode( int id )
 
   bindNodeSignals( node );
 
-  node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
+  if ( !node->worker->startWorker( socketName, m_pythonPath, m_scriptPath ) )
+  {
+    node->worker->disconnect();
+    node->server->disconnect();
+    node->server->close();
+    delete node->server;
+    delete node->worker;
+    delete node;
+    return nullptr;
+  }
+
   armHandshakeWatchdog( node );
   return node;
 }
 
 WorkerNode *PythonWorkerProcessPool::findNodeById( int id ) const
 {
+  QMutexLocker lock( &m_nodesMutex );
   for ( WorkerNode *candidate : m_nodes )
   {
     if ( candidate && candidate->id == id )
@@ -535,7 +593,7 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
   QString socketName = QString( "sicnu_pool_%1_%2_%3" )
                          .arg( QCoreApplication::applicationPid() )
                          .arg( id )
-                         .arg( node->restartCount );
+                         .arg( node->restartCount.load() );
   node->server = new PythonIpcServer();
   node->worker = new PythonWorkerProcess();
   node->isBusy = wasBusy;

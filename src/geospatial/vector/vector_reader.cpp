@@ -11,6 +11,7 @@
 #include <cpl_error.h>
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/util/resource_uri.h"
 
 #include <gdal.h>
 #include <ogr_api.h>
@@ -56,11 +57,14 @@ VectorReader VectorReader::open( const std::string &path, const std::string &lay
 
   ensureGdalRegistered();
   QuietCplErrors quiet;
-  GDALDatasetH handle = GDALOpenEx( path.c_str(), GDAL_OF_READONLY | GDAL_OF_VECTOR, nullptr, nullptr, nullptr );
+  const std::string gdalPath = ResourceUri::toGdalPath( path );
+  GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_VECTOR, nullptr, nullptr, nullptr );
   if ( !handle )
   {
     Json::Value details;
     details["path"] = path;
+    if ( gdalPath != path )
+      details["resolved_path"] = gdalPath;
     const char *lastError = CPLGetLastErrorMsg();
     if ( lastError && *lastError )
       details["gdal_error"] = lastError;

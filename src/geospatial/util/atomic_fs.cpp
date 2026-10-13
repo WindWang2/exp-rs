@@ -374,35 +374,57 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   const std::string mainBackup = targetMainPath + ".bak";
   std::vector<std::string> published;
   auto cleanup = [ & ]( const std::string &failedName ) {
+    std::vector<std::string> restoreFailures;
     for ( const std::string &done : published )
       removeFileQuiet( done );
     // Restore every backed-up member (the previous good group): the MAIN
     // target first (it is the completeness marker), then the sidecars.
     // #791 review: a failed restore must NOT drop the backup — that would
-    // destroy the last copy of the previous good main file.
+    // destroy the last copy of the previous good file.
+    bool mainRestored = false;
     if ( hadMainTarget && fileExists( mainBackup ) )
     {
       removeFileQuiet( targetMainPath );
       if ( !renameReplaceQuiet( mainBackup, targetMainPath ) )
-        throw GeoError( ErrorCode::IoError,
-                        "group publish failed at " + failedName +
-                            "; the previous main file could not be restored from " + mainBackup );
+        restoreFailures.push_back( mainBackup + " -> " + targetMainPath );
+      else
+        mainRestored = true;
     }
+    std::vector<bool> sidecarsRestored( targetSidecars.size(), false );
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
     {
       const std::string backup = targetSidecars[i] + ".bak";
       if ( hadTarget[i] && fileExists( backup ) )
       {
         removeFileQuiet( targetSidecars[i] );
-        renameReplaceQuiet( backup, targetSidecars[i] );
+        if ( !renameReplaceQuiet( backup, targetSidecars[i] ) )
+          restoreFailures.push_back( backup + " -> " + targetSidecars[i] );
+        else
+          sidecarsRestored[i] = true;
       }
     }
-    // Drop any leftover backup copies.
-    removeFileQuiet( mainBackup );
+    // Drop backup copies ONLY if the target was successfully restored (or wasn't backed up)
+    if ( !hadMainTarget || mainRestored )
+      removeFileQuiet( mainBackup );
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
-      removeFileQuiet( targetSidecars[i] + ".bak" );
+    {
+      if ( !hadTarget[i] || sidecarsRestored[i] )
+        removeFileQuiet( targetSidecars[i] + ".bak" );
+    }
+
     Json::Value details;
     details["failed_member"] = failedName;
+    if ( !restoreFailures.empty() )
+    {
+      Json::Value fails( Json::arrayValue );
+      for ( const auto &f : restoreFailures )
+        fails.append( f );
+      details["restore_failures"] = fails;
+      throw GeoError( ErrorCode::IoError,
+                      "group publish failed at " + failedName +
+                          "; target group rollback encountered restore failures",
+                      details );
+    }
     throw GeoError( ErrorCode::IoError, "group publish failed at " + failedName + "; target group rolled back", details );
   };
 
@@ -470,13 +492,12 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
   std::vector<bool> hadTarget( live.size(), false );
   std::vector<std::string> published;
   auto cleanup = [ & ]( const std::string &failedName ) {
+    std::vector<std::string> restoreFailures;
     for ( const std::string &done : published )
       removeFileQuiet( done );
     // Restore backups for every member that had a prior target (main first
-    // among restores when it is last in live — walk reverse so main restores
-    // before dependents that may reference it? Actually restore in reverse
-    // publish order: last published removed first above; restore originals
-    // in original index order with main (last) restored first for presence).
+    // among restores when it is last in live, then dependents).
+    std::vector<bool> restored( live.size(), false );
     if ( !live.empty() )
     {
       const std::size_t mainIdx = live.size() - 1;
@@ -485,9 +506,9 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
       {
         removeFileQuiet( live[mainIdx].second );
         if ( !renameReplaceQuiet( mainBackup, live[mainIdx].second ) )
-          throw GeoError( ErrorCode::IoError,
-                          "group publish failed at " + failedName +
-                              "; the previous main file could not be restored from " + mainBackup );
+          restoreFailures.push_back( mainBackup + " -> " + live[mainIdx].second );
+        else
+          restored[mainIdx] = true;
       }
       for ( std::size_t i = 0; i + 1 < live.size(); ++i )
       {
@@ -495,14 +516,33 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
         if ( hadTarget[i] && fileExists( backup ) )
         {
           removeFileQuiet( live[i].second );
-          renameReplaceQuiet( backup, live[i].second );
+          if ( !renameReplaceQuiet( backup, live[i].second ) )
+            restoreFailures.push_back( backup + " -> " + live[i].second );
+          else
+            restored[i] = true;
         }
       }
     }
-    for ( const auto &m : live )
-      removeFileQuiet( m.second + ".bak" );
+    // Drop backup copies ONLY if the target file was successfully restored or wasn't backed up
+    for ( std::size_t i = 0; i < live.size(); ++i )
+    {
+      if ( !hadTarget[i] || ( i < restored.size() && restored[i] ) )
+        removeFileQuiet( live[i].second + ".bak" );
+    }
+
     Json::Value details;
     details["failed_member"] = failedName;
+    if ( !restoreFailures.empty() )
+    {
+      Json::Value fails( Json::arrayValue );
+      for ( const auto &f : restoreFailures )
+        fails.append( f );
+      details["restore_failures"] = fails;
+      throw GeoError( ErrorCode::IoError,
+                      "group publish failed at " + failedName +
+                          "; target group rollback encountered restore failures",
+                      details );
+    }
     throw GeoError( ErrorCode::IoError, "group publish failed at " + failedName + "; target group rolled back", details );
   };
 

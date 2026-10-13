@@ -7,6 +7,7 @@
 // into C++ memory to count buckets. Facet writes attach to DRAFT versions
 // only — facets describe content and committed versions are frozen.
 #include "dataset_store_impl.h"
+#include <QDebug>
 #include <QJsonArray>
 
 #include <QDateTime>
@@ -187,6 +188,13 @@ sicnu::data::Result<DatasetStore::FacetDistribution> DatasetStore::facetDistribu
         distribution.values.append( qMakePair( values.text( 0 ), values.i64( 1 ) ) );
         reported += values.i64( 1 );
     }
+    // After the loop, not inside: a mid-scan ERROR (CORRUPT/IOERR) must
+    // fail the distribution instead of returning a silently partial
+    // histogram with an "(other)" remainder computed from it
+    // (#1448/#1457 — same contract as the dataset listing).
+    if ( values.stepFailed() )
+        return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           values.error( m_impl->db ) ) );
     if ( reported < distribution.total )
         distribution.values.append(
             qMakePair( QStringLiteral( "(other)" ), distribution.total - reported ) );
@@ -221,6 +229,11 @@ sicnu::data::Result<QVector<QPair<QPair<QString, QString>, qint64>>> DatasetStor
     while ( cells.stepRow() )
         out.append( qMakePair( qMakePair( cells.text( 0 ), cells.text( 1 ) ),
                                cells.i64( 2 ) ) );
+    // Mid-scan ERROR fails the cross-count instead of returning silently
+    // partial cells (#1448/#1457 contract).
+    if ( cells.stepFailed() )
+        return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           cells.error( m_impl->db ) ) );
     return Result::success( out );
 }
 
@@ -239,6 +252,16 @@ QVector<QString> DatasetStore::facetNames( const DatasetVersionId &versionId, qi
     stmt.bind( 2, limit );
     while ( stmt.stepRow() )
         names.append( stmt.text( 0 ) );
+    // Loud-subset contract (the signature returns a bare list — same call as
+    // splitManifestsForVersion): a mid-scan sqlite ERROR must not read as
+    // "no more rows" (#1448/#1457).
+    if ( stmt.stepFailed() )
+    {
+        qWarning( "dataset.facet_names_scan_failed: version %s sqlite scan ended with"
+                  " error (%s); the returned names are a SUBSET of the stored facets",
+                  qUtf8Printable( versionId.toString() ),
+                  qUtf8Printable( stmt.error( m_impl->db ) ) );
+    }
     return names;
 }
 

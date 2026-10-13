@@ -6,6 +6,7 @@
 #include <QMessageBox>
 #include <QAction>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QDir>
 #include <QTemporaryFile>
@@ -143,6 +144,12 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
   }
 
   QFileInfo fileInfo( filePath );
+  if ( fileInfo.isDir() )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Target is a directory: %1" ).arg( filePath );
+    return false;
+  }
   QDir parentDir = fileInfo.dir();
   if ( !parentDir.exists() )
   {
@@ -285,7 +292,7 @@ void PipelineEditorDock::onSaveClicked()
   baseDef.title = "Exported Pipeline";
 
   WorkflowDefinition exported = mCanvasWidget->exportWorkflowDefinition( baseDef );
-  Json::Value root = workflowDefinitionToJson( exported );
+  const Json::Value root = workflowDefinitionToJson( exported );
 
   QString err;
   if ( !writePipelineDefinitionFile( fileName, root, &err ) )
@@ -296,6 +303,14 @@ void PipelineEditorDock::onSaveClicked()
 
   QMessageBox::information( this, tr( "Succeeded" ), tr( "Pipeline definition saved to: %1" ).arg( fileName ) );
   emit saveWorkflowRequested();
+}
+
+bool writePipelineDefinitionFile( const QString &path,
+                                  const sicnu::workflow::WorkflowDefinition &def,
+                                  QString *error )
+{
+  const Json::Value root = workflowDefinitionToJson( def );
+  return PipelineEditorDock::writePipelineDefinitionFile( path, root, error );
 }
 
 void PipelineEditorDock::onRunFullClicked()

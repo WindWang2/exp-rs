@@ -6,6 +6,34 @@
 
 #include "app/shell/schema_form_builder.h"
 #include "app/shell/workflow_session_controller.h"
+#include "app/shell/task_panel_host.h"
+#include "processing/framework/task_center.h"
+
+namespace
+{
+// TaskPanelHost is a QWidget: every case that binds a panel needs a
+// QApplication first (a later case may be the first to construct one).
+void ensureApp()
+{
+    if ( !qApp )
+    {
+        static int argc = 1;
+        static char a0[] = "test_workflow_session_controller";
+        char *argv[] = { a0, nullptr };
+        new QApplication( argc, argv );
+    }
+}
+
+// The submit/cancel paths drive the TaskCenter singleton. Without a clean
+// shutdown on both sides of a case, in-flight worker records outlive the
+// test binary's teardown and the process segfaults at exit — the pattern
+// test_agent_ops_task_center_executor.cpp already uses.
+struct TaskCenterGuard
+{
+    TaskCenterGuard() { sicnu::TaskCenter::instance().shutdownForTests(); }
+    ~TaskCenterGuard() { sicnu::TaskCenter::instance().shutdownForTests(); }
+};
+} // namespace
 
 TEST_CASE( "WorkflowSessionController default state queries return clean initial values", "[workflow][shell][controller]" )
 {
@@ -37,26 +65,32 @@ TEST_CASE( "WorkflowSessionController cancelActiveRun resets state cleanly when 
 
 TEST_CASE( "WorkflowSessionController cancelActiveRun cancels in-flight pipeline run", "[workflow][shell][controller]" )
 {
+    ensureApp();
+    TaskCenterGuard taskGuard;
   WorkflowSessionController controller;
-  controller.registerBuiltins();
+  // Heap + explicit delete: a stack QWidget outliving Catch2's teardown of
+  // the QApplication this binary lazily constructs segfaults at exit.
+  auto *panel = new TaskPanelHost();
+  controller.bindPanel( panel );
 
-  const QString sessionId = controller.openTool( QStringLiteral( "wf:vegetation_indices" ) );
-  if ( !sessionId.isEmpty() )
-  {
-    controller.runFullWorkflow();
-    if ( controller.isRunInFlight() )
-    {
-      CHECK( ( controller.activePipelineId() >= 0 || controller.pendingTaskId() >= 0 ) );
-      controller.cancelActiveRun();
-      CHECK_FALSE( controller.isRunInFlight() );
-      CHECK( controller.activePipelineId() == -1 );
-      CHECK( controller.pendingTaskId() == -1 );
+  // R10-B: the old "wf:vegetation_indices" id does not exist anywhere in
+  // the source, so this case used to vacuate. This is a definition
+  // registerBuiltins() really registers (builtin_definitions.cpp).
+  const QString sessionId = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
+  REQUIRE( !sessionId.isEmpty() );
 
-      // Safe idempotent cancel
-      controller.cancelActiveRun();
-      CHECK_FALSE( controller.isRunInFlight() );
-    }
-  }
+  controller.runFullWorkflow();
+  REQUIRE( controller.isRunInFlight() );
+  CHECK( ( controller.activePipelineId() >= 0 || controller.pendingTaskId() >= 0 ) );
+  controller.cancelActiveRun();
+  CHECK_FALSE( controller.isRunInFlight() );
+  CHECK( controller.activePipelineId() == -1 );
+  CHECK( controller.pendingTaskId() == -1 );
+
+  // Safe idempotent cancel
+  controller.cancelActiveRun();
+  CHECK_FALSE( controller.isRunInFlight() );
+  delete panel;
 }
 
 // Restored regression home (#595): SchemaFormBuilder must round-trip ARRAY
@@ -101,4 +135,73 @@ TEST_CASE("SchemaFormBuilder round-trips array parameters as arrays (#595)", "[s
     REQUIRE(out["bands"].size() == 3);
     REQUIRE(out["bands"][0].asInt() == 1);
     REQUIRE(out["bands"][2].asInt() == 3);
+}
+
+// R10-B P1-1: runFullWorkflow/runUpToNode had no in-flight guard — a second
+// click submitted a SECOND tracked pipeline, overwrote activePipelineId and
+// orphaned the first run (Stop could only cancel the latest). Both entries
+// now refuse while m_runInFlight, mirroring onRunClicked.
+TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in flight",
+           "[workflow][shell][controller][r10b]" )
+{
+    ensureApp();
+    TaskCenterGuard taskGuard;
+  WorkflowSessionController controller;
+  // Heap + explicit delete: a stack QWidget outliving Catch2's teardown of
+  // the QApplication this binary lazily constructs segfaults at exit.
+  auto *panel = new TaskPanelHost();
+  controller.bindPanel( panel );
+  controller.registerBuiltins();
+
+    // Real definition registered by registerBuiltins() (builtin_definitions.cpp)
+    // — the old "wf:vegetation_indices" id exists nowhere in the source, so
+    // the previous setup vacated this whole test case.
+    const QString sessionId = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
+    REQUIRE( !sessionId.isEmpty() );
+
+    QStringList messages;
+    QObject::connect( &controller, &WorkflowSessionController::statusMessage,
+                      [&messages]( const QString &m ) { messages << m; });
+
+    controller.runFullWorkflow();
+    // REQUIRE, not CHECK-in-if: a submission that never armed the guard
+    // would silently vacuate every assertion below.
+    REQUIRE( controller.isRunInFlight() );
+    {
+        const int pipelineBefore = controller.activePipelineId();
+
+        // Second full submission: refused, id not overwritten, typed message.
+        controller.runFullWorkflow();
+        CHECK( controller.isRunInFlight() );
+        CHECK( controller.activePipelineId() == pipelineBefore );
+        bool sawRefusal = false;
+        for ( const QString &m : messages )
+        {
+            if ( m.contains( QLatin1String( "already in flight" ) ) )
+                sawRefusal = true;
+        }
+        REQUIRE( sawRefusal );
+
+        // Partial-DAG entry shares the guard.
+        messages.clear();
+        controller.runUpToNode( QStringLiteral( "step_that_does_not_matter" ) );
+        CHECK( controller.isRunInFlight() );
+        CHECK( controller.activePipelineId() == pipelineBefore );
+        sawRefusal = false;
+        for ( const QString &m : messages )
+        {
+            if ( m.contains( QLatin1String( "already in flight" ) ) )
+                sawRefusal = true;
+        }
+        REQUIRE( sawRefusal );
+
+        // The guard is recoverable, not a dead end: cancel re-arms submission.
+        controller.cancelActiveRun();
+        REQUIRE_FALSE( controller.isRunInFlight() );
+        controller.runFullWorkflow();
+        REQUIRE( controller.isRunInFlight() );
+        controller.cancelActiveRun();
+        REQUIRE_FALSE( controller.isRunInFlight() );
+    }
+    delete panel;
 }

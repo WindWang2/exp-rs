@@ -31,6 +31,31 @@ bool unmix( const float *pixels, size_t count, int bands,
         return false;
     }
 
+    for ( size_t i = 0; i < static_cast<size_t>( nEndmembers ) * bands; ++i )
+    {
+        if ( !std::isfinite( endmembers[i] ) )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Endmember contains non-finite values" );
+            return false;
+        }
+    }
+    for ( int e = 0; e < nEndmembers; ++e )
+    {
+        double energy = 0.0;
+        for ( int b = 0; b < bands; ++b )
+        {
+            const double v = static_cast<double>( endmembers[static_cast<size_t>( e ) * bands + b] );
+            energy += v * v;
+        }
+        if ( energy <= 0.0 )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Endmember %1 has zero energy across all bands" ).arg( e );
+            return false;
+        }
+    }
+
     result->abundances.assign( count * static_cast<size_t>( nEndmembers ), 0.0f );
     result->reconstructionError.assign( count, 0.0f );
 
@@ -368,6 +393,16 @@ bool unmixFcls( const float *pixels, size_t count, int bands,
         if ( errorMessage )
             *errorMessage = QStringLiteral( "Invalid FCLS unmixing arguments" );
         return false;
+    }
+
+    for ( size_t i = 0; i < static_cast<size_t>( nEndmembers ) * bands; ++i )
+    {
+        if ( !std::isfinite( endmembers[i] ) )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Endmember contains non-finite values" );
+            return false;
+        }
     }
 
     // Fail-closed guards: zero-norm endmembers and collinear (rank-deficient)

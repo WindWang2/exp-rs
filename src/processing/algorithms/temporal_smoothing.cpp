@@ -107,6 +107,8 @@ std::vector<float> whittakerSmooth( const std::vector<float> &y, const std::vect
     const std::size_t n = y.size();
     if ( n == 0 )
         return {};
+    if ( !w.empty() && w.size() != n )
+        return {};
     if ( d != 1 && d != 2 )
         return {};
     if ( lambda < 0.0 || !std::isfinite( lambda ) )

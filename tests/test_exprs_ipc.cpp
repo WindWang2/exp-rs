@@ -399,6 +399,127 @@ TEST_CASE( "channel interleaves progress events with the response", "[ipc][chann
     serve.join();
 }
 
+TEST_CASE( "pre-sink events replay in order before live delivery", "[ipc][channel]" )
+{
+    std::unique_ptr<IIpcStream> hostSide;
+    std::unique_ptr<IIpcStream> workerSide;
+    makeIpcMemoryPipePair( hostSide, workerSide );
+
+    IpcChannel host( std::move( hostSide ) );
+    IpcChannel worker( std::move( workerSide ) );
+
+    std::thread serve( [&worker] {
+        Ipc::Envelope request;
+        while ( worker.nextRequest( request, 2000 ) )
+        {
+            std::string sendError;
+            worker.sendResponse( request.id, request.params, sendError );
+        }
+    } );
+
+    // "queued" is sent while NO sink exists; the request round-trip that
+    // follows is the barrier: once it answers, the reader has processed the
+    // event frame, and — no sink installed — parked it in the pending queue.
+    REQUIRE( worker.sendEvent( "worker.hello", objectWith( "seq", "queued" ) ) );
+    REQUIRE( host.request( "echo", {}, 2000 ).status == IpcChannel::Outcome::Status::Ok );
+
+    std::vector<std::string> order;
+    std::mutex orderMutex;
+    host.setEventSink( [&]( const Ipc::Envelope &event ) {
+        std::lock_guard<std::mutex> lock( orderMutex );
+        order.push_back( event.params["seq"].asString() );
+    } );
+
+    // "live" arrives after the sink is installed and must not overtake the
+    // queued event replayed above it (#1449 hello-first ordering).
+    REQUIRE( worker.sendEvent( "worker.hello", objectWith( "seq", "live" ) ) );
+    for ( int waited = 0; waited < 100; ++waited )
+    {
+        std::lock_guard<std::mutex> lock( orderMutex );
+        if ( order.size() == 2 )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+    }
+    {
+        std::lock_guard<std::mutex> lock( orderMutex );
+        REQUIRE( order.size() == 2 );
+        REQUIRE( order[0] == "queued" );
+        REQUIRE( order[1] == "live" );
+    }
+
+    host.close();
+    worker.close();
+    serve.join();
+}
+
+TEST_CASE( "event-sink replay tolerates re-entrant channel calls", "[ipc][channel]" )
+{
+    std::unique_ptr<IIpcStream> hostSide;
+    std::unique_ptr<IIpcStream> workerSide;
+    makeIpcMemoryPipePair( hostSide, workerSide );
+
+    // Raw pointer ownership: on the pre-fix deadlock path the installer
+    // thread is wedged inside the channel holding its state lock — the
+    // destructor would hang too, so the channel is deliberately leaked and
+    // only the typed REQUIRE below reports the failure. On the fixed path
+    // the unique_ptr cleans up normally.
+    auto host = std::make_unique<IpcChannel>( std::move( hostSide ) );
+    IpcChannel * const hostRaw = host.get();
+    IpcChannel worker( std::move( workerSide ) );
+
+    std::thread serve( [&worker] {
+        Ipc::Envelope request;
+        while ( worker.nextRequest( request, 2000 ) )
+        {
+            std::string sendError;
+            worker.sendResponse( request.id, request.params, sendError );
+        }
+    } );
+
+    for ( int i = 0; i < 3; ++i )
+        REQUIRE( worker.sendEvent( "worker.hello", objectWith( "seq", std::to_string( i ) ) ) );
+    // Barrier: the response is the 4th frame, so once the request answers,
+    // all three events are parked in the pending queue.
+    REQUIRE( host->request( "echo", {}, 2000 ).status == IpcChannel::Outcome::Status::Ok );
+
+    std::atomic<int> delivered{ 0 };
+    std::atomic<bool> reentered{ false };
+    std::atomic<bool> installed{ false };
+    std::thread installer( [&] {
+        host->setEventSink( [&]( const Ipc::Envelope & ) {
+            if ( delivered.fetch_add( 1 ) == 0 )
+            {
+                // Re-enter the channel from inside a replayed callback: both
+                // calls take the channel state lock and self-deadlocked when
+                // the replay still ran under it (PR #1469 review finding).
+                (void) hostRaw->protocolFailure();
+                hostRaw->close();
+                reentered = true;
+            }
+        } );
+        installed = true;
+    } );
+
+    for ( int waited = 0; waited < 100 && !installed.load(); ++waited )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+    if ( !installed.load() )
+    {
+        // Pre-fix deadlock: leave the wedged thread and the channel (it
+        // holds the state lock; joining or destroying either would hang)
+        // and let the REQUIRE report the failure.
+        installer.detach();
+        host.release();
+    }
+    REQUIRE( installed.load() );
+    installer.join();
+    REQUIRE( reentered.load() );
+    REQUIRE( delivered.load() == 3 );
+    REQUIRE_FALSE( host->isOpen() );
+
+    worker.close();
+    serve.join();
+}
+
 TEST_CASE( "a protocol-corrupting peer closes the channel with E6002", "[ipc][channel]" )
 {
     std::unique_ptr<IIpcStream> hostSide;
@@ -814,4 +935,48 @@ TEST_CASE( "concurrent close() calls never throw and always reap the reader",
         channel.reset(); // destructor re-enters close() — must stay quiet
         b->close();
     }
+}
+
+TEST_CASE( "request with empty method fails closed immediately with E6002",
+           "[ipc][channel][validation]" )
+{
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+    IpcChannel channel( std::move( a ) );
+
+    IpcChannel::Outcome outcome = channel.request( "", Json::Value(), 100 );
+    REQUIRE( outcome.status == IpcChannel::Outcome::Status::ProtocolError );
+    REQUIRE( outcome.statusCode() == "E6002" );
+}
+
+TEST_CASE( "incoming request queue cap bounds memory and answers backpressure E6008",
+           "[ipc][channel][backpressure]" )
+{
+    std::unique_ptr<IIpcStream> clientStream;
+    std::unique_ptr<IIpcStream> serverStream;
+    makeIpcMemoryPipePair( clientStream, serverStream );
+
+    IpcChannel::Options serverOpts;
+    serverOpts.maxQueuedRequests = 1;
+    IpcChannel server( std::move( serverStream ), serverOpts );
+    IpcChannel client( std::move( clientStream ) );
+
+    std::thread t1( [&] {
+        client.request( "heavy_task", objectWith( "k", "1" ), 500 );
+    } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+
+    IpcChannel::Outcome outcome2 = client.request( "heavy_task", objectWith( "k", "2" ), 500 );
+    REQUIRE( outcome2.status == IpcChannel::Outcome::Status::Error );
+    REQUIRE( outcome2.statusCode() == "E6008" );
+    REQUIRE( outcome2.error.retryable == true );
+    REQUIRE( server.droppedRequests() >= 1 );
+
+    Ipc::Envelope req;
+    REQUIRE( server.nextRequest( req, 500 ) );
+    std::string err;
+    server.sendResponse( req.id, objectWith( "status", "ok" ), err );
+
+    t1.join();
 }

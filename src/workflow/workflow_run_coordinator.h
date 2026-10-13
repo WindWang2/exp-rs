@@ -278,6 +278,7 @@ class WorkflowRunCoordinator : public QObject {
     std::atomic<int> m_checkpointIoDelayMs{ 0 };
     std::atomic<int> m_checkpointLoadDelayMs{ 0 };
     std::atomic<int> m_inFlightPersists{ 0 };
+    std::atomic<int> m_inFlightTerminalHandouts{ 0 };
     mutable std::condition_variable m_persistCv;
     mutable std::mutex m_persistCvMutex;
 };

@@ -842,3 +842,21 @@ TEST_CASE( "Repeated real recovery cycles leak no fds, zombies or workers",
     INFO( "fds before=" << fdBefore << " after=" << fdAfter );
     CHECK( fdAfter <= fdBefore + 4 );
 }
+
+TEST_CASE( "Worker initialization with failing process spawn fails closed without stranding zombie nodes",
+           "[python][pool][init][fail_closed]" )
+{
+    PythonWorkerProcessPool pool( 2 );
+    // Passing non-existent binary causes startWorker to fail
+    bool ok = pool.initialize( QStringLiteral( "/nonexistent/path/to/python_binary_xyz" ),
+                               QStringLiteral( "/nonexistent/script.py" ) );
+    CHECK( !ok );
+    CHECK( pool.activeWorkerCount() == 0 );
+    CHECK( pool.availableWorkerCount() == 0 );
+    auto health = pool.poolHealth();
+    CHECK( health.total == 0 );
+    CHECK( health.active == 0 );
+    CHECK( health.available == 0 );
+    CHECK( !health.isHealthy() );
+    pool.shutdown();
+}

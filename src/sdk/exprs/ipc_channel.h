@@ -55,6 +55,9 @@ public:
         /// worker.hello handshake event is always the first queued entry, so
         /// it can never be evicted by a log flood).
         size_t maxQueuedEvents = 1024;
+        /// Cap on incoming requests queued before nextRequest consumes them (flow control).
+        /// Overflow answers the caller with a typed backpressure refusal (E6008).
+        size_t maxQueuedRequests = 1024;
     };
 
     explicit IpcChannel( std::unique_ptr<IIpcStream> stream );
@@ -157,6 +160,8 @@ public:
     uint32_t recvFrameCap() const { return mMaxRecvFrameBytes.load(); }
     /// Events dropped by the pending-event queue cap (diagnostics).
     long long droppedEvents() const { return mDroppedEvents.load(); }
+    /// Requests refused by the incoming request queue cap (flow control).
+    long long droppedRequests() const { return mDroppedRequests.load(); }
 
 private:
     struct Pending
@@ -164,6 +169,20 @@ private:
         ProgressSink progress;
         IpcChannel::Outcome outcome;
         bool done = false;
+    };
+
+    /// Event-sink delivery lifecycle. The queued-event replay in
+    /// setEventSink runs OUTSIDE mMutex (a sink may re-enter channel APIs
+    /// — close(), protocolFailure(), request() — all of which take mMutex;
+    /// replaying under it self-deadlocked, PR #1469 review). Ordering is
+    /// preserved by the phase instead: while a drain is in flight the
+    /// reader parks newly-arrived events on mEventOrderCv, so the queued
+    /// worker.hello still reaches the sink first (#1449).
+    enum class EventDeliveryPhase
+    {
+        NotInstalled,   ///< no sink yet: events park in mPendingEvents
+        Draining,       ///< sink installed, pre-install queue replaying to it
+        Live,           ///< reader delivers events directly
     };
 
     bool sendEnvelope( const Ipc::Envelope &envelope, std::string &error,
@@ -186,6 +205,15 @@ private:
     std::function<void( const Ipc::Envelope & )> mEventSink;
     std::function<void( long long )> mCancelSink;
     std::string mProtocolFailure;
+    /// Event-delivery ordering (see EventDeliveryPhase). Notified on
+    /// Draining -> Live and from closeLocked() so a parked reader wakes up
+    /// when the channel dies mid-drain.
+    std::condition_variable mEventOrderCv;
+    EventDeliveryPhase mEventDeliveryPhase = EventDeliveryPhase::NotInstalled;
+    /// Thread currently inside the replay loop (guards re-entrant
+    /// setEventSink calls from a sink callback — they cannot wait for a
+    /// drain they themselves are blocking).
+    std::thread::id mEventDrainOwner{};
 
     /// Serializes the joinable()/join() pair in close() — mMutex is held
     /// only for the state flip (the reader may be waiting on it on its way
@@ -201,6 +229,7 @@ private:
     std::atomic<uint32_t> mMaxSendFrameBytes;
     std::atomic<uint32_t> mMaxRecvFrameBytes;
     std::atomic<long long> mDroppedEvents{ 0 };
+    std::atomic<long long> mDroppedRequests{ 0 };
     /// Peer protocol version, published via relaxed stores (see the
     /// peerProtocolMajor/Minor accessors).
     std::atomic<int> mPeerMajor{ -1 };

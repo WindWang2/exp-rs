@@ -3,6 +3,7 @@
 
 #include <QList>
 #include <QMap>
+#include <QMutex>
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -10,6 +11,7 @@
 #include "python_ipc_server.h"
 #include "python_worker_process.h"
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <vector>
@@ -27,12 +29,12 @@ constexpr int kMaxWorkerCrashRestarts = 5;
 struct WorkerNode
 {
   int id = 0;
-  int restartCount = 0;      ///< cumulative crash restarts since creation (health metric)
-  int crashBudgetLeft = kMaxWorkerCrashRestarts;
+  std::atomic<int> restartCount{ 0 };      ///< cumulative crash restarts since creation (health metric)
+  std::atomic<int> crashBudgetLeft{ kMaxWorkerCrashRestarts };
   PythonWorkerProcess *worker = nullptr;
   PythonIpcServer *server = nullptr;
-  bool isBusy = false;
-  bool isRestarting = false;
+  std::atomic<bool> isBusy{ false };
+  std::atomic<bool> isRestarting{ false };
 };
 
 /// Composite health snapshot for the worker pool (ADR 0045).
@@ -76,7 +78,13 @@ class PythonWorkerProcessPool : public QObject
     bool initialize( const QString &pythonPath = QString(), const QString &scriptPath = QString() );
     void shutdown();
 
-    WorkerNode *acquireWorker();
+    /// Blocks up to @p timeoutMs for a free node, marking it busy
+    /// atomically (scan-and-mark under the node mutex — #1462: the old
+    /// unsynchronized check-then-mark let a re-entrant or cross-thread
+    /// acquire double-occupy one node). On the pool's own thread the wait
+    /// is event-loop driven (queued releases must be able to land); other
+    /// threads poll with a plain sleep. Returns nullptr on timeout.
+    WorkerNode *acquireWorker( int timeoutMs = 1000 );
     void releaseWorker( WorkerNode *node );
 
     int poolSize() const { return m_poolSize; }
@@ -124,6 +132,19 @@ class PythonWorkerProcessPool : public QObject
     QString m_pythonPath;
     QString m_scriptPath;
     QList<WorkerNode *> m_nodes;
+    /// Guards the m_nodes LIST structure and the WorkerNode::isBusy
+    /// check-and-mark in acquireWorker/releaseWorker (#1462: the old
+    /// unsynchronized check-then-mark let two callers leave with one node).
+    /// It does NOT cover the remaining per-node lifecycle fields
+    /// (isRestarting, crashBudgetLeft, restartCount): those are written on
+    /// the pool's own thread from signal handlers that must stay
+    /// callback-free under the lock, so a concurrent setPoolSize shrink can
+    /// still observe a stale value. Closing that fully needs either
+    /// reference-counted nodes or a per-node lock with re-validation after
+    /// detach — tracked as a follow-up, out of scope for #1462.
+    /// NEVER hold this across signal emission or pending-request callbacks:
+    /// those may re-enter the pool.
+    mutable QMutex m_nodesMutex;
     /// Recovered requests awaiting their restart-backoff timer / replay /
     /// watchdog, keyed by node id. Sole ownership lives HERE (not in the
     /// timer lambda's capture): a pool destroyed mid-backoff answers its

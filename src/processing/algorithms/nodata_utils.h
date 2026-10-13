@@ -23,13 +23,13 @@ namespace sicnu::rs
 /// band declares no finite sentinel. O(1) GDAL metadata read.
 float bandNoDataSentinel( const GdalDatasetWrapper &ds, int band );
 
-/// True when @a v must be treated as missing: NaN (always invalid) or exact
-/// equality with a declared, non-NaN @a sentinel.
+/// True when @a v must be treated as missing: non-finite (always invalid) or exact
+/// equality with a declared, finite @a sentinel.
 inline bool isNoDataValue( float v, float sentinel )
 {
-    if ( std::isnan( v ) )
+    if ( !std::isfinite( v ) )
         return true;
-    return !std::isnan( sentinel ) && v == sentinel;
+    return std::isfinite( sentinel ) && v == sentinel;
 }
 
 } // namespace sicnu::rs

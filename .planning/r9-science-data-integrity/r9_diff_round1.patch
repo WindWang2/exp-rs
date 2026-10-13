@@ -1,0 +1,965 @@
+diff --git a/resources/icons b/resources/icons
+deleted file mode 120000
+index 4d26768f7..000000000
+--- a/resources/icons
++++ /dev/null
+@@ -1 +0,0 @@
+-../docs/design/ui/svg-icons/icons
+\ No newline at end of file
+diff --git a/src/core/qgsdatasourceresolver.cpp b/src/core/qgsdatasourceresolver.cpp
+index f402f0bc8..071224d04 100644
+--- a/src/core/qgsdatasourceresolver.cpp
++++ b/src/core/qgsdatasourceresolver.cpp
+@@ -82,15 +82,31 @@ QString QgsDataSourceResolver::localPath( const QString &source )
+     return source; // malformed: caller's existence check fails closed as before
+ 
+   // file://<authority>/<path>: an empty authority denotes the local machine
+-  // (QUrl::toLocalFile decodes percent escapes; note it rejects
+-  // file://localhost on non-Windows, so that spelling is mapped explicitly);
+-  // any other authority becomes the UNC form //authority/path so Windows
+-  // shares stay addressable by QFile/QFileInfo/GDAL.
++  // (QUrl::toLocalFile decodes percent escapes). "localhost" is the local
++  // machine too, but Qt includes every nonempty hostname in toLocalFile's
++  // return as an SMB-style path (//localhost/…) on non-Windows, which the
++  // previous early-return passed through and made POSIX existence checks
++  // fail — so the localhost spelling is mapped explicitly BEFORE
++  // toLocalFile is consulted (#1472 review). On Windows toLocalFile already
++  // drops a localhost authority and yields the drive path, so it stays
++  // preferred there. Any other authority becomes the UNC form
++  // //authority/path so Windows shares stay addressable by
++  // QFile/QFileInfo/GDAL.
++  const bool localhost =
++    url.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0;
++#ifdef Q_OS_WIN
+   const QString local = url.toLocalFile();
+   if ( !local.isEmpty() )
+     return local;
+-  if ( url.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0 )
++  if ( localhost )
+     return url.path( QUrl::FullyDecoded );
++#else
++  if ( localhost )
++    return url.path( QUrl::FullyDecoded );
++  const QString local = url.toLocalFile();
++  if ( !local.isEmpty() )
++    return local;
++#endif
+   if ( !url.host().isEmpty() && !url.path().isEmpty() )
+     return QStringLiteral( "//" ) + url.host() + url.path();
+   return source;
+diff --git a/src/core/radiometric_state.cpp b/src/core/radiometric_state.cpp
+index b657aa554..d9ef617ef 100644
+--- a/src/core/radiometric_state.cpp
++++ b/src/core/radiometric_state.cpp
+@@ -45,23 +45,16 @@ namespace exp_radiometric
+     /// necessarily a path — Qt resources (":/…"), GDAL subdataset
+     /// descriptors ("GTIFF_DIR:…", "HDF5:…"), and remote schemes
+     /// ("https://…", "WMS:…") must skip the GDALOpenEx metadata round-trip
+-    /// instead of being opened. The only colon a local path may carry is a
+-    /// Windows drive letter ("C:/…" / "C:\…"); anything else is a URI.
++    /// instead of being opened. Classification — including POSIX filenames
++    /// that legally contain ':' beyond a drive letter, #1469 review — lives
++    /// in local_source::isPlainLocalPath: one authority, shared with the
++    /// header-only preflight consumers.
+     QString layerLocalFilePath( const QgsRasterLayer *layer )
+     {
+       if ( !layer )
+         return QString();
+       const QString source = layer->source();
+-      const int colon = source.indexOf( QLatin1Char( ':' ) );
+-      if ( colon < 0 )
+-        return source; // POSIX / UNC / relative path
+-      if ( colon != 1 || source.size() < 3 )
+-        return QString();
+-      const QChar afterColon = source.at( 2 );
+-      if ( !source.at( 0 ).isLetter() ||
+-           ( afterColon != QLatin1Char( '/' ) && afterColon != QLatin1Char( '\\' ) ) )
+-        return QString();
+-      return source;
++      return local_source::isPlainLocalPath( source ) ? source : QString();
+     }
+   } // namespace
+ 
+diff --git a/src/core/radiometric_state.h b/src/core/radiometric_state.h
+index 66a38dac0..9357c7c0c 100644
+--- a/src/core/radiometric_state.h
++++ b/src/core/radiometric_state.h
+@@ -109,6 +109,58 @@ namespace exp_radiometric
+         }
+     } // namespace vocabulary
+ 
++    /// Local-path classification for radiometric metadata persistence
++    /// (#1467 / #1469 review): decides whether a QgsRasterLayer source
++    /// string is a plain local filesystem path — one whose GDAL DEFAULT-
++    /// domain metadata the FSM may read and write through GDALOpenEx — or a
++    /// scheme-prefixed non-local source (provider URI, remote URL, GDAL
++    /// subdataset descriptor, Qt resource) that must skip that round-trip.
++    /// Header-only and QtCore-only, like the vocabulary above, so the
++    /// production preflight consumes the same classification as the FSM
++    /// without a qgis_core link edge.
++    namespace local_source
++    {
++        /// True for plain local paths: POSIX/UNC/relative paths — including
++        /// POSIX paths whose filename component legally contains ':' (e.g.
++        /// "/data/acq:2026.tif"; ':' is only special to QGIS/GDAL as a
++        /// scheme separator, never inside a POSIX component) — Windows
++        /// drive paths ("C:/…", "C:\\…") and GDAL VSI virtual paths
++        /// ("/vsimem/…"). False for "scheme:"-prefixed sources
++        /// ("https://…", "WMS:…", "HDF5:"…"://ds", "GTIFF_DIR:1:…"),
++        /// Qt resources (":/…") and drive-relative Windows spellings
++        /// ("c:name.tif" — no separator follows the drive colon).
++        inline bool isPlainLocalPath( const QString &source )
++        {
++            if ( source.isEmpty() )
++                return false;
++            const int colon = source.indexOf( QLatin1Char( ':' ) );
++            if ( colon < 0 )
++                return true; // POSIX / UNC / relative path — no scheme anywhere
++            if ( colon == 1 )
++            {
++                // Windows drive path: "C:/…", "C:\…" (or the bare "C:" root).
++                if ( !source.at( 0 ).isLetter() )
++                    return false;
++                return source.size() == 2 || source.at( 2 ) == QLatin1Char( '/' )
++                       || source.at( 2 ) == QLatin1Char( '\\' );
++            }
++            if ( colon == 0 )
++                return false; // Qt resource ":/…" / ":…" — never a local path
++            // Every remaining colon is local exactly when it lives INSIDE a
++            // path component — after a separator — because ':' is a legal
++            // POSIX filename character there. A colon before any separator
++            // terminates a scheme-like leading token (provider URI, remote
++            // URL, subdataset driver prefix); a colon with no separator at
++            // all (relative "weird:name.tif") is inherently ambiguous and
++            // fails closed to non-local.
++            const int slash = source.indexOf( QLatin1Char( '/' ) );
++            const int backslash = source.indexOf( QLatin1Char( '\\' ) );
++            const int firstSep = slash < 0 ? backslash
++                              : ( backslash < 0 ? slash : qMin( slash, backslash ) );
++            return firstSep >= 0 && firstSep < colon;
++        }
++    } // namespace local_source
++
+     /// Thrown by validateBandPreflight when a layer's radiometric state does
+     /// not lawfully transition to the required unit (ADR 0158 — fail closed).
+     class RadiometricStateMismatchException : public std::runtime_error
+diff --git a/src/data/data_manager.cpp b/src/data/data_manager.cpp
+index a496b89fb..a1917a1f8 100644
+--- a/src/data/data_manager.cpp
++++ b/src/data/data_manager.cpp
+@@ -32,6 +32,7 @@
+ #include "providers/xyz_source_provider.h"
+ #include "virtual_raster_preflight.h"
+ #include "platform/durable_sidecar.h"
++#include "runtime/observability/fault_point.h"
+ 
+ namespace sicnu::data
+ {
+@@ -776,14 +777,56 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
+     // a runaway generator must still be refused instead of filling the disk.
+     const QByteArray xmlBytes = xml.toUtf8();
+     constexpr std::size_t kVrtPublishCap = std::size_t( 256 ) * 1024 * 1024;
+-    const sicnu::platform::sidecar::WriteResult published =
++    sicnu::platform::sidecar::WriteResult published =
+       sicnu::platform::sidecar::write(
+         { dependentIt->snapshot.source().canonicalSource.toUtf8().constData(),
+           std::string( xmlBytes.constData(), static_cast<std::size_t>( xmlBytes.size() ) ),
+           "", kVrtPublishCap } );
+-    if ( published )
++    // Test-only seam (#1473 review): convert a real Ok publish into the
++    // typed post-publish VerifyFailed status so the branch below is
++    // exercised deterministically — the sidecar's own write hook cannot be
++    // threaded through this internal call (same pattern as dataset_store
++    // injected faults).
++    if ( published.status == sicnu::platform::sidecar::WriteStatus::Ok
++         && SICNU_FAULT_POINT( "data_manager.dependent_vrt_verify" ) )
++    {
++      published.status = sicnu::platform::sidecar::WriteStatus::VerifyFailed;
++      published.error = "injected verify fault";
++    }
++    // VerifyFailed has ALREADY renamed the new bytes onto the target before
++    // read-back failed, so the dependent VRT path holds changed (suspect)
++    // bytes: assetChanged must fire — suppressing it leaves displays on the
++    // pre-relocate VRT while the file changed underneath (#1473 review).
++    // Pre-publish failures (EmptyPath/TooLarge/ClaimFailed/WriteFailed/
++    // DurabilityFailed/PublishFailed/StagedCleanupFailed) keep the old
++    // target intact: no reload, warning only, as before.
++    if ( published
++         || published.status == sicnu::platform::sidecar::WriteStatus::VerifyFailed )
+     {
+       emit assetChanged( dependentId );
++      if ( published.status == sicnu::platform::sidecar::WriteStatus::VerifyFailed )
++      {
++        relocateDiagnostics.append( Diagnostic{
++          QStringLiteral( "relocate.dependent_vrt_verify_failed" ),
++          QStringLiteral( "Dependent virtual raster VRT published but read-back verification "
++                          "failed — the target holds suspect bytes: %1" )
++            .arg( dependentIt->snapshot.source().canonicalSource ),
++          DiagnosticSeverity::Error
++        } );
++      }
++      else if ( published.lastGoodStatus != sicnu::platform::sidecar::WriteStatus::Ok )
++      {
++        // Main committed (status Ok) but the last-good rotation failed: the
++        // dependent DID change (the reload already fired above); surface the
++        // rotation failure instead of dropping it silently.
++        relocateDiagnostics.append( Diagnostic{
++          QStringLiteral( "relocate.dependent_vrt_last_good_failed" ),
++          QStringLiteral( "Dependent virtual raster VRT published but last-good rotation "
++                          "failed: %1" )
++            .arg( dependentIt->snapshot.source().canonicalSource ),
++          DiagnosticSeverity::Warning
++        } );
++      }
+     }
+     else
+     {
+diff --git a/src/data/workspace_catalog.cpp b/src/data/workspace_catalog.cpp
+index 77fa8fe3b..8a97d4864 100644
+--- a/src/data/workspace_catalog.cpp
++++ b/src/data/workspace_catalog.cpp
+@@ -4,6 +4,7 @@
+ #include "runtime/observability/fault_point.h"
+ 
+ #include <QDateTime>
++#include <QDebug>
+ #include <QDir>
+ 
+ #include <sqlite3.h>
+@@ -38,8 +39,17 @@ class Stmt
+     ~Stmt() { if ( m_stmt ) sqlite3_finalize( m_stmt ); }
+     explicit operator bool() const { return m_stmt != nullptr; }
+     sqlite3_stmt *get() const { return m_stmt; }
+-    bool step() const { return sqlite3_step( m_stmt ) == SQLITE_DONE; }
+-    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
++    bool step() const { return ( m_lastRc = sqlite3_step( m_stmt ) ) == SQLITE_DONE; }
++    bool stepRow() const { return ( m_lastRc = sqlite3_step( m_stmt ) ) == SQLITE_ROW; }
++    /// True when the last step()/stepRow() ended in an ERROR (not DONE/ROW):
++    /// a mid-scan CORRUPT/IOERR otherwise folds into "no more rows" and
++    /// readers answer from a silently partial result (#1448/#1457 — same
++    /// contract as DatasetStore::StoreStmt).
++    bool stepFailed() const
++    {
++        return m_lastRc != SQLITE_ROW && m_lastRc != SQLITE_DONE && m_lastRc != SQLITE_OK;
++    }
++    QString error() const { return QString::fromUtf8( sqlite3_errmsg( m_db ) ); }
+     void reset() { sqlite3_reset( m_stmt ); sqlite3_clear_bindings( m_stmt ); }
+     void bind( int idx, const QString &v ) const
+     {
+@@ -57,6 +67,7 @@ class Stmt
+   private:
+     sqlite3 *m_db = nullptr;
+     sqlite3_stmt *m_stmt = nullptr;
++    mutable int m_lastRc = SQLITE_OK;
+ };
+ } // namespace
+ 
+@@ -488,6 +499,14 @@ CatalogPage WorkspaceCatalog::page( const CatalogQuery &query, qint64 offset, qi
+         if ( !query.textPrefix.isEmpty() ) { s.bind( idx++, prefix ); s.bind( idx++, prefix ); }
+         if ( s.stepRow() )
+             out.total = s.i64( 0 );
++        else if ( s.stepFailed() )
++        {
++            // Loud-subset contract (#1448/#1457): CatalogPage carries no
++            // error channel, so a failed COUNT or a mid-scan ERROR must not
++            // read as an empty/complete page without a trace.
++            qWarning( "catalog.page_count_failed: total stays 0 after sqlite error (%s)",
++                      qUtf8Printable( s.error() ) );
++        }
+     }
+     {
+         Stmt s( m_impl->db, ( QString( "SELECT " SICNU_CATALOG_ASSET_COLS " FROM assets" ) + where +
+@@ -503,6 +522,14 @@ CatalogPage WorkspaceCatalog::page( const CatalogQuery &query, qint64 offset, qi
+         s.bind( idx++, clampedOffset );
+         while ( s.stepRow() )
+             out.items.append( m_impl->readAsset( s ) );
++        // A mid-scan sqlite ERROR ends stepRow() exactly like exhaustion:
++        // without this the page reads as complete (#1448/#1457).
++        if ( s.stepFailed() )
++        {
++            qWarning( "catalog.page_scan_failed: page items are a SUBSET after sqlite"
++                      " error (%s)",
++                      qUtf8Printable( s.error() ) );
++        }
+     }
+     return out;
+ }
+diff --git a/src/dataset/dataset_store_facets.cpp b/src/dataset/dataset_store_facets.cpp
+index dbb31bc3e..12714445b 100644
+--- a/src/dataset/dataset_store_facets.cpp
++++ b/src/dataset/dataset_store_facets.cpp
+@@ -7,6 +7,7 @@
+ // into C++ memory to count buckets. Facet writes attach to DRAFT versions
+ // only — facets describe content and committed versions are frozen.
+ #include "dataset_store_impl.h"
++#include <QDebug>
+ #include <QJsonArray>
+ 
+ #include <QDateTime>
+@@ -187,6 +188,13 @@ sicnu::data::Result<DatasetStore::FacetDistribution> DatasetStore::facetDistribu
+         distribution.values.append( qMakePair( values.text( 0 ), values.i64( 1 ) ) );
+         reported += values.i64( 1 );
+     }
++    // After the loop, not inside: a mid-scan ERROR (CORRUPT/IOERR) must
++    // fail the distribution instead of returning a silently partial
++    // histogram with an "(other)" remainder computed from it
++    // (#1448/#1457 — same contract as the dataset listing).
++    if ( values.stepFailed() )
++        return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
++                                           values.error( m_impl->db ) ) );
+     if ( reported < distribution.total )
+         distribution.values.append(
+             qMakePair( QStringLiteral( "(other)" ), distribution.total - reported ) );
+@@ -221,6 +229,11 @@ sicnu::data::Result<QVector<QPair<QPair<QString, QString>, qint64>>> DatasetStor
+     while ( cells.stepRow() )
+         out.append( qMakePair( qMakePair( cells.text( 0 ), cells.text( 1 ) ),
+                                cells.i64( 2 ) ) );
++    // Mid-scan ERROR fails the cross-count instead of returning silently
++    // partial cells (#1448/#1457 contract).
++    if ( cells.stepFailed() )
++        return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
++                                           cells.error( m_impl->db ) ) );
+     return Result::success( out );
+ }
+ 
+@@ -239,6 +252,16 @@ QVector<QString> DatasetStore::facetNames( const DatasetVersionId &versionId, qi
+     stmt.bind( 2, limit );
+     while ( stmt.stepRow() )
+         names.append( stmt.text( 0 ) );
++    // Loud-subset contract (the signature returns a bare list — same call as
++    // splitManifestsForVersion): a mid-scan sqlite ERROR must not read as
++    // "no more rows" (#1448/#1457).
++    if ( stmt.stepFailed() )
++    {
++        qWarning( "dataset.facet_names_scan_failed: version %s sqlite scan ended with"
++                  " error (%s); the returned names are a SUBSET of the stored facets",
++                  qUtf8Printable( versionId.toString() ),
++                  qUtf8Printable( stmt.error( m_impl->db ) ) );
++    }
+     return names;
+ }
+ 
+diff --git a/src/dataset/dataset_store_samples.cpp b/src/dataset/dataset_store_samples.cpp
+index fb0ec766e..20cf3e3fd 100644
+--- a/src/dataset/dataset_store_samples.cpp
++++ b/src/dataset/dataset_store_samples.cpp
+@@ -498,9 +498,13 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
+         "DELETE FROM samples WHERE dataset_version_id=? AND sample_id=?" ) );
+     if ( !stmt )
+     {
++        // Capture the sqlite error BEFORE rollback: a successful ROLLBACK
++        // resets the connection's error string (same ordering as the step
++        // failure branch below) so the diagnostic would read "not an error".
++        const QString message = stmt.error( m_impl->db );
+         m_impl->rollback();
+         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+-                                           stmt.error( m_impl->db ) ) );
++                                           message ) );
+     }
+     stmt.bind( 1, versionId.toString() );
+     stmt.bind( 2, sampleId.toString() );
+@@ -525,9 +529,12 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
+         "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
+     if ( !facetStmt )
+     {
++        // Same capture-before-rollback ordering: keep the prepare cause
++        // (damaged schema / refused DELETE) visible to the caller.
++        const QString message = facetStmt.error( m_impl->db );
+         m_impl->rollback();
+         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+-                                           facetStmt.error( m_impl->db ) ) );
++                                           message ) );
+     }
+     facetStmt.bind( 1, versionId.toString() );
+     facetStmt.bind( 2, sampleId.toString() );
+diff --git a/src/dataset/dataset_store_splits.cpp b/src/dataset/dataset_store_splits.cpp
+index 7dbc66e22..44cca3ab7 100644
+--- a/src/dataset/dataset_store_splits.cpp
++++ b/src/dataset/dataset_store_splits.cpp
+@@ -201,6 +201,18 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
+             ++corruptRows;
+         }
+     }
++    // Mid-scan sqlite ERROR (CORRUPT/IOERR) ends stepRow() exactly like
++    // exhaustion: without this check the returned list is a SILENTLY partial
++    // subset (#1448/#1457). Same loud-subset contract as the parse skip
++    // above — the signature stays QVector (out-of-scope callers), so the
++    // scan failure is named here instead of returned.
++    if ( stmt.stepFailed() )
++    {
++        qWarning( "dataset.split_manifest_scan_failed: version %s sqlite scan ended with"
++                  " error (%s); the returned list is a SUBSET of the stored evidence",
++                  qUtf8Printable( versionId.toString() ),
++                  qUtf8Printable( stmt.error( m_impl->db ) ) );
++    }
+     if ( corruptRows > 0 )
+     {
+         qWarning( "dataset.split_manifest_corrupt_skipped: version %s has %d"
+@@ -306,6 +318,15 @@ QVector<LeakageReport> DatasetStore::leakageReportsForSplit( const QString &spli
+         if ( report )
+             reports.append( report.value() );
+     }
++    // Same loud-subset contract as splitManifestsForVersion: a mid-scan
++    // sqlite ERROR must not read as "no more rows" (#1448/#1457).
++    if ( stmt.stepFailed() )
++    {
++        qWarning( "dataset.leakage_report_scan_failed: split %s sqlite scan ended with"
++                  " error (%s); the returned list is a SUBSET of the stored evidence",
++                  qUtf8Printable( splitManifestId ),
++                  qUtf8Printable( stmt.error( m_impl->db ) ) );
++    }
+     return reports;
+ }
+ 
+diff --git a/src/geospatial/fabric/query_planner.cpp b/src/geospatial/fabric/query_planner.cpp
+index 68b57292c..2f0cf0ce0 100644
+--- a/src/geospatial/fabric/query_planner.cpp
++++ b/src/geospatial/fabric/query_planner.cpp
+@@ -360,8 +360,17 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
+         walkPages( service, plan.mIntent.query );
+     }
+     plan.mSelected = selector.take();
+-    truncated = matches > plan.mSelected.size() && static_cast<int>( plan.mSelected.size() ) >=
+-                                                     plan.mIntent.sceneBudget;
++    // Two distinct truncations must both stay visible (#1456): the catalog
++    // WALK can stop early at query.maxItems (matches is a floor — the
++    // catalog may hold more), and the SELECTOR can drop already-seen scenes
++    // beyond sceneBudget. The old recompute REPLACED the walk's signal, so
++    // a maxItems-capped walk with maxItems <= sceneBudget reported "not
++    // truncated" and downstream planned as if the catalog was fully
++    // scanned. OR them: either cap alone means the match set is incomplete.
++    const bool selectorTruncated =
++        matches > plan.mSelected.size() && static_cast<int>( plan.mSelected.size() ) >=
++                                                  plan.mIntent.sceneBudget;
++    truncated = truncated || selectorTruncated;
+     catalogStage.inputs = matches;
+     catalogStage.outputs = plan.mSelected.size();
+     catalogStage.status = "planned";
+diff --git a/src/operators/framework/model_catalog.cpp b/src/operators/framework/model_catalog.cpp
+index 50fcb8173..f050f56fe 100644
+--- a/src/operators/framework/model_catalog.cpp
++++ b/src/operators/framework/model_catalog.cpp
+@@ -1377,8 +1377,18 @@ std::string ModelPostprocessContract::validateMorphology() const
+ 
+ std::string ModelEoDomainContract::validate() const
+ {
++  // Manifest-facing calibration vocabulary. Production spellings mirror the
++  // platform-wide SICNU_RADIOMETRIC_STATE vocabulary (radiometric_state.h,
++  // #1450) plus the manifest-only "any" wildcard: the SAR backscatter
++  // calibration states (sigma0/beta0, alongside gamma0) must be accepted
++  // here or models trained on calibrated SAR inputs are rejected at
++  // registration before the runtime preflight can compare states (#1472
++  // review). Manifest aliases (dn, boa_reflectance, sar_pair_metric,
++  // sar_texture) stay intentionally outside — manifests declare the
++  // production spelling.
+   static const char *kStates[] = { "radiance", "toa_reflectance", "surface_reflectance",
+                                    "brightness_temperature", "digital_number", "gamma0",
++                                   "sigma0", "beta0",
+                                    "indices", "any" };
+   if ( !calibrationState.empty() )
+   {
+@@ -1389,7 +1399,8 @@ std::string ModelEoDomainContract::validate() const
+     if ( !known )
+       return "eo.calibration.state '" + calibrationState
+              + "' is not part of the radiometric-state vocabulary (radiance, toa_reflectance, "
+-               "surface_reflectance, brightness_temperature, digital_number, gamma0, indices, any)";
++               "surface_reflectance, brightness_temperature, digital_number, gamma0, sigma0, "
++               "beta0, indices, any)";
+     if ( calibrationEnforced && calibrationState == "any" )
+       return "eo.calibration.state 'any' cannot be enforced (an enforced calibration must name "
+              "a concrete state)";
+diff --git a/src/operators/framework/rs_json_params.cpp b/src/operators/framework/rs_json_params.cpp
+index 91ffbe288..2a9c96ed2 100644
+--- a/src/operators/framework/rs_json_params.cpp
++++ b/src/operators/framework/rs_json_params.cpp
+@@ -8,6 +8,8 @@
+ #include <QString>
+ #include <QStringList>
+ 
++#include <qgsdatasourceresolver.h>
++
+ #include <cpl_vsi.h>
+ 
+ #include <algorithm>
+@@ -16,7 +18,13 @@
+ namespace sicnu::operators::params {
+ 
+ bool fileExists(const std::string& path) {
+-    const QString p = QString::fromStdString(path);
++    // Map file:// URLs to their local path through the single resolver
++    // authority before the Qt existence check (#1467/#1472 review):
++    // classify() answers LocalFile for them, but QFile::exists on the raw
++    // URL always fails, so operators' shared precheck used to reject valid
++    // inputs as FileNotFound before the GDAL open could run. Every other
++    // source spelling is identity-mapped.
++    const QString p = QgsDataSourceResolver::localPath(QString::fromStdString(path));
+     if (QFile::exists(p))
+         return true;
+     // GDAL VSI paths (/vsicurl/, /vsis3/, /vsizip/…) are not Qt files; ask
+diff --git a/src/processing/algorithms/temporal/temporal_workspace.cpp b/src/processing/algorithms/temporal/temporal_workspace.cpp
+index 24ad74e5e..34478d88e 100644
+--- a/src/processing/algorithms/temporal/temporal_workspace.cpp
++++ b/src/processing/algorithms/temporal/temporal_workspace.cpp
+@@ -481,14 +481,20 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
+     if ( exclude.contains( path ) )
+       continue;
+     const QgsDataSourceKind kind = QgsDataSourceResolver::classify( path );
+-    QString lookupPath = path;
++    // file:// inputs resolve through their local mapping before the
++    // existence check — classify() answers LocalFile for them, but
++    // QFileInfo on the raw URL always fails and used to end the step with
++    // "unidentifiable local input" (#1472 review; the same mapping the
++    // scenes loop below applies). Identity for every other spelling.
++    QString lookupPath = QgsDataSourceResolver::localPath( path );
+     if ( kind == QgsDataSourceKind::LocalFile )
+     {
+-      if ( !QFileInfo( path ).isFile() )
+-        return fail( QStringLiteral( "unidentifiable local input (missing file): %1" ).arg( path ) );
++      if ( !QFileInfo( lookupPath ).isFile() )
++        return fail( QStringLiteral( "unidentifiable local input (missing file): %1" )
++                       .arg( lookupPath ) );
+       // Registered assets store a canonicalized source; compare canonically
+       // so a symlinked/relative spelling still resolves (as lineage does).
+-      const QString canonical = QFileInfo( path ).canonicalFilePath();
++      const QString canonical = QFileInfo( lookupPath ).canonicalFilePath();
+       if ( !canonical.isEmpty() )
+         lookupPath = canonical;
+     }
+diff --git a/src/suitability/suitability_goal.cpp b/src/suitability/suitability_goal.cpp
+index c555ae47c..2e4ef429e 100644
+--- a/src/suitability/suitability_goal.cpp
++++ b/src/suitability/suitability_goal.cpp
+@@ -8,6 +8,8 @@
+ #include <QJsonArray>
+ #include <QJsonDocument>
+ 
++#include "data/execution_fingerprint.h"
++
+ #include <cmath>
+ #include <limits>
+ 
+@@ -332,8 +334,11 @@ sicnu::data::Result<SuitabilityGoal> SuitabilityGoal::fromJson( const QJsonObjec
+ 
+ QString SuitabilityGoal::contentDigest() const
+ {
+-    const QJsonDocument document( toJson() );
+-    const QByteArray canonical = document.toJson( QJsonDocument::Compact );
++    // #1450: single digest authority — RFC 8785 canonical JSON, the same
++    // serializer as execution/dataset fingerprints (see
++    // SuitabilityReport::contentDigest for why Qt's Compact dialect kept
++    // the digest unverifiable through the canonical path).
++    const QByteArray canonical = sicnu::data::canonicalizeJsonRfc8785( toJson() );
+     return QString::fromLatin1(
+         QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 ).toHex() );
+ }
+diff --git a/src/suitability/suitability_report.cpp b/src/suitability/suitability_report.cpp
+index 9ad7eb404..47ce1539d 100644
+--- a/src/suitability/suitability_report.cpp
++++ b/src/suitability/suitability_report.cpp
+@@ -6,6 +6,8 @@
+ #include <QJsonArray>
+ #include <QJsonDocument>
+ 
++#include "data/execution_fingerprint.h"
++
+ namespace sicnu::suitability
+ {
+ 
+@@ -62,8 +64,13 @@ QVector<SuitabilityGap> SuitabilityReport::allGaps() const
+ 
+ QString SuitabilityReport::contentDigest() const
+ {
+-    const QJsonDocument document( toJson() );
+-    const QByteArray canonical = document.toJson( QJsonDocument::Compact );
++    // #1450: the digest must go through the platform's ONE canonical JSON
++    // serializer (RFC 8785) — the same authority as execution/dataset
++    // fingerprints. QJsonDocument::toJson(Compact) is Qt's own dialect
++    // (escaping/number formatting), which no canonical-path verifier could
++    // ever reproduce, so report_digest was unverifiable through the
++    // authority agents are told to use.
++    const QByteArray canonical = sicnu::data::canonicalizeJsonRfc8785( toJson() );
+     return QString::fromLatin1(
+         QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 ).toHex() );
+ }
+diff --git a/tests/test_datasource_resolver.cpp b/tests/test_datasource_resolver.cpp
+index 40af25920..d4d932bf0 100644
+--- a/tests/test_datasource_resolver.cpp
++++ b/tests/test_datasource_resolver.cpp
+@@ -185,8 +185,24 @@ TEST_CASE( "QgsDataSourceResolver localPath maps file URLs to openable paths", "
+ #endif
+     // POSIX URL -> plain POSIX path.
+     CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///tmp/a.tif" ) ) == QStringLiteral( "/tmp/a.tif" ) );
+-    // Percent escapes decode.
++    // Percent escapes decode. The expectation is platform-aware: QUrl's
++    // toLocalFile keeps the leading slash for a Windows-style path on
++    // non-Windows (#1472 review — the shared assertion failed on the
++    // Linux/macOS lanes while passing on Windows).
++#ifdef Q_OS_WIN
+     CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///C:/my%20data/a.tif" ) ) == QStringLiteral( "C:/my data/a.tif" ) );
++#else
++    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///C:/my%20data/a.tif" ) ) == QStringLiteral( "/C:/my data/a.tif" ) );
++#endif
++    // A localhost authority IS the local machine — never an SMB share
++    // (#1472 review): the mapping must drop the authority on every
++    // platform, not pass through toLocalFile's //localhost/… form.
++#ifdef Q_OS_WIN
++    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://localhost/C:/data/a.tif" ) ) == QStringLiteral( "C:/data/a.tif" ) );
++#else
++    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://localhost/tmp/a.tif" ) ) == QStringLiteral( "/tmp/a.tif" ) );
++    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://LOCALHOST/tmp/a.tif" ) ) == QStringLiteral( "/tmp/a.tif" ) );
++#endif
+     // Named authority -> UNC form (Windows share addressable by QFile/GDAL).
+     CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://server/share/a.tif" ) ) == QStringLiteral( "//server/share/a.tif" ) );
+     // Scheme is case-insensitive.
+diff --git a/tests/test_eo_platform_10.cpp b/tests/test_eo_platform_10.cpp
+index d201673bb..2efba7eea 100644
+--- a/tests/test_eo_platform_10.cpp
++++ b/tests/test_eo_platform_10.cpp
+@@ -348,6 +348,13 @@ TEST_CASE( "WP-A: eo contract validation refuses bad windows, states and enforce
+   issues = catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "magic"}})JSON" ) );
+   REQUIRE_FALSE( issues.empty() );
+ 
++  // SAR backscatter calibration states are part of the manifest vocabulary
++  // (#1472 review): the raster-side vocabulary (radiometric_state.h #1450)
++  // knows sigma0/beta0, so manifest registration must accept them — an
++  // enforced sigma0 contract is a concrete, checkable state.
++  CHECK( catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "sigma0"}})JSON" ) ).empty() );
++  CHECK( catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "beta0", "enforced": true}})JSON" ) ).empty() );
++
+   // Enforcing "any" is a contract contradiction.
+   issues = catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "any", "enforced": true}})JSON" ) );
+   REQUIRE_FALSE( issues.empty() );
+diff --git a/tests/test_io_fabric_plan.cpp b/tests/test_io_fabric_plan.cpp
+index 45c80528c..b55fc98eb 100644
+--- a/tests/test_io_fabric_plan.cpp
++++ b/tests/test_io_fabric_plan.cpp
+@@ -580,3 +580,68 @@ TEST_CASE( "the mirror honors the declared blockSize knob (#1456)",
+   }
+   CHECK( inspected == 4 );
+ }
++
++TEST_CASE( "a maxItems-capped catalog walk reports truncation even within sceneBudget",
++           "[io][fabric][plan][selection]" )
++{
++  // #1456: the walk's truncation (query.maxItems stopped the catalog scan)
++  // is a DIFFERENT truncation from the selector's (sceneBudget dropped
++  // already-seen scenes). The old recompute overwrote the walk flag, so
++  // maxItems <= sceneBudget planned as "not truncated" — downstream
++  // believed the catalog was fully scanned when it had been capped.
++  const std::string dir = scratchDir( "walkcap" );
++  std::vector<AssetRecord> records;
++  for ( int i = 0; i < 20; ++i )
++  {
++    const std::string scene = dir + "/s" + std::to_string( i ) + ".tif";
++    RasterWriter writer = RasterWriter::create(
++      scene, 32, 32, { RasterBandSpec {} },
++      { "GTiff", { "TILED=YES", "BLOCKXSIZE=32", "BLOCKYSIZE=32" }, true } );
++    writer.setCrs( Crs::fromAuthid( "EPSG:4326" ) );
++    writer.setGeotransform( { 0.0, 1.0, 0.0, 32.0, 0.0, -1.0 } );
++    std::vector<double> raster( 32ull * 32, double( i ) );
++    writer.writeWindow( 1, { 0, 0, 32, 32 }, raster.data() );
++    writer.finalize();
++    records.push_back( sceneRecord( "s" + std::to_string( i ), scene,
++                                    "2024-01-01T00:00:0" + std::to_string( i % 10 ) + "Z",
++                                    double( 100 - i ) ) );
++  }
++
++  FabricIntent intent;
++  intent.records = records;
++  intent.query.maxItems = 3;  // the WALK stops here: 3 of 20 records seen
++  intent.sceneBudget = 5;     // ...while the selector could have kept 5
++  intent.grid.explicitGrid = true;
++  intent.grid.crs.valid = true;
++  intent.grid.crs.authid = "EPSG:4326";
++  intent.grid.scaleX = 1.0;
++  intent.grid.scaleY = 1.0;
++  intent.grid.minX = 0.0;
++  intent.grid.minY = 0.0;
++  intent.grid.maxX = 32.0;
++  intent.grid.maxY = 32.0;
++
++  const FabricPlan plan = planFabric( intent );
++  CHECK( plan.cost().catalogMatches == 3 );
++  CHECK( plan.selectedAssets().size() == 3 );
++  // RED on master: the recompute saw matches == selected.size() and
++  // reported "not truncated" although the catalog scan was capped.
++  CHECK( plan.cost().catalogMatchesTruncated );
++
++  // maxItems == sceneBudget is the second masked shape: every seen record
++  // is selected, yet the catalog scan itself was capped.
++  FabricIntent equalCap = intent;
++  equalCap.query.maxItems = 5;
++  const FabricPlan equalPlan = planFabric( equalCap );
++  CHECK( equalPlan.cost().catalogMatches == 5 );
++  CHECK( equalPlan.selectedAssets().size() == 5 );
++  CHECK( equalPlan.cost().catalogMatchesTruncated );
++
++  // Uncapped walk, selector within budget: the honest "not truncated".
++  FabricIntent openIntent = intent;
++  openIntent.query.maxItems = 0;
++  openIntent.sceneBudget = 64;
++  const FabricPlan openPlan = planFabric( openIntent );
++  CHECK( openPlan.cost().catalogMatches == 20 );
++  CHECK_FALSE( openPlan.cost().catalogMatchesTruncated );
++}
+diff --git a/tests/test_radiometric_state.cpp b/tests/test_radiometric_state.cpp
+index 91f477cf7..4c4e6db37 100644
+--- a/tests/test_radiometric_state.cpp
++++ b/tests/test_radiometric_state.cpp
+@@ -249,3 +249,50 @@ TEST_CASE( "RadiometricState provider-URI sources skip the GDAL metadata preflig
+   QgsRasterLayer resource( QStringLiteral( ":/embedded/raster.tif" ), QStringLiteral( "res" ) );
+   REQUIRE( RadiometricState::layerUnit( &resource ) == U::DigitalNumber );
+ }
++
++TEST_CASE( "local_source classification keeps POSIX colon filenames local",
++           "[radiometric][state][paths]" )
++{
++  using exp_radiometric::local_source::isPlainLocalPath;
++
++  // Local: POSIX paths whose filename component legally contains ':' — the
++  // old drive-letter-only rule misfiled these as provider URIs and silently
++  // skipped reading AND writing their radiometric metadata, so a reopened
++  // layer fell back to DigitalNumber (#1469 review / #1467).
++  CHECK( isPlainLocalPath( QStringLiteral( "/data/acq:2026.tif" ) ) );
++  CHECK( isPlainLocalPath( QStringLiteral( "data/acq:2026.tif" ) ) );
++  CHECK( isPlainLocalPath( QStringLiteral( "//server/share/acq:2026.tif" ) ) );
++  CHECK( isPlainLocalPath( QStringLiteral( "/plain/path.tif" ) ) );
++  CHECK( isPlainLocalPath( QStringLiteral( "relative.tif" ) ) );
++  CHECK( isPlainLocalPath( QStringLiteral( "C:/data/a.tif" ) ) );
++  CHECK( isPlainLocalPath( QStringLiteral( "C:\data\a.tif" ) ) );
++  CHECK( isPlainLocalPath( QStringLiteral( "/vsimem/acq:2026.tif" ) ) );
++
++  // Non-local: scheme-like leading tokens keep skipping the GDAL round-trip
++  // (#1467 contract unchanged).
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "https://example.com/a.tif" ) ) );
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "GTIFF_DIR:1:/data/a.tif" ) ) );
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "HDF5:\"/data/a.h5\"://ds" ) ) );
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "WMS:?url=http://x" ) ) );
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( ":/embedded/raster.tif" ) ) );
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "qrc:/icon.tif" ) ) );
++  // Ambiguous drive-relative / bare scheme-like spellings fail closed, and
++  // the empty source is never a local path.
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "c:name.tif" ) ) );
++  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "weird:name.tif" ) ) );
++  CHECK_FALSE( isPlainLocalPath( QString() ) );
++
++#ifdef Q_OS_UNIX
++  // End-to-end where ':' is a legal filename byte: the marker must persist
++  // through GDAL file metadata on a colon-named raster and a freshly opened
++  // layer must honor it (Windows cannot create this filename — there the
++  // classification checks above carry the regression).
++  QTemporaryDir dir;
++  REQUIRE( dir.isValid() );
++  const std::string path = writeTinyGeotiff( dir, QStringLiteral( "acq:2026.tif" ) );
++  auto layer = openLayer( path );
++  REQUIRE( RadiometricState::setLayerRadiometricState( layer.get(), U::Radiance ) );
++  auto reopened = openLayer( path );
++  REQUIRE( RadiometricState::layerUnit( reopened.get() ) == U::Radiance );
++#endif
++}
+diff --git a/tests/test_sample_label_annotation.cpp b/tests/test_sample_label_annotation.cpp
+index 1ced3b1e1..1eae219a0 100644
+--- a/tests/test_sample_label_annotation.cpp
++++ b/tests/test_sample_label_annotation.cpp
+@@ -531,6 +531,84 @@ TEST_CASE( "removeSample is transactional: a failed facet delete rolls the sampl
+     CHECK( after->values.isEmpty() );
+ }
+ 
++TEST_CASE( "removeSample prepare failures keep their sqlite cause past rollback",
++           "[dataset][sample][store][faults]" )
++{
++    // #1473 review (W6): both prepare-failure branches in removeSample read
++    // stmt.error() AFTER m_impl->rollback(); a successful ROLLBACK resets the
++    // connection error string to "not an error" (the same ordering the
++    // step-failure branches already document), so callers lost the actual
++    // cause of the store failure. A damaged-schema prepare is the
++    // deterministic trigger — the same shape a corrupted database or an
++    // authorizer-refused DELETE produces in production.
++    const auto dropTable = []( const QString &dbPath, const char *table ) {
++        sqlite3 *raw = nullptr;
++        if ( sqlite3_open( dbPath.toUtf8().constData(), &raw ) != SQLITE_OK )
++        {
++            sqlite3_close( raw );
++            return false;
++        }
++        const QString sql =
++          QStringLiteral( "DROP TABLE %1" ).arg( QLatin1String( table ) );
++        char *err = nullptr;
++        const int rc = sqlite3_exec( raw, sql.toUtf8().constData(), nullptr, nullptr, &err );
++        if ( err )
++            sqlite3_free( err );
++        sqlite3_close( raw );
++        return rc == SQLITE_OK;
++    };
++
++    SECTION( "base-row DELETE prepare failure reports the sqlite cause" )
++    {
++        QTemporaryDir dir;
++        QString versionId;
++        DatasetStore store;
++        makeStoreWithDraftVersion( store, dir, &versionId );
++        const DatasetVersionId vid =
++            DatasetVersionId::fromString( versionId ).value_or( DatasetVersionId{} );
++        SampleRecord sample = makePatchSample( versionId );
++        sample.setSampleId( SampleId::generate().toString() );
++        REQUIRE( store.addSamples( QVector<SampleRecord>{ sample } ).has_value() );
++        const SampleId sid = SampleId::fromString( sample.sampleId() ).value_or( SampleId{} );
++
++        REQUIRE( dropTable( dir.filePath( QStringLiteral( "datasets.db" ) ), "samples" ) );
++        const auto failed = store.removeSample( vid, sid );
++        CHECK( !failed.has_value() );
++        CHECK( failed.diagnostics().first().code ==
++               QStringLiteral( "dataset.store_query_failed" ) );
++        CHECK( failed.diagnostics().first().message.contains(
++          QStringLiteral( "no such table" ) ) );
++    }
++
++    SECTION( "facet DELETE prepare failure reports the sqlite cause" )
++    {
++        QTemporaryDir dir;
++        QString versionId;
++        DatasetStore store;
++        makeStoreWithDraftVersion( store, dir, &versionId );
++        const DatasetVersionId vid =
++            DatasetVersionId::fromString( versionId ).value_or( DatasetVersionId{} );
++        SampleRecord sample = makePatchSample( versionId );
++        sample.setSampleId( SampleId::generate().toString() );
++        REQUIRE( store.addSamples( QVector<SampleRecord>{ sample } ).has_value() );
++        const SampleId sid = SampleId::fromString( sample.sampleId() ).value_or( SampleId{} );
++
++        // Only the facet table is damaged: the base-row DELETE succeeds and
++        // must roll back, and the facet prepare failure must still name the
++        // real cause (this is the second ordering defect the review cites).
++        REQUIRE( dropTable( dir.filePath( QStringLiteral( "datasets.db" ) ), "sample_facets" ) );
++        const auto failed = store.removeSample( vid, sid );
++        CHECK( !failed.has_value() );
++        CHECK( failed.diagnostics().first().code ==
++               QStringLiteral( "dataset.store_query_failed" ) );
++        CHECK( failed.diagnostics().first().message.contains(
++          QStringLiteral( "no such table" ) ) );
++        // The rolled-back base row survives the facet prepare failure.
++        const auto reloaded = store.sampleById( vid, sid );
++        CHECK( reloaded.has_value() );
++    }
++}
++
+ TEST_CASE( "saveLabelSchema resolves a competing first write idempotently or typed",
+            "[dataset][label][store]" )
+ {
+diff --git a/tests/test_suitability_spatial.cpp b/tests/test_suitability_spatial.cpp
+index e2f384e0c..ceaed54d6 100644
+--- a/tests/test_suitability_spatial.cpp
++++ b/tests/test_suitability_spatial.cpp
+@@ -26,6 +26,9 @@
+ #include "suitability/suitability_time.h"
+ 
+ #include "data/band_role.h"
++#include "data/execution_fingerprint.h"
++
++#include <QCryptographicHash>
+ 
+ #include <QJsonArray>
+ #include <QJsonDocument>
+@@ -372,6 +375,14 @@ TEST_CASE( "goal JSON round-trip and deterministic digest", "[suitability][spati
+     SuitabilityGoal changed = goal;
+     changed.minSamples = 201;
+     REQUIRE( changed.contentDigest() != goal.contentDigest() );
++
++    // #1450: the digest hashes the platform's RFC 8785 canonical
++    // serialization — the ONE authority shared with execution/dataset
++    // fingerprints — not Qt's Compact dialect, which no canonical-path
++    // verifier could ever reproduce.
++    const QByteArray goalCanonical = sicnu::data::canonicalizeJsonRfc8785( goal.toJson() );
++    REQUIRE( goal.contentDigest() == QString::fromLatin1( QCryptographicHash::hash(
++                 goalCanonical, QCryptographicHash::Sha256 ).toHex() ) );
+ }
+ 
+ TEST_CASE( "spatial coverage without an AOI is unknown, not applicable-looking", "[suitability][spatial]" )
+@@ -731,6 +742,13 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
+     REQUIRE( replay->contentDigest() == report.contentDigest() );
+     REQUIRE( replay->toJson() == report.toJson() );
+ 
++    // #1450: the report digest also hashes the RFC 8785 canonical form —
++    // the single authority, so agents can re-verify report_digest through
++    // the canonicalizer they are told to use.
++    const QByteArray reportCanonical = sicnu::data::canonicalizeJsonRfc8785( report.toJson() );
++    REQUIRE( report.contentDigest() == QString::fromLatin1( QCryptographicHash::hash(
++                 reportCanonical, QCryptographicHash::Sha256 ).toHex() ) );
++
+     // Scenes present without an AOI stay a legal subject; coverage is Unknown.
+     SuitabilityAssessor::Inputs noAoi;
+     noAoi.scenes.append( makeScene( QStringLiteral( "s1" ), 0, 0, 100, 100 ) );
+diff --git a/tests/test_virtual_raster_create.cpp b/tests/test_virtual_raster_create.cpp
+index 03d158143..bbbf8d0e5 100644
+--- a/tests/test_virtual_raster_create.cpp
++++ b/tests/test_virtual_raster_create.cpp
+@@ -31,6 +31,7 @@
+ #include "data/data_manager.h"
+ #include "data/source_descriptor.h"
+ #include "data/virtual_raster_recipe.h"
++#include "runtime/observability/fault_registry.h"
+ 
+ using namespace sicnu::data;
+ using sicnu::display::DisplayViewId;
+@@ -417,6 +418,61 @@ TEST_CASE( "A failed dependent-VRT rewrite warns and never signals a reload",
+   QDir( vrtPath ).removeRecursively();
+ }
+ 
++TEST_CASE( "A verify-failed dependent-VRT publish still signals the reload",
++           "[virtual_raster][create][relocate][failure]" )
++{
++  // #1473 review: WriteStatus::VerifyFailed means the sidecar ALREADY
++  // renamed the new bytes onto the target before read-back failed — the
++  // dependent VRT path holds changed (suspect) bytes. The boolean write
++  // check used to take that as a plain failure and suppress assetChanged,
++  // leaving displays on the pre-relocate VRT while the file changed
++  // underneath. The reload must fire AND an ERROR diagnostic must name the
++  // suspect publish (fail-visible, never silent).
++  ensureQgisApplication();
++  QTemporaryDir dir;
++  DataManager manager;
++
++  const QString originalPath = stageDem( dir, QStringLiteral( "orig-verify.tif" ) );
++  const AssetId a = registerRaster( manager, originalPath );
++  const AssetId b =
++    registerRaster( manager, stageDem( dir, QStringLiteral( "b-verify.tif" ) ) );
++
++  const Result<AssetId> created = manager.createVirtualRaster(
++    recipeFor( { BandRef{ a, 1 }, BandRef{ b, 1 } } ) );
++  REQUIRE( created );
++
++  int dependentChangeEvents = 0;
++  QObject::connect( &manager, &DataManager::assetChanged,
++                    [&]( AssetId emitted ) {
++                      if ( emitted == created.value() )
++                        ++dependentChangeEvents;
++                    } );
++
++  const QString movedPath = dir.filePath( QStringLiteral( "moved-verify.tif" ) );
++  REQUIRE( QFile::rename( originalPath, movedPath ) );
++  SourceDescriptor replacement;
++  replacement.providerKey = QStringLiteral( "gdal" );
++  replacement.canonicalSource = movedPath;
++
++  sicnu::runtime::observability::fault::ArmedFault verifyFault(
++    { "data_manager.dependent_vrt_verify",
++      sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
++  const Result<RelocateResult> relocated =
++    manager.relocate( RelocateRequest{ a, replacement } );
++
++  // The relocation itself completes; the suspect publish is a diagnostic.
++  REQUIRE( relocated );
++  CHECK( dependentChangeEvents == 1 );
++  bool sawVerifyError = false;
++  for ( const Diagnostic &diagnostic : relocated.value().diagnostics )
++  {
++    if ( diagnostic.code == QStringLiteral( "relocate.dependent_vrt_verify_failed" )
++         && diagnostic.severity == DiagnosticSeverity::Error )
++      sawVerifyError = true;
++  }
++  CHECK( sawVerifyError );
++}
++
+ TEST_CASE( "A chained virtual raster (virtual of virtual) registers and links",
+            "[virtual_raster][create]" )
+ {

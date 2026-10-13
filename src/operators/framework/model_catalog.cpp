@@ -1377,8 +1377,18 @@ std::string ModelPostprocessContract::validateMorphology() const
 
 std::string ModelEoDomainContract::validate() const
 {
+  // Manifest-facing calibration vocabulary. Production spellings mirror the
+  // platform-wide SICNU_RADIOMETRIC_STATE vocabulary (radiometric_state.h,
+  // #1450) plus the manifest-only "any" wildcard: the SAR backscatter
+  // calibration states (sigma0/beta0, alongside gamma0) must be accepted
+  // here or models trained on calibrated SAR inputs are rejected at
+  // registration before the runtime preflight can compare states (#1472
+  // review). Manifest aliases (dn, boa_reflectance, sar_pair_metric,
+  // sar_texture) stay intentionally outside — manifests declare the
+  // production spelling.
   static const char *kStates[] = { "radiance", "toa_reflectance", "surface_reflectance",
                                    "brightness_temperature", "digital_number", "gamma0",
+                                   "sigma0", "beta0",
                                    "indices", "any" };
   if ( !calibrationState.empty() )
   {
@@ -1389,7 +1399,8 @@ std::string ModelEoDomainContract::validate() const
     if ( !known )
       return "eo.calibration.state '" + calibrationState
              + "' is not part of the radiometric-state vocabulary (radiance, toa_reflectance, "
-               "surface_reflectance, brightness_temperature, digital_number, gamma0, indices, any)";
+               "surface_reflectance, brightness_temperature, digital_number, gamma0, sigma0, "
+               "beta0, indices, any)";
     if ( calibrationEnforced && calibrationState == "any" )
       return "eo.calibration.state 'any' cannot be enforced (an enforced calibration must name "
              "a concrete state)";

@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cwctype>
 #include <cstring>
 #include <filesystem>
 #include <map>
@@ -214,6 +215,66 @@ bool isDriveAbsolute( const std::wstring &candidate )
     return letter && candidate[1] == L':' && ( candidate[2] == L'\\' || candidate[2] == L'/' );
 }
 
+/// Value of @p name (L"PATH", L"PATHEXT", ...) from the child environment
+/// block, falling back to the host process value when the block omits it.
+/// An empty block means "the child inherits the parent environment"
+/// (CreateProcessW null block), so the host fallback matches what the child
+/// actually sees.
+std::wstring environmentValue( const std::vector<wchar_t> &environment, const wchar_t *name )
+{
+    const size_t nameLength = wcslen( name );
+    for ( size_t index = 0; index + 1 < environment.size(); )
+    {
+        const std::wstring entry( environment.data() + index );
+        if ( entry.size() > nameLength + 1
+             && _wcsnicmp( entry.c_str(), name, nameLength ) == 0
+             && entry[ nameLength ] == L'=' )
+            return entry.substr( nameLength + 1 );
+        index += entry.size() + 1;
+    }
+    const DWORD size = ::GetEnvironmentVariableW( name, nullptr, 0 );
+    if ( size == 0 )
+        return std::wstring();
+    std::wstring value( size, L'\0' );
+    ::GetEnvironmentVariableW( name, value.data(), size );
+    if ( !value.empty() && value.back() == L'\0' )
+        value.pop_back();
+    return value;
+}
+
+/// Bare-name suffix probing follows PATHEXT order, restricted to the
+/// extensions CreateProcessW can execute DIRECTLY (.com/.exe — PE images).
+/// .bat/.cmd entries of PATHEXT describe shell scripts: this spawn contract
+/// never invokes a shell, so those are reported typed instead of executed
+/// (the caller checks them separately for the diagnostic). Falls back to
+/// the legacy .com;.exe pair when PATHEXT is unset or lists neither.
+std::vector<std::wstring> executableSuffixes( const std::vector<wchar_t> &environment )
+{
+    std::vector<std::wstring> suffixes;
+    const std::wstring pathExt = environmentValue( environment, L"PATHEXT" );
+    size_t start = 0;
+    while ( start <= pathExt.size() && suffixes.size() < 2 )
+    {
+        const size_t next = pathExt.find( L';', start );
+        const size_t end = next == std::wstring::npos ? pathExt.size() : next;
+        std::wstring entry = pathExt.substr( start, end - start );
+        for ( wchar_t &character : entry )
+            character = static_cast<wchar_t>( ::towlower( character ) );
+        if ( ( entry == L".com" || entry == L".exe" )
+             && std::find( suffixes.begin(), suffixes.end(), entry ) == suffixes.end() )
+            suffixes.push_back( entry );
+        if ( next == std::wstring::npos )
+            break;
+        start = next + 1;
+    }
+    if ( suffixes.empty() )
+    {
+        suffixes.push_back( L".com" );
+        suffixes.push_back( L".exe" );
+    }
+    return suffixes;
+}
+
 /// Resolves the spawn's application to an ABSOLUTE path with the current
 /// directory excluded from the search (#1380). When lpApplicationName is
 /// null, Windows re-parses the first command-line token and its search
@@ -222,11 +283,15 @@ bool isDriveAbsolute( const std::wstring &candidate )
 /// from the resolution entirely: absolute programs pass through, programs
 /// with separators anchor at the child's (policy-gated) working
 /// directory, and bare names walk the child's PATH with empty entries
-/// (the CWD convention) skipped. Returns an empty string when a bare name
-/// is nowhere on the PATH.
+/// (the CWD convention) skipped. Suffix probing follows PATHEXT order for
+/// the directly-executable extensions (.com/.exe). Returns an empty string
+/// when a bare name is nowhere on the PATH; @p shellScriptHit then carries
+/// the first .bat/.cmd hit (the typed-refusal diagnostic for shell-script
+/// shims — they are never executed by this argv-only contract).
 std::wstring resolveWindowsProgram( const std::string &program,
                                     const std::vector<wchar_t> &environment,
-                                    const std::string &workingDirectory )
+                                    const std::string &workingDirectory,
+                                    std::wstring &shellScriptHit )
 {
     const std::wstring wide = utf8ToWide( program );
     if ( isDriveAbsolute( wide ) )
@@ -237,7 +302,10 @@ std::wstring resolveWindowsProgram( const std::string &program,
         // Relative with separators: anchor at the child working directory
         // (the workspace policy already bounds it); std::filesystem mirrors
         // the host-cwd anchoring CreateProcessW applies to a relative
-        // lpCurrentDirectory.
+        // lpCurrentDirectory. A ROOTED-without-drive program ("/x") lands
+        // on the WORKING DIRECTORY'S DRIVE ROOT — operator/ replaces
+        // everything after the root name — which is exactly where
+        // CreateProcessW's lpApplicationName below points.
         std::error_code error;
         std::filesystem::path anchored =
             workingDirectory.empty()
@@ -249,28 +317,8 @@ std::wstring resolveWindowsProgram( const std::string &program,
         return anchored.wstring();
     }
     // Bare name: walk the child's PATH only.
-    std::wstring searchPath;
-    for ( size_t index = 0; index + 1 < environment.size(); )
-    {
-        const std::wstring entry( environment.data() + index );
-        if ( entry.size() >= 5 && _wcsnicmp( entry.c_str(), L"PATH=", 5 ) == 0 )
-        {
-            searchPath = entry.substr( 5 );
-            break;
-        }
-        index += entry.size() + 1;
-    }
-    if ( searchPath.empty() )
-    {
-        const DWORD size = ::GetEnvironmentVariableW( L"PATH", nullptr, 0 );
-        if ( size > 0 )
-        {
-            searchPath.resize( size );
-            ::GetEnvironmentVariableW( L"PATH", searchPath.data(), size );
-            if ( !searchPath.empty() && searchPath.back() == L'\0' )
-                searchPath.pop_back();
-        }
-    }
+    std::wstring searchPath = environmentValue( environment, L"PATH" );
+    const std::vector<std::wstring> suffixes = executableSuffixes( environment );
     const bool hasExtension = wide.find( L'.' ) != std::wstring::npos;
     size_t start = 0;
     while ( start <= searchPath.size() )
@@ -282,19 +330,37 @@ std::wstring resolveWindowsProgram( const std::string &program,
         // exactly the resolution this function exists to prevent.
         if ( !dir.empty() )
         {
-            const bool tryExeSuffix = !hasExtension;
             const std::wstring exact = dir + L"\\" + wide;
             const DWORD attributes = ::GetFileAttributesW( exact.c_str() );
             if ( attributes != INVALID_FILE_ATTRIBUTES
                  && !( attributes & FILE_ATTRIBUTE_DIRECTORY ) )
                 return exact;
-            if ( tryExeSuffix )
+            if ( !hasExtension )
             {
-                const std::wstring withExe = exact + L".exe";
-                const DWORD exeAttributes = ::GetFileAttributesW( withExe.c_str() );
-                if ( exeAttributes != INVALID_FILE_ATTRIBUTES
-                     && !( exeAttributes & FILE_ATTRIBUTE_DIRECTORY ) )
-                    return withExe;
+                for ( const std::wstring &suffix : suffixes )
+                {
+                    const std::wstring withSuffix = exact + suffix;
+                    const DWORD suffixAttributes = ::GetFileAttributesW( withSuffix.c_str() );
+                    if ( suffixAttributes != INVALID_FILE_ATTRIBUTES
+                         && !( suffixAttributes & FILE_ATTRIBUTE_DIRECTORY ) )
+                        return withSuffix;
+                }
+                // Shell-script shims (npm, code CLI): not executable without
+                // a shell. Record the first hit for the typed refusal.
+                if ( shellScriptHit.empty() )
+                {
+                    for ( const wchar_t *scriptSuffix : { L".cmd", L".bat" } )
+                    {
+                        const std::wstring script = exact + scriptSuffix;
+                        const DWORD scriptAttributes = ::GetFileAttributesW( script.c_str() );
+                        if ( scriptAttributes != INVALID_FILE_ATTRIBUTES
+                             && !( scriptAttributes & FILE_ATTRIBUTE_DIRECTORY ) )
+                        {
+                            shellScriptHit = script;
+                            break;
+                        }
+                    }
+                }
             }
         }
         if ( next == std::wstring::npos )
@@ -444,15 +510,19 @@ bool drainPipe( HANDLE pipe, BoundedSink &sink )
     return false; // pipe closed (child exited)
 }
 
-/// run()'s pre-spawn gate (#1460): same checks as the advisory
-/// validateArgv(), except a RELATIVE program is probed where the spawn
-/// resolves it — anchored at the request's working directory
-/// (resolveWindowsProgram builds workingDirectory/program for
-/// CreateProcessW). validateArgv() deliberately keeps the host-cwd probe
-/// (its documented diagnostics contract); gating run() on that refused
-/// spawns that would have succeeded.
+/// run()'s pre-spawn gate (#1460): resolves argv[0] EXACTLY the way the
+/// spawn will (resolveWindowsProgram — the same function run() passes to
+/// CreateProcessW), so probe and spawn can never disagree on anchoring
+/// (rooted "/x" landing on the drive root), PATH source (the child's
+/// environment block) or PATHEXT suffix order. The probe then only adds
+/// the existence check for pass-through forms. validateArgv() (advisory,
+/// no request) passes an empty environment block and no working directory:
+/// the resolver then anchors at the host cwd and searches the host PATH —
+/// its documented diagnostics contract.
 bool validateArgvAnchored( const std::vector<std::string> &argv,
-                           const std::string &workingDirectory, std::string &error )
+                           const std::string &workingDirectory,
+                           const std::vector<wchar_t> &environment,
+                           std::string &error )
 {
     if ( argv.empty() || argv.front().empty() )
     {
@@ -460,75 +530,28 @@ bool validateArgvAnchored( const std::vector<std::string> &argv,
         return false;
     }
     const std::string &program = argv.front();
-    if ( program.find( '/' ) == std::string::npos
-         && program.find( '\\' ) == std::string::npos
-         && program.find( ':' ) == std::string::npos )
+    std::wstring shellScriptHit;
+    const std::wstring resolved =
+        resolveWindowsProgram( program, environment, workingDirectory, shellScriptHit );
+    if ( resolved.empty() )
     {
-        // Bare name: verify presence on PATH for diagnostics (the security
-        // boundary is argv-only spawn, never this check). The search uses an
-        // EXPLICIT path — SearchPathW with a null path searches the current
-        // directory FIRST, which is exactly the resolution the spawn itself
-        // no longer performs (#1380); diagnostics must not report a
-        // CWD-planted executable as found.
-        DWORD pathSize = ::GetEnvironmentVariableW( L"PATH", nullptr, 0 );
-        std::wstring explicitPath;
-        if ( pathSize > 0 )
-        {
-            explicitPath.resize( pathSize );
-            ::GetEnvironmentVariableW( L"PATH", explicitPath.data(), pathSize );
-            if ( !explicitPath.empty() && explicitPath.back() == L'\0' )
-                explicitPath.pop_back();
-        }
-        if ( explicitPath.empty() )
-        {
-            // No PATH at all: a bare name has nothing to resolve against
-            // (and the current directory must not stand in for it).
-            error = "program '" + program + "' not found in PATH";
-            return false;
-        }
-        wchar_t pathBuffer[ MAX_PATH ];
-        std::wstring bare = utf8ToWide( program );
-        wchar_t *filePart = nullptr;
-        DWORD searched = ::SearchPathW( explicitPath.c_str(), bare.c_str(), L".exe",
-                                        MAX_PATH, pathBuffer, &filePart );
-        if ( searched >= MAX_PATH )
-        {
-            // SearchPathW reports the required size when the stack buffer is
-            // too small: retry once on the heap so a hit beyond MAX_PATH is
-            // still recognized (it used to surface as "not found"). Still too
-            // long fails with the same diagnostic as a miss.
-            const DWORD required = searched + 1;
-            std::wstring longPath( required, L'\0' );
-            const DWORD retried =
-                ::SearchPathW( explicitPath.c_str(), bare.c_str(), L".exe", required,
-                               longPath.data(), &filePart );
-            if ( retried == 0 || retried >= required )
-            {
-                error = "program '" + program + "' not found in PATH";
-                return false;
-            }
-        }
-        else if ( searched == 0 )
-        {
-            error = "program '" + program + "' not found in PATH";
-            return false;
-        }
+        // The current directory is never searched (#1380); a PATH hit that
+        // is only a shell-script shim is reported by NAME — executing it
+        // would require a shell, which this contract never provides.
+        error = shellScriptHit.empty()
+                    ? "program '" + program
+                          + "' not found in PATH (the current directory is never searched)"
+                    : "program '" + program + "' only resolves to the shell script '"
+                          + wideToUtf8( shellScriptHit.c_str() )
+                          + "'; this spawn contract executes binaries without a shell, so "
+                            ".cmd/.bat shims are refused";
+        return false;
     }
-    else
+    const DWORD attributes = ::GetFileAttributesW( resolved.c_str() );
+    if ( attributes == INVALID_FILE_ATTRIBUTES || ( attributes & FILE_ATTRIBUTE_DIRECTORY ) )
     {
-        // Mirror resolveWindowsProgram's anchoring decision (#1460): a
-        // relative program is probed under the child's working directory;
-        // without one the spawn inherits the host cwd, and so does the probe.
-        const std::string probe =
-            ( workingDirectory.empty() || isDriveAbsolute( utf8ToWide( program ) ) )
-                ? program
-                : workingDirectory + "/" + program;
-        const DWORD attributes = ::GetFileAttributesW( utf8ToWide( probe ).c_str() );
-        if ( attributes == INVALID_FILE_ATTRIBUTES || ( attributes & FILE_ATTRIBUTE_DIRECTORY ) )
-        {
-            error = "program '" + program + "' is not an executable file";
-            return false;
-        }
+        error = "program '" + program + "' is not an executable file";
+        return false;
     }
     return true;
 }
@@ -538,9 +561,9 @@ bool validateArgvAnchored( const std::vector<std::string> &argv,
 bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::string &error )
 {
     // Advisory diagnostics (header contract): argv[0] as the PARENT sees it.
-    // No working directory here, so a relative program anchors at the host
-    // cwd exactly as before.
-    return validateArgvAnchored( argv, std::string(), error );
+    // No working directory or request environment here, so the resolver
+    // anchors at the host cwd and walks the host PATH — exactly as before.
+    return validateArgvAnchored( argv, std::string(), std::vector<wchar_t>(), error );
 }
 
 ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &request )
@@ -564,12 +587,18 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         }
     }
 
+    // The child environment block is built BEFORE the program gate: the
+    // probe must search the PATH the child will actually see (an explicit
+    // request PATH overrides the host's), not the parent's.
+    std::vector<wchar_t> environment = environmentBlock( request );
+
     std::string programError;
-    // Anchored gate (#1460): the probe resolves a relative argv[0] the way
-    // resolveWindowsProgram will at spawn time (request working directory,
-    // host cwd without one), not the advisory host-cwd probe validateArgv()
-    // reports on.
-    if ( !validateArgvAnchored( request.argv, request.workingDirectory, programError ) )
+    // Anchored gate (#1460): the probe resolves argv[0] with the same
+    // resolver the spawn uses (request working directory, child PATH,
+    // PATHEXT order), so a validation pass can never diverge from the
+    // spawn's own resolution.
+    if ( !validateArgvAnchored( request.argv, request.workingDirectory, environment,
+                                programError ) )
     {
         result.error = programError;
         return result;
@@ -648,7 +677,6 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             startupInfo.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inheritList,
             sizeof( inheritList ), nullptr, nullptr );
 
-    std::vector<wchar_t> environment = environmentBlock( request );
     const std::wstring workingDirectory =
         request.workingDirectory.empty() ? std::wstring() : utf8ToWide( request.workingDirectory );
 
@@ -656,12 +684,19 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     // directory out of the program resolution entirely (the command line
     // below still carries the caller's argv[0], so the child's $0 is
     // unchanged).
-    const std::wstring applicationName =
-        resolveWindowsProgram( request.argv.front(), environment, request.workingDirectory );
+    std::wstring shellScriptHit;
+    const std::wstring applicationName = resolveWindowsProgram(
+        request.argv.front(), environment, request.workingDirectory, shellScriptHit );
     if ( applicationName.empty() )
     {
-        result.error = "program '" + request.argv.front()
-                       + "' not found in PATH (the current directory is never searched)";
+        result.error = shellScriptHit.empty()
+                           ? "program '" + request.argv.front()
+                                 + "' not found in PATH (the current directory is never searched)"
+                           : "program '" + request.argv.front()
+                                 + "' only resolves to the shell script '"
+                                 + wideToUtf8( shellScriptHit.c_str() )
+                                 + "'; this spawn contract executes binaries without a shell, "
+                                   "so .cmd/.bat shims are refused";
         ::CloseHandle( stdoutRead );
         ::CloseHandle( stderrRead );
         if ( job )

@@ -6,6 +6,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include "data/execution_fingerprint.h"
+
 namespace sicnu::suitability
 {
 
@@ -62,8 +64,13 @@ QVector<SuitabilityGap> SuitabilityReport::allGaps() const
 
 QString SuitabilityReport::contentDigest() const
 {
-    const QJsonDocument document( toJson() );
-    const QByteArray canonical = document.toJson( QJsonDocument::Compact );
+    // #1450: the digest must go through the platform's ONE canonical JSON
+    // serializer (RFC 8785) — the same authority as execution/dataset
+    // fingerprints. QJsonDocument::toJson(Compact) is Qt's own dialect
+    // (escaping/number formatting), which no canonical-path verifier could
+    // ever reproduce, so report_digest was unverifiable through the
+    // authority agents are told to use.
+    const QByteArray canonical = sicnu::data::canonicalizeJsonRfc8785( toJson() );
     return QString::fromLatin1(
         QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 ).toHex() );
 }

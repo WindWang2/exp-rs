@@ -31,6 +31,18 @@ struct SubmissionItem
     qint64 bytes = -1;
 };
 
+/// A file the discovery heuristics refused to treat as a submission
+/// (reserved tool-output name: grades* prefix, or the batch/summary/
+/// feedback substrings). Refusals are deliberate — re-grading must not
+/// pick up the console's own outputs — but they are ACCOUNTED, never a
+/// silent vanish: every refusal reaches the published report (#1466).
+struct DiscoverySkip
+{
+    QString studentId;   ///< owning one-level student dir; empty for root-level files
+    QString path;        ///< absolute path of the refused file
+    QString reason;      ///< stable human-readable refusal reason
+};
+
 struct BatchRowResult
 {
     QString studentId;
@@ -99,6 +111,11 @@ struct BatchAssessmentReport
     int truncated = 0;
     /// Rows adopted from a matching checkpoint instead of re-graded.
     int resumed = 0;
+    /// Files discovery refused (reserved tool-output names) — accounted so
+    /// a submission named e.g. zhang_feedback.json is an explicit refusal
+    /// in the report/CSV instead of vanishing without a trace (#1466).
+    /// These files are NOT rows and never enter the checkpoint.
+    QVector<DiscoverySkip> skippedFiles;
     QString rubricVersion;
     QString labVersion;
     QString softwareVersion;
@@ -109,6 +126,13 @@ struct BatchAssessmentReport
 
 /// Discover submissions under a class directory (non-recursive files + one-level student dirs).
 QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir );
+
+/// Same discovery, accounting every refused file into @p skipped (owned by
+/// the caller; pass nullptr for the legacy skip-silent behavior — the
+/// batch orchestrator always passes a real vector so the report can carry
+/// the refusals).
+QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
+                                             QVector<DiscoverySkip> *skipped );
 
 SubmissionKind classifySubmission( const QString &path );
 

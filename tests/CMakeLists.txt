@@ -12025,8 +12025,29 @@ sicnu_add_test(test_gcp_manager)
 sicnu_add_test(test_geometric_transform)
 sicnu_add_test(test_tps_interpolator)
 sicnu_add_test(test_feature_matcher)
-sicnu_add_test(test_resampler)
-sicnu_add_test(test_pansharpening)
+qt_add_executable(test_resampler test_resampler.cpp)
+target_link_libraries(test_resampler PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_resampler PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_resampler)
+
+qt_add_executable(test_pansharpening test_pansharpening.cpp)
+target_link_libraries(test_pansharpening PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_pansharpening PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_pansharpening)
 
 # D14 Package G: dual-window georeferencing workbench (app sources compiled in).
 add_executable(test_georef_dual_window_workbench
@@ -14892,6 +14913,11 @@ sicnu_add_teaching_admin_test(test_lab_pack_boundaries_r4)
 # all-fail typing, throw isolation, duplicate discovery, corrupt/foreign
 # checkpoint degradation, cancel-then-resume, atomic publish + BOM).
 sicnu_add_teaching_admin_test(test_teaching_batch_r4)
+
+# hardening/r10-ui-teaching (#1466 tail): discovery skip accounting — every
+# file the discovery heuristics refuse must surface in the published
+# report/CSV instead of vanishing without a trace.
+sicnu_add_teaching_admin_test(test_teaching_batch_discovery_r10)
 
 # hardening/r4-teaching-lab (Track 12): authoring-family failure paths +
 # fixture/pack asset consistency through the SAME inventory entry.

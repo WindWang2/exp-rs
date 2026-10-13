@@ -57,6 +57,30 @@ struct CompletionIdentity
     std::string digest;
 };
 
+/// RAII guard tracking in-flight terminal persistence and ownership handover.
+/// drainPersists() waits on m_inFlightTerminalHandouts to guarantee that
+/// releaseRunOwnership() has completed and its flock / m_locksByRunId entry
+/// is dropped before drainPersists() unblocks the caller (#1448, #1450).
+struct TerminalHandoutGuard
+{
+    std::atomic<int> &counter;
+    std::condition_variable &cv;
+    std::mutex &cvMutex;
+    TerminalHandoutGuard( std::atomic<int> &c, std::condition_variable &v, std::mutex &m )
+        : counter( c ), cv( v ), cvMutex( m )
+    {
+        counter.fetch_add( 1, std::memory_order_acq_rel );
+    }
+    ~TerminalHandoutGuard()
+    {
+        if ( counter.fetch_sub( 1, std::memory_order_acq_rel ) == 1 )
+        {
+            std::lock_guard<std::mutex> lock( cvMutex );
+            cv.notify_all();
+        }
+    }
+};
+
 /// Computes the identity for @a outputPath. Deliberately lock-free: the
 /// digest can read up to the verification budget, and onTaskUpdated folds
 /// under the coordinator mutex — hashing there would stall every tracked run
@@ -559,7 +583,8 @@ void WorkflowRunCoordinator::drainPersists()
 {
     std::unique_lock<std::mutex> lock( m_persistCvMutex );
     m_persistCv.wait( lock, [this]() {
-        return m_inFlightPersists.load( std::memory_order_acquire ) == 0;
+        return m_inFlightPersists.load( std::memory_order_acquire ) == 0
+            && m_inFlightTerminalHandouts.load( std::memory_order_acquire ) == 0;
     } );
     std::lock_guard<std::mutex> io( m_checkpointIoMutex );
 }
@@ -814,6 +839,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     persistRun( std::move( postSubmitPersist ) );
     if ( persistFinalize )
     {
+        TerminalHandoutGuard handout( m_inFlightTerminalHandouts, m_persistCv, m_persistCvMutex );
         persistRun( std::move( finalizePersist ) );
         // The terminal checkpoint (and any history/ archive sweep) is durable
         // now: release the run lock + reverse map only at this point, never
@@ -936,6 +962,7 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     persistRun( std::move( foldPersist ) );
     if ( persistFinalize )
     {
+        TerminalHandoutGuard handout( m_inFlightTerminalHandouts, m_persistCv, m_persistCvMutex );
         persistRun( std::move( finalizePersist ) );
         // Terminal checkpoint durable: release the run lock + reverse map only
         // now (finalizeRunLocked keeps m_locksByRunId alive exactly this long)
@@ -1447,6 +1474,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             donePersist = capturePersistLocked(
                 run, run->state() == WorkflowRunState::Completed );
         }
+        TerminalHandoutGuard handout( m_inFlightTerminalHandouts, m_persistCv, m_persistCvMutex );
         persistRun( std::move( donePersist ) );
         // Terminal checkpoint durable: hand the run lock (and reverse map) to
         // the next owner only now — erasing them inside the m_mutex block
@@ -1471,6 +1499,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             std::lock_guard<std::mutex> lock( m_mutex );
             failedResumePersist = capturePersistLocked( run );
         }
+        TerminalHandoutGuard handout( m_inFlightTerminalHandouts, m_persistCv, m_persistCvMutex );
         persistRun( std::move( failedResumePersist ) );
         // The refusal checkpoint is durable: only now may another owner take
         // the run lock (an earlier erase exposes the stale pre-resume state).
@@ -1641,6 +1670,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     {
         // Every step completed inside the missed window: the finalize persist
         // above is durable, so the ownership handover happens only now.
+        TerminalHandoutGuard handout( m_inFlightTerminalHandouts, m_persistCv, m_persistCvMutex );
         releaseRunOwnership( runId );
     }
     return pipelineId;
@@ -1703,6 +1733,7 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
         }
         if ( didFinalize )
         {
+            TerminalHandoutGuard handout( m_inFlightTerminalHandouts, m_persistCv, m_persistCvMutex );
             persistRun( std::move( finalizePersist ) );
             // Terminal checkpoint durable: the ownership handover (run lock +
             // reverse map) happens only now, never inside the m_mutex block

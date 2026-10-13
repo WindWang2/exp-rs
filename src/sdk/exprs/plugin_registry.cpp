@@ -256,24 +256,36 @@ void PluginRegistry::refreshUnlocked()
     applyPolicyAndIndex();
 }
 
-const PluginRecord *PluginRegistry::record( const std::string &pluginId ) const
+std::shared_ptr<const PluginRecord> PluginRegistry::record( const std::string &pluginId ) const
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     for ( const PluginRecord &entry : mRecords )
     {
         if ( entry.id() == pluginId )
         {
-            // #943: return a registry-RETAINED copy, not &entry — mRecords is
-            // replaced wholesale by the next refresh(), which used to dangle
-            // every pointer still held by a caller. Retention (never
-            // eviction) keeps such pointers valid for the registry's
-            // lifetime; only external read-only callers allocate here,
-            // internal paths resolve under the lock via findRecord().
-            mRecordSnapshots.push_back( std::make_shared<PluginRecord>( entry ) );
-            return mRecordSnapshots.back().get();
+            // #943: hand out a CALLER-OWNED snapshot, never &entry — mRecords
+            // is replaced wholesale by the next refresh(), which used to
+            // dangle every pointer still held by a caller. R9 (PR #1469
+            // review): the snapshot is owned by the returned shared_ptr, so
+            // the registry retains NOTHING — the old per-call retention made
+            // repeated queries grow memory without bound (an unbounded
+            // polling caller was a leak, and eviction could not be added
+            // without reintroducing the dangling the retention existed to
+            // prevent). Internal paths resolve under the lock via
+            // findRecord()/copyRecord() instead.
+            return std::make_shared<const PluginRecord>( entry );
         }
     }
     return nullptr;
+}
+
+std::size_t PluginRegistry::retainedRecordSnapshots() const
+{
+    // mRecordSnapshots is a diagnostic invariant (always 0 — record() retains
+    // nothing), so no lock is needed to read it; keep the lock so a future
+    // reintroduced retention stays observable under concurrency.
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    return mRetainedRecordSnapshots;
 }
 
 Json::Value PluginRegistry::accessDeclarationFor( const std::string &pluginId ) const
