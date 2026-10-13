@@ -215,6 +215,25 @@ TEST_CASE(
   REQUIRE( outDs != nullptr );
   REQUIRE( outDs->GetRasterBand( 1 )->GetRasterDataType() == GDT_Int32 );
   GDALClose( outDs );
+
+  // Even if writeOutputNodata is false, negative unclassified value must still
+  // widen to GDT_Int32 to prevent unclassified pixels from wrapping into 255.
+  RsClassificationPipeline::Config cfgNoNodata = baseConfig( srcPath, tmp.path() + "/out_no_nodata.tif" );
+  cfgNoNodata.backend.reset( new RsClassifierNormalBayes );
+  cfgNoNodata.trainX = X;
+  cfgNoNodata.trainY = y;
+  cfgNoNodata.ignoreOptions.writeOutputNodata = false;
+  cfgNoNodata.ignoreOptions.unclassifiedValue = -1;
+
+  const RsClassificationPipelineResult resNoNodata = RsClassificationPipeline::run( std::move( cfgNoNodata ) );
+  INFO( resNoNodata.errorMessage.toStdString() );
+  REQUIRE( resNoNodata.ok );
+
+  GDALDataset *outDsNoNodata = static_cast<GDALDataset *>(
+    GDALOpen( ( tmp.path() + "/out_no_nodata.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( outDsNoNodata != nullptr );
+  REQUIRE( outDsNoNodata->GetRasterBand( 1 )->GetRasterDataType() == GDT_Int32 );
+  GDALClose( outDsNoNodata );
 }
 
 TEST_CASE(

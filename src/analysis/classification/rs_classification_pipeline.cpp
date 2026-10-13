@@ -836,7 +836,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     maxClassId = std::max( maxClassId, id );
     maxClassIdKnown = true;
   }
-  if ( config.ignoreOptions.writeOutputNodata && config.ignoreOptions.unclassifiedValue < 0 )
+  if ( config.ignoreOptions.unclassifiedValue < 0 )
   {
     minClassId = std::min( minClassId, config.ignoreOptions.unclassifiedValue );
   }

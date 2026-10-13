@@ -35,7 +35,7 @@ std::vector<double> effectiveWeights( const std::vector<float> &y, const std::ve
     {
         if ( !std::isfinite( y[i] ) )
             continue;
-        out[i] = ( w.empty() || i >= w.size() ) ? 1.0 : std::max( 0.0, static_cast<double>( w[i] ) );
+        out[i] = w.empty() ? 1.0 : std::max( 0.0, static_cast<double>( w[i] ) );
     }
     return out;
 }
