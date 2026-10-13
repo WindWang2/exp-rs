@@ -88,3 +88,21 @@
 - **Exit Code**: 0
 - **Commit**: `2bb9733166`
 - **Next Epoch**: Full regression suite verification and independent code review.
+
+---
+
+## Epoch 6: Independent Review, Push & Pull Request Submission
+- **Master SHA**: `8a08642760e2e8ffd2c4b965fc4683c01d3e4758`
+- **Independent Review**:
+  - Round 1: Identified P1 in `main_window_vector.cpp:151` (`cutFeatures()` count queried post-deletion).
+  - P1 Fix: Captured `selectedFeatureCount()` before deletion in commit `930cc4af0e`.
+  - Round 2: APPROVED (0 P0 / 0 P1 / 2 P2).
+- **Remote Push**:
+  - Connected `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus` to access system desktop keyring (`WindWang2`).
+  - Pushed `hardening/r11-d-qt-teaching-ux` to `origin/hardening/r11-d-qt-teaching-ux`.
+- **Pull Request Created**:
+  - URL: https://github.com/WindWang2/exp-rs/pull/1482
+  - State: `OPEN`
+  - Base: `master`, Head: `hardening/r11-d-qt-teaching-ux`
+- **Status**: COMPLETE
+

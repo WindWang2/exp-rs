@@ -81,11 +81,12 @@ All changes strictly follow Karpathy's 4 core guidelines:
 
 ---
 
-## 5. PR Submission Status & Prepared Metadata
+## 5. PR Submission Status & Link
 
-- **Remote Push Status**: `NOT_VERIFIED` (Local token in `gh auth status` is expired for account `WindWang2`; HTTPS push prompts for credentials).
-- **Local Worktree & Branch**: Ready on `hardening/r11-d-qt-teaching-ux` at commit `149f8b751d`.
-- **Target Remote**: `origin/master` on `WindWang2/exp-rs`.
+- **Remote Push Status**: `VERIFIED` (pushed to `origin/hardening/r11-d-qt-teaching-ux` via system session bus keyring).
+- **Pull Request URL**: https://github.com/WindWang2/exp-rs/pull/1482
+- **PR State**: `OPEN` (Base: `master`, Head: `hardening/r11-d-qt-teaching-ux`)
+- **Target Remote**: `WindWang2/exp-rs`
 
 ### Prepared PR Metadata
 
