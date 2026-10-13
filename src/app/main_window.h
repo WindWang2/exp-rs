@@ -244,6 +244,9 @@ public:
     sicnu::app::WorkbenchHost *workbenchHost() const { return m_workbenchHost; }
     sicnu::app::SelectionContext *selectionContext() const { return m_selectionContext; }
     sicnu::app::CommandRegistry *commandRegistry() const { return m_commandRegistry; }
+    /// Vector editing infrastructure accessors
+    QAction *editingAction( const QString &name ) const;
+    const QList<QAction *> &editingToolActions() const { return m_editingToolActions; }
     /// Workbench 9.0 M1: explicit coarse-state model (phase/tool/task facts).
     sicnu::app::WorkbenchStateModel *workbenchState() const { return m_workbenchState; }
     /// Workbench 9.0 M2: registry workflow.* command handlers forward here.

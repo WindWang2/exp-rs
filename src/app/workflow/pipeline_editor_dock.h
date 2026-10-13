@@ -46,9 +46,20 @@ public slots:
   /// Workbench 10.0: run workflow:preflight on the canvas DAG and project
   /// error findings onto node badges (shared agent engine, no second check).
   void runPreflightProjection();
+
 public:
   // Convenience for ribbon / programmatic open — delegates to onOpenClicked's file-dialog flow.
   void openPipelineDialog() { onOpenClicked(); }
+
+  /// Atomic write: writes to temporary file and renames to target, ensuring
+  /// zero corruption or partial files on failure.
+  static bool writePipelineDefinitionFile( const QString &filePath,
+                                           const Json::Value &root,
+                                           QString *errorOut = nullptr );
+
+  static bool readPipelineDefinitionFile( const QString &filePath,
+                                          Json::Value &rootOut,
+                                          QString *errorOut = nullptr );
 private slots:
   void onRunFullClicked();
   void onStopClicked();

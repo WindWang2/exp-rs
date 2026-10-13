@@ -7,7 +7,15 @@
 #include <QAction>
 #include <QFile>
 #include <QFileDevice>
+#include <QFileInfo>
+#include <QDir>
+#include <QTemporaryFile>
+#include <QDateTime>
+#include <cerrno>
+#include <cstring>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 #include "workflow_definition.h"
 #include "agent/spatial_tools/spatial_tool.h"
@@ -124,37 +132,148 @@ void PipelineEditorDock::onNewClicked()
   emit newWorkflowRequested();
 }
 
+bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
+                                                     const Json::Value &root,
+                                                     QString *errorOut )
+{
+  if ( filePath.isEmpty() )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Target file path is empty." );
+    return false;
+  }
+
+  QFileInfo fileInfo( filePath );
+  if ( fileInfo.isDir() )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Target is a directory: %1" ).arg( filePath );
+    return false;
+  }
+  QDir parentDir = fileInfo.dir();
+  if ( !parentDir.exists() )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Directory does not exist: %1" ).arg( parentDir.absolutePath() );
+    return false;
+  }
+
+  QTemporaryFile tempFile( parentDir.filePath( QStringLiteral( "pipeline_save_XXXXXX.tmp" ) ) );
+  tempFile.setAutoRemove( true );
+  if ( !tempFile.open() )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Cannot create temporary file: %1" ).arg( tempFile.errorString() );
+    return false;
+  }
+
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "  ";
+  const std::string text = Json::writeString( builder, root );
+
+  qint64 written = tempFile.write( text.data(), text.size() );
+  if ( written != static_cast<qint64>( text.size() ) || !tempFile.flush() )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Failed to write complete data: %1" ).arg( tempFile.errorString() );
+    return false;
+  }
+
+  const QString tempName = tempFile.fileName();
+  tempFile.close();
+
+  tempFile.setAutoRemove( false );
+#if defined(Q_OS_UNIX)
+  if ( ::rename( QFile::encodeName( tempName ).constData(),
+                 QFile::encodeName( filePath ).constData() ) != 0 )
+  {
+    tempFile.setAutoRemove( true );
+    if ( errorOut )
+      *errorOut = QObject::tr( "Failed to atomically publish pipeline file: %1" )
+                      .arg( QString::fromLocal8Bit( strerror( errno ) ) );
+    return false;
+  }
+#else
+  if ( QFile::exists( filePath ) )
+  {
+    const QString backupPath = filePath + QStringLiteral( ".bak.%1" ).arg( QDateTime::currentMSecsSinceEpoch() );
+    if ( !QFile::rename( filePath, backupPath ) )
+    {
+      tempFile.setAutoRemove( true );
+      if ( errorOut )
+        *errorOut = QObject::tr( "Cannot backup existing file before replace: %1" ).arg( filePath );
+      return false;
+    }
+    if ( !QFile::rename( tempName, filePath ) )
+    {
+      QFile::rename( backupPath, filePath );
+      tempFile.setAutoRemove( true );
+      if ( errorOut )
+        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( filePath );
+      return false;
+    }
+    QFile::remove( backupPath );
+  }
+  else
+  {
+    if ( !QFile::rename( tempName, filePath ) )
+    {
+      tempFile.setAutoRemove( true );
+      if ( errorOut )
+        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( filePath );
+      return false;
+    }
+  }
+#endif
+
+  return true;
+}
+
+bool PipelineEditorDock::readPipelineDefinitionFile( const QString &filePath,
+                                                    Json::Value &rootOut,
+                                                    QString *errorOut )
+{
+  QFile file( filePath );
+  if ( !file.open( QIODevice::ReadOnly ) )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Cannot open file: %1 (%2)" ).arg( filePath, file.errorString() );
+    return false;
+  }
+
+  const QByteArray data = file.readAll();
+  Json::CharReaderBuilder builder;
+  builder["collectComments"] = false;
+  std::string errs;
+  std::istringstream stream( std::string( data.constData(), static_cast<size_t>( data.size() ) ) );
+  if ( !Json::parseFromStream( builder, stream, &rootOut, &errs ) )
+  {
+    if ( errorOut )
+      *errorOut = QString::fromStdString( errs );
+    return false;
+  }
+  return true;
+}
+
 void PipelineEditorDock::onOpenClicked()
 {
   QString fileName = QFileDialog::getOpenFileName( this, tr( "Open Pipeline Definition JSON" ), QString(), tr( "JSON Files (*.json)" ) );
   if ( fileName.isEmpty() )
     return;
 
-  QFile inFile( fileName );
-  if ( !inFile.open( QIODevice::ReadOnly ) )
-  {
-    QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open file: %1" ).arg( fileName ) );
-    return;
-  }
-  const QByteArray raw = inFile.readAll();
-
   Json::Value root;
-  Json::CharReaderBuilder builder;
-  std::string errs;
-  // In-memory parse (Json::parseFromStream needs a std::istream; QFile is
-  // not one) — same pattern as src/agent/output_verifier.cpp.
-  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-  if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &root, &errs ) )
+  QString err;
+  if ( !readPipelineDefinitionFile( fileName, root, &err ) )
   {
-    QMessageBox::warning( this, tr( "Parse Error" ), QString::fromStdString( errs ) );
+    QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open file: %1" ).arg( err ) );
     return;
   }
 
   WorkflowDefinition def;
-  std::string err;
-  if ( !workflowDefinitionFromJson( root, def, err ) )
+  std::string parseErr;
+  if ( !workflowDefinitionFromJson( root, def, parseErr ) )
   {
-    QMessageBox::warning( this, tr( "Format Error" ), QString::fromStdString( err ) );
+    QMessageBox::warning( this, tr( "Format Error" ), QString::fromStdString( parseErr ) );
     return;
   }
 
@@ -173,11 +292,12 @@ void PipelineEditorDock::onSaveClicked()
   baseDef.title = "Exported Pipeline";
 
   WorkflowDefinition exported = mCanvasWidget->exportWorkflowDefinition( baseDef );
+  const Json::Value root = workflowDefinitionToJson( exported );
 
-  QString error;
-  if ( !writePipelineDefinitionFile( fileName, exported, &error ) )
+  QString err;
+  if ( !writePipelineDefinitionFile( fileName, root, &err ) )
   {
-    QMessageBox::warning( this, tr( "Error" ), error );
+    QMessageBox::warning( this, tr( "Save Failed" ), tr( "Cannot write pipeline definition:\n%1" ).arg( err ) );
     return;
   }
 
@@ -190,28 +310,7 @@ bool writePipelineDefinitionFile( const QString &path,
                                   QString *error )
 {
   const Json::Value root = workflowDefinitionToJson( def );
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "  ";
-  const std::string bytes = Json::writeString( builder, root );
-
-  QFile outFile( path );
-  if ( !outFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-  {
-    if ( error )
-      *error = PipelineEditorDock::tr( "Cannot write file: %1" ).arg( path );
-    return false;
-  }
-  const qint64 written = outFile.write( bytes.data(), static_cast<qint64>( bytes.size() ) );
-  outFile.flush();
-  const QFile::FileError ferr = outFile.error();
-  outFile.close();
-  if ( written != static_cast<qint64>( bytes.size() ) || ferr != QFileDevice::NoError )
-  {
-    if ( error )
-      *error = PipelineEditorDock::tr( "Writing stopped before completion (disk full or target unavailable): %1" ).arg( path );
-    return false;
-  }
-  return true;
+  return PipelineEditorDock::writePipelineDefinitionFile( path, root, error );
 }
 
 void PipelineEditorDock::onRunFullClicked()

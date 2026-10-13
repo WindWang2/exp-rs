@@ -178,6 +178,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         m_matrixStatus->setObjectName( QStringLiteral( "rsStudioMatrixStatus" ) );
         layout->addWidget( m_matrixStatus );
         m_matrixTable = new QTableWidget( 0, 6 );
+        m_matrixTable->setObjectName( QStringLiteral( "rsStudioMatrixTable" ) );
         m_matrixTable->setHorizontalHeaderLabels(
             { tr( "Point" ), tr( "Rep" ), tr( "Run" ), tr( "Status" ), tr( "Metric" ),
               tr( "Error" ) } );
@@ -421,6 +422,8 @@ void ExperimentStudioDock::rebuildMatrixTable()
     if ( !report )
     {
         m_matrixStatus->setText( tr( "No report loaded" ) );
+        m_matrixTable->clearContents();
+        m_matrixTable->setRowCount( 0 );
         return;
     }
     RunMatrixFilter filter;
@@ -434,7 +437,11 @@ void ExperimentStudioDock::rebuildMatrixTable()
             .arg( vm.failedCount )
             .arg( vm.cancelledCount )
             .arg( vm.missingCount ) );
-    m_matrixTable->setRowCount( 0 );
+
+    const bool sortingWasEnabled = m_matrixTable->isSortingEnabled();
+    m_matrixTable->setSortingEnabled( false );
+    m_matrixTable->setUpdatesEnabled( false );
+    m_matrixTable->clearContents();
     m_matrixTable->setRowCount( vm.rows.size() );
     for ( int i = 0; i < vm.rows.size(); ++i )
     {
@@ -453,6 +460,8 @@ void ExperimentStudioDock::rebuildMatrixTable()
         m_matrixTable->setItem( i, 4, new QTableWidgetItem( metric ) );
         m_matrixTable->setItem( i, 5, new QTableWidgetItem( r.errorSummary ) );
     }
+    m_matrixTable->setUpdatesEnabled( true );
+    m_matrixTable->setSortingEnabled( sortingWasEnabled );
 }
 
 ExperimentStudioDock::~ExperimentStudioDock()
@@ -504,6 +513,7 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
     m_session.faultScenarioId.clear();
     m_lastStudyReport = QJsonObject{};
     m_session.lastStudyReport = QJsonObject{};
+    rebuildMatrixTable();
     m_liveLedger = std::make_shared<sicnu::experiment::MatrixLedger>( *store );
     m_liveStudyOutputDir =
         QFileInfo( path ).absolutePath() + QStringLiteral( "/studio-study-outputs" );
@@ -715,8 +725,12 @@ void ExperimentStudioDock::compareSelectedSpatial()
     // compare the COMMITTED outputs through the real GDAL summarizer.
     if ( m_liveStore && !m_lastStudyReport.isEmpty() && selected.size() >= 2 )
     {
-        const QString leftId = m_matrixTable->item( selected[0].row(), 0 )->text();
-        const QString rightId = m_matrixTable->item( selected[1].row(), 0 )->text();
+        const auto *item0 = m_matrixTable->item( selected[0].row(), 0 );
+        const auto *item1 = m_matrixTable->item( selected[1].row(), 0 );
+        if ( !item0 || !item1 )
+            return;
+        const QString leftId = item0->text();
+        const QString rightId = item1->text();
         const auto vm = compareRecordedPoints( m_liveStudyOutputDir, leftId, rightId,
                                                m_liveSpatialEpsilon, SpatialCompareMode::DiffSummary,
                                                m_session.policy );
@@ -740,10 +754,15 @@ void ExperimentStudioDock::compareSelectedSpatial()
     QString rightId = QStringLiteral( "p0001" );
     if ( selected.size() >= 2 )
     {
-        leftId = m_matrixTable->item( selected[0].row(), 0 )->text();
-        rightId = m_matrixTable->item( selected[1].row(), 0 )->text();
-        left = QStringLiteral( "synthetic://out/%1.tif" ).arg( leftId );
-        right = QStringLiteral( "synthetic://out/%1.tif" ).arg( rightId );
+        const auto *item0 = m_matrixTable->item( selected[0].row(), 0 );
+        const auto *item1 = m_matrixTable->item( selected[1].row(), 0 );
+        if ( item0 && item1 )
+        {
+            leftId = item0->text();
+            rightId = item1->text();
+            left = QStringLiteral( "synthetic://out/%1.tif" ).arg( leftId );
+            right = QStringLiteral( "synthetic://out/%1.tif" ).arg( rightId );
+        }
     }
     BufferSummarizer summarizer;
     const auto vm =
@@ -896,14 +915,19 @@ void ExperimentStudioDock::loadFirstDivergenceDemo()
         const auto report = StudyReport::fromJson( m_lastStudyReport );
         if ( report )
         {
-            const QString leftPointId = m_matrixTable->item( selected[0].row(), 0 )->text();
-            const QString rightPointId = m_matrixTable->item( selected[1].row(), 0 )->text();
-            for ( const StudyRunRow &row : report->runTable )
+            const auto *item0 = m_matrixTable->item( selected[0].row(), 0 );
+            const auto *item1 = m_matrixTable->item( selected[1].row(), 0 );
+            if ( item0 && item1 )
             {
-                if ( row.pointId == leftPointId && !row.runId.isEmpty() )
-                    referenceRunId = row.runId;
-                if ( row.pointId == rightPointId && !row.runId.isEmpty() )
-                    studentRunId = row.runId;
+                const QString leftPointId = item0->text();
+                const QString rightPointId = item1->text();
+                for ( const StudyRunRow &row : report->runTable )
+                {
+                    if ( row.pointId == leftPointId && !row.runId.isEmpty() )
+                        referenceRunId = row.runId;
+                    if ( row.pointId == rightPointId && !row.runId.isEmpty() )
+                        studentRunId = row.runId;
+                }
             }
         }
     }

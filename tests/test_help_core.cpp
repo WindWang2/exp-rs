@@ -20,6 +20,7 @@
 #include "help/help_markdown_writer.h"
 #include "help/diagnostic_catalog.h"
 #include "help/availability_facts.h"
+#include "help/terminology_provider.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -490,4 +491,44 @@ TEST_CASE( "Markdown writer output is stable and complete", "[help][markdown]" )
 
   // deterministic
   CHECK( markdown == HelpMarkdownWriter::commandReference( registry ) );
+}
+
+TEST_CASE( "terminology provider assigns distinct unique ids to duplicate en/slug terms without dropping entries", "[help][terms]" )
+{
+    QVector<TermEntry> terms;
+    TermEntry t1;
+    t1.en = QStringLiteral( "resolution" );
+    t1.zh = QStringLiteral( "分辨率 (光谱)" );
+    t1.definitionZh = QStringLiteral( "光谱采样间隔。" );
+    t1.category = QStringLiteral( "spectral" );
+
+    TermEntry t2;
+    t2.en = QStringLiteral( "resolution" );
+    t2.zh = QStringLiteral( "分辨率 (空间)" );
+    t2.definitionZh = QStringLiteral( "地面采样距离。" );
+    t2.category = QStringLiteral( "spatial" );
+
+    TermEntry t3;
+    t3.en = QStringLiteral( "pixel size" );
+    t3.zh = QStringLiteral( "像元大小" );
+    t3.definitionZh = QStringLiteral( "单个栅格单元尺寸。" );
+    t3.category = QStringLiteral( "spatial" );
+    t3.related = { QStringLiteral( "resolution" ) };
+
+    terms << t1 << t2 << t3;
+
+    HelpRegistry registry;
+    QStringList errors;
+    TerminologyProvider::appendDescriptors( terms, registry, &errors );
+
+    INFO( "append errors: " << errors.join( QStringLiteral( "; " ) ).toStdString() );
+    CHECK( errors.isEmpty() );
+    // All 3 terms must be distinct registered descriptors; none dropped or overwritten!
+    REQUIRE( registry.count() == 3 );
+    CHECK( registry.find( QStringLiteral( "concept.term.resolution" ) ) != nullptr );
+    CHECK( registry.find( QStringLiteral( "concept.term.resolution_2" ) ) != nullptr );
+    CHECK( registry.find( QStringLiteral( "concept.term.pixel_size" ) ) != nullptr );
+
+    // And related lookup must resolve without dangling references
+    CHECK( registry.validateReferences().isEmpty() );
 }

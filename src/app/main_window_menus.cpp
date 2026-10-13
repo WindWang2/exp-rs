@@ -788,6 +788,7 @@ void QgisDesktopWindow::setupToolbars()
     auto makeEditAct = [this]( const char *icon, const QString &text, const QString &tipText,
                                void ( QgisDesktopWindow::*slot )() ) -> QAction * {
         auto *a = new QAction( QIcon( QStringLiteral( ":/icons/" ) + QLatin1String( icon ) ), text, this );
+        a->setObjectName( QString::fromLatin1( icon ) );
         tip( a, tipText ); // toolTip + statusTip + whatsThis
         a->setEnabled( false );
         connect( a, &QAction::triggered, this, slot );

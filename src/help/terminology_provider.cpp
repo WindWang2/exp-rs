@@ -169,7 +169,8 @@ TerminologyProvider::LoadResult TerminologyProvider::loadFromResources()
     LoadResult result;
     if ( !file.open( QIODevice::ReadOnly ) )
     {
-        // Tools/tests without the embedded resource simply get zero terms.
+        result.errors << QStringLiteral( "cannot open embedded glossary resource: %1" )
+                             .arg( QString::fromUtf8( kGlossaryResource ) );
         return result;
     }
     return loadFromJson( file.readAll(), QLatin1String( kGlossaryResource ) );
@@ -180,6 +181,8 @@ void TerminologyProvider::appendDescriptors( const QVector<TermEntry> &terms,
 {
     // id → en map for related[] resolution; slug dedup keeps ids unique.
     QHash<QString, QString> idByEnLower;
+    QVector<QString> assignedIds;
+    assignedIds.reserve( terms.size() );
     {
         QSet<QString> used;
         for ( const TermEntry &term : terms )
@@ -190,18 +193,19 @@ void TerminologyProvider::appendDescriptors( const QVector<TermEntry> &terms,
             while ( used.contains( id ) )
                 id = QStringLiteral( "%1_%2" ).arg( base ).arg( n++ );
             used.insert( id );
-            idByEnLower.insert( term.en.toLower(), id );
+            assignedIds.push_back( id );
+            if ( !idByEnLower.contains( term.en.toLower() ) )
+                idByEnLower.insert( term.en.toLower(), id );
         }
     }
 
-    for ( const TermEntry &term : terms )
+    for ( int i = 0; i < terms.size(); ++i )
     {
+        const TermEntry &term = terms[ i ];
         HelpDescriptor d;
-        // (review #1447) register under the dedup-suffixed id computed above:
-        // the bare slug collides for distinct en terms with equal slugs, so
-        // upsertDescriptor silently replaced the earlier term and related[]
-        // pointed at ids that were never registered.
-        d.id = idByEnLower.value( term.en.toLower() );
+        // Each entry receives its unique dedup-suffixed id computed above,
+        // preventing duplicate en/slug entries from overwriting each other (#1465).
+        d.id = assignedIds[ i ];
         d.kind = HelpKind::Concept;
         d.title = QStringLiteral( "%1（%2）" ).arg( term.zh, term.en );
         d.summary = term.definitionZh;

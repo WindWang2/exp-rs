@@ -694,3 +694,41 @@ TEST_CASE( "PipelineEditorDock write helper reports write failures honestly",
   REQUIRE( workflowDefinitionFromJson( root, restored, defErr ) );
   CHECK( restored.id == def.id );
 }
+
+TEST_CASE( "PipelineEditorDock: atomic pipeline save and read contracts", "[workflow][pipeline][save]" )
+{
+  ensureApp();
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+
+  const QString validPath = tempDir.filePath( QStringLiteral( "test_pipeline.json" ) );
+
+  Json::Value root;
+  root["id"] = "test_pipe";
+  root["title"] = "Test Pipeline";
+  root["steps"] = Json::Value( Json::arrayValue );
+
+  // 1. Successful save
+  QString error;
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( validPath, root, &error ) );
+  CHECK( error.isEmpty() );
+  CHECK( QFile::exists( validPath ) );
+
+  // 2. Successful read back
+  Json::Value loaded;
+  REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( validPath, loaded, &error ) );
+  CHECK( loaded["id"].asString() == "test_pipe" );
+  CHECK( loaded["title"].asString() == "Test Pipeline" );
+
+  // 3. Unwritable directory / invalid path fails cleanly with error message
+  const QString badPath = tempDir.filePath( QStringLiteral( "non_existent_subdir/bad.json" ) );
+  CHECK_FALSE( PipelineEditorDock::writePipelineDefinitionFile( badPath, root, &error ) );
+  CHECK_FALSE( error.isEmpty() );
+
+  // 4. Overwrite existing file succeeds atomically
+  root["title"] = "Updated Pipeline";
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( validPath, root, &error ) );
+  Json::Value reloaded;
+  REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( validPath, reloaded, &error ) );
+  CHECK( reloaded["title"].asString() == "Updated Pipeline" );
+}
