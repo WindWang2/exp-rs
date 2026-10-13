@@ -144,11 +144,12 @@ void QgisDesktopWindow::cutFeatures()
         statusBar()->showMessage(tr("No features selected to cut"), 2000);
         return;
     }
+    const int cutCount = vl->selectedFeatureCount();
     m_clipboard->replaceWithCopyOf(vl);
     vl->beginEditCommand(tr("Cut features"));
     vl->deleteSelectedFeatures();
     vl->endEditCommand();
-    statusBar()->showMessage(tr("Cut %1 feature(s)").arg(vl->selectedFeatureCount()), 2000);
+    statusBar()->showMessage(tr("Cut %1 feature(s)").arg(cutCount), 2000);
 }
 
 void QgisDesktopWindow::copyFeatures()
