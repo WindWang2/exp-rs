@@ -10,6 +10,7 @@
 #include "python_ipc_server.h"
 #include "python_worker_process.h"
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <vector>
@@ -27,12 +28,12 @@ constexpr int kMaxWorkerCrashRestarts = 5;
 struct WorkerNode
 {
   int id = 0;
-  int restartCount = 0;      ///< cumulative crash restarts since creation (health metric)
-  int crashBudgetLeft = kMaxWorkerCrashRestarts;
+  std::atomic<int> restartCount{ 0 };      ///< cumulative crash restarts since creation (health metric)
+  std::atomic<int> crashBudgetLeft{ kMaxWorkerCrashRestarts };
   PythonWorkerProcess *worker = nullptr;
   PythonIpcServer *server = nullptr;
-  bool isBusy = false;
-  bool isRestarting = false;
+  std::atomic<bool> isBusy{ false };
+  std::atomic<bool> isRestarting{ false };
 };
 
 /// Composite health snapshot for the worker pool (ADR 0045).
