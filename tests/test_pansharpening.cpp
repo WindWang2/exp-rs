@@ -103,6 +103,10 @@ TEST_CASE("test_pansharpening - sharpen validates its inputs", "[pansharpen][d14
     // Wrong bandWeights size.
     REQUIRE_FALSE(PanSharpening::sharpen(PanSharpenMethod::GramSchmidt, threeBands, 4, 4,
                                          pan.data(), 8, 8, out3p, {0.5, 0.5}));
+    // Null pointer in msBands.
+    const std::vector<const float*> nullMsBands{a.data(), nullptr, c.data()};
+    REQUIRE_FALSE(PanSharpening::sharpen(PanSharpenMethod::Brovey, nullMsBands, 4, 4,
+                                         pan.data(), 8, 8, out3p));
 }
 
 TEST_CASE("test_pansharpening - Brovey reduces to the input bands for a self-consistent pan", "[pansharpen][d14]")
@@ -243,4 +247,15 @@ TEST_CASE("test_pansharpening - evaluateQuality of identical rasters is the iden
     REQUIRE(metrics.ergas <= 1e-9);
     REQUIRE_THAT(metrics.meanCc, WithinAbs(1.0, 1e-9));
     REQUIRE_THAT(metrics.ssim, WithinAbs(1.0, 1e-9));
+
+    // Null pointers in bands are refused fail-closed.
+    const std::vector<const float*> nullBands{a.data(), nullptr};
+    const auto nullMetrics = PanSharpening::evaluateQuality(nullBands, original, 16, 16, 0.25);
+    REQUIRE(nullMetrics.rmse == 0.0);
+    REQUIRE(nullMetrics.ergas == 0.0);
+
+    // Invalid scaleRatio is refused fail-closed.
+    const auto invalidScaleMetrics = PanSharpening::evaluateQuality(fused, original, 16, 16, -0.5);
+    REQUIRE(invalidScaleMetrics.rmse == 0.0);
+    REQUIRE(invalidScaleMetrics.ergas == 0.0);
 }

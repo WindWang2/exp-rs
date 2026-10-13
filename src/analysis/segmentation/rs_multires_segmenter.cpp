@@ -1,6 +1,7 @@
 // rs_multires_segmenter.cpp — Native Baatz-Schäpe (FNEA) Multiresolution Segmentation Engine.
 #include "rs_multires_segmenter.h"
 #include "sicnu_logging.h"
+#include "processing/algorithms/nodata_utils.h"
 
 #include <gdal.h>
 
@@ -710,7 +711,7 @@ RsSegmentMap RsMultiresSegmenter::segmentRasterFile(
             const float sentinel = static_cast<float>( ndVal );
             for ( float &v : bandBuffers[i] )
             {
-                if ( std::abs( v - sentinel ) < 1e-6f )
+                if ( sicnu::rs::isNoDataValue( v, sentinel ) )
                     v = std::numeric_limits<float>::quiet_NaN();
             }
         }

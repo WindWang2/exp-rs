@@ -61,10 +61,10 @@ RsAccuracyAssessment::compute( const QVector<int> &yt, const QVector<int> &yp )
     pe += static_cast<double>( rowSum ) * colSum;
   }
   pe = MathUtils::safeDivDouble(pe, static_cast<double>(total) * total);
-  if ( r.overallAccuracy == 1.0 )
+  if ( r.overallAccuracy >= 1.0 - 1e-12 )
     r.kappa = 1.0;
-  else if ( pe == 1.0 )
-    r.kappa = 1.0; // degenerate single-class case
+  else if ( pe >= 1.0 - 1e-12 )
+    r.kappa = 0.0; // no agreement beyond chance
   else
     r.kappa = MathUtils::safeDivDouble(r.overallAccuracy - pe, 1.0 - pe);
 

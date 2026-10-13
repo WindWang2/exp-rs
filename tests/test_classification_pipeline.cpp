@@ -187,6 +187,37 @@ TEST_CASE(
 }
 
 TEST_CASE(
+  "Classification pipeline: negative unclassified/class id escalates output to signed Int32",
+  "[classify][pipeline][dtype]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y, { 1, 2, 3 } );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.ignoreOptions.writeOutputNodata = true;
+  cfg.ignoreOptions.unclassifiedValue = -1;
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( res.ok );
+
+  GDALDataset *outDs = static_cast<GDALDataset *>(
+    GDALOpen( ( tmp.path() + "/out.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( outDs != nullptr );
+  REQUIRE( outDs->GetRasterBand( 1 )->GetRasterDataType() == GDT_Int32 );
+  GDALClose( outDs );
+}
+
+TEST_CASE(
   "Classification pipeline: source NoData pixels map to unclassified class 0",
   "[classify][pipeline][nodata]" )
 {

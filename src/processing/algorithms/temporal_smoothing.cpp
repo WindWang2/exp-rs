@@ -35,7 +35,7 @@ std::vector<double> effectiveWeights( const std::vector<float> &y, const std::ve
     {
         if ( !std::isfinite( y[i] ) )
             continue;
-        out[i] = w.empty() ? 1.0 : std::max( 0.0, static_cast<double>( w[i] ) );
+        out[i] = ( w.empty() || i >= w.size() ) ? 1.0 : std::max( 0.0, static_cast<double>( w[i] ) );
     }
     return out;
 }
@@ -106,6 +106,8 @@ std::vector<float> whittakerSmooth( const std::vector<float> &y, const std::vect
 {
     const std::size_t n = y.size();
     if ( n == 0 )
+        return {};
+    if ( !w.empty() && w.size() != n )
         return {};
     if ( d != 1 && d != 2 )
         return {};

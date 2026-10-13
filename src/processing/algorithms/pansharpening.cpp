@@ -215,6 +215,9 @@ bool PanSharpening::sharpen(PanSharpenMethod method,
     for (const float* band : outSharpenedBands)
         if (!band)
             return false;
+    for (const float* band : msBands)
+        if (!band)
+            return false;
 
     const size_t bands = msBands.size();
     std::vector<double> weights = bandWeights;
@@ -276,8 +279,12 @@ PanSharpenMetrics PanSharpening::evaluateQuality(const std::vector<const float*>
 {
     PanSharpenMetrics metrics;
     const size_t bands = std::min(degradedFusedBands.size(), originalMsBands.size());
-    if (bands == 0 || width <= 0 || height <= 0)
+    if (bands == 0 || width <= 0 || height <= 0 || scaleRatio <= 0.0 || !std::isfinite(scaleRatio))
         return metrics;
+    for (size_t k = 0; k < bands; ++k) {
+        if (!degradedFusedBands[k] || !originalMsBands[k])
+            return metrics;
+    }
     const int count = width * height;
 
     double ergasSum = 0.0;
