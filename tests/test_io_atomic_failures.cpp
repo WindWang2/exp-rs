@@ -507,3 +507,115 @@ TEST_CASE( "publishStagedMembers restores prior group when a mid-member publish 
   CHECK( fs::is_directory( oldMain ) );
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( oldSide + ".bak" ) );
 }
+
+TEST_CASE( "multi-sidecar group publication rolls back all sidecars when main fails on conflict (Oracle-B6.1)",
+           "[io][atomic][group][rollback]" )
+{
+  const std::string dir = scratch( "multi_sidecar_rollback" );
+  const std::string targetMain = ( fs::path( dir ) / "dataset.shp" ).string();
+  const std::string stagedMain = ( fs::path( dir ) / "staged.shp" ).string();
+
+  const std::vector<std::string> exts = { ".dbf", ".shx", ".prj" };
+
+  // Write initial v1 files for all sidecars
+  for ( const auto &ext : exts )
+  {
+    std::ofstream out( ( fs::path( dir ) / ( "dataset" + ext ) ).string() );
+    out << "V1" << ext;
+  }
+
+  // Write staged v2 files for main and all sidecars
+  {
+    std::ofstream out( stagedMain );
+    out << "V2_MAIN";
+  }
+  for ( const auto &ext : exts )
+  {
+    std::ofstream out( ( fs::path( dir ) / ( "staged" + ext ) ).string() );
+    out << "V2" << ext;
+  }
+
+  // Create an unoverwritable non-empty directory occupying targetMain
+  fs::create_directories( fs::path( targetMain ) / "conflict_sub" );
+
+  bool failed = false;
+  try
+  {
+    sicnu::geo::atomic_fs::publishStagedGroup( stagedMain, targetMain );
+    FAIL( "expected publish failure" );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    failed = true;
+  }
+  CHECK( failed );
+
+  // Verify all sidecars rolled back to V1
+  for ( const auto &ext : exts )
+  {
+    const std::string sidecarPath = ( fs::path( dir ) / ( "dataset" + ext ) ).string();
+    std::ifstream in( sidecarPath );
+    std::string content;
+    in >> content;
+    CHECK( content == ( "V1" + ext ) );
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( sidecarPath + ".bak" ) );
+  }
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( targetMain + ".bak" ) );
+}
+
+TEST_CASE( "multi-dependent publishStagedMembers rolls back all dependents cleanly (Oracle-B6.1)",
+           "[io][atomic][group][members]" )
+{
+  const std::string dir = scratch( "multi_dep_rollback" );
+  const std::string mainTarget = ( fs::path( dir ) / "main.out" ).string();
+  const std::string mainStaged = ( fs::path( dir ) / "main.tmp" ).string();
+
+  const std::string dep1Target = ( fs::path( dir ) / "dep1.out" ).string();
+  const std::string dep1Staged = ( fs::path( dir ) / "dep1.tmp" ).string();
+
+  const std::string dep2Target = ( fs::path( dir ) / "dep2.out" ).string();
+  const std::string dep2Staged = ( fs::path( dir ) / "dep2.tmp" ).string();
+
+  auto write = []( const std::string &p, const char *c ) {
+    std::ofstream out( p );
+    out << c;
+  };
+
+  write( dep1Target, "DEP1_V1" );
+  write( dep2Target, "DEP2_V1" );
+  write( dep1Staged, "DEP1_V2" );
+  write( dep2Staged, "DEP2_V2" );
+  write( mainStaged, "MAIN_V2" );
+
+  // Block mainTarget with a non-empty directory
+  fs::create_directories( fs::path( mainTarget ) / "block" );
+
+  bool failed = false;
+  try
+  {
+    sicnu::geo::atomic_fs::publishStagedMembers( {
+      { dep1Staged, dep1Target },
+      { dep2Staged, dep2Target },
+      { mainStaged, mainTarget }
+    } );
+    FAIL( "expected member publish failure" );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    failed = true;
+  }
+  CHECK( failed );
+
+  auto read = []( const std::string &p ) {
+    std::ifstream in( p );
+    std::string s;
+    in >> s;
+    return s;
+  };
+
+  CHECK( read( dep1Target ) == "DEP1_V1" );
+  CHECK( read( dep2Target ) == "DEP2_V1" );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( dep1Target + ".bak" ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( dep2Target + ".bak" ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( mainTarget + ".bak" ) );
+}
