@@ -427,3 +427,42 @@ TEST_CASE( "every shipped help file parses as an array of uniquely-identified en
     CHECK( totalEntries >= 300 );
     CHECK( totalCommandEntries >= 70 );
 }
+
+// R10-B B7: F1 context help must resolve for every registered workbench.
+// main_window_workbench.cpp maps bench id -> "workbench.<id with - as _>"
+// and hands it to HelpSystemController; a bench whose topic is absent shows
+// "Topic not found". The id list is duplicated HERE on purpose (same
+// discipline as consumerFamilies): the gate must go red when a bench is
+// registered without a shipped topic, and reading the ids from the app
+// source would require linking the shell. Keep in sync with the
+// ExternalWindowWorkbench registrations in main_window_workbench.cpp.
+TEST_CASE( "every registered workbench id resolves to a shipped help topic",
+           "[helpintegrity12][r10b][workbench]" )
+{
+    const QStringList benchIds = {
+        QStringLiteral( "classify" ),
+        QStringLiteral( "georef-i2i" ),
+        QStringLiteral( "geocorrection" ),
+        QStringLiteral( "georef-dual" ),
+        QStringLiteral( "classify-studio" ),
+        QStringLiteral( "obia" ),
+        QStringLiteral( "layout" ),
+        QStringLiteral( "map" ),
+    };
+
+    const auto result = sicnu::help::HelpContentStore::loadFromDirectory( contentDir() );
+    REQUIRE( result.errors.isEmpty() );
+
+    QStringList missing;
+    for ( const QString &benchId : benchIds )
+    {
+        // Same mapping the F1 filter applies (bench ids may contain '-',
+        // help-id grammar uses '_').
+        const QString topicId =
+          QStringLiteral( "workbench.%1" ).arg( QString( benchId ).replace( u'-', u'_' ) );
+        if ( result.registry.find( topicId ) == nullptr )
+            missing << topicId;
+    }
+    INFO( "unresolved workbench topics: " << missing.join( ", " ).toStdString() );
+    CHECK( missing.isEmpty() );
+}
