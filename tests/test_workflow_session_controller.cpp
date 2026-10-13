@@ -7,6 +7,33 @@
 #include "app/shell/schema_form_builder.h"
 #include "app/shell/workflow_session_controller.h"
 #include "app/shell/task_panel_host.h"
+#include "processing/framework/task_center.h"
+
+namespace
+{
+// TaskPanelHost is a QWidget: every case that binds a panel needs a
+// QApplication first (a later case may be the first to construct one).
+void ensureApp()
+{
+    if ( !qApp )
+    {
+        static int argc = 1;
+        static char a0[] = "test_workflow_session_controller";
+        char *argv[] = { a0, nullptr };
+        new QApplication( argc, argv );
+    }
+}
+
+// The submit/cancel paths drive the TaskCenter singleton. Without a clean
+// shutdown on both sides of a case, in-flight worker records outlive the
+// test binary's teardown and the process segfaults at exit — the pattern
+// test_agent_ops_task_center_executor.cpp already uses.
+struct TaskCenterGuard
+{
+    TaskCenterGuard() { sicnu::TaskCenter::instance().shutdownForTests(); }
+    ~TaskCenterGuard() { sicnu::TaskCenter::instance().shutdownForTests(); }
+};
+} // namespace
 
 TEST_CASE( "WorkflowSessionController default state queries return clean initial values", "[workflow][shell][controller]" )
 {
@@ -38,15 +65,18 @@ TEST_CASE( "WorkflowSessionController cancelActiveRun resets state cleanly when 
 
 TEST_CASE( "WorkflowSessionController cancelActiveRun cancels in-flight pipeline run", "[workflow][shell][controller]" )
 {
+    ensureApp();
+    TaskCenterGuard taskGuard;
   WorkflowSessionController controller;
-  TaskPanelHost panel;
-  controller.bindPanel( &panel );
-  controller.registerBuiltins();
+  // Heap + explicit delete: a stack QWidget outliving Catch2's teardown of
+  // the QApplication this binary lazily constructs segfaults at exit.
+  auto *panel = new TaskPanelHost();
+  controller.bindPanel( panel );
 
   // R10-B: the old "wf:vegetation_indices" id does not exist anywhere in
-  // the source, so this case used to vacuate. openBareOperator registers
-  // a real definition at runtime.
-  const QString sessionId = controller.openBareOperator( QStringLiteral( "rs:band_math" ) );
+  // the source, so this case used to vacuate. This is a definition
+  // registerBuiltins() really registers (builtin_definitions.cpp).
+  const QString sessionId = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
   REQUIRE( !sessionId.isEmpty() );
 
   controller.runFullWorkflow();
@@ -60,6 +90,7 @@ TEST_CASE( "WorkflowSessionController cancelActiveRun cancels in-flight pipeline
   // Safe idempotent cancel
   controller.cancelActiveRun();
   CHECK_FALSE( controller.isRunInFlight() );
+  delete panel;
 }
 
 // Restored regression home (#595): SchemaFormBuilder must round-trip ARRAY
@@ -113,15 +144,19 @@ TEST_CASE("SchemaFormBuilder round-trips array parameters as arrays (#595)", "[s
 TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in flight",
            "[workflow][shell][controller][r10b]" )
 {
-    WorkflowSessionController controller;
-    TaskPanelHost panel;
-    controller.bindPanel( &panel );
-    controller.registerBuiltins();
+    ensureApp();
+    TaskCenterGuard taskGuard;
+  WorkflowSessionController controller;
+  // Heap + explicit delete: a stack QWidget outliving Catch2's teardown of
+  // the QApplication this binary lazily constructs segfaults at exit.
+  auto *panel = new TaskPanelHost();
+  controller.bindPanel( panel );
+  controller.registerBuiltins();
 
-    // Real operator path (openBareOperator registers a definition at
-    // runtime): "wf:vegetation_indices" exists nowhere in the source, so
-    // the previous openTool-based setup vacated this whole test case.
-    const QString sessionId = controller.openBareOperator( QStringLiteral( "rs:band_math" ) );
+    // Real definition registered by registerBuiltins() (builtin_definitions.cpp)
+    // — the old "wf:vegetation_indices" id exists nowhere in the source, so
+    // the previous setup vacated this whole test case.
+    const QString sessionId = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
     REQUIRE( !sessionId.isEmpty() );
 
     QStringList messages;
@@ -168,4 +203,5 @@ TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in
         controller.cancelActiveRun();
         REQUIRE_FALSE( controller.isRunInFlight() );
     }
+    delete panel;
 }
