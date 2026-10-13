@@ -353,3 +353,39 @@ TEST_CASE( "publish replaces a read-only target file (rename semantics)",
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( staged ) );
 #endif
 }
+
+TEST_CASE( "file:// URLs open seamlessly via RasterReader and inspectRaster (Oracle-B1.2)",
+           "[io][paths][file_uri]" )
+{
+  const std::string dir = scratch( "file_uri_direct_open" );
+  const std::string rasterPath = ( fs::path( dir ) / "test_scene.tif" ).string();
+
+  // Create valid raster fixture
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( rasterPath, 4, 4, { {} }, {} );
+  sicnu::geo::RasterWindow full;
+  full.width = 4;
+  full.height = 4;
+  std::vector<double> values( 16, 42.0 );
+  writer.writeWindow( 1, full, values.data() );
+  writer.finalize();
+
+  const std::string fileUri = "file://" + rasterPath;
+
+  // 1. inspectRaster via file://
+  sicnu::geo::RasterMetadata meta;
+  REQUIRE_NOTHROW( meta = sicnu::geo::inspectRaster( fileUri ) );
+  CHECK( meta.width == 4 );
+  CHECK( meta.height == 4 );
+
+  // 2. inspectAny via file://
+  Json::Value anyMeta;
+  REQUIRE_NOTHROW( anyMeta = sicnu::geo::inspectAny( fileUri ) );
+  CHECK( anyMeta["kind"].asString() == "raster" );
+
+  // 3. RasterReader::open via file://
+  REQUIRE_NOTHROW( [&]() {
+    sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( fileUri );
+    CHECK( reader.metadata().width == 4 );
+    CHECK( reader.metadata().height == 4 );
+  }() );
+}

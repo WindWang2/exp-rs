@@ -7,6 +7,7 @@
 
 #include "geospatial/remote/remote_source_validator.h"
 
+#include "geospatial/remote/offline_gate.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <algorithm>
@@ -364,6 +365,12 @@ RemoteSourceValidator RemoteSourceValidator::probe( const std::string &url,
   RemoteSourceValidator validator;
   const std::string requestUrl =
     uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
+  if ( options.blockPrivateNetworks && offline::isPrivateHost( requestUrl ) )
+  {
+    Json::Value details;
+    details["url"] = uri.display();
+    throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
+  }
   try
   {
     HttpFetchResult fetch = httpFetchStatus( requestUrl, fetchOptions );
@@ -434,6 +441,13 @@ RevalidationResult RemoteSourceValidator::revalidate( const RemoteValidatorOptio
     // needs a probed validator object.
     result.decidedBy = "no_prior_identity";
     return result;
+  }
+
+  if ( options.blockPrivateNetworks && offline::isPrivateHost( mRequestUrl ) )
+  {
+    Json::Value details;
+    details["url"] = mIdentity.url;
+    throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
   }
 
   HttpFetchOptions fetchOptions;

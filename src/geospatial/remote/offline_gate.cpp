@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
@@ -32,6 +33,147 @@ bool envFlagEnabled( const char *name )
     for ( char &c : s )
         c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
     return s == "1" || s == "true" || s == "yes" || s == "on";
+}
+
+bool parseIpv4( const std::string &text, std::uint32_t &out )
+{
+    std::size_t i = 0;
+    int octets = 0;
+    std::uint32_t value = 0;
+    while ( i < text.size() )
+    {
+        if ( octets == 4 )
+            return false;
+        std::uint32_t octet = 0;
+        int digits = 0;
+        while ( i < text.size() && std::isdigit( static_cast<unsigned char>( text[i] ) ) )
+        {
+            octet = octet * 10 + static_cast<unsigned char>( text[i] - '0' );
+            if ( octet > 255 )
+                return false;
+            ++i;
+            ++digits;
+        }
+        if ( digits == 0 )
+            return false;
+        value = ( value << 8 ) | octet;
+        ++octets;
+        if ( i < text.size() )
+        {
+            if ( text[i] != '.' )
+                return false;
+            ++i;
+        }
+    }
+    if ( octets != 4 )
+        return false;
+    out = value;
+    return true;
+}
+
+bool parseIpv6( const std::string &text, unsigned char out[16] )
+{
+    const std::size_t cc = text.find( "::" );
+    if ( cc != std::string::npos && text.find( "::", cc + 2 ) != std::string::npos )
+        return false; // at most one compression
+    const std::string head = cc == std::string::npos ? text : text.substr( 0, cc );
+    const std::string tail = cc == std::string::npos ? std::string() : text.substr( cc + 2 );
+
+    std::uint16_t groups[8] = {};
+    int headCount = 0;
+    int tailCount = 0;
+
+    auto parseSection = [ & ]( const std::string &section, std::uint16_t *groups_, int &count,
+                               bool allowV4Tail ) {
+        if ( section.empty() )
+            return true;
+        std::size_t pos = 0;
+        while ( true )
+        {
+            if ( count >= 8 )
+                return false;
+            const std::size_t colon = section.find( ':', pos );
+            const std::string token = colon == std::string::npos ? section.substr( pos )
+                                                                 : section.substr( pos, colon - pos );
+            if ( allowV4Tail && colon == std::string::npos && token.find( '.' ) != std::string::npos )
+            {
+                std::uint32_t v4 = 0;
+                if ( !parseIpv4( token, v4 ) )
+                    return false;
+                groups_[count++] = static_cast<std::uint16_t>( v4 >> 16 );
+                if ( count >= 8 )
+                    return false;
+                groups_[count++] = static_cast<std::uint16_t>( v4 & 0xFFFFu );
+                return true;
+            }
+            if ( token.empty() || token.size() > 4 )
+                return false;
+            std::uint32_t group = 0;
+            for ( const char c : token )
+            {
+                if ( !std::isxdigit( static_cast<unsigned char>( c ) ) )
+                    return false;
+                const std::uint32_t digit = c <= '9' ? static_cast<std::uint32_t>( c - '0' )
+                                                     : static_cast<std::uint32_t>( ( c | 0x20 ) - 'a' + 10 );
+                group = group * 16 + digit;
+            }
+            groups_[count++] = static_cast<std::uint16_t>( group );
+            if ( colon == std::string::npos )
+                return true;
+            pos = colon + 1;
+        }
+    };
+
+    const bool headAllowV4Tail = ( cc == std::string::npos );
+    if ( !parseSection( head, groups, headCount, headAllowV4Tail ) )
+        return false;
+    if ( !parseSection( tail, groups + headCount, tailCount, true ) )
+        return false;
+
+    const int total = headCount + tailCount;
+    if ( cc == std::string::npos )
+    {
+        if ( total != 8 )
+            return false;
+    }
+    else if ( total > 7 )
+    {
+        return false;
+    }
+    else
+    {
+        for ( int i = 0; i < tailCount; ++i )
+        {
+            groups[7 - i] = groups[headCount + tailCount - 1 - i];
+            groups[headCount + tailCount - 1 - i] = 0;
+        }
+    }
+
+    for ( int i = 0; i < 8; ++i )
+    {
+        out[i * 2] = static_cast<unsigned char>( groups[i] >> 8 );
+        out[i * 2 + 1] = static_cast<unsigned char>( groups[i] & 0xFF );
+    }
+    return true;
+}
+
+bool isPrivateIpv4( std::uint32_t v4 )
+{
+    if ( ( v4 & 0xFF000000u ) == 0x0A000000u ) // 10.0.0.0/8
+        return true;
+    if ( ( v4 & 0xFFF00000u ) == 0xAC100000u ) // 172.16.0.0/12
+        return true;
+    if ( ( v4 & 0xFFFF0000u ) == 0xC0A80000u ) // 192.168.0.0/16
+        return true;
+    if ( ( v4 & 0xFFFF0000u ) == 0xA9FE0000u ) // 169.254.0.0/16 link-local
+        return true;
+    if ( ( v4 & 0xFF000000u ) == 0x7F000000u ) // 127.0.0.0/8 loopback
+        return true;
+    if ( ( v4 & 0xFF000000u ) == 0x00000000u ) // 0.0.0.0/8
+        return true;
+    if ( ( v4 & 0xFFC00000u ) == 0x64400000u ) // 100.64.0.0/10 CGNAT
+        return true;
+    return false;
 }
 
 } // namespace
@@ -98,6 +240,110 @@ std::string refusalMessage( const std::string &source )
 {
     return "offline mode (--offline / SICNU_OFFLINE): refusing remote "
            "request without network access: " + source;
+}
+
+bool isPrivateHost( const std::string &hostOrUrl )
+{
+    if ( hostOrUrl.empty() )
+        return true;
+
+    std::string input = hostOrUrl;
+    while ( input.rfind( "/vsi", 0 ) == 0 )
+    {
+        const std::size_t slash = input.find( '/', 1 );
+        if ( slash == std::string::npos )
+            break;
+        input = input.substr( slash + 1 );
+    }
+
+    std::string host;
+    const std::size_t schemePos = input.find( "://" );
+    if ( schemePos != std::string::npos )
+    {
+        std::string afterScheme = input.substr( schemePos + 3 );
+        const std::size_t atPos = afterScheme.find( '@' );
+        const std::size_t firstSlash = afterScheme.find( '/' );
+        if ( atPos != std::string::npos && ( firstSlash == std::string::npos || atPos < firstSlash ) )
+            afterScheme = afterScheme.substr( atPos + 1 );
+        const std::size_t term = afterScheme.find_first_of( "/?#" );
+        host = ( term == std::string::npos ) ? afterScheme : afterScheme.substr( 0, term );
+    }
+    else
+    {
+        if ( !input.empty() && input.front() == '/' )
+            return false;
+        const std::size_t term = input.find_first_of( "/?#" );
+        host = ( term == std::string::npos ) ? input : input.substr( 0, term );
+    }
+
+    if ( !host.empty() && host.front() == '[' )
+    {
+        const std::size_t close = host.find( ']' );
+        host = ( close == std::string::npos ) ? host.substr( 1 ) : host.substr( 1, close - 1 );
+    }
+    else if ( host.find( ':' ) != std::string::npos && host.find( ':' ) == host.rfind( ':' ) )
+    {
+        host = host.substr( 0, host.find( ':' ) );
+    }
+
+    std::string lowered;
+    lowered.reserve( host.size() );
+    for ( const char c : host )
+        lowered += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+
+    if ( lowered.empty() )
+        return true;
+    if ( lowered == "localhost" || ( lowered.size() > 10 && lowered.compare( lowered.size() - 10, 10, ".localhost" ) == 0 ) )
+        return true;
+    if ( lowered == "metadata.google.internal" )
+        return true;
+
+    std::uint32_t v4 = 0;
+    if ( parseIpv4( host, v4 ) )
+        return isPrivateIpv4( v4 );
+
+    unsigned char v6[16] = {};
+    if ( parseIpv6( host, v6 ) )
+    {
+        bool ipv4Mapped = v6[10] == 0xFF && v6[11] == 0xFF;
+        for ( int i = 0; i < 10 && ipv4Mapped; ++i )
+            ipv4Mapped = ( v6[i] == 0 );
+        if ( ipv4Mapped )
+        {
+            const std::uint32_t embedded =
+                ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
+                ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
+            return isPrivateIpv4( embedded );
+        }
+
+        // IPv4-compatible ::a.b.c.d (96 zero bits)
+        bool ipv4Compatible = true;
+        for ( int i = 0; i < 12; ++i )
+            ipv4Compatible = ipv4Compatible && ( v6[i] == 0 );
+        if ( ipv4Compatible )
+        {
+            const std::uint32_t embedded =
+                ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
+                ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
+            if ( embedded > 1 )
+                return isPrivateIpv4( embedded );
+        }
+
+        bool loopback = true;
+        for ( int i = 0; i < 15; ++i )
+            loopback = loopback && ( v6[i] == 0 );
+        loopback = loopback && ( v6[15] == 1 );
+        if ( loopback )
+            return true;
+
+        if ( v6[0] == 0xFE && ( v6[1] & 0xC0 ) == 0x80 )
+            return true;
+        if ( ( v6[0] & 0xFE ) == 0xFC )
+            return true;
+        return false;
+    }
+
+    return false;
 }
 
 void applyGdalNetworkDeny()

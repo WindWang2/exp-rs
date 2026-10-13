@@ -94,6 +94,15 @@ struct ResourceUri
     /// otherwise empty.
     std::string embeddedLocalPath() const;
 
+    /// Target path for direct GDAL open/identify operations (GDALOpenEx, etc.):
+    /// for file:// URIs, returns the normalized local filesystem path (uri.path);
+    /// for other schemes, returns canonical().
+    std::string gdalOpenTarget() const;
+
+    /// Normalizes any input source to a GDAL-compatible open target,
+    /// resolving file:// URIs to local filesystem paths.
+    static std::string toGdalPath( const std::string &source );
+
     /// True when the input text looks like a directory product container:
     /// an existing directory whose name/layout smells like a sensor product
     /// (".SAFE", ".GRP", "MTL.txt" sibling, "GRANULE", "*.hdf" sidecars...).

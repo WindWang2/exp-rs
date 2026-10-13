@@ -9,6 +9,7 @@
 #include "geospatial/metadata/canonical_metadata.h"
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/util/resource_uri.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -88,11 +89,14 @@ GDALDatasetH openReadOnlyOrThrow( const std::string &path, unsigned int openFlag
 {
   QuietCplErrors quiet;
   ensureGdalRegistered();
-  GDALDatasetH handle = GDALOpenEx( path.c_str(), GDAL_OF_READONLY | openFlags, nullptr, nullptr, nullptr );
+  const std::string gdalPath = ResourceUri::toGdalPath( path );
+  GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | openFlags, nullptr, nullptr, nullptr );
   if ( !handle )
   {
     Json::Value details;
     details["path"] = path;
+    if ( gdalPath != path )
+      details["resolved_path"] = gdalPath;
     const char *lastError = CPLGetLastErrorMsg();
     if ( lastError && *lastError )
       details["gdal_error"] = lastError;
