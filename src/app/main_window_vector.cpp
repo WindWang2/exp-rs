@@ -140,18 +140,28 @@ void QgisDesktopWindow::cutFeatures()
         statusBar()->showMessage(tr("Select an editable vector layer to cut"), 2000);
         return;
     }
-    if (vl->selectedFeatureIds().isEmpty()) return;
+    if (vl->selectedFeatureIds().isEmpty()) {
+        statusBar()->showMessage(tr("No features selected to cut"), 2000);
+        return;
+    }
     m_clipboard->replaceWithCopyOf(vl);
     vl->beginEditCommand(tr("Cut features"));
     vl->deleteSelectedFeatures();
     vl->endEditCommand();
+    statusBar()->showMessage(tr("Cut %1 feature(s)").arg(vl->selectedFeatureCount()), 2000);
 }
 
 void QgisDesktopWindow::copyFeatures()
 {
     QgsVectorLayer *vl = qobject_cast<QgsVectorLayer*>(activeLayer());
-    if (!vl) return;
-    if (vl->selectedFeatureIds().isEmpty()) return;
+    if (!vl) {
+        statusBar()->showMessage(tr("Select a vector layer to copy features"), 2000);
+        return;
+    }
+    if (vl->selectedFeatureIds().isEmpty()) {
+        statusBar()->showMessage(tr("No features selected to copy"), 2000);
+        return;
+    }
     m_clipboard->replaceWithCopyOf(vl);
     statusBar()->showMessage(tr("Copied %1 feature(s)").arg(vl->selectedFeatureCount()), 2000);
 }
@@ -164,7 +174,10 @@ void QgisDesktopWindow::pasteFeatures()
         return;
     }
     QgsFeatureList features = m_clipboard->transformedCopyOf(vl->crs(), vl->fields());
-    if (features.isEmpty()) return;
+    if (features.isEmpty()) {
+        statusBar()->showMessage(tr("Clipboard contains no compatible features to paste"), 2000);
+        return;
+    }
     vl->beginEditCommand(tr("Paste features"));
     for (QgsFeature &f : features) {
         f.setId(FID_NULL);
@@ -180,6 +193,8 @@ void QgisDesktopWindow::selectAll()
     if (vl) {
         vl->selectAll();
         statusBar()->showMessage(tr("Selected %1 feature(s)").arg(vl->selectedFeatureCount()), 2000);
+    } else {
+        statusBar()->showMessage(tr("Select a vector layer to select features"), 2000);
     }
 }
 // ── Vector Editing Actions ─────────────────────────────────────────────────
@@ -218,6 +233,16 @@ void QgisDesktopWindow::updateEditingUI(QgsVectorLayer *vlayer)
     if (m_saveEditsAction) m_saveEditsAction->setEnabled(editing);
     for (QAction *a : m_editingToolActions)
         a->setEnabled(editing);
+}
+
+QAction *QgisDesktopWindow::editingAction( const QString &name ) const
+{
+    for ( QAction *a : m_editingToolActions )
+    {
+        if ( a && a->objectName() == name )
+            return a;
+    }
+    return nullptr;
 }
 
 bool QgisDesktopWindow::confirmSaveEdits(QgsVectorLayer *vl)

@@ -77,6 +77,12 @@ class RibbonController : public QObject
     QToolButton *addCommandButton( GroupHost &group,
                                    const QString &commandId,
                                    bool large = true );
+    /**
+     * Action-projected tool button: text/icon/tooltip/enabled state follow a window QAction.
+     */
+    QToolButton *addActionButton( GroupHost &group,
+                                  QAction *action,
+                                  bool large = true );
     QSlider *addSlider( GroupHost &group,
                         const QString &title,
                         int minVal,

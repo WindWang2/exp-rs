@@ -315,6 +315,40 @@ QToolButton *RibbonController::addCommandButton( GroupHost &group,
   return btn;
 }
 
+QToolButton *RibbonController::addActionButton( GroupHost &group,
+                                                QAction *action,
+                                                bool large )
+{
+  if ( !group.toolsLayout || !action )
+    return nullptr;
+
+  auto *btn = new QToolButton( group.widget );
+  if ( large )
+    polishLargeButton( btn );
+  else
+    polishSmallButton( btn );
+  btn->setText( action->text() );
+  btn->setIcon( action->icon() );
+  btn->setCheckable( action->isCheckable() );
+  btn->setAccessibleName( action->text() );
+
+  auto syncFromAction = [btn, action] {
+    btn->setText( action->text() );
+    btn->setIcon( action->icon() );
+    btn->setEnabled( action->isEnabled() );
+    btn->setChecked( action->isChecked() );
+    btn->setToolTip( action->toolTip() );
+    btn->setStatusTip( action->statusTip() );
+    btn->setAccessibleDescription( action->isEnabled() ? QString() : action->toolTip() );
+  };
+  syncFromAction();
+  connect( action, &QAction::changed, btn, syncFromAction );
+  connect( btn, &QToolButton::clicked, action, &QAction::trigger );
+
+  group.toolsLayout->insertWidget( group.toolsLayout->count() - 1, btn );
+  return btn;
+}
+
 QSlider *RibbonController::addSlider( GroupHost &group,
                                       const QString &title,
                                       int minVal,
@@ -845,59 +879,91 @@ QWidget *RibbonController::createRibbonBar()
     QHBoxLayout *pl = pageLayoutOf( pageW );
 
     auto manage = addGroup( pl, tr( "Session" ) );
-    if ( auto *btn = addToolButton( manage, tr( "Start Editing" ), "mActionToggleEditing",
-                                    tr( "Toggle the vector layer editing session" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::toggleEditing );
-    if ( auto *btn = addToolButton( manage, tr( "Save Edits" ), "mActionSaveEdits",
-                                    tr( "Save Vector Edits to Data Source" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::saveEdits );
+    if ( !addCommandButton( manage, QStringLiteral( "layer.toggleEditing" ) ) )
+    {
+      if ( auto *btn = addToolButton( manage, tr( "Start Editing" ), "mActionToggleEditing",
+                                      tr( "Toggle the vector layer editing session" ) ) )
+        connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::toggleEditing );
+    }
+    if ( !addCommandButton( manage, QStringLiteral( "layer.saveEdits" ) ) )
+    {
+      if ( auto *btn = addToolButton( manage, tr( "Save Edits" ), "mActionSaveEdits",
+                                      tr( "Save Vector Edits to Data Source" ) ) )
+        connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::saveEdits );
+    }
 
     addGroupSeparator( pl );
     auto capture = addGroup( pl, tr( "Features" ) );
-    if ( auto *btn = addToolButton( capture, tr( "Select" ), "mActionSelectRectangle",
-                                    tr( "Select Features" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionSelectRectangle" ) ) : nullptr )
+      addActionButton( capture, a );
+    else if ( auto *btn = addToolButton( capture, tr( "Select" ), "mActionSelectRectangle",
+                                         tr( "Select Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::selectFeatures );
-    if ( auto *btn = addToolButton( capture, tr( "Add" ), "mActionCapturePoint",
-                                    tr( "Add Feature" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionCapturePoint" ) ) : nullptr )
+      addActionButton( capture, a );
+    else if ( auto *btn = addToolButton( capture, tr( "Add" ), "mActionCapturePoint",
+                                         tr( "Add Feature" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::addFeature );
-    if ( auto *btn = addToolButton( capture, tr( "Node" ), "mActionVertexTool",
-                                    tr( "Node Tool" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionVertexTool" ) ) : nullptr )
+      addActionButton( capture, a );
+    else if ( auto *btn = addToolButton( capture, tr( "Node" ), "mActionVertexTool",
+                                         tr( "Node Tool" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::vertexTool );
 
     addGroupSeparator( pl );
     auto reshape = addGroup( pl, tr( "Modify" ) );
-    if ( auto *btn = addToolButton( reshape, tr( "Move" ), "mActionMoveFeature",
-                                    tr( "Move Features" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionMoveFeature" ) ) : nullptr )
+      addActionButton( reshape, a );
+    else if ( auto *btn = addToolButton( reshape, tr( "Move" ), "mActionMoveFeature",
+                                         tr( "Move Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::moveFeature );
-    if ( auto *btn = addToolButton( reshape, tr( "Rotate" ), "mActionRotateFeature",
-                                    tr( "Rotate Features" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionRotateFeature" ) ) : nullptr )
+      addActionButton( reshape, a );
+    else if ( auto *btn = addToolButton( reshape, tr( "Rotate" ), "mActionRotateFeature",
+                                         tr( "Rotate Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::rotateFeature );
-    if ( auto *btn = addToolButton( reshape, tr( "Reshape" ), "mActionReshape",
-                                    tr( "Reshape" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionReshape" ) ) : nullptr )
+      addActionButton( reshape, a );
+    else if ( auto *btn = addToolButton( reshape, tr( "Reshape" ), "mActionReshape",
+                                         tr( "Reshape" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::reshapeGeometry );
-    if ( auto *btn = addToolButton( reshape, tr( "Split Features" ), "mActionSplitFeatures",
-                                    tr( "Split Features" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionSplitFeatures" ) ) : nullptr )
+      addActionButton( reshape, a );
+    else if ( auto *btn = addToolButton( reshape, tr( "Split Features" ), "mActionSplitFeatures",
+                                         tr( "Split Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::splitFeatures );
 
     addGroupSeparator( pl );
     auto advanced = addGroup( pl, tr( "Advanced" ) );
-    if ( auto *btn = addToolButton( advanced, tr( "Offset" ), "mActionOffsetCurve",
-                                    tr( "Offset Curve" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionOffsetCurve" ) ) : nullptr )
+      addActionButton( advanced, a );
+    else if ( auto *btn = addToolButton( advanced, tr( "Offset" ), "mActionOffsetCurve",
+                                         tr( "Offset Curve" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::offsetCurve );
-    if ( auto *btn = addToolButton( advanced, tr( "Simplify" ), "mActionSimplify",
-                                    tr( "Simplify Features" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionSimplify" ) ) : nullptr )
+      addActionButton( advanced, a );
+    else if ( auto *btn = addToolButton( advanced, tr( "Simplify" ), "mActionSimplify",
+                                         tr( "Simplify Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::simplifyFeature );
-    if ( auto *btn = addToolButton( advanced, tr( "Reverse" ), "mActionReverseLine",
-                                    tr( "Reverse Line" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionReverseLine" ) ) : nullptr )
+      addActionButton( advanced, a );
+    else if ( auto *btn = addToolButton( advanced, tr( "Reverse" ), "mActionReverseLine",
+                                         tr( "Reverse Line" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::reverseLine );
-    if ( auto *btn = addToolButton( advanced, tr( "Add Ring" ), "mActionAddRing",
-                                    tr( "Add Ring" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionAddRing" ) ) : nullptr )
+      addActionButton( advanced, a );
+    else if ( auto *btn = addToolButton( advanced, tr( "Add Ring" ), "mActionAddRing",
+                                         tr( "Add Ring" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::addRing );
-    if ( auto *btn = addToolButton( advanced, tr( "Fill Ring" ), "mActionFillRing",
-                                    tr( "Fill Ring" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionFillRing" ) ) : nullptr )
+      addActionButton( advanced, a );
+    else if ( auto *btn = addToolButton( advanced, tr( "Fill Ring" ), "mActionFillRing",
+                                         tr( "Fill Ring" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::fillRing );
-    if ( auto *btn = addToolButton( advanced, tr( "Delete Part" ), "mActionDeletePart",
-                                    tr( "Delete Part" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionDeletePart" ) ) : nullptr )
+      addActionButton( advanced, a );
+    else if ( auto *btn = addToolButton( advanced, tr( "Delete Part" ), "mActionDeletePart",
+                                         tr( "Delete Part" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::deletePart );
 
     addTab( tr( "Vector Editing" ), pageW, tr( "Vector Editing - Vector Data Processing and Geometry Operations" ) );
