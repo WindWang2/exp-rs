@@ -372,7 +372,7 @@ TEST_CASE( "rs:terrain_solar shadow duration and hillshade series E2E",
     bg.withGeoTransform( 116.0, kCellDeg, 40.0, -kCellDeg );
     for ( int x = 0; x < kW; ++x )
         bg.withPixel( 1, x, 0, 0.0f );
-    bg.withPixel( 1, 2, 0, 10.0f ); // 10m wall
+    bg.withPixel( 1, 2, 0, 50.0f ); // 50m wall (> 30m cell spacing)
     const QString demGeoPath = bg.writeToDisk( dir.filePath( "wall_geo.tif" ) );
     REQUIRE( !demGeoPath.isEmpty() );
 
