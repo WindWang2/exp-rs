@@ -37,6 +37,7 @@
 #include "processing/algorithms/terrain_analysis.h"
 #include "processing/algorithms/spectral_anomaly.h"
 #include "processing/algorithms/sar/sar_calibration.h"
+#include "processing/algorithms/sar/sar_metadata.h"
 
 #include <cmath>
 #include <limits>
