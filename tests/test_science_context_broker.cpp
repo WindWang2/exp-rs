@@ -913,3 +913,63 @@ TEST_CASE( "a changed resolve-failure reason invalidates the cached bundle",
     auto third = broker.synthesize( req );
     CHECK( third.cacheHit );
 }
+
+TEST_CASE( "AssetStateProvider thread safety under concurrent resolve and authority mutation (#1449)",
+           "[science_context][concurrency]" )
+{
+    AssetStateProvider provider;
+    provider.setResolverAuthority( "authority-initial" );
+    provider.setCatalogGeneration( 1 );
+    CHECK( provider.resolverAuthority() == "authority-initial" );
+    CHECK( provider.catalogGeneration() == 1 );
+
+    provider.setResolver( []( const std::string &key ) -> PassportResolution {
+        PassportResolution res;
+        if ( key == "known-asset" )
+        {
+            sicnu::state::RemoteSensingAssetState state;
+            state.assetId = "known-asset";
+            res.state = state;
+        }
+        else
+        {
+            res.errorCode = "asset_not_found";
+        }
+        return res;
+    } );
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> resolveCount{ 0 };
+
+    auto worker = [&]() {
+        AssetResolveRequest req;
+        req.assetKey = "known-asset";
+        while ( !stop.load() )
+        {
+            auto res = provider.resolve( req );
+            if ( res.ok )
+                resolveCount.fetch_add( 1, std::memory_order_relaxed );
+        }
+    };
+
+    auto mutator = [&]() {
+        for ( int i = 0; i < 200; ++i )
+        {
+            provider.setResolverAuthority( "authority-" + std::to_string( i ) );
+            provider.setCatalogGeneration( static_cast<std::uint64_t>( i ) );
+            provider.invalidate( "known-asset" );
+        }
+    };
+
+    std::thread t1( worker );
+    std::thread t2( worker );
+    std::thread t3( mutator );
+
+    t3.join();
+    stop.store( true );
+    t1.join();
+    t2.join();
+
+    CHECK( resolveCount.load() > 0 );
+    CHECK( provider.hasResolver() );
+}

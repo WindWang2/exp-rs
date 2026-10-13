@@ -4115,6 +4115,34 @@ if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.
                 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
             set_tests_properties(pi_bridge_lifecycle PROPERTIES TIMEOUT 120)
             sicnu_set_test_env(pi_bridge_lifecycle)
+
+            add_test(
+                NAME pi_prompt_templates
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/prompt_templates.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_prompt_templates PROPERTIES TIMEOUT 60)
+            sicnu_set_test_env(pi_prompt_templates)
+
+            add_test(
+                NAME pi_remote_sensing_assets
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/remote_sensing_assets.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_remote_sensing_assets PROPERTIES TIMEOUT 60)
+            sicnu_set_test_env(pi_remote_sensing_assets)
+
+            add_test(
+                NAME pi_scientific_workflow_compiler
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_scientific_workflow_compiler PROPERTIES TIMEOUT 120)
+            sicnu_set_test_env(pi_scientific_workflow_compiler)
+
+            add_test(
+                NAME pi_scientific_workflow_compiler_11
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler_11.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_scientific_workflow_compiler_11 PROPERTIES TIMEOUT 120)
+            sicnu_set_test_env(pi_scientific_workflow_compiler_11)
         else()
             message(STATUS "node ${_sicnu_node_version} lacks default type stripping — pi bridge lifecycle tests skipped")
         endif()
