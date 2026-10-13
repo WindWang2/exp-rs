@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -84,6 +85,13 @@ QLabel *matrixStatus( ExperimentStudioDock &dock )
     auto *label = dock.findChild<QLabel *>( QStringLiteral( "rsStudioMatrixStatus" ) );
     REQUIRE( label != nullptr );
     return label;
+}
+
+QTableWidget *matrixTable( ExperimentStudioDock &dock )
+{
+    auto *table = dock.findChild<QTableWidget *>();
+    REQUIRE( table != nullptr );
+    return table;
 }
 
 QPushButton *runLiveButton( ExperimentStudioDock &dock )
@@ -276,4 +284,27 @@ TEST_CASE( "studio dock destruction with a study in flight is clean",
             return opened >= 0 && opened == terminal;
         },
         30000 ) );
+}
+
+TEST_CASE( "studio dock matrix table population and reset honesty",
+           "[experiment_studio][dock][matrix_table]" )
+{
+    ensureQgisApplication();
+    ExperimentStudioDock dock;
+    auto *table = matrixTable( dock );
+    REQUIRE( table != nullptr );
+    CHECK( table->rowCount() == 0 );
+
+    dock.loadDemoThresholdStudy();
+    CHECK( table->rowCount() == 5 );
+    CHECK( matrixStatus( dock )->text().contains( QStringLiteral( "points=5" ) ) );
+
+    // Opening a fresh live store clears any demo/previous report rows honestly
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString storePath = createEmptyStore( dir, QStringLiteral( "test-matrix.sqlite" ) );
+    REQUIRE( !storePath.isEmpty() );
+    CHECK( dock.openLiveStoreAtPath( storePath ) );
+    CHECK( table->rowCount() == 0 );
+    CHECK( matrixStatus( dock )->text().contains( QStringLiteral( "No report loaded" ) ) );
 }
