@@ -230,7 +230,7 @@ struct HalfFailFixture
         state.loadedIds = registry.loadedPluginIds();
         state.operatorIds = sink.operatorIds;
         state.factories = sink.factories;
-        if ( const PluginRecord *record = registry.record( id ) )
+        if ( auto record = registry.record( id ) )
         {
             state.hasRecord = true;
             state.recordState = record->state;
@@ -379,7 +379,7 @@ TEST_CASE( "manifest/binary id mismatch is refused typed before registration",
     // impostor id needs its own explicit enable after the rescan.
     fixture.registry.setEnabled( impostorId, true );
 
-    const PluginRecord *record = fixture.registry.record( impostorId );
+    auto record = fixture.registry.record( impostorId );
     REQUIRE( record != nullptr );
     const HalfFailFixture::State before = fixture.capture( impostorId );
 
@@ -449,7 +449,7 @@ TEST_CASE( "an invalid dependency spec refuses validation before any load",
                            "\n            \"dependencies\": [\"@^1.0\"]," );
     fixture.configure();
 
-    const PluginRecord *record = fixture.registry.record( kBrokenId );
+    auto record = fixture.registry.record( kBrokenId );
     REQUIRE( record != nullptr );
     REQUIRE( record->state != PluginState::Validated ); // refused structurally
     const HalfFailFixture::State before = fixture.capture( kBrokenId );
@@ -461,8 +461,15 @@ TEST_CASE( "an invalid dependency spec refuses validation before any load",
     REQUIRE( after.factories == before.factories );
     // Validation failures are recorded on the RECORD's diagnostic log (the
     // scan-time verdict), not in the registry's global log.
+    // Named holder, NOT a range-for over the record() temporary: the
+    // returned shared_ptr owns the record, and binding a range directly to
+    // `record(...)->diagnostics.items()` destroys that owner at the end of
+    // the range-init expression — the loop then walks freed memory (R9
+    // review: MSVC yields 0 iterations, silently disabling the check).
+    auto brokenRecord = fixture.registry.record( kBrokenId );
+    REQUIRE( brokenRecord != nullptr );
     bool sawSpec = false;
-    for ( const PluginDiagnostic &item : fixture.registry.record( kBrokenId )->diagnostics.items() )
+    for ( const PluginDiagnostic &item : brokenRecord->diagnostics.items() )
         if ( item.code == PluginDiagnosticCode::ManifestInvalidField )
             sawSpec = true;
     REQUIRE( sawSpec );

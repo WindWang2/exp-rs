@@ -214,7 +214,7 @@ AttemptOutcome attemptLoad( ParityFixture &fixture, bool hostProcess,
 
     AttemptOutcome outcome;
     outcome.globalItems = registry.diagnostics().items();
-    if ( const PluginRecord *record = registry.record( subjectId ) )
+    if ( auto record = registry.record( subjectId ) )
         for ( const PluginDiagnostic &item : record->diagnostics.items() )
             if ( item.code == expectedRecordCode )
                 outcome.recordHasCode = true;

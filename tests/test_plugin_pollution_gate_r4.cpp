@@ -198,7 +198,7 @@ TEST_CASE( "a manifest claims nothing when third-party natives are untrusted",
     fixture.writeStrangerManifest( "org.test.stranger" );
     fixture.configure( false ); // production trust: bundled natives only
 
-    const PluginRecord *stranger = fixture.registry.record( "org.test.stranger" );
+    auto stranger = fixture.registry.record( "org.test.stranger" );
     REQUIRE( stranger != nullptr );
     // The trust gate runs at CONFIGURE time: the record is Blocked and the
     // TrustRejected verdict sits on the RECORD's diagnostics.
@@ -226,7 +226,7 @@ TEST_CASE( "impersonating a trusted id is refused by the identity gate",
 
     // First-root-wins discovery resolves the id to the REAL directory; the
     // stranger copy is a shadowed duplicate the registry never loads.
-    const PluginRecord *record = fixture.registry.record( kHelloId );
+    auto record = fixture.registry.record( kHelloId );
     REQUIRE( record != nullptr );
     REQUIRE( record->directory == fixture.helloDir );
     REQUIRE( fixture.registry.load( kHelloId ) );

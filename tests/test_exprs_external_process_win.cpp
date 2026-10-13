@@ -255,3 +255,125 @@ TEST_CASE( "windows workspace effect policy refuses before spawn", "[external][w
 
     _putenv( "SICNU_MCP_WORKSPACE=" );
 }
+
+namespace {
+
+/// Per-case scratch dir (pid-unique so parallel test processes cannot touch
+/// each other's fixtures; see TEST_INFRA's process-scratch contract).
+std::filesystem::path scratchFor( const std::string &name )
+{
+    // Windows-only lane (tests/CMakeLists.txt registers this file under
+    // if(WIN32)), so the pid source is unconditional.
+    const long long pid = ::GetCurrentProcessId();
+    return std::filesystem::temp_directory_path()
+           / ( "sicnu-ep-win-" + std::to_string( pid ) + "-" + name );
+}
+
+} // namespace
+
+TEST_CASE( "windows rooted argv[0] probes where the spawn anchors it", "[external][win]" )
+{
+    // "/name.exe" is DRIVE-ROOT rooted: std::filesystem (and the spawn's
+    // lpApplicationName built from it) anchors it at <wd-drive>:\name.exe,
+    // while the old pre-spawn probe concatenated <wd> + "/" + "/name.exe"
+    // and accepted a different file — a spawn that then failed to resolve
+    // (PR #1469 review finding). The file exists ONLY under the working
+    // directory, so a truthful probe must refuse BEFORE the spawn.
+    const std::filesystem::path scratch = scratchFor( "rooted" );
+    std::error_code error;
+    std::filesystem::remove_all( scratch, error );
+    std::filesystem::create_directories( scratch, error );
+    std::filesystem::copy_file( kHelper, scratch / "rooted_probe.exe",
+                                std::filesystem::copy_options::overwrite_existing, error );
+    REQUIRE_FALSE( error );
+
+    ExternalProcessRequest request;
+    request.argv = { "/rooted_probe.exe", "exit", "0" };
+    request.workingDirectory = scratch.generic_string();
+    request.timeoutSeconds = 20;
+    const ExternalProcessResult result = ExternalProcess::run( request );
+    REQUIRE_FALSE( result.started );
+    REQUIRE( result.error.find( "not an executable file" ) != std::string::npos );
+
+    std::filesystem::remove_all( scratch, error );
+}
+
+TEST_CASE( "windows relative argv[0] with separators anchors at the working directory",
+           "[external][win]" )
+{
+    // The consistent counterpart of the rooted case: "sub/tool.exe" anchors
+    // UNDER the working directory on both the probe and the spawn side.
+    const std::filesystem::path scratch = scratchFor( "relative" );
+    std::error_code error;
+    std::filesystem::remove_all( scratch, error );
+    std::filesystem::create_directories( scratch / "sub", error );
+    std::filesystem::copy_file( kHelper, scratch / "sub" / "reltool.exe",
+                                std::filesystem::copy_options::overwrite_existing, error );
+    REQUIRE_FALSE( error );
+
+    ExternalProcessRequest request;
+    request.argv = { "sub/reltool.exe", "exit", "0" };
+    request.workingDirectory = scratch.generic_string();
+    request.timeoutSeconds = 20;
+    const ExternalProcessResult result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    REQUIRE( result.exitedCleanly() );
+    REQUIRE( result.exitCode == 0 );
+
+    std::filesystem::remove_all( scratch, error );
+}
+
+TEST_CASE( "windows bare-name resolution follows PATHEXT (.com is executable)", "[external][win]" )
+{
+    // PATH limited to the scratch dir; the program exists only as .COM —
+    // the FIRST executable entry of the default PATHEXT. Both the probe and
+    // the spawn must resolve it: the old walk tried <name> and <name>.exe
+    // only (#1460).
+    const std::filesystem::path scratch = scratchFor( "pathtext" );
+    std::error_code error;
+    std::filesystem::remove_all( scratch, error );
+    std::filesystem::create_directories( scratch, error );
+    std::filesystem::copy_file( kHelper, scratch / "pathtool.COM",
+                                std::filesystem::copy_options::overwrite_existing, error );
+    REQUIRE_FALSE( error );
+
+    ExternalProcessRequest request;
+    request.argv = { "pathtool", "exit", "0" };
+    request.timeoutSeconds = 20;
+    request.environment = Json::Value( Json::objectValue );
+    request.environment[ "PATH" ] = scratch.generic_string();
+    const ExternalProcessResult result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    REQUIRE( result.exitedCleanly() );
+    REQUIRE( result.exitCode == 0 );
+
+    std::filesystem::remove_all( scratch, error );
+}
+
+TEST_CASE( "windows .cmd shims are refused with a typed shell-script diagnostic",
+           "[external][win]" )
+{
+    // npm-style .cmd shims are shell scripts: this spawn contract never
+    // invokes a shell, so the refusal must NAME the shim instead of the
+    // misleading "not found in PATH" the bare-name walk used to report.
+    const std::filesystem::path scratch = scratchFor( "cmdshim" );
+    std::error_code error;
+    std::filesystem::remove_all( scratch, error );
+    std::filesystem::create_directories( scratch, error );
+    {
+        std::ofstream shim( scratch / "shim.cmd" );
+        shim << "@echo off\r\n";
+    }
+
+    ExternalProcessRequest request;
+    request.argv = { "shim", "exit", "0" };
+    request.timeoutSeconds = 20;
+    request.environment = Json::Value( Json::objectValue );
+    request.environment[ "PATH" ] = scratch.generic_string();
+    const ExternalProcessResult result = ExternalProcess::run( request );
+    REQUIRE_FALSE( result.started );
+    REQUIRE( result.error.find( "shell script" ) != std::string::npos );
+    REQUIRE( result.error.find( "shim.cmd" ) != std::string::npos );
+
+    std::filesystem::remove_all( scratch, error );
+}

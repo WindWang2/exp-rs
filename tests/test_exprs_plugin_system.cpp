@@ -211,7 +211,7 @@ TEST_CASE( "registry lifecycle: validate, policy, disable", "[plugin][registry]"
     registry.setContributionSink( nullptr );
     registry.configure( options );
 
-    const PluginRecord *record = registry.record( "org.test.life" );
+    auto record = registry.record( "org.test.life" );
     REQUIRE( record != nullptr );
     REQUIRE( record->state == PluginState::Validated ); // manifest kind: nothing to load natively
     REQUIRE( registry.isEnabled( "org.test.life" ) );
@@ -243,7 +243,7 @@ TEST_CASE( "registry policy blocks plugin ids", "[plugin][registry]" )
     auto &registry = PluginRegistry::instance();
     registry.configure( options );
 
-    const PluginRecord *record = registry.record( "org.test.blocked" );
+    auto record = registry.record( "org.test.blocked" );
     REQUIRE( record != nullptr );
     REQUIRE( record->state == PluginState::Blocked );
     REQUIRE( record->diagnostics.hasErrorsFor( "org.test.blocked" ) );

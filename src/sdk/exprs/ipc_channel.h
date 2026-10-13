@@ -166,6 +166,20 @@ private:
         bool done = false;
     };
 
+    /// Event-sink delivery lifecycle. The queued-event replay in
+    /// setEventSink runs OUTSIDE mMutex (a sink may re-enter channel APIs
+    /// — close(), protocolFailure(), request() — all of which take mMutex;
+    /// replaying under it self-deadlocked, PR #1469 review). Ordering is
+    /// preserved by the phase instead: while a drain is in flight the
+    /// reader parks newly-arrived events on mEventOrderCv, so the queued
+    /// worker.hello still reaches the sink first (#1449).
+    enum class EventDeliveryPhase
+    {
+        NotInstalled,   ///< no sink yet: events park in mPendingEvents
+        Draining,       ///< sink installed, pre-install queue replaying to it
+        Live,           ///< reader delivers events directly
+    };
+
     bool sendEnvelope( const Ipc::Envelope &envelope, std::string &error,
                        std::string *failureCode = nullptr );
     void readerLoop();
@@ -186,6 +200,15 @@ private:
     std::function<void( const Ipc::Envelope & )> mEventSink;
     std::function<void( long long )> mCancelSink;
     std::string mProtocolFailure;
+    /// Event-delivery ordering (see EventDeliveryPhase). Notified on
+    /// Draining -> Live and from closeLocked() so a parked reader wakes up
+    /// when the channel dies mid-drain.
+    std::condition_variable mEventOrderCv;
+    EventDeliveryPhase mEventDeliveryPhase = EventDeliveryPhase::NotInstalled;
+    /// Thread currently inside the replay loop (guards re-entrant
+    /// setEventSink calls from a sink callback — they cannot wait for a
+    /// drain they themselves are blocking).
+    std::thread::id mEventDrainOwner{};
 
     /// Serializes the joinable()/join() pair in close() — mMutex is held
     /// only for the state flip (the reader may be waiting on it on its way
