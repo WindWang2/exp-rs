@@ -31,7 +31,7 @@ schema 来源：每个 rs 类有自身 `schema()` override（共享 helper：`pr
 - provider 静态注册面：gdal_tools 26（`src/processing/providers/gdal_tools/provider.cpp:44-90`）+ otb_tools 30（`src/processing/providers/otb_tools/provider.cpp:48-106`）+ qgis_algorithms 39（`src/processing/providers/qgis_algorithms/provider.cpp:65-121`），另有 CLI auto-discovery 的 GenericCliAlgorithm 动态注册。
 
 ### 2.2 data/processing/algorithm_meta/（顶层稀疏目录，ADR 0122）
-- **57 个** sidecar（56 rs + 1 `gdal:polygonize`）；`id` 与文件名 `:`→`-` 规范一致；**零幽灵**（全部命中注册表）。
+- **57 个** sidecar（56 rs + 1 `gdal:polygonize`）；`id` 与文件名 `:`→`-` **且 `_`→`-`** 规范一致（rs:apply_mask → rs-apply-mask.json；初版误记为仅 `:`→`-`，闸门初版因此对带下划线算子静默跳过——已修正并经 RED/GREEN 双向验证）；**零幽灵**（全部命中注册表）。
 - 生成机制：`AlgorithmMetaStore::exportCatalog`（`src/processing/framework/algorithm_meta_store.h:90`）只导出 taskFamily 非空者；漂移闸门 `tests/test_algorithm_meta_drift.cpp`（1 case，钉死目录精确集合）；运行时 resolve 描述符优先（`algorithm_meta_store.h:71` `resolveAgainstDescriptor`，冲突字段丢弃并记 drift）。
 
 ### 2.3 data/processing/algorithm_meta/capability/（能力目录，ADR 0154/D8）

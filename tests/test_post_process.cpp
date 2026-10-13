@@ -366,5 +366,11 @@ TEST_CASE( "RsPostProcess::sieve does not swap labels of adjacent small patches 
   src.at<int>( 2, 3 ) = 2;
   cv::Mat dst;
   REQUIRE( RsPostProcess::sieve( src, dst, 4, 8 ) );
-  REQUIRE( dst.at<int>( 2, 2 ) == dst.at<int>( 2, 3 ) );
+  const int a = dst.at<int>( 2, 2 );
+  const int b = dst.at<int>( 2, 3 );
+  // No swap (a==b), AND the pair must land on a real class — NoData (0)
+  // eating both patches would also make them equal, but that silently
+  // deletes classified pixels (AN-3 semantics).
+  REQUIRE( a == b );
+  REQUIRE( ( a == 1 || a == 2 ) );
 }

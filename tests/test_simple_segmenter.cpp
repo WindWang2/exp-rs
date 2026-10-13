@@ -282,7 +282,9 @@ TEST_CASE( "SimpleSegmenter: minRegionSize honors 8-connectivity for diagonal-on
     // Two 25-px blocks touching only diagonally; every orthogonal neighbour
     // is nodata. The CC phase is 8-connected, so the merge phase must be too,
     // or both regions survive below the promised minRegionSize and the
-    // fixpoint loop burns 32 full-image passes for nothing.
+    // fixpoint loop burns 32 full-image passes for nothing. No smoothing
+    // (kernel < 3 skips the filter): a smoothed corner blurs a grey bridge
+    // between the blocks and merges them for the wrong reason.
     const int w = 12, h = 12;
     QVector<float> data( w * h, -9999.0f );
     for ( int r = 1; r <= 5; ++r )
@@ -293,7 +295,7 @@ TEST_CASE( "SimpleSegmenter: minRegionSize honors 8-connectivity for diagonal-on
             data[r * w + c] = 200.0f;
 
     RsSimpleSegmenter::Params params;
-    params.smoothKernel = 3;
+    params.smoothKernel = 0;
     params.quantizeBins = 2;
     params.minRegionSize = 26;
 

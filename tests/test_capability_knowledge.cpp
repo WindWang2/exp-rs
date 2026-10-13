@@ -792,9 +792,12 @@ TEST_CASE( "D8 array semantics: sidecar parameter rows carry the schema's array 
              !schema["properties"].isObject() )
           continue;
 
+        // Exporter filename convention: ':' AND '_' both map to '-'
+        // (rs:apply_mask → rs-apply-mask.json) — match it exactly.
         const QString sidecarPath = QString( kSourceDir ) +
           "/data/processing/algorithm_meta/capability/" +
-          QString::fromStdString( id ).replace( ':', '-' ) + ".json";
+          QString::fromStdString( id ).replace( ':', '-' ).replace( '_', '-' ) +
+          ".json";
         QFile file( sidecarPath );
         if ( !file.open( QIODevice::ReadOnly ) )
           continue; // missing sidecars are the coverage gate's job, not ours
