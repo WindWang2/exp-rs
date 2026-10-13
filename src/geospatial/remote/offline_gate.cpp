@@ -37,34 +37,43 @@ bool envFlagEnabled( const char *name )
 
 bool parseIpv4( const std::string &text, std::uint32_t &out )
 {
+    if ( text.empty() )
+        return false;
+
+    std::uint64_t parts[4] = {};
+    int numParts = 0;
     std::size_t i = 0;
-    int octets = 0;
-    std::uint32_t value = 0;
+
     while ( i < text.size() )
     {
-        if ( octets == 4 )
+        if ( numParts >= 4 )
             return false;
-        std::uint32_t octet = 0;
-        int digits = 0;
+
         int base = 10;
-        if ( text[i] == '0' && i + 1 < text.size() && ( text[i + 1] == 'x' || text[i + 1] == 'X' ) )
+        if ( text[i] == '0' )
         {
-            base = 16;
-            i += 2;
+            if ( i + 1 < text.size() && ( text[i + 1] == 'x' || text[i + 1] == 'X' ) )
+            {
+                base = 16;
+                i += 2;
+                if ( i == text.size() || text[i] == '.' )
+                    return false;
+            }
+            else
+            {
+                base = 8;
+            }
         }
-        else if ( text[i] == '0' && i + 1 < text.size() && std::isdigit( static_cast<unsigned char>( text[i + 1] ) ) )
+
+        std::uint64_t val = 0;
+        int digits = 0;
+        while ( i < text.size() && text[i] != '.' )
         {
-            base = 8;
-            ++i;
-            digits = 1;
-        }
-        while ( i < text.size() )
-        {
-            const unsigned char c = static_cast<unsigned char>( text[i] );
+            const char c = text[i];
             int digit = -1;
             if ( base == 16 )
             {
-                if ( std::isdigit( c ) )
+                if ( c >= '0' && c <= '9' )
                     digit = c - '0';
                 else if ( c >= 'a' && c <= 'f' )
                     digit = c - 'a' + 10;
@@ -78,32 +87,64 @@ bool parseIpv4( const std::string &text, std::uint32_t &out )
             }
             else
             {
-                if ( std::isdigit( c ) )
+                if ( c >= '0' && c <= '9' )
                     digit = c - '0';
             }
+
             if ( digit < 0 )
-                break;
-            octet = octet * base + digit;
-            if ( octet > 255 )
                 return false;
-            ++i;
+
+            val = val * base + static_cast<std::uint64_t>( digit );
+            if ( val > 0xFFFFFFFFull )
+                return false;
+
             ++digits;
+            ++i;
         }
+
         if ( digits == 0 )
             return false;
-        value = ( value << 8 ) | octet;
-        ++octets;
+
+        parts[numParts++] = val;
+
         if ( i < text.size() )
         {
             if ( text[i] != '.' )
                 return false;
             ++i;
+            if ( i == text.size() )
+                return false;
         }
     }
-    if ( octets != 4 )
+
+    if ( numParts == 0 || numParts > 4 )
         return false;
-    out = value;
-    return true;
+
+    switch ( numParts )
+    {
+    case 1:
+        if ( parts[0] > 0xFFFFFFFFull )
+            return false;
+        out = static_cast<std::uint32_t>( parts[0] );
+        return true;
+    case 2:
+        if ( parts[0] > 0xFFull || parts[1] > 0xFFFFFFull )
+            return false;
+        out = static_cast<std::uint32_t>( ( parts[0] << 24 ) | parts[1] );
+        return true;
+    case 3:
+        if ( parts[0] > 0xFFull || parts[1] > 0xFFull || parts[2] > 0xFFFFull )
+            return false;
+        out = static_cast<std::uint32_t>( ( parts[0] << 24 ) | ( parts[1] << 16 ) | parts[2] );
+        return true;
+    case 4:
+        if ( parts[0] > 0xFFull || parts[1] > 0xFFull || parts[2] > 0xFFull || parts[3] > 0xFFull )
+            return false;
+        out = static_cast<std::uint32_t>( ( parts[0] << 24 ) | ( parts[1] << 16 ) | ( parts[2] << 8 ) | parts[3] );
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool parseIpv6( const std::string &text, unsigned char out[16] )
@@ -343,28 +384,8 @@ bool isPrivateHost( const std::string &hostOrUrl )
         return true;
 
     std::uint32_t v4 = 0;
-    if ( parseIpv4( host, v4 ) )
+    if ( parseIpv4( lowered, v4 ) )
         return isPrivateIpv4( v4 );
-
-    if ( !host.empty() )
-    {
-        bool allDigits = true;
-        for ( const char c : host )
-        {
-            if ( !std::isdigit( static_cast<unsigned char>( c ) ) )
-            {
-                allDigits = false;
-                break;
-            }
-        }
-        if ( allDigits )
-        {
-            char *end = nullptr;
-            const unsigned long long val = std::strtoull( host.c_str(), &end, 10 );
-            if ( end == host.c_str() + host.size() && val <= 0xFFFFFFFFull )
-                return isPrivateIpv4( static_cast<std::uint32_t>( val ) );
-        }
-    }
 
     unsigned char v6[16] = {};
     if ( parseIpv6( host, v6 ) )
