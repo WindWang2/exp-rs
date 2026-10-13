@@ -212,6 +212,7 @@ TEST_CASE( "in-memory backend applies the full filter vocabulary with honest pag
   const CatalogPage memCappedPage = service.searchPage( memCapped, {} );
   CHECK( memCappedPage.records.size() == 2 );
   CHECK( memCappedPage.truncatedByCap );
+  CHECK( memCappedPage.next.hasMore );
 }
 
 
@@ -323,6 +324,7 @@ TEST_CASE( "local STAC trees serve through the same query vocabulary — link-fo
   const CatalogPage cappedPage = service.searchPage( localCapped, {} );
   CHECK( cappedPage.records.size() == 1 );
   CHECK( cappedPage.truncatedByCap );
+  CHECK( cappedPage.next.hasMore );
 
   // --- plain directory scan (no catalog.json) --------------------------
   const std::string plain = scratchDir( "plain" );
@@ -382,6 +384,11 @@ TEST_CASE( "the remote backend reuses the STAC client and refuses offline by typ
   const CatalogService::SearchAllResult truncated = service.searchAll( capped );
   CHECK( truncated.records.size() == 1 );
   CHECK( truncated.truncatedByCap );
+
+  const CatalogPage truncatedPage = service.searchPage( capped, {} );
+  CHECK( truncatedPage.records.size() == 1 );
+  CHECK( truncatedPage.truncatedByCap );
+  CHECK( truncatedPage.next.hasMore );
 
   // Offline AFTER open: page fetches refuse too.
   offline::setEnabled( true );

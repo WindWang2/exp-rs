@@ -546,9 +546,3 @@ data/labs/_tmp/
 r6_*.log
 r6_*.txt
 r6_dev.cmd
-
-# r11-b-geospatial planning notes (markdown only)
-!.planning/r11-b-geospatial/
-.planning/r11-b-geospatial/*
-!.planning/r11-b-geospatial/*.md
-

@@ -736,12 +736,6 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
     {
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
-      if ( query.maxItems > 0 &&
-           page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
-      {
-        cappedByMax = true;
-        break;
-      }
       if ( recordPasses( all[index], query ) )
       {
         page.records.push_back( all[index] );
@@ -759,7 +753,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       }
     }
     page.truncatedByCap = cappedByMax;
-    page.next.hasMore = !cappedByMax && ( index < all.size() );
+    page.next.hasMore = index < all.size();
     page.next.localOffset = index;
     return page;
   }
@@ -796,8 +790,10 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       stacPage = mRemote->client->search( stacQuery );
     }
 
-    for ( const StacItem &item : stacPage.items )
+    bool cappedByMax = false;
+    for ( std::size_t i = 0; i < stacPage.items.size(); ++i )
     {
+      const StacItem &item = stacPage.items[i];
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
       AssetRecord record;
@@ -806,6 +802,12 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
         case ItemVerdict::Accepted:
           page.records.push_back( std::move( record ) );
           page.items.push_back( item );
+          if ( query.maxItems > 0 &&
+               page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
+          {
+            cappedByMax = ( i + 1 < stacPage.items.size() ) || stacPage.hasMore();
+            goto remoteItemsFinished;
+          }
           break;
         case ItemVerdict::Unresolvable:
           ++page.unresolvable;
@@ -815,9 +817,11 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
           break;
       }
     }
+remoteItemsFinished:
     page.offset = 0;
     page.serverFiltered = true;   // bbox/datetime/collections/ids went to the server
-    page.next.hasMore = stacPage.hasMore();
+    page.truncatedByCap = cappedByMax;
+    page.next.hasMore = cappedByMax || stacPage.hasMore();
     page.next.remoteMethod = stacPage.nextMethod;
     page.next.remoteHref = stacPage.nextHref;
     page.next.remoteBody = stacPage.nextBody;
@@ -834,18 +838,11 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
     page.offset = continuation.localOffset;
     const int pageSize = query.limit > 0 ? query.limit : mOptions.maxRecordsPerPage;
     std::size_t index = continuation.localOffset;
-    int fetched = 0;
     bool cappedByMaxItems = false;
     for ( ; index < mLocal->itemFiles.size(); ++index )
     {
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
-      if ( query.maxItems > 0 &&
-           page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
-      {
-        cappedByMaxItems = true;
-        break;
-      }
       if ( static_cast<int>( page.records.size() ) >= pageSize )
         break;
       try
@@ -863,7 +860,6 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
           case ItemVerdict::Accepted:
             page.records.push_back( std::move( record ) );
             page.items.push_back( item );
-            ++fetched;
             if ( query.maxItems > 0 &&
                  page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
             {
@@ -886,7 +882,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       }
     }
 localScanFinished:
-    page.next.hasMore = !cappedByMaxItems && ( index < mLocal->itemFiles.size() );
+    page.next.hasMore = index < mLocal->itemFiles.size();
     page.next.localOffset = index;
     // The walk bounds are honest: a page that consumed candidates up to
     // (or past) the declared file cap or maxItems reports the truncation.
