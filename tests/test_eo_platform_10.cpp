@@ -348,6 +348,13 @@ TEST_CASE( "WP-A: eo contract validation refuses bad windows, states and enforce
   issues = catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "magic"}})JSON" ) );
   REQUIRE_FALSE( issues.empty() );
 
+  // SAR backscatter calibration states are part of the manifest vocabulary
+  // (#1472 review): the raster-side vocabulary (radiometric_state.h #1450)
+  // knows sigma0/beta0, so manifest registration must accept them — an
+  // enforced sigma0 contract is a concrete, checkable state.
+  CHECK( catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "sigma0"}})JSON" ) ).empty() );
+  CHECK( catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "beta0", "enforced": true}})JSON" ) ).empty() );
+
   // Enforcing "any" is a contract contradiction.
   issues = catalog.validateManifestJson( wrap( R"JSON({"calibration": {"state": "any", "enforced": true}})JSON" ) );
   REQUIRE_FALSE( issues.empty() );

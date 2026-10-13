@@ -133,6 +133,9 @@ struct RemoteValidatorOptions
     /// Ranged GET bound for the metadata fetch (headers ride any response);
     /// hard-capped at 1 MiB like probeRemote.
     std::uintmax_t probeBytes = 1024;
+    /// When true, requests targeting loopback, RFC 1918, CGNAT, link-local,
+    /// or metadata hosts are rejected before dispatch with GeoError(PermissionDenied).
+    bool blockPrivateNetworks = false;
 };
 
 class RemoteSourceValidator

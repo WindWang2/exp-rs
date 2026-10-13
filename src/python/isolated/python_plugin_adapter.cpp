@@ -82,28 +82,11 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
         return false;
     }
 
-    m_workerNode = m_pool->acquireWorker();
+    // #1462: the pool's own bounded wait (event-loop driven on its thread)
+    // replaces this nested QEventLoop + 50 ms poll — the nesting was the
+    // re-entrancy amplifier around acquireWorker's processEvents spin.
     if ( !m_workerNode )
-    {
-        QEventLoop waitLoop;
-        QTimer waitTimer;
-        waitTimer.setSingleShot( true );
-        waitTimer.setInterval( 3000 );
-
-        QTimer pollTimer;
-        pollTimer.setInterval( 50 );
-        QObject::connect( &pollTimer, &QTimer::timeout, [&]() {
-            m_workerNode = m_pool->acquireWorker();
-            if ( m_workerNode )
-            {
-                waitLoop.quit();
-            }
-        } );
-        QObject::connect( &waitTimer, &QTimer::timeout, &waitLoop, &QEventLoop::quit );
-        pollTimer.start();
-        waitTimer.start();
-        waitLoop.exec();
-    }
+        m_workerNode = m_pool->acquireWorker( 4000 );
 
     if ( !m_workerNode || !m_workerNode->server )
     {

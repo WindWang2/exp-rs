@@ -214,8 +214,8 @@ struct ModelWavelengthWindowNm
  * Calibration vocabulary mirrors the platform-wide SICNU_RADIOMETRIC_STATE
  * domain (satellite_products.h / ADR 0114): "radiance" | "toa_reflectance" |
  * "surface_reflectance" | "brightness_temperature" | "digital_number" |
- * "gamma0" | "indices" | "any". The authority for input facts is the
- * canonical metadata layer (`inspectRaster`), never a guess.
+ * "gamma0" | "sigma0" | "beta0" | "indices" | "any". The authority for input
+ * facts is the canonical metadata layer (`inspectRaster`), never a guess.
  */
 struct ModelEoDomainContract
 {

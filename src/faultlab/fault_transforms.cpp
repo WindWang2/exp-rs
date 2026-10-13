@@ -386,10 +386,6 @@ FaultOutcome applyTrainTestSpatialLeakage( FaultGrid &grid, const Json::Value &p
         return errorOutcome( "faultlab.fault_unsafe_target",
                              "train_test_spatial_leakage needs a fixture with sample points" );
     }
-    // All refusals are past: publish the declared bin size onto the faulted
-    // grid so the observable measures leakage at the scenario's own scale.
-    if ( hasCellSize )
-        grid.extras["leakage_cell_size"] = cellSize;
     Json::Value &samples = grid.extras["samples"];
 
     if ( mode == "duplicate" )
@@ -409,14 +405,19 @@ FaultOutcome applyTrainTestSpatialLeakage( FaultGrid &grid, const Json::Value &p
                 ++cloned;
             }
         }
-        for ( const auto &clone : clones )
-        {
-            samples.append( clone );
-        }
         if ( cloned == 0 )
         {
             return errorOutcome( "faultlab.fault_unsafe_target",
                                  "train_test_spatial_leakage found no train samples to clone" );
+        }
+        // A rejected transform must not mutate its input (#1474 review): the
+        // declared bin size is published only on the success path, after
+        // every mode-specific target refusal is past.
+        if ( hasCellSize )
+            grid.extras["leakage_cell_size"] = cellSize;
+        for ( const auto &clone : clones )
+        {
+            samples.append( clone );
         }
         return okOutcome( cloned );
     }
@@ -446,6 +447,10 @@ FaultOutcome applyTrainTestSpatialLeakage( FaultGrid &grid, const Json::Value &p
         return errorOutcome( "faultlab.fault_unsafe_target",
                              "train_test_spatial_leakage relocate needs train and test samples" );
     }
+    // Same fail-before-mutate rule as the duplicate branch: publish the
+    // declared bin size only now that the relocation target checks passed.
+    if ( hasCellSize )
+        grid.extras["leakage_cell_size"] = cellSize;
     samples[Json::ArrayIndex( firstTest )]["x"] = samples[Json::ArrayIndex( firstTrain )]["x"];
     samples[Json::ArrayIndex( firstTest )]["y"] = samples[Json::ArrayIndex( firstTrain )]["y"];
     return okOutcome( 1 );

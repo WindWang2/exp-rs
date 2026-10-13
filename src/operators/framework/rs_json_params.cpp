@@ -8,6 +8,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <qgsdatasourceresolver.h>
+
 #include <cpl_vsi.h>
 
 #include <algorithm>
@@ -16,7 +18,13 @@
 namespace sicnu::operators::params {
 
 bool fileExists(const std::string& path) {
-    const QString p = QString::fromStdString(path);
+    // Map file:// URLs to their local path through the single resolver
+    // authority before the Qt existence check (#1467/#1472 review):
+    // classify() answers LocalFile for them, but QFile::exists on the raw
+    // URL always fails, so operators' shared precheck used to reject valid
+    // inputs as FileNotFound before the GDAL open could run. Every other
+    // source spelling is identity-mapped.
+    const QString p = QgsDataSourceResolver::localPath(QString::fromStdString(path));
     if (QFile::exists(p))
         return true;
     // GDAL VSI paths (/vsicurl/, /vsis3/, /vsizip/…) are not Qt files; ask

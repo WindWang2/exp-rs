@@ -143,6 +143,46 @@
     }
   },
   {
+    "id": "workbench.georef_dual",
+    "title": "双窗口几何配准",
+    "summary": "固定/浮动双窗口联动采点配准工作区，适合教学演示同名点选取。",
+    "category": "工作区",
+    "keywords": [
+      "配准",
+      "双窗口",
+      "GCP",
+      "同名点"
+    ],
+    "guidance": {
+      "headline": "还没有采集控制点",
+      "body": "双窗口配准需要在固定影像与浮动影像上成对选取同名点。至少采集 3 个不共线的控制点后才能解算变换；点应尽量均匀覆盖全图，避免集中在局部。",
+      "actions": [
+        "workbench.georefDual"
+      ],
+      "helpTopic": "concept.rs.rpc"
+    }
+  },
+  {
+    "id": "workbench.classify_studio",
+    "title": "分类/变化工作室",
+    "summary": "分类与变化检测的组合工作区，串联样本、训练与变化产品。",
+    "category": "分类",
+    "keywords": [
+      "分类",
+      "变化检测",
+      "studio"
+    ],
+    "guidance": {
+      "headline": "还没有可用的训练样本",
+      "body": "监督分类与变化检测都需要先有类别样本。先在分类工作区采集并保存样本，再回到本工作区选择输入影像与样本执行；结果会自动加入图层并保留谱系。",
+      "actions": [
+        "workbench.classifyStudio",
+        "workbench.classify"
+      ],
+      "helpTopic": "concept.rs.change_detection"
+    }
+  },
+  {
     "id": "workbench.classification",
     "aliasOf": "workbench.classify"
   }

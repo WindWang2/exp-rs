@@ -493,3 +493,31 @@ TEST_CASE( "csv run table keeps exact 64-bit seeds", "[experiment_studio][csv][s
     const QString legacyCsv = studyRunTableToCsv( legacy );
     CHECK( legacyCsv.contains( QStringLiteral( ",42," ) ) );
 }
+
+// R10-B B8 (#S3 audit): a STOPPED study's partial curves must not read as a
+// complete outcome in the sensitivity view — run_matrix_projection already
+// carries StudyReport::stoppedReason into issues; projectSensitivity dropped
+// it, painting partial data as a finished curve.
+TEST_CASE( "experiment_studio stopped study surfaces in sensitivity view", "[experiment_studio]" )
+{
+    StudyReport report = syntheticReport( 4 );
+    report.stoppedReason = QStringLiteral( "cancelled" );
+    const auto vm = projectSensitivity( report );
+    bool surfaced = false;
+    for ( const QString &issue : vm.issues )
+    {
+        if ( issue == QLatin1String( "cancelled" ) )
+            surfaced = true;
+    }
+    CHECK( surfaced );
+
+    report.stoppedReason = QStringLiteral( "aborted:quota" );
+    const auto vm2 = projectSensitivity( report );
+    bool surfaced2 = false;
+    for ( const QString &issue : vm2.issues )
+    {
+        if ( issue == QLatin1String( "aborted:quota" ) )
+            surfaced2 = true;
+    }
+    CHECK( surfaced2 );
+}

@@ -1,5 +1,55 @@
 # Changelog
 
+## [Unreleased] - Agent Execution Reliability 9.0 (hardening/r9-agent-execution-reliability)
+
+Direction-B hardening of the agent/execution runtime, plugin SDK and isolated
+Python worker. Six work packages, each closed with a failing reproduction first
+and a regression case after:
+
+- **IPC event-sink replay no longer self-deadlocks** (`src/sdk/exprs/ipc_channel.cpp`):
+  `setEventSink` replayed its queued events while holding the channel state lock,
+  so a sink that re-entered any channel API (`close()`, `protocolFailure()`,
+  `request()`) deadlocked the non-recursive mutex. The replay now runs outside
+  the lock behind an explicit `EventDeliveryPhase` gate, and the reader parks
+  newer events until the drain ends — the `worker.hello`-first ordering
+  (#1449) is preserved by the phase, not by the lock.
+- **Windows external-process program resolution is single-sourced**
+  (`src/sdk/exprs/external_process.cpp`): the pre-spawn probe and the spawn now
+  share one resolver, so a rooted `argv[0]` such as `/tools/worker.exe` can no
+  longer be validated against one path and executed from another. Bare names
+  now follow `%PATHEXT%` order for the directly-executable extensions, and a
+  `.cmd`/`.bat`-only hit is refused with a typed diagnostic naming the shim
+  instead of the misleading "not found in PATH" (this spawn contract never
+  invokes a shell). **Behavior change to note**: with the default
+  `.COM;.EXE;…` PATHEXT, a directory holding both `foo.com` and `foo.exe`
+  resolves to `foo.com` — the same order `CreateProcessW` itself applies.
+- **Plugin record snapshots are caller-owned and bounded**
+  (`src/sdk/exprs/plugin_registry.cpp`): `record()` retained one registry-owned
+  copy per call with no eviction, which grew without bound for any polling
+  caller. It now returns a `shared_ptr` the caller owns; the registry retains
+  nothing, and the #943 guarantee (the snapshot survives a `refresh()`) still
+  holds.
+- **Same-key model loads coalesce** (`src/operators/runtime/model_runtime.cpp`):
+  the factory load runs outside the registry lock, so two concurrent acquires of
+  the same model each took a VRAM admission — the second was falsely refused
+  ("device unavailable") while the identical session was loading — and each paid
+  its own weight parse. An in-flight table now makes later same-key acquires
+  ride the loader's outcome: one ticket, one load, failures broadcast typed.
+- **TaskCenter's catalog seam is guarded** (`src/processing/framework/task_center.cpp`):
+  a host that destroyed its `DataManager` without `shutdown()`/`setCatalog(nullptr)`
+  left a dangling pointer. The seam is now a `QPointer` plus a `destroyed()`
+  guard held as a connection handle, so `shutdown()` severs it too — a stale
+  catalog dying after `shutdown()` + `setCatalog(B)` can no longer clear B's seam.
+- **Python worker pool hand-out is atomic and bounded**
+  (`src/python/isolated/python_worker_process_pool.cpp`): `acquireWorker`'s
+  check-then-mark was unsynchronized (two callers could leave with one node) and
+  its wait was a fixed ~1 s spin; it now marks under a node mutex and waits for
+  the caller's own budget. The plugin adapter's nested poll event loop is gone.
+- Known pre-existing (not from this change, reproduced on master at the same
+  rate): `test_execution_plane_9 [ep9][observability]`'s `runLocks held: 0`
+  assertion flakes because `WorkflowRunCoordinator` releases the run lock on a
+  worker thread with no happens-before against `drainPersists()`.
+
 ## [RS14-09 Scientific Task Planner Recovery] - completion/scientific-planner-recovery
 
 - **Goal → explainable ScientificPlan decision layer restored** (PR #1193's

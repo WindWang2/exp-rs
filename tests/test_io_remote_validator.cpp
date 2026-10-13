@@ -10,6 +10,7 @@
  ***************************************************************************/
 
 #include "geospatial/remote/http_fetch.h"
+#include "geospatial/remote/offline_gate.h"
 #include "geospatial/remote/remote_identity_resolver.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "support/http_range_server.h"
@@ -404,4 +405,82 @@ TEST_CASE( "the session identity resolver returns on first sight, never deadlock
   REQUIRE( status == std::future_status::ready );
   // First sight probes the origin; a strong ETag comes back as the token.
   CHECK( future.get() == "\"resolver-first-sight-1\"" );
+}
+
+TEST_CASE( "offline::isPrivateHost identifies private, loopback and IPv4-mapped IPv6 targets (Oracle-B2.1)",
+           "[io][remote][offline][ssrf]" )
+{
+  using sicnu::geo::offline::isPrivateHost;
+
+  // IPv4-mapped IPv6 loopback, link-local, and private networks
+  CHECK( isPrivateHost( "http://[::ffff:127.0.0.1]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[::ffff:169.254.169.254]/meta" ) );
+  CHECK( isPrivateHost( "https://[::ffff:10.0.0.5]/stac" ) );
+  CHECK( isPrivateHost( "https://[::ffff:172.31.255.1]/stac" ) );
+  CHECK( isPrivateHost( "https://[::ffff:192.168.1.7]/stac" ) );
+  CHECK( isPrivateHost( "https://[::ffff:100.64.0.1]/stac" ) );
+  CHECK( isPrivateHost( "https://[::ffff:0.0.0.1]/stac" ) );
+  CHECK( isPrivateHost( "::ffff:127.0.0.1" ) );
+  CHECK( isPrivateHost( "[::ffff:127.0.0.1]:8080" ) );
+  CHECK( isPrivateHost( "/vsicurl/http://[::ffff:127.0.0.1]/data.tif" ) );
+  CHECK( isPrivateHost( "/vsirangecache/http://[::ffff:169.254.169.254]/data.tif" ) );
+
+  // Uncompressed IPv4-mapped IPv6 (RFC 4291 §2.5.5.2) and IPv4-compatible (P0-1 regression)
+  CHECK( isPrivateHost( "http://[0:0:0:0:0:ffff:127.0.0.1]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[0:0:0:0:0:ffff:169.254.169.254]/meta" ) );
+  CHECK( isPrivateHost( "http://[0000:0000:0000:0000:0000:ffff:169.254.169.254]/meta" ) );
+  CHECK( isPrivateHost( "http://[::127.0.0.1]/data.tif" ) );
+  CHECK_FALSE( isPrivateHost( "http://[0:0:0:0:0:ffff:8.8.8.8]/data.tif" ) );
+
+  // IPv4-mapped IPv6 public addresses must NOT be blocked
+  CHECK_FALSE( isPrivateHost( "https://[::ffff:8.8.8.8]/stac" ) );
+  CHECK_FALSE( isPrivateHost( "::ffff:8.8.8.8" ) );
+
+  // Native IPv6 addresses
+  CHECK( isPrivateHost( "https://[::1]/stac" ) );
+  CHECK( isPrivateHost( "::1" ) );
+  CHECK( isPrivateHost( "https://[fe80::1]/stac" ) );
+  CHECK( isPrivateHost( "https://[fd12::1]/stac" ) );
+  CHECK_FALSE( isPrivateHost( "https://[2001:db8::1]/stac" ) );
+
+  // Native IPv4 and hostname targets
+  CHECK( isPrivateHost( "http://127.0.0.1:8000/data.tif" ) );
+  CHECK( isPrivateHost( "127.0.0.1" ) );
+  CHECK( isPrivateHost( "10.0.0.1" ) );
+  CHECK( isPrivateHost( "192.168.1.1" ) );
+  CHECK( isPrivateHost( "169.254.169.254" ) );
+  CHECK( isPrivateHost( "localhost" ) );
+  CHECK( isPrivateHost( "sub.localhost" ) );
+  CHECK( isPrivateHost( "metadata.google.internal" ) );
+  CHECK_FALSE( isPrivateHost( "https://example.com/cog.tif" ) );
+  CHECK_FALSE( isPrivateHost( "8.8.8.8" ) );
+}
+
+TEST_CASE( "RemoteSourceValidator blocks private networks when requested (Oracle-B2.1)",
+           "[io][remote][validator][ssrf]" )
+{
+  RemoteValidatorOptions options;
+  options.blockPrivateNetworks = true;
+
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://[::ffff:127.0.0.1]/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://[::ffff:169.254.169.254]/meta", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://127.0.0.1:8000/data.tif", options ), GeoError );
+}
+
+TEST_CASE( "RemoteSourceValidator in offline mode enforces zero egress (Oracle-B2.2)",
+           "[io][remote][validator][offline]" )
+{
+  offline::setEnabled( true );
+  struct RestoreGuard
+  {
+    ~RestoreGuard() { offline::setEnabled( false ); }
+  } guard;
+
+  RemoteSourceValidator validator = RemoteSourceValidator::probe( "https://example.com/data.tif" );
+  CHECK( validator.identity().state == RemoteSourceState::Offline );
+  CHECK( validator.identity().lastError.find( "offline mode" ) != std::string::npos );
+
+  RevalidationResult res = validator.revalidate();
+  CHECK( res.outcome == RevalidationOutcome::Inconclusive );
+  CHECK( res.decidedBy == "offline" );
 }

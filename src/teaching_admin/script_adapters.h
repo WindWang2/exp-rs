@@ -45,21 +45,23 @@ ScriptRunResult runScript( const ScriptRunRequest &req );
 
 /// The stack's own Python: SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE when
 /// the harness (or a deployment) pins one; else a real executable discovered
-/// on PATH (per-OS candidate order — on Windows "python3" is usually the
-/// Store alias stub, so real installs win there), resolved to its absolute
-/// path; the bare "python3" name survives only as the last resort when
-/// nothing real is discoverable. The test harness exports
-/// PYTHONHOME/PYTHONPATH describing its CMake-configured interpreter
-/// (cmake/SicnuTestEnv.cmake, TEST_INFRA.md #730), and
+/// on PATH (per-OS candidate order) and VERIFIED to actually start and load
+/// the stdlib — on Windows the WindowsApps Store alias stub resolves like a
+/// real interpreter for any candidate name but exits 9009, so each candidate
+/// is probed (`python -c "import re"`) and unusable ones are skipped (#1474
+/// review); the resolved path is absolute. The bare "python3" name survives
+/// only as the last resort when nothing verifiable is discoverable. The test
+/// harness exports PYTHONHOME/PYTHONPATH describing its CMake-configured
+/// interpreter (cmake/SicnuTestEnv.cmake, TEST_INFRA.md #730), and
 /// src/python/isolated/python_worker_process.cpp resolves the same pins for
 /// exactly that reason. A bare "python3" is merely whatever PATH offers:
 /// when that is a DIFFERENT interpreter than PYTHONHOME describes, the child
 /// inherits a foreign stdlib — PYTHONPATH wins over the home stdlib in
 /// sys.path, so the script loads one version's `re` package with another
 /// version's `_sre` extension and dies at `import re` ("SRE module mismatch")
-/// before it can emit any transcript. Same fix and priority order as
-/// #1431 (python worker provider); the PATH probe closes the Windows
-/// start_failed hole (#1466).
+/// before any script line runs. Same fix and priority order as
+/// #1431 (python worker provider); the start probe closes the Windows
+/// alias/start_failed hole (#1466, #1474 review).
 QString resolveDefaultPythonInterpreter();
 
 /// Adapter: gen_lab_packs.py → structured result.
@@ -73,6 +75,10 @@ struct BundleVerifyResult
     int exitCode = -1;
     QStringList findings;
     QString summary;
+    /// The verifier transcript exceeded the capture cap (#1474 review): the
+    /// exit-code verdict stands, but findings/summary are refused — a
+    /// retained head must never be published as the complete output.
+    bool outputTruncated = false;
     // Manifest metadata surfaced for the teacher (projection only — the
     // canonical verifier script stays the only digest authority).
     QString manifestSchema;
@@ -120,6 +126,10 @@ struct PackDriftCheck
     bool inSync = false;
     QStringList driftFiles;
     QString summary;
+    /// The foundry transcript exceeded the capture cap (#1474 review): the
+    /// exit code still decides inSync, but the DRIFT list is refused — a
+    /// truncated list would under-report real classroom drift.
+    bool outputTruncated = false;
     QJsonObject toJson() const;
 };
 

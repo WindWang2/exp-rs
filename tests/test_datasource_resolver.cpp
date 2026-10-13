@@ -185,8 +185,24 @@ TEST_CASE( "QgsDataSourceResolver localPath maps file URLs to openable paths", "
 #endif
     // POSIX URL -> plain POSIX path.
     CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///tmp/a.tif" ) ) == QStringLiteral( "/tmp/a.tif" ) );
-    // Percent escapes decode.
+    // Percent escapes decode. The expectation is platform-aware: QUrl's
+    // toLocalFile keeps the leading slash for a Windows-style path on
+    // non-Windows (#1472 review — the shared assertion failed on the
+    // Linux/macOS lanes while passing on Windows).
+#ifdef Q_OS_WIN
     CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///C:/my%20data/a.tif" ) ) == QStringLiteral( "C:/my data/a.tif" ) );
+#else
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file:///C:/my%20data/a.tif" ) ) == QStringLiteral( "/C:/my data/a.tif" ) );
+#endif
+    // A localhost authority IS the local machine — never an SMB share
+    // (#1472 review): the mapping must drop the authority on every
+    // platform, not pass through toLocalFile's //localhost/… form.
+#ifdef Q_OS_WIN
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://localhost/C:/data/a.tif" ) ) == QStringLiteral( "C:/data/a.tif" ) );
+#else
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://localhost/tmp/a.tif" ) ) == QStringLiteral( "/tmp/a.tif" ) );
+    CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://LOCALHOST/tmp/a.tif" ) ) == QStringLiteral( "/tmp/a.tif" ) );
+#endif
     // Named authority -> UNC form (Windows share addressable by QFile/GDAL).
     CHECK( QgsDataSourceResolver::localPath( QStringLiteral( "file://server/share/a.tif" ) ) == QStringLiteral( "//server/share/a.tif" ) );
     // Scheme is case-insensitive.

@@ -26,6 +26,9 @@
 #include "suitability/suitability_time.h"
 
 #include "data/band_role.h"
+#include "data/execution_fingerprint.h"
+
+#include <QCryptographicHash>
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -372,6 +375,14 @@ TEST_CASE( "goal JSON round-trip and deterministic digest", "[suitability][spati
     SuitabilityGoal changed = goal;
     changed.minSamples = 201;
     REQUIRE( changed.contentDigest() != goal.contentDigest() );
+
+    // #1450: the digest hashes the platform's RFC 8785 canonical
+    // serialization — the ONE authority shared with execution/dataset
+    // fingerprints — not Qt's Compact dialect, which no canonical-path
+    // verifier could ever reproduce.
+    const QByteArray goalCanonical = sicnu::data::canonicalizeJsonRfc8785( goal.toJson() );
+    REQUIRE( goal.contentDigest() == QString::fromLatin1( QCryptographicHash::hash(
+                 goalCanonical, QCryptographicHash::Sha256 ).toHex() ) );
 }
 
 TEST_CASE( "spatial coverage without an AOI is unknown, not applicable-looking", "[suitability][spatial]" )
@@ -730,6 +741,13 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
     REQUIRE( replay.has_value() );
     REQUIRE( replay->contentDigest() == report.contentDigest() );
     REQUIRE( replay->toJson() == report.toJson() );
+
+    // #1450: the report digest also hashes the RFC 8785 canonical form —
+    // the single authority, so agents can re-verify report_digest through
+    // the canonicalizer they are told to use.
+    const QByteArray reportCanonical = sicnu::data::canonicalizeJsonRfc8785( report.toJson() );
+    REQUIRE( report.contentDigest() == QString::fromLatin1( QCryptographicHash::hash(
+                 reportCanonical, QCryptographicHash::Sha256 ).toHex() ) );
 
     // Scenes present without an AOI stay a legal subject; coverage is Unknown.
     SuitabilityAssessor::Inputs noAoi;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
@@ -409,6 +410,11 @@ public:
     /// fingerprinting is disabled — a step whose inputs cannot be
     /// revision-identified must never be served from cache.
     void setCatalog( sicnu::data::DataManager *catalog );
+
+    /// Severs the m_catalog destroyed() guard by its stored handle. Caller
+    /// holds m_mutex. Idempotent; independent of m_catalog's current value
+    /// so shutdown() (which nulls the pointer) can still sever it.
+    void disconnectCatalogGuardLocked();
 
     /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
     void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
@@ -925,7 +931,10 @@ private:
     struct PendingSubmissionFingerprint
     {
         long taskId = -1;
-        sicnu::data::DataManager *catalog = nullptr;
+        /// Guarded like TaskCenter::m_catalog (#1454-5): the commit phase
+        /// runs lock-free on the submitting thread, possibly after the host
+        /// dropped its DataManager.
+        QPointer<sicnu::data::DataManager> catalog;
         QString algorithmId;
         QString implementationHash;            // schema + contract + platform version hex
         QJsonObject hashedParams;              // output-vocabulary keys excluded (identity)
@@ -1022,7 +1031,23 @@ private:
     /// or no longer Completed when the record would be written.
     void storeExecutionResult( ExecutionStoreRequest request );
 
-    sicnu::data::DataManager *m_catalog = nullptr;
+    /// Catalog seam (#1454-5): guarded so a host that destroys its
+    /// DataManager without TaskCenter::shutdown()/setCatalog(nullptr) cannot
+    /// leave a dangling pointer behind — QPointer auto-nulls on completed
+    /// QObject destruction and setCatalog() additionally wires the
+    /// destroyed() signal. Residual window (documented): calls racing INTO
+    /// the DataManager destructor body are the host's destruction-order
+    /// contract, not this seam's.
+    QPointer<sicnu::data::DataManager> m_catalog;
+    /// The destroyed() guard connection for m_catalog. Held as a handle (not
+    /// re-derived from m_catalog) because shutdown() nulls the pointer while
+    /// the connection must stay severable: a stale catalog destroyed after a
+    /// shutdown() + setCatalog(B) would otherwise clear the NEW seam (R9
+    /// review P1). DirectConnection, so the clearing lambda runs ON the
+    /// destroying thread — callers must therefore never destroy a
+    /// DataManager while holding m_mutex (TaskCenter never owns one, and
+    /// every catalog-touching callback runs outside the lock).
+    QMetaObject::Connection m_catalogGuard;
     /// Submission-time fingerprints (dispatch order → completion store).
     /// Entries are removed on every terminal transition and on clear/reset.
     QMap<long, sicnu::data::ExecutionFingerprint> m_taskFingerprints;

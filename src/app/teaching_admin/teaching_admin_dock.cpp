@@ -402,8 +402,22 @@ void TeachingAdminDock::onRunBatch()
     if ( grader.cliPath.isEmpty() )
         appendLog( tr( "grader CLI not found (set SICNU_GEO_RS_CLI); rows will be typed unavailable" ) );
 
-    const int total = sicnu::teaching_admin::discoverSubmissions( cfg.submissionsDir ).size();
+    QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
+    const int total =
+      sicnu::teaching_admin::discoverSubmissions( cfg.submissionsDir, &discoverySkips ).size();
     m_batchProgressLabel->setText( tr( "running 0 / %1" ).arg( total ) );
+    if ( !discoverySkips.isEmpty() )
+    {
+        // Preview honesty (#1466): reserved-name refusals are visible BEFORE
+        // the run, so a mis-named submission can be fixed while grading.
+        QStringList names;
+        for ( const auto &skip : discoverySkips )
+            names << QFileInfo( skip.path ).fileName();
+        appendLog( tr( "discovery refused %1 reserved-name file(s) (skipped, not graded): %2 — "
+                       "rename them if they are real submissions; see the report for reasons" )
+                     .arg( discoverySkips.size() )
+                     .arg( names.join( QStringLiteral( ", " ) ) ) );
+    }
     m_batchCancelButton->setEnabled( true );
 
     const QString outPrefix = m_batchOutEdit->text();
@@ -487,11 +501,17 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QSt
       reportJson.value( QStringLiteral( "cancelled_early" ) ).toBool()
         ? tr( "cancelled (durable partial results published)" )
         : tr( "finished" );
-    m_batchProgressLabel->setText(
+    // Skipped refusals ride the summary (#1466): graded + skipped is the
+    // full accounting of what discovery saw.
+    QString summary =
       tr( "%1 — graded %2 / %3" )
         .arg( state )
         .arg( reportJson.value( QStringLiteral( "graded" ) ).toInt() )
-        .arg( reportJson.value( QStringLiteral( "total" ) ).toInt() ) );
+        .arg( reportJson.value( QStringLiteral( "total" ) ).toInt() );
+    const int skippedCount = reportJson.value( QStringLiteral( "skipped" ) ).toInt();
+    if ( skippedCount > 0 )
+        summary += tr( " — %1 file(s) skipped (reserved names, see report)" ).arg( skippedCount );
+    m_batchProgressLabel->setText( summary );
     appendLog( QString::fromUtf8( QJsonDocument( reportJson ).toJson( QJsonDocument::Compact ) ) );
 
     // Class summary from the SAME published truth (the report on disk), not

@@ -145,22 +145,25 @@ bool Resampler::warpRaster(const float* srcBuffer, int srcWidth, int srcHeight,
         return false;
     if (!inverseCoordMap)
         return false;
-    if (std::abs(srcGeoTransform[1]) < 1e-300 || std::abs(srcGeoTransform[5]) < 1e-300)
+    const double det = srcGeoTransform[1] * srcGeoTransform[5] - srcGeoTransform[2] * srcGeoTransform[4];
+    if (std::abs(det) < 1e-15)
         return false;
 
     for (int j = 0; j < dstHeight; ++j) {
         for (int i = 0; i < dstWidth; ++i) {
             // Destination pixel -> world -> user inverse map -> source world.
-            const double worldX = dstGeoTransform[0] + dstGeoTransform[1] * i;
-            const double worldY = dstGeoTransform[3] + dstGeoTransform[5] * j;
+            const double worldX = dstGeoTransform[0] + dstGeoTransform[1] * i + dstGeoTransform[2] * j;
+            const double worldY = dstGeoTransform[3] + dstGeoTransform[4] * i + dstGeoTransform[5] * j;
             const auto [srcWorldX, srcWorldY] = inverseCoordMap(worldX, worldY);
             // Source world -> source pixel (invert the affine geotransform).
-            const double u = (srcWorldX - srcGeoTransform[0]) / srcGeoTransform[1];
-            const double v = (srcWorldY - srcGeoTransform[3]) / srcGeoTransform[5];
+            const double dx = srcWorldX - srcGeoTransform[0];
+            const double dy = srcWorldY - srcGeoTransform[3];
+            const double u = (dx * srcGeoTransform[5] - dy * srcGeoTransform[2]) / det;
+            const double v = (-dx * srcGeoTransform[4] + dy * srcGeoTransform[1]) / det;
 
             double value = interpolate(srcBuffer, srcWidth, srcHeight, u, v,
                                        options.method, options.noDataValue);
-            if (options.clampRange && value != options.noDataValue) {
+            if (options.clampRange && !isNoData(value, options.noDataValue)) {
                 value = std::clamp(value, options.minValue, options.maxValue);
             }
             dstBuffer[static_cast<size_t>(j) * dstWidth + i] = static_cast<float>(value);

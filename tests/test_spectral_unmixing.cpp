@@ -109,6 +109,18 @@ TEST_CASE("Spectral unmixing guards invalid arguments", "[unmixing][kernel]")
     const std::vector<float> twoEnds = {0.6f, 0.2f, 0.2f, 0.1f, 0.4f, 0.5f};
     CHECK_FALSE(SpectralUnmixing::unmix(pixel.data(), 1, 2, twoEnds.data(), 3,
                                         &result, &err));
+
+    // Non-finite endmembers are refused fail-closed.
+    const std::vector<float> nanEnds = {std::numeric_limits<float>::quiet_NaN(), 0.2f, 0.2f};
+    CHECK_FALSE(SpectralUnmixing::unmix(pixel.data(), 1, 3, nanEnds.data(), 1,
+                                        &result, &err));
+    CHECK(err.contains("non-finite"));
+
+    // Zero-norm endmembers are refused fail-closed.
+    const std::vector<float> zeroEnds = {0.0f, 0.0f, 0.0f};
+    CHECK_FALSE(SpectralUnmixing::unmix(pixel.data(), 1, 3, zeroEnds.data(), 1,
+                                        &result, &err));
+    CHECK(err.contains("zero energy"));
 }
 
 TEST_CASE("rs:spectral_unmixing writes abundance bands", "[operators][rs][unmixing]")

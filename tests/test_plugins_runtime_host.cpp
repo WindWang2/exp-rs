@@ -196,7 +196,7 @@ TEST_CASE( "unload refuses while an execution lease is active (issue #747)",
 
     REQUIRE_FALSE( registry.unload( pluginId, 200 ) );
     REQUIRE( registry.isLoaded( pluginId ) );
-    const PluginRecord *record = registry.record( pluginId );
+    auto record = registry.record( pluginId );
     REQUIRE( record );
     REQUIRE( record->state == PluginState::Loaded );
     bool sawInUse = false;

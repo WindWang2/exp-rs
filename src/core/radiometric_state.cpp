@@ -45,23 +45,16 @@ namespace exp_radiometric
     /// necessarily a path — Qt resources (":/…"), GDAL subdataset
     /// descriptors ("GTIFF_DIR:…", "HDF5:…"), and remote schemes
     /// ("https://…", "WMS:…") must skip the GDALOpenEx metadata round-trip
-    /// instead of being opened. The only colon a local path may carry is a
-    /// Windows drive letter ("C:/…" / "C:\…"); anything else is a URI.
+    /// instead of being opened. Classification — including POSIX filenames
+    /// that legally contain ':' beyond a drive letter, #1469 review — lives
+    /// in local_source::isPlainLocalPath: one authority, shared with the
+    /// header-only preflight consumers.
     QString layerLocalFilePath( const QgsRasterLayer *layer )
     {
       if ( !layer )
         return QString();
       const QString source = layer->source();
-      const int colon = source.indexOf( QLatin1Char( ':' ) );
-      if ( colon < 0 )
-        return source; // POSIX / UNC / relative path
-      if ( colon != 1 || source.size() < 3 )
-        return QString();
-      const QChar afterColon = source.at( 2 );
-      if ( !source.at( 0 ).isLetter() ||
-           ( afterColon != QLatin1Char( '/' ) && afterColon != QLatin1Char( '\\' ) ) )
-        return QString();
-      return source;
+      return local_source::isPlainLocalPath( source ) ? source : QString();
     }
   } // namespace
 

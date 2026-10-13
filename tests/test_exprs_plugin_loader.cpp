@@ -386,7 +386,7 @@ TEST_CASE( "granted permissions carry audit events in both policy modes",
         options.policy = PluginPolicy::fromEnvironment();
         options.policy.mode = PluginPolicyMode::Audit;
         registry.configure( options );
-        const PluginRecord *record = registry.record( "org.test.audit" );
+        auto record = registry.record( "org.test.audit" );
         REQUIRE( record != nullptr );
         REQUIRE( record->manifest.permissions.size() == 2 );
         REQUIRE( registry.load( "org.test.audit" ) );
@@ -614,7 +614,7 @@ TEST_CASE( "hot reload swaps in a valid new manifest and refuses a broken one",
         // v2-declared operator id (the fixture binary itself registers the
         // hard-coded "test:hello" factory either way — that is the payload's
         // business, not the manifest's).
-        const PluginRecord *after = registry.record( fixture.id );
+        auto after = registry.record( fixture.id );
         REQUIRE( after != nullptr );
         REQUIRE( after->manifest.version == "2.0.0" );
         REQUIRE( after->manifest.name == "Hello Fixture v2" );
@@ -1234,7 +1234,7 @@ TEST_CASE( "installOrUpgrade installs a fresh package, then atomically upgrades 
     REQUIRE( fixture.sawCode( PluginDiagnosticCode::PluginUpgraded ) );
 
     // The published generation is v2 — record AND on-disk bytes agree.
-    const PluginRecord *record = registry.record( fixture.id );
+    auto record = registry.record( fixture.id );
     REQUIRE( record != nullptr );
     REQUIRE( record->manifest.version == "2.0.0" );
     REQUIRE( fixture.installedVersion() == "2.0.0" );
@@ -1326,7 +1326,7 @@ TEST_CASE( "installOrUpgrade rolls back when the new version cannot load",
     REQUIRE( fixture.installedCapabilities()
              == std::vector<std::string>{ "external_tools", "operator" } );
     REQUIRE( registry.isLoaded( fixture.id ) );
-    const PluginRecord *record = registry.record( fixture.id );
+    auto record = registry.record( fixture.id );
     REQUIRE( record != nullptr );
     REQUIRE( record->manifest.version == "1.0.0" );
     // Rollback consumed the snapshot; the upgrade backup is gone.
@@ -2433,4 +2433,59 @@ TEST_CASE( "a rewritten manifest index with a non-integral mtime is a cache miss
     REQUIRE( second.size() == 1 );
     REQUIRE( second[0].manifest.id == "org.exprs.test.hello-plugin" );
     REQUIRE( second[0].state == PluginState::Discovered );
+}
+
+TEST_CASE( "record() hands out snapshots without registry-side accumulation",
+           "[plugin][registry][bounded]" )
+{
+    // PR #1469 review: record() retained one registry-owned snapshot per
+    // CALL with no eviction — unbounded for any polling caller. The
+    // contract is caller-owned snapshots: repeated queries must leave the
+    // registry holding nothing.
+    ScratchGuard scratch( "exprs_test_record_bounded" );
+    const std::string root = scratch.path;
+    {
+        const std::string dir = root + "/org.test.snap";
+        std::error_code ec;
+        std::filesystem::create_directories( dir, ec );
+        std::ofstream output( dir + "/plugin.json", std::ios::trunc );
+        output << R"({
+            "manifest_version": 1,
+            "id": "org.test.snap",
+            "name": "Snapshot Plugin",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "capabilities": ["operator"],
+            "permissions": [],
+            "operators": [{
+                "id": "snap:echo",
+                "display_name": "Echo",
+                "group": "test",
+                "external": { "argv": ["cmd", "/c", "exit 0"], "timeout_seconds": 30 }
+            }]
+        })";
+    }
+
+    PluginRegistryOptions options;
+    options.roots = { root };
+    auto &registry = PluginRegistry::instance();
+    registry.setContributionSink( nullptr );
+    registry.configure( options );
+
+    for ( int query = 0; query < 64; ++query )
+    {
+        auto snapshot = registry.record( "org.test.snap" );
+        REQUIRE( snapshot != nullptr );
+        REQUIRE( snapshot->state == PluginState::Validated );
+    }
+    REQUIRE( registry.retainedRecordSnapshots() == 0 );
+
+    // The handed-out snapshot stays valid across a refresh (the #943
+    // contract) even though the registry itself retains nothing.
+    auto held = registry.record( "org.test.snap" );
+    registry.refresh();
+    REQUIRE( held != nullptr );
+    REQUIRE( held->id() == "org.test.snap" );
 }

@@ -446,7 +446,24 @@ void TaskCenter::shutdown()
         // guaranteed), and a late worker record would dereference the
         // dangling pointer in taskExecutionFingerprintLocked (adversarial
         // review of #724). No execution can follow shutdown().
+        // #1454-5 (R9 review P1): sever the destroyed() guard by its stored
+        // HANDLE, not by re-deriving it from m_catalog — nulling the pointer
+        // alone left the connection live, so a catalog destroyed AFTER a
+        // shutdown()+setCatalog(B) ran the stale lambda and cleared the NEW
+        // seam (fingerprints silently degraded to "no catalog wired").
+        disconnectCatalogGuardLocked();
         m_catalog = nullptr;
+    }
+}
+
+void TaskCenter::disconnectCatalogGuardLocked()
+{
+    // Caller holds m_mutex. Severing by handle is idempotent and independent
+    // of m_catalog's current value.
+    if ( m_catalogGuard )
+    {
+        disconnect( m_catalogGuard );
+        m_catalogGuard = {};
     }
 }
 
@@ -1604,7 +1621,9 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 {
     if ( m_isShuttingDown.load() )
         return -1; // no new work after shutdown (#684)
-    sicnu::data::DataManager *catalogForWarm = nullptr;
+    // #1454-5: guarded snapshot — a host destroying its DataManager without
+    // shutdown() nulls this between the snapshot and the lock-free use.
+    QPointer<sicnu::data::DataManager> catalogForWarm;
     TaskEstimateResolver estimateResolverCopy;
     // 8.0 WP-F (review P1 fix): the remote-identity probe is network I/O —
     // perform it HERE, lock-free on the submitting thread, so the collector's
@@ -1616,7 +1635,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         catalogForWarm = m_catalog;
         estimateResolverCopy = m_resourceBudget.estimateResolver();
     }
-    sicnu::temporal::warmExecutionIdentityCache( catalogForWarm, params );
+    sicnu::temporal::warmExecutionIdentityCache( catalogForWarm.data(), params );
     // #1097 / #930: QGIS registry lazy-construction (and descriptor JSON) must
     // not run under m_mutex — first touch of an unknown provider id builds
     // QgsProcessingAlgorithm adapters and would stall every terminal /
@@ -4079,7 +4098,8 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     if ( fusedChainsEnabled )
         fusedPlan = sicnu::processing::planFusedChain( def );
 
-    sicnu::data::DataManager *catalogForWarm = nullptr;
+    // #1454-5: guarded snapshot (see enqueueTask).
+    QPointer<sicnu::data::DataManager> catalogForWarm;
     TaskEstimateResolver estimateResolverCopy;
     // 8.0 WP-F (review P1 fix): warm the remote-identity session cache for
     // every step's params BEFORE the mutex section (network I/O must never
@@ -4089,11 +4109,11 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
         catalogForWarm = m_catalog;
         estimateResolverCopy = m_resourceBudget.estimateResolver();
     }
-    if ( catalogForWarm )
+    if ( sicnu::data::DataManager *catalogForWarmLive = catalogForWarm.data() )
     {
         for ( const auto &step : def.steps )
             sicnu::temporal::warmExecutionIdentityCache(
-                catalogForWarm, sicnu::processing::jsonParamsToVariantMap( step.params ) );
+                catalogForWarmLive, sicnu::processing::jsonParamsToVariantMap( step.params ) );
     }
 
     // #1097 / #930 + 12.0: warm admission dims, resource profiles and RAM
@@ -4503,7 +4523,26 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
 void TaskCenter::setCatalog( sicnu::data::DataManager *catalog )
 {
     QMutexLocker locker( &m_mutex );
+    if ( m_catalog.data() == catalog )
+        return;
+    // Sever the OUTGOING catalog's guard by its stored handle (#1454-5 /
+    // R9 review P1): deriving it from m_catalog missed the shutdown()-then-
+    // setCatalog(B) case, where a stale ~A cleared B's seam.
+    disconnectCatalogGuardLocked();
     m_catalog = catalog;
+    // #1454-5: a host that destroys its DataManager without calling
+    // shutdown()/setCatalog(nullptr) first must not leave a dangling seam.
+    // DirectConnection so the clear runs ON the destroying thread during
+    // ~QObject — every later m_mutex-guarded read sees null, and the
+    // lock-free warm/fingerprint snapshots (QPointer locals) null out on
+    // their own once destruction completes.
+    if ( m_catalog )
+    {
+        m_catalogGuard = connect( m_catalog.data(), &QObject::destroyed, this, [this] {
+            QMutexLocker clearLocker( &m_mutex );
+            m_catalog.clear();
+        }, Qt::DirectConnection );
+    }
 }
 
 std::optional<TaskCenter::PendingSubmissionFingerprint>

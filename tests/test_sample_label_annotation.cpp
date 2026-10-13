@@ -531,6 +531,84 @@ TEST_CASE( "removeSample is transactional: a failed facet delete rolls the sampl
     CHECK( after->values.isEmpty() );
 }
 
+TEST_CASE( "removeSample prepare failures keep their sqlite cause past rollback",
+           "[dataset][sample][store][faults]" )
+{
+    // #1473 review (W6): both prepare-failure branches in removeSample read
+    // stmt.error() AFTER m_impl->rollback(); a successful ROLLBACK resets the
+    // connection error string to "not an error" (the same ordering the
+    // step-failure branches already document), so callers lost the actual
+    // cause of the store failure. A damaged-schema prepare is the
+    // deterministic trigger — the same shape a corrupted database or an
+    // authorizer-refused DELETE produces in production.
+    const auto dropTable = []( const QString &dbPath, const char *table ) {
+        sqlite3 *raw = nullptr;
+        if ( sqlite3_open( dbPath.toUtf8().constData(), &raw ) != SQLITE_OK )
+        {
+            sqlite3_close( raw );
+            return false;
+        }
+        const QString sql =
+          QStringLiteral( "DROP TABLE %1" ).arg( QLatin1String( table ) );
+        char *err = nullptr;
+        const int rc = sqlite3_exec( raw, sql.toUtf8().constData(), nullptr, nullptr, &err );
+        if ( err )
+            sqlite3_free( err );
+        sqlite3_close( raw );
+        return rc == SQLITE_OK;
+    };
+
+    SECTION( "base-row DELETE prepare failure reports the sqlite cause" )
+    {
+        QTemporaryDir dir;
+        QString versionId;
+        DatasetStore store;
+        makeStoreWithDraftVersion( store, dir, &versionId );
+        const DatasetVersionId vid =
+            DatasetVersionId::fromString( versionId ).value_or( DatasetVersionId{} );
+        SampleRecord sample = makePatchSample( versionId );
+        sample.setSampleId( SampleId::generate().toString() );
+        REQUIRE( store.addSamples( QVector<SampleRecord>{ sample } ).has_value() );
+        const SampleId sid = SampleId::fromString( sample.sampleId() ).value_or( SampleId{} );
+
+        REQUIRE( dropTable( dir.filePath( QStringLiteral( "datasets.db" ) ), "samples" ) );
+        const auto failed = store.removeSample( vid, sid );
+        CHECK( !failed.has_value() );
+        CHECK( failed.diagnostics().first().code ==
+               QStringLiteral( "dataset.store_query_failed" ) );
+        CHECK( failed.diagnostics().first().message.contains(
+          QStringLiteral( "no such table" ) ) );
+    }
+
+    SECTION( "facet DELETE prepare failure reports the sqlite cause" )
+    {
+        QTemporaryDir dir;
+        QString versionId;
+        DatasetStore store;
+        makeStoreWithDraftVersion( store, dir, &versionId );
+        const DatasetVersionId vid =
+            DatasetVersionId::fromString( versionId ).value_or( DatasetVersionId{} );
+        SampleRecord sample = makePatchSample( versionId );
+        sample.setSampleId( SampleId::generate().toString() );
+        REQUIRE( store.addSamples( QVector<SampleRecord>{ sample } ).has_value() );
+        const SampleId sid = SampleId::fromString( sample.sampleId() ).value_or( SampleId{} );
+
+        // Only the facet table is damaged: the base-row DELETE succeeds and
+        // must roll back, and the facet prepare failure must still name the
+        // real cause (this is the second ordering defect the review cites).
+        REQUIRE( dropTable( dir.filePath( QStringLiteral( "datasets.db" ) ), "sample_facets" ) );
+        const auto failed = store.removeSample( vid, sid );
+        CHECK( !failed.has_value() );
+        CHECK( failed.diagnostics().first().code ==
+               QStringLiteral( "dataset.store_query_failed" ) );
+        CHECK( failed.diagnostics().first().message.contains(
+          QStringLiteral( "no such table" ) ) );
+        // The rolled-back base row survives the facet prepare failure.
+        const auto reloaded = store.sampleById( vid, sid );
+        CHECK( reloaded.has_value() );
+    }
+}
+
 TEST_CASE( "saveLabelSchema resolves a competing first write idempotently or typed",
            "[dataset][label][store]" )
 {

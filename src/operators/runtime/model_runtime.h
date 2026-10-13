@@ -38,6 +38,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <condition_variable>
 #include <vector>
 
 namespace sicnu::operators::runtime {
@@ -487,6 +488,7 @@ class ModelRuntimeRegistry
       std::uint64_t cacheHits = 0;
       std::uint64_t cacheMisses = 0;
       std::uint64_t evictions = 0;     ///< LRU/idle evictions (not releaseAll)
+      std::uint64_t coalescedWaits = 0; ///< same-key acquires that rode an in-flight load (R9)
     };
     PoolStats poolStats() const;
 
@@ -555,8 +557,47 @@ class ModelRuntimeRegistry
     /// Caller holds m_mutex.
     void dropReservationLocked( const CacheEntry &entry );
 
+    /// Same-key in-flight load coalescing (PR #1469 review): the factory
+    /// load runs outside the registry lock, so two same-key acquires used
+    /// to take two VRAM admissions (the second falsely refused — "device
+    /// unavailable" while the identical session was being loaded) and two
+    /// factory calls (duplicate weight parse). The FIRST miss registers a
+    /// flight and loads; later same-key acquires wait and ride its outcome
+    /// — success (same session, one ledger ticket) or typed failure
+    /// (broadcast, no retry from the waiter).
+    struct InFlightLoad
+    {
+        std::condition_variable cv;
+        std::string identity;  ///< framework|digest — refusal-path matching
+        std::string key;       ///< full cache key this flight will insert
+        ResolvedDevice device; ///< target device of the load
+        ModelRuntimePtr session; ///< set when the load succeeded
+        std::string error;       ///< typed failure reason when it did not
+        bool done = false;
+        /// Published exactly once by finishInFlight; the loader's
+        /// exception-safety scope guard uses it so an unexpected throw
+        /// between registration and the normal publish paths cannot leave
+        /// waiters parked forever (R9 review).
+        bool published = false;
+    };
+    /// Publishes the loader's outcome to waiters and unregisters the flight.
+    /// Called WITHOUT m_mutex held (takes it internally). Idempotent: the
+    /// exception-safety scope guard may call it after a normal path already
+    /// published.
+    void finishInFlight( const std::string &key, const std::shared_ptr<InFlightLoad> &flight,
+                         ModelRuntimePtr session, const std::string &error );
+    /// Called at a FAILED device resolution, BEFORE the eviction valve and
+    /// the typed refusal: a peer loading the same identity may already hold
+    /// the only ticket this request needs. Returns the ridden session with
+    /// m_mutex RELEASED, or nullptr with m_mutex HELD (caller proceeds to
+    /// its own refusal — the peer's failed reservation is already unwound).
+    ModelRuntimePtr rideInFlightOnRefusal( const std::string &identity,
+                                           const RequestedDevice &request,
+                                           std::unique_lock<std::mutex> &lock );
+
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, CacheEntry> m_cache;
+    std::unordered_map<std::string, std::shared_ptr<InFlightLoad>> m_inFlight;
     /// #1160: shared so the session reservation guards below can outlive
     /// the registry object without dangling.
     std::shared_ptr<VramLedger> m_ledger = std::make_shared<VramLedger>();
@@ -576,6 +617,7 @@ class ModelRuntimeRegistry
     std::uint64_t m_cacheHits = 0;
     std::uint64_t m_cacheMisses = 0;
     std::uint64_t m_evictions = 0;
+    std::uint64_t m_coalescedWaits = 0;
 };
 
 } // namespace sicnu::operators::runtime

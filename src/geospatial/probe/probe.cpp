@@ -254,7 +254,7 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
   const bool specificProductClaim =
     claimedKind != ProductKind::Unknown && claimedKind != ProductKind::GenericRaster;
 
-  const std::string gdalPath = uri.canonical();
+  const std::string gdalPath = uri.gdalOpenTarget();
   if ( gdalCandidate && !specificProductClaim )
   {
     QuietCplErrors quiet;

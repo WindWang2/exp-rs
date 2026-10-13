@@ -201,6 +201,18 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
             ++corruptRows;
         }
     }
+    // Mid-scan sqlite ERROR (CORRUPT/IOERR) ends stepRow() exactly like
+    // exhaustion: without this check the returned list is a SILENTLY partial
+    // subset (#1448/#1457). Same loud-subset contract as the parse skip
+    // above — the signature stays QVector (out-of-scope callers), so the
+    // scan failure is named here instead of returned.
+    if ( stmt.stepFailed() )
+    {
+        qWarning( "dataset.split_manifest_scan_failed: version %s sqlite scan ended with"
+                  " error (%s); the returned list is a SUBSET of the stored evidence",
+                  qUtf8Printable( versionId.toString() ),
+                  qUtf8Printable( stmt.error( m_impl->db ) ) );
+    }
     if ( corruptRows > 0 )
     {
         qWarning( "dataset.split_manifest_corrupt_skipped: version %s has %d"
@@ -305,6 +317,15 @@ QVector<LeakageReport> DatasetStore::leakageReportsForSplit( const QString &spli
         const auto report = LeakageReport::fromJson( textToJson( stmt.text( 0 ) ) );
         if ( report )
             reports.append( report.value() );
+    }
+    // Same loud-subset contract as splitManifestsForVersion: a mid-scan
+    // sqlite ERROR must not read as "no more rows" (#1448/#1457).
+    if ( stmt.stepFailed() )
+    {
+        qWarning( "dataset.leakage_report_scan_failed: split %s sqlite scan ended with"
+                  " error (%s); the returned list is a SUBSET of the stored evidence",
+                  qUtf8Printable( splitManifestId ),
+                  qUtf8Printable( stmt.error( m_impl->db ) ) );
     }
     return reports;
 }

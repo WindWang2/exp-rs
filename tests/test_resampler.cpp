@@ -218,3 +218,56 @@ TEST_CASE("test_resampler - clampRange suppresses cubic overshoot at sharp edges
     }
     REQUIRE(overshot); // the overshoot exists and clamping was doing real work
 }
+
+TEST_CASE("test_resampler - Rotated geotransform warp correctly maps coordinates", "[resampler][d14]")
+{
+    const int size = 4;
+    const auto src = analyticPlaneGrid(size);
+    std::vector<float> dst(static_cast<size_t>(size) * size, static_cast<float>(kNoData));
+    const double srcGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    // Transposed/rotated dst geotransform: worldX = j, worldY = i
+    const double dstGt[6] = {0.0, 0.0, 1.0, 0.0, 1.0, 0.0};
+
+    WarpOptions options;
+    options.method = ResampleMethod::NearestNeighbor;
+    options.noDataValue = kNoData;
+    options.clampRange = false;
+
+    REQUIRE(Resampler::warpRaster(src.data(), size, size, srcGt, dst.data(), size, size, dstGt,
+                                  [](double x, double y) { return std::make_pair(x, y); },
+                                  options));
+    for (int j = 0; j < size; ++j) {
+        for (int i = 0; i < size; ++i) {
+            REQUIRE(dst[static_cast<size_t>(j) * size + i] == src[static_cast<size_t>(i) * size + j]);
+        }
+    }
+}
+
+TEST_CASE("test_resampler - clampRange with NaN NoData preserves NaN voids", "[resampler][d14]")
+{
+    const int size = 4;
+    const auto src = analyticPlaneGrid(size);
+    const double nanNoData = std::numeric_limits<double>::quiet_NaN();
+    std::vector<float> dst(static_cast<size_t>(size) * size, 0.0f);
+    const double srcGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    const double dstGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+
+    WarpOptions options;
+    options.method = ResampleMethod::NearestNeighbor;
+    options.noDataValue = nanNoData;
+    options.clampRange = true;
+    options.minValue = 100.0;
+    options.maxValue = 200.0;
+
+    // Shift by 1 pixel so first column falls out of bounds into NoData
+    REQUIRE(Resampler::warpRaster(src.data(), size, size, srcGt, dst.data(), size, size, dstGt,
+                                  [](double x, double y) { return std::make_pair(x - 1.0, y); },
+                                  options));
+    for (int j = 0; j < size; ++j) {
+        REQUIRE(std::isnan(dst[static_cast<size_t>(j) * size + 0]));
+        for (int i = 1; i < size; ++i) {
+            REQUIRE_FALSE(std::isnan(dst[static_cast<size_t>(j) * size + i]));
+            REQUIRE(dst[static_cast<size_t>(j) * size + i] >= 100.0f);
+        }
+    }
+}

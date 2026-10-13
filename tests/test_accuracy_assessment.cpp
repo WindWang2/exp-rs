@@ -60,4 +60,10 @@ TEST_CASE( "Accuracy: single-class degenerate case", "[classify][acc]" )
   REQUIRE( r.classIds.size() == 1 );
   REQUIRE( r.overallAccuracy == Approx( 1.0 ) );
   REQUIRE( r.kappa == Approx( 1.0 ) );
+
+  // When all true labels are class 1 but all predictions are class 2, OA is 0 and kappa is 0.
+  QVector<int> yp2 = { 2, 2, 2 };
+  const auto r2 = RsAccuracyAssessment::compute( yt, yp2 );
+  REQUIRE( r2.overallAccuracy == Approx( 0.0 ) );
+  REQUIRE( r2.kappa == Approx( 0.0 ) );
 }

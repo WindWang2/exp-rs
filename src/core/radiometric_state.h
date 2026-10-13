@@ -109,6 +109,58 @@ namespace exp_radiometric
         }
     } // namespace vocabulary
 
+    /// Local-path classification for radiometric metadata persistence
+    /// (#1467 / #1469 review): decides whether a QgsRasterLayer source
+    /// string is a plain local filesystem path — one whose GDAL DEFAULT-
+    /// domain metadata the FSM may read and write through GDALOpenEx — or a
+    /// scheme-prefixed non-local source (provider URI, remote URL, GDAL
+    /// subdataset descriptor, Qt resource) that must skip that round-trip.
+    /// Header-only and QtCore-only, like the vocabulary above, so the
+    /// production preflight consumes the same classification as the FSM
+    /// without a qgis_core link edge.
+    namespace local_source
+    {
+        /// True for plain local paths: POSIX/UNC/relative paths — including
+        /// POSIX paths whose filename component legally contains ':' (e.g.
+        /// "/data/acq:2026.tif"; ':' is only special to QGIS/GDAL as a
+        /// scheme separator, never inside a POSIX component) — Windows
+        /// drive paths ("C:/…", "C:\\…") and GDAL VSI virtual paths
+        /// ("/vsimem/…"). False for "scheme:"-prefixed sources
+        /// ("https://…", "WMS:…", "HDF5:"…"://ds", "GTIFF_DIR:1:…"),
+        /// Qt resources (":/…") and drive-relative Windows spellings
+        /// ("c:name.tif" — no separator follows the drive colon).
+        inline bool isPlainLocalPath( const QString &source )
+        {
+            if ( source.isEmpty() )
+                return false;
+            const int colon = source.indexOf( QLatin1Char( ':' ) );
+            if ( colon < 0 )
+                return true; // POSIX / UNC / relative path — no scheme anywhere
+            if ( colon == 1 )
+            {
+                // Windows drive path: "C:/…", "C:\…" (or the bare "C:" root).
+                if ( !source.at( 0 ).isLetter() )
+                    return false;
+                return source.size() == 2 || source.at( 2 ) == QLatin1Char( '/' )
+                       || source.at( 2 ) == QLatin1Char( '\\' );
+            }
+            if ( colon == 0 )
+                return false; // Qt resource ":/…" / ":…" — never a local path
+            // Every remaining colon is local exactly when it lives INSIDE a
+            // path component — after a separator — because ':' is a legal
+            // POSIX filename character there. A colon before any separator
+            // terminates a scheme-like leading token (provider URI, remote
+            // URL, subdataset driver prefix); a colon with no separator at
+            // all (relative "weird:name.tif") is inherently ambiguous and
+            // fails closed to non-local.
+            const int slash = source.indexOf( QLatin1Char( '/' ) );
+            const int backslash = source.indexOf( QLatin1Char( '\\' ) );
+            const int firstSep = slash < 0 ? backslash
+                              : ( backslash < 0 ? slash : qMin( slash, backslash ) );
+            return firstSep >= 0 && firstSep < colon;
+        }
+    } // namespace local_source
+
     /// Thrown by validateBandPreflight when a layer's radiometric state does
     /// not lawfully transition to the required unit (ADR 0158 — fail closed).
     class RadiometricStateMismatchException : public std::runtime_error

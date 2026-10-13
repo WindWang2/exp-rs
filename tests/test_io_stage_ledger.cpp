@@ -214,16 +214,46 @@ TEST_CASE( "attachExisting fails closed on every crash shape", "[io][ledger][neg
     CHECK( issueCodes( check ).find( "driver_mismatch" ) != std::string::npos );
   }
 
-  SECTION( "shape drift between journal and staged dataset" )
+  SECTION( "shape drift between journal and staged dataset (Oracle-B6.2)" )
   {
     const std::string dir = scratch( "shapedrift" );
     const std::string staged = makeStagedRaster( dir, "out.2.2.tmp.tif" );
-    StageRecord record = journal( dir, "out.tif", staged );
-    record.width = 64; // lie
+
+    // Width mismatch
+    StageRecord recordW = journal( dir, "out_w.tif", staged );
+    recordW.width = 64; // lie
+    recordStaged( recordW );
+    const AttachCheck checkW = attachExisting( recordW.finalPath );
+    CHECK( !checkW.attachable );
+    CHECK( issueCodes( checkW ).find( "shape_mismatch" ) != std::string::npos );
+
+    // Height mismatch
+    StageRecord recordH = journal( dir, "out_h.tif", staged );
+    recordH.height = 64; // lie
+    recordStaged( recordH );
+    const AttachCheck checkH = attachExisting( recordH.finalPath );
+    CHECK( !checkH.attachable );
+    CHECK( issueCodes( checkH ).find( "shape_mismatch" ) != std::string::npos );
+
+    // BandCount mismatch
+    StageRecord recordB = journal( dir, "out_b.tif", staged );
+    recordB.bandCount = 3; // lie
+    recordStaged( recordB );
+    const AttachCheck checkB = attachExisting( recordB.finalPath );
+    CHECK( !checkB.attachable );
+    CHECK( issueCodes( checkB ).find( "shape_mismatch" ) != std::string::npos );
+  }
+
+  SECTION( "zero-byte corrupt staged file reports staged_unopenable (Oracle-B6.2)" )
+  {
+    const std::string dir = scratch( "zerobyte" );
+    const std::string staged = dir + "/out.0.0.tmp.tif";
+    { std::ofstream out( staged, std::ios::binary ); } // empty 0-byte file
+    const StageRecord record = journal( dir, "out.tif", staged );
     recordStaged( record );
     const AttachCheck check = attachExisting( record.finalPath );
     CHECK( !check.attachable );
-    CHECK( issueCodes( check ).find( "shape_mismatch" ) != std::string::npos );
+    CHECK( issueCodes( check ).find( "staged_unopenable" ) != std::string::npos );
   }
 
   SECTION( "finalizeAttached refuses when attach fails" )

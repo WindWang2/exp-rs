@@ -86,13 +86,21 @@ public:
     /// full copy is fine for small registries / one-shot CLI dumps.
     std::vector<PluginRecord> records() const;
 
-    /// Read-only lookup of one record. #943: the pointer references a
-    /// registry-RETAINED copy, never the mRecords vector itself, so it stays
-    /// valid across refresh()/load()/unload() — all of which replace
-    /// mRecords wholesale. The data is a snapshot taken at call time;
-    /// re-query instead of holding the pointer across a mutation whose
-    /// result you need to observe.
-    const PluginRecord *record( const std::string &pluginId ) const;
+    /// Read-only lookup of one record. #943: the result is a CALLER-OWNED
+    /// snapshot, never a pointer into the mRecords vector — that vector is
+    /// replaced wholesale by refresh()/load()/unload(), which used to dangle
+    /// every pointer a caller still held. R9 (PR #1469 review): ownership
+    /// moves to the returned shared_ptr, so the registry retains nothing and
+    /// repeated queries stay bounded (the old per-call retention grew
+    /// without limit). The data is a snapshot taken at call time; re-query
+    /// instead of holding it across a mutation whose result you need to
+    /// observe.
+    std::shared_ptr<const PluginRecord> record( const std::string &pluginId ) const;
+
+    /// Diagnostic: registry-retained record snapshots currently alive from
+    /// record() calls (pins the bounded-snapshot contract; cf. droppedEvents
+    /// on IpcChannel for the same test-observability pattern).
+    std::size_t retainedRecordSnapshots() const;
 
     /// Plugin-platform 9.0: COPY accessors (#943). record() used to hand
     /// out a pointer into the mRecords vector without holding the registry
@@ -300,13 +308,15 @@ private:
 
     PluginRegistryOptions mOptions;
     std::vector<PluginRecord> mRecords;
-    /// Registry-retained record copies handed out by record() (#943): they
-    /// deliberately outlive every mRecords replacement so the pointers
-    /// callers hold can never dangle. Grows once per external record() call
-    /// (there is no production polling caller, and eviction would reintroduce
-    /// the dangling the retention exists to prevent). Guarded by
-    /// gRegistryMutex.
-    mutable std::vector<std::shared_ptr<const PluginRecord>> mRecordSnapshots;
+    /// Contract gauge for the bounded-snapshot rule (R9 / PR #1469 review):
+    /// record() hands out caller-owned snapshots, so the registry retains
+    /// NOTHING and this stays 0 for the registry's lifetime. The pre-R9
+    /// implementation grew a vector here once per record() call with no
+    /// eviction — unbounded for any polling caller. The regression case
+    /// asserts the gauge reads 0 so a reintroduced retention cannot pass
+    /// silently; a real statistic would need weak_ptr bookkeeping that buys
+    /// nothing over the invariant itself.
+    mutable std::size_t mRetainedRecordSnapshots = 0;
     PluginDiagnosticLog mDiagnostics;
     PluginContributionSink *mSink = nullptr;
     HostProcessRuntime *mHostProcessRuntime = nullptr;

@@ -31,6 +31,7 @@
 #include "data/data_manager.h"
 #include "data/source_descriptor.h"
 #include "data/virtual_raster_recipe.h"
+#include "runtime/observability/fault_registry.h"
 
 using namespace sicnu::data;
 using sicnu::display::DisplayViewId;
@@ -415,6 +416,61 @@ TEST_CASE( "A failed dependent-VRT rewrite warns and never signals a reload",
 
   // Cleanup so QTemporaryDir can reap the tree.
   QDir( vrtPath ).removeRecursively();
+}
+
+TEST_CASE( "A verify-failed dependent-VRT publish still signals the reload",
+           "[virtual_raster][create][relocate][failure]" )
+{
+  // #1473 review: WriteStatus::VerifyFailed means the sidecar ALREADY
+  // renamed the new bytes onto the target before read-back failed — the
+  // dependent VRT path holds changed (suspect) bytes. The boolean write
+  // check used to take that as a plain failure and suppress assetChanged,
+  // leaving displays on the pre-relocate VRT while the file changed
+  // underneath. The reload must fire AND an ERROR diagnostic must name the
+  // suspect publish (fail-visible, never silent).
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const QString originalPath = stageDem( dir, QStringLiteral( "orig-verify.tif" ) );
+  const AssetId a = registerRaster( manager, originalPath );
+  const AssetId b =
+    registerRaster( manager, stageDem( dir, QStringLiteral( "b-verify.tif" ) ) );
+
+  const Result<AssetId> created = manager.createVirtualRaster(
+    recipeFor( { BandRef{ a, 1 }, BandRef{ b, 1 } } ) );
+  REQUIRE( created );
+
+  int dependentChangeEvents = 0;
+  QObject::connect( &manager, &DataManager::assetChanged,
+                    [&]( AssetId emitted ) {
+                      if ( emitted == created.value() )
+                        ++dependentChangeEvents;
+                    } );
+
+  const QString movedPath = dir.filePath( QStringLiteral( "moved-verify.tif" ) );
+  REQUIRE( QFile::rename( originalPath, movedPath ) );
+  SourceDescriptor replacement;
+  replacement.providerKey = QStringLiteral( "gdal" );
+  replacement.canonicalSource = movedPath;
+
+  sicnu::runtime::observability::fault::ArmedFault verifyFault(
+    { "data_manager.dependent_vrt_verify",
+      sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+  const Result<RelocateResult> relocated =
+    manager.relocate( RelocateRequest{ a, replacement } );
+
+  // The relocation itself completes; the suspect publish is a diagnostic.
+  REQUIRE( relocated );
+  CHECK( dependentChangeEvents == 1 );
+  bool sawVerifyError = false;
+  for ( const Diagnostic &diagnostic : relocated.value().diagnostics )
+  {
+    if ( diagnostic.code == QStringLiteral( "relocate.dependent_vrt_verify_failed" )
+         && diagnostic.severity == DiagnosticSeverity::Error )
+      sawVerifyError = true;
+  }
+  CHECK( sawVerifyError );
 }
 
 TEST_CASE( "A chained virtual raster (virtual of virtual) registers and links",

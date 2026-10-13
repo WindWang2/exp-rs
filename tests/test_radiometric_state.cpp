@@ -249,3 +249,50 @@ TEST_CASE( "RadiometricState provider-URI sources skip the GDAL metadata preflig
   QgsRasterLayer resource( QStringLiteral( ":/embedded/raster.tif" ), QStringLiteral( "res" ) );
   REQUIRE( RadiometricState::layerUnit( &resource ) == U::DigitalNumber );
 }
+
+TEST_CASE( "local_source classification keeps POSIX colon filenames local",
+           "[radiometric][state][paths]" )
+{
+  using exp_radiometric::local_source::isPlainLocalPath;
+
+  // Local: POSIX paths whose filename component legally contains ':' — the
+  // old drive-letter-only rule misfiled these as provider URIs and silently
+  // skipped reading AND writing their radiometric metadata, so a reopened
+  // layer fell back to DigitalNumber (#1469 review / #1467).
+  CHECK( isPlainLocalPath( QStringLiteral( "/data/acq:2026.tif" ) ) );
+  CHECK( isPlainLocalPath( QStringLiteral( "data/acq:2026.tif" ) ) );
+  CHECK( isPlainLocalPath( QStringLiteral( "//server/share/acq:2026.tif" ) ) );
+  CHECK( isPlainLocalPath( QStringLiteral( "/plain/path.tif" ) ) );
+  CHECK( isPlainLocalPath( QStringLiteral( "relative.tif" ) ) );
+  CHECK( isPlainLocalPath( QStringLiteral( "C:/data/a.tif" ) ) );
+  CHECK( isPlainLocalPath( QStringLiteral( "C:\\data\\a.tif" ) ) );
+  CHECK( isPlainLocalPath( QStringLiteral( "/vsimem/acq:2026.tif" ) ) );
+
+  // Non-local: scheme-like leading tokens keep skipping the GDAL round-trip
+  // (#1467 contract unchanged).
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "https://example.com/a.tif" ) ) );
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "GTIFF_DIR:1:/data/a.tif" ) ) );
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "HDF5:\"/data/a.h5\"://ds" ) ) );
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "WMS:?url=http://x" ) ) );
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( ":/embedded/raster.tif" ) ) );
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "qrc:/icon.tif" ) ) );
+  // Ambiguous drive-relative / bare scheme-like spellings fail closed, and
+  // the empty source is never a local path.
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "c:name.tif" ) ) );
+  CHECK_FALSE( isPlainLocalPath( QStringLiteral( "weird:name.tif" ) ) );
+  CHECK_FALSE( isPlainLocalPath( QString() ) );
+
+#ifdef Q_OS_UNIX
+  // End-to-end where ':' is a legal filename byte: the marker must persist
+  // through GDAL file metadata on a colon-named raster and a freshly opened
+  // layer must honor it (Windows cannot create this filename — there the
+  // classification checks above carry the regression).
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const std::string path = writeTinyGeotiff( dir, QStringLiteral( "acq:2026.tif" ) );
+  auto layer = openLayer( path );
+  REQUIRE( RadiometricState::setLayerRadiometricState( layer.get(), U::Radiance ) );
+  auto reopened = openLayer( path );
+  REQUIRE( RadiometricState::layerUnit( reopened.get() ) == U::Radiance );
+#endif
+}

@@ -271,10 +271,13 @@ TEST_CASE( "Degenerate inputs are refused or NaN-filled without crashing",
 {
     const std::vector<float> y = { 1, 2, 3, 4, 5 };
 
-    // Unsupported difference order and bad lambda -> empty (documented).
+    // Unsupported difference order, bad lambda, or mismatched weights -> empty (documented).
     REQUIRE( whittakerSmooth( y, {}, 10.0, 3 ).empty() );
     REQUIRE( whittakerSmooth( y, {}, 10.0, 0 ).empty() );
     REQUIRE( whittakerSmooth( y, {}, -1.0, 2 ).empty() );
+    const std::vector<float> shortW = { 1.0f, 1.0f };
+    REQUIRE( whittakerSmooth( y, shortW, 10.0, 2 ).empty() );
+    REQUIRE( whittakerSmoothRobust( y, shortW, 10.0, 3 ).empty() );
 
     // All-NaN series -> all-NaN, same size (no data, no fit).
     const std::vector<float> holes( 9, kNan );

@@ -1595,7 +1595,7 @@ TEST_CASE( "record() snapshots stay valid across a refresh (issue #943)",
 {
     Stack stack;
     auto &registry = PluginRegistry::instance();
-    const PluginRecord *before = registry.record( kPluginId );
+    auto before = registry.record( kPluginId );
     REQUIRE( before != nullptr );
     const std::string idBefore = before->id();
 
