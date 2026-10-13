@@ -35,6 +35,12 @@ bool isRemoteTarget( const std::string &source );
 /// Typed refusal text naming the source and the engaging flag.
 std::string refusalMessage( const std::string &source );
 
+/// True when hostOrUrl targets a loopback, RFC 1918, CGNAT, link-local,
+/// cloud metadata (169.254.169.254 / metadata.google.internal), or
+/// IPv4-mapped IPv6 (::ffff:127.0.0.1, ::ffff:169.254.169.254) address.
+/// Accepts bare host/IP, [host]:port, or URLs (http(s)://..., /vsicurl/..., etc.).
+bool isPrivateHost( const std::string &hostOrUrl );
+
 /// GDAL-level backstop: CPL_VSIL_CURL_ALLOWED_EXTENSIONS is set to an
 /// impossible extension so every network /vsi* open fails fast ("does not
 /// exist", no packet leaves the machine) even on open paths that bypass this
