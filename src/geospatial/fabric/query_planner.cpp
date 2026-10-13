@@ -360,8 +360,17 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
         walkPages( service, plan.mIntent.query );
     }
     plan.mSelected = selector.take();
-    truncated = matches > plan.mSelected.size() && static_cast<int>( plan.mSelected.size() ) >=
-                                                     plan.mIntent.sceneBudget;
+    // Two distinct truncations must both stay visible (#1456): the catalog
+    // WALK can stop early at query.maxItems (matches is a floor — the
+    // catalog may hold more), and the SELECTOR can drop already-seen scenes
+    // beyond sceneBudget. The old recompute REPLACED the walk's signal, so
+    // a maxItems-capped walk with maxItems <= sceneBudget reported "not
+    // truncated" and downstream planned as if the catalog was fully
+    // scanned. OR them: either cap alone means the match set is incomplete.
+    const bool selectorTruncated =
+        matches > plan.mSelected.size() && static_cast<int>( plan.mSelected.size() ) >=
+                                                  plan.mIntent.sceneBudget;
+    truncated = truncated || selectorTruncated;
     catalogStage.inputs = matches;
     catalogStage.outputs = plan.mSelected.size();
     catalogStage.status = "planned";

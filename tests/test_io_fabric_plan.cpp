@@ -580,3 +580,69 @@ TEST_CASE( "the mirror honors the declared blockSize knob (#1456)",
   }
   CHECK( inspected == 4 );
 }
+
+TEST_CASE( "a maxItems-capped catalog walk reports truncation even within sceneBudget",
+           "[io][fabric][plan][selection]" )
+{
+  // #1456: the walk's truncation (query.maxItems stopped the catalog scan)
+  // is a DIFFERENT truncation from the selector's (sceneBudget dropped
+  // already-seen scenes). The old recompute overwrote the walk flag, so
+  // maxItems <= sceneBudget planned as "not truncated" — downstream
+  // believed the catalog was fully scanned when it had been capped.
+  const std::string dir = scratchDir( "walkcap" );
+  std::vector<AssetRecord> records;
+  for ( int i = 0; i < 20; ++i )
+  {
+    const std::string scene = dir + "/s" + std::to_string( i ) + ".tif";
+    RasterWriter writer = RasterWriter::create(
+      scene, 32, 32, { RasterBandSpec {} },
+      { "GTiff", { "TILED=YES", "BLOCKXSIZE=32", "BLOCKYSIZE=32" }, true } );
+    writer.setCrs( Crs::fromAuthid( "EPSG:4326" ) );
+    writer.setGeotransform( { 0.0, 1.0, 0.0, 32.0, 0.0, -1.0 } );
+    std::vector<double> raster( 32ull * 32, double( i ) );
+    writer.writeWindow( 1, { 0, 0, 32, 32 }, raster.data() );
+    writer.finalize();
+    records.push_back( sceneRecord( "s" + std::to_string( i ), scene,
+                                    "2024-01-01T00:00:0" + std::to_string( i % 10 ) + "Z",
+                                    double( 100 - i ) ) );
+  }
+
+  FabricIntent intent;
+  intent.records = records;
+  intent.query.maxItems = 3;  // the WALK stops here: 3 of 20 records seen
+  intent.sceneBudget = 5;     // ...while the selector could have kept 5
+  intent.grid.explicitGrid = true;
+  intent.grid.crs.valid = true;
+  intent.grid.crs.authid = "EPSG:4326";
+  intent.grid.scaleX = 1.0;
+  intent.grid.scaleY = 1.0;
+  intent.grid.minX = 0.0;
+  intent.grid.minY = 0.0;
+  intent.grid.maxX = 32.0;
+  intent.grid.maxY = 32.0;
+
+  const FabricPlan plan = planFabric( intent );
+  CHECK( plan.cost().catalogMatches == 3 );
+  CHECK( plan.selectedAssets().size() == 3 );
+  // RED on master: the recompute saw matches == selected.size() and
+  // reported "not truncated" although the catalog scan was capped.
+  CHECK( plan.cost().catalogMatchesTruncated );
+
+  // maxItems == sceneBudget is the second masked shape: every seen record
+  // is selected, yet the catalog scan itself was capped.
+  FabricIntent equalCap = intent;
+  equalCap.query.maxItems = 5;
+  const FabricPlan equalPlan = planFabric( equalCap );
+  CHECK( equalPlan.cost().catalogMatches == 5 );
+  CHECK( equalPlan.selectedAssets().size() == 5 );
+  CHECK( equalPlan.cost().catalogMatchesTruncated );
+
+  // Uncapped walk (maxItems raised to the 1000 default — 0 is refused by
+  // validation), selector within budget: the honest "not truncated".
+  FabricIntent openIntent = intent;
+  openIntent.query.maxItems = 1000;
+  openIntent.sceneBudget = 64;
+  const FabricPlan openPlan = planFabric( openIntent );
+  CHECK( openPlan.cost().catalogMatches == 20 );
+  CHECK_FALSE( openPlan.cost().catalogMatchesTruncated );
+}
