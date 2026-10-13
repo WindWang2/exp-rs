@@ -69,6 +69,13 @@ SensitivityViewModel projectSensitivity( const sicnu::study::StudyReport &report
     vm.declaredBest = report.declaredBest;
     vm.selectedPointId = selectedPointId;
 
+    // A stopped study's curves are PARTIAL data. Surface the typed stop
+    // reason ("cancelled" / "aborted:<code>") instead of letting partial
+    // points read as a completed outcome — same contract as
+    // run_matrix_projection (R10-B B8).
+    if ( !report.stoppedReason.isEmpty() )
+        vm.issues.append( report.stoppedReason );
+
     // Uncertainty requires seed replicates > 1; empty envelopes with seedReplicates==1
     // or missing replicate metadata → flag for teaching UI.
     bool anyBand = false;
