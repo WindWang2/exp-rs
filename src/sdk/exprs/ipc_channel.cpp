@@ -187,6 +187,14 @@ IpcChannel::Outcome IpcChannel::request( const std::string &method, const Json::
                                          const ProgressSink &progressSink )
 {
     Outcome outcome;
+    if ( method.empty() )
+    {
+        outcome.status = Outcome::Status::ProtocolError;
+        outcome.error.code = "E6002";
+        outcome.error.message = "request envelope without method (E6002)";
+        return outcome;
+    }
+
     if ( mClosed )
     {
         outcome.status = Outcome::Status::ChannelClosed;
@@ -563,9 +571,29 @@ void IpcChannel::handleFrame( const std::string &payload )
     }
     case Ipc::MessageType::Request:
     {
-        std::lock_guard<std::mutex> lock( mMutex );
-        mIncomingRequests.push_back( std::move( envelope ) );
-        mRequestCv.notify_all();
+        bool overflow = false;
+        long long reqId = envelope.id;
+        {
+            std::lock_guard<std::mutex> lock( mMutex );
+            if ( mIncomingRequests.size() >= mOptions.maxQueuedRequests )
+            {
+                overflow = true;
+                mDroppedRequests.fetch_add( 1, std::memory_order_relaxed );
+            }
+            else
+            {
+                mIncomingRequests.push_back( std::move( envelope ) );
+                mRequestCv.notify_all();
+            }
+        }
+        if ( overflow )
+        {
+            IpcError err;
+            err.code = "E6008";
+            err.message = "request queue capacity exceeded (backpressure)";
+            err.retryable = true;
+            sendError( reqId, err );
+        }
         break;
     }
     case Ipc::MessageType::Cancel:

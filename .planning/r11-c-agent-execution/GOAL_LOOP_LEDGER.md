@@ -1,0 +1,16 @@
+# Direction C Goal Loop Ledger
+
+- **Baseline Master Commit**: `8a08642760e2e8ffd2c4b965fc4683c01d3e4758`
+- **Worktree**: `/home/kevin/projects/rs-studio/exp-rs-r11-c-agent`
+- **Branch**: `hardening/r11-c-agent-execution`
+- **Protocol Note**: `/teamwork-preview` and `/goal-loop` recorded as NOT_AVAILABLE in raw interactive shell mode, mapped to native role separation and strict Oracle loop.
+
+| Epoch | WP / Focus | Hypothesis | Modified Paths | Command / Target | Exit Code | Evidence / Findings | Next Action |
+|---|---|---|---|---|---|---|---|
+| E0 | Baseline Setup | Clean configure on Linux using preset `dev-default` and `-j2` build | `.planning/r11-c-agent-execution/*` | `cmake --preset dev-default -G Ninja` & build `test_exprs_ipc` | 0 | 24 test cases in `test_exprs_ipc` pass. Baseline clean. | Proceed to E1: IPC channel hardening (empty method fail-close, queue cap backpressure). |
+| E1 | WP-C5 / WP-C10 | 1) Empty request method should fail closed with E6002 immediately.<br>2) Incoming request queue should be bounded by `maxQueuedRequests` and reply E6008 backpressure on overflow. | `src/sdk/exprs/ipc_channel.h`, `src/sdk/exprs/ipc_channel.cpp`, `tests/test_exprs_ipc.cpp` | `cmake --build build-dev --target test_exprs_ipc --parallel 2 && ./build-dev/test_exprs_ipc` | 0 | RED verified on empty method (timeout status 2 vs expected protocol error 5); minimal fix added; GREEN × 2 (143 assertions in 26 test cases pass). | Proceed to E2: Python Worker Process Pool thread safety and zombie worker cleanup (WP-C6). |
+| E2 | WP-C6 | 1) `WorkerNode` lifecycle fields (`isBusy`, `isRestarting`, `crashBudgetLeft`, `restartCount`) must be thread-safe std::atomic with CAS acquisition.<br>2) `createWorkerNode` must check `startWorker` return value and fail closed without stranding zombie nodes in `m_nodes`. | `src/python/isolated/python_worker_process_pool.h`, `src/python/isolated/python_worker_process_pool.cpp`, `tests/test_runtime_pool_recovery_r5.cpp` | `cmake --build build-dev --target test_runtime_pool_recovery_r5 --parallel 2 && ./build-dev/tests/test_runtime_pool_recovery_r5` | 0 | RED verified (non-existent worker binary returned ok=true, health.total=2 != 0); minimal fix applied; GREEN × 2 (214 assertions in 14 test cases pass, test_runtime_python_channel_r4 75 assertions in 9 cases pass). | Proceed to E3: Workflow terminal persistence and ownership happens-before race (WP-C3/WP-C4). |
+| E3 | WP-C3 / WP-C4 | `drainPersists()` must synchronize both `m_inFlightPersists == 0` and `m_inFlightTerminalHandouts == 0` so terminal `releaseRunOwnership` has completely released `m_locksByRunId` before caller queries run status. | `src/workflow/workflow_run_coordinator.h`, `src/workflow/workflow_run_coordinator.cpp` | `cmake --build build-dev --target test_execution_plane_9 --parallel 2 && ./build-dev/tests/test_execution_plane_9` | 0 | Root cause of pre-existing flake analyzed (drainPersists returning between persistRun and releaseRunOwnership); `TerminalHandoutGuard` RAII synchronization added across all 6 handover sites; GREEN × 2 (883 assertions in 17 test cases pass). | Proceed to E4: Full regression suite, multi-target verification, independent review, and PR preparation. |
+
+
+

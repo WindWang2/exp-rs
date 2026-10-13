@@ -155,17 +155,15 @@ WorkerNode *PythonWorkerProcessPool::acquireWorker( int timeoutMs )
       std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs > 0 ? timeoutMs : 0 );
   for ( ;; )
   {
-    {
-      // #1462: scan-and-mark under the node mutex. The old unsynchronized
-      // check-then-mark double-occupied one node when a second acquire ran
-      // re-entrantly (the wait's processEvents pumps arbitrary slot code,
-      // including other adapters' initialize()) or cross-thread.
       QMutexLocker lock( &m_nodesMutex );
       for ( WorkerNode *node : m_nodes )
       {
-        if ( node && !node->isBusy && node->worker && node->worker->isRunning() && node->server && node->server->hasClient() )
+        if ( node && !node->isBusy.load( std::memory_order_relaxed ) &&
+             !node->isRestarting.load( std::memory_order_acquire ) &&
+             node->worker && node->worker->isRunning() &&
+             node->server && node->server->hasClient() )
         {
-          node->isBusy = true;
+          node->isBusy.store( true, std::memory_order_release );
           return node;
         }
       }
@@ -182,18 +180,21 @@ void PythonWorkerProcessPool::releaseWorker( WorkerNode *node )
 {
   if ( node )
   {
-    // #1462: the busy flip is a node-state transition — take it under the
-    // same mutex acquireWorker marks with, so a concurrent scan never hands
-    // this node out before the budget bookkeeping below is coherent.
     QMutexLocker lock( &m_nodesMutex );
-    node->isBusy = false;
+    node->isBusy.store( false, std::memory_order_release );
     // Dead-worker recycling: a worker that survived a full job cycle earns
     // back one crash-restart step (bounded by the budget it started with), so
     // a long-lived pool's nodes are not retired over transient crashes that
     // happened long ago. The cumulative restartCount stays untouched — it is
     // the health metric, not the budget.
-    if ( node->worker && node->worker->isRunning() && node->crashBudgetLeft < kMaxWorkerCrashRestarts )
-      node->crashBudgetLeft++;
+    if ( node->worker && node->worker->isRunning() )
+    {
+      int current = node->crashBudgetLeft.load( std::memory_order_relaxed );
+      while ( current < kMaxWorkerCrashRestarts &&
+              !node->crashBudgetLeft.compare_exchange_weak( current, current + 1, std::memory_order_release, std::memory_order_relaxed ) )
+      {
+      }
+    }
   }
 }
 
@@ -360,7 +361,17 @@ WorkerNode *PythonWorkerProcessPool::createWorkerNode( int id )
 
   bindNodeSignals( node );
 
-  node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
+  if ( !node->worker->startWorker( socketName, m_pythonPath, m_scriptPath ) )
+  {
+    node->worker->disconnect();
+    node->server->disconnect();
+    node->server->close();
+    delete node->server;
+    delete node->worker;
+    delete node;
+    return nullptr;
+  }
+
   armHandshakeWatchdog( node );
   return node;
 }
@@ -582,7 +593,7 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
   QString socketName = QString( "sicnu_pool_%1_%2_%3" )
                          .arg( QCoreApplication::applicationPid() )
                          .arg( id )
-                         .arg( node->restartCount );
+                         .arg( node->restartCount.load() );
   node->server = new PythonIpcServer();
   node->worker = new PythonWorkerProcess();
   node->isBusy = wasBusy;
