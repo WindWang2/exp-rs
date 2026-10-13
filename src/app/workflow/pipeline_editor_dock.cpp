@@ -10,6 +10,8 @@
 #include <QDir>
 #include <QTemporaryFile>
 #include <QDateTime>
+#include <cerrno>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -173,16 +175,28 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
   const QString tempName = tempFile.fileName();
   tempFile.close();
 
+  tempFile.setAutoRemove( false );
+#if defined(Q_OS_UNIX)
+  if ( ::rename( QFile::encodeName( tempName ).constData(),
+                 QFile::encodeName( filePath ).constData() ) != 0 )
+  {
+    tempFile.setAutoRemove( true );
+    if ( errorOut )
+      *errorOut = QObject::tr( "Failed to atomically publish pipeline file: %1" )
+                      .arg( QString::fromLocal8Bit( strerror( errno ) ) );
+    return false;
+  }
+#else
   if ( QFile::exists( filePath ) )
   {
     const QString backupPath = filePath + QStringLiteral( ".bak.%1" ).arg( QDateTime::currentMSecsSinceEpoch() );
     if ( !QFile::rename( filePath, backupPath ) )
     {
+      tempFile.setAutoRemove( true );
       if ( errorOut )
         *errorOut = QObject::tr( "Cannot backup existing file before replace: %1" ).arg( filePath );
       return false;
     }
-    tempFile.setAutoRemove( false );
     if ( !QFile::rename( tempName, filePath ) )
     {
       QFile::rename( backupPath, filePath );
@@ -195,7 +209,6 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
   }
   else
   {
-    tempFile.setAutoRemove( false );
     if ( !QFile::rename( tempName, filePath ) )
     {
       tempFile.setAutoRemove( true );
@@ -204,6 +217,7 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
       return false;
     }
   }
+#endif
 
   return true;
 }
