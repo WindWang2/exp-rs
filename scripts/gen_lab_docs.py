@@ -294,7 +294,10 @@ def main():
         # (beyond the whitelisted hand-written pages).
         known = {rel for rel in outputs}
         for extra in sorted(DOCS_DIR.glob("*.md")):
-            rel = str(extra.relative_to(REPO_ROOT))
+            # as_posix: on Windows relative_to() yields backslash paths,
+            # which never match the forward-slash keys above — every doc
+            # was falsely flagged "untracked" and --check always exit 1.
+            rel = extra.relative_to(REPO_ROOT).as_posix()
             if rel not in known and rel not in HAND_WRITTEN:
                 stale.append(rel)
                 print(f"--- untracked generated doc (remove): {rel}")
