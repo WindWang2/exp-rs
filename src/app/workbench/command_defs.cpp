@@ -479,6 +479,13 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     }
 
     // ── 处理 Processing（对话框开放器批次） ──────────────────────────
+    // Two availability contracts, matching the two handler shapes below:
+    // - rasterTool: legacy dialog path, genuinely needs a selected raster.
+    // - workflowRasterTool: the handler routes to the workflow task panel
+    //   when a session controller exists (the production shell always has
+    //   one) and the panel selects its own input layer — demanding a
+    //   selected raster up front over-disabled Band Math / Spectral
+    //   Indices / etc. on an empty project even though they were usable.
     auto rasterTool = [&]( const char *id, const QString &title, const QString &desc,
                            const QString &icon, void ( QgisDesktopWindow::*slot )() ) {
         CommandDefinition d = base( id, title, desc, icon, QObject::tr( "Processing" ) );
@@ -487,10 +494,20 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         d.handler = [window, slot] { ( window->*slot )(); };
         registry->registerCommand( d );
     };
-    rasterTool( "rs.bandMath", QObject::tr( "Band Math..." ),
+    auto workflowRasterTool = [&]( const char *id, const QString &title, const QString &desc,
+                                   const QString &icon, void ( QgisDesktopWindow::*slot )() ) {
+        CommandDefinition d = base( id, title, desc, icon, QObject::tr( "Processing" ) );
+        d.availability = [window]( const SelectionContextSnapshot &s ) {
+            return window->sessionController() != nullptr || ContextRules::rasterSelected( s );
+        };
+        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
+        d.handler = [window, slot] { ( window->*slot )(); };
+        registry->registerCommand( d );
+    };
+    workflowRasterTool( "rs.bandMath", QObject::tr( "Band Math..." ),
                 QObject::tr( "Expression-driven multiband math." ), "b_nd_m_th",
                 &QgisDesktopWindow::openBandMathDialog );
-    rasterTool( "rs.spectralIndex", QObject::tr( "Spectral Indices..." ),
+    workflowRasterTool( "rs.spectralIndex", QObject::tr( "Spectral Indices..." ),
                 QObject::tr( "Common indices such as NDVI / NDWI / NDBI." ), "s_ectr_l_profile",
                 &QgisDesktopWindow::openSpectralIndexDialog );
     rasterTool( "rs.contrastStretch", QObject::tr( "Contrast Stretch..." ),
@@ -499,18 +516,18 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     rasterTool( "rs.spatialFilter", QObject::tr( "Spatial Filtering..." ),
                 QObject::tr( "Mean / Gaussian / median / Laplacian convolution." ), "r_ster_c_lc",
                 &QgisDesktopWindow::openSpatialFilterDialog );
-    rasterTool( "rs.pca", QObject::tr( "Principal Component Analysis..." ),
+    workflowRasterTool( "rs.pca", QObject::tr( "Principal Component Analysis..." ),
                 QObject::tr( "Multiband PCA forward and inverse transforms." ), "pca", &QgisDesktopWindow::openPcaDialog );
     rasterTool( "rs.bandRatio", QObject::tr( "Band Ratio..." ),
                 QObject::tr( "Two-band ratio / normalized-ratio output." ), "b_nd_m_th_pro",
                 &QgisDesktopWindow::openBandRatioDialog );
-    rasterTool( "rs.mosaic", QObject::tr( "Mosaic..." ),
+    workflowRasterTool( "rs.mosaic", QObject::tr( "Mosaic..." ),
                 QObject::tr( "Mosaic multiple rasters into a continuous image." ), "mos_ic",
                 &QgisDesktopWindow::openMosaicDialog );
-    rasterTool( "rs.changeDetection", QObject::tr( "Change Detection..." ),
+    workflowRasterTool( "rs.changeDetection", QObject::tr( "Change Detection..." ),
                 QObject::tr( "Two-date differencing / ratio / CVA detection." ), "ch_nge_detect",
                 &QgisDesktopWindow::openChangeDetectionDialog );
-    rasterTool( "rs.atmospheric", QObject::tr( "Atmospheric Correction..." ),
+    workflowRasterTool( "rs.atmospheric", QObject::tr( "Atmospheric Correction..." ),
                 QObject::tr( "6S / DOS reflectance products." ), "at_os_corr",
                 &QgisDesktopWindow::openAtmosphericCorrectionDialog );
     rasterTool( "rs.qaMask", QObject::tr( "Generate QA Mask..." ),
@@ -525,10 +542,10 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     rasterTool( "rs.ortho", QObject::tr( "Orthorectification..." ),
                 QObject::tr( "RPC / GCP geometric correction to map coordinates." ), "geocorrection",
                 &QgisDesktopWindow::openOrthorectificationDialog );
-    rasterTool( "rs.terrain", QObject::tr( "Terrain Analysis..." ),
+    workflowRasterTool( "rs.terrain", QObject::tr( "Terrain Analysis..." ),
                 QObject::tr( "DEM products such as slope / aspect / hillshade." ), "hillsh_de",
                 &QgisDesktopWindow::openTerrainDialog );
-    rasterTool( "rs.fusion", QObject::tr( "Image Fusion..." ),
+    workflowRasterTool( "rs.fusion", QObject::tr( "Image Fusion..." ),
                 QObject::tr( "Pansharpening (Brovey / IHS / Gram-Schmidt)." ), "p_nsh_r_en",
                 &QgisDesktopWindow::openFusionDialog );
     rasterTool( "rs.temporal", QObject::tr( "Time Series Analysis..." ),
