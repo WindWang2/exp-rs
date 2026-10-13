@@ -250,6 +250,12 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
     for (size_t outBand = 0; outBand < selection.bands.size(); ++outBand)
     {
         const int srcBand = selection.bands[outBand];
+        bool hasNd = false;
+        const double nd = ds.bandNoDataValue(srcBand, &hasNd);
+        if (hasNd)
+        {
+            out.setBandNoDataValue(static_cast<int>(outBand) + 1, nd);
+        }
         for (int y = 0; y < height; ++y)
         {
             context.throwIfCancelled();

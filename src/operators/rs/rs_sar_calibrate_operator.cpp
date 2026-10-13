@@ -311,9 +311,6 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                             "(band=1..n)" );
     }
 
-    // Sentinel declared on the analysis band (NaN when undeclared).
-    const float nodata = sicnu::rs::bandNoDataSentinel(src, firstBand);
-
     context.reportProgress(0.05, "Calibrating SAR raster");
     GdalStreamingOutput dst(QString::fromStdString(outputPath), src.width(), src.height(),
                             bandCount, GDT_Float32, src.geoTransform(), src.projection());
@@ -328,8 +325,9 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
     bool ok = true;
     for (int b = 0; b < bandCount && ok; ++b) {
         context.throwIfCancelled();
+        const float bandNoData = sicnu::rs::bandNoDataSentinel(src, firstBand + b);
         ok = sicnu::sar::calibrateRaster(src, firstBand + b, calibrationA, noiseLinear, domain,
-                                         nodata, dst, 256, b + 1, polarizations, sensor,
+                                         bandNoData, dst, 256, b + 1, polarizations, sensor,
                                          incidenceDeg, 0.0, lutRowAPtr);
         context.reportProgress(0.1 + 0.85 * (b + 1) / bandCount, "Calibrated band");
     }

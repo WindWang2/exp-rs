@@ -339,3 +339,48 @@ TEST_CASE("Library select refuses unknown materials and invalid libraries",
         CHECK(threw);
     }
 }
+
+TEST_CASE("Band select propagates source band NoData values (#1461)",
+          "[spectral][band_select][nodata]")
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString input = dir.filePath("nd_input.tif");
+    const QString output = dir.filePath("nd_output.tif");
+
+    // Write a 4-band raster where bands have NoData value -9999.0
+    std::vector<std::vector<float>> bands(4, std::vector<float>(4, 1.0f));
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(input, 2, 2, bands, gt, "EPSG:32648", &err, -9999.0));
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_band_select");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+
+    Json::Value params;
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    Json::Value bandIndices(Json::arrayValue);
+    bandIndices.append(2); // band 2: NoData -9999.0
+    bandIndices.append(3); // band 3: NoData -9999.0
+    params["bands"] = bandIndices;
+
+    Json::Value result = op->run(params, ctx);
+    CHECK(result["bands"].asInt() == 2);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(output));
+    REQUIRE(out.bandCount() == 2);
+
+    bool hasNd1 = false;
+    double nd1 = out.bandNoDataValue(1, &hasNd1);
+    CHECK(hasNd1);
+    CHECK(nd1 == Approx(-9999.0));
+
+    bool hasNd2 = false;
+    double nd2 = out.bandNoDataValue(2, &hasNd2);
+    CHECK(hasNd2);
+    CHECK(nd2 == Approx(-9999.0));
+}
