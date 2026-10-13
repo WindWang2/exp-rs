@@ -947,10 +947,11 @@ void ExperimentStudioDock::exportBundle()
         // demo data whenever no study was loaded — a bundle the user never
         // asked for. Refuse VISIBLY (studyError only builds the diagnostic;
         // the log is what the user reads).
-        m_exportLog->setPlainText( studyError(
+        const auto refusal = studyError(
           QStringLiteral( "experiment_studio.export_no_study" ),
           QStringLiteral( "no study report loaded — load a live study (or press the demo "
-                          "button) before exporting" ) ) );
+                          "button) before exporting" ) );
+        m_exportLog->setPlainText( refusal.code + QStringLiteral( ": " ) + refusal.message );
         return;
     }
     StudioExportBundle bundle;

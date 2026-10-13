@@ -500,7 +500,15 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         d.availability = [window]( const SelectionContextSnapshot &s ) {
             return window->sessionController() != nullptr || ContextRules::rasterSelected( s );
         };
-        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
+        // Honest projection: the task-panel route picks its own input
+        // layer, so on the workflow surface the raster fact is advisory,
+        // not a precondition. Leaving the default raster reason would
+        // tell the user a lie about why the command is unavailable.
+        d.explain = [window, id = d.id]( const SelectionContextSnapshot &s ) {
+            if ( window->sessionController() != nullptr )
+                return QString();
+            return ContextRules::unavailabilityReason( s, id );
+        };
         d.handler = [window, slot] { ( window->*slot )(); };
         registry->registerCommand( d );
     };

@@ -39,25 +39,27 @@ TEST_CASE( "WorkflowSessionController cancelActiveRun resets state cleanly when 
 TEST_CASE( "WorkflowSessionController cancelActiveRun cancels in-flight pipeline run", "[workflow][shell][controller]" )
 {
   WorkflowSessionController controller;
+  TaskPanelHost panel;
+  controller.bindPanel( &panel );
   controller.registerBuiltins();
 
-  const QString sessionId = controller.openTool( QStringLiteral( "wf:vegetation_indices" ) );
-  if ( !sessionId.isEmpty() )
-  {
-    controller.runFullWorkflow();
-    if ( controller.isRunInFlight() )
-    {
-      CHECK( ( controller.activePipelineId() >= 0 || controller.pendingTaskId() >= 0 ) );
-      controller.cancelActiveRun();
-      CHECK_FALSE( controller.isRunInFlight() );
-      CHECK( controller.activePipelineId() == -1 );
-      CHECK( controller.pendingTaskId() == -1 );
+  // R10-B: the old "wf:vegetation_indices" id does not exist anywhere in
+  // the source, so this case used to vacuate. openBareOperator registers
+  // a real definition at runtime.
+  const QString sessionId = controller.openBareOperator( QStringLiteral( "rs:band_math" ) );
+  REQUIRE( !sessionId.isEmpty() );
 
-      // Safe idempotent cancel
-      controller.cancelActiveRun();
-      CHECK_FALSE( controller.isRunInFlight() );
-    }
-  }
+  controller.runFullWorkflow();
+  REQUIRE( controller.isRunInFlight() );
+  CHECK( ( controller.activePipelineId() >= 0 || controller.pendingTaskId() >= 0 ) );
+  controller.cancelActiveRun();
+  CHECK_FALSE( controller.isRunInFlight() );
+  CHECK( controller.activePipelineId() == -1 );
+  CHECK( controller.pendingTaskId() == -1 );
+
+  // Safe idempotent cancel
+  controller.cancelActiveRun();
+  CHECK_FALSE( controller.isRunInFlight() );
 }
 
 // Restored regression home (#595): SchemaFormBuilder must round-trip ARRAY
@@ -116,7 +118,10 @@ TEST_CASE( "runFullWorkflow and runUpToNode refuse duplicate submission while in
     controller.bindPanel( &panel );
     controller.registerBuiltins();
 
-    const QString sessionId = controller.openTool( QStringLiteral( "wf:vegetation_indices" ) );
+    // Real operator path (openBareOperator registers a definition at
+    // runtime): "wf:vegetation_indices" exists nowhere in the source, so
+    // the previous openTool-based setup vacated this whole test case.
+    const QString sessionId = controller.openBareOperator( QStringLiteral( "rs:band_math" ) );
     REQUIRE( !sessionId.isEmpty() );
 
     QStringList messages;
