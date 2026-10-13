@@ -526,9 +526,10 @@ TEST_CASE(
   REQUIRE( vdrv != nullptr );
   GDALDatasetH vds = GDALCreate( vdrv, vectorPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
   REQUIRE( vds != nullptr );
-  OGRSpatialReference geoSrs;
-  geoSrs.importFromEPSG( 4326 );
-  OGRLayerH lyr = GDALDatasetCreateLayer( vds, "training", &geoSrs, wkbPolygon, nullptr );
+  OGRSpatialReferenceH geoSrs = OSRNewSpatialReference( nullptr );
+  OSRImportFromEPSG( geoSrs, 4326 );
+  OGRLayerH lyr = GDALDatasetCreateLayer( vds, "training", geoSrs, wkbPolygon, nullptr );
+  OSRDestroySpatialReference( geoSrs );
   REQUIRE( lyr != nullptr );
   OGRFieldDefnH fld = OGR_Fld_Create( "class_id", OFTInteger );
   OGR_L_CreateField( lyr, fld, true );

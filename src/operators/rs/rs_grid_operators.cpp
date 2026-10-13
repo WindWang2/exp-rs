@@ -394,7 +394,7 @@ Json::Value RsAlignOperator::run(const Json::Value& params,
         alreadyAligned = true;
     } else {
         sicnu::geo::WarpOptions options;
-        options.targetCrs = refWkt;
+        options.targetCrs = refWkt.toStdString();
         options.resampling = kernel;
         // te + tr exactly reproduce the reference grid: origin = gt origin,
         // extent = width*resX / height*resY — the warped raster and the
