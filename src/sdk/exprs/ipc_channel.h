@@ -55,6 +55,9 @@ public:
         /// worker.hello handshake event is always the first queued entry, so
         /// it can never be evicted by a log flood).
         size_t maxQueuedEvents = 1024;
+        /// Cap on incoming requests queued before nextRequest consumes them (flow control).
+        /// Overflow answers the caller with a typed backpressure refusal (E6008).
+        size_t maxQueuedRequests = 1024;
     };
 
     explicit IpcChannel( std::unique_ptr<IIpcStream> stream );
@@ -157,6 +160,8 @@ public:
     uint32_t recvFrameCap() const { return mMaxRecvFrameBytes.load(); }
     /// Events dropped by the pending-event queue cap (diagnostics).
     long long droppedEvents() const { return mDroppedEvents.load(); }
+    /// Requests refused by the incoming request queue cap (flow control).
+    long long droppedRequests() const { return mDroppedRequests.load(); }
 
 private:
     struct Pending
@@ -201,6 +206,7 @@ private:
     std::atomic<uint32_t> mMaxSendFrameBytes;
     std::atomic<uint32_t> mMaxRecvFrameBytes;
     std::atomic<long long> mDroppedEvents{ 0 };
+    std::atomic<long long> mDroppedRequests{ 0 };
     /// Peer protocol version, published via relaxed stores (see the
     /// peerProtocolMajor/Minor accessors).
     std::atomic<int> mPeerMajor{ -1 };

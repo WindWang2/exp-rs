@@ -815,3 +815,47 @@ TEST_CASE( "concurrent close() calls never throw and always reap the reader",
         b->close();
     }
 }
+
+TEST_CASE( "request with empty method fails closed immediately with E6002",
+           "[ipc][channel][validation]" )
+{
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+    IpcChannel channel( std::move( a ) );
+
+    IpcChannel::Outcome outcome = channel.request( "", Json::Value(), 100 );
+    REQUIRE( outcome.status == IpcChannel::Outcome::Status::ProtocolError );
+    REQUIRE( outcome.statusCode() == "E6002" );
+}
+
+TEST_CASE( "incoming request queue cap bounds memory and answers backpressure E6008",
+           "[ipc][channel][backpressure]" )
+{
+    std::unique_ptr<IIpcStream> clientStream;
+    std::unique_ptr<IIpcStream> serverStream;
+    makeIpcMemoryPipePair( clientStream, serverStream );
+
+    IpcChannel::Options serverOpts;
+    serverOpts.maxQueuedRequests = 1;
+    IpcChannel server( std::move( serverStream ), serverOpts );
+    IpcChannel client( std::move( clientStream ) );
+
+    std::thread t1( [&] {
+        client.request( "heavy_task", objectWith( "k", "1" ), 500 );
+    } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+
+    IpcChannel::Outcome outcome2 = client.request( "heavy_task", objectWith( "k", "2" ), 500 );
+    REQUIRE( outcome2.status == IpcChannel::Outcome::Status::Error );
+    REQUIRE( outcome2.statusCode() == "E6008" );
+    REQUIRE( outcome2.error.retryable == true );
+    REQUIRE( server.droppedRequests() >= 1 );
+
+    Ipc::Envelope req;
+    REQUIRE( server.nextRequest( req, 500 ) );
+    std::string err;
+    server.sendResponse( req.id, objectWith( "status", "ok" ), err );
+
+    t1.join();
+}
