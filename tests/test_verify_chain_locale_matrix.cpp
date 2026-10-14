@@ -22,15 +22,19 @@
 
 #include <catch2/catch_message.hpp>
 
+#include "faultlab/util/sha256.h"
 #include "grader/grader_engine.h"
+#include "grader/grader_sha256.h"
 #include "grader/grader_types.h"
 #include "preflight/engine.h"
 #include "preflight/report.h"
+#include "preflight/sha256.h"
 #include "science_context/broker.h"
 #include "suitability/suitability_report.h"
 #include "verify/verify_engine.h"
 #include "verify/verify_levels.h"
 #include "verify/verify_pack.h"
+#include "verify/verify_sha256.h"
 #include "verify/verify_types.h"
 
 #include <json/json.h>
@@ -41,6 +45,7 @@
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <algorithm>
@@ -257,6 +262,61 @@ PreflightReport fractionalPreflightReport()
     // refuses a report whose verdict contradicts its own findings).
     report.verdict = "requires_ack";
     return report;
+}
+
+// ---- SHA-256 fork parity corpus (#1450) -----------------------------------
+
+/// Named byte strings exercising every padding/block boundary that has ever
+/// broken an FIPS 180-4 implementation, plus hostile-content shapes
+/// (embedded NUL, multibyte UTF-8). All four forks must agree on every entry.
+std::vector<std::pair<std::string, std::string>> shaParityCorpus()
+{
+    std::vector<std::pair<std::string, std::string>> corpus;
+    auto add = [&corpus]( std::string name, std::string bytes ) {
+        corpus.emplace_back( std::move( name ), std::move( bytes ) );
+    };
+    add( "empty", "" );
+    add( "abc", "abc" );
+    for ( const std::size_t n : { 55, 56, 57, 63, 64, 65, 119, 120, 128 } )
+    {
+        std::string bytes( n, '\0' );
+        for ( std::size_t i = 0; i < n; ++i )
+            bytes[i] = static_cast<char>( ( i * 31 + 7 ) & 0xFF );
+        add( std::to_string( n ) + "-byte pattern", std::move( bytes ) );
+    }
+    std::string big( 1024 * 1024, '\0' );
+    for ( std::size_t i = 0; i < big.size(); ++i )
+        big[i] = static_cast<char>( ( i * 31 + 7 ) & 0xFF );
+    add( "1 MiB pattern", std::move( big ) );
+    // Embedded NULs with explicit lengths: strlen-based hashing would
+    // silently truncate here.
+    add( "embedded NUL", std::string( "rs-studio\0boundary\0probe", 24 ) );
+    add( "UTF-8 multibyte", "\xe9\x81\xa5\xe6\x84\x9f\xe7\xa7\x91\xe5\xad\xa6\xe5\xae\x9e\xe4\xb9\xa0\x2d\xc2\xb7\xe8\xbe\xb9\xe7\x95\x8c\x31\x32\x33\x61\x62\x63" );
+    return corpus;
+}
+
+/// One fork's digest per corpus entry, in corpus order.
+std::vector<std::string> verifyForkDigests( const std::vector<std::pair<std::string, std::string>> &corpus )
+{
+    std::vector<std::string> digests;
+    digests.reserve( corpus.size() );
+    for ( const auto &[name, bytes] : corpus )
+    {
+        INFO( "corpus entry " << name );
+        digests.push_back( sicnu::verify::sha256Hex( bytes ) );
+        REQUIRE( digests.back().size() == 64 );
+    }
+    return digests;
+}
+
+/// Grader's streaming Sha256 over @p bytes fed in @p chunk -sized pieces
+/// (the last piece short or empty).
+std::string graderStreamingDigest( const std::string &bytes, std::size_t chunk )
+{
+    sicnu::grader::Sha256 hasher;
+    for ( std::size_t off = 0; off < bytes.size(); off += chunk )
+        hasher.update( bytes.data() + off, std::min( chunk, bytes.size() - off ) );
+    return hasher.hexDigest();
 }
 
 } // namespace
@@ -519,4 +579,86 @@ TEST_CASE( "the harness comma-decimal locale actually bites the formatter",
     char buffer[64];
     std::snprintf( buffer, sizeof( buffer ), "%.12g", 0.5 );
     CHECK( std::string( buffer ) == "0,5" );
+}
+
+TEST_CASE( "the four sha256 forks agree byte-for-byte over a boundary corpus",
+           "[track16][sha256][parity]" )
+{
+    // Parity gate (#1450): verify / grader / preflight / faultlab each ship
+    // a deliberate per-leaf copy of the FIPS 180-4 core. A full-read audit
+    // confirmed the four byte-equivalent; nothing pins that, so a future fix
+    // to one copy would drift the others. Every corpus entry below must
+    // hash identically under all four forks, and the pinned NIST
+    // known-answer strings anchor the corpus so an all-four-drift-together
+    // regression is caught too.
+    LocaleRestorer restorer;
+    requireCommaLocaleEvidence();
+
+    const auto corpus = shaParityCorpus();
+    REQUIRE( corpus.size() >= 12 );
+
+    // Reference digests under "C".
+    REQUIRE( tryLocale( "C" ) );
+    const std::vector<std::string> reference = verifyForkDigests( corpus );
+
+    for ( std::size_t i = 0; i < corpus.size(); ++i )
+    {
+        const auto &[name, bytes] = corpus[i];
+        INFO( "corpus entry " << name );
+        const std::string v = sicnu::verify::sha256Hex( bytes );
+        const std::string g = sicnu::grader::sha256Hex( bytes );
+        const std::string p = sicnu::preflight::sha256Hex( bytes );
+        const std::string f = sicnu::faultlab::sha256Hex( bytes );
+        CHECK( v == reference[i] );
+        CHECK( g == reference[i] );
+        CHECK( p == reference[i] );
+        CHECK( f == reference[i] );
+        // The grader fork is the only one with a streaming API: its chunked
+        // feed must agree with its own one-shot on every split that has ever
+        // broken a streaming pad (single-byte, sub-block, exact-block and
+        // super-block chunks).
+        for ( const std::size_t chunk : { 1, 7, 64, 1000 } )
+            CHECK( graderStreamingDigest( bytes, chunk ) == reference[i] );
+    }
+
+    SECTION( "NIST known-answer pins anchor the corpus against joint drift" )
+    {
+        CHECK( sicnu::verify::sha256Hex( "" ) ==
+               "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" );
+        CHECK( sicnu::grader::sha256Hex( "abc" ) ==
+               "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" );
+        CHECK( sicnu::preflight::sha256Hex( "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" ) ==
+               "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1" );
+        CHECK( sicnu::faultlab::sha256Hex( "abc" ) ==
+               "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" );
+    }
+
+    SECTION( "parity holds under every locale the host offers" )
+    {
+        // The hash itself is integer-only, but the forks live behind digest
+        // producers whose inputs go through locale-sensitive formatters
+        // elsewhere on the chain; a sweep proves the hash primitive adds no
+        // locale coupling of its own.
+        std::string comma;
+        const std::vector<std::string> locales = sweepLocales( comma );
+        REQUIRE( locales.size() >= 2 );
+        for ( const std::string &locale : locales )
+        {
+            INFO( "locale " << locale );
+            REQUIRE( tryLocale( locale.c_str() ) );
+            const std::vector<std::string> underLocale = verifyForkDigests( corpus );
+            for ( std::size_t i = 0; i < corpus.size(); ++i )
+            {
+                INFO( "corpus entry " << corpus[i].first );
+                CHECK( underLocale[i] == reference[i] );
+            }
+            for ( const auto &[name, bytes] : corpus )
+            {
+                INFO( "corpus entry " << name );
+                CHECK( sicnu::grader::sha256Hex( bytes ) == sicnu::verify::sha256Hex( bytes ) );
+                CHECK( sicnu::preflight::sha256Hex( bytes ) == sicnu::verify::sha256Hex( bytes ) );
+                CHECK( sicnu::faultlab::sha256Hex( bytes ) == sicnu::verify::sha256Hex( bytes ) );
+            }
+        }
+    }
 }

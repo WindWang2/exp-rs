@@ -40,6 +40,20 @@ TEST_CASE("NDVI handles zero denominator (NIR+Red=0)", "[spectral][ndvi]")
     REQUIRE_FALSE(std::isnan(out[1]));
 }
 
+TEST_CASE("NDVI handles negative sentinels and non-finite values without producing legitimate zero", "[spectral][ndvi][nodata]")
+{
+    std::vector<float> nir = {-9999.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN(), 0.5f};
+    std::vector<float> red = {-9999.0f, 0.2f, 0.2f, 0.1f};
+    std::vector<float> out(4);
+
+    REQUIRE(SpectralIndices::ndvi(nir.data(), red.data(), out.data(), 4));
+    REQUIRE(std::isnan(out[0]));
+    REQUIRE(std::isnan(out[1]));
+    REQUIRE(std::isnan(out[2]));
+    REQUIRE_FALSE(std::isnan(out[3]));
+    REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(0.4f / 0.6f, 0.001f));
+}
+
 TEST_CASE("NDVI rejects null pointers", "[spectral][ndvi]")
 {
     std::vector<float> buf(4);

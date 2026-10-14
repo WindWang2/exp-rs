@@ -1273,6 +1273,14 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         }
         if ( v < 0 )
           v = unclassified;
+        if ( ( outType == GDT_Byte && ( v < 0 || v > 255 ) ) ||
+             ( outType == GDT_UInt16 && ( v < 0 || v > 65535 ) ) )
+        {
+          return failWithPartialOutput(
+            RsClassificationPipelineResult::Error::PredictionFailed,
+            QStringLiteral( "Predicted class ID %1 exceeds output raster data type capacity (%2) — refusing silent truncation" )
+              .arg( v ).arg( GDALGetDataTypeName( outType ) ) );
+        }
         outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( v );
         if ( needProbs )
         {

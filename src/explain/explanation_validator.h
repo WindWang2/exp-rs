@@ -39,8 +39,10 @@ public:
                                  const IAuthoredGuidance *guidance = nullptr );
 
   // Cross-checks a complete explanation. Operator steps are resolved against
-  // the live operator knowledge; authored guidance (when provided) is used to
-  // verify source references.
+  // the live operator knowledge. Authored guidance (when provided) is stored
+  // for future/structural use; source references are verified structurally
+  // (known kind, non-empty title/locator) only — no content cross-check
+  // against guidance is performed yet.
   ValidationReport validate( const StepExplanation &explanation ) const;
 
   // Semantic validation of one authored guidance entry against the live

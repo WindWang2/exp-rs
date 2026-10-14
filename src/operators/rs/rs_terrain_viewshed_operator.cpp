@@ -11,6 +11,7 @@
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 
 #include <QString>
 
@@ -223,7 +224,11 @@ Json::Value RsTerrainViewshedOperator::run( const Json::Value &params,
     if ( cellSizeX <= 0.0 || cellSizeY <= 0.0 )
         throw RSOperatorError( ErrorCode::InvalidInputData, "DEM has a degenerate geotransform" );
     const QString projection = ds.projection();
-    if ( wantCurvature && projection.contains( "GEOGCS" ) && !projection.contains( "PROJCS" ) )
+    const bool isGeographic =
+        sicnu::processing::gdal_util::isGeographicCrs( projection )
+        || ( ( projection.contains( "GEOGCS" ) || projection.contains( "GEOGCRS" ) )
+             && !projection.contains( "PROJCS" ) && !projection.contains( "PROJCRS" ) );
+    if ( wantCurvature && isGeographic )
         throw RSOperatorError(
             ErrorCode::InvalidParameter,
             "curvature correction requires a projected (metric) CRS; the input is geographic" );

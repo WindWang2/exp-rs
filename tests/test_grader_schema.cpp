@@ -88,6 +88,34 @@ TEST_CASE( "sha256 NIST vectors", "[grader][schema][sha]" )
     CHECK( stream.hexDigest() == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1" );
 }
 
+TEST_CASE( "sha256 streaming pins update-after-hexDigest as a silent no-op",
+           "[grader][schema][sha]" )
+{
+    // BEHAVIOR PIN (R12-E F9): pins the current latent semantics of the
+    // streaming Sha256 — once hexDigest() finalizes the state, a later
+    // update() must leave the digest unchanged and a second hexDigest()
+    // must return the same string. Deliberate fail-quiet behavior: a future
+    // semantic change (exception, continued streaming, re-initialization)
+    // must update this pin explicitly.
+    Sha256 hasher;
+    hasher.update( "abc", 3 );
+    const std::string first = hasher.hexDigest();
+    REQUIRE( first == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" );
+    hasher.update( "tamper", 6 );
+    CHECK( hasher.hexDigest() == first );
+
+    // Same pin on a just-constructed (empty) stream: late data must not
+    // retroactively define the digest.
+    Sha256 emptyHasher;
+    const std::string emptyDigest = emptyHasher.hexDigest();
+    emptyHasher.update( "late data", 9 );
+    CHECK( emptyHasher.hexDigest() == emptyDigest );
+
+    // Sanity: the no-op is about the finalized instance, not the algorithm —
+    // a fresh stream over the would-be tampered content really does differ.
+    CHECK( sha256Hex( "abctamper" ) != first );
+}
+
 TEST_CASE( "canonicalNumber is shortest round-trip and refuses non-finite", "[grader][schema][json]" )
 {
     auto err = noopError();

@@ -50,7 +50,7 @@ struct RasterTileMeta {
     int height = 0;
     std::array<double, 6> geotransform{};
     QString projection;
-    float nodata = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> bandNodata;
     int64_t offsetX = 0;
     int64_t offsetY = 0;
 };
@@ -78,7 +78,7 @@ Json::Value RsMosaicOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     Json::Value inputs = makeStringParam("inputs",
-                                         "Array of input raster paths (band 1 used)",
+                                         "Array of input raster paths",
                                          "");
     inputs["type"] = "array";
     inputs["items"] = Json::Value(Json::objectValue);
@@ -106,7 +106,7 @@ Json::Value RsMosaicOperator::metadata() const {
     meta["tags"].append("merge");
     meta["tags"].append("composition");
     meta["purpose"] = "Stitch adjacent or overlapping rasters into a single scene";
-    meta["limitations"] = "Uses band 1 only; requires matching CRS across inputs";
+    meta["limitations"] = "Requires matching CRS and band count across inputs";
     return meta;
 }
 
@@ -200,18 +200,32 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
             throw RSOperatorError(ErrorCode::InvalidInputData, "Invalid dimensions: " + path);
         }
 
-        // Propagate the input's real NoData value (if any) into the mosaic
-        // merge so numeric NoData pixels are NOT blended as valid data. NaN
-        // (no declared NoData) keeps the previous behavior.
-        bool hasNodata = false;
-        const double nd = ds.bandNoDataValue(1, &hasNodata);
-        meta.nodata = hasNodata ? static_cast<float>(nd)
-                                : std::numeric_limits<float>::quiet_NaN();
+        const int dsBands = ds.bandCount();
+        if (dsBands <= 0) {
+            throw RSOperatorError(ErrorCode::InvalidInputData, "Input has no raster bands: " + path);
+        }
+        if (i > 0 && dsBands != inputDatasets[0].bandCount()) {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Band count mismatch between " + metaList[0].path + " (" +
+                std::to_string(inputDatasets[0].bandCount()) + " bands) and " + path +
+                " (" + std::to_string(dsBands) + " bands)");
+        }
+
+        meta.bandNodata.resize(static_cast<size_t>(dsBands));
+        for (int b = 1; b <= dsBands; ++b) {
+            bool hasNodata = false;
+            const double nd = ds.bandNoDataValue(b, &hasNodata);
+            meta.bandNodata[static_cast<size_t>(b - 1)] = hasNodata ? static_cast<float>(nd)
+                                                                    : std::numeric_limits<float>::quiet_NaN();
+        }
 
         metaList.push_back(std::move(meta));
         context.reportProgress(0.05 * (i + 1) / inputCount, "Inspected " + path);
         context.throwIfCancelled();
     }
+
+    const int bandCount = inputDatasets[0].bandCount();
 
     // CRS consistency
     for (int i = 1; i < inputCount; ++i) {
@@ -350,26 +364,39 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     cleaner.ds = &outDs;
     cleaner.path = QString::fromStdString(outputPath);
 
-    if (!outDs.create(cleaner.path, outWidth, outHeight, 1,
+    if (!outDs.create(cleaner.path, outWidth, outHeight, bandCount,
                       static_cast<int>(GDT_Float32), outGT, metaList[0].projection, &outErr)) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create mosaic output: " + outErr.toStdString());
     }
 
-    float outNodata = std::numeric_limits<float>::quiet_NaN();
-    for (const auto& meta : metaList) {
-        if (!std::isnan(meta.nodata)) {
-            outNodata = static_cast<float>(meta.nodata);
-            break;
+    std::vector<float> outBandNodata(static_cast<size_t>(bandCount), std::numeric_limits<float>::quiet_NaN());
+    for (int b = 1; b <= bandCount; ++b) {
+        for (const auto& meta : metaList) {
+            const float nd = meta.bandNodata[static_cast<size_t>(b - 1)];
+            if (!std::isnan(nd)) {
+                outBandNodata[static_cast<size_t>(b - 1)] = nd;
+                break;
+            }
         }
+        outDs.setBandNoDataValue(b, outBandNodata[static_cast<size_t>(b - 1)]);
     }
-    outDs.setBandNoDataValue(1, outNodata);
 
     // Window streaming mosaic execution:
-    // Process the output grid in kTileSize x kTileSize windows.
+    // Process the output grid in kTileSize x kTileSize windows across all bands.
     // For each window, read intersecting sub-windows from inputs in index order
     // (later inputs overwrite earlier ones for non-nodata pixels), then write
     // the window directly to the output GeoTIFF.
+    struct TileIntersection {
+        size_t inputIndex;
+        int srcX = 0;
+        int srcY = 0;
+        int iw = 0;
+        int ih = 0;
+        int dstRelX = 0;
+        int dstRelY = 0;
+    };
+
     std::vector<float> tileOut(static_cast<size_t>(kTileSize) * kTileSize);
     std::vector<float> tileIn(static_cast<size_t>(kTileSize) * kTileSize);
 
@@ -384,9 +411,8 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
             const int w = (std::min)(kTileSize, outWidth - x);
             const size_t currentTilePixels = static_cast<size_t>(w) * h;
 
-            // Initialize current output window with outNodata (unfilled / nodata)
-            std::fill(tileOut.begin(), tileOut.begin() + currentTilePixels, outNodata);
-
+            // Compute intersections once per spatial tile
+            std::vector<TileIntersection> intersections;
             for (int i = 0; i < inputCount; ++i) {
                 const auto& meta = metaList[static_cast<size_t>(i)];
 
@@ -399,39 +425,50 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
                     continue;
                 }
 
-                const int iw = static_cast<int>(interMaxX - interMinX);
-                const int ih = static_cast<int>(interMaxY - interMinY);
-                const int srcX = static_cast<int>(interMinX - meta.offsetX);
-                const int srcY = static_cast<int>(interMinY - meta.offsetY);
-                const int dstRelX = static_cast<int>(interMinX - x);
-                const int dstRelY = static_cast<int>(interMinY - y);
+                intersections.push_back({
+                    static_cast<size_t>(i),
+                    static_cast<int>(interMinX - meta.offsetX),
+                    static_cast<int>(interMinY - meta.offsetY),
+                    static_cast<int>(interMaxX - interMinX),
+                    static_cast<int>(interMaxY - interMinY),
+                    static_cast<int>(interMinX - x),
+                    static_cast<int>(interMinY - y)
+                });
+            }
 
-                if (!inputDatasets[static_cast<size_t>(i)].readBandWindow(
-                        1, srcX, srcY, iw, ih, tileIn.data())) {
-                    throw RSOperatorError(
-                        ErrorCode::GdalError,
-                        "Failed to read window from " + meta.path + " at ("
-                            + std::to_string(srcX) + ", " + std::to_string(srcY) + ")");
-                }
+            for (int b = 1; b <= bandCount; ++b) {
+                const float currentOutNodata = outBandNodata[static_cast<size_t>(b - 1)];
+                std::fill(tileOut.begin(), tileOut.begin() + currentTilePixels, currentOutNodata);
 
-                const float nodata = meta.nodata;
-                for (int r = 0; r < ih; ++r) {
-                    const size_t outRowOffset = static_cast<size_t>(dstRelY + r) * w + dstRelX;
-                    const size_t inRowOffset = static_cast<size_t>(r) * iw;
-                    for (int c = 0; c < iw; ++c) {
-                        const float val = tileIn[inRowOffset + c];
-                        const bool valid = !std::isnan(val) && (std::isnan(nodata) || val != nodata);
-                        if (valid) {
-                            tileOut[outRowOffset + c] = val;
+                for (const auto& isec : intersections) {
+                    if (!inputDatasets[isec.inputIndex].readBandWindow(
+                            b, isec.srcX, isec.srcY, isec.iw, isec.ih, tileIn.data())) {
+                        throw RSOperatorError(
+                            ErrorCode::GdalError,
+                            "Failed to read band " + std::to_string(b) + " window from "
+                                + metaList[isec.inputIndex].path + " at ("
+                                + std::to_string(isec.srcX) + ", " + std::to_string(isec.srcY) + ")");
+                    }
+
+                    const float nodata = metaList[isec.inputIndex].bandNodata[static_cast<size_t>(b - 1)];
+                    for (int r = 0; r < isec.ih; ++r) {
+                        const size_t outRowOffset = static_cast<size_t>(isec.dstRelY + r) * w + isec.dstRelX;
+                        const size_t inRowOffset = static_cast<size_t>(r) * isec.iw;
+                        for (int c = 0; c < isec.iw; ++c) {
+                            const float val = tileIn[inRowOffset + c];
+                            const bool valid = !std::isnan(val) && (std::isnan(nodata) || val != nodata);
+                            if (valid) {
+                                tileOut[outRowOffset + c] = val;
+                            }
                         }
                     }
                 }
-            }
 
-            if (!outDs.writeBandWindow(1, x, y, w, h, tileOut.data())) {
-                throw RSOperatorError(ErrorCode::GdalError,
-                                      "Failed to write mosaic window at ("
-                                          + std::to_string(x) + ", " + std::to_string(y) + ")");
+                if (!outDs.writeBandWindow(b, x, y, w, h, tileOut.data())) {
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to write mosaic window for band " + std::to_string(b)
+                                              + " at (" + std::to_string(x) + ", " + std::to_string(y) + ")");
+                }
             }
 
             processedTiles++;
@@ -442,7 +479,11 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         }
     }
 
-    outDs.close();
+    QString closeErr;
+    if (!outDs.closeWithError(&closeErr)) {
+        throw RSOperatorError(ErrorCode::GdalError,
+                              closeErr.isEmpty() ? "Failed to finalize mosaic output" : closeErr.toStdString());
+    }
     cleaner.committed = true;
     context.reportProgress(1.0, "Mosaic complete");
 

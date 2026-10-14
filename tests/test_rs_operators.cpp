@@ -1769,6 +1769,96 @@ TEST_CASE("RS mosaic operator handles bottom-up rasters (positive pixel height)"
     CHECK(outGt[5] == Catch::Approx(1.0));
 }
 
+TEST_CASE("RS mosaic operator streams all bands for multi-band rasters", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Tile A: 4x4, 3 bands, origin (0, 4), pixel size (1.0, -1.0)
+    const QString pA = tmp.path() + "/multi_a.tif";
+    std::vector<std::vector<float>> bA(3);
+    for (int b = 0; b < 3; ++b) {
+        bA[b].assign(16, static_cast<float>(10 * (b + 1)));
+    }
+    std::array<double, 6> gtA = {0.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(pA, 4, 4, bA, gtA, "EPSG:4326", &err));
+
+    // Tile B: 4x4, 3 bands, origin (2, 4), pixel size (1.0, -1.0) (overlaps right half of Tile A)
+    const QString pB = tmp.path() + "/multi_b.tif";
+    std::vector<std::vector<float>> bB(3);
+    for (int b = 0; b < 3; ++b) {
+        bB[b].assign(16, static_cast<float>(20 * (b + 1)));
+    }
+    std::array<double, 6> gtB = {2.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    REQUIRE(writeGdalOutput(pB, 4, 4, bB, gtB, "EPSG:4326", &err));
+
+    const QString outPath = tmp.path() + "/out_multi.tif";
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(pA.toStdString());
+    params["inputs"].append(pB.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    CHECK(result["width"].asInt() == 6);
+    CHECK(result["height"].asInt() == 4);
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outPath));
+    CHECK(outDs.bandCount() == 3);
+
+    for (int b = 1; b <= 3; ++b) {
+        std::vector<float> data(24);
+        REQUIRE(outDs.readBandData(b, data.data(), 6, 4));
+        CHECK(data[0] == Catch::Approx(static_cast<float>(10 * b)));
+        CHECK(data[2] == Catch::Approx(static_cast<float>(20 * b)));
+        CHECK(data[5] == Catch::Approx(static_cast<float>(20 * b)));
+    }
+}
+
+TEST_CASE("RS mosaic operator rejects inputs with mismatched band counts", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString pA = tmp.path() + "/bands3.tif";
+    std::vector<std::vector<float>> bA(3);
+    for (int b = 0; b < 3; ++b) {
+        bA[b].assign(16, 1.0f);
+    }
+    std::array<double, 6> gtA = {0.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(pA, 4, 4, bA, gtA, "EPSG:4326", &err));
+
+    const QString pB = tmp.path() + "/bands1.tif";
+    std::vector<std::vector<float>> bB(1);
+    bB[0].assign(16, 2.0f);
+    std::array<double, 6> gtB = {2.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    REQUIRE(writeGdalOutput(pB, 4, 4, bB, gtB, "EPSG:4326", &err));
+
+    const QString outPath = tmp.path() + "/out_mismatch.tif";
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(pA.toStdString());
+    params["inputs"].append(pB.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    try {
+        op->run(params, ctx);
+        FAIL("Expected RSOperatorError for mismatched band count");
+    } catch (const RSOperatorError &e) {
+        CHECK(e.code() == ErrorCode::InvalidInputData);
+    }
+}
+
 
 
 

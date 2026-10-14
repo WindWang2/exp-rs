@@ -19,6 +19,7 @@
 #include <json/json.h>
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -335,6 +336,74 @@ TEST_CASE( "execution evidence without machine-kind links is refused",
   REQUIRE( grounded.explanation.execution.has_value() );
   CHECK( grounded.explanation.execution->status == "Succeeded" );
   CHECK( !hasProblem( grounded, "ungrounded_execution_evidence" ) );
+}
+
+TEST_CASE( "execution evidence with an empty status is refused and never breaks the round trip",
+           "[explain][builder][hallucination]" )
+{
+  Fixture fixture;
+  ExplanationRequest request = baseRequest();
+  request.runId = "run-empty-status";
+
+  // Machine link present, status empty: the record carries no usable run
+  // state. The builder must not fabricate ExecutionFacts — its own strict
+  // serializer writes "status" while fromJson requires it non-empty, so an
+  // attached empty status would make the built document unparseable.
+  StepEvidence emptyStatus;
+  emptyStatus.links = { machineLink( "provenance:run-empty-status#node:step-1" ) };
+  fixture.evidence.evidence.emplace( "run-empty-status#step-1", emptyStatus );
+
+  const BuildOutcome refused = fixture.builder().build( request );
+  CHECK( !refused.failed() );
+  CHECK( hasProblem( refused, "ungrounded_execution_evidence" ) );
+  CHECK( !refused.explanation.execution.has_value() );
+
+  // With a real status the evidence is attached and the canonical document
+  // round-trips through the strict parser.
+  fixture.evidence.evidence["run-empty-status#step-1"].status = "Succeeded";
+  const BuildOutcome built = fixture.builder().build( request );
+  REQUIRE( !built.failed() );
+  REQUIRE( built.explanation.execution.has_value() );
+  CHECK( built.explanation.execution->status == "Succeeded" );
+
+  const std::string canonical = stepExplanationToCanonicalJson( built.explanation );
+  Json::Value parsed;
+  Json::CharReaderBuilder readerBuilder;
+  std::string parseErrors;
+  std::unique_ptr<Json::CharReader> reader( readerBuilder.newCharReader() );
+  REQUIRE( reader->parse( canonical.data(), canonical.data() + canonical.size(), &parsed,
+                          &parseErrors ) );
+  StepExplanation reparsed;
+  std::string fromJsonError;
+  REQUIRE( reparsed.fromJson( parsed, fromJsonError ) );
+  REQUIRE( reparsed.execution.has_value() );
+  CHECK( reparsed.execution->status == "Succeeded" );
+}
+
+TEST_CASE( "skipped-step trust note attributes the consequence as authored expectation",
+           "[explain][builder]" )
+{
+  Fixture fixture;
+  ExplanationRequest request = baseRequest();
+  request.executionStatus = "Skipped";
+
+  const BuildOutcome outcome = fixture.builder().build( request );
+  REQUIRE( !outcome.failed() );
+  REQUIRE( outcome.explanation.skipConsequence.has_value() );
+
+  bool pinned = false;
+  for ( const std::string &note : outcome.explanation.trustNotes )
+  {
+    if ( note.find( "Skipped" ) == std::string::npos )
+      continue;
+    pinned = true;
+    // The note attributes the consequence to the authored guidance as a
+    // declared expectation; it must not assert it as a verified fact of this
+    // run.
+    CHECK( note.find( "预期" ) != std::string::npos );
+    CHECK( note.find( "实际发生" ) == std::string::npos );
+  }
+  CHECK( pinned );
 }
 
 TEST_CASE( "skipped steps surface their runtime state honestly", "[explain][builder]" )

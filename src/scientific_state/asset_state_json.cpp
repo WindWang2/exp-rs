@@ -97,7 +97,10 @@ bool readInt( const Json::Value &node, const char *key, int &out, AssetStateErro
 {
     if ( node.isMember( key ) )
     {
-        if ( !node[key].isIntegral() )
+        // isInt() (not isIntegral()): jsoncpp asInt() throws on integral
+        // values outside int range, which would escape as an untyped
+        // exception instead of the module's typed error contract.
+        if ( !node[key].isInt() )
         {
             error.code = StateErrorCode::InvalidField;
             error.message = std::string( "field '" ) + key + "' must be an integer";

@@ -11,6 +11,8 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace sicnu::grader {
 
@@ -64,6 +66,55 @@ bool boundedIntMember( const Json::Value &object, const char *key, int &out )
         return false;
     out = static_cast<int>( signedValue );
     return true;
+}
+
+/// D12: an orderedAfter edge set must be acyclic over the declared stage
+/// keys. A self-reference is vacuously satisfied (a stage's own record
+/// meets its own prereq at an equal stamp) and a cycle is satisfiable at
+/// equal stamps — either lets a malformed teacher rubric grade
+/// permissively instead of being refused at the door. Iterative DFS with
+/// an explicit stack (no recursion), so a pathological rubric cannot
+/// overflow the call stack either.
+bool orderedAfterGraphHasCycle( const std::map<std::string, std::vector<std::string>> &graph,
+                                std::string &offendingKey )
+{
+    enum class VisitState
+    {
+        Unvisited,
+        InStack,
+        Done
+    };
+    std::map<std::string, VisitState> state;
+    for ( const auto &[start, edges] : graph ) {
+        (void) edges;
+        if ( state[start] != VisitState::Unvisited )
+            continue;
+        std::vector<std::pair<std::string, std::size_t>> stack;
+        stack.emplace_back( start, 0 );
+        state[start] = VisitState::InStack;
+        while ( !stack.empty() ) {
+            const std::string node = stack.back().first;
+            std::size_t &nextEdge = stack.back().second;
+            const auto edgesIt = graph.find( node );
+            const std::size_t edgeCount = edgesIt == graph.end() ? 0 : edgesIt->second.size();
+            if ( nextEdge >= edgeCount ) {
+                state[node] = VisitState::Done;
+                stack.pop_back();
+                continue;
+            }
+            const std::string &next = edgesIt->second[nextEdge];
+            ++nextEdge;
+            if ( state[next] == VisitState::InStack ) {
+                offendingKey = next;
+                return true;
+            }
+            if ( state[next] == VisitState::Unvisited ) {
+                state[next] = VisitState::InStack;
+                stack.emplace_back( next, 0 );
+            }
+        }
+    }
+    return false;
 }
 
 bool parseStageExpectation( const Json::Value &doc, const std::string &path, StageExpectation &out, GraderError &error )
@@ -592,6 +643,7 @@ bool GradingRubric::validate( GraderError &error ) const
     }
 
     // Stage ordering references must point at declared stage criteria.
+    std::map<std::string, std::vector<std::string>> criteriaOrder;
     for ( std::size_t d = 0; d < dimensions.size(); ++d ) {
         const Dimension &dimension = dimensions[d];
         for ( std::size_t c = 0; c < dimension.criteria.size(); ++c ) {
@@ -605,8 +657,35 @@ bool GradingRubric::validate( GraderError &error ) const
                                        "orderedAfter references unknown stage key: " + after, critPath + ".stage.orderedAfter" );
                     return false;
                 }
+                if ( after == criterion.evidenceKey ) {
+                    error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                       "orderedAfter must not reference the stage itself: " + after,
+                                       critPath + ".stage.orderedAfter" );
+                    return false;
+                }
+            }
+            criteriaOrder[criterion.evidenceKey] = criterion.stage.orderedAfter;
+        }
+    }
+    // D12: a cycle (which self-references above already exclude) would be
+    // satisfiable at equal stamps, grading a rubric that declares no real
+    // order. Refuse it instead.
+    std::string cycleKey;
+    if ( orderedAfterGraphHasCycle( criteriaOrder, cycleKey ) ) {
+        for ( std::size_t d = 0; d < dimensions.size() && error.ok(); ++d ) {
+            const Dimension &dimension = dimensions[d];
+            for ( std::size_t c = 0; c < dimension.criteria.size(); ++c ) {
+                const Criterion &criterion = dimension.criteria[c];
+                if ( criterion.kind == CriterionKind::Stage && criterion.evidenceKey == cycleKey ) {
+                    error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                       "orderedAfter forms a cycle involving stage key: " + cycleKey,
+                                       "dimensions[" + std::to_string( d ) + "].criteria[" + std::to_string( c ) +
+                                           "].stage.orderedAfter" );
+                    break;
+                }
             }
         }
+        return false;
     }
 
     // Hard constraints.
@@ -675,6 +754,7 @@ bool GradingRubric::validate( GraderError &error ) const
     }
 
     // requiredStages keys must reference declared stage criteria.
+    std::map<std::string, std::vector<std::string>> requiredOrder;
     for ( std::size_t i = 0; i < requiredStages.size(); ++i ) {
         const StageRequirement &requirement = requiredStages[i];
         const std::string path = "requiredStages[" + std::to_string( i ) + "]";
@@ -691,7 +771,26 @@ bool GradingRubric::validate( GraderError &error ) const
                                    path + ".orderedAfter" );
                 return false;
             }
+            if ( after == requirement.stageKey ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "requiredStages orderedAfter must not reference the stage itself: " + after,
+                                   path + ".orderedAfter" );
+                return false;
+            }
         }
+        requiredOrder[requirement.stageKey] = requirement.orderedAfter;
+    }
+    // D12: same cycle refusal as the criteria-level graph above.
+    if ( orderedAfterGraphHasCycle( requiredOrder, cycleKey ) ) {
+        for ( std::size_t i = 0; i < requiredStages.size() && error.ok(); ++i ) {
+            if ( requiredStages[i].stageKey == cycleKey ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "requiredStages orderedAfter forms a cycle involving stage key: " + cycleKey,
+                                   "requiredStages[" + std::to_string( i ) + "].orderedAfter" );
+                break;
+            }
+        }
+        return false;
     }
 
     return true;

@@ -346,3 +346,24 @@ TEST_CASE( "SpectralAnomaly::rxDetector on All-NoData Input", "[spectral_anomaly
     CHECK( err.contains( QStringLiteral( "No valid pixels" ) ) );
 }
 
+TEST_CASE( "SpectralAnomaly::rxDetector masks declared NoData pixels as NaN", "[spectral_anomaly][rx][nodata]" )
+{
+    constexpr size_t count = 32;
+    constexpr int bands = 2;
+    std::vector<float> pixels( count * bands, 10.0f );
+    for ( size_t i = 0; i < count; ++i ) {
+        pixels[i * bands + 0] += static_cast<float>( i % 5 );
+        pixels[i * bands + 1] += static_cast<float>( ( i * 3 ) % 7 );
+    }
+    pixels[0] = -9999.0f;
+    pixels[1] = -9999.0f;
+
+    const std::vector<float> noData = { -9999.0f, -9999.0f };
+    std::vector<float> rx;
+    QString err;
+    REQUIRE( SpectralAnomaly::rxDetector( pixels.data(), count, bands, &rx, &err, noData.data() ) );
+    REQUIRE( rx.size() == count );
+    REQUIRE( std::isnan( rx[0] ) );
+    REQUIRE( std::isfinite( rx[1] ) );
+}
+

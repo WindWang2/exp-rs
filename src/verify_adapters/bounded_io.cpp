@@ -78,9 +78,22 @@ std::optional<Json::Value> parseJsonBounded( const std::string &text, std::strin
     // Same locale pin as the verifier's own serde: sidecar and checkpoint
     // numbers must parse identically on every host.
     const sicnu::verify::ClassicNumericLocale pin;
-    if ( !reader->parse( text.data(), text.data() + text.size(), &root, &parseError ) )
+    // jsoncpp signals a stackLimit violation by THROWING Json::Exception out
+    // of parse() rather than returning false (same shape as grader_json,
+    // capability_mirror and scientific_recipe). Sidecars and checkpoints
+    // are untrusted content; the contract here is "Nullopt on any parse
+    // failure", so the throw dies as a typed refusal.
+    try
     {
-        error = "invalid JSON: " + parseError;
+        if ( !reader->parse( text.data(), text.data() + text.size(), &root, &parseError ) )
+        {
+            error = "invalid JSON: " + parseError;
+            return std::nullopt;
+        }
+    }
+    catch ( const Json::Exception &exception )
+    {
+        error = std::string( "invalid JSON: " ) + exception.what();
         return std::nullopt;
     }
     error.clear();

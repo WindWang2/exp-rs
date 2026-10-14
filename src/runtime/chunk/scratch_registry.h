@@ -143,6 +143,8 @@ class ScratchRegistry
 
   private:
     friend class ScratchLease;
+    struct LifecycleToken;
+    std::shared_ptr<LifecycleToken> m_token;
     void releaseEntry( ScratchLease::Entry *entry );
     void unaccountLocked( const std::string &runId, std::uint64_t bytes );
 

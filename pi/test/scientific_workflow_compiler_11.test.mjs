@@ -74,7 +74,7 @@ test("schema constants the bridge relies on stay pinned in C++", () => {
   }
 });
 
-test("compiler knowledge pages stay within the 8 KiB knowledge-page budget", () => {
+test("compiler knowledge pages stay within the knowledge-page budget", () => {
   // tool_shortlist pages compiler knowledge at a hard budget; the on-disk
   // pages it draws from must not silently outgrow it.
   const pages = [

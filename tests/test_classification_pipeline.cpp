@@ -236,6 +236,48 @@ TEST_CASE(
   GDALClose( outDsNoNodata );
 }
 
+namespace
+{
+class MockOverflowClassifier final : public RsClassifierBackend
+{
+  public:
+    explicit MockOverflowClassifier( int predClassId ) : mPredClassId( predClassId ) {}
+    bool fit( const cv::Mat &, const cv::Mat & ) override { return true; }
+    cv::Mat predict( const cv::Mat &X ) const override
+    {
+      cv::Mat out( X.rows, 1, CV_32S );
+      out.setTo( mPredClassId );
+      return out;
+    }
+    QString name() const override { return QStringLiteral( "MockOverflow" ); }
+    bool isFitted() const override { return true; }
+  private:
+    int mPredClassId = 300;
+};
+} // namespace
+
+TEST_CASE(
+  "Classification pipeline: outType capacity overflow is refused fail-closed without silent clamping",
+  "[classify][pipeline][dtype][overflow]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new MockOverflowClassifier( 300 ) );
+  cfg.classColors[1] = QColor( "#ff0000" );
+  cfg.classColors[2] = QColor( "#00ff00" );
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsClassificationPipelineResult::Error::PredictionFailed );
+  REQUIRE( res.errorMessage.contains( "exceeds output raster data type capacity" ) );
+  REQUIRE( !QFile::exists( tmp.path() + "/out.tif" ) );
+}
+
 TEST_CASE(
   "Classification pipeline: source NoData pixels map to unclassified class 0",
   "[classify][pipeline][nodata]" )

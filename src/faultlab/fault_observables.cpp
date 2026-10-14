@@ -197,8 +197,13 @@ void measureExtras( const FaultGrid &grid, ObservableSet &out )
         std::vector<std::pair<double, double>> testCells;
         for ( const auto &sample : extras["samples"] )
         {
+            // Type gates before the as*() reads below: a malformed sample
+            // point is skipped (this measurement has no diagnostic channel;
+            // the transform side refuses it typed) instead of throwing out
+            // of an observable read (#1447).
             if ( !sample.isObject() || !sample.isMember( "role" ) || !sample.isMember( "x" ) ||
-                 !sample.isMember( "y" ) )
+                 !sample.isMember( "y" ) || !sample["role"].isString() ||
+                 !sample["x"].isNumeric() || !sample["y"].isNumeric() )
             {
                 continue;
             }

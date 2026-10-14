@@ -7,6 +7,9 @@
 #include <QJsonArray>
 #include <QTimeZone>
 
+#include <cmath>
+#include <limits>
+
 namespace sicnu::suitability
 {
 
@@ -45,6 +48,51 @@ std::optional<sicnu::data::AssetState> assetStateFromToken( const QString &token
     if ( token == QLatin1String( "Error" ) ) return sicnu::data::AssetState::Error;
     if ( token == QLatin1String( "Stale" ) ) return sicnu::data::AssetState::Stale;
     return std::nullopt;
+}
+
+/// Optional numeric with the goal-parser gate (Slice G parity): an absent
+/// key stays absent; a present-but-wrong-typed value fails typed instead of
+/// being silently dropped — a persisted string GSD must not read back as
+/// "unknown" (#1466 class).
+sicnu::data::Result<std::optional<double>> optionalSceneDouble( const QJsonValue &value,
+                                                                const QString &key )
+{
+    if ( value.isUndefined() || value.isNull() )
+        return sicnu::data::Result<std::optional<double>>::success( std::nullopt );
+    if ( !value.isDouble() )
+    {
+        return sicnu::data::Result<std::optional<double>>::failure(
+            sicnu::data::Diagnostic{
+                QStringLiteral( "suitability.scene_invalid" ),
+                QStringLiteral( "scene candidate carries a non-numeric %1" ).arg( key ),
+                sicnu::data::DiagnosticSeverity::Error } );
+    }
+    return sicnu::data::Result<std::optional<double>>::success( value.toDouble() );
+}
+
+/// Same gate for the integer-shaped fields (band count, grid dimensions):
+/// absent keeps the caller's default; present-but-wrong-typed fails typed.
+/// The value must be a finite integer-valued double within [0, INT_MAX]:
+/// these fields truncate through toInt() downstream, so a fractional double
+/// would silently lose its fraction (4.7 bands reading back as 4), and a
+/// negative or out-of-int-range double would store / convert out of range
+/// (R2 P2). Zero stays allowed — an unmeasured count reads back as 0.
+sicnu::data::Result<void> requireSceneNumber( const QJsonValue &value,
+                                              const QString &key )
+{
+    if ( value.isUndefined() || value.isNull() )
+        return sicnu::data::Result<void>::success();
+    const double number = value.toDouble();
+    if ( !value.isDouble() || !std::isfinite( number ) ||
+         std::trunc( number ) != number || number < 0.0 ||
+         number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    {
+        return sicnu::data::Result<void>::failure( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.scene_invalid" ),
+            QStringLiteral( "scene candidate carries a non-integer or out-of-range %1" ).arg( key ),
+            sicnu::data::DiagnosticSeverity::Error } );
+    }
+    return sicnu::data::Result<void>::success();
 }
 
 QJsonObject extentToJson( const sicnu::data::SpatialExtent &extent )
@@ -88,7 +136,7 @@ QJsonObject gridToJson( const sicnu::data::RasterGrid &grid )
     return json;
 }
 
-sicnu::data::RasterGrid gridFromJson( const QJsonObject &json )
+sicnu::data::Result<sicnu::data::RasterGrid> gridFromJson( const QJsonObject &json )
 {
     sicnu::data::RasterGrid grid;
     grid.crsWkt = json.value( QStringLiteral( "crs_wkt" ) ).toString();
@@ -96,8 +144,16 @@ sicnu::data::RasterGrid gridFromJson( const QJsonObject &json )
     const QJsonArray transformArray = json.value( QStringLiteral( "geo_transform" ) ).toArray();
     for ( int i = 0; i < transformArray.size() && i < 6; ++i )
         grid.geoTransform[static_cast< std::size_t >( i )] = transformArray.at( i ).toDouble();
-    grid.width = json.value( QStringLiteral( "width" ) ).toInt();
-    grid.height = json.value( QStringLiteral( "height" ) ).toInt();
+    const QJsonValue widthValue = json.value( QStringLiteral( "width" ) );
+    auto width = requireSceneNumber( widthValue, QStringLiteral( "grid width" ) );
+    if ( !width.has_value() )
+        return sicnu::data::Result<sicnu::data::RasterGrid>::failure( width.diagnostics() );
+    const QJsonValue heightValue = json.value( QStringLiteral( "height" ) );
+    auto height = requireSceneNumber( heightValue, QStringLiteral( "grid height" ) );
+    if ( !height.has_value() )
+        return sicnu::data::Result<sicnu::data::RasterGrid>::failure( height.diagnostics() );
+    grid.width = widthValue.toInt();
+    grid.height = heightValue.toInt();
     const QJsonArray noDataArray = json.value( QStringLiteral( "band_no_data" ) ).toArray();
     for ( const QJsonValue &value : noDataArray )
     {
@@ -106,7 +162,7 @@ sicnu::data::RasterGrid gridFromJson( const QJsonObject &json )
         else
             grid.bandNoData.append( value.toDouble() );
     }
-    return grid;
+    return sicnu::data::Result<sicnu::data::RasterGrid>::success( grid );
 }
 
 } // namespace
@@ -168,11 +224,18 @@ sicnu::data::Result<SceneCandidate> SceneCandidate::fromJson( const QJsonObject 
     candidate.extent = extentFromJson( json.value( QStringLiteral( "extent" ) ).toObject() );
 
     const QJsonValue gsdValue = json.value( QStringLiteral( "gsd_m" ) );
-    if ( gsdValue.isDouble() )
-        candidate.gsdM = gsdValue.toDouble();
+    auto gsd = optionalSceneDouble( gsdValue, QStringLiteral( "gsd_m" ) );
+    if ( !gsd.has_value() )
+        return sicnu::data::Result<SceneCandidate>::failure( gsd.diagnostics() );
+    if ( gsd->has_value() )
+        candidate.gsdM = *gsd.value();
     const QJsonValue pixelValue = json.value( QStringLiteral( "pixel_size_crs_units" ) );
-    if ( pixelValue.isDouble() )
-        candidate.pixelSizeCrsUnits = pixelValue.toDouble();
+    auto pixelSize = optionalSceneDouble( pixelValue,
+                                          QStringLiteral( "pixel_size_crs_units" ) );
+    if ( !pixelSize.has_value() )
+        return sicnu::data::Result<SceneCandidate>::failure( pixelSize.diagnostics() );
+    if ( pixelSize->has_value() )
+        candidate.pixelSizeCrsUnits = *pixelSize.value();
 
     const QString acquisitionText = json.value( QStringLiteral( "acquisition_time_utc" ) ).toString();
     if ( !acquisitionText.isEmpty() )
@@ -192,17 +255,30 @@ sicnu::data::Result<SceneCandidate> SceneCandidate::fromJson( const QJsonObject 
     }
 
     const QJsonValue cloudValue = json.value( QStringLiteral( "cloud_cover_percent" ) );
-    if ( cloudValue.isDouble() )
-        candidate.cloudCoverPercent = cloudValue.toDouble();
+    auto cloudCover = optionalSceneDouble( cloudValue,
+                                           QStringLiteral( "cloud_cover_percent" ) );
+    if ( !cloudCover.has_value() )
+        return sicnu::data::Result<SceneCandidate>::failure( cloudCover.diagnostics() );
+    if ( cloudCover->has_value() )
+        candidate.cloudCoverPercent = *cloudCover.value();
 
     const QJsonArray bandRolesArray = json.value( QStringLiteral( "band_roles" ) ).toArray();
     for ( const QJsonValue &roleValue : bandRolesArray )
         candidate.bandRoles.append( roleValue.toString() );
-    candidate.bandCount = json.value( QStringLiteral( "band_count" ) ).toInt();
+    const QJsonValue bandCountValue = json.value( QStringLiteral( "band_count" ) );
+    auto bandCount = requireSceneNumber( bandCountValue, QStringLiteral( "band_count" ) );
+    if ( !bandCount.has_value() )
+        return sicnu::data::Result<SceneCandidate>::failure( bandCount.diagnostics() );
+    candidate.bandCount = bandCountValue.toInt();
 
     const QJsonValue gridValue = json.value( QStringLiteral( "grid" ) );
     if ( gridValue.isObject() )
-        candidate.grid = gridFromJson( gridValue.toObject() );
+    {
+        auto grid = gridFromJson( gridValue.toObject() );
+        if ( !grid.has_value() )
+            return sicnu::data::Result<SceneCandidate>::failure( grid.diagnostics() );
+        candidate.grid = grid.value();
+    }
 
     candidate.modality = json.value( QStringLiteral( "modality" ) ).toString();
     candidate.provenance = json.value( QStringLiteral( "provenance" ) ).toObject();

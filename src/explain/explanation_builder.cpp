@@ -316,7 +316,8 @@ BuildOutcome StepExplanationBuilder::build( const ExplanationRequest &request ) 
   {
     if ( explanation.skipConsequence.has_value() )
     {
-      explanation.trustNotes.push_back( "本步骤在运行中被 Skipped：以上跳过后果即为本次运行实际发生的情况" );
+      explanation.trustNotes.push_back(
+        "本步骤在运行中被 Skipped；以上跳过后果来自编写指引（authored guidance）中声明的预期影响，并非已核实的本次运行结果" );
     }
     else
     {
@@ -325,7 +326,9 @@ BuildOutcome StepExplanationBuilder::build( const ExplanationRequest &request ) 
     }
   }
 
-  // --- execution evidence: machine links required, otherwise refused
+  // --- execution evidence: machine links and a non-empty status required,
+  // otherwise refused (fromJson requires the status, so attaching an empty
+  // one would emit a document the strict parser refuses)
   if ( evidence_ != nullptr && !request.runId.empty() )
   {
     const std::optional<StepEvidence> stepEvidence = evidence_->evidenceFor( request.runId, request.stepId );
@@ -333,7 +336,7 @@ BuildOutcome StepExplanationBuilder::build( const ExplanationRequest &request ) 
     {
       const bool hasMachine = std::any_of( stepEvidence->links.begin(), stepEvidence->links.end(),
                                            []( const EvidenceLink &l ) { return isMachineEvidenceKind( l.kind ); } );
-      if ( hasMachine )
+      if ( hasMachine && !stepEvidence->status.empty() )
       {
         ExecutionFacts executionEntry;
         executionEntry.status = stepEvidence->status;
@@ -355,8 +358,9 @@ BuildOutcome StepExplanationBuilder::build( const ExplanationRequest &request ) 
       }
       else
       {
-        outcome.problems.push_back( { "ungrounded_execution_evidence", "execution",
-                                      "execution evidence carried no machine-kind link; refused" } );
+        outcome.problems.push_back(
+          { "ungrounded_execution_evidence", "execution",
+            "execution evidence carried no machine-kind link or an empty status; refused" } );
       }
     }
   }

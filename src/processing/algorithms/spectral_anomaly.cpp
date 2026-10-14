@@ -240,7 +240,9 @@ float rxScore( const float *spectrum, const std::vector<double> &mean,
 }
 
 bool rxDetector( const float *pixels, size_t count, int bands,
-                 std::vector<float> *rxValues, QString *errorMessage )
+                 std::vector<float> *rxValues, QString *errorMessage,
+                 const float *noDataBands,
+                 const uint8_t *hasNoDataBands )
 {
     if ( !pixels || !rxValues || count == 0 || bands <= 0 )
     {
@@ -250,9 +252,9 @@ bool rxDetector( const float *pixels, size_t count, int bands,
     }
 
     BackgroundStats stats;
-    accumulateMean( pixels, count, bands, &stats, true );
+    accumulateMean( pixels, count, bands, &stats, true, noDataBands, hasNoDataBands );
     finalizeMean( &stats );
-    accumulateCovariance( pixels, count, bands, &stats, true );
+    accumulateCovariance( pixels, count, bands, &stats, true, noDataBands, hasNoDataBands );
     finalizeCovariance( &stats );
 
     if ( stats.count == 0 )
@@ -274,8 +276,20 @@ bool rxDetector( const float *pixels, size_t count, int bands,
     std::vector<double> scratch( bands );
     for ( size_t p = 0; p < count; ++p )
     {
-        ( *rxValues )[p] =
-            rxScore( pixels + p * static_cast<size_t>( bands ), stats.mean, invCov, bands, &scratch );
+        const float *spec = pixels + p * static_cast<size_t>( bands );
+        bool valid = true;
+        for ( int b = 0; b < bands; ++b )
+        {
+            const float v = spec[b];
+            const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
+            if ( !std::isfinite( v ) || ( checkNd && ( v == noDataBands[b] || std::isnan( v ) ) ) )
+            {
+                valid = false;
+                break;
+            }
+        }
+        ( *rxValues )[p] = valid ? rxScore( spec, stats.mean, invCov, bands, &scratch )
+                                 : std::numeric_limits<float>::quiet_NaN();
     }
     return true;
 }
