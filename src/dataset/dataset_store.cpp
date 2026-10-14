@@ -92,7 +92,7 @@ bool DatasetStore::open( const QString &dbPath, QString *errorOut )
             *errorOut = db ? QString::fromUtf8( sqlite3_errmsg( db ) )
                            : QStringLiteral( "cannot open %1" ).arg( dbPath );
         if ( db )
-            sqlite3_close( db );
+            sqlite3_close_v2( db );
         return false;
     }
 
