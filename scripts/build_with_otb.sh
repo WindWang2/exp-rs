@@ -30,7 +30,9 @@ echo ""
 echo "=== Building (this may take 30-45 minutes on first run) ==="
 # ITK is static PIC; OTB is shared (BUILD_SHARED_LIBS=ON after ITK) so composite
 # apps like TrainImagesClassifier share one ApplicationEngine.
-make -j"$(nproc)"
+# Honor an externally pinned parallelism cap (shared-host memory governance,
+# R13-I): when CMAKE_BUILD_PARALLEL_LEVEL is set it wins over nproc.
+make -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
 
 # Stage CLI launchers + shared OTB libs into tools/otb for ToolPathManager
 if [[ -x "${SRC_DIR}/scripts/bundle_otb_tools.sh" ]]; then

@@ -370,6 +370,20 @@ def load_state(path: Path) -> dict:
     return {}
 
 
+def _default_build_jobs() -> int:
+    """Shared-host memory governance (R13-I): an externally pinned
+    CMAKE_BUILD_PARALLEL_LEVEL always wins over the local heuristic, so a
+    caller's -j2 can never be silently amplified by this script."""
+    env = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL")
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            raise SystemExit(
+                f"CMAKE_BUILD_PARALLEL_LEVEL must be an integer, got {env!r}")
+    return min(8, os.cpu_count() or 2)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -381,8 +395,9 @@ def main() -> int:
                         help="skip lane items recorded passed in the state file")
     parser.add_argument("--list", action="store_true", help="list lanes and exit")
     parser.add_argument("--json", default=None, help="write machine-readable results here")
-    parser.add_argument("--build-jobs", type=int, default=min(8, os.cpu_count() or 2),
-                        help="parallel jobs for build targets (bounded)")
+    parser.add_argument("--build-jobs", type=int, default=_default_build_jobs(),
+                        help="parallel jobs for build targets (bounded; env "
+                             "CMAKE_BUILD_PARALLEL_LEVEL overrides the default)")
     parser.add_argument("--ctest-jobs", type=int, default=1,
                         help="parallel jobs for the L8 ctest lane (default 1)")
     parser.add_argument("--timeout-scale", type=float, default=1.0,
