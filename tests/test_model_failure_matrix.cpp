@@ -34,6 +34,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -928,4 +929,108 @@ TEST_CASE( "#1455: recycling a zombie session still held by an ensemble member "
   replacement.reset();
   registry.releaseAll();
   CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
+}
+
+TEST_CASE( "VRAM ledger allocation and reclaim stress test: 1000 iterations",
+           "[models][pool][stress]" )
+{
+  RegistryReset reset;
+  auto &registry = ModelRuntimeRegistry::instance();
+
+  ModelHardwareCapabilities hw;
+  hw.cudaAvailable = true;
+  hw.cudaDeviceCount = 2;
+  hw.vramBudgetMb = 2048;
+  const HardwarePin pin( hw );
+  registry.vramLedger().reset();
+  registry.vramLedger().setCapacity( 0, 2048 );
+  registry.vramLedger().setCapacity( 1, 2048 );
+
+  struct StressSession final : IModelRuntime
+  {
+    explicit StressSession( std::string id ) : m_id( std::move( id ) ) {}
+    std::string framework() const override { return "stressfw"; }
+    std::string backendName() const override { return "stress-fake"; }
+    std::string deviceName() const override { return "cuda"; }
+    std::string artifactPath() const override { return m_id; }
+    cv::Mat infer( const cv::Mat &blob ) override { return blob.clone(); }
+    std::string m_id;
+  };
+
+  registry.registerProvider(
+    "stressfw",
+    []( const ModelInfo &info, const ModelHardwareCapabilities &,
+        std::string * ) -> ModelRuntimePtr {
+      return std::make_shared<StressSession>( info.id );
+    } );
+
+  QTemporaryDir dir;
+  std::vector<ModelInfo> models;
+  for ( int i = 0; i < 5; ++i )
+  {
+    const QString artifact = dir.filePath( QStringLiteral( "stress-%1.bin" ).arg( i ) );
+    {
+      QFile f( artifact );
+      REQUIRE( f.open( QIODevice::WriteOnly ) );
+      f.write( QByteArray( "weights" ) );
+    }
+    ModelInfo m;
+    m.name = "stress-" + std::to_string( i );
+    m.id = m.name;
+    m.framework = "stressfw";
+    m.readiness = ModelReadiness::Ready;
+    m.runtime.gpu = true;
+    m.runtime.estimatedVramMb = 16 * ( i + 1 ); // 16, 32, 48, 64, 80 MB
+    m.resolvedArtifactPath = artifact.toStdString();
+    m.contentDigest = "digest-stress-" + std::to_string( i );
+    models.push_back( m );
+  }
+
+  std::vector<ModelRuntimePtr> heldHandles;
+  std::mt19937 rng( 42 );
+
+  for ( int iter = 0; iter < 1000; ++iter )
+  {
+    int action = rng() % 3;
+    if ( action == 0 && !heldHandles.empty() )
+    {
+      // Release a random held handle
+      size_t idx = rng() % heldHandles.size();
+      heldHandles[idx].reset();
+      heldHandles.erase( heldHandles.begin() + idx );
+    }
+    else
+    {
+      // Acquire a model
+      size_t modelIdx = rng() % models.size();
+      int devIdx = rng() % 2;
+      std::string error;
+      auto handle = registry.acquire( models[modelIdx], RequestedDevice::cuda( devIdx ), &error );
+      if ( handle )
+      {
+        heldHandles.push_back( handle );
+      }
+    }
+
+    // Invariant checks
+    for ( int d = 0; d < 2; ++d )
+    {
+      REQUIRE( registry.vramLedger().reservedMb( d ) >= 0 );
+    }
+  }
+
+  // Release all remaining handles and evict cached sessions
+  heldHandles.clear();
+  registry.releaseAll();
+
+  // Strict check: zero leak, zero undercount
+  for ( int d = 0; d < 2; ++d )
+  {
+    CHECK( registry.vramLedger().reservedMb( d ) == 0 );
+  }
+  for ( const auto &state : registry.deviceReport() )
+  {
+    CHECK( state.reservedMb == 0 );
+    CHECK( state.holders == 0 );
+  }
 }
