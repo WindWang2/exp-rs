@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA = "exp.ci-status.v1"
@@ -49,14 +51,18 @@ _CONFIGURE_TOKENS = ("configure",)
 # test: the tier-1 step is literally named "Compile Core & Test Targets" and
 # must classify as build, not test.
 _BUILD_TOKENS = ("build", "compil")
+# Short ambiguous tokens match on word boundaries: "Attest provenance" must
+# not classify as a test failure via the substring "test" (review P3-8).
 _TEST_TOKENS = ("ctest", "test", "execute")
+_TEST_RE = re.compile(r"\b(?:" + "|".join(_TEST_TOKENS) + r")\b")
 
 
 # When several jobs fail in one run, the run-level label picks the most
 # action-relevant stage (a required-lane test failure outranks a platform
 # build seam); the per-job detail is kept in the record's failed_jobs field.
+# A job that timed out with no failed step is a hang ("timeout"), not infra.
 _STAGE_PRIORITY = ["failed-test", "failed-build", "failed-configure", "infra",
-                   "failed-unknown"]
+                   "failed-unknown", "timeout"]
 
 
 def classify_failure_stage(jobs: list[dict]) -> tuple[str, list[dict]]:
@@ -65,7 +71,9 @@ def classify_failure_stage(jobs: list[dict]) -> tuple[str, list[dict]]:
     for job in jobs:
         if job.get("conclusion") not in ("failure", "timed_out"):
             continue
-        stage = "infra"  # job failed with no recorded failed step: runner died
+        # No recorded failed step: a timed-out job is a hang, anything else
+        # means the runner died mid-flight (infra).
+        stage = "timeout" if job.get("conclusion") == "timed_out" else "infra"
         for step in job.get("steps") or []:
             if step.get("conclusion") in ("failure", "timed_out"):
                 name = (step.get("name") or "").lower()
@@ -73,7 +81,7 @@ def classify_failure_stage(jobs: list[dict]) -> tuple[str, list[dict]]:
                     stage = "failed-configure"
                 elif any(t in name for t in _BUILD_TOKENS):
                     stage = "failed-build"
-                elif any(t in name for t in _TEST_TOKENS):
+                elif _TEST_RE.search(name):
                     stage = "failed-test"
                 elif any(t in name for t in _INFRA_TOKENS):
                     stage = "infra"
@@ -158,7 +166,20 @@ def main() -> int:
     counts = Counter(r["class"] for r in records)
     scoped = [r for r in records
               if r["event"] == args.event and r["branch"] == args.branch]
-    scoped.sort(key=lambda r: r.get("createdAt") or "", reverse=True)
+    # Parse timestamps when possible (hand-edited dumps may mix offsets);
+    # fall back to the raw RFC3339 string, which sorts correctly for gh's
+    # canonical Z-suffixed output (review P3-8).
+    def _sort_key(rec):
+        raw = rec.get("createdAt") or ""
+        try:
+            ts = datetime.fromisoformat(raw.replace("Z", "+00:00")) \
+                .astimezone(timezone.utc).timestamp()
+        except ValueError:
+            ts = 0.0
+        return (ts, raw)
+    scoped.sort(key=_sort_key, reverse=True)
+    # "skipped" counts as completed here: a skipped run DID reach a terminal
+    # state, it just never gates anything (never class "passed").
     completed = [r for r in scoped if r["class"] not in ("pending", "cancelled")]
     latest_completed = completed[0] if completed else None
     gate_ok = bool(latest_completed and latest_completed["class"] == "passed")

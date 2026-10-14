@@ -377,10 +377,14 @@ def _default_build_jobs() -> int:
     env = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL")
     if env:
         try:
-            return max(1, int(env))
+            value = int(env)
         except ValueError:
             raise SystemExit(
                 f"CMAKE_BUILD_PARALLEL_LEVEL must be an integer, got {env!r}")
+        if value < 1:
+            raise SystemExit(
+                f"CMAKE_BUILD_PARALLEL_LEVEL must be >= 1, got {env!r}")
+        return value
     return min(8, os.cpu_count() or 2)
 
 
@@ -395,9 +399,10 @@ def main() -> int:
                         help="skip lane items recorded passed in the state file")
     parser.add_argument("--list", action="store_true", help="list lanes and exit")
     parser.add_argument("--json", default=None, help="write machine-readable results here")
-    parser.add_argument("--build-jobs", type=int, default=_default_build_jobs(),
+    parser.add_argument("--build-jobs", type=int, default=None,
                         help="parallel jobs for build targets (bounded; env "
-                             "CMAKE_BUILD_PARALLEL_LEVEL overrides the default)")
+                             "CMAKE_BUILD_PARALLEL_LEVEL sets the default; "
+                             "default without a pin: min(8, cpus))")
     parser.add_argument("--ctest-jobs", type=int, default=1,
                         help="parallel jobs for the L8 ctest lane (default 1)")
     parser.add_argument("--timeout-scale", type=float, default=1.0,
@@ -427,6 +432,17 @@ def main() -> int:
                 tag = f" [requires {req}]" if req else ""
                 print(f"    - {label}: {name} [{kind}]{tag}")
         return 0
+
+    # Resolve the build-jobs default lazily (review P3-6): --list must not
+    # abort on a malformed env pin, and an explicit flag that disagrees with
+    # a pin is acknowledged on stderr instead of silently outranking it.
+    if args.build_jobs is None:
+        args.build_jobs = _default_build_jobs()
+    elif os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL"):
+        pin = _default_build_jobs()
+        if args.build_jobs != pin:
+            print(f"note: --build-jobs {args.build_jobs} overrides pinned "
+                  f"CMAKE_BUILD_PARALLEL_LEVEL={pin}", file=sys.stderr)
 
     build_dir = Path(args.build_dir).resolve()
     if not (build_dir / "CMakeCache.txt").is_file():

@@ -32,7 +32,12 @@ echo "=== Building (this may take 30-45 minutes on first run) ==="
 # apps like TrainImagesClassifier share one ApplicationEngine.
 # Honor an externally pinned parallelism cap (shared-host memory governance,
 # R13-I): when CMAKE_BUILD_PARALLEL_LEVEL is set it wins over nproc.
-make -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+case "${CMAKE_BUILD_PARALLEL_LEVEL:-}" in
+  "" )            SICNU_JOBS="$(nproc)" ;;
+  *[!0-9]* | 0 )  echo "build_with_otb: CMAKE_BUILD_PARALLEL_LEVEL must be a positive integer, got '${CMAKE_BUILD_PARALLEL_LEVEL}'" >&2; exit 2 ;;
+  * )             SICNU_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL}" ;;
+esac
+make -j"${SICNU_JOBS}"
 
 # Stage CLI launchers + shared OTB libs into tools/otb for ToolPathManager
 if [[ -x "${SRC_DIR}/scripts/bundle_otb_tools.sh" ]]; then

@@ -72,6 +72,10 @@ def diff(args) -> int:
                                  ("peak_rss_mb", "rssd", "MB")):
             if key in b and key in a:
                 print("   %-5s %s" % (label, _fmt_delta(b[key], a[key], unit)))
+            elif key in b:
+                # A metric present in BEFORE but gone from AFTER is itself a
+                # signal (baseline drift), not mere absence of data (P3-12).
+                print("   %-5s (disappeared in AFTER)" % label)
             else:
                 print("   %-5s (no data)" % label)
         if b.get("wall_ms", 0) > 0 and "wall_ms" in a:

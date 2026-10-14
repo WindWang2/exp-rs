@@ -35,6 +35,12 @@ if ! git rev-parse --verify --quiet "${BASE_REF}" >/dev/null; then
   echo "[clang-tidy-lane] base ref '${BASE_REF}' not found locally — falling back to HEAD~1" >&2
   BASE_REF="HEAD~1"
 fi
+if ! git rev-parse --verify --quiet "${BASE_REF}" >/dev/null; then
+  # Fail closed: diffing an unresolvable ref would print "nothing to lint"
+  # and exit 0 — a silent pass on a gate that is supposed to block (#1495).
+  echo "[clang-tidy-lane] ERROR: neither the requested base nor HEAD~1 resolves; refusing to silently pass" >&2
+  exit 2
+fi
 
 # Diff base..working tree (not merge-base): robust on shallow CI checkouts,
 # and on master pushes the diff is empty so the lane no-ops.
@@ -53,9 +59,20 @@ echo "${FILES}"
 # legacy flooding through the header path. Narrow the effective header filter
 # to this checkout's own src/ tree; main-file diagnostics (the changed files
 # themselves) are unaffected by header-filter and always reported.
-REPO_ROOT="$(pwd)"
-ESCAPED_ROOT="$(printf '%s' "${REPO_ROOT}" | sed 's/[][\\.^$*]/\\&/g')"
+# Anchor on BOTH the logical and the physical checkout root: clang's
+# diagnostic paths follow the include-resolution spelling, which in a
+# symlinked checkout may be either (review P2-4). The escape class covers
+# every ERE metacharacter so a path with + ? ( ) | { } cannot invalidate the
+# regex.
+escape_ere() { printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g'; }
+ROOT_LOGICAL="$(pwd)"
+ROOT_PHYSICAL="$(pwd -P)"
+if [ "${ROOT_LOGICAL}" = "${ROOT_PHYSICAL}" ]; then
+  HEADER_FILTER="^$(escape_ere "${ROOT_LOGICAL}")/src/"
+else
+  HEADER_FILTER="^($(escape_ere "${ROOT_LOGICAL}")|$(escape_ere "${ROOT_PHYSICAL}"))/src/"
+fi
 # shellcheck disable=SC2086 — filenames from git cannot contain spaces here
 # (repo convention); xargs keeps the invocation one process per batch.
 echo "${FILES}" | xargs clang-tidy -p "${BUILD_DIR}" --warnings-as-errors='*' \
-  --header-filter="^${ESCAPED_ROOT}/src/"
+  --header-filter="${HEADER_FILTER}"
