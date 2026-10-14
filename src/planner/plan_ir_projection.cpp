@@ -174,9 +174,17 @@ Json::Value projectPlanToIr( const ScientificPlan &plan, std::vector<std::string
                 wire["node"] = input.fromStepId;
                 wire["output"] = "output";
             }
+            else if ( !input.assetRef.empty() )
+            {
+                const auto slotIt = slotForAsset.find( input.assetRef );
+                if ( slotIt == slotForAsset.end() )
+                    return fail( "step input references unindexed asset: " + input.assetRef );
+                wire["input"] = slotIt->second;
+            }
             else
             {
-                wire["input"] = slotForAsset[input.assetRef];
+                return fail( "step input in step \"" + step.stepId
+                             + "\" carries neither fromStepId nor assetRef" );
             }
             wire["as"] = input.as;
             nodeInputs.append( wire );

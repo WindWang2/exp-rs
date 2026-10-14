@@ -112,22 +112,34 @@ std::string RecipeRouter::packDigest() const
 RecipeDocument RecipeRouter::fromRecipeJson( const Json::Value &doc )
 {
     RecipeDocument d;
-    d.recipeId = doc.get( "recipe_id", "" ).asString();
-    d.title = doc.get( "title", "" ).asString();
+    if ( !doc.isObject() )
+        return d;
+    if ( doc.isMember( "recipe_id" ) && doc["recipe_id"].isString() )
+        d.recipeId = doc["recipe_id"].asString();
+    if ( doc.isMember( "title" ) && doc["title"].isString() )
+        d.title = doc["title"].asString();
     const Json::Value &goal = doc["goal_pattern"];
     if ( goal.isObject() )
     {
-        d.intent = goal.get( "intent", "" ).asString();
-        d.modality = goal.get( "modality", "" ).asString();
-        for ( const auto &k : goal["keywords_en"] )
+        if ( goal.isMember( "intent" ) && goal["intent"].isString() )
+            d.intent = goal["intent"].asString();
+        if ( goal.isMember( "modality" ) && goal["modality"].isString() )
+            d.modality = goal["modality"].asString();
+        if ( goal.isMember( "keywords_en" ) && goal["keywords_en"].isArray() )
         {
-            if ( k.isString() )
-                d.keywords.push_back( k.asString() );
+            for ( const auto &k : goal["keywords_en"] )
+            {
+                if ( k.isString() )
+                    d.keywords.push_back( k.asString() );
+            }
         }
-        for ( const auto &k : goal["keywords_zh"] )
+        if ( goal.isMember( "keywords_zh" ) && goal["keywords_zh"].isArray() )
         {
-            if ( k.isString() )
-                d.keywords.push_back( k.asString() );
+            for ( const auto &k : goal["keywords_zh"] )
+            {
+                if ( k.isString() )
+                    d.keywords.push_back( k.asString() );
+            }
         }
     }
     const Json::Value &stages = doc["stages"];
@@ -136,7 +148,10 @@ RecipeDocument RecipeRouter::fromRecipeJson( const Json::Value &doc )
         d.stageCount = static_cast<int>( stages.size() );
         for ( const auto &st : stages )
         {
-            const std::string kind = st.get( "kind", "" ).asString();
+            if ( !st.isObject() )
+                continue;
+            const std::string kind =
+                st.isMember( "kind" ) && st["kind"].isString() ? st["kind"].asString() : "";
             if ( kind == "human_only" || kind == "reflection" )
                 d.hasHumanOnly = true;
             if ( st.isMember( "verifier_hooks" ) && st["verifier_hooks"].isArray() &&
@@ -158,7 +173,9 @@ RecipeRouterResult RecipeRouter::search( const RecipeQuery &query ) const
 
     const std::string modality = lower( query.modality );
     const std::string observedModality =
-        lower( query.observedState.get( "modality", "" ).asString() );
+        query.observedState.isMember( "modality" ) && query.observedState["modality"].isString()
+            ? lower( query.observedState["modality"].asString() )
+            : "";
     const std::string text = lower( query.text );
     const std::string intent = query.intent;
 

@@ -167,7 +167,8 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
             anyMissing = true;
             // Typed reason survives into the bundle problem channel:
             // gdal_open_failed ≠ asset_not_found ≠ resolver_unavailable.
-            std::string marker = "asset_resolve_failed:" + resolved.error;
+            const std::string err = resolved.error.empty() ? "asset_not_found" : resolved.error;
+            std::string marker = "asset_resolve_failed:" + err;
             if ( !resolved.errorDetail.empty() )
                 marker += ":" + resolved.errorDetail;
             resolveFailures.push_back( std::move( marker ) );
@@ -304,7 +305,9 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
 
     RecipeQuery rq;
     rq.intent = caps.intent.empty() ? request.intent : caps.intent;
-    rq.modality = mergedObserved.get( "modality", "" ).asString();
+    rq.modality = mergedObserved.isMember( "modality" ) && mergedObserved["modality"].isString()
+                      ? mergedObserved["modality"].asString()
+                      : "";
     rq.text = request.goal;
     rq.observedState = mergedObserved;
     // Over-fetch so ContextBudget can record deterministic truncation metadata.

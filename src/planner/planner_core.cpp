@@ -45,6 +45,12 @@ void rankCandidates( std::vector<PlannerCapability> &candidates )
                               return ra < rb;
                           return a.operatorId < b.operatorId;
                       } );
+    candidates.erase(
+        std::unique( candidates.begin(), candidates.end(),
+                     []( const PlannerCapability &a, const PlannerCapability &b ) {
+                         return a.operatorId == b.operatorId && a.costClass == b.costClass;
+                     } ),
+        candidates.end() );
 }
 
 /// First contracts-verified capability of @p family, cheapest-operator order.

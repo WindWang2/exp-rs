@@ -50,7 +50,8 @@ PassportResolver makeFactsBasedResolver( AssetFactSources sources )
         {
             // Fail closed with the typed reason when one source reported why;
             // a plain "nothing known" stays asset_not_found.
-            return PassportResolution{ std::nullopt, errorCode, errorDetail };
+            const std::string finalCode = errorCode.empty() ? "asset_not_found" : errorCode;
+            return PassportResolution{ std::nullopt, finalCode, errorDetail };
         }
         return PassportResolution{ resolveAssetState( input ).state, std::string(),
                                    std::string() };

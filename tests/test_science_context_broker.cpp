@@ -13,8 +13,10 @@
 #include "scientific_state/asset_state_json.h"
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 using namespace sicnu::science_context;
 using namespace sicnu::state;
@@ -972,4 +974,82 @@ TEST_CASE( "AssetStateProvider thread safety under concurrent resolve and author
 
     CHECK( resolveCount.load() > 0 );
     CHECK( provider.hasResolver() );
+}
+
+TEST_CASE( "broker cache key changes when failure reason changes (Issue #1465)",
+           "[science_context][broker][cache]" )
+{
+    ScienceContextBroker broker;
+    std::string currentErrorCode = "asset_not_found";
+    std::string currentErrorDetail = "";
+
+    broker.assets().setResolver( [&]( const std::string &assetKey ) -> PassportResolution {
+        PassportResolution res;
+        res.errorCode = currentErrorCode;
+        res.errorDetail = currentErrorDetail;
+        return res;
+    } );
+
+    SynthesizeRequest req;
+    req.goal = "test failure digest cache transition";
+    req.intent = "ndvi";
+    req.assetKeys = { "asset-failing" };
+    req.useCache = true;
+
+    auto r1 = broker.synthesize( req );
+    CHECK_FALSE( r1.cacheHit );
+    CHECK( r1.planning.openQuestions.size() > 0 );
+    bool foundNotFound = false;
+    for ( const auto &q : r1.bundle.openQuestions )
+    {
+        if ( q.find( "asset_resolve_failed:asset_not_found" ) != std::string::npos )
+            foundNotFound = true;
+    }
+    CHECK( foundNotFound );
+
+    // Second call with same failure reason should be a cache hit
+    auto r2 = broker.synthesize( req );
+    CHECK( r2.cacheHit );
+
+    // Now change the failure reason to a different error code
+    currentErrorCode = "gdal_open_failed";
+    currentErrorDetail = "permission denied";
+
+    // Third call must NOT return stale cached bundle from first failure
+    auto r3 = broker.synthesize( req );
+    CHECK_FALSE( r3.cacheHit );
+
+    // Verify the bundle contains the updated failure reason
+    bool foundGdal = false;
+    for ( const auto &q : r3.bundle.openQuestions )
+    {
+        if ( q.find( "gdal_open_failed:permission denied" ) != std::string::npos )
+            foundGdal = true;
+    }
+    CHECK( foundGdal );
+}
+
+TEST_CASE( "budget truncation preserves critical blocking questions over non-blocking questions",
+           "[science_context][budget]" )
+{
+    ScientificContextBundle bundle;
+    bundle.goal = "test budget truncation";
+    bundle.intent = "ndvi";
+    bundle.schemaId = kBundleSchemaId;
+
+    // Add 2 non-blocking questions and 1 blocking question
+    bundle.openQuestions.push_back( "offline_mode_no_remote_enrichment" );
+    bundle.openQuestions.push_back( "autonomy_L2_requires_review" );
+    bundle.openQuestions.push_back( "asset_resolve_failed:gdal_open_failed:file missing" );
+
+    BudgetPolicy policy;
+    policy.maxOpenQuestions = 1; // Keep only 1 question
+
+    applyContextBudget( bundle, policy );
+
+    REQUIRE( bundle.openQuestions.size() == 1 );
+    // The single retained question MUST be the critical/blocking one
+    CHECK( bundle.openQuestions[0].rfind( "asset_resolve_failed:", 0 ) == 0 );
+    CHECK( bundle.truncation.truncated );
+    CHECK( bundle.truncation.droppedQuestions == 2 );
 }

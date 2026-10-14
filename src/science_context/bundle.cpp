@@ -155,15 +155,22 @@ Json::Value sectionSourceToJson( const SectionSource &s )
     return o;
 }
 
+std::string readString( const Json::Value &val, const std::string &key, const std::string &fallback = "" )
+{
+    if ( val.isObject() && val.isMember( key ) && val[key].isString() )
+        return val[key].asString();
+    return fallback;
+}
+
 SectionSource sectionSourceFromJson( const Json::Value &o )
 {
     SectionSource s;
     if ( !o.isObject() )
         return s;
-    contentSourceFromString( o.get( "source", "unavailable" ).asString(), s.source );
-    s.authority = o.get( "authority", "" ).asString();
-    s.revision = o.get( "revision", 0 ).asUInt64();
-    s.degraded = o.get( "degraded", false ).asBool();
+    contentSourceFromString( readString( o, "source", "unavailable" ), s.source );
+    s.authority = readString( o, "authority", "" );
+    s.revision = o.isMember( "revision" ) && o["revision"].isUInt64() ? o["revision"].asUInt64() : 0;
+    s.degraded = o.isMember( "degraded" ) && o["degraded"].isBool() ? o["degraded"].asBool() : false;
     return s;
 }
 
@@ -287,7 +294,7 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
             *error = "bundle root must be object";
         return false;
     }
-    const std::string schema = json.get( "schema", "" ).asString();
+    const std::string schema = readString( json, "schema", "" );
     if ( schema != kBundleSchemaId )
     {
         if ( error )
@@ -296,9 +303,9 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
     }
     ScientificContextBundle b;
     b.schemaId = schema;
-    b.bundleId = json.get( "bundle_id", "" ).asString();
-    b.goal = json.get( "goal", "" ).asString();
-    b.intent = json.get( "intent", "" ).asString();
+    b.bundleId = readString( json, "bundle_id", "" );
+    b.goal = readString( json, "goal", "" );
+    b.intent = readString( json, "intent", "" );
 
     for ( const auto &a : json["assets"] )
     {
@@ -309,20 +316,20 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
             return false;
         }
         AssetSummary s;
-        s.assetId = a.get( "asset_id", "" ).asString();
-        s.revision = a.get( "revision", "" ).asString();
-        s.displayName = a.get( "display_name", "" ).asString();
-        s.modality = a.get( "modality", "" ).asString();
-        s.radiometricUnit = a.get( "radiometric_unit", "" ).asString();
-        s.crsAuthid = a.get( "crs_authid", "" ).asString();
+        s.assetId = readString( a, "asset_id", "" );
+        s.revision = readString( a, "revision", "" );
+        s.displayName = readString( a, "display_name", "" );
+        s.modality = readString( a, "modality", "" );
+        s.radiometricUnit = readString( a, "radiometric_unit", "" );
+        s.crsAuthid = readString( a, "crs_authid", "" );
         s.bandRoles = readStringArray( a["band_roles"] );
         EvidenceBucket bucket = EvidenceBucket::Unknown;
-        evidenceBucketFromString( a.get( "evidence", "unknown" ).asString(), bucket );
+        evidenceBucketFromString( readString( a, "evidence", "unknown" ), bucket );
         s.evidence = bucket;
         s.evidencePaths = readStringArray( a["evidence_paths"] );
         s.conflictAlternatives = readStringArray( a["conflict_alternatives"] );
-        s.pathHint = a.get( "path_hint", "" ).asString();
-        s.source = a.get( "source", "unavailable" ).asString();
+        s.pathHint = readString( a, "path_hint", "" );
+        s.source = readString( a, "source", "unavailable" );
         b.assets.push_back( std::move( s ) );
     }
 
@@ -331,13 +338,13 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         if ( !c.isObject() )
             continue;
         CapabilityEntry e;
-        e.capabilityId = c.get( "capability_id", "" ).asString();
-        e.intent = c.get( "intent", "" ).asString();
-        e.status = c.get( "status", "" ).asString();
-        e.score = c.get( "score", 0.0 ).asDouble();
+        e.capabilityId = readString( c, "capability_id", "" );
+        e.intent = readString( c, "intent", "" );
+        e.status = readString( c, "status", "" );
+        e.score = c.isMember( "score" ) && c["score"].isDouble() ? c["score"].asDouble() : 0.0;
         e.reasons = readStringArray( c["reasons"] );
         e.prepActions = readStringArray( c["prep_actions"] );
-        e.structuralOnly = c.get( "structural_only", true ).asBool();
+        e.structuralOnly = c.isMember( "structural_only" ) && c["structural_only"].isBool() ? c["structural_only"].asBool() : true;
         b.capabilities.push_back( std::move( e ) );
     }
 
@@ -346,14 +353,14 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         if ( !r.isObject() )
             continue;
         RecipeEntry e;
-        e.recipeId = r.get( "recipe_id", "" ).asString();
-        e.title = r.get( "title", "" ).asString();
-        e.intent = r.get( "intent", "" ).asString();
-        e.modality = r.get( "modality", "" ).asString();
-        e.score = r.get( "score", 0.0 ).asDouble();
-        e.stageCount = r.get( "stage_count", 0 ).asInt();
-        e.hasHumanOnly = r.get( "has_human_only", false ).asBool();
-        e.hasVerifierHooks = r.get( "has_verifier_hooks", false ).asBool();
+        e.recipeId = readString( r, "recipe_id", "" );
+        e.title = readString( r, "title", "" );
+        e.intent = readString( r, "intent", "" );
+        e.modality = readString( r, "modality", "" );
+        e.score = r.isMember( "score" ) && r["score"].isDouble() ? r["score"].asDouble() : 0.0;
+        e.stageCount = r.isMember( "stage_count" ) && r["stage_count"].isInt() ? r["stage_count"].asInt() : 0;
+        e.hasHumanOnly = r.isMember( "has_human_only" ) && r["has_human_only"].isBool() ? r["has_human_only"].asBool() : false;
+        e.hasVerifierHooks = r.isMember( "has_verifier_hooks" ) && r["has_verifier_hooks"].isBool() ? r["has_verifier_hooks"].asBool() : false;
         e.matched = readStringArray( r["matched"] );
         b.recipes.push_back( std::move( e ) );
     }
@@ -361,13 +368,13 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
     const Json::Value &constraints = json["constraints"];
     if ( constraints.isObject() )
     {
-        b.constraints.autonomyLevel = constraints.get( "autonomy_level", "L2" ).asString();
-        b.constraints.allowAutonomousExec = constraints.get( "allow_autonomous_exec", false ).asBool();
-        b.constraints.offline = constraints.get( "offline", false ).asBool();
-        b.constraints.maxBytes = constraints.get( "max_bytes", 65536 ).asInt();
-        b.constraints.maxRecipes = constraints.get( "max_recipes", 5 ).asInt();
-        b.constraints.maxCapabilities = constraints.get( "max_capabilities", 8 ).asInt();
-        b.constraints.determinismRequired = constraints.get( "determinism_required", true ).asBool();
+        b.constraints.autonomyLevel = readString( constraints, "autonomy_level", "L2" );
+        b.constraints.allowAutonomousExec = constraints.isMember( "allow_autonomous_exec" ) && constraints["allow_autonomous_exec"].isBool() ? constraints["allow_autonomous_exec"].asBool() : false;
+        b.constraints.offline = constraints.isMember( "offline" ) && constraints["offline"].isBool() ? constraints["offline"].asBool() : false;
+        b.constraints.maxBytes = constraints.isMember( "max_bytes" ) && constraints["max_bytes"].isInt() ? constraints["max_bytes"].asInt() : 65536;
+        b.constraints.maxRecipes = constraints.isMember( "max_recipes" ) && constraints["max_recipes"].isInt() ? constraints["max_recipes"].asInt() : 5;
+        b.constraints.maxCapabilities = constraints.isMember( "max_capabilities" ) && constraints["max_capabilities"].isInt() ? constraints["max_capabilities"].asInt() : 8;
+        b.constraints.determinismRequired = constraints.isMember( "determinism_required" ) && constraints["determinism_required"].isBool() ? constraints["determinism_required"].asBool() : true;
     }
 
     b.openQuestions = readStringArray( json["open_questions"] );
@@ -375,28 +382,28 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
     const Json::Value &planner = json["planner_projection"];
     if ( planner.isObject() )
     {
-        b.planner.goal = planner.get( "goal", "" ).asString();
-        b.planner.intent = planner.get( "intent", "" ).asString();
-        b.planner.recipeId = planner.get( "recipe_id", "" ).asString();
-        b.planner.inputFacts = planner.get( "input_facts", Json::objectValue );
-        b.planner.missingFacts = planner.get( "missing_facts", Json::arrayValue );
-        b.planner.limitations = planner.get( "limitations", Json::arrayValue );
-        b.planner.openQuestions = planner.get( "open_questions", Json::arrayValue );
-        b.planner.executionBlocked = planner.get( "execution_blocked", false ).asBool();
-        b.planner.blockReason = planner.get( "block_reason", "" ).asString();
+        b.planner.goal = readString( planner, "goal", "" );
+        b.planner.intent = readString( planner, "intent", "" );
+        b.planner.recipeId = readString( planner, "recipe_id", "" );
+        b.planner.inputFacts = planner.isMember( "input_facts" ) && planner["input_facts"].isObject() ? planner["input_facts"] : Json::Value( Json::objectValue );
+        b.planner.missingFacts = planner.isMember( "missing_facts" ) && planner["missing_facts"].isArray() ? planner["missing_facts"] : Json::Value( Json::arrayValue );
+        b.planner.limitations = planner.isMember( "limitations" ) && planner["limitations"].isArray() ? planner["limitations"] : Json::Value( Json::arrayValue );
+        b.planner.openQuestions = planner.isMember( "open_questions" ) && planner["open_questions"].isArray() ? planner["open_questions"] : Json::Value( Json::arrayValue );
+        b.planner.executionBlocked = planner.isMember( "execution_blocked" ) && planner["execution_blocked"].isBool() ? planner["execution_blocked"].asBool() : false;
+        b.planner.blockReason = readString( planner, "block_reason", "" );
     }
 
     const Json::Value &trunc = json["truncation"];
     if ( trunc.isObject() )
     {
-        b.truncation.truncated = trunc.get( "truncated", false ).asBool();
+        b.truncation.truncated = trunc.isMember( "truncated" ) && trunc["truncated"].isBool() ? trunc["truncated"].asBool() : false;
         b.truncation.sections = readStringArray( trunc["sections"] );
-        b.truncation.droppedRecipes = trunc.get( "dropped_recipes", 0 ).asInt();
-        b.truncation.droppedCapabilities = trunc.get( "dropped_capabilities", 0 ).asInt();
-        b.truncation.droppedQuestions = trunc.get( "dropped_questions", 0 ).asInt();
-        b.truncation.droppedAssets = trunc.get( "dropped_assets", 0 ).asInt();
-        b.truncation.originalBytes = trunc.get( "original_bytes", 0 ).asInt();
-        b.truncation.finalBytes = trunc.get( "final_bytes", 0 ).asInt();
+        b.truncation.droppedRecipes = trunc.isMember( "dropped_recipes" ) && trunc["dropped_recipes"].isInt() ? trunc["dropped_recipes"].asInt() : 0;
+        b.truncation.droppedCapabilities = trunc.isMember( "dropped_capabilities" ) && trunc["dropped_capabilities"].isInt() ? trunc["dropped_capabilities"].asInt() : 0;
+        b.truncation.droppedQuestions = trunc.isMember( "dropped_questions" ) && trunc["dropped_questions"].isInt() ? trunc["dropped_questions"].asInt() : 0;
+        b.truncation.droppedAssets = trunc.isMember( "dropped_assets" ) && trunc["dropped_assets"].isInt() ? trunc["dropped_assets"].asInt() : 0;
+        b.truncation.originalBytes = trunc.isMember( "original_bytes" ) && trunc["original_bytes"].isInt() ? trunc["original_bytes"].asInt() : 0;
+        b.truncation.finalBytes = trunc.isMember( "final_bytes" ) && trunc["final_bytes"].isInt() ? trunc["final_bytes"].asInt() : 0;
     }
 
     const Json::Value &sources = json["sources"];
