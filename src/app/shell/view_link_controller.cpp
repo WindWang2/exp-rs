@@ -49,6 +49,16 @@ ViewLinkController::ViewLinkController( sicnu::display::QgisDisplayManager *disp
     }
 }
 
+ViewLinkController::~ViewLinkController()
+{
+    mThrottle.stop();
+    hideAllMarkers();
+    while ( !m_views.isEmpty() )
+    {
+        removeView( m_views.first().id );
+    }
+}
+
 void ViewLinkController::setActiveView( sicnu::display::DisplayViewId viewId )
 {
     mActiveView = viewId;
@@ -94,6 +104,7 @@ void ViewLinkController::addView( sicnu::display::DisplayViewId viewId )
     record.id = viewId;
     if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
     {
+        record.canvas = canvas;
         // Duplicate registration is already rejected above (recordFor guard);
         // Qt::UniqueConnection is illegal for lambdas — the connections are
         // stored in the record and dropped by removeView instead.
@@ -123,8 +134,15 @@ void ViewLinkController::removeView( sicnu::display::DisplayViewId viewId )
             QObject::disconnect( record.cursorConn );
         if ( record.filterInstalled )
         {
-            if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
+            if ( record.canvas )
+                record.canvas->removeEventFilter( this );
+            else if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
                 canvas->removeEventFilter( this );
+        }
+        if ( record.marker && record.canvas )
+        {
+            delete record.marker;
+            record.marker = nullptr;
         }
         m_views.removeAt( i );
         break;

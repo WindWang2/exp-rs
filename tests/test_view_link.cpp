@@ -52,8 +52,6 @@ using sicnu::display::DisplayViewId;
 using sicnu::display::DisplayViewSpec;
 using sicnu::display::QgisDisplayManager;
 
-CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
-
 namespace
 {
 
@@ -582,4 +580,38 @@ TEST_CASE( "cursor probe samples the known-answer pixel and drops stale work",
     }
     CHECK_FALSE( probe.isBusy() );
     CHECK( probe.stats().delivered == 2 ); // nothing new after the cancel
+}
+
+TEST_CASE( "destroying ViewLinkController unregisters event filters and disconnects signals",
+           "[view_link][lifecycle][issue1453]" )
+{
+    DataManager data;
+    QgsMapCanvas a, b;
+    QgsLayerTree treeA, treeB;
+    QgsMapLayerStore storeA, storeB;
+    const DisplayViewId viewA = data.createView( a, treeA, storeA );
+    const DisplayViewId viewB = data.createView( b, treeB, storeB );
+    REQUIRE( !viewA.isNull() );
+    REQUIRE( !viewB.isNull() );
+
+    {
+        ViewLinkController controller( &data.manager );
+        controller.addView( viewA );
+        controller.addView( viewB );
+        controller.setLinked( viewA, true );
+        controller.setLinked( viewB, true );
+        CHECK( controller.views().size() == 2 );
+    }
+    // controller is now destroyed. The canvases outlive it.
+    // Sending events or invoking signals must not trigger Use-After-Free crashes.
+    QEvent leave( QEvent::Leave );
+    CHECK_NOTHROW( QApplication::sendEvent( &a, &leave ) );
+    QApplication::processEvents();
+
+    a.setExtent( QgsRectangle( 10, 10, 50, 50 ) );
+    QApplication::processEvents();
+
+    const QgsPointXY p( 25.0, 25.0 );
+    QMetaObject::invokeMethod( &a, "xyCoordinates", Q_ARG( QgsPointXY, p ) );
+    QApplication::processEvents();
 }

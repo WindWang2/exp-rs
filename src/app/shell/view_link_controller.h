@@ -74,6 +74,7 @@ class ViewLinkController : public QObject
 
     explicit ViewLinkController( sicnu::display::QgisDisplayManager *displayManager,
                                  QObject *parent = nullptr );
+    ~ViewLinkController() override;
 
     /// Registers a view (main + secondaries). Idempotent. Unknown/dead views
     /// are rejected (the manager must know the id).
@@ -161,6 +162,7 @@ class ViewLinkController : public QObject
         /// so a remove/re-add cycle on a living canvas never double-connects.
         QMetaObject::Connection extentConn;
         QMetaObject::Connection cursorConn;
+        QPointer<QgsMapCanvas> canvas;
         bool filterInstalled = false;
         /// WKT cache: generating WKT per pointer move is too expensive; the
         /// cache is keyed by CRS equality (cheap), so a project CRS change
@@ -184,7 +186,7 @@ class ViewLinkController : public QObject
 
     QgsMapCanvas *canvasFor( sicnu::display::DisplayViewId viewId ) const;
 
-    sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
+    QPointer<sicnu::display::QgisDisplayManager> m_displayManager;
     QVector<ViewRecord> m_views;
     bool mCenterSync = true;
     bool mScaleSync = true;
