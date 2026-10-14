@@ -3,6 +3,11 @@
 ## Executive Summary
 Hardening Track R13-H addresses scientific planning determinism, context broker cache integrity, repair decision ranking, and fail-closed JSON schema resilience across the SICNU scientific planning subsystem.
 
+- **Pull Request**: [#1500](https://github.com/WindWang2/exp-rs/pull/1500)
+- **Branch**: `hardening/r13-h-scientific-planning`
+- **Head Commit**: `656d6a89c2`
+- **Base SHA**: `892295685e3606f3ac54c959954dde626508cc17` (origin/master)
+
 ## Work Packages Completed (WP-01 through WP-16)
 - **WP-01**: `ScientificGoal` in-memory boundary validation, acceptance criteria deduplication, and fail-closed JSON envelope checks (#1447).
 - **WP-02**: Deterministic candidate ranking and duplicate operator elimination in `PlannerCore`.
