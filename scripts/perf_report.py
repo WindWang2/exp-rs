@@ -65,10 +65,16 @@ def diff(args) -> int:
         if not b or not a:
             print("   %s" % ("missing in AFTER" if b else "missing in BEFORE"))
             continue
-        print("   wall  %s" % _fmt_delta(b["wall_ms"], a["wall_ms"], "ms"))
-        print("   cpu   %s" % _fmt_delta(b["cpu_ms"], a["cpu_ms"], "ms"))
-        print("   rssd  %s" % _fmt_delta(b["peak_rss_mb"], a["peak_rss_mb"], "MB"))
-        if b["wall_ms"] > 0:
+        # Records from older/leaner bench lanes may lack cpu_ms/peak_rss_mb;
+        # a missing metric is "no data", never a KeyError crash (R13-I WP-16).
+        for key, label, unit in (("wall_ms", "wall", "ms"),
+                                 ("cpu_ms", "cpu", "ms"),
+                                 ("peak_rss_mb", "rssd", "MB")):
+            if key in b and key in a:
+                print("   %-5s %s" % (label, _fmt_delta(b[key], a[key], unit)))
+            else:
+                print("   %-5s (no data)" % label)
+        if b.get("wall_ms", 0) > 0 and "wall_ms" in a:
             wall_delta = (a["wall_ms"] - b["wall_ms"]) / b["wall_ms"]
             if wall_delta * 100.0 > args.threshold:
                 regressions.append((name, wall_delta * 100.0))
