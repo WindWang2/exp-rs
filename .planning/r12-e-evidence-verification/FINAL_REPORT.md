@@ -51,4 +51,4 @@ Branch: `hardening/r12-e-verification-evidence` · Worktree: `exp-rs-r12-e-verif
 - P3 observations from Reviewer-C (canonicalFindingText tie-break precision; absent-evidence silence in explain adapter; canonicalizer ≥2^53/NaN narrowing pre-existing in data layer) — recorded, not in R12-E scope to change.
 
 ## 6. PR
-Created via `gh pr create` (non-draft, base master, head hardening/r12-e-verification-evidence); URL recorded below after creation. No auto-merge; CI not awaited per directive.
+**Created and verified**: https://github.com/WindWang2/exp-rs/pull/1497 — `gh pr view` confirms number=1497, state=OPEN, head=hardening/r12-e-verification-evidence, base=master, draft=false, 14 commits. Non-draft, no auto-merge, CI not awaited per directive. Branch and worktree retained for maintainer review.
