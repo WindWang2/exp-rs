@@ -260,6 +260,32 @@ TEST_CASE( "execution facts without machine evidence are refused",
   CHECK( codes.has( "system_fact_without_machine_evidence" ) );
 }
 
+TEST_CASE( "execution facts with an empty status are a typed issue",
+           "[explain][validator][hallucination]" )
+{
+  FakeKnowledge knowledge;
+  knowledge.operators.emplace( "rs:test", makeOperator( "rs:test" ) );
+  const ExplanationValidator validator( knowledge );
+
+  // The machine link is present, but an empty status means the record never
+  // produced a run state: nothing the view model could render honestly.
+  StepExplanation explanation = baseExplanation();
+  ExecutionFacts execution;
+  execution.evidence = { machineLink() };
+  explanation.execution = execution;
+
+  const ValidationReport report = validator.validate( explanation );
+  const IssueCodes codes( report );
+  CHECK( codes.has( "empty_content" ) );
+  bool fieldPinned = false;
+  for ( const ValidationIssue &issue : report.issues )
+  {
+    if ( issue.code == "empty_content" && issue.field == "execution.status" )
+      fieldPinned = true;
+  }
+  CHECK( fieldPinned );
+}
+
 TEST_CASE( "malformed evidence links and citations are typed", "[explain][validator]" )
 {
   FakeKnowledge knowledge;
