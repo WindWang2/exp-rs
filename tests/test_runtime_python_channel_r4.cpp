@@ -656,3 +656,68 @@ TEST_CASE( "Recovery watchdog answers pending calls when the restarted worker ne
     CHECK( answeredMessage.contains( QStringLiteral( "restart timed out" ) ) );
     pool.shutdown();
 }
+
+TEST_CASE( "acquireWorker is safe under concurrent worker loss and restart cycles (#1486)",
+           "[runtime][python][r4][pool]" )
+{
+    ScriptFixture fixture;
+    // Script sleeps briefly then exits with 42 to trigger worker loss and auto-heal restart
+    const QString script =
+        fixture.write( "pool_loss_race.sh", "#!/bin/sh\nsleep 1\nexit 42\n" );
+
+    PythonWorkerProcessPool pool( 2 );
+    std::atomic<int> crashCount{ 0 };
+    std::atomic<int> restartCount{ 0 };
+    QObject::connect( &pool, &PythonWorkerProcessPool::workerCrashed,
+                      [&]( int, const QString & ) { crashCount.fetch_add( 1 ); } );
+    QObject::connect( &pool, &PythonWorkerProcessPool::workerRestarted,
+                      [&]( int ) { restartCount.fetch_add( 1 ); } );
+
+    REQUIRE( pool.initialize( "/bin/sh", script ) );
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> acquireAttempts{ 0 };
+    constexpr int kThreads = 4;
+    std::vector<std::thread> threads;
+
+    for ( int i = 0; i < kThreads; ++i )
+    {
+        threads.emplace_back( [&] {
+            while ( !stop.load( std::memory_order_relaxed ) )
+            {
+                acquireAttempts.fetch_add( 1, std::memory_order_relaxed );
+                WorkerNode *node = pool.acquireWorker( 20 );
+                if ( node )
+                {
+                    if ( node->worker )
+                    {
+                        (void)node->worker->isRunning();
+                    }
+                    if ( node->server )
+                    {
+                        (void)node->server->hasClient();
+                    }
+                    pool.releaseWorker( node );
+                }
+                std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+            }
+        } );
+    }
+
+    const auto start = std::chrono::steady_clock::now();
+    while ( std::chrono::steady_clock::now() - start < std::chrono::milliseconds( 2500 ) )
+    {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+
+    stop.store( true, std::memory_order_release );
+    for ( auto &t : threads )
+    {
+        t.join();
+    }
+
+    CHECK( acquireAttempts.load() > 0 );
+    CHECK( crashCount.load() > 0 );
+    pool.shutdown();
+}
