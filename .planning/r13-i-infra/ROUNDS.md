@@ -121,3 +121,8 @@
 - All 16 WPs addressed: 5 fixed-with-diff (WP-01/02/03/04 + WP-08 parallel-cap tail), WP-05/06/07 verified-no-op (#1468 already fixed on master, fixtures GREEN x2), WP-09/11/14/15 verified with fixture matrices, WP-10 static-only (no Windows host), WP-12 partial (full install blocked by cross-domain #1499), WP-13 discovery determinism + census lane, WP-16 perf_report fix + timing baseline.
 - Cross-domain: issue #1499 filed (master compile break, src/python) with minimal-fix A/B proof.
 - Independent review: 2 rounds, BLOCK -> APPROVE, all findings closed with repros.
+
+## Round 21 — closeout (lead)
+- HEAD e4f8f635465f (12 commits over base 892295685e36). master unchanged at push time (re-fetched). Overlap vs R13-G/H: none (comm-verified).
+- Pushed branch hardening/r13-i-build-test-packaging; PR: https://github.com/WindWang2/exp-rs/pull/1502 (not merged, cloud CI not awaited per track rules).
+- PR body placeholder mishap fixed via gh pr edit (recorded as process note).
