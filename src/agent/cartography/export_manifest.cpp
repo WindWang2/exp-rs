@@ -97,9 +97,10 @@ std::vector<std::string> validateExportManifest( const Json::Value &document )
         problems.push_back( "manifest must be a JSON object" );
         return problems;
     }
-    if ( !document.isMember( "kind" ) || document["kind"].asString() != "cartography_export_manifest" )
+    if ( !document.isMember( "kind" ) || !document["kind"].isString() ||
+         document["kind"].asString() != "cartography_export_manifest" )
         problems.push_back( "kind must be 'cartography_export_manifest'" );
-    if ( !document.isMember( "manifest_version" ) ||
+    if ( !document.isMember( "manifest_version" ) || !document["manifest_version"].isIntegral() ||
          document["manifest_version"].asInt() != kExportManifestVersion )
         problems.push_back( "unsupported manifest_version" );
     for ( const char *member : { "layout_name", "format", "structural_digest" } )
@@ -124,9 +125,9 @@ std::vector<std::string> validateExportManifest( const Json::Value &document )
             problems.push_back( where + " must be an object" );
             continue;
         }
-        if ( !page.isMember( "file_name" ) || !isBareName( page["file_name"].asString() ) )
+        if ( !page.isMember( "file_name" ) || !page["file_name"].isString() || !isBareName( page["file_name"].asString() ) )
             problems.push_back( where + ".file_name must be a bare name" );
-        if ( !page.isMember( "sha256" ) || !isHexDigest( page["sha256"].asString() ) )
+        if ( !page.isMember( "sha256" ) || !page["sha256"].isString() || !isHexDigest( page["sha256"].asString() ) )
             problems.push_back( where + ".sha256 must be a lowercase hex sha256" );
         if ( !page.isMember( "bytes" ) || !page["bytes"].isIntegral() || page["bytes"].asInt64() <= 0 )
             problems.push_back( where + ".bytes must be a positive integer" );
