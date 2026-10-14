@@ -312,3 +312,56 @@ TEST_CASE( "asset kind and modality strings round-trip", "[scientific_state][sli
         REQUIRE( parsed == modality );
     }
 }
+
+namespace
+{
+
+std::string writeDoc( const Json::Value &doc )
+{
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    builder["commentStyle"] = "None";
+    return Json::writeString( builder, doc );
+}
+
+} // namespace
+
+TEST_CASE( "integral int fields outside int range are refused with a typed error",
+           "[scientific_state][slice_a]" )
+{
+    const RemoteSensingAssetState state = makeSampleState();
+
+    // bands[].index beyond int range: isIntegral() is true but asInt() throws.
+    Json::Value bandDoc = assetStateToJson( state );
+    bandDoc["bands"][0]["index"] = Json::Value( Json::Int64( 3000000000LL ) );
+    RemoteSensingAssetState decoded;
+    AssetStateError error;
+    REQUIRE_NOTHROW( !assetStateFromJson( writeDoc( bandDoc ), decoded, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( !error.message.empty() );
+
+    // geometry.width beyond uint32: same throw path through readInt.
+    Json::Value geometryDoc = assetStateToJson( state );
+    geometryDoc["geometry"]["width"] = Json::Value( Json::UInt64( 4294967295ULL ) );
+    REQUIRE_NOTHROW( !assetStateFromJson( writeDoc( geometryDoc ), decoded, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( !error.message.empty() );
+}
+
+TEST_CASE( "int field boundaries are enforced exactly at int range",
+           "[scientific_state][slice_a]" )
+{
+    const RemoteSensingAssetState state = makeSampleState();
+    RemoteSensingAssetState decoded;
+    AssetStateError error;
+
+    Json::Value maxDoc = assetStateToJson( state );
+    maxDoc["bands"][0]["index"] = 2147483647;
+    REQUIRE( assetStateFromJson( writeDoc( maxDoc ), decoded, error ) );
+    REQUIRE( decoded.bands[0].index == 2147483647 );
+
+    Json::Value overDoc = assetStateToJson( state );
+    overDoc["bands"][0]["index"] = Json::Value( Json::Int64( 2147483648LL ) );
+    REQUIRE_NOTHROW( !assetStateFromJson( writeDoc( overDoc ), decoded, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+}
