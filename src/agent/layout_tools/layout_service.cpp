@@ -745,7 +745,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
   setProp( "width", [&]() {
     if ( !props["width"].isNumeric() || !std::isfinite( props["width"].asDouble() ) || props["width"].asDouble() <= 0 )
       return false;
-    const double h = props.isMember( "height" ) && props["height"].isNumeric() && std::isfinite( props["height"].asDouble() )
+    const double h = props.isMember( "height" ) && props["height"].isNumeric() &&
+                     std::isfinite( props["height"].asDouble() ) && props["height"].asDouble() > 0
                        ? props["height"].asDouble()
                        : item->sizeWithUnits().height();
     undoStack->beginCommand( item, QStringLiteral( "Resize Item" ), QgsLayoutItem::UndoIncrementalResize );
@@ -756,7 +757,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
   setProp( "height", [&]() {
     if ( !props["height"].isNumeric() || !std::isfinite( props["height"].asDouble() ) || props["height"].asDouble() <= 0 )
       return false;
-    const double w = props.isMember( "width" ) && props["width"].isNumeric() && std::isfinite( props["width"].asDouble() )
+    const double w = props.isMember( "width" ) && props["width"].isNumeric() &&
+                     std::isfinite( props["width"].asDouble() ) && props["width"].asDouble() > 0
                        ? props["width"].asDouble()
                        : item->sizeWithUnits().width();
     undoStack->beginCommand( item, QStringLiteral( "Resize Item" ), QgsLayoutItem::UndoIncrementalResize );
@@ -817,6 +819,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
     return true;
   } );
   setProp( "frame_width", [&]() {
+    if ( !props["frame_width"].isNumeric() || !std::isfinite( props["frame_width"].asDouble() ) || props["frame_width"].asDouble() < 0 )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Change Frame Width" ), QgsLayoutItem::UndoStrokeWidth );
     item->setFrameStrokeWidth( QgsLayoutMeasurement( props["frame_width"].asDouble() ) );
     undoStack->endCommand();
@@ -1102,9 +1106,21 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       continue;
     if ( ignored )
     {
-      const bool known = std::find( std::begin( kKnown ), std::end( kKnown ), key ) != std::end( kKnown );
-      ignored->append( known ? qKey + QStringLiteral( " (not applicable to this item type)" )
-                             : qKey + QStringLiteral( " (unknown property)" ) );
+      bool alreadyIgnored = false;
+      for ( const QString &ig : *ignored )
+      {
+        if ( ig.startsWith( qKey ) )
+        {
+          alreadyIgnored = true;
+          break;
+        }
+      }
+      if ( !alreadyIgnored )
+      {
+        const bool known = std::find( std::begin( kKnown ), std::end( kKnown ), key ) != std::end( kKnown );
+        ignored->append( known ? qKey + QStringLiteral( " (not applicable to this item type or invalid value)" )
+                               : qKey + QStringLiteral( " (unknown property)" ) );
+      }
     }
   }
 

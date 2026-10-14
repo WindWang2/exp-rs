@@ -62,7 +62,9 @@ void writeRect( Json::Value &item, const Rect &rect )
 
 double anchorMargin( const Json::Value &anchor, double marginDefaultMm )
 {
-  return anchor.isObject() && anchor.isMember( "margin_mm" ) && anchor["margin_mm"].isNumeric()
+  return anchor.isObject() && anchor.isMember( "margin_mm" ) &&
+         anchor["margin_mm"].isNumeric() && std::isfinite( anchor["margin_mm"].asDouble() ) &&
+         anchor["margin_mm"].asDouble() >= 0
            ? anchor["margin_mm"].asDouble()
            : marginDefaultMm;
 }

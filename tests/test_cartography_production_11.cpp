@@ -1212,6 +1212,16 @@ TEST_CASE( "Schema and descriptor validation robustness against malformed types 
         manifest["pages"].append( page );
         REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
         CHECK_FALSE( problems.empty() );
+
+        // Test non-finite and non-positive dpi
+        manifest["pages"] = Json::Value( Json::arrayValue );
+        manifest["dpi"] = -300.0;
+        REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
+        CHECK_FALSE( problems.empty() );
+
+        manifest["dpi"] = std::numeric_limits<double>::quiet_NaN();
+        REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
+        CHECK_FALSE( problems.empty() );
     }
 
     SECTION( "Template descriptor validation does not throw when deprecated is wrong type (WP-13)" )

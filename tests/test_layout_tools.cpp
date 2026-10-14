@@ -700,6 +700,33 @@ TEST_CASE( "LayoutService robustness: null layouts, non-finite properties and bo
     CHECK( !ignored.empty() );
     CHECK( ignored.first().contains( "extent" ) );
 
+    // Verify negative sibling dimension in batch resize cannot poison item height
+    Json::Value resizeProps( Json::objectValue );
+    resizeProps["width"] = 120.0;
+    resizeProps["height"] = -10.0;
+    applied.clear();
+    ignored.clear();
+    LayoutService::instance().applyItemProperties( item, resizeProps, &applied, &ignored, &error );
+    CHECK( item->sizeWithUnits().height() == 100.0 );
+    CHECK( item->sizeWithUnits().width() == 120.0 );
+    CHECK( !ignored.filter( QStringLiteral( "height" ) ).isEmpty() );
+
+    // Verify negative and NaN frame_width are rejected
+    Json::Value frameProps( Json::objectValue );
+    frameProps["frame_width"] = -2.0;
+    applied.clear();
+    ignored.clear();
+    LayoutService::instance().applyItemProperties( item, frameProps, &applied, &ignored, &error );
+    CHECK( applied.empty() );
+    CHECK( !ignored.filter( QStringLiteral( "frame_width" ) ).isEmpty() );
+
+    frameProps["frame_width"] = std::numeric_limits<double>::quiet_NaN();
+    applied.clear();
+    ignored.clear();
+    LayoutService::instance().applyItemProperties( item, frameProps, &applied, &ignored, &error );
+    CHECK( applied.empty() );
+    CHECK( !ignored.filter( QStringLiteral( "frame_width" ) ).isEmpty() );
+
     LayoutService::instance().deleteLayout( QStringLiteral( "RobustnessTest" ) );
   }
 }

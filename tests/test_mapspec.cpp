@@ -605,6 +605,24 @@ TEST_CASE( "MapSpec validation and condition parser robustness (R13-G WP-01/WP-0
     label["rect_mm"] = rect;
     spec["labels"].append( label );
 
-    REQUIRE_NOTHROW( sicnu::agent::cartography::resolveComposition( spec, 12.0 ) );
+    sicnu::agent::cartography::CompositionResult result;
+    REQUIRE_NOTHROW( result = sicnu::agent::cartography::resolveComposition( spec, 12.0 ) );
+
+    // Test anchor with NaN and negative margins in composition solver
+    Json::Value anchorItem( Json::objectValue );
+    anchorItem["id"] = "anchor-nan";
+    Json::Value anchor( Json::objectValue );
+    anchor["edge"] = "top-left";
+    anchor["margin_mm"] = std::numeric_limits<double>::quiet_NaN();
+    anchorItem["anchor"] = anchor;
+    Json::Value rect2( Json::arrayValue );
+    rect2.append( 0 ); rect2.append( 0 ); rect2.append( 20 ); rect2.append( 20 );
+    anchorItem["rect_mm"] = rect2;
+    spec["labels"].append( anchorItem );
+
+    REQUIRE_NOTHROW( result = sicnu::agent::cartography::resolveComposition( spec, 12.0 ) );
+    // anchorMargin safely defaulted to marginDefaultMm (12.0) instead of poisoning rect with NaN
+    CHECK( spec["labels"][1]["rect_mm"][0].asDouble() == 12.0 );
+    CHECK( spec["labels"][1]["rect_mm"][1].asDouble() == 12.0 );
   }
 }

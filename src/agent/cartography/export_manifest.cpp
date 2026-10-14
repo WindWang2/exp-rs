@@ -108,6 +108,8 @@ std::vector<std::string> validateExportManifest( const Json::Value &document )
             problems.push_back( std::string( "missing string member: " ) + member );
     if ( !document.isMember( "dpi" ) || !document["dpi"].isNumeric() )
         problems.push_back( "missing numeric member: dpi" );
+    else if ( !std::isfinite( document["dpi"].asDouble() ) || document["dpi"].asDouble() <= 0.0 )
+        problems.push_back( "dpi must be a positive finite number" );
     if ( !document.isMember( "pages" ) || !document["pages"].isArray() )
     {
         problems.push_back( "missing pages array" );
