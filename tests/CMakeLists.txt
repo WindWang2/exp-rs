@@ -12533,6 +12533,20 @@ sicnu_add_test(test_chunked_fabric_e2e TIMEOUT 300)
 target_link_libraries(test_chunked_fabric_e2e PRIVATE sicnu_runtime)
 sicnu_add_test(test_chunked_operators_parity TIMEOUT 300)
 target_link_libraries(test_chunked_operators_parity PRIVATE sicnu_runtime)
+
+qt_add_executable(test_challenger_m1_2_harness test_challenger_m1_2_harness.cpp)
+target_link_libraries(test_challenger_m1_2_harness PRIVATE
+  Qt6::Core
+  sicnu_runtime
+)
+target_include_directories(test_challenger_m1_2_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_challenger_m1_2_harness PROPERTIES AUTOMOC ON)
+add_test(NAME test_challenger_m1_2_harness COMMAND test_challenger_m1_2_harness)
+
 qt_add_executable(test_challenger_m3_2_harness test_challenger_m3_2_harness.cpp)
 target_link_libraries(test_challenger_m3_2_harness PRIVATE
   Catch2::Catch2WithMain
