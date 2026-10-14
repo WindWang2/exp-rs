@@ -672,13 +672,13 @@ TEST_CASE( "createVirtualRaster uses SHA-256 recipe hash and canonical recipe in
   const Result<AssetId> created = manager.createVirtualRaster( recipe );
   REQUIRE( created );
 
-  const auto snapshot = manager.snapshot( created.value() );
+  const std::optional<AssetSnapshot> snapshot = manager.asset( created.value() );
   REQUIRE( snapshot.has_value() );
-  const QString canonicalSource = snapshot->descriptor.canonicalSource;
+  const QString canonicalSource = snapshot->source().canonicalSource;
   const QString expectedFileName = QStringLiteral( "vrt_%1.vrt" ).arg( recipe.contentDigest() );
   CHECK( canonicalSource.endsWith( expectedFileName ) );
 
-  const QString storedRecipe = snapshot->descriptor.dataOptions.value( QStringLiteral( "recipe" ) );
+  const QString storedRecipe = snapshot->source().dataOptions.value( QStringLiteral( "recipe" ) );
   CHECK_FALSE( storedRecipe.isEmpty() );
   const auto parsed = VirtualRasterRecipe::fromJson(
     QJsonDocument::fromJson( storedRecipe.toUtf8() ).object() );
