@@ -154,9 +154,20 @@ FaultOutcome applyWrongScaleOffset( FaultGrid &grid, const Json::Value &params,
                              "wrong_scale_offset needs a finite, nonzero gain" );
     }
     const double gain = params["gain"].asDouble();
-    const double offset = params.isMember( "offset" ) && isFiniteNumber( params["offset"] )
-                              ? params["offset"].asDouble()
-                              : 0.0;
+    // A declared optional param with an unusable value is a typed refusal,
+    // never a silent coercion into the identity offset / data path (#1447
+    // type-gate shape, same as the cell_size gate on the leakage family).
+    if ( params.isMember( "offset" ) && !isFiniteNumber( params["offset"] ) )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "wrong_scale_offset needs a finite numeric offset" );
+    }
+    const double offset = params.isMember( "offset" ) ? params["offset"].asDouble() : 0.0;
+    if ( params.isMember( "metadata" ) && !params["metadata"].isBool() )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "wrong_scale_offset metadata must be a boolean" );
+    }
     const int index = grid.bandIndexByRole( role );
     if ( index < 0 )
     {
@@ -165,8 +176,7 @@ FaultOutcome applyWrongScaleOffset( FaultGrid &grid, const Json::Value &params,
     }
     BandSpec &band = grid.bands[static_cast<std::size_t>( index )];
 
-    if ( params.isMember( "metadata" ) && params["metadata"].isBool() &&
-         params["metadata"].asBool() )
+    if ( params.isMember( "metadata" ) && params["metadata"].asBool() )
     {
         // Declared scale/offset wrong, pixel values kept: downstream products
         // silently misinterpret the data.
@@ -325,7 +335,10 @@ FaultOutcome applyTemporalShuffle( FaultGrid &grid, const Json::Value &params,
 FaultOutcome applyTemporalGap( FaultGrid &grid, const Json::Value &params,
                                 std::uint32_t /*seed*/ )
 {
-    if ( !params.isMember( "epoch_index" ) || !params["epoch_index"].isIntegral() )
+    // isInt64(), not isIntegral(): a UInt64 above INT64_MAX passes the latter
+    // but throws Json::LogicError out of asInt64() below, escaping the
+    // never-throws contract through runFaultScenario (R2 P1).
+    if ( !params.isMember( "epoch_index" ) || !params["epoch_index"].isInt64() )
     {
         return errorOutcome( "faultlab.fault_unsupported_params",
                              "temporal_gap needs an integer epoch_index" );
@@ -396,13 +409,24 @@ FaultOutcome applyTrainTestSpatialLeakage( FaultGrid &grid, const Json::Value &p
         std::uint32_t cloned = 0;
         for ( const auto &sample : samples )
         {
-            if ( sample.isObject() && sample.isMember( "role" ) &&
-                 sample["role"].asString() == "train" )
+            if ( sample.isObject() && sample.isMember( "role" ) )
             {
-                Json::Value clone = sample;
-                clone["role"] = "test";
-                clones.append( clone );
-                ++cloned;
+                // Role reads are type-gated like the param gates above:
+                // asString() on a non-string throws (or stringifies on newer
+                // jsoncpp) instead of refusing — a malformed sample point
+                // arrives as a typed error, never an exception (#1447).
+                if ( !sample["role"].isString() )
+                {
+                    return errorOutcome( "faultlab.fault_unsafe_target",
+                                         "train_test_spatial_leakage sample roles must be strings" );
+                }
+                if ( sample["role"].asString() == "train" )
+                {
+                    Json::Value clone = sample;
+                    clone["role"] = "test";
+                    clones.append( clone );
+                    ++cloned;
+                }
             }
         }
         if ( cloned == 0 )
@@ -432,6 +456,12 @@ FaultOutcome applyTrainTestSpatialLeakage( FaultGrid &grid, const Json::Value &p
         if ( !sample.isObject() || !sample.isMember( "role" ) )
         {
             continue;
+        }
+        // Same role type gate as the duplicate branch (#1447).
+        if ( !sample["role"].isString() )
+        {
+            return errorOutcome( "faultlab.fault_unsafe_target",
+                                 "train_test_spatial_leakage sample roles must be strings" );
         }
         if ( firstTrain < 0 && sample["role"].asString() == "train" )
         {
@@ -509,7 +539,9 @@ FaultOutcome applyModelChannelMismatch( FaultGrid &grid, const Json::Value &para
     for ( Json::ArrayIndex i = 0; i < permutation.size(); ++i )
     {
         const auto &entry = permutation[i];
-        if ( !entry.isIntegral() )
+        // isInt64(), not isIntegral(): a UInt64 above INT64_MAX passes the
+        // latter but throws Json::LogicError out of asInt64() below (R2 P1).
+        if ( !entry.isInt64() )
         {
             return errorOutcome( "faultlab.fault_unsupported_params",
                                  "model_channel_mismatch permutation entries must be integers" );

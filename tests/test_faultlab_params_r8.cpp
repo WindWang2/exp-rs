@@ -14,6 +14,7 @@
 #include "faultlab/fault_transforms.h"
 #include "faultlab/fault_types.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
@@ -173,6 +174,171 @@ TEST_CASE( "train_test_spatial_leakage refusals leave the grid unmutated",
         CHECK( error->code == "faultlab.fault_unsafe_target" );
         CHECK( grid.extras["leakage_cell_size"].asDouble() == 4.0 );
         CHECK( grid.extras["samples"] == pristineSamples );
+    }
+}
+
+TEST_CASE( "wrong_scale_offset refuses mistyped optional params instead of coercing",
+           "[faultlab][params][r12]" )
+{
+    // Present-but-unusable optional params used to be silently coerced:
+    // offset "abc" became 0.0, metadata 1 became false — a refused-looking
+    // scenario silently applied the identity offset. Same gate shape as
+    // cell_size (#1464): a declared param with an unusable value is a typed
+    // refusal, never a silent default.
+    SECTION( "string offset refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["offset"] = "abc";
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "array offset refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        Json::Value offset( Json::arrayValue );
+        offset.append( 1 );
+        spec.params["offset"] = offset;
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "numeric metadata refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["metadata"] = 1;
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "valid offset and metadata still apply" )
+    {
+        FaultGrid grid = leakageGrid();
+        BandSpec red;
+        red.role = "red";
+        red.samples.assign( 4, 1.0 );
+        grid.bands.push_back( red );
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["offset"] = 0.5;
+        spec.params["metadata"] = true;
+        const FaultOutcome applied = applyFault( grid, spec );
+        REQUIRE( applied.ok );
+        CHECK( grid.bands.back().scale == Catch::Approx( 2.0 ) );
+        CHECK( grid.bands.back().offset == Catch::Approx( 0.5 ) );
+        CHECK( grid.bands.back().samples[0] == Catch::Approx( 1.0 ) ); // data kept
+    }
+}
+
+TEST_CASE( "integral params beyond int64 refuse typed instead of throwing",
+           "[faultlab][params][r12]" )
+{
+    // Round-2 review (P1): isIntegral() is true for a UInt64 above INT64_MAX,
+    // but asInt64() THROWS Json::LogicError on one — escaping the
+    // never-throws contract (fault_types.h) through applyFault /
+    // runFaultScenario, which have no try/catch. Same defect class as the
+    // R1 P1 closed in scientific_state: gate with isInt64() and refuse the
+    // out-of-range value with the existing typed vocabulary.
+    const Json::Value beyondInt64( Json::UInt64( 18446744073709551615ull ) );
+
+    SECTION( "temporal_gap epoch_index" )
+    {
+        auto datedGrid = [] {
+            FaultGrid grid;
+            for ( int i = 0; i < 2; ++i )
+            {
+                BandSpec band;
+                band.role = "epoch" + std::to_string( i + 1 );
+                band.acquisitionDate = "2020-0" + std::to_string( i + 1 ) + "-01";
+                band.samples.assign( 4, 0.1 );
+                grid.bands.push_back( band );
+            }
+            return grid;
+        };
+
+        FaultGrid grid = datedGrid();
+        FaultSpec refused;
+        refused.familyId = "temporal_gap";
+        refused.params["epoch_index"] = beyondInt64;
+        FaultOutcome outcome;
+        REQUIRE_NOTHROW( outcome = applyFault( grid, refused ) );
+        CHECK_FALSE( outcome.ok );
+        const FaultDiagnostic *error = outcome.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+        CHECK( grid.bands.size() == 2 );
+
+        // In-range guard: an ordinary index still applies the gap.
+        FaultGrid victim = datedGrid();
+        FaultSpec valid;
+        valid.familyId = "temporal_gap";
+        valid.params["epoch_index"] = 1;
+        const FaultOutcome applied = applyFault( victim, valid );
+        REQUIRE( applied.ok );
+        CHECK( victim.bands.size() == 1 );
+    }
+
+    SECTION( "model_channel_mismatch permutation entry" )
+    {
+        auto modelGrid = [] {
+            FaultGrid grid;
+            Json::Value order( Json::arrayValue );
+            order.append( "red" );
+            order.append( "nir" );
+            Json::Value model( Json::objectValue );
+            model["channel_order"] = order;
+            grid.extras["model"] = model;
+            return grid;
+        };
+
+        FaultGrid grid = modelGrid();
+        FaultSpec refused;
+        refused.familyId = "model_channel_mismatch";
+        Json::Value permutation( Json::arrayValue );
+        permutation.append( 1 );
+        permutation.append( beyondInt64 );
+        refused.params["permutation"] = permutation;
+        FaultOutcome outcome;
+        REQUIRE_NOTHROW( outcome = applyFault( grid, refused ) );
+        CHECK_FALSE( outcome.ok );
+        const FaultDiagnostic *error = outcome.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+        // Refusal leaves the declared channel order unmutated.
+        REQUIRE( grid.extras["model"].isMember( "channel_order" ) );
+        CHECK( grid.extras["model"]["channel_order"][0].asString() == "red" );
+
+        // In-range guard: a real permutation still applies.
+        FaultGrid victim = modelGrid();
+        FaultSpec valid;
+        valid.familyId = "model_channel_mismatch";
+        Json::Value swap( Json::arrayValue );
+        swap.append( 1 );
+        swap.append( 0 );
+        valid.params["permutation"] = swap;
+        const FaultOutcome applied = applyFault( victim, valid );
+        REQUIRE( applied.ok );
+        CHECK( victim.extras["model"]["channel_order"][0].asString() == "nir" );
     }
 }
 

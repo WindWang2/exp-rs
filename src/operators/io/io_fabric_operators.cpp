@@ -153,14 +153,18 @@ Json::Value IoCatalogSearchOperator::metadata() const
 Json::Value IoCatalogSearchOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return fabricGuarded( [ & ] {
+    context.reportProgress( 0.05, "opening catalog service" );
     sicnu::geo::CatalogServiceOptions options;
     const sicnu::geo::CatalogService service =
       sicnu::geo::openCatalogService( sicnu::operators::params::requireString( params, "catalog" ),
                                       options );
+    context.reportProgress( 0.25, "querying catalog assets" );
     // The shared intent parser IS the query parser (one vocabulary).
     const sicnu::geo::CatalogQuery query = sicnu::geo::fabricIntentFromJson( params ).query;
     const sicnu::geo::CancelToken cancel = contextCancelToken( context );
     const sicnu::geo::CatalogService::SearchAllResult result = service.searchAll( query, cancel );
+    context.throwIfCancelled();
+    context.reportProgress( 0.85, "formatting catalog records" );
     Json::Value out;
     out["backend"] = sicnu::geo::catalogBackendKindName( service.info().kind );
     out["records"] = recordsJson( result );
@@ -208,9 +212,12 @@ Json::Value IoCubePlanOperator::metadata() const
 Json::Value IoCubePlanOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return fabricGuarded( [ & ] {
+    context.reportProgress( 0.1, "parsing intent" );
     const sicnu::geo::FabricIntent intent = intentFrom( params );
     const sicnu::geo::CancelToken cancel = contextCancelToken( context );
+    context.reportProgress( 0.4, "planning virtual cube" );
     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
+    context.throwIfCancelled();
     context.reportProgressForced( 1.0, "cube plan complete" );
     return plan.toJson();
   } );
@@ -261,11 +268,13 @@ Json::Value IoCubeWindowOperator::run( const Json::Value &params, RSOperatorCont
 {
   return fabricGuarded( [ & ] {
     using namespace sicnu::operators::params;
+    context.reportProgress( 0.05, "parsing cube window intent" );
     sicnu::geo::FabricIntent intent = intentFrom( params );
     if ( !intent.hasWindow )
       throw sicnu::geo::GeoError( sicnu::geo::ErrorCode::InvalidArgument,
                                   "io:cube_window needs a window{x,y,w,h} object" );
     const sicnu::geo::CancelToken cancel = contextCancelToken( context );
+    context.reportProgress( 0.2, "planning virtual cube window" );
     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
 
     sicnu::geo::VirtualCubeReadOptions readOptions;
@@ -273,10 +282,14 @@ Json::Value IoCubeWindowOperator::run( const Json::Value &params, RSOperatorCont
     readOptions.bandRole = getString( params, "bandRole", "" );
     readOptions.mirrorDirectory = getString( params, "mirrorDirectory", "" );
 
+    context.reportProgress( 0.45, "executing cube window read" );
     sicnu::geo::FabricExecutionReport report;
     const sicnu::geo::VirtualCubeWindowResult window =
       sicnu::geo::executeWindow( plan, readOptions, report, cancel );
 
+    context.throwIfCancelled();
+
+    context.reportProgress( 0.8, "writing atomic raster output" );
     const std::string output = requireString( params, "output" );
     sicnu::geo::atomic_fs::writeFileAtomic( output, [ & ]( const std::string &staged ) {
       // The band declares the window's NoData (uncovered cells are NOT
@@ -349,16 +362,20 @@ Json::Value IoCachePrefetchOperator::run( const Json::Value &params, RSOperatorC
 {
   return fabricGuarded( [ & ] {
     using namespace sicnu::operators::params;
+    context.reportProgress( 0.1, "planning chunks for prefetch" );
     const sicnu::geo::FabricIntent intent = intentFrom( params );
     const sicnu::geo::CancelToken cancel = contextCancelToken( context );
     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
 
+    context.throwIfCancelled();
+    context.reportProgress( 0.35, "warming range cache" );
     sicnu::geo::PrefetchOptions options;
     options.maxBytes = params.get( "maxBytes", 0 ).asUInt64();
     options.chunkWindow = static_cast<std::size_t>( getInt( params, "chunkWindow", 64 ) );
     options.mirrorDirectory = getString( params, "mirrorDirectory", "" );
 
     const sicnu::geo::PrefetchReport report = sicnu::geo::prefetchChunks( plan, options, cancel );
+    context.throwIfCancelled();
     context.reportProgressForced( 1.0, "prefetch complete" );
     Json::Value out = report.toJson();
     out["plan"] = plan.toJson();

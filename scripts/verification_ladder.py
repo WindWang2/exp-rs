@@ -344,12 +344,38 @@ def run_executable(binary: Path, env: dict, timeout: float,
     return "failed", tail, elapsed
 
 
+_CTEST_NO_TESTS_SUPPORTED: bool | None = None
+
+
+def _ctest_supports_no_tests() -> bool:
+    """Whether this ctest accepts --no-tests=error (CMake >= 3.18).
+
+    An unsupported flag would turn every ctest lane into a usage error, so the
+    capability is probed once instead of assumed.
+    """
+    global _CTEST_NO_TESTS_SUPPORTED
+    if _CTEST_NO_TESTS_SUPPORTED is None:
+        try:
+            probe = subprocess.run(["ctest", "--help"], capture_output=True,
+                                   text=True, timeout=60)
+            _CTEST_NO_TESTS_SUPPORTED = "--no-tests" in (probe.stdout or "")
+        except (OSError, subprocess.SubprocessError):
+            _CTEST_NO_TESTS_SUPPORTED = False
+    return _CTEST_NO_TESTS_SUPPORTED
+
+
 def run_ctest(build_dir: Path, pattern: str, jobs: int, timeout: float,
               env: dict) -> tuple[str, str, float]:
     started = time.monotonic()
     cmd = ["ctest", "--test-dir", str(build_dir), "-R", pattern,
            "--output-on-failure", "-j", str(max(1, jobs)),
            "--timeout", str(int(timeout))]
+    # "-R" that selects nothing exits 0 by default, so an empty registration
+    # (a whole conditional gate in tests/CMakeLists.txt evaluating false, or a
+    # CTest discovery drift) would be reported as "passed" on a lane that ran
+    # no test at all. Refuse to call that success.
+    if _ctest_supports_no_tests():
+        cmd.append("--no-tests=error")
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout * 4, env=env)
@@ -358,7 +384,13 @@ def run_ctest(build_dir: Path, pattern: str, jobs: int, timeout: float,
     elapsed = time.monotonic() - started
     if proc.returncode == 0:
         return "passed", "", elapsed
-    return "failed", (proc.stdout + proc.stderr)[-4000:], elapsed
+    combined = (proc.stdout + "\n" + proc.stderr)
+    if "No tests were found" in combined:
+        return ("failed",
+                f"ctest matched no test for pattern {pattern!r}: the lane ran "
+                "nothing, so it proves nothing (registration drift?)",
+                elapsed)
+    return "failed", combined[-4000:], elapsed
 
 
 def load_state(path: Path) -> dict:
@@ -368,6 +400,24 @@ def load_state(path: Path) -> dict:
         except json.JSONDecodeError:
             pass
     return {}
+
+
+def _default_build_jobs() -> int:
+    """Shared-host memory governance (R13-I): an externally pinned
+    CMAKE_BUILD_PARALLEL_LEVEL always wins over the local heuristic, so a
+    caller's -j2 can never be silently amplified by this script."""
+    env = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL")
+    if env:
+        try:
+            value = int(env)
+        except ValueError:
+            raise SystemExit(
+                f"CMAKE_BUILD_PARALLEL_LEVEL must be an integer, got {env!r}")
+        if value < 1:
+            raise SystemExit(
+                f"CMAKE_BUILD_PARALLEL_LEVEL must be >= 1, got {env!r}")
+        return value
+    return min(8, os.cpu_count() or 2)
 
 
 def main() -> int:
@@ -381,8 +431,10 @@ def main() -> int:
                         help="skip lane items recorded passed in the state file")
     parser.add_argument("--list", action="store_true", help="list lanes and exit")
     parser.add_argument("--json", default=None, help="write machine-readable results here")
-    parser.add_argument("--build-jobs", type=int, default=min(8, os.cpu_count() or 2),
-                        help="parallel jobs for build targets (bounded)")
+    parser.add_argument("--build-jobs", type=int, default=None,
+                        help="parallel jobs for build targets (bounded; env "
+                             "CMAKE_BUILD_PARALLEL_LEVEL sets the default; "
+                             "default without a pin: min(8, cpus))")
     parser.add_argument("--ctest-jobs", type=int, default=1,
                         help="parallel jobs for the L8 ctest lane (default 1)")
     parser.add_argument("--timeout-scale", type=float, default=1.0,
@@ -412,6 +464,17 @@ def main() -> int:
                 tag = f" [requires {req}]" if req else ""
                 print(f"    - {label}: {name} [{kind}]{tag}")
         return 0
+
+    # Resolve the build-jobs default lazily (review P3-6): --list must not
+    # abort on a malformed env pin, and an explicit flag that disagrees with
+    # a pin is acknowledged on stderr instead of silently outranking it.
+    if args.build_jobs is None:
+        args.build_jobs = _default_build_jobs()
+    elif os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL"):
+        pin = _default_build_jobs()
+        if args.build_jobs != pin:
+            print(f"note: --build-jobs {args.build_jobs} overrides pinned "
+                  f"CMAKE_BUILD_PARALLEL_LEVEL={pin}", file=sys.stderr)
 
     build_dir = Path(args.build_dir).resolve()
     if not (build_dir / "CMakeCache.txt").is_file():
@@ -443,6 +506,12 @@ def main() -> int:
         "lanes": {},
     }
     overall_ok = True
+    # "Every lane green" is only evidence if something actually RAN. A ladder
+    # pointed at an unbuilt tree produces not-built for every item; item-level
+    # status stays honest, but the aggregate must not read "PASSED" for a run
+    # that executed nothing.
+    executed = 0
+    planned = 0
 
     for lane in lanes:
         if lane not in LANES:
@@ -559,6 +628,20 @@ def main() -> int:
     state_path.write_text(json.dumps(state, indent=1))
 
     results["finished_utc"] = datetime.now(timezone.utc).isoformat()
+
+    for _lane, _lr in results["lanes"].items():
+        for _item in _lr["items"]:
+            planned += 1
+            if _item["status"] == "passed":
+                executed += 1
+    results["executed_items"] = executed
+    results["planned_items"] = planned
+    if planned and executed == 0:
+        overall_ok = False
+        print("\nOVERALL NOTE: no item actually executed "
+              f"({planned} planned, 0 executed) — this run produced no "
+              "evidence and is not a pass.")
+
     results["overall"] = "passed" if overall_ok else "attention"
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=1))

@@ -275,13 +275,19 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     }
     painter.setPen( textColor );
     for ( int c = 0; c < n; ++c )
-      painter.drawText( QRectF( labelW + c * cellW, 24, cellW, headerH ), Qt::AlignCenter,
-                        QString::fromStdString( matrix["labels"][c].asString() ) );
+    {
+      const QString lbl = matrix["labels"][c].isString()
+                            ? QString::fromStdString( matrix["labels"][c].asString() )
+                            : QString::number( c );
+      painter.drawText( QRectF( labelW + c * cellW, 24, cellW, headerH ), Qt::AlignCenter, lbl );
+    }
     for ( int r = 0; r < n; ++r )
     {
+      const QString lbl = matrix["labels"][r].isString()
+                            ? QString::fromStdString( matrix["labels"][r].asString() )
+                            : QString::number( r );
       painter.drawText( QRectF( 4, 24 + headerH + r * cellH, labelW - 8, cellH ),
-                        Qt::AlignVCenter | Qt::AlignRight,
-                        QString::fromStdString( matrix["labels"][r].asString() ) );
+                        Qt::AlignVCenter | Qt::AlignRight, lbl );
       for ( int c = 0; c < n; ++c )
       {
         const Json::Value &cell = matrix["rows"][r][c];
@@ -940,35 +946,44 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
                             ? "accuracy_summary charts need binding.matrix {labels, rows} "
                               "(square confusion matrix)"
                             : "matrix charts need binding.matrix {labels, rows}" );
-    else if ( kind == "accuracy_summary" )
+    else
     {
-      if ( matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() )
-        problems.push_back( "accuracy_summary needs a square confusion matrix "
-                            "(rows = reference, columns = predicted)" );
-      if ( static_cast<int>( matrix["labels"].size() ) > 31 )
-        problems.push_back( "accuracy_summary capped at 31 classes so the metric "
-                            "table fits its 64-row budget" );
+      const int n = static_cast<int>( matrix["labels"].size() );
+      if ( matrix["rows"].empty() || static_cast<int>( matrix["rows"].size() ) != n )
+        problems.push_back( kind == "accuracy_summary"
+                              ? "accuracy_summary needs a square confusion matrix "
+                                "(rows = reference, columns = predicted)"
+                              : "matrix charts need a square matrix (rows == labels)" );
+      const int cap = kind == "accuracy_summary" ? 31 : 24;
+      if ( n > cap )
+        problems.push_back( kind + " capped at " + std::to_string( cap ) +
+                            ( kind == "accuracy_summary" ? " classes so the metric table fits its 64-row budget"
+                                                         : " classes/labels" ) );
       int labelIndex = 0;
       for ( const auto &label : matrix["labels"] )
       {
         if ( !label.isString() )
-          problems.push_back( "accuracy_summary labels[" + std::to_string( labelIndex ) +
+          problems.push_back( kind + " labels[" + std::to_string( labelIndex ) +
                               "] must be a string" );
         ++labelIndex;
       }
       int rowIndex = 0;
       for ( const auto &row : matrix["rows"] )
       {
+        if ( !row.isArray() || static_cast<int>( row.size() ) != n )
+        {
+          problems.push_back( kind + " matrix rows must all carry n entries" );
+          break;
+        }
         int cellIndex = 0;
-        if ( row.isArray() )
-          for ( const auto &cell : row )
-          {
-            if ( !cell.isNumeric() )
-              problems.push_back( "accuracy_summary matrix rows must be numeric "
-                                  "(row " + std::to_string( rowIndex ) + ", cell " +
-                                  std::to_string( cellIndex ) + ")" );
-            ++cellIndex;
-          }
+        for ( const auto &cell : row )
+        {
+          if ( !cell.isNumeric() || !std::isfinite( cell.asDouble() ) )
+            problems.push_back( kind + " matrix rows must be numeric finite values "
+                                "(row " + std::to_string( rowIndex ) + ", cell " +
+                                std::to_string( cellIndex ) + ")" );
+          ++cellIndex;
+        }
         ++rowIndex;
       }
     }

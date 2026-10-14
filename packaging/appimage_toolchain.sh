@@ -17,8 +17,9 @@
 #     copy is verified against the same checksums file (offline reproducible
 #     once a maintainer has recorded the hashes once).
 #
-# This file is sourced by build-appimage.sh and unit-tested directly
-# (tests run fetch_tool against fixture files) — keep it free of side
+# This file is sourced by build-appimage.sh; the fetch_tool contract is
+# exercised offline by a fixture matrix (pinned-hash pass, tampered reject,
+# PENDING reject, pre-provisioned tools-dir verify). Keep it free of side
 # effects on source.
 
 APPIMAGE_TOOL_CHECKSUMS_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/appimage-tool-checksums.txt"

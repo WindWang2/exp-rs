@@ -237,7 +237,7 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     // (P0 review finding: mixing pixel-space fits with world-space gts
     // silently warped products; buffer-pixel space keeps one frame).
     double refGtBuf[6] = {refGt[0], refGt[1] * static_cast<double>(rawRefW) / refW, refGt[2],
-                          refGt[3], refGt[5] * static_cast<double>(rawRefH) / refH, refGt[4]};
+                          refGt[3], refGt[4], refGt[5] * static_cast<double>(rawRefH) / refH};
     const double identityGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
 
     std::vector<float> outData(static_cast<std::size_t>(refW) * refH, 0.0f);

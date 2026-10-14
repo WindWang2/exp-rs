@@ -89,7 +89,26 @@ AssetStateProvider &AssetStateProvider::operator=( AssetStateProvider &&other ) 
 
 void AssetStateProvider::setResolver( PassportResolver resolver )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mResolver = std::move( resolver );
+}
+
+void AssetStateProvider::setResolverAuthority( const std::string &authority )
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    mResolverAuthority = authority;
+}
+
+std::string AssetStateProvider::resolverAuthority() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return mResolverAuthority;
+}
+
+bool AssetStateProvider::hasResolver() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return static_cast<bool>( mResolver );
 }
 
 void AssetStateProvider::clearCache()
@@ -113,6 +132,12 @@ void AssetStateProvider::invalidateAll()
 {
     std::lock_guard<std::mutex> lock( mMutex );
     mCache.clear();
+}
+
+std::uint64_t AssetStateProvider::catalogGeneration() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return mCatalogGeneration;
 }
 
 void AssetStateProvider::setCatalogGeneration( std::uint64_t generation )
@@ -170,6 +195,7 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
         return result;
     }
 
+    PassportResolver resolver;
     {
         std::lock_guard<std::mutex> lock( mMutex );
         auto it = mCache.find( request.assetKey );
@@ -180,15 +206,16 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
             result.summary = summarize( result.state );
             return result;
         }
+        resolver = mResolver;
     }
 
-    if ( !mResolver )
+    if ( !resolver )
     {
         result.error = "resolver_unavailable";
         return result;
     }
 
-    const PassportResolution resolved = mResolver( request.assetKey );
+    const PassportResolution resolved = resolver( request.assetKey );
     if ( !resolved )
     {
         // Typed failure: keep the resolver's reason (gdal_open_failed vs

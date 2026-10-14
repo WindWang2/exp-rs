@@ -35,11 +35,16 @@ $script:SUPPORTED_SCHEMAS = @("sicnu.offline_bundle/1", "sicnu.offline_bundle/2"
 
 # Substring-based relative path (PS 5.1 has no [IO.Path]::GetRelativePath).
 function Get-RelPath([string] $root, [string] $fullName) {
-  $r = $root.TrimEnd('\')
-  if (-not $fullName.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) {
+  # Canonicalise BOTH sides first. A caller may hand us a non-canonical path
+  # (%TEMP% is often the 8.3 short form C:\Users\WANGJ~1.KEV\...), while
+  # Get-ChildItem reports the long form; a raw string prefix compare then fails
+  # and throws "path outside bundle root" instead of verifying the bundle.
+  $r = [IO.Path]::GetFullPath($root).TrimEnd('\')
+  $f = [IO.Path]::GetFullPath($fullName)
+  if (-not $f.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) {
     throw "path outside bundle root: $fullName"
   }
-  return $fullName.Substring($r.Length).TrimStart('\').Replace('\', '/')
+  return $f.Substring($r.Length).TrimStart('\').Replace('\', '/')
 }
 
 function Get-ManifestFiles([string] $root) {
@@ -150,7 +155,10 @@ function Test-Bundle([string] $root) {
     }
   }
   $ceiling = $m.size_ceiling_mb
-  if ($null -eq $ceiling -or $ceiling -isnot [int] -or $ceiling -lt 0) {
+  # [int] OR [long]: PowerShell 7's ConvertFrom-Json yields Int64 for JSON
+  # integers, so a plain -isnot [int] rejects every valid manifest (and flips
+  # the verdict to FAIL). Same rule as compat.min_reader_schema above.
+  if ($null -eq $ceiling -or ($ceiling -isnot [int] -and $ceiling -isnot [long]) -or $ceiling -lt 0) {
     $bad += "size_ceiling_mb must be a non-negative integer"
     $ceiling = 250
   }

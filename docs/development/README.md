@@ -16,7 +16,7 @@ Nothing here invents new policy; the tools enforce the existing one.
 | 1. Orient | `python scripts/dev/preflight.py --json` | See live master, open PRs/issues, every worktree and its dirty state, and historical branches with ahead/behind — before touching anything. |
 | 2. Check overlap | `python scripts/dev/overlap_scan.py <paths> --json` | Evidence of who else touches your planned files: open PRs, remote branches, sibling worktrees' uncommitted work. Read it, decide yourself — the tool never claims equivalence. |
 | 3. Create your worktree | `python scripts/dev/new_worktree.py --path ../exp-rs-worktrees/<track> --branch agent/<track>` | Fails closed on a dirty master checkout, a duplicate branch name, an existing/registered path, or an unresolvable base. Never writes to master. |
-| 4. Build/test under the lock | `python scripts/dev/resource_guard.py --lock-dir build-dev -- cmake --build build-dev --parallel 8` | One writer per build directory (a second concurrent writer gets exit 75, or queues behind `--wait`), and parallelism is clamped to the policy cap (`-j1` preferred, `-j2` max). |
+| 4. Build/test under the lock | `python scripts/dev/resource_guard.py --lock-dir build-dev -- cmake --build build-dev --parallel 8` | One writer per build directory (a second concurrent writer gets exit 75, or queues behind `--wait`), and parallelism is clamped to the policy cap (`-j1` preferred, `-j2` max): the `--parallel 8` above reaches cmake as `--parallel 2`. The guard's **own** `--parallel` is different — above `--max-parallel` it is refused (exit 2), not clamped. |
 | 5. Assemble review evidence | `python scripts/dev/review_pack.py --base origin/master --head HEAD --out PR_PACK.md` | Diff stat, changed public headers, changed tests, `git diff --check` verdict, conflict scan and a PR-body draft with every required section. |
 
 `python scripts/dev/stale_branches.py` is the standing census of remote
@@ -38,6 +38,17 @@ received. It only reports; it never deletes anything.
 4. **Evidence policy.** Every capability claim in a PR body maps to a local
    command plus its exit code, or is explicitly marked not-executed
    (`docs/agents/goal-template.md`, Evidence policy).
+5. **The lease is not optional by accident.** `scripts/build.sh` wraps every
+   `cmake`/`ctest` payload in the guard, and four switches decide what
+   happens around it: `SICNU_BUILD_GUARD_WAIT` (default 1800 s) is how long
+   the lease queues before giving up with exit 75;
+   `SICNU_BUILD_JOBS_CAP` (default 2) is the single authority for the `-j`
+   ceiling — raise it deliberately, the guard follows rather than second-
+   guessing you; `SICNU_BUILD_NO_GUARD=1` runs without the lease and says so
+   loudly; `SICNU_BUILD_REQUIRE_GUARD=1` turns the opposite mistake into a
+   failure, so an unavailable lease can never silently produce an ungoverned
+   build. Setting both `NO_GUARD` and `REQUIRE_GUARD` is a contradiction and
+   exits 1 instead of picking a winner.
 5. **Resources.** `-j1` preferred, `-j2` maximum, `-j3+` forbidden; build
    through the guard so the cap is enforced mechanically, not by memory. The
    guard also exports `CMAKE_BUILD_PARALLEL_LEVEL` /

@@ -13,6 +13,8 @@
 #include <QImage>
 #include <QTemporaryDir>
 
+#include <limits>
+
 #include <QApplication>
 
 
@@ -657,4 +659,74 @@ TEST_CASE( "Raster renderer drives legend color ramp nodes in layouts", "[layout
   // The legend model mirrors the linked map's layers.
   legend->refresh();
   CHECK( legend->model()->rootGroup()->findLayers().size() == 1 );
+}
+
+TEST_CASE( "LayoutService robustness: null layouts, non-finite properties and bounds (R13-G WP-07)", "[layout_service][robustness]" )
+{
+  ensureQgisApplication();
+  QString error;
+
+  SECTION( "removeItem on null layout fails cleanly with Null layout error" )
+  {
+    bool removed = LayoutService::instance().removeItem( nullptr, QStringLiteral( "any" ), &error );
+    CHECK_FALSE( removed );
+    CHECK( error == QStringLiteral( "Null layout" ) );
+  }
+
+  SECTION( "applyItemProperties rejects non-finite and malformed map extents" )
+  {
+    REQUIRE( run( "layout:create", R"({"name":"RobustnessTest"})" ).success );
+    QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "RobustnessTest" ) );
+    REQUIRE( layout != nullptr );
+
+    auto mapAdded = run( "layout:add_item",
+                         R"({"layout":"RobustnessTest","type":"map","properties":{"x":10,"y":10,"width":100,"height":100}})" );
+    REQUIRE( mapAdded.success );
+    QgsLayoutItem *item = LayoutService::instance().findItem( layout, QString::fromStdString( mapAdded.output["id"].asString() ) );
+    REQUIRE( item != nullptr );
+
+    Json::Value badProps( Json::objectValue );
+    Json::Value ext( Json::arrayValue );
+    ext.append( std::numeric_limits<double>::quiet_NaN() );
+    ext.append( 0.0 );
+    ext.append( 100.0 );
+    ext.append( 100.0 );
+    badProps["extent"] = ext;
+
+    QStringList applied;
+    QStringList ignored;
+    LayoutService::instance().applyItemProperties( item, badProps, &applied, &ignored, &error );
+    CHECK( applied.empty() );
+    CHECK( !ignored.empty() );
+    CHECK( ignored.first().contains( "extent" ) );
+
+    // Verify negative sibling dimension in batch resize cannot poison item height
+    Json::Value resizeProps( Json::objectValue );
+    resizeProps["width"] = 120.0;
+    resizeProps["height"] = -10.0;
+    applied.clear();
+    ignored.clear();
+    LayoutService::instance().applyItemProperties( item, resizeProps, &applied, &ignored, &error );
+    CHECK( item->sizeWithUnits().height() == 100.0 );
+    CHECK( item->sizeWithUnits().width() == 120.0 );
+    CHECK( !ignored.filter( QStringLiteral( "height" ) ).isEmpty() );
+
+    // Verify negative and NaN frame_width are rejected
+    Json::Value frameProps( Json::objectValue );
+    frameProps["frame_width"] = -2.0;
+    applied.clear();
+    ignored.clear();
+    LayoutService::instance().applyItemProperties( item, frameProps, &applied, &ignored, &error );
+    CHECK( applied.empty() );
+    CHECK( !ignored.filter( QStringLiteral( "frame_width" ) ).isEmpty() );
+
+    frameProps["frame_width"] = std::numeric_limits<double>::quiet_NaN();
+    applied.clear();
+    ignored.clear();
+    LayoutService::instance().applyItemProperties( item, frameProps, &applied, &ignored, &error );
+    CHECK( applied.empty() );
+    CHECK( !ignored.filter( QStringLiteral( "frame_width" ) ).isEmpty() );
+
+    LayoutService::instance().deleteLayout( QStringLiteral( "RobustnessTest" ) );
+  }
 }

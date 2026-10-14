@@ -1417,3 +1417,81 @@ TEST_CASE( "result digest linking refuses unknown plans and wrong digests",
   notAResult["kind"] = "something_else";
   CHECK_FALSE( state.resultDigestMatches( notAResult ) );
 }
+
+TEST_CASE( "repair planner deduplicates candidates by (operatorId, ruleId, actionKey)",
+           "[repair][planner][dedup]" )
+{
+  FakeProvider provider;
+  // Add duplicate capabilities with same operator ID and cost class
+  provider.add( requirement_kind::kGridAlign, gridCapability( "op:warp_align", "medium" ) );
+  provider.add( requirement_kind::kGridAlign, gridCapability( "op:warp_align", "medium" ) );
+  provider.add( requirement_kind::kGridAlign, gridCapability( "op:resample_grid", "light" ) );
+
+  RepairPolicyContext policy;
+  policy.role = "analyst";
+  policy.allowAutonomousExec = true;
+
+  RepairPlannerOptions opts;
+  opts.intent = "align_scenes";
+
+  std::vector<Json::Value> findings = { findingOf( "GRID_MISMATCH" ) };
+
+  RepairPlannerOutcome outcome;
+  RepairError error;
+  REQUIRE( planRepairsForFindings( findings, provider, policy, opts, outcome, error ) );
+
+  // op:resample_grid (light, cost 2) selected first
+  REQUIRE( outcome.plan.selected.size() == 1 );
+  CHECK( outcome.plan.selected[0].operatorId == "op:resample_grid" );
+
+  // alternatives should only contain ONE instance of op:warp_align, not two
+  int warpCount = 0;
+  for ( const auto &alt : outcome.plan.alternatives )
+  {
+    if ( alt["operator_id"].asString() == "op:warp_align" )
+      ++warpCount;
+  }
+  CHECK( warpCount == 1 );
+}
+
+TEST_CASE( "repair planner candidate cost ranking penalizes unknown cost class",
+           "[repair][planner][cost]" )
+{
+  FakeProvider provider;
+  // Missing cost class candidate
+  Json::Value unkCost = gridCapability( "op:unknown_cost" );
+  unkCost.removeMember( "resource" );
+  provider.add( requirement_kind::kGridAlign, unkCost );
+
+  // Valid light cost candidate
+  provider.add( requirement_kind::kGridAlign, gridCapability( "op:valid_light", "light" ) );
+
+  RepairPolicyContext policy;
+  policy.role = "analyst";
+  policy.allowAutonomousExec = true;
+
+  RepairPlannerOptions opts;
+  opts.intent = "align_scenes";
+
+  std::vector<Json::Value> findings = { findingOf( "GRID_MISMATCH" ) };
+
+  RepairPlannerOutcome outcome;
+  RepairError error;
+  REQUIRE( planRepairsForFindings( findings, provider, policy, opts, outcome, error ) );
+
+  // op:valid_light must be selected ahead of unkCost
+  REQUIRE( outcome.plan.selected.size() == 1 );
+  CHECK( outcome.plan.selected[0].operatorId == "op:valid_light" );
+
+  // unkCost is in alternatives marked refused with cost_unknown
+  bool foundUnk = false;
+  for ( const auto &alt : outcome.plan.alternatives )
+  {
+    if ( alt["operator_id"].asString() == "op:unknown_cost" )
+    {
+      foundUnk = true;
+      CHECK( alt["refusal_cause"].asString() == "cost_unknown" );
+    }
+  }
+  CHECK( foundUnk );
+}

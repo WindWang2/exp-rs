@@ -87,7 +87,7 @@ inline bool checkEnvelope( const Json::Value &doc, const std::string &expectedKi
         err = error( "invalid_document", "document is not a JSON object" );
         return false;
     }
-    if ( !doc.isMember( "kind" ) || doc["kind"].asString() != expectedKind )
+    if ( !doc.isMember( "kind" ) || !doc["kind"].isString() || doc["kind"].asString() != expectedKind )
     {
         err = error( "invalid_document", "kind must be \"" + expectedKind + "\"" );
         return false;

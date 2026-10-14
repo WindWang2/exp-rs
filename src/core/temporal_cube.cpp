@@ -391,6 +391,18 @@ class TemporalCubeImpl final : public TemporalCube
             }
             return; // typed read failure: this scene contributes no candidates
         }
+        catch ( ... )
+        {
+            ++mSceneReadFailures;
+            if ( !scene.readFailureLogged )
+            {
+                scene.readFailureLogged = true;
+                qWarning().noquote() << QStringLiteral( "TemporalCube: unknown error reading window for scene '%1' (failure #%2)" )
+                                            .arg( scene.path )
+                                            .arg( mSceneReadFailures );
+            }
+            return;
+        }
         const std::size_t pixels = static_cast<std::size_t>( window.width ) * window.height;
         const double *cloud = scene.hasCloud ? values.data() + pixels : nullptr;
         for ( std::size_t i = 0; i < pixels; ++i )

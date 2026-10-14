@@ -1401,6 +1401,227 @@ TEST_CASE( "unrepresentable integral facts fields from json fail typed like goal
     REQUIRE( extentOk.value().maxY == 40.0 );
 }
 
+TEST_CASE( "wrong-typed or negative facts counts from json fail typed instead of reading as absent",
+           "[suitability][adversarial]" )
+{
+    // Review round 2 (P2): counts went through toDouble(-1.0), so a string
+    // count read as the -1 "unknown" sentinel (indistinguishable from an
+    // absent field) and a negative count was accepted verbatim. Same typed
+    // gate as the goal parser: absent keeps -1, present must be a
+    // non-negative JSON number.
+    auto factsJson = [] {
+        QJsonObject json;
+        json.insert( QStringLiteral( "schema_version" ), 1 );
+        json.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-1" ) );
+        return json;
+    };
+    auto expectFactsInvalid = []( const sicnu::data::Result<DatasetFacts> &facts ) {
+        REQUIRE( !facts.has_value() );
+        REQUIRE( facts.diagnostics().first().code
+                 == QStringLiteral( "suitability.facts_invalid" ) );
+    };
+
+    QJsonObject stringSampleCount = factsJson();
+    stringSampleCount.insert( QStringLiteral( "sample_count" ),
+                              QStringLiteral( "100" ) );
+    expectFactsInvalid( DatasetFacts::fromJson( stringSampleCount ) );
+
+    QJsonObject negativeSampleCount = factsJson();
+    negativeSampleCount.insert( QStringLiteral( "sample_count" ), -5.0 );
+    expectFactsInvalid( DatasetFacts::fromJson( negativeSampleCount ) );
+
+    QJsonObject stringHistogram = factsJson();
+    QJsonObject stringByClass;
+    stringByClass.insert( QStringLiteral( "forest" ), QStringLiteral( "-3" ) );
+    stringHistogram.insert( QStringLiteral( "samples_by_class" ), stringByClass );
+    expectFactsInvalid( DatasetFacts::fromJson( stringHistogram ) );
+
+    QJsonObject negativeHistogram = factsJson();
+    QJsonObject negativeByClass;
+    negativeByClass.insert( QStringLiteral( "forest" ), -3.0 );
+    negativeHistogram.insert( QStringLiteral( "samples_by_class" ), negativeByClass );
+    expectFactsInvalid( DatasetFacts::fromJson( negativeHistogram ) );
+
+    // Absent fields keep their -1 "unknown" semantics (guard against
+    // over-tightening: only present-but-broken values are refused).
+    const auto absent = DatasetFacts::fromJson( factsJson() );
+    REQUIRE( absent.has_value() );
+    REQUIRE( absent.value().sampleCount == -1 );
+    REQUIRE( absent.value().pseudoLabelCount == -1 );
+    REQUIRE( absent.value().missingTimeCount == -1 );
+}
+
+TEST_CASE( "wrong-typed scene candidate numerics from json fail typed, absent stays absent",
+           "[suitability][adversarial]" )
+{
+    // Review round 2 (P2): the optional doubles were gated by isDouble() and
+    // the integer fields read via bare toInt(), so a string value was
+    // silently dropped (reading as "unknown" or 0) instead of refusing the
+    // document — a persisted corruption must surface, not launder into a
+    // missing-evidence verdict.
+    auto sceneJson = [] {
+        QJsonObject json;
+        json.insert( QStringLiteral( "schema_version" ), 1 );
+        json.insert( QStringLiteral( "id" ), QStringLiteral( "scene-1" ) );
+        json.insert( QStringLiteral( "state" ), QStringLiteral( "Ready" ) );
+        return json;
+    };
+    auto expectSceneInvalid = []( const sicnu::data::Result<SceneCandidate> &scene ) {
+        REQUIRE( !scene.has_value() );
+        REQUIRE( scene.diagnostics().first().code
+                 == QStringLiteral( "suitability.scene_invalid" ) );
+    };
+
+    QJsonObject stringGsd = sceneJson();
+    stringGsd.insert( QStringLiteral( "gsd_m" ), QStringLiteral( "10" ) );
+    expectSceneInvalid( SceneCandidate::fromJson( stringGsd ) );
+
+    QJsonObject stringCloud = sceneJson();
+    stringCloud.insert( QStringLiteral( "cloud_cover_percent" ),
+                        QStringLiteral( "20" ) );
+    expectSceneInvalid( SceneCandidate::fromJson( stringCloud ) );
+
+    QJsonObject stringBandCount = sceneJson();
+    stringBandCount.insert( QStringLiteral( "band_count" ), QStringLiteral( "4" ) );
+    expectSceneInvalid( SceneCandidate::fromJson( stringBandCount ) );
+
+    QJsonObject stringGrid = sceneJson();
+    QJsonObject grid;
+    grid.insert( QStringLiteral( "width" ), QStringLiteral( "8000" ) );
+    stringGrid.insert( QStringLiteral( "grid" ), grid );
+    expectSceneInvalid( SceneCandidate::fromJson( stringGrid ) );
+
+    // Valid numerics still parse and absent optionals stay absent.
+    QJsonObject valid = sceneJson();
+    valid.insert( QStringLiteral( "gsd_m" ), 10.0 );
+    valid.insert( QStringLiteral( "pixel_size_crs_units" ), 30.0 );
+    valid.insert( QStringLiteral( "cloud_cover_percent" ), 20.0 );
+    valid.insert( QStringLiteral( "band_count" ), 4 );
+    const auto ok = SceneCandidate::fromJson( valid );
+    REQUIRE( ok.has_value() );
+    REQUIRE( ok.value().gsdM.has_value() );
+    REQUIRE( *ok.value().gsdM == 10.0 );
+    REQUIRE( ok.value().cloudCoverPercent.has_value() );
+    REQUIRE( *ok.value().cloudCoverPercent == 20.0 );
+    REQUIRE( ok.value().bandCount == 4 );
+
+    const auto bare = SceneCandidate::fromJson( sceneJson() );
+    REQUIRE( bare.has_value() );
+    REQUIRE( !bare.value().gsdM.has_value() );
+    REQUIRE( !bare.value().cloudCoverPercent.has_value() );
+    REQUIRE( bare.value().bandCount == 0 );
+}
+
+TEST_CASE( "fractional integer-shaped scene fields fail typed instead of truncating",
+           "[suitability][adversarial]" )
+{
+    // Review round 3 (nit): requireSceneNumber accepted any double, so a
+    // fractional band_count or grid dimension silently truncated through
+    // toInt() (4.7 bands became 4). Integer-shaped fields must require
+    // integer-valued doubles.
+    auto sceneJson = [] {
+        QJsonObject json;
+        json.insert( QStringLiteral( "schema_version" ), 1 );
+        json.insert( QStringLiteral( "id" ), QStringLiteral( "scene-1" ) );
+        json.insert( QStringLiteral( "state" ), QStringLiteral( "Ready" ) );
+        return json;
+    };
+    auto expectSceneInvalid = []( const sicnu::data::Result<SceneCandidate> &scene ) {
+        REQUIRE( !scene.has_value() );
+        REQUIRE( scene.diagnostics().first().code
+                 == QStringLiteral( "suitability.scene_invalid" ) );
+    };
+
+    QJsonObject fractionalBandCount = sceneJson();
+    fractionalBandCount.insert( QStringLiteral( "band_count" ), 4.7 );
+    expectSceneInvalid( SceneCandidate::fromJson( fractionalBandCount ) );
+
+    QJsonObject fractionalWidth = sceneJson();
+    QJsonObject grid;
+    grid.insert( QStringLiteral( "width" ), 10.9 );
+    fractionalWidth.insert( QStringLiteral( "grid" ), grid );
+    expectSceneInvalid( SceneCandidate::fromJson( fractionalWidth ) );
+
+    QJsonObject fractionalHeight = sceneJson();
+    QJsonObject heightGrid;
+    heightGrid.insert( QStringLiteral( "height" ), 99.5 );
+    fractionalHeight.insert( QStringLiteral( "grid" ), heightGrid );
+    expectSceneInvalid( SceneCandidate::fromJson( fractionalHeight ) );
+
+    // Integer-valued doubles still parse (JSON has no int/float split); the
+    // values round-trip exactly.
+    QJsonObject valid = sceneJson();
+    valid.insert( QStringLiteral( "band_count" ), 4.0 );
+    QJsonObject validGrid;
+    validGrid.insert( QStringLiteral( "width" ), 8000.0 );
+    validGrid.insert( QStringLiteral( "height" ), 6000.0 );
+    valid.insert( QStringLiteral( "grid" ), validGrid );
+    const auto ok = SceneCandidate::fromJson( valid );
+    REQUIRE( ok.has_value() );
+    REQUIRE( ok.value().bandCount == 4 );
+    REQUIRE( ok.value().grid.has_value() );
+    REQUIRE( ok.value().grid->width == 8000 );
+    REQUIRE( ok.value().grid->height == 6000 );
+}
+
+TEST_CASE( "negative or out-of-int-range integer-shaped scene fields fail typed",
+           "[suitability][adversarial]" )
+{
+    // Round-2 review (P2): requireSceneNumber accepted any integer-valued
+    // double, so band_count -3 stored -3 and band_count 1e20 survived the
+    // trunc() gate only to reach an out-of-range QJsonValue::toInt()
+    // conversion (undefined behavior) downstream. These fields are counts and
+    // dimensions: finite, integer-valued, within [0, INT_MAX]; zero stays
+    // allowed so a candidate that never measured a count keeps its reading.
+    auto sceneJson = [] {
+        QJsonObject json;
+        json.insert( QStringLiteral( "schema_version" ), 1 );
+        json.insert( QStringLiteral( "id" ), QStringLiteral( "scene-1" ) );
+        json.insert( QStringLiteral( "state" ), QStringLiteral( "Ready" ) );
+        return json;
+    };
+    auto expectSceneInvalid = []( const sicnu::data::Result<SceneCandidate> &scene ) {
+        REQUIRE( !scene.has_value() );
+        REQUIRE( scene.diagnostics().first().code
+                 == QStringLiteral( "suitability.scene_invalid" ) );
+    };
+
+    QJsonObject negativeBandCount = sceneJson();
+    negativeBandCount.insert( QStringLiteral( "band_count" ), -3 );
+    expectSceneInvalid( SceneCandidate::fromJson( negativeBandCount ) );
+
+    QJsonObject hugeBandCount = sceneJson();
+    hugeBandCount.insert( QStringLiteral( "band_count" ), 1e20 );
+    expectSceneInvalid( SceneCandidate::fromJson( hugeBandCount ) );
+
+    QJsonObject negativeWidth = sceneJson();
+    QJsonObject widthGrid;
+    widthGrid.insert( QStringLiteral( "width" ), -1 );
+    negativeWidth.insert( QStringLiteral( "grid" ), widthGrid );
+    expectSceneInvalid( SceneCandidate::fromJson( negativeWidth ) );
+
+    QJsonObject overflowingHeight = sceneJson();
+    QJsonObject heightGrid;
+    heightGrid.insert( QStringLiteral( "height" ), 2147483648.0 ); // INT_MAX + 1
+    overflowingHeight.insert( QStringLiteral( "grid" ), heightGrid );
+    expectSceneInvalid( SceneCandidate::fromJson( overflowingHeight ) );
+
+    // Guards: zero, small counts, and ordinary dimensions still parse and
+    // round-trip exactly.
+    QJsonObject valid = sceneJson();
+    valid.insert( QStringLiteral( "band_count" ), 0 );
+    QJsonObject validGrid;
+    validGrid.insert( QStringLiteral( "width" ), 8000 );
+    validGrid.insert( QStringLiteral( "height" ), 4 );
+    valid.insert( QStringLiteral( "grid" ), validGrid );
+    const auto ok = SceneCandidate::fromJson( valid );
+    REQUIRE( ok.has_value() );
+    CHECK( ok.value().bandCount == 0 );
+    REQUIRE( ok.value().grid.has_value() );
+    CHECK( ok.value().grid->width == 8000 );
+    CHECK( ok.value().grid->height == 4 );
+}
+
 // ---------------------------------------------------------------------------
 // Track 16 WP-F: the provider seam boundary — a named dataset is never
 // silently assessed without its facts.

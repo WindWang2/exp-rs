@@ -14,12 +14,17 @@ namespace SpectralIndices
 {
 
 namespace {
+inline bool isSentinelSample(float v)
+{
+    return !std::isfinite(v) || v <= -999.0f;
+}
+
 bool isScaledReflectance(const float *a, const float *b, size_t count)
 {
     float m = 0.0f;
     for (size_t i = 0; i < count; i++) {
-        if (std::isfinite(a[i])) m = std::max(m, std::abs(a[i]));
-        if (std::isfinite(b[i])) m = std::max(m, std::abs(b[i]));
+        if (std::isfinite(a[i]) && a[i] > 0.0f) m = std::max(m, a[i]);
+        if (std::isfinite(b[i]) && b[i] > 0.0f) m = std::max(m, b[i]);
     }
     return m > 5.0f; // 0..10000 DN lands here; 0..1 reflectance never does
 }
@@ -63,7 +68,8 @@ bool eviUnit(const float *nir, const float *red, const float *blue, float *out, 
     if (count == 0) return false;
     constexpr float addConst = 1.0f;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || (blue && !std::isfinite(blue[i]))) {
+        if (isSentinelSample(nir[i]) || isSentinelSample(red[i]) || (blue && isSentinelSample(blue[i])) ||
+            (nir[i] == red[i] && nir[i] < 0.0f)) {
             out[i] = std::numeric_limits<float>::quiet_NaN();
             continue;
         }
@@ -83,7 +89,8 @@ bool eviDn(const float *nir, const float *red, const float *blue, float *out, si
     if (count == 0) return false;
     constexpr float addConst = 10000.0f;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || (blue && !std::isfinite(blue[i]))) {
+        if (isSentinelSample(nir[i]) || isSentinelSample(red[i]) || (blue && isSentinelSample(blue[i])) ||
+            (nir[i] == red[i] && nir[i] < 0.0f)) {
             out[i] = std::numeric_limits<float>::quiet_NaN();
             continue;
         }
@@ -130,7 +137,11 @@ bool saviUnit(const float *nir, const float *red, float *out, size_t count)
     // (#680 review).
     constexpr float kOnePlusL = 1.5f;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) { out[i] = std::numeric_limits<float>::quiet_NaN(); continue; }
+        if (isSentinelSample(nir[i]) || isSentinelSample(red[i]) ||
+            (nir[i] == red[i] && nir[i] < 0.0f)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
         out[i] = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i] + L) * kOnePlusL;
     }
     return true;
@@ -148,7 +159,8 @@ bool saviDn(const float *nir, const float *red, float *out, size_t count)
     constexpr float L = 5000.0f;
     constexpr float kOnePlusL = 1.5f;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) {
+        if (isSentinelSample(nir[i]) || isSentinelSample(red[i]) ||
+            (nir[i] == red[i] && nir[i] < 0.0f)) {
             out[i] = std::numeric_limits<float>::quiet_NaN();
             continue;
         }
@@ -216,8 +228,10 @@ bool arvi(const float *nir, const float *red, const float *blue, float *out, siz
     if (count == 0) return false;
     // RB = 2*Red - Blue; NaN in any participating band → NaN.
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || !std::isfinite(blue[i])) {
-            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        if (isSentinelSample(nir[i]) || isSentinelSample(red[i]) || isSentinelSample(blue[i]) ||
+            (nir[i] == red[i] && nir[i] < 0.0f)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
         }
         const float rb = 2.0f * red[i] - blue[i];
         out[i] = MathUtils::safeDiv(nir[i] - rb, nir[i] + rb);
@@ -239,8 +253,8 @@ struct ReflectancePair {
         if (isScaled) {
             nirBuf.resize(count); redBuf.resize(count);
             for (size_t i = 0; i < count; i++) {
-                nirBuf[i] = std::isfinite(n[i]) ? n[i] / 10000.0f : std::numeric_limits<float>::quiet_NaN();
-                redBuf[i] = std::isfinite(r[i]) ? r[i] / 10000.0f : std::numeric_limits<float>::quiet_NaN();
+                nirBuf[i] = !isSentinelSample(n[i]) ? n[i] / 10000.0f : std::numeric_limits<float>::quiet_NaN();
+                redBuf[i] = !isSentinelSample(r[i]) ? r[i] / 10000.0f : std::numeric_limits<float>::quiet_NaN();
             }
             nir = nirBuf.data(); red = redBuf.data();
         }
@@ -277,8 +291,10 @@ bool msaviUnit(const float *nir, const float *red, float *out, size_t count)
     for (size_t i = 0; i < count; i++) {
         const float n = nir[i];
         const float r = red[i];
-        if (!std::isfinite(n) || !std::isfinite(r)) {
-            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        if (isSentinelSample(n) || isSentinelSample(r) ||
+            (n == r && n < 0.0f)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
         }
         // Formula: (2*NIR + 1 - sqrt((2*NIR + 1)^2 - 8*(NIR - Red))) / 2.
         const float term = 2.0f * n + 1.0f;
@@ -329,8 +345,10 @@ bool evi2Unit(const float *nir, const float *red, float *out, size_t count)
     if (count == 0) return false;
     constexpr float c = 1.0f;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) {
-            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        if (isSentinelSample(nir[i]) || isSentinelSample(red[i]) ||
+            (nir[i] == red[i] && nir[i] < 0.0f)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
         }
         out[i] = MathUtils::safeDiv(2.5f * (nir[i] - red[i]), nir[i] + 2.4f * red[i] + c);
     }
@@ -348,8 +366,10 @@ bool evi2Dn(const float *nir, const float *red, float *out, size_t count)
     // data regime (1 → 10000), the numerator factor stays dimensionless.
     constexpr float c = 10000.0f;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) {
-            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        if (isSentinelSample(nir[i]) || isSentinelSample(red[i]) ||
+            (nir[i] == red[i] && nir[i] < 0.0f)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
         }
         out[i] = MathUtils::safeDiv(2.5f * (nir[i] - red[i]), nir[i] + 2.4f * red[i] + c);
     }
@@ -385,8 +405,9 @@ bool baiUnit(const float *red, const float *nir, float *out, size_t count)
     for (size_t i = 0; i < count; i++) {
         const float n = nir[i];
         const float r = red[i];
-        if (!std::isfinite(n) || !std::isfinite(r)) {
-            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        if (isSentinelSample(n) || isSentinelSample(r)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
         }
         const float dRed = 0.1f - r;
         const float dNir = 0.06f - n;
@@ -425,7 +446,8 @@ bool bui(const float *swir, const float *nir, const float *red, float *out, size
     }
     if (count == 0) return false;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(swir[i]) || !std::isfinite(nir[i]) || !std::isfinite(red[i])) {
+        if (isSentinelSample(swir[i]) || isSentinelSample(nir[i]) || isSentinelSample(red[i]) ||
+            (swir[i] == nir[i] && swir[i] < 0.0f) || (nir[i] == red[i] && nir[i] < 0.0f)) {
             out[i] = std::numeric_limits<float>::quiet_NaN();
             continue;
         }

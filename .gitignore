@@ -140,6 +140,7 @@ vendor/
 .superpowers/
 .gstack/
 .planning/*
+!.planning/r13-i-infra/
 !.planning/RS14-05-process-grader/
 !.planning/processing-meta-r4/
 !.planning/unified-help-diagnostics-6/

@@ -368,3 +368,27 @@ TEST_CASE( "ScratchRegistry sweepStale removes only aged run directories", "[scr
     REQUIRE_FALSE( std::filesystem::exists( staleDir ) );
     REQUIRE( std::filesystem::exists( std::filesystem::path( root ) / "run-keep" ) );
 }
+
+TEST_CASE( "ScratchLease release safely handles ScratchRegistry destruction without UAF (#1449)",
+           "[scratch][lsee10][concurrency]" )
+{
+    const std::string root = tempRoot( "uaf_guard" );
+    auto *registry = new ScratchRegistry( { root, 0 } );
+    ScratchLease lease = registry->acquire( "run-safe", "tile", 1024 );
+    REQUIRE( lease.isValid() );
+    REQUIRE( registry->outstandingBytes() == 1024 );
+
+    // Concurrently destroy registry while releasing lease.
+    // Pre-fix: check-then-lock allowed lease deleter to dereference a destroyed ScratchRegistry*.
+    // Post-fix: LifecycleToken serializes or gracefully bails without UAF.
+    std::thread t1( [registry]() {
+        delete registry;
+    } );
+    std::thread t2( [&lease]() {
+        lease = ScratchLease();
+    } );
+
+    t1.join();
+    t2.join();
+    REQUIRE_FALSE( lease.isValid() );
+}

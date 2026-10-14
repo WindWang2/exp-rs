@@ -6,9 +6,8 @@ Wraps a build/test command so that
   * only ONE process at a time writes a given build directory (a second
     concurrent writer is refused with exit 75 EX_TEMPFAIL, or serialized
     behind the first when --wait is given),
-  * build parallelism never exceeds the configured cap (default 2;
-    `-j3+` is forbidden by the repository's resource policy): known
-    command-line forms (`cmake --build … --parallel N` / `-j N`,
+  * build parallelism never exceeds the cap the caller declares (default 2,
+    the repository's own `-j3+` resource policy): known command-line forms (`cmake --build … --parallel N` / `-j N`,
     `ninja -jN`, `make -jN`) are clamped downward, and the governing
     environment variables are exported for everything else.
 
@@ -280,8 +279,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="the build directory being written (lock keys on it)")
     parser.add_argument("--wait", type=float, default=0.0,
                         help="seconds to wait for a busy lock (0 = fail fast, default)")
-    parser.add_argument("--parallel", type=int, default=2, choices=(1, 2),
+    parser.add_argument("--parallel", type=int, default=2,
                         help="parallelism cap for the wrapped build (default 2)")
+    parser.add_argument("--max-parallel", type=int, default=2,
+                        help="hard ceiling for --parallel; the caller passes its own "
+                             "resolved cap (scripts/build.sh passes JOBS_CAP). Keeps "
+                             "the -j<=2 discipline enforceable in the guard itself "
+                             "without hard-coding the policy here (default 2).")
     parser.add_argument("--stale-after", type=float, default=3600.0,
                         help="seconds after which a DEAD holder's lock may be broken")
     parser.add_argument("--status", action="store_true",
@@ -290,6 +294,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", nargs=argparse.REMAINDER,
                         help="the command to run, after --")
     args = parser.parse_args(argv)
+
+    # The cap is the CALLER's policy (scripts/build.sh owns the -j<=2
+    # discipline and its documented SICNU_BUILD_JOBS_CAP escalation). This tool
+    # clamps to whatever cap it is handed; it must not second-guess a raised
+    # cap, but a nonsense one is refused rather than silently ignored.
+    if args.parallel < 1:
+        print(f"refused: --parallel must be >= 1, got {args.parallel}",
+              file=sys.stderr)
+        return EXIT_REFUSED
+    # --parallel is no longer an argparse choice, so the guard itself has to
+    # hold the line: a caller that forgot to clamp (or a direct invocation)
+    # must not get a -j value above the declared ceiling.
+    if args.max_parallel < 1:
+        print(f"refused: --max-parallel must be >= 1, got {args.max_parallel}",
+              file=sys.stderr)
+        return EXIT_REFUSED
+    if args.parallel > args.max_parallel:
+        print(f"refused: --parallel {args.parallel} exceeds --max-parallel "
+              f"{args.max_parallel} (raise the caller's cap deliberately, e.g. "
+              f"SICNU_BUILD_JOBS_CAP)", file=sys.stderr)
+        return EXIT_REFUSED
 
     build_dir = Path(args.lock_dir)
     if not build_dir.is_absolute():

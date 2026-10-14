@@ -24,8 +24,11 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QTemporaryDir>
+#include <QTextStream>
 
 #include <array>
+#include <chrono>
+#include <thread>
 #include <vector>
 
 using namespace sicnu::operators;
@@ -342,4 +345,142 @@ TEST_CASE("OTB operators are registered", "[otb]") {
     auto op = reg.create("otb:meanshift_segmentation");
     REQUIRE(op != nullptr);
     REQUIRE(op->name() == "otb:meanshift_segmentation");
+}
+
+namespace {
+
+class MockOtbTimeoutOperator final : public OtbOperatorBase {
+public:
+    std::string name() const override { return "otb:mock_timeout"; }
+    std::string group() const override { return "otb-test"; }
+    std::string description() const override { return "Mock OTB operator for timeout and process control testing"; }
+    Json::Value schema() const override {
+        Json::Value props(Json::objectValue);
+        props["output"] = schema::makeOutputParam("output", "Output path");
+        props["timeout_s"] = schema::makeNumberParam("timeout_s", "Timeout in seconds");
+        props["max_runtime_s"] = schema::makeNumberParam("max_runtime_s", "Max runtime in seconds");
+        return buildSchema("Mock Timeout", description(), props, Json::Value(), {"output"});
+    }
+protected:
+    QString otbApplicationName() const override { return QStringLiteral("MockTimeout"); }
+    QStringList buildOtbArgs(const Json::Value& params, RSOperatorContext&) const override {
+        QStringList args;
+        args << QStringLiteral("-out") << QString::fromStdString(params["output"].asString());
+        return args;
+    }
+};
+
+struct OtbPathPin {
+    explicit OtbPathPin(const QString& path) {
+        ToolPathManager::instance().setOtbPath(path);
+    }
+    ~OtbPathPin() {
+        ToolPathManager::instance().setOtbPath(QString());
+    }
+};
+
+} // namespace
+
+TEST_CASE("OtbOperatorBase enforces configurable timeout and preserves partial output on timeout", "[otb][timeout]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    const QString scriptPath = tempDir.path() + QDir::separator() + QStringLiteral("otbcli_MockTimeout");
+    {
+        QFile script(scriptPath);
+        REQUIRE(script.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream out(&script);
+        out << "#!/bin/sh\n";
+        out << "OUT=\"\"\n";
+        out << "while [ $# -gt 0 ]; do\n";
+        out << "  if [ \"$1\" = \"-out\" ]; then OUT=\"$2\"; shift 2; else shift; fi\n";
+        out << "done\n";
+        out << "if [ -n \"$OUT\" ]; then\n";
+        out << "  echo 'partial content before timeout' > \"$OUT\"\n";
+        out << "fi\n";
+        out << "sleep 30\n";
+        script.close();
+    }
+    QFile::setPermissions(scriptPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner |
+                                      QFileDevice::ReadUser | QFileDevice::WriteUser | QFileDevice::ExeUser);
+
+    const OtbPathPin pathPin(tempDir.path());
+
+    const QString outputPath = tempDir.path() + QDir::separator() + QStringLiteral("hung_output.tif");
+    const QString partialPath = outputPath + QStringLiteral(".partial");
+
+    MockOtbTimeoutOperator op;
+    RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["output"] = outputPath.toStdString();
+    params["timeout_s"] = 1.0; // Clamped to min safe runtime (1000 ms)
+
+    bool caughtTimeout = false;
+    try {
+        op.run(params, ctx);
+    } catch (const RSOperatorError& e) {
+        caughtTimeout = true;
+        CHECK(e.code() == ErrorCode::ExternalProcessTimeout);
+        CHECK(e.details().isMember("timeoutMs"));
+        CHECK(e.details()["timeoutMs"].asInt64() == 1000);
+        CHECK(e.details().isMember("applicationName"));
+    }
+    CHECK(caughtTimeout);
+    CHECK_FALSE(QFile::exists(outputPath));
+    CHECK(QFile::exists(partialPath));
+}
+
+TEST_CASE("OtbOperatorBase terminates process group and preserves partial output on cancellation", "[otb][cancel]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    const QString scriptPath = tempDir.path() + QDir::separator() + QStringLiteral("otbcli_MockTimeout");
+    {
+        QFile script(scriptPath);
+        REQUIRE(script.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream out(&script);
+        out << "#!/bin/sh\n";
+        out << "OUT=\"\"\n";
+        out << "while [ $# -gt 0 ]; do\n";
+        out << "  if [ \"$1\" = \"-out\" ]; then OUT=\"$2\"; shift 2; else shift; fi\n";
+        out << "done\n";
+        out << "if [ -n \"$OUT\" ]; then\n";
+        out << "  echo 'partial content before cancel' > \"$OUT\"\n";
+        out << "fi\n";
+        out << "sleep 30\n";
+        script.close();
+    }
+    QFile::setPermissions(scriptPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner |
+                                      QFileDevice::ReadUser | QFileDevice::WriteUser | QFileDevice::ExeUser);
+
+    const OtbPathPin pathPin(tempDir.path());
+
+    const QString outputPath = tempDir.path() + QDir::separator() + QStringLiteral("cancelled_output.tif");
+    const QString partialPath = outputPath + QStringLiteral(".partial");
+
+    MockOtbTimeoutOperator op;
+    RSOperatorContext ctx;
+    std::atomic<bool> cancelled{ false };
+    ctx.setCancelFlag(&cancelled);
+
+    std::jthread cancelThread([&cancelled](std::stop_token) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        cancelled.store(true);
+    });
+
+    Json::Value params(Json::objectValue);
+    params["output"] = outputPath.toStdString();
+    params["timeout_s"] = 15.0;
+
+    bool caughtCancel = false;
+    try {
+        op.run(params, ctx);
+    } catch (const RSOperatorError& e) {
+        caughtCancel = true;
+        CHECK(e.code() == ErrorCode::Cancelled);
+    }
+
+    CHECK(caughtCancel);
+    CHECK_FALSE(QFile::exists(outputPath));
+    CHECK(QFile::exists(partialPath));
 }

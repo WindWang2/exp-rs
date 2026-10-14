@@ -257,3 +257,67 @@ TEST_CASE( "feasible verdict with blocking questions is self-inconsistent", "[sc
     REQUIRE( problems.size() == 1 );
     CHECK( problems[0].find( "blocking" ) != std::string::npos );
 }
+
+TEST_CASE( "checkEnvelope fails closed without throwing on non-string kind and version (#1447)",
+           "[scientific_planner][schema]" )
+{
+    Json::Value doc = scientificGoalToJson( sampleGoal() );
+    std::string err;
+    ScientificGoal goal;
+
+    // kind is integer
+    doc["kind"] = 42;
+    CHECK_FALSE( scientificGoalFromJson( doc, goal, err ) );
+    CHECK( err.find( "invalid_document" ) != std::string::npos );
+
+    // kind is array
+    doc["kind"] = Json::Value( Json::arrayValue );
+    CHECK_FALSE( scientificGoalFromJson( doc, goal, err ) );
+    CHECK( err.find( "invalid_document" ) != std::string::npos );
+
+    // schema_version is integer
+    doc = scientificGoalToJson( sampleGoal() );
+    doc["schema_version"] = 1;
+    CHECK_FALSE( scientificGoalFromJson( doc, goal, err ) );
+    CHECK( err.find( "unsupported_version" ) != std::string::npos );
+
+    // schema_version is object
+    doc["schema_version"] = Json::Value( Json::objectValue );
+    CHECK_FALSE( scientificGoalFromJson( doc, goal, err ) );
+    CHECK( err.find( "unsupported_version" ) != std::string::npos );
+}
+
+TEST_CASE( "validateScientificGoal and readAcceptanceCriteria enforce boundary constraints",
+           "[scientific_planner][schema]" )
+{
+    ScientificGoal goal = sampleGoal();
+    CHECK( validateScientificGoal( goal ).empty() );
+
+    // Duplicate criterion IDs rejected
+    goal.acceptanceCriteria.push_back( goal.acceptanceCriteria.front() );
+    auto problems = validateScientificGoal( goal );
+    CHECK_FALSE( problems.empty() );
+    CHECK( problems[0].find( "duplicate criterion_id" ) != std::string::npos );
+
+    // Also rejected in JSON deserialization
+    std::string err;
+    ScientificGoal parsed;
+    Json::Value doc = scientificGoalToJson( sampleGoal() );
+    doc["acceptance_criteria"].append( doc["acceptance_criteria"][0] );
+    CHECK_FALSE( scientificGoalFromJson( doc, parsed, err ) );
+    CHECK( err.find( "duplicate criterion_id" ) != std::string::npos );
+
+    // Negative temporal bounds rejected
+    ScientificGoal negScenes = sampleGoal();
+    negScenes.temporalScope->minScenes = -5;
+    CHECK_FALSE( validateScientificGoal( negScenes ).empty() );
+
+    ScientificGoal negGap = sampleGoal();
+    negGap.temporalScope->maxGapDays = -1;
+    CHECK_FALSE( validateScientificGoal( negGap ).empty() );
+
+    // Oversized strings rejected
+    ScientificGoal longQuantity = sampleGoal();
+    longQuantity.quantity = std::string( PlanLimits::kMaxTextChars + 1, 'q' );
+    CHECK_FALSE( validateScientificGoal( longQuantity ).empty() );
+}

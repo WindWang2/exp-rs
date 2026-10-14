@@ -647,3 +647,140 @@ TEST_CASE( "adversarial G-13: a node set that is entirely unrun never rolls up t
     REQUIRE( task.status != CheckStatus::Pass );
     REQUIRE( contains( task.blockingNodes, "n1" ) );
 }
+
+// ---------------------------------------------------------------------------
+// 9. The node map is caller structure; a check it forgets must not vanish
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "adversarial G-14: a check no node claims still reaches the verdict",
+           "[verifier14][adversarial][failopen]" )
+{
+    // The NodeCheckMap is supplied by the caller, alongside the spec. A check
+    // the map forgets still has a verdict in results, and the doctrine is
+    // absolute: report.status must never be Pass while any result is Fail.
+    // Folding only node-mapped statuses lets a mapping gap swallow a Fail
+    // whole -- the counters accuse (by_status.fail == 1) while the headline
+    // acquits (status == Pass). That disagreement is the fail-open.
+    VerificationSpec spec;
+    spec.specId = "coverage-gap";
+    spec.specVersion = "1";
+    spec.checks.push_back( makeStateCheck( "c0", "probe0", "linear" ) );     // will Pass
+    spec.checks.push_back( makeStateCheck( "c1", "probe1", "sigma0_db" ) );  // will Fail
+
+    NodeCheckMap nodeChecks;
+    nodeChecks["n1"] = { "c0" };   // c1's verdict belongs to no node
+
+    const StateDomainProvider provider;
+    const VerificationReport report = runSpec( spec, stateOnlyInputs( provider ), nodeChecks );
+
+    REQUIRE( report.results.size() == 2 );
+    REQUIRE( report.results[0].status == CheckStatus::Pass );
+    REQUIRE( report.results[1].status == CheckStatus::Fail );
+
+    // The counter sees the Fail; the verdict must not disagree with it.
+    REQUIRE( report.counters["by_status"]["fail"].asInt() == 1 );
+    REQUIRE( report.status != CheckStatus::Pass );
+    REQUIRE( report.outcome.status == CheckStatus::Fail );
+
+    // The gap itself is surfaced with the closed spec-vocabulary code, so a
+    // reader can tell a coverage defect from a data defect, and the failed
+    // check's own code is carried even though no node claimed it.
+    REQUIRE( contains( report.outcome.failureCodes, failure_codes::kSpecInvalid ) );
+    REQUIRE( contains( report.outcome.failureCodes, failure_codes::kStateInvariantViolation ) );
+
+    // Full coverage must roll up exactly as before: same verdict, no gap code,
+    // and the blocking node is the one that actually failed.
+    NodeCheckMap full;
+    full["n1"] = { "c0" };
+    full["n2"] = { "c1" };
+    const VerificationReport covered = runSpec( spec, stateOnlyInputs( provider ), full );
+
+    REQUIRE( covered.status == CheckStatus::Fail );
+    REQUIRE( covered.outcome.blockingNodes == std::vector<std::string>{ "n2" } );
+    REQUIRE( covered.counters["by_status"]["fail"].asInt() == 1 );
+    REQUIRE( contains( covered.outcome.failureCodes, failure_codes::kStateInvariantViolation ) );
+    REQUIRE_FALSE( contains( covered.outcome.failureCodes, failure_codes::kSpecInvalid ) );
+}
+
+// ---------------------------------------------------------------------------
+// 10. Refusal vocabulary: missing evidence is not a budget overrun
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "adversarial G-15: missing required evidence names itself, not the budget",
+           "[verifier14][adversarial][failopen]" )
+{
+    // requiredEvidence the providers cannot supply stops the run before any
+    // check evaluates. That is an evidence problem, not a resource one: no cap
+    // was hit, nothing was truncated mid-stream. Reporting it as
+    // VERIFY.BUDGET_EXCEEDED tells the caller to raise a ceiling that was
+    // never the cause.
+    VerificationSpec spec;
+    spec.specId = "missing-evidence";
+    spec.specVersion = "1";
+    spec.requiredEvidence = { "artifact" };
+    spec.checks.push_back( makeCheck( "c0", checkKindToWire( CheckKind::ArtifactShape ) ) );
+
+    // Only the state seam is wired; the required artifact evidence is not.
+    const StateDomainProvider provider;
+    const VerificationReport report = runSpec( spec, stateOnlyInputs( provider ) );
+
+    REQUIRE( report.results.size() == 1 );
+    REQUIRE( report.results.front().status == CheckStatus::Indeterminate );
+    REQUIRE( report.results.front().failureCode == failure_codes::kEvidenceUnavailable );
+
+    // The outcome names the true cause ...
+    REQUIRE( contains( report.outcome.failureCodes, failure_codes::kEvidenceUnavailable ) );
+    // ... and does NOT claim a budget was exceeded.
+    REQUIRE_FALSE( contains( report.outcome.failureCodes, failure_codes::kBudgetExceeded ) );
+    REQUIRE_FALSE( report.budgetUsage.exceeded );
+    REQUIRE( report.budgetUsage.checksUnevaluated == 1 );
+}
+
+TEST_CASE( "adversarial G-16: strict policy promotes an uncovered Indeterminate before folding",
+           "[verifier14][adversarial][failopen]" )
+{
+    // The D10 coverage-gap fold folds uncovered results into the task outcome
+    // via combineStatus, which bypassed the IndeterminatePolicy::Fail
+    // promotion rollUpNode applies per node: an uncovered Indeterminate under
+    // a strict spec stayed Indeterminate while a mapped one became Fail — the
+    // wrong verdict class in exactly the edge configuration the policy exists
+    // for. The fold must promote (and record the promotion) like a node does.
+    auto makeSpec = [] {
+        VerificationSpec spec;
+        spec.specId = "uncovered-strict";
+        spec.specVersion = "1";
+        spec.checks.push_back( makeStateCheck( "c0", "probe0", "linear" ) ); // Pass, covered
+        spec.checks.push_back( makeCheck( "c1", checkKindToWire( CheckKind::ArtifactShape ) ) );
+        return spec;
+    };
+    NodeCheckMap nodeChecks;
+    nodeChecks["n1"] = { "c0" };   // c1's verdict belongs to no node
+
+    const StateDomainProvider provider;
+    const VerificationInputs inputs = stateOnlyInputs( provider );
+
+    VerificationSpec strict = makeSpec();
+    strict.indeterminatePolicy = IndeterminatePolicy::Fail;
+    const VerificationReport strictReport = runSpec( strict, inputs, nodeChecks );
+
+    REQUIRE( strictReport.results.size() == 2 );
+    REQUIRE( strictReport.results[0].status == CheckStatus::Pass );
+    REQUIRE( strictReport.results[1].status == CheckStatus::Indeterminate );
+
+    // Strict: the covered node passes, so the verdict hinges entirely on the
+    // uncovered result — it must be promoted to Fail ...
+    REQUIRE( strictReport.outcome.status == CheckStatus::Fail );
+    REQUIRE( strictReport.status == CheckStatus::Fail );
+    // ... and the promotion must be RECORDED, like rollUpNode records
+    // promoted_check_ids: a reader must be able to tell "this failed" from
+    // "we raised it to fail".
+    REQUIRE( strictReport.results[1].promoted );
+
+    // Lenient guard: with the default policy nothing is promoted and the
+    // uncovered Indeterminate folds as Indeterminate.
+    VerificationSpec lenient = makeSpec();
+    const VerificationReport lenientReport = runSpec( lenient, inputs, nodeChecks );
+    REQUIRE( lenientReport.outcome.status == CheckStatus::Indeterminate );
+    REQUIRE( lenientReport.results[1].status == CheckStatus::Indeterminate );
+    REQUIRE_FALSE( lenientReport.results[1].promoted );
+}
