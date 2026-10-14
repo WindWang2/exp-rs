@@ -773,3 +773,432 @@ TEST_CASE( "merged adapter output stays within evidence budgets and dedupes",
     CHECK( outcome.report.dimensions[0].criteria[0].evidenceIds.size() == 2 );
     CHECK( outcome.report.score == 100.0 );
 }
+
+// ---------------------------------------------------------------------------
+// E12 teaching behavior benchmark (WP E12, D17)
+//
+// The grader-side half of the direction's behavior benchmark: one NDVI
+// teaching scenario (NoData handling, cloud mask, confusion-matrix accuracy,
+// spatial-leakage declaration, CRS match, sidecar digest) hand-built from
+// the adapter documents above plus the recorded declarations the d17
+// projection does not carry. Clean evidence must earn every criterion with
+// an empty reason chain; each single-fault variant must flip EXACTLY its own
+// criterion with the precise reason slug(s) — never just any failure; and
+// repeated grading must reproduce the report digest byte-for-byte.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// d17_provenance/1.0 for the NDVI accuracy lab: cloud mask → NDVI →
+/// accuracy evaluation, plus the cloud-mask and inference-sidecar artifacts.
+Json::Value ndviProvenanceDoc( bool includeCloudMask = true )
+{
+    Json::Value doc{ Json::objectValue };
+    doc["kind"] = "d17_provenance";
+    doc["version"] = "1.0";
+
+    Json::Value run{ Json::objectValue };
+    run["id"] = "run:exp-ndvi-1#1";
+    run["kind"] = "run";
+    run["attributes"] = Json::Value{ Json::objectValue };
+    run["attributes"]["workflowId"] = "wf-ndvi-accuracy";
+    run["attributes"]["workflowName"] = "NDVI accuracy lab";
+    run["attributes"]["schemaVersion"] = 3;
+    run["attributes"]["planSignature"] = "sig-ndvi-1";
+    doc["nodes"] = Json::Value{ Json::arrayValue };
+    doc["nodes"].append( run );
+
+    auto execNode = []( const char *id, const char *nodeId, const char *operatorId ) {
+        Json::Value exec{ Json::objectValue };
+        exec["id"] = id;
+        exec["kind"] = "nodeExec";
+        exec["attributes"] = Json::Value{ Json::objectValue };
+        exec["attributes"]["nodeId"] = nodeId;
+        exec["attributes"]["operatorId"] = operatorId;
+        exec["attributes"]["state"] = "Completed";
+        exec["attributes"]["isCacheHit"] = false;
+        return exec;
+    };
+    if ( includeCloudMask )
+        doc["nodes"].append( execNode( "node:cloud_mask", "cloud_mask", "op.cloud_mask" ) );
+    doc["nodes"].append( execNode( "node:ndvi", "ndvi", "op.ndvi" ) );
+    doc["nodes"].append( execNode( "node:accuracy_eval", "accuracy_eval", "op.accuracy_eval" ) );
+
+    auto artifactNode = []( const char *path, const char *fingerprint ) {
+        Json::Value artifact{ Json::objectValue };
+        artifact["id"] = std::string( "artifact:" ) + path;
+        artifact["kind"] = "artifact";
+        artifact["attributes"] = Json::Value{ Json::objectValue };
+        artifact["attributes"]["path"] = path;
+        artifact["attributes"]["fingerprint"] = fingerprint;
+        return artifact;
+    };
+    if ( includeCloudMask )
+        doc["nodes"].append( artifactNode( "/runs/exp-ndvi-1/cloud_mask.tif", "fp-mask-1" ) );
+    doc["nodes"].append( artifactNode( "/runs/exp-ndvi-1/inference_sidecar.json",
+                                       "sha256:sidecar-aa11" ) );
+
+    doc["edges"] = Json::Value{ Json::arrayValue };
+    auto producedEdge = []( const char *from, const char *to ) {
+        Json::Value edge{ Json::objectValue };
+        edge["from"] = from;
+        edge["to"] = to;
+        edge["kind"] = "produced";
+        return edge;
+    };
+    if ( includeCloudMask )
+        doc["edges"].append( producedEdge( "node:cloud_mask",
+                                           "artifact:/runs/exp-ndvi-1/cloud_mask.tif" ) );
+    doc["edges"].append( producedEdge( "node:accuracy_eval",
+                                       "artifact:/runs/exp-ndvi-1/inference_sidecar.json" ) );
+    return doc;
+}
+
+/// WorkflowRun checkpoint (v2) for the same lab, mirroring the stage keys.
+Json::Value ndviCheckpointDoc( bool includeCloudMask = true )
+{
+    Json::Value doc{ Json::objectValue };
+    doc["version"] = 2;
+    doc["runId"] = "exp-ndvi-1";
+    doc["workflowId"] = "wf-ndvi-accuracy";
+    doc["attempt"] = 1;
+    doc["state"] = "Completed";
+    doc["progress"] = 1.0;
+    doc["createdAt"] = "2026-10-01T08:00:00Z";
+    doc["updatedAt"] = "2026-10-01T09:00:00Z";
+    doc["definition"] = Json::Value{ Json::objectValue };
+
+    auto step = []( const char *stepId, const char *operatorId ) {
+        Json::Value plan{ Json::objectValue };
+        plan["stepId"] = stepId;
+        plan["operatorId"] = operatorId;
+        plan["status"] = "Completed";
+        plan["cacheHit"] = false;
+        plan["fingerprint"] = std::string( "fp-" ) + stepId;
+        plan["outputDigest"] = std::string( "digest-" ) + stepId;
+        plan["outputSizeBytes"] = Json::Int64( 1024 );
+        plan["errorMessage"] = "";
+        return plan;
+    };
+    doc["stepPlans"] = Json::Value{ Json::arrayValue };
+    if ( includeCloudMask )
+        doc["stepPlans"].append( step( "cloud_mask", "op.cloud_mask" ) );
+    doc["stepPlans"].append( step( "ndvi", "op.ndvi" ) );
+    doc["stepPlans"].append( step( "accuracy_eval", "op.accuracy_eval" ) );
+    doc["artifacts"] = Json::Value{ Json::objectValue };
+    return doc;
+}
+
+/// Metric record for the lab. `ignoreNoData` models the classic fault: the
+/// accuracy was computed on raw pixels with the NoData sentinel left in.
+Json::Value ndviMetricDoc( bool ignoreNoData = false )
+{
+    Json::Value doc{ Json::objectValue };
+    doc["run_id"] = "exp-ndvi-1";
+    doc["protocol"] = Json::Value{ Json::objectValue };
+    doc["protocol"]["kind"] = "classification";
+    Json::Value confusion{ Json::objectValue };
+    confusion["overall_accuracy"] = 0.91;
+    confusion["kappa"] = 0.86;
+    Json::Value ndvi{ Json::objectValue };
+    ndvi["nodata_aware_accuracy"] = ignoreNoData ? 0.71 : 0.91;
+    Json::Value sidecar{ Json::objectValue };
+    sidecar["digest_match"] = 1.0;
+    doc["metrics"] = Json::Value{ Json::objectValue };
+    doc["metrics"]["confusion_matrix"] = confusion;
+    doc["metrics"]["ndvi"] = ndvi;
+    doc["metrics"]["sidecar"] = sidecar;
+    doc["metrics_hash"] = ignoreNoData ? "mh-ndvi-1b" : "mh-ndvi-1";
+    doc["metrics_schema_version"] = 1;
+    return doc;
+}
+
+/// Recorded spatial-split declaration (the d17 artifact projection carries
+/// path/fingerprint/size only, so the declaration arrives as its own item,
+/// mirroring the recorded spatial_split.json the lab writes).
+GradeEvidenceItem spatialSplitItem( const char *leakage )
+{
+    GradeEvidenceItem item;
+    item.evidenceId = "prov:run:exp-ndvi-1#1:artifact:/runs/exp-ndvi-1/spatial_split.json";
+    item.kind = EvidenceKind::ArtifactState;
+    item.key = "spatial_split";
+    item.state = "present";
+    item.facts["path"] = "/runs/exp-ndvi-1/spatial_split.json";
+    item.facts["leakage"] = leakage;
+    item.source = "d17_provenance";
+    return item;
+}
+
+/// Recorded CRS check against the scene's reference CRS.
+GradeEvidenceItem crsCheckItem( const char *state )
+{
+    GradeEvidenceItem item;
+    item.evidenceId = "prov:run:exp-ndvi-1#1:check:crs";
+    item.kind = EvidenceKind::Provenance;
+    item.key = "crs_check";
+    item.state = state; // "matched" | "mismatch"
+    item.facts["crs"] = "EPSG:32648";
+    item.facts["expected"] = "EPSG:32648";
+    item.source = "d17_provenance";
+    return item;
+}
+
+/// The full teaching bundle: all three adapter projections plus the two
+/// recorded declarations. Every item is rebuilt from documents on each call
+/// so mutations can never leak between benchmark runs.
+std::vector<GradeEvidenceItem> ndviEvidenceItems( const Json::Value &provenanceDoc,
+                                                  const Json::Value &checkpointDoc,
+                                                  const Json::Value &metricDoc,
+                                                  const char *leakage, const char *crsState )
+{
+    GraderError err;
+    std::vector<GradeEvidenceItem> items = provenanceToEvidence( provenanceDoc, err );
+    REQUIRE( err.ok() );
+    const auto checkpoint = checkpointToEvidence( checkpointDoc, err );
+    REQUIRE( err.ok() );
+    items.insert( items.end(), checkpoint.begin(), checkpoint.end() );
+    const auto metrics = metricRecordToEvidence( metricDoc, err );
+    REQUIRE( err.ok() );
+    items.insert( items.end(), metrics.begin(), metrics.end() );
+    items.push_back( spatialSplitItem( leakage ) );
+    items.push_back( crsCheckItem( crsState ) );
+    return items;
+}
+
+std::vector<GradeEvidenceItem> ndviEvidenceItems()
+{
+    return ndviEvidenceItems( ndviProvenanceDoc(), ndviCheckpointDoc(), ndviMetricDoc(), "none",
+                              "matched" );
+}
+
+/// Six criteria, 100 points: process (cloud mask, leakage, CRS), results
+/// (raw + NoData-aware accuracy), artifact integrity (sidecar digest).
+GradingRubric ndviRubric()
+{
+    GradingRubric rubric;
+    rubric.rubricId = "ndvi-lab-e12";
+    rubric.revision = 1;
+    rubric.totalPoints = 100.0;
+    rubric.passingScore = 60.0;
+    Dimension dim;
+    dim.dimensionId = "d";
+    dim.weight = 100.0;
+
+    Criterion cloudMask;
+    cloudMask.criterionId = "proc-cloud-mask";
+    cloudMask.maxPoints = 15.0;
+    cloudMask.kind = CriterionKind::Stage;
+    cloudMask.evidenceKey = "cloud_mask";
+    cloudMask.stage.expectedState = "Completed";
+    dim.criteria.push_back( cloudMask );
+
+    Criterion accuracy;
+    accuracy.criterionId = "res-accuracy";
+    accuracy.maxPoints = 25.0;
+    accuracy.kind = CriterionKind::Metric;
+    accuracy.evidenceKey = "confusion_matrix.overall_accuracy";
+    accuracy.metric.mode = MetricExpectation::Mode::AtLeast;
+    accuracy.metric.value = 0.85;
+    dim.criteria.push_back( accuracy );
+
+    Criterion nodataAccuracy;
+    nodataAccuracy.criterionId = "res-nodata-accuracy";
+    nodataAccuracy.maxPoints = 20.0;
+    nodataAccuracy.kind = CriterionKind::Metric;
+    nodataAccuracy.evidenceKey = "ndvi.nodata_aware_accuracy";
+    nodataAccuracy.metric.mode = MetricExpectation::Mode::AtLeast;
+    nodataAccuracy.metric.value = 0.85;
+    dim.criteria.push_back( nodataAccuracy );
+
+    Criterion leakage;
+    leakage.criterionId = "proc-leakage";
+    leakage.maxPoints = 15.0;
+    leakage.kind = CriterionKind::Fact;
+    leakage.evidenceKey = "spatial_split";
+    leakage.requireEvidenceKind = EvidenceKind::ArtifactState;
+    leakage.fact.expectedState = "present";
+    leakage.fact.requiredFacts["leakage"] = "\"none\"";
+    dim.criteria.push_back( leakage );
+
+    Criterion crs;
+    crs.criterionId = "proc-crs";
+    crs.maxPoints = 10.0;
+    crs.kind = CriterionKind::Fact;
+    crs.evidenceKey = "crs_check";
+    crs.requireEvidenceKind = EvidenceKind::Provenance;
+    crs.fact.expectedState = "matched";
+    crs.fact.requiredFacts["crs"] = "\"EPSG:32648\"";
+    dim.criteria.push_back( crs );
+
+    Criterion sidecar;
+    sidecar.criterionId = "art-sidecar";
+    sidecar.maxPoints = 15.0;
+    sidecar.kind = CriterionKind::Metric;
+    sidecar.evidenceKey = "sidecar.digest_match";
+    sidecar.metric.mode = MetricExpectation::Mode::Equals;
+    sidecar.metric.value = 1.0;
+    dim.criteria.push_back( sidecar );
+
+    rubric.dimensions.push_back( dim );
+    return rubric;
+}
+
+const CriterionOutcome *findCriterion( const GradeReport &report, const std::string &criterionId )
+{
+    for ( const auto &dimension : report.dimensions )
+        for ( const auto &criterion : dimension.criteria )
+            if ( criterion.criterionId == criterionId )
+                return &criterion;
+    return nullptr;
+}
+
+/// Grades one evidence bundle against the NDVI rubric (the rubric is rebuilt
+/// per call so a caller-side mutation can never leak into the next grade).
+GradeOutcome gradeNdvi( const std::vector<GradeEvidenceItem> &items )
+{
+    GradeEvidence evidence;
+    evidence.subject.experimentId = "exp-ndvi-1";
+    evidence.items = items;
+    GraderError err;
+    REQUIRE( evidence.validate( err ) );
+    CAPTURE( err.message );
+    const GradeOutcome outcome = grade( ndviRubric(), evidence );
+    CAPTURE( outcome.error.message );
+    REQUIRE( outcome.ok );
+    return outcome;
+}
+
+/// The six criterion ids, in rubric order.
+const std::vector<std::string> kNdviCriteria = { "proc-cloud-mask", "res-accuracy",
+                                                 "res-nodata-accuracy", "proc-leakage", "proc-crs",
+                                                 "art-sidecar" };
+
+/// Asserts the report flips exactly `flipped` — with the precise reason
+/// slug(s) — while every other criterion stays earned with an empty reason
+/// chain (the REASON CHAIN contract: full points carry no slugs).
+void checkSingleFault( const GradeReport &report, const std::string &flipped,
+                       const std::vector<std::string> &expectedSlugs, double expectedScore )
+{
+    for ( const std::string &criterionId : kNdviCriteria ) {
+        const CriterionOutcome *outcome = findCriterion( report, criterionId );
+        REQUIRE( outcome != nullptr );
+        if ( criterionId == flipped ) {
+            CHECK( outcome->status != OutcomeStatus::Earned );
+            CHECK( outcome->reasonCodes == expectedSlugs );
+            CHECK( outcome->rawEarned == 0.0 );
+        }
+        else {
+            CHECK( outcome->status == OutcomeStatus::Earned );
+            CHECK( outcome->reasonCodes.empty() );
+            CHECK( outcome->rawEarned == outcome->maxPoints );
+        }
+    }
+    CHECK( report.score == expectedScore );
+}
+
+} // namespace
+
+TEST_CASE( "teaching benchmark: clean NDVI evidence earns every criterion with an empty reason chain",
+           "[grader][adapters][teaching][benchmark]" )
+{
+    const GradeOutcome outcome = gradeNdvi( ndviEvidenceItems() );
+    const GradeReport &report = outcome.report;
+
+    CHECK( report.score == 100.0 );
+    CHECK( report.verdict == ReportVerdict::Pass );
+    for ( const std::string &criterionId : kNdviCriteria ) {
+        const CriterionOutcome *criterion = findCriterion( report, criterionId );
+        REQUIRE( criterion != nullptr );
+        CHECK( criterion->status == OutcomeStatus::Earned );
+        CHECK( criterion->rawEarned == criterion->maxPoints );
+        // The expected reason-slug set for an earned criterion is EMPTY: the
+        // REASON CHAIN contract pays slugs only for points not earned.
+        CHECK( criterion->reasonCodes.empty() );
+        // ...and every earned point is cited against recorded evidence.
+        CHECK( !criterion->evidenceIds.empty() );
+    }
+}
+
+TEST_CASE( "teaching benchmark: each single-fault variant flips exactly its criterion with the precise reason slug",
+           "[grader][adapters][teaching][benchmark]" )
+{
+    SECTION( "NoData-ignored accuracy is below the declared band" )
+    {
+        // The same lab recomputed with the NoData sentinel left in the
+        // pixels: the recorded NoData-aware accuracy collapses to 0.71.
+        const GradeOutcome outcome = gradeNdvi( ndviEvidenceItems(
+            ndviProvenanceDoc(), ndviCheckpointDoc(), ndviMetricDoc( /*ignoreNoData*/ true ), "none",
+            "matched" ) );
+        checkSingleFault( outcome.report, "res-nodata-accuracy", { "grader:metric-below-band" },
+                          80.0 );
+    }
+
+    SECTION( "missing cloud mask leaves the stage unrecorded" )
+    {
+        const GradeOutcome outcome = gradeNdvi( ndviEvidenceItems(
+            ndviProvenanceDoc( /*includeCloudMask*/ false ),
+            ndviCheckpointDoc( /*includeCloudMask*/ false ), ndviMetricDoc(), "none", "matched" ) );
+        checkSingleFault( outcome.report, "proc-cloud-mask", { "grader:stage-missing" }, 85.0 );
+    }
+
+    SECTION( "leakage-declared provenance contradicts the required declaration" )
+    {
+        const GradeOutcome outcome = gradeNdvi(
+            ndviEvidenceItems( ndviProvenanceDoc(), ndviCheckpointDoc(), ndviMetricDoc(), "declared",
+                               "matched" ) );
+        checkSingleFault( outcome.report, "proc-leakage",
+                          { "grader:fact-missing-required-fact" }, 85.0 );
+    }
+
+    SECTION( "CRS mismatch record never carries the expected state" )
+    {
+        const GradeOutcome outcome = gradeNdvi( ndviEvidenceItems(
+            ndviProvenanceDoc(), ndviCheckpointDoc(), ndviMetricDoc(), "none", "mismatch" ) );
+        checkSingleFault( outcome.report, "proc-crs", { "grader:fact-state-mismatch" }, 90.0 );
+    }
+
+    SECTION( "tampered sidecar digest makes the recorded observations conflict" )
+    {
+        // A re-issued metric record after the sidecar was swapped contradicts
+        // the original observation: conflicting recorded truth is
+        // indeterminate, never silently resolved to one side.
+        std::vector<GradeEvidenceItem> items = ndviEvidenceItems();
+        GradeEvidenceItem tampered;
+        tampered.evidenceId = "metric_record:exp-ndvi-1:mh-ndvi-1-tampered:sidecar.digest_match";
+        tampered.kind = EvidenceKind::Metric;
+        tampered.key = "sidecar.digest_match";
+        tampered.hasValue = true;
+        tampered.value = 0.0;
+        tampered.source = "metric_record:exp-ndvi-1:mh-ndvi-1-tampered";
+        items.push_back( tampered );
+
+        const GradeOutcome outcome = gradeNdvi( items );
+        checkSingleFault( outcome.report, "art-sidecar", { "grader:metric-ambiguous" }, 85.0 );
+        // The ambiguity cites BOTH contradictory records.
+        const CriterionOutcome *sidecar = findCriterion( outcome.report, "art-sidecar" );
+        REQUIRE( sidecar != nullptr );
+        CHECK( sidecar->evidenceIds.size() == 2 );
+    }
+}
+
+TEST_CASE( "teaching benchmark: grading the same NDVI evidence 10x seals a byte-stable report digest",
+           "[grader][adapters][teaching][benchmark]" )
+{
+    std::string firstDigest;
+    for ( int round = 0; round < 10; ++round ) {
+        CAPTURE( round );
+        // Documents and rubric are rebuilt every round: the digest must not
+        // depend on shared mutable state either.
+        const GradeOutcome outcome = gradeNdvi( ndviEvidenceItems() );
+        REQUIRE( outcome.report.score == 100.0 );
+        if ( round == 0 )
+            firstDigest = outcome.report.digest;
+        CHECK( outcome.report.digest == firstDigest );
+
+        // The sealed digest verifies over the canonical body.
+        GraderError err;
+        CHECK( outcome.report.verifyDigest( err ) );
+        CHECK( err.ok() );
+    }
+    CHECK_FALSE( firstDigest.empty() );
+}

@@ -638,3 +638,361 @@ TEST_CASE( "re-archiving over an existing history entry loses nothing (#1459)",
     REQUIRE( archived.open( QIODevice::ReadOnly ) );
     CHECK( archived.readAll().contains( "\"v\":2" ) );
 }
+
+// ---------------------------------------------------------------------------
+// E12 teaching behavior benchmark (WP E12, D17)
+//
+// The lab-side half of the direction's behavior benchmark, built only from
+// EXISTING teaching evidence paths: a clean baseline scenario must pass with
+// a byte-stable report digest; every destructive undergrad variant must be
+// localized precisely (the report names the injected fault family and the
+// family-specific observables carry expected-vs-observed evidence — never a
+// generic failure); and running fault scenarios must never corrupt the seed
+// fixture (the baseline replays identically after all faults).
+//
+// The faultlab core is Qt-free and depends on jsoncpp only; jsoncpp already
+// reaches this executable PUBLIC through sicnu_workflow, and tests/
+// CMakeLists.txt is outside this direction's edit scope, so the teaching
+// core is compiled into this translation unit by source (each faultlab
+// source includes its own headers relatively, so the includes below are the
+// whole measure). No production code is touched.
+// ---------------------------------------------------------------------------
+
+#include <catch2/catch_approx.hpp>
+
+#include <cmath>
+
+#include "faultlab/fault_diagnosis.h"
+#include "faultlab/fault_fixtures.h"
+#include "faultlab/fault_observables.h"
+#include "faultlab/fault_registry.h"
+#include "faultlab/fault_report.h"
+#include "faultlab/fault_runner.h"
+#include "faultlab/fault_sandbox.h"
+#include "faultlab/fault_transforms.h"
+#include "faultlab/fault_types.h"
+#include "faultlab/util/canonical_json.h"
+
+// The benchmark below links the faultlab leaf library (sicnu_faultlab, see
+// tests/CMakeLists.txt) and drives real scenario documents through
+// loadFaultScenario / runFaultScenario.
+
+namespace
+{
+
+/// Skeleton of a complete sicnu.lab.faults/1 benchmark scenario document;
+/// callers set the fault params and the observable expectations.
+Json::Value benchmarkScenarioDoc( const char *scenarioId, const char *family,
+                                  const char *fixtureId, unsigned int seed,
+                                  unsigned int fixtureSeed, const char *diagnosisSignature )
+{
+    using namespace sicnu::faultlab;
+
+    Json::Value doc( Json::objectValue );
+    doc["schema_version"] = kFaultScenarioSchemaId;
+    doc["scenario_id"] = scenarioId;
+    doc["title"] = "E12 teaching behavior benchmark";
+
+    Json::Value fault( Json::objectValue );
+    fault["family"] = family;
+    fault["params"] = Json::Value( Json::objectValue );
+    fault["seed"] = seed;
+    doc["fault"] = fault;
+
+    Json::Value fixture( Json::objectValue );
+    fixture["fixture_id"] = fixtureId;
+    fixture["params"] = Json::Value( Json::objectValue );
+    fixture["seed"] = fixtureSeed;
+    doc["base_fixture"] = fixture;
+
+    Json::Value expected( Json::objectValue );
+    expected["observables"] = Json::Value( Json::arrayValue );
+    Json::Value diagnosis( Json::objectValue );
+    diagnosis["signature"] = diagnosisSignature;
+    expected["diagnosis"] = diagnosis;
+    doc["expected"] = expected;
+
+    Json::Value objective( Json::objectValue );
+    objective["id"] = "LO-11";
+    objective["statement"] = "Localize the injected fault family from the measured observables.";
+    doc["learning_objective"] = objective;
+    return doc;
+}
+
+/// Appends one observable expectation (number relations carry their operand
+/// in "value"; "changed" needs none).
+void expectObservable( Json::Value &doc, const char *id, const char *relation, double value = 0.0,
+                       bool hasValue = false )
+{
+    Json::Value entry( Json::objectValue );
+    entry["id"] = id;
+    entry["relation"] = relation;
+    if ( hasValue )
+    {
+        entry["value"] = value;
+    }
+    doc["expected"]["observables"].append( entry );
+}
+
+/// Loads and runs one benchmark scenario document, requiring the pipeline
+/// itself to complete (a passed==false report is a legitimate outcome the
+/// caller asserts on; a failed LOAD or run is not).
+sicnu::faultlab::FaultRunReport runBenchmarkScenario( const Json::Value &doc )
+{
+    using namespace sicnu::faultlab;
+    const auto loaded = loadFaultScenario( doc );
+    INFO( "scenario load failed: "
+          << ( loaded.diagnostics.empty() ? std::string( "unknown" )
+                                          : loaded.diagnostics.front().message ) );
+    REQUIRE( loaded.ok );
+    const auto run = runFaultScenario( loaded.value );
+    REQUIRE( run.ok );
+    return run.value;
+}
+
+/// The clean baseline anchor: the canonical index-pair role swap, declared
+/// exactly as the registry documents it (fault applied, expectations hold,
+/// diagnosis all_negative_index matched).
+Json::Value baselineScenarioDoc()
+{
+    Json::Value doc = benchmarkScenarioDoc( "fs_benchmark_baseline_ndvi", "band_role_swap",
+                                            "two_band_index_pair", 42u, 42u, "all_negative_index" );
+    doc["fault"]["params"]["role_a"] = "red";
+    doc["fault"]["params"]["role_b"] = "nir";
+    expectObservable( doc, "band_roles", "changed" );
+    // Swapping numerator/denominator flips the index: the mean moves by at
+    // least half a unit downward.
+    expectObservable( doc, "index_mean", "delta_le", -0.5, true );
+    return doc;
+}
+
+/// Undergrad variant: train/test spatial leakage (duplicate mode) on the
+/// classification fixture, with the #1464 cell_size param declared.
+Json::Value leakageScenarioDoc()
+{
+    using namespace sicnu::faultlab;
+    Json::Value doc = benchmarkScenarioDoc( "fs_benchmark_leakage_duplicate",
+                                            "train_test_spatial_leakage", "classification_grid", 3u,
+                                            11u, kDiagnosisUnmatched );
+    doc["fault"]["params"]["mode"] = "duplicate";
+    doc["fault"]["params"]["cell_size"] = 2.0;
+    expectObservable( doc, "leakage.overlap_fraction", "changed" );
+    expectObservable( doc, "leakage.test_count", "changed" );
+    return doc;
+}
+
+/// Undergrad variant: cloud (quality) mask dropped from the masked pair.
+Json::Value omitMaskScenarioDoc()
+{
+    using namespace sicnu::faultlab;
+    Json::Value doc = benchmarkScenarioDoc( "fs_benchmark_omit_quality_mask", "omit_quality_mask",
+                                            "quality_masked_pair", 7u, 7u, kDiagnosisUnmatched );
+    doc["fault"]["params"]["role"] = "qa";
+    expectObservable( doc, "band_count", "changed" );
+    expectObservable( doc, "valid_fraction", "changed" );
+    return doc;
+}
+
+/// Undergrad variant: declared scale/offset wrong, pixel values kept. The
+/// distinguishing precision angle: band statistics must NOT move (a data-path
+/// fault would move them), only the declared scale does.
+Json::Value wrongScaleScenarioDoc()
+{
+    using namespace sicnu::faultlab;
+    Json::Value doc = benchmarkScenarioDoc( "fs_benchmark_wrong_scale_offset", "wrong_scale_offset",
+                                            "quality_masked_pair", 11u, 5u, kDiagnosisUnmatched );
+    doc["fault"]["params"]["role"] = "red";
+    doc["fault"]["params"]["gain"] = 2.0;
+    doc["fault"]["params"]["metadata"] = true;
+    expectObservable( doc, "band.scale.red", "changed" );
+    // equals on numbers compares the clean→faulted DELTA against the operand:
+    // the metadata path must leave the red band's mean exactly where the seed
+    // fixture put it (delta 0), unlike a data-path gain fault.
+    expectObservable( doc, "band.mean.red", "equals", 0.0, true );
+    return doc;
+}
+
+/// The invariant set every destructive run must keep: the pipeline completed
+/// truthfully, the sandbox cleaned, the source untouched, the replay
+/// deterministic, and NO typed diagnostic (a diagnostic would be a generic
+/// pipeline failure, not a localized teaching outcome).
+void checkRunInvariant( const sicnu::faultlab::FaultRunReport &report )
+{
+    CHECK( report.faultApplied );
+    CHECK( report.sandboxRemoved );
+    CHECK( report.sourceUnchanged );
+    CHECK( report.sourceDigestBefore == report.sourceDigestAfter );
+    CHECK( report.replayDeterministic );
+    CHECK( report.diagnostics.empty() );
+}
+
+} // namespace
+
+TEST_CASE( "teaching benchmark: clean baseline scenario passes with a byte-stable report digest",
+           "[fault][teaching][benchmark]" )
+{
+    using namespace sicnu::faultlab;
+
+    const FaultRunReport first = runBenchmarkScenario( baselineScenarioDoc() );
+    INFO( "report: " << faultReportToJson( first ) );
+    REQUIRE( first.passed );
+    CHECK( first.expectationsPassed );
+    CHECK( first.diagnosisMatched );
+    CHECK( first.actualDiagnosisSignature == "all_negative_index" );
+    checkRunInvariant( first );
+
+    // The same scenario replays byte-identically on any machine: no wall
+    // clock, no absolute paths in the canonical body.
+    const FaultRunReport second = runBenchmarkScenario( baselineScenarioDoc() );
+    REQUIRE( second.passed );
+    CHECK( faultReportDigest( second ) == faultReportDigest( first ) );
+}
+
+TEST_CASE( "teaching benchmark: destructive undergrad variants localize to their own observables",
+           "[fault][teaching][benchmark]" )
+{
+    using namespace sicnu::faultlab;
+
+    SECTION( "train_test_spatial_leakage is localized by the leakage observables" )
+    {
+        const FaultRunReport report = runBenchmarkScenario( leakageScenarioDoc() );
+        INFO( "report: " << faultReportToJson( report ) );
+        REQUIRE( report.passed );
+        // The report names the injected family — not a generic failure.
+        CHECK( report.faultFamily == "train_test_spatial_leakage" );
+        CHECK( report.toJson()["fault"]["family"].asString() == "train_test_spatial_leakage" );
+        // The expectation evidence names exactly the family observables with
+        // expected-vs-observed values: every train point was cloned into the
+        // test role (4 → 8 samples), and the four clones sit inside train
+        // cells (overlap 4/8).
+        REQUIRE( report.expectationResults.size() == 2 );
+        CHECK( report.expectationResults[0].id == "leakage.overlap_fraction" );
+        CHECK( report.expectationResults[0].passed );
+        CHECK( report.expectationResults[0].observed == Catch::Approx( 0.5 ) );
+        CHECK( report.expectationResults[1].id == "leakage.test_count" );
+        CHECK( report.expectationResults[1].passed );
+        CHECK( report.expectationResults[1].observed == 8.0 );
+        // An ML family has no canonical lab signature: the typed
+        // diagnostic.unmatched value is the precise, declared diagnosis.
+        CHECK( report.actualDiagnosisSignature == kDiagnosisUnmatched );
+        CHECK( report.diagnosisMatched );
+        checkRunInvariant( report );
+
+        // #1464 precision: the declared cell_size is CONSUMED — published
+        // into the copy and read by the leakage observable's binning — and
+        // an unusable cell_size is a typed refusal that mutates nothing.
+        const auto fixture = makeFixture( "classification_grid", Json::Value( Json::objectValue ), 11u );
+        REQUIRE( fixture.ok );
+        FaultGrid consumed = FaultSandbox::copyOf( fixture.value );
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "duplicate";
+        spec.params["cell_size"] = 2.0;
+        REQUIRE( applyFault( consumed, spec ).ok );
+        CHECK( consumed.extras["leakage_cell_size"].asDouble() == 2.0 );
+        CHECK( measureObservables( consumed ).at( "leakage.overlap_fraction" ).number ==
+               Catch::Approx( 0.5 ) );
+
+        FaultGrid refused = FaultSandbox::copyOf( fixture.value );
+        const std::string digestBefore = canonical::sha256HexOf( refused.toJson() );
+        FaultSpec bad;
+        bad.familyId = "train_test_spatial_leakage";
+        bad.params["mode"] = "duplicate";
+        bad.params["cell_size"] = 0.0;
+        const auto rejected = applyFault( refused, bad );
+        REQUIRE_FALSE( rejected.ok );
+        CHECK( rejected.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        // Fail-before-mutate: the declared bin size is never published and
+        // the sample points are byte-identical after the refusal.
+        CHECK( refused.extras["leakage_cell_size"].asDouble() == 4.0 );
+        CHECK( canonical::sha256HexOf( refused.toJson() ) == digestBefore );
+
+        bad.params["cell_size"] = std::nan( "" );
+        const auto rejectedNan = applyFault( refused, bad );
+        CHECK_FALSE( rejectedNan.ok );
+        CHECK( rejectedNan.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( canonical::sha256HexOf( refused.toJson() ) == digestBefore );
+    }
+
+    SECTION( "omit_quality_mask is localized by the masking observables" )
+    {
+        const FaultRunReport report = runBenchmarkScenario( omitMaskScenarioDoc() );
+        INFO( "report: " << faultReportToJson( report ) );
+        REQUIRE( report.passed );
+        CHECK( report.faultFamily == "omit_quality_mask" );
+        // The quality band is gone (3 → 2) and dropping the mask moves
+        // valid_fraction upward — the masked-but-finite pixels are now
+        // counted as valid. The deltas in the evidence carry both facts.
+        REQUIRE( report.expectationResults.size() == 2 );
+        CHECK( report.expectationResults[0].id == "band_count" );
+        CHECK( report.expectationResults[0].passed );
+        CHECK( report.expectationResults[0].observed == 2.0 );
+        CHECK( report.expectationResults[0].delta == -1.0 );
+        CHECK( report.expectationResults[1].id == "valid_fraction" );
+        CHECK( report.expectationResults[1].passed );
+        CHECK( report.expectationResults[1].delta > 0.0 );
+        CHECK( report.actualDiagnosisSignature == kDiagnosisUnmatched );
+        CHECK( report.diagnosisMatched );
+        checkRunInvariant( report );
+    }
+
+    SECTION( "wrong_scale_offset metadata path moves the declared scale only" )
+    {
+        const FaultRunReport report = runBenchmarkScenario( wrongScaleScenarioDoc() );
+        INFO( "report: " << faultReportToJson( report ) );
+        REQUIRE( report.passed );
+        CHECK( report.faultFamily == "wrong_scale_offset" );
+        // Precision angle: the declared scale doubles (1.0 → 2.0) while the
+        // red band's measured mean does not move at all (delta == 0) — the
+        // observable pair distinguishes the metadata fault from a data-path
+        // gain fault, which would have shifted the mean by the gain.
+        REQUIRE( report.expectationResults.size() == 2 );
+        CHECK( report.expectationResults[0].id == "band.scale.red" );
+        CHECK( report.expectationResults[0].passed );
+        CHECK( report.expectationResults[0].observed == 2.0 );
+        CHECK( report.expectationResults[1].id == "band.mean.red" );
+        CHECK( report.expectationResults[1].passed );
+        CHECK( report.expectationResults[1].delta == 0.0 );
+        CHECK( report.actualDiagnosisSignature == kDiagnosisUnmatched );
+        CHECK( report.diagnosisMatched );
+        checkRunInvariant( report );
+    }
+}
+
+TEST_CASE( "teaching benchmark: fault scenarios never corrupt the seed fixture",
+           "[fault][teaching][benchmark]" )
+{
+    using namespace sicnu::faultlab;
+
+    // Digest of the pristine fixture, materialized independently of any
+    // scenario run.
+    const auto pristine = makeFixture( "classification_grid", Json::Value( Json::objectValue ), 11u );
+    REQUIRE( pristine.ok );
+    const std::string fixtureDigest = canonical::sha256HexOf( pristine.value.toJson() );
+
+    // Clean baseline anchor.
+    const FaultRunReport baseline = runBenchmarkScenario( baselineScenarioDoc() );
+    REQUIRE( baseline.passed );
+    const std::string baselineDigest = faultReportDigest( baseline );
+
+    // Every destructive variant (plus one refused fault) runs in between.
+    for ( const auto &variant : { leakageScenarioDoc(), omitMaskScenarioDoc(),
+                                  wrongScaleScenarioDoc() } )
+    {
+        const FaultRunReport report = runBenchmarkScenario( variant );
+        INFO( "report: " << faultReportToJson( report ) );
+        REQUIRE( report.passed );
+    }
+
+    // The seed fixture still materializes byte-identically.
+    const auto after = makeFixture( "classification_grid", Json::Value( Json::objectValue ), 11u );
+    REQUIRE( after.ok );
+    CHECK( canonical::sha256HexOf( after.value.toJson() ) == fixtureDigest );
+
+    // Re-running the clean baseline AFTER the faults reproduces the anchor
+    // report byte-for-byte.
+    const FaultRunReport rerun = runBenchmarkScenario( baselineScenarioDoc() );
+    REQUIRE( rerun.passed );
+    CHECK( rerun.expectationResults.size() == baseline.expectationResults.size() );
+    CHECK( faultReportDigest( rerun ) == baselineDigest );
+}
