@@ -2,10 +2,12 @@
 #
 # Execution-gate layer: judges whether an operation SHOULD be run
 # scientifically before it runs, as typed findings + a versioned,
-# deterministic PreflightReport. Plain C++20 + jsoncpp; deliberately no
-# Qt / QGIS / GDAL so the library stays a testable leaf (sicnu_verifier
+# deterministic PreflightReport. Plain C++20 + jsoncpp; the SOURCES stay
+# Qt/QGIS/GDAL-free so the library remains a testable leaf (sicnu_verifier
 # precedent). It consumes the capability knowledge mirror read-only and
-# never registers operators, stores or registries of its own.
+# never registers operators, stores or registries of its own. The link
+# closure carries sicnu_data for exactly one reason — the digest paths ride
+# the platform canonical-JSON authority (documented at the link edge below).
 
 add_library( sicnu_preflight STATIC
     sha256.cpp
@@ -67,5 +69,17 @@ else()
         target_link_libraries( sicnu_preflight PUBLIC jsoncpp_lib )
     endif()
 endif()
+
+# R12-E D8 — the ONE recorded exception to the no-Qt/GDAL leaf rule above:
+# the report/request digests must ride the platform's single canonical JSON
+# authority, sicnu::data::canonicalizeJsonRfc8785 (#1387), not a module-local
+# jsoncpp writer; a second serializer is exactly how evidence doubles beyond
+# 12 significant digits came to digest differently from every other path.
+# PUBLIC, not PRIVATE: the canonicalizer's declaration lives in a Qt header,
+# so consumers verifying digests against the authority need the include path
+# through this edge. Acyclic by inspection: sicnu_data links Qt6::Core, GDAL,
+# SQLite, sicnu_runtime, sicnu_geospatial, Sicnu::Platform and jsoncpp —
+# nothing in that closure links back to sicnu_preflight.
+target_link_libraries( sicnu_preflight PUBLIC sicnu_data )
 
 add_library( Sicnu::Preflight ALIAS sicnu_preflight )

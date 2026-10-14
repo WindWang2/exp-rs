@@ -12,8 +12,15 @@
 #include <json/json.h>
 
 #include "preflight/finding.h"
+#include "preflight/render.h"
 #include "preflight/report.h"
 #include "preflight/sha256.h"
+
+#include "preflight/engine.h"
+
+// Qt headers (via data/execution_fingerprint.h) define the `slots` macro;
+// every preflight header must precede this include.
+#include "data/execution_fingerprint.h" // canonicalizeJsonRfc8785 (#1387)
 
 using namespace sicnu::preflight;
 
@@ -210,4 +217,86 @@ TEST_CASE("report fromJson round-trips and is fail-closed", "[preflight][report]
     lying.verdict = "ok"; // claims a clean run...
     lying.findings.push_back(sampleFinding()); // ...while carrying a Block
     REQUIRE_FALSE(PreflightReport::fromJson(lying.toJson()).has_value());
+}
+
+TEST_CASE("agent projection aligns with the teaching proceed predicate (R12-E D9)",
+          "[preflight][render]")
+{
+    // Handcrafted stored report: verdict ok carrying a NON-blocking finding.
+    // Builtin rules never emit warn/info today, but the projections must
+    // already agree — the teaching predicate (verdict == ok && findings
+    // empty) gates can_proceed, and the agent surface may not project a
+    // proceed the teaching layer refuses.
+    auto reportWithAdvisory = [](const char *severity) {
+        Json::Value doc(Json::objectValue);
+        doc["schema"] = "sicnu.preflight.report/1";
+        doc["schema_version"] = "1";
+        doc["kind"] = "preflight_report";
+        doc["request_digest"] = shortDigest("req");
+        doc["rules_revision"] = shortDigest("rules");
+        doc["operator_id"] = "rs:ndvi";
+        doc["mode"] = "teaching";
+        doc["verdict"] = "ok"; // non-blocking findings do not move it
+        Json::Value finding(Json::objectValue);
+        finding["code"] = "SPF_RADIOMETRIC_STATE_MISMATCH";
+        finding["severity"] = severity;
+        finding["basis"] = "observed";
+        finding["human_explanation"] = "advisory boundary note";
+        doc["findings"].append(finding);
+        doc["evaluated"] = Json::Value(Json::arrayValue);
+        Json::Value budgets(Json::objectValue);
+        budgets["max_rules"] = 512;
+        budgets["max_inputs"] = 64;
+        budgets["max_findings"] = 256;
+        doc["budgets"] = budgets;
+        return PreflightReport::fromJson(doc);
+    };
+
+    for (const char *severity : {"warn", "info"}) {
+        auto parsed = reportWithAdvisory(severity);
+        REQUIRE(parsed.has_value());
+        const Json::Value teaching = renderTeaching(*parsed);
+        const Json::Value agent = renderAgent(*parsed);
+        // The teaching predicate: all_clear exists only when there are no
+        // findings; the agent proceed flag must track it exactly.
+        REQUIRE_FALSE(teaching["all_clear"].isObject());
+        REQUIRE(agent["can_proceed"].asBool() == teaching["all_clear"].isObject());
+        REQUIRE_FALSE(agent["can_proceed"].asBool());
+    }
+}
+
+TEST_CASE("report and request digests ride the platform canonical-JSON authority (R12-E D8)",
+          "[preflight][report]")
+{
+    // canonicalReportJson / computeRequestDigest delegate to the platform's
+    // ONE canonical serializer (sicnu::data::canonicalizeJsonRfc8785, #1387).
+    // An evidence double with more than 12 significant digits used to be
+    // rounded by the module-local jsoncpp writer (precision=12), digesting
+    // differently from every other evidence path in the platform.
+    PreflightReport r = PreflightReport::makeEmpty("rs:ndvi", "teaching");
+    r.verdict = "blocked"; // consistent with the Block finding below
+    r.requestDigest = shortDigest("req");
+    r.rulesRevision = shortDigest("rules");
+    PreflightFinding f = sampleFinding();
+    f.evidence["ndvi_mean"] = 0.123456789012345; // 15 significant digits
+    r.findings.push_back(f);
+
+    const std::string authorityBytes =
+        sicnu::data::canonicalizeJsonRfc8785(r.toJson()).toStdString();
+    // The canonical bytes ARE the authority's bytes, and the digest is the
+    // sha256 over exactly those bytes.
+    REQUIRE(canonicalReportJson(r) == authorityBytes);
+    REQUIRE(reportDigest(r) == sha256Hex(authorityBytes));
+
+    // Same for the request digest: a >12-significant-digit double in the
+    // operator params must not be rounded away from the authority path.
+    PreflightRequest req;
+    req.operatorId = "rs:ndvi";
+    req.mode = "teaching";
+    req.humanOperatorId = "authority";
+    req.inputs = {{"primary", "scene-a"}};
+    req.operatorParams["threshold"] = 0.123456789012345;
+    REQUIRE(computeRequestDigest(req) ==
+            shortDigest(sicnu::data::canonicalizeJsonRfc8785(req.toRequestJson())
+                            .toStdString()));
 }

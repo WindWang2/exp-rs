@@ -28,6 +28,7 @@
 #include <sstream>
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace sicnu::preflight;
@@ -551,6 +552,86 @@ TEST_CASE( "mirror accepts a chain exactly at the merge bound", "[preflight][pro
     const auto merged = mirror.entryForOperator( "bound:e", {} );
     REQUIRE( merged.status == FactStatus::Available );
     REQUIRE( merged.entry["band_roles"]["red"].asInt() == 1 );
+}
+
+TEST_CASE( "mirror refuses over-deep extends chains regardless of document order",
+           "[preflight][provider]" )
+{
+    // R12-E D7: the merge-depth bound must be load-order independent. The
+    // deep child used to load "clean" when it arrived before its ancestors
+    // (the insert-time walk only saw already-loaded entries), and the query
+    // time merge then silently truncated the chain — dropping the root's
+    // policies. Both orders must now refuse identically.
+    auto makeChain = []( int count, const char *prefix ) {
+        Json::Value doc( Json::arrayValue );
+        for ( int i = 0; i < count; ++i )
+        {
+            Json::Value entry( Json::objectValue );
+            entry["id"] = std::string( prefix ) + static_cast<char>( 'a' + i );
+            if ( i > 0 )
+                entry["extends"] = std::string( prefix ) + static_cast<char>( 'a' + i - 1 );
+            else
+            {
+                Json::Value roles( Json::objectValue );
+                roles["red"] = 1;
+                entry["band_roles"] = roles;
+            }
+            doc.append( entry );
+        }
+        return doc;
+    };
+    // The deep child alone in the first document, its ancestors second.
+    auto splitChildFirst = []( const Json::Value &doc ) {
+        Json::Value child( Json::arrayValue );
+        child.append( doc[doc.size() - 1] );
+        Json::Value parents( Json::arrayValue );
+        for ( Json::ArrayIndex i = 0; i + 1 < doc.size(); ++i )
+            parents.append( doc[i] );
+        return std::make_pair( child, parents );
+    };
+
+    // Six entries: the merge walks at most kMaxMergeDepth=4 hops, so the
+    // policy at the chain root is unreachable for the deep child — refused
+    // child-first (the forward-referenced load) …
+    {
+        CapabilityMirrorProjection mirror;
+        const auto split = splitChildFirst( makeChain( 6, "ord:" ) );
+        mirror.addDocument( split.first, "first_child.json" );
+        REQUIRE( mirror.healthy() ); // a dangling ref alone is a bounded stop
+        mirror.addDocument( split.second, "second_parents.json" );
+        REQUIRE_FALSE( mirror.healthy() );
+        bool sawDeep = false;
+        for ( const auto &p : mirror.problems() )
+            sawDeep = sawDeep || p.find( "ord:f" ) != std::string::npos;
+        REQUIRE( sawDeep );
+        REQUIRE( mirror.entryForOperator( "ord:f", {} ).status == FactStatus::Unavailable );
+    }
+    // … and parent-first: the identical verdict.
+    {
+        CapabilityMirrorProjection mirror;
+        const auto split = splitChildFirst( makeChain( 6, "ord:" ) );
+        mirror.addDocument( split.second, "first_parents.json" );
+        mirror.addDocument( split.first, "second_child.json" );
+        REQUIRE_FALSE( mirror.healthy() );
+        REQUIRE( mirror.entryForOperator( "ord:f", {} ).status == FactStatus::Unavailable );
+    }
+    // A chain exactly at the bound (4 hops) stays Available in BOTH orders.
+    {
+        const auto split = splitChildFirst( makeChain( 5, "ok:" ) );
+        CapabilityMirrorProjection childFirst;
+        childFirst.addDocument( split.first, "c.json" );
+        childFirst.addDocument( split.second, "p.json" );
+        REQUIRE( childFirst.healthy() );
+        const auto merged = childFirst.entryForOperator( "ok:e", {} );
+        REQUIRE( merged.status == FactStatus::Available );
+        REQUIRE( merged.entry["band_roles"]["red"].asInt() == 1 );
+
+        CapabilityMirrorProjection parentFirst;
+        parentFirst.addDocument( split.second, "p.json" );
+        parentFirst.addDocument( split.first, "c.json" );
+        REQUIRE( parentFirst.healthy() );
+        REQUIRE( parentFirst.entryForOperator( "ok:e", {} ).status == FactStatus::Available );
+    }
 }
 
 TEST_CASE( "integration: a variant-only capability gates the verdict instead of passing silently",

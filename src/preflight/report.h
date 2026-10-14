@@ -82,9 +82,11 @@ struct PreflightReport
   static std::optional<PreflightReport> fromJson( const Json::Value &json );
 };
 
-/// Byte-deterministic serialization: sorted keys, compact separators,
-/// 12-significant-digit doubles, no comments. Two evaluations of the same
-/// request under the same rule set produce identical bytes.
+/// Byte-deterministic serialization through the platform's single canonical
+/// JSON authority (sicnu::data::canonicalizeJsonRfc8785, #1387): sorted keys,
+/// shortest-round-trip doubles, no comments. Two evaluations of the same
+/// request under the same rule set produce identical bytes, and any consumer
+/// can re-verify the digest through the canonical path (R12-E D8).
 std::string canonicalReportJson( const PreflightReport &report );
 
 /// sha256 over canonicalReportJson — tamper evidence for stored reports.

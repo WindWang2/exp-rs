@@ -2,6 +2,11 @@
 
 #include "preflight/sha256.h"
 
+#include "data/execution_fingerprint.h" // canonicalizeJsonRfc8785 (#1387)
+// Qt keyword macros clash with preflight identifiers (RuleFacts::slots is
+// used below); the canonicalizer needs none of them.
+#undef slots
+
 #include <algorithm>
 #include <map>
 
@@ -95,13 +100,11 @@ Json::Value PreflightRequest::toRequestJson() const
 
 std::string computeRequestDigest( const PreflightRequest &request )
 {
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    builder["commentStyle"] = "None";
-    builder["precision"] = 12;
-    builder["precisionType"] = "significant";
-    builder["emitUTF8"] = true;
-    return shortDigest( Json::writeString( builder, request.toRequestJson() ) );
+    // R12-E D8: same authority as the report digest (see report.cpp) — the
+    // request's provenance handle must canonicalize through the platform's
+    // ONE canonical serializer, not a local jsoncpp writer.
+    return shortDigest(
+        sicnu::data::canonicalizeJsonRfc8785( request.toRequestJson() ).toStdString() );
 }
 
 std::string computeRulesRevision(
