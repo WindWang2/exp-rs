@@ -30,16 +30,36 @@ QJsonObject sortedHashToJson( const QHash<QString, qint64> &hash )
 inline constexpr double kMaxExactIntegralDouble = 9007199254740992.0; // 2^53
 
 /// Integral JSON value without UB — the same gate goal fields apply (Slice G
-/// standard): anything non-finite or outside the exact-integer double range
-/// fails typed instead of casting.
-sicnu::data::Result<qint64> boundedCount( double raw, const QString &key )
+/// standard): an absent field keeps the -1 "unknown" sentinel, anything
+/// present must be a non-negative JSON number in the exact-integer range.
+/// A string count fails typed instead of reading as unknown, and a negative
+/// count fails typed instead of being accepted verbatim.
+sicnu::data::Result<qint64> boundedCount( const QJsonValue &value, const QString &key,
+                                          qint64 defaultValue )
 {
+    if ( value.isUndefined() || value.isNull() )
+        return sicnu::data::Result<qint64>::success( defaultValue );
+    if ( !value.isDouble() )
+    {
+        return sicnu::data::Result<qint64>::failure( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.facts_invalid" ),
+            QStringLiteral( "%1 is not a number" ).arg( key ),
+            sicnu::data::DiagnosticSeverity::Error } );
+    }
+    const double raw = value.toDouble();
     if ( !std::isfinite( raw ) || raw < -kMaxExactIntegralDouble
          || raw > kMaxExactIntegralDouble )
     {
         return sicnu::data::Result<qint64>::failure( sicnu::data::Diagnostic{
             QStringLiteral( "suitability.facts_invalid" ),
             QStringLiteral( "%1 is not a representable integer" ).arg( key ),
+            sicnu::data::DiagnosticSeverity::Error } );
+    }
+    if ( raw < 0.0 )
+    {
+        return sicnu::data::Result<qint64>::failure( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.facts_invalid" ),
+            QStringLiteral( "%1 must not be negative" ).arg( key ),
             sicnu::data::DiagnosticSeverity::Error } );
     }
     return sicnu::data::Result<qint64>::success( static_cast< qint64 >( raw ) );
@@ -51,7 +71,17 @@ sicnu::data::Result<QHash<QString, qint64>> hashFromJson( const QJsonObject &jso
     QHash<QString, qint64> hash;
     for ( auto it = json.begin(); it != json.end(); ++it )
     {
-        auto value = boundedCount( it.value().toDouble( -1.0 ), key );
+        // Histogram entries are present by construction — there is no
+        // "absent" to default to, so a null must not become a silent -1.
+        if ( it.value().isNull() )
+        {
+            return sicnu::data::Result<QHash<QString, qint64>>::failure(
+                sicnu::data::Diagnostic{
+                    QStringLiteral( "suitability.facts_invalid" ),
+                    QStringLiteral( "%1 is not a number" ).arg( key ),
+                    sicnu::data::DiagnosticSeverity::Error } );
+        }
+        auto value = boundedCount( it.value(), key, -1 );
         if ( !value.has_value() )
             return sicnu::data::Result<QHash<QString, qint64>>::failure( value.diagnostics() );
         hash.insert( it.key(), value.value() );
@@ -154,20 +184,20 @@ sicnu::data::Result<DatasetFacts> DatasetFacts::fromJson( const QJsonObject &jso
     }
     facts.factsTruncated = json.value( QStringLiteral( "facts_truncated" ) ).toBool( false );
     auto sampleCount = boundedCount(
-        json.value( QStringLiteral( "sample_count" ) ).toDouble( -1.0 ),
-        QStringLiteral( "sample_count" ) );
+        json.value( QStringLiteral( "sample_count" ) ),
+        QStringLiteral( "sample_count" ), -1 );
     if ( !sampleCount.has_value() )
         return sicnu::data::Result<DatasetFacts>::failure( sampleCount.diagnostics() );
     facts.sampleCount = sampleCount.value();
     auto pseudoLabelCount = boundedCount(
-        json.value( QStringLiteral( "pseudo_label_count" ) ).toDouble( -1.0 ),
-        QStringLiteral( "pseudo_label_count" ) );
+        json.value( QStringLiteral( "pseudo_label_count" ) ),
+        QStringLiteral( "pseudo_label_count" ), -1 );
     if ( !pseudoLabelCount.has_value() )
         return sicnu::data::Result<DatasetFacts>::failure( pseudoLabelCount.diagnostics() );
     facts.pseudoLabelCount = pseudoLabelCount.value();
     auto missingTimeCount = boundedCount(
-        json.value( QStringLiteral( "missing_time_count" ) ).toDouble( -1.0 ),
-        QStringLiteral( "missing_time_count" ) );
+        json.value( QStringLiteral( "missing_time_count" ) ),
+        QStringLiteral( "missing_time_count" ), -1 );
     if ( !missingTimeCount.has_value() )
         return sicnu::data::Result<DatasetFacts>::failure( missingTimeCount.diagnostics() );
     facts.missingTimeCount = missingTimeCount.value();
