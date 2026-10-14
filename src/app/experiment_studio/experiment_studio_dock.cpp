@@ -672,7 +672,13 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
                                                  const QString &error )
 {
     if ( m_liveRunThread && m_liveRunThread->joinable() )
-        m_liveRunThread->join();
+    {
+        std::thread reaper( [t = std::move( m_liveRunThread )]() mutable {
+            if ( t && t->joinable() )
+                t->join();
+        } );
+        reaper.detach();
+    }
     m_liveRunThread.reset();
     m_liveCancel.reset();
     m_runLiveBtn->setEnabled( true );

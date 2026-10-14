@@ -172,7 +172,10 @@ void AgentOpsControlCenterDock::startWorker(std::function<void(const std::atomic
         {
             coord->requestCancel();
         }
-        mWorkerThread.join();
+        std::thread([t = std::move(mWorkerThread)]() mutable {
+            if (t.joinable())
+                t.join();
+        }).detach();
     }
 
     mCancelRequested.store(false);
