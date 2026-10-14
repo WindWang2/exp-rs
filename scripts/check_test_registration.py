@@ -51,9 +51,25 @@ def template_registrations(text: str) -> dict[str, str]:
 
 
 def uncommented(text: str) -> str:
-    """Strip #-to-EOL comments so a commented-out registration cannot mask an
-    orphan (static mode remains a heuristic; build mode is authoritative)."""
-    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    """Strip comments so a commented-out registration cannot mask an orphan:
+    `#...`-to-EOL and multi-line `#[[ ... ]]` bracket comments (N3).
+    A `#` inside a quoted string on a registration line could theoretically
+    produce a false orphan (noisy, fail-loud direction) — build mode
+    (--build-dir) stays the authoritative check."""
+    lines = []
+    in_bracket = False
+    for line in text.splitlines():
+        if in_bracket:
+            if "]]" in line:
+                in_bracket = False
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("#[["):
+            if "]]" not in stripped[3:]:
+                in_bracket = True
+            continue
+        lines.append(line.split("#", 1)[0])
+    return "\n".join(lines)
 
 
 def collect_test_sources(tests_dir: str) -> list[str]:

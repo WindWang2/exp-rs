@@ -34,8 +34,9 @@ echo "=== Building (this may take 30-45 minutes on first run) ==="
 # R13-I): when CMAKE_BUILD_PARALLEL_LEVEL is set it wins over nproc.
 case "${CMAKE_BUILD_PARALLEL_LEVEL:-}" in
   "" )            SICNU_JOBS="$(nproc)" ;;
-  *[!0-9]* | 0 )  echo "build_with_otb: CMAKE_BUILD_PARALLEL_LEVEL must be a positive integer, got '${CMAKE_BUILD_PARALLEL_LEVEL}'" >&2; exit 2 ;;
-  * )             SICNU_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL}" ;;
+  *[!0-9]* )      echo "build_with_otb: CMAKE_BUILD_PARALLEL_LEVEL must be a positive integer, got '${CMAKE_BUILD_PARALLEL_LEVEL}'" >&2; exit 2 ;;
+  * )             SICNU_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL}"
+                  [ "${SICNU_JOBS}" -ge 1 ] || { echo "build_with_otb: CMAKE_BUILD_PARALLEL_LEVEL must be >= 1, got '${SICNU_JOBS}'" >&2; exit 2; } ;;
 esac
 make -j"${SICNU_JOBS}"
 

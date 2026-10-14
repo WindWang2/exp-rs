@@ -52,8 +52,9 @@ _CONFIGURE_TOKENS = ("configure",)
 # must classify as build, not test.
 _BUILD_TOKENS = ("build", "compil")
 # Short ambiguous tokens match on word boundaries: "Attest provenance" must
-# not classify as a test failure via the substring "test" (review P3-8).
-_TEST_TOKENS = ("ctest", "test", "execute")
+# not classify as a test failure via the substring "test" (review P3-8), and
+# the plural "tests" is one of the most common step names (round-2 N1).
+_TEST_TOKENS = ("ctest", "tests?", "execut\\w*")
 _TEST_RE = re.compile(r"\b(?:" + "|".join(_TEST_TOKENS) + r")\b")
 
 
