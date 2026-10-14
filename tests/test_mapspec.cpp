@@ -608,4 +608,3 @@ TEST_CASE( "MapSpec validation and condition parser robustness (R13-G WP-01/WP-0
     REQUIRE_NOTHROW( sicnu::agent::cartography::resolveComposition( spec, 12.0 ) );
   }
 }
-

@@ -703,4 +703,3 @@ TEST_CASE( "LayoutService robustness: null layouts, non-finite properties and bo
     LayoutService::instance().deleteLayout( QStringLiteral( "RobustnessTest" ) );
   }
 }
-

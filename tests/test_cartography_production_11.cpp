@@ -1268,4 +1268,3 @@ TEST_CASE( "Schema and descriptor validation robustness against malformed types 
         CHECK_FALSE( problems.empty() );
     }
 }
-
