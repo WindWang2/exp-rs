@@ -15271,6 +15271,7 @@ target_link_libraries(test_verify_chain_locale_matrix PRIVATE
   sicnu_verifier
   sicnu_grader
   sicnu_preflight
+  sicnu_faultlab
   Sicnu::ScienceContext
   sicnu_recipes
   Sicnu::ScientificState
