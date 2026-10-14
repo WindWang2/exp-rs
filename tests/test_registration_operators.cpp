@@ -161,6 +161,14 @@ TEST_CASE("rs:register_images recovers a shifted pair and writes output + report
     REQUIRE(out != nullptr);
     REQUIRE(out->GetRasterXSize() == kDim);
     REQUIRE(out->GetRasterYSize() == kDim);
+    double outGt[6] = {0};
+    REQUIRE(out->GetGeoTransform(outGt) == CE_None);
+    CHECK(outGt[0] == Catch::Approx(450000.0));
+    CHECK(outGt[1] == Catch::Approx(10.0));
+    CHECK(outGt[2] == Catch::Approx(0.0));
+    CHECK(outGt[3] == Catch::Approx(5000000.0));
+    CHECK(outGt[4] == Catch::Approx(0.0));
+    CHECK(outGt[5] == Catch::Approx(-10.0));
     GDALClose(out);
 
     // Sidecar carries the F13 quality schema.

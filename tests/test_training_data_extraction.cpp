@@ -495,3 +495,64 @@ TEST_CASE(
   REQUIRE( !resVec.ok );
   REQUIRE( resVec.error == RsTrainingDataResult::Error::RasterizeFailed );
 }
+
+TEST_CASE(
+  "Training extraction: vector layer with failing coordinate reprojection fails closed",
+  "[classification][training-data][crs]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  const QString raster = tmp.path() + "/src_utm.tif";
+  GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+  REQUIRE( drv != nullptr );
+  GDALDataset *ds = drv->Create( raster.toUtf8().constData(), 16, 16, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  double gt[6] = { 500000.0, 30.0, 0.0, 4500000.0, 0.0, -30.0 };
+  ds->SetGeoTransform( gt );
+  OGRSpatialReference utmSrs;
+  utmSrs.importFromEPSG( 32648 );
+  char *wkt = nullptr;
+  utmSrs.exportToWkt( &wkt );
+  ds->SetProjection( wkt );
+  CPLFree( wkt );
+  std::vector<float> band( 16 * 16, 10.0f );
+  ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, 16, 16, band.data(), 16, 16, GDT_Float32, 0, 0 );
+  GDALClose( ds );
+
+  const QString vectorPath = tmp.path() + "/training_bad_crs.gpkg";
+  GDALDriverH vdrv = GDALGetDriverByName( "GPKG" );
+  REQUIRE( vdrv != nullptr );
+  GDALDatasetH vds = GDALCreate( vdrv, vectorPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+  REQUIRE( vds != nullptr );
+  OGRSpatialReferenceH geoSrs = OSRNewSpatialReference( nullptr );
+  OSRImportFromEPSG( geoSrs, 4326 );
+  OGRLayerH lyr = GDALDatasetCreateLayer( vds, "training", geoSrs, wkbPolygon, nullptr );
+  OSRDestroySpatialReference( geoSrs );
+  REQUIRE( lyr != nullptr );
+  OGRFieldDefnH fld = OGR_Fld_Create( "class_id", OFTInteger );
+  OGR_L_CreateField( lyr, fld, true );
+  OGR_Fld_Destroy( fld );
+
+  OGRGeometryH ring = OGR_G_CreateGeometry( wkbLinearRing );
+  OGR_G_AddPoint_2D( ring, 250.0, 100.0 );
+  OGR_G_AddPoint_2D( ring, 260.0, 100.0 );
+  OGR_G_AddPoint_2D( ring, 260.0, 110.0 );
+  OGR_G_AddPoint_2D( ring, 250.0, 110.0 );
+  OGR_G_AddPoint_2D( ring, 250.0, 100.0 );
+  OGRGeometryH poly = OGR_G_CreateGeometry( wkbPolygon );
+  OGR_G_AddGeometryDirectly( poly, ring );
+  OGRFeatureH feat = OGR_F_Create( OGR_L_GetLayerDefn( lyr ) );
+  OGR_F_SetFieldInteger( feat, 0, 1 );
+  OGR_F_SetGeometryDirectly( feat, poly );
+  OGR_L_CreateFeature( lyr, feat );
+  OGR_F_Destroy( feat );
+  GDALClose( vds );
+
+  const RsTrainingDataResult res = RsTrainingDataExtraction::extractFromVector(
+    raster, { 1 }, vectorPath, QStringLiteral( "class_id" ) );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsTrainingDataResult::Error::NoValidPixels );
+  REQUIRE( res.errorMessage.contains( "transformFailed" ) );
+}

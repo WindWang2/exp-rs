@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_unmixing.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "rs_spectral_reference_input.h"
 #include "rs_partial_output_guard.h"
@@ -193,7 +194,8 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                                           " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
                 for (size_t p = 0; p < tileSize; ++p) {
                     float val = bandData[p];
-                    if (bandNoData[bi].first && val == static_cast<float>(bandNoData[bi].second))
+                    const float sentinel = bandNoData[bi].first ? static_cast<float>( bandNoData[bi].second ) : std::numeric_limits<float>::quiet_NaN();
+                    if ( sicnu::rs::isNoDataValue( val, sentinel ) )
                         val = std::numeric_limits<float>::quiet_NaN();
                     tilePixels[p * static_cast<size_t>(nBands) + bi] = val;
                 }

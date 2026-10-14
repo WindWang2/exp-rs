@@ -549,6 +549,16 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
                       .arg( out.featuresRead ) );
   }
 
+  if ( geometries.empty() )
+  {
+    out.error = RsTrainingDataResult::Error::NoValidPixels;
+    out.errorMessage =
+      QStringLiteral( "No valid training geometries extracted (featuresRead=%1, transformFailed=%2)" )
+        .arg( out.featuresRead )
+        .arg( transformFailed );
+    return out;
+  }
+
   GDALDataset *ds = openRaster( rasterPath, bands, out );
   if ( !ds )
     return out;

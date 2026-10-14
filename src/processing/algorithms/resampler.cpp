@@ -151,15 +151,15 @@ bool Resampler::warpRaster(const float* srcBuffer, int srcWidth, int srcHeight,
 
     for (int j = 0; j < dstHeight; ++j) {
         for (int i = 0; i < dstWidth; ++i) {
-            // Destination pixel -> world -> user inverse map -> source world.
-            const double worldX = dstGeoTransform[0] + dstGeoTransform[1] * i + dstGeoTransform[2] * j;
-            const double worldY = dstGeoTransform[3] + dstGeoTransform[4] * i + dstGeoTransform[5] * j;
+            // Destination pixel center -> world -> user inverse map -> source world.
+            const double worldX = dstGeoTransform[0] + dstGeoTransform[1] * (i + 0.5) + dstGeoTransform[2] * (j + 0.5);
+            const double worldY = dstGeoTransform[3] + dstGeoTransform[4] * (i + 0.5) + dstGeoTransform[5] * (j + 0.5);
             const auto [srcWorldX, srcWorldY] = inverseCoordMap(worldX, worldY);
-            // Source world -> source pixel (invert the affine geotransform).
+            // Source world -> source pixel (invert the affine geotransform, then center-align).
             const double dx = srcWorldX - srcGeoTransform[0];
             const double dy = srcWorldY - srcGeoTransform[3];
-            const double u = (dx * srcGeoTransform[5] - dy * srcGeoTransform[2]) / det;
-            const double v = (-dx * srcGeoTransform[4] + dy * srcGeoTransform[1]) / det;
+            const double u = (dx * srcGeoTransform[5] - dy * srcGeoTransform[2]) / det - 0.5;
+            const double v = (-dx * srcGeoTransform[4] + dy * srcGeoTransform[1]) / det - 0.5;
 
             double value = interpolate(srcBuffer, srcWidth, srcHeight, u, v,
                                        options.method, options.noDataValue);

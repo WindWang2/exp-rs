@@ -1615,6 +1615,22 @@ target_include_directories(test_nodata_utils PRIVATE
 )
 sicnu_discover_tests(test_nodata_utils)
 
+# E2E Science Numerics, CRS and NoData Contracts (R12-A Science Hardening)
+add_executable(test_e2e_science_numerics test_e2e_science_numerics.cpp)
+target_link_libraries(test_e2e_science_numerics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_e2e_science_numerics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_e2e_science_numerics)
+
 # Shared scientific primitives (Scientific Algorithm Foundation 5.0, A):
 # histogram/otsu/quantile, morphology, connected components, distance
 # transform, exact quantiles, window contract.

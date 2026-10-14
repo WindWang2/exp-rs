@@ -96,3 +96,16 @@ TEST_CASE( "isNoDataValue matches exactly and never epsilon-drops near values",
     REQUIRE_FALSE( isNoDataValue( 0.0f, nan ) );
     REQUIRE_FALSE( isNoDataValue( -9999.0f, nan ) );
 }
+
+TEST_CASE( "isNoDataValue handles double precision overloads",
+           "[processing][nodata]" )
+{
+    REQUIRE( isNoDataValue( -9999.0, -9999.0 ) );
+    REQUIRE_FALSE( isNoDataValue( -9999.0 + 1e-12, -9999.0 ) );
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    REQUIRE( isNoDataValue( nan, -9999.0 ) );
+    REQUIRE( isNoDataValue( inf, -9999.0 ) );
+    REQUIRE( isNoDataValue( -inf, -9999.0 ) );
+    REQUIRE_FALSE( isNoDataValue( 0.0, nan ) );
+}

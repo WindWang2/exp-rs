@@ -12,6 +12,7 @@
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 
 #include <QString>
 
@@ -215,10 +216,11 @@ Json::Value RsTerrainSolarOperator::run( const Json::Value &params,
                 + " cells); raise SICNU_TERRAIN_MAX_CELLS or tile the analysis" );
 
     const std::array<double, 6> gt = ds.geoTransform();
-    const double cellSizeX = std::abs( gt[1] );
-    const double cellSizeY = std::abs( gt[5] );
-    if ( cellSizeX <= 0.0 || cellSizeY <= 0.0 )
+    if ( std::abs( gt[1] ) <= 0.0 || std::abs( gt[5] ) <= 0.0 )
         throw RSOperatorError( ErrorCode::InvalidInputData, "DEM has a degenerate geotransform" );
+    double cellSizeX = 0.0;
+    double cellSizeY = 0.0;
+    sicnu::processing::gdal_util::cellSizesMetres( ds, &cellSizeX, &cellSizeY );
 
     bool hasNodata = false;
     double nodataD = 0.0;
