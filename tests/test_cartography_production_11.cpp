@@ -12,6 +12,8 @@
 #include <json/json.h>
 
 #include "agent/cartography/cartography_operators.h"
+#include "agent/cartography/chart_registry.h"
+#include "agent/cartography/design_tokens.h"
 #include "agent/cartography/export.h"
 #include "agent/cartography/export_manifest.h"
 #include "agent/cartography/produce.h"
@@ -1179,4 +1181,100 @@ TEST_CASE( "whitespace repair converges (frames excluded from measurement)",
         CHECK( item["code"].asString() != "MAP_WHITESPACE_IMBALANCE" );
     // Bounded convergence: the movable block actually moved toward center.
     CHECK( repaired["titles"][0]["rect_mm"][0].asDouble() > 2.0 );
+}
+
+TEST_CASE( "Schema and descriptor validation robustness against malformed types (R13-G WP-06/WP-08/WP-12/WP-13)",
+           "[cp11][robustness]" )
+{
+    SECTION( "validateExportManifest safely rejects non-string and non-integer fields without throwing (WP-12)" )
+    {
+        Json::Value manifest( Json::objectValue );
+        manifest["kind"] = 12345; // wrong type, was crashing via .asString()
+        std::vector<std::string> problems;
+        REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
+        CHECK_FALSE( problems.empty() );
+
+        manifest["kind"] = "cartography_export_manifest";
+        manifest["manifest_version"] = "1"; // string instead of int
+        REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
+        CHECK_FALSE( problems.empty() );
+
+        manifest["manifest_version"] = 1;
+        manifest["layout_name"] = "test";
+        manifest["format"] = "png";
+        manifest["structural_digest"] = "abc";
+        manifest["dpi"] = 300;
+        manifest["pages"] = Json::Value( Json::arrayValue );
+        Json::Value page( Json::objectValue );
+        page["file_name"] = 999; // not string
+        page["sha256"] = false; // not string
+        page["bytes"] = 100;
+        manifest["pages"].append( page );
+        REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
+        CHECK_FALSE( problems.empty() );
+
+        // Test non-finite and non-positive dpi
+        manifest["pages"] = Json::Value( Json::arrayValue );
+        manifest["dpi"] = -300.0;
+        REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
+        CHECK_FALSE( problems.empty() );
+
+        manifest["dpi"] = std::numeric_limits<double>::quiet_NaN();
+        REQUIRE_NOTHROW( problems = validateExportManifest( manifest ) );
+        CHECK_FALSE( problems.empty() );
+    }
+
+    SECTION( "Template descriptor validation does not throw when deprecated is wrong type (WP-13)" )
+    {
+        Json::Value descriptor( Json::objectValue );
+        descriptor["id"] = "test-desc";
+        descriptor["descriptor_version"] = 1;
+        descriptor["replaced_by"] = "other-template";
+        descriptor["deprecated"] = "true"; // string instead of boolean
+        std::vector<std::string> problems;
+        REQUIRE_NOTHROW( problems = validateTemplateGovernance( descriptor ) );
+        CHECK_FALSE( problems.empty() );
+    }
+
+    SECTION( "validateTokenSet safely handles non-string weights and non-finite spacing (WP-06)" )
+    {
+        Json::Value doc( Json::objectValue );
+        doc["id"] = "test-tokens";
+        doc["version"] = 1;
+        doc["typography"] = Json::Value( Json::objectValue );
+        doc["typography"]["styles"] = Json::Value( Json::objectValue );
+        Json::Value style( Json::objectValue );
+        style["size_pt"] = 12.0;
+        style["weight"] = 700; // int instead of string
+        doc["typography"]["styles"]["body"] = style;
+        doc["spacing"] = Json::Value( Json::objectValue );
+        doc["spacing"]["margin_mm"] = std::numeric_limits<double>::quiet_NaN();
+
+        std::vector<std::string> problems;
+        REQUIRE_NOTHROW( problems = validateTokenSet( doc ) );
+        CHECK_FALSE( problems.empty() );
+    }
+
+    SECTION( "validateChartSpec validates matrix dimensions, cell types, and labels (WP-08)" )
+    {
+        Json::Value chart( Json::objectValue );
+        chart["kind"] = "matrix";
+        chart["binding"] = Json::Value( Json::objectValue );
+        chart["binding"]["mode"] = "inline";
+        Json::Value matrix( Json::objectValue );
+        matrix["labels"] = Json::Value( Json::arrayValue );
+        matrix["labels"].append( "A" );
+        matrix["labels"].append( 123 ); // not string
+        matrix["rows"] = Json::Value( Json::arrayValue );
+        Json::Value row1( Json::arrayValue );
+        row1.append( 1.0 );
+        row1.append( "bad" ); // not numeric
+        matrix["rows"].append( row1 );
+        // non-square: only 1 row for 2 labels
+        chart["binding"]["matrix"] = matrix;
+
+        std::vector<std::string> problems;
+        REQUIRE_NOTHROW( problems = validateChartSpec( chart ) );
+        CHECK_FALSE( problems.empty() );
+    }
 }

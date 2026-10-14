@@ -96,7 +96,9 @@ void checkRect( const Json::Value &item, const std::string &id,
   const double y = rect[1].asDouble();
   const double w = rect[2].asDouble();
   const double h = rect[3].asDouble();
-  if ( w <= 0 || h <= 0 )
+  if ( !std::isfinite( x ) || !std::isfinite( y ) || !std::isfinite( w ) || !std::isfinite( h ) )
+    problems.push_back( id + ": rect_mm coordinates must be finite numbers" );
+  else if ( w <= 0 || h <= 0 )
     problems.push_back( id + ": rect_mm width/height must be positive" );
   // Page-bounds violations are cartography-preflight findings (MAP_OFF_PAGE,
   // repairable), not structural validation failures.
@@ -105,6 +107,7 @@ void checkRect( const Json::Value &item, const std::string &id,
 bool isPositiveSizeArray( const Json::Value &value )
 {
   return value.isArray() && value.size() == 2 && value[0].isNumeric() && value[1].isNumeric() &&
+         std::isfinite( value[0].asDouble() ) && std::isfinite( value[1].asDouble() ) &&
          value[0].asDouble() > 0 && value[1].asDouble() > 0;
 }
 
@@ -127,7 +130,9 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
                                    "center-left|center|center-right|bottom-left|bottom-center|"
                                    "bottom-right" );
       if ( anchor.isMember( "margin_mm" ) &&
-           ( !anchor["margin_mm"].isNumeric() || anchor["margin_mm"].asDouble() < 0 ) )
+           ( !anchor["margin_mm"].isNumeric() ||
+             !std::isfinite( anchor["margin_mm"].asDouble() ) ||
+             anchor["margin_mm"].asDouble() < 0 ) )
         problems.push_back( id + ": anchor.margin_mm must be a non-negative number" );
     }
   }
@@ -659,16 +664,17 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
   double pageW = 0.0;
   double pageH = 0.0;
   if ( !spec.isMember( "page" ) || !spec["page"].isObject() ||
-       !spec["page"].isMember( "width_mm" ) || !spec["page"].isMember( "height_mm" ) )
+       !spec["page"].isMember( "width_mm" ) || !spec["page"].isMember( "height_mm" ) ||
+       !spec["page"]["width_mm"].isNumeric() || !spec["page"]["height_mm"].isNumeric() )
   {
-    problems.push_back( "page must carry width_mm/height_mm" );
+    problems.push_back( "page must carry numeric width_mm/height_mm" );
   }
   else
   {
     pageW = spec["page"]["width_mm"].asDouble();
     pageH = spec["page"]["height_mm"].asDouble();
-    if ( pageW <= 0 || pageH <= 0 )
-      problems.push_back( "page width_mm/height_mm must be positive" );
+    if ( !std::isfinite( pageW ) || !std::isfinite( pageH ) || pageW <= 0 || pageH <= 0 )
+      problems.push_back( "page width_mm/height_mm must be positive finite numbers" );
   }
 
   // Per-item checks + global id uniqueness.

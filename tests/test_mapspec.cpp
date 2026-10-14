@@ -10,11 +10,16 @@
 #include "agent/cartography/cartography_tools.h"
 #include "agent/cartography/cartography_operators.h"
 #include "agent/cartography/chart_registry.h"
+#include "agent/cartography/composition.h"
 #include "agent/cartography/export.h"
 #include "agent/cartography/registry.h"
 #include "agent/contracts/spatial_contracts.h"
 #include "agent/mapspec/mapspec.h"
 #include "agent/mapspec/mapspec_compiler.h"
+#include "agent/mapspec/mapspec_conditions.h"
+
+#include <cmath>
+#include <limits>
 
 #include <qgsapplication.h>
 #include <qgslayoutitemmap.h>
@@ -522,4 +527,102 @@ TEST_CASE( "Cartography repair loop converges on broken drafts", "[cartography][
   report = sicnu::agent::cartography::preflightMapSpec( spec );
   CHECK( report["passed"].asBool() );
   CHECK( report["quality_score"].asInt() >= scoreAfter );
+}
+
+TEST_CASE( "MapSpec validation and condition parser robustness (R13-G WP-01/WP-02)", "[mapspec][robustness]" )
+{
+  SECTION( "Non-finite numbers and type mismatches in rect_mm and page are rejected" )
+  {
+    Json::Value spec = minimalSpec( "robustness-test" );
+    // rect_mm with NaN
+    spec["map_frames"][0]["rect_mm"][0] = std::numeric_limits<double>::quiet_NaN();
+    auto problems = validateMapSpec( spec );
+    REQUIRE_FALSE( problems.empty() );
+
+    // rect_mm with Infinity
+    spec["map_frames"][0]["rect_mm"][0] = std::numeric_limits<double>::infinity();
+    problems = validateMapSpec( spec );
+    REQUIRE_FALSE( problems.empty() );
+
+    // page width_mm as string or NaN
+    Json::Value specPage = minimalSpec( "robustness-page" );
+    specPage["page"]["width_mm"] = "invalid_string";
+    problems = validateMapSpec( specPage );
+    REQUIRE_FALSE( problems.empty() );
+
+    specPage["page"]["width_mm"] = std::numeric_limits<double>::quiet_NaN();
+    problems = validateMapSpec( specPage );
+    REQUIRE_FALSE( problems.empty() );
+  }
+
+  SECTION( "Deeply chained conditions exceeding nesting budget are rejected" )
+  {
+    std::string chainedExpr = "a == 1";
+    for ( int i = 0; i < 10; ++i )
+      chainedExpr += " or b == " + std::to_string( i );
+    std::vector<std::string> problems;
+    bool ok = validateConditionSyntax( chainedExpr, &problems );
+    CHECK_FALSE( ok );
+    REQUIRE_FALSE( problems.empty() );
+  }
+
+  SECTION( "Compiler rejects non-string expressions (WP-03)" )
+  {
+    Json::Value spec = minimalSpec( "expr-type-test" );
+    Json::Value title( Json::objectValue );
+    title["id"] = "title-bad-expr";
+    Json::Value rect( Json::arrayValue );
+    rect.append( 12 ); rect.append( 12 ); rect.append( 100 ); rect.append( 10 );
+    title["rect_mm"] = rect;
+    title["text"] = "Sample Title";
+    title["expression"] = 12345; // integer instead of string
+    spec["titles"].append( title );
+
+    QString error;
+    QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
+    INFO( "error was: " << error.toStdString() );
+    CHECK( layout == nullptr );
+    CHECK( error.contains( "expression must be a" ) );
+
+    // Also test unparseable QgsExpression
+    spec["titles"][0]["expression"] = "1 + * 2";
+    error.clear();
+    layout = MapSpecCompiler::compile( spec, &error );
+    CHECK( layout == nullptr );
+    CHECK( error.contains( "invalid expression" ) );
+  }
+
+  SECTION( "Composition solver safely handles non-finite rects and bounds (WP-04)" )
+  {
+    Json::Value spec = minimalSpec( "composition-nan-test" );
+    Json::Value label( Json::objectValue );
+    label["id"] = "label-nan";
+    Json::Value rect( Json::arrayValue );
+    rect.append( std::numeric_limits<double>::quiet_NaN() );
+    rect.append( 10 );
+    rect.append( 50 );
+    rect.append( 10 );
+    label["rect_mm"] = rect;
+    spec["labels"].append( label );
+
+    sicnu::agent::cartography::CompositionResult result;
+    REQUIRE_NOTHROW( result = sicnu::agent::cartography::resolveComposition( spec, 12.0 ) );
+
+    // Test anchor with NaN and negative margins in composition solver
+    Json::Value anchorItem( Json::objectValue );
+    anchorItem["id"] = "anchor-nan";
+    Json::Value anchor( Json::objectValue );
+    anchor["edge"] = "top-left";
+    anchor["margin_mm"] = std::numeric_limits<double>::quiet_NaN();
+    anchorItem["anchor"] = anchor;
+    Json::Value rect2( Json::arrayValue );
+    rect2.append( 0 ); rect2.append( 0 ); rect2.append( 20 ); rect2.append( 20 );
+    anchorItem["rect_mm"] = rect2;
+    spec["labels"].append( anchorItem );
+
+    REQUIRE_NOTHROW( result = sicnu::agent::cartography::resolveComposition( spec, 12.0 ) );
+    // anchorMargin safely defaulted to marginDefaultMm (12.0) instead of poisoning rect with NaN
+    CHECK( spec["labels"][1]["rect_mm"][0].asDouble() == 12.0 );
+    CHECK( spec["labels"][1]["rect_mm"][1].asDouble() == 12.0 );
+  }
 }
