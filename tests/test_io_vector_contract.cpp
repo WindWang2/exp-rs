@@ -13,21 +13,56 @@
 
 using Catch::Approx;
 
+#include <chrono>
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
 namespace
 {
 
+fs::path processScratchRoot()
+{
+  static const fs::path sRoot = []() {
+    std::string pidStr;
+#ifdef _WIN32
+    pidStr = std::to_string( ::_getpid() );
+#else
+    pidStr = std::to_string( ::getpid() );
+#endif
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path root = fs::temp_directory_path() / ( "sicnu_io_test_vector_" + pidStr + "_" + std::to_string( now ) );
+    std::error_code ec;
+    fs::create_directories( root, ec );
+    return root;
+  }();
+  return sRoot;
+}
+
+struct ScratchCleaner
+{
+  ~ScratchCleaner()
+  {
+    std::error_code ec;
+    fs::remove_all( processScratchRoot(), ec );
+  }
+};
+static ScratchCleaner sCleaner;
+
 std::string scratchDir( const std::string &name )
 {
-  const fs::path dir = fs::temp_directory_path() / "sicnu_io_test_vector" / name;
+  const fs::path dir = processScratchRoot() / name;
   std::error_code ec;
   fs::remove_all( dir, ec ); // idempotent suites: start from a clean scratch
-  fs::create_directories( dir );
+  fs::create_directories( dir, ec );
   return dir.string();
 }
 
@@ -333,7 +368,7 @@ void writeDemoFeature( sicnu::geo::VectorWriter &writer, const std::string &name
 TEST_CASE( "moving a mid-stream writer keeps the transaction (issue850)",
            "[io][vector][contract][issue850]" )
 {
-  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "moved.gpkg" ).string();
+  const std::string target = ( fs::path( scratchDir( "move850_ctor" ) ) / "moved.gpkg" ).string();
   sicnu::geo::VectorWriter first = sicnu::geo::VectorWriter::create(
     target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
   writeDemoFeature( first, "before-move-1", 1.0 );
@@ -352,8 +387,9 @@ TEST_CASE( "moving a mid-stream writer keeps the transaction (issue850)",
 TEST_CASE( "move-assignment keeps the transaction (issue850)",
            "[io][vector][contract][issue850]" )
 {
-  const std::string targetA = ( fs::path( scratchDir( "move850" ) ) / "a.gpkg" ).string();
-  const std::string targetB = ( fs::path( scratchDir( "move850" ) ) / "b.gpkg" ).string();
+  const std::string dir = scratchDir( "move850_assign" );
+  const std::string targetA = ( fs::path( dir ) / "a.gpkg" ).string();
+  const std::string targetB = ( fs::path( dir ) / "b.gpkg" ).string();
 
   sicnu::geo::VectorWriter writerA = sicnu::geo::VectorWriter::create(
     targetA, "layer_a", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
@@ -378,7 +414,7 @@ TEST_CASE( "cancel after move rolls back explicitly and leaves no staging (issue
 {
   // Snapshot the scratch dir BEFORE the run (scratchDir() wipes on every
   // call, so re-invoking it before counting made the residue check vacuous).
-  const std::string dir = scratchDir( "move850" );
+  const std::string dir = scratchDir( "move850_cancel" );
   const std::string target = ( fs::path( dir ) / "cancelled.gpkg" ).string();
   {
     sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
@@ -407,7 +443,7 @@ TEST_CASE( "finalize after a failed commit discards output without crashing (iss
   // commit failure itself needs a driver fault we cannot trigger portably —
   // so this covers the observable contract: finalize-then-cancel is refused,
   // and a normal finalize never leaves the transaction flag set.
-  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "twice.gpkg" ).string();
+  const std::string target = ( fs::path( scratchDir( "move850_twice" ) ) / "twice.gpkg" ).string();
   sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
     target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
   writeDemoFeature( writer, "once", 1.0 );
