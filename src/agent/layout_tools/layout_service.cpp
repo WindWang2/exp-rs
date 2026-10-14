@@ -617,7 +617,18 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
   {
     // Prefer the project's full extent when the caller did not specify one.
     if ( !props.isMember( "extent" ) && !props.isMember( "scale" ) && !QgsProject::instance()->mapLayers().empty() )
-      map->zoomToExtent( QgsProject::instance()->viewSettings()->fullExtent() );
+    {
+      const QgsRectangle projectExt = QgsProject::instance()->viewSettings()->fullExtent();
+      if ( !projectExt.isEmpty() && projectExt.width() > 0.0 && projectExt.height() > 0.0 )
+        map->zoomToExtent( projectExt );
+    }
+
+    const QgsRectangle currentExt = map->extent();
+    if ( currentExt.isEmpty() || currentExt.width() <= 0.0 || currentExt.height() <= 0.0 ||
+         !std::isfinite( currentExt.width() ) || !std::isfinite( currentExt.height() ) )
+    {
+      map->zoomToExtent( QgsRectangle( 0.0, 0.0, 100.0, 100.0 ) );
+    }
     map->invalidateCache();
   }
   return item;
@@ -1444,7 +1455,17 @@ Json::Value LayoutService::autoArrange( QgsLayout *layout, bool apply, QString *
     map->setId( QStringLiteral( "auto:map" ) );
     map->attemptSetSceneRect( QRectF( mapX, mapY, mapW, mapH ) );
     if ( !QgsProject::instance()->mapLayers().empty() )
-      map->zoomToExtent( QgsProject::instance()->viewSettings()->fullExtent() );
+    {
+      const QgsRectangle projectExt = QgsProject::instance()->viewSettings()->fullExtent();
+      if ( !projectExt.isEmpty() && projectExt.width() > 0.0 && projectExt.height() > 0.0 )
+        map->zoomToExtent( projectExt );
+    }
+    const QgsRectangle currentExt = map->extent();
+    if ( currentExt.isEmpty() || currentExt.width() <= 0.0 || currentExt.height() <= 0.0 ||
+         !std::isfinite( currentExt.width() ) || !std::isfinite( currentExt.height() ) )
+    {
+      map->zoomToExtent( QgsRectangle( 0.0, 0.0, 100.0, 100.0 ) );
+    }
     layout->addLayoutItem( map );  // pushes its own undo command
     record( map, createdMap );
   }

@@ -15,6 +15,10 @@
 #include "agent/contracts/spatial_contracts.h"
 #include "agent/mapspec/mapspec.h"
 #include "agent/mapspec/mapspec_compiler.h"
+#include "agent/mapspec/mapspec_conditions.h"
+
+#include <cmath>
+#include <limits>
 
 #include <qgsapplication.h>
 #include <qgslayoutitemmap.h>
@@ -523,3 +527,42 @@ TEST_CASE( "Cartography repair loop converges on broken drafts", "[cartography][
   CHECK( report["passed"].asBool() );
   CHECK( report["quality_score"].asInt() >= scoreAfter );
 }
+
+TEST_CASE( "MapSpec validation and condition parser robustness (R13-G WP-01/WP-02)", "[mapspec][robustness]" )
+{
+  SECTION( "Non-finite numbers and type mismatches in rect_mm and page are rejected" )
+  {
+    Json::Value spec = minimalSpec( "robustness-test" );
+    // rect_mm with NaN
+    spec["map_frames"][0]["rect_mm"][0] = std::numeric_limits<double>::quiet_NaN();
+    auto problems = validateMapSpec( spec );
+    REQUIRE_FALSE( problems.empty() );
+
+    // rect_mm with Infinity
+    spec["map_frames"][0]["rect_mm"][0] = std::numeric_limits<double>::infinity();
+    problems = validateMapSpec( spec );
+    REQUIRE_FALSE( problems.empty() );
+
+    // page width_mm as string or NaN
+    Json::Value specPage = minimalSpec( "robustness-page" );
+    specPage["page"]["width_mm"] = "invalid_string";
+    problems = validateMapSpec( specPage );
+    REQUIRE_FALSE( problems.empty() );
+
+    specPage["page"]["width_mm"] = std::numeric_limits<double>::quiet_NaN();
+    problems = validateMapSpec( specPage );
+    REQUIRE_FALSE( problems.empty() );
+  }
+
+  SECTION( "Deeply chained conditions exceeding nesting budget are rejected" )
+  {
+    std::string chainedExpr = "a == 1";
+    for ( int i = 0; i < 10; ++i )
+      chainedExpr += " or b == " + std::to_string( i );
+    std::vector<std::string> problems;
+    bool ok = validateConditionSyntax( chainedExpr, &problems );
+    CHECK_FALSE( ok );
+    REQUIRE_FALSE( problems.empty() );
+  }
+}
+

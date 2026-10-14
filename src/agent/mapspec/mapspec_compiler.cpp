@@ -356,6 +356,13 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         compiledMap->setAtlasDriven( true );
       if ( atlasMarginFraction >= 0.0 )
         compiledMap->setAtlasMargin( atlasMarginFraction );
+
+      const QgsRectangle currentExt = compiledMap->extent();
+      if ( currentExt.isEmpty() || currentExt.width() <= 0.0 || currentExt.height() <= 0.0 ||
+           !std::isfinite( currentExt.width() ) || !std::isfinite( currentExt.height() ) )
+      {
+        compiledMap->zoomToExtent( QgsRectangle( 0.0, 0.0, 100.0, 100.0 ) );
+      }
     }
     mapFrameIds.push_back( id );
   }

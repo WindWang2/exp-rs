@@ -46,6 +46,11 @@ bool tokenize( const std::string &expr, std::vector<Token> &tokens, std::string 
       try
       {
         token.number = std::stod( token.text );
+        if ( !std::isfinite( token.number ) )
+        {
+          error = "non-finite number '" + token.text + "'";
+          return false;
+        }
       }
       catch ( const std::exception & )
       {
@@ -170,8 +175,14 @@ class Parser
       ConditionPtr left = parseAnd( depth, error );
       if ( !error.empty() )
         return nullptr;
+      int currentDepth = depth;
       while ( peekIdent( "or" ) )
       {
+        if ( ++currentDepth > kMaxDepth )
+        {
+          error = "expression exceeds the nesting budget";
+          return nullptr;
+        }
         ++mPos;
         ConditionPtr right = parseAnd( depth, error );
         if ( !error.empty() )
@@ -195,8 +206,14 @@ class Parser
       ConditionPtr left = parseCompare( depth, error );
       if ( !error.empty() )
         return nullptr;
+      int currentDepth = depth;
       while ( peekIdent( "and" ) )
       {
+        if ( ++currentDepth > kMaxDepth )
+        {
+          error = "expression exceeds the nesting budget";
+          return nullptr;
+        }
         ++mPos;
         ConditionPtr right = parseCompare( depth, error );
         if ( !error.empty() )
