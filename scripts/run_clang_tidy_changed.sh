@@ -46,6 +46,16 @@ fi
 
 echo "[clang-tidy-lane] linting changed files vs ${BASE_REF}:"
 echo "${FILES}"
+# .clang-tidy's HeaderFilterRegex 'src/.*' matches ANY path containing
+# "/src/" — including the build tree's fetched third parties
+# (build*/_deps/catch2-src/src/...) and vendored refs/qgis/src/... With the
+# gate blocking (#1495) that would fail PRs on Catch2's own macro debt, i.e.
+# legacy flooding through the header path. Narrow the effective header filter
+# to this checkout's own src/ tree; main-file diagnostics (the changed files
+# themselves) are unaffected by header-filter and always reported.
+REPO_ROOT="$(pwd)"
+ESCAPED_ROOT="$(printf '%s' "${REPO_ROOT}" | sed 's/[][\\.^$*]/\\&/g')"
 # shellcheck disable=SC2086 — filenames from git cannot contain spaces here
 # (repo convention); xargs keeps the invocation one process per batch.
-echo "${FILES}" | xargs clang-tidy -p "${BUILD_DIR}" --warnings-as-errors='*'
+echo "${FILES}" | xargs clang-tidy -p "${BUILD_DIR}" --warnings-as-errors='*' \
+  --header-filter="^${ESCAPED_ROOT}/src/"
