@@ -118,13 +118,18 @@ bool readDigestSidecar( const std::string &path, std::uint64_t &hash, std::uint6
 }
 } // namespace
 
-// ── ScratchLease::Entry ────────────────────────────────────────────────────
+struct ScratchRegistry::LifecycleToken
+{
+    mutable std::mutex mutex;
+    std::atomic<bool> alive{ true };
+    ScratchRegistry *registry = nullptr;
+};
 
 struct ScratchLease::Entry
 {
-    // Detachment pointer (F-A-2): read without any lock by the releasing
-    // thread, so the destructor's detach write must be atomic with it.
-    std::atomic<ScratchRegistry *> registry{ nullptr };
+    // Lifecycle token (#1449): eliminates check-then-lock destruction window.
+    // Locking the weak token guarantees registry memory is valid during release.
+    std::weak_ptr<ScratchRegistry::LifecycleToken> registryToken;
     std::string path;                    ///< provisional `<name>.part` path (writable)
     std::string finalPath;               ///< post-finalize name (no suffix)
     std::string runId;
@@ -255,11 +260,19 @@ void ScratchLease::Deleter::operator()( Entry *entry ) const
 {
     if ( !entry )
         return;
-    ScratchRegistry *registry = entry->registry.load( std::memory_order_acquire );
-    if ( registry )
-        registry->releaseEntry( entry ); // takes ownership of `entry`
-    else
-        delete entry; // registry died first: no accounting to undo
+    // #1449: lock the lifecycle token to serialize lease release against
+    // ~ScratchRegistry. If the registry is alive, its mutex and memory are
+    // guaranteed valid for the entire releaseEntry call.
+    if ( auto token = entry->registryToken.lock() )
+    {
+        std::lock_guard<std::mutex> lock( token->mutex );
+        if ( token->alive.load( std::memory_order_acquire ) && token->registry )
+        {
+            token->registry->releaseEntry( entry );
+            return;
+        }
+    }
+    delete entry; // registry died first: no accounting to undo
 }
 
 // ── ScratchRegistry ────────────────────────────────────────────────────────
@@ -326,8 +339,11 @@ void validatePathComponent( const std::string &value, const char *what )
                                          " uses a reserved device name: '" + value + "'" );
 }
 
-ScratchRegistry::ScratchRegistry( Config config ) : m_config( std::move( config ) )
+ScratchRegistry::ScratchRegistry( Config config )
+    : m_config( std::move( config ) )
+    , m_token( std::make_shared<LifecycleToken>() )
 {
+    m_token->registry = this;
     if ( m_config.root.empty() )
     {
         std::error_code ec;
@@ -346,14 +362,14 @@ ScratchRegistry::ScratchRegistry( Config config ) : m_config( std::move( config 
 
 ScratchRegistry::~ScratchRegistry()
 {
-    // Detach every live lease: its release path must not touch this (dying)
-    // registry. Files stay on disk; the stale sweep owns them from here on.
-    std::lock_guard<std::mutex> lock( m_mutex );
-    for ( auto &weak : m_liveEntries )
+    // Detach every live lease under token lock (#1449): its release path must
+    // not touch this dying registry or dereference freed memory.
     {
-        if ( auto entry = weak.lock(); entry && !entry->released.load() )
-            entry->registry.store( nullptr, std::memory_order_release );
+        std::lock_guard<std::mutex> lock( m_token->mutex );
+        m_token->alive.store( false, std::memory_order_release );
+        m_token->registry = nullptr;
     }
+    std::lock_guard<std::mutex> lock( m_mutex );
     m_liveEntries.clear();
 }
 
@@ -394,7 +410,7 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
     // refcount, and the LAST release must unaccount the bytes (the default
     // delete would leak the accounting and the provisional file).
     ScratchLease::Entry *rawEntry = new ScratchLease::Entry();
-    rawEntry->registry.store( this, std::memory_order_release );
+    rawEntry->registryToken = m_token;
     rawEntry->path = sicnu::portable::pathToUtf8( provisional );
     rawEntry->finalPath = sicnu::portable::pathToUtf8( final );
     rawEntry->runId = runId;
@@ -432,27 +448,17 @@ void ScratchRegistry::releaseEntry( ScratchLease::Entry *entry )
     const bool wasReleased = entry->released.exchange( true );
     if ( !wasReleased )
     {
-        // #1449: the registry-liveness check and the accounting it gates must
-        // share ONE mutex. ~ScratchRegistry publishes registry=nullptr under
-        // m_mutex; deciding on a lock-free read first and locking second left
-        // a check-then-lock window in which the registry could detach (or
-        // begin dying) between the two. Re-verified under the lock, the
-        // release either sees a live registry and unaccounts atomically with
-        // respect to the detach, or sees the detachment and touches nothing.
         std::lock_guard<std::mutex> lock( m_mutex );
-        if ( entry->registry.load( std::memory_order_acquire ) )
+        unaccountLocked( entry->runId, entry->bytes );
+        // Delete ONLY the provisional file: a finalized file may still be
+        // referenced by a disk-backed tile consumer and dies with the run
+        // sweep (or an explicit cleanup), never mid-stream.
+        if ( !entry->finalized.load() )
         {
-            unaccountLocked( entry->runId, entry->bytes );
-            // Delete ONLY the provisional file: a finalized file may still be
-            // referenced by a disk-backed tile consumer and dies with the run
-            // sweep (or an explicit cleanup), never mid-stream.
-            if ( !entry->finalized.load() )
-            {
-                std::error_code ec;
-                std::filesystem::remove( sicnu::portable::pathFromUtf8( entry->path ), ec );
-                std::filesystem::remove(
-                    sicnu::portable::pathFromUtf8( sidecarPath( entry->path ) ), ec );
-            }
+            std::error_code ec;
+            std::filesystem::remove( sicnu::portable::pathFromUtf8( entry->path ), ec );
+            std::filesystem::remove(
+                sicnu::portable::pathFromUtf8( sidecarPath( entry->path ) ), ec );
         }
     }
     delete entry;

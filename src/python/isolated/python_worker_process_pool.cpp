@@ -155,12 +155,16 @@ WorkerNode *PythonWorkerProcessPool::acquireWorker( int timeoutMs )
       std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs > 0 ? timeoutMs : 0 );
   for ( ;; )
   {
+    {
       QMutexLocker lock( &m_nodesMutex );
       for ( WorkerNode *node : m_nodes )
       {
-        if ( node && !node->isBusy.load( std::memory_order_relaxed ) &&
-             !node->isRestarting.load( std::memory_order_acquire ) &&
-             node->worker && node->worker->isRunning() &&
+        if ( !node || node->isRestarting.load( std::memory_order_acquire ) ||
+             node->isBusy.load( std::memory_order_relaxed ) )
+        {
+          continue;
+        }
+        if ( node->worker && node->worker->isRunning() &&
              node->server && node->server->hasClient() )
         {
           node->isBusy.store( true, std::memory_order_release );
@@ -496,10 +500,10 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
 
 void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString &reason )
 {
-  if ( !node || node->isRestarting || m_shuttingDown )
+  if ( !node || node->isRestarting.load( std::memory_order_acquire ) || m_shuttingDown )
     return;
 
-  node->isRestarting = true;
+  node->isRestarting.store( true, std::memory_order_release );
   int id = node->id;
   qWarning() << "Worker lost in pool, id:" << id << "reason:" << reason;
   emit workerCrashed( id, reason );
@@ -518,26 +522,29 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
   if ( node->server )
     pending = node->server->takeInFlightRequests();
 
-  if ( node->worker )
   {
-    node->worker->disconnect();
-    node->worker->stopWorker();
-    node->worker->deleteLater();
-    node->worker = nullptr;
-  }
-  if ( node->server )
-  {
-    node->server->disconnect();
-    node->server->close();
-    node->server->deleteLater();
-    node->server = nullptr;
+    QMutexLocker lock( &m_nodesMutex );
+    if ( node->worker )
+    {
+      node->worker->disconnect();
+      node->worker->stopWorker();
+      node->worker->deleteLater();
+      node->worker = nullptr;
+    }
+    if ( node->server )
+    {
+      node->server->disconnect();
+      node->server->close();
+      node->server->deleteLater();
+      node->server = nullptr;
+    }
   }
 
   if ( node->crashBudgetLeft <= 0 )
   {
     qWarning() << "Worker process id:" << id << "exhausted its crash-restart budget (" << kMaxWorkerCrashRestarts
                << "); retiring the node";
-    node->isRestarting = false;
+    node->isRestarting.store( false, std::memory_order_release );
     failPendingRequests( pending, QStringLiteral( "Worker crash restart budget exhausted" ) );
     // A PREVIOUS cycle's recovery may still be waiting on this node's backoff
     // timer (replacement workers dying pre-connect leave the fresh in-flight
@@ -594,15 +601,20 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
                          .arg( QCoreApplication::applicationPid() )
                          .arg( id )
                          .arg( node->restartCount.load() );
-  node->server = new PythonIpcServer();
-  node->worker = new PythonWorkerProcess();
-  node->isBusy = wasBusy;
+  auto *newServer = new PythonIpcServer();
+  auto *newWorker = new PythonWorkerProcess();
 
-  if ( node->server->listen( socketName ) )
+  if ( newServer->listen( socketName ) )
   {
+    {
+      QMutexLocker lock( &m_nodesMutex );
+      node->server = newServer;
+      node->worker = newWorker;
+      node->isBusy.store( wasBusy, std::memory_order_release );
+    }
     bindNodeSignals( node );
     const bool started = node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
-    node->isRestarting = false;
+    node->isRestarting.store( false, std::memory_order_release );
     if ( !started )
     {
       // The fresh worker never launched: dispose both allocations exactly as
@@ -611,21 +623,24 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
       // with no signal able to move it into another loss cycle. The node
       // itself stays: a busy node is still owned by its adapter (DATAPY-3),
       // and the budget step is refunded because nothing was restarted.
-      if ( node->server )
       {
-        node->server->disconnect();
-        node->server->close();
-        node->server->deleteLater();
-        node->server = nullptr;
-      }
-      if ( node->worker )
-      {
-        node->worker->disconnect();
-        node->worker->deleteLater();
-        node->worker = nullptr;
+        QMutexLocker lock( &m_nodesMutex );
+        if ( node->server )
+        {
+          node->server->disconnect();
+          node->server->close();
+          node->server->deleteLater();
+          node->server = nullptr;
+        }
+        if ( node->worker )
+        {
+          node->worker->disconnect();
+          node->worker->deleteLater();
+          node->worker = nullptr;
+        }
       }
       if ( !wasBusy )
-        node->isBusy = false; // unowned: let shrink/acquire reclaim the slot
+        node->isBusy.store( false, std::memory_order_release ); // unowned: let shrink/acquire reclaim the slot
       if ( node->crashBudgetLeft < kMaxWorkerCrashRestarts )
         node->crashBudgetLeft++; // refund — the restart never launched
       qWarning() << "Worker restart FAILED for id:" << id
@@ -723,22 +738,19 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
     // stays: a busy node is still owned by its adapter, which re-acquires
     // through the normal !server error path — DATAPY-3) and refund the
     // budget step: nothing was restarted.
-    if ( node->server )
+    newServer->disconnect();
+    newServer->close();
+    newServer->deleteLater();
+    newWorker->disconnect();
+    newWorker->deleteLater();
     {
-      node->server->disconnect();
-      node->server->close();
-      node->server->deleteLater();
+      QMutexLocker lock( &m_nodesMutex );
       node->server = nullptr;
-    }
-    if ( node->worker )
-    {
-      node->worker->disconnect();
-      node->worker->deleteLater();
       node->worker = nullptr;
     }
-    node->isRestarting = false;
+    node->isRestarting.store( false, std::memory_order_release );
     if ( !wasBusy )
-      node->isBusy = false; // unowned: let shrink/acquire reclaim the slot
+      node->isBusy.store( false, std::memory_order_release ); // unowned: let shrink/acquire reclaim the slot
     if ( node->crashBudgetLeft < kMaxWorkerCrashRestarts )
       node->crashBudgetLeft++; // refund — the restart never launched
     qWarning() << "Worker restart listen failed for id:" << id

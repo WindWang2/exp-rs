@@ -109,6 +109,7 @@ class ExperimentStudioDock : public QgsDockWidget
     QString m_liveStudyOutputDir;
     double m_liveSpatialEpsilon = 0.0;
     std::shared_ptr<std::atomic<bool>> m_liveCancel;
+    std::shared_ptr<std::atomic<bool>> m_aliveFlag = std::make_shared<std::atomic<bool>>( true );
     std::unique_ptr<std::thread> m_liveRunThread;
     QPushButton *m_runLiveBtn = nullptr;
     QPushButton *m_openStoreBtn = nullptr;

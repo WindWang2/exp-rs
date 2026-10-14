@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
+#include <tuple>
 
 namespace sicnu::repair {
 
@@ -148,8 +150,10 @@ bool candidateLess( const RepairAction &a, const RepairAction &b )
     const bool bRefusal = !b.refusalCause.empty();
     if ( aRefusal != bRefusal )
         return !aRefusal;
-    if ( a.cost.rank != b.cost.rank )
-        return a.cost.rank < b.cost.rank;
+    const int aRank = a.cost.rank <= 0 ? 999 : a.cost.rank;
+    const int bRank = b.cost.rank <= 0 ? 999 : b.cost.rank;
+    if ( aRank != bRank )
+        return aRank < bRank;
     if ( a.operatorId != b.operatorId )
         return a.operatorId < b.operatorId;
     return a.id < b.id;
@@ -374,6 +378,30 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
                                   return aPrimary;
                               return candidateLess( a, b );
                           } );
+
+        // Deduplicate candidates with identical (operatorId, ruleId, actionKey),
+        // preserving the highest-ranked entry.
+        {
+            std::set<std::tuple<std::string, std::string, std::string>> seenCandidates;
+            std::vector<RepairAction> uniqueCandidates;
+            uniqueCandidates.reserve( candidates.size() );
+            for ( auto &cand : candidates )
+            {
+                if ( cand.operatorId.empty() && cand.actionKey.empty() )
+                {
+                    uniqueCandidates.push_back( std::move( cand ) );
+                }
+                else
+                {
+                    auto key = std::make_tuple( cand.operatorId, cand.ruleId, cand.actionKey );
+                    if ( seenCandidates.insert( key ).second )
+                    {
+                        uniqueCandidates.push_back( std::move( cand ) );
+                    }
+                }
+            }
+            candidates = std::move( uniqueCandidates );
+        }
 
         // Decision-only kinds never fall through silently: when no provider
         // candidate exists, the synthesized decision IS the offer. A fully

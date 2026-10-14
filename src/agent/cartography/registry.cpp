@@ -1637,7 +1637,8 @@ std::vector<std::string> validateTemplateGovernance( const Json::Value &descript
        ( !descriptor["replaced_by"].isString() || descriptor["replaced_by"].asString().empty() ) )
     problems.push_back( "replaced_by must be a non-empty template id" );
   if ( descriptor.isMember( "replaced_by" ) &&
-       ( !descriptor.isMember( "deprecated" ) || !descriptor["deprecated"].asBool() ) )
+       ( !descriptor.isMember( "deprecated" ) || !descriptor["deprecated"].isBool() ||
+         !descriptor["deprecated"].asBool() ) )
     problems.push_back( "replaced_by only makes sense on a deprecated descriptor" );
   if ( descriptor.isMember( "required_furniture" ) )
   {

@@ -238,9 +238,15 @@ std::optional<StepEvidence> ProvenanceFileEvidence::evidenceFor( const std::stri
   if ( exec == nullptr )
     return std::nullopt;
 
-  StepEvidence evidence;
+  // A nodeExec record without a run state carries no execution fact at all;
+  // absent evidence is reported as absent (nullopt), never as an empty status.
   const QJsonObject &attributes = exec->attributes;
-  evidence.status = toStd( attributes[QStringLiteral( "state" )].toString() );
+  const QString state = attributes[QStringLiteral( "state" )].toString();
+  if ( state.isEmpty() )
+    return std::nullopt;
+
+  StepEvidence evidence;
+  evidence.status = toStd( state );
   if ( attributes[QStringLiteral( "elapsedMs" )].isDouble() )
     evidence.elapsedMs = static_cast<long long>( attributes[QStringLiteral( "elapsedMs" )].toDouble() );
   if ( attributes[QStringLiteral( "isCacheHit" )].isBool() )

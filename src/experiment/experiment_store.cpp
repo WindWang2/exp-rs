@@ -144,7 +144,7 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
             *errorOut = db ? QString::fromUtf8( sqlite3_errmsg( db ) )
                            : QStringLiteral( "cannot open %1" ).arg( dbPath );
         if ( db )
-            sqlite3_close( db );
+            sqlite3_close_v2( db );
         return false;
     }
     m_impl = new Impl;
@@ -310,7 +310,7 @@ void ExperimentStore::close()
     // lives in m_impl, so release it before deleting — destroying a locked
     // QMutex (via the locker) is undefined behavior.
     QMutexLocker lock( &m_impl->mutex );
-    sqlite3_close( m_impl->db );
+    sqlite3_close_v2( m_impl->db );
     lock.unlock();
     delete m_impl;
     m_impl = nullptr;

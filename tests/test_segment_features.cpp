@@ -215,6 +215,61 @@ TEST_CASE( "SegmentFeatures: extract computes correct stats from real raster", "
     REQUIRE( s1.compactness == Approx( 64.0 / ( 4.0 * M_PI * 8.0 ) ).margin( 1e-3 ) );
 }
 
+TEST_CASE( "SegmentFeatures: multi-band NoData, NaN, and Inf pixels are excluded without corrupting stats", "[segmentation][nodata]" )
+{
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const int W = 4;
+    const int H = 2;
+    const QString path = tempDir.filePath( "test_multiband_nodata.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 2, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+
+    // Band 1: sentinel = -9999.0
+    // Pixels: (10, 20, -9999, inf) / (10, 20, 30, nan)
+    std::vector<float> b1 = {
+        10.0f, 20.0f, -9999.0f, std::numeric_limits<float>::infinity(),
+        10.0f, 20.0f, 30.0f,    std::numeric_limits<float>::quiet_NaN()
+    };
+    GDALRasterBandH band1 = GDALGetRasterBand( ds, 1 );
+    GDALRasterIO( band1, GF_Write, 0, 0, W, H, b1.data(), W, H, GDT_Float32, 0, 0 );
+    GDALSetRasterNoDataValue( band1, -9999.0 );
+
+    // Band 2: sentinel = -9999.0 (where pixel (1,2) is NoData in band 2, while valid 30.0 in band 1)
+    // Pixels: (100, 200, 300, 400) / (100, 200, -9999.0, 400)
+    std::vector<float> b2 = {
+        100.0f, 200.0f, 300.0f, 400.0f,
+        100.0f, 200.0f, -9999.0f, 400.0f
+    };
+    GDALRasterBandH band2 = GDALGetRasterBand( ds, 2 );
+    GDALRasterIO( band2, GF_Write, 0, 0, W, H, b2.data(), W, H, GDT_Float32, 0, 0 );
+    GDALSetRasterNoDataValue( band2, -9999.0 );
+    GDALClose( ds );
+
+    // Single segment containing all pixels
+    QVector<quint32> labels( W * H, 1u );
+    RsSegmentMap segMap( labels, W, H );
+
+    QVector<int> bandIndices = { 1, 2 };
+    QString err;
+    auto stats = RsSegmentFeatures::extract( path, segMap, bandIndices, nullptr, nullptr, &err );
+    REQUIRE( err.isEmpty() );
+    REQUIRE( stats.contains( 1 ) );
+
+    // Pixels at (0, 2) [b1=-9999], (0, 3) [b1=inf], (1, 2) [b2=-9999], (1, 3) [b1=nan] are invalid
+    // Valid pixels are: (0, 0) [10, 100], (0, 1) [20, 200], (1, 0) [10, 100], (1, 1) [20, 200]
+    const auto &s = stats[1];
+    REQUIRE( std::isfinite( s.mean[0] ) );
+    REQUIRE( std::isfinite( s.mean[1] ) );
+    REQUIRE( s.mean[0] == Approx( 15.0 ).margin( 1e-6 ) );
+    REQUIRE( s.mean[1] == Approx( 150.0 ).margin( 1e-6 ) );
+    REQUIRE_FALSE( std::isinf( s.mean[0] ) );
+    REQUIRE_FALSE( std::isnan( s.mean[0] ) );
+}
+
 #ifdef SICNU_HAS_OPENCV
 TEST_CASE( "SegmentFeatures: toFeatureMatrix dimensions", "[segmentation]" )
 {

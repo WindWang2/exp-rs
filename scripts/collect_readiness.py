@@ -168,7 +168,8 @@ def main() -> int:
 
     capabilities = []
     counts = {"compiled": 0, "passed": 0, "failed": 0, "not_built": 0,
-              "skipped": 0, "timeout": 0, "no_evidence": 0}
+              "skipped": 0, "timeout": 0, "cancelled": 0, "no_evidence": 0,
+              "unknown_status": 0}
     for capability, (binary, verdict_key) in CAPABILITIES.items():
         path = binary_path(build_dir, binary)
         compiled = path is not None
@@ -191,6 +192,16 @@ def main() -> int:
             counts["skipped" if status == "skipped" else "no_evidence"] += 1
         elif status == "timeout":
             counts["timeout"] += 1
+        elif status == "cancelled":
+            # #1491: an interrupted verdict is evidence of a broken evidence
+            # chain — counted on its own, never silently dropped, never pass.
+            counts["cancelled"] += 1
+        else:
+            # fail-closed (#1491): a verdict outside the known table means the
+            # producer and this report disagree. Count it loudly instead of
+            # dropping it from every bucket (previously sum(counts) could be
+            # less than the capability count with no trace).
+            counts["unknown_status"] += 1
         capabilities.append({
             "capability": capability,
             "artifact": binary,
@@ -204,11 +215,15 @@ def main() -> int:
 
     # "ready" requires EVERY named capability to have executed and passed on
     # this host; anything else is honestly downgraded (not-run is never pass).
-    not_passed = counts["failed"] + counts["timeout"] + counts["not_built"] \
-        + counts["skipped"] + counts["no_evidence"]
+    # cancelled/unknown statuses are attention-level: the evidence chain broke
+    # or disagreed with this reporter, which is not a mere evidence gap.
+    not_passed = counts["failed"] + counts["timeout"] + counts["cancelled"] \
+        + counts["not_built"] + counts["skipped"] + counts["no_evidence"] \
+        + counts["unknown_status"]
     if counts["passed"] == len(capabilities) and not_passed == 0:
         overall = "ready"
-    elif counts["failed"] or counts["timeout"]:
+    elif (counts["failed"] or counts["timeout"] or counts["cancelled"]
+          or counts["unknown_status"]):
         overall = "attention"
     else:
         overall = "insufficient-evidence"

@@ -374,9 +374,7 @@ RemoteSourceValidator RemoteSourceValidator::probe( const std::string &url,
       throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
     }
     fetchOptions.redirectGuard = []( const std::string &hopUrl ) -> std::string {
-      if ( offline::isPrivateHost( hopUrl ) )
-        return "private / loopback / link-local hosts are blocked";
-      return "";
+      return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
     };
   }
   try
@@ -471,9 +469,7 @@ RevalidationResult RemoteSourceValidator::revalidate( const RemoteValidatorOptio
       throw GeoError( ErrorCode::PermissionDenied, "RemoteSourceValidator: private / loopback / link-local hosts are blocked", details );
     }
     fetchOptions.redirectGuard = []( const std::string &hopUrl ) -> std::string {
-      if ( offline::isPrivateHost( hopUrl ) )
-        return "private / loopback / link-local hosts are blocked";
-      return "";
+      return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
     };
   }
 

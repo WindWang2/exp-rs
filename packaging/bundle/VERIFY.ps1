@@ -16,16 +16,27 @@ param(
   [switch] $Runtime
 )
 
+# Canonicalise the root once: everything below compares paths as strings, and
+# a short-form root (8.3) against Get-ChildItem's long-form FullName would
+# otherwise fail every containment check (or throw).
+$Root = [IO.Path]::GetFullPath($Root)
+
 $ErrorActionPreference = "Stop"
 $script:BUNDLE_VERDICT = $false
 $supportedSchemas = @("sicnu.offline_bundle/1", "sicnu.offline_bundle/2")
 
 function Get-RelPath([string] $root, [string] $fullName) {
-  $r = $root.TrimEnd('\')
-  if (-not $fullName.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) {
+  # Canonicalise BOTH sides first: the bundle root may be handed to us in a
+  # non-canonical form (%TEMP% is often the 8.3 short path
+  # C:\Users\WANGJ~1.KEV\...) while Get-ChildItem reports the long form, and a
+  # raw string prefix compare then aborts the whole verification with an
+  # unhandled exception instead of reporting a verdict.
+  $r = [IO.Path]::GetFullPath($root).TrimEnd('\')
+  $f = [IO.Path]::GetFullPath($fullName)
+  if (-not $f.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) {
     throw "path outside bundle root: $fullName"
   }
-  return $fullName.Substring($r.Length).TrimStart('\').Replace('\', '/')
+  return $f.Substring($r.Length).TrimStart('\').Replace('\', '/')
 }
 
 $manifestPath = Join-Path $Root "manifest.json"
@@ -95,7 +106,7 @@ foreach ($req in $m.required) {
 }
 
 $ceiling = $m.size_ceiling_mb
-if ($null -eq $ceiling -or $ceiling -isnot [int] -or $ceiling -lt 0) {
+if ($null -eq $ceiling -or ($ceiling -isnot [int] -and $ceiling -isnot [long]) -or $ceiling -lt 0) {
   $bad += "size_ceiling_mb must be a non-negative integer"
   $ceiling = 250
 }

@@ -5,6 +5,6 @@
   "description": "Pi agent-runtime adapter for exp-rs (ADR 0122) — bridge lifecycle tests",
   "type": "module",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.test.mjs"
   }
 }

@@ -133,15 +133,9 @@ class PythonWorkerProcessPool : public QObject
     QString m_scriptPath;
     QList<WorkerNode *> m_nodes;
     /// Guards the m_nodes LIST structure and the WorkerNode::isBusy
-    /// check-and-mark in acquireWorker/releaseWorker (#1462: the old
-    /// unsynchronized check-then-mark let two callers leave with one node).
-    /// It does NOT cover the remaining per-node lifecycle fields
-    /// (isRestarting, crashBudgetLeft, restartCount): those are written on
-    /// the pool's own thread from signal handlers that must stay
-    /// callback-free under the lock, so a concurrent setPoolSize shrink can
-    /// still observe a stale value. Closing that fully needs either
-    /// reference-counted nodes or a per-node lock with re-validation after
-    /// detach — tracked as a follow-up, out of scope for #1462.
+    /// check-and-mark in acquireWorker/releaseWorker (#1462), as well as
+    /// WorkerNode::worker and WorkerNode::server pointer mutation during
+    /// worker loss and recovery (#1486).
     /// NEVER hold this across signal emission or pending-request callbacks:
     /// those may re-enter the pool.
     mutable QMutex m_nodesMutex;

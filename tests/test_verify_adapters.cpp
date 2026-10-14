@@ -653,6 +653,51 @@ TEST_CASE( "bounded_io refuses oversized, missing and malformed inputs typed",
     CHECK_FALSE( adapters::pathExists( dir.file( "absent.bin" ) ) );
 }
 
+TEST_CASE( "a JSON nesting bomb is refused typed on every adapter surface",
+           "[verify_adapters][track16][bounded_io]" )
+{
+    // jsoncpp signals a stackLimit violation by THROWING Json::Exception out
+    // of parse(), and bounded_io.h pins "Nullopt on any parse failure" — a
+    // thrown stackLimit is a parse failure, so every surface below must
+    // answer typed, never let the exception escape (the grader_json /
+    // capability_mirror / scientific_recipe precedent).
+    const std::string bomb = std::string( 500, '[' ) + std::string( 500, ']' );
+    TempDir dir;
+
+    // (a) Direct parse: nullopt with an error string, never a throw.
+    std::string error;
+    std::optional<Json::Value> parsed;
+    REQUIRE_NOTHROW( parsed = adapters::parseJsonBounded( bomb, error ) );
+    CHECK_FALSE( parsed.has_value() );
+    CHECK_FALSE( error.empty() );
+
+    // (b) Through the checkpoint reader: typed Unreadable, nothrow.
+    const std::string checkpoint = dir.file( "checkpoint_bomb.json" );
+    TempDir::write( checkpoint, bomb );
+    adapters::CheckpointReadResult checkpointRead;
+    REQUIRE_NOTHROW( checkpointRead = adapters::readCheckpoint( checkpoint ) );
+    CHECK( checkpointRead.status == adapters::CheckpointReadStatus::Unreadable );
+    CHECK_FALSE( checkpointRead.detail.empty() );
+
+    // (c) Through FsArtifactProbe::readJson: nullopt, the exception must
+    // never cross IArtifactProbe.
+    const std::string bombPath = dir.file( "bomb.json" );
+    TempDir::write( bombPath, bomb );
+    adapters::FsArtifactProbe probe;
+    std::optional<Json::Value> probed;
+    REQUIRE_NOTHROW( probed = probe.readJson( bombPath ) );
+    CHECK_FALSE( probed.has_value() );
+
+    // (d) Through the provenance sidecar reader: typed non-Ok, nothrow.
+    const std::string product = dir.file( "product.tif" );
+    TempDir::write( product, "bytes" );
+    TempDir::write( adapters::provenanceSidecarPathFor( product ), bomb );
+    adapters::ProvenanceReadResult sidecar;
+    REQUIRE_NOTHROW( sidecar = adapters::readProvenanceSidecar( product ) );
+    CHECK( sidecar.status == adapters::ProvenanceReadStatus::Unreadable );
+    CHECK_FALSE( sidecar.detail.empty() );
+}
+
 TEST_CASE( "the widest production adapter assembly drives five check kinds "
            "through one evaluation",
            "[verify_adapters][track16][matrix]" )

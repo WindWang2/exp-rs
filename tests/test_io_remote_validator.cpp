@@ -444,6 +444,18 @@ TEST_CASE( "offline::isPrivateHost identifies private, loopback and IPv4-mapped 
   CHECK( isPrivateHost( "https://[fd12::1]/stac" ) );
   CHECK_FALSE( isPrivateHost( "https://[2001:db8::1]/stac" ) );
 
+  // Scoped IPv6 addresses (RFC 6874 zone ID)
+  CHECK( isPrivateHost( "http://[fe80::1%eth0]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[fe80::1%25eth0]/data.tif" ) );
+  CHECK( isPrivateHost( "fe80::1%eth0" ) );
+
+  // IPv6 unspecified address
+  CHECK( isPrivateHost( "http://[::]/data.tif" ) );
+  CHECK( isPrivateHost( "::" ) );
+
+  // IPv6 malformed boundary (buffer overflow regression test)
+  CHECK_FALSE( isPrivateHost( "1:2:3:4:5:6:7::8:9" ) );
+
   // Native IPv4 and hostname targets
   CHECK( isPrivateHost( "http://127.0.0.1:8000/data.tif" ) );
   CHECK( isPrivateHost( "127.0.0.1" ) );
@@ -452,9 +464,28 @@ TEST_CASE( "offline::isPrivateHost identifies private, loopback and IPv4-mapped 
   CHECK( isPrivateHost( "169.254.169.254" ) );
   CHECK( isPrivateHost( "localhost" ) );
   CHECK( isPrivateHost( "sub.localhost" ) );
+  CHECK( isPrivateHost( "localhost." ) );
+  CHECK( isPrivateHost( "http://localhost./data.tif" ) );
   CHECK( isPrivateHost( "metadata.google.internal" ) );
   CHECK_FALSE( isPrivateHost( "https://example.com/cog.tif" ) );
   CHECK_FALSE( isPrivateHost( "8.8.8.8" ) );
+
+  // Dotted octal, hexadecimal, and shortened IPv4 representations
+  CHECK( isPrivateHost( "http://0177.0.0.1/data.tif" ) );
+  CHECK( isPrivateHost( "0177.0.0.1" ) );
+  CHECK( isPrivateHost( "http://2130706433/data.tif" ) );
+  CHECK( isPrivateHost( "2130706433" ) );
+  CHECK( isPrivateHost( "127.1" ) );
+  CHECK( isPrivateHost( "http://127.1/data.tif" ) );
+  CHECK( isPrivateHost( "10.1" ) );
+  CHECK( isPrivateHost( "http://10.1/data.tif" ) );
+  CHECK( isPrivateHost( "127.0.1" ) );
+  CHECK( isPrivateHost( "0x7f000001" ) );
+  CHECK( isPrivateHost( "http://0x7f000001/data.tif" ) );
+  CHECK( isPrivateHost( "017700000001" ) );
+  CHECK( isPrivateHost( "http://017700000001/data.tif" ) );
+  CHECK( isPrivateHost( "0x7f.1" ) );
+  CHECK( isPrivateHost( "0177.1" ) );
 }
 
 TEST_CASE( "RemoteSourceValidator blocks private networks when requested (Oracle-B2.1)",
@@ -466,6 +497,35 @@ TEST_CASE( "RemoteSourceValidator blocks private networks when requested (Oracle
   REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://[::ffff:127.0.0.1]/data.tif", options ), GeoError );
   REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://[::ffff:169.254.169.254]/meta", options ), GeoError );
   REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://127.0.0.1:8000/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://[fe80::1%eth0]/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://[::]/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://0177.0.0.1/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://2130706433/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://127.1/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://0x7f000001/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://017700000001/data.tif", options ), GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( "http://10.1/data.tif", options ), GeoError );
+}
+
+TEST_CASE( "redirectGuard blocks redirect hopping to private networks (#1485)",
+           "[io][remote][validator][ssrf]" )
+{
+  HttpFetchOptions fetchOptions;
+  fetchOptions.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+    return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
+  };
+
+  CHECK( fetchOptions.redirectGuard( "http://127.0.0.1/admin" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://169.254.169.254/latest/meta-data/" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://[::1]/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://[fe80::1%eth0]/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://[::]/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://2130706433/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://0177.0.0.1/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://127.1/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://0x7f000001/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "http://017700000001/secret" ) == "private network blocked" );
+  CHECK( fetchOptions.redirectGuard( "https://example.com/cog.tif" ).empty() );
 }
 
 TEST_CASE( "RemoteSourceValidator in offline mode enforces zero egress (Oracle-B2.2)",

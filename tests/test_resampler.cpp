@@ -271,3 +271,51 @@ TEST_CASE("test_resampler - clampRange with NaN NoData preserves NaN voids", "[r
         }
     }
 }
+
+TEST_CASE("test_resampler - default WarpOptions does not clamp scientific values > 1.0", "[resampler][d14]")
+{
+    WarpOptions defaultOptions;
+    CHECK(defaultOptions.clampRange == false);
+
+    const int size = 4;
+    std::vector<float> src(static_cast<size_t>(size) * size, 1500.0f);
+    std::vector<float> dst(static_cast<size_t>(size) * size, 0.0f);
+    const double srcGt[6] = {0.0, 10.0, 0.0, 0.0, 0.0, -10.0};
+    const double dstGt[6] = {0.0, 10.0, 0.0, 0.0, 0.0, -10.0};
+
+    REQUIRE(Resampler::warpRaster(src.data(), size, size, srcGt, dst.data(), size, size, dstGt,
+                                  [](double x, double y) { return std::make_pair(x, y); },
+                                  defaultOptions));
+    for (size_t i = 0; i < dst.size(); ++i) {
+        REQUIRE_THAT(static_cast<double>(dst[i]), WithinAbs(1500.0, 1e-6));
+    }
+}
+
+TEST_CASE("test_resampler - pixel center query preserves fractional coordinate accuracy", "[resampler][d14]")
+{
+    const int size = 8;
+    std::vector<float> src(static_cast<size_t>(size) * size, 0.0f);
+    for (int j = 0; j < size; ++j) {
+        for (int i = 0; i < size; ++i) {
+            src[static_cast<size_t>(j) * size + i] = static_cast<float>(i);
+        }
+    }
+
+    std::vector<float> dst(static_cast<size_t>(size) * size, kNoData);
+    const double srcGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    const double dstGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+
+    WarpOptions options;
+    options.method = ResampleMethod::Bilinear;
+    options.noDataValue = kNoData;
+
+    REQUIRE(Resampler::warpRaster(src.data(), size, size, srcGt, dst.data(), size, size, dstGt,
+                                  [](double x, double y) { return std::make_pair(x + 0.5, y); },
+                                  options));
+    for (int j = 0; j < size; ++j) {
+        for (int i = 0; i < size - 1; ++i) {
+            REQUIRE_THAT(static_cast<double>(dst[static_cast<size_t>(j) * size + i]),
+                         WithinAbs(static_cast<double>(i) + 0.5, 1e-5));
+        }
+    }
+}

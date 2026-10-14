@@ -88,59 +88,112 @@ bool parseIpv4( const std::string &text, std::uint32_t &out )
 {
     if ( text.empty() )
         return false;
-    std::vector<std::string> parts;
-    std::size_t pos = 0;
-    while ( true )
+
+    std::uint64_t parts[4] = {};
+    int numParts = 0;
+    std::size_t i = 0;
+
+    while ( i < text.size() )
     {
-        const std::size_t dot = text.find( '.', pos );
-        if ( dot == std::string::npos )
-        {
-            parts.push_back( text.substr( pos ) );
-            break;
-        }
-        parts.push_back( text.substr( pos, dot - pos ) );
-        pos = dot + 1;
-        if ( parts.size() > 4 )
+        if ( numParts >= 4 )
             return false;
+
+        int base = 10;
+        if ( text[i] == '0' )
+        {
+            if ( i + 1 < text.size() && ( text[i + 1] == 'x' || text[i + 1] == 'X' ) )
+            {
+                base = 16;
+                i += 2;
+                if ( i == text.size() || text[i] == '.' )
+                    return false;
+            }
+            else
+            {
+                base = 8;
+            }
+        }
+
+        std::uint64_t val = 0;
+        int digits = 0;
+        while ( i < text.size() && text[i] != '.' )
+        {
+            const char c = text[i];
+            int digit = -1;
+            if ( base == 16 )
+            {
+                if ( c >= '0' && c <= '9' )
+                    digit = c - '0';
+                else if ( c >= 'a' && c <= 'f' )
+                    digit = c - 'a' + 10;
+                else if ( c >= 'A' && c <= 'F' )
+                    digit = c - 'A' + 10;
+            }
+            else if ( base == 8 )
+            {
+                if ( c >= '0' && c <= '7' )
+                    digit = c - '0';
+            }
+            else
+            {
+                if ( c >= '0' && c <= '9' )
+                    digit = c - '0';
+            }
+
+            if ( digit < 0 )
+                return false;
+
+            val = val * base + static_cast<std::uint64_t>( digit );
+            if ( val > 0xFFFFFFFFull )
+                return false;
+
+            ++digits;
+            ++i;
+        }
+
+        if ( digits == 0 )
+            return false;
+
+        parts[numParts++] = val;
+
+        if ( i < text.size() )
+        {
+            if ( text[i] != '.' )
+                return false;
+            ++i;
+            if ( i == text.size() )
+                return false;
+        }
     }
-    if ( parts.empty() || parts.size() > 4 )
+
+    if ( numParts == 0 || numParts > 4 )
         return false;
 
-    std::uint64_t values[4] = {};
-    for ( std::size_t i = 0; i < parts.size(); ++i )
+    switch ( numParts )
     {
-        if ( !parseNumericPart( parts[i], values[i] ) )
+    case 1:
+        if ( parts[0] > 0xFFFFFFFFull )
             return false;
-    }
-
-    std::uint32_t result = 0;
-    switch ( parts.size() )
-    {
-        case 1:
-            if ( values[0] > 0xFFFFFFFFULL )
-                return false;
-            result = static_cast<std::uint32_t>( values[0] );
-            break;
-        case 2:
-            if ( values[0] > 0xFFULL || values[1] > 0xFFFFFFULL )
-                return false;
-            result = static_cast<std::uint32_t>( ( values[0] << 24 ) | values[1] );
-            break;
-        case 3:
-            if ( values[0] > 0xFFULL || values[1] > 0xFFULL || values[2] > 0xFFFFULL )
-                return false;
-            result = static_cast<std::uint32_t>( ( values[0] << 24 ) | ( values[1] << 16 ) | values[2] );
-            break;
-        case 4:
-            if ( values[0] > 0xFFULL || values[1] > 0xFFULL || values[2] > 0xFFULL || values[3] > 0xFFULL )
-                return false;
-            result = static_cast<std::uint32_t>( ( values[0] << 24 ) | ( values[1] << 16 ) | ( values[2] << 8 ) | values[3] );
-            break;
-        default:
+        out = static_cast<std::uint32_t>( parts[0] );
+        return true;
+    case 2:
+        if ( parts[0] > 0xFFull || parts[1] > 0xFFFFFFull )
             return false;
+        out = static_cast<std::uint32_t>( ( parts[0] << 24 ) | parts[1] );
+        return true;
+    case 3:
+        if ( parts[0] > 0xFFull || parts[1] > 0xFFull || parts[2] > 0xFFFFull )
+            return false;
+        out = static_cast<std::uint32_t>( ( parts[0] << 24 ) | ( parts[1] << 16 ) | parts[2] );
+        return true;
+    case 4:
+        if ( parts[0] > 0xFFull || parts[1] > 0xFFull || parts[2] > 0xFFull || parts[3] > 0xFFull )
+            return false;
+        out = static_cast<std::uint32_t>( ( parts[0] << 24 ) | ( parts[1] << 16 ) | ( parts[2] << 8 ) | parts[3] );
+        return true;
+    default:
+        return false;
     }
-    out = result;
-    return true;
 }
 
 bool parseIpv6( const std::string &text, unsigned char out[16] )
@@ -156,13 +209,13 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
     int tailCount = 0;
 
     auto parseSection = [ & ]( const std::string &section, std::uint16_t *groups_, int &count,
-                               int maxCount, bool allowV4Tail ) {
+                               int maxGroups, bool allowV4Tail ) {
         if ( section.empty() )
             return true;
         std::size_t pos = 0;
         while ( true )
         {
-            if ( count >= maxCount )
+            if ( count >= maxGroups )
                 return false;
             const std::size_t colon = section.find( ':', pos );
             const std::string token = colon == std::string::npos ? section.substr( pos )
@@ -172,7 +225,7 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
                 std::uint32_t v4 = 0;
                 if ( !parseIpv4( token, v4 ) )
                     return false;
-                if ( count + 2 > maxCount )
+                if ( count + 2 > maxGroups )
                     return false;
                 groups_[count++] = static_cast<std::uint16_t>( v4 >> 16 );
                 groups_[count++] = static_cast<std::uint16_t>( v4 & 0xFFFFu );
@@ -187,7 +240,7 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
                     return false;
                 const std::uint32_t digit = c <= '9' ? static_cast<std::uint32_t>( c - '0' )
                                                      : static_cast<std::uint32_t>( ( c | 0x20 ) - 'a' + 10 );
-                group = group * 16 + digit;
+            group = group * 16 + digit;
             }
             groups_[count++] = static_cast<std::uint16_t>( group );
             if ( colon == std::string::npos )
@@ -198,6 +251,8 @@ bool parseIpv6( const std::string &text, unsigned char out[16] )
 
     const bool headAllowV4Tail = ( cc == std::string::npos );
     if ( !parseSection( head, groups, headCount, 8, headAllowV4Tail ) )
+        return false;
+    if ( headCount >= 7 && !tail.empty() )
         return false;
     if ( !parseSection( tail, groups + headCount, tailCount, 8 - headCount, true ) )
         return false;
@@ -392,16 +447,17 @@ bool isPrivateHost( const std::string &hostOrUrl )
         host = host.substr( 0, host.find( ':' ) );
     }
 
-    const std::size_t zonePos = host.find( '%' );
-    if ( zonePos != std::string::npos )
-    {
-        host = host.substr( 0, zonePos );
-    }
+    const std::size_t pct = host.find( '%' );
+    if ( pct != std::string::npos )
+        host = host.substr( 0, pct );
 
     std::string lowered;
     lowered.reserve( host.size() );
     for ( const char c : host )
         lowered += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+
+    while ( !lowered.empty() && lowered.back() == '.' )
+        lowered.pop_back();
 
     if ( lowered.empty() )
         return true;
@@ -411,12 +467,18 @@ bool isPrivateHost( const std::string &hostOrUrl )
         return true;
 
     std::uint32_t v4 = 0;
-    if ( parseIpv4( host, v4 ) )
+    if ( parseIpv4( lowered, v4 ) )
         return isPrivateIpv4( v4 );
 
     unsigned char v6[16] = {};
     if ( parseIpv6( host, v6 ) )
     {
+        bool unspecified = true;
+        for ( int i = 0; i < 16; ++i )
+            unspecified = unspecified && ( v6[i] == 0 );
+        if ( unspecified )
+            return true;
+
         bool ipv4Mapped = v6[10] == 0xFF && v6[11] == 0xFF;
         for ( int i = 0; i < 10 && ipv4Mapped; ++i )
             ipv4Mapped = ( v6[i] == 0 );

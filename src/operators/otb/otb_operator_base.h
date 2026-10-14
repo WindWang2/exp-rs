@@ -78,7 +78,7 @@ protected:
 
 private:
     bool runOtbProcess(const QString& program, const QStringList& args,
-                       RSOperatorContext& context);
+                       RSOperatorContext& context, const Json::Value& params = Json::Value());
 
     QProcessEnvironment buildProcessEnvironment(const QString& toolPath) const;
 

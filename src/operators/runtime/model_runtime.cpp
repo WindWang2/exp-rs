@@ -739,7 +739,8 @@ ModelRuntimeRegistry::ModelRuntimeRegistry()
   registerOpenVinoProvider( *this );
 }
 
-ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::string *errorMessage )
+ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::string *errorMessage,
+                                               const std::function<bool()> &cancelPredicate )
 {
   // Manifest contract → device request. Legacy manifests (no runtime.device)
   // keep the historical Auto behavior: cuda when the model wants GPU and the
@@ -755,11 +756,12 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::stri
       return nullptr;
     }
   }
-  return acquire( model, request, errorMessage );
+  return acquire( model, request, errorMessage, cancelPredicate );
 }
 
 ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const RequestedDevice &request,
-                                               std::string *errorMessage )
+                                               std::string *errorMessage,
+                                               const std::function<bool()> &cancelPredicate )
 {
   const ModelHardwareCapabilities hw = hardware();
   const std::string framework = model.framework;
@@ -862,8 +864,15 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     // no compatible flight exists (or the peer's load failed and unwound
     // its reservation), nullptr comes back with the lock held and the
     // pressure valve below proceeds as before.
-    if ( ModelRuntimePtr ridden = rideInFlightOnRefusal( identityComponent, request, lock ) )
+    if ( ModelRuntimePtr ridden = rideInFlightOnRefusal( identityComponent, request, lock, cancelPredicate ) )
       return ridden;
+    if ( cancelPredicate && cancelPredicate() )
+    {
+      lock.unlock();
+      if ( errorMessage )
+        *errorMessage = "Model acquisition cancelled";
+      return nullptr;
+    }
     // Platform 7.0 pressure valve on the RESOLUTION path: a GPU-fit refusal
     // may be recoverable by evicting cached sessions — ONE bounded pass over
     // the addressable devices, then a single resolution retry. A request the
@@ -979,7 +988,26 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     }
     flight = existing->second;
     ++m_coalescedWaits;
-    flight->cv.wait( lock, [ &flight ] { return flight->done; } );
+    while ( !flight->done )
+    {
+      if ( cancelPredicate && cancelPredicate() )
+      {
+        --m_coalescedWaits;
+        lock.unlock();
+        if ( errorMessage )
+          *errorMessage = "Model acquisition cancelled";
+        return nullptr;
+      }
+      flight->cv.wait_for( lock, std::chrono::milliseconds( 100 ), [ &flight ] { return flight->done; } );
+    }
+    if ( cancelPredicate && cancelPredicate() )
+    {
+      --m_coalescedWaits;
+      lock.unlock();
+      if ( errorMessage )
+        *errorMessage = "Model acquisition cancelled";
+      return nullptr;
+    }
     if ( !flight->session )
     {
       // Failure broadcast: the waiter receives the loader's own typed
@@ -1212,7 +1240,8 @@ void ModelRuntimeRegistry::finishInFlight( const std::string &key,
 
 ModelRuntimePtr ModelRuntimeRegistry::rideInFlightOnRefusal( const std::string &identity,
                                                             const RequestedDevice &request,
-                                                            std::unique_lock<std::mutex> &lock )
+                                                            std::unique_lock<std::mutex> &lock,
+                                                            const std::function<bool()> &cancelPredicate )
 {
   // Caller holds m_mutex on a FAILED device resolution. Compatibility: same
   // identity, GPU target (this refusal path exists only for GPU-demanding
@@ -1234,7 +1263,20 @@ ModelRuntimePtr ModelRuntimeRegistry::rideInFlightOnRefusal( const std::string &
   if ( !flight )
     return nullptr; // lock stays held: caller proceeds to the valve/refusal
   ++m_coalescedWaits;
-  flight->cv.wait( lock, [ &flight ] { return flight->done; } );
+  while ( !flight->done )
+  {
+    if ( cancelPredicate && cancelPredicate() )
+    {
+      --m_coalescedWaits;
+      return nullptr;
+    }
+    flight->cv.wait_for( lock, std::chrono::milliseconds( 100 ), [ &flight ] { return flight->done; } );
+  }
+  if ( cancelPredicate && cancelPredicate() )
+  {
+    --m_coalescedWaits;
+    return nullptr;
+  }
   if ( !flight->session )
     return nullptr; // peer's load failed and unwound its ticket: honest refusal
   const auto served = m_cache.find( flight->key );
@@ -1278,7 +1320,8 @@ Json::Value ProviderSelectionReport::toJson() const
 ModelRuntimePtr ModelRuntimeRegistry::acquireWithFallback( const ModelInfo &model,
                                                            const RequestedDevice *explicitDevice,
                                                            std::string *errorMessage,
-                                                           ProviderSelectionReport *report )
+                                                           ProviderSelectionReport *report,
+                                                           const std::function<bool()> &cancelPredicate )
 {
   ProviderSelectionReport localReport;
   ProviderSelectionReport &out = report ? *report : localReport;
@@ -1298,6 +1341,12 @@ ModelRuntimePtr ModelRuntimeRegistry::acquireWithFallback( const ModelInfo &mode
   std::string allAttempts;
   for ( const std::string &framework : chain )
   {
+    if ( cancelPredicate && cancelPredicate() )
+    {
+      if ( errorMessage )
+        *errorMessage = "Model acquisition cancelled";
+      return nullptr;
+    }
     ProviderSelectionReport::Attempt attempt;
     attempt.framework = framework;
     attempt.providerRegistered = hasProvider( framework );
@@ -1317,9 +1366,9 @@ ModelRuntimePtr ModelRuntimeRegistry::acquireWithFallback( const ModelInfo &mode
       std::string attemptError;
       ModelRuntimePtr session;
       if ( explicitDevice )
-        session = acquire( candidate, *explicitDevice, &attemptError );
+        session = acquire( candidate, *explicitDevice, &attemptError, cancelPredicate );
       else
-        session = acquire( candidate, &attemptError );
+        session = acquire( candidate, &attemptError, cancelPredicate );
       if ( session )
       {
         attempt.loaded = true;
@@ -1328,6 +1377,12 @@ ModelRuntimePtr ModelRuntimeRegistry::acquireWithFallback( const ModelInfo &mode
         if ( errorMessage )
           errorMessage->clear();
         return session;
+      }
+      if ( cancelPredicate && cancelPredicate() )
+      {
+        if ( errorMessage )
+          *errorMessage = attemptError.empty() ? "Model acquisition cancelled" : attemptError;
+        return nullptr;
       }
       attempt.detail = attemptError.empty() ? "failed to load model session" : attemptError;
     }

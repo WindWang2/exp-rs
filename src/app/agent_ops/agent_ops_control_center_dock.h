@@ -43,7 +43,12 @@ class AgentOpsControlCenterDock : public QDockWidget
     sicnu::agent_ops::OperationsCoordinator *coordinator() const;
 
     bool isWorkerRunning() const { return mWorkerRunning.load(); }
-    bool isCancelRequested() const { return mCancelRequested.load(); }
+    bool isCancelRequested() const
+    {
+        if (mCurrentWorkerCancel && mCurrentWorkerCancel->load())
+            return true;
+        return mCancelRequested.load();
+    }
     bool isPauseRequested() const;
 
     void startSession(const sicnu::agent_ops::OpsRunRequest &request);
@@ -93,6 +98,9 @@ class AgentOpsControlCenterDock : public QDockWidget
     std::thread mWorkerThread;
     std::atomic<bool> mCancelRequested{false};
     std::atomic<bool> mWorkerRunning{false};
+    std::shared_ptr<std::atomic<bool>> m_aliveFlag = std::make_shared<std::atomic<bool>>( true );
+    std::shared_ptr<std::atomic<bool>> mCurrentWorkerCancel;
+    std::atomic<uint64_t> mWorkerGeneration{ 0 };
 
     Json::Value m_pendingRepairApprovalToken;
     std::string m_lastApprovalResult;

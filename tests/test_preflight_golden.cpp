@@ -6,6 +6,13 @@
 // replays. The matrix is the engine's semantic pin: any change to rule
 // semantics, ordering, ack handling or truncation that shifts a scenario is
 // a contract change and must fail here.
+//
+// R12-E D8: canonicalReportJson/reportDigest bytes are produced by the
+// platform canonical-JSON authority (sicnu::data::canonicalizeJsonRfc8785,
+// #1387), not a module-local jsoncpp writer. The pins here are
+// replay-equality (same run twice), which holds under either serializer, so
+// the authority change moves no pin; it only guarantees the bytes digest
+// identically to every other evidence path in the platform.
 
 #include <catch2/catch_test_macros.hpp>
 

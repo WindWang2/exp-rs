@@ -428,17 +428,28 @@ sicnu_add_io_test(test_io_multidim)
 # directly. A bare find_library leaves the NOTFOUND literal in
 # target_link_libraries and the io targets fail at LINK time with cryptic
 # errors — refuse at configure time with an actionable message instead.
+# #1468 follow-up (R12-G/G05): find_library alone is a FALSE SUCCESS — it
+# proves the link artefact exists, not that <netcdf.h> resolves. FOUR suites
+# below include the header directly (R1-03: the census initially missed
+# test_io_roundtrip_matrix, which is exactly the TU that would still fail), so
+# probe the pair and refuse at configure time with an actionable message
+# instead of failing 4 targets at compile time
+# with "netcdf.h: No such file or directory".
 find_library(NETCDF_LIBRARY NAMES netcdf)
-if(NOT NETCDF_LIBRARY)
+find_path(NETCDF_INCLUDE_DIR NAMES netcdf.h)
+if(NOT NETCDF_LIBRARY OR NOT NETCDF_INCLUDE_DIR)
   message(FATAL_ERROR
-    "netcdf not found, but test_io_multidim / test_io_roundtrip_matrix / "
-    "test_io_subdataset_inventory / test_io_fabric_multidim_11 link it "
+    "netcdf is not usable: library='${NETCDF_LIBRARY}' header='${NETCDF_INCLUDE_DIR}', "
+    "but test_io_multidim / test_io_roundtrip_matrix / "
+    "test_io_subdataset_inventory / test_io_fabric_multidim_11 use it "
     "directly. Install the netcdf development package (libnetcdf-dev, "
-    "netcdf, or vcpkg port) or set NETCDF_LIBRARY to a found library, "
-    "then reconfigure.")
+    "netcdf, or vcpkg port), or set NETCDF_LIBRARY and NETCDF_INCLUDE_DIR to "
+    "a found library and the directory containing netcdf.h, then reconfigure.")
 endif()
 target_link_libraries(test_io_multidim PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_multidim PRIVATE ${NETCDF_INCLUDE_DIR})
 target_link_libraries(test_io_roundtrip_matrix PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_roundtrip_matrix PRIVATE ${NETCDF_INCLUDE_DIR})
 sicnu_add_io_test(test_io_products)
 sicnu_add_io_test(test_io_doctor)
 # 8.0: cacheability/reproducibility doctor checks probe remote identities
@@ -572,6 +583,7 @@ sicnu_add_io_test(test_io_cog_options)
 sicnu_add_io_test(test_io_vector_interchange)
 sicnu_add_io_test(test_io_subdataset_inventory)
 target_link_libraries(test_io_subdataset_inventory PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_subdataset_inventory PRIVATE ${NETCDF_INCLUDE_DIR})
 sicnu_add_io_test(test_io_metadata_patch)
 # 11.0 GDAL version/capability matrix: feature detection, corrupt/truncated
 # negatives, huge logical datasets within bounded memory.
@@ -609,6 +621,7 @@ endif()
 sicnu_add_io_test(test_io_fabric_multidim_11)
 target_include_directories(test_io_fabric_multidim_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_fabric_multidim_11 PRIVATE ${NETCDF_INCLUDE_DIR})
 # 11.0 access-pattern-driven prefetch (WP F).
 sicnu_add_io_test(test_io_fabric_locality_11)
 target_include_directories(test_io_fabric_locality_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1619,6 +1632,22 @@ target_include_directories(test_nodata_utils PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_nodata_utils)
+
+# E2E Science Numerics, CRS and NoData Contracts (R12-A Science Hardening)
+add_executable(test_e2e_science_numerics test_e2e_science_numerics.cpp)
+target_link_libraries(test_e2e_science_numerics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_e2e_science_numerics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_e2e_science_numerics)
 
 # Shared scientific primitives (Scientific Algorithm Foundation 5.0, A):
 # histogram/otsu/quantile, morphology, connected components, distance
@@ -4120,6 +4149,34 @@ if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.
                 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
             set_tests_properties(pi_bridge_lifecycle PROPERTIES TIMEOUT 120)
             sicnu_set_test_env(pi_bridge_lifecycle)
+
+            add_test(
+                NAME pi_prompt_templates
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/prompt_templates.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_prompt_templates PROPERTIES TIMEOUT 60)
+            sicnu_set_test_env(pi_prompt_templates)
+
+            add_test(
+                NAME pi_remote_sensing_assets
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/remote_sensing_assets.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_remote_sensing_assets PROPERTIES TIMEOUT 60)
+            sicnu_set_test_env(pi_remote_sensing_assets)
+
+            add_test(
+                NAME pi_scientific_workflow_compiler
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_scientific_workflow_compiler PROPERTIES TIMEOUT 120)
+            sicnu_set_test_env(pi_scientific_workflow_compiler)
+
+            add_test(
+                NAME pi_scientific_workflow_compiler_11
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler_11.test.mjs
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_scientific_workflow_compiler_11 PROPERTIES TIMEOUT 120)
+            sicnu_set_test_env(pi_scientific_workflow_compiler_11)
         else()
             message(STATUS "node ${_sicnu_node_version} lacks default type stripping — pi bridge lifecycle tests skipped")
         endif()
@@ -11065,6 +11122,9 @@ target_link_libraries(test_fault_matrix PRIVATE
   sicnu_data
   sicnu_workflow
   sicnu_runtime
+  # R12-E (E12): the teaching behavior benchmark drives real fault scenarios;
+  # link the leaf library instead of compiling its sources into the TU.
+  sicnu_faultlab
 )
 
 # Bounded contract fuzz (task D): ResourceUri total-function/credential/
@@ -12571,6 +12631,23 @@ sicnu_add_test(test_chunked_fabric_e2e TIMEOUT 300)
 target_link_libraries(test_chunked_fabric_e2e PRIVATE sicnu_runtime)
 sicnu_add_test(test_chunked_operators_parity TIMEOUT 300)
 target_link_libraries(test_chunked_operators_parity PRIVATE sicnu_runtime)
+# #1494: milestone-1 memory-governance challenger harness (own main(), no
+# Catch2) — present in the tree but registered nowhere, so it never compiled
+# or ran. Registered beside the other challenger harnesses; TIMEOUT bounds a
+# hung stress suite instead of letting ctest wait forever.
+qt_add_executable(test_challenger_m1_2_harness test_challenger_m1_2_harness.cpp)
+target_link_libraries(test_challenger_m1_2_harness PRIVATE
+  Qt6::Core
+  sicnu_runtime
+)
+target_include_directories(test_challenger_m1_2_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_challenger_m1_2_harness PROPERTIES AUTOMOC ON)
+add_test(NAME test_challenger_m1_2_harness COMMAND test_challenger_m1_2_harness)
+set_tests_properties(test_challenger_m1_2_harness PROPERTIES TIMEOUT 300)
 qt_add_executable(test_challenger_m3_2_harness test_challenger_m3_2_harness.cpp)
 target_link_libraries(test_challenger_m3_2_harness PRIVATE
   Catch2::Catch2WithMain
@@ -15306,6 +15383,7 @@ target_link_libraries(test_verify_chain_locale_matrix PRIVATE
   sicnu_verifier
   sicnu_grader
   sicnu_preflight
+  sicnu_faultlab
   Sicnu::ScienceContext
   sicnu_recipes
   Sicnu::ScientificState
@@ -15610,6 +15688,15 @@ if(Python_EXECUTABLE)
   add_test(NAME test_model_library_generator_parity
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_model_library.py --check)
   sicnu_set_test_env(test_model_library_generator_parity)
+  # R13-I WP-04 / #1494: orphan-test census gate — every tests/test_*.cpp must
+  # be registered in CMake. Static text scan (no build tree needed, so it runs
+  # everywhere ctest runs); foreach-computed families resolve through
+  # template_registrations() in the script, expanded from live CMake text.
+  add_test(NAME test_registration_census
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_test_registration.py
+            --tests-dir ${CMAKE_SOURCE_DIR}/tests)
+  set_tests_properties(test_registration_census PROPERTIES TIMEOUT 60)
+  sicnu_set_test_env(test_registration_census)
 endif()
 # ===========================================================================
 # Unified Scientific Verifier (RS14-10, ADR 0172)

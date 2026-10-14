@@ -1,0 +1,31 @@
+{
+ "schema": "exp.ci-status.v1",
+ "branch": "master",
+ "event": "push",
+ "runs": 25,
+ "counts": {
+  "cancelled": 15,
+  "failed-test": 3,
+  "failed-unknown": 5,
+  "pending": 2
+ },
+ "latest_completed": {
+  "id": 38413453866,
+  "event": "push",
+  "branch": "master",
+  "sha": "551c0d72",
+  "createdAt": "2026-10-13T14:27:04Z",
+  "class": "failed-test",
+  "failed_jobs": [
+   {
+    "job": "Tier 1 - Fast Required (Linux GCC)",
+    "class": "failed-test"
+   },
+   {
+    "job": "Tier 3 - macOS Clang Configure & Build Seam",
+    "class": "failed-build"
+   }
+  ]
+ },
+ "gate": "fail"
+}

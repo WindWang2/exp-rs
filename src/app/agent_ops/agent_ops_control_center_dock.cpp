@@ -38,12 +38,17 @@ AgentOpsControlCenterDock::AgentOpsControlCenterDock(const QString &title, QWidg
 
 AgentOpsControlCenterDock::~AgentOpsControlCenterDock()
 {
-    mCancelRequested.store(true);
-    if (auto *coord = coordinator())
+    m_aliveFlag->store( false, std::memory_order_release );
+    mCancelRequested.store( true );
+    if ( mCurrentWorkerCancel )
+    {
+        mCurrentWorkerCancel->store( true );
+    }
+    if ( auto *coord = coordinator() )
     {
         coord->requestCancel();
     }
-    if (mWorkerThread.joinable())
+    if ( mWorkerThread.joinable() )
     {
         mWorkerThread.join();
     }
@@ -98,8 +103,12 @@ void AgentOpsControlCenterDock::requestPause()
 
 void AgentOpsControlCenterDock::requestCancel()
 {
-    mCancelRequested.store(true);
-    if (auto *coord = coordinator())
+    mCancelRequested.store( true );
+    if ( mCurrentWorkerCancel )
+    {
+        mCurrentWorkerCancel->store( true );
+    }
+    if ( auto *coord = coordinator() )
     {
         coord->requestCancel();
     }
@@ -168,22 +177,37 @@ void AgentOpsControlCenterDock::startWorker(std::function<void(const std::atomic
     if (mWorkerThread.joinable())
     {
         mCancelRequested.store(true);
+        if (mCurrentWorkerCancel)
+        {
+            mCurrentWorkerCancel->store(true);
+        }
         if (auto *coord = coordinator())
         {
             coord->requestCancel();
         }
-        mWorkerThread.join();
+        std::thread([t = std::move(mWorkerThread)]() mutable {
+            if (t.joinable())
+                t.join();
+        }).detach();
     }
 
+    auto taskCancel = std::make_shared<std::atomic<bool>>(false);
+    mCurrentWorkerCancel = taskCancel;
     mCancelRequested.store(false);
+    const uint64_t gen = ++mWorkerGeneration;
     mWorkerRunning.store(true);
 
-    mWorkerThread = std::thread([this, task = std::move(task)]() {
+    mWorkerThread = std::thread([this, alive = m_aliveFlag, taskCancel, gen, task = std::move(task)]() {
         if (task)
         {
-            task(mCancelRequested);
+            task(*taskCancel);
         }
-        mWorkerRunning.store(false);
+        if (!alive->load(std::memory_order_acquire))
+            return;
+        if (mWorkerGeneration.load() == gen)
+        {
+            mWorkerRunning.store(false);
+        }
     });
 }
 

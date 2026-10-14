@@ -466,6 +466,7 @@ void ExperimentStudioDock::rebuildMatrixTable()
 
 ExperimentStudioDock::~ExperimentStudioDock()
 {
+    m_aliveFlag->store( false, std::memory_order_release );
     if ( m_liveCancel )
         m_liveCancel->store( true );
     if ( m_liveRunThread && m_liveRunThread->joinable() )
@@ -594,60 +595,73 @@ void ExperimentStudioDock::runLiveStudy()
     auto store = m_liveStore;
     auto ledger = m_liveLedger;
     const QString outputDir = m_liveStudyOutputDir;
-    QPointer<ExperimentStudioDock> guard( this );
+    auto alive = m_aliveFlag;
 
     m_liveRunThread = std::make_unique<std::thread>(
-        [guard, store, ledger, spec, pts = points.value(), outputDir, cancel]() {
-            // Waiter thread only: StudyRunner owns the in-flight window and
-            // TaskCenter owns admission. No study point executes here.
-            ExecutionPlaneStudyBackend backend; // production spine adapter
-            const auto ran =
-                runStudy( *store, *ledger, spec, backend, outputDir, *cancel );
+        [this, alive, store, ledger, spec, pts = points.value(), outputDir, cancel]() {
             QJsonObject reportJson;
             QString error;
             int recorded = 0;
             int failed = 0;
             int cancelledCount = 0;
-            if ( ran )
+            try
             {
-                recorded = ran->recordedCount;
-                failed = ran->failedCount;
-                cancelledCount = ran->cancelledCount;
-                if ( spec.spatialComparison && ran->recordedCount > 0 )
+                // Waiter thread only: StudyRunner owns the in-flight window and
+                // TaskCenter owns admission. No study point executes here.
+                ExecutionPlaneStudyBackend backend; // production spine adapter
+                const auto ran =
+                    runStudy( *store, *ledger, spec, backend, outputDir, *cancel );
+                if ( ran )
                 {
-                    // Real GDAL run-vs-baseline summaries for the report.
-                    const GdalRasterDifferenceSummarizer summarizer( spec.spatialEpsilon );
-                    const auto spatial =
-                        summarizeStudyOutputs( *store, *ledger, spec, pts, outputDir,
-                                               summarizer );
-                    const StudyReport report =
-                        reportFromStore( *store, *ledger, spec, pts,
-                                         spatial ? spatial.value()
-                                                 : QVector<SpatialDifferenceSummary>{},
-                                         &ran.value() );
-                    reportJson = report.toJson();
+                    recorded = ran->recordedCount;
+                    failed = ran->failedCount;
+                    cancelledCount = ran->cancelledCount;
+                    if ( spec.spatialComparison && ran->recordedCount > 0 )
+                    {
+                        // Real GDAL run-vs-baseline summaries for the report.
+                        const GdalRasterDifferenceSummarizer summarizer( spec.spatialEpsilon );
+                        const auto spatial =
+                            summarizeStudyOutputs( *store, *ledger, spec, pts, outputDir,
+                                                   summarizer );
+                        const StudyReport report =
+                            reportFromStore( *store, *ledger, spec, pts,
+                                             spatial ? spatial.value()
+                                                     : QVector<SpatialDifferenceSummary>{},
+                                             &ran.value() );
+                        reportJson = report.toJson();
+                    }
+                    else
+                    {
+                        const StudyReport report =
+                            reportFromStore( *store, *ledger, spec, pts, {}, &ran.value() );
+                        reportJson = report.toJson();
+                    }
                 }
                 else
                 {
-                    const StudyReport report =
-                        reportFromStore( *store, *ledger, spec, pts, {}, &ran.value() );
-                    reportJson = report.toJson();
+                    error = QStringLiteral( "%1: %2" )
+                                .arg( ran.diagnostics().first().code,
+                                      ran.diagnostics().first().message );
                 }
             }
-            else
+            catch ( const std::exception &e )
             {
-                error = QStringLiteral( "%1: %2" )
-                            .arg( ran.diagnostics().first().code,
-                                  ran.diagnostics().first().message );
+                error = QString::fromUtf8( e.what() );
             }
-            if ( !guard )
+            catch ( ... )
+            {
+                error = QStringLiteral( "Unknown fatal exception in live study execution" );
+            }
+
+            if ( !alive->load( std::memory_order_acquire ) )
                 return; // dock closed mid-run; refs keep the stores alive
+
             QMetaObject::invokeMethod(
-                guard,
-                [guard, reportJson, recorded, failed, cancelledCount, error]() {
-                    if ( guard )
-                        guard->applyLiveStudyResult( reportJson, recorded, failed, cancelledCount,
-                                                     error );
+                this,
+                [this, alive, reportJson, recorded, failed, cancelledCount, error]() {
+                    if ( alive->load( std::memory_order_acquire ) )
+                        applyLiveStudyResult( reportJson, recorded, failed, cancelledCount,
+                                             error );
                 },
                 Qt::QueuedConnection );
         } );
@@ -658,7 +672,13 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
                                                  const QString &error )
 {
     if ( m_liveRunThread && m_liveRunThread->joinable() )
-        m_liveRunThread->join();
+    {
+        std::thread reaper( [t = std::move( m_liveRunThread )]() mutable {
+            if ( t && t->joinable() )
+                t->join();
+        } );
+        reaper.detach();
+    }
     m_liveRunThread.reset();
     m_liveCancel.reset();
     m_runLiveBtn->setEnabled( true );

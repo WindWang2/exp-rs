@@ -34,6 +34,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -928,4 +929,183 @@ TEST_CASE( "#1455: recycling a zombie session still held by an ensemble member "
   replacement.reset();
   registry.releaseAll();
   CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
+}
+
+TEST_CASE( "in-flight model acquisition can be cancelled without hanging (#1455)",
+           "[models][registry][cancel]" )
+{
+  RegistryReset reset;
+  std::atomic<bool> loaderStarted{ false };
+  std::atomic<bool> blockLoader{ true };
+
+  ModelRuntimeRegistry::instance().registerProvider(
+    "slowfw",
+    [ &loaderStarted, &blockLoader ]( const ModelInfo &, const ModelHardwareCapabilities &,
+                                      std::string * ) -> ModelRuntimePtr {
+      loaderStarted.store( true );
+      while ( blockLoader.load() )
+      {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+      }
+      return nullptr;
+    } );
+
+  ModelInfo model;
+  model.name = "slow-model";
+  model.framework = "slowfw";
+  model.resolvedArtifactPath = "/dummy/slow.onnx";
+
+  // Thread 1: starts the load (becomes the flight loader)
+  std::thread loaderThread( [ &model ] {
+    std::string err;
+    ModelRuntimeRegistry::instance().acquire( model, &err );
+  } );
+
+  // Wait until the loader has actually started loading
+  while ( !loaderStarted.load() )
+  {
+    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+  }
+
+  // Thread 2: waiter coalesces on the in-flight load, but provides a cancelPredicate
+  std::atomic<bool> cancelFlag{ false };
+  const auto cancelPredicate = [ &cancelFlag ] { return cancelFlag.load(); };
+
+  std::atomic<bool> waiterReturned{ false };
+  std::string waiterError;
+  std::thread waiterThread( [ &model, &cancelPredicate, &waiterReturned, &waiterError ] {
+    ModelRuntimeRegistry::instance().acquire( model, &waiterError, cancelPredicate );
+    waiterReturned.store( true );
+  } );
+
+  // Let waiter coalesce onto flight
+  std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+  CHECK_FALSE( waiterReturned.load() );
+
+  // Cancel the waiter
+  const auto start = std::chrono::steady_clock::now();
+  cancelFlag.store( true );
+
+  // Waiter must return cleanly within < 500ms even though loader is still blocked
+  while ( !waiterReturned.load() )
+  {
+    if ( std::chrono::steady_clock::now() - start > std::chrono::milliseconds( 1000 ) )
+      break;
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - start ).count();
+
+  CHECK( waiterReturned.load() );
+  CHECK( elapsed < 500 );
+  CHECK( waiterError.find( "cancelled" ) != std::string::npos );
+
+  // Unblock the loader and join threads
+  blockLoader.store( false );
+  loaderThread.join();
+  waiterThread.join();
+}
+
+TEST_CASE( "VRAM ledger allocation and reclaim stress test: 1000 iterations",
+           "[models][pool][stress]" )
+{
+  RegistryReset reset;
+  auto &registry = ModelRuntimeRegistry::instance();
+
+  ModelHardwareCapabilities hw;
+  hw.cudaAvailable = true;
+  hw.cudaDeviceCount = 2;
+  hw.vramBudgetMb = 2048;
+  const HardwarePin pin( hw );
+  registry.vramLedger().reset();
+  registry.vramLedger().setCapacity( 0, 2048 );
+  registry.vramLedger().setCapacity( 1, 2048 );
+
+  struct StressSession final : IModelRuntime
+  {
+    explicit StressSession( std::string id ) : m_id( std::move( id ) ) {}
+    std::string framework() const override { return "stressfw"; }
+    std::string backendName() const override { return "stress-fake"; }
+    std::string deviceName() const override { return "cuda"; }
+    std::string artifactPath() const override { return m_id; }
+    cv::Mat infer( const cv::Mat &blob ) override { return blob.clone(); }
+    std::string m_id;
+  };
+
+  registry.registerProvider(
+    "stressfw",
+    []( const ModelInfo &info, const ModelHardwareCapabilities &,
+        std::string * ) -> ModelRuntimePtr {
+      return std::make_shared<StressSession>( info.id );
+    } );
+
+  QTemporaryDir dir;
+  std::vector<ModelInfo> models;
+  for ( int i = 0; i < 5; ++i )
+  {
+    const QString artifact = dir.filePath( QStringLiteral( "stress-%1.bin" ).arg( i ) );
+    {
+      QFile f( artifact );
+      REQUIRE( f.open( QIODevice::WriteOnly ) );
+      f.write( QByteArray( "weights" ) );
+    }
+    ModelInfo m;
+    m.name = "stress-" + std::to_string( i );
+    m.id = m.name;
+    m.framework = "stressfw";
+    m.readiness = ModelReadiness::Ready;
+    m.runtime.gpu = true;
+    m.runtime.estimatedVramMb = 16 * ( i + 1 ); // 16, 32, 48, 64, 80 MB
+    m.resolvedArtifactPath = artifact.toStdString();
+    m.contentDigest = "digest-stress-" + std::to_string( i );
+    models.push_back( m );
+  }
+
+  std::vector<ModelRuntimePtr> heldHandles;
+  std::mt19937 rng( 42 );
+
+  for ( int iter = 0; iter < 1000; ++iter )
+  {
+    int action = rng() % 3;
+    if ( action == 0 && !heldHandles.empty() )
+    {
+      // Release a random held handle
+      size_t idx = rng() % heldHandles.size();
+      heldHandles[idx].reset();
+      heldHandles.erase( heldHandles.begin() + idx );
+    }
+    else
+    {
+      // Acquire a model
+      size_t modelIdx = rng() % models.size();
+      int devIdx = rng() % 2;
+      std::string error;
+      auto handle = registry.acquire( models[modelIdx], RequestedDevice::cuda( devIdx ), &error );
+      if ( handle )
+      {
+        heldHandles.push_back( handle );
+      }
+    }
+
+    // Invariant checks
+    for ( int d = 0; d < 2; ++d )
+    {
+      REQUIRE( registry.vramLedger().reservedMb( d ) >= 0 );
+    }
+  }
+
+  // Release all remaining handles and evict cached sessions
+  heldHandles.clear();
+  registry.releaseAll();
+
+  // Strict check: zero leak, zero undercount
+  for ( int d = 0; d < 2; ++d )
+  {
+    CHECK( registry.vramLedger().reservedMb( d ) == 0 );
+  }
+  for ( const auto &state : registry.deviceReport() )
+  {
+    CHECK( state.reservedMb == 0 );
+    CHECK( state.holders == 0 );
+  }
 }

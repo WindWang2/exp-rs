@@ -1301,3 +1301,59 @@ TEST_CASE( "rs:sar_backscatter pure domain conversion ignores the declared state
     for ( float v : readBand( output ) )
         REQUIRE( v == Approx( -6.0206f ).margin( 1e-3 ) );
 }
+
+TEST_CASE( "rs:sar_calibrate multi-band resolves per-band NoData sentinel independently (#1467)",
+           "[sar][operator][nodata]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName( "HFA" );
+    REQUIRE( driver != nullptr );
+    const QString input = tmp.filePath( "multiband_dn.img" );
+    const QString output = tmp.filePath( "multiband_sigma0.tif" );
+    GDALDatasetH ds = GDALCreate( driver, input.toUtf8().constData(), 2, 2, 2, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+
+    // Band 1: nodata = -9999.0f. Pixels: {4.0f, -9999.0f, 4.0f, 4.0f}
+    GDALRasterBandH b1 = GDALGetRasterBand( ds, 1 );
+    GDALSetRasterNoDataValue( b1, -9999.0 );
+    float v1[4] = { 4.0f, -9999.0f, 4.0f, 4.0f };
+    REQUIRE( GDALRasterIO( b1, GF_Write, 0, 0, 2, 2, v1, 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+
+    // Band 2: nodata = -32768.0f. Pixels: {-32768.0f, 4.0f, -9999.0f, 4.0f}
+    GDALRasterBandH b2 = GDALGetRasterBand( ds, 2 );
+    GDALSetRasterNoDataValue( b2, -32768.0 );
+    float v2[4] = { -32768.0f, 4.0f, -9999.0f, 4.0f };
+    REQUIRE( GDALRasterIO( b2, GF_Write, 0, 0, 2, 2, v2, 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( ds );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_calibrate" );
+    REQUIRE( op != nullptr );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["calibrationA"] = 2.0;
+    params["band"] = 0; // 0 = process all bands of multi-band raster
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run( params, ctx );
+    REQUIRE( result["calibration"].asString() == "sigma0" );
+
+    // Band 1: pixel 1 should be NaN (was -9999.0f)
+    const auto out1 = readBand( output, 1 );
+    REQUIRE( out1.size() == 4 );
+    CHECK( out1[0] == Approx( 4.0f ) );
+    CHECK( std::isnan( out1[1] ) );
+    CHECK( out1[2] == Approx( 4.0f ) );
+
+    // Band 2: pixel 0 should be NaN (was -32768.0f)
+    // and pixel 2 should NOT be NaN (was -9999.0f, calibrated normally)!
+    const auto out2 = readBand( output, 2 );
+    REQUIRE( out2.size() == 4 );
+    CHECK( std::isnan( out2[0] ) );
+    CHECK( out2[1] == Approx( 4.0f ) );
+    CHECK( !std::isnan( out2[2] ) );
+}

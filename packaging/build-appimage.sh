@@ -88,7 +88,23 @@ if [ -d "$OTB_SOURCE/bin" ]; then
     # Copy OTB share (applications metadata)
     mkdir -p "$APPDIR/usr/share/otb"
     cp -a "$OTB_SOURCE/share/otb/"* "$APPDIR/usr/share/otb/" 2>/dev/null || true
-    echo "OTB bundled successfully"
+    # OTB is declared required above, so an empty copy is a FAILURE, not a
+    # success. Every cp is `|| true` (a missing optional subdir must not abort
+    # the whole copy), which means the previous unconditional
+    # "OTB bundled successfully" was printed even when 0 files landed. Count
+    # what actually arrived and refuse to claim success without evidence.
+    otb_files=0
+    for _d in "$APPDIR/usr/tools/otb" "$APPDIR/usr/lib/otb" "$APPDIR/usr/share/otb"; do
+        [ -d "$_d" ] || continue
+        _n=$(find "$_d" -type f 2>/dev/null | wc -l)
+        otb_files=$((otb_files + _n))
+    done
+    if [ "$otb_files" -eq 0 ]; then
+        echo "ERROR: OTB is required but 0 files were copied from $OTB_SOURCE." >&2
+        echo "  expected: bin/otbcli_* + bin/otbcli, lib/*.so*, share/otb/*" >&2
+        exit 1
+    fi
+    echo "OTB bundled successfully ($otb_files files)"
 else
     echo "WARNING: OTB not found at $OTB_SOURCE. Set OTB_INSTALL_DIR to bundle OTB."
     echo "  Example: OTB_INSTALL_DIR=/path/to/otb $0"
@@ -102,7 +118,10 @@ if [ -n "$GDAL_SOURCE" ] && [ -d "$GDAL_SOURCE/bin" ]; then
     for tool in gdal_translate gdalwarp gdalinfo gdalbuildvrt gdaldem gdal_grid gdal_rasterize ogr2ogr ogrinfo; do
         cp "$GDAL_SOURCE/bin/$tool" "$APPDIR/usr/tools/gdal/" 2>/dev/null || true
     done
-    echo "GDAL tools bundled"
+    # GDAL is optional, so 0 files is not an error — but the message must state
+    # what actually landed instead of asserting a bundled state.
+    gdal_files=$(find "$APPDIR/usr/tools/gdal" -type f 2>/dev/null | wc -l)
+    echo "GDAL tools bundled ($gdal_files files)"
 fi
 
 # Bundle PROJ data (F19: full share, dereferenced) for offline CRS transforms.

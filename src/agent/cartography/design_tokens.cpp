@@ -71,10 +71,12 @@ void checkStyleEntry( const std::string &name, const Json::Value &style,
     problems.push_back( "typography.styles." + name + " must be an object" );
     return;
   }
-  if ( !style.isMember( "size_pt" ) || !style["size_pt"].isNumeric() || style["size_pt"].asDouble() <= 0 )
+  if ( !style.isMember( "size_pt" ) || !style["size_pt"].isNumeric() ||
+       !std::isfinite( style["size_pt"].asDouble() ) || style["size_pt"].asDouble() <= 0 )
     problems.push_back( "typography.styles." + name + " needs a positive size_pt" );
-  if ( style.isMember( "weight" ) && style["weight"].asString() != "normal" &&
-       style["weight"].asString() != "bold" )
+  if ( style.isMember( "weight" ) &&
+       ( !style["weight"].isString() ||
+         ( style["weight"].asString() != "normal" && style["weight"].asString() != "bold" ) ) )
     problems.push_back( "typography.styles." + name + ".weight must be normal|bold" );
 }
 
@@ -126,8 +128,8 @@ std::vector<std::string> validateTokenSet( const Json::Value &doc )
     for ( const auto &key : doc["spacing"].getMemberNames() )
     {
       const Json::Value &value = doc["spacing"][key];
-      if ( !value.isNumeric() || value.asDouble() < 0 )
-        problems.push_back( id + ": spacing." + key + " must be a non-negative number" );
+      if ( !value.isNumeric() || !std::isfinite( value.asDouble() ) || value.asDouble() < 0 )
+        problems.push_back( id + ": spacing." + key + " must be a non-negative finite number" );
     }
   }
   if ( doc.isMember( "colors" ) && doc["colors"].isObject() )

@@ -32,4 +32,11 @@ inline bool isNoDataValue( float v, float sentinel )
     return std::isfinite( sentinel ) && v == sentinel;
 }
 
+inline bool isNoDataValue( double v, double sentinel )
+{
+    if ( !std::isfinite( v ) )
+        return true;
+    return std::isfinite( sentinel ) && v == sentinel;
+}
+
 } // namespace sicnu::rs

@@ -1,6 +1,7 @@
 // rs_segment_features.cpp — Phase 10B Task 10B.1
 #include "rs_segment_features.h"
 #include "processing/algorithms/math_utils.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "sicnu_logging.h"
 
 #include <gdal.h>
@@ -116,7 +117,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             {
                 if ( !validMask[base + i] ) continue;
                 const float v = bandBuf[i];
-                if ( std::isnan( v ) || ( hasNoData[b] && v == static_cast<float>( bandNoData[b] ) ) )
+                const float sentinel = hasNoData[b] ? static_cast<float>( bandNoData[b] ) : std::numeric_limits<float>::quiet_NaN();
+                if ( sicnu::rs::isNoDataValue( v, sentinel ) )
                     validMask[base + i] = 0;
             }
         }
@@ -365,8 +367,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                     if ( !validMask[idx] ) continue;
                     const float val1 = chunkVal( r, c );
                     // validMask guarantees not NaN/NoData, but keep guard for safety
-                    if ( std::isnan(val1) ) continue;
-                    if ( hasNoData[b] && val1 == static_cast<float>( bandNoData[b] ) ) continue;
+                    const float sentinel = hasNoData[b] ? static_cast<float>( bandNoData[b] ) : std::numeric_limits<float>::quiet_NaN();
+                    if ( sicnu::rs::isNoDataValue( val1, sentinel ) ) continue;
                     const size_t level1 = static_cast<size_t>( std::clamp( static_cast<int>( ( val1 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
                     const int drs[] = { 0, 1 };
                     const int dcs[] = { 1, 0 };
@@ -379,8 +381,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                         if ( labels[static_cast<qsizetype>(nIdx)] != segId ) continue;
                         if ( !validMask[nIdx] ) continue;
                         const float val2 = chunkVal( nr, nc );
-                        if ( std::isnan(val2) ) continue;
-                        if ( hasNoData[b] && val2 == static_cast<float>( bandNoData[b] ) ) continue;
+                        if ( sicnu::rs::isNoDataValue( val2, sentinel ) ) continue;
                         const size_t level2 = static_cast<size_t>( std::clamp( static_cast<int>( ( val2 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
                         glcm[level1][level2] += 1.0;
                         glcm[level2][level1] += 1.0;

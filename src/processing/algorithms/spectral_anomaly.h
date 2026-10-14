@@ -103,5 +103,7 @@ namespace SpectralAnomaly
     bool invertMatrix( const std::vector<double> &m, int n, std::vector<double> *inverse );
 
     bool rxDetector( const float *pixels, size_t count, int bands,
-                     std::vector<float> *rxValues, QString *errorMessage = nullptr );
+                     std::vector<float> *rxValues, QString *errorMessage = nullptr,
+                     const float *noDataBands = nullptr,
+                     const uint8_t *hasNoDataBands = nullptr );
 } // namespace SpectralAnomaly
