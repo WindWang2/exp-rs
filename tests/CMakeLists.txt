@@ -15637,6 +15637,15 @@ if(Python_EXECUTABLE)
   add_test(NAME test_model_library_generator_parity
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_model_library.py --check)
   sicnu_set_test_env(test_model_library_generator_parity)
+  # R13-I WP-04 / #1494: orphan-test census gate — every tests/test_*.cpp must
+  # be registered in CMake. Static text scan (no build tree needed, so it runs
+  # everywhere ctest runs); foreach-computed families resolve through a
+  # PATTERN_ALLOWLIST entry whose anchor is itself verified against this file.
+  add_test(NAME test_registration_census
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_test_registration.py
+            --tests-dir ${CMAKE_SOURCE_DIR}/tests)
+  set_tests_properties(test_registration_census PROPERTIES TIMEOUT 60)
+  sicnu_set_test_env(test_registration_census)
 endif()
 # ===========================================================================
 # Unified Scientific Verifier (RS14-10, ADR 0172)

@@ -74,6 +74,8 @@ Non-Catch2 lanes registered in CTest so they run in the same `ctest` invocation:
 
 Lint lane (blocking CI step, Tier 1, #1495): `scripts/run_clang_tidy_changed.sh <base-ref> <build-dir>` runs the repo's targeted `.clang-tidy` over only the C++ files changed vs `<base-ref>`, using the build tree's `compile_commands.json` (exported by default on GCC/Clang generators). Header diagnostics are filtered to this checkout's own `src/` tree so third-party headers (e.g. Catch2 under `build*/_deps/`) cannot flood the gate.
 
+Registration census lane (`test_registration_census`, #1494): `scripts/check_test_registration.py` runs under ctest (guarded on `Python_EXECUTABLE`) and fails when any `tests/test_*.cpp` is registered nowhere. It matches stems against the uncommented CMake text and expands template (foreach-computed) registrations only when their anchor text is present; with `--build-dir` it additionally trusts `compile_commands.json` as ground truth. New deliberate exceptions belong in the script's `template_registrations()` with an anchor, not in a filename allowlist.
+
 ## Environment governance (#730)
 
 Host layouts that mix a system GIS stack with a conda/miniconda Python (this project's default CMake `find_package(Python)` on many workstations) need an explicit library and interpreter policy. CMake writes it into `build/CTestCustom.cmake` and stamps the same mods onto every CTest test (`cmake/SicnuTestEnv.cmake`).

@@ -3,17 +3,19 @@
 
 Every tests/test_*.cpp must be accounted for exactly once:
 
-  * registered   — its stem is named in tests/CMakeLists.txt / *.cmake, or
-                   (with --build-dir) the file appears in compile_commands.json
-                   (catches foreach-computed registrations such as the
-                   SICNU_VERIFIER_LANES family whose literal stems never
-                   appear in the CMake text)
-  * pattern-ok   — matches a documented PATTERN_ALLOWLIST entry (each entry
-                   carries its reason; add one only with a justification)
+  * registered   — its stem is named in the UNCOMMENTED tests/ CMake text
+                   (comments stripped: a commented-out registration must not
+                   mask an orphan), or (with --build-dir) the file appears in
+                   compile_commands.json (ground truth for generated or
+                   foreach-computed registrations)
+  * template-ok  — produced by a template registration whose anchor is proven
+                   present in the live CMake text (template_registrations);
+                   an allowlist keyed on filenames alone would keep passing
+                   after the foreach it names is deleted, so templates are
+                   expanded from the text, never trusted blindly
   * ORPHAN       — neither: printed and counted, exit code 1
 
-A file that is only #included by another test, or a deliberate utility, must
-carry an allowlist entry — silent orphans fail the gate.
+Static mode (no --build-dir) is a heuristic; build mode is authoritative.
 
 Usage:
     python3 scripts/check_test_registration.py [--build-dir build-r13-i]
@@ -29,15 +31,29 @@ import os
 import re
 import sys
 
-# Each entry: (regex over the file name, reason this family is registered or
-# deliberately not a standalone test). Verified on origin/master 89229568.
-PATTERN_ALLOWLIST: list[tuple[str, str]] = [
-    # The SICNU_VERIFIER_LANES foreach in tests/CMakeLists.txt computes
-    # test_verifier_{core,checks,provenance,packs,render,drift,adversarial}_14
-    # at configure time; the literal stems never appear in the file.
-    (r"^test_verifier_(core|checks|provenance|packs|render|drift|adversarial)_14\.cpp$",
-     "registered via SICNU_VERIFIER_LANES foreach (tests/CMakeLists.txt)"),
-]
+
+def template_registrations(text: str) -> dict[str, str]:
+    """Expand template (foreach-computed) registrations to concrete file names.
+
+    Each family is emitted only when its anchor text is present RIGHT NOW in
+    the CMake sources, so deleting or renaming the template turns its files
+    back into visible orphans instead of permanent pattern-ok entries.
+    """
+    out: dict[str, str] = {}
+    # tests/CMakeLists.txt: foreach(LANE ${SICNU_VERIFIER_LANES}) builds
+    # test_verifier_${LANE}_14 — the literal stems never appear in the text.
+    m = re.search(r"set\(\s*SICNU_VERIFIER_LANES\s*([^)]*?)\)", text, re.S)
+    if m and "test_verifier_${LANE}_14" in text:
+        for lane in m.group(1).split():
+            out[f"test_verifier_{lane}_14.cpp"] = (
+                "registered via SICNU_VERIFIER_LANES foreach (tests/CMakeLists.txt)")
+    return out
+
+
+def uncommented(text: str) -> str:
+    """Strip #-to-EOL comments so a commented-out registration cannot mask an
+    orphan (static mode remains a heuristic; build mode is authoritative)."""
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
 
 
 def collect_test_sources(tests_dir: str) -> list[str]:
@@ -85,29 +101,30 @@ def main() -> int:
         return 2
 
     text = cmake_text(args.tests_dir)
+    searchable = uncommented(text)
+    templates = template_registrations(text)
     compiled = compiled_sources(args.build_dir) if args.build_dir else set()
     tests_root = os.path.realpath(args.tests_dir)
 
-    orphans, pattern_ok = [], []
+    orphans, template_ok = [], []
     for f in collect_test_sources(args.tests_dir):
         stem = f[:-4]
-        if re.search(r"(?<![A-Za-z0-9_])" + re.escape(stem) + r"(?![A-Za-z0-9_])", text):
+        if re.search(r"(?<![A-Za-z0-9_])" + re.escape(stem) + r"(?![A-Za-z0-9_])", searchable):
             continue
         if compiled and os.path.join(tests_root, f) in compiled:
             continue
-        reason = next((why for pat, why in PATTERN_ALLOWLIST if re.match(pat, f)), None)
-        if reason:
-            pattern_ok.append((f, reason))
+        if f in templates:
+            template_ok.append((f, templates[f]))
         else:
             orphans.append(f)
 
     print(f"census: {len(collect_test_sources(args.tests_dir))} test_*.cpp; "
-          f"{len(pattern_ok)} pattern-ok; {len(orphans)} orphan(s)")
-    for f, why in pattern_ok:
-        print(f"  pattern-ok: {f} — {why}")
+          f"{len(template_ok)} template-ok; {len(orphans)} orphan(s)")
+    for f, why in template_ok:
+        print(f"  template-ok: {f} — {why}")
     if orphans:
-        print("unregistered test sources (not in CMake text, not compiled, "
-              "no allowlist entry):", file=sys.stderr)
+        print("unregistered test sources (not in uncommented CMake text, not "
+              "compiled, no live template registration):", file=sys.stderr)
         for f in orphans:
             print(f"  ORPHAN: {f}", file=sys.stderr)
         return 1
