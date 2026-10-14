@@ -344,12 +344,38 @@ def run_executable(binary: Path, env: dict, timeout: float,
     return "failed", tail, elapsed
 
 
+_CTEST_NO_TESTS_SUPPORTED: bool | None = None
+
+
+def _ctest_supports_no_tests() -> bool:
+    """Whether this ctest accepts --no-tests=error (CMake >= 3.18).
+
+    An unsupported flag would turn every ctest lane into a usage error, so the
+    capability is probed once instead of assumed.
+    """
+    global _CTEST_NO_TESTS_SUPPORTED
+    if _CTEST_NO_TESTS_SUPPORTED is None:
+        try:
+            probe = subprocess.run(["ctest", "--help"], capture_output=True,
+                                   text=True, timeout=60)
+            _CTEST_NO_TESTS_SUPPORTED = "--no-tests" in (probe.stdout or "")
+        except (OSError, subprocess.SubprocessError):
+            _CTEST_NO_TESTS_SUPPORTED = False
+    return _CTEST_NO_TESTS_SUPPORTED
+
+
 def run_ctest(build_dir: Path, pattern: str, jobs: int, timeout: float,
               env: dict) -> tuple[str, str, float]:
     started = time.monotonic()
     cmd = ["ctest", "--test-dir", str(build_dir), "-R", pattern,
            "--output-on-failure", "-j", str(max(1, jobs)),
            "--timeout", str(int(timeout))]
+    # "-R" that selects nothing exits 0 by default, so an empty registration
+    # (a whole conditional gate in tests/CMakeLists.txt evaluating false, or a
+    # CTest discovery drift) would be reported as "passed" on a lane that ran
+    # no test at all. Refuse to call that success.
+    if _ctest_supports_no_tests():
+        cmd.append("--no-tests=error")
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout * 4, env=env)
@@ -358,7 +384,13 @@ def run_ctest(build_dir: Path, pattern: str, jobs: int, timeout: float,
     elapsed = time.monotonic() - started
     if proc.returncode == 0:
         return "passed", "", elapsed
-    return "failed", (proc.stdout + proc.stderr)[-4000:], elapsed
+    combined = (proc.stdout + "\n" + proc.stderr)
+    if "No tests were found" in combined:
+        return ("failed",
+                f"ctest matched no test for pattern {pattern!r}: the lane ran "
+                "nothing, so it proves nothing (registration drift?)",
+                elapsed)
+    return "failed", combined[-4000:], elapsed
 
 
 def load_state(path: Path) -> dict:
@@ -443,6 +475,12 @@ def main() -> int:
         "lanes": {},
     }
     overall_ok = True
+    # "Every lane green" is only evidence if something actually RAN. A ladder
+    # pointed at an unbuilt tree produces not-built for every item; item-level
+    # status stays honest, but the aggregate must not read "PASSED" for a run
+    # that executed nothing.
+    executed = 0
+    planned = 0
 
     for lane in lanes:
         if lane not in LANES:
@@ -559,6 +597,20 @@ def main() -> int:
     state_path.write_text(json.dumps(state, indent=1))
 
     results["finished_utc"] = datetime.now(timezone.utc).isoformat()
+
+    for _lane, _lr in results["lanes"].items():
+        for _item in _lr["items"]:
+            planned += 1
+            if _item["status"] == "passed":
+                executed += 1
+    results["executed_items"] = executed
+    results["planned_items"] = planned
+    if planned and executed == 0:
+        overall_ok = False
+        print("\nOVERALL NOTE: no item actually executed "
+              f"({planned} planned, 0 executed) — this run produced no "
+              "evidence and is not a pass.")
+
     results["overall"] = "passed" if overall_ok else "attention"
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=1))
