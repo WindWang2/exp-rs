@@ -23,6 +23,10 @@ namespace
 
 using Json::Value;
 
+/// Hard ceiling for one scenario document (4 MiB). A scenario is a small
+/// teaching artifact; anything larger is refused before a byte is parsed.
+inline constexpr std::uint64_t kMaxScenarioFileBytes = 4ull * 1024 * 1024;
+
 bool isNonEmptyString( const Value &doc, const char *key )
 {
     return doc.isMember( key ) && doc[key].isString() && !doc[key].asString().empty();
@@ -393,6 +397,19 @@ FaultResult<FaultScenario> loadFaultScenarioFile( const std::string &path )
         return makeError<FaultScenario>( "faultlab.scenario_unreadable",
                                          "cannot open scenario file: " + path );
     }
+    // Bound the read before slurping: a scenario is a small teaching
+    // artifact, so an oversized file is refused with the existing
+    // unreadable vocabulary instead of an unbounded rdbuf copy.
+    stream.seekg( 0, std::ios::end );
+    const std::streamoff length = stream.tellg();
+    if ( length < 0 || static_cast<std::uint64_t>( length ) > kMaxScenarioFileBytes )
+    {
+        return makeError<FaultScenario>( "faultlab.scenario_unreadable",
+                                         "scenario file exceeds the 4 MiB teaching-artifact cap: " +
+                                             path );
+    }
+    stream.seekg( 0, std::ios::beg );
+
     std::ostringstream buffer;
     buffer << stream.rdbuf();
 
@@ -402,12 +419,32 @@ FaultResult<FaultScenario> loadFaultScenarioFile( const std::string &path )
 
     Json::Value doc;
     Json::CharReaderBuilder builder;
+    // Same safe-reader discipline as grader_json / guidance_store: a scenario
+    // file is untrusted content. The reader THROWS on a nesting bomb past
+    // the stack limit, trailing garbage used to be silently ignored
+    // (failIfExtra defaults to false), and no scenario fixture relies on
+    // comments — so the bomb arrives as a typed refusal, extra text fails
+    // the parse, and allowComments=false matches the grader doctrine. The
+    // module contract is never exceptions across the API boundary.
+    builder["stackLimit"] = 128;
+    builder["allowComments"] = false;
+    builder["collectComments"] = false;
+    builder["failIfExtra"] = true;
     std::string errors;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &errors ) )
+    try
+    {
+        if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &errors ) )
+        {
+            return makeError<FaultScenario>( "faultlab.scenario_malformed",
+                                             "cannot parse scenario JSON: " + errors );
+        }
+    }
+    catch ( const Json::Exception &exception )
     {
         return makeError<FaultScenario>( "faultlab.scenario_malformed",
-                                         "cannot parse scenario JSON: " + errors );
+                                         std::string( "cannot parse scenario JSON: " ) +
+                                             exception.what() );
     }
     return loadFaultScenario( doc );
 }

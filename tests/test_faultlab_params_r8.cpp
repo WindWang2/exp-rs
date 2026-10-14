@@ -14,6 +14,7 @@
 #include "faultlab/fault_transforms.h"
 #include "faultlab/fault_types.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
@@ -173,6 +174,79 @@ TEST_CASE( "train_test_spatial_leakage refusals leave the grid unmutated",
         CHECK( error->code == "faultlab.fault_unsafe_target" );
         CHECK( grid.extras["leakage_cell_size"].asDouble() == 4.0 );
         CHECK( grid.extras["samples"] == pristineSamples );
+    }
+}
+
+TEST_CASE( "wrong_scale_offset refuses mistyped optional params instead of coercing",
+           "[faultlab][params][r12]" )
+{
+    // Present-but-unusable optional params used to be silently coerced:
+    // offset "abc" became 0.0, metadata 1 became false — a refused-looking
+    // scenario silently applied the identity offset. Same gate shape as
+    // cell_size (#1464): a declared param with an unusable value is a typed
+    // refusal, never a silent default.
+    SECTION( "string offset refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["offset"] = "abc";
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "array offset refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        Json::Value offset( Json::arrayValue );
+        offset.append( 1 );
+        spec.params["offset"] = offset;
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "numeric metadata refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["metadata"] = 1;
+        const FaultOutcome refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        const FaultDiagnostic *error = refused.firstError();
+        REQUIRE( error != nullptr );
+        CHECK( error->code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "valid offset and metadata still apply" )
+    {
+        FaultGrid grid = leakageGrid();
+        BandSpec red;
+        red.role = "red";
+        red.samples.assign( 4, 1.0 );
+        grid.bands.push_back( red );
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["offset"] = 0.5;
+        spec.params["metadata"] = true;
+        const FaultOutcome applied = applyFault( grid, spec );
+        REQUIRE( applied.ok );
+        CHECK( grid.bands.back().scale == Catch::Approx( 2.0 ) );
+        CHECK( grid.bands.back().offset == Catch::Approx( 0.5 ) );
+        CHECK( grid.bands.back().samples[0] == Catch::Approx( 1.0 ) ); // data kept
     }
 }
 

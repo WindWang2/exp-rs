@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -1624,5 +1625,80 @@ TEST_CASE( "fault lab: transforms refuse mistyped params with typed errors", "[f
         CHECK_FALSE( outcome.ok );
         CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
         CHECK( grid.bands[0].samples[0] == Catch::Approx( 0.1 ) );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Regression — scenario file loading is bounded and never throws (R12-E)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+std::string writeScenarioFile( const std::string &name, const std::string &content )
+{
+    const auto dir = std::filesystem::temp_directory_path() / "exp-rs-faultlab-r12e";
+    std::filesystem::create_directories( dir );
+    const auto path = dir / name;
+    std::ofstream out( path, std::ios::binary | std::ios::trunc );
+    out.write( content.data(), static_cast<std::streamsize>( content.size() ) );
+    return path.string();
+}
+
+std::string validScenarioText()
+{
+    return Json::FastWriter().write( validScenarioDoc() );
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: scenario file loader refuses hostile documents without throwing",
+           "[faultlab]" )
+{
+    // The loader's contract is "never exceptions across the API boundary"
+    // (fault_types.h): a hostile file arrives as a typed faultlab.*
+    // diagnostic. A nesting bomb used to escape as a Json::Exception past the
+    // reader's default stackLimit; trailing garbage used to be silently
+    // ignored (failIfExtra defaults to false); an oversized file used to be
+    // slurped unbounded.
+    SECTION( "nesting bomb" )
+    {
+        const std::string path = writeScenarioFile(
+            "nesting_bomb.json", std::string( 1200, '[' ) + std::string( 1200, ']' ) );
+        FaultResult<FaultScenario> result;
+        REQUIRE_NOTHROW( result = loadFaultScenarioFile( path ) );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_malformed" );
+    }
+    SECTION( "trailing garbage after the document" )
+    {
+        const std::string path =
+            writeScenarioFile( "trailing_garbage.json", validScenarioText() + " not json" );
+        const auto result = loadFaultScenarioFile( path );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_malformed" );
+    }
+    SECTION( "embedded NUL byte" )
+    {
+        std::string content = validScenarioText();
+        content.insert( content.begin() + 10, '\0' );
+        const std::string path = writeScenarioFile( "embedded_nul.json", content );
+        const auto result = loadFaultScenarioFile( path );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_malformed" );
+    }
+    SECTION( "file above the teaching-artifact size cap" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["title"] = std::string( 4 * 1024 * 1024 + 64, 'x' );
+        const std::string path =
+            writeScenarioFile( "oversized.json", Json::FastWriter().write( doc ) );
+        const auto result = loadFaultScenarioFile( path );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_unreadable" );
     }
 }
