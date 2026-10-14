@@ -650,12 +650,10 @@ TEST_CASE( "re-archiving over an existing history entry loses nothing (#1459)",
 // generic failure); and running fault scenarios must never corrupt the seed
 // fixture (the baseline replays identically after all faults).
 //
-// The faultlab core is Qt-free and depends on jsoncpp only; jsoncpp already
-// reaches this executable PUBLIC through sicnu_workflow, and tests/
-// CMakeLists.txt is outside this direction's edit scope, so the teaching
-// core is compiled into this translation unit by source (each faultlab
-// source includes its own headers relatively, so the includes below are the
-// whole measure). No production code is touched.
+// The faultlab core is Qt-free and depends on jsoncpp only; this target
+// links the sicnu_faultlab leaf library (recorded exception in
+// .planning/r12-e-evidence-verification/OWNERSHIP.md), so the benchmark
+// below drives the real loadFaultScenario / runFaultScenario paths.
 // ---------------------------------------------------------------------------
 
 #include <catch2/catch_approx.hpp>

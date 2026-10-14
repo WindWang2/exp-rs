@@ -50,6 +50,12 @@ R12-E-relevant leads (re-adjudicated against current master — see PR_ISSUE_REV
 - Existing configured reference tree: `main/build-dev` (used as `--base-cache` for our configure).
 - Resource discipline: `scripts/build.sh` (cap -j2, ctest -j1, QT_QPA_PLATFORM=offscreen); heavy builds under `flock "$HOME/.cache/exp-rs-heavy-build.lock"`.
 
+## Baseline refresh at PR submit (2026-10-14, second fetch)
+
+- `origin/master` still `28abef358217520dfbb802efdfdb11a2bf850465` (0 commits delta) — no rebase needed.
+- Open PRs now: #1483 (R12-A), #1484 (R12-C), **#1496 (R12-F, new)** — #1496 touches only src/operators/{io,otb} + its own tests; `comm -12` against this branch's changed files: **zero overlap**.
+- #1483 gained `src/processing/algorithms/spectral_indices.cpp` since first snapshot — still no R12-E overlap.
+
 ## Test inventory (existing targets in tests/CMakeLists.txt, 15630 lines)
 
 Relevant existing test files: test_grader_{engine,schema,adapters,render}, test_faultlab, test_faultlab_params_r8, test_fault_registry, test_fault_injection, test_fault_matrix, test_preflight{,_engine,_golden,_rules,_provider,_render,_report_schema,_check_tool,_authority_invalidation,_runtime_adapter}, test_suitability_{adversarial,core,labels,profiles,spatial,spectral,store_provider,teaching,temporal,uncertainty,agent_tools}, test_explain_{builder,validator,schema,projection,...}, test_scientific_state_{core,catalog,diff,fixtures,gdal,geo,nul_tokens_r8,provenance,resolver,review,teaching}, test_verify_adapters{,_grid}, test_verify_chain_locale_matrix, test_fault_injection, test_store_fault_injection.

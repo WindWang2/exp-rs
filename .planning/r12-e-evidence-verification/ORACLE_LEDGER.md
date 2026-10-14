@@ -15,26 +15,26 @@ Legend: WP / root cause / verdict / fix owner / RED→GREEN evidence / status.
 | #1447 capability_mirror unguarded parse | try/catch+stackLimit capability_mirror.cpp:23-35 | ALREADY_FIXED |
 | E02 lattice fail-closure | Pass<Indeterminate<Fail worst-wins, empty→Indeterminate; strict wire spelling status_lattice.cpp:43-61 | VERIFIED_SOUND |
 
-## LIVE defects confirmed (assigned)
-| ID | WP | Defect | Seveity | Owner |
-|---|---|---|---|---|
-| D1 | E05 | faultlab loadFaultScenarioFile: no stackLimit, no try/catch (CharReader throws on >1000 nesting, grader_json.cpp:224 documents), unbounded whole-file read, allowComments default-on — violates fault_types.h:53 never-throws | P1 | F1 |
-| D2 | E04 | faultlab wrong_scale_offset silently coerces mistyped optional params (offset non-numeric→0.0 :157-159; metadata non-bool→false :168-169) | P2 | F1 |
-| D3 | E10 | verify_adapters parseJsonBounded (bounded_io.cpp:77-85): stackLimit=128 set but no try/catch → Json::Exception escapes "Never throws" headers (checkpoint_state_view.h:75, provenance_sidecar_view.h:54, bounded_io.h:54); engine misclassifies as Fail/invalid-spec instead of Indeterminate/artifact-unreadable | P1 | F2 |
-| D4 | E09 | scientific_state readInt (asset_state_json.cpp:96-109): isIntegral() then asInt() throws Json::LogicError for out-of-int-range (e.g. 3000000000) → exception escapes typed StateError contract | P1 | F3 |
-| D5 | E07 | suitability DatasetFacts: counts via toDouble(-1.0) with no type/non-negativity check (dataset_facts.cpp:54,157,163,169); "100"→-1-as-absent; negative accepted | P2 | F4 |
-| D6 | E07 | SceneCandidate::fromJson silently drops wrong-typed numerics (scene_candidate.cpp:170-196; bare toInt for band_count/width/height) — parity break with goal parser | P2 | F4 |
-| D7 | E08 | capability_mirror forward-referenced extends chains bypass load-time depth check (capability_mirror.cpp:228-248 sees only loaded entries); mergeEntry :323-331 silently truncates at 4 hops → policies vanish → bandRoleEvaluate "pass" — silent policy narrowing | P1 | F5 |
-| D8 | E08 | preflight report/request digest via private jsoncpp writer precision=12 (report.cpp:178-192, engine.cpp:96-105), not RFC8785 authority; only tests consume today; goldens pin current bytes | P2 | F5 |
-| D9 | E08 | render projections can_proceed inconsistency: teaching requires findings.empty() (render.cpp:62), agent only verdict=="ok" (:109); unreachable with builtin rules | P2 | F5 |
-| D10 | E02 | verification buildReport drops results whose checkId is unmapped in nodeChecks → report.status==Pass while results contain Fail (report.cpp:569-578, 310-355); public runSpec(nodeChecks) entry; latent (no in-repo caller passes partial map) | P1 | F6 |
-| D11 | E02 | runSpec hoists VERIFY.BUDGET_EXCEEDED for missing-required-evidence (check_runner.cpp:201,286-292) — mislabeled cause at outcome level | P2 | F6 |
-| D12 | E03 | grader rubric validation accepts self/cyclic orderedAfter (grader_types.cpp:594-610,687-694) — vacuously satisfiable | P2 | F7 |
-| D13 | E11 | explain: empty execution status passes evidenceFor (provenance_file_evidence.cpp:243) → builder → validator never checks status → renders "状态: " SystemFact badge; ExecutionFacts::toJson writes "status" unconditionally but fromJson requires non-empty (step_explanation.cpp:363 vs :395) — builder output its own strict parser refuses | P1 | F8 |
-| D14 | E11 | explain skipped-step trust note asserts authored skipConsequence IS the run outcome (explanation_builder.cpp:319) — overclaim; dormant (projectEngine2Step test-only) | P2 | F8 |
-| D15 | E11 | explanation_validator.h:41-44 declares guidance cross-check; member stored, never read — doc/impl mismatch | P2 | F8 |
-| D16 | E06 | four SHA-256 forks byte-equivalent today (full-read confirmed) but no parity gate; grader Sha256 update-after-finalize silent no-op (grader_sha256.cpp:86-87, latent) | P2 | F9 |
-| D17 | E12 | behavior benchmark: verify→grader→explain teaching scenario with destructive variants — coverage to add | P2 | F10 |
+## LIVE defects confirmed (assigned) — all resolved; resolution column records fix commit and review state
+| ID | WP | Defect | Severity | Owner | Resolution |
+|---|---|---|---|---|---|
+| D1 | E05 | faultlab loadFaultScenarioFile: no stackLimit, no try/catch (CharReader throws on >1000 nesting, grader_json.cpp:224 documents), unbounded whole-file read, allowComments default-on — violates fault_types.h:53 never-throws | P1 | F1 | FIXED c21f097a68 (cap+stackLimit+catch); TOCTOU hardening e067a523b2; R1/R2 verified |
+| D2 | E04 | faultlab wrong_scale_offset silently coerces mistyped optional params (offset non-numeric→0.0; metadata non-bool→false) | P2 | F1 | FIXED c21f097a68; R1 verified |
+| D3 | E10 | verify_adapters parseJsonBounded: stackLimit=128 set but no try/catch → Json::Exception escapes "Never throws" headers; engine misclassifies verdict class | P1 | F2 | FIXED d89a313bf0; R1 verified |
+| D4 | E09 | scientific_state readInt: isIntegral() then asInt() throws for out-of-int-range → exception escapes typed StateError contract | P1 | F3 | FIXED 0344543bce; class closure extended to model_sidecar/asset_state_diff/fault_scenario.max_bytes 717f5537f4 and fault_transforms e067a523b2; R1/R2 verified |
+| D5 | E07 | suitability DatasetFacts: counts via toDouble(-1.0) with no type/non-negativity check | P2 | F4 | FIXED 477ddd6683; R1 verified |
+| D6 | E07 | SceneCandidate::fromJson silently drops wrong-typed numerics | P2 | F4 | FIXED 477ddd6683; integer-valued+range gate e067a523b2; R1/R2 verified |
+| D7 | E08 | capability_mirror forward-referenced extends chains bypass depth refusal → silent policy truncation → pass | P1 | F5 | FIXED e15ff4f79a (load-order-independent validation); boundary false-positive fix 717f5537f4; R1/R2 verified |
+| D8 | E08 | preflight report/request digest via private precision-12 writer, not RFC8785 authority | P2 | F5 | FIXED e15ff4f79a (+projection canonicalizer 717f5537f4); R1/R2 verified |
+| D9 | E08 | render projections can_proceed inconsistency (teaching stricter than agent) | P2 | F5 | FIXED e15ff4f79a (fail-closed alignment); R1 verified |
+| D10 | E02 | verification buildReport drops node-unmapped Fail results → report.status==Pass possible | P1 | F6 | FIXED 6709ff7d1d; policy-promotion parity 717f5537f4; R1/R2 verified |
+| D11 | E02 | runSpec marks budgetUsage.exceeded on missing-required-evidence (untruthful cause) | P2 | F6 | FIXED 6709ff7d1d; R1 verified |
+| D12 | E03 | grader rubric validation accepts self/cyclic orderedAfter | P2 | F7 | FIXED c05a350dba; R1/R2 verified |
+| D13 | E11 | explain: empty execution status flows to a SystemFact badge; builder output its own strict parser refuses | P1 | F8 | FIXED 1a771c4b7a (adapter+builder+validator three-gate); R1 verified |
+| D14 | E11 | explain skipped-step trust note asserts authored consequence IS run outcome | P2 | F8 | FIXED 1a771c4b7a (attribution reworded); R1 verified |
+| D15 | E11 | explanation_validator.h declares guidance cross-check never implemented | P2 | F8 | DOC-FIXED 1a771c4b7a (header matches reality); follow-up recorded in DECISIONS |
+| D16 | E06 | four SHA-256 forks unpinned; grader streaming update-after-finalize silent no-op unpinned | P2 | F9 | GATE ADDED 095614d9f7 (parity corpus+KATs+locale sweep; streaming pin); R1/R2 verified |
+| D17 | E12 | behavior benchmark coverage for verify→grader→explain-adjacent teaching evidence | P2 | F10 | ADDED 959d19aae7 (faultlab leg + grader leg, precise localization, seed isolation, digest stability); link cleanup by main agent; R1/R2 verified |
 
 ## Documented, no code change (DECISIONS.md)
 - verify vs verification NaN verdict-class divergence (Fail vs Indeterminate) — two deliberate lattices (verify_status.h:13-17); needs owner ruling, recorded.

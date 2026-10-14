@@ -2,12 +2,14 @@
 #
 # Execution-gate layer: judges whether an operation SHOULD be run
 # scientifically before it runs, as typed findings + a versioned,
-# deterministic PreflightReport. Plain C++20 + jsoncpp; the SOURCES stay
-# Qt/QGIS/GDAL-free so the library remains a testable leaf (sicnu_verifier
-# precedent). It consumes the capability knowledge mirror read-only and
-# never registers operators, stores or registries of its own. The link
-# closure carries sicnu_data for exactly one reason — the digest paths ride
-# the platform canonical-JSON authority (documented at the link edge below).
+# deterministic PreflightReport. Plain C++20 + jsoncpp with ONE recorded
+# exception: the digest paths (engine.cpp / report.cpp) compile the Qt-side
+# canonical-JSON authority header and link sicnu_data PUBLIC so report and
+# request digests ride the platform's single serializer (R12-E D8,
+# documented at the link edge below). Everything else stays
+# Qt/QGIS/GDAL-free (sicnu_verifier precedent). It consumes the capability
+# knowledge mirror read-only and never registers operators, stores or
+# registries of its own.
 
 add_library( sicnu_preflight STATIC
     sha256.cpp

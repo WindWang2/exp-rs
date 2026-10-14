@@ -9,7 +9,7 @@ Scope: all changes are correctness/typed-refusal fixes plus tests; no hot-path a
 
 ## Runtime cost of new/changed code paths
 - D1 scenario loader: one seek/tell size probe + same parse as before; 4 MiB cap only refuses pathological files (scenario docs are ≤ tens of KB).
-- D7 mirror validation: O(entries × depth ≤ 4) once per addDocument; entry counts are ≤2048 by the existing cap.
+- D7 mirror validation: after every addDocument, all loaded entries re-walk their extends chain (≤4 hops each) — O(D·N·depth) for D documents and N≤2048 entries; trivial at the cap.
 - D8 digest: canonicalizeJsonRfc8785 replaces a jsoncpp writer — same order of magnitude; report JSON is small.
 - D12 cycle detection: iterative three-color DFS over orderedAfter adjacency — O(V+E) per validate(), rubric-sized graphs only.
 - Parity gate test: 14 digests ×4 forks incl. one 1 MiB input — ~2 s measured (ctest 1.9–0.9 s).
