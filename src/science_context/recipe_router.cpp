@@ -173,7 +173,9 @@ RecipeRouterResult RecipeRouter::search( const RecipeQuery &query ) const
 
     const std::string modality = lower( query.modality );
     const std::string observedModality =
-        query.observedState.isMember( "modality" ) && query.observedState["modality"].isString()
+        query.observedState.isObject() &&
+        query.observedState.isMember( "modality" ) &&
+        query.observedState["modality"].isString()
             ? lower( query.observedState["modality"].asString() )
             : "";
     const std::string text = lower( query.text );

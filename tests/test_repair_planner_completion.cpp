@@ -1434,7 +1434,7 @@ TEST_CASE( "repair planner deduplicates candidates by (operatorId, ruleId, actio
   RepairPlannerOptions opts;
   opts.intent = "align_scenes";
 
-  std::vector<Json::Value> findings = { findingOf( "finding.grid.mismatch" ) };
+  std::vector<Json::Value> findings = { findingOf( "GRID_MISMATCH" ) };
 
   RepairPlannerOutcome outcome;
   RepairError error;
@@ -1473,7 +1473,7 @@ TEST_CASE( "repair planner candidate cost ranking penalizes unknown cost class",
   RepairPlannerOptions opts;
   opts.intent = "align_scenes";
 
-  std::vector<Json::Value> findings = { findingOf( "finding.grid.mismatch" ) };
+  std::vector<Json::Value> findings = { findingOf( "GRID_MISMATCH" ) };
 
   RepairPlannerOutcome outcome;
   RepairError error;

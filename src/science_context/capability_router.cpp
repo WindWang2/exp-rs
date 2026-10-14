@@ -21,6 +21,8 @@ std::string lower( std::string s )
 std::set<std::string> bandRoleSet( const Json::Value &observed )
 {
     std::set<std::string> roles;
+    if ( !observed.isObject() )
+        return roles;
     const Json::Value &arr = observed["band_roles"];
     if ( !arr.isArray() )
         return roles;
@@ -34,6 +36,8 @@ std::set<std::string> bandRoleSet( const Json::Value &observed )
 
 std::string radiometryOf( const Json::Value &observed )
 {
+    if ( !observed.isObject() )
+        return "";
     if ( observed.isMember( "radiometric_conflicted" ) &&
          observed["radiometric_conflicted"].isBool() &&
          observed["radiometric_conflicted"].asBool() )
@@ -46,6 +50,8 @@ std::string radiometryOf( const Json::Value &observed )
 
 std::string modalityOf( const Json::Value &observed )
 {
+    if ( !observed.isObject() )
+        return "unknown";
     if ( !observed.isMember( "modality" ) || !observed["modality"].isString() )
         return "unknown";
     return lower( observed["modality"].asString() );

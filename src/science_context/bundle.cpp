@@ -415,7 +415,9 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.sources.plannerFacts = sectionSourceFromJson( sources["planner_facts"] );
     }
 
-    b.observability = json.get( "observability", Json::objectValue );
+    b.observability = json.isMember( "observability" ) && json["observability"].isObject()
+                          ? json["observability"]
+                          : Json::Value( Json::objectValue );
     out = std::move( b );
     return true;
 }
