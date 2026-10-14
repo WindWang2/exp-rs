@@ -29,7 +29,11 @@ namespace
 // GDAL driver registration is process-global; do it exactly once.
 struct GdalInit
 {
-    GdalInit() { GDALAllRegister(); }
+    GdalInit()
+    {
+        GDALAllRegister();
+        GDALSetCacheMax64( 64 * 1024 * 1024 );
+    }
 };
 
 QDate kEpoch( 2020, 1, 1 );
@@ -216,9 +220,26 @@ TEST_CASE( "Open refuses scenes with unparseable dates, mismatched grids, or an 
 
 namespace
 {
-/// Process peak RSS in bytes (Linux ru_maxrss is KiB).
+/// Process peak RSS in bytes (Linux /proc/self/status VmHWM, or ru_maxrss fallback).
 std::size_t peakRssBytes()
 {
+#if defined(__linux__)
+    FILE *f = fopen( "/proc/self/status", "r" );
+    if ( f )
+    {
+        char line[256];
+        while ( fgets( line, sizeof( line ), f ) )
+        {
+            unsigned long hwm = 0;
+            if ( sscanf( line, "VmHWM: %lu kB", &hwm ) == 1 )
+            {
+                fclose( f );
+                return static_cast<std::size_t>( hwm ) * 1024ull;
+            }
+        }
+        fclose( f );
+    }
+#endif
     rusage usage;
     getrusage( RUSAGE_SELF, &usage );
     return static_cast<std::size_t>( usage.ru_maxrss ) * 1024ull;
