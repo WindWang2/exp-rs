@@ -238,7 +238,9 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
         if ( sandbox.isMember( "max_bytes" ) )
         {
             const Value &maxBytes = sandbox["max_bytes"];
-            if ( !maxBytes.isIntegral() || maxBytes.asUInt64() > kFaultLabMaxBytes )
+            // isUInt64() (not isIntegral()): jsoncpp asUInt64() throws on
+            // negative integrals instead of refusing them.
+            if ( !maxBytes.isUInt64() || maxBytes.asUInt64() > kFaultLabMaxBytes )
             {
                 return fieldError( "sandbox.max_bytes must be an integer <= 64 MiB" );
             }

@@ -735,3 +735,52 @@ TEST_CASE( "adversarial G-15: missing required evidence names itself, not the bu
     REQUIRE_FALSE( report.budgetUsage.exceeded );
     REQUIRE( report.budgetUsage.checksUnevaluated == 1 );
 }
+
+TEST_CASE( "adversarial G-16: strict policy promotes an uncovered Indeterminate before folding",
+           "[verifier14][adversarial][failopen]" )
+{
+    // The D10 coverage-gap fold folds uncovered results into the task outcome
+    // via combineStatus, which bypassed the IndeterminatePolicy::Fail
+    // promotion rollUpNode applies per node: an uncovered Indeterminate under
+    // a strict spec stayed Indeterminate while a mapped one became Fail — the
+    // wrong verdict class in exactly the edge configuration the policy exists
+    // for. The fold must promote (and record the promotion) like a node does.
+    auto makeSpec = [] {
+        VerificationSpec spec;
+        spec.specId = "uncovered-strict";
+        spec.specVersion = "1";
+        spec.checks.push_back( makeStateCheck( "c0", "probe0", "linear" ) ); // Pass, covered
+        spec.checks.push_back( makeCheck( "c1", checkKindToWire( CheckKind::ArtifactShape ) ) );
+        return spec;
+    };
+    NodeCheckMap nodeChecks;
+    nodeChecks["n1"] = { "c0" };   // c1's verdict belongs to no node
+
+    const StateDomainProvider provider;
+    const VerificationInputs inputs = stateOnlyInputs( provider );
+
+    VerificationSpec strict = makeSpec();
+    strict.indeterminatePolicy = IndeterminatePolicy::Fail;
+    const VerificationReport strictReport = runSpec( strict, inputs, nodeChecks );
+
+    REQUIRE( strictReport.results.size() == 2 );
+    REQUIRE( strictReport.results[0].status == CheckStatus::Pass );
+    REQUIRE( strictReport.results[1].status == CheckStatus::Indeterminate );
+
+    // Strict: the covered node passes, so the verdict hinges entirely on the
+    // uncovered result — it must be promoted to Fail ...
+    REQUIRE( strictReport.outcome.status == CheckStatus::Fail );
+    REQUIRE( strictReport.status == CheckStatus::Fail );
+    // ... and the promotion must be RECORDED, like rollUpNode records
+    // promoted_check_ids: a reader must be able to tell "this failed" from
+    // "we raised it to fail".
+    REQUIRE( strictReport.results[1].promoted );
+
+    // Lenient guard: with the default policy nothing is promoted and the
+    // uncovered Indeterminate folds as Indeterminate.
+    VerificationSpec lenient = makeSpec();
+    const VerificationReport lenientReport = runSpec( lenient, inputs, nodeChecks );
+    REQUIRE( lenientReport.outcome.status == CheckStatus::Indeterminate );
+    REQUIRE( lenientReport.results[1].status == CheckStatus::Indeterminate );
+    REQUIRE_FALSE( lenientReport.results[1].promoted );
+}

@@ -13,8 +13,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "scientific_state/asset_state_diff.h"
 #include "scientific_state/asset_state_json.h"
 #include "scientific_state/asset_state_types.h"
+#include "scientific_state/model_sidecar.h"
 
 #include <json/json.h>
 
@@ -364,4 +366,67 @@ TEST_CASE( "int field boundaries are enforced exactly at int range",
     overDoc["bands"][0]["index"] = Json::Value( Json::Int64( 2147483648LL ) );
     REQUIRE_NOTHROW( !assetStateFromJson( writeDoc( overDoc ), decoded, error ) );
     REQUIRE( error.code == StateErrorCode::InvalidField );
+}
+
+TEST_CASE( "sidecar integral fields outside int range are refused with a typed error",
+           "[scientific_state][slice_a]" )
+{
+    // Same defect class as D4 (asset_state_json readInt): the sidecar parser
+    // gated 'version' and 'classes[].id' with isIntegral() then called
+    // asInt(), so an out-of-int-range integral escaped as an uncaught
+    // Json::LogicError instead of the typed InvalidField contract the header
+    // documents.
+    ModelSidecarFacts facts;
+    AssetStateError error;
+
+    // version beyond int range.
+    REQUIRE_NOTHROW( !parseClassifierSidecarJson(
+        R"JSON({ "version": 3000000000, "method": "rf" })JSON", "/m.meta.json", facts, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( !error.message.empty() );
+
+    // classes[].id beyond int range.
+    REQUIRE_NOTHROW( !parseClassifierSidecarJson(
+        R"JSON({ "version": 2, "method": "rf",
+                  "classes": [ { "id": 4294967295, "label": "water" } ] })JSON",
+        "/m.meta.json", facts, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( !error.message.empty() );
+}
+
+TEST_CASE( "sidecar int field boundaries are enforced exactly at int range",
+           "[scientific_state][slice_a]" )
+{
+    ModelSidecarFacts facts;
+    AssetStateError error;
+
+    // INT_MAX parses; INT_MAX+1 is refused, not thrown.
+    REQUIRE( parseClassifierSidecarJson(
+        R"JSON({ "version": 1, "method": "rf", "classes": [ { "id": 2147483647 } ] })JSON",
+        "/m.meta.json", facts, error ) );
+    REQUIRE( facts.labels == std::vector<std::string>{ "2147483647" } );
+
+    REQUIRE_NOTHROW( !parseClassifierSidecarJson(
+        R"JSON({ "version": 2147483648, "method": "rf" })JSON", "/m.meta.json", facts, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+
+    REQUIRE_NOTHROW( !parseClassifierSidecarJson(
+        R"JSON({ "version": 2, "method": "rf", "classes": [ { "id": 2147483648 } ] })JSON",
+        "/m.meta.json", facts, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+}
+
+TEST_CASE( "diff unchanged_fields outside uint64 range is refused with a typed error",
+           "[scientific_state][slice_a]" )
+{
+    // isIntegral() admits negatives; asUInt64() throws Json::LogicError on
+    // them — the same escape past the typed contract, on the diff reader.
+    StateDiff diff;
+    AssetStateError error;
+    Json::Value doc( Json::objectValue );
+    doc["schema"] = kAssetStateDiffSchemaId;
+    doc["unchanged_fields"] = Json::Value( Json::Int64( -1 ) );
+    REQUIRE_NOTHROW( !stateDiffFromJson( doc, diff, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( !error.message.empty() );
 }

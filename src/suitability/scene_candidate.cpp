@@ -7,6 +7,8 @@
 #include <QJsonArray>
 #include <QTimeZone>
 
+#include <cmath>
+
 namespace sicnu::suitability
 {
 
@@ -69,15 +71,22 @@ sicnu::data::Result<std::optional<double>> optionalSceneDouble( const QJsonValue
 
 /// Same gate for the integer-shaped fields (band count, grid dimensions):
 /// absent keeps the caller's default; present-but-wrong-typed fails typed.
+/// The value must also be integer-valued: these fields truncate through
+/// toInt() downstream, so a fractional double would silently lose its
+/// fraction (4.7 bands reading back as 4) instead of surfacing.
 sicnu::data::Result<void> requireSceneNumber( const QJsonValue &value,
                                               const QString &key )
 {
-    if ( value.isUndefined() || value.isNull() || value.isDouble() )
+    if ( value.isUndefined() || value.isNull() )
         return sicnu::data::Result<void>::success();
-    return sicnu::data::Result<void>::failure( sicnu::data::Diagnostic{
-        QStringLiteral( "suitability.scene_invalid" ),
-        QStringLiteral( "scene candidate carries a non-numeric %1" ).arg( key ),
-        sicnu::data::DiagnosticSeverity::Error } );
+    if ( !value.isDouble() || std::trunc( value.toDouble() ) != value.toDouble() )
+    {
+        return sicnu::data::Result<void>::failure( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.scene_invalid" ),
+            QStringLiteral( "scene candidate carries a non-integer %1" ).arg( key ),
+            sicnu::data::DiagnosticSeverity::Error } );
+    }
+    return sicnu::data::Result<void>::success();
 }
 
 QJsonObject extentToJson( const sicnu::data::SpatialExtent &extent )

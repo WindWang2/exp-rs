@@ -1512,6 +1512,58 @@ TEST_CASE( "wrong-typed scene candidate numerics from json fail typed, absent st
     REQUIRE( bare.value().bandCount == 0 );
 }
 
+TEST_CASE( "fractional integer-shaped scene fields fail typed instead of truncating",
+           "[suitability][adversarial]" )
+{
+    // Review round 3 (nit): requireSceneNumber accepted any double, so a
+    // fractional band_count or grid dimension silently truncated through
+    // toInt() (4.7 bands became 4). Integer-shaped fields must require
+    // integer-valued doubles.
+    auto sceneJson = [] {
+        QJsonObject json;
+        json.insert( QStringLiteral( "schema_version" ), 1 );
+        json.insert( QStringLiteral( "id" ), QStringLiteral( "scene-1" ) );
+        json.insert( QStringLiteral( "state" ), QStringLiteral( "Ready" ) );
+        return json;
+    };
+    auto expectSceneInvalid = []( const sicnu::data::Result<SceneCandidate> &scene ) {
+        REQUIRE( !scene.has_value() );
+        REQUIRE( scene.diagnostics().first().code
+                 == QStringLiteral( "suitability.scene_invalid" ) );
+    };
+
+    QJsonObject fractionalBandCount = sceneJson();
+    fractionalBandCount.insert( QStringLiteral( "band_count" ), 4.7 );
+    expectSceneInvalid( SceneCandidate::fromJson( fractionalBandCount ) );
+
+    QJsonObject fractionalWidth = sceneJson();
+    QJsonObject grid;
+    grid.insert( QStringLiteral( "width" ), 10.9 );
+    fractionalWidth.insert( QStringLiteral( "grid" ), grid );
+    expectSceneInvalid( SceneCandidate::fromJson( fractionalWidth ) );
+
+    QJsonObject fractionalHeight = sceneJson();
+    QJsonObject heightGrid;
+    heightGrid.insert( QStringLiteral( "height" ), 99.5 );
+    fractionalHeight.insert( QStringLiteral( "grid" ), heightGrid );
+    expectSceneInvalid( SceneCandidate::fromJson( fractionalHeight ) );
+
+    // Integer-valued doubles still parse (JSON has no int/float split); the
+    // values round-trip exactly.
+    QJsonObject valid = sceneJson();
+    valid.insert( QStringLiteral( "band_count" ), 4.0 );
+    QJsonObject validGrid;
+    validGrid.insert( QStringLiteral( "width" ), 8000.0 );
+    validGrid.insert( QStringLiteral( "height" ), 6000.0 );
+    valid.insert( QStringLiteral( "grid" ), validGrid );
+    const auto ok = SceneCandidate::fromJson( valid );
+    REQUIRE( ok.has_value() );
+    REQUIRE( ok.value().bandCount == 4 );
+    REQUIRE( ok.value().grid.has_value() );
+    REQUIRE( ok.value().grid->width == 8000 );
+    REQUIRE( ok.value().grid->height == 6000 );
+}
+
 // ---------------------------------------------------------------------------
 // Track 16 WP-F: the provider seam boundary — a named dataset is never
 // silently assessed without its facts.

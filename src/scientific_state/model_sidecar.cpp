@@ -63,7 +63,10 @@ bool parseClassifierSidecarJson( const std::string &text, const std::string &sid
         return fail( error, StateErrorCode::MalformedJson, "sidecar is not a JSON object" );
 
     // ---- version (required, supported) ----
-    if ( !root.isMember( "version" ) || !root[ "version" ].isIntegral() )
+    // isInt() (not isIntegral()): jsoncpp asInt() throws on integral
+    // values outside int range, which would escape as an untyped
+    // exception instead of the typed error contract this header documents.
+    if ( !root.isMember( "version" ) || !root[ "version" ].isInt() )
         return fail( error, StateErrorCode::InvalidField,
                      "sidecar must declare an integral 'version'" );
     const Json::Int version = root[ "version" ].asInt();
@@ -90,7 +93,9 @@ bool parseClassifierSidecarJson( const std::string &text, const std::string &sid
                          "sidecar field 'classes' must be an array" );
         for ( const Json::Value &entry : classes )
         {
-            if ( !entry.isObject() || !entry.isMember( "id" ) || !entry[ "id" ].isIntegral() )
+            // Same isInt() gate as 'version' above: asInt() throws on
+            // integral values outside int range.
+            if ( !entry.isObject() || !entry.isMember( "id" ) || !entry[ "id" ].isInt() )
                 return fail( error, StateErrorCode::InvalidField,
                              "sidecar field 'classes[]' must be objects with an integral 'id'" );
             facts.labels.push_back( std::to_string( entry[ "id" ].asInt() ) );

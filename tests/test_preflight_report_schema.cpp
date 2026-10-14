@@ -300,3 +300,22 @@ TEST_CASE("report and request digests ride the platform canonical-JSON authority
             shortDigest(sicnu::data::canonicalizeJsonRfc8785(req.toRequestJson())
                             .toStdString()));
 }
+
+TEST_CASE("projection canonical JSON rides the platform canonical-JSON authority (R12-E R1.4)",
+          "[preflight][render]")
+{
+    // canonicalProjectionJson still used the module-local jsoncpp writer at
+    // precision=12 — the exact divergence class D8 eliminated for the report
+    // and request digests. A projection double with more than 12 significant
+    // digits must serialize byte-identically to the authority's output.
+    Json::Value projection(Json::objectValue);
+    projection["schema"] = "sicnu.preflight.agent/1";
+    projection["evidence"]["ndvi_mean"] = 0.123456789012345; // 15 significant digits
+
+    const std::string authorityBytes =
+        sicnu::data::canonicalizeJsonRfc8785(projection).toStdString();
+    REQUIRE(canonicalProjectionJson(projection) == authorityBytes);
+    // The >12-digit double must actually survive in the bytes — otherwise the
+    // equality above could pass with both sides rounded to the same thing.
+    REQUIRE(authorityBytes.find("0.123456789012345") != std::string::npos);
+}

@@ -209,6 +209,23 @@ TEST_CASE( "fault lab: scenario loader rejects malformed required fields", "[fau
         CHECK_FALSE( result.ok );
         CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
     }
+    SECTION( "sandbox byte budget negative" )
+    {
+        // isIntegral() admits negatives but asUInt64() throws Json::LogicError
+        // on them — an untyped escape past the typed diagnostic contract.
+        Json::Value doc = validScenarioDoc();
+        doc["sandbox"]["max_bytes"] = Json::Value::Int64( -1 );
+        bool refused = false;
+        std::string code;
+        auto parse = [&]() {
+            const auto result = loadFaultScenario( doc );
+            refused = !result.ok;
+            code = result.diagnostics.front().code;
+        };
+        REQUIRE_NOTHROW( parse() );
+        REQUIRE( refused );
+        REQUIRE( code == "faultlab.scenario_field" );
+    }
     SECTION( "cleanup may not be waived" )
     {
         Json::Value doc = validScenarioDoc();

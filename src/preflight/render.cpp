@@ -1,5 +1,7 @@
 #include "preflight/render.h"
 
+#include "data/execution_fingerprint.h" // canonicalizeJsonRfc8785 (#1387)
+
 namespace sicnu::preflight {
 namespace {
 
@@ -116,13 +118,10 @@ Json::Value renderAgent( const PreflightReport &report )
 
 std::string canonicalProjectionJson( const Json::Value &projection )
 {
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    builder["commentStyle"] = "None";
-    builder["precision"] = 12;
-    builder["precisionType"] = "significant";
-    builder["emitUTF8"] = true;
-    return Json::writeString( builder, projection );
+    // The ONE canonical serializer (R12-E D8): a module-local jsoncpp writer
+    // at precision=12 rounds >12-significant-digit evidence doubles and
+    // digests projections differently from every other path.
+    return sicnu::data::canonicalizeJsonRfc8785( projection ).toStdString();
 }
 
 } // namespace sicnu::preflight

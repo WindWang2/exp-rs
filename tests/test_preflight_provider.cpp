@@ -634,6 +634,84 @@ TEST_CASE( "mirror refuses over-deep extends chains regardless of document order
     }
 }
 
+TEST_CASE( "mirror treats an unresolved parent at the depth bound as a benign stop",
+           "[preflight][provider]" )
+{
+    // Boundary false positive (R1.2): a five-entry chain whose root extends an
+    // UNKNOWN parent consumes exactly kMaxMergeDepth hops. The old depth-cut
+    // condition fired on any string "extends" at the bound, so it flagged this
+    // chain even though the merge would stop benignly at the unknown parent.
+    // The cut must only fire when the bound-exhausted cursor's parent actually
+    // resolves.
+    auto makeChainWithMissingRoot = [] {
+        Json::Value doc( Json::arrayValue );
+        const char *ids[] = { "miss:a", "miss:b", "miss:c", "miss:d", "miss:e" };
+        for ( int i = 0; i < 5; ++i )
+        {
+            Json::Value entry( Json::objectValue );
+            entry["id"] = ids[i];
+            if ( i > 0 )
+            {
+                entry["extends"] = ids[i - 1];
+            }
+            else
+            {
+                entry["extends"] = "miss:never-loaded";
+                Json::Value roles( Json::objectValue );
+                roles["red"] = 1;
+                entry["band_roles"] = roles;
+            }
+            doc.append( entry );
+        }
+        return doc;
+    };
+    auto splitChildFirst = []( const Json::Value &doc ) {
+        Json::Value child( Json::arrayValue );
+        child.append( doc[doc.size() - 1] );
+        Json::Value parents( Json::arrayValue );
+        for ( Json::ArrayIndex i = 0; i + 1 < doc.size(); ++i )
+            parents.append( doc[i] );
+        return std::make_pair( child, parents );
+    };
+    const auto split = splitChildFirst( makeChainWithMissingRoot() );
+
+    // Child-first: the deep child alone is a dangling ref (benign), and the
+    // completed chain still ends at an unknown parent at the bound.
+    {
+        CapabilityMirrorProjection mirror;
+        mirror.addDocument( split.first, "c.json" );
+        mirror.addDocument( split.second, "p.json" );
+        REQUIRE( mirror.healthy() );
+        const auto merged = mirror.entryForOperator( "miss:e", {} );
+        REQUIRE( merged.status == FactStatus::Available );
+        REQUIRE( merged.entry["band_roles"]["red"].asInt() == 1 );
+    }
+    // Parent-first: identical verdict regardless of load order.
+    {
+        CapabilityMirrorProjection mirror;
+        mirror.addDocument( split.second, "p.json" );
+        mirror.addDocument( split.first, "c.json" );
+        REQUIRE( mirror.healthy() );
+        REQUIRE( mirror.entryForOperator( "miss:e", {} ).status == FactStatus::Available );
+    }
+}
+
+TEST_CASE( "mirror refuses a self-extends entry", "[preflight][provider]" )
+{
+    // Pin: an entry whose extends target is itself is a one-node cycle. The
+    // visited set catches it today; this keeps the refusal load-bearing.
+    CapabilityMirrorProjection mirror;
+    Json::Value doc( Json::arrayValue );
+    Json::Value entry( Json::objectValue );
+    entry["id"] = "self:a";
+    entry["extends"] = "self:a";
+    doc.append( entry );
+    mirror.addDocument( doc, "self.json" );
+    REQUIRE_FALSE( mirror.healthy() );
+    REQUIRE( mirror.problems().front().find( "cyclic" ) != std::string::npos );
+    REQUIRE( mirror.entryForOperator( "self:a", {} ).status == FactStatus::Unavailable );
+}
+
 TEST_CASE( "integration: a variant-only capability gates the verdict instead of passing silently",
            "[preflight][provider][integration]" )
 {

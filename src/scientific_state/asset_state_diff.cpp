@@ -178,7 +178,10 @@ bool stateDiffFromJson( const Json::Value &json, StateDiff &out, AssetStateError
 
     if ( json.isMember( "unchanged_fields" ) )
     {
-        if ( !json[ "unchanged_fields" ].isIntegral() )
+        // isUInt64() (not isIntegral()): jsoncpp asUInt64() throws on
+        // negative integrals, which would escape as an untyped exception
+        // instead of the typed error contract.
+        if ( !json[ "unchanged_fields" ].isUInt64() )
         {
             error.code = StateErrorCode::InvalidField;
             error.message = "field 'unchanged_fields' must be an integer";

@@ -250,7 +250,8 @@ void CapabilityMirrorProjection::addDocument( const Json::Value &documentArray,
             ++depth;
         }
         if ( problem.empty() && depth == kMaxMergeDepth &&
-             cursor->value["extends"].isString() )
+             cursor->value["extends"].isString() &&
+             findEntry( cursor->value["extends"].asString() ) != nullptr )
             problem = "extends chain deeper than the merge bound";
         if ( !problem.empty() )
         {
