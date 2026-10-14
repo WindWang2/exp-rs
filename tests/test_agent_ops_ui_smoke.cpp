@@ -65,3 +65,106 @@ TEST_CASE("agent_ops UI dock: startWorker does not block on prior worker", "[age
     dock.joinWorker();
     CHECK(runs.load() >= 1);
 }
+
+TEST_CASE("agent_ops UI dock: rapid restart cancels prior worker and preserves running flag", "[agent_ops][dock][cancellation_stress]")
+{
+    if (!qApp)
+    {
+        int argc = 0;
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        new QApplication(argc, nullptr);
+    }
+
+    auto dock = std::make_unique<sicnu::app::agent_ops::AgentOpsControlCenterDock>();
+    std::atomic<bool> worker1Cancelled{false};
+    std::atomic<bool> worker1Finished{false};
+    std::atomic<int> worker1Ticks{0};
+
+    // Worker 1 loops for up to 500ms unless cancelled
+    dock->startWorker([&](const std::atomic<bool> &cancel) {
+        for (int i = 0; i < 50; ++i)
+        {
+            if (cancel.load())
+            {
+                worker1Cancelled.store(true);
+                break;
+            }
+            worker1Ticks.fetch_add(1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        worker1Finished.store(true);
+    });
+
+    // Give worker 1 just enough time to enter the loop
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    REQUIRE(dock->isWorkerRunning());
+
+    // Worker 2 starts while worker 1 is running
+    std::atomic<bool> worker2Running{true};
+    dock->startWorker([&](const std::atomic<bool> &cancel) {
+        while (worker2Running.load() && !cancel.load())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    });
+
+    // Worker 1 MUST have been cancelled
+    // Wait up to 100ms for worker 1 to observe cancel and finish
+    for (int i = 0; i < 15 && !worker1Finished.load(); ++i)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    CHECK(worker1Cancelled.load() == true);
+    CHECK(worker1Ticks.load() < 10);
+
+    // Worker 2 is still running: isWorkerRunning() must still be true!
+    CHECK(dock->isWorkerRunning() == true);
+
+    worker2Running.store(false);
+    dock->joinWorker();
+    CHECK(dock->isWorkerRunning() == false);
+}
+
+TEST_CASE("agent_ops UI dock: worker running flag corruption when prior worker completes", "[agent_ops][dock][running_flag_corruption]")
+{
+    if (!qApp)
+    {
+        int argc = 0;
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        new QApplication(argc, nullptr);
+    }
+
+    auto dock = std::make_unique<sicnu::app::agent_ops::AgentOpsControlCenterDock>();
+    std::atomic<bool> worker1Finished{false};
+
+    // Worker 1 runs for 50ms
+    dock->startWorker([&](const std::atomic<bool> &) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        worker1Finished.store(true);
+    });
+
+    // Wait 10ms so worker 1 has started
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(dock->isWorkerRunning());
+
+    // Worker 2 starts: it runs for 200ms
+    std::atomic<bool> worker2Running{true};
+    dock->startWorker([&](const std::atomic<bool> &) {
+        while (worker2Running.load())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    });
+
+    // Wait for worker 1 to finish (sleep 100ms)
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    REQUIRE(worker1Finished.load());
+
+    // Worker 2 is STILL RUNNING!
+    // Buggy behavior: Worker 1 executed `mWorkerRunning.store(false)` upon its exit!
+    CHECK(dock->isWorkerRunning() == true);
+
+    worker2Running.store(false);
+    dock->joinWorker();
+}
