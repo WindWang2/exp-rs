@@ -174,9 +174,9 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
     if (count == 0) return false;
 
     for (size_t i = 0; i < count; ++i) {
-        if (!std::isfinite(a[i]) || !std::isfinite(b[i])) {
-            out[i] = std::numeric_limits<float>::quiet_NaN();
-        } else if (a[i] == b[i] && a[i] < 0.0f) {
+        if (!std::isfinite(a[i]) || !std::isfinite(b[i]) ||
+            a[i] <= -999.0f || b[i] <= -999.0f ||
+            (a[i] == b[i] && a[i] < 0.0f)) {
             // Negative sentinel values (e.g. -9999) must never evaluate to false legitimate zero
             out[i] = std::numeric_limits<float>::quiet_NaN();
         } else {
