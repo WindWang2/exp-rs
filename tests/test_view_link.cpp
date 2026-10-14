@@ -615,3 +615,226 @@ TEST_CASE( "destroying ViewLinkController unregisters event filters and disconne
     QMetaObject::invokeMethod( &a, "xyCoordinates", Q_ARG( QgsPointXY, p ) );
     QApplication::processEvents();
 }
+
+TEST_CASE( "Challenger M2: ViewLinkController rapid addition/removal churn stress test",
+           "[view_link][lifecycle][challenger][stress][issue1453]" )
+{
+    DataManager data;
+    QgsMapCanvas a, b;
+    QgsLayerTree treeA, treeB;
+    QgsMapLayerStore storeA, storeB;
+    const DisplayViewId viewA = data.createView( a, treeA, storeA );
+    const DisplayViewId viewB = data.createView( b, treeB, storeB );
+    REQUIRE( !viewA.isNull() );
+    REQUIRE( !viewB.isNull() );
+
+    ViewLinkController controller( &data.manager );
+
+    // 500 iterations of rapid addition, removal, link toggling, and signal dispatch
+    for ( int i = 0; i < 500; ++i )
+    {
+        controller.addView( viewA );
+        controller.setLinked( viewA, ( i % 2 == 0 ) );
+        controller.addView( viewB );
+        controller.setLinked( viewB, true );
+
+        // Redundant addView must be idempotent
+        controller.addView( viewA );
+        CHECK( controller.views().size() == 2 );
+
+        // Move cursor / extents during churn
+        const QgsPointXY p( 10.0 + ( i % 50 ), 20.0 + ( i % 50 ) );
+        QMetaObject::invokeMethod( &a, "xyCoordinates", Q_ARG( QgsPointXY, p ) );
+        a.setExtent( QgsRectangle( 0, 0, 100 + ( i % 50 ), 100 + ( i % 50 ) ) );
+
+        if ( i % 3 == 0 )
+        {
+            controller.removeView( viewA );
+            CHECK( controller.views().size() == 1 );
+        }
+        else if ( i % 3 == 1 )
+        {
+            controller.removeView( viewB );
+            CHECK( controller.views().size() == 1 );
+        }
+        else
+        {
+            controller.removeView( viewA );
+            controller.removeView( viewB );
+            CHECK( controller.views().isEmpty() );
+        }
+
+        // Stray removeView on already removed view must be safe no-op
+        controller.removeView( viewA );
+        controller.removeView( DisplayViewId() );
+    }
+
+    QApplication::processEvents();
+}
+
+TEST_CASE( "Challenger M2: Canvases destroyed BEFORE ViewLinkController",
+           "[view_link][lifecycle][challenger][destruction_order][issue1453]" )
+{
+    DataManager data;
+    QgsLayerTree treeA, treeB, treeC;
+    QgsMapLayerStore storeA, storeB, storeC;
+
+    auto canvasA = std::make_unique<QgsMapCanvas>();
+    auto canvasB = std::make_unique<QgsMapCanvas>();
+    auto canvasC = std::make_unique<QgsMapCanvas>();
+
+    const DisplayViewId viewA = data.createView( *canvasA, treeA, storeA );
+    const DisplayViewId viewB = data.createView( *canvasB, treeB, storeB );
+    const DisplayViewId viewC = data.createView( *canvasC, treeC, storeC );
+
+    REQUIRE( !viewA.isNull() );
+    REQUIRE( !viewB.isNull() );
+    REQUIRE( !viewC.isNull() );
+
+    ViewLinkController controller( &data.manager );
+    controller.addView( viewA );
+    controller.addView( viewB );
+    controller.addView( viewC );
+    controller.setLinked( viewA, true );
+    controller.setLinked( viewB, true );
+    controller.setLinked( viewC, true );
+    controller.setCursorMarkersVisible( true );
+
+    // Move cursor on A to spawn vertex markers on B and C
+    const QgsPointXY p( 15.0, 25.0 );
+    QMetaObject::invokeMethod( canvasA.get(), "xyCoordinates", Q_ARG( QgsPointXY, p ) );
+    QApplication::processEvents();
+
+    // Destroy canvas B while controller still links it
+    canvasB.reset();
+    QApplication::processEvents();
+
+    // Trigger cursor move on canvas A - target canvas B is destroyed
+    // Controller must safely skip destroyed canvas B without UAF
+    const QgsPointXY p2( 30.0, 40.0 );
+    CHECK_NOTHROW( QMetaObject::invokeMethod( canvasA.get(), "xyCoordinates", Q_ARG( QgsPointXY, p2 ) ) );
+    QApplication::processEvents();
+
+    // Extents changed on A
+    CHECK_NOTHROW( canvasA->setExtent( QgsRectangle( 0, 0, 200, 200 ) ) );
+    QApplication::processEvents();
+
+    // Remove viewB (whose canvas is dead)
+    CHECK_NOTHROW( controller.removeView( viewB ) );
+
+    // Destroy canvas A and C
+    canvasA.reset();
+    canvasC.reset();
+    QApplication::processEvents();
+
+    // Controller is now destroyed at scope exit after all canvases are dead
+    // Controller destructor must cleanly tear down without accessing dead canvases
+}
+
+TEST_CASE( "Challenger M2: Event filter dispatch during destruction and canvas leave events",
+           "[view_link][lifecycle][challenger][event_filter][issue1453]" )
+{
+    DataManager data;
+    QgsMapCanvas a, b;
+    QgsLayerTree treeA, treeB;
+    QgsMapLayerStore storeA, storeB;
+    const DisplayViewId viewA = data.createView( a, treeA, storeA );
+    const DisplayViewId viewB = data.createView( b, treeB, storeB );
+
+    {
+        ViewLinkController controller( &data.manager );
+        controller.addView( viewA );
+        controller.addView( viewB );
+        controller.setLinked( viewA, true );
+        controller.setLinked( viewB, true );
+
+        // Dispatch leave events while controller is active
+        QEvent leaveEvent( QEvent::Leave );
+        CHECK_NOTHROW( QApplication::sendEvent( &a, &leaveEvent ) );
+        CHECK_NOTHROW( QApplication::sendEvent( &b, &leaveEvent ) );
+
+        // Rapid leave and coordinate events
+        for ( int i = 0; i < 100; ++i )
+        {
+            QEvent ev( QEvent::Leave );
+            QApplication::sendEvent( &a, &ev );
+            QMetaObject::invokeMethod( &a, "xyCoordinates", Q_ARG( QgsPointXY, QgsPointXY( i, i ) ) );
+        }
+    }
+
+    // Now controller is destroyed; send leave events to the canvases
+    for ( int i = 0; i < 100; ++i )
+    {
+        QEvent ev( QEvent::Leave );
+        CHECK_NOTHROW( QApplication::sendEvent( &a, &ev ) );
+        CHECK_NOTHROW( QApplication::sendEvent( &b, &ev ) );
+    }
+    QApplication::processEvents();
+}
+
+TEST_CASE( "Challenger M2: DisplayManager destroyed BEFORE ViewLinkController",
+           "[view_link][lifecycle][challenger][display_manager_order][issue1453]" )
+{
+    sicnu::data::DataManager rawData;
+    auto manager = std::make_unique<QgisDisplayManager>( &rawData );
+
+    QgsMapCanvas a;
+    QgsLayerTree treeA;
+    QgsMapLayerStore storeA;
+    DisplayViewSpec spec;
+    spec.canvas = &a;
+    spec.layerTree = &treeA;
+    spec.layerStore = &storeA;
+    auto res = manager->createView( spec );
+    REQUIRE( res.has_value() );
+    DisplayViewId viewA = res.value();
+
+    ViewLinkController controller( manager.get() );
+    controller.addView( viewA );
+
+    // Destroy displayManager before controller
+    manager.reset();
+
+    // Controller operations when displayManager is null
+    CHECK( controller.views().size() == 1 );
+    CHECK_NOTHROW( controller.setActiveView( viewA ) );
+    CHECK_NOTHROW( controller.restoreActiveViewport() );
+
+    // Remove view and destructor should safely handle null displayManager
+    CHECK_NOTHROW( controller.removeView( viewA ) );
+    CHECK( controller.views().isEmpty() );
+}
+
+TEST_CASE( "Challenger M2: Closing canvas with active cursor marker triggers UAF on cursor leave",
+           "[view_link][lifecycle][challenger][marker_uaf][issue1453]" )
+{
+    DataManager data;
+    QgsLayerTree treeA, treeB;
+    QgsMapLayerStore storeA, storeB;
+
+    auto canvasA = std::make_unique<QgsMapCanvas>();
+    auto canvasB = std::make_unique<QgsMapCanvas>();
+
+    const DisplayViewId viewA = data.createView( *canvasA, treeA, storeA );
+    const DisplayViewId viewB = data.createView( *canvasB, treeB, storeB );
+
+    ViewLinkController controller( &data.manager );
+    controller.addView( viewA );
+    controller.addView( viewB );
+    controller.setLinked( viewA, true );
+    controller.setLinked( viewB, true );
+    controller.setCursorMarkersVisible( true );
+
+    // Move cursor on A to create marker on B
+    const QgsPointXY p( 10.0, 10.0 );
+    QMetaObject::invokeMethod( canvasA.get(), "xyCoordinates", Q_ARG( QgsPointXY, p ) );
+    QApplication::processEvents();
+
+    // Canvas B is closed / destroyed by user
+    canvasB.reset();
+    QApplication::processEvents();
+
+    // Cursor leaves canvas A -> onCursorLeft -> clearCursor -> hideAllMarkers -> SEGFAULT
+    QEvent leave( QEvent::Leave );
+    CHECK_NOTHROW( QApplication::sendEvent( canvasA.get(), &leave ) );
+}

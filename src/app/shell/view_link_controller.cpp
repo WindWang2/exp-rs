@@ -105,6 +105,13 @@ void ViewLinkController::addView( sicnu::display::DisplayViewId viewId )
     if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
     {
         record.canvas = canvas;
+        connect( canvas, &QObject::destroyed, this, [this, viewId] {
+            if ( auto *rec = recordFor( viewId ) )
+            {
+                rec->marker = nullptr;
+                rec->canvas = nullptr;
+            }
+        } );
         // Duplicate registration is already rejected above (recordFor guard);
         // Qt::UniqueConnection is illegal for lambdas — the connections are
         // stored in the record and dropped by removeView instead.
@@ -139,9 +146,10 @@ void ViewLinkController::removeView( sicnu::display::DisplayViewId viewId )
             else if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
                 canvas->removeEventFilter( this );
         }
-        if ( record.marker && record.canvas )
+        if ( record.marker )
         {
-            delete record.marker;
+            if ( record.canvas )
+                delete record.marker;
             record.marker = nullptr;
         }
         m_views.removeAt( i );
@@ -463,8 +471,10 @@ void ViewLinkController::hideAllMarkers()
 {
     for ( auto &record : m_views )
     {
-        if ( record.marker )
+        if ( record.canvas && record.marker )
             record.marker->hide();
+        else if ( !record.canvas )
+            record.marker = nullptr;
     }
 }
 
