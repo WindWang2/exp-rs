@@ -1719,3 +1719,39 @@ TEST_CASE( "fault lab: scenario file loader refuses hostile documents without th
         CHECK( result.diagnostics.front().code == "faultlab.scenario_unreadable" );
     }
 }
+
+TEST_CASE( "fault lab: scenario loader pins the 4 MiB read-cap boundary", "[faultlab]" )
+{
+    // The seekg/tellg probe is only an early rejection; the cap is enforced
+    // on bytes actually read (cap+1 sentinel), so a file that grows between
+    // probe and read still hits the cap. Pin both sides of the boundary so
+    // the cap rule cannot drift: exactly 4 MiB of valid scenario content is
+    // accepted, one byte past refuses.
+    constexpr std::size_t kCap = 4u * 1024 * 1024;
+
+    // Pad the title so the serialized document lands exactly on the cap.
+    // 'x' is not JSON-escaped, so the byte delta is exactly the title delta.
+    const Json::Value baseDoc = validScenarioDoc();
+    const std::string baseText = Json::FastWriter().write( baseDoc );
+    const std::size_t titleBytes = baseDoc["title"].asString().size();
+    const std::size_t pad = kCap - baseText.size() + titleBytes;
+    REQUIRE( pad >= titleBytes );
+
+    Json::Value atCap = baseDoc;
+    atCap["title"] = std::string( pad, 'x' );
+    const std::string atCapText = Json::FastWriter().write( atCap );
+    REQUIRE( atCapText.size() == kCap );
+    const auto accepted =
+        loadFaultScenarioFile( writeScenarioFile( "exactly_at_cap.json", atCapText ) );
+    REQUIRE( accepted.ok );
+
+    Json::Value overCap = baseDoc;
+    overCap["title"] = std::string( pad + 1, 'x' );
+    const std::string overCapText = Json::FastWriter().write( overCap );
+    REQUIRE( overCapText.size() == kCap + 1 );
+    const auto refused =
+        loadFaultScenarioFile( writeScenarioFile( "one_byte_over_cap.json", overCapText ) );
+    CHECK_FALSE( refused.ok );
+    REQUIRE( !refused.diagnostics.empty() );
+    CHECK( refused.diagnostics.front().code == "faultlab.scenario_unreadable" );
+}

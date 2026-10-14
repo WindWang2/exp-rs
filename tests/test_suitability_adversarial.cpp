@@ -1564,6 +1564,64 @@ TEST_CASE( "fractional integer-shaped scene fields fail typed instead of truncat
     REQUIRE( ok.value().grid->height == 6000 );
 }
 
+TEST_CASE( "negative or out-of-int-range integer-shaped scene fields fail typed",
+           "[suitability][adversarial]" )
+{
+    // Round-2 review (P2): requireSceneNumber accepted any integer-valued
+    // double, so band_count -3 stored -3 and band_count 1e20 survived the
+    // trunc() gate only to reach an out-of-range QJsonValue::toInt()
+    // conversion (undefined behavior) downstream. These fields are counts and
+    // dimensions: finite, integer-valued, within [0, INT_MAX]; zero stays
+    // allowed so a candidate that never measured a count keeps its reading.
+    auto sceneJson = [] {
+        QJsonObject json;
+        json.insert( QStringLiteral( "schema_version" ), 1 );
+        json.insert( QStringLiteral( "id" ), QStringLiteral( "scene-1" ) );
+        json.insert( QStringLiteral( "state" ), QStringLiteral( "Ready" ) );
+        return json;
+    };
+    auto expectSceneInvalid = []( const sicnu::data::Result<SceneCandidate> &scene ) {
+        REQUIRE( !scene.has_value() );
+        REQUIRE( scene.diagnostics().first().code
+                 == QStringLiteral( "suitability.scene_invalid" ) );
+    };
+
+    QJsonObject negativeBandCount = sceneJson();
+    negativeBandCount.insert( QStringLiteral( "band_count" ), -3 );
+    expectSceneInvalid( SceneCandidate::fromJson( negativeBandCount ) );
+
+    QJsonObject hugeBandCount = sceneJson();
+    hugeBandCount.insert( QStringLiteral( "band_count" ), 1e20 );
+    expectSceneInvalid( SceneCandidate::fromJson( hugeBandCount ) );
+
+    QJsonObject negativeWidth = sceneJson();
+    QJsonObject widthGrid;
+    widthGrid.insert( QStringLiteral( "width" ), -1 );
+    negativeWidth.insert( QStringLiteral( "grid" ), widthGrid );
+    expectSceneInvalid( SceneCandidate::fromJson( negativeWidth ) );
+
+    QJsonObject overflowingHeight = sceneJson();
+    QJsonObject heightGrid;
+    heightGrid.insert( QStringLiteral( "height" ), 2147483648.0 ); // INT_MAX + 1
+    overflowingHeight.insert( QStringLiteral( "grid" ), heightGrid );
+    expectSceneInvalid( SceneCandidate::fromJson( overflowingHeight ) );
+
+    // Guards: zero, small counts, and ordinary dimensions still parse and
+    // round-trip exactly.
+    QJsonObject valid = sceneJson();
+    valid.insert( QStringLiteral( "band_count" ), 0 );
+    QJsonObject validGrid;
+    validGrid.insert( QStringLiteral( "width" ), 8000 );
+    validGrid.insert( QStringLiteral( "height" ), 4 );
+    valid.insert( QStringLiteral( "grid" ), validGrid );
+    const auto ok = SceneCandidate::fromJson( valid );
+    REQUIRE( ok.has_value() );
+    CHECK( ok.value().bandCount == 0 );
+    REQUIRE( ok.value().grid.has_value() );
+    CHECK( ok.value().grid->width == 8000 );
+    CHECK( ok.value().grid->height == 4 );
+}
+
 // ---------------------------------------------------------------------------
 // Track 16 WP-F: the provider seam boundary — a named dataset is never
 // silently assessed without its facts.

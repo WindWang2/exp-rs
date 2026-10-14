@@ -8,6 +8,7 @@
 #include <QTimeZone>
 
 #include <cmath>
+#include <limits>
 
 namespace sicnu::suitability
 {
@@ -71,19 +72,24 @@ sicnu::data::Result<std::optional<double>> optionalSceneDouble( const QJsonValue
 
 /// Same gate for the integer-shaped fields (band count, grid dimensions):
 /// absent keeps the caller's default; present-but-wrong-typed fails typed.
-/// The value must also be integer-valued: these fields truncate through
-/// toInt() downstream, so a fractional double would silently lose its
-/// fraction (4.7 bands reading back as 4) instead of surfacing.
+/// The value must be a finite integer-valued double within [0, INT_MAX]:
+/// these fields truncate through toInt() downstream, so a fractional double
+/// would silently lose its fraction (4.7 bands reading back as 4), and a
+/// negative or out-of-int-range double would store / convert out of range
+/// (R2 P2). Zero stays allowed — an unmeasured count reads back as 0.
 sicnu::data::Result<void> requireSceneNumber( const QJsonValue &value,
                                               const QString &key )
 {
     if ( value.isUndefined() || value.isNull() )
         return sicnu::data::Result<void>::success();
-    if ( !value.isDouble() || std::trunc( value.toDouble() ) != value.toDouble() )
+    const double number = value.toDouble();
+    if ( !value.isDouble() || !std::isfinite( number ) ||
+         std::trunc( number ) != number || number < 0.0 ||
+         number > static_cast<double>( std::numeric_limits<int>::max() ) )
     {
         return sicnu::data::Result<void>::failure( sicnu::data::Diagnostic{
             QStringLiteral( "suitability.scene_invalid" ),
-            QStringLiteral( "scene candidate carries a non-integer %1" ).arg( key ),
+            QStringLiteral( "scene candidate carries a non-integer or out-of-range %1" ).arg( key ),
             sicnu::data::DiagnosticSeverity::Error } );
     }
     return sicnu::data::Result<void>::success();

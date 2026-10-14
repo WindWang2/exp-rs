@@ -10,7 +10,6 @@
 #include <json/json.h>
 
 #include <fstream>
-#include <sstream>
 #include <string>
 
 #include <limits>
@@ -401,7 +400,11 @@ FaultResult<FaultScenario> loadFaultScenarioFile( const std::string &path )
     }
     // Bound the read before slurping: a scenario is a small teaching
     // artifact, so an oversized file is refused with the existing
-    // unreadable vocabulary instead of an unbounded rdbuf copy.
+    // unreadable vocabulary instead of an unbounded rdbuf copy. The probe is
+    // only an early rejection (seekg/tellg vs. the actual read is a TOCTOU
+    // gap): enforcement is on bytes actually read — cap+1 sentinel bytes,
+    // mirroring verify_adapters/bounded_io.cpp — so a file that grows
+    // between probe and read still hits the cap.
     stream.seekg( 0, std::ios::end );
     const std::streamoff length = stream.tellg();
     if ( length < 0 || static_cast<std::uint64_t>( length ) > kMaxScenarioFileBytes )
@@ -412,12 +415,21 @@ FaultResult<FaultScenario> loadFaultScenarioFile( const std::string &path )
     }
     stream.seekg( 0, std::ios::beg );
 
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-
-    // str() returns a fresh copy per call: three inline calls would hand the
-    // reader begin/end pointers into three different temporaries (#1447).
-    const std::string text = buffer.str();
+    std::string text;
+    text.resize( static_cast<std::size_t>( kMaxScenarioFileBytes ) + 1 );
+    stream.read( text.data(), static_cast<std::streamsize>( text.size() ) );
+    if ( stream.bad() )
+    {
+        return makeError<FaultScenario>( "faultlab.scenario_unreadable",
+                                         "cannot read scenario file: " + path );
+    }
+    text.resize( static_cast<std::size_t>( stream.gcount() ) );
+    if ( text.size() > kMaxScenarioFileBytes )
+    {
+        return makeError<FaultScenario>( "faultlab.scenario_unreadable",
+                                         "scenario file exceeds the 4 MiB teaching-artifact cap: " +
+                                             path );
+    }
 
     Json::Value doc;
     Json::CharReaderBuilder builder;

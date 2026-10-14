@@ -335,7 +335,10 @@ FaultOutcome applyTemporalShuffle( FaultGrid &grid, const Json::Value &params,
 FaultOutcome applyTemporalGap( FaultGrid &grid, const Json::Value &params,
                                 std::uint32_t /*seed*/ )
 {
-    if ( !params.isMember( "epoch_index" ) || !params["epoch_index"].isIntegral() )
+    // isInt64(), not isIntegral(): a UInt64 above INT64_MAX passes the latter
+    // but throws Json::LogicError out of asInt64() below, escaping the
+    // never-throws contract through runFaultScenario (R2 P1).
+    if ( !params.isMember( "epoch_index" ) || !params["epoch_index"].isInt64() )
     {
         return errorOutcome( "faultlab.fault_unsupported_params",
                              "temporal_gap needs an integer epoch_index" );
@@ -536,7 +539,9 @@ FaultOutcome applyModelChannelMismatch( FaultGrid &grid, const Json::Value &para
     for ( Json::ArrayIndex i = 0; i < permutation.size(); ++i )
     {
         const auto &entry = permutation[i];
-        if ( !entry.isIntegral() )
+        // isInt64(), not isIntegral(): a UInt64 above INT64_MAX passes the
+        // latter but throws Json::LogicError out of asInt64() below (R2 P1).
+        if ( !entry.isInt64() )
         {
             return errorOutcome( "faultlab.fault_unsupported_params",
                                  "model_channel_mismatch permutation entries must be integers" );
