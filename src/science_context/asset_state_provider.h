@@ -53,15 +53,15 @@ class AssetStateProvider
 
     void setResolver( PassportResolver resolver );
     /// Bundle-provenance id of the wired resolver ("" when none wired).
-    void setResolverAuthority( const std::string &authority ) { mResolverAuthority = authority; }
-    const std::string &resolverAuthority() const { return mResolverAuthority; }
-    bool hasResolver() const { return static_cast<bool>( mResolver ); }
+    void setResolverAuthority( const std::string &authority );
+    std::string resolverAuthority() const;
+    bool hasResolver() const;
     void clearCache();
     void clear();
     void invalidate( const std::string &assetKey );
     void invalidateAll();
     void setCatalogGeneration( std::uint64_t generation );
-    std::uint64_t catalogGeneration() const { return mCatalogGeneration; }
+    std::uint64_t catalogGeneration() const;
     AssetResolveResult resolve( const AssetResolveRequest &request ) const;
     static AssetSummary summarize( const sicnu::state::RemoteSensingAssetState &state );
 
