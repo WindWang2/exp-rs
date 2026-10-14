@@ -21,7 +21,19 @@ def main() -> int:
     ap.add_argument("--timeout", type=int, default=90)
     args = ap.parse_args()
 
-    env = {"QT_QPA_PLATFORM": "offscreen", "SICNU_OFFLINE": "1", "PATH": __import__("os").environ["PATH"]}
+    import os
+    import shutil
+    env = {"QT_QPA_PLATFORM": "offscreen", "SICNU_OFFLINE": "1", "PATH": os.environ["PATH"]}
+    if not (os.path.isfile(args.exe) and os.access(args.exe, os.X_OK)):
+        # Bare-name invocation (PATH-resolved by Popen) stays legal: resolve
+        # through the same PATH we hand to the child before failing closed.
+        resolved = shutil.which(args.exe, path=env["PATH"])
+        if resolved:
+            args.exe = resolved
+        else:
+            print(f"MCP STDIO CHECK FAIL {args.exe} (not found or not executable)",
+                  file=sys.stderr)
+            return 1
     p = subprocess.Popen([args.exe, "--mcp"], stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                          text=True, bufsize=1, env=env)

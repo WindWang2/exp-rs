@@ -12593,6 +12593,23 @@ sicnu_add_test(test_chunked_fabric_e2e TIMEOUT 300)
 target_link_libraries(test_chunked_fabric_e2e PRIVATE sicnu_runtime)
 sicnu_add_test(test_chunked_operators_parity TIMEOUT 300)
 target_link_libraries(test_chunked_operators_parity PRIVATE sicnu_runtime)
+# #1494: milestone-1 memory-governance challenger harness (own main(), no
+# Catch2) — present in the tree but registered nowhere, so it never compiled
+# or ran. Registered beside the other challenger harnesses; TIMEOUT bounds a
+# hung stress suite instead of letting ctest wait forever.
+qt_add_executable(test_challenger_m1_2_harness test_challenger_m1_2_harness.cpp)
+target_link_libraries(test_challenger_m1_2_harness PRIVATE
+  Qt6::Core
+  sicnu_runtime
+)
+target_include_directories(test_challenger_m1_2_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_challenger_m1_2_harness PROPERTIES AUTOMOC ON)
+add_test(NAME test_challenger_m1_2_harness COMMAND test_challenger_m1_2_harness)
+set_tests_properties(test_challenger_m1_2_harness PROPERTIES TIMEOUT 300)
 qt_add_executable(test_challenger_m3_2_harness test_challenger_m3_2_harness.cpp)
 target_link_libraries(test_challenger_m3_2_harness PRIVATE
   Catch2::Catch2WithMain
@@ -15633,6 +15650,15 @@ if(Python_EXECUTABLE)
   add_test(NAME test_model_library_generator_parity
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_model_library.py --check)
   sicnu_set_test_env(test_model_library_generator_parity)
+  # R13-I WP-04 / #1494: orphan-test census gate — every tests/test_*.cpp must
+  # be registered in CMake. Static text scan (no build tree needed, so it runs
+  # everywhere ctest runs); foreach-computed families resolve through
+  # template_registrations() in the script, expanded from live CMake text.
+  add_test(NAME test_registration_census
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_test_registration.py
+            --tests-dir ${CMAKE_SOURCE_DIR}/tests)
+  set_tests_properties(test_registration_census PROPERTIES TIMEOUT 60)
+  sicnu_set_test_env(test_registration_census)
 endif()
 # ===========================================================================
 # Unified Scientific Verifier (RS14-10, ADR 0172)

@@ -238,17 +238,19 @@ cmd_selftest() {
     echo "build.sh selftest: resource caps + path/space/Unicode quoting"
 
     # --- 1. job resolution matrix ------------------------------------------
-    st_assert_eq 1 "$(env -u CMAKE_BUILD_PARALLEL_LEVEL -u CTEST_PARALLEL_LEVEL SICNU_BUILD_JOBS= "$0" --print-jobs)" "default jobs = 1"
-    st_assert_eq 1 "$(SICNU_BUILD_JOBS=1 "$0" --print-jobs)" "jobs 1"
-    st_assert_eq 2 "$(SICNU_BUILD_JOBS=2 "$0" --print-jobs)" "jobs 2 (cap)"
+    # Re-exec through $BASH, not "$0" directly: the file is 100644 in git, so
+    # a plain exec of $0 fails with EACCES on a fresh clone.
+    st_assert_eq 1 "$(env -u CMAKE_BUILD_PARALLEL_LEVEL -u CTEST_PARALLEL_LEVEL SICNU_BUILD_JOBS= "$BASH" "$0" --print-jobs)" "default jobs = 1"
+    st_assert_eq 1 "$(SICNU_BUILD_JOBS=1 "$BASH" "$0" --print-jobs)" "jobs 1"
+    st_assert_eq 2 "$(SICNU_BUILD_JOBS=2 "$BASH" "$0" --print-jobs)" "jobs 2 (cap)"
     local rc=0
-    SICNU_BUILD_JOBS=3 "$0" --print-jobs >/dev/null 2>&1 || rc=$?
+    SICNU_BUILD_JOBS=3 "$BASH" "$0" --print-jobs >/dev/null 2>&1 || rc=$?
     st_assert_eq 2 "$rc" "jobs 3 refused with exit 2"
     rc=0
-    SICNU_BUILD_JOBS=8 "$0" --print-jobs >/dev/null 2>&1 || rc=$?
+    SICNU_BUILD_JOBS=8 "$BASH" "$0" --print-jobs >/dev/null 2>&1 || rc=$?
     st_assert_eq 2 "$rc" "jobs 8 refused with exit 2"
-    st_assert_eq 2 "$(SICNU_BUILD_JOBS=2 CMAKE_BUILD_PARALLEL_LEVEL=8 "$0" --print-jobs 2>/dev/null)" "inherited CMAKE_BUILD_PARALLEL_LEVEL=8 clamped to cap"
-    st_assert_eq 1 "$(env -u CMAKE_BUILD_PARALLEL_LEVEL CTEST_PARALLEL_LEVEL=8 "$0" --print-jobs 2>/dev/null)" "inherited CTEST_PARALLEL_LEVEL clamped"
+    st_assert_eq 2 "$(SICNU_BUILD_JOBS=2 CMAKE_BUILD_PARALLEL_LEVEL=8 "$BASH" "$0" --print-jobs 2>/dev/null)" "inherited CMAKE_BUILD_PARALLEL_LEVEL=8 clamped to cap"
+    st_assert_eq 1 "$(env -u CMAKE_BUILD_PARALLEL_LEVEL CTEST_PARALLEL_LEVEL=8 "$BASH" "$0" --print-jobs 2>/dev/null)" "inherited CTEST_PARALLEL_LEVEL clamped"
 
     # --- 2. space/Unicode quoting -------------------------------------------
     # A directory name with spaces, combining Unicode and CJK: every historical
@@ -263,7 +265,7 @@ cmd_selftest() {
         *) selftest_fail "argument values mangled by quoting" ;;
     esac
     # The wrapper must operate from a spaced/Unicode cwd.
-    if ( cd "$fixture" && "$script_dir/build.sh" --print-jobs >/dev/null 2>&1 ); then
+    if ( cd "$fixture" && "$BASH" "$script_dir/build.sh" --print-jobs >/dev/null 2>&1 ); then
         echo "  ok: wrapper runs from spaced/Unicode cwd"
     else
         selftest_fail "wrapper failed from spaced/Unicode cwd"

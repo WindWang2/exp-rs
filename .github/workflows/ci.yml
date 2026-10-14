@@ -7,10 +7,17 @@ on:
     branches: [ master, main ]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Only superseded PR runs are cancelled. A push to master must finish so
-  # every merge gets a build signal (merge waves used to cancel all but the
-  # last master run, leaving master without a completed CI result).
+  # #1490: GitHub keeps at most ONE pending run per concurrency group — a new
+  # master push used to cancel the still-queued run for the previous push even
+  # with cancel-in-progress=false (the old group keyed on workflow+ref made
+  # every master push share one group; the 2026-10-14 dump of the last 25
+  # master runs shows 15 cancelled and zero successes — see
+  # .planning/r13-i-infra/evidence/master-runs-2026-10-14.json). Key push runs on the commit SHA so every
+  # landed master commit gets its own uninterruptible run; PR runs keep the
+  # per-ref group so a new commit on the same PR still supersedes the old one.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  # Only superseded PR runs are cancelled. Push runs are singletons in their
+  # per-SHA group, so this flag only ever acts on pull_request events.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -96,12 +103,16 @@ jobs:
         # numpy, so pin the system interpreter (python3-numpy via apt).
         run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
-      # #706: the repo's targeted .clang-tidy (12 checks for exactly the
-      # #610-#658 bug classes) was dead config — nothing ever ran it. Lint only
-      # the files changed vs master so no full-tree tidy is needed; the step is
-      # non-blocking while the findings backlog is triaged.
-      - name: Clang-Tidy Lint (changed files, non-blocking)
-        continue-on-error: true
+      # #706/#1495: the repo's targeted .clang-tidy (12 checks for exactly the
+      # #610-#658 bug classes) was dead config — first nothing ran it, then a
+      # continue-on-error step that reported but never blocked (#1495). The
+      # lane lints ONLY files changed vs origin/master with
+      # --warnings-as-errors='*', so legacy backlog outside the diff cannot
+      # flood the gate, while any NEW instance of the tracked bug classes in a
+      # changed file fails the job. The script still exits 0 (documented
+      # no-op) when clang-tidy/compile_commands.json are absent or the diff
+      # has no C++ files — those states are printed, not silently passed.
+      - name: Clang-Tidy Lint (changed files, blocking)
         run: |
           git fetch --no-tags --depth=1 origin master
           ./scripts/run_clang_tidy_changed.sh origin/master build
