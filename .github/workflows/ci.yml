@@ -98,10 +98,9 @@ jobs:
 
       # #706: the repo's targeted .clang-tidy (12 checks for exactly the
       # #610-#658 bug classes) was dead config — nothing ever ran it. Lint only
-      # the files changed vs master so no full-tree tidy is needed; the step is
-      # non-blocking while the findings backlog is triaged.
-      - name: Clang-Tidy Lint (changed files, non-blocking)
-        continue-on-error: true
+      # the files changed vs master so no full-tree tidy is needed; enforced
+      # as a quality gate (#1495).
+      - name: Clang-Tidy Lint (changed files)
         run: |
           git fetch --no-tags --depth=1 origin master
           ./scripts/run_clang_tidy_changed.sh origin/master build
