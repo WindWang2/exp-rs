@@ -142,6 +142,48 @@ def norm(value):
     return value
 
 
+_CTEST_NO_TESTS_SUPPORTED: bool | None = None
+
+
+def _ctest_supports_no_tests() -> bool:
+    """Whether this ctest accepts --no-tests=error (CMake >= 3.18).
+
+    Without it, a filter that matches nothing exits 0 and the oracle reports a
+    green run that executed nothing."""
+    global _CTEST_NO_TESTS_SUPPORTED
+    if _CTEST_NO_TESTS_SUPPORTED is None:
+        try:
+            probe = subprocess.run(["ctest", "--help"],
+                                   capture_output=True, text=True)
+            _CTEST_NO_TESTS_SUPPORTED = "--no-tests" in (probe.stdout or "")
+        except OSError:
+            _CTEST_NO_TESTS_SUPPORTED = False
+    return _CTEST_NO_TESTS_SUPPORTED
+
+
+def _green_summary(log_path: str) -> str:
+    """Actual passed/total read back from a ctest log.
+
+    The previous "13/13 green" was a literal in the message, printed whenever
+    ctest exited 0, so it was indistinguishable from a run that executed
+    nothing. When the log carries no ctest summary line the count is reported
+    as unproven rather than assumed."""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return "green (ctest log unreadable — count unproven)"
+    match = None
+    for line in text.splitlines():
+        found = re.search(r"(\d+) tests failed out of (\d+)", line)
+        if found:
+            match = found
+    if match is None:
+        return "green (no ctest summary line — count unproven)"
+    failed, total = int(match.group(1)), int(match.group(2))
+    return "%d/%d green" % (total - failed, total)
+
+
 def run_ctest(build: str, out_dir: str, jobs: int) -> tuple[bool, str]:
     env = dict(os.environ)
     env["SICNU_OBS_OUT"] = out_dir
@@ -157,6 +199,8 @@ def run_ctest(build: str, out_dir: str, jobs: int) -> tuple[bool, str]:
         "ctest", "--test-dir", build_dir, "-j%d" % jobs,
         "--output-on-failure", "-R", CTEST_FILTER,
     ]
+    if _ctest_supports_no_tests():
+        cmd.append("--no-tests=error")
     try:
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, cwd=ROOT)
     except OSError as exc:
@@ -164,9 +208,19 @@ def run_ctest(build: str, out_dir: str, jobs: int) -> tuple[bool, str]:
         # it escape as an uncaught traceback, which would skip the report and
         # read as a pass.
         return False, "ctest could not be started: %s" % exc
+    combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
     log = os.path.join(out_dir, "ctest.log")
+    # An empty match exits 0 on ctest builds without --no-tests=error, so a run
+    # that executed nothing would otherwise be reported as green.
+    if "No tests were found" in combined:
+        combined += ("\n\nperf_observatory_verify: ctest matched no test for "
+                     "pattern %r — nothing was executed, so this run proves "
+                     "nothing (registration drift?).\n" % CTEST_FILTER)
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write(combined)
+        return False, log
     with open(log, "w", encoding="utf-8") as fh:
-        fh.write(proc.stdout + "\n" + proc.stderr)
+        fh.write(combined)
     return proc.returncode == 0, log
 
 
@@ -227,11 +281,11 @@ def main(argv=None) -> int:
         # ---- O1 ----------------------------------------------------------- #
         ok_a, log_a = run_ctest(build, run_a, args.jobs)
         report.add(ok_a, "O1", "run 1: %s (offline, fixed seed)%s"
-                   % ("13/13 green" if ok_a else "FAILED",
+                   % (_green_summary(log_a) if ok_a else "FAILED",
                       "" if ok_a else " — see " + log_a))
         ok_b, log_b = run_ctest(build, run_b, args.jobs)
         report.add(ok_b, "O1", "run 2: %s (offline, fixed seed)%s"
-                   % ("13/13 green" if ok_b else "FAILED",
+                   % (_green_summary(log_b) if ok_b else "FAILED",
                       "" if ok_b else " — see " + log_b))
 
         # ---- O2 ----------------------------------------------------------- #
@@ -246,8 +300,14 @@ def main(argv=None) -> int:
                       "" if not problems else " — " + "; ".join(problems[:4])))
 
         # ---- O3 ----------------------------------------------------------- #
+        # Two empty record sets are trivially "identical", so O3 used to pass
+        # when nothing ran. Require the same evidence floor as O2 first.
         names = sorted(set(rec_a) | set(rec_b))
         divergent = []
+        if len(rec_a) < EXPECTED_RECORDS or len(rec_b) < EXPECTED_RECORDS:
+            divergent.append("only %d / %d records (expected >= %d): comparing "
+                             "them proves nothing"
+                             % (len(rec_a), len(rec_b), EXPECTED_RECORDS))
         for name in names:
             if name not in rec_a or name not in rec_b:
                 divergent.append("%s: missing in one run" % name)

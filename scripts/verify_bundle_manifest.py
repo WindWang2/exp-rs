@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import os
+import posixpath
 import sys
 
 SUPPORTED_SCHEMAS = ("sicnu.offline_bundle/1", "sicnu.offline_bundle/2")
@@ -74,12 +75,47 @@ def _unsafe_bundle_rel(rel):
     if os.path.isabs(rel):
         return True
     normalized = rel.replace("\\", "/")
+    # A rooted path is absolute on POSIX; on Windows ntpath.isabs() reports
+    # False for a single leading slash ("/etc/passwd") or a single leading
+    # backslash, which would degrade the typed "unsafe" rejection into a
+    # generic "required missing" and make the same manifest verify differently
+    # per platform. Reject it explicitly.
+    if normalized.startswith("/") or rel.startswith("\\"):
+        return True
     if len(normalized) >= 2 and normalized[0].isalpha() and normalized[1] == ":":
         return True  # drive-qualified (C:/...) — absolute on Windows
     parts = normalized.split("/")
     if parts and parts[-1] == "":
         parts = parts[:-1]  # trailing slash of a required prefix
     return ".." in parts
+
+
+def _normalized_rel(rel):
+    """Canonical form of a manifest path for *identity* comparisons only.
+
+    "./manifest.json", "sub/../manifest.json" and "manifest.json" all name the
+    same entry; comparing the raw string let those variants slip past the
+    explicit "manifest.json must not appear in files[]" rejection and degrade
+    into a generic size-mismatch finding.
+    """
+    return posixpath.normpath(rel.replace("\\", "/"))
+
+
+def _is_link_or_reparse(path):
+    """True when @p path redirects somewhere else.
+
+    os.path.islink() alone is not enough on Windows: a directory junction (or
+    any other reparse point, tag IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003) is
+    NOT reported as a link by islink(), so os.walk() descends straight through
+    it and hashes content that lives outside the bundle as if it were inside.
+    """
+    if os.path.islink(path):
+        return True
+    try:
+        attrs = os.lstat(path).st_file_attributes  # Windows-only attribute
+    except (OSError, AttributeError):
+        return False
+    return bool(attrs & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
 
 
 def verify_bundle(root):
@@ -122,6 +158,10 @@ def verify_bundle(root):
     bad = []
     listed = set()
     total = 0
+    # Resolved form of the bundle root. The caller may pass a non-canonical
+    # path (an 8.3 short path on Windows, a symlinked /tmp elsewhere), so every
+    # containment decision is made against the resolved root, never the string.
+    resolved_root = os.path.realpath(root)
     entries = manifest.get("files")
     if not isinstance(entries, list):
         bad.append("files[] must be an array")
@@ -137,7 +177,7 @@ def verify_bundle(root):
         if os.path.isabs(rel) or rel.startswith("..") or not target.startswith(root + os.sep):
             bad.append("unsafe manifest path: %s" % rel)
             continue
-        if rel == "manifest.json":
+        if _normalized_rel(rel) == "manifest.json":
             bad.append("manifest.json must not appear in files[]")
             continue
         listed.add(rel)
@@ -146,9 +186,20 @@ def verify_bundle(root):
             continue
         if os.path.islink(target):
             resolved = os.path.realpath(target)
-            if not resolved.startswith(root + os.sep):
+            if not (resolved == resolved_root
+                    or resolved.startswith(resolved_root + os.sep)):
                 bad.append("symlink escapes bundle: %s -> %s" % (rel, resolved))
                 continue
+        # os.path.islink() alone is not enough on Windows: a directory junction
+        # (or any other reparse point) is NOT reported as a link, so the entry
+        # still looks contained as a string while its real target is outside
+        # the bundle. Checked after the islink branch so that a genuine symlink
+        # keeps its own typed finding.
+        resolved = os.path.realpath(target)
+        if not (resolved == resolved_root
+                or resolved.startswith(resolved_root + os.sep)):
+            bad.append("path escapes bundle through a link: %s -> %s" % (rel, resolved))
+            continue
         try:
             size = os.path.getsize(target)
         except OSError as exc:
@@ -170,16 +221,21 @@ def verify_bundle(root):
     # A symlinked directory is pruned and flagged rather than silently skipped
     # (os.walk does not descend into it, so its contents would otherwise be
     # neither hashed nor reported) or followed (hashing outside content).
+    # A junction (Windows reparse point) is pruned too: os.walk() would
+    # otherwise descend straight through it and hash content that lives
+    # outside the bundle as if it were inside it.
     for base, dirs, names in os.walk(root):
         for name in dirs:
             joined = os.path.join(base, name)
-            if os.path.islink(joined):
+            if _is_link_or_reparse(joined):
                 rel = os.path.relpath(joined, root).replace(os.sep, "/")
                 resolved = os.path.realpath(joined)
-                if resolved.startswith(root + os.sep):
-                    bad.append("unlisted symlinked directory: %s" % rel)
+                kind = ("symlinked directory" if os.path.islink(joined)
+                        else "reparse point directory")
+                if resolved == resolved_root or resolved.startswith(resolved_root + os.sep):
+                    bad.append("unlisted %s: %s" % (kind, rel))
                 else:
-                    bad.append("symlink escapes bundle: %s -> %s" % (rel, resolved))
+                    bad.append("%s escapes bundle: %s -> %s" % (kind, rel, resolved))
                 dirs.remove(name)
         for name in names:
             rel = os.path.relpath(os.path.join(base, name), root).replace(os.sep, "/")

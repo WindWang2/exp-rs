@@ -424,17 +424,28 @@ sicnu_add_io_test(test_io_multidim)
 # directly. A bare find_library leaves the NOTFOUND literal in
 # target_link_libraries and the io targets fail at LINK time with cryptic
 # errors — refuse at configure time with an actionable message instead.
+# #1468 follow-up (R12-G/G05): find_library alone is a FALSE SUCCESS — it
+# proves the link artefact exists, not that <netcdf.h> resolves. FOUR suites
+# below include the header directly (R1-03: the census initially missed
+# test_io_roundtrip_matrix, which is exactly the TU that would still fail), so
+# probe the pair and refuse at configure time with an actionable message
+# instead of failing 4 targets at compile time
+# with "netcdf.h: No such file or directory".
 find_library(NETCDF_LIBRARY NAMES netcdf)
-if(NOT NETCDF_LIBRARY)
+find_path(NETCDF_INCLUDE_DIR NAMES netcdf.h)
+if(NOT NETCDF_LIBRARY OR NOT NETCDF_INCLUDE_DIR)
   message(FATAL_ERROR
-    "netcdf not found, but test_io_multidim / test_io_roundtrip_matrix / "
-    "test_io_subdataset_inventory / test_io_fabric_multidim_11 link it "
+    "netcdf is not usable: library='${NETCDF_LIBRARY}' header='${NETCDF_INCLUDE_DIR}', "
+    "but test_io_multidim / test_io_roundtrip_matrix / "
+    "test_io_subdataset_inventory / test_io_fabric_multidim_11 use it "
     "directly. Install the netcdf development package (libnetcdf-dev, "
-    "netcdf, or vcpkg port) or set NETCDF_LIBRARY to a found library, "
-    "then reconfigure.")
+    "netcdf, or vcpkg port), or set NETCDF_LIBRARY and NETCDF_INCLUDE_DIR to "
+    "a found library and the directory containing netcdf.h, then reconfigure.")
 endif()
 target_link_libraries(test_io_multidim PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_multidim PRIVATE ${NETCDF_INCLUDE_DIR})
 target_link_libraries(test_io_roundtrip_matrix PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_roundtrip_matrix PRIVATE ${NETCDF_INCLUDE_DIR})
 sicnu_add_io_test(test_io_products)
 sicnu_add_io_test(test_io_doctor)
 # 8.0: cacheability/reproducibility doctor checks probe remote identities
@@ -568,6 +579,7 @@ sicnu_add_io_test(test_io_cog_options)
 sicnu_add_io_test(test_io_vector_interchange)
 sicnu_add_io_test(test_io_subdataset_inventory)
 target_link_libraries(test_io_subdataset_inventory PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_subdataset_inventory PRIVATE ${NETCDF_INCLUDE_DIR})
 sicnu_add_io_test(test_io_metadata_patch)
 # 11.0 GDAL version/capability matrix: feature detection, corrupt/truncated
 # negatives, huge logical datasets within bounded memory.
@@ -605,6 +617,7 @@ endif()
 sicnu_add_io_test(test_io_fabric_multidim_11)
 target_include_directories(test_io_fabric_multidim_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_io_fabric_multidim_11 PRIVATE ${NETCDF_INCLUDE_DIR})
 # 11.0 access-pattern-driven prefetch (WP F).
 sicnu_add_io_test(test_io_fabric_locality_11)
 target_include_directories(test_io_fabric_locality_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
