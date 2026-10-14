@@ -19,6 +19,11 @@
 #include <algorithm>
 #include <cctype>
 
+#if defined(Q_OS_UNIX)
+#include <signal.h>
+#include <unistd.h>
+#endif
+
 namespace sicnu::operators::otb {
 
 Json::Value OtbOperatorBase::run(const Json::Value& params, RSOperatorContext& context) {
@@ -55,7 +60,7 @@ Json::Value OtbOperatorBase::run(const Json::Value& params, RSOperatorContext& c
     context.logInfo("Executing OTB application: otbcli_" + appName.toStdString());
     context.logInfo("Command: " + (program + " " + args.join(' ')).toStdString());
 
-    if (!runOtbProcess(program, args, context)) {
+    if (!runOtbProcess(program, args, context, params)) {
         throw RSOperatorError(ErrorCode::OtbError,
                               "OTB application '" + appName.toStdString() + "' failed. "
                               "Check the execution log for details.",
@@ -103,10 +108,13 @@ Json::Value OtbOperatorBase::buildSchema(const std::string& title,
 }
 
 bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& args,
-                                    RSOperatorContext& context) {
+                                    RSOperatorContext& context, const Json::Value& params) {
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
     proc.setProcessEnvironment(buildProcessEnvironment(program));
+#if defined(Q_OS_UNIX)
+    proc.setChildProcessModifier([] { ::setpgid(0, 0); });
+#endif
 
     proc.start(program, args);
 
@@ -120,6 +128,9 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     // Best-effort output cleanup (#647): OTB applications write their product
     // at the "-out" argument. On cancellation or a non-zero exit the truncated
     // file must be removed instead of left looking like a result.
+    // F09: Partial outputs are preserved under a .partial extension for
+    // diagnostics and forensics rather than discarded, but never exposed as
+    // a valid product.
     QString outputPath;
     for (int i = 0; i + 1 < args.size(); ++i) {
         if (args.at(i) == QLatin1String("-out")) {
@@ -130,7 +141,16 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     struct OutputCleanup {
         QString path;
         bool committed = false;
-        ~OutputCleanup() { if (!path.isEmpty() && !committed) QFile::remove(path); }
+        ~OutputCleanup() {
+            if (!path.isEmpty() && !committed && QFile::exists(path)) {
+                const QString partialPath = path + QStringLiteral(".partial");
+                if (QFile::exists(partialPath))
+                    QFile::remove(partialPath);
+                if (!QFile::rename(path, partialPath)) {
+                    QFile::remove(path);
+                }
+            }
+        }
     };
     OutputCleanup cleanup{ outputPath };
 
@@ -139,23 +159,48 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     // let the QProcess destructor orphan the otbcli child, which would keep
     // running (and holding the deleted output's fd) forever. terminate() first
     // so multi-GB OTB writes can flush, then kill() after a grace period.
-    const auto terminateGracefully = [&proc]() {
+    // F09: Terminate the entire process group on POSIX to sweep child workers.
+    const qint64 pid = proc.processId();
+    const auto terminateGracefully = [&proc, pid]() {
+#if defined(Q_OS_UNIX)
+        if (pid > 0) {
+            ::kill(static_cast<pid_t>(-pid), SIGTERM);
+        }
+#endif
         proc.terminate();
-        if (!proc.waitForFinished(5000))
+        if (!proc.waitForFinished(5000)) {
+#if defined(Q_OS_UNIX)
+            if (pid > 0) {
+                ::kill(static_cast<pid_t>(-pid), SIGKILL);
+            }
+#endif
             proc.kill();
+        }
         proc.waitForFinished(2000);
     };
     QElapsedTimer watchdog;
     watchdog.start();
-    // 1 h default — OTB composites/mosaics can be long. An escape hatch for
-    // legitimately longer jobs via SICNU_OTB_MAX_RUNTIME_S (#1455): the
-    // hardcoded cap killed jobs whose runtime was simply larger than the
-    // guess and deleted their partial outputs. <=0 or unparseable keeps the
-    // default.
+    // 1 h default — OTB composites/mosaics can be long.
+    // F09: Configurable timeout via operator parameters (timeout_s / max_runtime_s / timeout)
+    // or SICNU_OTB_MAX_RUNTIME_S env var, bounded by a safe global ceiling and floor.
     qint64 maxRuntimeMs = 60 * 60 * 1000;
-    const qint64 overrideSeconds = qEnvironmentVariableIntValue( "SICNU_OTB_MAX_RUNTIME_S" );
-    if ( overrideSeconds > 0 )
+    const qint64 overrideSeconds = qEnvironmentVariableIntValue("SICNU_OTB_MAX_RUNTIME_S");
+    if (overrideSeconds > 0)
         maxRuntimeMs = overrideSeconds * 1000;
+
+    if (params.isObject()) {
+        if (params.isMember("max_runtime_s") && params["max_runtime_s"].isNumeric()) {
+            maxRuntimeMs = static_cast<qint64>(params["max_runtime_s"].asDouble() * 1000.0);
+        } else if (params.isMember("timeout_s") && params["timeout_s"].isNumeric()) {
+            maxRuntimeMs = static_cast<qint64>(params["timeout_s"].asDouble() * 1000.0);
+        } else if (params.isMember("timeout") && params["timeout"].isNumeric()) {
+            maxRuntimeMs = static_cast<qint64>(params["timeout"].asDouble() * 1000.0);
+        }
+    }
+
+    constexpr qint64 kMinSafeRuntimeMs = 1000;                // 1s minimum
+    constexpr qint64 kMaxSafeRuntimeMs = 86400 * 7 * 1000LL;  // 7 days safety cap
+    maxRuntimeMs = std::clamp(maxRuntimeMs, kMinSafeRuntimeMs, kMaxSafeRuntimeMs);
 
     try {
     while (proc.state() == QProcess::Running) {
@@ -168,10 +213,19 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
 
         if (watchdog.elapsed() > maxRuntimeMs) {
             terminateGracefully();
-            throw RSOperatorError(ErrorCode::OtbError,
+            const std::string appNameStd = otbApplicationName().toStdString();
+            throw RSOperatorError(ErrorCode::ExternalProcessTimeout,
                                   "OTB application exceeded the maximum runtime ("
                                       + std::to_string(maxRuntimeMs / 1000)
-                                      + " s) and was terminated.");
+                                      + " s) and was terminated.",
+                                  [appNameStd, maxRuntimeMs, elapsed = watchdog.elapsed()] {
+                                      Json::Value d(Json::objectValue);
+                                      d["applicationName"] = "otbcli_" + appNameStd;
+                                      d["timeoutMs"] = static_cast<Json::Int64>(maxRuntimeMs);
+                                      d["maxRuntimeSeconds"] = static_cast<Json::Int64>(maxRuntimeMs / 1000);
+                                      d["elapsedMs"] = static_cast<Json::Int64>(elapsed);
+                                      return d;
+                                  }());
         }
 
         proc.waitForReadyRead(100);

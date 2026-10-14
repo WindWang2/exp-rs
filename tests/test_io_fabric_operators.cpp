@@ -321,4 +321,172 @@ TEST_CASE( "io fabric operators honor workflow cancellation (#1455)",
   live.setCancelFlag( &notCancelled );
   const Json::Value result = op->run( params, live );
   CHECK( result["records"].size() == 2 );
+
+  // Cooperative cancellation on io:cube_plan
+  auto planOp = RSOperatorRegistry::instance().create( "io:cube_plan" );
+  REQUIRE( planOp );
+  Json::Value planParams;
+  planParams["catalog"] = root;
+  bool planCancelled = false;
+  try
+  {
+    static_cast<void>( planOp->run( planParams, context ) );
+  }
+  catch ( const RSOperatorError &error )
+  {
+    planCancelled = true;
+    REQUIRE( error.code() == ErrorCode::Cancelled );
+  }
+  CHECK( planCancelled );
+
+  // Cooperative cancellation on io:cube_window
+  auto winOp = RSOperatorRegistry::instance().create( "io:cube_window" );
+  REQUIRE( winOp );
+  Json::Value winParams;
+  winParams["catalog"] = root;
+  Json::Value winObj;
+  winObj["x"] = 0;
+  winObj["y"] = 0;
+  winObj["w"] = 16;
+  winObj["h"] = 16;
+  winParams["window"] = winObj;
+  winParams["output"] = root + "/win_cancel.tif";
+  bool winCancelled = false;
+  try
+  {
+    static_cast<void>( winOp->run( winParams, context ) );
+  }
+  catch ( const RSOperatorError &error )
+  {
+    winCancelled = true;
+    REQUIRE( error.code() == ErrorCode::Cancelled );
+  }
+  CHECK( winCancelled );
+  CHECK_FALSE( std::filesystem::exists( winParams["output"].asString() ) );
+
+  // Cooperative cancellation on io:cache_prefetch
+  sicnu::geo::RemoteRangeCache::install( {} );
+  auto prefetchOp = RSOperatorRegistry::instance().create( "io:cache_prefetch" );
+  REQUIRE( prefetchOp );
+  Json::Value prefetchParams;
+  prefetchParams["catalog"] = root;
+  bool prefetchCancelled = false;
+  try
+  {
+    static_cast<void>( prefetchOp->run( prefetchParams, context ) );
+  }
+  catch ( const RSOperatorError &error )
+  {
+    prefetchCancelled = true;
+    REQUIRE( error.code() == ErrorCode::Cancelled );
+  }
+  CHECK( prefetchCancelled );
+  sicnu::geo::RemoteRangeCache::uninstall();
+}
+
+TEST_CASE( "io fabric operators report monotonic progress callbacks",
+           "[io][fabric][operators][progress]" )
+{
+  const std::string root = sceneTree( "progressops" );
+
+  // 1. io:catalog_search
+  {
+    auto op = RSOperatorRegistry::instance().create( "io:catalog_search" );
+    REQUIRE( op );
+    Json::Value params;
+    params["catalog"] = root;
+
+    RSOperatorContext context;
+    std::vector<double> progressValues;
+    context.setProgressCallback( [&]( double p, const std::string & ) {
+      progressValues.push_back( p );
+    } );
+
+    const Json::Value result = op->run( params, context );
+    REQUIRE( !progressValues.empty() );
+    for ( size_t i = 1; i < progressValues.size(); ++i )
+    {
+      CHECK( progressValues[i] >= progressValues[i - 1] );
+    }
+    CHECK( progressValues.front() >= 0.0 );
+    CHECK( progressValues.back() == 1.0 );
+  }
+
+  // 2. io:cube_plan
+  {
+    auto op = RSOperatorRegistry::instance().create( "io:cube_plan" );
+    REQUIRE( op );
+    Json::Value params;
+    params["catalog"] = root;
+
+    RSOperatorContext context;
+    std::vector<double> progressValues;
+    context.setProgressCallback( [&]( double p, const std::string & ) {
+      progressValues.push_back( p );
+    } );
+
+    const Json::Value result = op->run( params, context );
+    REQUIRE( !progressValues.empty() );
+    for ( size_t i = 1; i < progressValues.size(); ++i )
+    {
+      CHECK( progressValues[i] >= progressValues[i - 1] );
+    }
+    CHECK( progressValues.front() >= 0.0 );
+    CHECK( progressValues.back() == 1.0 );
+  }
+
+  // 3. io:cube_window
+  {
+    auto op = RSOperatorRegistry::instance().create( "io:cube_window" );
+    REQUIRE( op );
+    Json::Value params;
+    params["catalog"] = root;
+    Json::Value winObj;
+    winObj["x"] = 0;
+    winObj["y"] = 0;
+    winObj["w"] = 16;
+    winObj["h"] = 16;
+    params["window"] = winObj;
+    params["output"] = root + "/prog_out.tif";
+
+    RSOperatorContext context;
+    std::vector<double> progressValues;
+    context.setProgressCallback( [&]( double p, const std::string & ) {
+      progressValues.push_back( p );
+    } );
+
+    const Json::Value result = op->run( params, context );
+    REQUIRE( !progressValues.empty() );
+    for ( size_t i = 1; i < progressValues.size(); ++i )
+    {
+      CHECK( progressValues[i] >= progressValues[i - 1] );
+    }
+    CHECK( progressValues.front() >= 0.0 );
+    CHECK( progressValues.back() == 1.0 );
+  }
+
+  // 4. io:cache_prefetch
+  {
+    sicnu::geo::RemoteRangeCache::install( {} );
+    auto op = RSOperatorRegistry::instance().create( "io:cache_prefetch" );
+    REQUIRE( op );
+    Json::Value params;
+    params["catalog"] = root;
+
+    RSOperatorContext context;
+    std::vector<double> progressValues;
+    context.setProgressCallback( [&]( double p, const std::string & ) {
+      progressValues.push_back( p );
+    } );
+
+    const Json::Value result = op->run( params, context );
+    REQUIRE( !progressValues.empty() );
+    for ( size_t i = 1; i < progressValues.size(); ++i )
+    {
+      CHECK( progressValues[i] >= progressValues[i - 1] );
+    }
+    CHECK( progressValues.front() >= 0.0 );
+    CHECK( progressValues.back() == 1.0 );
+    sicnu::geo::RemoteRangeCache::uninstall();
+  }
 }
