@@ -101,10 +101,14 @@ struct CanonicalWriter
 
     bool writeNumber( const Json::Value &value )
     {
-        if ( value.isIntegral() )
+        if ( value.isInt64() )
         {
-            const Json::Int64 asInt = value.asInt64();
-            out += std::to_string( asInt );
+            out += std::to_string( value.asInt64() );
+            return true;
+        }
+        if ( value.isUInt64() )
+        {
+            out += std::to_string( value.asUInt64() );
             return true;
         }
 
