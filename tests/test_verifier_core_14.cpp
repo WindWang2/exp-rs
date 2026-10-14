@@ -198,6 +198,13 @@ TEST_CASE( "verifier14: canonical json is member-order independent and refuses u
     // this stronger assertion carries the load instead.
     REQUIRE( outA == "{\"alpha\":2,\"mid\":{\"deep\":3},\"zeta\":1}" );
 
+    // Issue #1488: canonical serialization of uint64 > INT64_MAX without LogicError boundary escape
+    Json::Value bigUint( Json::UInt64( 18446744073709551615ULL ) );
+    std::string outBig;
+    std::string errBig;
+    REQUIRE( canonicalJson( bigUint, outBig, errBig ) );
+    CHECK( outBig == "18446744073709551615" );
+
     // Floating point must be pinned to 12 significant digits, otherwise a
     // digest over the same logical value drifts between platforms.
     Json::Value computed{ Json::objectValue };

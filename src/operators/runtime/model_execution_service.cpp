@@ -230,10 +230,15 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   std::string loadError;
   ProviderSelectionReport selection;
   const RequestedDevice *explicitDevice = request.deviceToken.empty() ? nullptr : &device;
-  const auto session = registry.acquireWithFallback( model, explicitDevice, &loadError, &selection );
+  const auto session = registry.acquireWithFallback(
+    model, explicitDevice, &loadError, &selection,
+    [ &context ] { return context.isCancelled(); } );
   if ( !session )
+  {
+    context.throwIfCancelled();
     throw RSOperatorError( ErrorCode::ComputationError,
                            "Failed to load model session: " + loadError );
+  }
 
   int bandCount = 0;
   if ( !multiInput )

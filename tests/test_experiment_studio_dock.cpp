@@ -308,3 +308,46 @@ TEST_CASE( "studio dock matrix table population and reset honesty",
     CHECK( table->rowCount() == 0 );
     CHECK( matrixStatus( dock )->text().contains( QStringLiteral( "No report loaded" ) ) );
 }
+
+TEST_CASE( "studio dock exception barrier handles invalid backend gracefully",
+           "[experiment_studio][dock][exception_barrier][issue1492]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString storePath = createEmptyStore( dir, QStringLiteral( "test-barrier.sqlite" ) );
+    REQUIRE( !storePath.isEmpty() );
+
+    // Target raster pointing to non-existent location will fail during runStudy.
+    auto dock = std::make_unique<ExperimentStudioDock>();
+    REQUIRE( dock->openLiveStoreAtPath( storePath ) );
+    setTextInput( *dock, QStringLiteral( "input" ), dir.filePath( QStringLiteral( "non_existent.tif" ) ) );
+
+    // Run study: worker thread runs with exception barrier.
+    // Must NOT crash or call std::terminate() even if execution throws.
+    runLiveButton( *dock )->click();
+    REQUIRE( waitFor( [ & ] { return runLiveButton( *dock )->isEnabled(); }, 30000 ) );
+
+    CHECK( runLiveButton( *dock )->isEnabled() );
+}
+
+TEST_CASE( "studio dock rapid destruction during active study run",
+           "[experiment_studio][dock][rapid_destruction][issue1492]" )
+{
+    ensureQgisApplication();
+    for ( int i = 0; i < 5; ++i )
+    {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        const QString storePath = createEmptyStore( dir, QStringLiteral( "test-rapid-destruct.sqlite" ) );
+        REQUIRE( !storePath.isEmpty() );
+
+        auto dock = std::make_unique<ExperimentStudioDock>();
+        REQUIRE( dock->openLiveStoreAtPath( storePath ) );
+        setTextInput( *dock, QStringLiteral( "input" ), dir.filePath( QStringLiteral( "non_existent.tif" ) ) );
+
+        runLiveButton( *dock )->click();
+        // Immediately destroy dock while background thread is active
+        dock.reset();
+    }
+}

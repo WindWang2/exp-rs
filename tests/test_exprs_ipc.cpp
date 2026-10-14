@@ -442,14 +442,20 @@ TEST_CASE( "pre-sink events replay in order before live delivery", "[ipc][channe
     }
     {
         std::lock_guard<std::mutex> lock( orderMutex );
+        INFO( "order size: " << order.size() );
+        for ( size_t i = 0; i < order.size(); ++i )
+            INFO( "order[" << i << "]: " << order[i] );
+    }
+    host.close();
+    worker.close();
+    if ( serve.joinable() )
+        serve.join();
+    {
+        std::lock_guard<std::mutex> lock( orderMutex );
         REQUIRE( order.size() == 2 );
         REQUIRE( order[0] == "queued" );
         REQUIRE( order[1] == "live" );
     }
-
-    host.close();
-    worker.close();
-    serve.join();
 }
 
 TEST_CASE( "event-sink replay tolerates re-entrant channel calls", "[ipc][channel]" )

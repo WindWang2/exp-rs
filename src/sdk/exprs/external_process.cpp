@@ -1139,9 +1139,16 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         envPointers.push_back( const_cast<char *>( entry.c_str() ) );
     envPointers.push_back( nullptr );
 
+    sigset_t blockMask, origMask;
+    sigemptyset( &blockMask );
+    for ( int sig : { SIGTERM, SIGINT, SIGQUIT, SIGABRT, SIGSEGV, SIGPIPE } )
+        sigaddset( &blockMask, sig );
+    ::sigprocmask( SIG_BLOCK, &blockMask, &origMask );
+
     const pid_t pid = ::fork();
     if ( pid < 0 )
     {
+        ::sigprocmask( SIG_SETMASK, &origMask, nullptr );
         result.error = "fork() failed: " + std::string( std::strerror( errno ) );
         for ( int fd : { stdoutPipe[0], stdoutPipe[1], stderrPipe[0], stderrPipe[1],
                          errorPipe[0], errorPipe[1] } )
@@ -1151,6 +1158,15 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 
     if ( pid == 0 )
     {
+        // Child: reset signals to default so parent/Catch2 handlers do not intercept signals before exec.
+        struct sigaction sa;
+        std::memset( &sa, 0, sizeof( sa ) );
+        sa.sa_handler = SIG_DFL;
+        sigemptyset( &sa.sa_mask );
+        for ( int sig : { SIGTERM, SIGINT, SIGQUIT, SIGABRT, SIGSEGV, SIGPIPE } )
+            ::sigaction( sig, &sa, nullptr );
+        ::sigprocmask( SIG_SETMASK, &origMask, nullptr );
+
         // Child: own session/process group so the parent can kill the whole
         // tree on timeout/cancel.
         ::setsid();
@@ -1176,6 +1192,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     }
 
     // Parent --------------------------------------------------------------
+    ::sigprocmask( SIG_SETMASK, &origMask, nullptr );
     ::close( stdoutPipe[1] );
     ::close( stderrPipe[1] );
     ::close( errorPipe[1] );

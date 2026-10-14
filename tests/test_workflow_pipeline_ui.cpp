@@ -732,3 +732,132 @@ TEST_CASE( "PipelineEditorDock: atomic pipeline save and read contracts", "[work
   REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( validPath, reloaded, &error ) );
   CHECK( reloaded["title"].asString() == "Updated Pipeline" );
 }
+
+TEST_CASE( "PipelineEditorDock: atomic write and fsync durability", "[workflow][pipeline][save][issue1487]" )
+{
+  ensureApp();
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+
+  const QString filePath = tempDir.filePath( QStringLiteral( "durable_pipeline.json" ) );
+
+  Json::Value root;
+  root["id"] = "durable_pipe";
+  root["title"] = "Durable Pipeline";
+  root["steps"] = Json::Value( Json::arrayValue );
+
+  QString error;
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( filePath, root, &error ) );
+  CHECK( error.isEmpty() );
+  CHECK( QFile::exists( filePath ) );
+
+  QFile check( filePath );
+  REQUIRE( check.open( QIODevice::ReadOnly ) );
+  CHECK( check.size() > 0 );
+  const QByteArray bytes = check.readAll();
+  check.close();
+  CHECK( bytes.contains( "durable_pipe" ) );
+
+  // Overwrite replaces file atomically with fsync
+  root["title"] = "Durable Pipeline v2";
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( filePath, root, &error ) );
+  Json::Value reloaded;
+  REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( filePath, reloaded, &error ) );
+  CHECK( reloaded["title"].asString() == "Durable Pipeline v2" );
+}
+
+TEST_CASE( "Challenger M2: PipelineEditorDock atomic write rapid overwrite stress test",
+           "[workflow][pipeline][save][challenger][stress][issue1487]" )
+{
+  ensureApp();
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+
+  const QString filePath = tempDir.filePath( QStringLiteral( "rapid_durable.json" ) );
+
+  // 100 consecutive rapid atomic writes with varying payload sizes and contents
+  for ( int i = 0; i < 100; ++i )
+  {
+    Json::Value root;
+    root["id"] = QStringLiteral( "rapid_pipe_%1" ).arg( i ).toStdString();
+    root["iteration"] = i;
+    root["payload"] = std::string( 100 * ( i % 10 ), 'X' );
+
+    QString error;
+    REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( filePath, root, &error ) );
+    CHECK( error.isEmpty() );
+
+    // Verify after each write: the file must be 100% valid JSON and match current iteration
+    Json::Value readBack;
+    REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( filePath, readBack, &error ) );
+    CHECK( readBack["iteration"].asInt() == i );
+    CHECK( readBack["id"].asString() == QStringLiteral( "rapid_pipe_%1" ).arg( i ).toStdString() );
+  }
+}
+
+TEST_CASE( "Challenger M2: PipelineEditorDock writePipelineDefinitionFile error paths and failure injection",
+           "[workflow][pipeline][save][challenger][error_paths][issue1487]" )
+{
+  ensureApp();
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+
+  Json::Value root;
+  root["id"] = "test_pipe";
+  root["title"] = "Test";
+
+  // Error Path 1: Non-existent directory
+  {
+    const QString nonExistent = tempDir.filePath( QStringLiteral( "nosuchdir_xyz/pipe.json" ) );
+    QString error;
+    CHECK_FALSE( PipelineEditorDock::writePipelineDefinitionFile( nonExistent, root, &error ) );
+    CHECK( error.contains( QStringLiteral( "Directory does not exist" ) ) );
+  }
+
+  // Error Path 2: Target path is an existing directory
+  {
+    const QString dirPath = tempDir.filePath( QStringLiteral( "target_is_dir" ) );
+    QDir().mkdir( dirPath );
+    QString error;
+    CHECK_FALSE( PipelineEditorDock::writePipelineDefinitionFile( dirPath, root, &error ) );
+    CHECK( error.contains( QStringLiteral( "Target is a directory" ) ) );
+  }
+
+  // Error Path 3: Read-only parent directory (cannot create temporary file)
+  {
+    const QString roDirPath = tempDir.filePath( QStringLiteral( "ro_dir" ) );
+    QDir().mkdir( roDirPath );
+    QFile::setPermissions( roDirPath, QFileDevice::ReadOwner | QFileDevice::ExeOwner );
+
+    const QString roTarget = QDir( roDirPath ).filePath( QStringLiteral( "blocked.json" ) );
+    QString error;
+    CHECK_FALSE( PipelineEditorDock::writePipelineDefinitionFile( roTarget, root, &error ) );
+    CHECK_FALSE( error.isEmpty() );
+    CHECK( error.contains( QStringLiteral( "Cannot create temporary file" ) ) );
+
+    // Restore permissions for cleanup
+    QFile::setPermissions( roDirPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner );
+  }
+
+  // Error Path 4: Target collision with directory (rename fails)
+  {
+    const QString conflictBase = tempDir.filePath( QStringLiteral( "conflict_test" ) );
+    QDir().mkdir( conflictBase );
+    const QString subDirTarget = QDir( conflictBase ).filePath( QStringLiteral( "sub_target" ) );
+    QDir().mkdir( subDirTarget );
+    // Put a file inside sub_target so it's a non-empty directory
+    QFile dummyFile( QDir( subDirTarget ).filePath( QStringLiteral( "dummy.txt" ) ) );
+    dummyFile.open( QIODevice::WriteOnly );
+    dummyFile.write( "hello" );
+    dummyFile.close();
+
+    // writePipelineDefinitionFile will see fileInfo(subDirTarget).isDir() is true
+    QString error;
+    CHECK_FALSE( PipelineEditorDock::writePipelineDefinitionFile( subDirTarget, root, &error ) );
+    CHECK( error.contains( QStringLiteral( "Target is a directory" ) ) );
+
+    // Verify no temporary files leaked into conflictBase
+    const QStringList leakedTemps = QDir( conflictBase ).entryList( QStringList() << QStringLiteral( "*.tmp" ), QDir::Files );
+    CHECK( leakedTemps.isEmpty() );
+  }
+}

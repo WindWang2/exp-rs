@@ -491,7 +491,12 @@ void TeachingAdminDock::onCancelBatch()
 void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QString &outPrefix )
 {
     if ( m_batchThread.joinable() )
-        m_batchThread.join();
+    {
+        std::thread( [t = std::move( m_batchThread )]() mutable {
+            if ( t.joinable() )
+                t.join();
+        } ).detach();
+    }
     // Re-arm the console for the next run (#1453/WP02): the run affordance
     // and the out-prefix edit were disabled for the run's duration.
     m_batchCancelButton->setEnabled( false );
@@ -550,13 +555,15 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QSt
 
 void TeachingAdminDock::failBatchOnUiThread( const QString &why )
 {
-    // The worker ran to completion (or died) on a typed failure: join it and
-    // re-arm the console. The old exception path only posted a label/log
-    // update — joinable() stayed true forever, so every later click was
-    // refused with a FALSE "a batch is already running", and the only way
-    // out was destroying the dock (#1453/WP02).
+    // The worker ran to completion (or died) on a typed failure: reap it and
+    // re-arm the console without blocking GUI event loop.
     if ( m_batchThread.joinable() )
-        m_batchThread.join();
+    {
+        std::thread( [t = std::move( m_batchThread )]() mutable {
+            if ( t.joinable() )
+                t.join();
+        } ).detach();
+    }
     m_batchCancelButton->setEnabled( false );
     m_batchRunButton->setEnabled( true );
     m_batchOutEdit->setEnabled( true );
