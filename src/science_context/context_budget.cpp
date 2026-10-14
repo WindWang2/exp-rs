@@ -57,6 +57,21 @@ std::string truncateUtf8( const std::string &text, std::size_t maxBytes )
     return text.substr( 0, end ) + kTruncationMarker;
 }
 
+bool isCriticalOrBlockingQuestion( const std::string &q )
+{
+    if ( q.find( "[blocking]" ) != std::string::npos ||
+         q.rfind( "asset_resolve_failed:", 0 ) == 0 ||
+         q.rfind( "unresolved_conflicts:", 0 ) == 0 ||
+         q.rfind( "operator_not_registered:", 0 ) == 0 ||
+         q.rfind( "unknown_operator_or_intent:", 0 ) == 0 ||
+         q.rfind( "intent_unresolved", 0 ) == 0 ||
+         q.find( ":blocking" ) != std::string::npos )
+    {
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 void applyContextBudget( ScientificContextBundle &bundle, const BudgetPolicy &policy )
@@ -163,6 +178,10 @@ void applyContextBudget( ScientificContextBundle &bundle, const BudgetPolicy &po
     auto trimQuestions = [&]( int keep ) {
         if ( static_cast<int>( bundle.openQuestions.size() ) <= keep )
             return;
+        std::stable_partition( bundle.openQuestions.begin(), bundle.openQuestions.end(),
+                               []( const std::string &q ) {
+                                   return isCriticalOrBlockingQuestion( q );
+                               } );
         const int dropped =
             static_cast<int>( bundle.openQuestions.size() ) - keep;
         bundle.openQuestions.resize( static_cast<std::size_t>( keep ) );

@@ -3,6 +3,8 @@
 
 #include "planner/json_util.h"
 
+#include <set>
+
 namespace sicnu::planner {
 
 namespace {
@@ -83,6 +85,15 @@ bool readAcceptanceCriteria( const Json::Value &doc, ScientificGoal &out, std::s
         if ( !json_util::readOptionalBoundedString( entry, "target", kTextMax, criterion.target,
                                                     err ) )
             return false;
+        for ( const auto &existing : out.acceptanceCriteria )
+        {
+            if ( existing.criterionId == criterion.criterionId )
+            {
+                err = json_util::error( "invalid_field", "duplicate criterion_id \""
+                                                         + criterion.criterionId + "\"" );
+                return false;
+            }
+        }
         out.acceptanceCriteria.push_back( criterion );
     }
     return true;
@@ -163,8 +174,33 @@ std::vector<std::string> validateScientificGoal( const ScientificGoal &goal )
         problems.push_back( "invalid_field: unknown goal kind \"" + goal.kind + "\"" );
     if ( goal.subject.empty() || goal.subject.size() > PlanLimits::kMaxTextChars )
         problems.push_back( "out_of_bounds: subject empty or over 512 chars" );
+    if ( goal.quantity.size() > PlanLimits::kMaxTextChars )
+        problems.push_back( "out_of_bounds: quantity over 512 chars" );
+    if ( goal.temporalScope )
+    {
+        if ( goal.temporalScope->minScenes < 0 )
+            problems.push_back( "invalid_field: temporal_scope.min_scenes must be non-negative" );
+        if ( goal.temporalScope->maxGapDays < 0 )
+            problems.push_back( "invalid_field: temporal_scope.max_gap_days must be non-negative" );
+        if ( goal.temporalScope->start.size() > PlanLimits::kMaxTextChars )
+            problems.push_back( "out_of_bounds: temporal_scope.start over 512 chars" );
+        if ( goal.temporalScope->end.size() > PlanLimits::kMaxTextChars )
+            problems.push_back( "out_of_bounds: temporal_scope.end over 512 chars" );
+    }
     if ( goal.acceptanceCriteria.size() > size_t( PlanLimits::kMaxAcceptanceCriteria ) )
         problems.push_back( "out_of_bounds: too many acceptance criteria" );
+    std::set<std::string> criterionIds;
+    for ( const auto &c : goal.acceptanceCriteria )
+    {
+        if ( c.criterionId.empty() || c.criterionId.size() > PlanLimits::kMaxIdChars )
+            problems.push_back( "out_of_bounds: criterion_id empty or over 64 chars" );
+        if ( !criterionIds.insert( c.criterionId ).second )
+            problems.push_back( "invalid_field: duplicate criterion_id \"" + c.criterionId + "\"" );
+        if ( c.check.empty() || c.check.size() > PlanLimits::kMaxTextChars )
+            problems.push_back( "out_of_bounds: criterion check empty or over 512 chars" );
+        if ( c.target.size() > PlanLimits::kMaxTextChars )
+            problems.push_back( "out_of_bounds: criterion target over 512 chars" );
+    }
     return problems;
 }
 
