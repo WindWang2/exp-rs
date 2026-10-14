@@ -732,3 +732,36 @@ TEST_CASE( "PipelineEditorDock: atomic pipeline save and read contracts", "[work
   REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( validPath, reloaded, &error ) );
   CHECK( reloaded["title"].asString() == "Updated Pipeline" );
 }
+
+TEST_CASE( "PipelineEditorDock: atomic write and fsync durability", "[workflow][pipeline][save][issue1487]" )
+{
+  ensureApp();
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+
+  const QString filePath = tempDir.filePath( QStringLiteral( "durable_pipeline.json" ) );
+
+  Json::Value root;
+  root["id"] = "durable_pipe";
+  root["title"] = "Durable Pipeline";
+  root["steps"] = Json::Value( Json::arrayValue );
+
+  QString error;
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( filePath, root, &error ) );
+  CHECK( error.isEmpty() );
+  CHECK( QFile::exists( filePath ) );
+
+  QFile check( filePath );
+  REQUIRE( check.open( QIODevice::ReadOnly ) );
+  CHECK( check.size() > 0 );
+  const QByteArray bytes = check.readAll();
+  check.close();
+  CHECK( bytes.contains( "durable_pipe" ) );
+
+  // Overwrite replaces file atomically with fsync
+  root["title"] = "Durable Pipeline v2";
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( filePath, root, &error ) );
+  Json::Value reloaded;
+  REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( filePath, reloaded, &error ) );
+  CHECK( reloaded["title"].asString() == "Durable Pipeline v2" );
+}

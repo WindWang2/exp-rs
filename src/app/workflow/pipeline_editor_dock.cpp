@@ -24,6 +24,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#if defined(Q_OS_UNIX)
+#include <fcntl.h>
+#include <unistd.h>
+#elif defined(Q_OS_WIN)
+#include <io.h>
+#endif
+
 namespace sicnu::workflow::gui {
 
 PipelineEditorDock::PipelineEditorDock( QWidget *parent )
@@ -179,6 +186,24 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
     return false;
   }
 
+#if defined(Q_OS_UNIX)
+  if ( ::fsync( tempFile.handle() ) != 0 )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Failed to fsync temporary file: %1" )
+                      .arg( QString::fromLocal8Bit( strerror( errno ) ) );
+    return false;
+  }
+#elif defined(Q_OS_WIN)
+  if ( ::_commit( tempFile.handle() ) != 0 )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Failed to commit temporary file: %1" )
+                      .arg( QString::fromLocal8Bit( strerror( errno ) ) );
+    return false;
+  }
+#endif
+
   const QString tempName = tempFile.fileName();
   tempFile.close();
 
@@ -192,6 +217,18 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
       *errorOut = QObject::tr( "Failed to atomically publish pipeline file: %1" )
                       .arg( QString::fromLocal8Bit( strerror( errno ) ) );
     return false;
+  }
+
+  const QByteArray parentDirBytes = QFile::encodeName( QFileInfo( filePath ).absolutePath() );
+#if defined(O_DIRECTORY)
+  const int dirFd = ::open( parentDirBytes.constData(), O_RDONLY | O_DIRECTORY );
+#else
+  const int dirFd = ::open( parentDirBytes.constData(), O_RDONLY );
+#endif
+  if ( dirFd >= 0 )
+  {
+    ::fsync( dirFd );
+    ::close( dirFd );
   }
 #else
   if ( QFile::exists( filePath ) )
