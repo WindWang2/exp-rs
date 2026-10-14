@@ -151,6 +151,81 @@ run_logged() {
 }
 
 # ---------------------------------------------------------------------------
+# Cross-process build lease (WP-G06).
+#
+# The -j<=2 cap bounds ONE build. It does nothing about several agents (or
+# several worktrees) building on the same machine at the same time: each one
+# stays inside its own cap and the machine still sees the sum, which is how a
+# heavy C++/Qt/QGIS link step OOMs and takes the other lanes down with it.
+#
+# scripts/dev/resource_guard.py already implements the lease (exclusive lock
+# file keyed on the build dir, dead-holder staleness, parallelism clamping) and
+# is unit-tested — but nothing ever called it, so the lease was decorative.
+# Every build/test payload below now runs inside it, sharing ONE lock per build
+# directory with every other wrapper instance on this machine.
+# ---------------------------------------------------------------------------
+GUARD="$script_dir/dev/resource_guard.py"
+
+# Echo the interpreter to run the guard with, or fail.
+guard_python() {
+    if [ -n "${SICNU_PYTHON:-}" ]; then printf '%s\n' "$SICNU_PYTHON"; return 0; fi
+    if command -v python3 >/dev/null 2>&1; then printf 'python3\n'; return 0; fi
+    if command -v python >/dev/null 2>&1; then printf 'python\n'; return 0; fi
+    return 1
+}
+
+# guard_prefix <build-dir> <jobs> — echo the argv prefix that wraps a payload
+# in the lease. Prints nothing (and explains why on stderr) when the lease is
+# unavailable, so callers degrade to an ungoverned run *loudly*;
+# SICNU_BUILD_REQUIRE_GUARD=1 turns that degradation into a refusal.
+guard_prefix() {
+    local build_dir=$1 jobs=$2 wait=${SICNU_BUILD_GUARD_WAIT:-1800}
+    # R1-06: two contradictory switches must be an explicit conflict, not a
+    # silent precedence that disarms the refusal.
+    if [ -n "${SICNU_BUILD_REQUIRE_GUARD:-}" ] && [ -n "${SICNU_BUILD_NO_GUARD:-}" ]; then
+        note "WARNING: SICNU_BUILD_REQUIRE_GUARD=1 and SICNU_BUILD_NO_GUARD are mutually exclusive"
+        return 2
+    fi
+    if [ -n "${SICNU_BUILD_NO_GUARD:-}" ]; then
+        note "WARNING: resource-guard disabled by SICNU_BUILD_NO_GUARD — running without the cross-process lease"
+        return 0
+    fi
+    local py
+    if [ ! -f "$GUARD" ] || ! py=$(guard_python); then
+        note "WARNING: resource-guard unavailable ($GUARD / python) — running WITHOUT the cross-process lease"
+        if [ -n "${SICNU_BUILD_REQUIRE_GUARD:-}" ]; then
+            # R1-01: do NOT `fail` here. guard_prefix runs in a process
+            # substitution, so exit only kills the subshell and the caller
+            # would carry on ungoverned with exit 0. Return a status and let
+            # the caller (this shell) refuse.
+            return 2
+        fi
+        return 0
+    fi
+    printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+        "$py" "$GUARD" --lock-dir "$build_dir" --wait "$wait" \
+        --parallel "$jobs" --max-parallel "$JOBS_CAP" --
+}
+
+# guard_prefix_into <array-name> <build-dir> <jobs> — fill the named array with
+# the lease prefix. Returns 0 (prefix taken) or non-zero (the caller must
+# refuse when SICNU_BUILD_REQUIRE_GUARD is set). Runs in the CURRENT shell, so
+# the decision is observable in the script's exit code.
+guard_prefix_into() {
+    local __arr=$1; shift
+    # Command substitution (not a temp file, not process substitution): the
+    # exit status is observable here, in the shell that must decide, and there
+    # is no temp file to clean up under a sandboxed `rm`.
+    local out rc=0
+    out=$(guard_prefix "$@") || rc=$?
+    if [ "$rc" -ne 0 ]; then return "$rc"; fi
+    local -n __dest=$__arr
+    __dest=()
+    if [ -n "$out" ]; then mapfile -t __dest <<<"$out"; fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # selftest — hermetic portability + resource-cap assertions (no toolchain used)
 # ---------------------------------------------------------------------------
 selftest_fail() { echo "selftest FAIL: $*" >&2; SELFTEST_FAILED=1; }
@@ -217,6 +292,56 @@ cmd_selftest() {
         *"QT_QPA_PLATFORM=offscreen"*) echo "  ok: ctest sets offscreen platform" ;;
         *) selftest_fail "ctest missing QT_QPA_PLATFORM=offscreen" ;;
     esac
+
+    # --- 4. cross-process build lease (WP-G06) ------------------------------
+    # Hermetic: a stub `cmake` proves whether the payload is reached, so no
+    # toolchain is touched. The lease is the ONLY thing that serialises
+    # several agents building on one host; the -j cap alone does not.
+    local py=""
+    py=$(guard_python 2>/dev/null) || py=""
+    if [ -z "$py" ] || [ ! -f "$GUARD" ]; then
+        echo "  SKIP: cross-process lease (no python or $GUARD)"
+    else
+        local lwork="$tmpbase/sicnu-lease-probe-$$"
+        rm -rf "$lwork" 2>/dev/null || true
+        mkdir -p "$lwork/build" "$lwork/bin" || { selftest_fail "cannot create lease fixture"; return 1; }
+        printf '#!/usr/bin/env bash\necho PAYLOAD-RAN\nexit 0\n' > "$lwork/bin/cmake"
+        chmod +x "$lwork/bin/cmake"
+        # R1-07: wait for a marker written BY the payload, not for the lock
+        # file's mere existence, and give it a 30s hold instead of 8s. A slow
+        # python startup or a loaded machine can no longer race this probe into
+        # a false result (the holder used to expire before the wrapper ran).
+        local lmarker="$lwork/held.marker"
+        "$py" "$GUARD" --lock-dir "$lwork/build" --wait 0 -- \
+            "$py" -c "import sys, time; open(sys.argv[1], 'w').write('held'); time.sleep(30)" \
+            "$lmarker" >/dev/null 2>&1 &
+        local lholder=$!
+        local lseen=0
+        for _ in $(seq 1 300); do
+            [ -f "$lmarker" ] && { lseen=1; break; }
+            sleep 0.1
+        done
+        if [ "$lseen" != 1 ]; then
+            selftest_fail "lease was never taken (probe setup broken)"
+        else
+            local lrc=0 lout
+            lout=$(PATH="$lwork/bin:$PATH" SICNU_BUILD_GUARD_WAIT=0 \
+                SICNU_BUILD_LOG_DIR="$lwork/logs" \
+                "$0" build --build-dir "$lwork/build" 2>&1) || lrc=$?
+            wait "$lholder" 2>/dev/null || true
+            if printf '%s' "$lout" | grep -q "PAYLOAD-RAN"; then
+                selftest_fail "build ran while another process held the lease"
+            elif [ "$lrc" != 75 ]; then
+                # Print what the wrapper actually said: without it, a refusal,
+                # a missing interpreter and a broken fixture all look alike.
+                selftest_fail "busy build dir must exit 75 (EX_TEMPFAIL), got $lrc"
+                printf '%s\n' "$lout" | sed 's/^/      | /' >&2
+            else
+                echo "  ok: busy build dir refused (exit 75); payload never ran"
+            fi
+        fi
+        rm -rf "$lwork" 2>/dev/null || true
+    fi
 
     if [ "$SELFTEST_FAILED" = 0 ]; then
         echo "selftest: ALL PASS"
@@ -319,9 +444,22 @@ cmd_build() {
             *) break ;;
         esac
     done
-    if [ -z "$jobs" ]; then jobs=$(resolve_jobs); fi
+    # R1-02: --jobs is a documented public flag and used to skip the cap check
+    # entirely; resolve_jobs accepts the requested value, so pass it through.
+    if [ -z "$jobs" ]; then jobs=$(resolve_jobs); else jobs=$(resolve_jobs "$jobs"); fi
     local cmd=(cmake --build "$build_dir" --parallel "$jobs")
     if [ $# -gt 0 ]; then cmd+=(-- "$@"); fi
+    # WP-G06: queue on the shared lease instead of hammering the machine
+    # alongside every other agent building on this host.
+    # R1-01: guard_prefix runs in a process substitution, so a `fail` inside it
+    # would only exit that subshell and the build would proceed ungoverned
+    # with exit 0. Read the prefix back in THIS shell and decide here.
+    local prefix=()
+    guard_prefix_into prefix "$build_dir" "$jobs" \
+        || fail "SICNU_BUILD_REQUIRE_GUARD=1 but the lease cannot be taken"
+    if [ ${#prefix[@]} -gt 0 ]; then
+        cmd=("${prefix[@]}" "${cmd[@]}")
+    fi
     run_logged build "${cmd[@]}"
 }
 
@@ -337,6 +475,14 @@ cmd_test() {
     done
     local cmd=(ctest --test-dir "$build_dir" --output-on-failure -j1)
     if [ -n "$regex" ]; then cmd+=(-R "$regex"); fi
+    # WP-G06: ctest writes into the same build tree, so it takes the same lease
+    # (a concurrent build must not be mutated under the test run).
+    local prefix=()
+    guard_prefix_into prefix "$build_dir" 1 \
+        || fail "SICNU_BUILD_REQUIRE_GUARD=1 but the lease cannot be taken"
+    if [ ${#prefix[@]} -gt 0 ]; then
+        cmd=("${prefix[@]}" "${cmd[@]}")
+    fi
     QT_QPA_PLATFORM=offscreen run_logged test "${cmd[@]}"
 }
 
