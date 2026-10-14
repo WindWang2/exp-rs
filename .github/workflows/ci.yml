@@ -7,11 +7,11 @@ on:
     branches: [ master, main ]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   # Only superseded PR runs are cancelled. A push to master must finish so
   # every merge gets a build signal (merge waves used to cancel all but the
   # last master run, leaving master without a completed CI result).
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && github.event_name == 'pull_request' }}
 
 jobs:
   # =========================================================================
