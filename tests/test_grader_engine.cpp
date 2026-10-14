@@ -427,6 +427,164 @@ TEST_CASE( "stage criteria: alternatives, minDistinct and orderedAfter sequencin
         CHECK( c.status == OutcomeStatus::Indeterminate );
         CHECK( c.reasonCodes[0] == "grader:stage-order-unprovable" );
     }
+
+    // Fail-closed GUARDS (not REDs): these pin the CURRENT degradation for
+    // out-of-grammar stamps. The sequencing parser refuses leap seconds
+    // (second 60 is outside its wall-clock range) and lowercase 't' date-
+    // time separators, so the order is unprovable → indeterminate — never
+    // a byte-order verdict and never an extrapolated instant. A future
+    // "be lenient" change must update these sections explicitly; silently
+    // flipping them is exactly the regression they exist to catch.
+    SECTION( "leap-second prerequisite stamps cannot prove order → indeterminate (guard)" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        // 2026-12-31T23:59:60Z is a real UTC leap second, chronologically
+        // BEFORE the candidate — but the parser's grammar stops at :59,
+        // so the prerequisite's instant is unrepresentable here. Fail
+        // closed: indeterminate, never a guessed leap-table verdict.
+        addStage( evidence, "ev-pre", "preprocess", "Completed", "2026-12-31T23:59:60Z" );
+        addStage( evidence, "ev-train", "train", "Completed", "2027-01-01T00:00:00Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &c = outcome.report.dimensions[0].criteria[0];
+        CHECK( c.status == OutcomeStatus::Indeterminate );
+        CHECK( c.reasonCodes[0] == "grader:stage-order-unprovable" );
+    }
+
+    SECTION( "lowercase-'t' candidate stamps cannot prove order → indeterminate (guard)" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        // ISO 8601 permits lowercase 't'/'z', but the documented grammar
+        // accepts uppercase only — 't' at position 10 refuses to parse.
+        // The candidate's instant is then unprovable: indeterminate, not
+        // a byte-order comparison ('t' > 'T' would grade violated).
+        addStage( evidence, "ev-pre", "preprocess", "Completed", "2026-09-23T07:00:00Z" );
+        addStage( evidence, "ev-train", "train", "Completed", "2026-09-23t08:00:00Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &c = outcome.report.dimensions[0].criteria[0];
+        CHECK( c.status == OutcomeStatus::Indeterminate );
+        CHECK( c.reasonCodes[0] == "grader:stage-order-unprovable" );
+    }
+}
+
+// D12 (WP E03 review finding): rubric validation checked only that
+// orderedAfter targets EXIST. A stage orderedAfter ITSELF is vacuously
+// satisfied (its own record meets the prereq at an equal stamp), and a
+// 2-cycle A <-> B is satisfiable at equal stamps — a malformed teacher
+// rubric graded permissively instead of being refused. Validation must
+// reject self-references and cycles in BOTH orderedAfter graphs
+// (criteria-level stage.orderedAfter and requiredStages[].orderedAfter)
+// via the typed schema-invalid refusal.
+TEST_CASE( "rubric validation refuses self-referential or cyclic orderedAfter graphs",
+           "[grader][engine][stage]" )
+{
+    SECTION( "a stage orderedAfter itself is refused instead of grading vacuously" )
+    {
+        GradingRubric rubric = stageRubric();
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "train" };
+
+        // RED pre-fix: validate() returned true and the rubric graded to
+        // an earned report — the vacuous-satisfaction hole above.
+        GraderError err;
+        CHECK_FALSE( rubric.validate( err ) );
+        CHECK( toCodeString( err.code ) == "grader:e-schema-shape" );
+        CHECK( err.path == "dimensions[0].criteria[0].stage.orderedAfter" );
+
+        // Grading refuses too: a malformed rubric never reaches the engine.
+        const GradeOutcome outcome = grade( rubric, stageEvidence() );
+        CHECK_FALSE( outcome.ok );
+        CHECK( toCodeString( outcome.error.code ) == "grader:e-schema-shape" );
+    }
+
+    SECTION( "a two-cycle between stage criteria is refused" )
+    {
+        GradingRubric rubric = stageRubric();
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        pre.stage.orderedAfter = { "train" };
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        // Equal stamps on both stages would satisfy both edges at once —
+        // permissive grading of a rubric that declares no real order.
+        GraderError err;
+        CHECK_FALSE( rubric.validate( err ) );
+        CHECK( toCodeString( err.code ) == "grader:e-schema-shape" );
+        CHECK( err.message.find( "cycle" ) != std::string::npos );
+
+        const GradeOutcome outcome = grade( rubric, stageEvidence() );
+        CHECK_FALSE( outcome.ok );
+        CHECK( toCodeString( outcome.error.code ) == "grader:e-schema-shape" );
+    }
+
+    SECTION( "a requiredStages entry orderedAfter itself is refused" )
+    {
+        GradingRubric rubric = stageRubric();
+        StageRequirement req;
+        req.stageKey = "train";
+        req.expectedState = "Completed";
+        req.orderedAfter = { "train" };
+        rubric.requiredStages.push_back( req );
+
+        GraderError err;
+        CHECK_FALSE( rubric.validate( err ) );
+        CHECK( toCodeString( err.code ) == "grader:e-schema-shape" );
+        CHECK( err.path == "requiredStages[0].orderedAfter" );
+    }
+
+    SECTION( "a two-cycle inside requiredStages orderedAfter is refused" )
+    {
+        GradingRubric rubric = stageRubric();
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 50.0;
+        rubric.dimensions[0].criteria[0].maxPoints = 50.0;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+
+        StageRequirement trainReq;
+        trainReq.stageKey = "train";
+        trainReq.expectedState = "Completed";
+        trainReq.orderedAfter = { "preprocess" };
+        StageRequirement preReq;
+        preReq.stageKey = "preprocess";
+        preReq.expectedState = "Completed";
+        preReq.orderedAfter = { "train" };
+        rubric.requiredStages = { trainReq, preReq };
+
+        GraderError err;
+        CHECK_FALSE( rubric.validate( err ) );
+        CHECK( toCodeString( err.code ) == "grader:e-schema-shape" );
+        CHECK( err.message.find( "cycle" ) != std::string::npos );
+    }
 }
 
 TEST_CASE( "metric criteria: bands, tolerance, linear window, range and ambiguity",
@@ -1360,6 +1518,19 @@ TEST_CASE( "permutation invariance: shuffled evidence order yields the identical
     GraderError digestError;
     CHECK( base.report.verifyDigest( digestError ) );
     CHECK( rotated.report.verifyDigest( digestError ) );
+
+    // Repeat-grading GUARD (not a RED): pin byte-identical report digests
+    // across 10 grade() calls on the same inputs — belt-and-suspenders over
+    // the judgmentsById pointer-stability construct in grader_engine.cpp.
+    // A future change that reorders maps, hashes, or citation order flips
+    // these CHECKs; that tripwire is the point.
+    const std::string baseReportDigest = base.report.digest;
+    REQUIRE_FALSE( baseReportDigest.empty() );
+    for ( int repeat = 0; repeat < 10; ++repeat ) {
+        const GradeOutcome again = grade( rubric, evidence );
+        REQUIRE( again.ok );
+        CHECK( again.report.digest == baseReportDigest );
+    }
 }
 
 TEST_CASE( "budget overrun is a typed refusal with no report", "[grader][engine][budget]" )

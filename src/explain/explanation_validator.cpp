@@ -151,9 +151,14 @@ ValidationReport ExplanationValidator::validate( const StepExplanation &explanat
     }
   }
 
-  if ( explanation.execution.has_value() && !hasMachineEvidence( explanation.execution->evidence ) )
-    addIssue( issues, "system_fact_without_machine_evidence", "execution",
-              "execution facts require machine-kind evidence" );
+  if ( explanation.execution.has_value() )
+  {
+    if ( !hasMachineEvidence( explanation.execution->evidence ) )
+      addIssue( issues, "system_fact_without_machine_evidence", "execution",
+                "execution facts require machine-kind evidence" );
+    if ( explanation.execution->status.empty() )
+      addIssue( issues, "empty_content", "execution.status", "execution status must not be empty" );
+  }
 
   for ( size_t i = 0; i < explanation.evidenceLinks.size(); ++i )
   {

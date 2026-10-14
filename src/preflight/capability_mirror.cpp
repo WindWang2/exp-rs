@@ -216,37 +216,50 @@ void CapabilityMirrorProjection::addDocument( const Json::Value &documentArray,
             problems_.push_back( origin + ": entry cap exceeded" );
             return;
         }
-        // The merge walks at most kMaxMergeDepth extends hops; a deeper
-        // chain would be silently truncated at query time and policies
-        // beyond the cut are unreachable. The header promises depth is
-        // never silently skipped, so flag it here, at load, where the
-        // projection can still fail closed. The walk below mirrors
-        // mergeEntry's FULL stop semantics — an unknown parent or a cycle
-        // is the merge's own bounded stop (it may resolve later, or never;
-        // either way querying stops safely), and only a chain that fills
-        // the depth budget and still names an ancestor is a real cut.
-        {
-            int depth = 0;
-            Json::Value cursorValue = entry;
-            std::set<std::string> visited;
-            visited.insert( id );
-            bool boundedStop = false;
-            while ( cursorValue["extends"].isString() && depth < kMaxMergeDepth )
-            {
-                const Entry *parent = findEntry( cursorValue["extends"].asString() );
-                if ( parent == nullptr || !visited.insert( parent->value["id"].asString() ).second )
-                {
-                    boundedStop = true;
-                    break;
-                }
-                cursorValue = parent->value;
-                ++depth;
-            }
-            if ( !boundedStop && cursorValue["extends"].isString() )
-                problems_.push_back( origin + ": entry " + id +
-                                     ": extends chain deeper than the merge bound" );
-        }
         entries_.push_back( Entry{ entry, origin } );
+    }
+    // Merge-depth and cycle validation over ALL loaded entries, run after
+    // every document. The merge walks at most kMaxMergeDepth extends hops; a
+    // deeper chain would be silently truncated at query time and the policies
+    // beyond the cut (band_roles at the chain root) would vanish. The header
+    // promises depth is never silently skipped, so this walk must resolve
+    // parents across documents — an insert-time walk only sees already-
+    // loaded entries and let a child-first chain load "clean". An unknown
+    // parent stays the merge's own bounded stop (it may resolve later);
+    // a resolved chain that fills the depth budget and still names an
+    // ancestor is a real cut, and a cycle is refused outright. Messages
+    // dedupe so revalidation after each document never double-records.
+    for ( const auto &entry : entries_ )
+    {
+        int depth = 0;
+        const Entry *cursor = &entry;
+        std::set<std::string> visited;
+        visited.insert( entry.value["id"].asString() );
+        std::string problem;
+        while ( cursor->value["extends"].isString() && depth < kMaxMergeDepth )
+        {
+            const Entry *parent = findEntry( cursor->value["extends"].asString() );
+            if ( parent == nullptr )
+                break; // unknown parent: bounded stop, may resolve later
+            if ( !visited.insert( parent->value["id"].asString() ).second )
+            {
+                problem = "cyclic extends chain";
+                break;
+            }
+            cursor = parent;
+            ++depth;
+        }
+        if ( problem.empty() && depth == kMaxMergeDepth &&
+             cursor->value["extends"].isString() &&
+             findEntry( cursor->value["extends"].asString() ) != nullptr )
+            problem = "extends chain deeper than the merge bound";
+        if ( !problem.empty() )
+        {
+            const std::string text = entry.origin + ": entry " +
+                                     entry.value["id"].asString() + ": " + problem;
+            if ( std::find( problems_.begin(), problems_.end(), text ) == problems_.end() )
+                problems_.push_back( text );
+        }
     }
 }
 

@@ -11071,6 +11071,9 @@ target_link_libraries(test_fault_matrix PRIVATE
   sicnu_data
   sicnu_workflow
   sicnu_runtime
+  # R12-E (E12): the teaching behavior benchmark drives real fault scenarios;
+  # link the leaf library instead of compiling its sources into the TU.
+  sicnu_faultlab
 )
 
 # Bounded contract fuzz (task D): ResourceUri total-function/credential/
@@ -15312,6 +15315,7 @@ target_link_libraries(test_verify_chain_locale_matrix PRIVATE
   sicnu_verifier
   sicnu_grader
   sicnu_preflight
+  sicnu_faultlab
   Sicnu::ScienceContext
   sicnu_recipes
   Sicnu::ScientificState

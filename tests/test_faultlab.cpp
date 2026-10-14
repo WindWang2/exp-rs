@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -207,6 +208,23 @@ TEST_CASE( "fault lab: scenario loader rejects malformed required fields", "[fau
         const auto result = loadFaultScenario( doc );
         CHECK_FALSE( result.ok );
         CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
+    }
+    SECTION( "sandbox byte budget negative" )
+    {
+        // isIntegral() admits negatives but asUInt64() throws Json::LogicError
+        // on them — an untyped escape past the typed diagnostic contract.
+        Json::Value doc = validScenarioDoc();
+        doc["sandbox"]["max_bytes"] = Json::Value::Int64( -1 );
+        bool refused = false;
+        std::string code;
+        auto parse = [&]() {
+            const auto result = loadFaultScenario( doc );
+            refused = !result.ok;
+            code = result.diagnostics.front().code;
+        };
+        REQUIRE_NOTHROW( parse() );
+        REQUIRE( refused );
+        REQUIRE( code == "faultlab.scenario_field" );
     }
     SECTION( "cleanup may not be waived" )
     {
@@ -1625,4 +1643,115 @@ TEST_CASE( "fault lab: transforms refuse mistyped params with typed errors", "[f
         CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
         CHECK( grid.bands[0].samples[0] == Catch::Approx( 0.1 ) );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Regression — scenario file loading is bounded and never throws (R12-E)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+std::string writeScenarioFile( const std::string &name, const std::string &content )
+{
+    const auto dir = std::filesystem::temp_directory_path() / "exp-rs-faultlab-r12e";
+    std::filesystem::create_directories( dir );
+    const auto path = dir / name;
+    std::ofstream out( path, std::ios::binary | std::ios::trunc );
+    out.write( content.data(), static_cast<std::streamsize>( content.size() ) );
+    return path.string();
+}
+
+std::string validScenarioText()
+{
+    return Json::FastWriter().write( validScenarioDoc() );
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: scenario file loader refuses hostile documents without throwing",
+           "[faultlab]" )
+{
+    // The loader's contract is "never exceptions across the API boundary"
+    // (fault_types.h): a hostile file arrives as a typed faultlab.*
+    // diagnostic. A nesting bomb used to escape as a Json::Exception past the
+    // reader's default stackLimit; trailing garbage used to be silently
+    // ignored (failIfExtra defaults to false); an oversized file used to be
+    // slurped unbounded.
+    SECTION( "nesting bomb" )
+    {
+        const std::string path = writeScenarioFile(
+            "nesting_bomb.json", std::string( 1200, '[' ) + std::string( 1200, ']' ) );
+        FaultResult<FaultScenario> result;
+        REQUIRE_NOTHROW( result = loadFaultScenarioFile( path ) );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_malformed" );
+    }
+    SECTION( "trailing garbage after the document" )
+    {
+        const std::string path =
+            writeScenarioFile( "trailing_garbage.json", validScenarioText() + " not json" );
+        const auto result = loadFaultScenarioFile( path );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_malformed" );
+    }
+    SECTION( "embedded NUL byte" )
+    {
+        std::string content = validScenarioText();
+        content.insert( content.begin() + 10, '\0' );
+        const std::string path = writeScenarioFile( "embedded_nul.json", content );
+        const auto result = loadFaultScenarioFile( path );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_malformed" );
+    }
+    SECTION( "file above the teaching-artifact size cap" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["title"] = std::string( 4 * 1024 * 1024 + 64, 'x' );
+        const std::string path =
+            writeScenarioFile( "oversized.json", Json::FastWriter().write( doc ) );
+        const auto result = loadFaultScenarioFile( path );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_unreadable" );
+    }
+}
+
+TEST_CASE( "fault lab: scenario loader pins the 4 MiB read-cap boundary", "[faultlab]" )
+{
+    // The seekg/tellg probe is only an early rejection; the cap is enforced
+    // on bytes actually read (cap+1 sentinel), so a file that grows between
+    // probe and read still hits the cap. Pin both sides of the boundary so
+    // the cap rule cannot drift: exactly 4 MiB of valid scenario content is
+    // accepted, one byte past refuses.
+    constexpr std::size_t kCap = 4u * 1024 * 1024;
+
+    // Pad the title so the serialized document lands exactly on the cap.
+    // 'x' is not JSON-escaped, so the byte delta is exactly the title delta.
+    const Json::Value baseDoc = validScenarioDoc();
+    const std::string baseText = Json::FastWriter().write( baseDoc );
+    const std::size_t titleBytes = baseDoc["title"].asString().size();
+    const std::size_t pad = kCap - baseText.size() + titleBytes;
+    REQUIRE( pad >= titleBytes );
+
+    Json::Value atCap = baseDoc;
+    atCap["title"] = std::string( pad, 'x' );
+    const std::string atCapText = Json::FastWriter().write( atCap );
+    REQUIRE( atCapText.size() == kCap );
+    const auto accepted =
+        loadFaultScenarioFile( writeScenarioFile( "exactly_at_cap.json", atCapText ) );
+    REQUIRE( accepted.ok );
+
+    Json::Value overCap = baseDoc;
+    overCap["title"] = std::string( pad + 1, 'x' );
+    const std::string overCapText = Json::FastWriter().write( overCap );
+    REQUIRE( overCapText.size() == kCap + 1 );
+    const auto refused =
+        loadFaultScenarioFile( writeScenarioFile( "one_byte_over_cap.json", overCapText ) );
+    CHECK_FALSE( refused.ok );
+    REQUIRE( !refused.diagnostics.empty() );
+    CHECK( refused.diagnostics.front().code == "faultlab.scenario_unreadable" );
 }

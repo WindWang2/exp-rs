@@ -2,6 +2,8 @@
 
 #include "preflight/sha256.h"
 
+#include "data/execution_fingerprint.h" // canonicalizeJsonRfc8785 (#1387)
+
 namespace sicnu::preflight {
 namespace {
 
@@ -177,13 +179,12 @@ std::optional<PreflightReport> PreflightReport::fromJson( const Json::Value &jso
 
 std::string canonicalReportJson( const PreflightReport &report )
 {
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "";
-  builder["commentStyle"] = "None";
-  builder["precision"] = 12;
-  builder["precisionType"] = "significant";
-  builder["emitUTF8"] = true;
-  return Json::writeString( builder, report.toJson() );
+  // R12-E D8: the digest rides the platform's ONE canonical serializer
+  // (sicnu::data::canonicalizeJsonRfc8785, #1387) — sorted keys, shortest
+  // round-trip numbers — so evidence doubles beyond 12 significant digits
+  // hash identically on every path instead of diverging on a module-local
+  // jsoncpp writer setting.
+  return sicnu::data::canonicalizeJsonRfc8785( report.toJson() ).toStdString();
 }
 
 std::string reportDigest( const PreflightReport &report )

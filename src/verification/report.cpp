@@ -575,6 +575,79 @@ VerificationReport buildReport( const VerificationSpec &spec,
         report.budgetUsage.nodes = nodeChecks.size();
     }
     report.outcome = rollUpTask( report.nodes );
+
+    // A result whose checkId no node claims must not vanish from the verdict.
+    // The roll-up above folds only node statuses, so a Fail that the caller's
+    // mapping forgot would leave status == Pass while counters accuse
+    // (by_status.fail == 1) -- the headline disagreeing with the evidence it
+    // carries. Folding the uncovered results in, worst-wins, keeps the lattice
+    // honest — and the fold runs through the same rollUp() the nodes use, so
+    // the IndeterminatePolicy applies to a forgotten check exactly as to a
+    // mapped one, with the promotion recorded. There is deliberately no
+    // blocking node for them: the gap belongs
+    // to the map, not to any node, and inventing a blocker to point at would
+    // be the same genre of dishonesty as inventing a pass. The gap is instead
+    // surfaced with the spec-vocabulary code, so a reader can tell a coverage
+    // defect from a data defect.
+    if ( !nodeChecks.empty() )
+    {
+        std::set<std::string> covered;
+        for ( const auto &entry : nodeChecks )
+        {
+            covered.insert( entry.second.begin(), entry.second.end() );
+        }
+        std::vector<std::pair<std::string, CheckStatus>> uncoveredLabelled;
+        for ( const CheckResult &result : results )
+        {
+            if ( covered.count( result.checkId ) != 0 )
+            {
+                continue;
+            }
+            uncoveredLabelled.emplace_back( result.checkId, result.status );
+        }
+        if ( !uncoveredLabelled.empty() )
+        {
+            // Mirror rollUpNode: the policy promotion applies to uncovered
+            // results too, before folding into the task outcome. Folding
+            // raw statuses via combineStatus would let an uncovered
+            // Indeterminate under IndeterminatePolicy::Fail stay Indeterminate
+            // while a mapped one became Fail — the same check promoted or not
+            // depending only on whether the caller's map remembered it.
+            const RollupResult uncovered = rollUp( uncoveredLabelled, policy );
+            report.outcome.status = combineStatus( report.outcome.status, uncovered.status );
+            for ( const std::string &promotedId : uncovered.promoted )
+            {
+                // rollUpNode records promotions on the node's promoted_check_ids;
+                // an uncovered result has no node, so the bookkeeping lives on
+                // the result itself — a reader can tell "this failed" from
+                // "we raised it to fail".
+                for ( CheckResult &result : report.results )
+                {
+                    if ( result.checkId == promotedId )
+                    {
+                        result.promoted = true;
+                    }
+                }
+            }
+            for ( const auto &entry : uncoveredLabelled )
+            {
+                if ( entry.second == CheckStatus::Pass )
+                {
+                    continue;
+                }
+                for ( const CheckResult &result : results )
+                {
+                    if ( result.checkId == entry.first )
+                    {
+                        addUniqueSorted( report.outcome.failureCodes, result.failureCode );
+                        break;
+                    }
+                }
+            }
+            addUniqueSorted( report.outcome.failureCodes, failure_codes::kSpecInvalid );
+        }
+    }
+
     report.status = report.outcome.status;
 
     // A budget overrun is a limitation on the run, not a property of the data.

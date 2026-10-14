@@ -10,7 +10,6 @@
 #include <json/json.h>
 
 #include <fstream>
-#include <sstream>
 #include <string>
 
 #include <limits>
@@ -22,6 +21,10 @@ namespace
 {
 
 using Json::Value;
+
+/// Hard ceiling for one scenario document (4 MiB). A scenario is a small
+/// teaching artifact; anything larger is refused before a byte is parsed.
+inline constexpr std::uint64_t kMaxScenarioFileBytes = 4ull * 1024 * 1024;
 
 bool isNonEmptyString( const Value &doc, const char *key )
 {
@@ -234,7 +237,9 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
         if ( sandbox.isMember( "max_bytes" ) )
         {
             const Value &maxBytes = sandbox["max_bytes"];
-            if ( !maxBytes.isIntegral() || maxBytes.asUInt64() > kFaultLabMaxBytes )
+            // isUInt64() (not isIntegral()): jsoncpp asUInt64() throws on
+            // negative integrals instead of refusing them.
+            if ( !maxBytes.isUInt64() || maxBytes.asUInt64() > kFaultLabMaxBytes )
             {
                 return fieldError( "sandbox.max_bytes must be an integer <= 64 MiB" );
             }
@@ -393,21 +398,67 @@ FaultResult<FaultScenario> loadFaultScenarioFile( const std::string &path )
         return makeError<FaultScenario>( "faultlab.scenario_unreadable",
                                          "cannot open scenario file: " + path );
     }
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
+    // Bound the read before slurping: a scenario is a small teaching
+    // artifact, so an oversized file is refused with the existing
+    // unreadable vocabulary instead of an unbounded rdbuf copy. The probe is
+    // only an early rejection (seekg/tellg vs. the actual read is a TOCTOU
+    // gap): enforcement is on bytes actually read — cap+1 sentinel bytes,
+    // mirroring verify_adapters/bounded_io.cpp — so a file that grows
+    // between probe and read still hits the cap.
+    stream.seekg( 0, std::ios::end );
+    const std::streamoff length = stream.tellg();
+    if ( length < 0 || static_cast<std::uint64_t>( length ) > kMaxScenarioFileBytes )
+    {
+        return makeError<FaultScenario>( "faultlab.scenario_unreadable",
+                                         "scenario file exceeds the 4 MiB teaching-artifact cap: " +
+                                             path );
+    }
+    stream.seekg( 0, std::ios::beg );
 
-    // str() returns a fresh copy per call: three inline calls would hand the
-    // reader begin/end pointers into three different temporaries (#1447).
-    const std::string text = buffer.str();
+    std::string text;
+    text.resize( static_cast<std::size_t>( kMaxScenarioFileBytes ) + 1 );
+    stream.read( text.data(), static_cast<std::streamsize>( text.size() ) );
+    if ( stream.bad() )
+    {
+        return makeError<FaultScenario>( "faultlab.scenario_unreadable",
+                                         "cannot read scenario file: " + path );
+    }
+    text.resize( static_cast<std::size_t>( stream.gcount() ) );
+    if ( text.size() > kMaxScenarioFileBytes )
+    {
+        return makeError<FaultScenario>( "faultlab.scenario_unreadable",
+                                         "scenario file exceeds the 4 MiB teaching-artifact cap: " +
+                                             path );
+    }
 
     Json::Value doc;
     Json::CharReaderBuilder builder;
+    // Same safe-reader discipline as grader_json / guidance_store: a scenario
+    // file is untrusted content. The reader THROWS on a nesting bomb past
+    // the stack limit, trailing garbage used to be silently ignored
+    // (failIfExtra defaults to false), and no scenario fixture relies on
+    // comments — so the bomb arrives as a typed refusal, extra text fails
+    // the parse, and allowComments=false matches the grader doctrine. The
+    // module contract is never exceptions across the API boundary.
+    builder["stackLimit"] = 128;
+    builder["allowComments"] = false;
+    builder["collectComments"] = false;
+    builder["failIfExtra"] = true;
     std::string errors;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &errors ) )
+    try
+    {
+        if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &errors ) )
+        {
+            return makeError<FaultScenario>( "faultlab.scenario_malformed",
+                                             "cannot parse scenario JSON: " + errors );
+        }
+    }
+    catch ( const Json::Exception &exception )
     {
         return makeError<FaultScenario>( "faultlab.scenario_malformed",
-                                         "cannot parse scenario JSON: " + errors );
+                                         std::string( "cannot parse scenario JSON: " ) +
+                                             exception.what() );
     }
     return loadFaultScenario( doc );
 }

@@ -198,8 +198,14 @@ VerificationReport runSpec( const VerificationSpec &spec, const VerificationInpu
             ++usage.checksUnevaluated;
         }
         usage.reasons.push_back( "required evidence unavailable: " + listed );
-        usage.exceeded = true;
-        return buildReport( spec, results, nodeChecks, spec.indeterminatePolicy, usage );
+        // Deliberately NOT usage.exceeded: no budget was consumed, and marking
+        // it exceeded would claim the run was truncated when the truth is the
+        // evidence was never there. The outcome carries the evidence code
+        // instead, which every per-check result already bears.
+        VerificationReport report =
+            buildReport( spec, results, nodeChecks, spec.indeterminatePolicy, usage );
+        addUniqueSorted( report.outcome.failureCodes, failure_codes::kEvidenceUnavailable );
+        return report;
     }
 
     for ( const VerificationCheck &check : spec.checks )
