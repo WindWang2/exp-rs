@@ -80,3 +80,20 @@
 | `scripts/bench/perf_observatory_verify.py` | `run_ctest` 空匹配判负；O1 打印真实计数；O3 加证据下限 |
 | `docs/development/README.md`、`scripts/dev/README.md` | R2 发现 F1/F2：区分两种 `--parallel` 语义；文档化四个 `SICNU_BUILD_*` 开关 |
 | `.planning/r12-g-build-test-deploy/`（16 个文件） | 证据链（R2 发现 F3）：13 份 markdown + 4 个可跑 oracle，按 R12-E 先例 `git add -f` 纳入 |
+
+## 6. 线上 CI 状态与合并决定（合并前归因）
+
+合并前最后一次线上运行 `38544560480`（head = `6d335eaf0`）三个 Tier 失败。**逐条归因后判定：全部为 master 既有失败，与本 PR 改动面无关。**
+
+| Job | 失败步骤 | 根因 | 归属 |
+|---|---|---|---|
+| Tier 1 - Fast Required (Linux GCC) | Compile Core & Test Targets | `tests/test_science_context_broker.cpp:941` `std::atomic<bool>` 不完整类型、`std::thread` 非 `std::` 成员 —— 缺 `#include <thread>` / `#include <atomic>` | **R8 / PR #1453**（`246408bed`）引入，非本 PR |
+| Tier 2 - Full Integration & Sanitizers | Build Sanitizer Test Targets | 同上（同一 TU 的 sanitizer 变体） | 同上 |
+| Tier 3 - macOS Clang Configure & Build Seam | Verify macOS Build | Xcode 26.6 SDK 头 `MacOSX.sdk/usr/include/_stdio.h` / `_time.h` 报 "expected function body after function declarator" / "__OSX_AVAILABLE" 重定义 —— 工具链/SDK 级 | **环境级**，非本 PR |
+
+**判定依据（可复核）**：
+1. `git diff origin/master...HEAD --name-only` 的 30 个文件中**不含** `tests/test_science_context_broker.cpp`；`git diff origin/master...HEAD -- tests/test_science_context_broker.cpp` 输出为空（与 master 逐字节一致）。
+2. master 自身的运行 `38515287149`（head = `892295685`，即本分支 `3a418ab60` 合并进来的**同一个** master 提交）呈现**完全相同的三处失败**。
+3. `gh api repos/WindWang2/exp-rs/branches/master/protection` 返回 `Branch not protected` —— master 无必需状态检查，`mergeStateStatus: UNSTABLE` 不阻塞合并。
+
+**决定**：按用户显式授权（"嗯，处理后合并"）执行合并，合并方式 `--merge`（与仓库既有 #1497 等一致的 merge-commit 风格），**不删除分支**（保留可追溯）。合并前的 4 项 R2 事项已全部处置（见 §4b）。
