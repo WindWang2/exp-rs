@@ -7,11 +7,18 @@ on:
     branches: [ master, main ]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Only superseded PR runs are cancelled. A push to master must finish so
-  # every merge gets a build signal (merge waves used to cancel all but the
-  # last master run, leaving master without a completed CI result).
+  # #1490: GitHub keeps at most ONE pending run per concurrency group — a new
+  # master push used to cancel the still-queued run for the previous push even
+  # with cancel-in-progress=false (the old group keyed on workflow+ref made
+  # every master push share one group; 30 of the last 40 master runs were
+  # cancelled before the audit). Key push runs on the commit SHA so every
+  # landed master commit gets its own uninterruptible run; PR runs keep the
+  # per-ref group so a new commit on the same PR still supersedes the old one.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  # Only superseded PR runs are cancelled. Push runs are singletons in their
+  # per-SHA group, so this flag only ever acts on pull_request events.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 
 jobs:
   # =========================================================================
