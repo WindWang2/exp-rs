@@ -330,3 +330,24 @@ TEST_CASE( "studio dock exception barrier handles invalid backend gracefully",
 
     CHECK( runLiveButton( *dock )->isEnabled() );
 }
+
+TEST_CASE( "studio dock rapid destruction during active study run",
+           "[experiment_studio][dock][rapid_destruction][issue1492]" )
+{
+    ensureQgisApplication();
+    for ( int i = 0; i < 5; ++i )
+    {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        const QString storePath = createEmptyStore( dir, QStringLiteral( "test-rapid-destruct.sqlite" ) );
+        REQUIRE( !storePath.isEmpty() );
+
+        auto dock = std::make_unique<ExperimentStudioDock>();
+        REQUIRE( dock->openLiveStoreAtPath( storePath ) );
+        setTextInput( *dock, QStringLiteral( "input" ), dir.filePath( QStringLiteral( "non_existent.tif" ) ) );
+
+        runLiveButton( *dock )->click();
+        // Immediately destroy dock while background thread is active
+        dock.reset();
+    }
+}

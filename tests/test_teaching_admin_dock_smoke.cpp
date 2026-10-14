@@ -338,3 +338,28 @@ TEST_CASE( "a failed batch re-arms the console instead of wedging it",
 
     qunsetenv( "SICNU_GEO_RS_CLI" );
 }
+
+TEST_CASE( "TeachingAdminDock rapid destruction during batch run", "[teaching_admin][dock][rapid_destruction]" )
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString slowPy = writeSlowGraderStub( dir, 2 );
+    if ( !slowPy.isEmpty() )
+    {
+        qputenv( "SICNU_GEO_RS_CLI", slowPy.toLocal8Bit() );
+        for ( int i = 0; i < 3; ++i )
+        {
+            auto dock = std::make_unique<TeachingAdminDock>();
+            auto *subs = dock->findChild<QLineEdit *>( QStringLiteral( "teachingAdminSubmissionsDir" ) );
+            auto *out = dock->findChild<QLineEdit *>( QStringLiteral( "teachingAdminBatchOut" ) );
+            auto *btn = dock->findChild<QPushButton *>( QStringLiteral( "teachingAdminBatchButton" ) );
+            subs->setText( dir.path() );
+            out->setText( dir.filePath( QStringLiteral( "out_%1" ).arg( i ) ) );
+            btn->click();
+            // Destroy immediately
+            dock.reset();
+        }
+    }
+    qunsetenv( "SICNU_GEO_RS_CLI" );
+}
