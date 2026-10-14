@@ -29,33 +29,46 @@ namespace fs = std::filesystem;
 namespace
 {
 
+class ProcessScratch
+{
+public:
+  const fs::path &root()
+  {
+    if ( m_root.empty() )
+    {
+      std::string pidStr;
+#ifdef _WIN32
+      pidStr = std::to_string( ::_getpid() );
+#else
+      pidStr = std::to_string( ::getpid() );
+#endif
+      const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+      m_root = fs::temp_directory_path() / ( "sicnu_io_test_vector_" + pidStr + "_" + std::to_string( now ) );
+      std::error_code ec;
+      fs::create_directories( m_root, ec );
+    }
+    return m_root;
+  }
+
+  ~ProcessScratch()
+  {
+    if ( !m_root.empty() )
+    {
+      std::error_code ec;
+      fs::remove_all( m_root, ec );
+    }
+  }
+
+private:
+  fs::path m_root;
+};
+
+static ProcessScratch sScratch;
+
 fs::path processScratchRoot()
 {
-  static const fs::path sRoot = []() {
-    std::string pidStr;
-#ifdef _WIN32
-    pidStr = std::to_string( ::_getpid() );
-#else
-    pidStr = std::to_string( ::getpid() );
-#endif
-    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    const fs::path root = fs::temp_directory_path() / ( "sicnu_io_test_vector_" + pidStr + "_" + std::to_string( now ) );
-    std::error_code ec;
-    fs::create_directories( root, ec );
-    return root;
-  }();
-  return sRoot;
+  return sScratch.root();
 }
-
-struct ScratchCleaner
-{
-  ~ScratchCleaner()
-  {
-    std::error_code ec;
-    fs::remove_all( processScratchRoot(), ec );
-  }
-};
-static ScratchCleaner sCleaner;
 
 std::string scratchDir( const std::string &name )
 {
