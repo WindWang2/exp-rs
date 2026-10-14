@@ -651,8 +651,15 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   // An unparseable expression is a compile failure, never silently static
   // text. `expression` beats `text` when both are declared.
   const auto textWithExpression = [ & ]( const Json::Value &item, Json::Value &props ) -> bool {
-    if ( !item.isMember( "expression" ) || !item["expression"].isString() )
+    if ( !item.isMember( "expression" ) )
       return true;
+    if ( !item["expression"].isString() )
+    {
+      if ( error )
+        *error = QStringLiteral( "%1: expression must be a string" )
+                   .arg( QString::fromStdString( item["id"].asString() ) );
+      return false;
+    }
     const QString expression =
       QString::fromStdString( item["expression"].asString() );
     if ( QgsExpression( expression ).hasParserError() )

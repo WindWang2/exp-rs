@@ -636,6 +636,12 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
 
 bool LayoutService::removeItem( QgsLayout *layout, const QString &idOrUuid, QString *error )
 {
+  if ( !layout )
+  {
+    if ( error )
+      *error = QStringLiteral( "Null layout" );
+    return false;
+  }
   QgsLayoutItem *item = findItem( layout, idOrUuid );
   if ( !item )
   {
@@ -715,40 +721,60 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
     return true;
   } );
   setProp( "x", [&]() {
-    const double y = props.isMember( "y" ) ? props["y"].asDouble() : item->positionWithUnits().y();
+    if ( !props["x"].isNumeric() || !std::isfinite( props["x"].asDouble() ) )
+      return false;
+    const double y = props.isMember( "y" ) && props["y"].isNumeric() && std::isfinite( props["y"].asDouble() )
+                       ? props["y"].asDouble()
+                       : item->positionWithUnits().y();
     undoStack->beginCommand( item, QStringLiteral( "Move Item" ), QgsLayoutItem::UndoIncrementalMove );
     item->attemptMove( QgsLayoutPoint( props["x"].asDouble(), y ) );
     undoStack->endCommand();
     return true;
   } );
   setProp( "y", [&]() {
-    const double x = props.isMember( "x" ) ? props["x"].asDouble() : item->positionWithUnits().x();
+    if ( !props["y"].isNumeric() || !std::isfinite( props["y"].asDouble() ) )
+      return false;
+    const double x = props.isMember( "x" ) && props["x"].isNumeric() && std::isfinite( props["x"].asDouble() )
+                       ? props["x"].asDouble()
+                       : item->positionWithUnits().x();
     undoStack->beginCommand( item, QStringLiteral( "Move Item" ), QgsLayoutItem::UndoIncrementalMove );
     item->attemptMove( QgsLayoutPoint( x, props["y"].asDouble() ) );
     undoStack->endCommand();
     return true;
   } );
   setProp( "width", [&]() {
-    const double h = props.isMember( "height" ) ? props["height"].asDouble() : item->sizeWithUnits().height();
+    if ( !props["width"].isNumeric() || !std::isfinite( props["width"].asDouble() ) || props["width"].asDouble() <= 0 )
+      return false;
+    const double h = props.isMember( "height" ) && props["height"].isNumeric() && std::isfinite( props["height"].asDouble() )
+                       ? props["height"].asDouble()
+                       : item->sizeWithUnits().height();
     undoStack->beginCommand( item, QStringLiteral( "Resize Item" ), QgsLayoutItem::UndoIncrementalResize );
     item->attemptResize( QgsLayoutSize( props["width"].asDouble(), h ) );
     undoStack->endCommand();
     return true;
   } );
   setProp( "height", [&]() {
-    const double w = props.isMember( "width" ) ? props["width"].asDouble() : item->sizeWithUnits().width();
+    if ( !props["height"].isNumeric() || !std::isfinite( props["height"].asDouble() ) || props["height"].asDouble() <= 0 )
+      return false;
+    const double w = props.isMember( "width" ) && props["width"].isNumeric() && std::isfinite( props["width"].asDouble() )
+                       ? props["width"].asDouble()
+                       : item->sizeWithUnits().width();
     undoStack->beginCommand( item, QStringLiteral( "Resize Item" ), QgsLayoutItem::UndoIncrementalResize );
     item->attemptResize( QgsLayoutSize( w, props["height"].asDouble() ) );
     undoStack->endCommand();
     return true;
   } );
   setProp( "rotation", [&]() {
+    if ( !props["rotation"].isNumeric() || !std::isfinite( props["rotation"].asDouble() ) )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Rotate" ), QgsLayoutItem::UndoRotation );
     item->setItemRotation( props["rotation"].asDouble(), true );
     undoStack->endCommand();
     return true;
   } );
   setProp( "opacity", [&]() {
+    if ( !props["opacity"].isNumeric() || !std::isfinite( props["opacity"].asDouble() ) )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Change Opacity" ), QgsLayoutItem::UndoOpacity );
     item->setItemOpacity( std::clamp( props["opacity"].asDouble(), 0.0, 100.0 ) / 100.0 );
     undoStack->endCommand();
@@ -763,6 +789,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
     return true;
   } );
   setProp( "z", [&]() {
+    if ( !props["z"].isNumeric() || !std::isfinite( props["z"].asDouble() ) )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Change Z Value" ) );
     item->setZValue( props["z"].asDouble() );
     undoStack->endCommand();
@@ -857,13 +885,15 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
   else if ( auto *map = qobject_cast<QgsLayoutItemMap *>( item ) )
   {
     setProp( "map_rotation", [&]() {
+      if ( !props["map_rotation"].isNumeric() || !std::isfinite( props["map_rotation"].asDouble() ) )
+        return false;
       undoStack->beginCommand( item, QStringLiteral( "Change Map Rotation" ), QgsLayoutItem::UndoMapRotation );
       map->setMapRotation( props["map_rotation"].asDouble() );
       undoStack->endCommand();
       return true;
     } );
     setProp( "scale", [&]() {
-      if ( props["scale"].asDouble() <= 0 )
+      if ( !props["scale"].isNumeric() || !std::isfinite( props["scale"].asDouble() ) || props["scale"].asDouble() <= 0 )
         return false;
       undoStack->beginCommand( item, QStringLiteral( "Change Map Scale" ) );
       map->setScale( props["scale"].asDouble() );
@@ -872,8 +902,11 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
     } );
     setProp( "extent", [&]() {
       const Json::Value &ext = props["extent"];
-      if ( !ext.isArray() || ext.size() != 4 || ext[0].asDouble() >= ext[2].asDouble() ||
-           ext[1].asDouble() >= ext[3].asDouble() )
+      if ( !ext.isArray() || ext.size() != 4 ||
+           !ext[0].isNumeric() || !ext[1].isNumeric() || !ext[2].isNumeric() || !ext[3].isNumeric() ||
+           !std::isfinite( ext[0].asDouble() ) || !std::isfinite( ext[1].asDouble() ) ||
+           !std::isfinite( ext[2].asDouble() ) || !std::isfinite( ext[3].asDouble() ) ||
+           ext[0].asDouble() >= ext[2].asDouble() || ext[1].asDouble() >= ext[3].asDouble() )
       {
         if ( ignored )
           ignored->append( QStringLiteral( "extent (expected [xmin,ymin,xmax,ymax] with min<max)" ) );

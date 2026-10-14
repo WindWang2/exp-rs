@@ -10,6 +10,7 @@
 #include "agent/cartography/cartography_tools.h"
 #include "agent/cartography/cartography_operators.h"
 #include "agent/cartography/chart_registry.h"
+#include "agent/cartography/composition.h"
 #include "agent/cartography/export.h"
 #include "agent/cartography/registry.h"
 #include "agent/contracts/spatial_contracts.h"
@@ -563,6 +564,48 @@ TEST_CASE( "MapSpec validation and condition parser robustness (R13-G WP-01/WP-0
     bool ok = validateConditionSyntax( chainedExpr, &problems );
     CHECK_FALSE( ok );
     REQUIRE_FALSE( problems.empty() );
+  }
+
+  SECTION( "Compiler rejects non-string expressions (WP-03)" )
+  {
+    Json::Value spec = minimalSpec( "expr-type-test" );
+    Json::Value title( Json::objectValue );
+    title["id"] = "title-bad-expr";
+    Json::Value rect( Json::arrayValue );
+    rect.append( 12 ); rect.append( 12 ); rect.append( 100 ); rect.append( 10 );
+    title["rect_mm"] = rect;
+    title["text"] = "Sample Title";
+    title["expression"] = 12345; // integer instead of string
+    spec["titles"].append( title );
+
+    QString error;
+    QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
+    INFO( "error was: " << error.toStdString() );
+    CHECK( layout == nullptr );
+    CHECK( error.contains( "expression must be a" ) );
+
+    // Also test unparseable QgsExpression
+    spec["titles"][0]["expression"] = "1 + * 2";
+    error.clear();
+    layout = MapSpecCompiler::compile( spec, &error );
+    CHECK( layout == nullptr );
+    CHECK( error.contains( "invalid expression" ) );
+  }
+
+  SECTION( "Composition solver safely handles non-finite rects and bounds (WP-04)" )
+  {
+    Json::Value spec = minimalSpec( "composition-nan-test" );
+    Json::Value label( Json::objectValue );
+    label["id"] = "label-nan";
+    Json::Value rect( Json::arrayValue );
+    rect.append( std::numeric_limits<double>::quiet_NaN() );
+    rect.append( 10 );
+    rect.append( 50 );
+    rect.append( 10 );
+    label["rect_mm"] = rect;
+    spec["labels"].append( label );
+
+    REQUIRE_NOTHROW( sicnu::agent::cartography::resolveComposition( spec, 12.0 ) );
   }
 }
 

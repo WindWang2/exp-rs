@@ -38,11 +38,16 @@ bool toRect( const Json::Value &item, Rect &out )
   if ( !item.isObject() || !item.isMember( "rect_mm" ) || !item["rect_mm"].isArray() ||
        item["rect_mm"].size() != 4 )
     return false;
-  out.x = item["rect_mm"][0].asDouble();
-  out.y = item["rect_mm"][1].asDouble();
-  out.w = item["rect_mm"][2].asDouble();
-  out.h = item["rect_mm"][3].asDouble();
-  return out.w > 0 && out.h > 0;
+  const Json::Value &r = item["rect_mm"];
+  if ( !r[0].isNumeric() || !r[1].isNumeric() || !r[2].isNumeric() || !r[3].isNumeric() )
+    return false;
+  out.x = r[0].asDouble();
+  out.y = r[1].asDouble();
+  out.w = r[2].asDouble();
+  out.h = r[3].asDouble();
+  return std::isfinite( out.x ) && std::isfinite( out.y ) &&
+         std::isfinite( out.w ) && std::isfinite( out.h ) &&
+         out.w > 0 && out.h > 0;
 }
 
 void writeRect( Json::Value &item, const Rect &rect )
@@ -669,12 +674,16 @@ bool Solver::clampSizes()
       const Json::Value &minSize = item.get( "min_size_mm", Json::Value() );
       const Json::Value &maxSize = item.get( "max_size_mm", Json::Value() );
       Rect clamped = rect;
-      if ( minSize.isArray() && minSize.size() == 2 )
+      if ( minSize.isArray() && minSize.size() == 2 &&
+           minSize[0].isNumeric() && minSize[1].isNumeric() &&
+           std::isfinite( minSize[0].asDouble() ) && std::isfinite( minSize[1].asDouble() ) )
       {
         clamped.w = std::max( clamped.w, minSize[0].asDouble() );
         clamped.h = std::max( clamped.h, minSize[1].asDouble() );
       }
-      if ( maxSize.isArray() && maxSize.size() == 2 )
+      if ( maxSize.isArray() && maxSize.size() == 2 &&
+           maxSize[0].isNumeric() && maxSize[1].isNumeric() &&
+           std::isfinite( maxSize[0].asDouble() ) && std::isfinite( maxSize[1].asDouble() ) )
       {
         clamped.w = std::min( clamped.w, maxSize[0].asDouble() );
         clamped.h = std::min( clamped.h, maxSize[1].asDouble() );
@@ -758,16 +767,16 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
       const Json::Value &maxSize = c.items[i]->get( "max_size_mm", Json::Value() );
       if ( minSize.isArray() && minSize.size() == 2 )
       {
-        if ( kind == "match_width" && minSize[0].isNumeric() )
+        if ( kind == "match_width" && minSize[0].isNumeric() && std::isfinite( minSize[0].asDouble() ) )
           target.w = std::max( target.w, minSize[0].asDouble() );
-        else if ( kind == "match_height" && minSize[1].isNumeric() )
+        else if ( kind == "match_height" && minSize[1].isNumeric() && std::isfinite( minSize[1].asDouble() ) )
           target.h = std::max( target.h, minSize[1].asDouble() );
       }
       if ( maxSize.isArray() && maxSize.size() == 2 )
       {
-        if ( kind == "match_width" && maxSize[0].isNumeric() )
+        if ( kind == "match_width" && maxSize[0].isNumeric() && std::isfinite( maxSize[0].asDouble() ) )
           target.w = std::min( target.w, maxSize[0].asDouble() );
-        else if ( kind == "match_height" && maxSize[1].isNumeric() )
+        else if ( kind == "match_height" && maxSize[1].isNumeric() && std::isfinite( maxSize[1].asDouble() ) )
           target.h = std::min( target.h, maxSize[1].asDouble() );
       }
       if ( !sameRect( rect, target ) )
@@ -1070,7 +1079,8 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
       content.append( heightMm );
     }
     if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
-         !content[1].isNumeric() )
+         !content[1].isNumeric() || !std::isfinite( content[0].asDouble() ) ||
+         !std::isfinite( content[1].asDouble() ) )
     {
       if ( failReason )
         *failReason = "fit_content needs content_mm";
@@ -1081,12 +1091,16 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
     rect.h = content[1].asDouble();
     const Json::Value &minSize = c.items[0]->get( "min_size_mm", Json::Value() );
     const Json::Value &maxSize = c.items[0]->get( "max_size_mm", Json::Value() );
-    if ( minSize.isArray() && minSize.size() == 2 )
+    if ( minSize.isArray() && minSize.size() == 2 &&
+         minSize[0].isNumeric() && minSize[1].isNumeric() &&
+         std::isfinite( minSize[0].asDouble() ) && std::isfinite( minSize[1].asDouble() ) )
     {
       rect.w = std::max( rect.w, minSize[0].asDouble() );
       rect.h = std::max( rect.h, minSize[1].asDouble() );
     }
-    if ( maxSize.isArray() && maxSize.size() == 2 )
+    if ( maxSize.isArray() && maxSize.size() == 2 &&
+         maxSize[0].isNumeric() && maxSize[1].isNumeric() &&
+         std::isfinite( maxSize[0].asDouble() ) && std::isfinite( maxSize[1].asDouble() ) )
     {
       rect.w = std::min( rect.w, maxSize[0].asDouble() );
       rect.h = std::min( rect.h, maxSize[1].asDouble() );
