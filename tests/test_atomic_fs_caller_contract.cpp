@@ -550,3 +550,242 @@ TEST_CASE( "session journal: every staging failure path removes the claimed stag
   // "never leaks residue" property the journal lane used to own.
   REQUIRE( authority.find( "WriteStatus::StagedCleanupFailed" ) != std::string::npos );
 }
+
+// ============================================================================
+// Part D — crash journal & recovery contract (B06 AtomicFsJournal)
+// ============================================================================
+
+TEST_CASE( "atomic_fs journal: uncommitted journal rolls back partial publish and restores backups",
+           "[atomic_fs][journal][recovery][durability]" )
+{
+  ScratchDir dir;
+  const std::string mainPath = dir.childUtf8( "raster.tif" );
+  const std::string sidecarPath = dir.childUtf8( "raster.tfw" );
+  const std::string mainBackup = mainPath + ".bak";
+  const std::string sidecarBackup = sidecarPath + ".bak";
+  const std::string journalPath = mainPath + ".publish-journal";
+
+  // Simulate original files
+  writeBytes( mainPath, "OLD_MAIN_DATA" );
+  writeBytes( sidecarPath, "OLD_SIDECAR_DATA" );
+
+  // Simulate crash during publish:
+  // 1. backups were created
+  writeBytes( mainBackup, "OLD_MAIN_DATA" );
+  writeBytes( sidecarBackup, "OLD_SIDECAR_DATA" );
+  // 2. sidecar was overwritten with NEW data, main hasn't been overwritten yet
+  writeBytes( sidecarPath, "NEW_SIDECAR_TORN" );
+  // 3. journal exists with status uncommitted
+  const std::string journalJson =
+    "{\n"
+    "  \"version\": 1,\n"
+    "  \"main\": \"" + mainPath + "\",\n"
+    "  \"members\": [\n"
+    "    { \"staged\": \"temp.tfw\", \"target\": \"" + sidecarPath + "\", \"backup\": \"" + sidecarBackup + "\", \"had_target\": true },\n"
+    "    { \"staged\": \"temp.tif\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
+    "  ]\n"
+    "}\n";
+  writeBytes( journalPath, journalJson );
+
+  REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
+
+  // Run recovery
+  const bool recovered = sicnu::geo::atomic_fs::recoverDatasetGroup( mainPath );
+  REQUIRE( recovered );
+  CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( journalPath ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( mainBackup ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( sidecarBackup ) );
+
+  // Old data restored
+  CHECK( readBytes( mainPath ) == "OLD_MAIN_DATA" );
+  CHECK( readBytes( sidecarPath ) == "OLD_SIDECAR_DATA" );
+}
+
+TEST_CASE( "atomic_fs journal: committed journal finalizes backups without rolling back new data",
+           "[atomic_fs][journal][recovery][durability]" )
+{
+  ScratchDir dir;
+  const std::string mainPath = dir.childUtf8( "dataset.shp" );
+  const std::string sidecarPath = dir.childUtf8( "dataset.shx" );
+  const std::string mainBackup = mainPath + ".bak";
+  const std::string sidecarBackup = sidecarPath + ".bak";
+  const std::string committedPath = mainPath + ".publish-journal.committed";
+
+  // Simulate files after all targets published: new data in place
+  writeBytes( mainPath, "NEW_MAIN_DATA" );
+  writeBytes( sidecarPath, "NEW_SIDECAR_DATA" );
+
+  // Backups still left on disk when process crashed before cleanup
+  writeBytes( mainBackup, "OLD_MAIN_BACKUP" );
+  writeBytes( sidecarBackup, "OLD_SIDECAR_BACKUP" );
+
+  // Committed journal marker
+  const std::string journalJson =
+    "{\n"
+    "  \"version\": 1,\n"
+    "  \"main\": \"" + mainPath + "\",\n"
+    "  \"members\": [\n"
+    "    { \"staged\": \"temp.shx\", \"target\": \"" + sidecarPath + "\", \"backup\": \"" + sidecarBackup + "\", \"had_target\": true },\n"
+    "    { \"staged\": \"temp.shp\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
+    "  ]\n"
+    "}\n";
+  writeBytes( committedPath, journalJson );
+
+  REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
+
+  const bool recovered = sicnu::geo::atomic_fs::recoverDatasetGroup( mainPath );
+  REQUIRE( recovered );
+  CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( committedPath ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( mainBackup ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( sidecarBackup ) );
+
+  // New data preserved
+  CHECK( readBytes( mainPath ) == "NEW_MAIN_DATA" );
+  CHECK( readBytes( sidecarPath ) == "NEW_SIDECAR_DATA" );
+}
+
+TEST_CASE( "atomic_fs journal: publishStagedGroup auto-recovers pending journal before publishing",
+           "[atomic_fs][journal][recovery][durability]" )
+{
+  ScratchDir dir;
+  const std::string mainPath = dir.childUtf8( "scene.shp" );
+  const std::string sidecarPath = dir.childUtf8( "scene.shx" );
+  const std::string mainBackup = mainPath + ".bak";
+  const std::string journalPath = mainPath + ".publish-journal";
+
+  writeBytes( mainPath, "ORIGINAL_MAIN" );
+  writeBytes( sidecarPath, "ORIGINAL_SIDECAR" );
+  writeBytes( mainBackup, "ORIGINAL_MAIN" );
+
+  // Plant uncommitted journal from prior crashed attempt
+  const std::string journalJson =
+    "{\n"
+    "  \"version\": 1,\n"
+    "  \"main\": \"" + mainPath + "\",\n"
+    "  \"members\": [\n"
+    "    { \"staged\": \"temp.shp\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
+    "  ]\n"
+    "}\n";
+  writeBytes( journalPath, journalJson );
+  REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
+
+  // Prepare staged files for new publication
+  const std::string stagedMain = dir.childUtf8( "staged_scene.shp" );
+  const std::string stagedSidecar = dir.childUtf8( "staged_scene.shx" );
+  writeBytes( stagedMain, "FINAL_MAIN" );
+  writeBytes( stagedSidecar, "FINAL_SIDECAR" );
+
+  // Publishing will trigger auto-recovery first, then publish the new files
+  REQUIRE_NOTHROW( sicnu::geo::atomic_fs::publishStagedGroup( stagedMain, mainPath ) );
+
+  CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
+  CHECK( readBytes( mainPath ) == "FINAL_MAIN" );
+  CHECK( readBytes( sidecarPath ) == "FINAL_SIDECAR" );
+}
+
+
+TEST_CASE( "atomic_fs journal: recoverDirectoryJournals recovers multiple crashed datasets",
+           "[atomic_fs][journal][recovery][directory]" )
+{
+  ScratchDir dir;
+  const std::string ds1 = dir.childUtf8( "ds1.tif" );
+  const std::string ds1Bak = ds1 + ".bak";
+  const std::string j1 = ds1 + ".publish-journal";
+  writeBytes( ds1, "TORN_1" );
+  writeBytes( ds1Bak, "ORIGINAL_1" );
+  writeBytes( j1, "{\"version\":1,\"main\":\"" + ds1 + "\",\"members\":[{\"target\":\"" + ds1 + "\",\"backup\":\"" + ds1Bak + "\",\"had_target\":true}]}" );
+
+  const std::string ds2 = dir.childUtf8( "ds2.tif" );
+  const std::string ds2Bak = ds2 + ".bak";
+  const std::string j2 = ds2 + ".publish-journal.committed";
+  writeBytes( ds2, "COMMITTED_2" );
+  writeBytes( ds2Bak, "LEFTOVER_2" );
+  writeBytes( j2, "{\"version\":1,\"main\":\"" + ds2 + "\",\"members\":[{\"target\":\"" + ds2 + "\",\"backup\":\"" + ds2Bak + "\",\"had_target\":true}]}" );
+
+  const std::size_t recoveredCount = sicnu::geo::atomic_fs::recoverDirectoryJournals( dir.childUtf8( "" ) );
+  CHECK( recoveredCount == 2 );
+  CHECK( readBytes( ds1 ) == "ORIGINAL_1" );
+  CHECK( readBytes( ds2 ) == "COMMITTED_2" );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ds1Bak ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ds2Bak ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( j1 ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( j2 ) );
+}
+
+TEST_CASE( "atomic_fs journal: corrupt and malformed journal files handled defensively without throwing",
+           "[atomic_fs][journal][recovery][corrupt]" )
+{
+  ScratchDir dir;
+
+  SECTION( "root is JSON array rather than object" )
+  {
+    const std::string ds = dir.childUtf8( "corrupt_root_arr.tif" );
+    const std::string data = "ORIGINAL_DATA_ROOT_ARRAY";
+    writeBytes( ds, data );
+    writeBytes( ds + ".publish-journal", "[1, 2, 3, {\"members\": []}]" );
+
+    REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_NOTHROW( sicnu::geo::atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBytes( ds ) == data );
+    CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "members is non-array type" )
+  {
+    const std::string ds = dir.childUtf8( "corrupt_members_type.tif" );
+    const std::string data = "ORIGINAL_DATA_MEMBERS_TYPE";
+    writeBytes( ds, data );
+    writeBytes( ds + ".publish-journal", "{\"version\": 1, \"members\": \"not_an_array\"}" );
+
+    REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_NOTHROW( sicnu::geo::atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBytes( ds ) == data );
+    CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "members array contains non-object elements" )
+  {
+    const std::string ds = dir.childUtf8( "corrupt_members_elements.tif" );
+    const std::string data = "ORIGINAL_DATA_MEMBERS_ELEMENTS";
+    writeBytes( ds, data );
+    writeBytes( ds + ".publish-journal", "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [null, 123, \"str\", {}]}" );
+
+    REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_NOTHROW( sicnu::geo::atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBytes( ds ) == data );
+    CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "member properties have invalid primitive types" )
+  {
+    const std::string ds = dir.childUtf8( "corrupt_field_types.tif" );
+    const std::string data = "ORIGINAL_DATA_FIELD_TYPES";
+    writeBytes( ds, data );
+    writeBytes( ds + ".publish-journal", "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [{\"target\": 9999, \"had_target\": \"true_str\"}]}" );
+
+    REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_NOTHROW( sicnu::geo::atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBytes( ds ) == data );
+    CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "truncated or invalid JSON syntax" )
+  {
+    const std::string ds = dir.childUtf8( "corrupt_syntax.tif" );
+    const std::string data = "ORIGINAL_DATA_SYNTAX";
+    writeBytes( ds, data );
+    writeBytes( ds + ".publish-journal", "{\"version\": 1, \"members\": [" );
+
+    REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_NOTHROW( sicnu::geo::atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBytes( ds ) == data );
+    CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ds + ".publish-journal" ) );
+  }
+}

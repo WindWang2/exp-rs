@@ -687,6 +687,85 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::createDraftVersion(
     return Result::success( record );
 }
 
+sicnu::data::Result<void> DatasetStore::addSourceAssetsToDraft(
+    const DatasetVersionId &versionId, const QVector<SourceAssetRef> &assets )
+{
+    using Result = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
+                                           QStringLiteral( "store is not open" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
+                                           QStringLiteral( "store is read-only" ) ) );
+
+    std::optional<DatasetVersionRecord> current;
+    {
+        Stmt stmt( m_impl->db, QStringLiteral(
+            "SELECT " DATASET_VERSION_COLS " FROM dataset_versions WHERE id=?" ) );
+        if ( !stmt )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               stmt.error( m_impl->db ) ) );
+        stmt.bind( 1, versionId.toString() );
+        if ( stmt.stepRow() )
+            current = recordFromRow( stmt );
+    }
+    if ( !current )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                           QStringLiteral( "version %1 does not exist" )
+                                               .arg( versionId.toString() ) ) );
+    if ( !current->isMutable() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.not_draft" ),
+                                           QStringLiteral( "only draft versions can be modified" ) ) );
+
+    const QJsonObject stored = textToJson( current->manifestJson() );
+    const auto parsed = DatasetManifest::fromJson( stored );
+    if ( !parsed )
+        return Result::failure( parsed.diagnostics() );
+
+    DatasetManifest manifest = parsed.value();
+    bool changed = false;
+
+    for ( const auto &asset : assets )
+    {
+        if ( asset.assetId.isEmpty() )
+            continue;
+        bool exists = false;
+        for ( const auto &existing : manifest.sourceAssets() )
+        {
+            if ( existing.assetId == asset.assetId &&
+                 existing.revision == asset.revision &&
+                 existing.role == asset.role )
+            {
+                exists = true;
+                break;
+            }
+        }
+        if ( !exists )
+        {
+            manifest.sourceAssets().append( asset );
+            changed = true;
+        }
+    }
+
+    if ( changed )
+    {
+        const QString updatedJson = jsonToText( manifest.toJson() );
+        Stmt update( m_impl->db, QStringLiteral(
+            "UPDATE dataset_versions SET manifest_json=?, staged=0 WHERE id=? AND status='draft'" ) );
+        if ( !update )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               update.error( m_impl->db ) ) );
+        update.bind( 1, updatedJson );
+        update.bind( 2, versionId.toString() );
+        if ( !update.step() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               update.error( m_impl->db ) ) );
+    }
+
+    return Result::success();
+}
+
 sicnu::data::Result<DatasetVersionRecord> DatasetStore::stageVersion(
     const DatasetVersionId &versionId )
 {

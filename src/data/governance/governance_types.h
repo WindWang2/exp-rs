@@ -286,7 +286,11 @@ struct FacetCount
 
 struct WorkspacePage
 {
-    qint64 total = 0;
+    union
+    {
+        qint64 total = 0;
+        qint64 totalCount;
+    };
     QVector<QVariantMap> items;   ///< row-shaped maps (bounded per page)
     QVector<FacetCount> facets;   ///< populated when query asks for one field
     QString facetField;
@@ -339,6 +343,12 @@ struct GovernanceDiagnostic
     QString message;
     QJsonObject details;
     QString repairSuggestion;     ///< human + agent actionable
+    bool ok = true;
+
+    bool isOk() const noexcept
+    {
+        return ok && severity != DiagnosticSeverity::Error && code != QLatin1String( "store.integrity_failed" );
+    }
 };
 
 /// Counted summary for validator outputs.

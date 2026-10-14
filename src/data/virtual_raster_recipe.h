@@ -81,6 +81,10 @@ struct VirtualRasterRecipe
 
   QJsonObject toJson() const;
 
+  /// Computes the 64-character SHA-256 hex digest of the RFC 8785 canonical
+  /// JSON representation of this recipe (#1450, ADR 0178).
+  QString contentDigest() const;
+
   /// Parses a recipe from JSON. Strict: rejects empty inputs, band numbers
   /// below 1, invalid AssetId strings, and unknown enum spellings with a
   /// `recipe.invalid` diagnostic.

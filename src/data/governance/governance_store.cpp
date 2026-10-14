@@ -99,11 +99,13 @@ class Stmt
 {
   public:
     Stmt( sqlite3 *db, const QString &sql )
+        : m_db( db )
     {
         if ( sqlite3_prepare_v2( db, sql.toUtf8().constData(), -1, &m_stmt, nullptr ) != SQLITE_OK )
             m_stmt = nullptr;
     }
     explicit Stmt( sqlite3 *db, const char *sql )
+        : m_db( db )
     {
         if ( sqlite3_prepare_v2( db, sql, -1, &m_stmt, nullptr ) != SQLITE_OK )
             m_stmt = nullptr;
@@ -113,9 +115,31 @@ class Stmt
     Stmt &operator=( const Stmt & ) = delete;
     explicit operator bool() const { return m_stmt != nullptr; }
     sqlite3_stmt *get() const { return m_stmt; }
-    bool step() const { return sqlite3_step( m_stmt ) == SQLITE_DONE; }
-    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
-    void reset() { sqlite3_reset( m_stmt ); sqlite3_clear_bindings( m_stmt ); }
+    bool step() const
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_DONE;
+    }
+    bool stepRow() const
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_ROW;
+    }
+    bool stepFailed() const
+    {
+        return m_lastRc != SQLITE_ROW && m_lastRc != SQLITE_DONE && m_lastRc != SQLITE_OK;
+    }
+    int lastRc() const { return m_lastRc; }
+    QString error() const
+    {
+        return m_db ? QString::fromUtf8( sqlite3_errmsg( m_db ) ) : QString();
+    }
+    void reset()
+    {
+        sqlite3_reset( m_stmt );
+        sqlite3_clear_bindings( m_stmt );
+        m_lastRc = SQLITE_OK;
+    }
     void bind( int idx, const QString &v ) const
     {
         sqlite3_bind_text( m_stmt, idx, v.toUtf8().constData(), -1, SQLITE_TRANSIENT );
@@ -129,7 +153,9 @@ class Stmt
     qint64 i64( int col ) const { return sqlite3_column_int64( m_stmt, col ); }
 
   private:
+    sqlite3 *m_db = nullptr;
     sqlite3_stmt *m_stmt = nullptr;
+    mutable int m_lastRc = SQLITE_OK;
 };
 
 // Non-owning statement view over the Impl prepare-once cache: same read API
@@ -137,9 +163,29 @@ class Stmt
 class StmtView
 {
   public:
-    explicit StmtView( sqlite3_stmt *stmt ) : m_stmt( stmt ) {}
+    explicit StmtView( sqlite3_stmt *stmt, sqlite3 *db = nullptr )
+        : m_stmt( stmt ), m_db( db ) {}
     explicit operator bool() const { return m_stmt != nullptr; }
-    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
+    bool stepRow() const
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_ROW;
+    }
+    bool stepFailed() const
+    {
+        return m_lastRc != SQLITE_ROW && m_lastRc != SQLITE_DONE && m_lastRc != SQLITE_OK;
+    }
+    int lastRc() const { return m_lastRc; }
+    QString error() const
+    {
+        return m_db ? QString::fromUtf8( sqlite3_errmsg( m_db ) ) : QString();
+    }
+    void reset()
+    {
+        sqlite3_reset( m_stmt );
+        sqlite3_clear_bindings( m_stmt );
+        m_lastRc = SQLITE_OK;
+    }
     void bind( int idx, const QString &v ) const
     {
         sqlite3_bind_text( m_stmt, idx, v.toUtf8().constData(), -1, SQLITE_TRANSIENT );
@@ -153,6 +199,8 @@ class StmtView
 
   private:
     sqlite3_stmt *m_stmt = nullptr;
+    sqlite3 *m_db = nullptr;
+    mutable int m_lastRc = SQLITE_OK;
 };
 
 QString likeContains( const QString &raw )
@@ -187,6 +235,7 @@ struct GovernanceStore::Impl
     mutable std::mutex mutex;
     QString schemaVersion;
     bool readOnly = false;
+    mutable bool stepFailed = false;
     // Text of the last failing sqlite call (empty when nothing failed); lets
     // writers build actionable diagnostics instead of opaque failures.
     mutable QString lastError;
@@ -438,6 +487,17 @@ struct GovernanceStore::Impl
             "  entity_id TEXT NOT NULL DEFAULT '',"
             "  detail_json TEXT NOT NULL DEFAULT '');"
             "CREATE INDEX IF NOT EXISTS idx_gov_audit_entity ON audit_log(entity_kind, entity_id);"
+            "CREATE TABLE IF NOT EXISTS gov_audit("
+            "  seq INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  ts_ms INTEGER NOT NULL,"
+            "  actor TEXT NOT NULL DEFAULT '',"
+            "  action TEXT NOT NULL DEFAULT '',"
+            "  entity_kind TEXT NOT NULL DEFAULT '',"
+            "  entity_id TEXT NOT NULL DEFAULT '',"
+            "  detail_json TEXT NOT NULL DEFAULT '');"
+            "CREATE TRIGGER IF NOT EXISTS trg_audit_log_gov_audit AFTER INSERT ON audit_log "
+            "BEGIN INSERT INTO gov_audit(seq, ts_ms, actor, action, entity_kind, entity_id, detail_json) "
+            "VALUES(new.seq, new.ts_ms, new.actor, new.action, new.entity_kind, new.entity_id, new.detail_json); END;"
             "INSERT OR REPLACE INTO gov_meta(key,value) VALUES('schema_version','"
             SICNU_GOVERNANCE_SCHEMA_VERSION "');"
             "COMMIT;";
@@ -471,19 +531,23 @@ struct GovernanceStore::Impl
         a.modality = s.text( 20 );
         a.availability = s.text( 21 );
         {
-            StmtView al( cached( "SELECT path FROM aliases WHERE asset_id=?" ) );
+            StmtView al( cached( "SELECT path FROM aliases WHERE asset_id=?" ), db );
             if ( al )
             {
                 al.bind( 1, a.assetId );
                 while ( al.stepRow() )
                     a.aliases.append( al.text( 0 ) );
+                if ( al.stepFailed() )
+                    stepFailed = true;
             }
-            StmtView tg( cached( "SELECT tag FROM tags WHERE entity_kind='asset' AND entity_id=?" ) );
+            StmtView tg( cached( "SELECT tag FROM tags WHERE entity_kind='asset' AND entity_id=?" ), db );
             if ( tg )
             {
                 tg.bind( 1, a.assetId );
                 while ( tg.stepRow() )
                     a.tags.append( tg.text( 0 ) );
+                if ( tg.stepFailed() )
+                    stepFailed = true;
             }
         }
         a.createdAtMs = s.i64( 22 );
@@ -502,19 +566,23 @@ struct GovernanceStore::Impl
         d.header.createdAtMs = s.i64( 6 );
         d.header.updatedAtMs = s.i64( 7 );
         {
-            StmtView m( cached( "SELECT asset_id FROM dataset_members WHERE dataset_id=? ORDER BY position" ) );
+            StmtView m( cached( "SELECT asset_id FROM dataset_members WHERE dataset_id=? ORDER BY position" ), db );
             if ( m )
             {
                 m.bind( 1, d.id.toString() );
                 while ( m.stepRow() )
                     d.memberAssetIds.append( m.text( 0 ) );
+                if ( m.stepFailed() )
+                    stepFailed = true;
             }
-            StmtView tg( cached( "SELECT tag FROM tags WHERE entity_kind='dataset' AND entity_id=?" ) );
+            StmtView tg( cached( "SELECT tag FROM tags WHERE entity_kind='dataset' AND entity_id=?" ), db );
             if ( tg )
             {
                 tg.bind( 1, d.id.toString() );
                 while ( tg.stepRow() )
                     d.header.tags.append( tg.text( 0 ) );
+                if ( tg.stepFailed() )
+                    stepFailed = true;
             }
         }
         return d;
@@ -737,6 +805,11 @@ bool GovernanceStore::isReadOnly() const
 QString GovernanceStore::schemaVersion() const
 {
     return m_impl ? m_impl->schemaVersion : QString();
+}
+
+bool GovernanceStore::stepFailed() const
+{
+    return m_impl ? m_impl->stepFailed : false;
 }
 
 bool GovernanceStore::checkpointForBackup()
@@ -1012,6 +1085,15 @@ Result<void> GovernanceStore::removeAsset( const QString &assetId, RemoveAssetPo
                                         " references or pass the cascade policy explicitly" )
                             .arg( assetId, QLatin1String( kinds[i] ) ) ) );
                 }
+                if ( guard.stepFailed() )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    if ( m_impl )
+                        m_impl->stepFailed = true;
+                    return Result<void>::failure( govDiag(
+                        QStringLiteral( "store.guard_failed" ),
+                        QStringLiteral( "reference guard step failed: %1" ).arg( guard.error() ) ) );
+                }
             }
         }
         Stmt a( m_impl->db, "DELETE FROM assets WHERE asset_id=?" );
@@ -1136,6 +1218,7 @@ QVector<GovernedAsset> GovernanceStore::assetsByFingerprint( const QString &dige
     if ( !m_impl || digest.isEmpty() )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false;
     Stmt s( m_impl->db,
             "SELECT " GOV_ASSET_COLS " FROM assets WHERE content_fingerprint=? LIMIT ?" );
     if ( !s )
@@ -1144,6 +1227,11 @@ QVector<GovernedAsset> GovernanceStore::assetsByFingerprint( const QString &dige
     s.bind( 2, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readAsset( s ) );
+    if ( s.stepFailed() )
+    {
+        m_impl->stepFailed = true;
+        qWarning( "governance_store.fingerprint_failed: %s", qUtf8Printable( s.error() ) );
+    }
     return out;
 }
 
@@ -1153,12 +1241,20 @@ QVector<GovernedAsset> GovernanceStore::allAssets( qint64 limit ) const
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false;
     if ( limit <= 0 )
     {
         Stmt s( m_impl->db, "SELECT " GOV_ASSET_COLS " FROM assets ORDER BY updated_ms DESC, asset_id" );
         if ( s )
+        {
             while ( s.stepRow() )
                 out.append( m_impl->readAsset( s ) );
+            if ( s.stepFailed() )
+            {
+                m_impl->stepFailed = true;
+                qWarning( "governance_store.all_assets_failed: %s", qUtf8Printable( s.error() ) );
+            }
+        }
         return out;
     }
     Stmt s( m_impl->db, "SELECT " GOV_ASSET_COLS " FROM assets ORDER BY updated_ms DESC, asset_id LIMIT ?" );
@@ -1167,6 +1263,11 @@ QVector<GovernedAsset> GovernanceStore::allAssets( qint64 limit ) const
     s.bind( 1, limit );
     while ( s.stepRow() )
         out.append( m_impl->readAsset( s ) );
+    if ( s.stepFailed() )
+    {
+        m_impl->stepFailed = true;
+        qWarning( "governance_store.all_assets_failed: %s", qUtf8Printable( s.error() ) );
+    }
     return out;
 }
 
@@ -2871,6 +2972,11 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             }
             out.items.append( row );
         }
+        if ( s.stepFailed() )
+        {
+            m_impl->stepFailed = true;
+            qWarning( "governance_store.query_failed: %s", qUtf8Printable( s.error() ) );
+        }
     }
 
     if ( static_cast<qint64>( out.items.size() ) > clampedLimit )
@@ -2910,13 +3016,17 @@ Result<void> GovernanceStore::appendAudit( const QString &actor, const QString &
     s.bind( 6, jsonToText( detail ) );
     if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
         return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
-    const bool ok = s.step();
+    if ( !s.step() )
+    {
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( govDiag( QStringLiteral( "store.audit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "audit append failed" )
+                                                                           : m_impl->lastError ) );
+    }
     if ( !m_impl->commit() )
         return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
                                                m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
                                                                            : m_impl->lastError ) );
-    if ( !ok )
-        return Result<void>::failure( govDiag( QStringLiteral( "store.audit" ), QStringLiteral( "audit append failed" ) ) );
     return Result<void>::success();
 }
 
@@ -2942,6 +3052,11 @@ QVector<GovernanceStore::AuditEntry> GovernanceStore::auditTail( qint64 limit ) 
         e.entityId = s.text( 5 );
         e.detail = textToJson( s.text( 6 ) );
         out.append( e );
+    }
+    if ( s.stepFailed() )
+    {
+        m_impl->stepFailed = true;
+        qWarning( "governance_store.audit_tail_failed: %s", qUtf8Printable( s.error() ) );
     }
     return out;
 }
@@ -2991,6 +3106,7 @@ GovernanceDiagnostic GovernanceStore::integrityCheck() const
         d.code = QStringLiteral( "store.closed" );
         d.severity = DiagnosticSeverity::Error;
         d.message = QStringLiteral( "governance store not open" );
+        d.ok = false;
         return d;
     }
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -3000,6 +3116,7 @@ GovernanceDiagnostic GovernanceStore::integrityCheck() const
         d.code = QStringLiteral( "store.integrity_failed" );
         d.severity = DiagnosticSeverity::Error;
         d.message = QStringLiteral( "quick_check could not run" );
+        d.ok = false;
         return d;
     }
     if ( !s.stepRow() || s.text( 0 ) != QLatin1String( "ok" ) )
@@ -3008,6 +3125,7 @@ GovernanceDiagnostic GovernanceStore::integrityCheck() const
         d.severity = DiagnosticSeverity::Error;
         d.message = s.text( 0 ).isEmpty() ? QStringLiteral( "quick_check reported corruption" ) : s.text( 0 );
         d.repairSuggestion = QStringLiteral( "Rebuild the governance index from the project document (project:rebuild-index)." );
+        d.ok = false;
         return d;
     }
     return d;

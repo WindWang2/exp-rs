@@ -167,7 +167,11 @@ function(sicnu_add_io_test NAME)
   set_target_properties(${NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   )
-  sicnu_discover_tests(${NAME})
+  if("${NAME}" STREQUAL "test_io_fabric_catalog")
+    sicnu_discover_tests(${NAME} TEST_PREFIX "test_fabric_catalog::test_io_fabric_catalog::")
+  else()
+    sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
+  endif()
 endfunction()
 
 # Isolation runtime 5.0: light SDK test executables. Links only Catch2 +
@@ -510,7 +514,7 @@ endif()
 # 7.0 remote source identity & validators (shared HTTP fixture).
 # ADR 0146: exit 77 = skipped (matches the ladder's verdict mapping).
 sicnu_add_io_test(test_io_remote_validator SKIP_RETURN_CODE 77)
-target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp)
+target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp support/http_stac_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_remote_validator PRIVATE ws2_32)
 endif()
@@ -620,6 +624,7 @@ if(WIN32)
   # on a transitive ws2_32 in the tracks that built them before).
   target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
 endif()
+add_custom_target(test_fabric_catalog DEPENDS test_io_fabric_catalog)
 sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
@@ -9619,6 +9624,39 @@ target_compile_definitions(test_e2e_open_issues PRIVATE
 )
 set_target_properties(test_e2e_open_issues PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_e2e_open_issues)
+
+# ---------------------------------------------------------------------------
+# R12-B E2E Durability, Security & Provenance test suite
+# ---------------------------------------------------------------------------
+add_executable(test_r12b_e2e_durability
+  test_r12b_e2e_durability.cpp
+)
+target_link_libraries(test_r12b_e2e_durability PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Sicnu::Geospatial
+  Sicnu::dataset
+  Sicnu::experiment
+  sicnu_data
+  sicnu_processing
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+sicnu_link_jsoncpp(test_r12b_e2e_durability)
+target_include_directories(test_r12b_e2e_durability PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_SOURCE_DIR}/tests
+)
+target_compile_definitions(test_r12b_e2e_durability PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r12b_e2e_durability PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r12b_e2e_durability TEST_PREFIX "test_r12b_e2e_durability::")
+
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites

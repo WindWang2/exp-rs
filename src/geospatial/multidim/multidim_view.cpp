@@ -9,6 +9,7 @@
 #include "geospatial/multidim/multidim_view.h"
 
 #include "geospatial/util/time_normalization.h"
+#include "geospatial/util/resource_uri.h"
 
 #include "geospatial/gdal_guard.h"
 
@@ -104,7 +105,8 @@ MultidimView MultidimView::open( const std::string &path )
 
   ensureGdalRegistered();
   QuietCplErrors quiet;
-  GDALDatasetH handle = GDALOpenEx( path.c_str(), GDAL_OF_READONLY | GDAL_OF_MULTIDIM_RASTER, nullptr, nullptr, nullptr );
+  const std::string gdalPath = ResourceUri::toGdalPath( path );
+  GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_MULTIDIM_RASTER, nullptr, nullptr, nullptr );
   if ( !handle )
     throw GeoError( ErrorCode::OpenFailed, "Cannot open multidimensional store: " + path );
 

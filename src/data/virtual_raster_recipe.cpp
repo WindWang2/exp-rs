@@ -1,6 +1,9 @@
 #include "virtual_raster_recipe.h"
 
+#include <QCryptographicHash>
 #include <QJsonArray>
+
+#include "execution_fingerprint.h"
 
 namespace sicnu::data
 {
@@ -145,6 +148,13 @@ QJsonObject VirtualRasterRecipe::toJson() const
   json.insert( kNoDataPolicy, noDataPolicyToString( noDataPolicy ) );
   json.insert( kNoDataFillValue, noDataFillValue );
   return json;
+}
+
+QString VirtualRasterRecipe::contentDigest() const
+{
+  const QByteArray canonical = canonicalizeJsonRfc8785( toJson() );
+  return QString::fromUtf8(
+    QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 ).toHex() );
 }
 
 Result<VirtualRasterRecipe> VirtualRasterRecipe::fromJson( const QJsonObject &json )

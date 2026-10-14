@@ -1,193 +1,130 @@
-# E2E Test Infra: RS Studio (exp-rs)
+# E2E Test Infrastructure: Direction B Geodata Durability, Security & Provenance (R12-B)
 
-## Test Philosophy
-- Opaque-box & Unit/Integration UI Verification.
-- Offscreen Headless Qt 6 / Catch2 test execution (`QT_QPA_PLATFORM=offscreen`, `LD_LIBRARY_PATH=/usr/lib`).
-- CTest itself pins that environment (see Environment governance below); developers should not need a hand-rolled `LD_PRELOAD` / `PYTHONHOME` soup.
-- Systematic Verification Tiers:
-  - Tier 1: Feature Coverage (Widget instantiation, layout initialization, default parameter validity).
-  - Tier 2: Boundary & Corner Cases (Invalid input range handling, empty input file checks, reset behavior, High-DPI minimumSizeHint).
-  - Tier 3: Cross-Feature Combinations (Dynamic UI updates on combo change, signal/slot propagation, layer switching).
-  - Tier 4: Real-World Scenarios (`buildParams()` JSON payload conformance to `RSOperator` schemas and execution via `GuiJobAdapter`).
-  - Tier 5: Adversarial Coverage Hardening (Stress testing edge cases and untested code paths).
+## 1. Test Philosophy
+The R12-B test suite provides an **opaque-box, requirement-driven end-to-end verification harness** for geospatial data infrastructure, crash consistency, network security perimeters, SQLite transaction durability, and scientific evidence provenance in `exp-rs`.
 
-## Feature Inventory
-| # | Feature | Source | Tier 1 | Tier 2 | Tier 3 | Tier 4 |
-|---|---------|--------|:------:|:------:|:------:|:------:|
-| 1 | Dialog Base & Layout (`RasterProcessingDialogBase`) | R1, M1 | 5 | 5 | ✓ | ✓ |
-| 2 | Atmospheric Correction Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 3 | Radiometric Calibration Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 4 | Contrast Stretch Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 5 | Spatial Filter Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 6 | Speckle Filter Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 7 | Spectral Index Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 8 | Spectral Library Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 9 | Band Ratio Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 10 | Band Math Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 11 | Extract Band Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 12 | QA Mask Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 13 | Orthorectification Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 14 | Mosaic Dialog & Mosaic Panel | R1/R2/R3, M2/M3 | 5 | 5 | ✓ | ✓ |
-| 15 | Fusion Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 16 | Change Detection Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 17 | PCA Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 18 | Post-Classification Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 19 | Terrain Analysis Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 20 | Apply Mask Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 21 | Batch Processing Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 22 | Product Import Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 23 | Sicnu Algorithm Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 24 | CRS Preset Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 25 | Comparison Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 26 | Help Viewer Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 27 | Preferences Dialog | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 28 | Classification & Post-Process Dialogs | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
-| 29 | Docking Panels & Empty States | R3, M3 | 5 | 5 | ✓ | ✓ |
-| 30 | UI Sanity & Layout Standards (QGroupBox/ButtonBox/Hints) | R1/R2, M4 | 10 | 10 | ✓ | ✓ |
-| 31 | Workspace Browser Wiring (governance dock contract) | UX4-A/D, M1 | ✓ | ✓ | ✓ | ✓ |
-| 32 | Band Tool Operators (rs:band_ratio / extract_bands / contrast_stretch) | UX4-C, M1 | ✓ | ✓ | ✓ | ✓ |
-| 33 | Schema Form Builder v2 (validation, x-ui-type editors) | UX4-B, M1 | ✓ | ✓ | ✓ | ✓ |
-| 34 | RsResultSummary (shared structured result view) | UX4-E, M1 | ✓ | ✓ | ✓ | ✓ |
-| 35 | Shortcut Conflicts (shell action host) | UX4-G, M1 | ✓ | ✓ | ✓ | ✓ |
+Core testing tenets:
+- **Opaque-Box & Requirement-Driven**: Tests assert externally observable contracts, file artifacts, database states, and cryptographic digests rather than inspecting private implementation details.
+- **Fail-Closed Security Perimeter**: Verify that SSRF filters, IPv6 address bounds, and offline mode prevent unauthorized or unexpected outbound network egress under all conditions.
+- **Crash Consistency & Atomic Durability**: Verify that multi-file datasets (rasters, sidecars, PAM files) publish transactionally without leaving partial or corrupt states on disk during crashes or exceptions.
+- **SQLite Transaction Invariants**: Validate that database operations (assets, lineage, artifacts, audit logs) fail fast on errors rather than silently swallowing corrupted pages or aborted statements.
+- **Cryptographic Authority & Determinism**: Enforce RFC 8785 canonical JSON serialization with single-standard SHA-256 digests across all recipe and manifest identity representations.
+- **Bounded Resource Disciplines**: Ensure patch tiling and hash computations operate within strictly bounded memory limits, eliminating OOM exceptions on multi-GB datasets.
 
-## Test Architecture
-- Test Runner: CTest & Catch2 test executables.
-- Invocation:
-  ```bash
-  cmake --build build -j$(nproc)
-  QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)
-  ```
-  CTestCustom.cmake (generated into the build tree) already applies these plus `PYTHONHOME` / `PYTHONPATH` and `QT_IM_MODULE=compose`. The exports above are belt-and-suspenders for shells that run test binaries **directly** (bypassing ctest). Do **not** use `LD_PRELOAD=/usr/lib/libxml2.so` as the primary workaround; if you still need it, `PYTHONHOME` must match the CMake-discovered interpreter (CTestCustom sets it).
-- Standard Test Structure:
-  1. Offscreen `QApplication` initialization with `app.processEvents()`.
-  2. Dialog construction and parent hierarchy inspection.
-  3. Layout & Widget Inspection (`QGroupBox`, `QDialogButtonBox`, `RasterLayerCombo`, `BandRoleCombo`).
-  4. Tooltip and placeholder presence assertions.
-  5. UI interaction simulations (combo selection, spinbox changes, file path entry).
-  6. Parameter serialization (`buildParams()`) validation against JSON schema expectations.
-  7. Reset button behavior and dialog destruction.
+---
 
-## Auxiliary Test Lanes (#706)
-Non-Catch2 lanes registered in CTest so they run in the same `ctest` invocation:
-- `python_bindings_smoke` — Python bindings smoke test (`tests/test_python_bindings.py`), guarded on the `_sicnu_operators` target; TIMEOUT 300.
-- `pi_bridge_lifecycle` — pi/ bridge lifecycle regression tests (`node --test pi/test`, #669 respawn/fork-loop family), guarded on node >= 22.18 / >= 23.6 (default type stripping of the `.ts` bridge import); TIMEOUT 120.
+## 2. Systematic Verification Tiers
 
-Lint lane (non-blocking CI step, Tier 1): `scripts/run_clang_tidy_changed.sh <base-ref> <build-dir>` runs the repo's targeted `.clang-tidy` over only the C++ files changed vs `<base-ref>`, using the build tree's `compile_commands.json` (exported by default on GCC/Clang generators).
+The test suite is organized into 4 systematic verification tiers:
 
-## Environment governance (#730)
+### Tier 1: Feature Coverage (>=5 test cases per feature area)
+Isolates and validates the primary behavior and contracts of each feature area across Direction B:
+- **Area 1: IPv6 & Address Parsing / Memory Safety (B02)**: Buffer bounds, RFC 6874 zone ID stripping, loopback/private classifications, `::` handling.
+- **Area 2: SSRF Protection & Offline Zero-Egress Boundaries (B03)**: Alternative IPv4 formats, offline gate enforcement, COG offline validation, redirect guard contracts.
+- **Area 3: Resource URI Resolution & Canonicalization (B04)**: `file://` anchor resolution, case-insensitive localhost, NUL byte rejection, root trailing slashes, GDAL open targets.
+- **Area 4: Catalog & STAC Traversal / Pagination Integrity (B05)**: Parameter validation, pagination metric retention, local STAC traversal containment, cooperative cancellation.
+- **Area 5: Atomic Publishing & Crash Recovery (B06)**: Single-file atomic write, exception rollback, multi-file sidecar ordering, backup file restoration, fsync validation.
+- **Area 6: SQLite Durability & Statement Error Propagation (B07)**: Governance store schema, asset transactions, audit transaction rollback on statement failure, artifact lifecycle.
+- **Area 7: Reproduction Bundle Containment & Streaming Verification (B08)**: Checksum verification, path traversal rejection (POSIX, Windows drive letters, UNC), missing/tampered file detection.
+- **Area 8: Resource Bounded Generation & Provenance Tracking (B09, B10)**: Patch generator config validation, bounded patch window generation, sample promotion provenance with source asset linkage.
+- **Area 9: Canonical Digest & Authority Convergence (B11, B12)**: RFC 8785 canonical JSON sorting and formatting, SHA-256 recipe digests, streaming file digests.
 
-Host layouts that mix a system GIS stack with a conda/miniconda Python (this project's default CMake `find_package(Python)` on many workstations) need an explicit library and interpreter policy. CMake writes it into `build/CTestCustom.cmake` and stamps the same mods onto every CTest test (`cmake/SicnuTestEnv.cmake`).
+### Tier 2: Boundary & Corner Cases (>=5 test cases per feature area)
+Adversarial boundary stress, malformed encodings, and edge conditions:
+- **Area 1 (IPv6)**: Extreme IPv6 representations (7 colons, double-colons at boundaries, 8-group tails, hex boundary overflows, complex interface zone IDs).
+- **Area 2 (SSRF)**: Exotic IPv4 representations (octal with leading zeroes, hex dwords, shorthand 2-part/3-part IPs, overflow integer IPs).
+- **Area 3 (URI)**: Path traversal escapes (`..`, encoded `%2e%2e`, encoded `%2f`), Windows drive letters (`file:///C:/`), UNC paths (`file://server/share/`), `%00` embedded NUL.
+- **Area 4 (Catalog)**: Empty STAC collections, missing next links, zero-item pages, invalid bounding box coordinates, malformed ISO timestamps.
+- **Area 5 (Atomic FS)**: Read-only targets, non-existent parent directories, multi-file group partial publication failures, locked file collisions.
+- **Area 6 (SQLite)**: Corrupted SQLite database files, constraint violations, transaction rollback on injected trigger failure.
+- **Area 7 (Bundle)**: Empty checksums.txt, malformed hash lengths, non-hex characters, zero-byte files, multi-MB payloads.
+- **Area 8 (Patch)**: 1x1 rasters with oversized windows, 0 stride handling, invalid seeds, border policy edge conditions.
+- **Area 9 (Digest)**: Empty objects, deeply nested JSON, floating point extreme numbers (-0.0, NaN, exponential notation).
 
-| Variable | Policy | Why |
-|---|---|---|
-| `LD_LIBRARY_PATH` | **Prepend `/usr/lib`** (do not leave conda first) | Test binaries' RUNPATH often starts with `$CONDA_PREFIX/lib`. That conda `libxml2` has no `xmlNanoHTTPCleanup`, so `/usr/lib/libspatialite.so.8` dies at load (`symbol lookup error`). `LD_PRELOAD=/usr/lib/libxml2.so` was the old hammer; `/usr/lib` first is the actual policy. Conda `libpython` still resolves via the binary RUNPATH. |
-| `PYTHONHOME` | **Set to `sys.base_prefix` of `Python_EXECUTABLE`** | Embedded `Py_Initialize()` in Catch binaries uses `argv[0]` (the test executable), not `python3`. A stale `PYTHONHOME=/usr` (system 3.14 vs conda 3.13) or a prefix computed from the test binary yields `Fatal Python error: No module named 'encodings'` — including under `LD_PRELOAD`. |
-| `PYTHONPATH` | **Prepend CMake `Python_STDLIB` / `STDARCH` / `SITELIB`** | Extra guarantee that `encodings` and site-packages of the linked interpreter are importable. |
-| `SICNU_PYTHON_EXECUTABLE` / `PYTHONEXECUTABLE` | **Set to `Python_EXECUTABLE`** | `PythonWorkerProcess` otherwise prefers `/usr/bin/python3`. That binary must not run under a conda `PYTHONHOME` (encodings mismatch). Pin the worker to the same interpreter CMake linked. |
-| `QT_QPA_PLATFORM` | **`offscreen`** | Headless Catch UI tests. |
-| `QT_IM_MODULE` | **`compose`** (bundled qtbase plugin) | Desktop `QT_IM_MODULE=fcitx` loads `libfcitx5platforminputcontextplugin.so`. QSS theme stress (`#2132`) passes all assertions, then SIGSEGVs at `__cxa_finalize` during plugin teardown. |
-| `XMODIFIERS` | **`@im=none`** | Stop IM auto-detect from re-selecting fcitx. |
-| `QT_PLUGIN_PATH` | **Set to Qt's `QT_INSTALL_PLUGINS`** | Isolates extra desktop plugin trees. Distro Qt may still ship fcitx next to compose; `QT_IM_MODULE` is what actually avoids loading it. Overriding the whole plugin path to an empty sandbox would break `platforms/offscreen` and imageformats. |
-| `LSAN_OPTIONS` | `detect_leaks=0` | QGIS/Qt/GDAL process-lifetime singletons (#706). |
-| `SICNU_CHECKPOINT_DIR` | **Point at a per-run temp dir in tests / per-session dir in headless sessions** (unset keeps `~/.rs_studio/checkpoints`) | Workflow checkpoints, run-lock files and history live under one directory read per call from this env (workflow_checkpoint.h). Without it, every `run_workflow`/`workflow resume` test writes the developer's real HOME where accumulated lock files from other sessions made the MCP run_workflow lane flaky (#1351 backlog). |
+### Tier 3: Cross-Feature Interactions (Pairwise Combinations)
+Verifies multi-subsystem contracts and data handoffs:
+1. **Interaction 1**: Offline Gate + Remote Source Validator + COG Validator.
+2. **Interaction 2**: ResourceUri Parsing + Path Normalization + GDAL Open Target + Atomic FS.
+3. **Interaction 3**: Catalog Query + Local STAC Traversal + SSRF Gate + Asset Ingestion.
+4. **Interaction 4**: Atomic Multi-File Publish + Governance Store Asset Registration + Audit Logging.
+5. **Interaction 5**: Sample Promotion + Source Asset Tracking + Dataset Store Manifest Commit + Canonical RFC 8785 Digest.
+6. **Interaction 6**: Reproduction Bundle Export + Checksum Generation + Path Traversal Verification + Streaming SHA-256.
 
-Do not skip or disable the embedded-Python tests or the QSS stress test to go green. If a new host still fails:
+### Tier 4: Real-World Application Workflows (>=5 Realistic Scenarios)
+Comprehensive end-to-end operational workflows:
+- **Scenario 1: Offline Air-Gapped Catalog Sync and Local Raster Ingestion**
+  Ingest local STAC metadata and raster imagery in an air-gapped environment (`SICNU_OFFLINE=1`), ensuring 0 egress attempts, valid local URI canonicalization, and indexing into `GovernanceStore`.
+- **Scenario 2: Multi-File Staged Publication with Simulated Interruption & Atomic Recovery**
+  Publish a multi-file raster dataset (GeoTIFF + `.ovr` + `.aux.xml`), simulate an interruption before the main file commit, verify complete cleanup and absence of corrupt residue.
+- **Scenario 3: Portable Reproduction Bundle Package, Transport & Provenance Audit**
+  Package an experiment run, environment metadata, dataset version pin, and checksums into a portable reproduction bundle; verify integrity, ensure zero secret leakage, and validate streaming checksums.
+- **Scenario 4: High-Throughput Raster Patching Pipeline with Bounded Memory**
+  Generate patch windows from a large virtual extent using sliding-window and random strategies, verify memory limits are strictly observed, and promote patches into governed samples with source asset lineage.
+- **Scenario 5: Corrupt Database Fail-Fast Detection & Audit Log Resilience**
+  Execute governance and artifact mutations, simulate statement failures and database corruption, verify typed error propagation, and confirm transaction rollback and audit preservation.
 
-1. `ldd tests/test_python_engine | grep libxml2` — must be `/usr/lib/libxml2.so*`, not `$CONDA_PREFIX/lib`.
-2. `PYTHONHOME` in the ctest environment must equal the prefix of the `libpython` the binary actually loads (`ldd | grep libpython`).
-3. `QT_IM_MODULE` must not be `fcitx` for any `QApplication` test.
+---
 
-## Budget governance (#1361, #1363)
+## 3. Feature Inventory & Coverage Matrix
 
-Performance and size budgets are split into two classes with different rules:
+| # | Feature ID | Feature / Defect Description | Milestone | Tier 1 | Tier 2 | Tier 3 | Tier 4 |
+|---|---|---|---|:---:|:---:|:---:|:---:|
+| 1 | B01-ReviewGate | PR #1481 full regression gate baseline verification & reproducer harness | M1 | ✓ | ✓ | ✓ | ✓ |
+| 2 | B02-IPv6Bounds | Stack buffer overflow fix in parseIpv6() remaining capacity bounds check | M1 | ✓ | ✓ | — | — |
+| 3 | B02-IPv6Zone | IPv6 zone ID (%eth0) stripping & link-local scope handling | M1 | ✓ | ✓ | — | — |
+| 4 | B02-IPv6Unspecified | Unspecified IPv6 address (::) classified as private/loopback | M1 | ✓ | ✓ | ✓ | ✓ |
+| 5 | B03-SSRFRedirect | Wire fetchOptions.redirectGuard in RemoteSourceValidator to check every redirect hop | M1 | ✓ | ✓ | ✓ | — |
+| 6 | B03-AltIPv4 | Numeric loopback & alternative IP encodings (octal, hex, dword) validation | M1 | ✓ | ✓ | — | — |
+| 7 | B03-ZeroEgressRedirect | Enforce offline zero-egress boundary across all redirect hops in http_fetch | M1 | ✓ | ✓ | ✓ | ✓ |
+| 8 | B03-COGOfflineGate | Apply offline::isPrivateHost and offline gate check before GDALOpenEx in cog_validator | M1 | ✓ | ✓ | ✓ | — |
+| 9 | B04-FileUriResolution | Fix ResourceUri::resolveAgainst corrupting file:// URIs as relative | M2 | ✓ | ✓ | ✓ | ✓ |
+| 10 | B04-UriNormalization | Fix case-insensitive localhost check, NUL byte percent-decode rejection, trailing slash root | M2 | ✓ | ✓ | ✓ | — |
+| 11 | B04-CheckedPathGdal | CheckedPath to use uri.gdalOpenTarget() instead of uri.raw | M2 | ✓ | ✓ | ✓ | — |
+| 12 | B04-FormatProfilePath | FormatProfileRegistry to use decoded paths rather than raw/canonical URI | M2 | ✓ | ✓ | — | — |
+| 13 | B04-GdalOpenSites | Apply ResourceUri::toGdalPath to 4 uncovered GDAL open call sites | M2 | ✓ | ✓ | ✓ | ✓ |
+| 14 | B05-CatalogPagination | Preserve clientFilteredOut/unresolvable metrics across pagination; support continuation without rel=next | M2 | ✓ | ✓ | — | — |
+| 15 | B05-StacLocalTraversal | Guard against path traversal in local STAC catalog crawl | M2 | ✓ | ✓ | ✓ | ✓ |
+| 16 | B06-AtomicFsJournal | Persistent journal/commit marker for atomic multi-file publish crash recovery | M3 | ✓ | ✓ | ✓ | ✓ |
+| 17 | B07-SqliteErrorDetect | Add stepFailed() tracking to GovernanceStore & ArtifactStore to prevent mid-scan silent drops | M3 | ✓ | ✓ | — | ✓ |
+| 18 | B07-SqliteRollback | Roll back transaction on statement failure in GovernanceStore::appendAudit | M3 | ✓ | ✓ | ✓ | ✓ |
+| 19 | B08-BundleTraversal | Cross-platform path traversal guard in verifyBundleChecksums (Windows drive letter & UNC) | M4 | ✓ | ✓ | ✓ | ✓ |
+| 20 | B08-BundleChunkedHash | Chunked streaming SHA-256 in verifyBundleChecksums to eliminate OOM on multi-GB rasters | M4 | ✓ | ✓ | ✓ | ✓ |
+| 21 | B09-PatchBoundedMem | Bounded patch generation in PatchGenerator::generate to prevent unbounded RAM explosion | M4 | ✓ | ✓ | — | ✓ |
+| 22 | B10-SamplePromotionProv | Aggregate sample.sourceAssets() into dataset version manifest m_sourceAssets | M4 | ✓ | ✓ | ✓ | ✓ |
+| 23 | B11-CanonicalDigest | Replace SHA-1 + compact JSON with canonical RFC 8785 SHA-256 for recipe digests in DataManager | M4 | ✓ | ✓ | ✓ | ✓ |
+| 24 | B12-SecurityAuditConvergence | Security audit closure, deprecate obsolete un-gated functions, ensure zero P0/P1 remain | M4 | ✓ | ✓ | ✓ | ✓ |
 
-| Class | Where measured | Examples | Raise rule |
-|---|---|---|---|
-| **Product SLO gate** | Release / RelWithDebInfo | `test_workspace_catalog` 100k page contract (500 ms); `test_mlops9_scale` 100k full-scale shape | Raise only with attribution data from the test's own report output |
-| **Non-product lane guard** | Debug / sanitizer / envelope | Debug 1000 ms + sanitizer 1500 ms page gates; `test_mlops9_scale` Debug 30k default; `test_catalog_size` per-operator ceiling + 288 KiB envelope | Same rule; keep the product gate reserved for the SLO lane — never widen it to fit local hardware |
+---
 
-The product gates are calibrated on CI-class runners. Slower workstations
-have a HOST BASELINE offset that is roughly profile-independent (r5
-measurement: the workspace 100k page median is stable at ~0.58-0.61 s on a
-loaded workstation in BOTH Debug (578-594 ms) and Release (595-605 ms)) —
-expect a stable red on the product gate there, read the printed medians as
-attribution, and compare against the CI baseline instead of raising the
-gate. Sanitizer builds do roughly double the per-row SQLite cost; their
-gates account for that.
+## 4. Test Architecture & Runner Governance
 
-### Rules
+### Execution Environment
+- **Test Framework**: Catch2 v3 (`Catch2::Catch2WithMain`).
+- **Binary Target**: `test_r12b_e2e_durability` (located in `${CMAKE_BINARY_DIR}/tests/test_r12b_e2e_durability`).
+- **Registration**: Registered in `tests/CMakeLists.txt` via `sicnu_discover_tests` with prefix `test_r12b_e2e_durability::`.
+- **Headless Isolation**: Run with offscreen Qt platform (`QT_QPA_PLATFORM=offscreen`) and system library path (`LD_LIBRARY_PATH=/usr/lib`).
 
-1. **Never raise a budget to silence a red** — first decide with robust stats
-   (median-of-3 passes in-process) whether the red is jitter, instrumentation
-   cost, environment, or a real regression. Only the last one is a product
-   bug; the other three are budget/process work.
-2. **Per-operator ceiling over envelope ratchet** (`test_catalog_size.cpp`):
-   the whole-catalog envelope (288 KiB) is a secondary guard. The primary
-   guard is the per-operator schema ceiling — a budget change must name the
-   operators that outgrew their budget. Run with
-   `SICNU_CATALOG_SIZE_REPORT=1` to dump the ranked per-operator size table
-   and attach it to the budget-change PR (#1361 acceptance).
-3. **Scale profiles, not timeouts** (`test_mlops9_scale.cpp`): the 100k-run
-   store keeps its true scale on Release/RelWithDebInfo. Debug (+sanitizer)
-   defaults to 30k and asserts the same per-run cost contract, so complexity
-   regressions still fail at reduced cost. Full scale in a Debug tree is a
-   labeled opt-in, not a timeout raise — ALWAYS pair the override with the
-   longrun selector (`-R ..._longrun`); without it the override re-creates
-   the #1363 red against the REGULAR registration's 900 s timeout:
-   ```bash
-   SICNU_MLOPS9_SCALE_RUNS=100000 ctest -R mlops9_scale_longrun -L LONG_RUN
-   ```
-   Sanitizer note: a sanitizer LONG_RUN session at 100k costs ~2x the Debug
-   seed (~2500 s+ measured basis: 12.27 ms/run Debug × 2) and would exceed
-   the longrun registration's 2400 s TIMEOUT. No sanitizer LONG_RUN lane
-   exists; if one is added, raise that TIMEOUT with attribution data.
-4. **Cost-tier labels** (R6, #1392): every discovered ctest case carries one,
-   injected as the default `FAST` by `sicnu_discover_tests` unless a
-   registration overrides it. Vocabulary (upper-case, per the LONG_RUN
-   precedent):
-   - `FAST` — the tier-1 signal lane; a bare/fast `ctest` selection.
-   - `SLOW` — audited minutes-scale clusters (benchmarks/scale suites,
-     TIMEOUT >= 300 s); still required coverage, run by tier 2 and by
-     explicit `ctest -L SLOW` sessions.
-   - `LONG_RUN` — 20 min+ full-scale sessions (`ctest -L LONG_RUN`).
-   Tier-1 CI and the fast local/PR loop select with `ctest -LE "SLOW|LONG_RUN"`;
-   tier 2 (sanitizer) runs everything EXCEPT `LONG_RUN` — the 2400 s
-   full-scale session is a deliberate CI exclusion (review P1, R6): master's
-   unfiltered lanes never completed inside GitHub's 360-min job cap, so the
-   session ran only by queue luck; run it explicitly via `ctest -L LONG_RUN`.
-   Coverage audit scope: the census gate
-   (`.planning/verify-chain-r4/chain_gate_census.sh`, section 5) FAILs any
-   DISCOVERY-FUNNEL case without a label; the ~28 bare `add_test` script
-   lanes (python/pi/i18n/edit/D16) run unlabeled in BOTH tiers by design
-   (label-less tests cannot match `-LE` exclusions) and remain
-   hand-countable. `ctest -N -V` shows all labels.
-   The Catch2 `[tier1]` / `[e2e]` source tags (48 suites) are documentation
-   only and are NOT the selection mechanism: a tag selects through Catch2's
-   own `-` filter inside one binary, so it cannot express a ctest-wide
-   exclusion, and a tag scan is not machine-auditable the way a LABELS
-   property is. #1392 asked for "exclude e2e" — measured on the tier-1 lane,
-   the e2e-tagged cases are seconds-scale (the whole 8210-case suite finishes
-   in 23 min at `-j4`), so excluding them buys nothing and would drop the
-   E2E contract out of the required signal lane. The cost tiers above carry
-   the exclusion instead.
-5. **Shared-host timing evidence**: perf contracts measure multiple passes
-   and assert on the median (see `test_workspace_catalog.cpp`). When quoting
-   timings in a budget discussion, record build type, sanitizer state, and
-   host load — a single Debug number on a loaded host is not attribution.
-6. **Per-process scratch directories** (`tests/support/process_scratch.h`,
-   R6, #1392): tier 1 runs `ctest -j4`, i.e. every case is its own process
-   running alongside three others, so a fixture directory derived from
-   `temp_directory_path()` with a literal name is shared across processes,
-   and each case's opening `remove_all()` deletes its siblings' fixtures
-   mid-write. #1414 hit this in `test_io_canonical_metadata`; the tier-1
-   `-j4` lane surfaced it in `test_io_multidim` (three cases share the
-   `"cube9"` scratch name) and `test_quality_mosaic_operator` (one fixed dir
-   shared by four cases). Use
-   `sicnu_test::processScratchDir( "<prefix>", "<case-name>" )` for any
-   `temp_directory_path()` / `QDir::tempPath()` fixture: it keys the root on
-   the process id and removes it at process exit, so parallel cases cannot
-   touch each other's files and a crashed run leaves nothing behind. Keep the
-   per-case `name` component — a single process running several cases (a
-   plain `./test_x`, or any `-j1` lane) still needs one directory per case.
-   The ~85 remaining fixed-path sites are a burn-down backlog, not a
-   licence to add more.
+### Concurrency & Resource Discipline
+- **Build Parallelism**: Strict `-j2` concurrency cap:
+  `export CMAKE_BUILD_PARALLEL_LEVEL=2; export MAKEFLAGS=-j2`
+- **Exclusive Build Lock**: Serialize builds with the host-wide flock lock:
+  `flock /tmp/exp-rs-build-j2.lock -c 'cmake --build build-r12-b-data --target test_r12b_e2e_durability --parallel 2'`
+- **Test Execution Parallelism**: Strict `-j1` sequential test execution:
+  `export CTEST_PARALLEL_LEVEL=1; ctest --test-dir build-r12-b-data -R test_r12b_e2e_durability -j1 --output-on-failure`
+
+### Command Line Invocations
+
+**Build the Test Executable:**
+```bash
+flock /tmp/exp-rs-build-j2.lock -c 'cmake --build build-r12-b-data --target test_r12b_e2e_durability --parallel 2'
+```
+
+**Run via CTest:**
+```bash
+QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build-r12-b-data -R test_r12b_e2e_durability --output-on-failure -j1
+```
+
+**Run Directly via Binary:**
+```bash
+QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ./build-r12-b-data/tests/test_r12b_e2e_durability
+```

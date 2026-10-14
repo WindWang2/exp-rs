@@ -565,6 +565,9 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     std::chrono::seconds( options.timeoutSeconds > 0 ? options.timeoutSeconds : 0 );
   for ( int hop = 0;; ++hop )
   {
+    if ( offline::enabled() )
+      throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( current ) );
+
     // Policy sees EVERY hop — including the first, so the predicate is the
     // single source of truth (the caller's own first-hop check, when it has
     // one, fires earlier with the same verdict).
