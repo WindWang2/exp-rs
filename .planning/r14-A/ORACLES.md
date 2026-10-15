@@ -24,3 +24,10 @@ cross-track global lock; see BASELINE.md).
   matches the spectral-family convention (rs_spectral_index, band_math); consumers keying on the
   tag follow automatically; consumers comparing raw values to a sentinel must switch to
   std::isnan (tests updated accordingly).
+
+## Audit-3 additions (WP02/WP08)
+
+| ID | Failing input | Old behavior | Fix (commit) | Status |
+|---|---|---|---|---|
+| A7a | OBIA features/label/uncertainty/segment-stats CSV output overwritten mid-run (write error, cancel between rows) | QFile WriteOnly/Truncate on the FINAL path destroyed the previous output; truncated CSV could survive | 50b3f1b5b (writeFileAtomic stage-fsync-publish ×4 sites) | publish/no-residue test written (test_obia_operators.cpp); run pending |
+| A7b | KMeans trained twice on identical data | KMEANS_PP_CENTERS seeds from OpenCV's unseeded thread-local RNG → centers/labels (and the Hungarian class remap) could differ run-to-run | 50b3f1b5b (setRNGSeed(42) before cv::kmeans) | bit-exact twice-run test written (test_classifier_kmeans.cpp); RED-ness is probabilistic pre-fix (RNG), determinism itself is the pinned contract |
