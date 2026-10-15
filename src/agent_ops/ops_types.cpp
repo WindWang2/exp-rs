@@ -41,45 +41,73 @@ std::optional<OpDiagnostic> OpDiagnostic::fromJson(const Json::Value &doc, std::
 {
     if (!requireObject(doc, error, "OpDiagnostic"))
         return std::nullopt;
-    if (doc.get("kind", "").asString() != kOpDiagnosticKind)
+    try
     {
-        if (error)
-            *error = "unknown diagnostic kind";
-        return std::nullopt;
-    }
-    OpDiagnostic d;
-    d.schemaVersion = doc.get("schema_version", kOpsSchemaVersion).asString();
-    d.code = doc.get("code", "").asString();
-    d.rootCauseCode = doc.get("root_cause_code", "").asString();
-    d.confidence = doc.get("confidence", 0.0).asDouble();
-    d.repairable = doc.get("repairable", false).asBool();
-    d.retryable = doc.get("retryable", false).asBool();
-    d.advisoryNext = doc.get("advisory_next", "").asString();
-    d.evidence = doc.get("evidence", Json::objectValue);
-    d.sources = doc.get("sources", Json::objectValue);
-    d.summary = doc.get("summary", "").asString();
-    if (doc.isMember("proposals") && doc["proposals"].isArray())
-    {
-        for (const auto &p : doc["proposals"])
-            if (p.isString())
-                d.proposals.push_back(p.asString());
-    }
-    if (doc.isMember("proposal_details") && doc["proposal_details"].isArray())
-    {
-        for (const auto &p : doc["proposal_details"])
+        if (!doc.isMember("kind") || !doc["kind"].isString() ||
+            doc["kind"].asString() != kOpDiagnosticKind)
         {
-            if (!p.isObject() || !p.isMember("rule_id") || !p["rule_id"].isString())
-                continue;
-            d.proposalDetails.append(p);
+            if (error)
+                *error = "unknown diagnostic kind";
+            return std::nullopt;
         }
+        OpDiagnostic d;
+        d.schemaVersion = (doc.isMember("schema_version") && doc["schema_version"].isString())
+                              ? doc["schema_version"].asString()
+                              : kOpsSchemaVersion;
+        d.code = (doc.isMember("code") && doc["code"].isString()) ? doc["code"].asString() : "";
+        d.rootCauseCode = (doc.isMember("root_cause_code") && doc["root_cause_code"].isString())
+                              ? doc["root_cause_code"].asString()
+                              : "";
+        d.confidence = (doc.isMember("confidence") && doc["confidence"].isNumeric())
+                           ? doc["confidence"].asDouble()
+                           : 0.0;
+        d.repairable = (doc.isMember("repairable") && doc["repairable"].isBool())
+                           ? doc["repairable"].asBool()
+                           : false;
+        d.retryable = (doc.isMember("retryable") && doc["retryable"].isBool())
+                          ? doc["retryable"].asBool()
+                          : false;
+        d.advisoryNext = (doc.isMember("advisory_next") && doc["advisory_next"].isString())
+                             ? doc["advisory_next"].asString()
+                             : "";
+        d.evidence = (doc.isMember("evidence") && doc["evidence"].isObject())
+                         ? doc["evidence"]
+                         : Json::objectValue;
+        d.sources = (doc.isMember("sources") && doc["sources"].isObject())
+                        ? doc["sources"]
+                        : Json::objectValue;
+        d.summary = (doc.isMember("summary") && doc["summary"].isString())
+                        ? doc["summary"].asString()
+                        : "";
+        if (doc.isMember("proposals") && doc["proposals"].isArray())
+        {
+            for (const auto &p : doc["proposals"])
+                if (p.isString())
+                    d.proposals.push_back(p.asString());
+        }
+        if (doc.isMember("proposal_details") && doc["proposal_details"].isArray())
+        {
+            for (const auto &p : doc["proposal_details"])
+            {
+                if (!p.isObject() || !p.isMember("rule_id") || !p["rule_id"].isString())
+                    continue;
+                d.proposalDetails.append(p);
+            }
+        }
+        if (d.code.empty() || d.rootCauseCode.empty())
+        {
+            if (error)
+                *error = "diagnostic requires code and root_cause_code";
+            return std::nullopt;
+        }
+        return d;
     }
-    if (d.code.empty() || d.rootCauseCode.empty())
+    catch (const std::exception &ex)
     {
         if (error)
-            *error = "diagnostic requires code and root_cause_code";
+            *error = std::string("malformed OpDiagnostic: ") + ex.what();
         return std::nullopt;
     }
-    return d;
 }
 
 Json::Value RecoveryDecision::toJson() const
@@ -135,40 +163,54 @@ std::optional<FinalDelivery> FinalDelivery::fromJson(const Json::Value &doc, std
 {
     if (!requireObject(doc, error, "FinalDelivery"))
         return std::nullopt;
-    if (doc.get("kind", "").asString() != kFinalDeliveryKind)
+    try
+    {
+        if (!doc.isMember("kind") || !doc["kind"].isString() ||
+            doc["kind"].asString() != kFinalDeliveryKind)
+        {
+            if (error)
+                *error = "unknown FinalDelivery kind";
+            return std::nullopt;
+        }
+        FinalDelivery d;
+        d.schemaVersion = (doc.isMember("schema_version") && doc["schema_version"].isString())
+                              ? doc["schema_version"].asString()
+                              : kOpsSchemaVersion;
+        d.sessionId = (doc.isMember("session_id") && doc["session_id"].isString())
+                          ? doc["session_id"].asString()
+                          : "";
+        d.goal = (doc.isMember("goal") && doc["goal"].isString()) ? doc["goal"].asString() : "";
+        d.outcome = (doc.isMember("outcome") && doc["outcome"].isString()) ? doc["outcome"].asString() : "";
+        d.stopReason = (doc.isMember("stop_reason") && doc["stop_reason"].isString()) ? doc["stop_reason"].asString() : "";
+        d.plan = (doc.isMember("plan") && doc["plan"].isObject()) ? doc["plan"] : Json::objectValue;
+        d.outputs = (doc.isMember("outputs") && doc["outputs"].isArray()) ? doc["outputs"] : Json::arrayValue;
+        d.verifier = (doc.isMember("verifier") && doc["verifier"].isObject()) ? doc["verifier"] : Json::objectValue;
+        d.warnings = (doc.isMember("warnings") && doc["warnings"].isArray()) ? doc["warnings"] : Json::arrayValue;
+        d.questions = (doc.isMember("questions") && doc["questions"].isArray()) ? doc["questions"] : Json::arrayValue;
+        d.provenance = (doc.isMember("provenance") && doc["provenance"].isObject()) ? doc["provenance"] : Json::objectValue;
+        d.runIds = (doc.isMember("run_ids") && doc["run_ids"].isArray()) ? doc["run_ids"] : Json::arrayValue;
+        d.capsule = (doc.isMember("capsule") && doc["capsule"].isObject()) ? doc["capsule"] : Json::objectValue;
+        d.benchmarkRefs = (doc.isMember("benchmark_refs") && doc["benchmark_refs"].isArray()) ? doc["benchmark_refs"] : Json::arrayValue;
+        d.claims = (doc.isMember("claims") && doc["claims"].isArray()) ? doc["claims"] : Json::arrayValue;
+        d.budgets = (doc.isMember("budgets") && doc["budgets"].isObject()) ? doc["budgets"] : Json::objectValue;
+        d.stages = (doc.isMember("stages") && doc["stages"].isArray()) ? doc["stages"] : Json::arrayValue;
+        d.decisions = (doc.isMember("decisions") && doc["decisions"].isArray()) ? doc["decisions"] : Json::arrayValue;
+        d.traceRef = (doc.isMember("trace_ref") && doc["trace_ref"].isObject()) ? doc["trace_ref"] : Json::objectValue;
+        d.journalReplay = (doc.isMember("journal_replay") && doc["journal_replay"].isObject()) ? doc["journal_replay"] : Json::objectValue;
+        if (d.sessionId.empty())
+        {
+            if (error)
+                *error = "FinalDelivery requires session_id";
+            return std::nullopt;
+        }
+        return d;
+    }
+    catch (const std::exception &ex)
     {
         if (error)
-            *error = "unknown FinalDelivery kind";
+            *error = std::string("malformed FinalDelivery: ") + ex.what();
         return std::nullopt;
     }
-    FinalDelivery d;
-    d.schemaVersion = doc.get("schema_version", kOpsSchemaVersion).asString();
-    d.sessionId = doc.get("session_id", "").asString();
-    d.goal = doc.get("goal", "").asString();
-    d.outcome = doc.get("outcome", "").asString();
-    d.stopReason = doc.get("stop_reason", "").asString();
-    d.plan = doc.get("plan", Json::objectValue);
-    d.outputs = doc.get("outputs", Json::arrayValue);
-    d.verifier = doc.get("verifier", Json::objectValue);
-    d.warnings = doc.get("warnings", Json::arrayValue);
-    d.questions = doc.get("questions", Json::arrayValue);
-    d.provenance = doc.get("provenance", Json::objectValue);
-    d.runIds = doc.get("run_ids", Json::arrayValue);
-    d.capsule = doc.get("capsule", Json::objectValue);
-    d.benchmarkRefs = doc.get("benchmark_refs", Json::arrayValue);
-    d.claims = doc.get("claims", Json::arrayValue);
-    d.budgets = doc.get("budgets", Json::objectValue);
-    d.stages = doc.get("stages", Json::arrayValue);
-    d.decisions = doc.get("decisions", Json::arrayValue);
-    d.traceRef = doc.get("trace_ref", Json::objectValue);
-    d.journalReplay = doc.get("journal_replay", Json::objectValue);
-    if (d.sessionId.empty())
-    {
-        if (error)
-            *error = "FinalDelivery requires session_id";
-        return std::nullopt;
-    }
-    return d;
 }
 
 } // namespace sicnu::agent_ops

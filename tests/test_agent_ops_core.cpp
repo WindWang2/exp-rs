@@ -1243,6 +1243,29 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
                                                     coord.instanceId(), 1000, 5000);
     REQUIRE(coord.armRepairApproval(premature, 1000) == "NO_PENDING_REPAIR_PLAN");
 
+    // Issue #1447: untyped malformed tokens must return APPROVAL_MALFORMED without LogicError
+    REQUIRE(coord.armRepairApproval(Json::Value(42), 1000) == "APPROVAL_MALFORMED");
+    REQUIRE(coord.armRepairApproval(Json::Value("string"), 1000) == "APPROVAL_MALFORMED");
+    REQUIRE(coord.armRepairApproval(Json::Value(Json::arrayValue), 1000) == "APPROVAL_MALFORMED");
+    Json::Value missingDigest(Json::objectValue);
+    missingDigest["findings_digest"] = "abc";
+    REQUIRE(coord.armRepairApproval(missingDigest, 1000) == "APPROVAL_MALFORMED");
+    Json::Value intDigest(Json::objectValue);
+    intDigest["digest"] = 12345;
+    intDigest["findings_digest"] = "abc";
+    REQUIRE(coord.armRepairApproval(intDigest, 1000) == "APPROVAL_MALFORMED");
+    Json::Value intFindings(Json::objectValue);
+    intFindings["digest"] = "0123456789abcdef";
+    intFindings["findings_digest"] = 999;
+    REQUIRE(coord.armRepairApproval(intFindings, 1000) == "APPROVAL_MALFORMED");
+
+    // Issue #1447: surface wire argument type robustness
+    Json::Value invalidRunArgs(Json::objectValue);
+    invalidRunArgs["goal"] = 12345; // non-string goal
+    auto runRes = sessionSurfaceApply(coord, "run", invalidRunArgs);
+    CHECK_FALSE(runRes["ok"].asBool());
+    CHECK(runRes["error"].asString() == "MISSING_ARGS");
+
     // Driver flow: evaluateRecovery projects a plan; the surface binds the
     // approval to exactly that repair science (findings digest).
     FakeCapabilityProvider provider;

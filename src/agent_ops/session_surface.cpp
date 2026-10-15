@@ -68,6 +68,13 @@ Json::Value errorDoc(const std::string &action, const std::string &error)
     return doc;
 }
 
+std::string safeString(const Json::Value &doc, const char *key, const std::string &fallback = {})
+{
+    if (doc.isObject() && doc.isMember(key) && doc[key].isString())
+        return doc[key].asString();
+    return fallback;
+}
+
 /// Reads the run/resume approval arguments into the request. The legacy
 /// bare-bool `approve_pending_repair` spelling is refused explicitly: an
 /// approval without a bound token is exactly what this surface must never
@@ -105,16 +112,17 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
 
     if (action == "run")
     {
-        if (!args.isObject() || args.get("goal", "").asString().empty())
+        if (!args.isObject() || !args.isMember("goal") || !args["goal"].isString() ||
+            args["goal"].asString().empty())
             return errorDoc(action, "MISSING_ARGS");
         OpsRunRequest request;
         request.session.goal = args["goal"].asString();
-        request.session.intent = args.get("intent", "").asString();
+        request.session.intent = safeString(args, "intent");
         if (args.isMember("refs"))
             request.session.refs = args["refs"];
-        request.journalDirectory = args.get("journal_directory", "").asString();
-        request.domain = args.get("domain", "research").asString();
-        request.role = args.get("role", "").asString();
+        request.journalDirectory = safeString(args, "journal_directory");
+        request.domain = safeString(args, "domain", "research");
+        request.role = safeString(args, "role");
         const std::string approvalError = readApprovalArgs(action, args, request);
         if (!approvalError.empty())
             return errorDoc(action, approvalError);
@@ -162,21 +170,22 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
         // journalled goal (SESSION_GOAL_MISMATCH) — and a goal-less attempt
         // would overwrite the parked journal with the refused terminal one.
         // Requiring the goal here fails the request before anything runs.
-        if (!args.isObject() || args.get("journal_directory", "").asString().empty() ||
-            args.get("session_id", "").asString().empty() ||
-            args.get("goal", "").asString().empty())
+        const std::string journalDir = safeString(args, "journal_directory");
+        const std::string sessionId = safeString(args, "session_id");
+        const std::string goal = safeString(args, "goal");
+        if (journalDir.empty() || sessionId.empty() || goal.empty())
             return errorDoc(action, "MISSING_ARGS");
         OpsRunRequest request;
-        request.session.goal = args.get("goal", "").asString();
-        request.session.intent = args.get("intent", "").asString();
-        request.journalDirectory = args["journal_directory"].asString();
-        request.domain = args.get("domain", "research").asString();
-        request.role = args.get("role", "").asString();
+        request.session.goal = goal;
+        request.session.intent = safeString(args, "intent");
+        request.journalDirectory = journalDir;
+        request.domain = safeString(args, "domain", "research");
+        request.role = safeString(args, "role");
         const std::string approvalError = readApprovalArgs(action, args, request);
         if (!approvalError.empty())
             return errorDoc(action, approvalError);
         doc = sessionSurfaceStatus(
-            coordinator.resume(request.journalDirectory, args["session_id"].asString(),
+            coordinator.resume(request.journalDirectory, sessionId,
                                request));
         doc["schema"] = kSessionSurfaceSchema;
         doc["action"] = action;
