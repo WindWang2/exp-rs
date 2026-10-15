@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <iomanip>
 #include <locale>
 #include <sstream>
@@ -224,14 +225,27 @@ bool canonicalJson( const Json::Value &value, std::string &out, std::string &err
     error.clear();
     std::string staged;
     CanonicalWriter writer{ limits, staged, error };
-    if ( !writer.write( value, 1 ) )
+    try
     {
-        // Leave @p out untouched on failure: a partial canonical form must
-        // never be mistaken for a successful one.
+        if ( !writer.write( value, 1 ) )
+        {
+            // Leave @p out untouched on failure: a partial canonical form must
+            // never be mistaken for a successful one.
+            return false;
+        }
+        out = std::move( staged );
+        return true;
+    }
+    catch ( const std::exception &ex )
+    {
+        error = std::string( "canonical json serialization threw an exception: " ) + ex.what();
         return false;
     }
-    out = std::move( staged );
-    return true;
+    catch ( ... )
+    {
+        error = "canonical json serialization threw an unknown exception";
+        return false;
+    }
 }
 
 } // namespace sicnu::verification
