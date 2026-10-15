@@ -10,6 +10,7 @@
 #include "science_context/recipe_router.h"
 #include "science_context/planner_projection.h"
 
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -46,6 +47,12 @@ struct SynthesizeResult
 class ScienceContextBroker
 {
   public:
+    ScienceContextBroker() = default;
+    ScienceContextBroker( const ScienceContextBroker & ) = delete;
+    ScienceContextBroker &operator=( const ScienceContextBroker & ) = delete;
+    ScienceContextBroker( ScienceContextBroker &&other ) noexcept;
+    ScienceContextBroker &operator=( ScienceContextBroker &&other ) noexcept;
+
     AssetStateProvider &assets() { return mAssets; }
     const AssetStateProvider &assets() const { return mAssets; }
     RecipeRouter &recipes() { return mRecipes; }
@@ -57,12 +64,17 @@ class ScienceContextBroker
     void setCapabilityFacts( CapabilityFactsLookup lookup );
     const CapabilityFactsLookup *capabilityFacts() const
     {
+        std::lock_guard<std::mutex> lock( mMutex );
         return mCapFacts ? &*mCapFacts : nullptr;
     }
 
     /// Registry the broker syncs recipe projections from (not owned).
     void setRecipeRegistry( sicnu::recipes::ScientificRecipeRegistry *registry );
-    sicnu::recipes::ScientificRecipeRegistry *recipeRegistry() const { return mRecipeRegistry; }
+    sicnu::recipes::ScientificRecipeRegistry *recipeRegistry() const
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        return mRecipeRegistry;
+    }
 
     /// Reload the registry into the recipe router. Returns false when the
     /// registry is unavailable (router left empty — fail-closed).
@@ -76,6 +88,7 @@ class ScienceContextBroker
     SynthesizeResult synthesize( const SynthesizeRequest &request );
 
   private:
+    mutable std::mutex mMutex;
     AssetStateProvider mAssets;
     RecipeRouter mRecipes;
     ContextCache mCache;
