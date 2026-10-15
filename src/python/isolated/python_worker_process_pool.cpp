@@ -516,14 +516,14 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
   // buffer, and the death/data notifiers have no ordering guarantee —
   // draining here turns "worker died on request X" into "request X actually
   // completed" whenever the bytes made it out.
-  if ( node->server )
-    node->server->drainBufferedResponses();
   std::vector<PythonIpcServer::PendingRequest> pending;
-  if ( node->server )
-    pending = node->server->takeInFlightRequests();
-
   {
     QMutexLocker lock( &m_nodesMutex );
+    if ( node->server )
+    {
+      node->server->drainBufferedResponses();
+      pending = node->server->takeInFlightRequests();
+    }
     if ( node->worker )
     {
       node->worker->disconnect();
@@ -774,6 +774,17 @@ void PythonWorkerProcessPool::failPendingRequests(
     err[QStringLiteral( "message" )] = message;
     req.callback( err, true );
   }
+}
+
+PythonIpcServer *PythonWorkerProcessPool::serverForWorker( int id ) const
+{
+  QMutexLocker lock( &m_nodesMutex );
+  for ( const auto &node : m_nodes )
+  {
+    if ( node && node->id == id )
+      return node->server;
+  }
+  return nullptr;
 }
 
 } // namespace sicnu::python::isolated

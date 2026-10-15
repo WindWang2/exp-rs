@@ -105,11 +105,15 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
     // reloaded by the caller. The adapter is not a QObject, so the bridge is
     // captured through a QPointer (no-op after unload) and the node id is
     // matched; the connection is severed in unload().
+    const int workerId = m_workerNode->id;
     m_restartRebindConnection = QObject::connect(
         m_pool, &PythonWorkerProcessPool::workerRestarted, m_pool,
-        [node = m_workerNode, bridgePtr = QPointer<AppInterfaceBridge>( m_bridge.get() )]( int id ) {
-            if ( node && node->server && bridgePtr && node->id == id )
-                bridgePtr->bindIpcServer( node->server );
+        [pool = m_pool, workerId, bridgePtr = QPointer<AppInterfaceBridge>( m_bridge.get() )]( int id ) {
+            if ( workerId == id && pool && bridgePtr )
+            {
+                if ( auto *server = pool->serverForWorker( id ) )
+                    bridgePtr->bindIpcServer( server );
+            }
         } );
     // DATAPY-3: if the worker dies while this plugin owns the node, the pool
     // keeps isBusy=true (reserved). Listen for workerCrashed to avoid re-using
@@ -119,8 +123,8 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
     // connection and sever it in unload()/#dtor, otherwise the lambda's
     // captured this dangles once the adapter is destroyed (#522).
     m_workerCrashedConnection = QObject::connect( m_pool, &PythonWorkerProcessPool::workerCrashed, m_pool,
-                      [this]( int id ) {
-                          if ( m_workerNode && m_workerNode->id == id )
+                      [this, workerId]( int id ) {
+                          if ( m_workerNode && workerId == id )
                           {
                               // Bridge stays bound to the old server until
                               // workerRestarted re-binds; no extra action needed
