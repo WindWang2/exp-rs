@@ -110,10 +110,13 @@ bool writeBytesAtomically( const QString &path, const QByteArray &bytes )
 /// start) — best-effort durability, never a wrong grade.
 QVector<DurableRow> loadCheckpointRows( const QString &path, const QString &configDigest )
 {
-    QFile f( path );
-    if ( !f.open( QIODevice::ReadOnly ) )
+    // Bounded read (R14-E audit F5): a tampered multi-GB checkpoint beside
+    // the submissions must degrade to a fresh start, not an OOM slurp.
+    constexpr qint64 kMaxCheckpointBytes = 64 * 1024 * 1024;
+    const BoundedReadResult read = readBounded( path, kMaxCheckpointBytes );
+    if ( read.oversize || read.unreadable )
         return {};
-    const QJsonObject doc = QJsonDocument::fromJson( f.readAll() ).object();
+    const QJsonObject doc = QJsonDocument::fromJson( read.bytes ).object();
     if ( doc.value( QStringLiteral( "schema" ) ).toString() != QLatin1String( kBatchCheckpointSchema ) )
         return {};
     if ( doc.value( QStringLiteral( "config_digest" ) ).toString() != configDigest )
@@ -254,7 +257,7 @@ static QString studentIdFromPath( const QString &path, const QString &root )
     const QString rel = rootDir.relativeFilePath( path );
     const QStringList parts = rel.split( QLatin1Char( '/' ), Qt::SkipEmptyParts );
     if ( parts.size() >= 2 )
-        return parts.first();
+        return parts.first().normalized( QString::NormalizationForm_C );
     QString base = fi.completeBaseName();
     // strip common suffixes
     for ( const char *suf : { "_submission", "_artifact", "_report" } )
@@ -262,13 +265,32 @@ static QString studentIdFromPath( const QString &path, const QString &root )
         if ( base.endsWith( QLatin1String( suf ) ) )
             base.chop( static_cast<int>( strlen( suf ) ) );
     }
-    return base;
+    return base.normalized( QString::NormalizationForm_C );
 }
 
 QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir )
 {
     return discoverSubmissions( submissionsDir, nullptr );
 }
+
+namespace {
+/// Every entry of @p dir except "." and "..", name-sorted — with NO QDir
+/// type filter applied. Type-filtered listings (QDir::Files etc.) follow
+/// symlinks, hide dangling links, and their type-bits semantics shift
+/// across platforms; discovery must SEE every entry and classify it itself
+/// (R14-E audit F1).
+QFileInfoList allEntries( const QDir &dir )
+{
+    // Empirically pinned on Qt 6.12 (probe in .planning/r14-E): this exact
+    // combination is the ONLY listing shape that returns live links, DANGLING
+    // links, specials and hidden entries alike. QDir::NoFilter falls back to
+    // the engine default (AllEntries), which silently drops dangling links
+    // and linked dirs; Files/Dirs-only listings follow or drop links.
+    return dir.entryInfoList(
+      QDir::Dirs | QDir::Files | QDir::System | QDir::Hidden | QDir::NoDotAndDotDot,
+      QDir::Name );
+}
+} // namespace
 
 namespace {
 /// Null-safe refusal bookkeeping: the skip set itself is unchanged — only
@@ -302,6 +324,30 @@ QString reservedNameReason( const QString &name )
     }
     return QStringLiteral( "reserved output name" );
 }
+
+/// Containment refusal for one enumerated entry inside a discovery root
+/// (R14-E audit F1): Qt's QDir::Files/Dirs filters follow symlinks, so a
+/// linked student folder or file would grade content from outside the
+/// submissions root, and a DANGLING link matches neither filter and used to
+/// vanish without a row. Links (live or dangling) and non-regular specials
+/// are typed refusals. Hidden-ness stays the CALLING loop's concern: the
+/// unfiltered enumeration sees hidden entries too, and the old QDir::Files
+/// / QDir::Dirs filters never listed them — the loops preserve that.
+bool entryRefused( const QFileInfo &fi, QString *reason )
+{
+    if ( fi.isSymLink() )
+    {
+        *reason = QStringLiteral(
+          "symlinked entry refused: discovery never follows links out of the submissions root" );
+        return true;
+    }
+    if ( !fi.isFile() && !fi.isDir() )
+    {
+        *reason = QStringLiteral( "non-regular entry refused (device/fifo/socket)" );
+        return true;
+    }
+    return false;
+}
 } // namespace
 
 QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
@@ -312,15 +358,44 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
     if ( !root.exists() )
         return items;
 
-    // One-level student directories
-    const auto subdirs = root.entryList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name );
-    for ( const QString &sub : subdirs )
+    // One-level student directories. Enumerated with NO filter so links and
+    // special entries are SEEN before any stat-based filter can follow or
+    // drop them ("."/".." are skipped by name — a type-filtered listing
+    // hides dangling links and type-bits change semantics across Qt
+    // versions).
+    const auto subdirs = allEntries( root );
+    for ( const QFileInfo &subInfo : subdirs )
     {
-        QDir sd( root.filePath( sub ) );
-        const auto files = sd.entryInfoList( QDir::Files, QDir::Name );
+        // NFC (R14-E audit F4): macOS/zip-tool extractors can decompose
+        // combining marks, so 张三(NFC) and 张三(NFD) would otherwise grade
+        // as two students and break count reconciliation. One canonical
+        // form for rows, skips and checkpoint keys alike.
+        const QString sub =
+            subInfo.fileName().normalized( QString::NormalizationForm_C );
+        QString reason;
+        if ( entryRefused( subInfo, &reason ) )
+        {
+            recordSkip( skipped, sub, subInfo.absoluteFilePath(), reason );
+            continue;
+        }
+        // Root-level plain files belong to the flat pass below; hidden
+        // entries keep the old invisibility (QDir::Files/Dirs never
+        // listed them and the unfiltered enumeration here does).
+        if ( !subInfo.isDir() || subInfo.isHidden() )
+            continue;
+        QDir sd( subInfo.absoluteFilePath() );
+        const auto files = allEntries( sd );
         for ( const QFileInfo &fi : files )
         {
             const QString name = fi.fileName();
+            QString entryReason;
+            if ( entryRefused( fi, &entryReason ) )
+            {
+                recordSkip( skipped, sub, fi.absoluteFilePath(), entryReason );
+                continue;
+            }
+            if ( !fi.isFile() || fi.isHidden() )
+                continue; // hidden entries and nested dirs stay invisible
             if ( name.startsWith( QLatin1String( "grades" ) )
                  || name.contains( QLatin1String( "batch" ) )
                  || name.contains( QLatin1String( "summary" ) )
@@ -344,10 +419,14 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
         }
     }
 
-    // Flat files in root
-    const auto flat = root.entryInfoList( QDir::Files, QDir::Name );
+    // Flat files in root. Links and specials at the root were already
+    // refused — and attributed to their name — by the student-directory
+    // pass above; only plain, visible files belong to this pass.
+    const auto flat = allEntries( root );
     for ( const QFileInfo &fi : flat )
     {
+        if ( fi.isSymLink() || !fi.isFile() || fi.isHidden() )
+            continue;
         if ( fi.fileName().startsWith( QLatin1String( "grades" ) ) )
         {
             // The console's own gradebook beside the submissions.
