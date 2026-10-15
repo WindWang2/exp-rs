@@ -349,6 +349,123 @@ TEST_CASE( "rs:sam_classify supports the SID metric", "[sid][gdal]" )
     REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) );
 }
 
+TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString inputPath = dir.filePath( QStringLiteral( "het.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "het_classes.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    // 3x1 raster, 2 bands with DIFFERENT declared sentinels: band 1 voids at
+    // 0.0, band 2 voids at -9999. Pixel 0 is clean; pixel 1 is void in band 1;
+    // pixel 2 is void in band 2. Under the old first-band-only sentinel,
+    // pixel 2's -9999 passed as data and was classified.
+    GDALDatasetH inDs = createOutputTiff( inputPath, 3, 1, 2, GDT_Float32, gt, QString() );
+    REQUIRE( inDs != nullptr );
+    const std::vector<float> b1 = { 0.8f, 0.0f, 0.8f };
+    const std::vector<float> b2 = { 0.2f, 0.2f, -9999.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 1 ), GF_Write, 0, 0, 3, 1,
+                           b1.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 2 ), GF_Write, 0, 0, 3, 1,
+                           b2.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 1 ), 0.0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 2 ), -9999.0 ) == CE_None );
+    GDALClose( inDs );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    Json::Value refs( Json::arrayValue );
+    Json::Value c0( Json::arrayValue );
+    c0.append( 0.8 );
+    c0.append( 0.2 );
+    Json::Value c1( Json::arrayValue );
+    c1.append( 0.2 );
+    c1.append( 0.8 );
+    refs.append( c0 );
+    refs.append( c1 );
+    params["refs"] = refs;
+
+    RsSamClassifyOperator op;
+    RSOperatorContext ctx;
+    const Json::Value result = op.run( params, ctx );
+    REQUIRE( QFile::exists( outputPath ) );
+    REQUIRE( result["classes"].asInt() == 2 );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> labels( 3 );
+    REQUIRE( out.readBandData( 1, labels.data(), 3, 1 ) );
+    REQUIRE( labels[0] == Approx( 0.0f ).margin( 0.5f ) ); // clean pixel classifies
+    REQUIRE( labels[1] == Approx( -9999.0f ) );            // band-1 void: unclassified
+    REQUIRE( labels[2] == Approx( -9999.0f ) );            // band-2 void: unclassified
+}
+
+TEST_CASE( "rs:continuum_removal honors heterogeneous per-band NoData [r14a]",
+           "[continuum][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString inputPath = dir.filePath( QStringLiteral( "cr_het.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "cr_het_out.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    // 3x1 raster, 3 bands: band 1 voids at 0.0, band 2 voids at -9999, band 3
+    // undeclared. Pixel 0 clean flat spectrum (Rc == 1); pixel 1 void in band
+    // 2; pixel 2 void in band 1. Under the old band-1-only sentinel, pixel 1's
+    // -9999 entered the convex hull as reflectance and produced finite (wrong)
+    // Rc values on the clean bands, and pixel 2's void was written back as the
+    // sentinel 0.0 instead of the family's NaN void.
+    GDALDatasetH inDs = createOutputTiff( inputPath, 3, 1, 3, GDT_Float32, gt, QString() );
+    REQUIRE( inDs != nullptr );
+    const std::vector<float> b1 = { 0.5f, 0.5f, 0.0f };
+    const std::vector<float> b2 = { 0.5f, -9999.0f, 0.5f };
+    const std::vector<float> b3 = { 0.5f, 0.5f, 0.5f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 1 ), GF_Write, 0, 0, 3, 1,
+                           b1.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 2 ), GF_Write, 0, 0, 3, 1,
+                           b2.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 3 ), GF_Write, 0, 0, 3, 1,
+                           b3.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 1 ), 0.0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 2 ), -9999.0 ) == CE_None );
+    GDALClose( inDs );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+
+    RsContinuumRemovalOperator op;
+    RSOperatorContext ctx;
+    const Json::Value result = op.run( params, ctx );
+    REQUIRE( QFile::exists( outputPath ) );
+    REQUIRE( result["bands"].asInt() == 3 );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 3 );
+    for ( int b = 1; b <= 3; ++b )
+    {
+        std::vector<float> band( 3 );
+        REQUIRE( out.readBandData( b, band.data(), 3, 1 ) );
+        REQUIRE( band[0] == Approx( 1.0f ).margin( 1e-5 ) ); // clean flat spectrum
+        REQUIRE( std::isnan( band[1] ) );                    // band-2 void voids the spectrum
+        REQUIRE( std::isnan( band[2] ) );                    // band-1 void voids the spectrum
+    }
+    // Output declares NaN voids (spectral-family convention after the wash).
+    int hasNd = 0;
+    const double ndTag = out.bandNoDataValue( 1, &hasNd );
+    CHECK( hasNd == 1 );
+    CHECK( std::isnan( ndTag ) );
+}
+
 TEST_CASE( "rs:continuum_removal normalizes a multi-band raster", "[continuum][gdal]" )
 {
     ensureGdalInit();
