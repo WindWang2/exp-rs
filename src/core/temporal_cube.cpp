@@ -386,6 +386,12 @@ class TemporalCubeImpl final : public TemporalCube
         if ( scene.hasCloud )
             bands.push_back( 2 );
         std::vector<double> values;
+        // Every thread's composeTile shares the same per-scene RasterReader
+        // (one GDALDataset handle); concurrent RasterIO on a single dataset
+        // is undefined — observed as read failures, hangs and heap
+        // corruption under concurrent readChunk. Serialize the raster I/O
+        // and the failure diagnostics; compositing math stays lock-free.
+        std::lock_guard<std::mutex> ioLock( mIoMutex );
         try
         {
             values = scene.reader.readWindow( bands, window );
@@ -437,6 +443,10 @@ class TemporalCubeImpl final : public TemporalCube
     }
 
     mutable std::mutex mCacheMutex;
+    /// Guards shared-dataset raster reads in readScenePlane and the #1467
+    /// failure counters (mSceneReadFailures / readFailureLogged): a
+    /// GDALDataset handle must not serve concurrent RasterIO.
+    mutable std::mutex mIoMutex;
     mutable std::list<std::pair<TileKey, TilePtr>> mLru; // front = MRU
     mutable std::unordered_map<TileKey, LruIterator, TileKeyHash> mIndex;
     /// #1467: scene-level window-read failures seen so far (diagnostics).
