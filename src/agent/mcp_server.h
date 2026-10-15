@@ -248,6 +248,13 @@ private:
     /// id; entries are removed when consumed by notifications/cancelled and
     /// the map is bounded (#644).
     QHash<QString, long> m_cancelledRequestTasks;
+    /// rpc request id -> pipeline id for run_workflow / resume_workflow
+    /// submissions, so a notifications/cancelled can stop the whole run
+    /// server-side (the Pi bridge abort path, #623). Only the SUBMITTING
+    /// call arms an entry — a get_workflow_status poll also returns a
+    /// pipeline_id but must never arm cancellation. Consumed on cancel;
+    /// bounded like m_cancelledRequestTasks.
+    QHash<QString, long> m_cancelledRequestPipelines;
     /// Surface-11: taskId → progress subscription for tools/call requests
     /// carrying arguments._meta.progressToken. Entries are removed on the
     /// terminal notification; the map is bounded like m_cancelledRequestTasks.

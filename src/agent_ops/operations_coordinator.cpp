@@ -334,34 +334,46 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     std::string approvalError;
     if (request.repairApproval.isObject() && !request.repairApproval.isNull())
     {
-        // Single-use is symmetric: a driver-held token goes through the
-        // SAME consumed ring as an armed one — a consumed token presented
-        // with the request is a replay, never a second authorization.
-        const std::string tokenDigest = request.repairApproval["digest"].asString();
-        bool replayed = false;
-        for (const std::string &consumed : mConsumedApprovalDigests)
+        // Fail closed on a malformed token BEFORE touching the digest — the
+        // same #1451 guard armRepairApproval has. jsoncpp's asString() throws
+        // Json::LogicError on a missing/non-string field; through OpsDriver
+        // that degrades to INVALID_ARGS, but a direct coordinator caller
+        // (the GUI dock worker thread) would terminate the process.
+        if (!request.repairApproval["digest"].isString())
         {
-            if (consumed == tokenDigest)
-            {
-                replayed = true;
-                break;
-            }
-        }
-        if (replayed)
-        {
-            if (approvalError.empty())
-                approvalError = "APPROVAL_REPLAYED";
+            approvalError = "APPROVAL_MALFORMED";
         }
         else
         {
-            const std::string directError = verifyApprovalAgainstLastProjection(
-                request.repairApproval, request.approvalNowMs);
-            if (directError.empty())
-                mPendingRepairApproval =
-                    ArmedApproval{request.repairApproval,
-                                  request.repairApproval["findings_digest"].asString()};
-            else if (approvalError.empty())
-                approvalError = directError;
+            // Single-use is symmetric: a driver-held token goes through the SAME
+            // consumed ring as an armed one — a consumed token presented with the
+            // request is a replay, never a second authorization.
+            const std::string tokenDigest = request.repairApproval["digest"].asString();
+            bool replayed = false;
+            for (const std::string &consumed : mConsumedApprovalDigests)
+            {
+                if (consumed == tokenDigest)
+                {
+                    replayed = true;
+                    break;
+                }
+            }
+            if (replayed)
+            {
+                if (approvalError.empty())
+                    approvalError = "APPROVAL_REPLAYED";
+            }
+            else
+            {
+                const std::string directError = verifyApprovalAgainstLastProjection(
+                    request.repairApproval, request.approvalNowMs);
+                if (directError.empty())
+                    mPendingRepairApproval =
+                        ArmedApproval{request.repairApproval,
+                                      request.repairApproval["findings_digest"].asString()};
+                else if (approvalError.empty())
+                    approvalError = directError;
+            }
         }
     }
     bool pendingApproval = false;

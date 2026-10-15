@@ -45,7 +45,14 @@ struct ExternalProcessRequest
 {
     std::vector<std::string> argv;         ///< argv[0] = program (no shell)
     std::string workingDirectory;          ///< optional; must exist
-    Json::Value environment;               ///< object: extra env vars (name -> string)
+    /// object: extra env vars (name -> string). EXPLICIT entries naming a
+    /// loader-injection key (LD_PRELOAD, LD_AUDIT, LD_LIBRARY_PATH,
+    /// LD_CONFIG_FILE, DYLD_INSERT_LIBRARIES / _LIBRARY_PATH /
+    /// _FRAMEWORK_PATH / _FALLBACK_LIBRARY_PATH, case-insensitive) are a
+    /// typed policy refusal (E5007) — they would load attacker-chosen
+    /// code into the spawned tool. Values arriving via inheritEnvironment
+    /// are host-controlled and not re-filtered.
+    Json::Value environment;
     bool inheritEnvironment = false;       ///< full env inheritance (opt-in)
     int timeoutSeconds = 3600;             ///< wall-clock budget (<=0 = 3600)
     long stdoutLimitBytes = 8 * 1024 * 1024;
@@ -68,8 +75,9 @@ struct ExternalProcessResult
     bool exitedCleanly() const { return started && exitSignal == 0 && exitCode == 0; }
     bool timedOut = false;
     bool cancelled = false;
-    /// True when the workspace-effect policy refused the spawn (E5005,
-    /// issue #757): nothing was executed. @p error carries the reason.
+    /// True when a spawn was refused BEFORE anything executed: the
+    /// workspace-effect policy (E5005, issue #757) or the loader-injection
+    /// environment deny-list (E5007). @p error carries the reason.
     bool refusedByPolicy = false;
     bool truncatedStdout = false;
     bool truncatedStderr = false;
