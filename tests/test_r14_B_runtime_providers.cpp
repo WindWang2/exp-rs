@@ -63,9 +63,15 @@ struct RegistryReset
 // OpenCV DNN inferMulti detachment
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "#r14B OpenCV inferMulti returns detached outputs safe across forwards",
+TEST_CASE( "#r14B OpenCV inferMulti results survive a second forward",
            "[models][providers][r14B]" )
 {
+  // Contract guard for the shared-session race: inferMulti detaches every
+  // plane before releasing m_inferMutex, so a caller's result stays valid
+  // while another worker runs its own forward. (The committed identity
+  // fixture already returns fresh buffers from OpenCV's forward, so this
+  // case pins the CONTRACT rather than a regression — the race needs a
+  // multi-layer net whose forward returns internal headers.)
   REQUIRE( QFile::exists( identityModelPath() ) );
 
   OpenCvDnnRuntime runtime( identityModelPath().toStdString(), /*modelWantsGpu=*/false,
@@ -109,12 +115,23 @@ TEST_CASE( "#r14B OpenCV infer refuses non-float32 blobs with a typed error",
   std::string loadError;
   REQUIRE( runtime.load( &loadError ) );
 
-  // 4-D uint8: passes the dims gate, must fail the float32 gate (a 2-D blob
-  // would hide behind the pre-existing dims!=4 refusal).
+  // 4-D uint8: passes the dims gate, must fail the float32 gate. The
+  // message must be the gate's, NOT OpenCV's own "incompatible type"
+  // complaint (which master surfaced wrapped as "forward pass failed") —
+  // only the new seam produces this text.
   const int dims[4] = { 1, 1, 4, 4 };
   cv::Mat bytes( 4, dims, CV_8U );
   bytes.setTo( cv::Scalar( 7 ) );
-  REQUIRE_THROWS_AS( runtime.infer( bytes ), std::runtime_error );
+  try
+  {
+    runtime.infer( bytes );
+    FAIL( "a non-float32 4-D blob must be refused" );
+  }
+  catch ( const std::runtime_error &e )
+  {
+    INFO( e.what() );
+    CHECK( std::string( e.what() ).find( "must be float32" ) != std::string::npos );
+  }
 }
 
 // ---------------------------------------------------------------------------

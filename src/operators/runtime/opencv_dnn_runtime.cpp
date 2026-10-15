@@ -150,6 +150,10 @@ std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> 
 
   const auto started = std::chrono::steady_clock::now();
   std::lock_guard<std::mutex> lock( m_inferMutex );
+  // Re-check after acquiring the lock: a cancel may have landed while this
+  // caller waited for an in-flight forward (infer() does the same).
+  if ( m_cancelRequested.load( std::memory_order_relaxed ) )
+    throw std::runtime_error( "inference canceled before the forward pass" );
   std::vector<cv::Mat> outputs;
   try
   {

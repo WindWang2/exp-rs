@@ -284,7 +284,12 @@ class PythonWorkerSession final : public IModelRuntime
             // to the NEXT request on this shared session (outputs of one
             // tile attributed to another — the desync the malformed/oversized
             // branches above refuse). Stop the worker so the stream dies with
-            // it; recovery routes through the bounded restart budget.
+            // it. Mark the session dead FOR GOOD (like those branches): a
+            // stopped worker is not restartable mid-request — without the
+            // flag the next request would fail as "not loaded" forever and
+            // the registry (which only recycles on permanentlyUnavailable())
+            // could never recycle this session.
+            m_permanentlyDead.store( true, std::memory_order_release );
             stopWorker();
             throw std::runtime_error( "python worker did not answer within "
                                       + std::to_string( m_timeoutMs )
