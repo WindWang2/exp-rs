@@ -27,3 +27,26 @@ path untouched; all fusion kernels' `== nodata` sites have isnan companions; sco
 values recomputed by hand.
 
 ## Round 2 — pending (after builds/tests run)
+
+## Round 2 — verdict: PASS (P0/P1/P2 = 0; 5 P3 observations, all disclosed)
+
+Same independent reviewer, fresh verification of current code (not commit messages):
+
+- Round-1 F1/F2/F3 re-verified FIXED in code (HPF halo wash at image_fusion.cpp:1664-1673;
+  declareNodata=false with accurate semantics; refs wash with correct i%nBands band indexing).
+- New commits verified by direct inspection of the primitives they build on: writeFileAtomic
+  rethrow semantics (RSOperatorError passes GeoError catch unchanged; ENOENT before-try staging),
+  written-counter unreachability on throw, setRNGSeed thread placement (only production OpenCV
+  RNG consumer), VRT fixture band/grid soundness (compareGrids short-circuit on GT-less VRT),
+  conditional-tag void-completeness (kernel-true cannot write non-finite for physical data;
+  zero-continuum guarded to 1.0f).
+- P3-1 republish test not RED-able (success-path pin), P3-2 kmeans RED probabilistic (~99.7%),
+  P3-3 fusion VRT lacks explicit declaration sanity check (cosmetic), P3-4 declared-but-clean
+  input still tags (defensible mirror of input's own declaration), P3-5 GTiff single-tag claim
+  corroborated via repo precedent (test_r5_nodata_contracts) + observed failure, not re-run in
+  the reviewer's env (it WAS observed empirically in the implementer's test runs — see the GDAL
+  warning captured during the failing first run).
+- Scope re-verified clean; evidence file claims match code behavior.
+
+Final-commit verification run (post-review, per review-protocol §5): r14a cases + continuum
+contracts re-run green at HEAD — recorded in TEST_RESULTS.md addendum.

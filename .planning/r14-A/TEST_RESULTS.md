@@ -63,3 +63,9 @@ fixtures fixed + sanity-checked (commit f7a236b53).
 - ctest as a whole suite not run (1010 test binaries); the 11 binaries covering every touched
   code path + the science baseline targets were run directly. CTest discovery of the 11 targets
   exists (built via catch_discover_tests); direct invocation is equivalent evidence per binary.
+
+## Final-commit verification (post-review round 2, HEAD = docs-only delta over the tested state)
+
+All r14a cases + continuum #473 + hetero continuum re-run at final HEAD: all rc=0
+(per-review-protocol closing run; code files identical to the fully-regressed state — only
+.planning docs landed after).
