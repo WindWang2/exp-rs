@@ -514,13 +514,13 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         : (allowIndexOverride ? "rs:spectral_index" : ("rs:" + QString::fromStdString(defaultIndex).toLower().toStdString()));
 
     sicnu::operators::ChunkedRunOptions runOpts = options;
-    if (params.isMember("executionMode")) {
+    if (params.isMember("executionMode") && params["executionMode"].isString()) {
         const std::string m = params["executionMode"].asString();
         if (m == "pipeline")
             runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
         else if (m == "resumable")
             runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
-    } else if (params.isMember("chunkedMode")) {
+    } else if (params.isMember("chunkedMode") && params["chunkedMode"].isString()) {
         const std::string m = params["chunkedMode"].asString();
         if (m == "pipeline")
             runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
@@ -556,8 +556,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     } else if (params.isMember("after") && params["after"].isString()) {
         canonicalParams["postfire"] = params["after"].asString();
     }
-    if (params.isMember("postNir")) canonicalParams["postNir"] = params["postNir"].asInt();
-    if (params.isMember("postSwir2")) canonicalParams["postSwir2"] = params["postSwir2"].asInt();
+    if (params.isMember("postNir") && params["postNir"].isInt()) canonicalParams["postNir"] = params["postNir"].asInt();
+    if (params.isMember("postSwir2") && params["postSwir2"].isInt()) canonicalParams["postSwir2"] = params["postSwir2"].asInt();
 
     sicnu::runtime::chunk::TileRunPartition partition;
     partition.rasterWidth = width;
