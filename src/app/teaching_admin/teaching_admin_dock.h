@@ -6,7 +6,9 @@
 #include <QJsonObject>
 
 #include <atomic>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 class QTabWidget;
 class QPlainTextEdit;
@@ -86,6 +88,16 @@ class TeachingAdminDock : public QWidget
     QLabel *m_batchProgressLabel = nullptr;
     std::atomic<bool> m_batchCancel{ false };
     std::thread m_batchThread;
+
+    struct RetiredThread
+    {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+    std::mutex m_retiredMutex;
+    std::vector<RetiredThread> m_retiredThreads;
+    void pruneRetiredThreadsLocked();
+
     void finishBatchOnUiThread( QJsonObject report, const QString &outPrefix );
     /// Joins + re-arms the console after a failed batch. The worker's
     /// exception path must land here too: joinable() staying true after a

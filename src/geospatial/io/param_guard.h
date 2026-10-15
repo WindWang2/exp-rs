@@ -32,9 +32,10 @@ namespace sicnu::geo::io
 /// A path/URI parameter that passed the boundary check.
 struct CheckedPath
 {
-    std::string raw;        ///< as given — the string GDAL opens
+    std::string raw;        ///< as given — preserved for caller provenance
     std::string canonical;  ///< identity form (normalized separators, VSI spelling kept)
     std::string display;    ///< redacted human/log form
+    std::string gdalTarget; ///< string GDAL opens (uri.gdalOpenTarget())
     bool isLocalPayload = false;
     bool isRemote = false;
     /// Windows "\\?\" long-path spelling for local payloads (identity on
@@ -43,10 +44,10 @@ struct CheckedPath
     std::string longPathSpelling;
 
     /// #1186: path GDAL/OS should open — prefers longPathSpelling when set so
-    /// the mitigation is no longer dead code.
+    /// the mitigation is no longer dead code; otherwise falls back to gdalTarget.
     const std::string &openPath() const
     {
-      return longPathSpelling.empty() ? raw : longPathSpelling;
+      return longPathSpelling.empty() ? ( gdalTarget.empty() ? raw : gdalTarget ) : longPathSpelling;
     }
 };
 

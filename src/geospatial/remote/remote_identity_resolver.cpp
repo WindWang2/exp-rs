@@ -123,6 +123,7 @@ RemoteValidatorOptions probeOptions()
     options.timeoutSeconds = 10;
     options.connectTimeoutSeconds = 5;
     options.maxRetries = 1;
+    options.blockPrivateNetworks = true;
     return options;
 }
 

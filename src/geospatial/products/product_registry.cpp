@@ -12,6 +12,7 @@
 #include "geospatial/products/cn_product_adapters.h"
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/util/resource_uri.h"
 
 #include <cpl_conv.h>
 #include <gdal.h>
@@ -827,8 +828,9 @@ class ModisAdapter final : public ProductAdapter
       // Enumerate subdatasets through GDAL (metadata-only open, bounded).
       ensureGdalRegistered();
       QuietCplErrors quiet;
+      const std::string gdalPath = ResourceUri::toGdalPath( path );
       GDALDatasetH dataset =
-        GDALOpenEx( path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
+        GDALOpenEx( gdalPath.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
       if ( dataset == nullptr )
       {
         result.completeness = ProductCompleteness::Invalid;
@@ -895,7 +897,8 @@ class GenericRasterAdapter final : public ProductAdapter
 
       ensureGdalRegistered();
       QuietCplErrors quiet;
-      GDALDriverH driver = GDALIdentifyDriverEx( path.c_str(), GDAL_OF_RASTER | GDAL_OF_VECTOR, nullptr, nullptr );
+      const std::string gdalPath = ResourceUri::toGdalPath( path );
+      GDALDriverH driver = GDALIdentifyDriverEx( gdalPath.c_str(), GDAL_OF_RASTER | GDAL_OF_VECTOR, nullptr, nullptr );
       if ( driver == nullptr )
       {
         result.completeness = ProductCompleteness::Invalid;

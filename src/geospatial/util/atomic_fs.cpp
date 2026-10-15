@@ -15,7 +15,10 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <memory>
 #include <random>
+#include <set>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -354,33 +357,297 @@ void discardStaged( const std::string &stagedMainPath )
     removeFileQuiet( sidecar );
 }
 
+namespace
+{
+
+struct JournalMember
+{
+  std::string staged;
+  std::string target;
+  std::string backup;
+  bool hadTarget = false;
+};
+
+void writeJournalFile( const std::string &journalPath, const std::string &mainTarget, const std::vector<JournalMember> &members )
+{
+  Json::Value root;
+  root["version"] = 1;
+  root["main"] = mainTarget;
+  Json::Value arr( Json::arrayValue );
+  for ( const auto &m : members )
+  {
+    Json::Value item;
+    item["staged"] = m.staged;
+    item["target"] = m.target;
+    item["backup"] = m.backup;
+    item["had_target"] = m.hadTarget;
+    arr.append( item );
+  }
+  root["members"] = arr;
+
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  const std::string text = Json::writeString( builder, root );
+
+  std::ofstream out( sicnu::portable::pathFromUtf8( journalPath ), std::ios::binary | std::ios::trunc );
+  if ( !out )
+    throw GeoError( ErrorCode::IoError, "cannot write atomic fs journal: " + journalPath );
+  out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
+  out.flush();
+  out.close();
+
+  fsyncFile( journalPath );
+}
+
+bool recoverFromJournalFile( const std::string &journalPath, bool isCommitted )
+{
+  try
+  {
+    std::ifstream file( sicnu::portable::pathFromUtf8( journalPath ), std::ios::binary );
+    if ( !file )
+      return false;
+    std::string text( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );
+    file.close();
+
+    Json::Value json;
+    Json::CharReaderBuilder builder;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    std::string err;
+    if ( !reader->parse( text.data(), text.data() + text.size(), &json, &err ) )
+    {
+      removeFileQuiet( journalPath );
+      return false;
+    }
+
+    if ( !json.isObject() )
+    {
+      removeFileQuiet( journalPath );
+      return false;
+    }
+
+    if ( !json.isMember( "members" ) || !json["members"].isArray() )
+    {
+      removeFileQuiet( journalPath );
+      return false;
+    }
+
+    const Json::Value members = json["members"];
+    if ( isCommitted )
+    {
+      for ( Json::ArrayIndex i = 0; i < members.size(); ++i )
+      {
+        if ( !members[i].isObject() )
+          continue;
+        const std::string backup = members[i].isMember( "backup" ) && members[i]["backup"].isString()
+                                       ? members[i]["backup"].asString()
+                                       : "";
+        if ( !backup.empty() )
+          removeFileQuiet( backup );
+      }
+    }
+    else
+    {
+      // Remove newly created targets that had no prior target
+      for ( Json::ArrayIndex i = 0; i < members.size(); ++i )
+      {
+        if ( !members[i].isObject() )
+          continue;
+        const std::string target = members[i].isMember( "target" ) && members[i]["target"].isString()
+                                       ? members[i]["target"].asString()
+                                       : "";
+        const bool hadTarget = members[i].isMember( "had_target" ) && members[i]["had_target"].isBool()
+                                   ? members[i]["had_target"].asBool()
+                                   : false;
+        if ( !hadTarget && !target.empty() )
+          removeFileQuiet( target );
+      }
+
+      // Restore backed-up members: restore main target first (if present), then others
+      int mainIdx = -1;
+      const std::string mainTarget = json.isMember( "main" ) && json["main"].isString()
+                                         ? json["main"].asString()
+                                         : "";
+      for ( Json::ArrayIndex i = 0; i < members.size(); ++i )
+      {
+        if ( !members[i].isObject() )
+          continue;
+        const std::string target = members[i].isMember( "target" ) && members[i]["target"].isString()
+                                       ? members[i]["target"].asString()
+                                       : "";
+        if ( !mainTarget.empty() && target == mainTarget )
+        {
+          mainIdx = static_cast<int>( i );
+          break;
+        }
+      }
+
+      if ( mainIdx >= 0 )
+      {
+        const std::string target = members[mainIdx].isMember( "target" ) && members[mainIdx]["target"].isString()
+                                       ? members[mainIdx]["target"].asString()
+                                       : "";
+        const std::string backup = members[mainIdx].isMember( "backup" ) && members[mainIdx]["backup"].isString()
+                                       ? members[mainIdx]["backup"].asString()
+                                       : "";
+        const bool hadTarget = members[mainIdx].isMember( "had_target" ) && members[mainIdx]["had_target"].isBool()
+                                   ? members[mainIdx]["had_target"].asBool()
+                                   : false;
+        bool restored = false;
+        if ( hadTarget && fileExists( backup ) )
+        {
+          removeFileQuiet( target );
+          restored = renameReplaceQuiet( backup, target );
+        }
+        if ( !hadTarget || restored )
+          removeFileQuiet( backup );
+      }
+
+      for ( Json::ArrayIndex i = 0; i < members.size(); ++i )
+      {
+        if ( static_cast<int>( i ) == mainIdx )
+          continue;
+        if ( !members[i].isObject() )
+          continue;
+        const std::string target = members[i].isMember( "target" ) && members[i]["target"].isString()
+                                       ? members[i]["target"].asString()
+                                       : "";
+        const std::string backup = members[i].isMember( "backup" ) && members[i]["backup"].isString()
+                                       ? members[i]["backup"].asString()
+                                       : "";
+        const bool hadTarget = members[i].isMember( "had_target" ) && members[i]["had_target"].isBool()
+                                   ? members[i]["had_target"].asBool()
+                                   : false;
+        bool restored = false;
+        if ( hadTarget && fileExists( backup ) )
+        {
+          removeFileQuiet( target );
+          restored = renameReplaceQuiet( backup, target );
+        }
+        if ( !hadTarget || restored )
+          removeFileQuiet( backup );
+      }
+    }
+
+    removeFileQuiet( journalPath );
+    return true;
+  }
+  catch ( const std::exception & )
+  {
+    removeFileQuiet( journalPath );
+    return false;
+  }
+}
+
+} // namespace
+
+bool hasPendingJournal( const std::string &targetMainPath )
+{
+  return fileExists( targetMainPath + ".publish-journal" ) ||
+         fileExists( targetMainPath + ".publish-journal.committed" ) ||
+         fileExists( targetMainPath + ".sicnu-journal" ) ||
+         fileExists( targetMainPath + ".sicnu-journal.committed" );
+}
+
+bool recoverDatasetGroup( const std::string &targetMainPath )
+{
+  const std::string journal1 = targetMainPath + ".publish-journal";
+  const std::string committed1 = targetMainPath + ".publish-journal.committed";
+  const std::string journal2 = targetMainPath + ".sicnu-journal";
+  const std::string committed2 = targetMainPath + ".sicnu-journal.committed";
+
+  bool recovered = false;
+  if ( fileExists( committed1 ) )
+    recovered = recoverFromJournalFile( committed1, true ) || recovered;
+  if ( fileExists( committed2 ) )
+    recovered = recoverFromJournalFile( committed2, true ) || recovered;
+  if ( fileExists( journal1 ) )
+    recovered = recoverFromJournalFile( journal1, false ) || recovered;
+  if ( fileExists( journal2 ) )
+    recovered = recoverFromJournalFile( journal2, false ) || recovered;
+
+  return recovered;
+}
+
+std::size_t recoverDirectoryJournals( const std::string &directoryPath )
+{
+  std::size_t count = 0;
+  std::error_code ec;
+  const fs::path p = sicnu::portable::pathFromUtf8( directoryPath );
+  if ( !fs::is_directory( p, ec ) )
+    return 0;
+
+  std::set<std::string> mainsToRecover;
+  for ( const auto &entry : fs::directory_iterator( p, ec ) )
+  {
+    if ( ec )
+      break;
+    if ( !entry.is_regular_file( ec ) )
+      continue;
+    const std::string filename = sicnu::portable::pathToUtf8( entry.path().filename() );
+    const std::string fullPath = sicnu::portable::pathToUtf8( entry.path() );
+
+    auto checkSuffix = [&]( const std::string &suffix ) -> bool {
+      if ( filename.size() > suffix.size() &&
+           filename.compare( filename.size() - suffix.size(), suffix.size(), suffix ) == 0 )
+      {
+        const std::string mainPath = fullPath.substr( 0, fullPath.size() - suffix.size() );
+        mainsToRecover.insert( mainPath );
+        return true;
+      }
+      return false;
+    };
+
+    if ( checkSuffix( ".publish-journal.committed" ) ) continue;
+    if ( checkSuffix( ".publish-journal" ) ) continue;
+    if ( checkSuffix( ".sicnu-journal.committed" ) ) continue;
+    if ( checkSuffix( ".sicnu-journal" ) ) continue;
+  }
+
+  for ( const auto &main : mainsToRecover )
+  {
+    if ( recoverDatasetGroup( main ) )
+      ++count;
+  }
+
+  return count;
+}
+
+
 void publishStagedGroup( const std::string &stagedMainPath, const std::string &targetMainPath )
 {
   if ( !fileExists( stagedMainPath ) )
     throw GeoError( ErrorCode::IoError, "group publish: staged main file missing: " + stagedMainPath );
 
-  // Snapshot existing targets so a mid-publish failure can RESTORE the
-  // previous good group: each existing member moves aside to a backup name
-  // first; cleanup restores backups for replaced members and removes only
-  // newly-created ones (a stale sidecar is recoverable; a deleted
-  // pre-existing sidecar referenced by the old main file is not).
-  // #791: the MAIN target is part of that backup set too — it used to be
-  // replaced with no backup, so a failure at or after the main swap (e.g.
-  // inside the #807 cross-device fallback) lost the previous good main file.
+  // Auto-recover any leftover journal from previous interrupted runs
+  recoverDatasetGroup( targetMainPath );
+
   const std::vector<std::string> stagedSidecars = sidecarsFor( stagedMainPath );
   const std::vector<std::string> targetSidecars = sidecarsFor( targetMainPath );
   std::vector<bool> hadTarget( targetSidecars.size(), false );
   const bool hadMainTarget = fileExists( targetMainPath );
   const std::string mainBackup = targetMainPath + ".bak";
   std::vector<std::string> published;
+
+  const std::string journalPath = targetMainPath + ".publish-journal";
+  const std::string commitMarkerPath = targetMainPath + ".publish-journal.committed";
+
+  // Prepare journal members and write persistent journal before modifying any targets
+  std::vector<JournalMember> journalMembers;
+  for ( std::size_t i = 0; i < stagedSidecars.size(); ++i )
+  {
+    if ( fileExists( stagedSidecars[i] ) )
+    {
+      hadTarget[i] = fileExists( targetSidecars[i] );
+      journalMembers.push_back( { stagedSidecars[i], targetSidecars[i], targetSidecars[i] + ".bak", hadTarget[i] } );
+    }
+  }
+  journalMembers.push_back( { stagedMainPath, targetMainPath, mainBackup, hadMainTarget } );
+  writeJournalFile( journalPath, targetMainPath, journalMembers );
+
   auto cleanup = [ & ]( const std::string &failedName ) {
     std::vector<std::string> restoreFailures;
     for ( const std::string &done : published )
       removeFileQuiet( done );
-    // Restore every backed-up member (the previous good group): the MAIN
-    // target first (it is the completeness marker), then the sidecars.
-    // #791 review: a failed restore must NOT drop the backup — that would
-    // destroy the last copy of the previous good file.
     bool mainRestored = false;
     if ( hadMainTarget && fileExists( mainBackup ) )
     {
@@ -403,7 +670,6 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
           sidecarsRestored[i] = true;
       }
     }
-    // Drop backup copies ONLY if the target was successfully restored (or wasn't backed up)
     if ( !hadMainTarget || mainRestored )
       removeFileQuiet( mainBackup );
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
@@ -411,6 +677,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
       if ( !hadTarget[i] || sidecarsRestored[i] )
         removeFileQuiet( targetSidecars[i] + ".bak" );
     }
+    removeFileQuiet( journalPath );
 
     Json::Value details;
     details["failed_member"] = failedName;
@@ -428,8 +695,6 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     throw GeoError( ErrorCode::IoError, "group publish failed at " + failedName + "; target group rolled back", details );
   };
 
-  // Sidecars first, main file last: an interrupted publish can leave a stale
-  // sidecar but never a main file referencing missing members.
   for ( std::size_t i = 0; i < stagedSidecars.size(); ++i )
   {
     if ( !fileExists( stagedSidecars[i] ) )
@@ -439,7 +704,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     {
       const std::string backup = targetSidecars[i] + ".bak";
       if ( !backupInPlace( targetSidecars[i], backup ) )
-        cleanup( targetSidecars[i] ); // cannot protect the old member: refuse
+        cleanup( targetSidecars[i] );
     }
     try
     {
@@ -451,14 +716,11 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     }
     published.push_back( targetSidecars[i] );
   }
-  // Main file last, with the same backup discipline as the sidecars (#791):
-  // backupInPlace keeps the old main's directory entry alive across the
-  // whole swap, so the crash window where the main is absent is closed
-  // (#1391) — the atomic rename below is the ONLY moment the entry flips.
+
   if ( hadMainTarget )
   {
     if ( !backupInPlace( targetMainPath, mainBackup ) )
-      cleanup( targetMainPath ); // cannot protect the old main file: refuse
+      cleanup( targetMainPath );
   }
   try
   {
@@ -468,17 +730,21 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   {
     cleanup( targetMainPath );
   }
-  // Success: drop the backup set.
+
+  // Atomically mark committed
+  renameReplaceQuiet( journalPath, commitMarkerPath );
+
+  // Success: drop the backup set
   removeFileQuiet( mainBackup );
   for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
     removeFileQuiet( targetSidecars[i] + ".bak" );
-}
 
+  // Remove committed marker
+  removeFileQuiet( commitMarkerPath );
+}
 
 void publishStagedMembers( const std::vector<std::pair<std::string, std::string>> &members )
 {
-  // Filter to pairs whose staged file exists; skip missing staged (callers may
-  // list optional dependents). Publishing an empty filtered set is a no-op.
   std::vector<std::pair<std::string, std::string>> live;
   live.reserve( members.size() );
   for ( const auto &m : members )
@@ -489,14 +755,26 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
   if ( live.empty() )
     return;
 
+  const std::string mainTarget = live.back().second;
+  recoverDatasetGroup( mainTarget );
+
   std::vector<bool> hadTarget( live.size(), false );
   std::vector<std::string> published;
+  const std::string journalPath = mainTarget + ".publish-journal";
+  const std::string commitMarkerPath = mainTarget + ".publish-journal.committed";
+
+  std::vector<JournalMember> journalMembers;
+  for ( std::size_t i = 0; i < live.size(); ++i )
+  {
+    hadTarget[i] = fileExists( live[i].second );
+    journalMembers.push_back( { live[i].first, live[i].second, live[i].second + ".bak", hadTarget[i] } );
+  }
+  writeJournalFile( journalPath, mainTarget, journalMembers );
+
   auto cleanup = [ & ]( const std::string &failedName ) {
     std::vector<std::string> restoreFailures;
     for ( const std::string &done : published )
       removeFileQuiet( done );
-    // Restore backups for every member that had a prior target (main first
-    // among restores when it is last in live, then dependents).
     std::vector<bool> restored( live.size(), false );
     if ( !live.empty() )
     {
@@ -523,12 +801,12 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
         }
       }
     }
-    // Drop backup copies ONLY if the target file was successfully restored or wasn't backed up
     for ( std::size_t i = 0; i < live.size(); ++i )
     {
       if ( !hadTarget[i] || ( i < restored.size() && restored[i] ) )
         removeFileQuiet( live[i].second + ".bak" );
     }
+    removeFileQuiet( journalPath );
 
     Json::Value details;
     details["failed_member"] = failedName;
@@ -565,8 +843,14 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
     }
     published.push_back( live[i].second );
   }
+
+  // Atomically mark committed
+  renameReplaceQuiet( journalPath, commitMarkerPath );
+
   for ( const auto &m : live )
     removeFileQuiet( m.second + ".bak" );
+
+  removeFileQuiet( commitMarkerPath );
 }
 
 void writeFileAtomic( const std::string &targetPath, const std::function<void( const std::string &stagedPath )> &writer )

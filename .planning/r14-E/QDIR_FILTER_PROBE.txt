@@ -1,0 +1,3 @@
+NoFilter: [.DH] [..DH] [linked_file+LF] [plain.jsonF] [realdirD]
+Dirs|Files|System|Hidden|NoDot: [.hidden.jsonFH] [dangling.json+L] [linked_dir+L] [linked_file+LF] [plain.jsonF] [realdirD]
+AllEntries|System|Hidden|NoDot: [.hidden.jsonFH] [dangling.json+L] [linked_dir+L] [linked_file+LF] [plain.jsonF] [realdirD]

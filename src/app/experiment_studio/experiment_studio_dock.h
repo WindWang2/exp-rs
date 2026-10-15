@@ -10,7 +10,9 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 class QComboBox;
 class QLabel;
@@ -111,6 +113,16 @@ class ExperimentStudioDock : public QgsDockWidget
     std::shared_ptr<std::atomic<bool>> m_liveCancel;
     std::shared_ptr<std::atomic<bool>> m_aliveFlag = std::make_shared<std::atomic<bool>>( true );
     std::unique_ptr<std::thread> m_liveRunThread;
+
+    struct RetiredStudyThread
+    {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+    std::mutex m_retiredStudyMutex;
+    std::vector<RetiredStudyThread> m_retiredStudyThreads;
+    void pruneRetiredStudyThreadsLocked();
+
     QPushButton *m_runLiveBtn = nullptr;
     QPushButton *m_openStoreBtn = nullptr;
 

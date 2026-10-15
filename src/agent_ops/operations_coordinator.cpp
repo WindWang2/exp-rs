@@ -343,6 +343,11 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     std::string approvalError;
     if (request.repairApproval.isObject() && !request.repairApproval.isNull())
     {
+        // Fail closed on a malformed token BEFORE touching the digest — the
+        // same #1451 guard armRepairApproval has. jsoncpp's asString() throws
+        // Json::LogicError on a missing/non-string field; through OpsDriver
+        // that degrades to INVALID_ARGS, but a direct coordinator caller
+        // (the GUI dock worker thread) would terminate the process.
         if (!request.repairApproval["digest"].isString() ||
             !request.repairApproval["findings_digest"].isString())
         {

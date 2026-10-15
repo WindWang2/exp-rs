@@ -1066,3 +1066,57 @@ TEST_CASE( "budget truncation preserves critical blocking questions over non-blo
     CHECK( bundle.truncation.truncated );
     CHECK( bundle.truncation.droppedQuestions == 2 );
 }
+
+TEST_CASE( "RecipeRouter stays consistent under concurrent search and replacement (R14-E)",
+           "[science_context][concurrency][r14e]" )
+{
+    // The agent path can refreshRecipes() (vector replace) while another
+    // thread is inside synthesize()'s search() iteration. Without the
+    // router's internal mutex this is a data race on the vector (and a
+    // crash when it reallocates mid-iteration). The oracle: every search
+    // either sees a fully-seeded or a fully-cleared set — hit counts are
+    // always 0 or 3 — and the loop completes without UB (run under TSan in
+    // the sanitizer lane for the race itself).
+    RecipeRouter router;
+    seedRecipes( router );
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> searches{ 0 };
+    std::atomic<bool> sawCorruptCount{ false };
+
+    std::vector<std::thread> workers;
+    for ( int w = 0; w < 2; ++w )
+    {
+        workers.emplace_back( [&]() {
+            RecipeQuery q;
+            q.intent = "ndvi";
+            q.modality = "optical";
+            q.limit = 10;
+            while ( !stop.load( std::memory_order_relaxed ) )
+            {
+                const RecipeRouterResult r = router.search( q );
+                // A torn read could surface a partial set (1 hit) or a
+                // revision from a different doc set. The seeded set yields
+                // exactly 2 optical/ndvi hits (the SAR recipe is filtered).
+                if ( r.hits.size() != 0 && r.hits.size() != 2 )
+                    sawCorruptCount = true;
+                if ( r.registryRevision != 0 && r.registryRevision != 7 )
+                    sawCorruptCount = true;
+                searches.fetch_add( 1 );
+            }
+        } );
+    }
+    for ( int i = 0; i < 200; ++i )
+    {
+        if ( i % 2 == 0 )
+            router.clear();
+        else
+            seedRecipes( router );
+    }
+    stop.store( true );
+    for ( std::thread &t : workers )
+        t.join();
+
+    CHECK( searches.load() > 0 );
+    CHECK_FALSE( sawCorruptCount.load() );
+}

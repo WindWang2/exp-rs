@@ -83,6 +83,13 @@ bool TensorBlob::isValid() const
     for ( std::int64_t d : shape )
         if ( d <= 0 )
             return false;
+    // Overflow-checked product: elementCount() multiplies unchecked size_t and
+    // a hostile wire document (e.g. shape {2^32, 2^32, 4}) wraps the product
+    // to 0 — matching an empty payload and validating as a "zero-element
+    // tensor". countOrZero() answers 0 for the same shape and the mismatch
+    // refuses it, like every other corrupt contract.
+    if ( countOrZero() == 0 )
+        return false;
     return bytes.size() == expectedByteCount();
 }
 
@@ -155,7 +162,20 @@ TensorBlob TensorBlob::fromMat( const cv::Mat &mat )
     }
     TensorBlob blob;
     blob.dtype = dtype;
-    blob.shape.assign( mat.size.p, mat.size.p + mat.dims );
+    // 2-D multi-channel Mats carry their channels OUTSIDE size.p ({rows, cols}
+    // only) while total()*elemSize() includes them — the blob would then hold
+    // rows*cols*C values under a {rows, cols} shape and fail isValid() with a
+    // misleading "shape/bytes mismatch". Append the channel axis so the shape
+    // describes the buffer (ND Mat headers already fold channels into the
+    // last dim). The copy order below is HWC-interleaved, which is exactly
+    // what appending C as the innermost axis declares.
+    if ( mat.dims == 2 && mat.channels() > 1 )
+    {
+        blob.shape.assign( mat.size.p, mat.size.p + mat.dims );
+        blob.shape.push_back( mat.channels() );
+    }
+    else
+        blob.shape.assign( mat.size.p, mat.size.p + mat.dims );
     const std::size_t total = static_cast<std::size_t>( mat.total() ) * mat.elemSize();
     // F-OPS-2: the row-range fallback iterated mat.rows, which is -1 for
     // dims > 2 — the loop body never ran and the blob stayed all-zero while

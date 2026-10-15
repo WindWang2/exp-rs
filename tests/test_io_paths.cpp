@@ -8,6 +8,11 @@
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/util/atomic_fs.h"
+#include "geospatial/io/param_guard.h"
+#include "geospatial/formats/format_profiles.h"
+#include "geospatial/convert/raster_convert.h"
+#include "geospatial/io/vector_interchange.h"
+#include "geospatial/products/product_registry.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -388,4 +393,80 @@ TEST_CASE( "file:// URLs open seamlessly via RasterReader and inspectRaster (Ora
     CHECK( reader.metadata().width == 4 );
     CHECK( reader.metadata().height == 4 );
   }() );
+}
+
+TEST_CASE( "CheckedPath resolves file:// URIs to GDAL-openable targets and verifies target dirs (Thread #8)",
+           "[io][param_guard][thread8]" )
+{
+  const std::string dir = scratch( "thread8_param_guard" );
+  const std::string sampleFile = ( fs::path( dir ) / "source.tif" ).string();
+  {
+    std::ofstream out( sampleFile, std::ios::binary );
+    out << "sample";
+  }
+
+  // Case A: checkSourcePath with file:// URI
+  const std::string sourceUri = "file://" + sampleFile;
+  const sicnu::geo::io::CheckedPath checkedSource = sicnu::geo::io::checkSourcePath( sourceUri );
+  CHECK( checkedSource.raw == sourceUri );
+  CHECK( checkedSource.openPath() == sampleFile );
+  CHECK( checkedSource.isLocalPayload );
+
+  // Case B: checkTargetPath with file:// URI in an existing directory
+  const std::string targetUri = "file://" + ( fs::path( dir ) / "output.tif" ).string();
+  REQUIRE_NOTHROW( sicnu::geo::io::checkTargetPath( targetUri ) );
+}
+
+TEST_CASE( "FormatRegistry profileForPath decodes percent-escapes and strips query strings (Thread #18)",
+           "[formats][profiles][thread18]" )
+{
+  const auto &registry = sicnu::geo::FormatRegistry::instance();
+
+  // Case A: Percent-encoded filename with encoded dot (%2E) and space (%20)
+  const auto *profileA = registry.profileForPath( "file:///data/eo%20scene%2Etif" );
+  REQUIRE( profileA != nullptr );
+  CHECK( profileA->id == "GeoTIFF" );
+
+  // Case B: URL with query parameters containing dots
+  const auto *profileB = registry.profileForPath( "https://example.com/cog.tif?v=2.1&token=abc.xyz" );
+  REQUIRE( profileB != nullptr );
+  CHECK( profileB->id == "GeoTIFF" );
+
+  // Case C: URL with fragment identifier
+  const auto *profileC = registry.profileForPath( "/vsicurl/http://example.com/vector.gpkg#layer_name" );
+  REQUIRE( profileC != nullptr );
+  CHECK( profileC->id == "GeoPackage" );
+}
+
+TEST_CASE( "SEC-09: Uncovered GDAL open call sites accept file:// URIs seamlessly",
+           "[geospatial][sec09]" )
+{
+  const std::string dir = scratch( "sec09_open_sites" );
+  const std::string rasterPath = ( fs::path( dir ) / "test_sec09.tif" ).string();
+
+  // Create valid 4x4 GeoTIFF fixture using RasterWriter
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( rasterPath, 4, 4, { {} }, {} );
+  sicnu::geo::RasterWindow full{ 0, 0, 4, 4 };
+  std::vector<double> vals( 16, 99.0 );
+  writer.writeWindow( 1, full, vals.data() );
+  writer.finalize();
+
+  const std::string fileUri = "file://" + rasterPath;
+
+  // 1. raster_convert: translateRaster (calls openRasterReadOnly)
+  const std::string translatedPath = ( fs::path( dir ) / "translated.tif" ).string();
+  sicnu::geo::TranslateOptions topts;
+  topts.outputFormat = "GTiff";
+  REQUIRE_NOTHROW( sicnu::geo::translateRaster( fileUri, translatedPath, topts ) );
+
+  // 2. raster_convert: buildOverviews
+  REQUIRE_NOTHROW( sicnu::geo::buildOverviews( fileUri, { 2 }, "NEAREST" ) );
+
+  // 3. vector_interchange: inputOpensAsRaster
+  CHECK( sicnu::geo::io::inputOpensAsRaster( fileUri ) == true );
+
+  // 4. product_registry: GenericRasterAdapter::enumerate via describe()
+  const auto assets = sicnu::geo::ProductAdapterRegistry::instance().describe( fileUri );
+  CHECK( assets.completeness == sicnu::geo::ProductCompleteness::Complete );
+  CHECK( assets.kind == sicnu::geo::ProductKind::GenericRaster );
 }

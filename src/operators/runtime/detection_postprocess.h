@@ -73,8 +73,11 @@ std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &bo
                                              const std::function<bool()> &cancelled );
 
 /// Cross-tile dedup: exact-duplicate collapse (bit-equal boxes from overlap
-/// seams) followed by the whole-raster NMS. Bounded by contract.maxDetections
-/// upstream — the accumulator refuses more, it never silently drops.
+/// seams) followed by the whole-raster NMS. Bounded by the caller's
+/// accumulation guard: the engine enforces the exact max_detections product
+/// cap on the KEPT set after this pass, with a generous raw ceiling upstream
+/// (see detection_tile_engine.cpp) — this function itself never drops
+/// silently.
 /// `cancelled` (F-OPS-5) is probed every iteration block so a near-max-budget
 /// candidate set cannot block worker cancellation for minutes; the kept set is
 /// unchanged whether or not a probe fires.

@@ -468,3 +468,145 @@ TEST_CASE( "a 6-value bbox filters on its horizontal slice — never silently sp
   crossed.bbox = { 9.0, 50.0, 0.0, 8.0, 51.0, 100.0 };
   REQUIRE_THROWS_AS( service.searchAll( crossed ), GeoError );
 }
+
+TEST_CASE( "searchAll accumulates metrics on terminating page when maxItems reached (Thread #10)",
+           "[io][fabric][catalog][metrics]" )
+{
+  std::vector<AssetRecord> records;
+  // First record does NOT match platform "S2A"
+  AssetRecord r1 = recordWith( "rec1", "2024-01-10T00:00:00Z", 5.0, true, "LANDSAT" );
+  // Second record matches
+  AssetRecord r2 = recordWith( "rec2", "2024-01-11T00:00:00Z", 5.0, true, "S2A" );
+  // Third record matches
+  AssetRecord r3 = recordWith( "rec3", "2024-01-12T00:00:00Z", 5.0, true, "S2A" );
+  records.push_back( r1 );
+  records.push_back( r2 );
+  records.push_back( r3 );
+
+  const CatalogService service = catalogServiceOverRecords( records );
+  CatalogQuery query;
+  query.platformEquals = "S2A";
+  query.maxItems = 1;
+
+  const CatalogService::SearchAllResult result = service.searchAll( query );
+  REQUIRE( result.records.size() == 1 );
+  CHECK( result.records[0].id == "rec2" );
+  CHECK( result.truncatedByCap );
+  // r1 was inspected and rejected by client-side filters on the terminating page
+  CHECK( result.clientFilteredOut == 1 );
+}
+
+TEST_CASE( "searchPage preserves unconsumed remote items across continuations (Thread #15)",
+           "[io][fabric][catalog][pagination]" )
+{
+  testsupport::HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+
+  // A single remote page with 3 items and no next link
+  Json::Value root( Json::objectValue );
+  root["type"] = "FeatureCollection";
+  root["features"] = Json::Value( Json::arrayValue );
+
+  auto makeFeature = []( const std::string &id ) {
+    Json::Value f( Json::objectValue );
+    f["type"] = "Feature";
+    f["stac_version"] = "1.0.0";
+    f["id"] = id;
+    f["properties"]["datetime"] = "2026-08-01T10:00:00Z";
+    f["properties"]["eo:cloud_cover"] = 1.0;
+    f["properties"]["platform"] = "S2A";
+    f["geometry"]["type"] = "Polygon";
+    f["geometry"]["coordinates"] = Json::Value( Json::arrayValue );
+    Json::Value ring( Json::arrayValue );
+    auto addPt = [&]( double x, double y ) {
+      Json::Value pt( Json::arrayValue );
+      pt.append( x ); pt.append( y );
+      ring.append( pt );
+    };
+    addPt( 10, 40 ); addPt( 11, 40 ); addPt( 11, 41 ); addPt( 10, 41 ); addPt( 10, 40 );
+    f["geometry"]["coordinates"].append( ring );
+    f["bbox"] = Json::Value( Json::arrayValue );
+    f["bbox"].append( 10.0 ); f["bbox"].append( 40.0 ); f["bbox"].append( 11.0 ); f["bbox"].append( 41.0 );
+    f["assets"]["image"]["href"] = "https://data.example.com/" + id + ".tif";
+    f["assets"]["image"]["type"] = "image/tiff";
+    f["assets"]["image"]["roles"].append( "data" );
+    return f;
+  };
+
+  root["features"].append( makeFeature( "item1" ) );
+  root["features"].append( makeFeature( "item2" ) );
+  root["features"].append( makeFeature( "item3" ) );
+  root["links"] = Json::Value( Json::arrayValue );
+
+  Json::StreamWriterBuilder writerBuilder;
+  writerBuilder["indentation"] = "";
+  testsupport::StacRoute route;
+  route.body = Json::writeString( writerBuilder, root );
+  server.setRoute( "/search", route );
+
+  CatalogServiceOptions opts;
+  opts.stac.blockPrivateNetworks = false;
+  const CatalogService service = openCatalogService( server.url(), opts );
+
+  CatalogQuery query;
+  query.maxItems = 1;
+
+  // Page 1 should consume item1, buffer item2 & item3, and indicate hasMore = true
+  CatalogPage page1 = service.searchPage( query, {} );
+  REQUIRE( page1.records.size() == 1 );
+  CHECK( page1.records[0].id == "item1" );
+  CHECK( page1.next.hasMore );
+  CHECK( page1.next.remoteBufferedItems.size() == 2 );
+
+  // Page 2 should consume item2 from buffer WITHOUT contacting server again
+  CatalogPage page2 = service.searchPage( query, page1.next );
+  REQUIRE( page2.records.size() == 1 );
+  CHECK( page2.records[0].id == "item2" );
+  CHECK( page2.next.hasMore );
+  CHECK( page2.next.remoteBufferedItems.size() == 1 );
+
+  // Page 3 should consume item3 from buffer
+  CatalogPage page3 = service.searchPage( query, page2.next );
+  REQUIRE( page3.records.size() == 1 );
+  CHECK( page3.records[0].id == "item3" );
+  CHECK_FALSE( page3.next.hasMore );
+  CHECK( page3.next.remoteBufferedItems.empty() );
+
+  // Only 1 network request was made across all 3 pages
+  CHECK( server.requests().size() == 1 );
+}
+
+TEST_CASE( "local catalog crawl traversal containment refuses out-of-bounds paths (SEC-08)",
+           "[io][fabric][catalog][security][sec08]" )
+{
+  const std::string root = scratchDir( "sec08_guard" );
+  const std::string sub = root + "/sub";
+  std::filesystem::create_directories( sub );
+
+  writeFile( root + "/outside.json",
+             itemJson( "outside", "2024-05-01T10:00:00Z", 2.0, "S2A", "pixels/outside.tif" ) );
+  writeFile( sub + "/good.json",
+             itemJson( "good", "2024-05-01T10:00:00Z", 3.0, "S2A", "pixels/good.tif" ) );
+
+  // Root catalog attempts directory traversal escape and absolute path escape
+  writeFile( root + "/catalog.json", R"({
+    "type": "Catalog", "stac_version": "1.0.0", "id": "root",
+    "links": [
+      {"rel": "item", "href": "../outside.json"},
+      {"rel": "item", "href": "/etc/passwd"},
+      {"rel": "child", "href": "sub/subcatalog.json"}
+    ]})" );
+
+  // Sub-catalog within root references good.json and relative escape
+  writeFile( sub + "/subcatalog.json", R"({
+    "type": "Catalog", "stac_version": "1.0.0", "id": "subcat",
+    "links": [
+      {"rel": "item", "href": "good.json"},
+      {"rel": "item", "href": "../../../etc/shadow"}
+    ]})" );
+
+  const CatalogService service = openCatalogService( root );
+  const CatalogService::SearchAllResult result = service.searchAll( {} );
+  REQUIRE( result.records.size() == 1 );
+  CHECK( result.records[0].id == "good" );
+}

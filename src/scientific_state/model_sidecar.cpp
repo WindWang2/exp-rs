@@ -19,6 +19,8 @@
 
 #include <json/json.h>
 
+#include <cmath>
+
 #include <algorithm>
 
 namespace sicnu::state
@@ -117,8 +119,17 @@ bool parseClassifierSidecarJson( const std::string &text, const std::string &sid
             if ( !validation[ "overallAccuracy" ].isNumeric() )
                 return fail( error, StateErrorCode::InvalidField,
                              "sidecar field 'validation.overallAccuracy' must be a number" );
+            // jsoncpp parses 1e999 to +inf with no parse error. A non-finite
+            // accuracy would poison the passport round-trip: the writer
+            // emits null, and re-reading refuses the document the module
+            // itself just wrote — refuse at the typed boundary instead
+            // (same gate as asset_state_json's readDouble).
+            const double accuracy = validation[ "overallAccuracy" ].asDouble();
+            if ( !std::isfinite( accuracy ) )
+                return fail( error, StateErrorCode::InvalidField,
+                             "sidecar field 'validation.overallAccuracy' must be a finite number" );
             facts.hasAccuracy = true;
-            facts.accuracy = validation[ "overallAccuracy" ].asDouble();
+            facts.accuracy = accuracy;
         }
     }
 

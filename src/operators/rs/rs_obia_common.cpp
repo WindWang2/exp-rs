@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "rs_obia_common.h"
 
+#include "geospatial/util/atomic_fs.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_error.h"
 
@@ -128,19 +129,30 @@ RsAccuracyAssessment::Result trainingAccuracy(const QMap<quint32, int>& trainLab
 void writeUncertaintyCsv(const std::string& path,
                          const QMap<quint32, double>& uncertainties,
                          const QMap<quint32, int>& segmentClasses) {
-    QFile csv(QString::fromStdString(path));
-    if (!csv.open(QIODevice::WriteOnly | QIODevice::Text))
-        throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write " + path);
-    QTextStream out(&csv);
-    out << "segment_id,entropy,class_id\n";
-    for (auto it = uncertainties.constBegin(); it != uncertainties.constEnd(); ++it)
-        out << it.key() << ',' << QString::number(it.value(), 'g', 17)
-            << ',' << segmentClasses.value(it.key(), 0) << '\n';
-    out.flush();
-    if (csv.error() != QFile::NoError)
+    // Stage-then-publish: a mid-write failure keeps the previous CSV intact
+    // (r14-A; same discipline as the pipeline's raster writers).
+    try {
+        sicnu::geo::atomic_fs::writeFileAtomic(
+            path, [&]( const std::string& stagedPath ) {
+            QFile csv(QString::fromStdString(stagedPath));
+            if (!csv.open(QIODevice::WriteOnly | QIODevice::Text))
+                throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write " + path);
+            QTextStream out(&csv);
+            out << "segment_id,entropy,class_id\n";
+            for (auto it = uncertainties.constBegin(); it != uncertainties.constEnd(); ++it)
+                out << it.key() << ',' << QString::number(it.value(), 'g', 17)
+                    << ',' << segmentClasses.value(it.key(), 0) << '\n';
+            out.flush();
+            if (csv.error() != QFile::NoError)
+                throw RSOperatorError(ErrorCode::FileNotWritable,
+                                      "Failed writing " + path + ": " + csv.errorString().toStdString());
+            csv.close();
+        });
+    }
+    catch (const sicnu::geo::GeoError& ex) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed writing " + path + ": " + csv.errorString().toStdString());
-    csv.close();
+                              std::string("Cannot finalize output: ") + ex.what());
+    }
 }
 
 } // namespace obia

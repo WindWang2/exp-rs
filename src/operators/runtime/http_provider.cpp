@@ -13,6 +13,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 
@@ -57,6 +58,18 @@ class HttpRuntimeSession final : public IModelRuntime
         throw std::runtime_error( "inference canceled before the forward pass" );
       if ( inputs.empty() )
         throw std::runtime_error( "multi-input inference needs at least one input tensor" );
+
+      // The exchange below drives a QNetworkAccessManager through THIS
+      // thread's event dispatcher (socket notifiers + the QTimer). JobEngine
+      // workers are plain std::threads with no dispatcher: there the timer
+      // never fires and the loop can never return — the request would hang
+      // FOREVER and the m_timeoutMs contract is void. Refuse typed instead
+      // of hanging; the caller routes HTTP models onto a dispatcher thread.
+      if ( !QThread::currentThread()->eventDispatcher() )
+        throw std::runtime_error( "HTTP inference requires a Qt event-dispatcher thread "
+                                  "(this worker thread has none — the request could never "
+                                  "be answered or time out; route the call onto a thread "
+                                  "with an event loop)" );
 
       // Offline gate (goal D7): this provider carries its own QNetworkAccess
       // HTTP stack and therefore bypasses geospatial's httpFetch choke point —

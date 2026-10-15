@@ -108,6 +108,10 @@ class ArtifactStore
     void close();
     bool isOpen() const;
 
+    /// True when the last query iteration or statement step ended in an error
+    /// (prevents mid-scan silent drops, PR #1481 Thread #14 / DB-01).
+    bool stepFailed() const;
+
     /// Registers a new version of the logical artifact @p reg.logicalKey.
     /// Transactional: either a complete version row exists or nothing.
     Result<ArtifactRecord> registerArtifact( const ArtifactRegistration &reg );

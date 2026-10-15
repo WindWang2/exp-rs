@@ -78,6 +78,9 @@ class GovernanceStore
     bool isOpen() const { return m_impl != nullptr; }
     bool isReadOnly() const;
     QString schemaVersion() const;
+    /// True when the last query iteration or statement step ended in an error
+    /// (prevents mid-scan silent drops, PR #1481 Thread #14 / DB-01).
+    bool stepFailed() const;
     /// Path the store was opened with (remembered independently of the
     /// writable gov_meta table so read-only stores report it too).
     QString storePath() const { return m_storePath; }

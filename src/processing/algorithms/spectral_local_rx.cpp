@@ -201,6 +201,18 @@ bool scorePixel( const float *spectrum,
         trace += var[static_cast<size_t>( b )];
     }
     const double load = loadingValue( trace, bands, std::max( 0.0, config.loading ) );
+    // Degenerate diagonal background: an all-constant window (trace == 0)
+    // or a user-set loading of 0 with a zero-variance band leaves
+    // var[b] + load == 0, and the Mahalanobis term below divides by zero
+    // (Inf, or 0/0 = NaN when the center matches). The header contract
+    // reserves false for structurally invalid calls only — per-window
+    // degeneracy is reported unscored, exactly like the full-covariance
+    // mode's post-loading singularity (SingularBackground).
+    for ( int b = 0; b < bands; ++b )
+    {
+        if ( !( var[static_cast<size_t>( b )] + load > 0.0 ) )
+            return finish( false, PixelScoreStatus::SingularBackground );
+    }
     double rx = 0.0;
     for ( int b = 0; b < bands; ++b )
     {

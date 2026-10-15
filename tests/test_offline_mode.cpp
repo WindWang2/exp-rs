@@ -7,8 +7,10 @@
  ***************************************************************************/
 
 #include "data/providers/remote_source_cache.h"
+#include "geospatial/cog/cog_validator.h"
 #include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/offline_gate.h"
+#include "geospatial/remote/probe_remote.h"
 
 #include <QByteArray>
 #include <QtGlobal>
@@ -173,4 +175,36 @@ TEST_CASE( "offline gate: gate off by default, clear restores", "[offline][d7]" 
     // After clearing, the config option is unset again — a local open path
     // cannot observe the deny.
     CHECK( CPLGetConfigOption( "CPL_VSIL_CURL_ALLOWED_EXTENSIONS", nullptr ) == nullptr );
+}
+
+TEST_CASE( "offline gate: probeRemote refuses with typed error in offline mode (SEC-10)",
+           "[offline][remote][probe]" )
+{
+    OfflineGuard guard;
+    REQUIRE_THROWS_AS( probeRemote( "https://offline-d7.invalid/scene.tif" ), GeoError );
+}
+
+TEST_CASE( "offline gate: validateCog refuses remote URLs when offline (SEC-10)",
+           "[offline][cog]" )
+{
+    OfflineGuard guard;
+    const auto report = validateCog( "http://remote-server.org/large_cog.tif" );
+    CHECK_FALSE( report.isCog );
+}
+
+TEST_CASE( "offline gate: validateCog refuses private network targets (SEC-10)",
+           "[offline][cog][ssrf]" )
+{
+    const auto report = validateCog( "http://127.0.0.1:8000/private_cog.tif" );
+    CHECK_FALSE( report.isCog );
+}
+
+TEST_CASE( "offline gate: guarded fetch refuses in offline mode even if guard is provided (SEC-06)",
+           "[offline][fetch][redirect]" )
+{
+    OfflineGuard guard;
+    HttpFetchOptions options;
+    options.redirectGuard = []( const std::string & ) { return ""; };
+    REQUIRE_THROWS_AS( httpFetch( "https://example.com/scene.tif", options ), GeoError );
+    REQUIRE_THROWS_AS( httpFetchStatus( "https://example.com/scene.tif", options ), GeoError );
 }
