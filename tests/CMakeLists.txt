@@ -3369,6 +3369,67 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_detection_nms_10)
 
+    # R14-B: model-runtime hardening regressions (decode NaN/batch/auto,
+    # NMS NaN hardening, writer clamps, TensorBlob contracts).
+    add_executable(test_r14_B_detection_decode test_r14_B_detection_decode.cpp)
+    target_link_libraries(test_r14_B_detection_decode PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r14_B_detection_decode)
+    target_include_directories(test_r14_B_detection_decode PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r14_B_detection_decode)
+
+    # R14-B: provider-surface regressions (inferMulti detachment, HTTP
+    # dispatcher-less thread refusal, randomized VRAM ledger conservation).
+    add_executable(test_r14_B_runtime_providers test_r14_B_runtime_providers.cpp)
+    target_link_libraries(test_r14_B_runtime_providers PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        Qt6::Network
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r14_B_runtime_providers)
+    target_include_directories(test_r14_B_runtime_providers PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r14_B_runtime_providers)
+
+    # R14-B: tile-engine regressions (strided-head halo alignment, Mask
+    # tallies, morphology re-tally + stage hygiene, channel-limit refusal).
+    add_executable(test_r14_B_tile_engine test_r14_B_tile_engine.cpp)
+    target_link_libraries(test_r14_B_tile_engine PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r14_B_tile_engine)
+    target_include_directories(test_r14_B_tile_engine PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r14_B_tile_engine)
+
     # Platform 10.0: EO model platform regressions (F-OPS fixes + manifest/tasks).
     add_executable(test_eo_platform_10 test_eo_platform_10.cpp)
     target_link_libraries(test_eo_platform_10 PRIVATE

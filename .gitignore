@@ -150,8 +150,10 @@ vendor/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
 # Track 14 CLI surface R4 planning artifacts (markdown only).
+!.planning/r14-B/
 !.planning/cli-surface-r4/
 .planning/cli-surface-r4/*
+!.planning/r14-B/
 !.planning/cli-surface-r4/*.md
 # R6 persistence/sidecar/atomicity track planning notes (markdown only).
 !.planning/r6-persistence-sidecar-atomicity/
