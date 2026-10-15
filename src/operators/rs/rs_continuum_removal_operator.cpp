@@ -95,12 +95,23 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
 
     const size_t pixelCount = static_cast<size_t>( width ) * height;
 
-    // Resolve the input nodata sentinel: prefer the raster-declared band-1
-    // nodata, falling back to NaN (matching only NaN pixels) when none is set (#473).
-    // Continuum-removal output values are ratios in (0, 1].
-    bool hasNodata = false;
-    double srcNodata = ds.bandNoDataValue( 1, &hasNodata );
-    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : std::numeric_limits<float>::quiet_NaN();
+    // Per-band declared sentinels (R14-A): each band's own declaration is
+    // washed to NaN while the spectrum is assembled, so heterogeneous
+    // per-band NoData is honored — the previous band-1-only sentinel let
+    // another band's voids (e.g. -9999) enter the convex hull as
+    // reflectance and garble every spectrum touching that band (#473's
+    // per-band closure). Continuum-removal output values are ratios in
+    // (0, 1]; void spectra are all-NaN in the output.
+    std::vector<float> bandSentinels( static_cast<size_t>( bandCount ),
+                                      std::numeric_limits<float>::quiet_NaN() );
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+        bool has = false;
+        const double nd = ds.bandNoDataValue( b, &has );
+        if ( has && std::isfinite( nd ) )
+            bandSentinels[static_cast<size_t>( b - 1 )] = static_cast<float>( nd );
+    }
+    const float nodata = std::numeric_limits<float>::quiet_NaN();
 
     // Wavelengths from band WAVELENGTH metadata (fallback to indices when absent)
     std::vector<float> wavelengths( bandCount, 0.0f );
@@ -188,14 +199,14 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
         throw RSOperatorError( ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + outErr.toStdString() );
 
-    if ( hasNodata )
+    // Void spectra are written as all-NaN (kernel nodata), so the output
+    // declares NaN per band — matching the spectral-family convention after
+    // the per-band wash (rs_spectral_index sets the same tag).
+    for ( int b = 1; b <= bandCount; ++b )
     {
-        for ( int b = 1; b <= bandCount; ++b )
-        {
-            GDALRasterBandH hOutBand = GDALGetRasterBand( outDs, b );
-            if ( hOutBand )
-                GDALSetRasterNoDataValue( hOutBand, nodata );
-        }
+        GDALRasterBandH hOutBand = GDALGetRasterBand( outDs, b );
+        if ( hOutBand )
+            GDALSetRasterNoDataValue( hOutBand, std::numeric_limits<double>::quiet_NaN() );
     }
 
     std::vector<float> spectrum( bandCount );
@@ -233,13 +244,26 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
                 float *specOut = tileOut.data() + p * B;
                 if ( wlPerm.empty() )
                 {
-                    std::memcpy( spectrum.data(), specIn, sizeof( float ) * bandCount );
+                    for ( int b = 0; b < bandCount; ++b )
+                    {
+                        const float v = specIn[b];
+                        spectrum[b] = v == bandSentinels[static_cast<size_t>( b )]
+                                          ? std::numeric_limits<float>::quiet_NaN()
+                                          : v;
+                    }
                 }
                 else
                 {
-                    // Re-order onto the ascending wavelength axis before the hull.
+                    // Re-order onto the ascending wavelength axis before the hull,
+                    // washing each sample against its own source band's sentinel.
                     for ( int b = 0; b < bandCount; ++b )
-                        spectrum[b] = specIn[wlPerm[b]];
+                    {
+                        const int src = wlPerm[b];
+                        const float v = specIn[src];
+                        spectrum[b] = v == bandSentinels[static_cast<size_t>( src )]
+                                          ? std::numeric_limits<float>::quiet_NaN()
+                                          : v;
+                    }
                 }
 
                 if ( SpectralClassification::continuumRemoval( spectrum.data(), wlPtr, removed.data(),
