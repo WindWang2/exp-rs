@@ -149,6 +149,36 @@ std::vector<RasterSlot> rasterSlots( const RuleFacts &facts )
     return out;
 }
 
+/// Slots whose facts did not resolve. Their kind is unknowable in that
+/// state, so rules that silently dropped them could pass over an
+/// incomplete input set — an unresolved slot cannot prove it is not a
+/// second raster. The band_role rule already refuses this shape with a
+/// typed unknown (R14-E audit F3); pair/quality/temporal align here.
+std::vector<const RuleFacts::Slot *> unresolvedSlots( const RuleFacts &facts )
+{
+    std::vector<const RuleFacts::Slot *> out;
+    for ( const auto &slot : facts.slots )
+        if ( slot.facts.status != FactStatus::Available )
+            out.push_back( &slot );
+    return out;
+}
+
+/// Emits one typed unknown per unresolved slot and returns how many were
+/// emitted (feeds the rule's unknownCount).
+std::size_t emitUnresolvedSlotUnknowns( RuleResult &result, const RuleFacts &facts,
+                                        const char *code, const char *domain )
+{
+    std::size_t unknownCount = 0;
+    for ( const RuleFacts::Slot *slot : unresolvedSlots( facts ) )
+    {
+        result.findings.push_back( unknownFinding(
+            code, domain, slot->slot,
+            slot->facts.detail.empty() ? "input facts unresolved" : slot->facts.detail ) );
+        ++unknownCount;
+    }
+    return unknownCount;
+}
+
 int countRole( const SlotFacts &facts, const std::string &role )
 {
     int count = 0;
@@ -290,6 +320,15 @@ RuleResult pairCrsEvaluate( const PreflightRequest &request, const RuleFacts &fa
     const auto rasters = rasterSlots( facts );
     if ( rasters.size() < 2 )
     {
+        if ( !unresolvedSlots( facts ).empty() )
+        {
+            // The pair set may be incomplete precisely because an input's
+            // facts never resolved — that cannot grade as "no pair needed".
+            emitUnresolvedSlotUnknowns( result, facts, "SPF_CRS_UNKNOWN", "grid" );
+            result.outcome = "insufficient_facts";
+            result.detail = "fewer than two resolved raster inputs; unresolved inputs present";
+            return result;
+        }
         result.detail = "fewer than two raster inputs; no pair to compare";
         result.outcome = "pass";
         return result;
@@ -359,6 +398,11 @@ RuleResult pairCrsEvaluate( const PreflightRequest &request, const RuleFacts &fa
             result.findings.push_back( std::move( f ) );
         }
     }
+    // R14-E review finding 5: with two resolved rasters a third UNRESOLVED
+    // input was still dropped silently — an unresolved slot cannot prove it
+    // would not have joined the pairs. Emitted as typed unknowns; a real
+    // mismatch finding still dominates (outcomeFor).
+    unknownCount += emitUnresolvedSlotUnknowns( result, facts, "SPF_CRS_UNKNOWN", "grid" );
     result.outcome = outcomeFor( result.findings, unknownCount );
     if ( result.outcome == "pass" )
         result.detail = "pair CRS consistent";
@@ -378,6 +422,13 @@ RuleResult resolutionRatioEvaluate( const PreflightRequest &request, const RuleF
     const auto rasters = rasterSlots( facts );
     if ( rasters.size() < 2 )
     {
+        if ( !unresolvedSlots( facts ).empty() )
+        {
+            emitUnresolvedSlotUnknowns( result, facts, "SPF_RESOLUTION_UNKNOWN", "grid" );
+            result.outcome = "insufficient_facts";
+            result.detail = "fewer than two resolved raster inputs; unresolved inputs present";
+            return result;
+        }
         result.detail = "fewer than two raster inputs; no pair to compare";
         result.outcome = "pass";
         return result;
@@ -424,6 +475,9 @@ RuleResult resolutionRatioEvaluate( const PreflightRequest &request, const RuleF
             result.findings.push_back( std::move( f ) );
         }
     }
+    // R14-E review finding 5 (same rationale as pair_crs above): an
+    // unresolved extra input is a typed unknown, never silently dropped.
+    unknownCount += emitUnresolvedSlotUnknowns( result, facts, "SPF_RESOLUTION_UNKNOWN", "grid" );
     result.outcome = outcomeFor( result.findings, unknownCount );
     if ( result.outcome == "pass" )
         result.detail = "pair resolutions compatible";
@@ -568,7 +622,8 @@ RuleResult modalityEvaluate( const PreflightRequest &request, const RuleFacts &f
 RuleResult qualityMaskEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
-    std::size_t unknownCount = 0;
+    std::size_t unknownCount = emitUnresolvedSlotUnknowns( result, facts, "SPF_QUALITY_UNKNOWN",
+                                                           "quality" );
     for ( const auto &raster : rasterSlots( facts ) )
     {
         const RuleFacts::Slot *slot = raster.slot;
@@ -637,7 +692,8 @@ RuleResult temporalEvaluate( const PreflightRequest &request, const RuleFacts &f
                              ? temporal["max_gap_days"].asInt()
                              : 0;
 
-    std::size_t unknownCount = 0;
+    std::size_t unknownCount = emitUnresolvedSlotUnknowns( result, facts,
+                                                           "SPF_TEMPORAL_UNKNOWN", "temporal" );
     for ( const auto &raster : rasterSlots( facts ) )
     {
         const RuleFacts::Slot *slot = raster.slot;

@@ -9,6 +9,7 @@
 
 #include <json/json.h>
 
+#include <algorithm>
 #include <fstream>
 #include <string>
 
@@ -349,7 +350,15 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
                                          "learning_objective.id must be a non-empty string" );
     }
     scenario.learningObjectiveId = objective["id"].asString();
-    if ( !matchesPattern( scenario.learningObjectiveId, "LO-", true ) )
+    // The published schema (data/faultlab/faults.schema.json) and every
+    // catalog id pin ^LO-[0-9]{2}$ exactly; the old [a-z0-9_]+ suffix let
+    // ids like LO-abc drift silently away from the documented grammar the
+    // refusal message already claimed (R14-E audit F3).
+    const std::string &loId = scenario.learningObjectiveId;
+    const bool loIdWellFormed = loId.size() == 5 && loId.rfind( "LO-", 0 ) == 0
+                                && std::all_of( loId.begin() + 3, loId.end(),
+                                                []( char c ) { return c >= '0' && c <= '9'; } );
+    if ( !loIdWellFormed )
     {
         return makeError<FaultScenario>( "faultlab.scenario_objective",
                                          "learning_objective.id '" + scenario.learningObjectiveId +

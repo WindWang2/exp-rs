@@ -159,15 +159,26 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
         if ( e.packId.endsWith( QLatin1String( ".pack.json" ) ) )
             e.packId.chop( 10 );
 
-        QFile f( e.path );
-        if ( !f.open( QIODevice::ReadOnly ) )
+        // Bounded read (R14-E audit F5): a tampered pack document is a
+        // typed inventory issue, not an unbounded slurp into memory.
+        constexpr qint64 kMaxPackBytes = 16 * 1024 * 1024;
+        const BoundedReadResult bounded = readBounded( e.path, kMaxPackBytes );
+        if ( bounded.oversize )
+        {
+            e.issues.push_back( { QStringLiteral( "pack_oversize" ), e.path,
+                                  QStringLiteral( "pack document exceeds the 16 MiB read budget" ),
+                                  QStringLiteral( "error" ) } );
+            inv.packs.push_back( e );
+            continue;
+        }
+        if ( bounded.unreadable )
         {
             e.issues.push_back( { QStringLiteral( "pack_unreadable" ), e.path,
                                   QStringLiteral( "cannot read pack" ), QStringLiteral( "error" ) } );
             inv.packs.push_back( e );
             continue;
         }
-        const QByteArray raw = f.readAll();
+        const QByteArray raw = bounded.bytes;
         e.digest = sha256Hex( raw );
         // Display projection only (lab id / version / generator strings for
         // the teacher UI); every VALIDATION decision below comes from the

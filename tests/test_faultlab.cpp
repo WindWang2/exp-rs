@@ -1755,3 +1755,62 @@ TEST_CASE( "fault lab: scenario loader pins the 4 MiB read-cap boundary", "[faul
     REQUIRE( !refused.diagnostics.empty() );
     CHECK( refused.diagnostics.front().code == "faultlab.scenario_unreadable" );
 }
+
+TEST_CASE( "fault lab: Changed without a clean baseline fails, never passes vacuously",
+           "[faultlab][expectations][r14e]" )
+{
+    // A text and a truth observable that exist ONLY in the faulted set:
+    // "changed" is unprovable without a baseline, and the number path
+    // already fails with a note in exactly this shape. On unfixed master
+    // both expectations passed with zero baseline evidence (RED).
+    ObservableSet clean;
+    ObservableSet faulted;
+    Observable textObs;
+    textObs.id = "artifact.text_only_after_fault";
+    textObs.kind = ObservableKind::Text;
+    textObs.text = "shifted";
+    faulted[textObs.id] = textObs;
+    Observable truthObs;
+    truthObs.id = "artifact.truth_only_after_fault";
+    truthObs.kind = ObservableKind::Truth;
+    truthObs.truth = true;
+    faulted[truthObs.id] = truthObs;
+
+    std::vector<ObservableExpectation> expectations;
+    ObservableExpectation textChanged;
+    textChanged.id = textObs.id;
+    textChanged.relation = ExpectationRelation::Changed;
+    expectations.push_back( textChanged );
+    ObservableExpectation truthChanged;
+    truthChanged.id = truthObs.id;
+    truthChanged.relation = ExpectationRelation::Changed;
+    expectations.push_back( truthChanged );
+
+    const auto results = checkExpectations( clean, faulted, expectations );
+    REQUIRE( results.size() == 2 );
+    CHECK_FALSE( results[0].passed );
+    CHECK( results[0].note.find( "clean baseline" ) != std::string::npos );
+    CHECK_FALSE( results[1].passed );
+    CHECK( results[1].note.find( "clean baseline" ) != std::string::npos );
+}
+
+TEST_CASE( "fault lab: learning objective ids outside ^LO-[0-9]{2}$ are refused",
+           "[faultlab][scenario][r14e]" )
+{
+    for ( const char *badId : { "LO-abc", "LO-1", "LO-123", "lo-03", "LO-03x" } )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["learning_objective"]["id"] = badId;
+        doc["learning_objective"]["statement"] = "statement";
+        const auto result = loadFaultScenario( doc );
+        INFO( "id: " << badId );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_objective" );
+    }
+    // The documented two-digit shape still loads.
+    Json::Value doc = validScenarioDoc();
+    doc["learning_objective"]["id"] = "LO-03";
+    doc["learning_objective"]["statement"] = "statement";
+    CHECK( loadFaultScenario( doc ).ok );
+}

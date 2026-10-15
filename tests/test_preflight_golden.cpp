@@ -238,7 +238,18 @@ TEST_CASE( "golden: unresolvable facts surface typed unknowns, never a pass",
     REQUIRE( r.verdict == "requires_ack" );
     const auto codes = codeSet( r );
     REQUIRE( codes.count( "SPF_BAND_ROLE_UNKNOWN" ) == 1 );
-    REQUIRE( codes.count( "SPF_CRS_UNKNOWN" ) == 0 ); // no pair to compare
+    // R14-E contract change (audit F3): an unresolved input used to let the
+    // pair/quality rules pass over an incomplete input set ("no pair to
+    // compare"); they now degrade to the same typed unknown band_role
+    // already pins here. temporal is NOT in this set: it deliberately
+    // stays a no-op when the operator declares no temporal policy at all
+    // (policyGateOutcome) — its unresolved emission fires only for
+    // operators that actually ask for temporal checks. This pin was
+    // consciously updated with that change.
+    REQUIRE( codes.count( "SPF_CRS_UNKNOWN" ) == 1 );
+    REQUIRE( codes.count( "SPF_RESOLUTION_UNKNOWN" ) == 1 );
+    REQUIRE( codes.count( "SPF_QUALITY_UNKNOWN" ) == 1 );
+    REQUIRE( codes.count( "SPF_TEMPORAL_UNKNOWN" ) == 0 ); // no temporal policy declared
     for ( const auto &f : r.findings )
         REQUIRE( f.basis == "unknown" );
 }

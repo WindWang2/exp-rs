@@ -748,6 +748,33 @@ LabResult<LabSession> sessionFromJson( const Json::Value &doc )
   else
     diags.push_back( LabDiag{ "lab.session.schema", "execution_refs must be an array" } );
 
+  // Sequence-envelope consistency (R14-E audit, teaching F2): every event
+  // seq must lie in (0, last_seq]. A shape-valid document whose event
+  // claims seq=500 while last_seq=3 would let a forged/stale "pass" win
+  // every latest-wins gate after reload while genuine events draw seq 4+
+  // and can never supersede it — the strict envelope the header promises
+  // ("never adopts partially") must refuse it instead.
+  if ( diags.empty() )
+  {
+    const auto seqWithinEnvelope = [&session]( long long seq ) {
+      return seq > 0 && seq <= session.lastSeq;
+    };
+    bool consistent = true;
+    for ( const CheckpointResult &result : session.checkpointResults )
+      consistent = consistent && seqWithinEnvelope( result.seq );
+    for ( const QuestionAnswer &answer : session.questionAnswers )
+      consistent = consistent && seqWithinEnvelope( answer.seq );
+    for ( const HintEvent &event : session.hintEvents )
+      consistent = consistent && seqWithinEnvelope( event.seq );
+    for ( const ToolChoice &choice : session.toolChoices )
+      consistent = consistent && seqWithinEnvelope( choice.seq );
+    for ( const ExecutionRef &ref : session.executionRefs )
+      consistent = consistent && seqWithinEnvelope( ref.seq );
+    if ( !consistent )
+      diags.push_back( LabDiag{ "lab.session.schema",
+                                "event seq outside the (0, last_seq] envelope" } );
+  }
+
   if ( !diags.empty() )
     return LabResult<LabSession>::failure( std::move( diags ) );
   return LabResult<LabSession>::success( std::move( session ) );

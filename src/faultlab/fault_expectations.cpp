@@ -88,7 +88,19 @@ ExpectationResult checkText( const ObservableExpectation &expectation, const Obs
             result.passed = faulted->text != expectation.text;
             break;
         case ExpectationRelation::Changed:
-            result.passed = clean != nullptr ? ( faulted->text != clean->text ) : true;
+            // Without a clean baseline "changed" is unprovable, not vacuously
+            // true — the number path fails with the same note when the
+            // clean observable is absent, and an expectation that only
+            // exists after fault injection must not pass on zero evidence.
+            if ( clean == nullptr )
+            {
+                result.passed = false;
+                result.note = "clean baseline for this observable is absent";
+            }
+            else
+            {
+                result.passed = faulted->text != clean->text;
+            }
             break;
         default:
             result.passed = false;
@@ -113,7 +125,18 @@ ExpectationResult checkTruth( const ObservableExpectation &expectation, const Ob
             result.passed = ( faulted->truth == ( expectation.value != 0.0 ) );
             break;
         case ExpectationRelation::Changed:
-            result.passed = clean != nullptr ? ( faulted->truth != clean->truth ) : true;
+            // Same baseline-absent discipline as checkNumber/checkText: the
+            // vacuous true let a fault-only truth observable pass Changed
+            // with no clean evidence at all.
+            if ( clean == nullptr )
+            {
+                result.passed = false;
+                result.note = "clean baseline for this observable is absent";
+            }
+            else
+            {
+                result.passed = faulted->truth != clean->truth;
+            }
             break;
         default:
             result.passed = false;
