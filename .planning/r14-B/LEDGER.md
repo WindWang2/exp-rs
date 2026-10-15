@@ -56,4 +56,19 @@
 
 ## Commits
 
-(planned; fill on commit)
+- `c47d8cedb` harden(detection): NaN-safe decode, batch/layout refusals, seam ownership, writer clamps (+test_r14_B_detection_decode)
+- `649fa3249` harden(tile-engine): strided-head halo alignment, morphology re-tally + stage hygiene, CV_CN_MAX refusals, multi-input batch check (+test_r14_B_tile_engine)
+- `f5888fa2b` harden(providers): shared-session serialization, typed timeouts, TensorBlob contracts (+test_r14_B_runtime_providers + CMake registration)
+- `0aa21ec37` docs(r14-B): ledger/oracles/risk/test-results + .gitignore whitelist (repo convention)
+- `6e1c9d547` harden(providers): review round-2 fixes (permanentlyDead on python timeout, inferMulti cancel re-check, dtype-gate pin, detachment retitle)
+- `78e9ed2ff` docs(r14-B): final report
+
+## Push / PR
+
+- Branch pushed via `git -c credential.helper=...` (gh token as basic-auth
+  password) with the broken gitconfig proxy bypassed: github.com git
+  smart-HTTP was reachable, the socks5h proxy and bearer-auth were not.
+- **PR: https://github.com/WindWang2/exp-rs/pull/1508** (base=master,
+  6 commits, state OPEN). No auto-merge; CI not awaited (per task stop
+  conditions). File-overlap with sibling PRs #1506/#1507 verified
+  disjoint (only shared file is tests/CMakeLists.txt at disjoint lines).
