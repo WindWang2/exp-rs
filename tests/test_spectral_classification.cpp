@@ -366,8 +366,8 @@ TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam]
     // pixel 2's -9999 passed as data and was classified.
     GDALDatasetH inDs = createOutputTiff( inputPath, 3, 1, 2, GDT_Float32, gt, QString() );
     REQUIRE( inDs != nullptr );
-    const std::vector<float> b1 = { 0.8f, 0.0f, 0.8f };
-    const std::vector<float> b2 = { 0.2f, 0.2f, -9999.0f };
+    std::vector<float> b1 = { 0.8f, 0.0f, 0.8f };
+    std::vector<float> b2 = { 0.2f, 0.2f, -9999.0f };
     REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 1 ), GF_Write, 0, 0, 3, 1,
                            b1.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
     REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 2 ), GF_Write, 0, 0, 3, 1,
@@ -425,9 +425,9 @@ TEST_CASE( "rs:continuum_removal honors heterogeneous per-band NoData [r14a]",
     // sentinel 0.0 instead of the family's NaN void.
     GDALDatasetH inDs = createOutputTiff( inputPath, 3, 1, 3, GDT_Float32, gt, QString() );
     REQUIRE( inDs != nullptr );
-    const std::vector<float> b1 = { 0.5f, 0.5f, 0.0f };
-    const std::vector<float> b2 = { 0.5f, -9999.0f, 0.5f };
-    const std::vector<float> b3 = { 0.5f, 0.5f, 0.5f };
+    std::vector<float> b1 = { 0.5f, 0.5f, 0.0f };
+    std::vector<float> b2 = { 0.5f, -9999.0f, 0.5f };
+    std::vector<float> b3 = { 0.5f, 0.5f, 0.5f };
     REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 1 ), GF_Write, 0, 0, 3, 1,
                            b1.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
     REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 2 ), GF_Write, 0, 0, 3, 1,
@@ -460,9 +460,9 @@ TEST_CASE( "rs:continuum_removal honors heterogeneous per-band NoData [r14a]",
         REQUIRE( std::isnan( band[2] ) );                    // band-1 void voids the spectrum
     }
     // Output declares NaN voids (spectral-family convention after the wash).
-    int hasNd = 0;
+    bool hasNd = false;
     const double ndTag = out.bandNoDataValue( 1, &hasNd );
-    CHECK( hasNd == 1 );
+    CHECK( hasNd );
     CHECK( std::isnan( ndTag ) );
 }
 

@@ -781,9 +781,9 @@ TEST_CASE( "Streaming brovey invalidates partially-NoData pixels like the kernel
     REQUIRE( out.readBandData( 2, out2.data(), 2, 1 ) );
     CHECK( std::isnan( out1[0] ) );
     CHECK( std::isnan( out2[0] ) );
-    int hasNd = 0;
+    bool hasNd = false;
     double ndTag = out.bandNoDataValue( 1, &hasNd );
-    CHECK( hasNd == 1 );
+    CHECK( hasNd );
     CHECK( std::isnan( ndTag ) );
     // Pixel 1 fuses normally: (4/6)*10, (2/6)*10.
     CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
@@ -846,9 +846,9 @@ TEST_CASE( "Streaming brovey honors heterogeneous per-band NoData declarations [
     CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
     CHECK( out2[1] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
     // Void outputs carry the NaN band tag (family convention after the wash).
-    int hasNd = 0;
+    bool hasNd = false;
     double ndTag = out.bandNoDataValue( 1, &hasNd );
-    CHECK( hasNd == 1 );
+    CHECK( hasNd );
     CHECK( std::isnan( ndTag ) );
 }
 

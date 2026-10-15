@@ -208,12 +208,12 @@ Json::Value RsObiaFeaturesOperator::run(const Json::Value& params, RSOperatorCon
     context.reportProgress(1.0, "Feature extraction complete");
 
     // 6 shape columns + 8 per-band columns.
-    const int featureColumns = 6 + 8 * nBands;
+    const int featureColumns = 6 + 8 * static_cast<int>(bands.size());
 
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["segments"] = static_cast<int>(stats.size());
-    result["bands"] = nBands;
+    result["bands"] = static_cast<int>(bands.size());
     result["features"] = featureColumns;
     result["width"] = segMap.width();
     result["height"] = segMap.height();
