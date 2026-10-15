@@ -237,6 +237,19 @@ TEST_CASE( "resolveAgainst joins relatives and refuses traversal escapes",
   REQUIRE( deepEscape.kind == ResourceKind::Invalid );
   REQUIRE( deepEscape.parseReason.find( "escape" ) != std::string::npos );
 
+  // Percent-encoded escapes (%2e%2e, %2E%2E) are refused (DEF-GEO-03).
+  const ResourceUri pctEscape = ResourceUri::resolveAgainst( base, "%2e%2e/outside.tif" );
+  REQUIRE( pctEscape.kind == ResourceKind::Invalid );
+  REQUIRE( pctEscape.parseReason.find( "escape" ) != std::string::npos );
+
+  const ResourceUri upperPctEscape = ResourceUri::resolveAgainst( base, "%2E%2E/outside.tif" );
+  REQUIRE( upperPctEscape.kind == ResourceKind::Invalid );
+  REQUIRE( upperPctEscape.parseReason.find( "escape" ) != std::string::npos );
+
+  const ResourceUri mixedPctEscape = ResourceUri::resolveAgainst( base, "a/%2e%2e/%2e%2e/outside.tif" );
+  REQUIRE( mixedPctEscape.kind == ResourceKind::Invalid );
+  REQUIRE( mixedPctEscape.parseReason.find( "escape" ) != std::string::npos );
+
   // Absolute and remote references pass through untouched.
   const ResourceUri absolute = ResourceUri::resolveAgainst( base, "C:/other/x.tif" );
   REQUIRE( absolute.kind == ResourceKind::Invalid ); // does not exist, but was not joined

@@ -847,7 +847,14 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
   bool escaped = false;
   for ( const std::string &segment : splitSegments( normalizeSeparators( reference ) ) )
   {
-    if ( segment == ".." )
+    std::string decoded;
+    const bool isDecoded = percentDecode( segment, decoded );
+    if ( !isDecoded || decoded.find( '\0' ) != std::string::npos )
+    {
+      escaped = true;
+      break;
+    }
+    if ( segment == ".." || decoded == ".." )
     {
       if ( segments.size() <= baseDepth || segments.empty() )
       {
@@ -855,6 +862,10 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
         break;
       }
       segments.pop_back();
+    }
+    else if ( segment == "." || decoded == "." || segment.empty() )
+    {
+      continue;
     }
     else
     {
