@@ -31,6 +31,7 @@
 #include "providers/wmts_source_provider.h"
 #include "providers/xyz_source_provider.h"
 #include "virtual_raster_preflight.h"
+#include "execution_fingerprint.h"
 #include "platform/durable_sidecar.h"
 #include "runtime/observability/fault_point.h"
 
@@ -1353,11 +1354,10 @@ Result<AssetId> DataManager::createVirtualRaster(
 
   // The recipe hash keys both dedup (via the descriptor) and the scratch
   // artifact path: same recipe -> same path -> same SourceKey -> reuse.
-  const QJsonDocument recipeDoc( recipe.toJson() );
+  // RFC 8785 canonical JSON + SHA-256 (Issue #1450, ADR 0178).
+  const QByteArray canonicalRecipe = canonicalizeJsonRfc8785( recipe.toJson() );
   const QString recipeHash = QString::fromUtf8(
-    QCryptographicHash::hash( recipeDoc.toJson( QJsonDocument::Compact ),
-                              QCryptographicHash::Sha1 )
-      .toHex() );
+    QCryptographicHash::hash( canonicalRecipe, QCryptographicHash::Sha256 ).toHex() );
 
   if ( !m_impl->vrtScratchDir || !m_impl->vrtScratchDir->isValid() )
     m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
@@ -1375,8 +1375,7 @@ Result<AssetId> DataManager::createVirtualRaster(
   source.providerKey = QStringLiteral( "vrt" );
   source.canonicalSource = vrtPath;
   source.dataOptions.insert( QStringLiteral( "recipe" ),
-                             QString::fromUtf8(
-                               recipeDoc.toJson( QJsonDocument::Compact ) ) );
+                             QString::fromUtf8( canonicalRecipe ) );
 
   RegisterRequest request;
   request.source = source;
@@ -1465,11 +1464,10 @@ Result<AssetId> DataManager::restoreVirtualRaster(
   // The recipe hash keys the descriptor and the deterministic scratch path,
   // exactly as createVirtualRaster derives them - same recipe -> same path ->
   // same SourceKey -> dedup across save/restore.
-  const QJsonDocument recipeDoc( request.recipe.toJson() );
+  // RFC 8785 canonical JSON + SHA-256 (Issue #1450, ADR 0178).
+  const QByteArray canonicalRecipe = canonicalizeJsonRfc8785( request.recipe.toJson() );
   const QString recipeHash = QString::fromUtf8(
-    QCryptographicHash::hash( recipeDoc.toJson( QJsonDocument::Compact ),
-                              QCryptographicHash::Sha1 )
-      .toHex() );
+    QCryptographicHash::hash( canonicalRecipe, QCryptographicHash::Sha256 ).toHex() );
 
   if ( !m_impl->vrtScratchDir || !m_impl->vrtScratchDir->isValid() )
     m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
@@ -1487,8 +1485,7 @@ Result<AssetId> DataManager::restoreVirtualRaster(
   descriptor.providerKey = QStringLiteral( "vrt" );
   descriptor.canonicalSource = vrtPath;
   descriptor.dataOptions.insert( QStringLiteral( "recipe" ),
-                                 QString::fromUtf8(
-                                   recipeDoc.toJson( QJsonDocument::Compact ) ) );
+                                 QString::fromUtf8( canonicalRecipe ) );
   const SourceKey sourceKey = descriptor.sourceKey();
 
   // Conflict guards mirror restoreSource: an id already bound to a different

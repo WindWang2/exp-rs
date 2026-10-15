@@ -656,3 +656,32 @@ TEST_CASE( "createVirtualRaster refuses absurd target dimensions instead of wrap
   }
   CHECK( mentionsGrid );
 }
+
+TEST_CASE( "createVirtualRaster uses SHA-256 recipe hash and canonical recipe in dataOptions",
+           "[virtual_raster][create][digest]" )
+{
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const AssetId input = registerRaster(
+    manager, writeByteGrid( dir.filePath( QStringLiteral( "utm.tif" ) ),
+                            QStringLiteral( "EPSG:32648" ) ) );
+
+  const VirtualRasterRecipe recipe = recipeFor( { BandRef{ input, 1 } } );
+  const Result<AssetId> created = manager.createVirtualRaster( recipe );
+  REQUIRE( created );
+
+  const std::optional<AssetSnapshot> snapshot = manager.asset( created.value() );
+  REQUIRE( snapshot.has_value() );
+  const QString canonicalSource = snapshot->source().canonicalSource;
+  const QString expectedFileName = QStringLiteral( "vrt_%1.vrt" ).arg( recipe.contentDigest() );
+  CHECK( canonicalSource.endsWith( expectedFileName ) );
+
+  const QString storedRecipe = snapshot->source().dataOptions.value( QStringLiteral( "recipe" ) );
+  CHECK_FALSE( storedRecipe.isEmpty() );
+  const auto parsed = VirtualRasterRecipe::fromJson(
+    QJsonDocument::fromJson( storedRecipe.toUtf8() ).object() );
+  REQUIRE( parsed );
+  CHECK( parsed.value() == recipe );
+}

@@ -256,6 +256,12 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteClassification(
         if ( !written )
             return failAs<PromotionReport>( written.diagnostics() );
         report.samplesWritten = samples.size();
+
+        SourceAssetRef assetRef;
+        assetRef.assetId = source.assetId;
+        assetRef.revision = source.revision;
+        assetRef.role = QStringLiteral( "label" );
+        m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
     }
     for ( auto &annotation : annotations )
     {
@@ -353,6 +359,12 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteSegmentation(
         if ( !written )
             return failAs<PromotionReport>( written.diagnostics() );
         report.samplesWritten = samples.size();
+
+        SourceAssetRef assetRef;
+        assetRef.assetId = source.assetId;
+        assetRef.revision = source.revision;
+        assetRef.role = QStringLiteral( "segmentation" );
+        m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
     }
     for ( auto &annotation : annotations )
     {
@@ -476,9 +488,16 @@ sicnu::data::Result<QString> SamplePromoter::promotePair( const DatasetVersionId
     provenance.insert( QStringLiteral( "event_group" ), eventGroup );
     sample.provenance() = provenance;
 
+    SourceAssetRef assetRef;
+    assetRef.assetId = source.assetId;
+    assetRef.revision = source.revision;
+    assetRef.role = pairRole;
+    sample.sourceAssets().append( assetRef );
+
     auto written = m_store->addSamples( QVector<SampleRecord>{ sample } );
     if ( !written )
         return failAs<QString>( written.diagnostics() );
+    m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
     return TypedResult::success( sample.sampleId() );
 }
 
@@ -539,9 +558,35 @@ sicnu::data::Result<QString> SamplePromoter::promoteTemporal(
     SampleRecord sample = baseSample( version, SampleKind::Temporal, source );
     sample.payload() = payload;
     sample.setGroupId( sharedGroup );
+
+    QVector<SourceAssetRef> assets;
+    if ( source.isValid() )
+    {
+        SourceAssetRef sourceRef;
+        sourceRef.assetId = source.assetId;
+        sourceRef.revision = source.revision;
+        sourceRef.role = QStringLiteral( "temporal" );
+        assets.append( sourceRef );
+        sample.sourceAssets().append( sourceRef );
+    }
+    for ( const auto &member : members )
+    {
+        if ( !member.assetId.isEmpty() )
+        {
+            SourceAssetRef memberRef;
+            memberRef.assetId = member.assetId;
+            memberRef.revision = member.revision;
+            memberRef.role = QStringLiteral( "observation" );
+            assets.append( memberRef );
+            sample.sourceAssets().append( memberRef );
+        }
+    }
+
     auto written = m_store->addSamples( QVector<SampleRecord>{ sample } );
     if ( !written )
         return failAs<QString>( written.diagnostics() );
+    if ( !assets.isEmpty() )
+        m_store->addSourceAssetsToDraft( version, assets );
     return TypedResult::success( sample.sampleId() );
 }
 

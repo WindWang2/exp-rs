@@ -83,9 +83,14 @@ struct GeneratedPatch
     QString classCode;
 };
 
+/// Default memory bound on batch patch generation to prevent unbounded allocations (PERF-01).
+inline constexpr qint64 kDefaultMaxBatchPatches = 100000;
+
 class PatchGenerator
 {
   public:
+    static constexpr qint64 kDefaultMaxBatchPatches = sicnu::dataset::kDefaultMaxBatchPatches;
+
     /// SHA-256 hex of the canonical config JSON (patch provenance).
     static QString configHash( const PatchGeneratorConfig &config );
 

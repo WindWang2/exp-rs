@@ -717,3 +717,65 @@ TEST_CASE( "GovernanceStore same-batch path move resolves by final state",
     CHECK( store.assetByPath( QStringLiteral( "/data/q.tif" ) )->assetId ==
            QLatin1String( "asset-a" ) );
 }
+
+TEST_CASE( "GovernanceStore appendAudit failure executes immediate ROLLBACK and leaves transaction clean (B07-SqliteRollback)",
+           "[governance][store][audit][rollback]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "gov_audit_rollback.db" ) );
+    GovernanceStore store;
+    REQUIRE( store.open( dbPath ) );
+
+    // Normal audit appends successfully
+    auto res1 = store.appendAudit( QStringLiteral( "user1" ), QStringLiteral( "CREATE" ),
+                                   QStringLiteral( "asset" ), QStringLiteral( "ast-101" ) );
+    REQUIRE( res1.isOk() );
+
+    // Plant trigger on gov_audit that aborts statement
+    plantTrigger( dbPath, QStringLiteral(
+        "CREATE TRIGGER abort_audit_test BEFORE INSERT ON gov_audit "
+        "BEGIN SELECT RAISE(ABORT, 'injected audit fail'); END;" ) );
+
+    // Appending audit must fail gracefully and roll back immediately
+    auto resFail = store.appendAudit( QStringLiteral( "user2" ), QStringLiteral( "UPDATE" ),
+                                      QStringLiteral( "asset" ), QStringLiteral( "ast-102" ) );
+    CHECK_FALSE( resFail.isOk() );
+
+    // Drop trigger
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "abort_audit_test" ) ) );
+
+    // Subsequent operation must succeed without "cannot start a transaction within a transaction"
+    auto res2 = store.appendAudit( QStringLiteral( "user3" ), QStringLiteral( "DELETE" ),
+                                   QStringLiteral( "asset" ), QStringLiteral( "ast-103" ) );
+    REQUIRE( res2.isOk() );
+
+    // Also verify asset upsert transaction succeeds without transaction collision
+    GovernedAsset a = makeAsset( QStringLiteral( "ast-post" ), QStringLiteral( "post_rollback" ) );
+    REQUIRE( store.upsertAsset( a ).isOk() );
+
+    // Audit log should only contain the 2 successful audits (ast-101 and ast-103), NOT ast-102
+    const auto tail = store.auditTail( 10 );
+    REQUIRE( tail.size() == 2 );
+    CHECK( tail[0].entityId == QLatin1String( "ast-103" ) );
+    CHECK( tail[1].entityId == QLatin1String( "ast-101" ) );
+}
+
+TEST_CASE( "GovernanceStore stepFailed tracks query statement failures (B07-SqliteErrorDetect)",
+           "[governance][store][integrity][stepFailed]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "gov_step_failed.db" ) );
+    GovernanceStore store;
+    REQUIRE( store.open( dbPath ) );
+
+    CHECK_FALSE( store.stepFailed() );
+
+    GovernedAsset a = makeAsset( QStringLiteral( "ast-1" ), QStringLiteral( "file1" ) );
+    REQUIRE( store.upsertAsset( a ).isOk() );
+    CHECK_FALSE( store.stepFailed() );
+
+    // Query succeeds
+    auto page = store.query( {} );
+    CHECK_FALSE( store.stepFailed() );
+    CHECK( page.totalCount >= 1 );
+}

@@ -75,40 +75,97 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
     QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
     if ( !checksumFile.open( QIODevice::ReadOnly ) )
     {
-        reasons->append( QStringLiteral( "checksums.txt missing" ) );
+        if ( reasons )
+            reasons->append( QStringLiteral( "checksums.txt missing" ) );
         return false;
     }
     const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
     QStringList listed;
+    const QString canonicalDir = QFileInfo( bundleDir ).canonicalFilePath();
     for ( const QString &line : lines )
     {
         const int split = line.indexOf( QStringLiteral( "  " ) );
-        if ( split <= 0 )
+        if ( split != 64 )
         {
             // A line that cannot be parsed is an integrity signal, not noise:
             // skipping it would let a truncated or edited table pass while
-            // only pretending to verify the bundle.
-            reasons->append( QStringLiteral( "malformed checksum line: %1" ).arg( line ) );
+            // only pretending to verify the bundle. Strict 64-char hex required.
+            if ( reasons )
+                reasons->append( QStringLiteral( "malformed checksum line: %1" ).arg( line ) );
             return false;
         }
-        const QString digest = line.left( split );
-        const QString name = line.mid( split + 2 );
+        const QString digest = line.left( 64 );
+        for ( const QChar &ch : digest )
+        {
+            const char c = ch.toLatin1();
+            if ( !( ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) || ( c >= 'A' && c <= 'F' ) ) )
+            {
+                if ( reasons )
+                    reasons->append( QStringLiteral( "malformed checksum line: %1" ).arg( line ) );
+                return false;
+            }
+        }
+        const QString name = line.mid( 66 );
         listed.append( name );
-        // Path traversal guard: bundle members are relative names inside the
-        // directory, never absolute paths or ../ escapes.
-        if ( name.startsWith( QLatin1Char( '/' ) ) || name.contains( QLatin1String( ".." ) ) )
+
+        // B08-BundleTraversal: Cross-platform path traversal guard
+        const bool hasDriveLetter = ( name.length() >= 2 && name.at( 1 ) == QLatin1Char( ':' ) &&
+                                      name.at( 0 ).isLetter() );
+        const bool isUncOrBackslash = name.startsWith( QLatin1String( "//" ) ) ||
+                                      name.startsWith( QLatin1String( "\\\\" ) ) ||
+                                      name.contains( QLatin1Char( '\\' ) );
+        if ( name.isEmpty() || name.startsWith( QLatin1Char( '/' ) ) ||
+             name.contains( QLatin1String( ".." ) ) || hasDriveLetter || isUncOrBackslash )
         {
-            reasons->append( QStringLiteral( "unsafe checksum entry: %1" ).arg( name ) );
+            if ( reasons )
+                reasons->append( QStringLiteral( "unsafe checksum entry: %1" ).arg( name ) );
             return false;
         }
-        QFile member( dir.filePath( name ) );
-        if ( !member.open( QIODevice::ReadOnly ) ||
-             QString::fromUtf8(
-                 QCryptographicHash::hash( member.readAll(), QCryptographicHash::Sha256 )
-                     .toHex() ) != digest )
+
+        const QFileInfo memberInfo( dir.filePath( name ) );
+        if ( !memberInfo.exists() )
         {
-            reasons->append( QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
+            if ( reasons )
+                reasons->append( QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
+            return false;
+        }
+        const QString canonicalMember = memberInfo.canonicalFilePath();
+        if ( canonicalDir.isEmpty() || canonicalMember.isEmpty() ||
+             !canonicalMember.startsWith( canonicalDir + QLatin1Char( '/' ),
+#if defined( Q_OS_WIN ) || defined( Q_OS_MACOS )
+                                          Qt::CaseInsensitive
+#else
+                                          Qt::CaseSensitive
+#endif
+             ) )
+        {
+            if ( reasons )
+                reasons->append( QStringLiteral( "unsafe checksum entry: %1" ).arg( name ) );
+            return false;
+        }
+
+        // B08-BundleChunkedHash: Stream in 1 MiB chunks to eliminate multi-GB raster OOM
+        QFile member( dir.filePath( name ) );
+        if ( !member.open( QIODevice::ReadOnly ) )
+        {
+            if ( reasons )
+                reasons->append( QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
+            return false;
+        }
+        QCryptographicHash hash( QCryptographicHash::Sha256 );
+        constexpr qint64 kChunkSize = 1024 * 1024;
+        while ( !member.atEnd() )
+        {
+            const QByteArray chunk = member.read( kChunkSize );
+            if ( chunk.isEmpty() )
+                break;
+            hash.addData( chunk );
+        }
+        if ( QString::fromLatin1( hash.result().toHex() ) != digest )
+        {
+            if ( reasons )
+                reasons->append( QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
             return false;
         }
     }
@@ -116,8 +173,9 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
     {
         if ( !listed.contains( QLatin1String( member ) ) )
         {
-            reasons->append( QStringLiteral( "checksums.txt does not cover %1" )
-                                 .arg( QLatin1String( member ) ) );
+            if ( reasons )
+                reasons->append( QStringLiteral( "missing required member: checksums.txt does not cover %1" )
+                                     .arg( QLatin1String( member ) ) );
             return false;
         }
     }
@@ -135,11 +193,11 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
             continue;
         if ( !listed.contains( name ) )
         {
-            reasons->append( QStringLiteral( "checksums.txt does not cover %1" ).arg( name ) );
+            if ( reasons )
+                reasons->append( QStringLiteral( "checksums.txt does not cover %1" ).arg( name ) );
             return false;
         }
     }
-    reasons->append( QStringLiteral( "bundle checksums verified" ) );
     return true;
 }
 

@@ -47,6 +47,12 @@ class Result
       return m_value.has_value();
     }
 
+    /// Convenience predicate for tests and callers checking success.
+    bool isOk() const noexcept
+    {
+      return static_cast<bool>( *this );
+    }
+
     /// std::optional-vocabulary alias for the boolean state (Foundation 5.0,
     /// ADR 0134): identical to operator bool, additive only.
     bool has_value() const
@@ -119,6 +125,12 @@ class Result<void>
     }
 
     explicit operator bool() const
+    {
+      return m_success;
+    }
+
+    /// Convenience predicate for tests and callers checking success.
+    bool isOk() const noexcept
     {
       return m_success;
     }

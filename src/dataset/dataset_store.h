@@ -84,6 +84,10 @@ class DatasetStore
     /// validated by stageVersion before commit. The dataset must exist.
     sicnu::data::Result<DatasetVersionRecord> createDraftVersion(
         const DatasetManifest &manifest, const QString &note = QString() );
+    /// Aggregates source asset references into a draft version's manifest (B10, Issue #1457).
+    /// Deduplicates against existing manifest sourceAssets and resets staged flag to 0.
+    sicnu::data::Result<void> addSourceAssetsToDraft(
+        const DatasetVersionId &versionId, const QVector<SourceAssetRef> &assets );
     /// Validates + canonicalizes the draft's manifest, stamps the
     /// fingerprint and persists the staged document. Still Draft — staging
     /// is recoverable work, not a commitment.

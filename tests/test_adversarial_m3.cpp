@@ -15,7 +15,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -259,5 +261,544 @@ TEST_CASE( "Adversarial M3 - #809: Probe structural classification & resilient f
     ProbeResult res = probeResource( largeTif );
     CHECK( res.format.driverName == "GTiff" );
     CHECK( res.isCog == false );
+  }
+}
+
+namespace
+{
+void writeBinaryFile( const std::string &path, const std::string &data )
+{
+  std::ofstream out( path, std::ios::binary | std::ios::trunc );
+  REQUIRE( static_cast<bool>( out ) );
+  out.write( data.data(), static_cast<std::streamsize>( data.size() ) );
+  out.flush();
+  REQUIRE( static_cast<bool>( out ) );
+}
+
+std::string readBinaryFile( const std::string &path )
+{
+  std::ifstream in( path, std::ios::binary );
+  REQUIRE( static_cast<bool>( in ) );
+  return std::string( std::istreambuf_iterator<char>( in ), std::istreambuf_iterator<char>() );
+}
+} // namespace
+
+TEST_CASE( "Adversarial M3 - B06: Comprehensive empirical stress testing of atomic_fs crash journal & recovery",
+           "[adv][m3][b06][atomic_fs][journal]" )
+{
+  // 1. Interrupted publish: simulated crash after 2 sidecars written, before main file is published.
+  SECTION( "Scenario 1: Crash after 2 sidecars written restores all original files byte-for-byte" )
+  {
+    const std::string dir = scratch( "adv_crash_interrupted_publish" );
+    const std::string mainPath = dir + "/roads.shp";
+    const std::string shxPath = dir + "/roads.shx";
+    const std::string dbfPath = dir + "/roads.dbf";
+    const std::string prjPath = dir + "/roads.prj";
+
+    const std::string origMain = std::string( "\x00\x01\x02ORIGINAL_SHP_BYTES_\xff\xfe", 24 );
+    const std::string origShx = std::string( "\x03\x04\x05ORIGINAL_SHX_BYTES_\xfd\xfc", 24 );
+    const std::string origDbf = std::string( "\x06\x07\x08ORIGINAL_DBF_BYTES_\xfb\xfa", 24 );
+    const std::string origPrj = std::string( "\x09\x0a\x0bORIGINAL_PRJ_BYTES_\xf9\xf8", 24 );
+
+    writeBinaryFile( mainPath, origMain );
+    writeBinaryFile( shxPath, origShx );
+    writeBinaryFile( dbfPath, origDbf );
+    writeBinaryFile( prjPath, origPrj );
+
+    // Simulate crash after shx and dbf were published with new data, but before prj and shp were published
+    const std::string shxBackup = shxPath + ".bak";
+    const std::string dbfBackup = dbfPath + ".bak";
+    writeBinaryFile( shxBackup, origShx );
+    writeBinaryFile( dbfBackup, origDbf );
+
+    writeBinaryFile( shxPath, "NEW_TORN_SHX_BYTES_WHICH_SHOULD_BE_ROLLED_BACK" );
+    writeBinaryFile( dbfPath, "NEW_TORN_DBF_BYTES_WHICH_SHOULD_BE_ROLLED_BACK" );
+
+    // Prepare journal
+    const std::string journalPath = mainPath + ".publish-journal";
+    const std::string journalJson =
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"main\": \"" + mainPath + "\",\n"
+      "  \"members\": [\n"
+      "    { \"staged\": \"staged.shx\", \"target\": \"" + shxPath + "\", \"backup\": \"" + shxBackup + "\", \"had_target\": true },\n"
+      "    { \"staged\": \"staged.dbf\", \"target\": \"" + dbfPath + "\", \"backup\": \"" + dbfBackup + "\", \"had_target\": true },\n"
+      "    { \"staged\": \"staged.prj\", \"target\": \"" + prjPath + "\", \"backup\": \"" + prjPath + ".bak\", \"had_target\": true },\n"
+      "    { \"staged\": \"staged.shp\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainPath + ".bak\", \"had_target\": true }\n"
+      "  ]\n"
+      "}\n";
+    writeBinaryFile( journalPath, journalJson );
+
+    REQUIRE( atomic_fs::hasPendingJournal( mainPath ) );
+
+    // Execute recovery
+    const bool recovered = atomic_fs::recoverDatasetGroup( mainPath );
+    CHECK( recovered );
+    CHECK_FALSE( atomic_fs::hasPendingJournal( mainPath ) );
+    CHECK_FALSE( fs::exists( journalPath ) );
+    CHECK_FALSE( fs::exists( shxBackup ) );
+    CHECK_FALSE( fs::exists( dbfBackup ) );
+
+    // Check byte-for-byte fidelity across ALL members
+    CHECK( readBinaryFile( mainPath ) == origMain );
+    CHECK( readBinaryFile( shxPath ) == origShx );
+    CHECK( readBinaryFile( dbfPath ) == origDbf );
+    CHECK( readBinaryFile( prjPath ) == origPrj );
+
+    // Also verify recovery on brand-new dataset (had_target == false):
+    // Staged files were written to targets, crash happened, recovery cleans up torn new targets
+    const std::string newMainPath = dir + "/brand_new.shp";
+    const std::string newShxPath = dir + "/brand_new.shx";
+    const std::string newDbfPath = dir + "/brand_new.dbf";
+    writeBinaryFile( newShxPath, "TORN_NEW_SHX" );
+    writeBinaryFile( newDbfPath, "TORN_NEW_DBF" );
+    const std::string newJournalPath = newMainPath + ".publish-journal";
+    const std::string newJournalJson =
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"main\": \"" + newMainPath + "\",\n"
+      "  \"members\": [\n"
+      "    { \"staged\": \"temp.shx\", \"target\": \"" + newShxPath + "\", \"backup\": \"" + newShxPath + ".bak\", \"had_target\": false },\n"
+      "    { \"staged\": \"temp.dbf\", \"target\": \"" + newDbfPath + "\", \"backup\": \"" + newDbfPath + ".bak\", \"had_target\": false },\n"
+      "    { \"staged\": \"temp.shp\", \"target\": \"" + newMainPath + "\", \"backup\": \"" + newMainPath + ".bak\", \"had_target\": false }\n"
+      "  ]\n"
+      "}\n";
+    writeBinaryFile( newJournalPath, newJournalJson );
+
+    CHECK( atomic_fs::recoverDatasetGroup( newMainPath ) );
+    CHECK_FALSE( fs::exists( newShxPath ) );
+    CHECK_FALSE( fs::exists( newDbfPath ) );
+    CHECK_FALSE( fs::exists( newMainPath ) );
+    CHECK_FALSE( fs::exists( newJournalPath ) );
+  }
+
+  // 2. Crash after atomic rename to .committed: recovery finalizes publishing without reverting new data
+  SECTION( "Scenario 2: Crash after rename to .committed finalizes publishing without reverting new data" )
+  {
+    const std::string dir = scratch( "adv_crash_committed" );
+    const std::string mainPath = dir + "/elevation.tif";
+    const std::string sidecarPath = dir + "/elevation.tfw";
+    const std::string mainBackup = mainPath + ".bak";
+    const std::string sidecarBackup = sidecarPath + ".bak";
+    const std::string commitMarkerPath = mainPath + ".publish-journal.committed";
+
+    const std::string newMain = "NEW_ELEVATION_RASTER_DATA_PUBLISHED";
+    const std::string newSidecar = "NEW_ELEVATION_WORLDFILE_DATA_PUBLISHED";
+    const std::string oldMainBackup = "OLD_ELEVATION_RASTER_OBSOLETE_BACKUP";
+    const std::string oldSidecarBackup = "OLD_ELEVATION_WORLDFILE_OBSOLETE_BACKUP";
+
+    writeBinaryFile( mainPath, newMain );
+    writeBinaryFile( sidecarPath, newSidecar );
+    writeBinaryFile( mainBackup, oldMainBackup );
+    writeBinaryFile( sidecarBackup, oldSidecarBackup );
+
+    const std::string committedJson =
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"main\": \"" + mainPath + "\",\n"
+      "  \"members\": [\n"
+      "    { \"staged\": \"temp.tfw\", \"target\": \"" + sidecarPath + "\", \"backup\": \"" + sidecarBackup + "\", \"had_target\": true },\n"
+      "    { \"staged\": \"temp.tif\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
+      "  ]\n"
+      "}\n";
+    writeBinaryFile( commitMarkerPath, committedJson );
+
+    REQUIRE( atomic_fs::hasPendingJournal( mainPath ) );
+
+    const bool recovered = atomic_fs::recoverDatasetGroup( mainPath );
+    CHECK( recovered );
+    CHECK_FALSE( atomic_fs::hasPendingJournal( mainPath ) );
+    CHECK_FALSE( fs::exists( commitMarkerPath ) );
+    CHECK_FALSE( fs::exists( mainBackup ) );
+    CHECK_FALSE( fs::exists( sidecarBackup ) );
+
+    // Crucial: new data MUST be preserved, NOT reverted to backups!
+    CHECK( readBinaryFile( mainPath ) == newMain );
+    CHECK( readBinaryFile( sidecarPath ) == newSidecar );
+  }
+
+  // 3. Corrupt/truncated .publish-journal handles errors gracefully without crashing or corruption
+  SECTION( "Scenario 3: Corrupt/truncated journal handles bad input gracefully without crashing or corrupting filesystem" )
+  {
+    const std::string dir = scratch( "adv_corrupt_journal" );
+
+    // Sub-case 3a: 0-byte truncated journal
+    {
+      const std::string ds = dir + "/trunc0.tif";
+      const std::string data = "ORIGINAL_DATA_FOR_TRUNC0";
+      writeBinaryFile( ds, data );
+      writeBinaryFile( ds + ".publish-journal", "" );
+
+      CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+      CHECK( readBinaryFile( ds ) == data );
+      CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+    }
+
+    // Sub-case 3b: Incomplete JSON token
+    {
+      const std::string ds = dir + "/trunc_json.tif";
+      const std::string data = "ORIGINAL_DATA_FOR_TRUNC_JSON";
+      writeBinaryFile( ds, data );
+      writeBinaryFile( ds + ".publish-journal", "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [" );
+
+      CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+      CHECK( readBinaryFile( ds ) == data );
+      CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+    }
+
+    // Sub-case 3c: Random binary garbage
+    {
+      const std::string ds = dir + "/garbage.tif";
+      const std::string data = "ORIGINAL_DATA_FOR_GARBAGE";
+      writeBinaryFile( ds, data );
+      const std::string junk = std::string( "\x7f\x45\x4c\x46\x02\x01\x01\x00\xff\xfe\xca\xfe\xba\xbe", 14 );
+      writeBinaryFile( ds + ".publish-journal", junk );
+
+      CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+      CHECK( readBinaryFile( ds ) == data );
+      CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+    }
+
+    // Sub-case 3d: Valid JSON with unexpected root types
+    {
+      const std::string ds = dir + "/wrong_schema.tif";
+      const std::string data = "ORIGINAL_DATA_FOR_WRONG_SCHEMA";
+      writeBinaryFile( ds, data );
+      writeBinaryFile( ds + ".publish-journal", "{\"version\": \"one\", \"members\": \"not_array\"}" );
+
+      CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+      CHECK( readBinaryFile( ds ) == data );
+      CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+    }
+
+    // Sub-case 3e: Valid JSON array containing malformed non-object members
+    {
+      const std::string ds = dir + "/malformed_members.tif";
+      const std::string data = "ORIGINAL_DATA_FOR_MALFORMED_MEMBERS";
+      writeBinaryFile( ds, data );
+      writeBinaryFile( ds + ".publish-journal", "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [null, 123, \"str\", {}]}" );
+
+      CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+      CHECK( readBinaryFile( ds ) == data );
+      CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+    }
+
+    // Sub-case 3f: Valid JSON object with member fields having wrong primitive types
+    {
+      const std::string ds = dir + "/wrong_member_types.tif";
+      const std::string data = "ORIGINAL_DATA_FOR_WRONG_MEMBER_TYPES";
+      writeBinaryFile( ds, data );
+      writeBinaryFile( ds + ".publish-journal", "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [{\"target\": 12345, \"had_target\": \"not_a_bool\"}]}" );
+
+      CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+      CHECK( readBinaryFile( ds ) == data );
+      CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+    }
+
+    // Sub-case 3g: JSON root is valid JSON array instead of JSON object
+    {
+      const std::string ds = dir + "/root_array.tif";
+      const std::string data = "ORIGINAL_DATA_FOR_ROOT_ARRAY";
+      writeBinaryFile( ds, data );
+      writeBinaryFile( ds + ".publish-journal", "[1, 2, 3, {\"members\": []}]" );
+
+      CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+      CHECK( readBinaryFile( ds ) == data );
+      CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+    }
+  }
+
+  // 4. Concurrent or repeated publish calls with leftover journals: auto-recovery heals cleanly
+  SECTION( "Scenario 4: Repeated publish / auto-recovery cleanly heals leftover journals" )
+  {
+    const std::string dir = scratch( "adv_repeated_autorecovery" );
+    const std::string mainPath = dir + "/survey.shp";
+    const std::string sidecarPath = dir + "/survey.shx";
+    const std::string mainBackup = mainPath + ".bak";
+    const std::string sidecarBackup = sidecarPath + ".bak";
+
+    // Setup original files
+    writeBinaryFile( mainPath, "OLD_SURVEY_MAIN" );
+    writeBinaryFile( sidecarPath, "OLD_SURVEY_SHX" );
+
+    // Plant leftover uncommitted journal from prior crashed attempt
+    writeBinaryFile( mainBackup, "OLD_SURVEY_MAIN" );
+    writeBinaryFile( sidecarBackup, "OLD_SURVEY_SHX" );
+    writeBinaryFile( mainPath, "CRASHED_TORN_MAIN" );
+    writeBinaryFile( sidecarPath, "CRASHED_TORN_SHX" );
+
+    const std::string journalJson =
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"main\": \"" + mainPath + "\",\n"
+      "  \"members\": [\n"
+      "    { \"staged\": \"s.shx\", \"target\": \"" + sidecarPath + "\", \"backup\": \"" + sidecarBackup + "\", \"had_target\": true },\n"
+      "    { \"staged\": \"s.shp\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
+      "  ]\n"
+      "}\n";
+    writeBinaryFile( mainPath + ".publish-journal", journalJson );
+
+    // Repeated manual recover calls:
+    // First call heals and returns true
+    CHECK( atomic_fs::recoverDatasetGroup( mainPath ) == true );
+    CHECK( readBinaryFile( mainPath ) == "OLD_SURVEY_MAIN" );
+    CHECK( readBinaryFile( sidecarPath ) == "OLD_SURVEY_SHX" );
+
+    // Second call is a safe no-op returning false
+    CHECK( atomic_fs::recoverDatasetGroup( mainPath ) == false );
+    CHECK( readBinaryFile( mainPath ) == "OLD_SURVEY_MAIN" );
+    CHECK( readBinaryFile( sidecarPath ) == "OLD_SURVEY_SHX" );
+
+    // Now test auto-recovery embedded in publishStagedGroup:
+    // Plant uncommitted journal again
+    writeBinaryFile( mainBackup, "OLD_SURVEY_MAIN" );
+    writeBinaryFile( mainPath + ".publish-journal", journalJson );
+    REQUIRE( atomic_fs::hasPendingJournal( mainPath ) );
+
+    // Prepare fresh staged files
+    const std::string stagedMain = dir + "/fresh.shp";
+    const std::string stagedSidecar = dir + "/fresh.shx";
+    writeBinaryFile( stagedMain, "FINAL_FRESH_MAIN" );
+    writeBinaryFile( stagedSidecar, "FINAL_FRESH_SHX" );
+
+    // publishStagedGroup must auto-recover the stale journal and publish the new dataset
+    REQUIRE_NOTHROW( atomic_fs::publishStagedGroup( stagedMain, mainPath ) );
+    CHECK_FALSE( atomic_fs::hasPendingJournal( mainPath ) );
+    CHECK( readBinaryFile( mainPath ) == "FINAL_FRESH_MAIN" );
+    CHECK( readBinaryFile( sidecarPath ) == "FINAL_FRESH_SHX" );
+    CHECK_FALSE( fs::exists( mainBackup ) );
+    CHECK_FALSE( fs::exists( sidecarBackup ) );
+
+    // Concurrency test: 8 parallel worker threads publishing and recovering distinct groups
+    std::vector<std::future<bool>> futures;
+    for ( int i = 0; i < 8; ++i )
+    {
+      futures.push_back( std::async( std::launch::async, [dir, i]() -> bool {
+        const std::string ds = dir + "/concurrent_" + std::to_string( i ) + ".tif";
+        const std::string stg = dir + "/staged_" + std::to_string( i ) + ".tif";
+        writeBinaryFile( stg, "PAYLOAD_" + std::to_string( i ) );
+        atomic_fs::publishStagedFile( stg, ds );
+        return atomic_fs::fileExists( ds ) && readBinaryFile( ds ) == ( "PAYLOAD_" + std::to_string( i ) );
+      } ) );
+    }
+    for ( auto &f : futures )
+      CHECK( f.get() == true );
+  }
+
+  // 5. Multi-dataset directory recovery: recoverDirectoryJournals cleans up multiple orphaned journals
+  SECTION( "Scenario 5: Multi-dataset directory recovery cleans up all orphaned journals across directory" )
+  {
+    const std::string dir = scratch( "adv_multidataset_dir" );
+
+    // Dataset 1: roads.shp with uncommitted .publish-journal (should roll back)
+    const std::string ds1 = dir + "/roads.shp";
+    const std::string ds1Bak = ds1 + ".bak";
+    const std::string ds1J = ds1 + ".publish-journal";
+    writeBinaryFile( ds1, "DS1_TORN" );
+    writeBinaryFile( ds1Bak, "DS1_ORIGINAL" );
+    writeBinaryFile( ds1J, "{\"version\":1,\"main\":\"" + ds1 + "\",\"members\":[{\"target\":\"" + ds1 + "\",\"backup\":\"" + ds1Bak + "\",\"had_target\":true}]}" );
+
+    // Dataset 2: elevation.tif with committed .publish-journal.committed (should finalize)
+    const std::string ds2 = dir + "/elevation.tif";
+    const std::string ds2Bak = ds2 + ".bak";
+    const std::string ds2J = ds2 + ".publish-journal.committed";
+    writeBinaryFile( ds2, "DS2_COMMITTED_NEW" );
+    writeBinaryFile( ds2Bak, "DS2_OLD_BACKUP" );
+    writeBinaryFile( ds2J, "{\"version\":1,\"main\":\"" + ds2 + "\",\"members\":[{\"target\":\"" + ds2 + "\",\"backup\":\"" + ds2Bak + "\",\"had_target\":true}]}" );
+
+    // Dataset 3: landcover.nc with uncommitted .sicnu-journal (should roll back)
+    const std::string ds3 = dir + "/landcover.nc";
+    const std::string ds3Bak = ds3 + ".bak";
+    const std::string ds3J = ds3 + ".sicnu-journal";
+    writeBinaryFile( ds3, "DS3_TORN" );
+    writeBinaryFile( ds3Bak, "DS3_ORIGINAL" );
+    writeBinaryFile( ds3J, "{\"version\":1,\"main\":\"" + ds3 + "\",\"members\":[{\"target\":\"" + ds3 + "\",\"backup\":\"" + ds3Bak + "\",\"had_target\":true}]}" );
+
+    // Dataset 4: boundaries.gpkg with committed .sicnu-journal.committed (should finalize)
+    const std::string ds4 = dir + "/boundaries.gpkg";
+    const std::string ds4Bak = ds4 + ".bak";
+    const std::string ds4J = ds4 + ".sicnu-journal.committed";
+    writeBinaryFile( ds4, "DS4_COMMITTED_NEW" );
+    writeBinaryFile( ds4Bak, "DS4_OLD_BACKUP" );
+    writeBinaryFile( ds4J, "{\"version\":1,\"main\":\"" + ds4 + "\",\"members\":[{\"target\":\"" + ds4 + "\",\"backup\":\"" + ds4Bak + "\",\"had_target\":true}]}" );
+
+    // Dataset 5: pristine file with no journal (should stay untouched)
+    const std::string ds5 = dir + "/clean_pristine.tif";
+    writeBinaryFile( ds5, "PRISTINE_DATA" );
+
+    // Recover directory
+    const std::size_t recovered = atomic_fs::recoverDirectoryJournals( dir );
+    CHECK( recovered == 4 );
+
+    // Verify final states
+    CHECK( readBinaryFile( ds1 ) == "DS1_ORIGINAL" );
+    CHECK( readBinaryFile( ds2 ) == "DS2_COMMITTED_NEW" );
+    CHECK( readBinaryFile( ds3 ) == "DS3_ORIGINAL" );
+    CHECK( readBinaryFile( ds4 ) == "DS4_COMMITTED_NEW" );
+    CHECK( readBinaryFile( ds5 ) == "PRISTINE_DATA" );
+
+    CHECK_FALSE( fs::exists( ds1Bak ) );
+    CHECK_FALSE( fs::exists( ds2Bak ) );
+    CHECK_FALSE( fs::exists( ds3Bak ) );
+    CHECK_FALSE( fs::exists( ds4Bak ) );
+    CHECK_FALSE( fs::exists( ds1J ) );
+    CHECK_FALSE( fs::exists( ds2J ) );
+    CHECK_FALSE( fs::exists( ds3J ) );
+    CHECK_FALSE( fs::exists( ds4J ) );
+
+    // Second recovery run must return 0 (idempotent)
+    CHECK( atomic_fs::recoverDirectoryJournals( dir ) == 0 );
+
+    // Edge cases for directory recovery:
+    // Non-existent directory returns 0
+    CHECK( atomic_fs::recoverDirectoryJournals( dir + "/non_existent_subdir" ) == 0 );
+    // File path passed to directory recovery returns 0
+    CHECK( atomic_fs::recoverDirectoryJournals( ds5 ) == 0 );
+  }
+}
+
+TEST_CASE( "Adversarial M3 - B06 Iteration 2: Deeply nested JSON, binary garbage, and permission edge cases",
+           "[adv][m3][b06][gen2]" )
+{
+  const std::string dir = scratch( "adv_m3_gen2_stress" );
+
+  SECTION( "Deeply nested JSON structures do not crash parser or recovery" )
+  {
+    const std::string ds = dir + "/deep_nested.tif";
+    const std::string origData = "ORIGINAL_DEEP_NESTED_DATA";
+    writeBinaryFile( ds, origData );
+
+    // Nest 200 levels deep: {"a":{"a":...}}
+    std::string deepJson;
+    for ( int i = 0; i < 200; ++i )
+      deepJson += "{\"level" + std::to_string( i ) + "\":";
+    deepJson += "{\"members\":[]}";
+    for ( int i = 0; i < 200; ++i )
+      deepJson += "}";
+
+    writeBinaryFile( ds + ".publish-journal", deepJson );
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBinaryFile( ds ) == origData );
+    CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+
+    // Deeply nested array: [[[[...]]]]
+    std::string deepArray;
+    for ( int i = 0; i < 200; ++i )
+      deepArray += "[";
+    deepArray += "1, 2, 3";
+    for ( int i = 0; i < 200; ++i )
+      deepArray += "]";
+
+    writeBinaryFile( ds + ".publish-journal", deepArray );
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBinaryFile( ds ) == origData );
+    CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "Multi-megabyte binary garbage and invalid UTF-8 sequences" )
+  {
+    const std::string ds = dir + "/large_garbage.tif";
+    const std::string origData = "ORIGINAL_LARGE_GARBAGE_DATA";
+    writeBinaryFile( ds, origData );
+
+    // 2 MB of repeating pseudo-random binary bytes with NULs and invalid UTF-8
+    std::string bigGarbage( 2 * 1024 * 1024, '\0' );
+    for ( std::size_t i = 0; i < bigGarbage.size(); ++i )
+      bigGarbage[i] = static_cast<char>( ( i * 37 + 101 ) & 0xFF );
+
+    writeBinaryFile( ds + ".publish-journal", bigGarbage );
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBinaryFile( ds ) == origData );
+    CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+
+    // Embedded NUL bytes inside otherwise valid JSON
+    const std::string nulJson = std::string( "{\"version\": 1, \"members\": [\x00\x00\x00]}", 32 );
+    writeBinaryFile( ds + ".publish-journal", nulJson );
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBinaryFile( ds ) == origData );
+    CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "Whitespace-only and invalid numerical literal JSON" )
+  {
+    const std::string ds = dir + "/whitespace.tif";
+    const std::string origData = "ORIGINAL_WHITESPACE_DATA";
+    writeBinaryFile( ds, origData );
+
+    // Whitespace only
+    writeBinaryFile( ds + ".publish-journal", "   \r\n\t  \n  " );
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBinaryFile( ds ) == origData );
+    CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+
+    // NaN / Infinity numerical literals (invalid standard JSON)
+    writeBinaryFile( ds + ".publish-journal", "{\"version\": NaN, \"members\": [Infinity]}" );
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBinaryFile( ds ) == origData );
+    CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "Large volume of malformed array members" )
+  {
+    const std::string ds = dir + "/malformed_swarm.tif";
+    const std::string origData = "ORIGINAL_SWARM_DATA";
+    writeBinaryFile( ds, origData );
+
+    // 5000 mixed invalid member elements
+    std::string swarmJson = "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [";
+    for ( int i = 0; i < 5000; ++i )
+    {
+      if ( i > 0 )
+        swarmJson += ",";
+      switch ( i % 5 )
+      {
+        case 0: swarmJson += "null"; break;
+        case 1: swarmJson += "12345"; break;
+        case 2: swarmJson += "\"bogus_string\""; break;
+        case 3: swarmJson += "[1,2,3]"; break;
+        case 4: swarmJson += "{\"target\": 9999, \"had_target\": \"invalid_bool\", \"backup\": []}"; break;
+      }
+    }
+    swarmJson += "]}";
+
+    writeBinaryFile( ds + ".publish-journal", swarmJson );
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( ds ) );
+    CHECK( readBinaryFile( ds ) == origData );
+    CHECK_FALSE( fs::exists( ds + ".publish-journal" ) );
+  }
+
+  SECTION( "Rollback safety when destination file restoration cannot overwrite target" )
+  {
+    const std::string subDir = dir + "/ro_target_test";
+    fs::create_directories( subDir );
+    const std::string targetFile = subDir + "/locked_raster.tif";
+    const std::string backupFile = targetFile + ".bak";
+    const std::string journalFile = targetFile + ".publish-journal";
+
+    writeBinaryFile( targetFile, "CORRUPTED_INCOMPLETE_WRITE" );
+    writeBinaryFile( backupFile, "SAFE_ORIGINAL_BACKUP" );
+
+    const std::string journalJson =
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"main\": \"" + targetFile + "\",\n"
+      "  \"members\": [\n"
+      "    { \"staged\": \"temp.tif\", \"target\": \"" + targetFile + "\", \"backup\": \"" + backupFile + "\", \"had_target\": true }\n"
+      "  ]\n"
+      "}\n";
+    writeBinaryFile( journalFile, journalJson );
+
+    // Make target directory read-only so rename/remove inside it fails
+    fs::permissions( subDir, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace );
+
+    // Attempt recovery under read-only target conditions
+    CHECK_NOTHROW( atomic_fs::recoverDatasetGroup( targetFile ) );
+
+    // Restore permissions so we can inspect and clean up
+    fs::permissions( subDir, fs::perms::all, fs::perm_options::replace );
+
+    // Crucial durability guarantee: If target could not be restored, the backup MUST NOT be unlinked!
+    CHECK( fs::exists( backupFile ) );
+    CHECK( readBinaryFile( backupFile ) == "SAFE_ORIGINAL_BACKUP" );
   }
 }
