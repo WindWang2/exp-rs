@@ -290,8 +290,18 @@ Json::Value RsTemporalIndexSeriesOperator::run( const Json::Value &params, RSOpe
             continue;
           for ( size_t i = 0; i < probePixels; ++i )
           {
-            if ( std::isfinite( probeTile[i] ) )
-              maxAbs = std::max( maxAbs, static_cast<double>( std::abs( probeTile[i] ) ) );
+            const float v = probeTile[i];
+            if ( !std::isfinite( v ) )
+                continue;
+            // Scale evidence is POSITIVE magnitudes only (#856 parity with
+            // the single-scene operator): reflectance and DN domains are
+            // non-negative, so a finite negative value is either an
+            // undeclared sentinel (TemporalTileReader masks only DECLARED
+            // NoData, so -9999 reaches this probe when the file omits the
+            // tag) or noise — its magnitude folding positive under abs must
+            // not flip a unit-reflectance scene into the DN divisor.
+            if ( v > 0.0f )
+                maxAbs = std::max( maxAbs, static_cast<double>( v ) );
           }
         }
       }

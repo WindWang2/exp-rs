@@ -547,3 +547,8 @@ data/labs/_tmp/
 r6_*.log
 r6_*.txt
 r6_dev.cmd
+
+# hardening/r14-A-science-processing (R14 track A): planning notes (markdown only; logs stay local).
+!.planning/r14-A/
+.planning/r14-A/*
+!.planning/r14-A/*.md

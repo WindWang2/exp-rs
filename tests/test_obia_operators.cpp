@@ -32,6 +32,7 @@
 #include <cpl_error.h>
 
 #include <QColor>
+#include <QDir>
 #include <QFile>
 #include <QSet>
 #include <QTemporaryDir>
@@ -403,6 +404,44 @@ TEST_CASE( "rs:obia_features CSV round-trips kernel statistics", "[obia][operato
 
     // Value parity on one stat (area) via a fresh kernel read: half the raster.
     REQUIRE( kernelStats.constBegin().value().area == 16 * 8 );
+}
+
+TEST_CASE( "rs:obia_features republishes the CSV with no staging residue [r14a]",
+           "[obia][operator][features]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = createTestRaster( tmp.path(), 16, 16, 2 );
+    const QString labels = createTwoSegmentLabels( tmp.path(), 16, 16 );
+    const QString csv = tmp.path() + QStringLiteral( "/features.csv" );
+
+    // A stale output at the final path must be replaced wholesale on success,
+    // with no staging residue left behind (the stage-fsync-publish discipline
+    // the pipeline's raster writers follow; r14-A closes the CSV gap — a
+    // mid-write failure now keeps the previous CSV instead of truncating it).
+    {
+        QFile stale( csv );
+        REQUIRE( stale.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        REQUIRE( stale.write( "stale\n" ) > 0 );
+    }
+
+    RsObiaFeaturesOperator op;
+    RSOperatorContext ctx;
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["labels"] = labels.toStdString();
+    params["output"] = csv.toStdString();
+    const Json::Value result = op.run( params, ctx );
+    REQUIRE( result["segments"].asInt() == 2 );
+
+    QFile f( csv );
+    REQUIRE( f.open( QIODevice::ReadOnly | QIODevice::Text ) );
+    QTextStream in( &f );
+    REQUIRE( in.readLine().startsWith( QStringLiteral( "segment_id" ) ) );
+    // No staging residue next to the published output.
+    const QDir dir( tmp.path() );
+    for ( const QString &entry : dir.entryList( QDir::Files ) )
+        CHECK_FALSE( entry.contains( QStringLiteral( ".tmp" ) ) );
 }
 
 TEST_CASE( "rs:obia_features rejects grid-mismatched labels", "[obia][operator][features][validation]" )
