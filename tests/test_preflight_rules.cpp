@@ -210,6 +210,27 @@ TEST_CASE( "band_role: unknown slot facts produce SPF_BAND_ROLE_UNKNOWN, not a p
     REQUIRE( trace( report, "preflight.band_role" )->outcome == "insufficient_facts" );
 }
 
+TEST_CASE( "pair_crs: an unresolved raster slot degrades to typed unknown, not a pass",
+           "[preflight][rules][r14e]" )
+{
+    // The secondary input's facts never resolved. On unfixed master the
+    // rule dropped the slot silently and PASSED with "fewer than two
+    // raster inputs" — an absent-check-that-passed (RED); band_role
+    // already refuses this shape with SPF_BAND_ROLE_UNKNOWN.
+    Loaded loaded;
+    SlotFacts a = opticalScene();
+    loaded.facts.set( "scene-a", a );
+    loaded.facts.setUnknown( "scene-b", "no passport for reference" );
+
+    const PreflightReport report =
+        loaded.run( { { "primary", "scene-a" }, { "secondary", "scene-b" } } );
+    const auto unknown = findings( report, "SPF_CRS_UNKNOWN" );
+    REQUIRE( unknown.size() == 1 );
+    REQUIRE( unknown[0]->severity == PreflightSeverity::RequireAck );
+    REQUIRE( unknown[0]->basis == "unknown" );
+    REQUIRE( trace( report, "preflight.pair_crs" )->outcome == "insufficient_facts" );
+}
+
 TEST_CASE( "pair_crs: mismatching pair is blocked; unknown CRS is typed require_ack",
            "[preflight][rules]" )
 {
