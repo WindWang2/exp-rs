@@ -125,7 +125,7 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
         throw RSOperatorError( ErrorCode::InvalidInputData, gridError.toStdString() );
     const ResolvedSpectralReference refsResolved =
         resolveSpectralReference( params, "refs", "refsRef", ds, bands, inputGrid );
-    const std::vector<float> refs = refsResolved.flat;
+    std::vector<float> refs = refsResolved.flat;
     const int refCount = refsResolved.count;
     if ( refCount < 1 )
         throw RSOperatorError( ErrorCode::InvalidParameter,
@@ -154,6 +154,15 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
             bandSentinels[bi] = static_cast<float>( nd );
     }
     const float nodata = std::numeric_limits<float>::quiet_NaN();
+    // Reference spectra live in the raster's units: a ref sample equal to a
+    // band's declared sentinel is absent data, not a measurement — wash it
+    // against the same per-band table so the kernel rejects that reference
+    // uniformly instead of classifying against the sentinel (review round-1 F3).
+    for ( size_t i = 0; i < refs.size(); ++i )
+    {
+        if ( refs[i] == bandSentinels[i % static_cast<size_t>( nBands )] )
+            refs[i] = std::numeric_limits<float>::quiet_NaN();
+    }
 
     // Single-pass streaming (perf goal §2c): stream the selected bands tile-by-
     // tile as a BIP window, classify per-tile (the kernel is per-pixel), and

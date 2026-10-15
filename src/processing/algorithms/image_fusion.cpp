@@ -1661,6 +1661,16 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 std::vector<float> halo( static_cast<size_t>( hw ) * hh );
                 if ( !panDataset.readBandWindow( 1, hx0, hy0, hw, hh, halo.data() ) )
                     return false;
+                // The halo read bypasses readPanWindow (different window
+                // geometry) — wash the pan sentinel here too, or a declared
+                // void passes as a valid center/neighbor under the NaN
+                // working sentinel (review round-1 F1).
+                if ( std::isfinite( panSentinel ) )
+                {
+                    for ( size_t hi = 0; hi < halo.size(); ++hi )
+                        if ( halo[hi] == panSentinel )
+                            halo[hi] = std::numeric_limits<float>::quiet_NaN();
+                }
                 for ( int b = 0; b < nMsBands; ++b )
                 {
                     if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )

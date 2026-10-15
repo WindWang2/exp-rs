@@ -605,6 +605,10 @@ TEST_CASE( "temporal_index_series EVI probe ignores undeclared negative fills (#
                                  { 0.10f, 0.10f, 0.10f, -9999.0f } );
     s.extraBands = { { 0.40f, 0.40f, 0.40f, 0.40f }, { 0.05f, 0.05f, 0.05f, 0.05f } };
     s.extraRoles = { QByteArrayLiteral( "nir" ), QByteArrayLiteral( "blue" ) };
+    // The fill must be UNDECLARED: TestScene defaults declareNodata=true,
+    // which would let TemporalTileReader mask the fill to NaN before the
+    // probe and the test would pass on the unfixed code too (review F2).
+    s.declareNodata = false;
     REQUIRE( writeTestScene( s ) );
 
     Json::Value seriesParams( Json::objectValue );
