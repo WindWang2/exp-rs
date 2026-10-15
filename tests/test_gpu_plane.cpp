@@ -139,3 +139,41 @@ TEST_CASE( "GPU plane evicts stale model identities", "[gpu_plane]" )
     auto freshSession = pool.acquireSession( freshReq );
     REQUIRE( freshSession.outcome == AcquireOutcome::Acquired );
 }
+
+TEST_CASE( "GPU plane evicts released warm sessions when capacity or VRAM budget is reached (DEF-RNT-03)", "[gpu_plane]" )
+{
+    auto backend = std::make_shared<FakeBackend>( 8192 );
+    ModelSessionPool pool( backend, 2048 );
+
+    auto s1 = pool.acquireSession( makeRequest( "m1", 1024 ) );
+    REQUIRE( s1.outcome == AcquireOutcome::Acquired );
+    auto s2 = pool.acquireSession( makeRequest( "m2", 1024 ) );
+    REQUIRE( s2.outcome == AcquireOutcome::Acquired );
+    REQUIRE( pool.usedVramMb( 0 ) == 2048 );
+
+    pool.releaseSession( s1.session->sessionId );
+    s1.session.reset();
+
+    auto s3 = pool.acquireSession( makeRequest( "m3", 1024 ) );
+    REQUIRE( s3.outcome == AcquireOutcome::Acquired );
+    REQUIRE( s3.session );
+    REQUIRE( pool.usedVramMb( 0 ) == 2048 );
+
+    auto backendBig = std::make_shared<FakeBackend>( 16384 );
+    ModelSessionPool poolBig( backendBig, 16384 );
+    std::vector<AcquireResult> sessions;
+    for ( int i = 0; i < 4; ++i )
+    {
+        auto s = poolBig.acquireSession( makeRequest( "model_" + std::to_string( i ), 1024 ) );
+        REQUIRE( s.outcome == AcquireOutcome::Acquired );
+        sessions.push_back( std::move( s ) );
+    }
+    REQUIRE( poolBig.liveSessionCount() == 4 );
+
+    poolBig.releaseSession( sessions[0].session->sessionId );
+    sessions[0].session.reset();
+
+    auto s5 = poolBig.acquireSession( makeRequest( "model_4", 1024 ) );
+    REQUIRE( s5.outcome == AcquireOutcome::Acquired );
+    REQUIRE( s5.session );
+}
