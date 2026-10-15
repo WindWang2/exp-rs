@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "teaching_admin/batch_assessment.h"
+#include "teaching_admin/json_util.h"
 
 #include <QDir>
 #include <QFile>
@@ -285,4 +286,157 @@ TEST_CASE( "r10 discovery accounting: skips never become rows or checkpoint entr
     CHECK( second.resumed == 1 );
     CHECK( second.total == 1 );
     CHECK( second.skippedFiles.size() == 2 );
+}
+
+TEST_CASE( "r14e discovery containment: symlinked entries are refused, not followed",
+           "[teaching_r14e][batch][discovery]" )
+{
+    // Containment (R14-E audit, teaching-side F1): Qt follows symlinks in
+    // QDir listings by default, so a symlinked student folder or a
+    // file-level link could grade content from OUTSIDE the submissions
+    // root, and a dangling link vanished with no row at all. All three
+    // shapes must be typed refusals that never enter the grading set.
+    DiscoveryTree tree( { QStringLiteral( "alice/report.json" ) } );
+
+    // External secrets outside the submissions root.
+    QFile secret( tree.dir.path() + QStringLiteral( "/answer_key.json" ) );
+    REQUIRE( secret.open( QIODevice::WriteOnly ) );
+    secret.write( "{}" );
+    secret.close();
+    QDir outsideBob( tree.dir.path() + QStringLiteral( "/outside_bob" ) );
+    REQUIRE( outsideBob.mkpath( QStringLiteral( "." ) ) );
+    QFile bobReport( outsideBob.filePath( QStringLiteral( "report.json" ) ) );
+    REQUIRE( bobReport.open( QIODevice::WriteOnly ) );
+    bobReport.write( "{}" );
+    bobReport.close();
+
+    // bob/ is a symlink to a directory outside the submissions root.
+    REQUIRE( QFile( outsideBob.path() ).link( tree.submissions.filePath( "bob" ) ) );
+    // alice/leak.json is a symlink to an external file.
+    REQUIRE( QFile( secret.fileName() )
+                 .link( tree.submissions.filePath( QStringLiteral( "alice/leak.json" ) ) ) );
+    // carol/dangling.json points at nothing.
+    QDir( tree.submissions.path() ).mkpath( QStringLiteral( "carol" ) );
+    REQUIRE( QFile( tree.dir.path() + QStringLiteral( "/does_not_exist.json" ) )
+                 .link( tree.submissions.filePath(
+                   QStringLiteral( "carol/dangling.json" ) ) ) );
+
+    QVector<DiscoverySkip> skips;
+    const QVector<SubmissionItem> items =
+        discoverSubmissions( tree.submissions.path(), &skips );
+
+    // Only the real file is graded.
+    REQUIRE( items.size() == 1 );
+    CHECK( items.front().studentId == QStringLiteral( "alice" ) );
+    CHECK( items.front().path.endsWith( QLatin1String( "report.json" ) ) );
+
+    // Every symlinked entry is an attributable typed refusal; dangling
+    // links are visible too instead of silently vanishing.
+    REQUIRE( skips.size() == 3 );
+    bool sawLinkedFolder = false, sawLinkedFile = false, sawDangling = false;
+    for ( const DiscoverySkip &skip : skips )
+    {
+        CHECK( !skip.reason.isEmpty() );
+        if ( skip.path.endsWith( QLatin1String( "/bob" ) ) )
+        {
+            sawLinkedFolder = true;
+            CHECK( skip.studentId == QStringLiteral( "bob" ) );
+        }
+        if ( skip.path.endsWith( QLatin1String( "leak.json" ) ) )
+        {
+            sawLinkedFile = true;
+            CHECK( skip.studentId == QStringLiteral( "alice" ) );
+        }
+        if ( skip.path.endsWith( QLatin1String( "dangling.json" ) ) )
+        {
+            sawDangling = true;
+            CHECK( skip.studentId == QStringLiteral( "carol" ) );
+        }
+    }
+    CHECK( sawLinkedFolder );
+    CHECK( sawLinkedFile );
+    CHECK( sawDangling );
+
+    // End-to-end honesty: the published report carries the refusals and
+    // nothing outside the root is ever graded.
+    const BatchAssessmentReport report = runBatchAssessment(
+      discoveryConfig( tree.submissions.path(), tree.checkpointPath() ),
+      []( const SubmissionItem &item ) {
+          CHECK( item.studentId == QStringLiteral( "alice" ) );
+          return passRow( item );
+      } );
+    CHECK( report.total == 1 );
+    CHECK( report.skippedFiles.size() == 3 );
+}
+
+TEST_CASE( "r14e discovery ids: Unicode normalization variants grade as one student",
+           "[teaching_r14e][batch][discovery]" )
+{
+    // "sān" in NFC (from the teacher's keyboard) and the same name in NFD
+    // (from a macOS/zip extractor that decomposes combining marks) must
+    // reconcile to ONE student id, or the class counts cannot balance
+    // (R14-E audit F4). NOTE: the name must contain a canonically
+    // decomposable character — pure CJK like 张三 is normalization-invariant.
+    const QString nfc = QStringLiteral( "student-s\u0101n" );
+    const QString nfd = nfc.normalized( QString::NormalizationForm_D );
+    REQUIRE( nfd != nfc );
+
+    DiscoveryTree tree( { QStringLiteral( "alice/report.json" ) } );
+    QDir( tree.submissions.path() ).mkpath( nfd );
+    QFile f( tree.submissions.filePath( nfd + QStringLiteral( "/report.json" ) ) );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( "payload" );
+    f.close();
+
+    QVector<DiscoverySkip> skips;
+    const QVector<SubmissionItem> items =
+        discoverSubmissions( tree.submissions.path(), &skips );
+    REQUIRE( items.size() == 2 );
+    bool sawNormalized = false;
+    int aliceRows = 0;
+    for ( const SubmissionItem &item : items )
+    {
+        if ( item.path.contains( nfd ) )
+        {
+            // The NFD-named folder's row must carry the NFC id.
+            INFO( "student id: " << item.studentId.toUtf8().constData() );
+            CHECK( item.studentId == nfc );
+            sawNormalized = true;
+        }
+        else if ( item.studentId == QLatin1String( "alice" ) )
+        {
+            ++aliceRows;
+        }
+    }
+    CHECK( sawNormalized );
+    CHECK( aliceRows == 1 );
+    CHECK( skips.isEmpty() );
+}
+
+TEST_CASE( "r14e bounded read: oversize documents are typed refusals, not slurps",
+           "[teaching_r14e][json_util]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( QStringLiteral( "doc.json" ) );
+    {
+        QFile f( path );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( 64, 'x' ) );
+    }
+    // Within budget: bytes flow.
+    const auto ok = sicnu::teaching_admin::readBounded( path, 1024 );
+    CHECK( !ok.oversize );
+    CHECK( !ok.unreadable );
+    CHECK( ok.bytes.size() == 64 );
+    // Over budget: refused BEFORE any proportional allocation.
+    const auto oversize = sicnu::teaching_admin::readBounded( path, 16 );
+    CHECK( oversize.oversize );
+    CHECK( !oversize.unreadable );
+    CHECK( oversize.bytes.isEmpty() );
+    // Missing file: unreadable, not oversize.
+    const auto missing =
+        sicnu::teaching_admin::readBounded( dir.filePath( QStringLiteral( "nope.json" ) ), 1024 );
+    CHECK( missing.unreadable );
+    CHECK( !missing.oversize );
 }

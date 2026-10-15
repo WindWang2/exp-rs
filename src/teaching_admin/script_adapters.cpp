@@ -1,5 +1,7 @@
 #include "script_adapters.h"
 
+#include "json_util.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -324,15 +326,25 @@ BundleManifestInfo inspectBundleManifest( const QString &bundleDir )
 {
     BundleManifestInfo info;
     const QString path = QDir( bundleDir ).filePath( QStringLiteral( "manifest.json" ) );
-    QFile f( path );
-    if ( !f.open( QIODevice::ReadOnly ) )
+    // Bounded read (R14-E audit F5): an oversized manifest is a typed
+    // finding, not an unbounded slurp into memory.
+    constexpr qint64 kMaxManifestBytes = 16 * 1024 * 1024;
+    const BoundedReadResult read = readBounded( path, kMaxManifestBytes );
+    if ( read.oversize )
+    {
+        info.issues.push_back( { QStringLiteral( "manifest_oversize" ), QStringLiteral( "manifest.json" ),
+                                 QStringLiteral( "bundle manifest exceeds the 16 MiB read budget" ),
+                                 QStringLiteral( "error" ) } );
+        return info;
+    }
+    if ( read.unreadable )
     {
         info.issues.push_back( { QStringLiteral( "manifest_unreadable" ), QStringLiteral( "manifest.json" ),
                                  QStringLiteral( "bundle manifest missing or unreadable" ),
                                  QStringLiteral( "error" ) } );
         return info;
     }
-    const QJsonObject manifest = QJsonDocument::fromJson( f.readAll() ).object();
+    const QJsonObject manifest = QJsonDocument::fromJson( read.bytes ).object();
     if ( manifest.isEmpty() )
     {
         info.issues.push_back( { QStringLiteral( "manifest_invalid" ), QStringLiteral( "manifest.json" ),

@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cwctype>
 #include <cstring>
 #include <filesystem>
@@ -92,6 +93,33 @@ private:
     bool &mTruncated;
     long mTotal = 0;
 };
+
+/// Loader-injection deny-list for EXPLICIT request.environment entries
+/// (R14-C FIX-7). These keys make the dynamic linker load attacker-chosen
+/// code into the spawned tool — a manifest-controlled "LD_PRELOAD" must not
+/// become code execution inside every child process. The baseline
+/// environment never carries them; only explicit entries are checked.
+/// Returns the offending key, empty when the request is clean. Names are
+/// matched case-insensitively (Windows env semantics; POSIX variants with
+/// odd casing are refused too — there is no honest use for them).
+std::string dangerousEnvironmentKey( const ExternalProcessRequest &request )
+{
+    if ( !request.environment.isObject() )
+        return {};
+    for ( const std::string &name : request.environment.getMemberNames() )
+    {
+        std::string upper;
+        upper.reserve( name.size() );
+        for ( const char c : name )
+            upper.push_back( static_cast<char>( ::toupper( static_cast<unsigned char>( c ) ) ) );
+        if ( upper == "LD_PRELOAD" || upper == "LD_AUDIT" || upper == "LD_LIBRARY_PATH"
+             || upper == "LD_CONFIG_FILE" || upper == "DYLD_INSERT_LIBRARIES"
+             || upper == "DYLD_LIBRARY_PATH" || upper == "DYLD_FRAMEWORK_PATH"
+             || upper == "DYLD_FALLBACK_LIBRARY_PATH" )
+            return name;
+    }
+    return {};
+}
 
 /// Issue #757: workspace effect policy. Validates the RESOLVED execution
 /// effects (working directory, argv paths, env-value paths) against the
@@ -587,6 +615,19 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         }
     }
 
+    // Loader-injection deny-list (R14-C FIX-7): an explicit LD_PRELOAD-class
+    // entry is a typed policy refusal, never a spawn.
+    {
+        const std::string injector = dangerousEnvironmentKey( request );
+        if ( !injector.empty() )
+        {
+            result.refusedByPolicy = true;
+            result.error = "env_injection (E5007): explicit environment key '" + injector
+                           + "' influences the dynamic linker and is refused";
+            return result;
+        }
+    }
+
     // The child environment block is built BEFORE the program gate: the
     // probe must search the PATH the child will actually see (an explicit
     // request PATH overrides the host's), not the parent's.
@@ -869,14 +910,12 @@ int execvpeCompat( const char *file, char *const argv[], char *const envp[] )
         return ::execve( file, argv, envp );
 
     const char *pathVal = nullptr;
-    for ( char *const *entry = envp; entry && *entry; ++entry )
-    {
-        if ( std::strncmp( *entry, "PATH=", 5 ) == 0 )
-        {
-            pathVal = *entry + 5;
-            break;
-        }
-    }
+    // Resolve PATH from the CALLING process's environment, matching
+    // execvpe(3) semantics ("the search path is obtained from the caller's
+    // environment, not from the envp argument"). Reading envp here made a
+    // child-env PATH override diverge exec resolution from the pre-spawn
+    // probe, which validates against the caller's PATH (R14-C FIX-7).
+    pathVal = std::getenv( "PATH" );
     if ( !pathVal || !pathVal[0] )
         pathVal = "/usr/bin:/bin";
 
@@ -1103,6 +1142,19 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         {
             result.refusedByPolicy = true;
             result.error = "workspace_escape (E5005): " + escape;
+            return result;
+        }
+    }
+
+    // Loader-injection deny-list (R14-C FIX-7): an explicit LD_PRELOAD-class
+    // entry is a typed policy refusal, never a spawn.
+    {
+        const std::string injector = dangerousEnvironmentKey( request );
+        if ( !injector.empty() )
+        {
+            result.refusedByPolicy = true;
+            result.error = "env_injection (E5007): explicit environment key '" + injector
+                           + "' influences the dynamic linker and is refused";
             return result;
         }
     }

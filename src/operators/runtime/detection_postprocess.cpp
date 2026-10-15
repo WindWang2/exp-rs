@@ -43,6 +43,9 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
   if ( output.empty() || output.dims != 3 )
     return "detection head output must be a 3-D tensor (1, C, N) or (1, N, C), got dims="
              + std::to_string( output.dims );
+  if ( output.size[0] != 1 )
+    return "detection head output must carry batch dimension 1, got "
+             + std::to_string( output.size[0] ) + " samples (slice per-sample before decoding)";
   if ( output.type() != CV_32F )
     return "detection head output must be float32";
   // #1056: the flat read below indexes with continuous (C, N) strides. A
@@ -57,9 +60,13 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
     channelsFirst = false;
   else if ( contract.tensorLayout == "auto" )
   {
+    if ( C == N )
+      return "detection head is square (" + std::to_string( C ) + "x" + std::to_string( N )
+               + ") and output.detection.tensor_layout is 'auto' — the channel axis is "
+                 "ambiguous, declare channels_first or channels_last";
     // Deterministic heuristic: the class axis is the SMALL one (a detection
     // head has 5..~100 channels vs hundreds..thousands of candidates).
-    channelsFirst = C <= N;
+    channelsFirst = C < N;
   }
   if ( !channelsFirst )
     std::swap( C, N );
@@ -107,6 +114,13 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
     const float cy = at( 1, n );
     const float w = at( 2, n );
     const float h = at( 3, n );
+    // NaN geometry is clamp-transparent (std::clamp returns NaN) and slips
+    // past the `<= 0` degenerate drop; downstream it breaks the NMS sort's
+    // strict weak ordering (UB) and lround(NaN) is UB. +Inf already clamps
+    // correctly — only NaN needs the explicit gate.
+    if ( !std::isfinite( cx ) || !std::isfinite( cy ) || !std::isfinite( w )
+         || !std::isfinite( h ) )
+      continue;
     DetectionBox box;
     box.x = static_cast<float>( tileX + ( cx - w * 0.5f ) * scaleX );
     box.y = static_cast<float>( tileY + ( cy - h * 0.5f ) * scaleY );
@@ -136,6 +150,17 @@ std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &bo
                                              double iouThreshold, const CancelProbe &cancelled )
 {
   std::vector<DetectionBox> ordered = boxes;
+  // Public API: producers other than decodeDetections can hand NaN geometry
+  // through (a NaN coordinate compares unequal to everything — it breaks the
+  // strict weak ordering std::sort requires, which is UB). NaN boxes are
+  // un-suppressible garbage (IoU collapses to 0); drop them before sorting.
+  ordered.erase( std::remove_if( ordered.begin(), ordered.end(),
+                                 []( const DetectionBox &b ) {
+                                   return !std::isfinite( b.x ) || !std::isfinite( b.y )
+                                          || !std::isfinite( b.w ) || !std::isfinite( b.h )
+                                          || !std::isfinite( b.confidence );
+                                 } ),
+                 ordered.end() );
   std::sort( ordered.begin(), ordered.end(), []( const DetectionBox &a, const DetectionBox &b ) {
     if ( a.confidence != b.confidence )
       return a.confidence > b.confidence;
@@ -258,6 +283,13 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold, con
     if ( cancelled && ( idx % 4096 == 0 ) )
       cancelled();
     const DetectionBox &b = boxes[idx];
+    // Non-finite geometry must not reach lround() (domain error, UB) nor the
+    // NMS sort — and a NaN CONFIDENCE breaks the sort's strict weak ordering
+    // exactly like a NaN coordinate (it compares unequal to everything).
+    // The same gate decodeDetections applies at its own seam.
+    if ( !std::isfinite( b.x ) || !std::isfinite( b.y ) || !std::isfinite( b.w )
+         || !std::isfinite( b.h ) || !std::isfinite( b.confidence ) )
+      continue;
     const auto key = std::make_tuple( static_cast<int>( std::lround( b.x * 100.0f ) ),
                                       static_cast<int>( std::lround( b.y * 100.0f ) ),
                                       static_cast<int>( std::lround( b.w * 100.0f ) ),

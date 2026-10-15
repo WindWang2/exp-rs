@@ -116,7 +116,8 @@ bool inputOpensAsRaster( const std::string &source )
   ensureGdalRegistered();
   CPLErrorStateBackuper errorState;
   CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
-  GDALDatasetH probe = GDALOpenEx( source.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  const std::string gdalPath = ResourceUri::toGdalPath( source );
+  GDALDatasetH probe = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !probe )
     return false;
   GDALClose( probe );

@@ -180,6 +180,10 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
                           std::vector<long long> &classPixelCounts,
                           const std::function<bool()> &cancelled )
 {
+  if ( kernel < 3 || kernel % 2 == 0 )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "morphology kernel must be odd and >= 3, got "
+                             + std::to_string( kernel ) );
   if ( cancelled && cancelled() )
     throw RSOperatorError( ErrorCode::Cancelled, "morphology pass cancelled before the scan" );
   GDALAllRegister();
@@ -195,6 +199,15 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
   int hasNoData = 0;
   const double noData = GDALGetRasterNoDataValue( band, &hasNoData );
   const QString morphStage = stagePath + QStringLiteral( ".morph~" );
+  // The re-tally REPLACES the pre-morphology counts (they describe a product
+  // that is about to stop existing); keep the original width so a run whose
+  // highest classes vanish still reports zeroed slots, never a shorter
+  // vector than the class vocabulary.
+  const std::size_t tallyWidth = std::max<std::size_t>( 1, classPixelCounts.size() );
+  classPixelCounts.assign( tallyWidth, 0 );
+  // Every exit after GDALCreate must not strand the .morph~ intermediate:
+  // close the datasets, drop the stage, then throw (publication never
+  // happened, so the caller's own failure cleanup still applies).
   // Preserve the publication encoding of the stage (tiled + compressed) and
   // its dataset metadata (SICNU_CLASS_PALETTE / SICNU_CLASS_NAMES / heads) —
   // a morphology run must publish the same product a plain run would.
@@ -210,6 +223,15 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
                            "morphology pass could not stage the output: "
                              + morphStage.toStdString() );
   }
+  // Every failure exit below must not strand the .morph~ intermediate:
+  // close both datasets, drop the stage file, then throw — publication never
+  // happened, so the caller's own failure cleanup still governs its stage.
+  auto failMorphology = [ & ]( ErrorCode code, const std::string &what ) {
+    GDALClose( dst );
+    GDALClose( src );
+    QFile::remove( morphStage );
+    throw RSOperatorError( code, what );
+  };
   GDALRasterBandH dstBand = GDALGetRasterBand( dst, 1 );
   if ( hasNoData )
     GDALSetRasterNoDataValue( dstBand, noData );
@@ -283,22 +305,14 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
   for ( int coreY = 0; coreY < height; coreY += rowsPerBand )
   {
     if ( cancelled && cancelled() )
-    {
-      GDALClose( dst );
-      GDALClose( src );
-      throw RSOperatorError( ErrorCode::Cancelled, "morphology pass cancelled mid-scan" );
-    }
+      failMorphology( ErrorCode::Cancelled, "morphology pass cancelled mid-scan" );
     const int coreH = std::min( rowsPerBand, height - coreY );
     const int winY = std::max( 0, coreY - halo );
     const int winH = std::min( height, coreY + coreH + halo ) - winY;
     window.assign( static_cast<std::size_t>( width ) * winH, 0.0f );
     if ( GDALRasterIO( band, GF_Read, 0, winY, width, winH, window.data(), width, winH,
                        GDT_Float32, 0, 0 ) != CE_None )
-    {
-      GDALClose( dst );
-      GDALClose( src );
-      throw RSOperatorError( ErrorCode::GdalError, "morphology pass failed to read a window" );
-    }
+      failMorphology( ErrorCode::GdalError, "morphology pass failed to read a window" );
     // Both ops over the FULL window: op1 at core±radius rows is exact (they
     // have radius context inside the 2*radius-halo window), so op2 at core
     // rows consumes exact values. Band seams are exact; only window-edge
@@ -310,12 +324,8 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
     if ( GDALRasterIO( dstBand, GF_Write, 0, coreY, width, coreH,
                        const_cast<float *>( coreRows ), width, coreH, GDT_Float32, 0, 0 )
          != CE_None )
-    {
-      GDALClose( dst );
-      GDALClose( src );
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "morphology pass failed to write a window" );
-    }
+      failMorphology( ErrorCode::FileNotWritable,
+                      "morphology pass failed to write a window" );
     // Re-tally the per-class counts of the PUBLISHED product (pre-morphology
     // tallies would misdescribe it).
     for ( int y = 0; y < coreH; ++y )
@@ -337,8 +347,11 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
   GDALClose( src );
   QFile::remove( stagePath );
   if ( !QFile::rename( morphStage, stagePath ) )
+  {
+    QFile::remove( morphStage );
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "morphology pass could not publish the staged product" );
+  }
 }
 
 /// Builds the shared provenance document body for one engine run (everything
@@ -1111,6 +1124,15 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     }
   }
   const int bandCount = static_cast<int>( bandList.size() );
+  // CV_MAKETYPE packs the channel count into 9 bits: a >512-band selection
+  // (e.g. hyperspectral rasters with bands unset) wraps the cv::Mat type —
+  // the Mat then strides garbage and the blob packer reads past the split
+  // vector. Typed refusal at the seam (#1044 family).
+  if ( bandCount > CV_CN_MAX )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "input selection carries " + std::to_string( bandCount )
+                             + " bands but cv::Mat supports at most " + std::to_string( CV_CN_MAX )
+                             + " channels — declare input.bands to select a subset" );
 
   // Platform 10.0: EO domain preflight — the manifest's `eo` section is
   // enforced against the input raster BEFORE any tile is read, with the
@@ -1700,9 +1722,31 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                 plane = plane( cv::Range( halo, halo + bt.h ), cv::Range( halo, halo + bt.w ) ).clone();
               }
             }
-            else if ( outW != bt.w || outH != bt.h )
+            else
             {
-              cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
+              // Strided/interpolating head (out != fed): the output STILL
+              // COVERS THE FED WINDOW (core + halo — plus the fixed model
+              // input when resize=to_input resampled it). Resizing the whole
+              // window plane straight onto the core maps window pixel (0,0)
+              // onto core pixel (0,0) — but the core starts halo pixels in,
+              // so every output pixel shifts by halo·(core/fed) and halo-only
+              // context leaks into the product. Crop the core rect through
+              // the window→output scale FIRST (the same chain the
+              // grid-preserving resize=to_input branch above uses: raster
+              // window → model input → output), then resample the crop.
+              const double sxF = static_cast<double>( outW ) / std::max( 1, bt.w + 2 * halo );
+              const double syF = static_cast<double>( outH ) / std::max( 1, bt.h + 2 * halo );
+              int cx = static_cast<int>( std::lround( halo * sxF ) );
+              int cy = static_cast<int>( std::lround( halo * syF ) );
+              int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
+              int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
+              cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
+              cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
+              cw = std::min( cw, outW - cx );
+              ch = std::min( ch, outH - cy );
+              plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
+              if ( plane.cols != bt.w || plane.rows != bt.h )
+                cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
             }
           }
           // Uncertainty statistics need the PRE-threshold class planes:
@@ -1856,6 +1900,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                                   : bestv;
                   break;
                 case RasterOutputMode::Mask:
+                {
                   outRow[col] = channels == 1
                                   ? ( ( calibrate
                                           ? calibrated[static_cast<std::size_t>( best )]
@@ -1863,7 +1908,13 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                                         ? 1.0f
                                         : 0.0f )
                                   : ( best != 0 ? 1.0f : 0.0f );
+                  // The header contract promises per-class counts for Mask
+                  // products too ({0,1} domain) — the blended path tallies
+                  // (setClassTally); the stitched path must not report zeros.
+                  if ( stats.classPixelCounts.size() >= 2 )
+                    ++stats.classPixelCounts[outRow[col] > 0.5f ? 1 : 0];
                   break;
+                }
                 case RasterOutputMode::Probability:
                   break; // unreachable
               }
@@ -2152,9 +2203,23 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   if ( ( mode == RasterOutputMode::Labels || mode == RasterOutputMode::Mask )
        && !m_model.postprocess.morphology.empty() )
   {
-    applyMorphologyPass( stagePath, m_model.postprocess.morphology,
-                         m_model.postprocess.morphologyKernelPx, stats.classPixelCounts,
-                         [ &context ] { return context.isCancelled(); } );
+    try
+    {
+      applyMorphologyPass( stagePath, m_model.postprocess.morphology,
+                           m_model.postprocess.morphologyKernelPx, stats.classPixelCounts,
+                           [ &context ] { return context.isCancelled(); } );
+    }
+    catch ( ... )
+    {
+      // The stage sits outside the tile loop's abandon scope (the writer is
+      // already closed) — remove it explicitly or a cancelled/failed pass
+      // strands `<output>.tmp~` next to the caller's path. The .morph~
+      // intermediate is removed too: allocation failures inside the pass
+      // (bad_alloc from a row-band window) bypass the pass's own cleanup.
+      QFile::remove( stagePath + QStringLiteral( ".morph~" ) );
+      QFile::remove( stagePath );
+      throw;
+    }
   }
 
   // Atomic publish: only a fully written, closed raster is renamed onto the
@@ -2278,6 +2343,11 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string 
                                  + std::to_string( rasterBands ) + ")" );
   }
   const int bandCount = static_cast<int>( bandList.size() );
+  if ( bandCount > CV_CN_MAX )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "input selection carries " + std::to_string( bandCount )
+                             + " bands but cv::Mat supports at most " + std::to_string( CV_CN_MAX )
+                             + " channels — declare input.bands to select a subset" );
 
   if ( const std::string dtypeError =
          inputDTypeMismatch( m_model, bandList,
@@ -3025,6 +3095,18 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                + " exceeds the fed channel budget — the stacked per-tile "
                                  "window would overflow its index math" );
     reader.channels = static_cast<int>( *channels64 );
+    // The stacked window is wrapped as CV_32FC(channels): the 9-bit channel
+    // field wraps above 512 (bands × temporal_length), so the Mat would
+    // stride garbage and the blob packer would index past the split vector.
+    if ( reader.channels > CV_CN_MAX )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "': bands × temporal_length = "
+                               + std::to_string( bandList.size() ) + "×"
+                               + std::to_string( declaredFrames ) + " = "
+                               + std::to_string( reader.channels )
+                               + " channels exceeds the cv::Mat channel limit ("
+                               + std::to_string( CV_CN_MAX ) + ") — narrow the band "
+                                 "selection or the temporal length" );
 
     // Open all provided frames.
     reader.frames.resize( declaredFrames );
@@ -3370,6 +3452,17 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         throw RSOperatorError( ErrorCode::InvalidInputData, typeError );
       if ( mat.size[1] <= 0 )
         throw RSOperatorError( ErrorCode::ComputationError, "model output has no channels" );
+      // The stitcher reshapes (B, C, H, W) with B = the batch it packed; a
+      // graph exported with a fixed batch-1 output against batch_size > 1
+      // must refuse HERE (typed), not inside cv::Mat::reshape as a raw
+      // cv::Exception — the single-input engine checks the same contract.
+      if ( mat.size[0] != B )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "model output '" + nt.first + "' carries batch dimension "
+                                 + std::to_string( mat.size[0] ) + " but the run packed "
+                                 + std::to_string( B )
+                                 + " tiles per forward — export the graph with a dynamic "
+                                   "batch axis or lower tiling.batch_size" );
       if ( const std::string classesError = classesChannelMismatch( m_model, mat.size[1], nt.first );
            !classesError.empty() )
         throw RSOperatorError( ErrorCode::InvalidInputData, classesError );
@@ -3469,9 +3562,31 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
             if ( margin > 0 )
               plane = plane( cv::Range( margin, margin + bt.h ), cv::Range( margin, margin + bt.w ) ).clone();
           }
-          else if ( outW != bt.w || outH != bt.h )
+          else
           {
-            cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, cv::INTER_LINEAR );
+            // Strided/interpolating head (out != fed): the output still
+            // covers the fed window, and the core starts halo+pad pixels in
+            // — crop the core rect through the window→output scale BEFORE
+            // resampling (a straight window→core resize shifts every pixel
+            // by margin·(core/fed) and leaks halo-only context into the
+            // product; the single-input engine maps the same way). Honor the
+            // declared interpolation, like every other output resample.
+            const int outInterp =
+              pre.interpolation == "nearest" ? cv::INTER_NEAREST : cv::INTER_LINEAR;
+            const double sxF = static_cast<double>( outW ) / std::max( 1, tileFedW );
+            const double syF = static_cast<double>( outH ) / std::max( 1, tileFedH );
+            const int margin = halo + pad;
+            int cx = static_cast<int>( std::lround( margin * sxF ) );
+            int cy = static_cast<int>( std::lround( margin * syF ) );
+            int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
+            int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
+            cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
+            cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
+            cw = std::min( cw, outW - cx );
+            ch = std::min( ch, outH - cy );
+            plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
+            if ( plane.cols != bt.w || plane.rows != bt.h )
+              cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, outInterp );
           }
           // The writer consumes a CONTIGUOUS bt.w × bt.h buffer: with uniform
           // fed windows the core sits at the window origin, so an uncropped

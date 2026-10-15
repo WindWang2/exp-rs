@@ -374,3 +374,167 @@ TEST_CASE( "file:// URIs classify as local filesystem resources (Oracle-B1.1)",
   CHECK( roundtrip4.kind == ResourceKind::LocalFile );
   CHECK( roundtrip4.path == uri4.path );
 }
+
+TEST_CASE( "resolveAgainst preserves absolute file:// URIs without corruption (Thread #9, SEC-07)",
+           "[io][uri][resolve][thread9]" )
+{
+  const std::string baseDir = "/home/user/project";
+
+  // 1. Absolute POSIX file URI
+  const ResourceUri res1 = ResourceUri::resolveAgainst( baseDir, "file:///var/data/scene.tif" );
+  CHECK( res1.kind == ResourceKind::LocalFile );
+  CHECK( res1.path == "/var/data/scene.tif" );
+  CHECK( res1.raw == "file:///var/data/scene.tif" );
+  CHECK( res1.path.find( "file:" ) == std::string::npos );
+
+  // 2. Windows drive file URI
+  const ResourceUri res2 = ResourceUri::resolveAgainst( baseDir, "file:///C:/data/scene.tif" );
+  CHECK( res2.kind == ResourceKind::LocalFile );
+  CHECK( res2.path == "C:/data/scene.tif" );
+  CHECK( res2.path.find( "file:" ) == std::string::npos );
+
+  // 3. Localhost file URI
+  const ResourceUri res3 = ResourceUri::resolveAgainst( baseDir, "file://localhost/data/scene.tif" );
+  CHECK( res3.kind == ResourceKind::LocalFile );
+  CHECK( res3.path == "/data/scene.tif" );
+  CHECK( res3.path.find( "file:" ) == std::string::npos );
+
+  // 4. UNC file URI
+  const ResourceUri res4 = ResourceUri::resolveAgainst( baseDir, "file://server/share/scene.tif" );
+  CHECK( res4.kind == ResourceKind::LocalFile );
+  CHECK( res4.path == "//server/share/scene.tif" );
+  CHECK( res4.path.find( "file:" ) == std::string::npos );
+}
+
+TEST_CASE( "ResourceUri::parse handles case-insensitive localhost and loopback authorities (Thread #6)",
+           "[io][uri][localhost][thread6]" )
+{
+  for ( const std::string &uriStr : { "file://localhost/data/test.tif",
+                                      "file://LocalHost/data/test.tif",
+                                      "file://LOCALHOST/data/test.tif",
+                                      "file://localhost.localdomain/data/test.tif",
+                                      "file://127.0.0.1/data/test.tif",
+                                      "file://[::1]/data/test.tif",
+                                      "file://::1/data/test.tif" } )
+  {
+    INFO( "Testing URI: " << uriStr );
+    const ResourceUri uri = ResourceUri::parse( uriStr );
+    CHECK( uri.kind == ResourceKind::LocalFile );
+    CHECK( uri.path == "/data/test.tif" );
+    CHECK_FALSE( uri.path.rfind( "//", 0 ) == 0 );
+  }
+}
+
+TEST_CASE( "ResourceUri::parse rejects embedded NUL bytes and %00 in file URIs (Thread #7)",
+           "[io][uri][security][nul_byte][thread7]" )
+{
+  // 1. %00 in path
+  const ResourceUri uri1 = ResourceUri::parse( "file:///var/data/scene.tif%00.jpg" );
+  CHECK( uri1.kind == ResourceKind::Invalid );
+  CHECK( uri1.parseReason.find( "NUL" ) != std::string::npos );
+
+  // 2. %00 path traversal attempt
+  const ResourceUri uri2 = ResourceUri::parse( "file:///allowed/dir%00/../../etc/passwd" );
+  CHECK( uri2.kind == ResourceKind::Invalid );
+
+  // 3. Literal NUL byte in raw input
+  const std::string rawWithNul = std::string( "file:///var/data/scene.tif" ) + '\0' + ".jpg";
+  const ResourceUri uri3 = ResourceUri::parse( rawWithNul );
+  CHECK( uri3.kind == ResourceKind::Invalid );
+  CHECK( uri3.parseReason.find( "NUL" ) != std::string::npos );
+
+  // 4. resolveAgainst rejects NUL byte in reference
+  const ResourceUri resWithNul = ResourceUri::resolveAgainst( "/base", "file:///data/scene.tif%00.jpg" );
+  CHECK( resWithNul.kind == ResourceKind::Invalid );
+}
+
+TEST_CASE( "ResourceUri preserves root slash in file:/// and canonicalizes file:// (Thread #19)",
+           "[io][uri][canonical][root][thread19]" )
+{
+  // 1. Root POSIX file URI preservation
+  const ResourceUri rootUri = ResourceUri::parse( "file:///" );
+  CHECK( rootUri.kind == ResourceKind::LocalDirectory );
+  CHECK( rootUri.path == "/" );
+  CHECK( rootUri.canonical() == "file:///" );
+
+  // Canonical roundtrip idempotency
+  const ResourceUri roundtrip = ResourceUri::parse( rootUri.canonical() );
+  CHECK( roundtrip.kind == ResourceKind::LocalDirectory );
+  CHECK( roundtrip.path == "/" );
+  CHECK( roundtrip.canonical() == "file:///" );
+
+  // 2. file:// parses to root and canonicalizes to file:///
+  const ResourceUri fileNoSlash = ResourceUri::parse( "file://" );
+  CHECK( fileNoSlash.kind == ResourceKind::LocalDirectory );
+  CHECK( fileNoSlash.path == "/" );
+  CHECK( fileNoSlash.canonical() == "file:///" );
+
+  // 3. Root directory on Windows drive
+  const ResourceUri winRoot = ResourceUri::parse( "file:///C:/" );
+  CHECK( winRoot.canonical() == "file:///C:/" );
+
+  // 4. Windows drive root with host authority preserves trailing slash and roundtrip idempotency
+  for ( const char *winHostRoot : { "file://localhost/C:/",
+                                           "file://LOCALHOST/C:/",
+                                           "file://127.0.0.1/C:/",
+                                           "file://[::1]/C:/" } )
+  {
+    INFO( "Testing winHostRoot: " << winHostRoot );
+    const ResourceUri uri = ResourceUri::parse( winHostRoot );
+    CHECK( uri.path == "C:/" );
+    CHECK( uri.canonical() == winHostRoot );
+
+    const ResourceUri rt = ResourceUri::parse( uri.canonical() );
+    CHECK( rt.path == "C:/" );
+    CHECK( rt.canonical() == winHostRoot );
+  }
+}
+
+TEST_CASE( "resolveAgainst prevents traversal bypass via single-dot and relative file URIs",
+           "[io][uri][resolve][security][challenger]" )
+{
+  const std::string base = "/data/repo/project";
+
+  // 1. Single-dot traversal bypasses (CWE-22)
+  const ResourceUri dotDot = ResourceUri::resolveAgainst( base, "./.." );
+  CHECK( dotDot.kind == ResourceKind::Invalid );
+  CHECK( dotDot.parseReason.find( "traversal" ) != std::string::npos );
+
+  const ResourceUri dotDotFile = ResourceUri::resolveAgainst( base, "./../outside.tif" );
+  CHECK( dotDotFile.kind == ResourceKind::Invalid );
+  CHECK( dotDotFile.parseReason.find( "traversal" ) != std::string::npos );
+
+  const ResourceUri nestedDotEscape = ResourceUri::resolveAgainst( base, "sub/./../../outside.tif" );
+  CHECK( nestedDotEscape.kind == ResourceKind::Invalid );
+  CHECK( nestedDotEscape.parseReason.find( "traversal" ) != std::string::npos );
+
+  // 2. Normal dot references resolve cleanly without embedded '.'
+  const ResourceUri dotFile = ResourceUri::resolveAgainst( base, "./raster.tif" );
+  CHECK( dotFile.kind == ResourceKind::LocalFile );
+  CHECK( dotFile.path == "/data/repo/project/raster.tif" );
+  CHECK( dotFile.path.find( "/./" ) == std::string::npos );
+
+  const ResourceUri dotDir = ResourceUri::resolveAgainst( base, "." );
+  CHECK( dotDir.kind == ResourceKind::LocalFile );
+  CHECK( dotDir.path == "/data/repo/project" );
+
+  // 3. Relative file: URIs resolve cleanly without scheme in folder name
+  const ResourceUri relFile = ResourceUri::resolveAgainst( base, "file:sub/raster.tif" );
+  CHECK( relFile.kind == ResourceKind::LocalFile );
+  CHECK( relFile.path == "/data/repo/project/sub/raster.tif" );
+  CHECK( relFile.path.find( "file:" ) == std::string::npos );
+
+  const ResourceUri relFileDot = ResourceUri::resolveAgainst( base, "file:./sub/raster.tif" );
+  CHECK( relFileDot.kind == ResourceKind::LocalFile );
+  CHECK( relFileDot.path == "/data/repo/project/sub/raster.tif" );
+  CHECK( relFileDot.path.find( "file:" ) == std::string::npos );
+
+  // 4. Relative file: traversal is blocked
+  const ResourceUri relFileEscape = ResourceUri::resolveAgainst( base, "file:../outside.tif" );
+  CHECK( relFileEscape.kind == ResourceKind::Invalid );
+  CHECK( relFileEscape.parseReason.find( "traversal" ) != std::string::npos );
+
+  const ResourceUri relFileNestedEscape = ResourceUri::resolveAgainst( base, "file:sub/../../outside.tif" );
+  CHECK( relFileNestedEscape.kind == ResourceKind::Invalid );
+  CHECK( relFileNestedEscape.parseReason.find( "traversal" ) != std::string::npos );
+}

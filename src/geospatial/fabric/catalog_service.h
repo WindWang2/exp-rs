@@ -128,6 +128,8 @@ struct CatalogContinuation
     bool hasMore = false;
     // Local backend: offset into the walk order.
     std::size_t localOffset = 0;
+    // Remote backend: tail items preserved from a maxItems-capped page (Thread #15).
+    std::vector<StacItem> remoteBufferedItems;
     // Remote backend: the StacPage continuation descriptor verbatim, plus
     // the producing request (POST pages merge their next body into self).
     std::string remoteMethod;

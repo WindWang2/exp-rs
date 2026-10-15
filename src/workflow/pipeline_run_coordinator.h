@@ -235,7 +235,12 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
     void dispatchReadyNodes( RunState *state );
     void onNodeFinished( const QString &nodeId, NodeExecutionResult result, qint64 elapsedMs );
     void finalizeIfDone( RunState *state );
-    void persistCheckpoint( RunState *state );
+    /// Serializes the current state and publishes it atomically. Returns
+    /// false when the publish FAILED (fault injection, sidecar refusal,
+    /// size cap): the on-disk checkpoint is then not this state's truth,
+    /// which the TERMINAL call in finalizeIfDone must respect before
+    /// releasing the run-ownership lock (#1448).
+    bool persistCheckpoint( RunState *state );
     void markRemaining( RunState *state, ExecutionState stateToMark );
 
     mutable std::mutex m_stateMutex;

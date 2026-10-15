@@ -279,8 +279,12 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     CacheKeyMaterial keyMat;
     keyMat.assetDigest = assetDigestOf( summaries, states, observed );
     keyMat.catalogGeneration = mAssets.catalogGeneration();
-    keyMat.registryRevision = mRecipes.registryRevision();
-    keyMat.recipePackDigest = mRecipes.packDigest();
+    // One locked snapshot: reading revision and digest as two separate
+    // acquisitions could tear the pair across a concurrent registry reload
+    // (R14-E review 7).
+    const auto recipeSnapshot = mRecipes.revisionAndDigest();
+    keyMat.registryRevision = recipeSnapshot.first;
+    keyMat.recipePackDigest = recipeSnapshot.second;
     keyMat.autonomyRevision = constraints.autonomyLevel;
     keyMat.goal = request.goal;
     keyMat.intent = request.intent;

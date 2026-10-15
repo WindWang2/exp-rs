@@ -14,6 +14,7 @@
 #include "geospatial/remote/remote_identity_resolver.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "support/http_range_server.h"
+#include "support/http_stac_server.h"
 #include "support/offline_probe.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -547,4 +548,114 @@ TEST_CASE( "RemoteSourceValidator in offline mode enforces zero egress (Oracle-B
   RevalidationResult res = validator.revalidate();
   CHECK( res.outcome == RevalidationOutcome::Inconclusive );
   CHECK( res.decidedBy == "offline" );
+}
+
+TEST_CASE( "RemoteSourceValidator blocks private network target reached via redirect (SEC-02)",
+           "[io][remote][validator][ssrf][redirect]" )
+{
+  testsupport::HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+
+  testsupport::StacRoute rImds;
+  rImds.status = 302;
+  rImds.contentType.clear();
+  rImds.headers["Location"] = "http://169.254.169.254/latest/meta-data/";
+  server.setRoute( "/redirect-imds", rImds );
+
+  testsupport::StacRoute rLoop;
+  rLoop.status = 302;
+  rLoop.contentType.clear();
+  rLoop.headers["Location"] = "http://127.0.0.1:8080/internal";
+  server.setRoute( "/redirect-loopback", rLoop );
+
+  RemoteValidatorOptions options;
+  options.blockPrivateNetworks = true;
+
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( server.url() + "/redirect-imds", options ),
+                     GeoError );
+  REQUIRE_THROWS_AS( RemoteSourceValidator::probe( server.url() + "/redirect-loopback", options ),
+                     GeoError );
+}
+
+TEST_CASE( "offline::isPrivateHost rejects oversized IPv6 without buffer overrun (SEC-01)",
+           "[io][remote][offline][ipv6][bounds]" )
+{
+  using sicnu::geo::offline::isPrivateHost;
+
+  // 7 head groups + 2 tail groups: total 9 groups > 8.
+  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5:6:7::8:9]/data.tif" ) );
+  CHECK_FALSE( isPrivateHost( "1:2:3:4:5:6:7::8:9" ) );
+
+  // 7 head groups + IPv4 tail (counts as 2 groups): total 9 groups > 8.
+  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5:6:7::127.0.0.1]/data.tif" ) );
+  CHECK_FALSE( isPrivateHost( "1:2:3:4:5:6:7::127.0.0.1" ) );
+
+  // Multiple tail groups exceeding 8 groups total.
+  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5::6:7:8:9:a:b]/data.tif" ) );
+  CHECK_FALSE( isPrivateHost( "http://[::1:2:3:4:5:6:7:8:9]/data.tif" ) );
+  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5:6:7:8::]/data.tif" ) );
+}
+
+TEST_CASE( "offline::isPrivateHost identifies :: and special ranges (SEC-03, SEC-04)",
+           "[io][remote][offline][ipv6][subnets]" )
+{
+  using sicnu::geo::offline::isPrivateHost;
+
+  // Unspecified address (::) routes to loopback on POSIX
+  CHECK( isPrivateHost( "http://[::]/data.tif" ) );
+  CHECK( isPrivateHost( "::" ) );
+  CHECK( isPrivateHost( "[::]:8080" ) );
+  CHECK( isPrivateHost( "http://[0:0:0:0:0:0:0:0]/data.tif" ) );
+
+  // IPv6 link-local with Zone ID / Scope Index (%eth0, %25eth0)
+  CHECK( isPrivateHost( "http://[fe80::1%eth0]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[fe80::1%25eth0]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[fe80::1%1]/data.tif" ) );
+  CHECK( isPrivateHost( "[fe80::1%eth0]:8080" ) );
+
+  // NAT64 prefix embedding private IPv4 (64:ff9b::/96)
+  CHECK( isPrivateHost( "http://[64:ff9b::127.0.0.1]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[64:ff9b::169.254.169.254]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[64:ff9b::10.0.0.1]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[64:ff9b::0.0.0.0]/data.tif" ) );
+  // Public IPv4 via NAT64 must NOT be classified as private
+  CHECK_FALSE( isPrivateHost( "http://[64:ff9b::8.8.8.8]/data.tif" ) );
+
+  // IPv6 Multicast (ff00::/8)
+  CHECK( isPrivateHost( "http://[ff02::1]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[ff01::1]/data.tif" ) );
+  CHECK( isPrivateHost( "ff02::1" ) );
+}
+
+TEST_CASE( "offline::isPrivateHost validates alternative IPv4 encodings (SEC-05)",
+           "[io][remote][offline][ipv4][encodings]" )
+{
+  using sicnu::geo::offline::isPrivateHost;
+
+  // Octal representations of loopback (0177 = 127)
+  CHECK( isPrivateHost( "http://0177.0.0.1:8080/data.tif" ) );
+  CHECK( isPrivateHost( "0177.0.0.1" ) );
+  CHECK( isPrivateHost( "http://0177.0.0.01/data.tif" ) );
+  CHECK( isPrivateHost( "http://012.0.0.1/data.tif" ) ); // 10.0.0.1 in octal
+
+  // Hexadecimal notation (0x7f = 127)
+  CHECK( isPrivateHost( "http://0x7f.0.0.1/data.tif" ) );
+  CHECK( isPrivateHost( "0x7f.0.0.1" ) );
+  CHECK( isPrivateHost( "http://0x7f000001/data.tif" ) );
+  CHECK( isPrivateHost( "0x7f000001" ) );
+
+  // DWORD / integer notation
+  CHECK( isPrivateHost( "http://2130706433/data.tif" ) ); // 127.0.0.1 as dword
+  CHECK( isPrivateHost( "2130706433" ) );
+  CHECK( isPrivateHost( "http://2852039166/data.tif" ) ); // 169.254.169.254 as dword
+
+  // Classful shorthand
+  CHECK( isPrivateHost( "http://127.1/data.tif" ) ); // 127.0.0.1 as 2-part
+  CHECK( isPrivateHost( "127.1" ) );
+  CHECK( isPrivateHost( "http://10.1/data.tif" ) ); // 10.0.0.1
+  CHECK( isPrivateHost( "http://192.168.1/data.tif" ) ); // 192.168.0.1 as 3-part
+
+  // Percent-encoded hostname
+  CHECK( isPrivateHost( "http://local%68ost:8080/data.tif" ) );
+  CHECK( isPrivateHost( "local%68ost" ) );
 }

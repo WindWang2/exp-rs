@@ -379,6 +379,54 @@ TEST_CASE( "Windows with too few valid samples stay unscored", "[localrx][kernel
     CHECK( result.scored[static_cast<size_t>( 12 ) * kWidth + 12] == 1 );
 }
 
+TEST_CASE( "Diagonal-mode zero-variance windows stay unscored, not raster-fatal [r14a]",
+           "[localrx][kernel]" )
+{
+    // All-constant cube: every background window has zero variance, so the
+    // scaled diagonal loading is 0 (load = alpha * trace/bands) and the
+    // Mahalanobis term divides by zero — Inf, or 0/0 = NaN when the center
+    // equals the mean. The header contract keeps per-window degeneracy out
+    // of the error path (full mode already returns SingularBackground for
+    // its zero-pivot windows); the raster call must succeed and report the
+    // pixels unscored.
+    std::vector<float> pixels( static_cast<size_t>( kWidth ) * kHeight * kBands );
+    for ( size_t i = 0; i < pixels.size(); ++i )
+        pixels[i] = 0.5f;
+
+    Config config;
+    config.outerWindow = 5;
+    config.innerWindow = 3;
+    config.covarianceMode = CovarianceMode::Diagonal;
+    Result result;
+    QString err;
+    REQUIRE( dualWindowRx( pixels.data(), kWidth, kHeight, kBands, config,
+                           nullptr, nullptr, &result, &err ) );
+    REQUIRE( result.scored.size() == static_cast<size_t>( kWidth ) * kHeight );
+    for ( size_t i = 0; i < result.scored.size(); ++i )
+    {
+        CHECK( result.scored[i] == 0 );
+        CHECK( std::isnan( result.scores[i] ) );
+    }
+
+    // scorePixel reports the same degeneracy as SingularBackground — never
+    // NonFiniteScore (which the grid driver treats as a fatal raster error).
+    float score = 0.0f;
+    PixelScoreStatus status = PixelScoreStatus::Scored;
+    const std::vector<float> background( static_cast<size_t>( kBands ) * 6, 0.5f );
+    CHECK_FALSE( scorePixel( pixels.data(), background.data(), 6, kBands, config,
+                             nullptr, nullptr, &score, &status ) );
+    CHECK( status == PixelScoreStatus::SingularBackground );
+
+    // A zero-variance window under an explicit loading of 0 behaves the
+    // same way (identity loading must not resurrect a division by zero).
+    Config zeroLoading = config;
+    zeroLoading.loading = 0.0;
+    status = PixelScoreStatus::Scored;
+    CHECK_FALSE( scorePixel( pixels.data(), background.data(), 6, kBands, zeroLoading,
+                             nullptr, nullptr, &score, &status ) );
+    CHECK( status == PixelScoreStatus::SingularBackground );
+}
+
 TEST_CASE( "scorePixel agrees with the grid driver", "[localrx][kernel]" )
 {
     const Design design;

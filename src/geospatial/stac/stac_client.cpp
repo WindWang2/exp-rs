@@ -88,6 +88,20 @@ void appendParam( std::string &query, const char *name, const std::string &value
   query += urlEncodeValue( value );
 }
 
+std::string toLowerAscii( std::string text )
+{
+  for ( char &c : text )
+    c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+  return text;
+}
+
+std::string toUpperAscii( std::string text )
+{
+  for ( char &c : text )
+    c = static_cast<char>( std::toupper( static_cast<unsigned char>( c ) ) );
+  return text;
+}
+
 /// Extracts the rel="next" link from a STAC response document.
 bool extractNextLink( const Json::Value &document, std::string &method, std::string &href,
                       Json::Value &body, bool &merge )
@@ -99,13 +113,21 @@ bool extractNextLink( const Json::Value &document, std::string &method, std::str
     if ( !link.isObject() )
       continue;
     const std::string rel = link["rel"].isString() ? link["rel"].asString() : std::string();
-    if ( rel != "next" )
+    std::string cleanRel = rel;
+    while ( !cleanRel.empty() && std::isspace( static_cast<unsigned char>( cleanRel.front() ) ) )
+      cleanRel.erase( cleanRel.begin() );
+    while ( !cleanRel.empty() && std::isspace( static_cast<unsigned char>( cleanRel.back() ) ) )
+      cleanRel.pop_back();
+    if ( toLowerAscii( cleanRel ) != "next" )
       continue;
     href = link["href"].isString() ? link["href"].asString() : std::string();
     if ( href.empty() )
       continue;
     method = link["method"].isString() ? link["method"].asString() : "GET";
-    if ( method != "POST" && method != "GET" )
+    const std::string upperMethod = toUpperAscii( method );
+    if ( upperMethod == "POST" || upperMethod == "GET" )
+      method = upperMethod;
+    else
       method = "GET";
     if ( link.isMember( "body" ) && link["body"].isObject() )
       body = link["body"];
@@ -155,24 +177,26 @@ std::string resolveReference( const std::string &baseUrl, const std::string &ref
     const std::size_t up = directory.rfind( '/' );
     directory = up == std::string::npos ? std::string() : directory.substr( 0, up );
   }
-  // RFC 3986 §5.3 merge: a root-absolute reference replaces the base path
-  // outright; otherwise it joins the base directory (never a doubled slash —
-  // a root-relative self link merged against a bare origin used to yield
-  // "host//path" and poison everything resolved from it).
+  // RFC 3986 §5.2.2 / §5.3 merge: an empty reference path inherits the base
+  // path; a root-absolute reference replaces the base path outright; otherwise
+  // it joins the base directory (never a doubled slash — a root-relative self
+  // link merged against a bare origin used to yield "host//path" and poison
+  // everything resolved from it).
   std::string mergedPath;
-  if ( !path.empty() && path[0] == '/' )
+  if ( path.empty() )
+  {
+    mergedPath = basePath;
+  }
+  else if ( path[0] == '/' )
   {
     mergedPath = path;
   }
   else
   {
     mergedPath = directory;
-    if ( !path.empty() )
-    {
-      if ( !mergedPath.empty() && mergedPath.back() != '/' )
-        mergedPath += '/';
-      mergedPath += path;
-    }
+    if ( !mergedPath.empty() && mergedPath.back() != '/' )
+      mergedPath += '/';
+    mergedPath += path;
   }
   std::string resolved = base.scheme + "://" + base.host;
   // userinfo is deliberately DROPPED on relative resolution: resolve only
@@ -703,8 +727,12 @@ StacRequest StacClient::buildNextRequest( const StacPage &page ) const
     // the body replaces it. A POST link with no body at all is a broken
     // origin, not an unfiltered re-search.
     if ( page.nextBody.isNull() )
+    {
+      if ( !page.selfBody.isNull() )
+        return StacRequest{ "POST", page.nextHref, page.selfBody };
       throw GeoError( ErrorCode::InvalidMetadata,
                       "StacClient: rel=next POST link carries no body; refusing an unfiltered crawl" );
+    }
     Json::Value merged = page.selfBody;
     if ( page.nextMerge )
     {
@@ -802,7 +830,14 @@ StacSearchAllResult StacClient::searchAll( const StacSearchQuery &query ) const
       result.truncatedByLimit = true;
       return result;
     }
-    if ( !visited.insert( page.nextHref ).second )
+    std::string loopKey = page.nextMethod + " " + page.nextHref;
+    if ( !page.nextBody.isNull() )
+    {
+      Json::StreamWriterBuilder writerBuilder;
+      writerBuilder["indentation"] = "";
+      loopKey += " " + Json::writeString( writerBuilder, page.nextBody );
+    }
+    if ( !visited.insert( loopKey ).second )
       throw GeoError( ErrorCode::InvalidMetadata,
                       "StacClient: pagination loop detected (repeated rel=next href)" );
     page = nextPage( page );

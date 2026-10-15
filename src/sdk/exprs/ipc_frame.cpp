@@ -58,8 +58,11 @@ bool readExact( IIpcStream &stream, char *data, size_t &got, size_t len,
 } // namespace
 
 bool writeJson( IIpcStream &stream, const Json::Value &json,
-                const IpcFrameLimits &limits, std::string &error )
+                const IpcFrameLimits &limits, std::string &error,
+                std::string *failureCode )
 {
+    if ( failureCode )
+        failureCode->clear();
     Json::StreamWriterBuilder builder;
     builder[ "indentation" ] = "";
     builder[ "commentStyle" ] = "None";
@@ -70,11 +73,15 @@ bool writeJson( IIpcStream &stream, const Json::Value &json,
         error = "frame payload of " + std::to_string( payload.size() )
                 + " bytes exceeds the negotiated cap of "
                 + std::to_string( limits.maxFrameBytes ) + " bytes (E6003)";
+        if ( failureCode )
+            *failureCode = "E6003";
         return false;
     }
     if ( payload.size() > 0xFFFFFFFFull - kPrefixBytes )
     {
         error = "frame payload exceeds the u32 length prefix";
+        if ( failureCode )
+            *failureCode = "E6003";
         return false;
     }
 

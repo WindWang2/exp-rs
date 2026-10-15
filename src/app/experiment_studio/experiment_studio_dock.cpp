@@ -438,12 +438,16 @@ void ExperimentStudioDock::rebuildMatrixTable()
             .arg( vm.cancelledCount )
             .arg( vm.missingCount ) );
 
+    constexpr int kMaxMatrixDisplayRows = 500;
+    const int totalRows = vm.rows.size();
+    const int displayCount = std::min( totalRows, kMaxMatrixDisplayRows );
+
     const bool sortingWasEnabled = m_matrixTable->isSortingEnabled();
     m_matrixTable->setSortingEnabled( false );
     m_matrixTable->setUpdatesEnabled( false );
     m_matrixTable->clearContents();
-    m_matrixTable->setRowCount( vm.rows.size() );
-    for ( int i = 0; i < vm.rows.size(); ++i )
+    m_matrixTable->setRowCount( displayCount );
+    for ( int i = 0; i < displayCount; ++i )
     {
         const auto &r = vm.rows[i];
         m_matrixTable->setItem( i, 0, new QTableWidgetItem( r.pointId ) );
@@ -462,6 +466,13 @@ void ExperimentStudioDock::rebuildMatrixTable()
     }
     m_matrixTable->setUpdatesEnabled( true );
     m_matrixTable->setSortingEnabled( sortingWasEnabled );
+    if ( totalRows > kMaxMatrixDisplayRows && m_matrixStatus )
+    {
+        m_matrixStatus->setText( m_matrixStatus->text() +
+                                 tr( " (preview limited to first %1 of %2 rows)" )
+                                     .arg( kMaxMatrixDisplayRows )
+                                     .arg( totalRows ) );
+    }
 }
 
 ExperimentStudioDock::~ExperimentStudioDock()
@@ -471,6 +482,13 @@ ExperimentStudioDock::~ExperimentStudioDock()
         m_liveCancel->store( true );
     if ( m_liveRunThread && m_liveRunThread->joinable() )
         m_liveRunThread->join(); // drains quickly: StudyRunner honours the flag
+    std::lock_guard<std::mutex> lock( m_retiredStudyMutex );
+    for ( auto &r : m_retiredStudyThreads )
+    {
+        if ( r.thread.joinable() )
+            r.thread.join();
+    }
+    m_retiredStudyThreads.clear();
 }
 
 void ExperimentStudioDock::openLiveStore()
@@ -667,17 +685,38 @@ void ExperimentStudioDock::runLiveStudy()
         } );
 }
 
+void ExperimentStudioDock::pruneRetiredStudyThreadsLocked()
+{
+    for ( auto it = m_retiredStudyThreads.begin(); it != m_retiredStudyThreads.end(); )
+    {
+        if ( it->done && it->done->load( std::memory_order_acquire ) )
+        {
+            if ( it->thread.joinable() )
+                it->thread.join();
+            it = m_retiredStudyThreads.erase( it );
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, int recordedCount,
                                                  int failedCount, int cancelledCount,
                                                  const QString &error )
 {
     if ( m_liveRunThread && m_liveRunThread->joinable() )
     {
-        std::thread reaper( [t = std::move( m_liveRunThread )]() mutable {
+        std::lock_guard<std::mutex> lock( m_retiredStudyMutex );
+        pruneRetiredStudyThreadsLocked();
+        auto done = std::make_shared<std::atomic<bool>>( false );
+        std::thread reaper( [t = std::move( m_liveRunThread ), done]() mutable {
             if ( t && t->joinable() )
                 t->join();
+            done->store( true, std::memory_order_release );
         } );
-        reaper.detach();
+        m_retiredStudyThreads.push_back( { std::move( reaper ), done } );
     }
     m_liveRunThread.reset();
     m_liveCancel.reset();

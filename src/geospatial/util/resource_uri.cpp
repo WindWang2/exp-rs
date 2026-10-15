@@ -73,6 +73,17 @@ std::string toLower( const std::string &text )
   return out;
 }
 
+/// Case-insensitive localhost and loopback detection (Thread #6).
+bool isLocalHost( const std::string &host )
+{
+  if ( host.empty() )
+    return true;
+  const std::string lower = toLower( host );
+  return ( lower == "localhost" || lower == "127.0.0.1" ||
+           lower == "localhost.localdomain" || lower == "[::1]" ||
+           lower == "::1" || lower == "[0:0:0:0:0:0:0:1]" );
+}
+
 /// Windows drive-letter path: "C:\..." or "C:/..." (single letter + colon).
 bool hasWindowsDriveLetter( const std::string &path )
 {
@@ -220,9 +231,32 @@ std::string normalizeSeparators( std::string text )
 
 std::string stripTrailingSlash( std::string text )
 {
-  while ( text.size() > 1 && ( text.back() == '/' ) &&
-          !( text.size() == 2 && text[1] == '/' ) ) // keep UNC "//server//"? no: keep "//" root only
+  while ( text.size() > 1 && text.back() == '/' )
+  {
+    // POSIX root "/"
+    if ( text.size() == 1 )
+      break;
+    // UNC root "//"
+    if ( text.size() == 2 && text[1] == '/' )
+      break;
+    // File URI root "file:///"
+    if ( text.size() == 8 && startsWithIgnoreCase( text, "file:///" ) )
+      break;
+    // Windows drive root: "C:/", "/C:/", "file:///C:/", "file://<host>/C:/"
+    if ( text.size() >= 3 && hasWindowsDriveLetter( text.substr( text.size() - 3, 2 ) ) )
+    {
+      if ( text.size() == 3 || text[text.size() - 4] == '/' || text[text.size() - 4] == '\\' )
+        break;
+    }
+    // File URI host root "file://<host>/"
+    if ( startsWithIgnoreCase( text, "file://" ) )
+    {
+      const std::size_t thirdSlash = text.find( '/', 7 );
+      if ( thirdSlash != std::string::npos && thirdSlash == text.size() - 1 )
+        break;
+    }
     text.pop_back();
+  }
   return text;
 }
 
@@ -351,7 +385,10 @@ bool percentDecode( const std::string &text, std::string &out )
       const int lo = hexValue( text[i + 2] );
       if ( hi >= 0 && lo >= 0 )
       {
-        out.push_back( static_cast<char>( hi * 16 + lo ) );
+        const char byte = static_cast<char>( hi * 16 + lo );
+        if ( byte == '\0' )
+          clean = false;
+        out.push_back( byte );
         i += 2;
         continue;
       }
@@ -391,6 +428,13 @@ ResourceUri ResourceUri::parse( const std::string &raw )
   {
     uri.kind = ResourceKind::Invalid;
     uri.parseReason = "empty source string";
+    return uri;
+  }
+
+  if ( raw.find( '\0' ) != std::string::npos )
+  {
+    uri.kind = ResourceKind::Invalid;
+    uri.parseReason = "input contains embedded NUL byte";
     return uri;
   }
 
@@ -461,6 +505,12 @@ ResourceUri ResourceUri::parse( const std::string &raw )
       {
         host = authority;
       }
+
+      // Root normalization: file:// or file://localhost -> "/"
+      if ( pathPart.empty() && isLocalHost( host ) )
+      {
+        pathPart = "/";
+      }
     }
     else
     {
@@ -469,10 +519,16 @@ ResourceUri ResourceUri::parse( const std::string &raw )
 
     std::string decodedPath;
     percentDecode( pathPart, decodedPath );
+    if ( decodedPath.find( '\0' ) != std::string::npos )
+    {
+      uri.kind = ResourceKind::Invalid;
+      uri.parseReason = "file URL contains embedded NUL byte";
+      return uri;
+    }
     decodedPath = normalizeSeparators( decodedPath );
 
     std::string localPath;
-    if ( host.empty() || host == "localhost" || host == "127.0.0.1" )
+    if ( isLocalHost( host ) )
     {
       // Strip leading slash before Windows drive letter ("/C:" -> "C:")
       if ( decodedPath.size() >= 3 && decodedPath[0] == '/' &&
@@ -648,7 +704,16 @@ std::string ResourceUri::canonical() const
     case ResourceKind::LocalDirectory:
     case ResourceKind::DirectoryProduct:
     case ResourceKind::Invalid:
+    {
+      if ( scheme == "file" )
+      {
+        if ( raw == "file://" || raw == "file:///" )
+          return "file:///";
+        if ( isLocalHost( host ) && ( path == "/" || path.empty() ) )
+          return host.empty() ? "file:///" : ( "file://" + host + "/" );
+      }
       return stripTrailingSlash( normalizeSeparators( raw ) );
+    }
     case ResourceKind::RemoteHttp:
     {
       std::string out =
@@ -803,7 +868,19 @@ bool ResourceUri::looksLikeDirectoryProduct( const std::string &path )
 
 ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const std::string &reference )
 {
+  if ( baseDirectory.find( '\0' ) != std::string::npos )
+  {
+    ResourceUri invalid;
+    invalid.kind = ResourceKind::Invalid;
+    invalid.raw = baseDirectory;
+    invalid.parseReason = "baseDirectory contains embedded NUL byte";
+    return invalid;
+  }
+
   ResourceUri direct = parse( reference );
+  if ( direct.kind == ResourceKind::Invalid && direct.parseReason.find( "NUL" ) != std::string::npos )
+    return direct;
+
   // Anchored = not relative: explicit schemes, VSI handles, or path shapes
   // rooted outside the base (drive letter, slash/UNC prefix). An Invalid
   // parse alone does NOT mean anchored — a relative reference that does not
@@ -823,10 +900,19 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
     case ResourceKind::LocalFile:
     case ResourceKind::LocalDirectory:
     case ResourceKind::DirectoryProduct:
-      // An existing path is anchored only when spelled absolutely; a
-      // relative spelling that exists resolves against the CWD, not base —
-      // treat it as anchored only with an absolute shape (checked below).
-      referenceAnchored = false;
+      // An existing path is anchored only when spelled absolutely; an explicit
+      // file:// URI is anchored by its decoded path shape, whereas a relative
+      // spelling resolves against baseDirectory.
+      if ( direct.scheme == "file" )
+      {
+        referenceAnchored = hasWindowsDriveLetter( direct.path ) ||
+                            hasUncPrefix( direct.path ) ||
+                            ( !direct.path.empty() && ( direct.path[0] == '/' || direct.path[0] == '\\' ) );
+      }
+      else
+      {
+        referenceAnchored = false;
+      }
       break;
     case ResourceKind::Invalid:
       referenceAnchored = false;
@@ -838,14 +924,44 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
   if ( referenceAnchored )
     return direct;
 
+  if ( direct.scheme == "file" && direct.kind == ResourceKind::Invalid )
+    return direct;
+
+  const std::string &targetReference = ( direct.scheme == "file" ) ? direct.path : reference;
+
+  std::string decodedTargetRef;
+  percentDecode( targetReference, decodedTargetRef );
+  if ( decodedTargetRef.find( '\0' ) != std::string::npos )
+  {
+    ResourceUri invalid;
+    invalid.kind = ResourceKind::Invalid;
+    invalid.raw = reference;
+    invalid.parseReason = "reference contains embedded NUL byte";
+    return invalid;
+  }
+
   // Join and lexically resolve '.'/'..' against the base; refuse any ".."
   // that would climb above the base directory.
   const std::string base = stripTrailingSlash( normalizeSeparators( baseDirectory ) );
-  std::vector<std::string> segments = splitSegments( base );
+  std::vector<std::string> segments;
+  for ( const std::string &seg : splitSegments( base ) )
+  {
+    if ( seg.empty() || seg == "." )
+      continue;
+    if ( seg == ".." )
+    {
+      if ( !segments.empty() )
+        segments.pop_back();
+    }
+    else
+    {
+      segments.push_back( seg );
+    }
+  }
   const std::size_t baseDepth = segments.size();
 
   bool escaped = false;
-  for ( const std::string &segment : splitSegments( normalizeSeparators( reference ) ) )
+  for ( const std::string &segment : splitSegments( normalizeSeparators( decodedTargetRef ) ) )
   {
     std::string decoded;
     const bool isDecoded = percentDecode( segment, decoded );
@@ -881,6 +997,7 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
     return refused;
   }
 
+  const bool uncPrefix = hasUncPrefix( base );
   const bool leadingSlash = !base.empty() && base[0] == '/';
   const std::string drivePrefix =
     !segments.empty() && segments.front().size() == 2 && segments.front()[1] == ':'
@@ -894,7 +1011,7 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
       resolved += "/";
   }
   const std::string joinedPath = drivePrefix.empty()
-    ? ( ( leadingSlash ? "/" : "" ) + resolved )
+    ? ( ( uncPrefix ? "//" : ( leadingSlash ? "/" : "" ) ) + resolved )
     : drivePrefix + resolved;
 
   // Lexical result: classification is by SHAPE, not by existence — a resolved

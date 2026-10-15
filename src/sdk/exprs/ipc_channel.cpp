@@ -163,14 +163,16 @@ bool IpcChannel::sendEnvelope( const Ipc::Envelope &envelope, std::string &error
     std::lock_guard<std::mutex> lock( mWriteMutex );
     IpcFrameLimits limits;
     limits.maxFrameBytes = mMaxSendFrameBytes.load();
-    if ( !IpcFrame::writeJson( *mStream, json, limits, error ) )
+    std::string frameFailureCode;
+    if ( !IpcFrame::writeJson( *mStream, json, limits, error, &frameFailureCode ) )
     {
         // A write failure means the peer is gone or the frame is too large
         // for the cap: both end the channel. The typed code comes from the
         // frame writer (E6003 for a cap violation) so a caller that refused
-        // to SEND an oversized frame reports E6003, not the generic E6002.
+        // to SEND an oversized frame reports E6003, not the generic E6002 —
+        // classified on the code, never on the prose (#1459 lesson).
         if ( failureCode )
-            *failureCode = error.find( "E6003" ) != std::string::npos ? "E6003" : "E6005";
+            *failureCode = frameFailureCode.empty() ? "E6005" : frameFailureCode;
         std::lock_guard<std::mutex> stateLock( mMutex );
         if ( mProtocolFailure.empty() )
             mProtocolFailure = error;

@@ -30,6 +30,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace sicnu::operators::runtime {
@@ -152,15 +153,66 @@ class TensorRtRuntime final : public IModelRuntime
 
     cv::Mat infer( const cv::Mat &nchwBlob ) override
     {
+      // The registry hands ONE cached session to any worker thread; the
+      // shared IExecutionContext/stream must never run concurrently, and the
+      // CUDA current device is THREAD-LOCAL — load()'s cudaSetDevice bound
+      // the loading thread only. Pin both per forward (same serialization
+      // contract as the ORT/OpenCV providers).
+      std::lock_guard<std::mutex> lock( m_inferMutex );
+      const cudaError_t devicePin = cudaSetDevice( m_cudaIndex );
+      if ( devicePin != cudaSuccess )
+        throw RSOperatorError( ErrorCode::RuntimeProviderFailed,
+                               "TensorRT cannot pin cuda device "
+                                 + std::to_string( m_cudaIndex ) );
+      // Depth/dims precede the element math: a CV_8U/CV_64F blob of matching
+      // ELEMENT count would memcpy 4x/0.5x the real host buffer (heap
+      // overread into device memory).
+      if ( nchwBlob.empty() || nchwBlob.dims != 4 || nchwBlob.type() != CV_32F )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "TensorRT input must be a 4-D float32 NCHW blob" );
       // Single-input, single-output contract; the engine must declare both
-      // bindings statically (dynamic dims are refused, never guessed).
-      if ( mEngine->getNbBindings() != 2 )
+      // bindings statically (dynamic dims are refused, never guessed). Bind
+      // by I/O DIRECTION, never by index: an engine serialized with the
+      // output first would otherwise swap the two buffers.
+#if NV_TENSORRT_MAJOR >= 10
+      const int nbBindings = mEngine->getNbIOTensors();
+#else
+      const int nbBindings = mEngine->getNbBindings();
+#endif
+      if ( nbBindings != 2 )
         throw RSOperatorError( ErrorCode::InvalidInputData,
                                "TensorRT engine must expose exactly 2 bindings (input, "
                                  "output); got "
-                                 + std::to_string( mEngine->getNbBindings() ) );
-      const int inputIndex = 0;
-      const int outputIndex = 1;
+                                 + std::to_string( nbBindings ) );
+#if NV_TENSORRT_MAJOR >= 10
+      int inputIndex = -1;
+      int outputIndex = -1;
+      for ( int i = 0; i < nbBindings; ++i )
+      {
+        const char *name = mEngine->getIOTensorName( static_cast<std::size_t>( i ) );
+        const bool isInput = mEngine->getTensorIOMode( name ) == nvinfer1::TensorIOMode::kINPUT;
+        if ( isInput && inputIndex < 0 )
+          inputIndex = i;
+        else if ( !isInput && outputIndex < 0 )
+          outputIndex = i;
+      }
+      if ( inputIndex < 0 || outputIndex < 0 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "TensorRT engine bindings are not one input + one output" );
+#else
+      int inputIndex = -1;
+      int outputIndex = -1;
+      for ( int i = 0; i < nbBindings; ++i )
+      {
+        if ( mEngine->bindingIsInput( i ) && inputIndex < 0 )
+          inputIndex = i;
+        else if ( !mEngine->bindingIsInput( i ) && outputIndex < 0 )
+          outputIndex = i;
+      }
+      if ( inputIndex < 0 || outputIndex < 0 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "TensorRT engine bindings are not one input + one output" );
+#endif
       auto dimsCount = []( nvinfer1::Dims dims ) -> std::int64_t {
         std::int64_t n = 1;
         for ( int i = 0; i < dims.nbDims; ++i )
@@ -171,14 +223,24 @@ class TensorRtRuntime final : public IModelRuntime
         }
         return n;
       };
+#if NV_TENSORRT_MAJOR >= 10
+      const std::int64_t engineInputElems =
+        dimsCount( mContext->getTensorShape( mEngine->getIOTensorName( static_cast<std::size_t>( inputIndex ) ) ) );
+#else
       const std::int64_t engineInputElems = dimsCount( mContext->getBindingDimensions( inputIndex ) );
+#endif
       const std::size_t inputElems = static_cast<std::size_t>( nchwBlob.total() ) * nchwBlob.channels();
       if ( engineInputElems != static_cast<std::int64_t>( inputElems ) )
         throw RSOperatorError( ErrorCode::InvalidInputData,
                                "fed blob size does not match the TensorRT engine input "
                                "binding (engine expects "
                                  + std::to_string( engineInputElems ) + " elements)" );
+#if NV_TENSORRT_MAJOR >= 10
+      const std::int64_t outputElems =
+        dimsCount( mContext->getTensorShape( mEngine->getIOTensorName( static_cast<std::size_t>( outputIndex ) ) ) );
+#else
       const std::int64_t outputElems = dimsCount( mContext->getBindingDimensions( outputIndex ) );
+#endif
       if ( outputElems <= 0 )
         throw RSOperatorError( ErrorCode::InvalidInputData,
                                "TensorRT engine output binding has dynamic/invalid dims — "
@@ -204,11 +266,13 @@ class TensorRtRuntime final : public IModelRuntime
       if ( copied )
       {
 #if NV_TENSORRT_MAJOR >= 10
-        ok = mContext->setTensorAddress( mEngine->getIOTensorName( 0 ), deviceInput )
-             && mContext->setTensorAddress( mEngine->getIOTensorName( 1 ), deviceOutput )
+        ok = mContext->setTensorAddress( mEngine->getIOTensorName( static_cast<std::size_t>( inputIndex ) ), deviceInput )
+             && mContext->setTensorAddress( mEngine->getIOTensorName( static_cast<std::size_t>( outputIndex ) ), deviceOutput )
              && mContext->enqueueV3( mStream );
 #else
-        void *bindings[2] = { deviceInput, deviceOutput };
+        void *bindings[2] = { nullptr, nullptr };
+        bindings[static_cast<std::size_t>( inputIndex )] = deviceInput;
+        bindings[static_cast<std::size_t>( outputIndex )] = deviceOutput;
         ok = mContext->enqueueV2( bindings, mStream, nullptr );
 #endif
         cudaStreamSynchronize( mStream );
@@ -217,7 +281,7 @@ class TensorRtRuntime final : public IModelRuntime
       if ( ok )
       {
 #if NV_TENSORRT_MAJOR >= 10
-        nvinfer1::Dims dims = mContext->getTensorShape( mEngine->getIOTensorName( 1 ) );
+        nvinfer1::Dims dims = mContext->getTensorShape( mEngine->getIOTensorName( static_cast<std::size_t>( outputIndex ) ) );
 #else
         nvinfer1::Dims dims = mContext->getBindingDimensions( outputIndex );
 #endif
@@ -239,6 +303,7 @@ class TensorRtRuntime final : public IModelRuntime
     std::string mArtifact = "tensorrt-engine";
     int m_cudaIndex = 0;
     cudaStream_t mStream = nullptr;
+    std::mutex m_inferMutex;
     std::unique_ptr<nvinfer1::IRuntime> mRuntime;
     std::unique_ptr<nvinfer1::ICudaEngine, EngineDeleter> mEngine;
     std::unique_ptr<nvinfer1::IExecutionContext, EngineDeleter> mContext;

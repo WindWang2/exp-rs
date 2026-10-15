@@ -1005,12 +1005,25 @@ void PipelineRunCoordinator::finalizeIfDone( RunState *state )
         }
     }
     state->success = success;
-    persistCheckpoint( state );
+    const bool terminalPersisted = persistCheckpoint( state );
 
     // The run is terminal: release the resume-ownership lock AFTER the final
     // checkpoint persist — a peer process may re-verify this checkpoint from
-    // here on, but never against a half-published terminal state.
-    state->runLock.reset();
+    // here on, but never against a half-published terminal state. A FAILED
+    // terminal publish keeps the flock held for this coordinator's lifetime
+    // (#1448, Engine-2 lane): the on-disk checkpoint still shows a mid-run
+    // generation, so a peer resume must be refused ("owned by a live
+    // process") instead of double-owning a run whose terminal state was
+    // never made durable. The lock releases on the next startRun, a
+    // coordinator destruction, or process exit, mirroring the Engine-1
+    // terminal-save retention contract.
+    if ( terminalPersisted )
+        state->runLock.reset();
+    else
+        qWarning( "D17 pipeline run '%s' finalized but its terminal checkpoint publish "
+                  "failed — run ownership retained, peer resume refused until this "
+                  "coordinator exits (#1448)",
+                  qPrintable( state->runId ) );
 
     // Provenance (WP5/D9): one queryable lineage record per terminal ATTEMPT,
     // emitted for successes AND failures — audits need the failure paths
@@ -1058,10 +1071,10 @@ void PipelineRunCoordinator::finalizeIfDone( RunState *state )
     state->cancelRequested.store( false, std::memory_order_relaxed );
 }
 
-void PipelineRunCoordinator::persistCheckpoint( RunState *state )
+bool PipelineRunCoordinator::persistCheckpoint( RunState *state )
 {
     if ( state->def.nodes.isEmpty() )
-        return;
+        return true;
 
     QJsonObject document;
     document.insert( QLatin1String( "kind" ), kCheckpointKind );
@@ -1098,6 +1111,7 @@ void PipelineRunCoordinator::persistCheckpoint( RunState *state )
     const QString path = atomicWriteJson( state->checkpointPath, document, "d17_checkpoint.publish" );
     if ( !path.isEmpty() )
         emit checkpointPersisted( path );
+    return !path.isEmpty();
 }
 
 bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFilePath, QString *outError )

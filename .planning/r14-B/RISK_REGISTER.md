@@ -1,0 +1,13 @@
+# R14-B Risk Register
+
+| # | Risk | Severity | Mitigation / status |
+|---|------|----------|---------------------|
+| R1 | TRT provider changes cannot be compile-verified on this host (no CUDA/TensorRT toolchain; SICNU_WITH_TENSORRT off builds only the stub) | medium | Disclosed in PR; changes are inside `#ifdef SICNU_WITH_TENSORRT`; the ≥10 half could not compile on master either (unguarded legacy binding APIs) so no regression is possible; flagged for a CUDA lane |
+| R2 | OpenVINO changes cannot be compile-verified (no OpenVINO on host) | medium | Same disclosure; `#ifdef SICNU_WITH_OPENVINO` scoped |
+| R3 | multi-input N==B typed check (WP-B5) lacks an E2E test this round — the multi-input fixture harness is heavy | low | Check is structurally identical to the single-input check that IS tested; follow-up noted in PR |
+| R4 | `tests/CMakeLists.txt` is a shared short-lease file | low | Single additive block (3 targets), copied verbatim from the neighboring registration pattern; separate commit; other open PRs (#1504/#1505) do not touch tests/CMakeLists.txt (verified via files lists) |
+| R5 | maxDetections semantics change (raw guard 8×, exact cap post-NMS) alters documented "bounded accumulation guard" behavior | medium | Rationale in code comment + PR; F-OPS-5 test (100k boxes) exercises dedupDetections directly and is unaffected; engine-level behavior verified |
+| R6 | HTTP dispatcher refusal makes HTTP models unusable from JobEngine worker threads (functional regression vs hang) | low | The alternative was an infinite hang with a void timeout contract; the typed error is fail-closed and actionable; proper fix (helper QThread exchange) is a follow-up |
+| R7 | Cross-track build lock contention with R14-C (and possibly other tracks) serializes local verification | low | Lock honored; verification queued; no shared build trees |
+| R8 | strided-head fix changes output values for strided models vs master | medium | Old values were spatially MISALIGNED (halo leak); new values are the aligned resample; tile-count-invariance + even-column-exactness pin the new contract |
+| R9 | square detection head (C == N) + default tensor_layout "auto" now refuses at RUNTIME where master's heuristic silently chose channels-first (review round 1, P2) | medium | Kept deliberately: the channels-LAST square head decoded TRANSPOSED values silently on master (same shape!), and fail-closed beats silent garbage (house rule). The better fix — refuse at manifest VALIDATION — lives in src/operators/framework/model_catalog.cpp (outside B ownership; left to the framework owner, noted in PR). Message tells the user to declare channels_first/channels_last explicitly |

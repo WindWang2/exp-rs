@@ -17,6 +17,7 @@
 #include "geospatial/cog/cog_validator.h"
 #include "geospatial/gdal_guard.h"
 #include "geospatial/util/atomic_fs.h"
+#include "geospatial/util/resource_uri.h"
 #include "geospatial/vector/vector_reader.h"
 #include "geospatial/vector/vector_writer.h"
 
@@ -89,7 +90,8 @@ GDALDatasetH openRasterReadOnly( const std::string &path )
 {
   ensureGdalRegistered();
   QuietCplErrors quiet;
-  GDALDatasetH handle = GDALOpenEx( path.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  const std::string gdalPath = ResourceUri::toGdalPath( path );
+  GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !handle )
     throwGdalFailure( ErrorCode::OpenFailed, "Cannot open raster input: " + path );
   return handle;
@@ -313,7 +315,8 @@ int buildOverviews( const std::string &path, const std::vector<int> &levels,
   QuietCplErrors quiet;
   // Update mode: overviews are derived data; base pixels are untouched by the
   // algorithm contract and a crash only loses derived levels.
-  GDALDatasetH handle = GDALOpenEx( path.c_str(), GDAL_OF_UPDATE | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  const std::string gdalPath = ResourceUri::toGdalPath( path );
+  GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_UPDATE | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !handle )
     throwGdalFailure( ErrorCode::OpenFailed, "buildOverviews: cannot open for update: " + path );
   GdalDatasetGuard guard( handle );

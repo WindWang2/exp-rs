@@ -67,12 +67,30 @@ class Stmt
     explicit operator bool() const { return m_stmt != nullptr; }
     sqlite3_stmt *get() const { return m_stmt; }
 
-    bool step() const { return sqlite3_step( m_stmt ) == SQLITE_DONE; }
-    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
+    bool step() const
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_DONE;
+    }
+    bool stepRow() const
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_ROW;
+    }
+    bool stepFailed() const
+    {
+        return m_lastRc != SQLITE_ROW && m_lastRc != SQLITE_DONE && m_lastRc != SQLITE_OK;
+    }
+    int lastRc() const { return m_lastRc; }
+    QString error() const
+    {
+        return m_db ? QString::fromUtf8( sqlite3_errmsg( m_db ) ) : QString();
+    }
     void reset()
     {
         sqlite3_reset( m_stmt );
         sqlite3_clear_bindings( m_stmt );
+        m_lastRc = SQLITE_OK;
     }
 
     void bind( int idx, const QString &v ) const
@@ -101,6 +119,7 @@ class Stmt
   private:
     sqlite3 *m_db = nullptr;
     sqlite3_stmt *m_stmt = nullptr;
+    mutable int m_lastRc = SQLITE_OK;
 };
 
 QString lastError( sqlite3 *db )
@@ -142,6 +161,7 @@ struct ArtifactStore::Impl
     // their lock acquisition.
     mutable std::recursive_mutex mutex;
     QString schemaVersion;
+    mutable bool stepFailed = false;
 
     bool exec( const char *sql, QString *errorOut ) const
     {
@@ -282,6 +302,11 @@ bool ArtifactStore::isOpen() const
     return m_impl && m_impl->db;
 }
 
+bool ArtifactStore::stepFailed() const
+{
+    return m_impl ? m_impl->stepFailed : false;
+}
+
 Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistration &reg )
 {
     if ( !isOpen() || reg.logicalKey.isEmpty() || reg.storagePath.isEmpty() || reg.kind.isEmpty() )
@@ -327,6 +352,12 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
         {
             artifactId = s.text( 0 );
             nextVersion = s.i( 1 ) + 1;
+        }
+        else if ( s.stepFailed() )
+        {
+            if ( m_impl )
+                m_impl->stepFailed = true;
+            return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), s.error() ) );
         }
     }
     if ( artifactId.isEmpty() )
@@ -487,6 +518,11 @@ QVector<ArtifactRecord> ArtifactStore::versionsByLogicalKey( const QString &logi
     s.bind( 1, logicalKey );
     while ( s.stepRow() )
         out.append( m_impl->readRecord( s ) );
+    if ( s.stepFailed() )
+    {
+        m_impl->stepFailed = true;
+        qWarning( "artifact_store.versions_failed: %s", qUtf8Printable( s.error() ) );
+    }
     return out;
 }
 
@@ -504,6 +540,11 @@ QVector<ArtifactRecord> ArtifactStore::byProducerFingerprint( const QString &fin
     s.bind( 1, fingerprint );
     while ( s.stepRow() )
         out.append( m_impl->readRecord( s ) );
+    if ( s.stepFailed() )
+    {
+        m_impl->stepFailed = true;
+        qWarning( "artifact_store.by_fingerprint_failed: %s", qUtf8Printable( s.error() ) );
+    }
     return out;
 }
 
@@ -595,6 +636,11 @@ QVector<ArtifactRef> ArtifactStore::refsOf( const QString &artifactId ) const
         r.createdAtMs = s.i64( 3 );
         out.append( r );
     }
+    if ( s.stepFailed() )
+    {
+        m_impl->stepFailed = true;
+        qWarning( "artifact_store.refs_failed: %s", qUtf8Printable( s.error() ) );
+    }
     return out;
 }
 
@@ -660,6 +706,12 @@ QVector<ArtifactRecord> ArtifactStore::reapable( qint64 lastTouchCutoffMs ) cons
     s.bind( 1, lastTouchCutoffMs );
     while ( s.stepRow() )
         out.append( m_impl->readRecord( s ) );
+    if ( s.stepFailed() )
+    {
+        m_impl->stepFailed = true;
+        qWarning( "artifact_store.reapable_failed: %s", qUtf8Printable( s.error() ) );
+        return {};
+    }
     return out;
 }
 
@@ -687,8 +739,7 @@ Result<void> ArtifactStore::forget( const QString &artifactId, ForgetItemPolicy 
             r.bind( 1, artifactId );
             // A probe step ERROR must fail the removal, never read as
             // "unreferenced" — the guard is a guarantee, not best-effort.
-            const int probeRc = sqlite3_step( r.get() );
-            if ( probeRc == SQLITE_ROW )
+            if ( r.stepRow() )
             {
                 m_impl->exec( "ROLLBACK", nullptr );
                 return Result<void>::failure( diag(
@@ -697,10 +748,12 @@ Result<void> ArtifactStore::forget( const QString &artifactId, ForgetItemPolicy 
                                     " the cascade policy explicitly" )
                         .arg( artifactId ) ) );
             }
-            if ( probeRc != SQLITE_DONE )
+            if ( r.stepFailed() )
             {
+                if ( m_impl )
+                    m_impl->stepFailed = true;
                 m_impl->exec( "ROLLBACK", nullptr );
-                return Result<void>::failure( diag( QStringLiteral( "artifact.db" ), lastError( m_impl->db ) ) );
+                return Result<void>::failure( diag( QStringLiteral( "artifact.db" ), r.error() ) );
             }
         }
         Stmt d( m_impl->db, "DELETE FROM artifact_refs WHERE artifact_id=?", nullptr );

@@ -617,9 +617,19 @@ void McpServer::handleRequest(const QVariantMap &request)
             const long taskId = m_cancelledRequestTasks.value( cancelledRpcId, -1 );
             if ( taskId > 0 )
                 sicnu::TaskCenter::instance().cancelTask( taskId );
+            // run_workflow / resume_workflow own a tracked pipeline rather
+            // than a single task: cancel through the coordinator (the same
+            // path the GUI shell uses) so the run folds to Canceled with a
+            // durable checkpoint instead of only stopping the tasks. The
+            // fallback covers an untracked pipeline id (#R14-C).
+            const long pipelineId = m_cancelledRequestPipelines.value( cancelledRpcId, -1 );
+            if ( pipelineId > 0
+                 && !sicnu::workflow::WorkflowRunCoordinator::instance().cancelRun( pipelineId ) )
+                sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
             // Cancellation is one-shot: consume the entry so the map cannot
             // grow without bound (#644).
             m_cancelledRequestTasks.remove( cancelledRpcId );
+            m_cancelledRequestPipelines.remove( cancelledRpcId );
         }
         // Notifications never get a response.
         return;
@@ -990,6 +1000,19 @@ void McpServer::handleRequest(const QVariantMap &request)
 
             // Remember the rpc-id -> task-id mapping so a later
             // notifications/cancelled for this request can cancel the task.
+            // run_workflow / resume_workflow own a PIPELINE instead: arm the
+            // pipeline map from the SUBMITTING call only. A get_workflow_status
+            // poll also returns a pipeline_id, but aborting a read-only status
+            // probe must never cancel the run it reports (R14-C FIX-1).
+            if ( ( toolName == QStringLiteral( "run_workflow" )
+                   || toolName == QStringLiteral( "resume_workflow" ) )
+                 && resultData.contains( QStringLiteral( "pipeline_id" ) )
+                 && !id.toString().isEmpty() )
+            {
+                insertBoundedKeepingNewest(
+                    m_cancelledRequestPipelines, id.toString(),
+                    resultData.value( QStringLiteral( "pipeline_id" ) ).toLongLong(), 1024 );
+            }
             if ( resultData.contains( QStringLiteral( "execution_id" ) ) )
             {
                 const auto executionId = sicnu::processing::ExecutionId::fromWire(

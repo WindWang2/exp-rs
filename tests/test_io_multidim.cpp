@@ -593,3 +593,29 @@ TEST_CASE( "cube descriptor JSON violations are typed errors",
     CHECK_THROWS_AS( sicnu::geo::describeCube( view, "nope" ), sicnu::geo::GeoError );
   }
 }
+
+TEST_CASE( "multidim view opens NetCDF via file URI (SEC-09)",
+           "[io][multidim][uri][sec09]" )
+{
+  if ( !netCdfAvailable() )
+  {
+    WARN( "netCDF driver unavailable — skipping MultidimView file URI test" );
+    return;
+  }
+  const std::string dir = scratch( "sec09_uri" );
+  const std::string rawPath = writeCube( dir, "cube_uri.nc" );
+  const std::string fileUri = "file://" + rawPath;
+
+  sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( fileUri );
+  CHECK( view.isOpen() );
+  bool foundSst = false;
+  for ( const auto &v : view.metadata().variables )
+  {
+    if ( v.name == "sst" )
+    {
+      foundSst = true;
+      break;
+    }
+  }
+  CHECK( foundSst );
+}

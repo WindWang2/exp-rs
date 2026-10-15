@@ -589,6 +589,64 @@ TEST_CASE( "temporal_index_series reuses the single-scene kernel bit-for-bit (§
     REQUIRE( seriesBand[0] == Approx( 0.25f ) );
 }
 
+TEST_CASE( "temporal_index_series EVI probe ignores undeclared negative fills (#856 parity)",
+           "[temporal][operators][index][r14a]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Unit-reflectance EVI scene carrying one UNDECLARED negative fill
+    // (-9999, no NoData tag) in the red band. The scene's numeric-domain
+    // probe must take POSITIVE magnitudes only (single-scene #856 rule):
+    // under std::abs the fill's magnitude flips the scene into the canonical
+    // DN divisor (10000) and every clean EVI pixel collapses by ~1e4, while
+    // the +1 constant silently dominates the denominator.
+    TestScene s = makeTestScene( fx.filePath( "evi_fill.tif" ),
+                                 QStringLiteral( "2025-04-01" ),
+                                 { 0.10f, 0.10f, 0.10f, -9999.0f } );
+    s.extraBands = { { 0.40f, 0.40f, 0.40f, 0.40f }, { 0.05f, 0.05f, 0.05f, 0.05f } };
+    s.extraRoles = { QByteArrayLiteral( "nir" ), QByteArrayLiteral( "blue" ) };
+    // The fill must be UNDECLARED: TestScene defaults declareNodata=true,
+    // which would let TemporalTileReader mask the fill to NaN before the
+    // probe and the test would pass on the unfixed code too (review F2).
+    s.declareNodata = false;
+    REQUIRE( writeTestScene( s ) );
+
+    Json::Value seriesParams( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    scenes.append( fx.filePath( "evi_fill.tif" ).toStdString() );
+    seriesParams["scenes"] = scenes;
+    seriesParams["index"] = "EVI";
+    seriesParams["output"] = fx.filePath( QStringLiteral( "evi_fill_series.tif" ) ).toStdString();
+    const Json::Value seriesResult = runOp( "rs:temporal_index_series", seriesParams );
+    REQUIRE( seriesResult["sceneCount"].asInt() == 1 );
+
+    Json::Value singleParams( Json::objectValue );
+    singleParams["input"] = fx.filePath( "evi_fill.tif" ).toStdString();
+    singleParams["index"] = "EVI";
+    singleParams["red"] = 1;
+    singleParams["nir"] = 2;
+    singleParams["blue"] = 3;
+    singleParams["output"] = fx.filePath( QStringLiteral( "evi_fill_single.tif" ) ).toStdString();
+    runOp( "rs:spectral_index", singleParams );
+
+    const auto seriesBand = readBand( fx.filePath( QStringLiteral( "evi_fill_series.tif" ) ), 1 );
+    const auto singleBand = readBand( fx.filePath( QStringLiteral( "evi_fill_single.tif" ) ), 1 );
+    REQUIRE( seriesBand.size() == singleBand.size() );
+    for ( size_t i = 0; i < seriesBand.size(); ++i )
+    {
+        if ( std::isnan( singleBand[i] ) )
+            REQUIRE( std::isnan( seriesBand[i] ) );
+        else
+            REQUIRE( seriesBand[i] == singleBand[i] ); // bit-identical: same kernel, same domain
+    }
+    // Clean pixel: EVI = 2.5*(0.40-0.10) / (0.40 + 6*0.10 - 7.5*0.05 + 1) = 0.75/1.625.
+    // The DN-flipped value would be ~7.5e-5 — four orders off.
+    REQUIRE( seriesBand[0] == Approx( 0.75f / 1.625f ).margin( 1e-6 ) );
+    REQUIRE( seriesBand[1] == Approx( 0.75f / 1.625f ).margin( 1e-6 ) );
+    // The undeclared fill itself is a kernel sentinel sample (<= -999): void.
+    REQUIRE( std::isnan( seriesBand[3] ) );
+}
+
 TEST_CASE( "temporal_index_series keeps acquisition metadata per band", "[temporal][operators][index]" )
 {
     ensureApp();

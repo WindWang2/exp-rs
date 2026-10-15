@@ -168,3 +168,46 @@ TEST_CASE("agent_ops UI dock: worker running flag corruption when prior worker c
     worker2Running.store(false);
     dock->joinWorker();
 }
+
+TEST_CASE("agent_ops UI dock: rapid destruction during active worker and reaper retirement", "[agent_ops][dock][reaper_lifetime][issue1493]")
+{
+    if (!qApp)
+    {
+        int argc = 0;
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        new QApplication(argc, nullptr);
+    }
+
+    for (int iter = 0; iter < 10; ++iter)
+    {
+        auto dock = std::make_unique<sicnu::app::agent_ops::AgentOpsControlCenterDock>();
+        std::atomic<bool> workerAlive{true};
+
+        // Start 3 workers in rapid succession so two are reaped in background
+        dock->startWorker([&](const std::atomic<bool> &cancel) {
+            while (!cancel.load() && workerAlive.load())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        });
+
+        dock->startWorker([&](const std::atomic<bool> &cancel) {
+            while (!cancel.load() && workerAlive.load())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        });
+
+        dock->startWorker([&](const std::atomic<bool> &cancel) {
+            while (!cancel.load() && workerAlive.load())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        });
+
+        // Immediately destroy dock: destructor MUST cancel and join active + all retired workers
+        // without crashing, hanging, or leaking detached threads
+        dock.reset();
+        workerAlive.store(false);
+    }
+}
