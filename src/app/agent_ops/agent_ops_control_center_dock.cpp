@@ -52,6 +52,13 @@ AgentOpsControlCenterDock::~AgentOpsControlCenterDock()
     {
         mWorkerThread.join();
     }
+    std::lock_guard<std::mutex> lock( m_reaperMutex );
+    for ( auto &w : m_retiredWorkers )
+    {
+        if ( w.thread.joinable() )
+            w.thread.join();
+    }
+    m_retiredWorkers.clear();
 }
 
 void AgentOpsControlCenterDock::setDriver(sicnu::agent_ops::OpsDriver *driver)
@@ -172,6 +179,23 @@ void AgentOpsControlCenterDock::onExportRequested()
     requestExport();
 }
 
+void AgentOpsControlCenterDock::pruneReaperThreadsLocked()
+{
+    for ( auto it = m_retiredWorkers.begin(); it != m_retiredWorkers.end(); )
+    {
+        if ( it->done && it->done->load( std::memory_order_acquire ) )
+        {
+            if ( it->thread.joinable() )
+                it->thread.join();
+            it = m_retiredWorkers.erase( it );
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void AgentOpsControlCenterDock::startWorker(std::function<void(const std::atomic<bool> &cancelRequested)> task)
 {
     if (mWorkerThread.joinable())
@@ -185,10 +209,15 @@ void AgentOpsControlCenterDock::startWorker(std::function<void(const std::atomic
         {
             coord->requestCancel();
         }
-        std::thread([t = std::move(mWorkerThread)]() mutable {
-            if (t.joinable())
+        std::lock_guard<std::mutex> lock( m_reaperMutex );
+        pruneReaperThreadsLocked();
+        auto done = std::make_shared<std::atomic<bool>>( false );
+        std::thread reaper( [t = std::move( mWorkerThread ), done]() mutable {
+            if ( t.joinable() )
                 t.join();
-        }).detach();
+            done->store( true, std::memory_order_release );
+        } );
+        m_retiredWorkers.push_back( { std::move( reaper ), done } );
     }
 
     auto taskCancel = std::make_shared<std::atomic<bool>>(false);
@@ -217,6 +246,13 @@ void AgentOpsControlCenterDock::joinWorker()
     {
         mWorkerThread.join();
     }
+    std::lock_guard<std::mutex> lock( m_reaperMutex );
+    for ( auto &w : m_retiredWorkers )
+    {
+        if ( w.thread.joinable() )
+            w.thread.join();
+    }
+    m_retiredWorkers.clear();
 }
 
 void AgentOpsControlCenterDock::startSession(const sicnu::agent_ops::OpsRunRequest &request)

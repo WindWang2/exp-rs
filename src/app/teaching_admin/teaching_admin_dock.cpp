@@ -41,6 +41,13 @@ TeachingAdminDock::~TeachingAdminDock()
     m_batchCancel.store( true );
     if ( m_batchThread.joinable() )
         m_batchThread.join();
+    std::lock_guard<std::mutex> lock( m_retiredMutex );
+    for ( auto &r : m_retiredThreads )
+    {
+        if ( r.thread.joinable() )
+            r.thread.join();
+    }
+    m_retiredThreads.clear();
 }
 
 TeachingAdminDock::TeachingAdminDock( QWidget *parent )
@@ -488,14 +495,36 @@ void TeachingAdminDock::onCancelBatch()
 
 
 
+void TeachingAdminDock::pruneRetiredThreadsLocked()
+{
+    for ( auto it = m_retiredThreads.begin(); it != m_retiredThreads.end(); )
+    {
+        if ( it->done && it->done->load( std::memory_order_acquire ) )
+        {
+            if ( it->thread.joinable() )
+                it->thread.join();
+            it = m_retiredThreads.erase( it );
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QString &outPrefix )
 {
     if ( m_batchThread.joinable() )
     {
-        std::thread( [t = std::move( m_batchThread )]() mutable {
+        std::lock_guard<std::mutex> lock( m_retiredMutex );
+        pruneRetiredThreadsLocked();
+        auto done = std::make_shared<std::atomic<bool>>( false );
+        std::thread reaper( [t = std::move( m_batchThread ), done]() mutable {
             if ( t.joinable() )
                 t.join();
-        } ).detach();
+            done->store( true, std::memory_order_release );
+        } );
+        m_retiredThreads.push_back( { std::move( reaper ), done } );
     }
     // Re-arm the console for the next run (#1453/WP02): the run affordance
     // and the out-prefix edit were disabled for the run's duration.
@@ -559,10 +588,15 @@ void TeachingAdminDock::failBatchOnUiThread( const QString &why )
     // re-arm the console without blocking GUI event loop.
     if ( m_batchThread.joinable() )
     {
-        std::thread( [t = std::move( m_batchThread )]() mutable {
+        std::lock_guard<std::mutex> lock( m_retiredMutex );
+        pruneRetiredThreadsLocked();
+        auto done = std::make_shared<std::atomic<bool>>( false );
+        std::thread reaper( [t = std::move( m_batchThread ), done]() mutable {
             if ( t.joinable() )
                 t.join();
-        } ).detach();
+            done->store( true, std::memory_order_release );
+        } );
+        m_retiredThreads.push_back( { std::move( reaper ), done } );
     }
     m_batchCancelButton->setEnabled( false );
     m_batchRunButton->setEnabled( true );
