@@ -345,3 +345,24 @@ TEST_CASE( "full sidecar text flows through parse and resolve deterministically"
     const std::string second = serializeState( resolveAssetState( input ).state );
     REQUIRE( first == second );
 }
+
+TEST_CASE( "classifier sidecar refuses a non-finite overallAccuracy",
+           "[scientific_state][slice_d][r14e]" )
+{
+    // jsoncpp parses 1e999 to +inf with no parse error. On unfixed master
+    // the value flowed into the passport, serialized as null, and the
+    // module then refused to re-read the document it had just written
+    // (RED).
+    const std::string text = []( std::string sidecar ) {
+        const std::string needle = "\"overallAccuracy\": 0.93";
+        const auto pos = sidecar.find( needle );
+        assert( pos != std::string::npos );
+        return sidecar.replace( pos, needle.size(), "\"overallAccuracy\": 1e999" );
+    }( std::string( kSidecarV2 ) );
+
+    ModelSidecarFacts facts;
+    AssetStateError error;
+    REQUIRE_FALSE( parseClassifierSidecarJson( text, "/models/rf.meta.json", facts, error ) );
+    CHECK( error.code == StateErrorCode::InvalidField );
+    CHECK( !facts.hasAccuracy );
+}
