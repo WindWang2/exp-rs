@@ -18,8 +18,10 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 class QCloseEvent;
 
@@ -101,6 +103,15 @@ class AgentOpsControlCenterDock : public QDockWidget
     std::shared_ptr<std::atomic<bool>> m_aliveFlag = std::make_shared<std::atomic<bool>>( true );
     std::shared_ptr<std::atomic<bool>> mCurrentWorkerCancel;
     std::atomic<uint64_t> mWorkerGeneration{ 0 };
+
+    struct RetiredWorker
+    {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+    std::mutex m_reaperMutex;
+    std::vector<RetiredWorker> m_retiredWorkers;
+    void pruneReaperThreadsLocked();
 
     Json::Value m_pendingRepairApprovalToken;
     std::string m_lastApprovalResult;

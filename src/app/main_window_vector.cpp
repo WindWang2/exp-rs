@@ -144,12 +144,17 @@ void QgisDesktopWindow::cutFeatures()
         statusBar()->showMessage(tr("No features selected to cut"), 2000);
         return;
     }
-    const int cutCount = vl->selectedFeatureCount();
     m_clipboard->replaceWithCopyOf(vl);
     vl->beginEditCommand(tr("Cut features"));
-    vl->deleteSelectedFeatures();
+    int deletedCount = 0;
+    const bool success = vl->deleteSelectedFeatures(&deletedCount);
+    if (!success || deletedCount == 0) {
+        vl->destroyEditCommand();
+        statusBar()->showMessage(tr("Failed to delete features during cut"), 2000);
+        return;
+    }
     vl->endEditCommand();
-    statusBar()->showMessage(tr("Cut %1 feature(s)").arg(cutCount), 2000);
+    statusBar()->showMessage(tr("Cut %1 feature(s)").arg(deletedCount), 2000);
 }
 
 void QgisDesktopWindow::copyFeatures()
@@ -390,8 +395,13 @@ void QgisDesktopWindow::deleteSelectedFeatures()
         statusBar()->showMessage(tr("No features selected"), 3000);
         return;
     }
-    vlayer->deleteFeatures(ids);
-    statusBar()->showMessage(tr("Deleted %1 feature(s)").arg(ids.size()), 3000);
+    int deletedCount = 0;
+    const bool success = vlayer->deleteSelectedFeatures(&deletedCount);
+    if (!success || deletedCount == 0) {
+        statusBar()->showMessage(tr("Failed to delete selected features"), 3000);
+        return;
+    }
+    statusBar()->showMessage(tr("Deleted %1 feature(s)").arg(deletedCount), 3000);
 }
 
 void QgisDesktopWindow::openAttributeTable()
