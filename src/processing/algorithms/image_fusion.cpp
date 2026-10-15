@@ -779,30 +779,34 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
         }
     } outputGuard{ outputPath, false };
 
-    // Resolve the working NoData sentinel from both inputs: prefer the pan's
-    // declared NoData, then the first MS band that declares one. Without any
-    // declaration there is no sentinel to mask against — use NaN so MS NoData
-    // pixels are never compared against a fabricated -9999 (#445).
-    bool hasPanNodata = false;
-    double panNodataVal = panDataset.bandNoDataValue( 1, &hasPanNodata );
-    if ( !hasPanNodata )
+    // Per-band declared sentinels (R14-A): each input band's own declaration
+    // is washed to NaN at its read boundary (readPanWindow / readMsWindow
+    // below), so heterogeneous declarations across pan and MS bands are all
+    // honored — the previous single working sentinel (pan's, else the first
+    // declaring MS band) let every other band's voids pass as data (#445's
+    // per-band closure). The working sentinel the kernels see is NaN, which
+    // every kernel already guards via std::isnan (the IHS path documented
+    // that NaN inputs occur in production); void outputs are NaN with NaN
+    // tags, matching the spectral-family wash convention.
+    float panSentinel = std::numeric_limits<float>::quiet_NaN();
     {
-        for ( int b = 1; b <= msBands; ++b )
-        {
-            bool hasMsNodata = false;
-            const double msNodataVal = msDataset.bandNoDataValue( b, &hasMsNodata );
-            if ( hasMsNodata )
-            {
-                panNodataVal = msNodataVal;
-                hasPanNodata = true;
-                break;
-            }
-        }
+        bool has = false;
+        const double nd = panDataset.bandNoDataValue( 1, &has );
+        if ( has && std::isfinite( nd ) )
+            panSentinel = static_cast<float>( nd );
     }
-    const float nodata = hasPanNodata ? static_cast<float>( panNodataVal )
-                                      : std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> msSentinels( static_cast<size_t>( msBands ),
+                                    std::numeric_limits<float>::quiet_NaN() );
+    for ( int b = 1; b <= msBands; ++b )
+    {
+        bool has = false;
+        const double nd = msDataset.bandNoDataValue( b, &has );
+        if ( has && std::isfinite( nd ) )
+            msSentinels[static_cast<size_t>( b - 1 )] = static_cast<float>( nd );
+    }
+    const float nodata = std::numeric_limits<float>::quiet_NaN();
     for ( int b = 0; b < nOutBands; ++b )
-        outDataset.setBandNoDataValue( b + 1, static_cast<double>( nodata ) );
+        outDataset.setBandNoDataValue( b + 1, std::numeric_limits<double>::quiet_NaN() );
 
     const int tileW = std::max( 16, params.tileWidth <= 0 ? 512 : params.tileWidth );
     const int tileH = std::max( 16, params.tileHeight <= 0 ? 512 : params.tileHeight );
@@ -844,14 +848,51 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
     // origin mismatches) and GDAL resamples.
     auto readMsWindow = [&]( int band, int xOff, int yOff, int tw, int th,
                              float *buf ) -> bool {
+        bool ok = false;
         if ( !resampleMs )
-            return msDataset.readBandWindow( band, xOff, yOff, tw, th, buf );
-        const int msXOff = static_cast<int>( std::floor( static_cast<double>( xOff ) * scaleX ) );
-        const int msYOff = static_cast<int>( std::floor( static_cast<double>( yOff ) * scaleY ) );
-        const int msW = static_cast<int>( std::ceil( static_cast<double>( xOff + tw ) * scaleX ) ) - msXOff;
-        const int msH = static_cast<int>( std::ceil( static_cast<double>( yOff + th ) * scaleY ) ) - msYOff;
-        return msDataset.readBandWindowScaled( band, msXOff, msYOff, msW, msH,
-                                               buf, tw, th, nodata );
+        {
+            ok = msDataset.readBandWindow( band, xOff, yOff, tw, th, buf );
+        }
+        else
+        {
+            const int msXOff = static_cast<int>( std::floor( static_cast<double>( xOff ) * scaleX ) );
+            const int msYOff = static_cast<int>( std::floor( static_cast<double>( yOff ) * scaleY ) );
+            const int msW = static_cast<int>( std::ceil( static_cast<double>( xOff + tw ) * scaleX ) ) - msXOff;
+            const int msH = static_cast<int>( std::ceil( static_cast<double>( yOff + th ) * scaleY ) ) - msYOff;
+            ok = msDataset.readBandWindowScaled( band, msXOff, msYOff, msW, msH,
+                                                 buf, tw, th, nodata );
+        }
+        if ( ok )
+        {
+            // Wash this band's own declared sentinel to NaN (R14-A per-band
+            // NoData). Exact matches only: values GDAL resampling already
+            // blended across a sentinel edge stay finite — a pre-existing
+            // limitation of resample-then-mask, not altered here.
+            const float sentinel = msSentinels[static_cast<size_t>( band - 1 )];
+            if ( std::isfinite( sentinel ) )
+            {
+                const size_t n = static_cast<size_t>( tw ) * th;
+                for ( size_t i = 0; i < n; ++i )
+                    if ( buf[i] == sentinel )
+                        buf[i] = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+        return ok;
+    };
+
+    // Pan reads go through one washed boundary too: pan band 1's declared
+    // sentinel becomes NaN before any method consumes the buffer (R14-A).
+    auto readPanWindow = [&]( int xOff, int yOff, int tw, int th, float *buf ) -> bool {
+        if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, buf ) )
+            return false;
+        if ( std::isfinite( panSentinel ) )
+        {
+            const size_t n = static_cast<size_t>( tw ) * th;
+            for ( size_t i = 0; i < n; ++i )
+                if ( buf[i] == panSentinel )
+                    buf[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+        return true;
     };
 
     if ( params.method == QStringLiteral( "linear" ) )
@@ -895,7 +936,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
@@ -968,7 +1009,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 std::fill_n( msSum.begin(), tileSize, 0.0f );
                 std::fill_n( validPixel.begin(), tileSize, true );
@@ -1050,7 +1091,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) ||
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) ||
                      !readMsWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
                      !readMsWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
                      !readMsWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
@@ -1091,7 +1132,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) ||
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) ||
                      !readMsWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
                      !readMsWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
                      !readMsWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
@@ -1176,7 +1217,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
@@ -1227,7 +1268,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
@@ -1332,7 +1373,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
@@ -1443,7 +1484,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
@@ -1516,7 +1557,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 const int tw = std::min( tileW, w - xOff );
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
-                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                if ( !readPanWindow( xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {

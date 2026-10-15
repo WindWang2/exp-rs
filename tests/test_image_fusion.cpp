@@ -770,18 +770,86 @@ TEST_CASE( "Streaming brovey invalidates partially-NoData pixels like the kernel
     REQUIRE( error.isEmpty() );
 
     // The streamed output must agree: pixel 0 is NoData in every band, not a
-    // partial-sum fusion of band 1 alone.
+    // partial-sum fusion of band 1 alone. R14-A per-band wash: streamed voids
+    // are NaN with a NaN band tag (the spectral-family convention), not an
+    // echo of the input's finite sentinel.
     GdalDatasetWrapper out;
     REQUIRE( out.open( outputPath ) );
     REQUIRE( out.bandCount() == 2 );
     std::vector<float> out1( 2 ), out2( 2 );
     REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
     REQUIRE( out.readBandData( 2, out2.data(), 2, 1 ) );
-    CHECK( out1[0] == NODATA );
-    CHECK( out2[0] == NODATA );
+    CHECK( std::isnan( out1[0] ) );
+    CHECK( std::isnan( out2[0] ) );
+    int hasNd = 0;
+    double ndTag = out.bandNoDataValue( 1, &hasNd );
+    CHECK( hasNd == 1 );
+    CHECK( std::isnan( ndTag ) );
     // Pixel 1 fuses normally: (4/6)*10, (2/6)*10.
     CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
     CHECK( out2[1] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+}
+
+TEST_CASE( "Streaming brovey honors heterogeneous per-band NoData declarations [r14a]",
+           "[fusion][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_het.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_het.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_het.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    // 2x1 inputs, 2 MS bands with DIFFERENT declared sentinels: pan and MS
+    // band 1 void at 0.0, MS band 2 voids at -9999. Pixel 0 carries a band-2
+    // void. Under the old single working sentinel (pan's 0.0), the -9999
+    // passed as data and the pixel fused to garbage instead of void.
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 1, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 1, 2, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    std::vector<float> pan = { 10.0f, 10.0f };
+    std::vector<float> ms1 = { 4.0f, 4.0f };
+    std::vector<float> ms2 = { -9999.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           pan.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( panDs, 1 ), 0.0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           ms1.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 1 ), 0.0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 1,
+                           ms2.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 2 ), -9999.0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 2 );
+    std::vector<float> out1( 2 ), out2( 2 );
+    REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
+    REQUIRE( out.readBandData( 2, out2.data(), 2, 1 ) );
+    // Band-2 void voids the fused pixel in every band (brovey's any-void rule).
+    CHECK( std::isnan( out1[0] ) );
+    CHECK( std::isnan( out2[0] ) );
+    // Pixel 1 fuses normally: (4/6)*10, (2/6)*10.
+    CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+    CHECK( out2[1] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+    // Void outputs carry the NaN band tag (family convention after the wash).
+    int hasNd = 0;
+    double ndTag = out.bandNoDataValue( 1, &hasNd );
+    CHECK( hasNd == 1 );
+    CHECK( std::isnan( ndTag ) );
 }
 
 // ===========================================================================
