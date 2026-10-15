@@ -141,6 +141,10 @@ vendor/
 .gstack/
 .planning/*
 !.planning/r13-i-infra/
+# R14-C track (Pi/MCP agent harness) planning artifacts (markdown only).
+!.planning/r14-C/
+.planning/r14-C/*
+!.planning/r14-C/*.md
 !.planning/RS14-05-process-grader/
 !.planning/processing-meta-r4/
 !.planning/unified-help-diagnostics-6/
