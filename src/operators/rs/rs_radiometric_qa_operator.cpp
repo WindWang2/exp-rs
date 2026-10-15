@@ -223,6 +223,21 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
                                "Failed to create output raster: " + outputPath );
 
     const size_t tilePixels = static_cast<size_t>( kTileDim ) * kTileDim;
+    // Per-band declared sentinels (R14-A): a declared NoData value is absent
+    // data, not a radiometric anomaly — washing it to NaN before evaluation
+    // reports those pixels as FlagNotFinite (invalid data) instead of a
+    // false FlagNegative (-9999 < 0), and keeps legitimate zero/negative
+    // reflectance statistics honest. NaN when the band declares nothing,
+    // matching the spectral-family wash convention.
+    std::vector<float> bandSentinels( static_cast<size_t>( bandCount ),
+                                      std::numeric_limits<float>::quiet_NaN() );
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+        bool has = false;
+        const double nd = ds.bandNoDataValue( b, &has );
+        if ( has && std::isfinite( nd ) )
+            bandSentinels[static_cast<size_t>( b - 1 )] = static_cast<float>( nd );
+    }
     std::vector<uint16_t> outFlags( tilePixels ), qaWords( tilePixels, 0 );
     std::vector<float> srcTile( tilePixels );
     // readBandWindow delivers floats; keep a float mask tile and quantize.
@@ -244,8 +259,12 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
 
         for ( int b = 0; b < bandCount; ++b )
         {
+            const float sentinel = bandSentinels[static_cast<size_t>( b )];
             for ( size_t i = 0; i < n; ++i )
-                srcTile[i] = bip[i * bandCount + b];
+            {
+                const float v = bip[i * bandCount + b];
+                srcTile[i] = v == sentinel ? std::numeric_limits<float>::quiet_NaN() : v;
+            }
             RadiometricQa::evaluateReflectance( srcTile.data(), outFlags.data(), n,
                                                 saturationLevel, nullptr );
             if ( hasCloudMask )
