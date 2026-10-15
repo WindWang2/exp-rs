@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -350,4 +351,22 @@ TEST_CASE( "studio dock rapid destruction during active study run",
         // Immediately destroy dock while background thread is active
         dock.reset();
     }
+}
+
+TEST_CASE( "studio dock matrix table displays bounded rows for large study reports",
+           "[experiment_studio][dock][matrix_table][bounding]" )
+{
+    ensureQgisApplication();
+    ExperimentStudioDock dock;
+    auto *table = matrixTable( dock );
+    REQUIRE( table != nullptr );
+
+    auto *spin = dock.findChild<QSpinBox *>();
+    REQUIRE( spin != nullptr );
+    spin->setValue( 800 );
+    dock.applySyntheticRunMatrix();
+
+    // Table rows must be bounded to 500, avoiding heap blowup
+    CHECK( table->rowCount() == 500 );
+    CHECK( matrixStatus( dock )->text().contains( QStringLiteral( "preview limited to first 500 of 800 rows" ) ) );
 }
