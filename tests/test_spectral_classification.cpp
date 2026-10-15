@@ -349,6 +349,35 @@ TEST_CASE( "rs:sam_classify supports the SID metric", "[sid][gdal]" )
     REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) );
 }
 
+namespace
+{
+// GTiff stores ONE NoData tag per dataset, so heterogeneous per-band
+// declarations ride on a VRT wrapper (same fixture strategy as
+// test_r5_nodata_contracts). An empty string leaves that band undeclared.
+bool writeVrtWithBandNodata( const QString &vrtPath, const QString &rawName, int width, int height,
+                             const std::vector<QString> &bandNodata )
+{
+    QFile vrt( vrtPath );
+    if ( !vrt.open( QIODevice::WriteOnly | QIODevice::Text ) )
+        return false;
+    QTextStream out( &vrt );
+    out << "<VRTDataset rasterXSize=\"" << width << "\" rasterYSize=\"" << height << "\">\n";
+    for ( int b = 0; b < static_cast<int>( bandNodata.size() ); ++b )
+    {
+        out << "  <VRTRasterBand dataType=\"Float32\" band=\"" << b + 1 << "\">\n";
+        if ( !bandNodata[static_cast<size_t>( b )].isEmpty() )
+            out << "    <NoDataValue>" << bandNodata[static_cast<size_t>( b )]
+                << "</NoDataValue>\n";
+        out << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">" << rawName
+            << "</SourceFilename><SourceBand>" << b + 1
+            << "</SourceBand></SimpleSource>\n";
+        out << "  </VRTRasterBand>\n";
+    }
+    out << "</VRTDataset>\n";
+    return true;
+}
+} // namespace
+
 TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam][gdal][nodata]" )
 {
     ensureGdalInit();
@@ -356,7 +385,8 @@ TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam]
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
 
-    const QString inputPath = dir.filePath( QStringLiteral( "het.tif" ) );
+    const QString rawPath = dir.filePath( QStringLiteral( "het_raw.tif" ) );
+    const QString inputPath = dir.filePath( QStringLiteral( "het.vrt" ) );
     const QString outputPath = dir.filePath( QStringLiteral( "het_classes.tif" ) );
     std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
 
@@ -364,7 +394,7 @@ TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam]
     // 0.0, band 2 voids at -9999. Pixel 0 is clean; pixel 1 is void in band 1;
     // pixel 2 is void in band 2. Under the old first-band-only sentinel,
     // pixel 2's -9999 passed as data and was classified.
-    GDALDatasetH inDs = createOutputTiff( inputPath, 3, 1, 2, GDT_Float32, gt, QString() );
+    GDALDatasetH inDs = createOutputTiff( rawPath, 3, 1, 2, GDT_Float32, gt, QString() );
     REQUIRE( inDs != nullptr );
     std::vector<float> b1 = { 0.8f, 0.0f, 0.8f };
     std::vector<float> b2 = { 0.2f, 0.2f, -9999.0f };
@@ -372,9 +402,19 @@ TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam]
                            b1.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
     REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 2 ), GF_Write, 0, 0, 3, 1,
                            b2.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
-    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 1 ), 0.0 ) == CE_None );
-    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 2 ), -9999.0 ) == CE_None );
     GDALClose( inDs );
+    REQUIRE( writeVrtWithBandNodata( inputPath, QStringLiteral( "het_raw.tif" ), 3, 1,
+                                     { QStringLiteral( "0" ), QStringLiteral( "-9999" ) } ) );
+    // Fixture sanity: the wrapper must expose the two DIFFERENT declarations.
+    {
+        GdalDatasetWrapper vds;
+        REQUIRE( vds.open( inputPath ) );
+        bool h1 = false, h2 = false;
+        vds.bandNoDataValue( 1, &h1 );
+        vds.bandNoDataValue( 2, &h2 );
+        REQUIRE( h1 );
+        REQUIRE( h2 );
+    }
 
     Json::Value params( Json::objectValue );
     params["input"] = inputPath.toStdString();
@@ -413,7 +453,8 @@ TEST_CASE( "rs:continuum_removal honors heterogeneous per-band NoData [r14a]",
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
 
-    const QString inputPath = dir.filePath( QStringLiteral( "cr_het.tif" ) );
+    const QString rawPath = dir.filePath( QStringLiteral( "cr_het_raw.tif" ) );
+    const QString inputPath = dir.filePath( QStringLiteral( "cr_het.vrt" ) );
     const QString outputPath = dir.filePath( QStringLiteral( "cr_het_out.tif" ) );
     std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
 
@@ -423,7 +464,7 @@ TEST_CASE( "rs:continuum_removal honors heterogeneous per-band NoData [r14a]",
     // -9999 entered the convex hull as reflectance and produced finite (wrong)
     // Rc values on the clean bands, and pixel 2's void was written back as the
     // sentinel 0.0 instead of the family's NaN void.
-    GDALDatasetH inDs = createOutputTiff( inputPath, 3, 1, 3, GDT_Float32, gt, QString() );
+    GDALDatasetH inDs = createOutputTiff( rawPath, 3, 1, 3, GDT_Float32, gt, QString() );
     REQUIRE( inDs != nullptr );
     std::vector<float> b1 = { 0.5f, 0.5f, 0.0f };
     std::vector<float> b2 = { 0.5f, -9999.0f, 0.5f };
@@ -434,9 +475,23 @@ TEST_CASE( "rs:continuum_removal honors heterogeneous per-band NoData [r14a]",
                            b2.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
     REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 3 ), GF_Write, 0, 0, 3, 1,
                            b3.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
-    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 1 ), 0.0 ) == CE_None );
-    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( inDs, 2 ), -9999.0 ) == CE_None );
     GDALClose( inDs );
+    // Per-band declarations ride on a VRT wrapper (GTiff stores one NoData
+    // tag per dataset); band 3 stays undeclared via an empty entry.
+    REQUIRE( writeVrtWithBandNodata( inputPath, QStringLiteral( "cr_het_raw.tif" ), 3, 1,
+                                     { QStringLiteral( "0" ), QStringLiteral( "-9999" ),
+                                       QString() } ) );
+    {
+        GdalDatasetWrapper vds;
+        REQUIRE( vds.open( inputPath ) );
+        bool h1 = false, h2 = false, h3 = true;
+        vds.bandNoDataValue( 1, &h1 );
+        vds.bandNoDataValue( 2, &h2 );
+        vds.bandNoDataValue( 3, &h3 );
+        REQUIRE( h1 );
+        REQUIRE( h2 );
+        REQUIRE_FALSE( h3 );
+    }
 
     Json::Value params( Json::objectValue );
     params["input"] = inputPath.toStdString();

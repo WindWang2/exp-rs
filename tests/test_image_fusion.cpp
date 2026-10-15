@@ -799,7 +799,8 @@ TEST_CASE( "Streaming brovey honors heterogeneous per-band NoData declarations [
     REQUIRE( dir.isValid() );
 
     const QString panPath = dir.filePath( QStringLiteral( "pan_het.tif" ) );
-    const QString msPath = dir.filePath( QStringLiteral( "ms_het.tif" ) );
+    const QString msRawPath = dir.filePath( QStringLiteral( "ms_het_raw.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_het.vrt" ) );
     const QString outputPath = dir.filePath( QStringLiteral( "fused_het.tif" ) );
     std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
 
@@ -807,8 +808,10 @@ TEST_CASE( "Streaming brovey honors heterogeneous per-band NoData declarations [
     // band 1 void at 0.0, MS band 2 voids at -9999. Pixel 0 carries a band-2
     // void. Under the old single working sentinel (pan's 0.0), the -9999
     // passed as data and the pixel fused to garbage instead of void.
+    // GTiff stores ONE NoData tag per dataset, so the MS declarations ride on
+    // a VRT wrapper (test_r5_nodata_contracts' fixture strategy).
     GDALDatasetH panDs = createOutputTiff( panPath, 2, 1, 1, GDT_Float32, gt, QString() );
-    GDALDatasetH msDs = createOutputTiff( msPath, 2, 1, 2, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msRawPath, 2, 1, 2, GDT_Float32, gt, QString() );
     REQUIRE( panDs != nullptr );
     REQUIRE( msDs != nullptr );
 
@@ -820,12 +823,27 @@ TEST_CASE( "Streaming brovey honors heterogeneous per-band NoData declarations [
     REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( panDs, 1 ), 0.0 ) == CE_None );
     REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 1,
                            ms1.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
-    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 1 ), 0.0 ) == CE_None );
     REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 1,
                            ms2.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
-    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 2 ), -9999.0 ) == CE_None );
     GDALClose( panDs );
     GDALClose( msDs );
+    {
+        QFile vrt( msPath );
+        REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        QTextStream ts( &vrt );
+        ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"1\">\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
+        ts << "    <NoDataValue>0</NoDataValue>\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_het_raw.tif"
+              "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"2\">\n";
+        ts << "    <NoDataValue>-9999</NoDataValue>\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_het_raw.tif"
+              "</SourceFilename><SourceBand>2</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "</VRTDataset>\n";
+    }
 
     ImageFusion::NativeFusionParams params;
     params.method = QStringLiteral( "brovey" );
