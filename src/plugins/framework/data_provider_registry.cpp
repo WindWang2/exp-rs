@@ -25,6 +25,14 @@ bool DataProviderRegistry::registerProvider(
     {
         if ( entry.providerId == providerId )
         {
+            // First registration wins across PLUGINS — the same doctrine the
+            // operator sink applies (#1462). Before this guard, plugin B
+            // registering A's providerId silently replaced the provider AND
+            // re-stamped ownership, so a later revoke of A no longer removed
+            // the entry (it was B's now) while B believed it owned it. The
+            // OWNER may re-register (hot reload replaces its own entry).
+            if ( entry.pluginId != pluginId )
+                return false;
             entry.pluginId = pluginId;
             entry.displayName = displayName;
             entry.description = description;
