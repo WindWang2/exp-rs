@@ -199,15 +199,16 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
         throw RSOperatorError( ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + outErr.toStdString() );
 
-    // Void spectra are written as all-NaN (kernel nodata), so the output
-    // declares NaN per band — matching the spectral-family convention after
-    // the per-band wash (rs_spectral_index sets the same tag).
-    for ( int b = 1; b <= bandCount; ++b )
-    {
-        GDALRasterBandH hOutBand = GDALGetRasterBand( outDs, b );
-        if ( hOutBand )
-            GDALSetRasterNoDataValue( hOutBand, std::numeric_limits<double>::quiet_NaN() );
-    }
+    // Output tagging is CONDITIONAL (#473): when any input band declared
+    // NoData, or a void spectrum was actually produced, the output declares
+    // NaN voids (spectral-family convention after the per-band wash). An
+    // undeclared, all-finite input keeps its tag absent — #473 pinned that
+    // no default tag may be fabricated. Tracked after the loop below.
+    bool anyDeclaredSentinel = false;
+    for ( int b = 0; b < bandCount; ++b )
+        anyDeclaredSentinel = anyDeclaredSentinel
+                              || std::isfinite( bandSentinels[static_cast<size_t>( b )] );
+    bool anyVoid = false;
 
     std::vector<float> spectrum( bandCount );
     std::vector<float> removed( bandCount );
@@ -283,6 +284,7 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
                 }
                 else
                 {
+                    anyVoid = true;
                     for ( int b = 0; b < bandCount; ++b )
                         specOut[b] = nodata;
                 }
@@ -303,6 +305,16 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
                                               std::to_string( x ) + ", " + std::to_string( y ) + ")" );
                 }
             }
+        }
+    }
+
+    if ( anyDeclaredSentinel || anyVoid )
+    {
+        for ( int b = 1; b <= bandCount; ++b )
+        {
+            GDALRasterBandH hOutBand = GDALGetRasterBand( outDs, b );
+            if ( hOutBand )
+                GDALSetRasterNoDataValue( hOutBand, std::numeric_limits<double>::quiet_NaN() );
         }
     }
 
