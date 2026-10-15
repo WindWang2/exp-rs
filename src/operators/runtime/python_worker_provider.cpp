@@ -270,6 +270,26 @@ class PythonWorkerSession final : public IModelRuntime
           }
           if ( attempt == 0 && m_process->state() != QProcess::Running )
             continue; // worker EXITED (crash) → restart + replay
+          // Failed with the worker still RUNNING is the DEADLINE, not a
+          // crash: classifyInferenceError keys on the message, and
+          // "exited unexpectedly" reads ProviderCrash — the live-but-slow
+          // case is the Timeout taxonomy the message below pins.
+          if ( m_process->state() == QProcess::Running )
+          {
+            recordFailure( "python worker did not answer within "
+                           + std::to_string( m_timeoutMs ) + " ms (timed out); stderr: "
+                           + drainStderr() );
+            // The worker is alive and will STILL answer, late: the protocol
+            // has no request correlation, so that stale line would be served
+            // to the NEXT request on this shared session (outputs of one
+            // tile attributed to another — the desync the malformed/oversized
+            // branches above refuse). Stop the worker so the stream dies with
+            // it; recovery routes through the bounded restart budget.
+            stopWorker();
+            throw std::runtime_error( "python worker did not answer within "
+                                      + std::to_string( m_timeoutMs )
+                                      + " ms (timed out)" );
+          }
           recordFailure( "python worker exited unexpectedly before responding; stderr: "
                          + drainStderr() );
           throw std::runtime_error( "python worker exited unexpectedly before responding" );

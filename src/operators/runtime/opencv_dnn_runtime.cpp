@@ -76,6 +76,10 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
     throw std::runtime_error( "runtime session is not loaded" );
   if ( nchwBlob.empty() || nchwBlob.dims != 4 )
     throw std::runtime_error( "inference input must be a 4-D NCHW blob" );
+  if ( nchwBlob.type() != CV_32F )
+    throw std::runtime_error( "inference input must be float32 (capabilities() declares "
+                              "input_dtypes float32 only), got cv depth "
+                              + std::to_string( CV_MAT_DEPTH( nchwBlob.type() ) ) );
   if ( m_cancelRequested.load( std::memory_order_relaxed ) )
     throw std::runtime_error( "inference canceled before the forward pass" );
 
@@ -139,30 +143,64 @@ std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> 
     if ( nb.second.empty() || nb.second.dims != 4 )
       throw std::runtime_error( "multi-input inference blobs must be 4-D NCHW (input '" +
                                 nb.first + "')" );
+    if ( nb.second.type() != CV_32F )
+      throw std::runtime_error( "multi-input inference blobs must be float32 (input '" + nb.first
+                                + "', capabilities() declares input_dtypes float32 only)" );
   }
 
+  const auto started = std::chrono::steady_clock::now();
   std::lock_guard<std::mutex> lock( m_inferMutex );
-  for ( const NamedBlob &nb : namedBlobs )
-  {
-    if ( nb.first.empty() )
-      m_net.setInput( nb.second );
-    else
-      m_net.setInput( nb.second, nb.first );
-  }
   std::vector<cv::Mat> outputs;
   try
   {
+    // setInput() lives INSIDE the try: an unknown blob name (or an
+    // unconvertible depth) throws cv::Exception too, and the interface
+    // contract is std::runtime_error-derived failures only.
+    for ( const NamedBlob &nb : namedBlobs )
+    {
+      if ( nb.first.empty() )
+        m_net.setInput( nb.second );
+      else
+        m_net.setInput( nb.second, nb.first );
+    }
     m_net.forward( outputs, m_net.getUnconnectedOutLayersNames() );
   }
   catch ( const cv::Exception &e )
   {
+    {
+      std::lock_guard<std::mutex> healthLock( m_healthMutex );
+      m_lastError = e.what();
+    }
+    m_failures.fetch_add( 1, std::memory_order_relaxed );
     throw std::runtime_error( std::string( "multi-input forward pass failed: " ) + e.what() );
   }
   outputs.erase( std::remove_if( outputs.begin(), outputs.end(),
                                  []( const cv::Mat &m ) { return m.empty(); } ),
                  outputs.end() );
   if ( outputs.empty() )
+  {
+    {
+      std::lock_guard<std::mutex> healthLock( m_healthMutex );
+      m_lastError = "multi-input inference produced no usable output";
+    }
+    m_failures.fetch_add( 1, std::memory_order_relaxed );
     throw std::runtime_error( "multi-input inference produced no usable output" );
+  }
+  // forward() returns headers onto the net's internal output blobs: the next
+  // forward() overwrites them. The lock releases on return — a second worker
+  // sharing this cached session would tear the buffers under the first
+  // caller's feet. Detach each plane while the lock is still held (same
+  // reasoning as infer()'s clone, one tile-sized copy each).
+  for ( cv::Mat &m : outputs )
+    m = m.clone();
+  {
+    std::lock_guard<std::mutex> healthLock( m_healthMutex );
+    m_lastForwardMs = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - started )
+                        .count();
+    m_lastError.clear();
+  }
+  m_forwards.fetch_add( 1, std::memory_order_relaxed );
   return outputs;
 }
 

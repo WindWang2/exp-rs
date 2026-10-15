@@ -17,7 +17,9 @@
 #include <opencv2/core.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace sicnu::operators::runtime {
@@ -75,10 +77,20 @@ class OpenVinoRuntime final : public IModelRuntime
 
     cv::Mat infer( const cv::Mat &nchwBlob ) override
     {
+      // The registry hands ONE cached session to any worker thread; the
+      // shared ov::InferRequest must never run concurrently (same
+      // serialization contract as the ORT/OpenCV providers).
+      std::lock_guard<std::mutex> lock( m_inferMutex );
       try
       {
         // Bridge NCHW float32 into the declared input shape — the sizes MUST
         // agree elementwise; a mismatch is a typed error, never an overflow.
+        // The depth check precedes the element math: a CV_8U/CV_64F blob of
+        // matching ELEMENT count would memcpy 4x/0.5x the real buffer (heap
+        // overread) — the interface contract is float32 NCHW.
+        if ( nchwBlob.empty() || nchwBlob.dims != 4 || nchwBlob.type() != CV_32F )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "OpenVINO input must be a 4-D float32 NCHW blob" );
         const std::size_t elems = nchwBlob.total() * nchwBlob.channels();
         std::size_t expected = 1;
         for ( std::int64_t d : mInputShape )
@@ -103,6 +115,11 @@ class OpenVinoRuntime final : public IModelRuntime
         std::memcpy( out.ptr<float>(), output.data<const float>(), outElems * sizeof( float ) );
         return out;
       }
+      catch ( const RSOperatorError & )
+      {
+        throw; // typed errors cross unchanged — the catch-all below must not
+               // rebrand InvalidInputData as RuntimeProviderFailed
+      }
       catch ( const std::exception &e )
       {
         throw RSOperatorError( ErrorCode::RuntimeProviderFailed,
@@ -116,6 +133,7 @@ class OpenVinoRuntime final : public IModelRuntime
     std::string mInputName;
     std::string mOutputName;
     ov::Shape mInputShape;
+    std::mutex m_inferMutex;
     std::unique_ptr<ov::Core> mCore;
     std::shared_ptr<ov::Model> mModel;
     ov::CompiledModel mCompiled;
