@@ -462,10 +462,14 @@ TEST_CASE( "offline::isPrivateHost identifies private, loopback and IPv4-mapped 
   CHECK( isPrivateHost( "192.168.1.1" ) );
   CHECK( isPrivateHost( "169.254.169.254" ) );
   CHECK( isPrivateHost( "localhost" ) );
+  CHECK( isPrivateHost( "localhost.localdomain" ) );
+  CHECK( isPrivateHost( "ip6-localhost" ) );
+  CHECK( isPrivateHost( "http://localhost.localdomain:8080/path.tif" ) );
   CHECK( isPrivateHost( "sub.localhost" ) );
   CHECK( isPrivateHost( "localhost." ) );
   CHECK( isPrivateHost( "http://localhost./data.tif" ) );
   CHECK( isPrivateHost( "metadata.google.internal" ) );
+  CHECK( isPrivateHost( "instance-data" ) );
   CHECK_FALSE( isPrivateHost( "https://example.com/cog.tif" ) );
   CHECK_FALSE( isPrivateHost( "8.8.8.8" ) );
 

@@ -111,6 +111,9 @@ struct RangeCacheConfig
     /// An empty directory disables the layer.
     std::string diskDirectory;
     std::uint64_t diskMaxBytes = 1024ull * 1024 * 1024;
+    /// When true, direct requests targeting loopback, RFC 1918, CGNAT, link-local,
+    /// or metadata hosts are rejected before dispatch (DEF-GEO-02).
+    bool blockPrivateNetworks = false;
 
     Json::Value toJson() const;
 };

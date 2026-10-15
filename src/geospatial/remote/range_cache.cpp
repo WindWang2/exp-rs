@@ -1025,6 +1025,20 @@ std::vector<unsigned char> fetchRangeOnce( const std::string &requestUrl, std::u
   options.timeoutSeconds = config.timeoutSeconds;
   options.connectTimeoutSeconds = config.connectTimeoutSeconds;
   options.maxRetries = config.maxRetries;
+  if ( config.blockPrivateNetworks )
+  {
+    if ( offline::isPrivateHost( requestUrl ) )
+    {
+      throw GeoError( ErrorCode::PermissionDenied,
+                      "range_cache: fetch refused to private network host: " +
+                        ResourceUri::parse( requestUrl ).display() );
+    }
+    options.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+      if ( offline::isPrivateHost( hopUrl ) )
+        return "private network blocked";
+      return "";
+    };
+  }
   const std::uint64_t length = endExclusive - start;
   // Budget the fetch at the coalescing limit, not the requested slice: a
   // range-ignoring origin answers with the whole object, and the answer is
@@ -1831,6 +1845,12 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       std::uint64_t openConfigGeneration = 0;
       const RangeCacheConfig config = cache.snapshotConfig( openConfigGeneration );
 
+      if ( config.blockPrivateNetworks && offline::isPrivateHost( requestUrl ) )
+      {
+        CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: target is a private network host" );
+        return nullptr;
+      }
+
       // Identity: probe once, then revalidate per the declared policy. A
       // validator mismatch invalidates the resource's cached bytes.
       // 12.0/13.0: the TTL horizon and the stale policy share ONE
@@ -2025,6 +2045,7 @@ Json::Value RangeCacheConfig::toJson() const
   json["retry_backoff_max_ms"] = retryBackoffMaxMs;
   json["disk_directory"] = diskDirectory;
   json["disk_max_bytes"] = static_cast<Json::UInt64>( diskMaxBytes );
+  json["block_private_networks"] = blockPrivateNetworks;
   return json;
 }
 

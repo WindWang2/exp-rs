@@ -10,6 +10,17 @@
 #include <cstdlib>
 #include <cstring>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <arpa/inet.h>
+#endif
+
 #include <cpl_conv.h>
 
 namespace sicnu::geo::offline {
@@ -378,9 +389,13 @@ bool isPrivateHost( const std::string &hostOrUrl )
 
     if ( lowered.empty() )
         return true;
-    if ( lowered == "localhost" || ( lowered.size() > 10 && lowered.compare( lowered.size() - 10, 10, ".localhost" ) == 0 ) )
+    if ( lowered == "localhost" ||
+         lowered == "localhost.localdomain" ||
+         lowered == "ip6-localhost" ||
+         lowered == "ip6-loopback" ||
+         ( lowered.size() > 10 && lowered.compare( lowered.size() - 10, 10, ".localhost" ) == 0 ) )
         return true;
-    if ( lowered == "metadata.google.internal" )
+    if ( lowered == "metadata.google.internal" || lowered == "instance-data" )
         return true;
 
     std::uint32_t v4 = 0;
@@ -432,6 +447,72 @@ bool isPrivateHost( const std::string &hostOrUrl )
         if ( ( v6[0] & 0xFE ) == 0xFC )
             return true;
         return false;
+    }
+
+    // Unparsed hostname: perform DNS resolution to block private/loopback/cloud-metadata targets (DEF-GEO-01).
+    struct addrinfo hints;
+    std::memset( &hints, 0, sizeof( hints ) );
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo *res = nullptr;
+    if ( getaddrinfo( lowered.c_str(), nullptr, &hints, &res ) == 0 && res != nullptr )
+    {
+        bool privateFound = false;
+        for ( struct addrinfo *p = res; p != nullptr; p = p->ai_next )
+        {
+            if ( p->ai_family == AF_INET )
+            {
+                auto *sa = reinterpret_cast<struct sockaddr_in *>( p->ai_addr );
+                const std::uint32_t resolvedV4 = ntohl( sa->sin_addr.s_addr );
+                if ( isPrivateIpv4( resolvedV4 ) )
+                {
+                    privateFound = true;
+                    break;
+                }
+            }
+            else if ( p->ai_family == AF_INET6 )
+            {
+                auto *sa6 = reinterpret_cast<struct sockaddr_in6 *>( p->ai_addr );
+                const unsigned char *bytes = reinterpret_cast<const unsigned char *>( &sa6->sin6_addr );
+
+                bool loopback = true;
+                for ( int i = 0; i < 15; ++i )
+                    loopback = loopback && ( bytes[i] == 0 );
+                loopback = loopback && ( bytes[15] == 1 );
+                if ( loopback )
+                {
+                    privateFound = true;
+                    break;
+                }
+
+                if ( ( bytes[0] == 0xFE && ( bytes[1] & 0xC0 ) == 0x80 ) ||
+                     ( ( bytes[0] & 0xFE ) == 0xFC ) )
+                {
+                    privateFound = true;
+                    break;
+                }
+
+                bool ipv4Mapped = ( bytes[10] == 0xFF && bytes[11] == 0xFF );
+                for ( int i = 0; i < 10 && ipv4Mapped; ++i )
+                    ipv4Mapped = ( bytes[i] == 0 );
+                if ( ipv4Mapped )
+                {
+                    const std::uint32_t emb = ( static_cast<std::uint32_t>( bytes[12] ) << 24 ) |
+                                              ( static_cast<std::uint32_t>( bytes[13] ) << 16 ) |
+                                              ( static_cast<std::uint32_t>( bytes[14] ) << 8 ) |
+                                              static_cast<std::uint32_t>( bytes[15] );
+                    if ( isPrivateIpv4( emb ) )
+                    {
+                        privateFound = true;
+                        break;
+                    }
+                }
+            }
+        }
+        freeaddrinfo( res );
+        if ( privateFound )
+            return true;
     }
 
     return false;
