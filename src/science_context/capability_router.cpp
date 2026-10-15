@@ -288,8 +288,11 @@ CapabilityEntry evaluate( const ResolvedSpec &spec, const Json::Value &observed 
     }
 
     // CRS / grid conflict flag from observed
-    if ( observed.get( "crs_conflicted", false ).asBool() ||
-         observed.get( "grid_conflicted", false ).asBool() )
+    const bool crsConflicted = observed.isObject() && observed.isMember( "crs_conflicted" ) &&
+                               observed["crs_conflicted"].isBool() && observed["crs_conflicted"].asBool();
+    const bool gridConflicted = observed.isObject() && observed.isMember( "grid_conflicted" ) &&
+                                observed["grid_conflicted"].isBool() && observed["grid_conflicted"].asBool();
+    if ( crsConflicted || gridConflicted )
     {
         e.status = "unavailable";
         e.reasons.push_back( "CRS_GRID_CONFLICT" );
