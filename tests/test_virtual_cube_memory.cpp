@@ -13,9 +13,11 @@
 #include <QDir>
 #include <QTemporaryDir>
 
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <string>
+#include <thread>
 #include <vector>
 
 using Catch::Approx;
@@ -576,4 +578,53 @@ TEST_CASE( "A window with only fully-clouded observations yields NaN under both 
         const auto clear = cube->extractPixelSeries( 6, 1 );
         REQUIRE( clear[0] == Approx( 0.5 ).margin( 1e-6 ) );
     }
+}
+
+TEST_CASE( "Concurrent readChunk threads do not corrupt LRU cache or cause UAF (DEF-COR-01)",
+           "[d16][cube][concurrency]" )
+{
+    GdalInit init;
+    QTemporaryDir tmp;
+    const QDir dir( tmp.path() );
+    const int w = 512, h = 512;
+
+    const std::vector<QString> scenes{
+        writeScene( dir, "s", kEpoch, w, h, plane( w, h, 0.2f ) ),
+        writeScene( dir, "s", QDate( 2020, 2, 1 ), w, h, plane( w, h, 0.4f ) ),
+        writeScene( dir, "s", QDate( 2020, 3, 1 ), w, h, plane( w, h, 0.6f ) )
+    };
+
+    TemporalCubeConfig cfg;
+    cfg.maxMemoryBudgetBytes = 512 * 512 * 4; // small budget to force frequent LRU evictions
+    auto cube = TemporalCube::open( scenes, cfg );
+    REQUIRE( cube != nullptr );
+
+    std::atomic<bool> failed{ false };
+    std::vector<std::thread> threads;
+    threads.reserve( 4 );
+    for ( int t = 0; t < 4; ++t )
+    {
+        threads.emplace_back( [&cube, &failed, t]() {
+            for ( int iter = 0; iter < 20; ++iter )
+            {
+                const int x = ( ( iter + t ) % 2 ) * 256;
+                const int y = ( ( iter + t ) / 2 % 2 ) * 256;
+                auto chunk = cube->readChunk( x, y, 128, 128, 0, 1 );
+                if ( chunk.size() != 128 * 128 )
+                {
+                    failed.store( true );
+                }
+                auto series = cube->extractPixelSeries( x, y );
+                if ( series.empty() )
+                {
+                    failed.store( true );
+                }
+            }
+        } );
+    }
+
+    for ( auto &th : threads )
+        th.join();
+
+    REQUIRE_FALSE( failed.load() );
 }
