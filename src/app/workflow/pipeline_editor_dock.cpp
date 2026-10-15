@@ -29,6 +29,10 @@
 #include <unistd.h>
 #elif defined(Q_OS_WIN)
 #include <io.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #endif
 
 namespace sicnu::workflow::gui {
@@ -157,12 +161,32 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
       *errorOut = QObject::tr( "Target is a directory: %1" ).arg( filePath );
     return false;
   }
-  QDir parentDir = fileInfo.dir();
+
+  // Symlink resolution: if filePath is a symlink, write to its resolved target
+  // so the symlink structure is preserved instead of being replaced by a regular file.
+  const QString targetPath = fileInfo.isSymLink() ? fileInfo.symLinkTarget() : filePath;
+  QFileInfo targetInfo( targetPath );
+  if ( targetInfo.isDir() )
+  {
+    if ( errorOut )
+      *errorOut = QObject::tr( "Target is a directory: %1" ).arg( targetPath );
+    return false;
+  }
+
+  QDir parentDir = targetInfo.dir();
   if ( !parentDir.exists() )
   {
     if ( errorOut )
       *errorOut = QObject::tr( "Directory does not exist: %1" ).arg( parentDir.absolutePath() );
     return false;
+  }
+
+  // Preserve existing permissions across atomic replacement
+  const bool fileExisted = targetInfo.exists();
+  QFile::Permissions origPermissions;
+  if ( fileExisted )
+  {
+    origPermissions = targetInfo.permissions();
   }
 
   QTemporaryFile tempFile( parentDir.filePath( QStringLiteral( "pipeline_save_XXXXXX.tmp" ) ) );
@@ -205,12 +229,16 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
 #endif
 
   const QString tempName = tempFile.fileName();
+  if ( fileExisted && origPermissions != 0 )
+  {
+    tempFile.setPermissions( origPermissions );
+  }
   tempFile.close();
 
   tempFile.setAutoRemove( false );
 #if defined(Q_OS_UNIX)
   if ( ::rename( QFile::encodeName( tempName ).constData(),
-                 QFile::encodeName( filePath ).constData() ) != 0 )
+                 QFile::encodeName( targetPath ).constData() ) != 0 )
   {
     tempFile.setAutoRemove( true );
     if ( errorOut )
@@ -219,7 +247,7 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
     return false;
   }
 
-  const QByteArray parentDirBytes = QFile::encodeName( QFileInfo( filePath ).absolutePath() );
+  const QByteArray parentDirBytes = QFile::encodeName( targetInfo.absolutePath() );
 #if defined(O_DIRECTORY)
   const int dirFd = ::open( parentDirBytes.constData(), O_RDONLY | O_DIRECTORY );
 #else
@@ -230,34 +258,63 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
     ::fsync( dirFd );
     ::close( dirFd );
   }
-#else
-  if ( QFile::exists( filePath ) )
+#elif defined(Q_OS_WIN)
+  const std::wstring wsTemp = tempName.toStdWString();
+  const std::wstring wsTarget = targetPath.toStdWString();
+  if ( fileExisted )
   {
-    const QString backupPath = filePath + QStringLiteral( ".bak.%1" ).arg( QDateTime::currentMSecsSinceEpoch() );
-    if ( !QFile::rename( filePath, backupPath ) )
+    if ( !::ReplaceFileW( wsTarget.c_str(), wsTemp.c_str(), nullptr,
+                          REPLACEFILE_WRITE_THROUGH | REPLACEFILE_IGNORE_MERGE_ERRORS,
+                          nullptr, nullptr ) )
+    {
+      if ( !::MoveFileExW( wsTemp.c_str(), wsTarget.c_str(),
+                           MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH ) )
+      {
+        tempFile.setAutoRemove( true );
+        if ( errorOut )
+          *errorOut = QObject::tr( "Failed to atomically replace target file on Windows." );
+        return false;
+      }
+    }
+  }
+  else
+  {
+    if ( !::MoveFileExW( wsTemp.c_str(), wsTarget.c_str(), MOVEFILE_WRITE_THROUGH ) )
     {
       tempFile.setAutoRemove( true );
       if ( errorOut )
-        *errorOut = QObject::tr( "Cannot backup existing file before replace: %1" ).arg( filePath );
+        *errorOut = QObject::tr( "Failed to publish pipeline file on Windows." );
       return false;
     }
-    if ( !QFile::rename( tempName, filePath ) )
+  }
+#else
+  if ( QFile::exists( targetPath ) )
+  {
+    const QString backupPath = targetPath + QStringLiteral( ".bak.%1" ).arg( QDateTime::currentMSecsSinceEpoch() );
+    if ( !QFile::rename( targetPath, backupPath ) )
     {
-      QFile::rename( backupPath, filePath );
       tempFile.setAutoRemove( true );
       if ( errorOut )
-        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( filePath );
+        *errorOut = QObject::tr( "Cannot backup existing file before replace: %1" ).arg( targetPath );
+      return false;
+    }
+    if ( !QFile::rename( tempName, targetPath ) )
+    {
+      QFile::rename( backupPath, targetPath );
+      tempFile.setAutoRemove( true );
+      if ( errorOut )
+        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( targetPath );
       return false;
     }
     QFile::remove( backupPath );
   }
   else
   {
-    if ( !QFile::rename( tempName, filePath ) )
+    if ( !QFile::rename( tempName, targetPath ) )
     {
       tempFile.setAutoRemove( true );
       if ( errorOut )
-        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( filePath );
+        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( targetPath );
       return false;
     }
   }
