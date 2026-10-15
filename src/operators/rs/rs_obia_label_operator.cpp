@@ -12,6 +12,7 @@
 #include "analysis/segmentation/rs_roi_labeler.h"
 #include "analysis/segmentation/rs_segment_map.h"
 
+#include "geospatial/util/atomic_fs.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -105,18 +106,31 @@ Json::Value RsObiaLabelOperator::run(const Json::Value& params, RSOperatorContex
         throw RSOperatorError(ErrorCode::GdalError, roiErr.toStdString());
 
     context.reportProgress(0.9, "Writing label CSV");
-    QFile csv(QString::fromStdString(outputPath));
-    if (!csv.open(QIODevice::WriteOnly | QIODevice::Text))
-        throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write " + outputPath);
-    QTextStream out(&csv);
-    out << "segment_id,class_id\n";
-    for (auto it = segLabels.constBegin(); it != segLabels.constEnd(); ++it)
-        out << it.key() << ',' << it.value() << '\n';
-    out.flush();
-    if (csv.error() != QFile::NoError)
+    // Stage-then-publish: a mid-write failure keeps the previous CSV intact
+    // (r14-A; same discipline as the pipeline's raster writers).
+    try
+    {
+        sicnu::geo::atomic_fs::writeFileAtomic(
+            outputPath, [&]( const std::string &stagedPath ) {
+            QFile csv(QString::fromStdString(stagedPath));
+            if (!csv.open(QIODevice::WriteOnly | QIODevice::Text))
+                throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write " + outputPath);
+            QTextStream out(&csv);
+            out << "segment_id,class_id\n";
+            for (auto it = segLabels.constBegin(); it != segLabels.constEnd(); ++it)
+                out << it.key() << ',' << it.value() << '\n';
+            out.flush();
+            if (csv.error() != QFile::NoError)
+                throw RSOperatorError(ErrorCode::FileNotWritable,
+                                      "Failed writing " + outputPath + ": " + csv.errorString().toStdString());
+            csv.close();
+        });
+    }
+    catch (const sicnu::geo::GeoError &ex)
+    {
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed writing " + outputPath + ": " + csv.errorString().toStdString());
-    csv.close();
+                              std::string("Cannot finalize output: ") + ex.what());
+    }
 
     context.reportProgress(1.0, "ROI labeling complete");
 
