@@ -1111,6 +1111,38 @@ TEST_CASE("unsupported finding codes stay typed through the recovery projection"
     REQUIRE(decision.action == recovery_action::kAsk);
 }
 
+TEST_CASE("a malformed driver-held repair approval is a typed refusal, never an exception (R14-C FIX-3)",
+          "[agent_ops][approval][r14_C]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    // Wire shapes the surface accepts as objects but that carry no usable
+    // digest. Before the guard, run() touched ["digest"].asString() first
+    // and Json::LogicError escaped the coordinator — contained to
+    // INVALID_ARGS through OpsDriver, but std::terminate on the GUI dock's
+    // worker thread, which calls run() directly.
+    Json::Value empty = Json::objectValue;
+    OpsRunRequest emptyReq;
+    emptyReq.session = ndviRequest();
+    emptyReq.repairApproval = empty;
+    auto emptyRun = coord.run(emptyReq);
+    REQUIRE(emptyRun.approvalError == "APPROVAL_MALFORMED");
+    REQUIRE_FALSE(coord.hasPendingRepairApproval());
+
+    Json::Value mistyped = Json::objectValue;
+    mistyped["digest"] = 5;
+    OpsRunRequest mistypedReq;
+    mistypedReq.session = ndviRequest();
+    mistypedReq.repairApproval = mistyped;
+    auto mistypedRun = coord.run(mistypedReq);
+    REQUIRE(mistypedRun.approvalError == "APPROVAL_MALFORMED");
+    REQUIRE_FALSE(coord.hasPendingRepairApproval());
+}
+
 TEST_CASE("the plan's own risk class drives the science-changing gate, not the caller claim",
           "[agent_ops][recovery][repair]")
 {

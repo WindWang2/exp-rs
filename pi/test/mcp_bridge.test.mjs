@@ -317,3 +317,73 @@ test("the bridge does NOT truncate: transport fidelity is the shell's budget bou
     bridge.stop();
   }
 });
+
+test("an oversized outbound payload fails alone; other pending calls survive (R14-C FIX-4)", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+
+    // One delayed (in-flight) request plus one request whose payload exceeds
+    // the server's 4 MiB stdin line cap. Before the guard, the oversized
+    // write reached the server, came back as an id:null -32700 error, and the
+    // bridge rejected EVERY pending request with it.
+    const delayed = bridge.request("tools/call", { arguments: { delay_ms: 300 } });
+    const oversized = bridge.request("tools/call", {
+      arguments: { big: "x".repeat(5 * 1024 * 1024) },
+    });
+    await assert.rejects(() => oversized, /line cap/);
+    assert.equal((await delayed)?.content?.[0]?.text, "late", "the in-flight call must survive");
+    // The child was never written to and stays healthy.
+    assert.equal(bridge.alive, true);
+    assert.equal(spawnCount(counter), 1);
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("a healthy initialize re-arms the fast-crash circuit (R14-C FIX-4)", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    // Two fast crashes (count 2), then a HEALTHY respawn+initialize (which
+    // must reset the circuit), then three more fast crashes. Without the
+    // reset the accumulated count reaches 5 and the final request is
+    // permanently refused ("keeps crashing"); with it, the count is 3 and
+    // lazy respawn still works.
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+    await assert.rejects(() => bridge.request("tools/call", { crash: true }), /exited/);
+    await assert.rejects(() => bridge.request("tools/call", { crash: true }), /exited/);
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+    await assert.rejects(() => bridge.request("tools/call", { crash: true }), /exited/);
+    await assert.rejects(() => bridge.request("tools/call", { crash: true }), /exited/);
+    await assert.rejects(() => bridge.request("tools/call", { crash: true }), /exited/);
+    const result = await bridge.request("tools/call", {});
+    assert.equal(result?.content?.[0]?.text, "ok", "respawn must still be enabled");
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("the outbound cap counts UTF-8 bytes, not UTF-16 code units (R14-C FIX-4 rework)", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+
+    // 3,000,000 CJK characters: 3,000,000 UTF-16 code units (UNDER the 4 MiB
+    // cap by string length) but 9,000,000 UTF-8 bytes (OVER it). A
+    // .length-based guard lets this through; the byte-based guard must
+    // refuse it before the write.
+    const multibyte = "地".repeat(3_000_000);
+    const delayed = bridge.request("tools/call", { arguments: { delay_ms: 300 } });
+    const oversized = bridge.request("tools/call", { arguments: { big: multibyte } });
+    await assert.rejects(() => oversized, /byte/);
+    assert.equal((await delayed)?.content?.[0]?.text, "late");
+    assert.equal(bridge.alive, true);
+    assert.equal(spawnCount(counter), 1);
+  } finally {
+    bridge.stop();
+  }
+});

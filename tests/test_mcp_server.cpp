@@ -1394,8 +1394,20 @@ TEST_CASE( "McpServer run_workflow recording handshake refuses truthfully",
         REQUIRE( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
         REQUIRE( !submitted.value( QStringLiteral( "experiment_run_id" ) ).toString().isEmpty() );
         // Second: recording into a DIFFERENT db must refuse at prepare(),
-        // BEFORE any dispatch — exactly one tracked run exists afterwards.
+        // BEFORE any dispatch — the refused rebind must leave no tracked run.
         QVariantMap rebind = ok;
+        // Distinct pipeline id: the original == 1 checkpoint-count assertion
+        // was timing-dependent (on a fast host the bound_run completes and
+        // the archive sweep leaves live + history copies = 2; pre-existing
+        // deterministic failure at f72f0c117, A/B-verified against the
+        // unfixed tree). Asserting "no checkpoint for the REFUSED id" pins
+        // the actual contract with no timing dependence (R14-C FIX-9).
+        rebind[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+            "id": "rebind_refused_probe",
+            "steps": [
+                {"id": "s1", "title": "first", "operator": "rs:mcp_noop", "params": {}}
+            ]
+        })" );
         rebind[QStringLiteral( "experiment_db" )] =
             storeDir.filePath( QStringLiteral( "b.db" ) );
         bool threw = false;
@@ -1408,7 +1420,23 @@ TEST_CASE( "McpServer run_workflow recording handshake refuses truthfully",
             threw = true;
         }
         REQUIRE( threw );
-        CHECK( checkpointGuard.checkpointCount() == 1 );
+        CHECK( checkpointGuard.waitDurableTerminal( QStringLiteral( "bound_run" ),
+                                                    QStringLiteral( "Completed" ) ) );
+        for ( const QString &family : { QString(), QStringLiteral( "history" ) } )
+        {
+            const QDir dir( checkpointGuard.dir.filePath( family ) );
+            for ( const QString &entry :
+                  dir.entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files ) )
+            {
+                QFile f( dir.filePath( entry ) );
+                if ( !f.open( QIODevice::ReadOnly ) )
+                    continue;
+                const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
+                f.close();
+                CHECK( doc.object().value( QStringLiteral( "workflowId" ) ).toString()
+                       != QStringLiteral( "rebind_refused_probe" ) );
+            }
+        }
         CHECK( !QFile::exists( storeDir.filePath( QStringLiteral( "b.db" ) ) ) );
     }
 }
