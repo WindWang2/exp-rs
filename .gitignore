@@ -142,6 +142,7 @@ vendor/
 .planning/*
 !.planning/r13-i-infra/
 !.planning/RS14-05-process-grader/
+!.planning/r14-E/
 !.planning/processing-meta-r4/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
