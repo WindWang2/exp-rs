@@ -114,7 +114,6 @@ std::uintmax_t fileSize( const std::string &path );
 /// Checks whether an uncommitted journal or committed marker exists for the given main target.
 bool hasPendingJournal( const std::string &targetMainPath );
 
-/// Recovers an interrupted multi-file publication for targetMainPath.
 /// R15-B (B13): true only for an UNCOMMITTED journal (".publish-journal" /
 /// ".sicnu-journal" without the ".committed" suffix). Such a group may be a
 /// mix of generations (a crash between sidecar and main renames); readers
@@ -130,6 +129,7 @@ bool hasUncommittedPublishJournal( const std::string &targetMainPath );
 /// and remote paths are ignored.
 void throwIfInterruptedPublish( const std::string &localPath );
 
+/// Recovers an interrupted multi-file publication for targetMainPath.
 /// If an uncommitted journal is found, rolls back published targets and restores backups.
 /// If a committed marker is found, cleans up leftover backups.
 /// Returns true if recovery was performed, false if no journal was present.
