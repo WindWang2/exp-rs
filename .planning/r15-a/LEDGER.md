@@ -9,10 +9,11 @@
 | L2 | O3：#1465 3-arg std::equal 定位与分类 | O3 | DONE（静态清扫） | 全仓 8 处：asset_state_json 4 处已有长度门卫（FIXED_ON_MASTER）；temporal_change.cpp:218 尺寸相等前置；study_spatial.cpp:169 定长 6 栈数组；qgsabstractgeometry（QGIS 只读）。结论：本分支无存活缺陷 |
 | L3 | O5：rs_spectral_index #1509 diff 审计 + 回归基线 | O5 | DONE（静态） | 共享 JSON 辅助（rs_json_params.cpp getInt/getString/getDouble/getBool）全部 isNumeric/isString/isBool 门卫 + #647 int64 范围检查；rs_spectral_index_operator 全部经辅助路由，scale 参数 isNumeric+finite>0 双检；锁已随 #1509 合并解除，无残留缺陷 |
 | L4 | O1：融合 resample-then-mask 边缘掺混 RED→GREEN×2 | O1 | DONE（**FALSE POSITIVE**） | diag1–diag4 实证：RED 模式系 fixture 缺陷（VRT 缺 `<GeoTransform>` → GDAL 默认单位变换 → 同分辨率钳位路径），非 GDAL 掺混。带 GT+SRS 的正确 fixture 下 BASE 输出 `{NaN,6.667×15}`/`{NaN,3.333×15}`（void 正确 void、邻域重归一化干净值）——与家族惯例一致。原 RED 测试已重写为 GREEN 回归锁（6d5672419）；附带暴露 A14（单侧无 GT 静默垃圾产出）已修复（bf5a7d27a） |
-| L5 | O2：sam/spectral_similarity NoData 方言双锁或统一 | O2 | TEST_READY | 双锁测试已写入 tests/test_spectral_classification.cpp（未提交）；sam metadata 文档已改（未提交）；待构建验证 |
+| L5 | O2：sam/spectral_similarity NoData 方言双锁或统一 | O2 | DONE（**双锁，不统一**） | 决策：钉死不统一——统一会静默改变既有未声明波段分类输出，超出本轨重构纪律。双锁测试（96b85fef4）同一 3×1 fixture 断言 sam labels[2] != -9999 且 spectral_similarity labels[2] == -9999 + fixture sanity；sam metadata() limitations 记录政策与交叉引用。BASE 即绿（无行为改变）：30 用例/197 断言 ×2 |
 | L6 | O4：#1454 科学算子回调侧审计 | O4 | PENDING | — |
 | L7 | A03-6（提交信息记作 A14，**新发现**，勿与工作包 A14=性能混淆）：单侧缺 GeoTransform 的非对称配对（O1 调查新发现） | A03-6 | DONE | RED：pan 有 GT+CRS、MS VRT 有 SRS 无 GT → BASE 融合"成功"且 12/16 像素 void 无报错。修复：processNativeFusion 增加 hasGeoTransform 对称性阻塞（bf5a7d27a）；both-unreferenced 合成回退保留并有测试锁定；[r14a] fixture 补 GT。36 用例/1611 断言 GREEN×2。驱动修复：%.6g→QString::arg 日志告警 |
-| L8+ | A01–A16 工作包审计新发现（按复现准入排队） | O6+ | IN_PROGRESS | 见 FINDINGS.md；已完成 A02/A03/A13 静态审计；A09 修复已应用（待 GREEN 验证） |
+| L8 | A09：multires 有效性谓词 epsilon 匹配 → 契约精确比较 | A09 | DONE | RED 9187cdc79（2×2 {5e-7×3, 0.0} nodata=0.0 → epsilon 吞合法值 → 空 map）；修复 rs_multires_segmenter.cpp:357 → sicnu::rs::isNoDataValue（28a1445c5）；test_obia_segmentation 14 用例/850 断言 GREEN×2 |
+| L9+ | A01–A16 工作包审计新发现（按复现准入排队） | O6+ | IN_PROGRESS | 见 FINDINGS.md；已完成 A02/A03/A13 静态审计 + A06/A09/A10 M2 审计；A12 在冻结文档枚举中缺失（定义缺口，已记录，不虚构范围）；A04/A05/A07/A08/A11/A15/A16 待后续循环 |
 
 ## 阻塞与假设变更记录
 
@@ -25,5 +26,6 @@
 
 - CP0（本轮）：M0 完成，分支 `hardening/r15-A-science-processing` @ 46791bc6 + M0 文档提交。
 - CP1：configure exit 0；O1 RED 测试提交（流式 + 质量报告两路径）；O2 双锁测试就绪；A02/A03/A13 静态审计完成（详见 FINDINGS.md）。
-- CP2：O1 关闭为 FALSE POSITIVE（6d5672419，diag1–diag4 证据链）；A14 非对称地理参照阻塞修复（bf5a7d27a，36 用例/1611 断言 GREEN×2）；%.6g 日志缺陷驱动修复。
-- 下一 session 恢复点：读本文件 + FINDINGS.md + BASELINE.md；A09 修复已应用待 test_obia_segmentation GREEN×2；O2 待 test_spectral_classification 构建验证后提交。
+- CP2：O1 关闭为 FALSE POSITIVE（6d5672419，diag1–diag4 证据链）；A03-6 非对称地理参照阻塞修复（bf5a7d27a，36 用例/1611 断言 GREEN×2）；%.6g 日志缺陷驱动修复。
+- CP3：规划文档更新（530a566b5）；A09 epsilon 谓词修复（28a1445c5，14 用例/850 断言 GREEN×2）；O2 方言双锁关闭（96b85fef4，30 用例/197 断言 BASE 即绿 ×2）。工作树清洁，进入 M4 评审 + PR 阶段。
+- 下一 session 恢复点：读本文件 + FINDINGS.md + BASELINE.md；M4 交付物（TEST_RESULTS/PERFORMANCE/REVIEW_ROUND1/2/FINAL_REPORT + gh pr create）进行中。
