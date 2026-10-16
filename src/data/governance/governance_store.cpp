@@ -1,5 +1,4 @@
 // governance_store.cpp — see governance_store.h for the contract.
-#include <QReadWriteLock>
 #include "governance_store.h"
 
 #include "data/query_cursor.h"
@@ -11,12 +10,14 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QReadWriteLock>
 
 #include <sqlite3.h>
 
 #include <QHash>
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 
 namespace sicnu::workspace
@@ -236,7 +237,9 @@ struct GovernanceStore::Impl
     mutable std::mutex mutex;
     QString schemaVersion;
     bool readOnly = false;
-    mutable bool stepFailed = false;
+    // R15-B (TSan): written under Impl::mutex by every reader, read by
+    // stepFailed() without it — atomic so the store-level flag is race-free.
+    mutable std::atomic<bool> stepFailed{ false };
     // Text of the last failing sqlite call (empty when nothing failed); lets
     // writers build actionable diagnostics instead of opaque failures.
     mutable QString lastError;
@@ -834,7 +837,7 @@ QString GovernanceStore::schemaVersion() const
 bool GovernanceStore::stepFailed() const
 {
     QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
-    return m_impl ? m_impl->stepFailed : false;
+    return m_impl ? m_impl->stepFailed.load() : false;
 }
 
 bool GovernanceStore::checkpointForBackup()
