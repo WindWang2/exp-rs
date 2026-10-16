@@ -15,7 +15,9 @@
 #include "dataset/dataset_store.h"
 #include "experiment/experiment_store.h"
 #include "experiment/lineage.h"
+#include "experiment/replay_readiness.h"
 #include "experiment/reproduction_bundle.h"
+#include "experiment/run_recorder.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -24,7 +26,9 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <chrono>
 #include <thread>
 #include <vector>
@@ -364,3 +368,54 @@ TEST_CASE( "#1449: a store can be reopened after close and stays consistent",
 #endif
   }
 }
+
+// ---------------------------------------------------------------------------
+// Item 7: checksums.txt CRLF tolerance. A bundle whose table went through a
+// Windows checkout (CRLF) is byte-identical in every member; before the fix
+// each listed name kept a trailing '\r' and the intact bundle was refused
+// ("checksum mismatch"). Tampering must still be refused.
+// ---------------------------------------------------------------------------
+namespace
+{
+QByteArray writeMember( const QDir &dir, const QString &name, const QByteArray &bytes )
+{
+  QFile f( dir.filePath( name ) );
+  REQUIRE( f.open( QIODevice::WriteOnly ) );
+  f.write( bytes );
+  f.close();
+  return QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex();
+}
+} // namespace
+
+TEST_CASE( "Item7: verifyBundleChecksums accepts a CRLF checksums.txt and still refuses tampering",
+           "[r15b][item7][bundle]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QDir dir( tmp.path() );
+  QByteArray table;
+  for ( const char *name : { "manifest.json", "run_config.json", "environment.json" } )
+  {
+    const QByteArray digest = writeMember( dir, QString::fromLatin1( name ), QByteArray( "{\"m\":\"" ) + name + "\"}" );
+    table += digest + "  " + name + "\r\n";
+  }
+  {
+    QFile f( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( table );
+  }
+  QStringList reasons;
+  CHECK( sicnu::experiment::verifyBundleChecksums( tmp.path(), &reasons ) );
+  INFO( reasons.join( QStringLiteral( "; " ) ).toStdString() );
+
+  // Tamper a member: still refused under CRLF.
+  {
+    QFile f( dir.filePath( QStringLiteral( "run_config.json" ) ) );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    f.write( "{\"m\":\"tampered\"}" );
+  }
+  reasons.clear();
+  CHECK_FALSE( sicnu::experiment::verifyBundleChecksums( tmp.path(), &reasons ) );
+  CHECK( reasons.join( QString() ).contains( QStringLiteral( "checksum mismatch: run_config.json" ) ) );
+}
+
