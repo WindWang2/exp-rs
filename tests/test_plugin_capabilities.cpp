@@ -119,6 +119,82 @@ TEST_CASE( "wrong-typed capabilities are validation errors", "[plugin][capabilit
     REQUIRE( result.errors.size() == 2 );
 }
 
+TEST_CASE( "worker write gate is fail-closed on access parse errors", "[plugin][capabilities]" )
+{
+    // The worker-side decision used to be `ok() && !writeRoots.empty()` —
+    // a manifest whose declared write root cannot expand in the worker's
+    // context (e.g. ${workspace} with no workspace configured) parsed with
+    // errors and silently turned the workDir gate OFF.
+    const auto gateOffOldFormula = []( const PluginCapabilityParseResult &r ) {
+        return r.ok() && !r.capabilities.fsWriteRoots.empty();
+    };
+
+    // Access-less manifest: no declarations, no errors -> gate stays off
+    // (unchanged: no capability claims means no gate, same as today).
+    const auto none = parsePluginAccess( Json::Value( Json::nullValue ),
+                                         anchorPath( "cap-p" ), anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
+    REQUIRE( none.ok() );
+    REQUIRE( none.capabilities.fsWriteRoots.empty() );
+    REQUIRE_FALSE( writeRootGateActive( none ) );
+
+    // Declared write roots that resolve -> gate on (unchanged).
+    {
+        Json::Value fs( Json::objectValue );
+        fs["write"] = Json::Value( Json::arrayValue );
+        fs["write"].append( "${temp}/out" );
+        Json::Value access( Json::objectValue );
+        access["filesystem"] = fs;
+        const auto r = parsePluginAccess( access, anchorPath( "cap-p" ),
+                                          anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
+        REQUIRE( r.ok() );
+        REQUIRE( r.capabilities.fsWriteRoots.size() == 1 );
+        REQUIRE( writeRootGateActive( r ) );
+    }
+
+    // Declared write root that cannot expand (workspace unset): the old
+    // formula dropped the gate entirely; now it stays ON so every non-temp
+    // workDir is refused.
+    {
+        Json::Value fs( Json::objectValue );
+        fs["write"] = Json::Value( Json::arrayValue );
+        fs["write"].append( "${workspace}/out" );
+        Json::Value access( Json::objectValue );
+        access["filesystem"] = fs;
+        const auto r = parsePluginAccess( access, anchorPath( "cap-p" ), "", anchorPath( "cap-t" ) );
+        REQUIRE_FALSE( r.ok() );
+        REQUIRE_FALSE( r.errors.empty() );
+        REQUIRE_FALSE( gateOffOldFormula( r ) ); // the pre-fix behavior: gate OFF
+        REQUIRE( writeRootGateActive( r ) );
+    }
+
+    // A parse error unrelated to write roots is still fail-closed.
+    {
+        Json::Value access( Json::objectValue );
+        access["network"] = "yes"; // wrong-typed leaf
+        const auto r = parsePluginAccess( access, anchorPath( "cap-p" ),
+                                          anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
+        REQUIRE_FALSE( r.ok() );
+        REQUIRE( r.capabilities.fsWriteRoots.empty() );
+        REQUIRE_FALSE( gateOffOldFormula( r ) ); // pre-fix: gate OFF
+        REQUIRE( writeRootGateActive( r ) );
+    }
+
+    // Read-only declarations parse clean with no write roots -> gate off
+    // (unchanged).
+    {
+        Json::Value fs( Json::objectValue );
+        fs["read"] = Json::Value( Json::arrayValue );
+        fs["read"].append( "${workspace}/inputs" );
+        Json::Value access( Json::objectValue );
+        access["filesystem"] = fs;
+        const auto r = parsePluginAccess( access, anchorPath( "cap-p" ),
+                                          anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
+        REQUIRE( r.ok() );
+        REQUIRE( r.capabilities.fsWriteRoots.empty() );
+        REQUIRE_FALSE( writeRootGateActive( r ) );
+    }
+}
+
 TEST_CASE( "quota manifest parsing warns on junk and keeps ceilings for clamping", "[plugin][quotas]" )
 {
     PluginQuota ceilings = PluginQuota::fromEnvironment();

@@ -1043,7 +1043,10 @@ int main( int argc, char **argv )
                 // host-provided default workDir (the executor's run
                 // directory) is legitimate and is not gated — identical to
                 // v1 behavior for manifests that make no capability claims.
-                policy.active = access.ok() && !policy.writeRoots.empty();
+                // Fail closed: ANY parse error (e.g. a declared root that
+                // cannot expand under the worker's context) still turns the
+                // gate ON — an unexpansed declaration is not a grant.
+                policy.active = writeRootGateActive( access );
             }
 
             PluginLoader loader;
