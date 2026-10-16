@@ -991,3 +991,201 @@ TEST_CASE( "ImageFusion processNativeFusion qualityReport verdicts are honest", 
         CHECK_FALSE( report.violations.empty() );
     }
 }
+
+// ===========================================================================
+// R15-A (O1): resample-then-mask boundary — GDAL's RasterIO bilinear kernel
+// does not honor NoData, so a declared sentinel adjacent to valid pixels is
+// blended into a FINITE contaminated value that the exact-match wash cannot
+// catch (R14-A residual: "values GDAL resampling already blended across a
+// sentinel edge stay finite"). The fix washes the sentinel to NaN in the
+// native window BEFORE resampling, so a pan pixel whose kernel touches a void
+// source is void (the family's partial-NoData convention, #700); void-free
+// windows keep the original GDAL path verbatim.
+//
+// Sentinel choice: -9999's blended sums are negative, so #611's
+// "negative band sums map to nodata" guard masks the contamination in the
+// pre-fix output. A mild sentinel (-1) keeps the blended sum positive and
+// lets the contamination survive as plausible-looking garbage — the honest
+// RED driver. The -9999 variant below pins the fixed behavior for the classic
+// sentinel too.
+// ===========================================================================
+
+TEST_CASE( "Streaming brovey resampling does not blend a mild declared sentinel into fused output [r15a][nodata][resample]",
+           "[fusion][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_rs1.tif" ) );
+    const QString msRawPath = dir.filePath( QStringLiteral( "ms_rs1_raw.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_rs1.vrt" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_rs1.tif" ) );
+
+    // pan 4x4 @1m; MS 2x2 @2m — the MS is resampled onto the pan grid.
+    // MS band 2 declares -1 and carries the void at the top-left MS pixel;
+    // every other MS pixel is valid (2.0). Pre-fix, the bilinear kernel blends
+    // the -1 into finite values at the three pan pixels whose kernels touch it
+    // (dst (1,0),(0,1),(1,1) → band2 0.5/0.5/1.25), which brovey then fuses
+    // into plausible-looking but wrong reflectance (8.889/7.619 instead of
+    // void). Post-fix those kernels are void in every band.
+    std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    std::array<double, 6> msGt = { 0.0, 2.0, 0.0, 0.0, 0.0, -2.0 };
+    GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
+                                           QStringLiteral( "EPSG:32648" ) );
+    GDALDatasetH msDs = createOutputTiff( msRawPath, 2, 2, 2, GDT_Float32, msGt,
+                                          QStringLiteral( "EPSG:32648" ) );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const std::vector<float> pan( 16, 10.0f );
+    const std::vector<float> ms1 = { 4.0f, 4.0f, 4.0f, 4.0f };
+    const std::vector<float> ms2 = { -1.0f, 2.0f, 2.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 4, 4,
+                           const_cast<float *>( pan.data() ), 4, 4, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms1.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms2.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+    {
+        // Per-band NoData declarations ride a VRT wrapper (GTiff stores ONE
+        // NoData tag per dataset; same strategy as the [r14a] hetero test).
+        // Band 1 declares none; band 2 declares -1.
+        QFile vrt( msPath );
+        REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        QTextStream ts( &vrt );
+        ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_rs1_raw.tif"
+              "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"2\">\n";
+        ts << "    <NoDataValue>-1</NoDataValue>\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_rs1_raw.tif"
+              "</SourceFilename><SourceBand>2</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "</VRTDataset>\n";
+    }
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 2 );
+    REQUIRE( out.width() == 4 );
+    REQUIRE( out.height() == 4 );
+    std::vector<float> out1( 16 ), out2( 16 );
+    REQUIRE( out.readBandData( 1, out1.data(), 4, 4 ) );
+    REQUIRE( out.readBandData( 2, out2.data(), 4, 4 ) );
+
+    // The pan pixels whose bilinear kernel touches the void MS pixel are void
+    // in every band (brovey's any-void rule): the top-left 2x2 quadrant
+    // (indices 0,1,4,5 in row-major 4x4).
+    for ( int i : { 0, 1, 4, 5 } )
+    {
+        CHECK( std::isnan( out1[static_cast<size_t>( i )] ) );
+        CHECK( std::isnan( out2[static_cast<size_t>( i )] ) );
+    }
+    // Every other pan pixel fuses from valid data only:
+    // out1 = 4/(4+2)*10, out2 = 2/(4+2)*10. Valid edge pixels adjacent to the
+    // void quadrant are NOT deleted — only kernels touching the void are.
+    for ( int i : { 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 } )
+    {
+        CHECK( out1[static_cast<size_t>( i )] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+        CHECK( out2[static_cast<size_t>( i )] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+    }
+    // No physically impossible negative reflectance survives anywhere.
+    for ( size_t i = 0; i < out1.size(); ++i )
+    {
+        if ( !std::isnan( out1[i] ) )
+            CHECK( out1[i] >= 0.0f );
+        if ( !std::isnan( out2[i] ) )
+            CHECK( out2[i] >= 0.0f );
+    }
+}
+
+TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps the void quadrant void [r15a][nodata][resample]",
+           "[fusion][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_rs2.tif" ) );
+    const QString msRawPath = dir.filePath( QStringLiteral( "ms_rs2_raw.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_rs2.vrt" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_rs2.tif" ) );
+
+    // Same geometry as the mild-sentinel case, but with the classic -9999
+    // declaration. Pre-fix, the contaminated blended sums are negative, so
+    // #611 masks the symptom (output already all-NaN in the quadrant); this
+    // case pins that the wash-then-resample fix is sentinel-agnostic.
+    std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    std::array<double, 6> msGt = { 0.0, 2.0, 0.0, 0.0, 0.0, -2.0 };
+    GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
+                                           QStringLiteral( "EPSG:32648" ) );
+    GDALDatasetH msDs = createOutputTiff( msRawPath, 2, 2, 2, GDT_Float32, msGt,
+                                          QStringLiteral( "EPSG:32648" ) );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const std::vector<float> pan( 16, 10.0f );
+    const std::vector<float> ms1 = { 4.0f, 4.0f, 4.0f, 4.0f };
+    const std::vector<float> ms2 = { -9999.0f, 2.0f, 2.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 4, 4,
+                           const_cast<float *>( pan.data() ), 4, 4, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms1.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms2.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+    {
+        QFile vrt( msPath );
+        REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        QTextStream ts( &vrt );
+        ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_rs2_raw.tif"
+              "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"2\">\n";
+        ts << "    <NoDataValue>-9999</NoDataValue>\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_rs2_raw.tif"
+              "</SourceFilename><SourceBand>2</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "</VRTDataset>\n";
+    }
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 2 );
+    std::vector<float> out1( 16 ), out2( 16 );
+    REQUIRE( out.readBandData( 1, out1.data(), 4, 4 ) );
+    REQUIRE( out.readBandData( 2, out2.data(), 4, 4 ) );
+
+    for ( int i : { 0, 1, 4, 5 } )
+    {
+        CHECK( std::isnan( out1[static_cast<size_t>( i )] ) );
+        CHECK( std::isnan( out2[static_cast<size_t>( i )] ) );
+    }
+    for ( int i : { 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 } )
+    {
+        CHECK( out1[static_cast<size_t>( i )] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+        CHECK( out2[static_cast<size_t>( i )] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+    }
+}
