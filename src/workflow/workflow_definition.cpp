@@ -207,10 +207,25 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
         }
       }
 
-      if ( stepVal.isMember( "gates" ) && stepVal["gates"].isArray() )
+      // Fail-closed like "steps: non-object step entry": a present, non-null
+      // gates/inputs member must be an array of objects. Probing a non-object
+      // element with isMember() throws Json::LogicError — a poison checkpoint
+      // would abort the recovery sweep on every launch — and silently
+      // dropping wrong-typed fields loses declared dependencies.
+      if ( stepVal.isMember( "gates" ) && !stepVal["gates"].isNull() )
       {
+        if ( !stepVal["gates"].isArray() )
+        {
+          error = "step '" + step.id + "': 'gates' must be an array";
+          return false;
+        }
         for ( const auto &gVal : stepVal["gates"] )
         {
+          if ( !gVal.isObject() )
+          {
+            error = "step '" + step.id + "': 'gates' element must be an object";
+            return false;
+          }
           GateDef gate;
           if ( gVal.isMember( "require" ) && gVal["require"].isString() )
             gate.require = gVal["require"].asString();
@@ -220,10 +235,28 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
         }
       }
 
-      if ( stepVal.isMember( "inputs" ) && stepVal["inputs"].isArray() )
+      if ( stepVal.isMember( "inputs" ) && !stepVal["inputs"].isNull() )
       {
+        if ( !stepVal["inputs"].isArray() )
+        {
+          error = "step '" + step.id + "': 'inputs' must be an array";
+          return false;
+        }
         for ( const auto &connVal : stepVal["inputs"] )
         {
+          if ( !connVal.isObject() )
+          {
+            error = "step '" + step.id + "': 'inputs' element must be an object";
+            return false;
+          }
+          for ( const char *field : { "fromStepId", "fromPort", "toPort" } )
+          {
+            if ( connVal.isMember( field ) && !connVal[field].isNull() && !connVal[field].isString() )
+            {
+              error = "step '" + step.id + "': 'inputs." + field + "' must be a string";
+              return false;
+            }
+          }
           StepConnection conn;
           if ( connVal.isMember( "fromStepId" ) && connVal["fromStepId"].isString() )
             conn.fromStepId = connVal["fromStepId"].asString();

@@ -595,3 +595,58 @@ TEST_CASE( "an id-less definition step is refused instead of poisoning the check
   REQUIRE( loaded != nullptr );
   REQUIRE( loaded->runId() == "run-round-trip" );
 }
+
+TEST_CASE( "loadCheckpoint refuses a poisoned gates element without throwing",
+           "[workflow][v2][checkpoint]" )
+{
+  // A hand-edited/corrupt checkpoint whose definition parses as JSON but
+  // carries a non-object `gates` element used to throw Json::LogicError
+  // (isMember() asserts on non-objects) straight out of loadCheckpoint —
+  // the same file would crash the recovery sweep on every launch. It must
+  // now be a typed refusal: nullptr + a non-empty error, never a throw.
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+  WorkflowCheckpointManager manager;
+
+  WorkflowDefinition def;
+  def.id = "wf_poisoned_gates";
+  StepDef step;
+  step.id = "s1";
+  step.operatorId = "rs:test";
+  def.steps.push_back( step );
+
+  auto run = WorkflowRun::createFromDefinition( def, "run-poisoned-gates" );
+  REQUIRE( run );
+  run->transitionTo( WorkflowRunState::Running );
+  const QString path = manager.saveCheckpoint( *run, tmpDir.path() );
+  REQUIRE( !path.isEmpty() );
+
+  // Rewrite the checkpoint in place with definition.steps[0].gates = [1] —
+  // well-formed JSON that trips the parser's non-object element check.
+  {
+    QFile in( path );
+    REQUIRE( in.open( QIODevice::ReadOnly | QIODevice::Text ) );
+    const QByteArray data = in.readAll();
+    in.close();
+
+    Json::Value root;
+    std::string errs;
+    const std::unique_ptr<Json::CharReader> reader( Json::CharReaderBuilder().newCharReader() );
+    REQUIRE( reader->parse( data.constData(), data.constData() + data.size(), &root, &errs ) );
+
+    Json::Value badGates( Json::arrayValue );
+    badGates.append( 1 );
+    root["definition"]["steps"][0]["gates"] = badGates;
+
+    QFile out( path );
+    REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate ) );
+    out.write( Json::writeString( Json::StreamWriterBuilder(), root ).c_str() );
+    out.close();
+  }
+
+  QString err;
+  std::unique_ptr<WorkflowRun> loaded;
+  REQUIRE_NOTHROW( loaded = manager.loadCheckpoint( path, &err ) );
+  REQUIRE( loaded == nullptr );
+  REQUIRE( !err.isEmpty() );
+}

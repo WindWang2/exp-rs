@@ -164,7 +164,22 @@ std::unique_ptr<WorkflowRun> WorkflowCheckpointManager::loadCheckpoint( const QS
   }
 
   std::string parseErr;
-  auto run = WorkflowRun::fromJson( root, parseErr );
+  std::unique_ptr<WorkflowRun> run;
+  try
+  {
+    run = WorkflowRun::fromJson( root, parseErr );
+  }
+  catch ( const std::exception &e )
+  {
+    // Defense in depth: a document that is well-formed JSON but trips a
+    // deep parser check (e.g. Json::LogicError from isMember on a non-object
+    // leaf) must be a typed refusal — a thrown exception here crashes the
+    // startup recovery sweep, every launch, for as long as the poison file
+    // exists.
+    if ( error )
+      *error = QStringLiteral( "Failed to parse checkpoint: %1" ).arg( QString::fromUtf8( e.what() ) );
+    return nullptr;
+  }
   if ( !run )
   {
     if ( error )
