@@ -17,6 +17,7 @@
 
 #include "geospatial/remote/probe_remote.h"
 
+#include "geospatial/remote/offline_gate.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <cpl_conv.h>
@@ -92,6 +93,9 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
   }
   const std::string target =
     uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
+
+  if ( offline::enabled() )
+    throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( uri.display() ) );
 
   // Option strings are built once, then the char* array — c_str() pointers
   // into a growing container dangle; assemble the array after the strings.

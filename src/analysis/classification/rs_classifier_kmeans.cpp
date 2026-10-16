@@ -52,6 +52,12 @@ bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat &y )
     cv::Mat labels;
     const cv::TermCriteria term( cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS,
                                  kKMeansMaxIter, kKMeansEps );
+    // Pin the thread-local OpenCV RNG before k-means++ seeding: KMEANS_PP_CENTERS
+    // draws its initial centers from it, so an unseeded run made cluster ids
+    // (and the Hungarian remap onto class ids) differ run-to-run on the same
+    // data (r14-A determinism; the repo's own test hedged with "centre
+    // ordering is non-deterministic"). Same seed every fit → same centers.
+    cv::setRNGSeed( 42 );
     cv::kmeans( data, m_k, labels, term, kKMeansAttempts, cv::KMEANS_PP_CENTERS, m_centers );
     SICNU_LOG_SUCCESS( SicnuLogTags::Classification, "KMeans training complete" );
     return !m_centers.empty();

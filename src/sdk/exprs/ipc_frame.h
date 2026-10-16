@@ -61,9 +61,14 @@ public:
 namespace IpcFrame {
 
 /// Serializes @p json into one frame and writes it. Fails (without writing
-/// anything) when the encoded size exceeds @p limits.maxFrameBytes.
+/// anything) when the encoded size exceeds @p limits.maxFrameBytes. When
+/// @p failureCode is non-null it receives the typed classification of the
+/// refusal ("E6003" for a size-class refusal, empty for a transport
+/// failure) — callers classify on the code, never by scraping @p error
+/// (#1459's substring-classification lesson, R14-C FIX-8).
 bool writeJson( IIpcStream &stream, const Json::Value &json,
-                const IpcFrameLimits &limits, std::string &error );
+                const IpcFrameLimits &limits, std::string &error,
+                std::string *failureCode = nullptr );
 
 enum class ReadStatus
 {

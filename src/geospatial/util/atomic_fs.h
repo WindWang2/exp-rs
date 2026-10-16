@@ -111,6 +111,34 @@ void writeFileAtomic( const std::string &targetPath, const std::function<void( c
 /// File size in bytes; 0 when unavailable.
 std::uintmax_t fileSize( const std::string &path );
 
+/// Checks whether an uncommitted journal or committed marker exists for the given main target.
+bool hasPendingJournal( const std::string &targetMainPath );
+
+/// Recovers an interrupted multi-file publication for targetMainPath.
+/// If an uncommitted journal is found, rolls back published targets and restores backups.
+/// If a committed marker is found, cleans up leftover backups.
+/// Returns true if recovery was performed, false if no journal was present.
+bool recoverDatasetGroup( const std::string &targetMainPath );
+
+/// Compatibility alias for recoverDatasetGroup.
+inline bool recoverInterruptedPublish( const std::string &targetMainPath ) { return recoverDatasetGroup( targetMainPath ); }
+
+/// Scans a directory for any .publish-journal or .publish-journal.committed files
+/// and recovers all found groups. Returns the count of recovered groups.
+std::size_t recoverDirectoryJournals( const std::string &directoryPath );
+
 } // namespace sicnu::geo::atomic_fs
+
+#if __has_include(<QString>)
+#include <QString>
+namespace sicnu::geo::atomic_fs
+{
+inline bool hasPendingJournal( const QString &targetMainPath ) { return hasPendingJournal( targetMainPath.toStdString() ); }
+inline bool recoverDatasetGroup( const QString &targetMainPath ) { return recoverDatasetGroup( targetMainPath.toStdString() ); }
+inline bool recoverInterruptedPublish( const QString &targetMainPath ) { return recoverDatasetGroup( targetMainPath ); }
+inline std::size_t recoverDirectoryJournals( const QString &directoryPath ) { return recoverDirectoryJournals( directoryPath.toStdString() ); }
+} // namespace sicnu::geo::atomic_fs
+#endif
+
 
 #endif // SICNU_GEOSPATIAL_ATOMIC_FS_H

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <sstream>
+#include <utility>
 
 namespace sicnu::science_context {
 
@@ -43,7 +44,28 @@ std::string hex16( std::uint64_t v )
 
 } // namespace
 
-void RecipeRouter::setRecipes( std::vector<RecipeDocument> recipes )
+RecipeRouter::RecipeRouter( RecipeRouter &&other ) noexcept
+{
+    const std::lock_guard<std::mutex> otherLock( other.mMutex );
+    mRecipes = std::move( other.mRecipes );
+    mRevision = other.mRevision;
+    mSource = std::move( other.mSource );
+}
+
+RecipeRouter &RecipeRouter::operator=( RecipeRouter &&other ) noexcept
+{
+    if ( this == &other )
+        return *this;
+    // Distinct mutexes (self-assignment guarded above): no lock-order cycle.
+    std::lock_guard<std::mutex> lock( mMutex );
+    const std::lock_guard<std::mutex> otherLock( other.mMutex );
+    mRecipes = std::move( other.mRecipes );
+    mRevision = other.mRevision;
+    mSource = std::move( other.mSource );
+    return *this;
+}
+
+void RecipeRouter::setRecipesLocked( std::vector<RecipeDocument> recipes )
 {
     mRecipes = std::move( recipes );
     std::sort( mRecipes.begin(), mRecipes.end(),
@@ -54,8 +76,15 @@ void RecipeRouter::setRecipes( std::vector<RecipeDocument> recipes )
     mSource.authority = "manual_seed";
 }
 
+void RecipeRouter::setRecipes( std::vector<RecipeDocument> recipes )
+{
+    const std::lock_guard<std::mutex> lock( mMutex );
+    setRecipesLocked( std::move( recipes ) );
+}
+
 void RecipeRouter::clear()
 {
+    const std::lock_guard<std::mutex> lock( mMutex );
     mRecipes.clear();
     mSource.mode = RecipeSourceMode::None;
     mSource.authority.clear();
@@ -63,21 +92,43 @@ void RecipeRouter::clear()
 
 void RecipeRouter::setRegistryRevision( std::uint64_t revision )
 {
+    const std::lock_guard<std::mutex> lock( mMutex );
     mRevision = revision;
+}
+
+std::uint64_t RecipeRouter::registryRevision() const
+{
+    const std::lock_guard<std::mutex> lock( mMutex );
+    return mRevision;
 }
 
 RecipeSourceInfo RecipeRouter::sourceInfo() const
 {
+    const std::lock_guard<std::mutex> lock( mMutex );
     return mSource;
 }
 
 bool RecipeRouter::loadFromRegistry( sicnu::recipes::ScientificRecipeRegistry &registry )
 {
+    // Registry interaction happens OUTSIDE the router lock: it does file
+    // I/O and its own synchronization, and holding mMutex across it would
+    // serialize unrelated searches against disk latency.
     registry.reload();
-    mSource.registryStatus = registry.status();
-    mSource.registryProblems = static_cast<int>( registry.loadProblems().size() );
+    const std::string status = registry.status();
+    const int problems = static_cast<int>( registry.loadProblems().size() );
+    const bool loaded = registry.loaded() && !registry.recipeIds().empty();
 
-    if ( !registry.loaded() || registry.recipeIds().empty() )
+    std::vector<RecipeDocument> docs;
+    if ( loaded )
+    {
+        for ( const auto &id : registry.recipeIds() )
+            docs.push_back( fromRecipeJson( registry.recipe( id ) ) );
+    }
+
+    const std::lock_guard<std::mutex> lock( mMutex );
+    mSource.registryStatus = status;
+    mSource.registryProblems = problems;
+    if ( !loaded )
     {
         // Fail closed: unavailable authority must not leave stale docs or a
         // stale live_authority label behind.
@@ -89,24 +140,33 @@ bool RecipeRouter::loadFromRegistry( sicnu::recipes::ScientificRecipeRegistry &r
         return false;
     }
 
-    std::vector<RecipeDocument> docs;
-    for ( const auto &id : registry.recipeIds() )
-        docs.push_back( fromRecipeJson( registry.recipe( id ) ) );
-    setRecipes( std::move( docs ) );
-    mSource.mode = RecipeSourceMode::LiveAuthority; // setRecipes re-tagged it
+    setRecipesLocked( std::move( docs ) );
+    mSource.mode = RecipeSourceMode::LiveAuthority; // setRecipesLocked re-tagged it
     mSource.authority = "recipes.scientific_recipe_registry";
     // Digest-derived: covers ids, intents and modalities of the synced set.
-    mSource.revision = fnv1a64( packDigest() );
+    mSource.revision = fnv1a64( packDigestLocked() );
     mRevision = mSource.revision;
     return true;
 }
 
-std::string RecipeRouter::packDigest() const
+std::string RecipeRouter::packDigestLocked() const
 {
     std::ostringstream oss;
     for ( const auto &r : mRecipes )
         oss << r.recipeId << '|' << r.intent << '|' << r.modality << ';';
     return hex16( fnv1a64( oss.str() ) );
+}
+
+std::string RecipeRouter::packDigest() const
+{
+    const std::lock_guard<std::mutex> lock( mMutex );
+    return packDigestLocked();
+}
+
+std::pair<std::uint64_t, std::string> RecipeRouter::revisionAndDigest() const
+{
+    const std::lock_guard<std::mutex> lock( mMutex );
+    return { mRevision, packDigestLocked() };
 }
 
 RecipeDocument RecipeRouter::fromRecipeJson( const Json::Value &doc )
@@ -168,6 +228,7 @@ RecipeDocument RecipeRouter::fromRecipeJson( const Json::Value &doc )
 
 RecipeRouterResult RecipeRouter::search( const RecipeQuery &query ) const
 {
+    const std::lock_guard<std::mutex> lock( mMutex );
     RecipeRouterResult result;
     result.registryRevision = mRevision;
 

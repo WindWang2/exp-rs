@@ -1226,3 +1226,193 @@ TEST_CASE( "the egress policy judges IPv4-mapped IPv6 literals by their embedded
   CHECK_FALSE( StacClient::egressPolicyError( "https://[fe80::1]/stac" ).empty() );
   CHECK_FALSE( StacClient::egressPolicyError( "https://[fd12::1]/stac" ).empty() );
 }
+
+TEST_CASE( "pagination follows RFC 3986 §5.2.2 query-only relative next link",
+           "[io][stac][client][pagination]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  const std::string page1 = renderPage(
+    { renderItem( "item1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) },
+    "?cursor=page2&limit=1" );
+  const std::string page2 = renderPage(
+    { renderItem( "item2", "2026-08-02T10:00:00Z", "2", "[10,40,11,41]" ) }, "" );
+  testsupport::StacRoute r1; r1.body = page1;
+  testsupport::StacRoute r2; r2.body = page2;
+  server.setRoute( "/search", r1 );
+  server.setRoute( "/search?cursor=page2&limit=1", r2 );
+
+  StacClient client( server.url() );
+  const StacSearchAllResult all = client.searchAll( StacSearchQuery{} );
+  REQUIRE( all.items.size() == 2 );
+  CHECK( all.items[0].id == "item1" );
+  CHECK( all.items[1].id == "item2" );
+
+  const auto requests = server.requests();
+  REQUIRE( requests.size() == 2 );
+  CHECK( requests[0].path == "/search" );
+  CHECK( requests[1].path == "/search" );
+  CHECK( requests[1].query == "cursor=page2&limit=1" );
+}
+
+TEST_CASE( "link relation matches case-insensitively with whitespace trimmed and normalizes method",
+           "[io][stac][client][pagination]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  const std::string page1 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "w1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": [{\"rel\": \"  NEXT  \", \"href\": \"" + server.url() +
+    "/search?page=2\", \"method\": \"get\"}]}";
+  const std::string page2 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "w2", "2026-08-02T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": []}";
+  testsupport::StacRoute r1; r1.body = page1;
+  testsupport::StacRoute r2; r2.body = page2;
+  server.setRoute( "/search", r1 );
+  server.setRoute( "/search?page=2", r2 );
+
+  StacClient client( server.url() );
+  StacPage first = client.search( StacSearchQuery{} );
+  REQUIRE( first.items.size() == 1 );
+  CHECK( first.hasMore() );
+  CHECK( first.nextMethod == "GET" );
+
+  StacPage second = client.nextPage( first );
+  REQUIRE( second.items.size() == 1 );
+  CHECK( second.items[0].id == "w2" );
+  CHECK_FALSE( second.hasMore() );
+}
+
+TEST_CASE( "POST next link without body falls back to selfBody",
+           "[io][stac][client][pagination]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  const std::string page1 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "p1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": [{\"rel\": \"Next\", \"href\": \"" + server.url() +
+    "/search2\", \"method\": \"post\"}]}";
+  const std::string page2 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "p2", "2026-08-02T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": []}";
+  testsupport::StacRoute r1; r1.body = page1;
+  testsupport::StacRoute r2; r2.body = page2;
+  server.setRoute( "/search", r1 );
+  server.setRoute( "/search2", r2 );
+
+  StacClient client( server.url() );
+  StacSearchQuery query;
+  query.bbox = { 10.0, 40.0, 11.0, 41.0 };
+  query.datetime = "2026-08-01T00:00:00Z/..";
+  StacPage first = client.search( query );
+  CHECK( first.nextMethod == "POST" );
+  StacPage second = client.nextPage( first );
+  REQUIRE( second.items.size() == 1 );
+  CHECK( second.items[0].id == "p2" );
+
+  const auto requests = server.requests();
+  REQUIRE( requests.size() == 2 );
+  CHECK( requests[1].method == "POST" );
+  CHECK( requests[1].path == "/search2" );
+  CHECK_THAT( requests[1].body, ContainsSubstring( "\"bbox\"" ) );
+}
+
+TEST_CASE( "POST pagination detects identical loop key incorporating body",
+           "[io][stac][client][pagination][bounds]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  const std::string loopPage =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "loop1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": [{\"rel\": \"next\", \"href\": \"" + server.url() +
+    "/loop\", \"method\": \"POST\", \"body\": {\"cursor\": \"c1\"}}]}";
+  testsupport::StacRoute route;
+  route.body = loopPage;
+  server.setRoute( "/search", route );
+  server.setRoute( "/loop", route );
+
+  StacClient client( server.url() );
+  CHECK_THROWS_AS( client.searchAll( StacSearchQuery{} ), GeoError );
+}
+
+TEST_CASE( "StacClient resolves query-only relative next link without stripping endpoint",
+           "[io][stac][client][pagination]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/api/v1/search?limit=1", { 200, "application/json", renderPage(
+    { renderItem( "s1", "2026-08-01T10:00:00Z", "5", "[10,40,11,41]" ) },
+    "?cursor=page2&limit=1" ) } );
+  server.setRoute( "/api/v1/search?cursor=page2&limit=1", { 200, "application/json", renderPage(
+    { renderItem( "s2", "2026-08-02T10:00:00Z", "5", "[10,40,11,41]" ) }, "" ) } );
+
+  StacClient client( server.url() + "/api/v1" );
+  StacSearchQuery q;
+  q.limit = 1;
+  const StacSearchAllResult all = client.searchAll( q );
+  REQUIRE( all.items.size() == 2 );
+  CHECK( all.items[0].id == "s1" );
+  CHECK( all.items[1].id == "s2" );
+}
+
+TEST_CASE( "StacClient extracts rel=next link with whitespace and mixed-case relation or method",
+           "[io][stac][client][pagination]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  const std::string page1 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "w1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": [{\"rel\": \" Next \", \"href\": \"" + server.url() +
+    "/p2\", \"method\": \"post\", \"body\": {\"cursor\": \"c2\"}}]}";
+  const std::string page2 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "w2", "2026-08-02T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": []}";
+
+  server.setRoute( "/search", { 200, "application/json", page1 } );
+  server.setRoute( "/p2", { 200, "application/json", page2 } );
+
+  StacClient client( server.url() );
+  StacPage first = client.search( StacSearchQuery{} );
+  CHECK( first.hasMore() );
+  CHECK( first.nextMethod == "POST" );
+  StacPage second = client.nextPage( first );
+  REQUIRE( second.items.size() == 1 );
+  CHECK( second.items[0].id == "w2" );
+}
+
+TEST_CASE( "StacClient buildNextRequest falls back to selfBody when next body is null",
+           "[io][stac][client][pagination]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  const std::string page1 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "fb1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": [{\"rel\": \"next\", \"href\": \"" + server.url() +
+    "/search2?page=2\", \"method\": \"POST\"}]}";
+  const std::string page2 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "fb2", "2026-08-02T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": []}";
+
+  server.setRoute( "/search", { 200, "application/json", page1 } );
+  server.setRoute( "/search2", { 200, "application/json", page2 } );
+
+  StacClient client( server.url() );
+  StacSearchQuery query;
+  query.bbox = { 10.0, 40.0, 11.0, 41.0 };
+  StacPage first = client.search( query );
+  CHECK( first.nextMethod == "POST" );
+  CHECK( first.nextBody.isNull() );
+  StacPage second = client.nextPage( first );
+  REQUIRE( second.items.size() == 1 );
+  CHECK( second.items[0].id == "fb2" );
+}

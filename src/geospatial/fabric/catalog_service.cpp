@@ -508,6 +508,22 @@ bool VSIFileExists( const std::string &path )
   return VSIStatL( path.c_str(), &statBuffer ) == 0;
 }
 
+bool isContainedWithin( const std::string &parentDir, const std::string &path )
+{
+  const std::string normParent = FileSystemlessNormalize( parentDir );
+  const std::string normChild = FileSystemlessNormalize( path );
+  if ( normChild == normParent )
+    return true;
+  const std::string prefix = normParent.back() == '/' ? normParent : normParent + "/";
+#ifdef _WIN32
+  const std::string lowerChild = lowerAscii( normChild );
+  const std::string lowerPrefix = lowerAscii( prefix );
+  return lowerChild.rfind( lowerPrefix, 0 ) == 0;
+#else
+  return normChild.rfind( prefix, 0 ) == 0;
+#endif
+}
+
 } // namespace
 
 struct CatalogService::LocalImpl
@@ -632,23 +648,37 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
           const ResourceUri resolved = ResourceUri::resolveAgainst( baseDirectory, href );
           if ( resolved.kind == ResourceKind::LocalFile )
           {
-            const std::string normal = FileSystemlessNormalize( resolved.raw );
-            if ( visited.insert( normal ).second )
-              service.mLocal->itemFiles.push_back( normal );
+            const std::string normal = FileSystemlessNormalize( resolved.path.empty() ? resolved.raw : resolved.path );
+            if ( isContainedWithin( rootNormalized, normal ) )
+            {
+              if ( visited.insert( normal ).second )
+                service.mLocal->itemFiles.push_back( normal );
+            }
+            else
+            {
+              ++service.mLocal->skippedFiles;
+            }
           }
           else
           {
-            ++service.mLocal->skippedFiles;   // remote links: not this backend's crawl
+            ++service.mLocal->skippedFiles;   // remote links / out of bounds: not this backend's crawl
           }
         }
         for ( const std::string &href : childLinks )
         {
           const ResourceUri resolved = ResourceUri::resolveAgainst( baseDirectory, href );
-          if ( resolved.kind == ResourceKind::LocalFile )
+          if ( resolved.kind == ResourceKind::LocalFile || resolved.kind == ResourceKind::LocalDirectory )
           {
-            const std::string normal = FileSystemlessNormalize( resolved.raw );
-            if ( visited.insert( normal ).second )
-              queue.push_back( normal );
+            const std::string normal = FileSystemlessNormalize( resolved.path.empty() ? resolved.raw : resolved.path );
+            if ( isContainedWithin( rootNormalized, normal ) )
+            {
+              if ( visited.insert( normal ).second )
+                queue.push_back( normal );
+            }
+            else
+            {
+              ++service.mLocal->skippedFiles;
+            }
           }
           else
           {
@@ -773,7 +803,18 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
 
     CatalogPage page;
     StacPage stacPage;
-    if ( continuation.hasMore || !continuation.remoteHref.empty() )
+    bool usingBuffered = !continuation.remoteBufferedItems.empty();
+    if ( usingBuffered )
+    {
+      stacPage.items = continuation.remoteBufferedItems;
+      stacPage.selfMethod = continuation.remoteSelfMethod.empty() ? "GET" : continuation.remoteSelfMethod;
+      stacPage.selfBody = continuation.remoteSelfBody;
+      stacPage.nextMethod = continuation.remoteMethod;
+      stacPage.nextHref = continuation.remoteHref;
+      stacPage.nextBody = continuation.remoteBody;
+      stacPage.nextMerge = continuation.remoteMerge;
+    }
+    else if ( continuation.hasMore || !continuation.remoteHref.empty() )
     {
       StacPage previous;
       previous.selfMethod = continuation.remoteSelfMethod.empty() ? "GET" : continuation.remoteSelfMethod;
@@ -791,6 +832,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
     }
 
     bool cappedByMax = false;
+    std::size_t consumedCount = 0;
     for ( std::size_t i = 0; i < stacPage.items.size(); ++i )
     {
       const StacItem &item = stacPage.items[i];
@@ -805,6 +847,7 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
           if ( query.maxItems > 0 &&
                page.records.size() >= static_cast<std::size_t>( query.maxItems ) )
           {
+            consumedCount = i + 1;
             cappedByMax = ( i + 1 < stacPage.items.size() ) || stacPage.hasMore();
             goto remoteItemsFinished;
           }
@@ -816,12 +859,17 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
           ++page.clientFilteredOut;
           break;
       }
+      consumedCount = i + 1;
     }
 remoteItemsFinished:
     page.offset = 0;
     page.serverFiltered = true;   // bbox/datetime/collections/ids went to the server
     page.truncatedByCap = cappedByMax;
-    page.next.hasMore = cappedByMax || stacPage.hasMore();
+    if ( consumedCount < stacPage.items.size() )
+    {
+      page.next.remoteBufferedItems.assign( stacPage.items.begin() + consumedCount, stacPage.items.end() );
+    }
+    page.next.hasMore = !page.next.remoteBufferedItems.empty() || stacPage.hasMore();
     page.next.remoteMethod = stacPage.nextMethod;
     page.next.remoteHref = stacPage.nextHref;
     page.next.remoteBody = stacPage.nextBody;
@@ -905,13 +953,15 @@ CatalogService::SearchAllResult CatalogService::searchAll( const CatalogQuery &q
   while ( true )
   {
     const CatalogPage page = searchPage( query, continuation, cancel );
+    bool maxReached = false;
     for ( std::size_t i = 0; i < page.records.size(); ++i )
     {
       if ( query.maxItems > 0 &&
            static_cast<int>( result.records.size() ) >= query.maxItems )
       {
         result.truncatedByCap = true;
-        return result;
+        maxReached = true;
+        break;
       }
       result.records.push_back( page.records[i] );
       if ( i < page.items.size() )
@@ -920,16 +970,17 @@ CatalogService::SearchAllResult CatalogService::searchAll( const CatalogQuery &q
            static_cast<int>( result.records.size() ) >= query.maxItems )
       {
         result.truncatedByCap = page.truncatedByCap || page.next.hasMore || ( i + 1 < page.records.size() );
-        return result;
+        maxReached = true;
+        break;
       }
     }
     result.clientFilteredOut += page.clientFilteredOut;
     result.unresolvable += page.unresolvable;
-    continuation = page.next;
     if ( page.truncatedByCap )
       result.truncatedByCap = true;
-    if ( !page.next.hasMore )
+    if ( maxReached || !page.next.hasMore )
       return result;
+    continuation = page.next;
     if ( ++guard > 100000 )   // loop backstop (bounds beats cleverness)
       throw GeoError( ErrorCode::ResourceExhausted, "catalog pagination failed to terminate" );
   }

@@ -381,12 +381,11 @@ ResolvedCapabilities resolveDatasetCapabilities( const std::string &path )
 
   ResolvedCapabilities resolved;
   resolved.remote = uri.isRemote();
-  const FormatRegistry &registry = FormatRegistry::instance();
-  if ( const FormatProfile *profile = registry.profileForPath( uri.canonical() ) )
-    resolved.profileId = profile->id;
-
   QuietCplErrors quiet;
   const std::string gdalPath = uri.gdalOpenTarget();
+  const FormatRegistry &registry = FormatRegistry::instance();
+  if ( const FormatProfile *profile = registry.profileForPath( gdalPath ) )
+    resolved.profileId = profile->id;
   GDALDatasetH dataset =
     GDALOpenEx( gdalPath.c_str(), GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
   if ( dataset == nullptr )
@@ -586,10 +585,14 @@ const FormatProfile *FormatRegistry::find( const std::string &id ) const
 
 const FormatProfile *FormatRegistry::profileForPath( const std::string &path ) const
 {
-  const std::size_t dot = path.rfind( '.' );
+  std::string decoded;
+  percentDecode( path, decoded );
+  const std::size_t queryOrFrag = decoded.find_first_of( "?#" );
+  const std::string cleanPath = queryOrFrag == std::string::npos ? decoded : decoded.substr( 0, queryOrFrag );
+  const std::size_t dot = cleanPath.rfind( '.' );
   if ( dot == std::string::npos )
     return nullptr;
-  const std::string extension = lowerAscii( path.substr( dot + 1 ) );
+  const std::string extension = lowerAscii( cleanPath.substr( dot + 1 ) );
   for ( const FormatProfile &profile : mProfiles )
   {
     if ( std::find( profile.extensions.begin(), profile.extensions.end(), extension ) != profile.extensions.end() )

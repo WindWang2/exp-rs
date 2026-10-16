@@ -202,8 +202,12 @@ void writeDetectionVector( const std::vector<DetectionBox> &boxes,
     const double gy2 = geoTransform[3] + ( box.x + box.w ) * geoTransform[4]
                        + ( box.y + box.h ) * geoTransform[5];
 
+    // Public shared API: a negative classId must not index before the vector
+    // (std::min clamps only the upper side; (size_t)-1 is a huge OOB read).
+    // Detections outlive their producer — clamp both sides like the comment
+    // below the decode contract promises.
     const std::size_t classIndex = static_cast<std::size_t>(
-      std::min( box.classId, static_cast<int>( classes.size() ) - 1 ) );
+      std::clamp( box.classId, 0, static_cast<int>( classes.size() ) - 1 ) );
     const std::string className = classes[classIndex];
 
     OGRFeatureH feature = OGR_F_Create( OGR_L_GetLayerDefn( layer ) );
@@ -481,7 +485,11 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
       // windows re-detect objects near the seams; keep a detection only when
       // its CENTER lies in this tile's core rect, so every object is owned
       // by exactly one tile (the whole-raster NMS then handles residual
-      // near-duplicates).
+      // near-duplicates). The rect is HALF-OPEN [x, x+w) x [y, y+h): with a
+      // strict `>` on the upper edges, a center exactly on a shared core
+      // edge was owned by BOTH adjacent tiles (two differently-scaled
+      // copies that NMS then had to collapse); `>=` hands it to exactly the
+      // right-hand/lower tile.
       const CoreTile &owner = batchCores[static_cast<std::size_t>( bi )];
       for ( std::size_t k = detections.size(); k > countBefore; )
       {
@@ -489,7 +497,7 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
         const DetectionBox &box = detections[k];
         const float cx = box.x + box.w * 0.5f;
         const float cy = box.y + box.h * 0.5f;
-        if ( cx < owner.x || cy < owner.y || cx > owner.x + owner.w || cy > owner.y + owner.h )
+        if ( cx < owner.x || cy < owner.y || cx >= owner.x + owner.w || cy >= owner.y + owner.h )
           detections.erase( detections.begin() + static_cast<std::ptrdiff_t>( k ) );
       }
     }
@@ -642,21 +650,34 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   }
 
   // Whole-raster dedup: exact-duplicate collapse + NMS = the tile-overlap
-  // resolution. Bounded accumulation guard before the write. The cancel
-  // predicate rides along (#971): a huge candidate set polls the task's
-  // cancel flag per NMS round instead of blocking the whole O(n²) pass.
+  // resolution. The cancel predicate rides along (#971): a huge candidate set
+  // polls the task's cancel flag per NMS round instead of blocking the whole
+  // O(n²) pass.
   stats.rawDetections = static_cast<int>( detections.size() );
-  if ( stats.rawDetections > det.maxDetections )
+  // Memory guard on the RAW (pre-NMS) accumulation: a head that emits k
+  // jittered near-duplicates per object routinely lands several times above
+  // the published count, so the raw ceiling carries headroom (8x) — the
+  // PRODUCT cap on what actually gets published is enforced post-dedup
+  // below, which is the count max_detections means for consumers.
+  const long long rawAccumulationCeiling =
+    std::max<long long>( 8LL * det.maxDetections, 100000LL );
+  if ( stats.rawDetections > rawAccumulationCeiling )
     throw RSOperatorError(
       ErrorCode::InvalidInputData,
       "detection accumulated " + std::to_string( stats.rawDetections )
-        + " boxes which exceeds output.detection.max_detections ("
+        + " raw candidates (post-NMS product cap is max_detections="
         + std::to_string( det.maxDetections ) + ") — raise the cap or lower the conf_threshold" );
   // F-OPS-5: the dedup/NMS pass probes cancellation every iteration block —
   // a near-max_detections candidate set used to block worker cancellation
   // for minutes inside the O(n^2) pass.
   dedupDetections( detections, det.nmsIou, [&context] { context.throwIfCancelled(); } );
   stats.detectionsKept = static_cast<int>( detections.size() );
+  if ( stats.detectionsKept > det.maxDetections )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "detection kept " + std::to_string( stats.detectionsKept )
+        + " boxes after dedup/NMS which exceeds output.detection.max_detections ("
+        + std::to_string( det.maxDetections ) + ") — raise the cap or lower the conf_threshold" );
 
   context.throwIfCancelled();
   if ( collectedBoxes )

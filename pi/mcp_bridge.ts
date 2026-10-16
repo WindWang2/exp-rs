@@ -13,6 +13,12 @@ export const MAX_RESULT_CHARS = 50_000;
 export const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const STARTUP_TIMEOUT_MS = 30 * 1000;
 export const MAX_LINE_BUFFER_CHARS = 32 * 1024 * 1024;
+/** The server's stdin line cap (McpServer kMaxMcpLine, 4 MiB). A request
+ * payload larger than this is answered by a -32700 id:null error — which the
+ * server cannot attribute to any single request, so the bridge-side handling
+ * rejects ALL pending requests. Refusing the oversized request BEFORE it is
+ * written keeps the failure to that one call (R14-C FIX-4). */
+export const MAX_OUTBOUND_LINE_BYTES = 4 * 1024 * 1024;
 
 export type Pending = {
   resolve: (value: any) => void;
@@ -238,6 +244,12 @@ export class McpBridge {
       // 30s timer armed, pinning the event loop after every spawn/respawn.
       cancelStartupDeadline();
     }
+    // A child that completed the handshake is healthy: re-arm the fast-crash
+    // circuit from zero. Without this, five crashes that each happened <10s
+    // after their spawn — spread arbitrarily far apart by healthy uptime —
+    // accumulated to a permanent respawn disable for the whole session
+    // (R14-C FIX-4).
+    this.fastCrashCount = 0;
     this.notify("notifications/initialized", {});
   }
 
@@ -399,6 +411,27 @@ export class McpBridge {
       };
       this.pending.set(id, { resolve: wrappedResolve, reject: wrappedReject, timer });
       const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+      // Outbound size guard: the server caps stdin lines at 4 MiB of UTF-8
+      // BYTES and answers anything larger with an id:null parse fault that
+      // cannot be matched to this request — the bridge-side handling then
+      // rejects EVERY pending request. Refuse here so only the oversized
+      // call fails (e.g. a tools/call embedding a giant GeoJSON argument
+      // must not kill ten concurrent exprs_wait_for_execution polls). The
+      // check is byte-based: string .length counts UTF-16 code units, which
+      // under-reports multibyte (CJK) payloads by up to 3x (review R1-P2).
+      const payloadBytes = Buffer.byteLength(payload, "utf8");
+      if (payloadBytes > MAX_OUTBOUND_LINE_BYTES) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        cleanup();
+        reject(
+          new Error(
+            `MCP request payload exceeds the server's ${MAX_OUTBOUND_LINE_BYTES}-byte line cap ` +
+              `(${payloadBytes} bytes, method ${method}); split the argument or use a file path`,
+          ),
+        );
+        return;
+      }
       this.child.stdin!.write(payload + "\n", (err) => {
         if (err) {
           this.pending.delete(id);

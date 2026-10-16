@@ -167,7 +167,11 @@ function(sicnu_add_io_test NAME)
   set_target_properties(${NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   )
-  sicnu_discover_tests(${NAME})
+  if("${NAME}" STREQUAL "test_io_fabric_catalog")
+    sicnu_discover_tests(${NAME} TEST_PREFIX "test_fabric_catalog::test_io_fabric_catalog::")
+  else()
+    sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
+  endif()
 endfunction()
 
 # Isolation runtime 5.0: light SDK test executables. Links only Catch2 +
@@ -521,7 +525,7 @@ endif()
 # 7.0 remote source identity & validators (shared HTTP fixture).
 # ADR 0146: exit 77 = skipped (matches the ladder's verdict mapping).
 sicnu_add_io_test(test_io_remote_validator SKIP_RETURN_CODE 77)
-target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp)
+target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp support/http_stac_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_remote_validator PRIVATE ws2_32)
 endif()
@@ -633,6 +637,7 @@ if(WIN32)
   # on a transitive ws2_32 in the tracks that built them before).
   target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
 endif()
+add_custom_target(test_fabric_catalog DEPENDS test_io_fabric_catalog)
 sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
@@ -2569,6 +2574,49 @@ target_include_directories(test_mcp_server PRIVATE
 )
 sicnu_discover_tests(test_mcp_server)
 
+# R14-C: run_workflow / resume_workflow server-side cancellation over the
+# real protocol entry (same compile-in-process pattern as test_mcp_server).
+add_executable(test_r14_C_mcp_workflow_cancel test_r14_C_mcp_workflow_cancel.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r14_C_mcp_workflow_cancel PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+  sicnu_workflow
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r14_C_mcp_workflow_cancel PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r14_C_mcp_workflow_cancel PRIVATE jsoncpp)
+elseif(PkgConfig_FOUND)
+  pkg_check_modules(JSONCPP_R14C QUIET jsoncpp)
+  if(JSONCPP_R14C_FOUND)
+    target_include_directories(test_r14_C_mcp_workflow_cancel PRIVATE ${JSONCPP_R14C_INCLUDE_DIRS})
+    target_link_libraries(test_r14_C_mcp_workflow_cancel PRIVATE ${JSONCPP_R14C_LIBRARIES})
+  else()
+    target_link_libraries(test_r14_C_mcp_workflow_cancel PRIVATE jsoncpp)
+  endif()
+else()
+  target_link_libraries(test_r14_C_mcp_workflow_cancel PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r14_C_mcp_workflow_cancel PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r14_C_mcp_workflow_cancel)
+
 # Surface-11 discovery parity gate: union projection vs MCP tools/list vs
 # dispatch tables. Compiles mcp_server.cpp in-process (same pattern as
 # test_mcp_server) so both sides share one registry state.
@@ -3320,6 +3368,67 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_detection_nms_10)
+
+    # R14-B: model-runtime hardening regressions (decode NaN/batch/auto,
+    # NMS NaN hardening, writer clamps, TensorBlob contracts).
+    add_executable(test_r14_B_detection_decode test_r14_B_detection_decode.cpp)
+    target_link_libraries(test_r14_B_detection_decode PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r14_B_detection_decode)
+    target_include_directories(test_r14_B_detection_decode PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r14_B_detection_decode)
+
+    # R14-B: provider-surface regressions (inferMulti detachment, HTTP
+    # dispatcher-less thread refusal, randomized VRAM ledger conservation).
+    add_executable(test_r14_B_runtime_providers test_r14_B_runtime_providers.cpp)
+    target_link_libraries(test_r14_B_runtime_providers PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        Qt6::Network
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r14_B_runtime_providers)
+    target_include_directories(test_r14_B_runtime_providers PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r14_B_runtime_providers)
+
+    # R14-B: tile-engine regressions (strided-head halo alignment, Mask
+    # tallies, morphology re-tally + stage hygiene, channel-limit refusal).
+    add_executable(test_r14_B_tile_engine test_r14_B_tile_engine.cpp)
+    target_link_libraries(test_r14_B_tile_engine PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r14_B_tile_engine)
+    target_include_directories(test_r14_B_tile_engine PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r14_B_tile_engine)
 
     # Platform 10.0: EO model platform regressions (F-OPS fixes + manifest/tasks).
     add_executable(test_eo_platform_10 test_eo_platform_10.cpp)
@@ -9678,6 +9787,39 @@ set_target_properties(test_e2e_open_issues PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_e2e_open_issues)
 
 # ---------------------------------------------------------------------------
+# R12-B E2E Durability, Security & Provenance test suite
+# ---------------------------------------------------------------------------
+add_executable(test_r12b_e2e_durability
+  test_r12b_e2e_durability.cpp
+)
+target_link_libraries(test_r12b_e2e_durability PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Sicnu::Geospatial
+  Sicnu::dataset
+  Sicnu::experiment
+  sicnu_data
+  sicnu_processing
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+sicnu_link_jsoncpp(test_r12b_e2e_durability)
+target_include_directories(test_r12b_e2e_durability PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_SOURCE_DIR}/tests
+)
+target_compile_definitions(test_r12b_e2e_durability PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r12b_e2e_durability PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r12b_e2e_durability TEST_PREFIX "test_r12b_e2e_durability::")
+
+
+# ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites
 # ---------------------------------------------------------------------------
 add_executable(test_workflow_engine_v2 test_workflow_engine_v2.cpp)
@@ -10188,6 +10330,12 @@ add_dependencies(test_exprs_plugin_loader hello_plugin)
 if(NOT WIN32)
   sicnu_add_test(test_exprs_external_process)
   target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
+
+  # R14-C FIX-7: loader-injection env deny-list. POSIX-only registration
+  # (probes /bin/echo + /bin/sh): the deny-list helper itself is shared with
+  # the Windows run() lane, but that lane's refusal is not executed here.
+  sicnu_add_test(test_r14_C_external_process_env)
+  target_link_libraries(test_r14_C_external_process_env PRIVATE sicnu_sdk)
 endif()
 # Isolation runtime 5.0: behavior helper + Windows external-process lane
 # (CreateProcessW implementation). The helper is cross-platform so the same
@@ -10285,6 +10433,10 @@ endif()
 # The plugins host runtime: registry bridging + external tool operator.
 sicnu_add_test(test_plugins_runtime_host)
 target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
+
+# R14-C FIX-5/FIX-6: provider take-over + builtin operator shadowing refusals.
+sicnu_add_test(test_r14_C_plugin_registration)
+target_link_libraries(test_r14_C_plugin_registration PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
 
 # Owner-scoped unload barrier (#747).
 sicnu_add_test(test_plugin_execution_barrier)
@@ -12272,6 +12424,20 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
   LIBS Qt6::Widgets Qt6::Test Qt6::Network sicnu_data
 )
 
+# R14-C FIX-2: #1448 Engine-2 lane — a failed TERMINAL checkpoint publish must
+# keep the run-ownership flock held (peer resume refused).
+sicnu_add_d17_test(test_r14_C_d17_terminal_persist
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
+    ${SICNU_FAULT_REGISTRY_SOURCE}
+  LIBS Qt6::Widgets Qt6::Test Qt6::Network sicnu_data
+)
+
 # --- Package F: canvas
 sicnu_add_d17_test(test_pipeline_canvas_widget
   SOURCES ${D17_CANVAS_SOURCES}
@@ -12322,6 +12488,7 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
 foreach(_d17_embeds_coordinator
     test_ir2_port_param_mapping
     test_workflow_checkpoint_cache
+    test_r14_C_d17_terminal_persist
     test_d17_workflow_pipeline_e2e)
   target_compile_definitions(${_d17_embeds_coordinator} PRIVATE sicnu_workflow_EXPORTS)
   # pipeline_run_coordinator.cpp publishes checkpoint/provenance through the

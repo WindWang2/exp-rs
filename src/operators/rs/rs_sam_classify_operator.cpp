@@ -125,7 +125,7 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
         throw RSOperatorError( ErrorCode::InvalidInputData, gridError.toStdString() );
     const ResolvedSpectralReference refsResolved =
         resolveSpectralReference( params, "refs", "refsRef", ds, bands, inputGrid );
-    const std::vector<float> refs = refsResolved.flat;
+    std::vector<float> refs = refsResolved.flat;
     const int refCount = refsResolved.count;
     if ( refCount < 1 )
         throw RSOperatorError( ErrorCode::InvalidParameter,
@@ -138,11 +138,31 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
                      std::to_string( height ) + ", " + std::to_string( nBands ) +
                      " bands, " + std::to_string( refCount ) + " classes" );
 
-    // Resolve the input nodata sentinel: prefer the raster-declared band-1
-    // nodata, falling back to NaN (matching only NaN pixels) when none is set (#420).
-    bool hasNodata = false;
-    double srcNodata = ds.bandNoDataValue( bands[0], &hasNodata );
-    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : std::numeric_limits<float>::quiet_NaN();
+    // Per-band declared sentinels (R14-A, mirroring rs_spectral_similarity):
+    // each used band's own declaration is washed to NaN per tile before the
+    // kernel, so heterogeneous per-band NoData is honored — the previous
+    // first-band-only sentinel let another band's void pass as data. Bands
+    // without a declaration keep the historical NaN-only matching (a
+    // declared-policy change would silently alter existing outputs).
+    std::vector<float> bandSentinels( static_cast<size_t>( nBands ),
+                                      std::numeric_limits<float>::quiet_NaN() );
+    for ( size_t bi = 0; bi < bands.size(); ++bi )
+    {
+        bool has = false;
+        const double nd = ds.bandNoDataValue( bands[bi], &has );
+        if ( has && std::isfinite( nd ) )
+            bandSentinels[bi] = static_cast<float>( nd );
+    }
+    const float nodata = std::numeric_limits<float>::quiet_NaN();
+    // Reference spectra live in the raster's units: a ref sample equal to a
+    // band's declared sentinel is absent data, not a measurement — wash it
+    // against the same per-band table so the kernel rejects that reference
+    // uniformly instead of classifying against the sentinel (review round-1 F3).
+    for ( size_t i = 0; i < refs.size(); ++i )
+    {
+        if ( refs[i] == bandSentinels[i % static_cast<size_t>( nBands )] )
+            refs[i] = std::numeric_limits<float>::quiet_NaN();
+    }
 
     // Single-pass streaming (perf goal §2c): stream the selected bands tile-by-
     // tile as a BIP window, classify per-tile (the kernel is per-pixel), and
@@ -180,18 +200,30 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     std::vector<float> tileAngles;
     std::vector<float> tileLabelBand;
     std::vector<float> tileAngleBand;
+    std::vector<float> washed; // sentinel-washed copy of the tile's BIP buffer
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             // Per-tile cancellation: a single-pass scan over a large raster must
             // stay responsive to user cancel, not just between passes.
             context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
+            washed.assign( bip, bip + tilePixels * static_cast<size_t>( nBands ) );
+            for ( size_t p = 0; p < tilePixels; ++p )
+            {
+                float *pixel = washed.data() + p * static_cast<size_t>( nBands );
+                for ( int b = 0; b < nBands; ++b )
+                {
+                    const float v = pixel[b];
+                    if ( v == bandSentinels[static_cast<size_t>( b )] || !std::isfinite( v ) )
+                        pixel[b] = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
             tileLabels.assign( tilePixels, 0 );
             tileAngles.assign( tilePixels, 0.0f );
             const bool ok = ( metric == "sid" )
-                ? SpectralClassification::sidClassify( bip, tilePixels, nBands,
+                ? SpectralClassification::sidClassify( washed.data(), tilePixels, nBands,
                                                        refs.data(), refCount,
                                                        tileLabels.data(), tileAngles.data(), nodata )
-                : SpectralClassification::samClassify( bip, tilePixels, nBands,
+                : SpectralClassification::samClassify( washed.data(), tilePixels, nBands,
                                                        refs.data(), refCount,
                                                        tileLabels.data(), tileAngles.data(), nodata );
             if ( !ok )

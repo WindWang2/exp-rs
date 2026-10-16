@@ -231,6 +231,32 @@ sicnu::data::Result<QVector<GeneratedPatch>> PatchGenerator::generate(
                                             DiagnosticSeverity::Error } );
     }
 
+    // BorderPolicy::Drop on extents smaller than window produces 0 patches
+    if ( config.borderPolicy == BorderPolicy::Drop &&
+         ( rasterWidth < config.windowWidth || rasterHeight < config.windowHeight ) )
+    {
+        return Result::success( {} );
+    }
+
+    // Memory bound check on batch generation (PERF-01)
+    if ( config.strategy == PatchStrategy::FixedGrid ||
+         config.strategy == PatchStrategy::SlidingWindow )
+    {
+        const qint64 tilesX = ( rasterWidth + config.strideX - 1 ) / config.strideX;
+        const qint64 tilesY = ( rasterHeight + config.strideY - 1 ) / config.strideY;
+        const qint64 totalExpected = tilesX * tilesY;
+        if ( totalExpected > kDefaultMaxBatchPatches )
+        {
+            return Result::failure(
+                Diagnostic{ QStringLiteral( "dataset.patch_budget_exceeded" ),
+                            QStringLiteral( "grid generates %1 patches, exceeding memory limit %2; "
+                                            "use streaming generation or increase stride" )
+                                .arg( totalExpected )
+                                .arg( kDefaultMaxBatchPatches ),
+                            DiagnosticSeverity::Error } );
+        }
+    }
+
     const QString hash = configHash( config );
     QVector<GeneratedPatch> patches;
 

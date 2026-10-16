@@ -144,13 +144,13 @@ void QgisDesktopWindow::cutFeatures()
         statusBar()->showMessage(tr("No features selected to cut"), 2000);
         return;
     }
-    const int cutCount = vl->selectedFeatureCount();
     m_clipboard->replaceWithCopyOf(vl);
     vl->beginEditCommand(tr("Cut features"));
-    const bool deleted = vl->deleteSelectedFeatures();
-    if (deleted) {
+    int deletedCount = 0;
+    const bool deleted = vl->deleteSelectedFeatures(&deletedCount);
+    if (deleted && deletedCount > 0) {
         vl->endEditCommand();
-        statusBar()->showMessage(tr("Cut %1 feature(s)").arg(cutCount), 2000);
+        statusBar()->showMessage(tr("Cut %1 feature(s)").arg(deletedCount), 2000);
     } else {
         // The clipboard holds a copy but the layer still contains the
         // features: claiming "Cut N" here is the classic silent partial

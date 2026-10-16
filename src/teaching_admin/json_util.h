@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QCryptographicHash>
 #include <QFile>
+#include <QFileInfo>
 #include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -96,6 +97,48 @@ inline bool isUnsafeRelativePath( const QString &rel )
             return true;
     }
     return false;
+}
+
+/// Result of one bounded read: exactly one of the three fields is set —
+/// bytes on success, oversize=true when the file exceeds the caller's
+/// budget (the read is refused BEFORE any allocation proportional to the
+/// file), unreadable=true when the file cannot be opened at all.
+struct BoundedReadResult
+{
+    QByteArray bytes;
+    bool oversize = false;
+    bool unreadable = false;
+};
+
+/// Size-gated read (R14-E audit F5): an oversized or hostile document is a
+/// typed refusal, not an unbounded slurp. The stat-before-read keeps the
+/// memory ceiling at maxBytes + O(1) regardless of the on-disk size.
+inline BoundedReadResult readBounded( const QString &path, qint64 maxBytes )
+{
+    BoundedReadResult out;
+    QFileInfo info( path );
+    if ( !info.exists() )
+    {
+        out.unreadable = true;
+        return out;
+    }
+    if ( info.size() > maxBytes )
+    {
+        out.oversize = true;
+        return out;
+    }
+    QFile f( path );
+    if ( !f.open( QIODevice::ReadOnly ) )
+    {
+        out.unreadable = true;
+        return out;
+    }
+    out.bytes = f.read( maxBytes );
+    // The file changed size between the stat and the read (growth window):
+    // a truncated prefix must not be digested as if it were the document.
+    if ( out.bytes.size() < 0 || out.bytes.size() != info.size() )
+        out.unreadable = true;
+    return out;
 }
 
 inline QJsonValue sortedValue( const QJsonValue &v );

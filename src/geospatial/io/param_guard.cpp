@@ -20,9 +20,10 @@ CheckedPath buildChecked( const ResourceUri &uri )
   checked.raw = uri.raw;
   checked.canonical = uri.canonical();
   checked.display = uri.display();
+  checked.gdalTarget = uri.gdalOpenTarget();
   checked.isLocalPayload = uri.isLocalPayload();
   checked.isRemote = uri.isRemote();
-  checked.longPathSpelling = ResourceUri::toWindowsLongPath( uri.raw );
+  checked.longPathSpelling = ResourceUri::toWindowsLongPath( checked.gdalTarget );
   return checked;
 }
 
@@ -67,7 +68,7 @@ CheckedPath checkTargetPath( const std::string &raw )
     // The staged pipeline stages NEXT TO the target: its directory must
     // already exist (we never create directories implicitly). /vsimem has no
     // directory semantics.
-    const std::string &path = uri.raw;
+    const std::string path = uri.isLocalPayload() ? uri.gdalOpenTarget() : uri.raw;
     if ( path.rfind( "/vsimem/", 0 ) != 0 )
     {
       const std::size_t lastSlash = path.find_last_of( "/\\" );

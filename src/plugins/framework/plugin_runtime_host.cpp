@@ -155,6 +155,18 @@ void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
     if ( existing != mOperators.end() && existing->second.pluginId != pluginId )
         return; // first registration wins; duplicates are diagnosed at load
 
+    // Builtin-shadowing guard (#1462's remaining half): every PLUGIN
+    // registration into RSOperatorRegistry flows through this host, so an id
+    // the registry already knows while mOperators has no entry for it is a
+    // NON-plugin registration (builtin rs:/gdal:/otb:/... family or a test
+    // fixture). A manifest declaring e.g. "rs:ndvi" must not silently
+    // replace that factory on the JobEngine direct path nor the atomic
+    // catalog adapter below — revoking the plugin later would then delete
+    // the builtin's registration.
+    if ( existing == mOperators.end()
+         && sicnu::operators::RSOperatorRegistry::instance().hasOperator( op.id ) )
+        return;
+
     const bool created = existing == mOperators.end();
     if ( created )
     {
@@ -386,6 +398,14 @@ bool PluginRuntimeHost::registerOperatorFactory(
     auto entry = mOperators.find( operatorId );
     if ( entry == mOperators.end() )
     {
+        // Builtin-shadowing guard (#1462's remaining half, binary twin of
+        // installPluginOperator's manifest guard): an id the registry already
+        // knows while mOperators has no entry for it is a NON-plugin
+        // registration — a binary plugin registering "rs:ndvi" must not
+        // replace the builtin factory.
+        if ( sicnu::operators::RSOperatorRegistry::instance().hasOperator( operatorId ) )
+            return false;
+
         // Binary-registered operator without a manifest declaration: build
         // its descriptor from a throwaway instance so the atomic catalog
         // entry is accurate (the conformance kit flags the manifest gap).

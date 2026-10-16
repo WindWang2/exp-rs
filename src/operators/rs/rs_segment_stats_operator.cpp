@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "rs_segment_stats_operator.h"
 
+#include "geospatial/util/atomic_fs.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -166,27 +167,42 @@ Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorCon
         throw RSOperatorError(ErrorCode::InvalidInputData, "No positive label IDs with valid pixels found");
 
     context.reportProgress(0.85, "Writing CSV");
-    QFile out(QString::fromStdString(outputPath));
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write: " + outputPath);
-    }
-    QTextStream ts(&out);
-    ts << "segment_id,area_pixels";
-    for (int f = 0; f < nFeat; ++f)
-        ts << ",mean_b" << bands[static_cast<size_t>(f)];
-    ts << "\n";
-
+    // Stage-then-publish: a mid-write failure keeps the previous CSV intact
+    // (r14-A; same discipline as the pipeline's raster writers).
     int written = 0;
-    for (const auto& [sid, a] : acc) {
-        ts << sid << "," << a.count;
-        for (int f = 0; f < nFeat; ++f) {
-            const double m = a.count > 0 ? a.sum[static_cast<size_t>(f)] / a.count : 0.0;
-            ts << "," << m;
-        }
-        ts << "\n";
-        ++written;
+    try {
+        sicnu::geo::atomic_fs::writeFileAtomic(
+            outputPath, [&]( const std::string& stagedPath ) {
+            QFile out(QString::fromStdString(stagedPath));
+            if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write: " + outputPath);
+            }
+            QTextStream ts(&out);
+            ts << "segment_id,area_pixels";
+            for (int f = 0; f < nFeat; ++f)
+                ts << ",mean_b" << bands[static_cast<size_t>(f)];
+            ts << "\n";
+
+            for (const auto& [sid, a] : acc) {
+                ts << sid << "," << a.count;
+                for (int f = 0; f < nFeat; ++f) {
+                    const double m = a.count > 0 ? a.sum[static_cast<size_t>(f)] / a.count : 0.0;
+                    ts << "," << m;
+                }
+                ts << "\n";
+                ++written;
+            }
+            ts.flush();
+            if (out.error() != QFile::NoError)
+                throw RSOperatorError(ErrorCode::FileNotWritable,
+                                      "Failed writing " + outputPath + ": " + out.errorString().toStdString());
+            out.close();
+        });
     }
-    out.close();
+    catch (const sicnu::geo::GeoError& ex) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              std::string("Cannot finalize output: ") + ex.what());
+    }
 
     context.reportProgress(1.0, "Segment stats complete");
 

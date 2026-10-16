@@ -249,6 +249,58 @@ TEST_CASE( "rs:radiometric_qa E2E: flags, mask propagation and summary",
     CHECK( at( b2, 9, 7 ) == RadiometricQa::FlagCloud );
 }
 
+TEST_CASE( "rs:radiometric_qa treats declared NoData as invalid data, not negative reflectance [r14a]",
+           "[qa][operator][e2e][nodata]" )
+{
+    using namespace sicnu::operators;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString reflPath = dir.filePath( "refl_nd.tif" );
+    const QString outPath = dir.filePath( "qa_nd.tif" );
+
+    constexpr int kW = 4;
+    constexpr int kH = 2;
+    sicnu::testing::RsSyntheticRasterBuilder refl( kW, kH, 1 );
+    refl.withNoData( -9999.0 );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            refl.withPixel( 1, x, y, 0.30f );
+    refl.withPixel( 1, 1, 0, -9999.0f ); // declared NoData fill
+    refl.withPixel( 1, 2, 0, -0.05f );   // genuine negative reflectance
+    REQUIRE( !refl.writeToDisk( reflPath ).isEmpty() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:radiometric_qa" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = reflPath.toStdString();
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext context;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, context ) );
+    // Both the fill and the genuine negative are flagged — the distinction is
+    // in WHICH flag: absent data is not a reflectance-physics violation.
+    CHECK( result["bands"]["band_1"]["flagged_pixels"].asUInt64() == 2 );
+
+    GDALAllRegister();
+    GDALDatasetH ds = GDALOpen( outPath.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds != nullptr );
+    std::vector<uint16_t> flags( static_cast<size_t>( kW ) * kH, 0 );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Read, 0, 0, kW, kH,
+                           flags.data(), kW, kH, GDT_UInt16, 0, 0 ) == CE_None );
+    GDALClose( ds );
+    const auto at = [&]( int x, int y ) {
+        return flags[static_cast<size_t>( y ) * kW + x];
+    };
+    // Declared NoData fill: invalid data (NotFinite), never a false negative-
+    // reflectance anomaly.
+    CHECK( at( 1, 0 ) == RadiometricQa::FlagNotFinite );
+    CHECK( ( at( 1, 0 ) & RadiometricQa::FlagNegative ) == 0 );
+    // A genuine sub-zero reflectance keeps its physics flag.
+    CHECK( at( 2, 0 ) == RadiometricQa::FlagNegative );
+    CHECK( at( 0, 0 ) == RadiometricQa::FlagNone );
+}
+
 TEST_CASE( "rs:radiometric_qa refuses mismatched mask grids", "[qa][operator][e2e]" )
 {
     using namespace sicnu::operators;

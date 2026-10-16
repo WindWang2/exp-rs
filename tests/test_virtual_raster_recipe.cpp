@@ -212,3 +212,26 @@ TEST_CASE( "BandRef equality and PreflightResult shape",
   CHECK( result.verdict == PreflightVerdict::NoOverlap );
   CHECK_FALSE( result.canCreate );
 }
+
+TEST_CASE( "VirtualRasterRecipe contentDigest computes deterministic RFC 8785 SHA-256 (#1450)",
+           "[virtual_raster_recipe]" )
+{
+  VirtualRasterRecipe r1 = sampleRecipe();
+  const QString digest1 = r1.contentDigest();
+  CHECK( digest1.length() == 64 );
+
+  // Hex format check
+  for ( const QChar &ch : digest1 )
+  {
+    const char c = ch.toLatin1();
+    CHECK( ( ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) ) );
+  }
+
+  // Determinism check
+  VirtualRasterRecipe r2 = r1;
+  CHECK( r2.contentDigest() == digest1 );
+
+  // Modifying property produces divergent digest
+  r2.targetResolutionX = 15.0;
+  CHECK( r2.contentDigest() != digest1 );
+}

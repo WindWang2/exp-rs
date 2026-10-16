@@ -89,3 +89,39 @@ TEST_CASE( "KMeans: predict returns empty matrix on feature dimension mismatch (
   REQUIRE( predFew.empty() );
 }
 
+
+TEST_CASE( "KMeans: same data trains bit-identical centers and labels [r14a]",
+           "[classify][backend][determinism]" )
+{
+  // Determinism pin (r14-A): cv::kmeans with KMEANS_PP_CENTERS seeds from
+  // OpenCV's thread-local RNG, which the backend now pins with setRNGSeed(42)
+  // before every fit. Two fits on the same data must agree bit-for-bit —
+  // centers AND the labels predict() assigns — so the Hungarian remap onto
+  // class ids is stable across runs and persisted models stay reproducible.
+  cv::RNG rng( 7 );
+  cv::Mat X( 300, 2, CV_32F );
+  for ( int i = 0; i < 300; ++i )
+  {
+    X.at<float>( i, 0 ) = static_cast<float>( rng.gaussian( 2.0 ) ) + ( i % 3 == 0 ? 5.0f : 20.0f );
+    X.at<float>( i, 1 ) = static_cast<float>( rng.gaussian( 2.0 ) ) + ( i % 3 == 1 ? 5.0f : 20.0f );
+  }
+
+  RsClassifierKMeans a( 3 ), b( 3 );
+  REQUIRE( a.fit( X, cv::Mat() ) );
+  REQUIRE( b.fit( X, cv::Mat() ) );
+
+  const cv::Mat ca = a.centers();
+  const cv::Mat cb = b.centers();
+  REQUIRE( ca.rows == 3 );
+  REQUIRE( ca.size == cb.size );
+  for ( int k = 0; k < ca.rows; ++k )
+    for ( int f = 0; f < ca.cols; ++f )
+      REQUIRE( ca.at<float>( k, f ) == cb.at<float>( k, f ) ); // bit-exact
+
+  const cv::Mat la = a.predict( X );
+  const cv::Mat lb = b.predict( X );
+  REQUIRE( la.rows == X.rows );
+  REQUIRE( lb.rows == X.rows );
+  for ( int i = 0; i < X.rows; ++i )
+    REQUIRE( la.at<int>( i, 0 ) == lb.at<int>( i, 0 ) );
+}

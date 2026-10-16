@@ -11,6 +11,7 @@
 #include "analysis/segmentation/rs_segment_features.h"
 #include "analysis/segmentation/rs_segment_map.h"
 
+#include "geospatial/util/atomic_fs.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -148,57 +149,71 @@ Json::Value RsObiaFeaturesOperator::run(const Json::Value& params, RSOperatorCon
                                                           : " — " + extractError.toStdString()));
 
     context.reportProgress(0.97, "Writing CSV");
-    QFile csv(QString::fromStdString(outputPath));
-    if (!csv.open(QIODevice::WriteOnly | QIODevice::Text))
-        throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write " + outputPath);
-    QTextStream out(&csv);
+    // Stage-then-publish (atomic_fs): a mid-write failure leaves the previous
+    // CSV intact instead of a truncated file at the final path — the same
+    // discipline the raster writers of this pipeline already follow (r14-A).
+    try
+    {
+        sicnu::geo::atomic_fs::writeFileAtomic(
+            outputPath, [&]( const std::string &stagedPath ) {
+            QFile csv(QString::fromStdString(stagedPath));
+            if (!csv.open(QIODevice::WriteOnly | QIODevice::Text))
+                throw RSOperatorError(ErrorCode::FileNotWritable, "Cannot write " + outputPath);
+            QTextStream out(&csv);
 
-    const int nBands = static_cast<int>(bands.size());
-    out << "segment_id,area,perimeter,shape_index,compactness,rectangularity,aspect_ratio";
-    for (int b = 1; b <= nBands; ++b)
-        out << ",mean_b" << b << ",stddev_b" << b << ",min_b" << b << ",max_b" << b
-            << ",glcm_contrast_b" << b << ",glcm_correlation_b" << b
-            << ",glcm_energy_b" << b << ",glcm_homogeneity_b" << b;
-    out << '\n';
+            const int nBands = static_cast<int>(bands.size());
+            out << "segment_id,area,perimeter,shape_index,compactness,rectangularity,aspect_ratio";
+            for (int b = 1; b <= nBands; ++b)
+                out << ",mean_b" << b << ",stddev_b" << b << ",min_b" << b << ",max_b" << b
+                    << ",glcm_contrast_b" << b << ",glcm_correlation_b" << b
+                    << ",glcm_energy_b" << b << ",glcm_homogeneity_b" << b;
+            out << '\n';
 
-    // 17 significant digits: exact round-trip of the doubles the GUI adapter
-    // rehydrates into its session stats map.
-    for (auto it = stats.constBegin(); it != stats.constEnd(); ++it) {
-        const auto &s = it.value();
-        out << it.key()
-            << ',' << QString::number(s.area, 'g', 17)
-            << ',' << QString::number(s.perimeter, 'g', 17)
-            << ',' << QString::number(s.shapeIndex, 'g', 17)
-            << ',' << QString::number(s.compactness, 'g', 17)
-            << ',' << QString::number(s.rectangularity, 'g', 17)
-            << ',' << QString::number(s.aspectRatio, 'g', 17);
-        for (int b = 0; b < nBands; ++b) {
-            out << ',' << QString::number(s.mean.value(b), 'g', 17)
-                << ',' << QString::number(s.stddev.value(b), 'g', 17)
-                << ',' << QString::number(s.min.value(b), 'g', 17)
-                << ',' << QString::number(s.max.value(b), 'g', 17)
-                << ',' << QString::number(s.glcmContrast.value(b), 'g', 17)
-                << ',' << QString::number(s.glcmCorrelation.value(b), 'g', 17)
-                << ',' << QString::number(s.glcmEnergy.value(b), 'g', 17)
-                << ',' << QString::number(s.glcmHomogeneity.value(b), 'g', 17);
-        }
-        out << '\n';
+            // 17 significant digits: exact round-trip of the doubles the GUI adapter
+            // rehydrates into its session stats map.
+            for (auto it = stats.constBegin(); it != stats.constEnd(); ++it) {
+                const auto &s = it.value();
+                out << it.key()
+                    << ',' << QString::number(s.area, 'g', 17)
+                    << ',' << QString::number(s.perimeter, 'g', 17)
+                    << ',' << QString::number(s.shapeIndex, 'g', 17)
+                    << ',' << QString::number(s.compactness, 'g', 17)
+                    << ',' << QString::number(s.rectangularity, 'g', 17)
+                    << ',' << QString::number(s.aspectRatio, 'g', 17);
+                for (int b = 0; b < nBands; ++b) {
+                    out << ',' << QString::number(s.mean.value(b), 'g', 17)
+                        << ',' << QString::number(s.stddev.value(b), 'g', 17)
+                        << ',' << QString::number(s.min.value(b), 'g', 17)
+                        << ',' << QString::number(s.max.value(b), 'g', 17)
+                        << ',' << QString::number(s.glcmContrast.value(b), 'g', 17)
+                        << ',' << QString::number(s.glcmCorrelation.value(b), 'g', 17)
+                        << ',' << QString::number(s.glcmEnergy.value(b), 'g', 17)
+                        << ',' << QString::number(s.glcmHomogeneity.value(b), 'g', 17);
+                }
+                out << '\n';
+            }
+            out.flush();
+            if (csv.error() != QFile::NoError)
+                throw RSOperatorError(ErrorCode::FileNotWritable,
+                                      "Failed writing " + outputPath + ": " + csv.errorString().toStdString());
+            csv.close();
+        });
     }
-    out.flush();
-    if (csv.error() != QFile::NoError)
+    catch (const sicnu::geo::GeoError &ex)
+    {
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed writing " + outputPath + ": " + csv.errorString().toStdString());
-    csv.close();
+                              std::string("Cannot finalize output: ") + ex.what());
+    }
 
     context.reportProgress(1.0, "Feature extraction complete");
 
     // 6 shape columns + 8 per-band columns.
-    const int featureColumns = 6 + 8 * nBands;
+    const int featureColumns = 6 + 8 * static_cast<int>(bands.size());
 
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["segments"] = static_cast<int>(stats.size());
-    result["bands"] = nBands;
+    result["bands"] = static_cast<int>(bands.size());
     result["features"] = featureColumns;
     result["width"] = segMap.width();
     result["height"] = segMap.height();

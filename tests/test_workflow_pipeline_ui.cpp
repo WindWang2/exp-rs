@@ -861,3 +861,49 @@ TEST_CASE( "Challenger M2: PipelineEditorDock writePipelineDefinitionFile error 
     CHECK( leakedTemps.isEmpty() );
   }
 }
+
+TEST_CASE( "PipelineEditorDock preserves symlink target and file permissions", "[workflow][ui][durability][issue1487]" )
+{
+  ensureApp();
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+
+  Json::Value root;
+  root["id"] = "symlink_test_pipe";
+  root["title"] = "Symlink Preservation Test";
+
+  const QString realFile = tempDir.filePath( QStringLiteral( "real_pipeline.json" ) );
+  const QString symlinkFile = tempDir.filePath( QStringLiteral( "link_pipeline.json" ) );
+
+  // 1. Initial write to realFile with custom permissions
+  QString error;
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( realFile, root, &error ) );
+  REQUIRE( QFile::exists( realFile ) );
+
+  // Set explicit permissions (e.g. read/write owner, read group)
+  const QFile::Permissions customPerms = QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadGroup;
+  QFile::setPermissions( realFile, customPerms );
+
+  // Create symlink
+  REQUIRE( QFile::link( realFile, symlinkFile ) );
+  QFileInfo linkInfo( symlinkFile );
+  REQUIRE( linkInfo.isSymLink() );
+
+  // 2. Overwrite via symlink: must update realFile and leave symlink intact
+  root["title"] = "Updated Title Through Symlink";
+  REQUIRE( PipelineEditorDock::writePipelineDefinitionFile( symlinkFile, root, &error ) );
+
+  // Symlink must still be a symlink
+  QFileInfo postLinkInfo( symlinkFile );
+  CHECK( postLinkInfo.isSymLink() );
+  CHECK( postLinkInfo.symLinkTarget() == realFile );
+
+  // Real file must have updated content
+  Json::Value readBack;
+  REQUIRE( PipelineEditorDock::readPipelineDefinitionFile( realFile, readBack, &error ) );
+  CHECK( readBack["title"].asString() == "Updated Title Through Symlink" );
+
+  // Permissions of real file must be preserved
+  QFileInfo realPostInfo( realFile );
+  CHECK( ( realPostInfo.permissions() & ( QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadGroup ) ) == customPerms );
+}

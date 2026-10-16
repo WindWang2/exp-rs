@@ -758,6 +758,36 @@ TEST_CASE( "session JSON envelope is strictly versioned and shaped", "[lab_runti
     doc.removeMember( "session_id" );
     REQUIRE( sicnu::lab::sessionFromJson( doc ).diagnostics.front().code == "lab.session.schema" );
   }
+  SECTION( "event seq outside the (0, last_seq] envelope is refused, not adopted" )
+  {
+    // A shape-valid document whose checkpoint claims seq far beyond
+    // last_seq: after reload that forged verdict would win every
+    // latest-wins gate while genuine events draw the next real seq and can
+    // never supersede it (R14-E audit F2). On unfixed master this parsed
+    // fine (RED).
+    Json::Value doc = parseJson( bytes );
+    doc["last_seq"] = 3;
+    Json::Value result( Json::objectValue );
+    result["checkpoint_id"] = "c1";
+    result["verdict"] = "pass";
+    result["attempt"] = 1;
+    result["seq"] = 500;
+    doc["checkpoint_results"].append( result );
+    const auto back = sicnu::lab::sessionFromJson( doc );
+    REQUIRE_FALSE( back.ok );
+    REQUIRE( back.diagnostics.front().code == "lab.session.schema" );
+  }
+  SECTION( "seq 0 is outside the envelope too" )
+  {
+    Json::Value doc = parseJson( bytes );
+    doc["last_seq"] = 3;
+    Json::Value answer( Json::objectValue );
+    answer["question_id"] = "q1";
+    answer["answer"] = "a";
+    answer["seq"] = 0;
+    doc["answers"].append( answer );
+    REQUIRE_FALSE( sicnu::lab::sessionFromJson( doc ).ok );
+  }
   SECTION( "bad state vocabulary" )
   {
     Json::Value doc = parseJson( bytes );

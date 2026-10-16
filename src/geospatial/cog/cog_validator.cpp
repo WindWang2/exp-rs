@@ -9,6 +9,7 @@
 #include "geospatial/cog/cog_validator.h"
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/remote/offline_gate.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <gdal.h>
@@ -56,9 +57,26 @@ CogValidationReport validateCog( const std::string &path )
   CogValidationReport report;
   report.path = path;
 
+  const std::string gdalPath = ResourceUri::toGdalPath( path );
+  if ( offline::isRemoteTarget( path ) || offline::isRemoteTarget( gdalPath ) )
+  {
+    if ( offline::enabled() )
+    {
+      addCheck( report.checks, "offline_gate", false, offline::refusalMessage( path ) );
+      report.isCog = false;
+      return report;
+    }
+    if ( offline::isPrivateHost( path ) || offline::isPrivateHost( gdalPath ) )
+    {
+      addCheck( report.checks, "private_network", false,
+                "private / loopback / link-local hosts are blocked: " + path );
+      report.isCog = false;
+      return report;
+    }
+  }
+
   ensureGdalRegistered();
   QuietCplErrors quiet;
-  const std::string gdalPath = ResourceUri::toGdalPath( path );
   GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !handle )
   {
