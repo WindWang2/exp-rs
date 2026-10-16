@@ -37,6 +37,7 @@
 #include "processing/providers/gdal_tools/provider.h"
 #include "processing/providers/otb_tools/provider.h"
 #include <QCoreApplication>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QDir>
 #include <QFile>
@@ -1013,8 +1014,14 @@ struct CheckpointEnvGuard
     }
     QStringList checkpoints() const
     {
-        return QDir( dir.path() )
-            .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+        // Exclude in-flight atomic-save temps (checkpoint_<id>.<pid>.<n>.<rng>.tmp.json):
+        // they match "checkpoint_*.json" but are not committed checkpoints — counting
+        // them races the writer and flakes.
+        QStringList names = QDir( dir.path() )
+                                .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
+                                            QDir::Files );
+        names.removeIf( []( const QString &n ) { return n.contains( QStringLiteral( ".tmp." ) ); } );
+        return names;
     }
     /// Checkpoints anywhere in the family: a COMPLETED run is archived into
     /// history/ by the finalize sweep, so the live-directory count alone
@@ -1022,11 +1029,11 @@ struct CheckpointEnvGuard
     /// archive before the assertion runs).
     int checkpointCount() const
     {
-        return checkpoints().size()
-               + QDir( dir.filePath( QStringLiteral( "history" ) ) )
-                     .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
-                                 QDir::Files )
-                     .size();
+        QStringList hist =
+            QDir( dir.filePath( QStringLiteral( "history" ) ) )
+                .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+        hist.removeIf( []( const QString &n ) { return n.contains( QStringLiteral( ".tmp." ) ); } );
+        return checkpoints().size() + hist.size();
     }
     /// Bounded wait for a run's LAST DURABLE STATE: a checkpoint carrying @p
     /// workflowId that reads back with a terminal @p state from the family
@@ -1962,6 +1969,12 @@ TEST_CASE( "MCP default workspace avoids / and $HOME", "[agent][mcp][sandbox][se
 
     SECTION( "CWD == HOME" )
     {
+#ifdef Q_OS_WIN
+        // QDir::homePath() on Windows uses GetUserProfileDirectory — neither
+        // HOME nor USERPROFILE env overrides reach it, so the fake-home
+        // premise of this section cannot hold here.
+        SKIP( "QDir::homePath() ignores HOME/USERPROFILE on Windows" );
+#endif
         REQUIRE( QDir::setCurrent( fakeHome.path() ) );
         const QString root = containment::effectiveMcpWorkspaceRoot();
         CHECK( root == QDir( expected ).canonicalPath() );
@@ -1969,6 +1982,9 @@ TEST_CASE( "MCP default workspace avoids / and $HOME", "[agent][mcp][sandbox][se
     }
     SECTION( "CWD == filesystem root" )
     {
+#ifdef Q_OS_WIN
+        SKIP( "QDir::homePath() ignores HOME/USERPROFILE on Windows" );
+#endif
         REQUIRE( QDir::setCurrent( QDir::rootPath() ) );
         // Resolve first: the fallback directory is created on demand, so its
         // canonical path only exists after effectiveMcpWorkspaceRoot() ran.
@@ -2027,6 +2043,9 @@ TEST_CASE( "MCP sandbox resolves symlinks through multiple missing directories (
     const QString link = workspace.filePath( QStringLiteral( "link" ) );
     if ( !QFile::link( outside.path(), link ) )
         SKIP( "symlinks unavailable on this filesystem" );
+    if ( !QFileInfo( link ).isSymLink() )
+        SKIP( "QFile::link succeeded but did not produce a real symlink "
+              "(Windows .lnk shortcut fallback — symlink privilege unavailable)" );
     qputenv( "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() );
     REQUIRE( QDir::setCurrent( workspace.path() ) );
 
@@ -2060,6 +2079,76 @@ TEST_CASE( "MCP sandbox resolves symlinks through multiple missing directories (
         CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Path outside" ) ) );
     }
 }
+
+#ifdef Q_OS_WIN
+TEST_CASE( "MCP sandbox rejects junction escapes on Windows (P1-3 junction variant)",
+           "[agent][mcp][sandbox][security]" )
+{
+    // Junctions (mklink /J) need no symlink privilege and ARE traversed by
+    // the Win32 file APIs, but QFileInfo::isSymLink()/canonicalFilePath()
+    // do not resolve them — the workspace escape must be caught by the
+    // existing-prefix resolution resolving reparse points to the final path.
+    const SandboxEnvGuard guard;
+    QTemporaryDir workspace;
+    QTemporaryDir outside;
+    REQUIRE( workspace.isValid() );
+    REQUIRE( outside.isValid() );
+    writeFile( outside.filePath( QStringLiteral( "secret.txt" ) ), "top-secret\n" );
+
+    const QString link = workspace.filePath( QStringLiteral( "link_j" ) );
+    QProcess mklink;
+    mklink.start( QStringLiteral( "cmd.exe" ),
+                  { QStringLiteral( "/c" ), QStringLiteral( "mklink" ),
+                    QStringLiteral( "/J" ), QDir::toNativeSeparators( link ),
+                    QDir::toNativeSeparators( outside.path() ) } );
+    mklink.waitForFinished();
+    if ( mklink.exitCode() != 0 || !QFileInfo( link ).exists() )
+        SKIP( QStringLiteral( "mklink /J unavailable: %1" )
+                  .arg( QString::fromLocal8Bit( mklink.readAllStandardError()
+                                                + mklink.readAllStandardOutput() ) )
+                  .toUtf8()
+                  .constData() );
+
+    using sicnu::agent::tool_catalog::surfacePathOutsideWorkspace;
+    // Existing file through the junction, the junction itself, and a
+    // non-existing tail below it are all OUTSIDE the workspace.
+    CHECK( surfacePathOutsideWorkspace( link + QStringLiteral( "/secret.txt" ),
+                                        workspace.path() ) );
+    CHECK( surfacePathOutsideWorkspace( link, workspace.path() ) );
+    CHECK( surfacePathOutsideWorkspace( link + QStringLiteral( "/new/not-yet.tif" ),
+                                        workspace.path() ) );
+
+    // Positive controls: real children stay inside, and the root itself is
+    // inside when spelled with different case or as an 8.3 short path.
+    writeFile( workspace.filePath( QStringLiteral( "real/ok.tif" ) ), "ok\n" );
+    CHECK_FALSE( surfacePathOutsideWorkspace( workspace.filePath( QStringLiteral( "real/ok.tif" ) ),
+                                              workspace.path() ) );
+    CHECK_FALSE( surfacePathOutsideWorkspace( workspace.path(), workspace.path() ) );
+    const QString lowerRoot = workspace.path().toLower();
+    if ( lowerRoot != workspace.path() )
+        CHECK_FALSE( surfacePathOutsideWorkspace( lowerRoot, workspace.path() ) );
+    QProcess forCmd;
+    forCmd.start( QStringLiteral( "cmd.exe" ),
+                  { QStringLiteral( "/c" ),
+                    QStringLiteral( "for %I in (\"%1\") do @echo %~sI" )
+                        .arg( QDir::toNativeSeparators( workspace.path() ) ) } );
+    forCmd.waitForFinished();
+    const QString shortRoot =
+        QDir::fromNativeSeparators( QString::fromLocal8Bit( forCmd.readAllStandardOutput() ).trimmed() );
+    if ( !shortRoot.isEmpty() && shortRoot.contains( QLatin1Char( '~' ) ) )
+        CHECK_FALSE( surfacePathOutsideWorkspace( shortRoot, workspace.path() ) );
+
+    // rmdir removes the junction itself (never recurse through it); the
+    // outside fixture must survive.
+    QProcess rmdir;
+    rmdir.start( QStringLiteral( "cmd.exe" ),
+                 { QStringLiteral( "/c" ), QStringLiteral( "rmdir" ),
+                   QDir::toNativeSeparators( link ) } );
+    rmdir.waitForFinished();
+    CHECK( !QFileInfo( link ).exists() );
+    CHECK( QFile::exists( outside.filePath( QStringLiteral( "secret.txt" ) ) ) );
+}
+#endif // Q_OS_WIN
 
 TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][spatial]" )
 {
