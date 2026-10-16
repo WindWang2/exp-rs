@@ -275,7 +275,14 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold, con
   // removes those even below the NMS threshold... NMS already removes them
   // (IoU 1 > threshold), so the collapse is an O(n) pre-pass that keeps the
   // NMS input smaller; correctness does not depend on it.
-  std::set<std::tuple<int, int, int, int, int, float>> seen;
+  // R15-C C08: the key components are long long via llround over DOUBLE
+  // products. The historical int/lround(float) form wrapped (UB) for
+  // coordinates beyond ~2.1e7 px — the key of one far-apart box could
+  // collide with another's and delete a real detection — and lost
+  // precision from ~1.6e7 px on. DetectionBox stores float, so boxes that
+  // differ below the float resolution are already bit-equal; the wider key
+  // only removes the wrap, never merges distinct geometry.
+  std::set<std::tuple<long long, long long, long long, long long, int, float>> seen;
   std::vector<DetectionBox> collapsed;
   collapsed.reserve( boxes.size() );
   for ( std::size_t idx = 0; idx < boxes.size(); ++idx )
@@ -290,10 +297,10 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold, con
     if ( !std::isfinite( b.x ) || !std::isfinite( b.y ) || !std::isfinite( b.w )
          || !std::isfinite( b.h ) || !std::isfinite( b.confidence ) )
       continue;
-    const auto key = std::make_tuple( static_cast<int>( std::lround( b.x * 100.0f ) ),
-                                      static_cast<int>( std::lround( b.y * 100.0f ) ),
-                                      static_cast<int>( std::lround( b.w * 100.0f ) ),
-                                      static_cast<int>( std::lround( b.h * 100.0f ) ),
+    const auto key = std::make_tuple( std::llround( static_cast<double>( b.x ) * 100.0 ),
+                                      std::llround( static_cast<double>( b.y ) * 100.0 ),
+                                      std::llround( static_cast<double>( b.w ) * 100.0 ),
+                                      std::llround( static_cast<double>( b.h ) * 100.0 ),
                                       b.classId, b.confidence );
     if ( seen.insert( key ).second )
       collapsed.push_back( b );

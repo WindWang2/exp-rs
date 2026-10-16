@@ -1595,9 +1595,25 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       {
         std::vector<float> &scaled = scaledScratch;
         for ( std::size_t p = 0; p < blockPlane; ++p )
-          scaled[p] = std::isnan( agreement[p] )
+        {
+          // R15-C C09: a NoData pixel carries the FINITE label sentinel
+          // (255 / 65535) in the agreement scratch plane — never NaN — so the
+          // historical std::isnan gate was dead code and every NoData pixel was
+          // quantized as floor(255*254+0.5)=64770 (Byte domain) or
+          // floor(65535*65534+0.5)=4294837290 (UInt16 domain): a value outside
+          // the band's dtype that GDAL's Float32→int conversion then clamps
+          // (masking the bug) or wraps (turning NoData into a plausible
+          // agreement value). The sentinel is the documented encoding
+          // (payload + sidecar), so a NoData pixel is written back as the
+          // sentinel instead of being quantized. Valid agreement values live
+          // in [0,1] and quantize to at most writeNoData-1, so the comparison
+          // can never swallow a real pixel.
+          const bool noData = agreement[p] == static_cast<float>( writeNoData )
+                              || !std::isfinite( agreement[p] );
+          scaled[p] = noData
                         ? static_cast<float>( writeNoData )
                         : static_cast<float>( std::floor( agreement[p] * agreementQuant + 0.5 ) );
+        }
         if ( GDALRasterIO( GDALGetRasterBand( dst, totalBands ), GF_Write, 0, y, width, rows,
                            scaled.data(), width, rows, GDT_Float32, 0, 0 )
              != CE_None )
