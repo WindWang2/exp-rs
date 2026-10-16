@@ -852,10 +852,15 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "font_size", [&]() {
-      if ( props["font_size"].asDouble() <= 0 || props["font_size"].asDouble() > 1000 )
+      // NaN fails both comparisons below, so finiteness is explicit (the
+      // x/y/width/height pattern from #1503; CARTO-7).
+      if ( !props["font_size"].isNumeric() )
+        return false;
+      const double sizePt = props["font_size"].asDouble();
+      if ( !std::isfinite( sizePt ) || sizePt <= 0 || sizePt > 1000 )
         return false;
       QFont font = label->font();
-      font.setPointSizeF( props["font_size"].asDouble() );
+      font.setPointSizeF( sizePt );
       undoStack->beginCommand( item, QStringLiteral( "Change Font Size" ) );
       label->setFont( font );
       undoStack->endCommand();
@@ -937,6 +942,12 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
         else
           missing.append( ref );
       }
+      // CARTO-5: every unresolvable ref is reported individually — when
+      // some refs resolved, the missing ones used to be dropped silently
+      // and the map rendered a different composition than declared.
+      if ( ignored && !missing.isEmpty() )
+        for ( const QString &ref : missing )
+          ignored->append( QStringLiteral( "layers: '%1' (not found in project)" ).arg( ref ) );
       if ( layers.isEmpty() )
       {
         if ( ignored )
@@ -1011,11 +1022,55 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       undoStack->endCommand();
       return true;
     } );
+    setProp( "unit", [&]() {
+      // CARTO-3: the QGIS distance unit the segment numbers are computed
+      // in. unit_label only relabels; without the unit a "km" bar shows
+      // meter (or degree) values. Vocabulary kept in sync with
+      // mapspec.cpp's isKnownScaleBarUnit and the compiler's mapping.
+      const QString unit = QString::fromStdString( props["unit"].asString() ).toLower();
+      Qgis::DistanceUnit distanceUnit = Qgis::DistanceUnit::Unknown;
+      bool valid = true;
+      if ( unit == QStringLiteral( "m" ) || unit == QStringLiteral( "meter" ) ||
+           unit == QStringLiteral( "meters" ) )
+        distanceUnit = Qgis::DistanceUnit::Meters;
+      else if ( unit == QStringLiteral( "km" ) || unit == QStringLiteral( "kilometer" ) ||
+                unit == QStringLiteral( "kilometers" ) )
+        distanceUnit = Qgis::DistanceUnit::Kilometers;
+      else if ( unit == QStringLiteral( "mi" ) || unit == QStringLiteral( "mile" ) ||
+                unit == QStringLiteral( "miles" ) )
+        distanceUnit = Qgis::DistanceUnit::Miles;
+      else if ( unit == QStringLiteral( "ft" ) || unit == QStringLiteral( "foot" ) ||
+                unit == QStringLiteral( "feet" ) )
+        distanceUnit = Qgis::DistanceUnit::Feet;
+      else if ( unit == QStringLiteral( "nm" ) )
+        distanceUnit = Qgis::DistanceUnit::NauticalMiles;
+      else if ( unit == QStringLiteral( "deg" ) || unit == QStringLiteral( "degree" ) ||
+                unit == QStringLiteral( "degrees" ) )
+        distanceUnit = Qgis::DistanceUnit::Degrees;
+      else
+        valid = false;
+      if ( !valid )
+      {
+        if ( ignored )
+          ignored->append( QStringLiteral( "unit: %1 (unknown; valid: m|km|mi|ft|nm|deg)" )
+                             .arg( unit ) );
+        return false;
+      }
+      undoStack->beginCommand( item, QStringLiteral( "Change Scale Bar Units" ) );
+      scaleBar->setUnits( distanceUnit );
+      scaleBar->update();
+      undoStack->endCommand();
+      return true;
+    } );
     setProp( "units_per_segment", [&]() {
-      if ( props["units_per_segment"].asDouble() <= 0 )
+      // NaN fails the <= 0 comparison; finiteness is explicit (CARTO-7).
+      if ( !props["units_per_segment"].isNumeric() )
+        return false;
+      const double perSegment = props["units_per_segment"].asDouble();
+      if ( !std::isfinite( perSegment ) || perSegment <= 0 )
         return false;
       undoStack->beginCommand( item, QStringLiteral( "Change Scale Bar Segments" ) );
-      scaleBar->setUnitsPerSegment( props["units_per_segment"].asDouble() );
+      scaleBar->setUnitsPerSegment( perSegment );
       scaleBar->update();
       undoStack->endCommand();
       return true;
@@ -1097,7 +1152,7 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
                                   "frame_color", "frame_width", "background_enabled", "background_color",
                                   "text", "font_size", "bold", "italic", "color", "map_rotation", "scale", "extent",
                                   "layers", "title", "linked_map", "style", "unit_label", "units_per_segment",
-                                  "path", "north_mode" };
+                                  "unit", "path", "north_mode" };
   const QSet<QString> handledSet = applied ? QSet<QString>( applied->cbegin(), applied->cend() ) : QSet<QString>();
   for ( const std::string &key : members )
   {

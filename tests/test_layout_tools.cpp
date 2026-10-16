@@ -30,15 +30,18 @@
 #include <qgslayoutitemlabel.h>
 #include <qgslayoutitemlegend.h>
 #include <qgslayoutitemmap.h>
+#include <qgslayoutitempage.h>
 #include <qgslayoutitemregistry.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutpagecollection.h>
+#include <qgslayoutsize.h>
 #include <qgslayoutmanager.h>
 #include <qgslayoutundostack.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
 #include <qgssinglebandpseudocolorrenderer.h>
+#include <qgsvectorlayer.h>
 
 #include "agent/layout_tools/layout_service.h"
 #include "agent/layout_tools/layout_tools.h"
@@ -729,4 +732,178 @@ TEST_CASE( "LayoutService robustness: null layouts, non-finite properties and bo
 
     LayoutService::instance().deleteLayout( QStringLiteral( "RobustnessTest" ) );
   }
+}
+
+// ---------------------------------------------------------------------------
+// R14-D WP-C+D — partial layer resolution honesty, multi-page export
+// reporting, non-finite scale-bar/font guards.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Partially-resolving map layer lists surface every missing reference (CARTO-5)",
+           "[layout][mcp][properties][r14d]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+
+  auto *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                    QStringLiteral( "lt-layers-a" ), QStringLiteral( "memory" ) );
+  QgsProject::instance()->addMapLayer( layer );
+
+  REQUIRE( run( "layout:create", R"({"name":"Layers"})" ).success );
+  QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "Layers" ) );
+  REQUIRE( layout != nullptr );
+
+  // Some refs resolve, one does not: the tool must succeed with the
+  // resolved subset AND report the missing ref — never drop it silently.
+  auto added = run( "layout:add_item",
+                    R"({"layout":"Layers","type":"map","properties":{"x":10,"y":10,"layers":["lt-layers-a","nope"]}})" );
+  REQUIRE( added.success );
+  bool surfacedNope = false;
+  for ( const auto &entry : added.output["ignored"] )
+    surfacedNope = surfacedNope ||
+                   entry.asString().find( "nope" ) != std::string::npos;
+  CHECK( surfacedNope );
+
+  QgsLayoutItem *mapItem =
+    LayoutService::instance().findItem( layout, QString::fromStdString( added.output["id"].asString() ) );
+  REQUIRE( mapItem != nullptr );
+  const Json::Value props = LayoutService::instance().itemProperties( mapItem );
+  REQUIRE( props["layers"].isArray() );
+  CHECK( props["layers"].size() == 1 );
+  CHECK( props["layers"][0].asString() == "lt-layers-a" );
+
+  // The property-edit path reports per-ref too (and applies nothing when
+  // nothing resolves).
+  const std::string setInput =
+      std::string( R"({"layout":"Layers","item":")" ) + added.output["id"].asString() +
+      R"(","properties":{"layers":["nope"]}})";
+  auto setResult = run( "layout:set_item_properties", setInput );
+  REQUIRE( setResult.success );
+  surfacedNope = false;
+  for ( const auto &entry : setResult.output["ignored"] )
+    surfacedNope = surfacedNope ||
+                   entry.asString().find( "nope" ) != std::string::npos;
+  CHECK( surfacedNope );
+  CHECK( LayoutService::instance().itemProperties( mapItem )["layers"].size() == 1 );
+
+  LayoutService::instance().deleteLayout( QStringLiteral( "Layers" ) );
+  cleanupProject();
+}
+
+TEST_CASE( "layout:export reports every page of a multi-page layout (CARTO-15)",
+           "[layout][mcp][export][r14d]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+
+  REQUIRE( run( "layout:create", R"({"name":"MultiExport"})" ).success );
+  QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "MultiExport" ) );
+  REQUIRE( layout != nullptr );
+  REQUIRE( run( "layout:add_item",
+                R"({"layout":"MultiExport","type":"label","properties":{"text":"第 1 页"}})" )
+              .success );
+  // Second physical page (pageCollection page 0 is the body page).
+  auto *secondPage = new QgsLayoutItemPage( layout );
+  secondPage->setPageSize( QgsLayoutSize( 210.0, 297.0 ) );
+  layout->pageCollection()->addPage( secondPage );
+  REQUIRE( layout->pageCollection()->pageCount() == 2 );
+
+  const QString png = dir.filePath( QStringLiteral( "multi.png" ) );
+  const std::string input =
+      R"({"layout":"MultiExport","path":")" + png.toStdString() + R"(","format":"png","dpi":96})";
+  auto exported = run( "layout:export", input );
+  REQUIRE( exported.success );
+  CHECK( exported.output["page_count"].asInt() == 2 );
+  REQUIRE( exported.output["pages"].isArray() );
+  REQUIRE( exported.output["pages"].size() == 2 );
+  // Deterministic page names: page 0 at the declared path, page 1 as the
+  // _2 sibling — and both are reported with their real byte sizes.
+  const QString page2 = dir.filePath( QStringLiteral( "multi_2.png" ) );
+  CHECK( exported.output["pages"][0]["path"].asString() == png.toStdString() );
+  CHECK( exported.output["pages"][1]["path"].asString() == page2.toStdString() );
+  REQUIRE( QFile::exists( png ) );
+  REQUIRE( QFile::exists( page2 ) );
+  CHECK( exported.output["pages"][0]["bytes"].asInt64() ==
+         static_cast<Json::Int64>( QFileInfo( png ).size() ) );
+  CHECK( exported.output["pages"][1]["bytes"].asInt64() ==
+         static_cast<Json::Int64>( QFileInfo( page2 ).size() ) );
+  CHECK( exported.output["bytes"].asInt64() ==
+         static_cast<Json::Int64>( QFileInfo( png ).size() ) );
+
+  LayoutService::instance().deleteLayout( QStringLiteral( "MultiExport" ) );
+  cleanupProject();
+}
+
+TEST_CASE( "Non-finite font sizes and scale-bar segments are ignored, not applied (CARTO-7)",
+           "[layout_service][robustness][r14d]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+  QString error;
+
+  REQUIRE( run( "layout:create", R"({"name":"FiniteGuards"})" ).success );
+  QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "FiniteGuards" ) );
+  REQUIRE( layout != nullptr );
+
+  auto labelAdded = run( "layout:add_item",
+                         R"({"layout":"FiniteGuards","type":"label","properties":{"font_size":12}})" );
+  REQUIRE( labelAdded.success );
+  QgsLayoutItem *labelItem =
+    LayoutService::instance().findItem( layout, QString::fromStdString( labelAdded.output["id"].asString() ) );
+  REQUIRE( labelItem != nullptr );
+  const double finiteSize = qobject_cast<QgsLayoutItemLabel *>( labelItem )->font().pointSizeF();
+
+  Json::Value nanFont( Json::objectValue );
+  nanFont["font_size"] = std::numeric_limits<double>::quiet_NaN();
+  QStringList applied;
+  QStringList ignored;
+  REQUIRE( LayoutService::instance().applyItemProperties( labelItem, nanFont, &applied, &ignored,
+                                                          &error ) );
+  CHECK( applied.empty() );
+  CHECK( !ignored.filter( QStringLiteral( "font_size" ) ).isEmpty() );
+  CHECK( qobject_cast<QgsLayoutItemLabel *>( labelItem )->font().pointSizeF() == finiteSize );
+
+  auto barAdded = run( "layout:add_item", R"({"layout":"FiniteGuards","type":"scalebar"})" );
+  REQUIRE( barAdded.success );
+  QgsLayoutItem *barItem =
+    LayoutService::instance().findItem( layout, QString::fromStdString( barAdded.output["id"].asString() ) );
+  REQUIRE( barItem != nullptr );
+
+  // NaN units_per_segment: <= 0 guards pass NaN — finiteness must refuse.
+  Json::Value nanSegments( Json::objectValue );
+  nanSegments["units_per_segment"] = std::numeric_limits<double>::quiet_NaN();
+  applied.clear();
+  ignored.clear();
+  REQUIRE( LayoutService::instance().applyItemProperties( barItem, nanSegments, &applied, &ignored,
+                                                          &error ) );
+  CHECK( applied.empty() );
+  CHECK( !ignored.filter( QStringLiteral( "units_per_segment" ) ).isEmpty() );
+
+  // The declared distance unit applies (and is reported), unknown ids do not.
+  Json::Value unitProps( Json::objectValue );
+  unitProps["unit"] = "km";
+  applied.clear();
+  ignored.clear();
+  REQUIRE( LayoutService::instance().applyItemProperties( barItem, unitProps, &applied, &ignored,
+                                                          &error ) );
+  CHECK( applied.contains( QStringLiteral( "unit" ) ) );
+  auto *bar = qobject_cast<QgsLayoutItemScaleBar *>( barItem );
+  REQUIRE( bar != nullptr );
+  CHECK( bar->units() == Qgis::DistanceUnit::Kilometers );
+
+  Json::Value badUnit( Json::objectValue );
+  badUnit["unit"] = "furlongs";
+  applied.clear();
+  ignored.clear();
+  REQUIRE( LayoutService::instance().applyItemProperties( barItem, badUnit, &applied, &ignored,
+                                                          &error ) );
+  CHECK( applied.empty() );
+  CHECK( !ignored.filter( QStringLiteral( "unit" ) ).isEmpty() );
+  CHECK( bar->units() == Qgis::DistanceUnit::Kilometers );
+
+  LayoutService::instance().deleteLayout( QStringLiteral( "FiniteGuards" ) );
+  cleanupProject();
 }

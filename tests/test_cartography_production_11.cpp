@@ -44,6 +44,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <set>
 #include <sstream>
 
 #ifndef SICNU_CARTOGRAPHY_DATA_DIR
@@ -324,6 +325,23 @@ TEST_CASE( "produce refuses invalid requests with typed error codes",
     request.mapspec = parse( R"({ "kind": "map_spec" })" ); // envelope-less
     ProduceResult invalid = produceMap( request );
     CHECK( invalid.error_code == "VALIDATION_FAILED" );
+
+    // CARTO-4: a wrong-typed spec_version used to throw out of
+    // upgradeMapSpec's asInt() before validation could refuse — produce
+    // must answer with the typed code instead.
+    Json::Value stringVersion = frameSpec( "produce-bad-version" );
+    stringVersion["spec_version"] = "5";
+    request.mapspec = stringVersion;
+    ProduceResult badVersion;
+    REQUIRE_NOTHROW( badVersion = produceMap( request ) );
+    CHECK_FALSE( badVersion.ok );
+    CHECK( badVersion.error_code == "VALIDATION_FAILED" );
+
+    stringVersion["spec_version"] = 5.5;
+    request.mapspec = stringVersion;
+    REQUIRE_NOTHROW( badVersion = produceMap( request ) );
+    CHECK_FALSE( badVersion.ok );
+    CHECK( badVersion.error_code == "VALIDATION_FAILED" );
 }
 
 TEST_CASE( "produce single-mode delivers artifact + manifest and rolls back on cancel",
@@ -1132,6 +1150,85 @@ TEST_CASE( "materialized series compiles to exactly N physical pages (no render)
     QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &compileError );
     REQUIRE( layout != nullptr );
     CHECK( layout->pageCollection()->pageCount() == 3 );
+}
+
+TEST_CASE( "produce single-mode multi-page delivery publishes and manifests every page (CARTO-1)",
+           "[cp11][series][r14d]" )
+{
+    skipIfHostRenderBroken();
+    // A real project layer keeps the (columns>1) fixture legend's snapshot
+    // path populated and mirrors the single-mode case's project shape.
+    QgsVectorLayer *basemap = new QgsVectorLayer(
+      QStringLiteral( "Point?crs=EPSG:4326" ), QStringLiteral( "cp11-multi-basemap" ),
+      QStringLiteral( "memory" ) );
+    const QString basemapId = QgsProject::instance()->addMapLayer( basemap )->id();
+    struct LayerCleanup
+    {
+        QString id;
+        ~LayerCleanup() { QgsProject::instance()->removeMapLayer( id ); }
+    } cleanup{ basemapId };
+
+    // Two physical pages: the body page plus one pages[] entry. The fixture
+    // legend also declares classes so the manual (columns>1) model is
+    // populated from them (CARTO-10) instead of rendering empty.
+    Json::Value spec = frameSpec( "produce-multi-map", true );
+    Json::Value classes( Json::arrayValue );
+    classes.append( "water" );
+    classes.append( "forest" );
+    spec["legends"][0]["classes"] = classes;
+    spec["pages"] = parse( R"([ { "width_mm": 297, "height_mm": 210 } ])" );
+    REQUIRE( validateMapSpec( spec ).empty() );
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ProduceRequest request;
+    request.mapspec = spec;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+
+    const ProduceResult result = produceMap( request );
+    REQUIRE( result.ok );
+    CHECK( result.mode == "single" );
+    CHECK( result.page_count == 2 );
+
+    // The manifest lists every delivered page with a matching page_count.
+    bool digestOk = false;
+    std::string error;
+    const Json::Value manifest = readExportManifest( dir.path().toStdString(), "produce-multi-map",
+                                                     "png", &digestOk, &error );
+    REQUIRE( !manifest.isNull() );
+    CHECK( digestOk );
+    CHECK( manifest["page_count"].asInt() == 2 );
+    REQUIRE( manifest["pages"].isArray() );
+    REQUIRE( manifest["pages"].size() == 2 );
+    std::set<std::string> listedFiles;
+    for ( const auto &page : manifest["pages"] )
+    {
+        const QString path =
+          QDir( dir.path() ).filePath( QString::fromStdString( page["file_name"].asString() ) );
+        REQUIRE( QFile::exists( path ) );
+        QFile file( path );
+        REQUIRE( file.open( QIODevice::ReadOnly ) );
+        QCryptographicHash diskHash( QCryptographicHash::Sha256 );
+        diskHash.addData( &file );
+        file.close();
+        CHECK( page["sha256"].asString() == diskHash.result().toHex().toStdString() );
+        CHECK( page["bytes"].asInt64() > 0 );
+        listedFiles.insert( page["file_name"].asString() );
+    }
+    CHECK( listedFiles.count( "produce-multi-map.png" ) == 1 );
+    CHECK( listedFiles.count( "produce-multi-map_2.png" ) == 1 );
+
+    // No orphan junk: every file in the directory is the manifest sidecar
+    // or a listed page (the old bug left randomly-named page siblings).
+    const QStringList files = QDir( dir.path() ).entryList( QDir::Files );
+    for ( const QString &file : files )
+    {
+        const std::string name = file.toStdString();
+        const bool manifestSidecar = name == "produce-multi-map.png.manifest.json";
+        CHECK( ( manifestSidecar || listedFiles.count( name ) == 1 ) );
+    }
 }
 
 TEST_CASE( "vector series source refuses bad definitions with problems",

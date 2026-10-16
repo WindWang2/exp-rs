@@ -22,9 +22,14 @@
 #include <limits>
 
 #include <qgsapplication.h>
+#include <qgis.h>
+#include <qgslayoutitemlegend.h>
 #include <qgslayoutitemmap.h>
+#include <qgslayoutitemscalebar.h>
+#include <qgslayertree.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
+#include <qgsvectorlayer.h>
 
 #include <QDir>
 #include <QFileInfo>
@@ -625,4 +630,379 @@ TEST_CASE( "MapSpec validation and condition parser robustness (R13-G WP-01/WP-0
     CHECK( spec["labels"][1]["rect_mm"][0].asDouble() == 12.0 );
     CHECK( spec["labels"][1]["rect_mm"][1].asDouble() == 12.0 );
   }
+}
+
+// ---------------------------------------------------------------------------
+// R14-D WP-C+D — validation honesty + cartography rendering correctness.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+bool anyProblemMentions( const std::vector<std::string> &problems, const std::string &needle )
+{
+  for ( const auto &problem : problems )
+    if ( problem.find( needle ) != std::string::npos )
+      return true;
+  return false;
+}
+
+Json::Value rectOf( double x, double y, double w, double h )
+{
+  Json::Value rect( Json::arrayValue );
+  rect.append( x );
+  rect.append( y );
+  rect.append( w );
+  rect.append( h );
+  return rect;
+}
+
+} // namespace
+
+TEST_CASE( "MapSpec validation rejects non-string map_ref on map-referencing collections (CARTO-2)",
+           "[mapspec][validation][r14d]" )
+{
+  const char *const collections[] = { "legends", "north_arrows", "scale_bars", "charts",
+                                      "colorbars", "grids" };
+  for ( const char *collection : collections )
+  {
+    Json::Value spec = minimalSpec( std::string( "mapref-type-" ) + collection );
+    Json::Value item( Json::objectValue );
+    item["id"] = std::string( collection ) + "-bad";
+    item["map_ref"] = 42; // numeric, not a string
+    if ( std::string( collection ) == "grids" )
+      item["interval"] = 0.5; // keep the other grid rules quiet
+    spec[collection].append( item );
+    const auto problems = validateMapSpec( spec );
+    INFO( "collection: " << collection );
+    CHECK( anyProblemMentions( problems, "map_ref must be a string" ) );
+  }
+
+  // The compiler must never see the raw value: compile runs validation and
+  // refuses with a located, typed error instead of throwing out of
+  // asString() (jsoncpp is compiled with exceptions).
+  Json::Value spec = minimalSpec( "mapref-throw" );
+  Json::Value grid( Json::objectValue );
+  grid["id"] = "grid-1";
+  grid["map_ref"] = 42;
+  grid["interval"] = 0.5;
+  spec["grids"].append( grid );
+  QString error;
+  QgsPrintLayout *layout = nullptr;
+  REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &error ) );
+  CHECK( layout == nullptr );
+  CHECK( error.contains( QStringLiteral( "invalid MapSpec" ) ) );
+  CHECK( error.contains( QStringLiteral( "map_ref must be a string" ) ) );
+}
+
+TEST_CASE( "upgradeMapSpec tolerates wrong-typed spec_version; validation reports it (CARTO-4)",
+           "[mapspec][validation][migrate][r14d]" )
+{
+  Json::Value spec = minimalSpec( "version-typed" );
+
+  // String version: no throw, no coercion — the doc passes through so the
+  // subsequent validateMapSpec produces the typed VALIDATION_FAILED.
+  spec["spec_version"] = "5";
+  Json::Value upgraded;
+  REQUIRE_NOTHROW( upgraded = upgradeMapSpec( spec ) );
+  CHECK( upgraded["spec_version"].asString() == "5" );
+  const auto stringProblems = validateMapSpec( upgraded );
+  REQUIRE_FALSE( stringProblems.empty() );
+  CHECK( anyProblemMentions( stringProblems, "spec_version" ) );
+
+  // Float version: same contract.
+  spec["spec_version"] = 5.5;
+  REQUIRE_NOTHROW( upgraded = upgradeMapSpec( spec ) );
+  CHECK( upgraded["spec_version"].asDouble() == Catch::Approx( 5.5 ) );
+  CHECK_FALSE( validateMapSpec( upgraded ).empty() );
+
+  // Integer versions still upgrade (regression).
+  spec["spec_version"] = 3;
+  REQUIRE_NOTHROW( upgraded = upgradeMapSpec( spec ) );
+  CHECK( upgraded["spec_version"].asInt() == kMapSpecCurrentVersion );
+  CHECK( validateMapSpec( upgraded ).empty() );
+}
+
+TEST_CASE( "MapSpec validation rejects malformed map frame extents (CARTO-6)",
+           "[mapspec][validation][r14d]" )
+{
+  const auto extentProblems = []( const Json::Value &extent ) {
+    Json::Value spec = minimalSpec( "extent-check" );
+    spec["map_frames"][0]["extent"] = extent;
+    return validateMapSpec( spec );
+  };
+
+  Json::Value shortExtent( Json::arrayValue );
+  shortExtent.append( 116 );
+  shortExtent.append( 39 );
+  shortExtent.append( 117 );
+  auto problems = extentProblems( shortExtent );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "extent must be [xmin, ymin, xmax, ymax]" ) );
+
+  Json::Value stringExtent( Json::arrayValue );
+  stringExtent.append( "a" );
+  stringExtent.append( "b" );
+  stringExtent.append( "c" );
+  stringExtent.append( "d" );
+  problems = extentProblems( stringExtent );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "extent entries must be numbers" ) );
+
+  Json::Value nanExtent( Json::arrayValue );
+  nanExtent.append( std::numeric_limits<double>::quiet_NaN() );
+  nanExtent.append( 39 );
+  nanExtent.append( 117 );
+  nanExtent.append( 40 );
+  problems = extentProblems( nanExtent );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "finite" ) );
+
+  Json::Value crossedExtent( Json::arrayValue );
+  crossedExtent.append( 117 );
+  crossedExtent.append( 40 );
+  crossedExtent.append( 116 );
+  crossedExtent.append( 39 );
+  problems = extentProblems( crossedExtent );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "xmin < xmax" ) );
+
+  Json::Value degenerate( Json::arrayValue );
+  degenerate.append( 5 );
+  degenerate.append( 5 );
+  degenerate.append( 5 );
+  degenerate.append( 5 );
+  problems = extentProblems( degenerate );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "xmin < xmax" ) );
+
+  // The valid minimalSpec extent stays clean (regression).
+  CHECK( validateMapSpec( minimalSpec( "extent-valid" ) ).empty() );
+}
+
+TEST_CASE( "MapSpec validation rejects non-finite font sizes and bad grid declarations (CARTO-7/CARTO-11)",
+           "[mapspec][validation][r14d]" )
+{
+  SECTION( "font.size_pt needs explicit finiteness (NaN passes <= 0 guards)" )
+  {
+    const auto fontProblems = []( const Json::Value &sizePt ) {
+      Json::Value spec = minimalSpec( "font-size-check" );
+      Json::Value label( Json::objectValue );
+      label["id"] = "label-font";
+      label["rect_mm"] = rectOf( 12, 180, 80, 8 );
+      label["font"] = Json::Value( Json::objectValue );
+      label["font"]["size_pt"] = sizePt;
+      spec["labels"].append( label );
+      return validateMapSpec( spec );
+    };
+    auto problems = fontProblems( Json::Value( std::numeric_limits<double>::quiet_NaN() ) );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "size_pt" ) );
+    problems = fontProblems( Json::Value( -5.0 ) );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "size_pt" ) );
+    problems = fontProblems( Json::Value( "big" ) );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "size_pt" ) );
+    CHECK( fontProblems( Json::Value( 18.0 ) ).empty() );
+  }
+
+  SECTION( "grids need a map_ref and a positive finite interval" )
+  {
+    const auto gridProblems = []( const Json::Value &grid ) {
+      Json::Value spec = minimalSpec( "grid-check" );
+      spec["grids"].append( grid );
+      return validateMapSpec( spec );
+    };
+    Json::Value noRef( Json::objectValue );
+    noRef["id"] = "grid-1";
+    noRef["interval"] = 0.5;
+    auto problems = gridProblems( noRef );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "missing map_ref" ) );
+
+    Json::Value negative( Json::objectValue );
+    negative["id"] = "grid-2";
+    negative["map_ref"] = "map-1";
+    negative["interval"] = -5.0;
+    problems = gridProblems( negative );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "interval" ) );
+
+    Json::Value nanInterval( Json::objectValue );
+    nanInterval["id"] = "grid-3";
+    nanInterval["map_ref"] = "map-1";
+    nanInterval["interval"] = std::numeric_limits<double>::quiet_NaN();
+    problems = gridProblems( nanInterval );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "interval" ) );
+
+    Json::Value valid( Json::objectValue );
+    valid["id"] = "grid-4";
+    valid["map_ref"] = "map-1";
+    valid["interval"] = 0.5;
+    CHECK( gridProblems( valid ).empty() );
+  }
+}
+
+TEST_CASE( "Scale bar units compile to the declared QGIS distance unit (CARTO-3)",
+           "[mapspec][compiler][r14d]" )
+{
+  const std::vector<std::pair<std::string, Qgis::DistanceUnit>> cases = {
+    { "m", Qgis::DistanceUnit::Meters },
+    { "km", Qgis::DistanceUnit::Kilometers },
+    { "mi", Qgis::DistanceUnit::Miles },
+    { "ft", Qgis::DistanceUnit::Feet },
+    { "nm", Qgis::DistanceUnit::NauticalMiles },
+    { "deg", Qgis::DistanceUnit::Degrees },
+  };
+  for ( const auto &entry : cases )
+  {
+    Json::Value spec = minimalSpec( "units-map-" + entry.first );
+    Json::Value scaleBar( Json::objectValue );
+    scaleBar["id"] = "scale_bar-1";
+    scaleBar["rect_mm"] = rectOf( 12, 190, 60, 8 );
+    scaleBar["map_ref"] = "map-1";
+    scaleBar["units"] = entry.first;
+    spec["scale_bars"].append( scaleBar );
+    QString error;
+    QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
+    INFO( "unit: " << entry.first << " error: " << error.toStdString() );
+    REQUIRE( layout != nullptr );
+    auto *bar = qobject_cast<QgsLayoutItemScaleBar *>(
+      sicnu::agent::layout_tools::LayoutService::instance().findItem( layout,
+                                                                      QStringLiteral( "scale_bar-1" ) ) );
+    REQUIRE( bar != nullptr );
+    CHECK( bar->units() == entry.second );
+    CHECK( bar->unitLabel().toStdString() == entry.first );
+  }
+
+  // Unknown unit vocabulary: typed validation refusal, never a silent guess.
+  Json::Value spec = minimalSpec( "units-map-unknown" );
+  Json::Value scaleBar( Json::objectValue );
+  scaleBar["id"] = "scale_bar-1";
+  scaleBar["rect_mm"] = rectOf( 12, 190, 60, 8 );
+  scaleBar["map_ref"] = "map-1";
+  scaleBar["units"] = "furlongs";
+  spec["scale_bars"].append( scaleBar );
+  const auto problems = validateMapSpec( spec );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "not a supported distance unit" ) );
+  QString error;
+  QgsPrintLayout *layout = nullptr;
+  REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &error ) );
+  CHECK( layout == nullptr );
+  CHECK( error.contains( QStringLiteral( "invalid MapSpec" ) ) );
+}
+
+TEST_CASE( "Declared legend classes populate manual multi-column legends (CARTO-10)",
+           "[mapspec][compiler][r14d]" )
+{
+  Json::Value spec = minimalSpec( "legend-classes" );
+  Json::Value legend( Json::objectValue );
+  legend["id"] = "legend-1";
+  legend["rect_mm"] = rectOf( 210, 30, 60, 70 );
+  legend["map_ref"] = "map-1";
+  legend["columns"] = 2;
+  Json::Value classes( Json::arrayValue );
+  classes.append( "water" );
+  classes.append( "forest" );
+  legend["classes"] = classes;
+  spec["legends"].append( legend );
+
+  QString error;
+  QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
+  INFO( "error: " << error.toStdString() );
+  REQUIRE( layout != nullptr );
+  auto *legendItem = qobject_cast<QgsLayoutItemLegend *>(
+    sicnu::agent::layout_tools::LayoutService::instance().findItem( layout,
+                                                                    QStringLiteral( "legend-1" ) ) );
+  REQUIRE( legendItem != nullptr );
+  CHECK( legendItem->columnCount() == 2 );
+  // Declared classes drive the content: the manual model carries one entry
+  // per class (rendered through a session-owned categorized layer).
+  legendItem->refresh();
+  REQUIRE( legendItem->model() != nullptr );
+  REQUIRE( legendItem->model()->rootGroup() != nullptr );
+  const auto layers = legendItem->model()->rootGroup()->findLayers();
+  CHECK( layers.size() == 1 );
+  if ( !layers.isEmpty() )
+    CHECK( layers.first()->layer() != nullptr );
+}
+
+TEST_CASE( "MapSpec compiler refuses unresolvable frame layer references (CARTO-5)",
+           "[mapspec][compiler][r14d]" )
+{
+  QgsVectorLayer *resolvable = new QgsVectorLayer(
+    QStringLiteral( "Point?crs=EPSG:4326" ), QStringLiteral( "carto5-layer" ),
+    QStringLiteral( "memory" ) );
+  const QString resolvableId = QgsProject::instance()->addMapLayer( resolvable )->id();
+  struct LayerCleanup
+  {
+    QString id;
+    ~LayerCleanup() { QgsProject::instance()->removeMapLayer( id ); }
+  } cleanup{ resolvableId };
+
+  Json::Value spec = minimalSpec( "layers-partial" );
+  spec["map_frames"][0]["layers"].append( "carto5-layer" );
+  spec["map_frames"][0]["layers"].append( "definitely-not-a-project-layer" );
+  QString error;
+  QgsPrintLayout *layout = nullptr;
+  REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &error ) );
+  CHECK( layout == nullptr );
+  CHECK( error.contains( QStringLiteral( "unresolvable reference" ) ) );
+  CHECK( error.contains( QStringLiteral( "definitely-not-a-project-layer" ) ) );
+  // The failed compile leaves no half-built layout registered.
+  CHECK( sicnu::agent::layout_tools::LayoutService::instance().findLayout(
+           QStringLiteral( "layers-partial" ) ) == nullptr );
+
+  // A fully-resolvable list still compiles (regression), and a declarative
+  // layers[] id is a legal ref even when no project layer backs it (the
+  // MAP_LAYER_UNREFERENCED repair attaches such ids to frames).
+  Json::Value good = minimalSpec( "layers-full" );
+  good["map_frames"][0]["layers"].append( "carto5-layer" );
+  Json::Value declared( Json::objectValue );
+  declared["id"] = "layer-declarative";
+  good["layers"].append( declared );
+  good["map_frames"][0]["layers"].append( "layer-declarative" );
+  error.clear();
+  QgsPrintLayout *compiled = nullptr;
+  REQUIRE_NOTHROW( compiled = MapSpecCompiler::compile( good, &error ) );
+  CHECK( compiled != nullptr );
+}
+
+TEST_CASE( "MapSpec validation rejects unknown token sets and malformed style overrides (CARTO-16)",
+           "[mapspec][validation][r14d]" )
+{
+  Json::Value spec = minimalSpec( "tokens-check" );
+  spec["style"]["token_set"] = "no-such-token-set";
+  auto problems = validateMapSpec( spec );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "not a registered token set" ) );
+
+  // A registered id stays valid (the shipped default set).
+  spec["style"]["token_set"] = "scientific-light";
+  CHECK( validateMapSpec( spec ).empty() );
+  spec["style"].removeMember( "token_set" );
+
+  spec["style"]["overrides"]["spacing"]["margin_mm"] = -5;
+  problems = validateMapSpec( spec );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "style.overrides.spacing.margin_mm" ) );
+
+  spec["style"]["overrides"]["spacing"]["margin_mm"] =
+    std::numeric_limits<double>::quiet_NaN();
+  problems = validateMapSpec( spec );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "style.overrides.spacing.margin_mm" ) );
+
+  spec["style"].removeMember( "overrides" );
+  spec["style"]["overrides"]["typography"]["styles"]["body"]["size_pt"] = -1;
+  problems = validateMapSpec( spec );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "style.overrides.typography.styles.body.size_pt" ) );
+
+  // A well-formed override set stays clean.
+  spec["style"].removeMember( "overrides" );
+  spec["style"]["overrides"]["spacing"]["margin_mm"] = 8;
+  CHECK( validateMapSpec( spec ).empty() );
 }

@@ -67,6 +67,24 @@ QStringList fontSubstitutionDiagnostics( QgsPrintLayout *layout )
   return diagnostics;
 }
 
+namespace
+{
+// The vendored QgsLayoutExporter derives non-first-page file names itself
+// (base_2.png siblings, generateFileName): redirecting a per-page export to a
+// caller-chosen temp path needs the virtual hook, not the settings object.
+class SingleNamePageExporter : public QgsLayoutExporter
+{
+  public:
+    using QgsLayoutExporter::QgsLayoutExporter;
+
+  protected:
+    QString generateFileName( const QgsLayoutExporter::PageExportDetails &details ) const override
+    {
+      return details.directory + '/' + details.baseName + '.' + details.extension;
+    }
+};
+} // namespace
+
 std::string sha256OfFile( const QString &path, long long *bytes )
 {
   QFile file( path );
@@ -191,6 +209,107 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
       ? layout->name()
       : QString::fromStdString( request.file_name );
   const QString suffix = QString::fromStdString( request.format );
+
+  // Deterministic per-page delivery names, mirroring the exporter's own
+  // generateFileName contract (page 0 → base.<fmt>, page N → base_<N+1>.<fmt>).
+  const auto pageFinalPath = [ &dir, &baseName, &suffix ]( int page ) {
+    return page == 0 ? dir.filePath( baseName + "." + suffix )
+                     : dir.filePath( baseName + "_" + QString::number( page + 1 ) + "." + suffix );
+  };
+
+  // CARTO-1: an all-pages png export of a multi-page layout used to hand the
+  // exporter ONE temp path — it wrote page 0 there and pages 1..N-1 as
+  // randomly-named SIBLINGS in the delivery directory (QTemporaryFile only
+  // removes its own file), so the delivery missed pages 2..N and carried
+  // orphan junk. Multi-page png is exported one page at a time through the
+  // same temp → verify → publish discipline, each under its deterministic
+  // name; any failure rolls back every page already delivered.
+  if ( request.format == "png" )
+  {
+    std::vector<int> pages = request.pages;
+    if ( pages.empty() )
+    {
+      const int pageCount = std::max( 1, layout->pageCollection()->pageCount() );
+      for ( int page = 0; page < pageCount; ++page )
+        pages.push_back( page );
+    }
+    if ( pages.size() > 1 )
+    {
+      QStringList delivered;
+      for ( const int page : pages )
+      {
+        QTemporaryFile temp( dir.filePath( baseName + ".XXXXXX." + suffix ) );
+        temp.setAutoRemove( true );
+        if ( !temp.open() )
+        {
+          result.error = QStringLiteral( "cannot create a temporary export file in '%1'" )
+                           .arg( dir.path() );
+          break;
+        }
+        const QString tempPath = temp.fileName();
+        temp.close(); // the exporter writes its own handle
+
+        SingleNamePageExporter exporter( layout );
+        QgsLayoutExporter::ImageExportSettings settings;
+        settings.dpi = request.dpi;
+        settings.pages << page;
+        result.exporterResult = exporter.exportToImage( tempPath, settings );
+        if ( result.exporterResult != QgsLayoutExporter::Success )
+        {
+          result.error = QStringLiteral( "exporter failed on page %1 with result %2" )
+                           .arg( page + 1 )
+                           .arg( static_cast<int>( result.exporterResult ) );
+          break;
+        }
+        if ( !QFile::exists( tempPath ) )
+          continue; // page excluded from export (conditional page / null size)
+        long long bytes = 0;
+        const std::string sha = sha256OfFile( tempPath, &bytes );
+        if ( bytes <= 0 || sha.empty() )
+        {
+          result.error = QStringLiteral( "exported page %1 is empty or unreadable" ).arg( page + 1 );
+          break;
+        }
+        const QString finalPagePath = pageFinalPath( page );
+        try
+        {
+          sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
+          sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(),
+                                                    finalPagePath.toStdString() );
+        }
+        catch ( const sicnu::geo::GeoError &ex )
+        {
+          result.error = QStringLiteral( "cannot publish page %1 at '%2': %3" )
+                           .arg( page + 1 )
+                           .arg( finalPagePath, QString::fromUtf8( ex.what() ) );
+          break;
+        }
+        delivered << finalPagePath;
+        if ( result.path.empty() )
+        {
+          // The primary artifact describes the first delivered page.
+          result.path = QFileInfo( finalPagePath ).absoluteFilePath().toStdString();
+          result.sha256 = sha;
+          result.bytes = bytes;
+        }
+      }
+      if ( !result.error.isEmpty() )
+      {
+        for ( const QString &published : delivered )
+          QFile::remove( published );
+        return result;
+      }
+      if ( result.path.empty() )
+      {
+        result.error = QStringLiteral( "export produced no pages (all pages excluded?)" );
+        return result;
+      }
+      result.ok = true;
+      result.fontDiagnostics = fontSubstitutionDiagnostics( layout );
+      return result;
+    }
+  }
+
   const QString finalPath = dir.filePath( baseName + "." + suffix );
 
   // Atomic write: exporter writes the temp file; only a verified write is
