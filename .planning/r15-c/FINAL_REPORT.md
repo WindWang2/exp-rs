@@ -6,8 +6,10 @@
   `C:\Users\wangj.KEVIN\projects\exp-rs-r15-c-20261016`）
 - **BASE_SHA (origin/master):** `46791bc65c6f552ebbcf723bb91892736d56f319`
   （2026-10-16，#1509 合并日）
-- **HEAD_SHA:** `44df74a27`（9 commits，ahead 9 / behind 0——建 PR 时复测）
-- **PR:** 见文末链接（建 PR 后回填）
+- **HEAD_SHA:** `44df74a27` + 1 docs commit（FINAL_REPORT），共 10 commits，
+  ahead 10 / behind 0（origin/master 未动：`46791bc65`）
+- **PR:** https://github.com/WindWang2/exp-rs/pull/1515（base master，未自动合并，
+  未等待线上 CI）
 - **宿主事实（如实记录）:** 本宿主非 Google Antigravity；`/teamwork-preview` 与
   `/goal-loop` 未注册（与 R14-B 相同的 DEGRADATION 记录）。等价结构：主编排 →
   实现（本 Agent）→ **7 个只读审计 subagent**（C01–C17 覆盖）+ **2 轮独立
@@ -100,4 +102,6 @@ docs：`.planning/r15-c/**`（10 个 markdown）+ `.gitignore`。
 
 ## 推送 / PR
 
-见文末（建 PR 后回填 URL）。未自动合并；未等待线上 CI。
+- **PR: https://github.com/WindWang2/exp-rs/pull/1515**（base master，head
+  `hardening/r15-C-model-runtime`，10 commits）。
+- 未自动合并；未等待线上 CI；本轨所有通过口径均为本地 targeted build + test 证据。
