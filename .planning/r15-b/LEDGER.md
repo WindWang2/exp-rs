@@ -24,5 +24,6 @@
 | 18 | 第 7 项 checksums.txt CRLF | 完成 | RED：完好 CRLF bundle 被判 checksum mismatch: manifest.json | GREEN×2 | d9ea2b01 |
 | 19 | 第 7 项 journal 闸门扩展 + 开后复查 | 完成（开后复查只缩窄窗口，无确定性 RED） | RED：inspectRaster/inspectAny/validateCog/translateRaster 在有 .publish-journal 时成功 | GREEN×2 | c4ed7d85 |
 | 20 | B15 远端源校验身份 | 完成 | RED：重签名 URL 的 recordedToken 为空、isStale=false、签名与 AKIA 凭据出现在 SQLite 文件中 | GREEN×2 | adb6e525 |
-| 21 | 第 8 项 #1505 已合并 | resource_uri：#1481 T6/T7/T8/T9/T19 首跑即绿（FIXED_ON_MASTER），#1505 T9 RED→修复；range_cache T6/T11、DNS T3 → POST_1505_PATCHES.md（未落地，原因见文档） | 1505-T9 RED：100%_coverage.tif 被判 Invalid | GREEN×2 | bfe83d41 |
-| 22 | 第 9 项 sanitizer / 第 10 项 RED 复跑 + 重型回归 | 待做；RED 工作树 `exp-rs-r15-b-red`（本轨新建，独立构建目录） | | | |
+| 21 | 第 8 项 #1505 已合并 | resource_uri：T6/T7/T8/T9/T19 FIXED_ON_MASTER，#1505 T9 修复（bfe83d41）；range_cache T6 修复（7ed6dc02）；DNS T3 修复（fc712c72）；T11 跨所有权未做（POST_1505_PATCHES §C） | T9/T6/T3 RED 见 TEST_RESULTS §5.1 | GREEN×2 | bfe83d41、7ed6dc02、fc712c72 |
+| 22 | 第 9 项 sanitizer + 第 10 项 RED 复跑 + 重型回归 | 完成：TSan 1 条真实 race→修复（f8e1f280）后 0；ASan+UBSan 0；原始 5 修复与本轮修复 RED 全部复现；回归 211/211×2，platform7/evaluation 二进制×2 | 见 TEST_RESULTS §5 | GREEN×2 | f8e1f280 |
+| 23 | REVIEW_ROUND3 + 文档 + PR body | 完成；P1 #1505 T11 未关闭 → PR 保持 Draft | — | — | 本提交 |

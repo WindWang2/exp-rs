@@ -15,51 +15,24 @@
 | #1481 T19 | `file:///`、`file:///C:/` canonical 丢根分隔符 | FIXED_ON_MASTER：首跑即绿（本轨起草的盘符根补丁因此撤回，未提交） | `1481-T19:` |
 | #1505 T9 | 相对文件名里的字面 `%` 被当遍历拒绝 | REPRODUCED → FIXED_HERE：RED `resolveAgainst("/base","reports/100%_coverage.tif")` 为 Invalid；修复后只拒绝解码后为 NUL / `..` 的段（`%2e%2e`、`%252e%252e`、`%00` 仍拒绝） | `1505-T9:` |
 
-## B. 未落地：range_cache.cpp —— #1505 T6 重定向拒绝后回落 /vsicurl/
+## B. 已落地：range_cache.cpp —— #1505 T6 重定向/策略拒绝后回落 /vsicurl/（提交 `7ed6dc02`）
 
-现状（读码确认）：`serveOrFetch()` 的 `catch ( const GeoError & )` 把 `fetchRangeOnce` 抛出的 `PermissionDenied`（重定向守卫拒绝私网跳转）当成传输失败，
-转去 `fallbackRead()`，而 fallback 走原始 `/vsicurl/`，会不经守卫地跟随同一个重定向。
+`serveOrFetch()` 现在把 `PermissionDenied` 视为终局：不再调用 `fallbackRead()`，读返回 0 并 CPLError。
+确定性 oracle 不需要测试接缝：对已打开的句柄在读之前把 `blockPrivateNetworks` 打开，下一次未缓存读即被 `fetchRangeOnce` 拒绝——与重定向跳被拒走同一个 catch 分支。
+RED（pre-fix）：读到 4096 字节、fallback_reads 0→1、origin 请求 2→5；GREEN×2。重定向跳本身没有单独 oracle（本机无法构造"公网 origin → 私网"拓扑），属于同一代码路径。
 
-建议补丁：
+## C. 未落地：#1505 T11 生产安装默认开启私网阻断（**仍是未关闭的 P1**）
 
-```diff
--      catch ( const GeoError & )
--      {
--        transportFailed = true;
--      }
-+      catch ( const GeoError &error )
-+      {
-+        // A policy refusal is final: the fallback would follow the same
-+        // redirect through raw /vsicurl/ without the guard.
-+        if ( error.code() == ErrorCode::PermissionDenied )
-+          refused = true;
-+        else
-+          transportFailed = true;
-+      }
- ...
-+      if ( refused )
-+      {
-+        CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: origin redirect refused by policy" );
-+        return 0; // readThroughCache reports a short read truthfully
-+      }
-```
+现状：`RangeCacheConfig::blockPrivateNetworks = false`；两条处理用户 URL 的生产 CLI 路径以默认配置调用 `RemoteRangeCache::install()`。
+不在本轨落地的原因（具体）：
+1. 安装点在 `src/cli/**`，不在本轨写权限（src/geospatial/**、src/data/**、src/dataset/**、src/experiment/**）内。
+2. 改结构体默认值（本轨可写）会让所有使用 127.0.0.1 测试服务器的既有用例（test_io_range_cache 等）在 open 阶段被拒，属于跨轨的策略变更，需要 owner 决定并同步改测试。
+建议补丁（CLI owner）：在两个 `install()` 调用点设置 `cfg.blockPrivateNetworks = true`，提供显式的 `--allow-private-network` 逃生开关；oracle：CLI 级测试断言安装后 `RemoteRangeCache::currentConfig().blockPrivateNetworks == true`，且对 `http://169.254.169.254/...` 的读取被拒。
 
-为什么没落地：确定性 RED 需要"公网 origin → 302 → 私网"的拓扑；本机测试服务器只能监听 127.0.0.1，而开启
-`blockPrivateNetworks` 后 127.0.0.1 在 open 阶段就被拒，到不了重定向分支。可行 oracle 设计：给 `offline::isPrivateHost`
-加测试注入的"视为公网"主机白名单（仅测试构建），或把重定向策略判定抽成可注入函数，再用 `http_range_server` 返回 302 到
-`169.254.169.254`，断言 `fallbackReads` 计数为 0 且读返回 0 字节。需要 owner 同意加测试接缝。
+## D. 已落地：offline_gate.cpp / http_fetch.cpp —— #1505 T3 / #1485 DNS rebinding（提交 `fc712c72`）
 
-## C. 未落地：range_cache.h —— #1505 T11 生产安装默认开启私网阻断
-
-现状：`RangeCacheConfig::blockPrivateNetworks = false`，两条 CLI 路径用默认配置 `install()`。
-建议：在 CLI 安装点（`src/cli/**`，非本轨所有权）显式设 `blockPrivateNetworks = true`，并提供 `--allow-private-network`
-逃生开关；**不**改结构体默认值（大量测试依赖 127.0.0.1 测试服务器）。oracle：CLI 级测试断言安装后的
-`RemoteRangeCache::config().blockPrivateNetworks == true`。属于策略变更 + 跨所有权，未做。
-
-## D. 未落地：offline_gate.cpp —— #1505 T3 / #1485 DNS rebinding
-
-现状：校验阶段 `getaddrinfo()` 的结果被释放，libcurl 再次独立解析，攻击者控制的域名可在两次解析间切换到私网地址。
-建议：校验函数返回已验证的地址集合；传输层用 `CURLOPT_RESOLVE`（`host:port:addr1,addr2`）把连接钉到这组地址，
-重定向的每一跳重复"解析→校验→钉住"；GDAL `/vsicurl/` 路径无法注入 `CURLOPT_RESOLVE`，需要经由
-`GDAL_HTTP_*` 配置或改走自有 HTTP 层。oracle：本地 DNS stub（返回序列 public→127.0.0.1）+ 断言第二次连接目标仍为第一次校验过的地址。
-跨 transport 的较大改动，本轨不做。
+新增 `offline::resolvePinnedPublicAddresses()`：对受守卫的每一跳再解析一次主机名，逐个校验全部地址，任一私网地址或无法解析即拒绝（fail closed）；
+通过后用 `CURLOPT_RESOLVE` 把这一跳钉到这组已验证地址，libcurl 不再自行查询 DNS。IP 字面量主机不受影响。
+oracle：测试二进制内插 `getaddrinfo`（只对一个测试专用域名生效：第一次答 192.0.2.1，之后答 127.0.0.1）。
+RED（pre-fix）：lookups=2，fixture 收到 1 个请求；GREEN×2：fixture 从未被连接。
+剩余限制（记录）：走代理时由代理解析（钉不住）；不经守卫的 GDAL `/vsicurl/` 路径（例如传输失败后的 fallback）不在此修复范围。

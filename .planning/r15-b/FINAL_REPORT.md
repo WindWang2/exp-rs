@@ -1,68 +1,61 @@
 # R15-B 最终报告（FINAL_REPORT）
 
-轨道 B：空间数据链路、数据集/实验存储与可恢复持久化。只审计/加固既有模块，没有新增 IO 框架、产品模块或框架迁移，也没有重做已合并的修复。
+轨道 B：空间数据链路、数据集/实验存储与可恢复持久化。只审计/加固既有模块，没有新增 IO 框架、产品模块或框架迁移，没有重做已合并的修复，没有 cherry-pick（含 #1512）。
 
 | 项 | 值 |
 |---|---|
-| 分支 | `hardening/r15-B-geodata-persistence` |
-| BASE_SHA | `46791bc6`（origin/master，fetch 后仍为最新） |
-| 代码 HEAD | `e89b9b51`（之后只有本文档提交） |
-| 工作树 | `<repo 父目录>/exp-rs-r15-b-20261016`；构建树 `build-r15-b` |
+| 分支 / PR | `hardening/r15-B-geodata-persistence` / #1513（Draft） |
+| BASE_SHA | `46791bc6`（origin/master，最后一次 fetch 仍为最新，无需 rebase） |
+| 代码 HEAD | `f8e1f280`（之后只有文档提交） |
+| 工作树 | `<repo 父目录>/exp-rs-r15-b-20261016`；构建树 `build-r15-b`、`build-r15-b-tsan`、`build-r15-b-asan`；RED 工作树 `<repo 父目录>/exp-rs-r15-b-red` |
 | 工具 | `/teamwork-preview`、`/goal-loop`：未安装/等价执行（Oracle-Ledger 循环） |
 
-## 1. 修复索引
+## 1. 修复索引（全部 RED→GREEN×2，RED 证据见 TEST_RESULTS.md §2、§5.1）
 
-| WP | 级别 | 缺陷 | 修复 | 文件 | 提交 | Oracle |
-|---|---|---|---|---|---|---|
-| B13 | P0（科学数据损坏） | 组发布在侧车与主文件 rename 之间被 kill，读者会打开混代组（#1481 T11 残留） | 读侧闸门 `atomic_fs::throwIfInterruptedPublish`：存在未提交 journal 即拒绝读取，无副作用；committed 标记不阻断 | atomic_fs.{h,cpp}、raster_reader.cpp、vector_reader.cpp | cec9b8d5、c85f475e | O-B13.1–4（含 40 轮 kill -9） |
-| B12 | P0（安全） | bundle 导入把 data/ 下符号链接（可指向任意宿主文件）及未被校验和覆盖的文件迁移出去（#1481 T12 残留） | 只迁移被 checksums.txt 列入、位于规范化 data/ 内的普通文件；其余拒绝并告警 | reproduction_bundle_import.cpp | f840caf2 | O-B12.1 |
-| B04 | P1（回归） | #1504 后 resolver 对私网源抛异常，违反"拒绝 ⇒ 空 token"契约，中断调用方指纹收集 | probe/revalidate 捕获 `GeoError` ⇒ 空 token，并照常丢弃旧 token | remote_identity_resolver.cpp、test_io_remote_validator.cpp | f6e720a2 | O-B04.1 + 历史用例 |
-| B05 | P1 | 远端 rel=next 自环/成环时 `CatalogService::searchAll` 重复拉取，结果中混入重复记录 | 对发请求的续页按 method+href+body 记账，重复即抛 `InvalidMetadata` | catalog_service.cpp | 46e321d0 | O-B05.1/2 |
-| B07 | P1（数据完整性） | ExperimentStore 4 个 list 扫描 + 4 个 COUNT + prune 规划在 SQLite 中途出错时返回部分结果并报成功（#1448/#1457 残留） | 循环/单步后检查 `stepFailed()` ⇒ `experiment.store_scan_failed` | experiment_store.cpp | 853af4c6（RED）、ba9487df | O-B07.1（真实损坏叶页） |
+| WP | 级别 | 缺陷 → 修复 | 提交 |
+|---|---|---|---|
+| B13 | P0 | 组发布中途被 kill，读者打开混代组 → 读侧 journal 闸门 | cec9b8d5、c85f475e |
+| B12 | P0 | bundle 导入迁移符号链接/未校验文件 → 只迁移已校验的普通文件 | f840caf2 |
+| B04 | P1 | resolver 对私网源抛异常 → 拒绝即空 token | f6e720a2 |
+| B05 | P1 | rel=next 成环时重复拉取 → 检测重复续页 | 46e321d0 |
+| B07 | P1 | ExperimentStore 扫描中途出错返回部分结果 → 类型化失败 | ba9487df |
+| 第 5 项（B07 尾部 / R1-08） | P1 | DatasetStore / ExperimentStore 边、GovernanceStore 列表扫描吞掉中途错误 → 可选尾参 `QString *scanError`（向后兼容）+ Governance `stepFailed()`；lineage 图标记不完整 | c68d5e95 |
+| 第 4 项 #1449 | P1 | close() 与并发调用 UAF（修复前 SIGSEGV）→ 四个 store 外置递归读写锁 | c68d5e95 |
+| B06 | P1 | 外部内容变更后元数据仍描述旧字节、损坏内容仍为 Ready → 重新解析，失败即 Error + `asset.content_unreadable` | 790d302c |
+| B15 | P2（含凭据落盘） | 远端源校验身份用原始 URL：签名落盘、轮换签名后永不判 stale → 去签名参数的资源身份 | adb6e525 |
+| 第 7 项 CRLF | P3 | CRLF checksums.txt 使完好 bundle 被拒 → 容忍单个行尾 CR | d9ea2b01 |
+| 第 7 项 闸门扩展（R1-04） | P2 | inspect*/validateCog/convert 输入不受 journal 闸门保护 → 加闸门 + 开后复查（缩窄 TOCTOU） | c4ed7d85 |
+| #1505 T9 | P2 | 字面 `%` 文件名被当遍历拒绝 → 只拒绝解码后 NUL/`..` | bfe83d41 |
+| #1505 T6 | P1 | 策略拒绝后回落到无守卫 /vsicurl/ → 拒绝即终局 | 7ed6dc02 |
+| #1505 T3 / #1485 | P1 | DNS rebinding → 再解析校验并以 CURLOPT_RESOLVE 钉住连接 | fc712c72 |
+| B09（TSan） | P2 | `GovernanceStore::stepFailed` 跨线程无锁读写 → atomic | f8e1f280 |
 
-只加 oracle、不改代码：B02（full==tile==block 拼接）、B16（#1481/#1485/#1505 SSRF 与 COG offline 闸门回归）、B14（隐藏测量用例）。
+只加 oracle（首跑即绿）：B02、B11（审计无引擎缺陷）、B16、#1481 T6/T7/T8/T9/T19（FIXED_ON_MASTER）。
+测量：B14（PERFORMANCE.md；PERF-2 的 keyset 改动实测更慢，已撤回）。审计记录：B03/B08/B09/B10（REVIEW_ROUND3.md）。
 
-## 2. WP 分类（B01–B17）
-- **FIXED_HERE**：B04、B05、B07、B12、B13。
-- **只加回归 oracle（FIXED_ON_MASTER / 未发现缺陷）**：B02、B16。
-- **测量**：B14（PERFORMANCE.md；发现 PERF-1/PERF-2，均为 P2，未修）。
-- **部分审计**：B15（resolver 失败后不重用旧 token，已由 B04 覆盖；其余未审）。
-- **未审计 / LIVE_DEFERRED**：B06、B11；DatasetStore 中 10 个返回裸 QVector 的扫描及 ExperimentStore 游标/lineage 扫描（R1-08，需改 API）。
-- 其余 WP 与 issue 的分类见 ISSUE_PR_REVIEW_MATRIX.md。
-
-## 3. 测试
-- 基线：89/90（#1504 回归）。
-- RED→GREEN：见 TEST_RESULTS.md §2。
-- GREEN×2：机器替换后在 HEAD `e89b9b51` 重新构建并运行，两次都是 113/113。
+## 2. 测试（详见 TEST_RESULTS.md）
+- RED：原始 5 个修复与本轮全部修复都在本机 RED 工作树重新复现。
+- GREEN×2：本轨 3 个新测试 22/22；相关回归子集 211/211（两次）；`test_platform7_library`、`test_experiment_evaluation` 直接运行两次全部通过；`test_r12b_e2e_durability` 在子集内。
+- Sanitizer：TSan 发现 1 条真实 race 并修复，之后 0；ASan+UBSan 0。
 - `git diff --check`：通过。
 
-## 4. 评审结论
-Round 1（REVIEW_ROUND1.md）与 Round 2（REVIEW_ROUND2.md）都由同一代理执行，属于等价替代，不是真正独立的评审。结论：**无 P0/P1 未关闭**；2 个 P2 已修（R1-01/R1-02）；其余为残留风险（§5）。
+## 3. 评审
+三轮（REVIEW_ROUND1/2/3）均为同一 agent 的等价自审，**不是独立评审**。
 
-## 5. 残留风险
-- R1-03（P2）：闸门与 `GDALOpenEx` 之间存在 TOCTOU。彻底解决需要读写锁或版本目录，超出"不新增框架"约束。
-- R1-04（P2）：闸门只覆盖 `RasterReader::open` / `VectorReader::open`；`inspectRaster`、数据集池、src/app 的 QGIS 图层、子数据集 URI 不受保护。
-- R1-08（P2）：其余扫描仍可能把中途错误当作结束（见 §2）。
-- PERF-1（P2）：upsertRun 吞吐随规模退化。PERF-2（P2）：OFFSET 分页为 O(n²)。
-- LIVE：DNS rebinding 未钉住解析结果（#1485 / #1505 T3），offline_gate 保守只读未修。
-- #1449：close() 与并发调用者的生命周期属于契约限制（LIVE_DEFERRED）。
-- P3：R1-05/06/07/09/10/11、R2-01。
+## 4. 仍未关闭
+- **P1：#1505 T11**（生产 CLI 安装点默认不开私网阻断）——安装点在 `src/cli/**`，不在本轨写权限；改结构体默认值会破坏大量 127.0.0.1 测试，属跨轨策略变更。补丁与 oracle 见 POST_1505_PATCHES.md §C。
+- P2：R3-07（run 遍历读失败时返回部分结果，返回类型无错误通道）、R3-10（传输失败仍回落无守卫 /vsicurl/）、PERF-1（run_ids 镜像重写，需改数据模型）、PERF-2（listRunsByCursor 每页 COUNT）。
+- P3：R1-05/06/07/09/10/11、R2-01、R3-01/02/03/04/08/09。开后复查无法消除"在一次 open 内开始并提交"的窗口。
 
-## 6. NOT VERIFIED
-- #1481 T6/T7/T8/T9/T19、#1505 T9（resource_uri.cpp，保守只读，未加 oracle）。
-- #1505 T6/T11（range_cache，保守只读）。
-- TSan/ASan、Windows、macOS 未运行。
-- `test_platform7_library`、`test_experiment_evaluation`、`test_r12b_*`、全量 ctest 未运行。
-- B06、B11 未审计；B15 只部分审计。
-- 机器替换后，RED 复现与 B14 性能数字未在新机器上复测（原始日志已丢失）。
-- 远端 CI 未等待。
+## 5. NOT VERIFIED
+- Windows、macOS。
+- 全量 ctest；相关存储测试（test_store_fault_injection 等）的 sanitizer 构建。
+- #1505 T6 的"重定向跳"形态（同一代码路径，无单独 oracle）。
+- 远端 CI（按要求不等待）。
 
-## 7. 受保护文件（未触碰）
-`src/geospatial/util/offline_gate.cpp`、`range_cache.{h,cpp}`、`resource_uri.cpp`、`src/core/temporal_cube.cpp`、`src/python/**`、`src/runtime/gpu/gpu_plane.cpp`、`src/operators/runtime/**`、`src/processing/**`、`src/app/**`、GitHub Actions。`tests/CMakeLists.txt` 只追加了一个测试块。
+## 6. PR 状态
+存在未关闭的 P1（#1505 T11），且 NOT VERIFIED 不只是平台项 → 按规则保持 **Draft**，未合并。
 
-## 8. 与 #1505 / #1509 / #1512 去重
-- 三者都已在 BASE 之前合并，目前没有开放 PR（`gh pr list --state open` = `[]`），所以不存在 COVERED_BY_OPEN_PR 项。
-- 没有 cherry-pick 任何提交（含 #1512）。
-- #1505 已修的 SSRF 项只加回归 oracle（B16），没有改 offline_gate.cpp。
-- B04 修的是 #1504 引入的回归，与 #1505 T1 的守卫开关互补（守卫保留开启，只修正拒绝的表达方式）。
-- 本轨每个修复点（读侧闸门、searchAll 去环、bundle data/ 迁移、ExperimentStore 扫描、resolver）的 RED 都是在已包含 #1505/#1509/#1512 的 BASE `46791bc6` 上复现的，因此不会与这三个 PR 已合并的修复重复。
+## 7. 所有权与受保护文件
+写入限于 src/geospatial/**、src/data/**、src/dataset/**、src/experiment/** 与本轨测试；`tests/CMakeLists.txt` 只追加了 3 个测试块。
+#1505 合并后才修改了 resource_uri.cpp、range_cache.cpp、offline_gate.cpp。未触碰 src/core/temporal_cube.cpp、src/python/**、src/runtime/gpu/gpu_plane.cpp、src/operators/runtime/**、src/processing/**、src/app/**、GitHub Actions，未写 master。

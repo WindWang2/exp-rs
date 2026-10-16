@@ -22,6 +22,17 @@
 - **B09 线程安全**：#1449 生命周期锁（c68d5e95）+ race-close oracle；TSan 结果见 TEST_RESULTS.md。
 - **B10 来源追溯**：LineageGraph 在 dataset 侧边读取失败或被截断时给出 `dataset_source_incomplete`（c68d5e95）；R3-07 是剩余缺口。
 
+## 补充（第 8 项落地后复读 7ed6dc02、fc712c72、f8e1f280）
+| ID | 级别 | 发现 | 处理 |
+|---|---|---|---|
+| R3-08 | P3 | DNS 钉住时再解析一次（守卫一次 + 钉住一次）：两次之间若重绑定，钉住阶段自行校验，最坏结果是拒绝，不会放行私网。 | 接受 |
+| R3-09 | P3 | 无法解析的主机在受守卫路径上从 NetworkError 变为 PermissionDenied（fail closed）。211 条回归无影响。 | 接受，记录 |
+| R3-10 | P2 | 传输失败（非策略拒绝）时 range_cache 仍回落到不受守卫的 `/vsicurl/`；重绑定者可先制造传输失败再借 fallback。 | LIVE_DEFERRED（需让 fallback 也走受守卫传输，跨大块代码） |
+| R3-11 | — | TSan 发现的 `stepFailed` race 已修；ASan/UBSan 0 报告。 | 已关闭 |
+
 ## 结论
-本轮无新的 P0/P1。P2：R3-07（新）、PERF-1、PERF-2、DNS rebinding（#1505 T3，P1 级别但属于 offline_gate/transport 跨轨大改，见下）。
-注意：#1505 T3（DNS 钉住）与 #1505 T6（重定向拒绝后回落）原评审标为 **P1**，本轨未落地 → 仍为未关闭的 P1。
+- P0：无。
+- **P1 未关闭：#1505 T11**（生产默认不开启私网阻断；安装点在 src/cli，不在本轨所有权，见 POST_1505_PATCHES.md §C）。
+- #1505 T3（DNS 钉住）与 T6（拒绝后回落）已在本轨修复并有 RED→GREEN。
+- P2：R3-07、R3-10、PERF-1、PERF-2。
+因此按规则 PR 保持 **Draft**。
