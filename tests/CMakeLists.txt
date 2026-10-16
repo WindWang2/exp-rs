@@ -9864,6 +9864,20 @@ target_include_directories(test_r15_B_post1505 PRIVATE
 )
 sicnu_discover_tests(test_r15_B_post1505 TEST_PREFIX "test_r15_B_post1505::")
 
+# R15-B #1505 T11: CLI remote entry points block private networks by default
+# (popen of the real CLI against a loopback fixture, like test_cli_commands_json).
+if(NOT WIN32)
+add_executable(test_r15_B_cli_private_network test_r15_B_cli_private_network.cpp
+  support/http_range_server.cpp)
+target_link_libraries(test_r15_B_cli_private_network PRIVATE Catch2::Catch2WithMain)
+sicnu_link_jsoncpp(test_r15_B_cli_private_network)
+target_include_directories(test_r15_B_cli_private_network PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(test_r15_B_cli_private_network PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>")
+add_dependencies(test_r15_B_cli_private_network sicnu_geo_rs_cli)
+sicnu_discover_tests(test_r15_B_cli_private_network TEST_PREFIX "test_r15_B_cli_private_network::")
+endif()
+
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites
