@@ -1157,6 +1157,11 @@ TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps th
     // declaration. The behavior is sentinel-agnostic: the void MS pixel
     // maps to a void pan pixel, the neighbors renormalize to exact values,
     // and #611's negative-sum guard never engages (the valid sum is 4+2=6).
+    // Coverage note (review R2-1): for THIS sentinel the negative-sum guard
+    // would also void pixel 0 if the exact-match wash were removed (sum
+    // 4-9999 <= 1e-10), so this lock is wash-removal-blind by construction —
+    // the mild-sentinel lock above carries that sensitivity (its blended
+    // sum stays positive). This lock pins the classic sentinel's end state.
     std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
     std::array<double, 6> msGt = { 0.0, 2.0, 0.0, 0.0, 0.0, -2.0 };
     GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
@@ -1445,6 +1450,19 @@ TEST_CASE( "ImageFusion still accepts a both-unreferenced synthetic pair [r15a][
     };
     writeBareVrt( panPath, 1, QStringLiteral( "a14b_pan_raw.tif" ) );
     writeBareVrt( msPath, 2, QStringLiteral( "a14b_ms_raw.tif" ) );
+
+    // Fixture sanity (review R2-4): both wrappers really are unreferenced —
+    // otherwise a future GDAL change (e.g. VRTs inheriting the source
+    // geotransform) would silently turn this into a both-referenced case
+    // that no longer exercises the documented fallback.
+    {
+        GdalDatasetWrapper panProbe;
+        REQUIRE( panProbe.open( panPath ) );
+        CHECK_FALSE( panProbe.hasGeoTransform() );
+        GdalDatasetWrapper msProbe;
+        REQUIRE( msProbe.open( msPath ) );
+        CHECK_FALSE( msProbe.hasGeoTransform() );
+    }
 
     ImageFusion::NativeFusionParams params;
     params.method = QStringLiteral( "brovey" );

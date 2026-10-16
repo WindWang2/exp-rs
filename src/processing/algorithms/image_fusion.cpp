@@ -719,7 +719,9 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
         }
     }
 
-    // A14: exactly one side georeferenced is not co-registered.
+    // A03-6 (track finding; commit messages alias it "A14" — not the A14
+    // performance work package): exactly one side georeferenced is not
+    // co-registered.
     // compareGrids returns no issues when EITHER side lacks a geotransform
     // — its documented fallback covers BOTH-unreferenced synthetic rasters.
     // The resample ratio below, however, is derived from the geotransforms:

@@ -462,7 +462,7 @@ TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam]
 // the same commit.
 // ===========================================================================
 
-TEST_CASE( "rs: sam_classify and rs:spectral_similarity pin the undeclared-band NoData dialect [r15a][nodata]",
+TEST_CASE( "rs:sam_classify and rs:spectral_similarity pin the undeclared-band NoData dialect [r15a][nodata]",
            "[sam][gdal][nodata]" )
 {
     ensureGdalInit();
