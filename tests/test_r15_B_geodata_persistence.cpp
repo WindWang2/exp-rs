@@ -12,6 +12,7 @@
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/remote/offline_gate.h"
+#include "geospatial/remote/range_cache.h"
 #include "geospatial/remote/remote_identity_resolver.h"
 #include "geospatial/util/atomic_fs.h"
 #include "geospatial/vector/vector_reader.h"
@@ -28,6 +29,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
+
+#include <cpl_vsi.h>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -878,4 +881,46 @@ TEST_CASE( "B14: bulk catalog paging and experiment-store throughput (measuremen
                                          << " last_page_ms=" << lastPageMs << " rss_kb written=" << rssWritten
                                          << " read_peak=" << rssPeak );
   }
+}
+
+// ---------------------------------------------------------------------------
+// #1505 T6 (item 8): a policy refusal of an origin fetch must not degrade to
+// the raw /vsicurl/ fallback (which applies no private-network guard and
+// follows redirects unguarded). Deterministic shape of the same defect:
+// the private-network policy is switched on for an already-open handle, so
+// the next uncached read is refused by fetchRangeOnce (PermissionDenied).
+// Before the fix serveOrFetch treated that like a transport failure and
+// read the bytes from the private host through the fallback anyway.
+// ---------------------------------------------------------------------------
+TEST_CASE( "1505-T6: a private-network refusal is final, never served by the raw fallback",
+           "[r15b][post1505][remote][ssrf]" )
+{
+  using sicnu::geo::RangeCacheConfig;
+  using sicnu::geo::RemoteRangeCache;
+  RemoteRangeCache::clearEntries();
+  RangeCacheConfig open;
+  open.blockSize = 64 * 1024;
+  open.maxSingleFetchBytes = 64 * 1024;
+  RemoteRangeCache::install( open );
+  testsupport::HttpRangeServer server( std::vector<unsigned char>( 1024 * 1024, 0x5A ) );
+  const std::string path = RemoteRangeCache::cachedPath( server.url() );
+  VSILFILE *fp = VSIFOpenL( path.c_str(), "rb" );
+  REQUIRE( fp != nullptr );
+  unsigned char head[16] = {};
+  REQUIRE( VSIFReadL( head, 1, sizeof head, fp ) == sizeof head );
+
+  RangeCacheConfig guarded = open;
+  guarded.blockPrivateNetworks = true;
+  RemoteRangeCache::install( guarded );
+  const auto fallback0 = RemoteRangeCache::telemetryJson()["fallback_reads"].asUInt64();
+  const int requests0 = server.requestCount();
+  std::vector<unsigned char> buf( 4096, 0 );
+  REQUIRE( VSIFSeekL( fp, 768 * 1024, SEEK_SET ) == 0 );
+  const size_t got = VSIFReadL( buf.data(), 1, buf.size(), fp );
+  CHECK( got == 0 );
+  CHECK( RemoteRangeCache::telemetryJson()["fallback_reads"].asUInt64() == fallback0 );
+  CHECK( server.requestCount() == requests0 );
+  VSIFCloseL( fp );
+  RemoteRangeCache::clearEntries();
+  RemoteRangeCache::install( RangeCacheConfig{} );
 }
