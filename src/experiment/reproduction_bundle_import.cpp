@@ -15,6 +15,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
 #include <QUuid>
 
 namespace sicnu::experiment
@@ -433,11 +434,51 @@ const auto installed = m_experimentStore->upsertRun( run );
         }
         else
         {
+            // R15-B (B12): only payloads the integrity gate actually
+            // verified may leave the bundle. verifyBundleChecksums hashes
+            // every LISTED member but its coverage sweep is top-level only,
+            // so data/ entries are trusted solely when checksums.txt lists
+            // "data/<name>". A symlink (or anything resolving outside data/)
+            // would make the copy read an arbitrary host file into the
+            // relocation target — refused, never followed.
+            QSet<QString> verifiedMembers;
+            {
+                QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
+                if ( checksumFile.open( QIODevice::ReadOnly ) )
+                {
+                    const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
+                                                  .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+                    for ( const QString &line : lines )
+                    {
+                        if ( line.size() > 66 && line.indexOf( QStringLiteral( "  " ) ) == 64 )
+                            verifiedMembers.insert( line.mid( 66 ) );
+                    }
+                }
+            }
+            const QString canonicalDataDir = QFileInfo( dataDir.absolutePath() ).canonicalFilePath();
             const QDir target( options.relocateDataDir );
             target.mkpath( QStringLiteral( "." ) );
             for ( const QFileInfo &entry :
-                  dataDir.entryInfoList( QDir::Files ) )
+                  dataDir.entryInfoList( QDir::Files | QDir::System | QDir::Hidden ) )
             {
+                const QString memberName = QStringLiteral( "data/" ) + entry.fileName();
+                const QString canonicalEntry = entry.canonicalFilePath();
+                QString refusal;
+                if ( entry.isSymLink() )
+                    refusal = QStringLiteral( "is a symbolic link" );
+                else if ( !entry.isFile() )
+                    refusal = QStringLiteral( "is not a regular file" );
+                else if ( canonicalDataDir.isEmpty() || canonicalEntry.isEmpty() ||
+                          QFileInfo( canonicalEntry ).absolutePath() != canonicalDataDir )
+                    refusal = QStringLiteral( "resolves outside the bundle data/ directory" );
+                else if ( !verifiedMembers.contains( memberName ) )
+                    refusal = QStringLiteral( "is not covered by checksums.txt" );
+                if ( !refusal.isEmpty() )
+                {
+                    report.warnings.append( QStringLiteral( "refused to relocate %1: %2" )
+                                                .arg( entry.fileName(), refusal ) );
+                    continue;
+                }
                 const QString destination = target.filePath( entry.fileName() );
                 QFile::remove( destination ); // relocation is last-writer-wins
                 if ( QFile::copy( entry.absoluteFilePath(), destination ) )
