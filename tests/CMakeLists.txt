@@ -9818,6 +9818,25 @@ target_compile_definitions(test_r12b_e2e_durability PRIVATE
 set_target_properties(test_r12b_e2e_durability PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r12b_e2e_durability TEST_PREFIX "test_r12b_e2e_durability::")
 
+# R15-B geodata chain / stores / recoverable persistence oracles
+add_executable(test_r15_B_geodata_persistence
+  test_r15_B_geodata_persistence.cpp
+  support/http_stac_server.cpp
+  support/http_range_server.cpp
+)
+target_link_libraries(test_r15_B_geodata_persistence PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Sicnu::Geospatial Sicnu::dataset Sicnu::experiment
+  GDAL::GDAL SQLite::SQLite3
+)
+if(WIN32)
+  target_link_libraries(test_r15_B_geodata_persistence PRIVATE ws2_32)
+endif()
+sicnu_link_jsoncpp(test_r15_B_geodata_persistence)
+target_include_directories(test_r15_B_geodata_persistence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r15_B_geodata_persistence TEST_PREFIX "test_r15_B_geodata_persistence::")
+
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites
