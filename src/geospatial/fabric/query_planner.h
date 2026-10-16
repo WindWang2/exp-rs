@@ -161,6 +161,9 @@ struct FabricPlanOptions
     int identityProbeLimit = 64;     ///< identity probes for cacheability
                                      ///< cost facts (assets beyond stay
                                      ///< uncounted — the estimate says so)
+    /// R15-B (#1505 T11): the planner's identity probes refuse
+    /// private-network origins (refused ⇒ unprovable, never a plan failure).
+    bool blockPrivateNetworks = false;
 };
 
 /// Runs the plan stages through chunk_planning. Takes the intent BY VALUE

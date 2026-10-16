@@ -48,6 +48,10 @@ struct RemoteIdentityTokenOptions
     /// Bounded metadata fetch (never a content download); hard-capped at the
     /// probe layer's 1 MiB ceiling.
     std::uintmax_t probeBytes = 1024;
+    /// R15-B (#1505 T11 follow-through): refuse private-network origins
+    /// (host check, redirect guard, DNS pinning). A refusal is "no proof":
+    /// the token is empty, never an exception.
+    bool blockPrivateNetworks = false;
 };
 
 /// Probes @p url and derives the fail-closed identity token ("" when the
