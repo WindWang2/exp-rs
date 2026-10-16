@@ -1412,6 +1412,11 @@ class RangeCacheHandle final : public VSIVirtualHandle
         mSizeKnown = true;
         return true;
       }
+      // R15-B R3-10: under the private-network policy an http entry never
+      // opens the raw /vsicurl/ handle (unguarded, unpinned) just to learn
+      // its size — the size stays unknown and the read fails honestly.
+      if ( guardedHttpFallback() )
+        return false;
       // Fall back to the underlying handle's own size (Seek END probe).
       VSIVirtualHandle *underlying = fallbackHandle();
       if ( underlying == nullptr )
@@ -1661,8 +1666,47 @@ class RangeCacheHandle final : public VSIVirtualHandle
       return usable;
     }
 
+    /// R15-B R3-10: true when this handle's degraded reads must stay on the
+    /// guarded transport — an http entry under blockPrivateNetworks. Raw
+    /// /vsicurl/ re-resolves the name with no private-network check and no
+    /// address pinning and follows redirects unguarded, so a transport
+    /// failure (which a rebinding resolver can provoke) must not become a
+    /// way around the guard. Object (VSI) entries keep their own signed
+    /// spelling and are unaffected.
+    bool guardedHttpFallback()
+    {
+      if ( mEntry->vsiObject )
+        return false;
+      std::uint64_t configGeneration = 0;
+      return store().snapshotConfig( configGeneration ).blockPrivateNetworks;
+    }
+
     std::size_t fallbackRead( unsigned char *destination, std::uint64_t position, std::uint64_t length )
     {
+      std::uint64_t configGeneration = 0;
+      const RangeCacheConfig config = store().snapshotConfig( configGeneration );
+      if ( !mEntry->vsiObject && config.blockPrivateNetworks )
+      {
+        // Same guarded, DNS-pinned single attempt as the cached path; the
+        // bytes answer this reader only (never inserted into the cache).
+        store().fallbackReads.fetch_add( 1 );
+        try
+        {
+          const std::vector<unsigned char> bytes =
+            fetchRangeOnce( mEntry->requestUrl, position, position + length, config );
+          const std::size_t usable =
+            static_cast<std::size_t>( std::min<std::uint64_t>( bytes.size(), length ) );
+          if ( usable > 0 )
+            std::memcpy( destination, bytes.data(), usable );
+          return usable;
+        }
+        catch ( const GeoError & )
+        {
+          CPLError( CE_Failure, CPLE_AppDefined,
+                    "vsirangecache: guarded fallback read failed (private-network policy active)" );
+          return 0;
+        }
+      }
       VSIVirtualHandle *underlying = fallbackHandle();
       if ( underlying == nullptr )
         throw GeoError( ErrorCode::IoError, "range_cache: fallback path unavailable" );
