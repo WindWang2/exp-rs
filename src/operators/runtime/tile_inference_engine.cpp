@@ -2025,8 +2025,16 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       // forward pass and wrote predictions where the contract promises
       // NoData. Same semantics as the multi-input lane (and the #705 skip):
       // decided per TILE over the CORE pixels, skipped tiles become NoData
-      // rows — never a resolution change, never a model change. Default 0
-      // keeps the historical behavior bit-identically.
+      // rows — never a resolution change, never a model change.
+      // Scope note (review R1 P3): with the DEFAULT gate (0) only
+      // validPixels==0 tiles are deferred, and they are now deferred
+      // individually BEFORE batching instead of running the forward inside a
+      // mixed batch and being masked afterwards. The written raster is
+      // unchanged; what changes is stats.tilesSkippedNoData and the
+      // forward-pass compute (an all-NoData tile inside a mixed batch no
+      // longer runs a forward whose output it would only overwrite) — the
+      // batch-level batchIsAllNoData skip below is the belt-and-braces
+      // remnant of the old shape.
       {
         const double minValidCoverage = std::clamp( m_model.tiling.minValidCoverage, 0.0, 1.0 );
         const double coverage =

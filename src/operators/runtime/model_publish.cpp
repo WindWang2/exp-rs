@@ -262,10 +262,20 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
 
 void DetectionPublishGuard::removeBackupFamily()
 {
-  QFile::remove( m_backup );
+  // R15-C C13 (review R1 P2): delete the sidecars/companions FIRST and the
+  // main backup LAST — the mirror of the park ladder. The ctor's
+  // suffix-complete adoption (below) fires only when the MAIN was never
+  // parked; with the historical main-first order a crash inside the
+  // disarm's partial-deletion window left no main backup while the product
+  // at the final path was already the NEW one, and the fold would have
+  // stapled the old product's companions (e.g. a stale .prj) onto it. With
+  // this order a mid-disarm crash always leaves the main backup present, so
+  // the fold stays blocked and the litter is simply incomplete — the next
+  // successful publish pre-cleans it.
   for ( const QString &companion : detectionSidecarsFor( m_final, m_backupSuffix ) )
     QFile::remove( companion );
   QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+  QFile::remove( m_backup );
 }
 
 DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
@@ -438,8 +448,16 @@ void DetectionPublishGuard::disarm()
 
 void ProductPublishGuard::removeBackupFamily()
 {
-  QFile::remove( m_backup );
+  // R15-C C13 (review R1 P2, mirror of DetectionPublishGuard): the prov
+  // backup goes FIRST, the main backup LAST. Window C's adoption (below)
+  // requires the main backup to be ABSENT and the sidecar to be missing at
+  // the final path; with the historical main-first order a crash inside the
+  // disarm's partial-deletion window produced exactly that shape while the
+  // final product was already the NEW one — folding the parked sidecar back
+  // would staple a stale sidecar onto it. With this order a mid-disarm crash
+  // always leaves the main backup present, so Window C stays blocked.
   QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+  QFile::remove( m_backup );
 }
 
 ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QString &backupSuffix,

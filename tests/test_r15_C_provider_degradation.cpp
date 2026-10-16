@@ -18,6 +18,7 @@
 #include "operators/framework/model_catalog.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/tensorrt_provider.h"
 #include "operators/runtime/tile_inference_engine.h"
@@ -27,6 +28,7 @@
 
 #include <opencv2/core.hpp>
 
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <memory>
@@ -127,7 +129,12 @@ TEST_CASE( "R15-C C05: one fed-tensor mistake classifies identically on every pr
                == ErrorCode::InvalidInputData );
     }
 
-    // Regressions the reordering must NOT change.
+    // Regressions the reordering / new patterns must NOT change.
+    // The rank-4 OUTPUT refusal is a different failure class than the
+    // fed-input spellings above and stays out of ShapeMismatch.
+    CHECK( classifyInferenceError( "ONNX Runtime output 'x' is not 4-D NCHW (the cv::Mat path "
+                                   "carries rank-4; use inferNamed for N-D heads)" )
+           == InferenceFailureKind::Unknown );
     CHECK( classifyInferenceError( "out of memory" ) == InferenceFailureKind::OutOfMemory );
     CHECK( classifyInferenceError( "cuda_error_out_of_memory" ) == InferenceFailureKind::OutOfMemory );
     CHECK( classifyInferenceError( "inference canceled before the forward pass" )
@@ -185,4 +192,66 @@ TEST_CASE( "R15-C C05: a single-seam session refuses a multi-input manifest befo
         CHECK_THAT( e.message(), Catch::Matchers::ContainsSubstring( "does not support multi-input" ) );
     }
     CHECK( refused );
+}
+
+TEST_CASE( "R15-C C11: a VRAM-budget refusal projects ResourceBudgetExceeded, not InvalidInputData",
+           "[models][runtime][r15-c]" )
+{
+    // Review R1 P1: the F11 mapping was inert (a string match that matched
+    // nothing) and untested. This case drives a real over-budget model
+    // through runModelInference and pins the projection. Env is restored on
+    // every exit path — hardware() re-detects per call.
+    struct EnvRestore
+    {
+        ~EnvRestore()
+        {
+            qunsetenv( "SICNU_MODEL_GPU" );
+            qunsetenv( "SICNU_MODEL_VRAM_MB" );
+        }
+    } envRestore;
+    qputenv( "SICNU_MODEL_GPU", "1" );        // a GPU host...
+    qputenv( "SICNU_MODEL_VRAM_MB", "128" );  // ...with a small VRAM budget
+
+    QTemporaryDir dir;
+    const QString weights = dir.filePath( QStringLiteral( "big.onnx" ) );
+    {
+        QFile f( weights );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( "big-weights" ) );
+    }
+    // The input-existence check runs before the readiness gate, so the lane
+    // needs a real (tiny) raster to reach the VRAM verdict.
+    const QString input = dir.filePath( QStringLiteral( "in.tif" ) );
+    REQUIRE_FALSE( sicnu::testing::RsSyntheticRasterBuilder( 8, 8, 1, GDT_Float32 )
+                     .withConstantValue( 1, 1.0f )
+                     .writeToDisk( input )
+                     .isEmpty() );
+    std::string regError;
+    REQUIRE( ModelCatalog::instance().registerManifestJson(
+        R"({"name": "r15c-vram", "task": "segmentation", "framework": "onnx",
+            "artifact": {"path": ")" + weights.toStdString() + R"("},
+            "runtime": {"gpu": true, "cpu_fallback": false, "estimated_vram_mb": 999999}})",
+        dir.filePath( QStringLiteral( "r15c-vram/model.json" ) ).toStdString(), &regError ) );
+
+    ModelExecutionRequest request;
+    request.modelReference = "r15c-vram";
+    request.inputPath = input.toStdString();
+    request.outputPath = dir.filePath( QStringLiteral( "out.tif" ) ).toStdString();
+    RSOperatorContext context;
+
+    bool refused = false;
+    try
+    {
+        sicnu::operators::runtime::runModelInference( request, context );
+    }
+    catch ( const sicnu::operators::RSOperatorError &e )
+    {
+        refused = true;
+        // THE ORACLE: a host-budget condition is a resource error, not bad
+        // input data.
+        CHECK( e.code() == ErrorCode::ResourceBudgetExceeded );
+        CHECK_THAT( e.message(), Catch::Matchers::ContainsSubstring( "VRAM" ) );
+    }
+    CHECK( refused );
+    ModelCatalog::instance().unregister( "r15c-vram" );
 }

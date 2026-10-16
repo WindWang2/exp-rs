@@ -568,14 +568,17 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
        // error — a fed tensor that does not fit the graph's declared input
        // (TensorRT "fed blob size does not match the ... input binding",
        // ONNX Runtime "rank N exceeds this provider's maximum rank", the
-       // rank-4 NCHW fast-path refusals). Normalized onto ShapeMismatch so
-       // every backend projects the same ErrorCode for one mistake. The
-       // pattern is the FED-BLOB spelling ("size does not match"), not the
-       // bare "does not match" — a load-time "engine/plan file does not
-       // match this TensorRT build" is a different failure class.
+       // rank-4 NCHW fast-path refusals "must be a 4-D NCHW blob" / "must be
+       // 4-D CV_32F NCHW"). Normalized onto ShapeMismatch so every backend
+       // projects the same ErrorCode for one mistake. The patterns are the
+       // FED-BLOB spellings: "size does not match" (not the bare "does not
+       // match" — a load-time "engine/plan file does not match this TensorRT
+       // build" is a different failure class) and the "must be ... nchw"
+       // pair (not a bare "nchw" — the rank-4 OUTPUT refusal "is not 4-D
+       // NCHW" is a different failure class).
        || contains( "size does not match" ) || contains( "input binding" )
-       || contains( "maximum rank" ) || contains( "must be a 4-d" )
-       || contains( "must be 4-d" ) )
+       || contains( "maximum rank" )
+       || ( contains( "must be" ) && contains( "nchw" ) ) )
     return InferenceFailureKind::ShapeMismatch;
   // Platform 7.0: a forward that RAN but produced an unusable output is an
   // output-validity failure, not an unknown crash.

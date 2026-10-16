@@ -85,10 +85,13 @@ class OpenVinoRuntime final : public IModelRuntime
       // device, so a bare "GPU" claim was as wrong as dropping the resolved
       // index. Report the platform token for the CPU plugin and, for the GPU
       // plugin, the device index the registry's resolver actually picked
-      // (runtime.resolvedCudaIndex) in the platform spelling.
+      // (runtime.resolvedCudaIndex) in the platform spelling. Device 0 is
+      // the DEFAULT/first GPU (resolvedCudaIndex is 0 both for it and for an
+      // unresolved CPU pick), so the guard is >= 0 — "cuda:0" is the honest
+      // platform spelling of "the GPU plugin ran on the first device".
       if ( mDevice == "CPU" )
         return std::string( "cpu" );
-      if ( mResolvedCudaIndex > 0 )
+      if ( mResolvedCudaIndex >= 0 )
         return "cuda:" + std::to_string( mResolvedCudaIndex );
       return mDevice;
     }

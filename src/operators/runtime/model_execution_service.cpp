@@ -195,8 +195,12 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     // ResourceBudgetExceeded, and a user reading "invalid input data" for a
     // host-budget condition would go audit their raster. Hardware-availability
     // verdicts (no CUDA, unaddressable device) keep InvalidInputData.
-    const bool vramBudget =
-      runtimeReason.find( "vram budget" ) != std::string::npos;
+    // The match targets the readiness layer's own spellings ("model requires
+    // N MiB VRAM but the host budget is M MiB", "model needs N MiB VRAM but
+    // the budget is M MiB and cpu_fallback is disabled") — both carry the
+    // contiguous "VRAM but"; a reword of either must update this test-pinned
+    // contract (test_r15_C_provider_degradation).
+    const bool vramBudget = runtimeReason.find( "VRAM but" ) != std::string::npos;
     throw RSOperatorError( vramBudget ? ErrorCode::ResourceBudgetExceeded
                                       : ErrorCode::InvalidInputData,
                            "Model '" + model.name + "' cannot execute: " + runtimeReason );

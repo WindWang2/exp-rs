@@ -148,3 +148,49 @@ TEST_CASE( "R15-C C13: the main-parked detection suffix still adopts the whole f
     CHECK_FALSE( exists( shp + QStringLiteral( ".det-prev~" ) ) );
     CHECK_FALSE( exists( base + QStringLiteral( ".dbf.det-prev~" ) ) );
 }
+
+TEST_CASE( "R15-C C13: a partial-disarm crash cannot staple old companions onto a new product",
+           "[models][publish][r15-c]" )
+{
+    // Review R1 P2: removeBackupFamily used to delete the MAIN backup first,
+    // so a crash inside the disarm's partial-deletion window left no main
+    // backup while the product at the final path was already the NEW one —
+    // and the suffix-complete adoption would have folded the old product's
+    // companions (e.g. a stale .prj) onto it. The removal order is now the
+    // mirror of the park ladder (sidecars/companions first, main LAST), so a
+    // mid-disarm crash ALWAYS leaves the main backup present and the fold
+    // stays blocked. This case hand-builds exactly that state: a new,
+    // complete product at the final names (which legitimately has FEWER
+    // companions than the old one) plus the old family's litter with the
+    // main backup still present.
+    QTemporaryDir dir;
+    const QString base = dir.filePath( QStringLiteral( "vec" ) );
+    const QString shp = base + QStringLiteral( ".shp" );
+
+    // The NEW product: .shp + .shx only (OGR omits .dbf/.prj for a
+    // geometry-less table / CRS-less layer).
+    writeFile( shp, QByteArrayLiteral( "new-shp" ) );
+    writeFile( base + QStringLiteral( ".shx" ), QByteArrayLiteral( "new-shx" ) );
+    REQUIRE_FALSE( exists( base + QStringLiteral( ".dbf" ) ) );
+    // The old family's litter — main backup still present (the new
+    // removeBackupFamily order removes it last).
+    writeFile( shp + QStringLiteral( ".det-prev~" ), QByteArrayLiteral( "old-main" ) );
+    writeFile( base + QStringLiteral( ".dbf.det-prev~" ), QByteArrayLiteral( "old-dbf" ) );
+    writeFile( base + QStringLiteral( ".shx.det-prev~" ), QByteArrayLiteral( "old-shx" ) );
+    writeFile( base + QStringLiteral( ".prj.det-prev~" ), QByteArrayLiteral( "old-prj" ) );
+
+    {
+        DetectionPublishGuard guard( shp, QStringLiteral( ".det-prev~" ) );
+        ( void )guard;
+    }
+
+    // The new product is untouched: no stale companion stapled on, its own
+    // bytes intact, and the litter is gone (pre-cleaned by the park step).
+    CHECK( readFile( shp ) == QByteArrayLiteral( "new-shp" ) );
+    CHECK( readFile( base + QStringLiteral( ".shx" ) ) == QByteArrayLiteral( "new-shx" ) );
+    CHECK_FALSE( exists( base + QStringLiteral( ".dbf" ) ) );
+    CHECK_FALSE( exists( base + QStringLiteral( ".prj" ) ) );
+    CHECK_FALSE( exists( shp + QStringLiteral( ".det-prev~" ) ) );
+    CHECK_FALSE( exists( base + QStringLiteral( ".dbf.det-prev~" ) ) );
+    CHECK_FALSE( exists( base + QStringLiteral( ".prj.det-prev~" ) ) );
+}
