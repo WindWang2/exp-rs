@@ -200,6 +200,20 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     // the budget is M MiB and cpu_fallback is disabled") — both carry the
     // contiguous "VRAM but"; a reword of either must update this test-pinned
     // contract (test_r15_C_provider_degradation).
+    //
+    // Known spelling gaps (review R2 P3; a string projection is inherently
+    // brittle — a typed reason out of evaluateRuntimeReadiness is the real
+    // fix, deferred as a signature change):
+    //   * resolveDevice's "no fitting CUDA device and cpu_fallback is
+    //     disabled" (reachable only via an explicit runtime.device token) is
+    //     a MIXED condition (no device at all vs no device with room) and
+    //     deliberately stays InvalidInputData — calling it a budget error
+    //     would misdirect a no-GPU host.
+    //   * a fallback chain whose PRIMARY candidate failed for a non-budget
+    //     reason while a FALLBACK candidate failed on budget accumulates both
+    //     into the reason while the verdict stays the primary's, so the
+    //     projection can read the fallback's "VRAM but". The chain-wide trail
+    //     is documented behavior; the primary verdict wins.
     const bool vramBudget = runtimeReason.find( "VRAM but" ) != std::string::npos;
     throw RSOperatorError( vramBudget ? ErrorCode::ResourceBudgetExceeded
                                       : ErrorCode::InvalidInputData,

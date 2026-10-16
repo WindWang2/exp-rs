@@ -72,3 +72,34 @@
 - 构建依赖 vcpkg 补装共享依赖树（进行中）；本轨所有 RED/GREEN 证据待其完成后取得。
 - OpenVINO/TensorRT 车道本宿主无工具链：相关修复为代码级（compile-only），
   标注 NOT VERIFIED，不伪造 GREEN。
+
+## Review 循环
+
+- **R3 独立 Review 第 1 轮**（未写生产代码的 subagent）：BLOCK — 1×P1
+  （VRAM→ResourceBudgetExceeded 投影无效：字符串匹配永远不匹配 + 无测试）、
+  1×P2（DetectionPublishGuard fold 在 partial-disarm 窗口可撕裂新产品）、4×P3。
+  处置：全部修复（P1 含 RED 验证；P2 改 removeBackupFamily 删除顺序为 park
+  阶梯的镜像 + 回归用例；P3 三条），复验 GREEN×1（24 目标全过）。
+  详见 REVIEW_ROUND1.md。
+- **R4 独立 Review 第 2 轮**：**PASS**（无开放 P0/P1/P2），3×P3：
+  (1) model_publish.cpp fold 注释仍描述旧删除顺序（已修，并加"勿改回"警告）；
+  (2) "VRAM but" 投影两处拼写缺口（resolveDevice 混合条件消息 + fallback 链
+  复合 reason）——已作为已知限制记入代码注释，类型化 reason 留待后续；
+  (3) **记录更正**：提交 30e8af67e 称 "must be a 4-d" pattern "matched no
+  message in the tree" 不准确——classifyInferenceError 先小写化，这两个
+  pattern 对树中 "must be a 4-D … NCHW blob" 系列本是 LIVE 的；替换为
+  ("must be" && "nchw") 后经 reviewer 对全部 8 条 nchw 消息逐个推演，
+  分类与旧 pattern 完全一致（6 条 fed-input→ShapeMismatch；2 条 rank-4
+  输出→Unknown），代码变更行为保持、健全，仅记录理由错误（此条即为更正）。
+  详见 REVIEW_ROUND2.md。
+
+## 提交序列
+
+1. `c1c67b978` test(r15-c): C02 manifest registration cross-constraints
+2. `c2a077ba1` harden(model-catalog): registration-time cross-constraints (C02)
+3. `abd33bbff` harden(model-publish): suffix-complete crash adoption (C13)
+4. `46169d6e4` harden(runtime): provider degradation/taxonomy/capability preflight (C05/C16)
+5. `5440971d4` harden(chunk,ledger): admission ladder + VRAM ledger (C11/C12)
+6. `d9ebe2427` harden(engine,service): coverage gate, vote sentinel, overrides, dedup (C07/C09/C14/C08)
+7. `91f6299a4` docs(r15-c): baseline/ownership/matrix/oracles/ledger/performance
+8. `30e8af67e` harden(r15-c): review round-1 fixes (VRAM projection, disarm-window tear, nits)

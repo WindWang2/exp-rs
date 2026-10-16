@@ -350,9 +350,16 @@ DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
   //     path is the PREVIOUS one, so a parked member is a crash suffix;
   //   * the member is MISSING at its final name: a parked member whose final
   //     name is already occupied belongs to a COMPLETE product there (the new
-  //     one), and the backup is disarm-time litter (removeBackupFamily drops
-  //     the main backup first, then the companions, then the prov backup) —
-  //     folding it back would tear the new product with the old family.
+  //     one), and the backup is disarm-time litter — folding it back would
+  //     tear the new product with the old family.
+  // The second gate is what makes the first safe: removeBackupFamily deletes
+  // the companions and the prov backup FIRST and the main backup LAST (the
+  // mirror of the park ladder, R15-C review R1 P2), so a crash inside the
+  // disarm's partial-deletion window ALWAYS leaves the main backup present
+  // and this fold stays blocked. Do not "simplify" that removal order back to
+  // main-first: the "no main backup + parked companions + a complete product
+  // at the final path" state would become reachable again, and the fold would
+  // staple the old product's companions onto the new one.
   if ( !QFile::exists( m_backup ) )
   {
     for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
