@@ -832,6 +832,10 @@ TEST_CASE( "Streaming brovey honors heterogeneous per-band NoData declarations [
         REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
         QTextStream ts( &vrt );
         ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"1\">\n";
+        // A14: the VRT carries the source geotransform (as GDAL-produced
+        // VRTs do). A GT-less MS paired with the referenced pan above is
+        // exactly the asymmetric case the fusion now refuses.
+        ts << "  <GeoTransform>0.0, 1.0, 0.0, 0.0, 0.0, -1.0</GeoTransform>\n";
         ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
         ts << "    <NoDataValue>0</NoDataValue>\n";
         ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_het_raw.tif"
@@ -1294,4 +1298,169 @@ TEST_CASE( "Streaming brovey qualityReport excludes the void pixel from fidelity
     REQUIRE( report.meanRatio.size() == 2 );
     CHECK( report.meanRatio[0] == Approx( ( 4.0 / 6.0 * 10.0 ) / 4.0 ).margin( 2e-3 ) );
     CHECK( report.meanRatio[1] == Approx( ( 2.0 / 6.0 * 10.0 ) / 2.0 ).margin( 2e-3 ) );
+}
+
+// ===========================================================================
+// R15-A (A14): asymmetric georeferencing is not co-registered.
+//
+// compareGrids returns NO issues when either side lacks a geotransform
+// (raster_grid_compat.cpp: "Both unreferenced: not spatially comparable.
+// The caller falls back to dimension checks") — the documented fallback
+// covers BOTH-unreferenced synthetic rasters. But the fusion derives its
+// resample ratio from the geotransforms: a GT-less raster reports GDAL's
+// DEFAULT IDENTITY transform, so a pair where exactly one side is
+// referenced silently routes through the same-resolution clamp path
+// (readBandWindow clamps the pan-grid window to the smaller MS raster and
+// pads the remainder with the declared sentinel) and voids most of the
+// output with NO error — the diag4 evidence that re-qualified O1.
+//
+// Exactly-one-side-referenced must be refused; the both-unreferenced
+// synthetic fallback must keep working.
+// ===========================================================================
+
+TEST_CASE( "ImageFusion rejects a pan/MS pair where exactly one side lacks a geotransform [r15a][a14]",
+           "[fusion][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "a14_pan.tif" ) );
+    const QString msRawPath = dir.filePath( QStringLiteral( "a14_ms_raw.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "a14_ms.vrt" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "a14_fused.tif" ) );
+
+    // pan 4x4 @1m EPSG:32648 (uniform 10); MS 2x2 @2m EPSG:32648 with band 2
+    // declaring -1. The MS VRT carries the SRS (so the CRS check passes) but
+    // NOT the GeoTransform — as a GDAL-produced VRT never would, but as a
+    // hand-written or stripped wrapper can.
+    std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    std::array<double, 6> msGt = { 0.0, 2.0, 0.0, 0.0, 0.0, -2.0 };
+    GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
+                                           QStringLiteral( "EPSG:32648" ) );
+    GDALDatasetH msDs = createOutputTiff( msRawPath, 2, 2, 2, GDT_Float32, msGt,
+                                          QStringLiteral( "EPSG:32648" ) );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const std::vector<float> pan( 16, 10.0f );
+    const std::vector<float> ms1 = { 4.0f, 4.0f, 4.0f, 4.0f };
+    const std::vector<float> ms2 = { -1.0f, 2.0f, 2.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 4, 4,
+                           const_cast<float *>( pan.data() ), 4, 4, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms1.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms2.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+    {
+        // SRS yes (CRS check passes), GeoTransform NO (the A14 gap).
+        QFile vrt( msPath );
+        REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        QTextStream ts( &vrt );
+        ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        ts << "  <SRS>EPSG:32648</SRS>\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">a14_ms_raw.tif"
+              "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"2\">\n";
+        ts << "    <NoDataValue>-1</NoDataValue>\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">a14_ms_raw.tif"
+              "</SourceFilename><SourceBand>2</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "</VRTDataset>\n";
+    }
+
+    // Sanity: the fixture really is the asymmetric case (pan referenced,
+    // MS not) — otherwise this test would silently prove nothing.
+    {
+        GdalDatasetWrapper probe;
+        REQUIRE( probe.open( msPath ) );
+        CHECK_FALSE( probe.hasGeoTransform() );
+        GdalDatasetWrapper panProbe;
+        REQUIRE( panProbe.open( panPath ) );
+        CHECK( panProbe.hasGeoTransform() );
+    }
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    CHECK_FALSE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    CHECK( error.contains( QStringLiteral( "co-registered" ) ) );
+    CHECK( error.contains( QStringLiteral( "geotransform" ) ) );
+    CHECK_FALSE( QFile::exists( outputPath ) );
+}
+
+TEST_CASE( "ImageFusion still accepts a both-unreferenced synthetic pair [r15a][a14]",
+           "[fusion][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // The documented compareGrids fallback: NEITHER side referenced ->
+    // dimension-checked same-resolution read. Both rasters ride VRT
+    // wrappers without GeoTransform/SRS (the only way to produce a
+    // GT-less dataset in this fixture family); both are 2x2 so the
+    // same-resolution read is well-defined.
+    const QString panRawPath = dir.filePath( QStringLiteral( "a14b_pan_raw.tif" ) );
+    const QString msRawPath = dir.filePath( QStringLiteral( "a14b_ms_raw.tif" ) );
+    const QString panPath = dir.filePath( QStringLiteral( "a14b_pan.vrt" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "a14b_ms.vrt" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "a14b_fused.tif" ) );
+
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    GDALDatasetH panDs = createOutputTiff( panRawPath, 2, 2, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msRawPath, 2, 2, 2, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+    const std::vector<float> pan = { 10.0f, 10.0f, 10.0f, 10.0f };
+    const std::vector<float> ms1 = { 4.0f, 4.0f, 4.0f, 4.0f };
+    const std::vector<float> ms2 = { 2.0f, 2.0f, 2.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( pan.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms1.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms2.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+    auto writeBareVrt = [&]( const QString &path, int bands, const QString &rawName ) {
+        QFile vrt( path );
+        REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        QTextStream ts( &vrt );
+        ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        for ( int b = 1; b <= bands; ++b )
+        {
+            ts << "  <VRTRasterBand dataType=\"Float32\" band=\"" << b << "\">\n";
+            ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">" << rawName
+               << "</SourceFilename><SourceBand>" << b << "</SourceBand></SimpleSource>\n";
+            ts << "  </VRTRasterBand>\n";
+        }
+        ts << "</VRTDataset>\n";
+    };
+    writeBareVrt( panPath, 1, QStringLiteral( "a14b_pan_raw.tif" ) );
+    writeBareVrt( msPath, 2, QStringLiteral( "a14b_ms_raw.tif" ) );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 2 );
+    std::vector<float> out1( 4 ), out2( 4 );
+    REQUIRE( out.readBandData( 1, out1.data(), 2, 2 ) );
+    REQUIRE( out.readBandData( 2, out2.data(), 2, 2 ) );
+    for ( int i = 0; i < 4; ++i )
+    {
+        CHECK( out1[static_cast<size_t>( i )] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+        CHECK( out2[static_cast<size_t>( i )] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+    }
 }
