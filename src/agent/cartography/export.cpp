@@ -269,6 +269,27 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
           QList< QgsLayoutItemPage * > pageItems = layout->pageCollection()->pages();
           if ( page >= pageCountAll || pageItems.at( page )->excludeFromExports() )
             continue;
+          // Review2 N3: an ACTIVE data-defined exclude expression overrides
+          // the static flag at evaluation time, so the exclusion technique
+          // could deliver the wrong page's bytes under a page's name. Refuse
+          // typed when any page carries one (reachable only through user
+          // .qpt templates; no in-repo spec path sets it).
+          for ( int probe = 0; probe < pageCountAll; ++probe )
+          {
+            if ( pageItems.at( probe )
+                   ->dataDefinedProperties()
+                   .property( QgsLayoutObject::DataDefinedProperty::ExcludeFromExports )
+                   .isActive() )
+            {
+              result.error = QStringLiteral(
+                               "multi-page svg export refuses layouts with a data-defined "
+                               "exclude-from-exports expression on a page item (ambiguous "
+                               "per-page delivery)" );
+              for ( const QString &published : delivered )
+                QFile::remove( published );
+              return result;
+            }
+          }
           std::vector< bool > saved( pageCountAll, false );
           for ( int other = 0; other < pageCountAll; ++other )
           {

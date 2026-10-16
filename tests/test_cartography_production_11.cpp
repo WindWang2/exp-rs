@@ -1254,6 +1254,31 @@ TEST_CASE( "produce single-mode multi-page delivery publishes and manifests ever
     CHECK( svgManifest["page_count"].asInt() == 2 );
     REQUIRE( svgManifest["pages"].isArray() );
     CHECK( svgManifest["pages"].size() == 2 );
+
+    // Review2 N1: a declaration-only layer ref (no backing) must surface a
+    // produce-level warning that survives the repair loop — the
+    // MAP_LAYER_UNREFERENCED repair attaches such ids on purpose, so the
+    // marker rides the FINAL layout, post-repair.
+    Json::Value ghostSpec = spec;
+    Json::Value declared( Json::objectValue );
+    declared["id"] = "ghost-declared-layer";
+    ghostSpec["layers"].append( declared );
+    ghostSpec["map_frames"][0]["layers"].append( "ghost-declared-layer" );
+    QTemporaryDir ghostDir;
+    REQUIRE( ghostDir.isValid() );
+    ProduceRequest ghostRequest;
+    ghostRequest.mapspec = ghostSpec;
+    ghostRequest.format = "png";
+    ghostRequest.dpi = 72.0;
+    ghostRequest.directory = ghostDir.path().toStdString();
+    const ProduceResult ghost = produceMap( ghostRequest );
+    REQUIRE( ghost.ok );
+    bool warned = false;
+    if ( ghost.quality.isMember( "issues" ) && ghost.quality["issues"].isArray() )
+        for ( const auto &issue : ghost.quality["issues"] )
+            warned = warned || ( issue.isObject() &&
+                                 issue["code"].asString() == "MAP_DECLARED_LAYER_UNBACKED" );
+    CHECK( warned );
 }
 
 TEST_CASE( "vector series source refuses bad definitions with problems",

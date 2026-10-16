@@ -82,12 +82,6 @@ bool sha256OfPath( const QString &path, std::string *sha256, long long *bytes )
 /// Deterministic per-page file names of a single-mode delivery, mirroring
 /// exportMapLayout / QgsLayoutExporter::generateFileName (page 0 →
 /// base.png, page N → base_<N+1>.png).
-QString singleModePagePath( const QDir &dir, const QString &baseName, int page )
-{
-    return page == 0 ? dir.filePath( baseName + QStringLiteral( ".png" ) )
-                     : dir.filePath( baseName + QStringLiteral( "_" ) +
-                                     QString::number( page + 1 ) + QStringLiteral( ".png" ) );
-}
 
 /// Production hazard guard (observed as a REAL hang in this environment):
 /// QgsLayoutItemLegend::paint loops forever when an auto-update legend
@@ -201,31 +195,6 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     result.provenance = composeProvenance( working );
     result.quality = quality;
 
-    // R14-D review P2-4: refs the compiler accepted only through a spec-level
-    // declaration (no backing layer) render nothing — append an honest
-    // compile-observation warning to the quality report so the delivery says
-    // what actually rendered, instead of silently shipping a subset.
-    const QVariant unbacked =
-      layout->customProperty( QStringLiteral( "sicnu/declaredUnbackedLayerRefs" ) );
-    if ( !unbacked.isNull() )
-    {
-        Json::Value issue( Json::objectValue );
-        issue["code"] = "MAP_DECLARED_LAYER_UNBACKED";
-        issue["severity"] = "warning";
-        issue["message"] = "frame layer reference(s) accepted via spec declaration with no "
-                           "backing layer; the composition renders without them";
-        issue["repairable"] = false;
-        Json::Value refs( Json::arrayValue );
-        const QStringList list = unbacked.toStringList();
-        for ( const QString &ref : list )
-            refs.append( ref.toStdString() );
-        issue["refs"] = refs;
-        if ( !quality.isMember( "issues" ) || !quality["issues"].isArray() )
-            quality["issues"] = Json::Value( Json::arrayValue );
-        quality["issues"].append( issue );
-        result.quality = quality;
-    }
-
     // Declared-legend render hazard (see above) fires BEFORE any repair so
     // the refusal names the author's declaration, not repair-added furniture.
     const std::string legendHazard = legendAutoUpdateHazard( working );
@@ -280,6 +249,35 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     }
 
     result.mapspec = working;
+
+    // R14-D review2 N1: refs the compiler accepted only through a spec-level
+    // declaration (no backing layer) render nothing. Appended AFTER the
+    // repair loop from the FINAL layout — repair passes reassign the whole
+    // quality document, and the MAP_LAYER_UNREFERENCED repair deliberately
+    // attaches such ids, so a pre-repair append would be wiped exactly in
+    // the flow it exists for.
+    {
+        const QVariant unbacked =
+          layout->customProperty( QStringLiteral( "sicnu/declaredUnbackedLayerRefs" ) );
+        if ( !unbacked.isNull() )
+        {
+            Json::Value issue( Json::objectValue );
+            issue["code"] = "MAP_DECLARED_LAYER_UNBACKED";
+            issue["severity"] = "warning";
+            issue["message"] = "frame layer reference(s) accepted via spec declaration with "
+                               "no backing layer; the composition renders without them";
+            issue["repairable"] = false;
+            Json::Value refs( Json::arrayValue );
+            const QStringList list = unbacked.toStringList();
+            for ( const QString &ref : list )
+                refs.append( ref.toStdString() );
+            issue["refs"] = refs;
+            Json::Value &qualityFinal = result.quality;
+            if ( !qualityFinal.isMember( "issues" ) || !qualityFinal["issues"].isArray() )
+                qualityFinal["issues"] = Json::Value( Json::arrayValue );
+            qualityFinal["issues"].append( issue );
+        }
+    }
 
     // --- export --------------------------------------------------------------
     if ( !report( reporter, "export", 0.6, "exporting" ) )
