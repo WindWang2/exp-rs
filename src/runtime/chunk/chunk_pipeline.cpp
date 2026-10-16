@@ -52,6 +52,15 @@ ChunkPipeline::ChunkPipeline( ProducerFn producer, std::vector<StageFn> stages,
 
 void ChunkPipeline::run()
 {
+    // R15-C C12 (F9): one-run contract. m_firstError/m_completedTiles are
+    // never reset, so a second run() used to join fresh threads and then
+    // immediately rethrow the FIRST run's stale error (and report the old
+    // tile count) even when the second run succeeded. Refuse typed instead —
+    // the same guard ChunkGraph has (chunk_graph.cpp "run() called twice").
+    if ( m_ran )
+        throw std::logic_error( "chunk pipeline: run() called twice" );
+    m_ran = true;
+
     const size_t queueCount = m_stages.size() + 1;
     std::vector<std::unique_ptr<BoundedChunkQueue<TilePayload>>> queues;
     queues.reserve( queueCount );

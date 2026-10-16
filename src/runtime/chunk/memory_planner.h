@@ -117,6 +117,16 @@ struct TileMemoryPlan
 /// deliberately over-estimates join width across non-join stages
 /// (conservative direction: refusing is safe, under-admitting memory is
 /// not). Every product saturates on overflow.
+///
+/// SCOPE NOTE (R15-C C12 / F8): the bound holds for stages that build their
+/// output from ONE moved-in tile (the StageFn contract above). A stage that
+/// transiently materializes a SECOND full tile-sized buffer on top of its
+/// input and output — e.g. src/processing/framework/fused_chain.cpp's stage,
+/// which holds the input payload, the kernel's outPlanes and the merged
+/// output — exceeds it by one tile per such stage. fused_chain hardcodes its
+/// own queueCapacity and never consults this planner, so no live lane
+/// overruns; callers wiring a 3-buffer stage shape must add the extra tile
+/// themselves (or keep the stage to the two-buffer contract).
 std::uint64_t tileStreamPeakBytes( const TileMemoryRequest &request, std::uint32_t queueCapacity );
 
 /// Plans the working set per the contract ladder (see TileMemoryPlan).
