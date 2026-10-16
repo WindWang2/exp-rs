@@ -9837,6 +9837,15 @@ target_include_directories(test_r15_B_geodata_persistence PRIVATE
 )
 sicnu_discover_tests(test_r15_B_geodata_persistence TEST_PREFIX "test_r15_B_geodata_persistence::")
 
+add_executable(test_r15_B_stores test_r15_B_stores.cpp)
+target_link_libraries(test_r15_B_stores PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Sicnu::data Sicnu::dataset Sicnu::experiment SQLite::SQLite3
+)
+target_include_directories(test_r15_B_stores PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r15_B_stores TEST_PREFIX "test_r15_B_stores::")
+
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites

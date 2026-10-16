@@ -127,8 +127,16 @@ LineageGraph::LineageGraph( const DatasetStore &datasetStore, const ExperimentSt
     // asset) MUST enter the graph so traversal can surface them as
     // tombstones — anchor-based pulls would silently drop exactly the
     // dangling lineage this layer exists to expose.
-    appendEdgesFrom( datasetStore.allLineageEdges(), m_edges, m_outgoing, m_incoming,
-                     m_referencedNodes );
+    // R15-B (B10/B07 tail): the dataset-side feed now discloses an unreadable
+    // or capped scan the same way the experiment-side page does.
+    constexpr qint64 kDatasetEdgeLimit = 100000;
+    QString datasetScanError;
+    const auto datasetEdges = datasetStore.allLineageEdges( kDatasetEdgeLimit, &datasetScanError );
+    QString datasetCountError;
+    const qint64 datasetEdgeTotal = datasetStore.lineageEdgeCount( &datasetCountError );
+    m_datasetSourceIncomplete = !datasetScanError.isEmpty() || !datasetCountError.isEmpty() ||
+                                datasetEdges.size() < datasetEdgeTotal;
+    appendEdgesFrom( datasetEdges, m_edges, m_outgoing, m_incoming, m_referencedNodes );
     // Page read, not a silent scan (#1333 item 9): a truncated feed is
     // carried on the graph so every query answer can disclose it.
     const auto experimentEdges = experimentStore.lineageEdgePage();
@@ -155,6 +163,7 @@ LineageQueryResult LineageGraph::ancestors( const LineageNodeId &start, int maxD
     LineageQueryResult result = traverse( start, true, m_edges, m_outgoing, m_incoming,
                                           m_referencedNodes, m_resolver, maxDepth, maxNodes );
     result.experimentSourceTruncated = m_experimentSourceTruncated;
+    result.datasetSourceIncomplete = m_datasetSourceIncomplete;
     return result;
 }
 
@@ -164,6 +173,7 @@ LineageQueryResult LineageGraph::descendants( const LineageNodeId &start, int ma
     LineageQueryResult result = traverse( start, false, m_edges, m_outgoing, m_incoming,
                                           m_referencedNodes, m_resolver, maxDepth, maxNodes );
     result.experimentSourceTruncated = m_experimentSourceTruncated;
+    result.datasetSourceIncomplete = m_datasetSourceIncomplete;
     return result;
 }
 
@@ -207,6 +217,8 @@ QJsonObject LineageQueryResult::toJson() const
     json.insert( QStringLiteral( "edges" ), edgeArray );
     json.insert( QStringLiteral( "budget_exhausted" ), budgetExhausted );
     json.insert( QStringLiteral( "experiment_source_truncated" ), experimentSourceTruncated );
+    if ( datasetSourceIncomplete ) // additive: key only present when true (golden JSON stable)
+        json.insert( QStringLiteral( "dataset_source_incomplete" ), true );
     return json;
 }
 
