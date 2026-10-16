@@ -548,6 +548,28 @@ bool hasPendingJournal( const std::string &targetMainPath )
          fileExists( targetMainPath + ".sicnu-journal.committed" );
 }
 
+bool hasUncommittedPublishJournal( const std::string &targetMainPath )
+{
+  return fileExists( targetMainPath + ".publish-journal" ) ||
+         fileExists( targetMainPath + ".sicnu-journal" );
+}
+
+void throwIfInterruptedPublish( const std::string &localPath )
+{
+  if ( localPath.empty() || localPath.rfind( "/vsi", 0 ) == 0 || localPath.find( "://" ) != std::string::npos )
+    return;
+  if ( !hasUncommittedPublishJournal( localPath ) )
+    return;
+  Json::Value details;
+  details["path"] = localPath;
+  details["reason"] = "interrupted_group_publish";
+  details["recovery"] = "atomic_fs::recoverDatasetGroup(path) restores the last complete group";
+  throw GeoError( ErrorCode::IoError,
+                  "dataset group was interrupted mid-publish (uncommitted journal present); "
+                  "refusing to read a possibly mixed generation: " + localPath,
+                  details );
+}
+
 bool recoverDatasetGroup( const std::string &targetMainPath )
 {
   const std::string journal1 = targetMainPath + ".publish-journal";
