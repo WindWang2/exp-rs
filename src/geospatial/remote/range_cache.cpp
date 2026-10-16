@@ -41,6 +41,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <list>
 #include <map>
 #include <memory>
@@ -285,6 +286,10 @@ RemoteValidatorOptions validatorOptions( const RangeCacheConfig &config )
   options.timeoutSeconds = config.timeoutSeconds;
   options.connectTimeoutSeconds = config.connectTimeoutSeconds;
   options.maxRetries = config.maxRetries;
+  // R15-B R4-01: the probe / revalidation / Stat requests of a guarded
+  // cache are guarded too (host check + redirect guard + DNS pinning) — the
+  // policy is the cache's, not only its ranged fetch's.
+  options.blockPrivateNetworks = config.blockPrivateNetworks;
   return options;
 }
 
@@ -457,7 +462,22 @@ class CacheStore
                                                   const RemoteValidatorOptions &options )
     {
       revalidations.fetch_add( 1 );
-      RemoteSourceValidator validator = RemoteSourceValidator::probe( requestUrl, options );
+      std::optional<RemoteSourceValidator> probed;
+      try
+      {
+        probed.emplace( RemoteSourceValidator::probe( requestUrl, options ) );
+      }
+      catch ( const GeoError &error )
+      {
+        // R4-01: a private-network refusal (incl. a rebinding answer at
+        // the probe's own resolution) is a quiet miss, never an exception
+        // through the GDAL handler boundary.
+        if ( error.code() != ErrorCode::PermissionDenied )
+          throw;
+        errno = EACCES;
+        return nullptr;
+      }
+      const RemoteSourceValidator &validator = *probed;
       const RemoteSourceIdentity &identity = validator.identity();
       // Offline: the origin never answered — nothing to cache against.
       // Unknown WITHOUT size or validators: a gone (404) or otherwise
@@ -1832,7 +1852,21 @@ std::shared_ptr<ResourceEntry> applyTrustPolicy( CacheStore &cache, const std::s
   cache.revalidations.fetch_add( 1 );
   RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
     cache.snapshotIdentity( entry ), requestUrl );
-  const RevalidationResult result = validator.revalidate( validatorOptions( config ) );
+  RevalidationResult result;
+  try
+  {
+    result = validator.revalidate( validatorOptions( config ) );
+  }
+  catch ( const GeoError &error )
+  {
+    // R4-01: the policy refused the origin (e.g. it now resolves private):
+    // the entry is not re-provable — drop it and let the caller's probe
+    // answer (which the same policy refuses quietly).
+    if ( error.code() != ErrorCode::PermissionDenied )
+      throw;
+    cache.invalidate( key );
+    return nullptr;
+  }
   if ( result.outcome == RevalidationOutcome::Changed )
   {
     // The cached identity is proven stale: invalidate and let the
@@ -1978,6 +2012,13 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       // copies so Stat never reads a racing live field.
       std::uint64_t statConfigGeneration = 0;
       const RangeCacheConfig config = cache.snapshotConfig( statConfigGeneration );
+      // R4-01: Stat is subject to the same private-network policy as Open.
+      if ( config.blockPrivateNetworks && !vsiObject && offline::isPrivateHost( requestUrl ) )
+      {
+        CPLErrorReset();
+        errno = ENOENT;
+        return -1;
+      }
       // 13.0: Stat answers from the SAME trust horizon as Open — an entry
       // past its TTL is re-proven, and RevalidateOnOpen revalidates
       // (unchanged → refreshed horizon; changed → invalidate + the normal
@@ -2009,9 +2050,20 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else
         {
-          RemoteSourceValidator validator =
-            RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) );
-          const RemoteSourceIdentity &identity = validator.identity();
+          std::optional<RemoteSourceValidator> probed;
+          try
+          {
+            probed.emplace( RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) ) );
+          }
+          catch ( const GeoError &error )
+          {
+            if ( error.code() != ErrorCode::PermissionDenied )
+              throw;
+            CPLErrorReset();
+            errno = ENOENT;
+            return -1; // R4-01: refused by the policy — a quiet stat miss
+          }
+          const RemoteSourceIdentity &identity = probed->identity();
           // Gone / unusable / unreachable: a quiet stat miss — speculative
           // sibling probes (\.aux, \.ovr, …) are normal GDAL behavior and
           // must stay silent, never pollute the CPL error state.
@@ -2031,6 +2083,12 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       {
         // Range-ignoring oversized origin: learn the size from the
         // underlying handle (open + Seek END — no content transfer).
+        // R4-01: never through raw (unguarded) /vsicurl/ under the policy.
+        if ( config.blockPrivateNetworks && !vsiObject )
+        {
+          errno = ENOENT;
+          return -1;
+        }
         const std::string underlyingSpelling =
           vsiObject ? vsiPath : std::string( "/vsicurl/" ) + requestUrl;
         VSIVirtualHandleUniquePtr underlying = openReadonlyVsi( underlyingSpelling.c_str() );
