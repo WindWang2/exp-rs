@@ -39,3 +39,23 @@ RSS：38,972 KB（起始）→ 81,288 KB（构建后）→ 峰值 89,452 KB。�
 - **PERF-2（P2）**：`listRuns` 采用 OFFSET 分页，末页耗时线性增长（11.8 → 63.6 ms），全量遍历为 O(n²)。已有 `listRunsByCursor` 游标路径可作为替代；切换调用方属于 API 行为变更，未做。
 - 内存：两类存储在测量规模内均无泄漏迹象（RSS 平稳）。
 - B07 新增的 `stepFailed` 检查在每次扫描结束时只执行一次判断，对上述分页耗时无可测影响（未做 A/B 对比，仅为推断）。
+
+## 4. 第 6 项 / PERF-2 复核：全表 run 遍历 OFFSET vs keyset（本机实测，2026-10-16 22:5x UTC+8）
+
+用例：`tests/test_r15_B_stores.cpp` 隐藏用例 `B14k: whole-store run walks, OFFSET vs keyset (measurement)`（`[.][b14k]`，规模 `R15B_PERF_KEYSET_RUNS`，每 experiment 100 run，`upsertRunsBatch` 写入）。
+"before" = pre-change 树 `exp-rs-r15-b-red`（07e2554b，三处遍历为 OFFSET）；"after" = 把 `run_recorder::reconcileStaleRuns`、`ReplayReadiness::equivalentRuns`、`lab_report` 改为 `listRunsByCursor` 的试验版本。Release，单进程串行，每格两次。
+
+| 规模 | 版本 | raw OFFSET 遍历 | raw keyset 遍历 | reconcileStaleRuns | equivalentRuns |
+|---|---|---|---|---|---|
+| 30k | before | 264 ms | 332 ms | 242 ms | 889 ms |
+| 100k | before | 1284 / 1473 ms | 1814 / 1802 ms | 1281 / 1242 ms | 3125 / 3226 ms |
+| 100k | after | 1275 / 1320 ms | 1687 / 1740 ms | 1710 / 1727 ms | 3614 / 3473 ms |
+| 200k | before | 3978 / 3718 ms | 5526 / 5511 ms | 3726 / 3665 ms | 7785 / 7946 ms |
+| 200k | after | 3729 / 3807 ms | 5501 / 5181 ms | 5630 / 5162 ms | 8967 / 9175 ms |
+
+结论：
+- **假设被实测否定**：有 `idx_runs_created(created_ms, run_id)` 覆盖索引时，OFFSET 跳过只走索引，200k 规模全表遍历仍近似线性；keyset 反而慢约 35–45%。
+  根因（读码）：`listRunsByCursor` 每页都执行一次 `SELECT COUNT(*)` 以填 `total`（契约："full match count, independent of the cursor"），全表遍历因此是 页数×COUNT。
+- 处理：**撤回**三处遍历的 keyset 改动（未提交），保留测量用例。PERF-2 维持 P2/LIVE_DEFERRED；若要改，应先让 `listRunsByCursor` 在非首页可跳过 COUNT（契约变更，需 owner 决定），再切换遍历方。
+- keyset 的正确性优势（遍历期间并发插入不跳行/不重复）仍成立，但本轨没有为它写确定性 oracle，未作为修复声明。
+- PERF-1（`upsertRun` 吞吐随规模退化）根因（读码）：每次写入都读出并重写所属 experiment JSON 里的 `run_ids` 镜像（解析/线性查重/序列化 O(该 experiment 的 run 数)）。本表 populate 每 experiment 仅 100 run，所以 100k 写入 11.2 s（约 8.9k run/s，批量事务）；PERFORMANCE §3 的 61.7 run/s 是单 experiment 10 万 run + 每次独立事务。修复需改数据模型（run_ids 改为由 experiment_runs.experiment_id 派生），LIVE_DEFERRED。
