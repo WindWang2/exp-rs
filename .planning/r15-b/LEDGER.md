@@ -27,3 +27,8 @@
 | 21 | 第 8 项 #1505 已合并 | resource_uri：T6/T7/T8/T9/T19 FIXED_ON_MASTER，#1505 T9 修复（bfe83d41）；range_cache T6 修复（7ed6dc02）；DNS T3 修复（fc712c72）；T11 跨所有权未做（POST_1505_PATCHES §C） | T9/T6/T3 RED 见 TEST_RESULTS §5.1 | GREEN×2 | bfe83d41、7ed6dc02、fc712c72 |
 | 22 | 第 9 项 sanitizer + 第 10 项 RED 复跑 + 重型回归 | 完成：TSan 1 条真实 race→修复（f8e1f280）后 0；ASan+UBSan 0；原始 5 修复与本轮修复 RED 全部复现；回归 211/211×2，platform7/evaluation 二进制×2 | 见 TEST_RESULTS §5 | GREEN×2 | f8e1f280 |
 | 23 | REVIEW_ROUND3 + 文档 + PR body | 完成；P1 #1505 T11 未关闭 → PR 保持 Draft | — | — | 本提交 |
+| 24 | #1505 T11 生产默认私网阻断（用户批准 src/cli/**） | 完成 | RED：data cache 退出码 0、fixture 收到 2 次请求；data identity 退出码 0、1 次请求 | GREEN×2 | 84cfbf27 |
+| 25 | R3-10 传输失败回落无守卫 /vsicurl/ | 完成 | RED：重绑定后 fixture 收到 3 次请求，读出 4096 B | GREEN×2 | 53941117 |
+| 26 | R4-01 探测/重新验证/Stat 未受策略约束 | 完成 | RED：Stat rc=0、1 次请求；重绑定 open 返回句柄、1 次请求 | GREEN×2 | 127ac320 |
+| 27 | R4-02 prefetch 规划阶段越过守卫 | 完成 | RED：fixture 请求 6（53941117）→ 2（R4-01 后）→ 0 | GREEN×2 | 08d8b295 |
+| 28 | 回归 + sanitizer + REVIEW_ROUND4 + 文档 + PR | 回归 218/218×2、扩展 107/107×2、platform7/evaluation×2；sanitizer 见 TEST_RESULTS §7 | — | — | 本提交 |

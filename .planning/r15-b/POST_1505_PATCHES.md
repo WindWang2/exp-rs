@@ -21,13 +21,13 @@
 确定性 oracle 不需要测试接缝：对已打开的句柄在读之前把 `blockPrivateNetworks` 打开，下一次未缓存读即被 `fetchRangeOnce` 拒绝——与重定向跳被拒走同一个 catch 分支。
 RED（pre-fix）：读到 4096 字节、fallback_reads 0→1、origin 请求 2→5；GREEN×2。重定向跳本身没有单独 oracle（本机无法构造"公网 origin → 私网"拓扑），属于同一代码路径。
 
-## C. 未落地：#1505 T11 生产安装默认开启私网阻断（**仍是未关闭的 P1**）
-
-现状：`RangeCacheConfig::blockPrivateNetworks = false`；两条处理用户 URL 的生产 CLI 路径以默认配置调用 `RemoteRangeCache::install()`。
-不在本轨落地的原因（具体）：
-1. 安装点在 `src/cli/**`，不在本轨写权限（src/geospatial/**、src/data/**、src/dataset/**、src/experiment/**）内。
-2. 改结构体默认值（本轨可写）会让所有使用 127.0.0.1 测试服务器的既有用例（test_io_range_cache 等）在 open 阶段被拒，属于跨轨的策略变更，需要 owner 决定并同步改测试。
-建议补丁（CLI owner）：在两个 `install()` 调用点设置 `cfg.blockPrivateNetworks = true`，提供显式的 `--allow-private-network` 逃生开关；oracle：CLI 级测试断言安装后 `RemoteRangeCache::currentConfig().blockPrivateNetworks == true`，且对 `http://169.254.169.254/...` 的读取被拒。
+## C. 已落地：#1505 T11 生产默认开启私网阻断（用户 2026-10-17 批准写 src/cli/**，见 OWNERSHIP.md）
+- `84cfbf27`：`data cache <url>`、`data cache prefetch`、`data identity` 默认阻断；`--allow-private-network` 为逐次调用的显式开关。test_cli_commands_json 的回环用例经局部 helper 显式放行，没有翻转全局默认，也没有逐个测试改开关。
+- `53941117`（R3-10）：策略开启时，传输失败后的回落也走受守卫的传输。
+- `127ac320`（R4-01）：策略同时覆盖探测、重新验证与 Stat。
+- `08d8b295`（R4-02）：prefetch 先装受守卫缓存再规划；规划器的 identity 探测受守卫。
+- 结构体默认值 `RangeCacheConfig::blockPrivateNetworks=false` 保持不变（库层与既有测试不受影响）。生产入口的默认值由 CLI 设定。
+- 剩余的、range cache 之外的路径：REVIEW_ROUND4 R4-03（P2）。
 
 ## D. 已落地：offline_gate.cpp / http_fetch.cpp —— #1505 T3 / #1485 DNS rebinding（提交 `fc712c72`）
 
