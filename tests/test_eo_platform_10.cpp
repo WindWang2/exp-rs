@@ -527,6 +527,11 @@ class ChangeStackRuntime final : public IModelRuntime
     std::string deviceName() const override { return "cpu"; }
     std::string artifactPath() const override { return "change-stack"; }
     cv::Mat infer( const cv::Mat & ) override { return {}; }
+    // This fake feeds several named inputs in ONE forward pass through its
+    // inferNamed override, so it declares the capability the engine's
+    // preflight (R15-C C05/B3) negotiates against — an undeclared override
+    // used to reach the wire and fail there.
+    bool supportsMultiInput() const override { return true; }
 
     std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
                                          const std::vector<std::string> &outputNames ) override
@@ -1005,15 +1010,26 @@ TEST_CASE( "WP-C: optional deployment providers degrade typed when absent",
            "[eo10][providers]" )
 {
   auto &registry = sicnu::operators::runtime::ModelRuntimeRegistry::instance();
-  if ( sicnu::operators::runtime::tensorRTProviderAvailable()
-       && sicnu::operators::runtime::openVinoProviderAvailable() )
-    return; // capability-gated: full-deployment host executes the real lanes
+  const bool trtAvailable = sicnu::operators::runtime::tensorRTProviderAvailable();
+  const bool ovAvailable = sicnu::operators::runtime::openVinoProviderAvailable();
+  if ( trtAvailable && ovAvailable )
+  {
+    // R15-C C16 (B10): full-deployment host. The historical early `return`
+    // made this case pass with ZERO assertions — "green" without testing
+    // anything. Assert the positive contract instead: both providers are
+    // registered and their unavailable-reason seams are silent (nothing to
+    // recover from), so the case has teeth on every host shape.
+    CHECK( registry.hasProvider( "tensorrt" ) );
+    CHECK( registry.hasProvider( "openvino" ) );
+    CHECK( sicnu::operators::runtime::tensorRTUnavailableReason().empty() );
+    CHECK( sicnu::operators::runtime::openVinoUnavailableReason().empty() );
+    return;
+  }
 
   ModelInfo model;
   model.name = "trt-engine";
   model.task = "segmentation";
-  model.framework = sicnu::operators::runtime::tensorRTProviderAvailable() ? "openvino"
-                                                                           : "tensorrt";
+  model.framework = trtAvailable ? "openvino" : "tensorrt";
   model.readiness = ModelReadiness::Ready;
 
   std::string reason;
@@ -1031,9 +1047,9 @@ TEST_CASE( "WP-C: optional deployment providers degrade typed when absent",
   // The typed per-provider unavailability reason (the stub contract).
   const std::string trtReason = sicnu::operators::runtime::tensorRTUnavailableReason();
   const std::string ovReason = sicnu::operators::runtime::openVinoUnavailableReason();
-  if ( !sicnu::operators::runtime::tensorRTProviderAvailable() )
+  if ( !trtAvailable )
     CHECK( trtReason.find( "without TensorRT" ) != std::string::npos );
-  if ( !sicnu::operators::runtime::openVinoProviderAvailable() )
+  if ( !ovAvailable )
     CHECK( ovReason.find( "without OpenVINO" ) != std::string::npos );
 }
 
