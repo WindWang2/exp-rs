@@ -949,6 +949,7 @@ CatalogService::SearchAllResult CatalogService::searchAll( const CatalogQuery &q
   query.validate();
   SearchAllResult result;
   CatalogContinuation continuation;
+  std::set<std::string> visitedRemotePages;
   int guard = 0;
   while ( true )
   {
@@ -980,6 +981,24 @@ CatalogService::SearchAllResult CatalogService::searchAll( const CatalogQuery &q
       result.truncatedByCap = true;
     if ( maxReached || !page.next.hasMore )
       return result;
+    // R15-B (B05): a remote origin whose rel=next repeats (self-loop or
+    // cycle) must be refused, not re-fetched until maxItems fills with
+    // duplicates (or the 100000-page backstop). Buffered tails do not
+    // re-fetch, so only a request-issuing continuation is keyed — same
+    // contract as StacClient::searchAll's revisit guard.
+    if ( mRemote && page.next.remoteBufferedItems.empty() && !page.next.remoteHref.empty() )
+    {
+      std::string loopKey = page.next.remoteMethod + " " + page.next.remoteHref;
+      if ( !page.next.remoteBody.isNull() )
+      {
+        Json::StreamWriterBuilder writerBuilder;
+        writerBuilder["indentation"] = "";
+        loopKey += " " + Json::writeString( writerBuilder, page.next.remoteBody );
+      }
+      if ( !visitedRemotePages.insert( loopKey ).second )
+        throw GeoError( ErrorCode::InvalidMetadata,
+                        "catalog pagination loop detected (repeated rel=next continuation)" );
+    }
     continuation = page.next;
     if ( ++guard > 100000 )   // loop backstop (bounds beats cleverness)
       throw GeoError( ErrorCode::ResourceExhausted, "catalog pagination failed to terminate" );
