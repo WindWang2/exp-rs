@@ -15,6 +15,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_sam_classify_operator.h"
+#include "operators/rs/rs_spectral_similarity_operator.h"
 #include "operators/rs/rs_continuum_removal_operator.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -23,6 +24,7 @@ using Catch::Approx;
 using sicnu::operators::RSOperatorContext;
 using sicnu::operators::rs::RsContinuumRemovalOperator;
 using sicnu::operators::rs::RsSamClassifyOperator;
+using sicnu::operators::rs::RsSpectralSimilarityOperator;
 
 static const float NODATA = -9999.0f;
 
@@ -443,6 +445,119 @@ TEST_CASE( "rs:sam_classify honors heterogeneous per-band NoData [r14a]", "[sam]
     REQUIRE( labels[0] == Approx( 0.0f ).margin( 0.5f ) ); // clean pixel classifies
     REQUIRE( labels[1] == Approx( -9999.0f ) );            // band-1 void: unclassified
     REQUIRE( labels[2] == Approx( -9999.0f ) );            // band-2 void: unclassified
+}
+
+// ===========================================================================
+// R15-A (O2): undeclared-band NoData dialect — sam_classify (NaN-only) vs
+// rs:spectral_similarity (-9999 family fallback). The two sibling spectral
+// operators answer the SAME scientific question differently for a raster
+// whose bands declare no NoData and whose samples carry -9999: sam treats
+// the sentinel as data and classifies the pixel; spectral_similarity voids
+// it. R14-A deliberately preserved the difference to avoid altering
+// existing outputs and recorded it for a future policy round. This test
+// dual-locks BOTH policies so the difference is explicit, regression-pinned,
+// and safe to flip in a future policy round; sam's metadata() documents the
+// policy the same way spectral_similarity's does. Unifying is a one-line
+// change (sam's bandSentinels default), gated on this test being updated in
+// the same commit.
+// ===========================================================================
+
+TEST_CASE( "rs: sam_classify and rs:spectral_similarity pin the undeclared-band NoData dialect [r15a][nodata]",
+           "[sam][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // 3x1 raster, 2 bands, NO NoData declaration anywhere (plain GTiff).
+    // Pixel 0 is clean; pixels 1-2 are clean in band 1; pixel 2 carries a
+    // -9999 sample in the UNDECLARED band 2 — the dialect probe.
+    const QString inputPath = dir.filePath( QStringLiteral( "dialect.tif" ) );
+    const QString samOut = dir.filePath( QStringLiteral( "dialect_sam.tif" ) );
+    const QString simOut = dir.filePath( QStringLiteral( "dialect_sim.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH inDs = createOutputTiff( inputPath, 3, 1, 2, GDT_Float32, gt, QString() );
+    REQUIRE( inDs != nullptr );
+    const std::vector<float> b1 = { 0.8f, 0.2f, 0.8f };
+    const std::vector<float> b2 = { 0.2f, 0.8f, -9999.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 1 ), GF_Write, 0, 0, 3, 1,
+                           const_cast<float *>( b1.data() ), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 2 ), GF_Write, 0, 0, 3, 1,
+                           const_cast<float *>( b2.data() ), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( inDs );
+    // Fixture sanity: neither band declares NoData.
+    {
+        GdalDatasetWrapper vds;
+        REQUIRE( vds.open( inputPath ) );
+        bool h1 = false, h2 = false;
+        vds.bandNoDataValue( 1, &h1 );
+        vds.bandNoDataValue( 2, &h2 );
+        REQUIRE_FALSE( h1 );
+        REQUIRE_FALSE( h2 );
+    }
+
+    Json::Value refs( Json::arrayValue );
+    Json::Value c0( Json::arrayValue );
+    c0.append( 0.8 );
+    c0.append( 0.2 );
+    Json::Value c1( Json::arrayValue );
+    c1.append( 0.2 );
+    c1.append( 0.8 );
+    refs.append( c0 );
+    refs.append( c1 );
+
+    // sam: NaN-only policy — the undeclared -9999 is DATA, so pixel 2 still
+    // receives a class label (its garbage angle happens to favor class 0).
+    {
+        Json::Value params( Json::objectValue );
+        params["input"] = inputPath.toStdString();
+        params["output"] = samOut.toStdString();
+        params["refs"] = refs;
+
+        RsSamClassifyOperator op;
+        RSOperatorContext ctx;
+        const Json::Value result = op.run( params, ctx );
+        REQUIRE( QFile::exists( samOut ) );
+        REQUIRE( result["classes"].asInt() == 2 );
+
+        GdalDatasetWrapper out;
+        REQUIRE( out.open( samOut ) );
+        std::vector<float> labels( 3 );
+        REQUIRE( out.readBandData( 1, labels.data(), 3, 1 ) );
+        REQUIRE( labels[0] == Approx( 0.0f ).margin( 0.5f ) ); // clean: class 0
+        REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) ); // clean: class 1
+        // The dialect lock: -9999 in an UNDECLARED band is classified, not
+        // voided. If sam ever adopts the -9999 family fallback, this becomes
+        // -9999 and this test must be updated in the same commit.
+        REQUIRE( labels[2] != Approx( -9999.0f ) );
+    }
+
+    // spectral_similarity: -9999 family fallback — the same pixel is void.
+    {
+        Json::Value params( Json::objectValue );
+        params["input"] = inputPath.toStdString();
+        params["output"] = simOut.toStdString();
+        params["refs"] = refs;
+
+        RsSpectralSimilarityOperator op;
+        RSOperatorContext ctx;
+        const Json::Value result = op.run( params, ctx );
+        REQUIRE( QFile::exists( simOut ) );
+        REQUIRE( result["refs"].asInt() == 2 );
+
+        GdalDatasetWrapper out;
+        REQUIRE( out.open( simOut ) );
+        std::vector<float> labels( 3 );
+        REQUIRE( out.readBandData( 1, labels.data(), 3, 1 ) );
+        REQUIRE( labels[0] == Approx( 0.0f ).margin( 0.5f ) ); // clean: class 0
+        REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) ); // clean: class 1
+        // The dialect lock: undeclared -9999 is voided under the family
+        // fallback. If the family policy is ever retired, update together
+        // with the sam side above.
+        REQUIRE( labels[2] == Approx( -9999.0f ) );
+    }
 }
 
 TEST_CASE( "rs:continuum_removal honors heterogeneous per-band NoData [r14a]",
