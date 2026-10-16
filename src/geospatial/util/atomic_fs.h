@@ -115,6 +115,21 @@ std::uintmax_t fileSize( const std::string &path );
 bool hasPendingJournal( const std::string &targetMainPath );
 
 /// Recovers an interrupted multi-file publication for targetMainPath.
+/// R15-B (B13): true only for an UNCOMMITTED journal (".publish-journal" /
+/// ".sicnu-journal" without the ".committed" suffix). Such a group may be a
+/// mix of generations (a crash between sidecar and main renames); readers
+/// must refuse it instead of serving it. A committed marker means the new
+/// group is complete (only backup sweeping was interrupted).
+bool hasUncommittedPublishJournal( const std::string &targetMainPath );
+
+/// R15-B (B13): reader-side gate. Throws GeoError(IoError) when @p localPath
+/// carries an uncommitted publish journal. Side-effect free: recovery is the
+/// writer's (publishStagedGroup/publishStagedMembers auto-recover) or an
+/// explicit recoverDatasetGroup() call — a reader must never roll back a
+/// publish that another thread/process may still be performing. /vsi*
+/// and remote paths are ignored.
+void throwIfInterruptedPublish( const std::string &localPath );
+
 /// If an uncommitted journal is found, rolls back published targets and restores backups.
 /// If a committed marker is found, cleans up leftover backups.
 /// Returns true if recovery was performed, false if no journal was present.
