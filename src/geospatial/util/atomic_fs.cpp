@@ -565,8 +565,9 @@ void throwIfInterruptedPublish( const std::string &localPath )
   details["reason"] = "interrupted_group_publish";
   details["recovery"] = "atomic_fs::recoverDatasetGroup(path) restores the last complete group";
   throw GeoError( ErrorCode::IoError,
-                  "dataset group was interrupted mid-publish (uncommitted journal present); "
-                  "refusing to read a possibly mixed generation: " + localPath,
+                  "dataset group was interrupted mid-publish (uncommitted journal present: a "
+                  "publish is in progress or was killed); refusing to read a possibly mixed "
+                  "generation: " + localPath,
                   details );
 }
 
