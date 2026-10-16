@@ -570,3 +570,78 @@ TEST_CASE( "B16: #1481 T17 direct COG validation is gated before GDAL dispatch w
   CHECK( gated );
   CHECK_FALSE( report.isCog );
 }
+
+// ---------------------------------------------------------------------------
+// B07 — a mid-scan SQLite error is a typed failure, never a short success
+// ---------------------------------------------------------------------------
+
+namespace
+{
+/// Corrupts the b-tree page holding @p marker (page-type byte => invalid),
+/// so a scan that reaches that row fails with SQLITE_CORRUPT mid-way.
+bool corruptPageContaining( const QString &dbPath, const QByteArray &marker, int pageSize = 4096 )
+{
+  QFile file( dbPath );
+  if ( !file.open( QIODevice::ReadWrite ) )
+    return false;
+  const QByteArray bytes = file.readAll();
+  const qsizetype at = bytes.indexOf( marker );
+  if ( at < 0 )
+    return false;
+  const qint64 pageStart = ( at / pageSize ) * pageSize;
+  if ( pageStart == 0 )
+    return false; // never touch the database header page
+  file.seek( pageStart );
+  const char garbage = static_cast<char>( 0x7F ); // not a valid b-tree page type
+  return file.write( &garbage, 1 ) == 1;
+}
+} // namespace
+
+TEST_CASE( "B07: ExperimentStore list scans report a mid-scan SQLITE_CORRUPT as failure",
+           "[r15b][b07][sqlite][experiment]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString dbPath = dir.filePath( QStringLiteral( "exp.db" ) );
+  {
+    ExperimentStore store;
+    REQUIRE( store.open( dbPath ) );
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-1" ) );
+    experiment.setName( QStringLiteral( "scan" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    const QString padding( 1800, QLatin1Char( 'x' ) );
+    for ( int i = 0; i < 60; ++i )
+    {
+      ExperimentRun run;
+      run.setRunId( QStringLiteral( "run-%1" ).arg( i, 3, 10, QLatin1Char( '0' ) ) );
+      run.setExperimentId( QStringLiteral( "exp-1" ) );
+      run.setAlgorithmId( QStringLiteral( "rs:classify" ) );
+      run.setAlgorithmVersion( QStringLiteral( "1.0" ) );
+      QJsonObject parameters;
+      parameters.insert( QStringLiteral( "marker" ), QStringLiteral( "R15B-MARK-%1-END" ).arg( i ) );
+      parameters.insert( QStringLiteral( "pad" ), padding );
+      run.setParameters( parameters );
+      run.setSeed( static_cast<quint64>( i ) );
+      run.setStatus( RunStatus::Created );
+      REQUIRE( store.upsertRun( run ).has_value() );
+    }
+    store.close(); // last connection: WAL checkpointed into the main file
+  }
+  REQUIRE( corruptPageContaining( dbPath, QByteArrayLiteral( "R15B-MARK-40-END" ) ) );
+
+  ExperimentStore reopened;
+  REQUIRE( reopened.open( dbPath ) );
+  const auto listed = reopened.listRuns( QString(), QString(), QString(), 0, 100 );
+  if ( listed.has_value() )
+  {
+    // The only acceptable success is a COMPLETE answer.
+    INFO( "listRuns succeeded with " << listed.value().second.size() << " of total "
+                                     << listed.value().first );
+    CHECK( listed.value().second.size() == 60 );
+  }
+  else
+  {
+    SUCCEED( "mid-scan corruption surfaced as a typed failure" );
+  }
+}
