@@ -16,9 +16,10 @@
 
 | # | 发现 | 状态 | 证据 |
 |---|---|---|---|
-| A03-1 | O1 缺陷：GDAL bilinear 重采样不识别 NoData → 哨兵掺混成有限污染值，精确匹配 wash 漏判（R14-A 残留）。image_fusion.cpp 两个调用点（862 流式融合、1845 质量报告参考读）同族 | ❌→修复中 | RED 测试 7aae63038 + b4a7d148b；修复 evidence/image_fusion.o1-fixed.cpp.bak |
+| A03-1 | ~~O1 缺陷：GDAL bilinear 重采样不识别 NoData~~ **O1 = FALSE POSITIVE（diag1–diag4 实证）**：① RED 模式系 fixture 缺陷——VRT 缺 `<GeoTransform>` 时 GDAL 填默认单位变换 [0,1,0,0,0,1]，融合走同分辨率钳位路径（readBandWindow 钳位 + 声明哨兵填充），wash 后呈 `{NaN,6.667,NaN,NaN,6.667,6.667,NaN×10}` 假"掺混"图案；② 带 GT+SRS 的正确 fixture 下，本环境 GDAL GRIORA_Bilinear 对声明 NoData 波段**是** NoData 感知的（排除空值 tap + 权重重归一化），BASE 输出 `{NaN,6.667×15}`/`{NaN,3.333×15}`——void 正确 void、邻域干净精确值，与 resampler.cpp 家族惯例一致；③ 空值仅在主导 tap 处原样透传，被 readMsWindow 精确匹配 wash 捕获。原 RED 测试已重写为 GREEN 回归锁（6d5672419） | ✅ FALSE POSITIVE | 6d5672419；diag 证据链见 LEDGER CP2；test_image_fusion 36 用例/1611 断言全绿 |
+| A03-6 | **A03-6（提交信息记作 A14，新发现，勿与工作包 A14=性能混淆）**：单侧缺 GeoTransform 时 compareGrids 返回空报告（`||` 条件把"单侧"混入"双侧均无"回退），融合按单位变换静默走同分辨率钳位路径，产出大面积 void 且无报错。修复：processNativeFusion 增加 hasGeoTransform 对称性阻塞；both-unreferenced 合成回退保留并测试锁定 | ✅ 已修复 | bf5a7d27a；RED：pan GT+CRS + MS VRT 有 SRS 无 GT → BASE "成功"且 12/16 像素 void 无报错；GREEN×2 后 36 用例/1611 断言 |
 | A03-2 | 参考实现存在：`rs::algorithms::Resampler` 用权重重归一化 + 50% 阈值，语义与 #700 any-touch 惯例不同但各自文档化且被测试钉死 | ✅ 不同策略 | resampler.cpp:75-77；tests/test_resampler.cpp |
-| A03-3 | `PanSharpening::runBrovey` 无任何 NoData 处理；`upsampleBilinear` 边缘复制无 NoData（与 O1 同族缺陷） | ⚠️ 死代码 | pansharpening.cpp:23-40,127-141；`sharpen()` 全仓零调用（src+tests） |
+| A03-3 | `PanSharpening::runBrovey` 无任何 NoData 处理（原记"与 O1 同族"——O1 误报后此关联撤销；但"无处理"本身仍是死代码路径的观测）；`upsampleBilinear` 边缘复制无 NoData | ⚠️ 死代码 | pansharpening.cpp:23-40,127-141；`sharpen()` 全仓零调用（src+tests） |
 | A03-4 | `evaluateFusionQuality`（Wald 协议入口）全仓零调用，仅注释引用 | ⚠️ 死代码 | image_fusion.cpp:1783 注释 |
 | A03-5 | pansharpening.cpp 无栅格 I/O（纯内存核）；spectral_resampling.cpp 为波长域 1-D 重采样——均不属 O1 空间重采样家族 | ✅ | 静态 |
 
@@ -42,7 +43,7 @@
 | A06-1 | 时序数值域探针仅采正量程（#856）：未声明 -9999 到达探针不会翻转域判定；TemporalTileReader 仅屏蔽已声明 NoData（文档化） | ✅ | rs_temporal_index_operator.cpp:296-304 |
 | A06-2 | #1465 家族 temporal_change.cpp:218 有尺寸相等前置守卫 | ✅ | LEDGER L2 |
 | A06-3 | 确定性：bootstrap/分类种子均有固定默认值（bootstrapSeed=20260915、seed=42） | ✅ 静态 | rs_temporal_seasonal_breaks_operator.cpp:255、rs_supervised_classification_operator.cpp:238 |
-| A09-1 | multires 核心像素有效性谓词用 epsilon 匹配（abs(val-nodata)<1e-6），违反 nodata_utils.h 精确相等契约；仅内存重载 + 小哨兵可复现（生产路径洗 NaN；float32 无法表示 -9999+5e-7） | ❌→修复中 | rs_multires_segmenter.cpp:357；RED 测试 9187cdc79（pending build） |
+| A09-1 | multires 核心像素有效性谓词用 epsilon 匹配（abs(val-nodata)<1e-6），违反 nodata_utils.h 精确相等契约；仅内存重载 + 小哨兵可复现（生产路径洗 NaN；float32 无法表示 -9999+5e-7） | ✅ 已修复（待 GREEN 验证） | rs_multires_segmenter.cpp:357 → `sicnu::rs::isNoDataValue(val, nodata)`；RED 测试 9187cdc79 |
 | A09-2 | rs_simple_segmenter NoData 完备（重归一化平滑 + 任意波段空值屏蔽 + 量化排除空值） | ✅ | rs_simple_segmenter.cpp:218-330 |
 | A09-3 | multires 文件入口按波段洗哨兵成 NaN（#1461 闭合），路由 isNoDataValue | ✅ | rs_multires_segmenter.cpp:702-723 |
 | A10-1 | gcp_manager 退化防护完备：重复点坍缩（1e-9）、monotone chain 退化点丢弃、shoelace 面积、Clark-Evans <2 点返回 0 | ✅ | gcp_manager.cpp:29-56,292-316,318-340 |
