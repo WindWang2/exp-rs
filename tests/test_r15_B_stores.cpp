@@ -419,3 +419,100 @@ TEST_CASE( "Item7: verifyBundleChecksums accepts a CRLF checksums.txt and still 
   CHECK( reasons.join( QString() ).contains( QStringLiteral( "checksum mismatch: run_config.json" ) ) );
 }
 
+// ---------------------------------------------------------------------------
+// B14 / item 6: whole-store run walks (hidden measurement; run explicitly with
+// "[b14k]"). Times the in-library walkers (reconcileStaleRuns, equivalentRuns)
+// plus a raw OFFSET walk vs a raw keyset walk over the same store. The same
+// test is run on the pre-change tree for the "before" numbers. Nothing is
+// asserted on speed; rows are asserted complete (no skip / no dup).
+// ---------------------------------------------------------------------------
+TEST_CASE( "B14k: whole-store run walks, OFFSET vs keyset (measurement)", "[.][r15b][b14k][perf]" )
+{
+  const char *env = std::getenv( "R15B_PERF_KEYSET_RUNS" );
+  const int runsN = env && *env ? std::atoi( env ) : 30000;
+  const int perExperiment = 100;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  ExperimentStore store;
+  REQUIRE( store.open( dir.filePath( QStringLiteral( "keyset.db" ) ) ) );
+  auto ms = []( std::chrono::steady_clock::time_point t0 ) {
+    return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count();
+  };
+  auto t0 = std::chrono::steady_clock::now();
+  for ( int e = 0; e * perExperiment < runsN; ++e )
+  {
+    sicnu::experiment::Experiment experiment;
+    const QString expId = QStringLiteral( "exp-%1" ).arg( e, 5, 10, QLatin1Char( '0' ) );
+    experiment.setExperimentId( expId );
+    experiment.setName( expId );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    QVector<sicnu::experiment::ExperimentRun> batch;
+    for ( int i = e * perExperiment; i < std::min( runsN, ( e + 1 ) * perExperiment ); ++i )
+    {
+      sicnu::experiment::ExperimentRun run;
+      run.setRunId( QStringLiteral( "run-%1" ).arg( i, 7, 10, QLatin1Char( '0' ) ) );
+      run.setExperimentId( expId );
+      run.setAlgorithmId( QStringLiteral( "rs:classify" ) );
+      run.setAlgorithmVersion( QStringLiteral( "1.0" ) );
+      run.setSeed( static_cast<quint64>( i ) );
+      run.setStatus( sicnu::experiment::RunStatus::Created );
+      batch.append( run );
+    }
+    REQUIRE( store.upsertRunsBatch( batch ).has_value() );
+  }
+  const double populateMs = ms( t0 );
+
+  // Raw OFFSET walk (the shape the three walkers used before item 6).
+  t0 = std::chrono::steady_clock::now();
+  QSet<QString> offsetIds;
+  qint64 offsetRows = 0;
+  for ( qint64 offset = 0;; )
+  {
+    const auto page = store.listRuns( QString(), QString(), QString(), offset, ExperimentStore::kMaxPageSize );
+    REQUIRE( page.has_value() );
+    if ( page.value().second.isEmpty() )
+      break;
+    for ( const auto &r : page.value().second )
+      offsetIds.insert( r.runId() );
+    offsetRows += page.value().second.size();
+    offset += page.value().second.size();
+  }
+  const double offsetMs = ms( t0 );
+
+  // Raw keyset walk.
+  t0 = std::chrono::steady_clock::now();
+  QSet<QString> keysetIds;
+  qint64 keysetRows = 0;
+  QString cursor;
+  while ( true )
+  {
+    const auto page = store.listRunsByCursor( QString(), QString(), QString(), cursor, ExperimentStore::kMaxPageSize );
+    REQUIRE( page.has_value() );
+    for ( const auto &r : page.value().runs )
+      keysetIds.insert( r.runId() );
+    keysetRows += page.value().runs.size();
+    cursor = page.value().nextCursor;
+    if ( cursor.isEmpty() || page.value().runs.isEmpty() )
+      break;
+  }
+  const double keysetMs = ms( t0 );
+  CHECK( offsetRows == runsN );
+  CHECK( keysetRows == runsN );
+  CHECK( offsetIds.size() == runsN );
+  CHECK( keysetIds.size() == runsN );
+
+  // Library walkers (implementation under test: OFFSET before, keyset after).
+  sicnu::experiment::ExperimentRunRecorder recorder( store );
+  t0 = std::chrono::steady_clock::now();
+  const auto stale = recorder.reconcileStaleRuns( {} );
+  const double reconcileMs = ms( t0 );
+  CHECK( stale.size() == runsN ); // every Created run is non-terminal
+  t0 = std::chrono::steady_clock::now();
+  const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
+    store, QStringLiteral( "no-such-fingerprint" ), QString() );
+  const double equivalentMs = ms( t0 );
+  CHECK( equivalent.isEmpty() );
+  WARN( "PERF keyset runs=" << runsN << " populate_ms=" << populateMs << " raw_offset_walk_ms=" << offsetMs
+                            << " raw_keyset_walk_ms=" << keysetMs << " reconcileStaleRuns_ms=" << reconcileMs
+                            << " equivalentRuns_ms=" << equivalentMs );
+}

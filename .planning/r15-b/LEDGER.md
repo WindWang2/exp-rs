@@ -18,6 +18,11 @@
 | 12 | 机器替换后恢复 | 完成：重装工具链（含 qt6-5compat-dev），重新配置 `build-r15-b`，HEAD `e89b9b51` 重新 GREEN×2（113/113，两次） | — | GREEN×2 | — |
 | 13 | TEST_RESULTS / PERFORMANCE / REVIEW_ROUND2 / FINAL_REPORT | 完成 | — | — | 本提交 |
 | 14 | master 冲突检查 + Draft PR | 完成：origin/master 仍为 `46791bc6`，无需 rebase | — | — | 见 FINAL_REPORT |
-| 15 | B06 / B11 审计 | 未做（LIVE_DEFERRED，时间预算） | | | |
-| 16 | DatasetStore 10 个裸 QVector 扫描 + ExperimentStore 游标/lineage 扫描（R1-08） | 未做（需改 API） | | | |
-| 17 | upsertRun 吞吐退化 / OFFSET 分页 O(n²)（PERF-1/2） | 未做（P2） | | | |
+| 15 | B06 元数据事实链 + B11 空间划分泄漏审计 | 完成：B06 修复；B11 审计无引擎缺陷，补回归 | B06 RED（07e2554b）：bandCount 1≠3、8×8≠16×12、垃圾文件 state=Ready；B11 首跑即绿 | GREEN×2（22/22） | 790d302c |
+| 16 | 第 5 项存储扫描吞错 + 第 4 项 #1449 close() 生命周期 | 完成 | RED（07e2554b，-DR15B_LEGACY_API）：allLineageEdges 32/60、outgoingEdges 40/60、allTags 40/60 且无错误；三个 race-close 用例 SIGSEGV | GREEN×2（精确提交 c68d5e95 上 8/8 两次） | c68d5e95 |
+| 17 | PERF-1/PERF-2 | PERF-2：keyset 改动实测更慢（listRunsByCursor 每页 COUNT），已撤回，只提交测量用例；PERF-1 根因确认（run_ids 镜像重写），需改数据模型 → LIVE_DEFERRED | 实测见 PERFORMANCE §4 | — | 本提交 |
+| 18 | 第 7 项 checksums.txt CRLF | 完成 | RED：完好 CRLF bundle 被判 checksum mismatch: manifest.json | GREEN×2 | d9ea2b01 |
+| 19 | 第 7 项 journal 闸门扩展 + 开后复查 | 完成（开后复查只缩窄窗口，无确定性 RED） | RED：inspectRaster/inspectAny/validateCog/translateRaster 在有 .publish-journal 时成功 | GREEN×2 | c4ed7d85 |
+| 20 | B15 远端源校验身份 | 完成 | RED：重签名 URL 的 recordedToken 为空、isStale=false、签名与 AKIA 凭据出现在 SQLite 文件中 | GREEN×2 | adb6e525 |
+| 21 | 第 8 项 #1505 已合并 | resource_uri：#1481 T6/T7/T8/T9/T19 首跑即绿（FIXED_ON_MASTER），#1505 T9 RED→修复；range_cache T6/T11、DNS T3 → POST_1505_PATCHES.md（未落地，原因见文档） | 1505-T9 RED：100%_coverage.tif 被判 Invalid | GREEN×2 | bfe83d41 |
+| 22 | 第 9 项 sanitizer / 第 10 项 RED 复跑 + 重型回归 | 待做；RED 工作树 `exp-rs-r15-b-red`（本轨新建，独立构建目录） | | | |
