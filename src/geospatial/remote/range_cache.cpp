@@ -1564,6 +1564,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
 
       std::vector<unsigned char> bytes;
       bool transportFailed = false;
+      bool policyRefused = false;
       try
       {
         // 13.0: the in-flight byte admission covers ONE origin transfer.
@@ -1585,14 +1586,29 @@ class RangeCacheHandle final : public VSIVirtualHandle
                               cache, mEntry );
         }
       }
-      catch ( const GeoError & )
+      catch ( const GeoError &error )
       {
-        transportFailed = true;
+        // R15-B (#1505 T6): a policy refusal (private-network origin or
+        // redirect hop) is FINAL. The fallback opens the same URL through raw
+        // /vsicurl/, which applies no private-network guard and follows the
+        // redirect unguarded — degrading to it would contact exactly the
+        // target the guard just refused.
+        if ( error.code() == ErrorCode::PermissionDenied )
+          policyRefused = true;
+        else
+          transportFailed = true;
       }
 
       fetchLock.lock();
       mEntry->fetchInProgress = false;
       mEntry->fetchCv.notify_all();
+
+      if ( policyRefused )
+      {
+        CPLError( CE_Failure, CPLE_AppDefined,
+                  "vsirangecache: origin fetch refused by the private-network policy" );
+        return 0; // readThroughCache reports the short read truthfully
+      }
 
       if ( transportFailed )
       {
