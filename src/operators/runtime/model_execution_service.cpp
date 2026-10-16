@@ -188,8 +188,19 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   const ModelReadiness runtimeReadiness =
     evaluateRuntimeReadiness( model, hw, &runtimeReason );
   if ( runtimeReadiness != ModelReadiness::Ready )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
+  {
+    // R15-C C11 (F11): a VRAM-BUDGET refusal is a resource/deployment
+    // condition (manifest estimate vs host budget), not invalid input data —
+    // the chunk bridge already projects the same class onto
+    // ResourceBudgetExceeded, and a user reading "invalid input data" for a
+    // host-budget condition would go audit their raster. Hardware-availability
+    // verdicts (no CUDA, unaddressable device) keep InvalidInputData.
+    const bool vramBudget =
+      runtimeReason.find( "vram budget" ) != std::string::npos;
+    throw RSOperatorError( vramBudget ? ErrorCode::ResourceBudgetExceeded
+                                      : ErrorCode::InvalidInputData,
                            "Model '" + model.name + "' cannot execute: " + runtimeReason );
+  }
 
   if ( multiInput && request.asDetection )
     throw RSOperatorError( ErrorCode::InvalidInputData,
@@ -280,9 +291,29 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
        && ( request.confOverride >= 0.0 || request.nmsIouOverride >= 0.0 ) )
   {
     if ( request.confOverride >= 0.0 )
+    {
+      // R15-C C14 (B5): an APPLIED override must satisfy the decode
+      // contract's own bounds — the operator schema declares conf/nms_iou in
+      // [0,1] / (0,1] but nothing enforced it, so conf=2.5 used to produce a
+      // silent EMPTY product with exit code 0 (the user concludes the model
+      // is broken) and nms_iou=0 disabled suppression and then tripped the
+      // misleading "raise the cap or lower the conf_threshold" guard. Refuse
+      // typed here, at the single seam every entry (CLI/SDK/Agent/UI) funnels
+      // through, instead of trusting each caller's validation.
+      if ( request.confOverride > 1.0 )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "conf must be in [0, 1] (declared "
+                                 + std::to_string( request.confOverride ) + ")" );
       effectiveModel.output.detection.confThreshold = request.confOverride;
+    }
     if ( request.nmsIouOverride >= 0.0 )
+    {
+      if ( request.nmsIouOverride <= 0.0 || request.nmsIouOverride > 1.0 )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "nms_iou must be in (0, 1] (declared "
+                                 + std::to_string( request.nmsIouOverride ) + ")" );
       effectiveModel.output.detection.nmsIou = request.nmsIouOverride;
+    }
   }
 
   TileInferenceRunOptions options;
