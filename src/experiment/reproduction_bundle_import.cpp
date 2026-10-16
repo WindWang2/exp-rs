@@ -448,8 +448,13 @@ const auto installed = m_experimentStore->upsertRun( run );
                 {
                     const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
                                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
-                    for ( const QString &line : lines )
+                    for ( QString line : lines )
                     {
+                        // R15-B (item 7): same CRLF tolerance as
+                        // verifyBundleChecksums, so a CRLF table that passed
+                        // the gate does not silently refuse every relocation.
+                        if ( line.endsWith( QLatin1Char( '\r' ) ) )
+                            line.chop( 1 );
                         if ( line.size() > 66 && line.indexOf( QStringLiteral( "  " ) ) == 64 )
                             verifiedMembers.insert( line.mid( 66 ) );
                     }
