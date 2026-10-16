@@ -17,3 +17,11 @@
 | O-B16.2 | `B16: #1481 T17 direct COG validation is gated before GDAL dispatch when offline` | offline 时 validateCog 在 GDAL 之前拒绝 | candidate regression oracle |
 
 另：`test_io_remote_validator::the session identity resolver returns on first sight, never deadlocks` 的期望由强 ETag 改为空 token（回环被 #1504 默认阻断），首见路径仍会在 probe 之后获取发布锁，死锁回归仍被覆盖。
+
+追加（`7d2ac030` / `e89b9b51`）：
+
+| ID | 用例名（前缀省略） | 不变量 | 分类 |
+|---|---|---|---|
+| O-B02.1 | `B02: full read equals tile-walk and block stitches for integer compressed rotated rasters` | 整型（Byte/Int16/UInt16/Int32/UInt32，含极值与 nodata）× 2 波段、37×23 非整块尺寸、16×16 DEFLATE 瓦片、旋转/剪切地理变换下，整幅读取 == 分块遍历拼接 == block 拼接，逐像素相等 | candidate regression oracle（首跑即绿，未发现缺陷） |
+| O-B16.3 | `B16: #1485 octal and trailing-dot loopback spellings are private` | `0177.0.0.1`（八进制）、`localhost.`（尾点）等拼写被判定为私网 | candidate regression oracle（FIXED_ON_MASTER） |
+| O-B14 | `B14: bulk catalog paging and experiment-store throughput (measurement)` | 隐藏用例 `[.]`，只做测量，不做断言门禁；数字见 PERFORMANCE.md | measurement |
