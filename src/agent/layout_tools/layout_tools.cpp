@@ -17,6 +17,7 @@
 
 #include <QFont>
 
+#include <QDir>
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
@@ -369,6 +370,7 @@ class LayoutAddItemTool final : public SpatialTool
       schema["properties"]["id"] = Json::Value( Json::objectValue );
       schema["properties"]["id"]["type"] = "string";
       schema["properties"]["item"] = Json::Value( Json::objectValue );
+      schema["properties"]["ignored"] = Json::Value( Json::arrayValue );
       return schema;
     }
     SpatialToolResult execute( const Json::Value &input ) override
@@ -395,6 +397,28 @@ class LayoutAddItemTool final : public SpatialTool
       Json::Value out( Json::objectValue );
       out["id"] = item->uuid().toStdString();
       out["item"] = LayoutService::instance().itemProperties( item );
+      // CARTO-5: the shared property layer reports unresolvable layer refs
+      // into an ignored list the service API keeps internal — re-derive the
+      // per-ref entries here (the same store lookups applyItemProperties
+      // uses) so the tool surface never drops a missing ref silently.
+      const Json::Value &addProperties = optionalObject( input, "properties" );
+      if ( addProperties.isMember( "layers" ) && addProperties["layers"].isArray() )
+      {
+        Json::Value ignored( Json::arrayValue );
+        const auto &store = QgsProject::instance()->layerStore();
+        for ( const auto &ref : addProperties["layers"] )
+        {
+          if ( !ref.isString() )
+            continue;
+          const QString name = QString::fromStdString( ref.asString() );
+          if ( store->mapLayersByName( name ).isEmpty() && store->mapLayer( name ) == nullptr )
+            ignored.append( QStringLiteral( "layers: '%1' (not found in project)" )
+                              .arg( name )
+                              .toStdString() );
+        }
+        if ( !ignored.empty() )
+          out["ignored"] = ignored;
+      }
       return SpatialToolResult::ok( out );
     }
 };
@@ -736,7 +760,8 @@ class LayoutExportTool final : public SpatialTool
     {
       return "Export a layout to png|jpg|pdf|svg at a given DPI. Raster exports are preflighted: "
              "requests whose RGBA buffers would exceed the memory guard are rejected with a hint "
-             "to lower the DPI.";
+             "to lower the DPI. Multi-page raster exports write one file per page (path, path_2, "
+             "path_3, ...) and the result lists every delivered page in pages[].";
     }
     std::vector<std::string> tags() const override { return { "layout", "export", "cartography" }; }
     Json::Value inputSchema() const override
@@ -773,6 +798,14 @@ class LayoutExportTool final : public SpatialTool
       schema["properties"]["path"]["type"] = "string";
       schema["properties"]["bytes"] = Json::Value( Json::objectValue );
       schema["properties"]["bytes"]["type"] = "integer";
+      schema["properties"]["page_count"] = Json::Value( Json::objectValue );
+      schema["properties"]["page_count"]["type"] = "integer";
+      Json::Value pages = Json::Value( Json::objectValue );
+      pages["type"] = "array";
+      Json::Value pageEntry = Json::Value( Json::objectValue );
+      pageEntry["type"] = "object";
+      pages["items"] = pageEntry;
+      schema["properties"]["pages"] = pages;
       return schema;
     }
     SpatialToolResult execute( const Json::Value &input ) override
@@ -802,11 +835,41 @@ class LayoutExportTool final : public SpatialTool
       if ( !LayoutService::instance().exportLayout( layout, path, format, dpi, kMaxExportBytes, &error ) )
         return SpatialToolResult::failure( error.toStdString(), "EXPORT_FAILED", "runtime", true );
 
+      // CARTO-15: report EVERY delivered page. Raster exports of multi-page
+      // layouts write page siblings (path_2.png, path_3.png, ... — QGIS
+      // generateFileName semantics); pdf/svg flatten into one file. path/
+      // bytes keep describing the page-0/primary file for backward
+      // compatibility; pages[] is the complete delivery list.
+      const int pageCount = std::max( 1, layout->pageCollection()->pageCount() );
+      const bool raster = format == QStringLiteral( "png" ) || format == QStringLiteral( "jpg" ) ||
+                          format == QStringLiteral( "jpeg" );
+      const QFileInfo info( path );
+      const auto pagePath = [&]( int page ) {
+        return page == 0 || !raster
+                 ? path
+                 : info.dir().filePath( info.completeBaseName() + QStringLiteral( "_" ) +
+                                        QString::number( page + 1 ) + QStringLiteral( "." ) +
+                                        info.suffix() );
+      };
+      Json::Value pages( Json::arrayValue );
+      for ( int page = 0; page < pageCount; ++page )
+      {
+        const QString candidate = pagePath( page );
+        if ( !QFile::exists( candidate ) )
+          continue; // page excluded from export
+        Json::Value entry( Json::objectValue );
+        entry["path"] = candidate.toStdString();
+        entry["bytes"] = static_cast<Json::Int64>( QFileInfo( candidate ).size() );
+        pages.append( entry );
+      }
+
       Json::Value out( Json::objectValue );
       out["path"] = path.toStdString();
       out["format"] = format.toStdString();
       out["dpi"] = dpi;
       out["bytes"] = static_cast<Json::Int64>( QFileInfo( path ).size() );
+      out["page_count"] = pageCount;
+      out["pages"] = pages;
       return SpatialToolResult::ok( out );
     }
 };

@@ -508,6 +508,15 @@ target_sources(sicnu_geo_rs_shell PRIVATE
     teaching/lab_validate_service.h
     teaching/status_badge.h
 )
+
+# R14-D WP-B (#1487 remainder): shared crash-or-valid durable-write authority
+# used by the pipeline editor, python script editor, GCP .points codec and the
+# CSV exporters. Implementation is header-only inline (see durable_file_write.h
+# for the link-topology rationale); this TU anchors it in the shell.
+target_sources(sicnu_geo_rs_shell PRIVATE
+    durable_file_write.cpp
+    durable_file_write.h
+)
 if(TARGET Sicnu::teaching)
     target_link_libraries(sicnu_geo_rs PRIVATE Sicnu::teaching)
 endif()

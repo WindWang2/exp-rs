@@ -147,14 +147,25 @@ void QgisDesktopWindow::cutFeatures()
     m_clipboard->replaceWithCopyOf(vl);
     vl->beginEditCommand(tr("Cut features"));
     int deletedCount = 0;
-    const bool success = vl->deleteSelectedFeatures(&deletedCount);
-    if (!success || deletedCount == 0) {
+    const bool deleted = vl->deleteSelectedFeatures(&deletedCount);
+    if (deleted && deletedCount > 0) {
+        vl->endEditCommand();
+        statusBar()->showMessage(tr("Cut %1 feature(s)").arg(deletedCount), 2000);
+    } else {
+        // The clipboard holds a copy but the layer still contains the
+        // features: claiming "Cut N" here is the classic silent partial
+        // failure of the cut contract — report the delete half honestly
+        // instead (deliberately without a feature count: the clipboard copy
+        // may hold fewer than the selection, e.g. stale deleted features).
         vl->destroyEditCommand();
-        statusBar()->showMessage(tr("Failed to delete features during cut"), 2000);
-        return;
+        QMessageBox::warning(this, tr("Cut Features"),
+            tr("Failed to remove the cut features from layer '%1'.\n"
+               "The clipboard holds a copy of the selection; the layer still contains the features.")
+                .arg(vl->name()));
+        statusBar()->showMessage(
+            tr("Cut failed — a copy is on the clipboard but the features were not removed from %1")
+                .arg(vl->name()), 5000);
     }
-    vl->endEditCommand();
-    statusBar()->showMessage(tr("Cut %1 feature(s)").arg(deletedCount), 2000);
 }
 
 void QgisDesktopWindow::copyFeatures()
@@ -185,12 +196,26 @@ void QgisDesktopWindow::pasteFeatures()
         return;
     }
     vl->beginEditCommand(tr("Paste features"));
+    int landed = 0;
     for (QgsFeature &f : features) {
         f.setId(FID_NULL);
-        vl->addFeature(f);
+        if (vl->addFeature(f))
+            ++landed;
     }
-    vl->endEditCommand();
-    statusBar()->showMessage(tr("Pasted %1 feature(s)").arg(features.size()), 2000);
+    if (landed > 0)
+        vl->endEditCommand();
+    else
+        vl->destroyEditCommand(); // nothing landed: no undo step, no "Pasted N"
+    if (landed == features.size()) {
+        statusBar()->showMessage(tr("Pasted %1 feature(s)").arg(landed), 2000);
+    } else {
+        QMessageBox::warning(this, tr("Paste Features"),
+            tr("Pasted %1 of %2 feature(s) from the clipboard. Features with "
+               "incompatible attributes or geometries were rejected by the layer.")
+                .arg(landed).arg(features.size()));
+        statusBar()->showMessage(
+            tr("Pasted %1 of %2 feature(s)").arg(landed).arg(features.size()), 5000);
+    }
 }
 
 void QgisDesktopWindow::selectAll()
@@ -307,8 +332,27 @@ void QgisDesktopWindow::toggleEditing()
                 QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
             if (res == QMessageBox::Cancel) return;
             if (res == QMessageBox::Save) {
-                if (vlayer->commitChanges())
+                if (vlayer->commitChanges()) {
                     commitEditLease(vlayer);
+                } else {
+                    // #1084 pattern (saveEdits()/confirmSaveEdits()): surface
+                    // commitErrors() instead of falling through. QGIS keeps
+                    // the layer in edit mode when a commit fails, so the
+                    // status must not claim "Stopped editing" while the
+                    // edits are still buffered.
+                    const QString commitDetails = vlayer->commitErrors().isEmpty()
+                        ? tr("The data source rejected the commit.")
+                        : vlayer->commitErrors().join(QLatin1Char('\n'));
+                    QMessageBox::warning(
+                        this, tr("Save Edits"),
+                        tr("Failed to save edits on layer '%1':\n%2")
+                            .arg(vlayer->name(), commitDetails));
+                    updateEditingUI(vlayer);
+                    statusBar()->showMessage(
+                        tr("Commit failed — still editing %1 (edits are buffered, not saved)")
+                            .arg(vlayer->name()), 5000);
+                    return;
+                }
             }
             else {
                 vlayer->rollBack();
@@ -344,6 +388,13 @@ void QgisDesktopWindow::saveEdits()
     if (!vlayer->commitChanges()) {
         QMessageBox::warning(this, tr("Save Edits"),
             tr("Failed to save edits: %1").arg(vlayer->commitErrors().join("\n")));
+        // APP-9A (#1084 family): the failed commit must not fall through to
+        // the "Edits saved" status below — the layer is still in edit mode
+        // with the edits buffered, and the status bar must say that.
+        statusBar()->showMessage(
+            tr("Failed to save edits for %1 — edits are still buffered"),
+            5000);
+        return;
     }
     else {
         // Committing advances the Asset Revision and releases the Edit Lease;
@@ -390,18 +441,30 @@ void QgisDesktopWindow::deleteSelectedFeatures()
         statusBar()->showMessage(tr("Select an editable vector layer first"), 3000);
         return;
     }
-    const QgsFeatureIds &ids = vlayer->selectedFeatureIds();
+    // Copy by value: deleteFeatures() subtracts the ids from the layer's own
+    // selection set, which this reference would alias ("Deleted 0" forever).
+    const QgsFeatureIds ids = vlayer->selectedFeatureIds();
     if (ids.isEmpty()) {
         statusBar()->showMessage(tr("No features selected"), 3000);
         return;
     }
-    int deletedCount = 0;
-    const bool success = vlayer->deleteSelectedFeatures(&deletedCount);
-    if (!success || deletedCount == 0) {
-        statusBar()->showMessage(tr("Failed to delete selected features"), 3000);
-        return;
+    // One edit command for the whole batch: a single "Delete features" undo
+    // step (the buffer deletes feature-by-feature otherwise), destroyed and
+    // rolled back wholesale when the provider rejects the deletes.
+    vlayer->beginEditCommand(tr("Delete features"));
+    if (vlayer->deleteFeatures(ids)) {
+        vlayer->endEditCommand();
+        statusBar()->showMessage(tr("Deleted %1 feature(s)").arg(ids.size()), 3000);
+    } else {
+        vlayer->destroyEditCommand();
+        QMessageBox::warning(this, tr("Delete Features"),
+            tr("Failed to delete the selected features from layer '%1'.\n"
+               "The delete was rolled back — the layer still contains the features.")
+                .arg(vlayer->name()));
+        statusBar()->showMessage(
+            tr("Failed to delete %1 feature(s) from %2 — the features are still in the layer")
+                .arg(ids.size()).arg(vlayer->name()), 5000);
     }
-    statusBar()->showMessage(tr("Deleted %1 feature(s)").arg(deletedCount), 3000);
 }
 
 void QgisDesktopWindow::openAttributeTable()

@@ -17,6 +17,8 @@
 
 #include "qgsclipboard.h"
 
+#include <QGuiApplication>
+
 #include <fstream>
 #include <nlohmann/json.hpp>
 
@@ -268,6 +270,13 @@ void QgsClipboard::generateClipboardText( QString &textContent, QString &htmlCon
 
 void QgsClipboard::setSystemClipboard()
 {
+  // The offscreen QPA platform ships no clipboard backend: pushing mime data
+  // through QClipboard dereferences a null platform object and crashes the
+  // process (headless CI lanes, screenshot runs). The internal feature
+  // clipboard below stays authoritative there, so skip the system mirror.
+  if ( QGuiApplication::platformName() == QLatin1String( "offscreen" ) )
+    return;
+
   // avoid overwriting internal clipboard - note that on Windows, the call to QClipboard::setText
   // below doesn't immediately trigger QClipboard::dataChanged, and accordingly the call to
   // systemClipboardChanged() is delayed. So by setting mIgnoreNextSystemClipboardChange we indicate

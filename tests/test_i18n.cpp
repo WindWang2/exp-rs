@@ -89,9 +89,19 @@ TEST_CASE( "zh_CN translation file is complete", "[i18n]" )
     if ( xml.isStartElement() && xml.name() == QLatin1String( "message" ) )
     {
       ++messages;
+      // Whitespace-only sources (e.g. state-dump continuation lines) can only
+      // be "translated" by preserving the whitespace exactly; do not count
+      // those as empty translations.
+      QString messageSource;
+      bool sourceIsWhitespaceOnly = false;
       while ( !( xml.isEndElement() && xml.name() == QLatin1String( "message" ) ) && !xml.atEnd() )
       {
         xml.readNext();
+        if ( xml.isStartElement() && xml.name() == QLatin1String( "source" ) )
+        {
+          messageSource += xml.readElementText();
+          sourceIsWhitespaceOnly = messageSource.trimmed().isEmpty();
+        }
         if ( xml.isStartElement() && xml.name() == QLatin1String( "translation" ) )
         {
           if ( xml.attributes().hasAttribute( QStringLiteral( "type" ) ) )
@@ -109,7 +119,7 @@ TEST_CASE( "zh_CN translation file is complete", "[i18n]" )
             if ( xml.isEndElement() && xml.name() == QLatin1String( "numerusform" ) && depth > 0 )
               --depth;
           }
-          if ( text.trimmed().isEmpty() )
+          if ( text.trimmed().isEmpty() && !sourceIsWhitespaceOnly )
             ++empty;
         }
       }

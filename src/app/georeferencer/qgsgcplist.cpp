@@ -14,6 +14,8 @@
 
 #include "qgspointxy.h"
 
+#include "durable_file_write.h"
+
 #include <QFile>
 #include <QString>
 #include <QStringList>
@@ -24,11 +26,13 @@
 bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &points,
                           const double *sourceGeoTransform )
 {
-  QFile pointFile( filePath );
-  if ( !pointFile.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
-    return false;
-
-  QTextStream out( &pointFile );
+  // APP-4 (R14-D WP-B): serialize the identical textual format into a buffer,
+  // then publish through the shared crash-or-valid authority (temp + fsync +
+  // atomic rename + permission preservation + symlink-referent following).
+  // The old in-place truncate could silently destroy a manually-picked GCP
+  // set on a full disk while returning true.
+  QByteArray bytes;
+  QTextStream out( &bytes, QIODevice::WriteOnly );
   out << "# QGEOS .points v2\n";
   out << "mapX,mapY,pixelX,pixelY,enable,dX,dY,residual,pointType,crs\n";
   for ( const QgsGcpPoint &p : points )
@@ -58,7 +62,13 @@ bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &p
         << p.pointType() << ","
         << p.destinationPointCrs().authid() << "\n";
   }
-  return true;
+  out.flush();
+#if defined( Q_OS_WIN )
+  // The old lane opened the file with QIODevice::Text (LF->CRLF on Windows);
+  // keep the published bytes byte-identical to what it produced.
+  bytes.replace( '\n', "\r\n" );
+#endif
+  return sicnu::writeBytesDurably( filePath, bytes ).ok;
 }
 
 bool rsLoadGcpPointsFile( const QString &filePath, const QgsCoordinateReferenceSystem &destCrs,

@@ -2,12 +2,15 @@
 #include "mapspec.h"
 
 #include "mapspec_conditions.h"
+#include "../cartography/design_tokens.h"
 #include "../cartography/typography.h"
 #include "../contracts/spatial_contracts.h"
 
+#include <QString>
 #include <QtGlobal>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <map>
 #include <set>
@@ -111,6 +114,61 @@ bool isPositiveSizeArray( const Json::Value &value )
          value[0].asDouble() > 0 && value[1].asDouble() > 0;
 }
 
+/// Validates one map_frames[].extent declaration (CARTO-6): the compiler
+/// hands the array straight to the map item, whose property layer rejects
+/// wrong arity/types/non-finite/crossed values into a discarded ignored
+/// list and silently falls back to the full project extent. Validation
+/// aligns with that applied contract: exactly 4 finite numbers with
+/// xmin < xmax and ymin < ymax (degenerate/equal extents rejected — an
+/// empty extent is a typo, not a map).
+void checkExtent( const Json::Value &item, const std::string &id,
+                  std::vector<std::string> &problems )
+{
+  const Json::Value &extent = item["extent"];
+  if ( !extent.isArray() || extent.size() != 4 )
+  {
+    problems.push_back( id + ": extent must be [xmin, ymin, xmax, ymax]" );
+    return;
+  }
+  for ( const auto &v : extent )
+  {
+    if ( !v.isNumeric() )
+    {
+      problems.push_back( id + ": extent entries must be numbers" );
+      return;
+    }
+  }
+  const double xMin = extent[0].asDouble();
+  const double yMin = extent[1].asDouble();
+  const double xMax = extent[2].asDouble();
+  const double yMax = extent[3].asDouble();
+  if ( !std::isfinite( xMin ) || !std::isfinite( yMin ) || !std::isfinite( xMax ) ||
+       !std::isfinite( yMax ) )
+    problems.push_back( id + ": extent coordinates must be finite numbers" );
+  else if ( xMin >= xMax || yMin >= yMax )
+    problems.push_back( id + ": extent must satisfy xmin < xmax and ymin < ymax" );
+}
+
+/// Scale-bar distance-unit vocabulary (CARTO-3): the closed set the
+/// compiler maps onto Qgis::DistanceUnit (and layout_service's "unit"
+/// property applies). Kept in sync with the mapping tables in
+/// mapspec_compiler.cpp and layout_service.cpp.
+bool isKnownScaleBarUnit( const std::string &unit )
+{
+  static const char *const kUnits[] = { "m",      "meter",   "meters",      "km",
+                                        "kilometer", "kilometers", "mi",    "mile",
+                                        "miles",   "ft",      "foot",       "feet",
+                                        "nm",      "deg",     "degree",     "degrees" };
+  std::string lower = unit;
+  std::transform( lower.begin(), lower.end(), lower.begin(), []( unsigned char ch ) {
+    return static_cast<char>( std::tolower( ch ) );
+  } );
+  for ( const char *candidate : kUnits )
+    if ( lower == candidate )
+      return true;
+  return false;
+}
+
 /// v2 per-item shape checks (anchor, min/max size, z_index, page, binding,
 /// component reference). Appends problems.
 void checkV2ItemFields( const Json::Value &item, const std::string &id,
@@ -155,9 +213,15 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
            !sicnu::agent::cartography::isTextBreakPolicy( font["break_policy"].asString() ) ) )
       problems.push_back( id + ": font.break_policy must be none|halfwidth" );
     if ( font.isMember( "line_height" ) &&
-         ( !font["line_height"].isNumeric() || font["line_height"].asDouble() <= 0 ||
-           font["line_height"].asDouble() > 3.0 ) )
+         ( !font["line_height"].isNumeric() || !std::isfinite( font["line_height"].asDouble() ) ||
+           font["line_height"].asDouble() <= 0 || font["line_height"].asDouble() > 3.0 ) )
       problems.push_back( id + ": font.line_height must be a number in (0, 3]" );
+    // NaN fails both <= 0 and > 1000, so finiteness is explicit (R14-D
+    // CARTO-7 — the same threat model #1503 guarded for rect_mm).
+    if ( font.isMember( "size_pt" ) &&
+         ( !font["size_pt"].isNumeric() || !std::isfinite( font["size_pt"].asDouble() ) ||
+           font["size_pt"].asDouble() <= 0 || font["size_pt"].asDouble() > 1000 ) )
+      problems.push_back( id + ": font.size_pt must be a number in (0, 1000]" );
   }
   // Platform 8.0: typed binding surface. Shape-checked, not key-closed —
   // the goal is better diagnostics for malformed documents without breaking
@@ -761,11 +825,54 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
            ( !item["crs"].isString() || item["crs"].asString().empty() ) )
         problems.push_back( id + ": crs must be a non-empty string (e.g. \"EPSG:4326\")" );
 
-      if ( info->mayReferenceMap && item.isMember( "map_ref" ) && item["map_ref"].isString() )
+      if ( info->mayReferenceMap && item.isMember( "map_ref" ) )
       {
-        const std::string mapRef = item["map_ref"].asString();
-        if ( !mapRef.empty() && !mapFrameIds.count( mapRef ) )
-          problems.push_back( id + ": map_ref '" + mapRef + "' does not resolve to a map frame" );
+        if ( !item["map_ref"].isString() )
+        {
+          // A non-string map_ref used to pass validation silently and then
+          // threw Json::LogicError out of the compiler's asString() (CARTO-2).
+          problems.push_back( id + ": map_ref must be a string (a map frame id)" );
+        }
+        else
+        {
+          const std::string mapRef = item["map_ref"].asString();
+          if ( !mapRef.empty() && !mapFrameIds.count( mapRef ) )
+            problems.push_back( id + ": map_ref '" + mapRef + "' does not resolve to a map frame" );
+        }
+      }
+
+      // CARTO-6: extents are applied, not advisory — shape-check them so a
+      // typo cannot silently fall back to the full project extent. Insets
+      // carry the same applied extent as map frames (review R14-D P3).
+      if ( ( std::string( info->name ) == "map_frames" ||
+             std::string( info->name ) == "insets" ) &&
+           item.isMember( "extent" ) )
+        checkExtent( item, id, problems );
+
+      // CARTO-3: the scale-bar unit vocabulary is closed — an unknown id
+      // would render meter numbers under a foreign label (1000x error).
+      if ( std::string( info->name ) == "scale_bars" && item.isMember( "units" ) )
+      {
+        if ( !item["units"].isString() )
+          problems.push_back( id + ": units must be a string" );
+        else if ( !isKnownScaleBarUnit( item["units"].asString() ) )
+          problems.push_back( id + ": units '" + item["units"].asString() +
+                              "' is not a supported distance unit "
+                              "(m|km|mi|ft|nm|deg)" );
+      }
+
+      // CARTO-11: a grid without map_ref attaches to nothing (the compiler
+      // dropped it silently); an interval that is not a positive finite
+      // number paints degenerate grid lines.
+      if ( std::string( info->name ) == "grids" )
+      {
+        if ( !item.isMember( "map_ref" ) || !item["map_ref"].isString() ||
+             item["map_ref"].asString().empty() )
+          problems.push_back( id + ": missing map_ref (a grid attaches to a map frame)" );
+        if ( item.isMember( "interval" ) &&
+             ( !item["interval"].isNumeric() || !std::isfinite( item["interval"].asDouble() ) ||
+               item["interval"].asDouble() <= 0 ) )
+          problems.push_back( id + ": interval must be a positive finite number" );
       }
 
       // Collection-specific required fields.
@@ -809,11 +916,77 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
     {
       if ( style.isMember( "token_set" ) && !style["token_set"].isString() )
         problems.push_back( "style.token_set must be a string" );
+      // CARTO-16: an unknown token_set id used to fall back to
+      // scientific-light with only a resolved.token_set note; a typo must
+      // be a validation problem, not a silent theme switch.
+      if ( style.isMember( "token_set" ) && style["token_set"].isString() &&
+           !style["token_set"].asString().empty() &&
+           // Fail open ONLY when the registry itself is empty (the data
+           // directory did not load — a data-less runtime must not
+           // false-reject every spec as "unknown token set"). The built-in
+           // scientific-light set doubles as the loaded sentinel.
+           !sicnu::agent::cartography::TokenSetRegistry::instance()
+              .find( QStringLiteral( "scientific-light" ) )
+              .isNull() &&
+           sicnu::agent::cartography::TokenSetRegistry::instance()
+             .find( QString::fromStdString( style["token_set"].asString() ) )
+             .isNull() )
+        problems.push_back( "style.token_set '" + style["token_set"].asString() +
+                            "' is not a registered token set" );
       if ( style.isMember( "medium" ) && style["medium"].isString() &&
            style["medium"].asString() != "print" && style["medium"].asString() != "screen" )
         problems.push_back( "style.medium must be print|screen" );
       if ( style.isMember( "overrides" ) && !style["overrides"].isObject() )
         problems.push_back( "style.overrides must be an object" );
+      // CARTO-16: overrides merge into the resolved token set without any
+      // rule checking (design_tokens.cpp mergeTokenValues), so a negative or
+      // non-finite spacing margin flowed straight into the composition
+      // solver. Validate the override entries with the same rules
+      // validateTokenSet applies to the families it governs.
+      if ( style.isMember( "overrides" ) && style["overrides"].isObject() )
+      {
+        const Json::Value &overrides = style["overrides"];
+        if ( overrides.isMember( "spacing" ) )
+        {
+          if ( !overrides["spacing"].isObject() )
+            problems.push_back( "style.overrides.spacing must be an object" );
+          else
+            for ( const auto &key : overrides["spacing"].getMemberNames() )
+            {
+              const Json::Value &value = overrides["spacing"][key];
+              if ( !value.isNumeric() || !std::isfinite( value.asDouble() ) ||
+                   value.asDouble() < 0 )
+                problems.push_back( "style.overrides.spacing." + key +
+                                    " must be a non-negative finite number" );
+            }
+        }
+        if ( overrides.isMember( "typography" ) && overrides["typography"].isObject() &&
+             overrides["typography"].isMember( "styles" ) &&
+             overrides["typography"]["styles"].isObject() )
+        {
+          for ( const auto &name : overrides["typography"]["styles"].getMemberNames() )
+          {
+            const Json::Value &entry = overrides["typography"]["styles"][name];
+            if ( !entry.isObject() )
+              problems.push_back( "style.overrides.typography.styles." + name +
+                                  " must be an object" );
+            else
+            {
+              if ( entry.isMember( "size_pt" ) &&
+                   ( !entry["size_pt"].isNumeric() || !std::isfinite( entry["size_pt"].asDouble() ) ||
+                     entry["size_pt"].asDouble() <= 0 ) )
+                problems.push_back( "style.overrides.typography.styles." + name +
+                                    ".size_pt must be a positive finite number" );
+              if ( entry.isMember( "weight" ) &&
+                   ( !entry["weight"].isString() ||
+                     ( entry["weight"].asString() != "normal" &&
+                       entry["weight"].asString() != "bold" ) ) )
+                problems.push_back( "style.overrides.typography.styles." + name +
+                                    ".weight must be normal|bold" );
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1271,8 +1444,14 @@ Json::Value upgradeMapSpec( const Json::Value &doc )
   // v1 → v2 → v3: every newer-version field is optional, so the upgrade is a
   // version bump. Idempotent: current-version documents and non-envelope
   // inputs pass through unchanged.
+  // CARTO-4: a wrong-typed spec_version (string "5", float 5.5) used to hit
+  // asInt() and throw before validation could refuse. checkEnvelope does not
+  // type-check the field, so the bump is guarded: a non-integral version is
+  // left untouched for the subsequent validateMapSpec to report as a typed
+  // VALIDATION_FAILED (produce upgrades before validating).
   const std::string env = checkEnvelope( upgraded, "map_spec" );
-  if ( env.empty() && upgraded["spec_version"].asInt() < kMapSpecCurrentVersion )
+  if ( env.empty() && upgraded["spec_version"].isIntegral() &&
+       upgraded["spec_version"].asInt() < kMapSpecCurrentVersion )
     upgraded["spec_version"] = kMapSpecCurrentVersion;
   return upgraded;
 }

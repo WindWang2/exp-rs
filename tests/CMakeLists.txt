@@ -15882,3 +15882,55 @@ endforeach()
 target_compile_definitions( test_verifier_drift_14 PRIVATE
     "CMAKE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\""
 )
+
+# R14-D (Qt/QGIS workbench hardening): vector-editing honesty + durable writes.
+# Recipes mirror test_workbench_full_shell_lifecycle (direct qgis link so the
+# shell library's PRIVATE usage requirements reach these TUs; whole-archive
+# sicnu_agent_loop per the pending #1335 central fix).
+add_executable(test_r14_D_vector_edit_honesty
+  test_r14_D_vector_edit_honesty.cpp
+)
+target_link_libraries(test_r14_D_vector_edit_honesty PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r14_D_vector_edit_honesty PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r14_D_vector_edit_honesty)
+set_target_properties(test_r14_D_vector_edit_honesty PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r14_D_vector_edit_honesty TEST_PREFIX "test_r14_D_vector_edit_honesty::")
+
+add_executable(test_r14_D_durable_writes test_r14_D_durable_writes.cpp)
+target_link_libraries(test_r14_D_durable_writes PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r14_D_durable_writes PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_SOURCE_DIR}/src/workflow
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r14_D_durable_writes)
+set_target_properties(test_r14_D_durable_writes PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r14_D_durable_writes TEST_PREFIX "test_r14_D_durable_writes::")

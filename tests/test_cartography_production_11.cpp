@@ -44,6 +44,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <set>
 #include <sstream>
 
 #ifndef SICNU_CARTOGRAPHY_DATA_DIR
@@ -324,6 +325,23 @@ TEST_CASE( "produce refuses invalid requests with typed error codes",
     request.mapspec = parse( R"({ "kind": "map_spec" })" ); // envelope-less
     ProduceResult invalid = produceMap( request );
     CHECK( invalid.error_code == "VALIDATION_FAILED" );
+
+    // CARTO-4: a wrong-typed spec_version used to throw out of
+    // upgradeMapSpec's asInt() before validation could refuse — produce
+    // must answer with the typed code instead.
+    Json::Value stringVersion = frameSpec( "produce-bad-version" );
+    stringVersion["spec_version"] = "5";
+    request.mapspec = stringVersion;
+    ProduceResult badVersion;
+    REQUIRE_NOTHROW( badVersion = produceMap( request ) );
+    CHECK_FALSE( badVersion.ok );
+    CHECK( badVersion.error_code == "VALIDATION_FAILED" );
+
+    stringVersion["spec_version"] = 5.5;
+    request.mapspec = stringVersion;
+    REQUIRE_NOTHROW( badVersion = produceMap( request ) );
+    CHECK_FALSE( badVersion.ok );
+    CHECK( badVersion.error_code == "VALIDATION_FAILED" );
 }
 
 TEST_CASE( "produce single-mode delivers artifact + manifest and rolls back on cancel",
@@ -1132,6 +1150,135 @@ TEST_CASE( "materialized series compiles to exactly N physical pages (no render)
     QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &compileError );
     REQUIRE( layout != nullptr );
     CHECK( layout->pageCollection()->pageCount() == 3 );
+}
+
+TEST_CASE( "produce single-mode multi-page delivery publishes and manifests every page (CARTO-1)",
+           "[cp11][series][r14d]" )
+{
+    skipIfHostRenderBroken();
+    // A real project layer keeps the (columns>1) fixture legend's snapshot
+    // path populated and mirrors the single-mode case's project shape.
+    QgsVectorLayer *basemap = new QgsVectorLayer(
+      QStringLiteral( "Point?crs=EPSG:4326" ), QStringLiteral( "cp11-multi-basemap" ),
+      QStringLiteral( "memory" ) );
+    const QString basemapId = QgsProject::instance()->addMapLayer( basemap )->id();
+    struct LayerCleanup
+    {
+        QString id;
+        ~LayerCleanup() { QgsProject::instance()->removeMapLayer( id ); }
+    } cleanup{ basemapId };
+
+    // Two physical pages: the body page plus one pages[] entry. The fixture
+    // legend also declares classes so the manual (columns>1) model is
+    // populated from them (CARTO-10) instead of rendering empty.
+    Json::Value spec = frameSpec( "produce-multi-map", true );
+    Json::Value classes( Json::arrayValue );
+    classes.append( "water" );
+    classes.append( "forest" );
+    spec["legends"][0]["classes"] = classes;
+    spec["pages"] = parse( R"([ { "width_mm": 297, "height_mm": 210 } ])" );
+    REQUIRE( validateMapSpec( spec ).empty() );
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ProduceRequest request;
+    request.mapspec = spec;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+
+    const ProduceResult result = produceMap( request );
+    REQUIRE( result.ok );
+    CHECK( result.mode == "single" );
+    CHECK( result.page_count == 2 );
+
+    // The manifest lists every delivered page with a matching page_count.
+    bool digestOk = false;
+    std::string error;
+    const Json::Value manifest = readExportManifest( dir.path().toStdString(), "produce-multi-map",
+                                                     "png", &digestOk, &error );
+    REQUIRE( !manifest.isNull() );
+    CHECK( digestOk );
+    CHECK( manifest["page_count"].asInt() == 2 );
+    REQUIRE( manifest["pages"].isArray() );
+    REQUIRE( manifest["pages"].size() == 2 );
+    std::set<std::string> listedFiles;
+    for ( const auto &page : manifest["pages"] )
+    {
+        const QString path =
+          QDir( dir.path() ).filePath( QString::fromStdString( page["file_name"].asString() ) );
+        REQUIRE( QFile::exists( path ) );
+        QFile file( path );
+        REQUIRE( file.open( QIODevice::ReadOnly ) );
+        QCryptographicHash diskHash( QCryptographicHash::Sha256 );
+        diskHash.addData( &file );
+        file.close();
+        CHECK( page["sha256"].asString() == diskHash.result().toHex().toStdString() );
+        CHECK( page["bytes"].asInt64() > 0 );
+        listedFiles.insert( page["file_name"].asString() );
+    }
+    CHECK( listedFiles.count( "produce-multi-map.png" ) == 1 );
+    CHECK( listedFiles.count( "produce-multi-map_2.png" ) == 1 );
+
+    // No orphan junk: every file in the directory is the manifest sidecar
+    // or a listed page (the old bug left randomly-named page siblings).
+    const QStringList files = QDir( dir.path() ).entryList( QDir::Files );
+    for ( const QString &file : files )
+    {
+        const std::string name = file.toStdString();
+        const bool manifestSidecar = name == "produce-multi-map.png.manifest.json";
+        CHECK( ( manifestSidecar || listedFiles.count( name ) == 1 ) );
+    }
+
+    // R14-D review P1-1: multi-page svg deliveries get the same per-page
+    // treatment (exportToSvg has no page filter; the old path handed the
+    // exporter one temp path and orphaned pages 2..N as base.ABC123_2.svg
+    // siblings while the manifest claimed a single file).
+    QTemporaryDir svgDir;
+    REQUIRE( svgDir.isValid() );
+    ProduceRequest svgRequest;
+    svgRequest.mapspec = spec;
+    svgRequest.format = "svg";
+    svgRequest.dpi = 72.0;
+    svgRequest.directory = svgDir.path().toStdString();
+    const ProduceResult svgResult = produceMap( svgRequest );
+    REQUIRE( svgResult.ok );
+    CHECK( svgResult.page_count == 2 );
+    CHECK( QFile::exists( svgDir.filePath( QStringLiteral( "produce-multi-map.svg" ) ) ) );
+    CHECK( QFile::exists( svgDir.filePath( QStringLiteral( "produce-multi-map_2.svg" ) ) ) );
+    bool svgDigestOk = false;
+    const Json::Value svgManifest =
+      readExportManifest( svgDir.path().toStdString(), "produce-multi-map", "svg", &svgDigestOk, &error );
+    REQUIRE( !svgManifest.isNull() );
+    CHECK( svgDigestOk );
+    CHECK( svgManifest["page_count"].asInt() == 2 );
+    REQUIRE( svgManifest["pages"].isArray() );
+    CHECK( svgManifest["pages"].size() == 2 );
+
+    // Review2 N1: a declaration-only layer ref (no backing) must surface a
+    // produce-level warning that survives the repair loop — the
+    // MAP_LAYER_UNREFERENCED repair attaches such ids on purpose, so the
+    // marker rides the FINAL layout, post-repair.
+    Json::Value ghostSpec = spec;
+    Json::Value declared( Json::objectValue );
+    declared["id"] = "ghost-declared-layer";
+    ghostSpec["layers"].append( declared );
+    ghostSpec["map_frames"][0]["layers"].append( "ghost-declared-layer" );
+    QTemporaryDir ghostDir;
+    REQUIRE( ghostDir.isValid() );
+    ProduceRequest ghostRequest;
+    ghostRequest.mapspec = ghostSpec;
+    ghostRequest.format = "png";
+    ghostRequest.dpi = 72.0;
+    ghostRequest.directory = ghostDir.path().toStdString();
+    const ProduceResult ghost = produceMap( ghostRequest );
+    REQUIRE( ghost.ok );
+    bool warned = false;
+    if ( ghost.quality.isMember( "issues" ) && ghost.quality["issues"].isArray() )
+        for ( const auto &issue : ghost.quality["issues"] )
+            warned = warned || ( issue.isObject() &&
+                                 issue["code"].asString() == "MAP_DECLARED_LAYER_UNBACKED" );
+    CHECK( warned );
 }
 
 TEST_CASE( "vector series source refuses bad definitions with problems",

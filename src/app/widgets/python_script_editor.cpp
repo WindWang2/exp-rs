@@ -1,6 +1,7 @@
 // python_script_editor.cpp — Dockable Python script editor implementation
 #include "python_script_editor.h"
 #include "python/qgis_python.h"
+#include "durable_file_write.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -228,15 +229,27 @@ void PythonScriptEditor::saveScript()
     if (fileName.isEmpty())
         return;
 
-    QFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    // UTF-8 without BOM, matching the old QTextStream defaults (default codec
+    // UTF-8, generateByteOrderMark never enabled). The old file was opened
+    // with QIODevice::Text, which translated "\n" to CRLF on Windows — kept
+    // byte-for-byte here.
+    QByteArray bytes = script().toUtf8();
+#if defined(Q_OS_WIN)
+    bytes.replace('\n', "\r\n");
+#endif
+
+    // APP-3 (R14-D WP-B): durable publish — temp file + fsync + atomic rename
+    // via the shared authority, so a full disk or crash can never leave a
+    // truncated script while the status bar says "Saved". On failure the
+    // previous file stays intact and this editor neither adopts the path nor
+    // emits a "Saved" status.
+    const sicnu::DurableWriteResult result = sicnu::writeBytesDurably(fileName, bytes);
+    if (!result.ok) {
         QMessageBox::warning(this, tr("Save Script"),
-                             tr("Cannot write file:\n%1").arg(fileName));
+                             tr("Cannot write file:\n%1\n%2").arg(fileName, result.error));
         return;
     }
 
-    QTextStream stream(&file);
-    stream << script();
     m_currentFile = fileName;
     emit statusMessage(tr("Saved %1").arg(fileName));
 }

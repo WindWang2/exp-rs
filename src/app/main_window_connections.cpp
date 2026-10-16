@@ -63,9 +63,18 @@ void QgisDesktopWindow::setupConnections()
             this, &QgisDesktopWindow::updateExtents);
     connect(m_mapCanvas, &QgsMapCanvas::renderComplete,
             this, &QgisDesktopWindow::onRenderComplete);
-    // Status bar: follow active map layer.
+    // Status bar: follow active map layer. currentLayerChanged also fires
+    // when the current layer is CLEARED (layer removal via the selection
+    // context) or set programmatically (classification windows, session
+    // workspaces) — the editing actions must follow it, or Save Edits /
+    // digitize tools stay enabled with no valid target layer and click as
+    // silent no-ops. This only re-runs the one enablement owner
+    // (updateEditingUI); no parallel enablement logic is introduced.
     connect( m_mapCanvas, &QgsMapCanvas::currentLayerChanged,
-             this, &QgisDesktopWindow::syncStatusBarLayer );
+             this, [this]( QgsMapLayer * layer ) {
+                 syncStatusBarLayer( layer );
+                 updateEditingUI( qobject_cast<QgsVectorLayer *>( layer ) );
+             } );
     connect( m_mapCanvas, &QgsMapCanvas::layersChanged, this, [this]() {
         if ( !m_mapCanvas )
             return;

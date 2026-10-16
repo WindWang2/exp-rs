@@ -29,6 +29,8 @@
 #include <qgslayoutatlas.h>
 #include <qgslayoutitemmapoverview.h>
 #include <qgslayoutitemshape.h>
+#include <qgscategorizedsymbolrenderer.h>
+#include <qgslayertree.h>
 #include <qgssymbol.h>
 #include <qgsfillsymbol.h>
 #include <qgsvectorlayer.h>
@@ -39,6 +41,8 @@
 #include <QVector>
 
 #include <algorithm>
+#include <cctype>
+#include <set>
 
 namespace sicnu::agent::mapspec {
 
@@ -76,6 +80,52 @@ QgsLayoutItem *compileItem( QgsPrintLayout *layout, const QString &type, const s
 {
   props["name"] = itemId;
   return LayoutService::instance().addItem( layout, type, props, error );
+}
+
+/// Scale-bar unit spelling → QGIS distance unit (CARTO-3). Without the
+/// distance unit the bar computes its numbers in whatever QGIS guessed
+/// (meters for projected CRS, degrees for geographic) while the label says
+/// otherwise — a systematic 1000x/degree ratio error. Vocabulary kept in
+/// sync with mapspec.cpp's isKnownScaleBarUnit and layout_service.cpp's
+/// "unit" property mapping.
+bool scaleBarUnitFor( const std::string &unit, Qgis::DistanceUnit *out )
+{
+  std::string lower = unit;
+  std::transform( lower.begin(), lower.end(), lower.begin(), []( unsigned char ch ) {
+    return static_cast<char>( std::tolower( ch ) );
+  } );
+  if ( lower == "m" || lower == "meter" || lower == "meters" )
+    *out = Qgis::DistanceUnit::Meters;
+  else if ( lower == "km" || lower == "kilometer" || lower == "kilometers" )
+    *out = Qgis::DistanceUnit::Kilometers;
+  else if ( lower == "mi" || lower == "mile" || lower == "miles" )
+    *out = Qgis::DistanceUnit::Miles;
+  else if ( lower == "ft" || lower == "foot" || lower == "feet" )
+    *out = Qgis::DistanceUnit::Feet;
+  else if ( lower == "nm" )
+    *out = Qgis::DistanceUnit::NauticalMiles;
+  else if ( lower == "deg" || lower == "degree" || lower == "degrees" )
+    *out = Qgis::DistanceUnit::Degrees;
+  else
+    return false;
+  return true;
+}
+
+/// Resolves one declared frame/inset layer ref the exact way the layout
+/// property layer will (workspace natural key, then the project store by
+/// name and id). Returns null when the ref resolves to nothing (CARTO-5).
+QgsMapLayer *resolveProjectLayer( const std::string &ref )
+{
+  const QString naturalKey = resolveLayerRef( ref );
+  if ( QgsProject *project = QgsProject::instance() )
+  {
+    const QList<QgsMapLayer *> matches = project->layerStore()->mapLayersByName( naturalKey );
+    if ( !matches.isEmpty() )
+      return matches.first();
+    if ( QgsMapLayer *byId = project->layerStore()->mapLayer( naturalKey ) )
+      return byId;
+  }
+  return nullptr;
 }
 
 /// Materializes token-based text styling for a label-ish item. Explicit item
@@ -156,6 +206,75 @@ void placeWithParentPage( QgsLayoutItem *item, const Json::Value &parent )
   if ( pageIndex <= 0 )
     return;
   item->attemptMove( item->pagePositionWithUnits(), true, false, pageIndex );
+}
+
+/// Populates a MANUAL legend (auto-update off — the columns > 1 path) with
+/// content (CARTO-10). QGIS legends are layer-tree based: out of auto-update
+/// the model snapshots whatever the project carried at compile time, which
+/// is EMPTY in a layer-less project — the multi-column legends the produce
+/// fixtures use rendered as empty boxes while declaring classes.
+///
+/// Declared classes drive the content: one legend entry per class, rendered
+/// through a session-owned categorized memory layer (a plain-text entry
+/// needs a layer node to hang from; the layer is parented to the legend
+/// item and never registered in the project, so it dies with the item).
+/// Without declared classes the legend snapshots the linked map's current
+/// layer set — the QGIS "froze the legend" semantics. When neither source
+/// has anything to show the model stays as-is (the empty-map state is
+/// governed by preflight and the render-hazard gate, and re-enabling
+/// auto-update there would reintroduce the paint-loop hang).
+void populateManualLegend( QgsLayoutItemLegend *legendItem, const Json::Value &legend,
+                           const Json::Value &tokens )
+{
+  if ( !legendItem || legendItem->model() == nullptr || legendItem->model()->rootGroup() == nullptr )
+    return;
+  QgsLayerTreeGroup *root = legendItem->model()->rootGroup();
+  const Json::Value classes = legend.get( "classes", Json::Value() );
+  if ( classes.isArray() && !classes.empty() )
+  {
+    auto *classLayer = new QgsVectorLayer(
+      QStringLiteral( "Point?crs=EPSG:4326&field=class:string" ), QStringLiteral( "Classes" ),
+      QStringLiteral( "memory" ) );
+    if ( !classLayer->isValid() )
+    {
+      classLayer->deleteLater();
+      return;
+    }
+    classLayer->setParent( legendItem ); // session-scoped, never in the project
+    const Json::Value palette =
+      sicnu::agent::cartography::tokenPalette( tokens, "qualitative" );
+    QgsCategoryList categories;
+    int index = 0;
+    for ( const auto &entry : classes )
+    {
+      if ( !entry.isString() || entry.asString().empty() )
+        continue;
+      const QString label = QString::fromStdString( entry.asString() );
+      QString color = QStringLiteral( "#8da0cb" ); // neutral fallback swatch
+      if ( index < static_cast<int>( palette.size() ) && palette[index].isString() )
+        color = QString::fromStdString( palette[index].asString() );
+      QVariantMap symbolProps;
+      symbolProps[QStringLiteral( "color" )] = color;
+      symbolProps[QStringLiteral( "outline_color" )] = QStringLiteral( "#333333" );
+      symbolProps[QStringLiteral( "outline_width" )] = QStringLiteral( "0.2" );
+      symbolProps[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
+      categories.append( QgsRendererCategory(
+        QVariant( label ), QgsFillSymbol::createSimple( symbolProps ).release(), label ) );
+      ++index;
+    }
+    if ( categories.isEmpty() )
+      return; // no usable string entries: leave the snapshot untouched
+    classLayer->setRenderer(
+      new QgsCategorizedSymbolRenderer( QStringLiteral( "class" ), categories ) );
+    root->addLayer( classLayer );
+    return;
+  }
+  // No declared classes: freeze the linked map's current layer set into
+  // the manual model so multi-column legends show real content.
+  if ( QgsLayoutItemMap *linked = legendItem->linkedMap() )
+    for ( QgsMapLayer *layer : linked->layers() )
+      if ( layer != nullptr )
+        root->addLayer( layer );
 }
 
 } // namespace
@@ -318,7 +437,26 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   };
   QString itemError;
 
+  // CARTO-5: frame/inset layer refs may name a project/workspace layer OR a
+  // declarative layers[] entry in the spec itself (the MAP_LAYER_UNREFERENCED
+  // repair attaches those ids to frames). A ref resolving to neither is a
+  // typo — see the frame loop below.
+  std::set<std::string> declaredLayerIds;
+  if ( spec.isMember( "layers" ) && spec["layers"].isArray() )
+    for ( const auto &layer : spec["layers"] )
+      if ( layer.isObject() && layer.isMember( "id" ) && layer["id"].isString() )
+        declaredLayerIds.insert( layer["id"].asString() );
+  const auto layerRefResolvable = [ &declaredLayerIds ]( const std::string &ref ) {
+    return declaredLayerIds.count( ref ) > 0 || resolveProjectLayer( ref ) != nullptr;
+  };
+
   // --- map frames first (legends/scale bars link to them) ------------------
+  // Review R14-D P2-4: refs accepted through a spec-level declaration with
+  // no backing layer compile but render NOTHING for that ref — record them
+  // on the layout so the produce chain can surface an honest warning
+  // instead of a silent subset render (hard-failing would break the
+  // MAP_LAYER_UNREFERENCED repair flow, which attaches such ids on purpose).
+  std::vector<std::string> declaredUnbackedRefs;
   std::vector<std::string> mapFrameIds;
   for ( const auto &frame : itemsOf( "map_frames" ) )
   {
@@ -331,10 +469,38 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       props["map_rotation"] = frame["rotation"];
     if ( frame.isMember( "layers" ) && frame["layers"].isArray() )
     {
+      // CARTO-5: a declared layer list that only partially resolves renders
+      // a different composition than declared — the property layer drops
+      // the unresolvable refs into an ignored list nobody reads. Refuse the
+      // compile with a located error naming every missing ref instead.
       Json::Value layerRefs( Json::arrayValue );
+      std::vector<std::string> missing;
       for ( const auto &ref : frame["layers"] )
-        if ( ref.isString() )
-          layerRefs.append( resolveLayerRef( ref.asString() ).toStdString() );
+      {
+        if ( !ref.isString() )
+          continue;
+        if ( resolveProjectLayer( ref.asString() ) == nullptr &&
+             declaredLayerIds.count( ref.asString() ) > 0 )
+          declaredUnbackedRefs.push_back( ref.asString() );
+        if ( !layerRefResolvable( ref.asString() ) )
+          missing.push_back( ref.asString() );
+        layerRefs.append( resolveLayerRef( ref.asString() ).toStdString() );
+      }
+      if ( !missing.empty() )
+      {
+        if ( error )
+        {
+          QString joined;
+          for ( const auto &ref : missing )
+            joined += ( joined.isEmpty() ? QString() : QStringLiteral( ", " ) ) +
+                      QString::fromStdString( ref );
+          *error = QStringLiteral( "map frame '%1': layers: unresolvable reference(s): %2" )
+                     .arg( QString::fromStdString( frame["id"].asString() ), joined );
+        }
+        LayoutService::instance().deleteLayout(
+          QString::fromStdString( spec["layout_name"].asString() ) );
+        return nullptr;
+      }
       props["layers"] = layerRefs;
     }
     const std::string id = frame["id"].asString();
@@ -396,10 +562,36 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     }
     if ( inset.isMember( "layers" ) && inset["layers"].isArray() )
     {
+      // CARTO-5 (same contract as map frames): partially-resolving layer
+      // lists are a typed compile failure, never a silent subset render.
       Json::Value layerRefs( Json::arrayValue );
+      std::vector<std::string> missing;
       for ( const auto &ref : inset["layers"] )
-        if ( ref.isString() )
-          layerRefs.append( resolveLayerRef( ref.asString() ).toStdString() );
+      {
+        if ( !ref.isString() )
+          continue;
+        if ( resolveProjectLayer( ref.asString() ) == nullptr &&
+             declaredLayerIds.count( ref.asString() ) > 0 )
+          declaredUnbackedRefs.push_back( ref.asString() );
+        if ( !layerRefResolvable( ref.asString() ) )
+          missing.push_back( ref.asString() );
+        layerRefs.append( resolveLayerRef( ref.asString() ).toStdString() );
+      }
+      if ( !missing.empty() )
+      {
+        if ( error )
+        {
+          QString joined;
+          for ( const auto &ref : missing )
+            joined += ( joined.isEmpty() ? QString() : QStringLiteral( ", " ) ) +
+                      QString::fromStdString( ref );
+          *error = QStringLiteral( "inset map '%1': layers: unresolvable reference(s): %2" )
+                     .arg( QString::fromStdString( inset["id"].asString() ), joined );
+        }
+        LayoutService::instance().deleteLayout(
+          QString::fromStdString( spec["layout_name"].asString() ) );
+        return nullptr;
+      }
       props["layers"] = layerRefs;
     }
     const std::string id = inset["id"].asString();
@@ -629,14 +821,34 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   // --- grids attach to map frames ------------------------------------------
   for ( const auto &grid : itemsOf( "grids" ) )
   {
+    // Validation rejects missing/non-string/unresolvable map_refs and
+    // non-positive intervals up front (CARTO-2/CARTO-11); the isString()
+    // check stays as the last line of defense because asString() on a
+    // wrong-typed jsoncpp value throws (jsoncpp is compiled with
+    // exceptions — see layout_service.cpp:669).
     QgsLayoutItem *frameItem =
-      grid.isMember( "map_ref" )
+      grid.isMember( "map_ref" ) && grid["map_ref"].isString()
         ? LayoutService::instance().findItem( layout, QString::fromStdString( grid["map_ref"].asString() ) )
         : nullptr;
     auto *map = qobject_cast<QgsLayoutItemMap *>( frameItem );
     if ( !map || map->grid() == nullptr )
-      continue;
-    if ( grid.isMember( "interval" ) && grid["interval"].isNumeric() )
+    {
+      // CARTO-11: a declared grid that cannot attach is a compile failure,
+      // never a silently absent feature. (The ref is echoed only when it is
+      // a string — echoing must not throw where the guard defends one.)
+      const std::string ref = grid.isMember( "map_ref" ) && grid["map_ref"].isString()
+                                ? grid["map_ref"].asString()
+                                : std::string( "(non-string)" );
+      if ( error )
+        *error = QStringLiteral( "grid '%1': map_ref '%2' does not resolve to a map frame "
+                                 "carrying a grid" )
+                   .arg( QString::fromStdString( grid["id"].asString() ),
+                         QString::fromStdString( ref ) );
+      LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
+      return nullptr;
+    }
+    if ( grid.isMember( "interval" ) && grid["interval"].isNumeric() &&
+         std::isfinite( grid["interval"].asDouble() ) && grid["interval"].asDouble() > 0 )
     {
       map->grid()->setIntervalX( grid["interval"].asDouble() );
       map->grid()->setIntervalY( grid["interval"].asDouble() );
@@ -852,6 +1064,10 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         // renamed setter does not exist here); deprecation is intentional.
         legendItem->setAutoUpdateModel( false );
         legendItem->setColumnCount( legend["columns"].asInt() );
+        // CARTO-10: populate the now-manual model (declared classes, else
+        // the linked map's layers) so a multi-column legend never renders
+        // as an empty box.
+        populateManualLegend( legendItem, legend, tokens );
       }
     }
     // Platform 8.0: declared NoData legend entry. QgsLayoutItemLegend cannot
@@ -913,7 +1129,16 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     if ( scaleBar.isMember( "style" ) && scaleBar["style"].isString() )
       props["style"] = scaleBar["style"];
     if ( scaleBar.isMember( "units" ) && scaleBar["units"].isString() )
+    {
       props["unit_label"] = scaleBar["units"];
+      // CARTO-3: the label alone lies about the numbers — also set the
+      // QGIS distance unit so segment values are computed in the declared
+      // unit. Unknown spellings were refused by validation; the mapping is
+      // defensive anyway (no unit set rather than a wrong one).
+      Qgis::DistanceUnit unit = Qgis::DistanceUnit::Unknown;
+      if ( scaleBarUnitFor( scaleBar["units"].asString(), &unit ) )
+        props["unit"] = scaleBar["units"];
+    }
     if ( scaleBar.isMember( "units_per_segment" ) && scaleBar["units_per_segment"].isNumeric() )
       props["units_per_segment"] = scaleBar["units_per_segment"];
     if ( scaleBar.isMember( "map_ref" ) )
@@ -1173,6 +1398,17 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     }
   }
 
+  // R14-D review P2-4: expose declaration-only layer refs (no backing layer)
+  // for post-compile gating by the produce chain.
+  if ( !declaredUnbackedRefs.empty() )
+  {
+    QStringList unbacked;
+    for ( const auto &ref : declaredUnbackedRefs )
+      if ( !unbacked.contains( QString::fromStdString( ref ) ) )
+        unbacked << QString::fromStdString( ref );
+    layout->setCustomProperty( QStringLiteral( "sicnu/declaredUnbackedLayerRefs" ),
+                               QVariant( unbacked ) );
+  }
   return layout;
 }
 

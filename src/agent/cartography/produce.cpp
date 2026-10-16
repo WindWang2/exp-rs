@@ -13,8 +13,10 @@
 #include <qgslayoutitem.h>
 #include <qgslayoutitemlegend.h>
 #include <qgslayoutitemmap.h>
+#include <qgslayoutpagecollection.h>
 #include <qgsproject.h>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -44,16 +46,6 @@ ProduceResult refused( const char *code, const QString &message )
     return result;
 }
 
-/// Removes the delivered files of a failed/cancelled production — the
-/// delivery directory keeps exactly its pre-call content.
-void rollbackArtifacts( const ProduceResult &partial, const QString &manifestPath )
-{
-    if ( !partial.artifact_path.empty() )
-        QFile::remove( QString::fromStdString( partial.artifact_path ) );
-    if ( !manifestPath.isEmpty() )
-        QFile::remove( manifestPath );
-}
-
 QStringList environmentFontDiagnostics( const QStringList &fontDiagnostics )
 {
     // Bounded the same way the exporter bounds its diagnostics (16).
@@ -61,6 +53,30 @@ QStringList environmentFontDiagnostics( const QStringList &fontDiagnostics )
     if ( bounded.size() > 16 )
         bounded = bounded.mid( 0, 16 );
     return bounded;
+}
+
+/// SHA-256 + size of a delivered file, recomputed from disk (CARTO-1: the
+/// multi-page manifest describes every page, and exportMapLayout's result
+/// struct reports only the primary artifact).
+bool sha256OfPath( const QString &path, std::string *sha256, long long *bytes )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+        return false;
+    QCryptographicHash hash( QCryptographicHash::Sha256 );
+    long long total = 0;
+    while ( true )
+    {
+        const QByteArray chunk = file.read( 1 << 20 );
+        if ( chunk.isEmpty() )
+            break;
+        hash.addData( chunk );
+        total += chunk.size();
+    }
+    file.close();
+    *sha256 = std::string( hash.result().toHex().constData() );
+    *bytes = total;
+    return total > 0 && !sha256->empty();
 }
 
 /// Production hazard guard (observed as a REAL hang in this environment):
@@ -230,6 +246,35 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
 
     result.mapspec = working;
 
+    // R14-D review2 N1: refs the compiler accepted only through a spec-level
+    // declaration (no backing layer) render nothing. Appended AFTER the
+    // repair loop from the FINAL layout — repair passes reassign the whole
+    // quality document, and the MAP_LAYER_UNREFERENCED repair deliberately
+    // attaches such ids, so a pre-repair append would be wiped exactly in
+    // the flow it exists for.
+    {
+        const QVariant unbacked =
+          layout->customProperty( QStringLiteral( "sicnu/declaredUnbackedLayerRefs" ) );
+        if ( !unbacked.isNull() )
+        {
+            Json::Value issue( Json::objectValue );
+            issue["code"] = "MAP_DECLARED_LAYER_UNBACKED";
+            issue["severity"] = "warning";
+            issue["message"] = "frame layer reference(s) accepted via spec declaration with "
+                               "no backing layer; the composition renders without them";
+            issue["repairable"] = false;
+            Json::Value refs( Json::arrayValue );
+            const QStringList list = unbacked.toStringList();
+            for ( const QString &ref : list )
+                refs.append( ref.toStdString() );
+            issue["refs"] = refs;
+            Json::Value &qualityFinal = result.quality;
+            if ( !qualityFinal.isMember( "issues" ) || !qualityFinal["issues"].isArray() )
+                qualityFinal["issues"] = Json::Value( Json::arrayValue );
+            qualityFinal["issues"].append( issue );
+        }
+    }
+
     // --- export --------------------------------------------------------------
     if ( !report( reporter, "export", 0.6, "exporting" ) )
         return refused( "PRODUCE_CANCELLED", QStringLiteral( "cancelled before export" ) );
@@ -368,15 +413,75 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
         failed.quality = quality;
         return failed;
     }
+    // CARTO-1: page_count reports the REAL delivery size — a multi-page
+    // "single" produce used to claim 1 page while the layout has N. Raster
+    // deliveries are one file per page (pagePaths); a pdf carries every page
+    // inside one flattened document, so its page count is the layout's.
+    const int layoutPages = std::max( 1, layout->pageCollection()->pageCount() );
     result.mode = "single";
-    result.page_count = 1;
+    result.page_count = ( request.format == "pdf" )
+                          ? layoutPages
+                          : std::max( 1, static_cast<int>( exported.pagePaths.size() ) );
     result.artifact_path = exported.path;
+
+    // Every delivered file, for the manifest and the failure rollbacks.
+    QStringList deliveredPaths;
+    std::vector<ExportManifestPage> pageEntries;
+    if ( request.format != "pdf" && exported.pagePaths.size() > 1 )
+    {
+        // CARTO-1: a multi-page raster delivery is N deterministic files; the
+        // manifest lists and hashes exactly the set exportMapLayout delivered
+        // this run — re-walking the directory would re-manifest stale page
+        // files left over from earlier deliveries as fresh pages.
+        bool complete = true;
+        for ( const std::string &delivered : exported.pagePaths )
+        {
+            const QString pagePath = QString::fromStdString( delivered );
+            std::string sha;
+            long long bytes = 0;
+            if ( !QFile::exists( pagePath ) || !sha256OfPath( pagePath, &sha, &bytes ) )
+            {
+                complete = false;
+                break;
+            }
+            ExportManifestPage entry;
+            entry.file_name = QFileInfo( pagePath ).fileName().toStdString();
+            entry.sha256 = sha;
+            entry.bytes = bytes;
+            pageEntries.push_back( entry );
+            deliveredPaths << pagePath;
+        }
+        if ( complete && pageEntries.empty() )
+            complete = false;
+        if ( !complete )
+        {
+            for ( const QString &stale : deliveredPaths )
+                QFile::remove( stale );
+            ProduceResult failed = refused(
+                "EXPORT_FAILED",
+                QStringLiteral( "multi-page delivery incomplete: page files missing or "
+                                "unreadable under '%1'" )
+                  .arg( dir.path() ) );
+            failed.quality = quality;
+            return failed;
+        }
+    }
+    else
+    {
+        ExportManifestPage page;
+        page.file_name = QFileInfo( QString::fromStdString( exported.path ) ).fileName().toStdString();
+        page.sha256 = exported.sha256;
+        page.bytes = exported.bytes;
+        pageEntries.push_back( page );
+        deliveredPaths << QString::fromStdString( exported.path );
+    }
 
     if ( request.write_manifest )
     {
         if ( !report( reporter, "manifest", 0.9, "writing manifest" ) )
         {
-            rollbackArtifacts( result, QString() );
+            for ( const QString &path : deliveredPaths )
+                QFile::remove( path );
             return refused( "PRODUCE_CANCELLED", QStringLiteral( "cancelled before manifest" ) );
         }
         ExportManifest manifest;
@@ -385,11 +490,8 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
         manifest.dpi = request.dpi;
         manifest.provenance = result.provenance;
         manifest.structural_digest = result.structural_digest;
-        ExportManifestPage page;
-        page.file_name = QFileInfo( QString::fromStdString( exported.path ) ).fileName().toStdString();
-        page.sha256 = exported.sha256;
-        page.bytes = exported.bytes;
-        manifest.pages.push_back( page );
+        for ( const ExportManifestPage &entry : pageEntries )
+            manifest.pages.push_back( entry );
         Json::Value environment( Json::objectValue );
         environment["qt_runtime"] = qVersion();
         environment["qgis_version"] = Qgis::version().toStdString();
@@ -406,7 +508,8 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
         {
             ProduceResult failed =
               refused( "MANIFEST_FAILED", QString::fromStdString( manifestError ) );
-            rollbackArtifacts( result, QString() );
+            for ( const QString &path : deliveredPaths )
+                QFile::remove( path );
             failed.artifact_path.clear();
             return failed;
         }
