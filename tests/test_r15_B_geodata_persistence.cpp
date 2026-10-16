@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -743,4 +744,138 @@ TEST_CASE( "B16: #1485 octal and trailing-dot loopback spellings are private",
 {
   CHECK( offline::isPrivateHost( "http://0177.0.0.1/x" ) );
   CHECK( offline::isPrivateHost( "http://localhost./x" ) );
+}
+
+// ---------------------------------------------------------------------------
+// B14 — bulk measurement (hidden: run explicitly with "[b14]"; numbers are
+// recorded in .planning/r15-b/PERFORMANCE.md, nothing is asserted on speed)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+long rssKb()
+{
+  std::ifstream status( "/proc/self/status" );
+  std::string line;
+  while ( std::getline( status, line ) )
+    if ( line.rfind( "VmRSS:", 0 ) == 0 )
+      return std::stol( line.substr( 6 ) );
+  return -1;
+}
+double msSince( std::chrono::steady_clock::time_point t0 )
+{
+  return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count();
+}
+int envInt( const char *name, int fallback )
+{
+  const char *v = std::getenv( name );
+  return v && *v ? std::atoi( v ) : fallback;
+}
+} // namespace
+
+TEST_CASE( "B14: bulk catalog paging and experiment-store throughput (measurement)",
+           "[.][r15b][b14][perf]" )
+{
+  const int catalogN = envInt( "R15B_PERF_CATALOG", 100000 );
+  const int runsN = envInt( "R15B_PERF_RUNS", 20000 );
+
+  // 1. In-memory catalog: 100k records, page walk at 500/page.
+  {
+    const long rss0 = rssKb();
+    auto t0 = std::chrono::steady_clock::now();
+    std::vector<AssetRecord> records;
+    records.reserve( static_cast<std::size_t>( catalogN ) );
+    for ( int i = 0; i < catalogN; ++i )
+    {
+      AssetRecord r;
+      r.id = "item-" + std::to_string( i );
+      r.collection = ( i % 2 ) ? "s2" : "l8";
+      r.path = "/data/" + r.id + ".tif";
+      r.mediaType = "image/tiff";
+      records.push_back( std::move( r ) );
+    }
+    const CatalogService service = catalogServiceOverRecords( std::move( records ) );
+    const double buildMs = msSince( t0 );
+    const long rssBuilt = rssKb();
+    CatalogQuery query;
+    query.limit = 500;
+    query.maxItems = 500;
+    CatalogContinuation cont;
+    std::size_t seen = 0;
+    int pages = 0;
+    long rssPeak = rssBuilt;
+    std::set<std::string> ids;
+    t0 = std::chrono::steady_clock::now();
+    while ( true )
+    {
+      CatalogPage page = service.searchPage( query, cont );
+      seen += page.records.size();
+      for ( const auto &r : page.records )
+        ids.insert( r.id );
+      ++pages;
+      rssPeak = std::max( rssPeak, rssKb() );
+      if ( !page.next.hasMore )
+        break;
+      cont = page.next;
+    }
+    const double walkMs = msSince( t0 );
+    CHECK( seen == static_cast<std::size_t>( catalogN ) );
+    CHECK( ids.size() == static_cast<std::size_t>( catalogN ) ); // no skip, no dup
+    WARN( "PERF catalog N=" << catalogN << " build_ms=" << buildMs << " pages=" << pages
+                            << " walk_ms=" << walkMs << " avg_page_ms=" << walkMs / pages
+                            << " rss_kb start=" << rss0 << " built=" << rssBuilt << " walk_peak=" << rssPeak );
+  }
+
+  // 2. ExperimentStore: batch writes then page reads.
+  {
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    sicnu::experiment::ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "perf.db" ) ) ) );
+    sicnu::experiment::Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-perf" ) );
+    experiment.setName( QStringLiteral( "perf" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    auto t0 = std::chrono::steady_clock::now();
+    for ( int i = 0; i < runsN; ++i )
+    {
+      sicnu::experiment::ExperimentRun run;
+      run.setRunId( QStringLiteral( "run-%1" ).arg( i, 7, 10, QLatin1Char( '0' ) ) );
+      run.setExperimentId( QStringLiteral( "exp-perf" ) );
+      run.setAlgorithmId( QStringLiteral( "rs:classify" ) );
+      run.setAlgorithmVersion( QStringLiteral( "1.0" ) );
+      run.setSeed( static_cast<quint64>( i ) );
+      run.setStatus( sicnu::experiment::RunStatus::Created );
+      REQUIRE( store.upsertRun( run ).has_value() );
+    }
+    const double writeMs = msSince( t0 );
+    const long rssWritten = rssKb();
+    long rssPeak = rssWritten;
+    qint64 read = 0;
+    int pages = 0;
+    double firstPageMs = 0, lastPageMs = 0;
+    t0 = std::chrono::steady_clock::now();
+    for ( qint64 offset = 0;; offset += 500 )
+    {
+      const auto p0 = std::chrono::steady_clock::now();
+      const auto page = store.listRuns( QStringLiteral( "exp-perf" ), QString(), QString(), offset, 500 );
+      const double pageMs = msSince( p0 );
+      REQUIRE( page.has_value() );
+      if ( pages == 0 )
+        firstPageMs = pageMs;
+      lastPageMs = pageMs;
+      read += page.value().second.size();
+      ++pages;
+      rssPeak = std::max( rssPeak, rssKb() );
+      if ( page.value().second.size() < 500 )
+        break;
+    }
+    const double readMs = msSince( t0 );
+    CHECK( read == runsN );
+    WARN( "PERF experiment_store runs=" << runsN << " write_ms=" << writeMs << " writes_per_s="
+                                         << ( runsN / ( writeMs / 1000.0 ) ) << " pages=" << pages
+                                         << " read_ms=" << readMs << " first_page_ms=" << firstPageMs
+                                         << " last_page_ms=" << lastPageMs << " rss_kb written=" << rssWritten
+                                         << " read_peak=" << rssPeak );
+  }
 }
