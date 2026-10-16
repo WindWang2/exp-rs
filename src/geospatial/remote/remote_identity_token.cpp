@@ -101,9 +101,19 @@ std::string remoteIdentityBasis( const std::string &url,
   validatorOptions.connectTimeoutSeconds = options.connectTimeoutSeconds;
   validatorOptions.maxRetries = options.maxRetries;
   validatorOptions.probeBytes = options.probeBytes;
+  validatorOptions.blockPrivateNetworks = options.blockPrivateNetworks;
 
-  RemoteSourceValidator validator = RemoteSourceValidator::probe( url, validatorOptions );
-  return basisFromIdentity( url, validator.identity() );
+  try
+  {
+    RemoteSourceValidator validator = RemoteSourceValidator::probe( url, validatorOptions );
+    return basisFromIdentity( url, validator.identity() );
+  }
+  catch ( const GeoError &error )
+  {
+    if ( error.code() != ErrorCode::PermissionDenied )
+      throw;
+    return std::string(); // refused by the private-network policy: unprovable
+  }
 }
 
 std::string remoteIdentityToken( const std::string &url,

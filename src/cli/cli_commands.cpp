@@ -2176,14 +2176,19 @@ int commandData( QStringList args, const CliIO &io )
         {
             sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
             sicnu::geo::CancelToken cancel;
-            const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
-            sicnu::geo::PrefetchOptions options;
-            options.maxBytes = maxBytes;
+            // T11: the guarded cache is installed BEFORE planning — chunk
+            // planning opens the first asset through fabricCachedPath(),
+            // which without an installed cache is raw (unguarded) /vsicurl/.
             struct CacheGuard
             {
                 ~CacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
             } cacheGuard;
             sicnu::geo::RemoteRangeCache::install( cliRangeCacheConfig( allowPrivateNetwork ) );
+            sicnu::geo::FabricPlanOptions planOptions;
+            planOptions.blockPrivateNetworks = !allowPrivateNetwork; // planner identity probes
+            const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, planOptions, cancel );
+            sicnu::geo::PrefetchOptions options;
+            options.maxBytes = maxBytes;
             const Json::Value before = sicnu::geo::RemoteRangeCache::telemetryJson();
             const sicnu::geo::PrefetchReport report =
               sicnu::geo::prefetchChunks( plan, options, cancel );
