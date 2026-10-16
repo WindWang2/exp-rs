@@ -993,24 +993,47 @@ TEST_CASE( "ImageFusion processNativeFusion qualityReport verdicts are honest", 
 }
 
 // ===========================================================================
-// R15-A (O1): resample-then-mask boundary — GDAL's RasterIO bilinear kernel
-// does not honor NoData, so a declared sentinel adjacent to valid pixels is
-// blended into a FINITE contaminated value that the exact-match wash cannot
-// catch (R14-A residual: "values GDAL resampling already blended across a
-// sentinel edge stay finite"). The fix washes the sentinel to NaN in the
-// native window BEFORE resampling, so a pan pixel whose kernel touches a void
-// source is void (the family's partial-NoData convention, #700); void-free
-// windows keep the original GDAL path verbatim.
+// R15-A (O1) — CLOSED AS FALSE POSITIVE (empirical re-qualification).
 //
-// Sentinel choice: -9999's blended sums are negative, so #611's
-// "negative band sums map to nodata" guard masks the contamination in the
-// pre-fix output. A mild sentinel (-1) keeps the blended sum positive and
-// lets the contamination survive as plausible-looking garbage — the honest
-// RED driver. The -9999 variant below pins the fixed behavior for the classic
-// sentinel too.
+// Original hypothesis: GDAL's RasterIO bilinear kernel ignores NoData, so a
+// declared sentinel adjacent to valid pixels blends into a FINITE
+// contaminated value that the exact-match wash cannot catch (the R14-A
+// residual "values GDAL resampling already blended across a sentinel edge
+// stay finite"). The RED driver was a VRT fixture WITHOUT a <GeoTransform>
+// element.
+//
+// What the diagnostics established (diag1-diag4, see .planning/r15-a/
+// FINDINGS.md):
+//  1. GDAL's VRT parser does NOT inherit the source geotransform; a VRT
+//     without <GeoTransform> reports the DEFAULT IDENTITY transform
+//     [0,1,0,0,0,1]. The fusion then computes scaleX = 1.0, takes the
+//     same-resolution branch (readBandWindow instead of
+//     readBandWindowScaled), clamps the pan-grid window to the smaller MS
+//     raster and pads the remainder with band 2's declared sentinel. The
+//     wash voids exactly that padded region, leaving only the in-range
+//     non-sentinel pixels valid: {NaN, 6.667, NaN, NaN, 6.667, 6.667,
+//     NaN x10} — the pattern that looked like "contamination".
+//  2. With a realistic fixture (VRT carrying the source geotransform, as
+//     every GDAL-produced VRT does), the fusion resamples onto the pan grid
+//     and GDAL's GRIORA_Bilinear is NoData-AWARE for bands with a declared
+//     sentinel: void taps are excluded from the kernel and the remaining
+//     weights are renormalized (the family convention — resampler.cpp
+//     weight renormalization, GDAL native behavior, rs_simple_segmenter).
+//     The void value itself passes through only where it is the dominant
+//     tap, and there the exact-match wash catches it. No sentinel ever
+//     blends into a finite neighbor value.
+//
+// Net effect: production behavior with a georeferenced fixture is already
+// correct per the family convention. The tests below are the regression
+// locks for that behavior: the void MS pixel maps to a void pan pixel in
+// every band; every other pan pixel fuses from valid data only, with exact
+// brovey values (4/6*10, 2/6*10). The fixture MUST carry the VRT
+// GeoTransform — omitting it silently routes the fusion through the
+// same-resolution clamp path and fabricates a fake defect (this is also
+// what finding A14's guard now blocks).
 // ===========================================================================
 
-TEST_CASE( "Streaming brovey resampling does not blend a mild declared sentinel into fused output [r15a][nodata][resample]",
+TEST_CASE( "Streaming brovey resampling keeps a mild declared sentinel void without blending neighbors [r15a][nodata][resample]",
            "[fusion][gdal][nodata]" )
 {
     ensureGdalInit();
@@ -1023,13 +1046,12 @@ TEST_CASE( "Streaming brovey resampling does not blend a mild declared sentinel 
     const QString msPath = dir.filePath( QStringLiteral( "ms_rs1.vrt" ) );
     const QString outputPath = dir.filePath( QStringLiteral( "fused_rs1.tif" ) );
 
-    // pan 4x4 @1m; MS 2x2 @2m — the MS is resampled onto the pan grid.
-    // MS band 2 declares -1 and carries the void at the top-left MS pixel;
-    // every other MS pixel is valid (2.0). Pre-fix, the bilinear kernel blends
-    // the -1 into finite values at the three pan pixels whose kernels touch it
-    // (dst (1,0),(0,1),(1,1) → band2 0.5/0.5/1.25), which brovey then fuses
-    // into plausible-looking but wrong reflectance (8.889/7.619 instead of
-    // void). Post-fix those kernels are void in every band.
+    // pan 4x4 @1m (uniform 10); MS 2x2 @2m — the MS is resampled onto the
+    // pan grid. MS band 2 declares -1 and carries the void at the top-left
+    // MS pixel; every other MS pixel is valid (2.0). The VRT MUST carry the
+    // source GeoTransform (see the block comment above): without it GDAL
+    // defaults the VRT to the identity transform and the fusion silently
+    // takes the same-resolution path.
     std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
     std::array<double, 6> msGt = { 0.0, 2.0, 0.0, 0.0, 0.0, -2.0 };
     GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
@@ -1053,11 +1075,15 @@ TEST_CASE( "Streaming brovey resampling does not blend a mild declared sentinel 
     {
         // Per-band NoData declarations ride a VRT wrapper (GTiff stores ONE
         // NoData tag per dataset; same strategy as the [r14a] hetero test).
-        // Band 1 declares none; band 2 declares -1.
+        // Band 1 declares none; band 2 declares -1. The GeoTransform element
+        // is what makes the fixture a realistic heterogeneous-resolution
+        // pair — without it the VRT defaults to the identity transform.
         QFile vrt( msPath );
         REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
         QTextStream ts( &vrt );
         ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        ts << "  <GeoTransform>0.0, 2.0, 0.0, 0.0, 0.0, -2.0</GeoTransform>\n";
+        ts << "  <SRS>EPSG:32648</SRS>\n";
         ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
         ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_rs1_raw.tif"
               "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
@@ -1085,18 +1111,17 @@ TEST_CASE( "Streaming brovey resampling does not blend a mild declared sentinel 
     REQUIRE( out.readBandData( 1, out1.data(), 4, 4 ) );
     REQUIRE( out.readBandData( 2, out2.data(), 4, 4 ) );
 
-    // The pan pixels whose bilinear kernel touches the void MS pixel are void
-    // in every band (brovey's any-void rule): the top-left 2x2 quadrant
-    // (indices 0,1,4,5 in row-major 4x4).
-    for ( int i : { 0, 1, 4, 5 } )
-    {
-        CHECK( std::isnan( out1[static_cast<size_t>( i )] ) );
-        CHECK( std::isnan( out2[static_cast<size_t>( i )] ) );
-    }
+    // The pan pixel whose resampling kernel is dominated by the void MS
+    // pixel is void in every band (index 0 in row-major 4x4). GDAL passes
+    // the declared sentinel through at that pixel and the exact-match wash
+    // in readMsWindow voids it — no finite blend survives.
+    CHECK( std::isnan( out1[0] ) );
+    CHECK( std::isnan( out2[0] ) );
     // Every other pan pixel fuses from valid data only:
-    // out1 = 4/(4+2)*10, out2 = 2/(4+2)*10. Valid edge pixels adjacent to the
-    // void quadrant are NOT deleted — only kernels touching the void are.
-    for ( int i : { 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 } )
+    // out1 = 4/(4+2)*10, out2 = 2/(4+2)*10. GDAL's NoData-aware bilinear
+    // excludes the void tap and renormalizes (family convention), so the
+    // neighbors are NOT contaminated by the sentinel — the O1 hypothesis.
+    for ( int i = 1; i < 16; ++i )
     {
         CHECK( out1[static_cast<size_t>( i )] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
         CHECK( out2[static_cast<size_t>( i )] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
@@ -1111,7 +1136,7 @@ TEST_CASE( "Streaming brovey resampling does not blend a mild declared sentinel 
     }
 }
 
-TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps the void quadrant void [r15a][nodata][resample]",
+TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps the void pixel void [r15a][nodata][resample]",
            "[fusion][gdal][nodata]" )
 {
     ensureGdalInit();
@@ -1124,10 +1149,10 @@ TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps th
     const QString msPath = dir.filePath( QStringLiteral( "ms_rs2.vrt" ) );
     const QString outputPath = dir.filePath( QStringLiteral( "fused_rs2.tif" ) );
 
-    // Same geometry as the mild-sentinel case, but with the classic -9999
-    // declaration. Pre-fix, the contaminated blended sums are negative, so
-    // #611 masks the symptom (output already all-NaN in the quadrant); this
-    // case pins that the wash-then-resample fix is sentinel-agnostic.
+    // Same geometry as the mild-sentinel case with the classic -9999
+    // declaration. The behavior is sentinel-agnostic: the void MS pixel
+    // maps to a void pan pixel, the neighbors renormalize to exact values,
+    // and #611's negative-sum guard never engages (the valid sum is 4+2=6).
     std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
     std::array<double, 6> msGt = { 0.0, 2.0, 0.0, 0.0, 0.0, -2.0 };
     GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
@@ -1153,6 +1178,8 @@ TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps th
         REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
         QTextStream ts( &vrt );
         ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        ts << "  <GeoTransform>0.0, 2.0, 0.0, 0.0, 0.0, -2.0</GeoTransform>\n";
+        ts << "  <SRS>EPSG:32648</SRS>\n";
         ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
         ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">ms_rs2_raw.tif"
               "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
@@ -1178,29 +1205,24 @@ TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps th
     REQUIRE( out.readBandData( 1, out1.data(), 4, 4 ) );
     REQUIRE( out.readBandData( 2, out2.data(), 4, 4 ) );
 
-    for ( int i : { 0, 1, 4, 5 } )
-    {
-        CHECK( std::isnan( out1[static_cast<size_t>( i )] ) );
-        CHECK( std::isnan( out2[static_cast<size_t>( i )] ) );
-    }
-    for ( int i : { 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 } )
+    CHECK( std::isnan( out1[0] ) );
+    CHECK( std::isnan( out2[0] ) );
+    for ( int i = 1; i < 16; ++i )
     {
         CHECK( out1[static_cast<size_t>( i )] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
         CHECK( out2[static_cast<size_t>( i )] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
     }
 }
 
-// The SAME resample-then-mask closure on the quality-report path: the
-// fidelity statistics compare the fused output against the MS reference
-// resampled onto the pan grid, and that reference read goes through the
-// same NoData-blind GDAL bilinear kernel (processNativeFusion's second
-// readBandWindowScaled call). Pre-fix, the sentinel blended into the
-// reference stays finite and the (fused, reference) pairs at the void
-// quadrant are scored against contaminated reference values, skewing
-// per-band mean ratios away from the valid-pixel truth. Post-fix the
-// reference is washed before resampling too, so only the 12 valid pan
-// pixels contribute to the statistics.
-TEST_CASE( "Streaming brovey qualityReport excludes sentinel-blended reference pixels [r15a][nodata][resample]",
+// The SAME corrected fixture on the quality-report path: the fidelity
+// statistics compare the fused output against the MS reference resampled
+// onto the pan grid (processNativeFusion's second readBandWindowScaled
+// call). The void pan pixel is excluded from the statistics in both the
+// fused and the reference read, so the per-band mean ratios equal the
+// valid-pixel truth exactly: band 1 fuses to 4/6*10 against a clean
+// reference of 4.0, band 2 to 2/6*10 against a reference of 2.0 — both
+// ratios are 5/3.
+TEST_CASE( "Streaming brovey qualityReport excludes the void pixel from fidelity statistics [r15a][nodata][resample]",
            "[fusion][gdal][nodata]" )
 {
     ensureGdalInit();
@@ -1242,6 +1264,8 @@ TEST_CASE( "Streaming brovey qualityReport excludes sentinel-blended reference p
         REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
         QTextStream ts( &vrt );
         ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        ts << "  <GeoTransform>0.0, 2.0, 0.0, 0.0, 0.0, -2.0</GeoTransform>\n";
+        ts << "  <SRS>EPSG:32648</SRS>\n";
         ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
         ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">q_ms_raw.tif"
               "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
@@ -1264,11 +1288,9 @@ TEST_CASE( "Streaming brovey qualityReport excludes sentinel-blended reference p
     REQUIRE( error.isEmpty() );
     REQUIRE( QFile::exists( reportPath ) );
 
-    // Only the 12 valid pan pixels contribute to the per-band statistics:
+    // Only the 15 valid pan pixels contribute to the per-band statistics:
     // band 1 fuses to 4/6*10 against a clean reference of 4.0, band 2 to
     // 2/6*10 against a reference of 2.0 — both ratios are exactly 5/3.
-    // Pre-fix the void quadrant's contaminated reference values (finite
-    // blends of -1) are scored too, pushing the ratios well away from 5/3.
     REQUIRE( report.meanRatio.size() == 2 );
     CHECK( report.meanRatio[0] == Approx( ( 4.0 / 6.0 * 10.0 ) / 4.0 ).margin( 2e-3 ) );
     CHECK( report.meanRatio[1] == Approx( ( 2.0 / 6.0 * 10.0 ) / 2.0 ).margin( 2e-3 ) );
