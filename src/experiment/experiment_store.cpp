@@ -447,6 +447,9 @@ sicnu::data::Result<QPair<qint64, QVector<Experiment>>> ExperimentStore::listExp
                                                 count.error( m_impl->db ) ) );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM experiments ORDER BY created_ms, id LIMIT ? OFFSET ?" ) );
@@ -464,6 +467,11 @@ sicnu::data::Result<QPair<qint64, QVector<Experiment>>> ExperimentStore::listExp
                                                 parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
@@ -1071,6 +1079,9 @@ sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::list
             count.bind( bindIndex++, status );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM experiment_runs%1 ORDER BY created_ms, run_id LIMIT ? OFFSET ?" )
@@ -1096,6 +1107,11 @@ sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::list
                                                 parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
@@ -1482,6 +1498,11 @@ sicnu::data::Result<ExperimentStore::RunPrunePlan> ExperimentStore::planRunPrune
                                          stmt.i64( 2 ), policy ) )
                 plan.runIds.append( stmt.text( 0 ) );
         }
+        // R15-B (B07): a partial scan would yield an incomplete prune plan
+        // presented as the whole store.
+        if ( stmt.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                stmt.error( m_impl->db ) ) );
         if ( rows < int( kPage ) )
             break;
         offset += kPage;
@@ -1913,6 +1934,9 @@ sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> ExperimentStore::listM
             count.bind( 1, datasetVersionId );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM run_metrics%1 ORDER BY created_ms, run_id LIMIT ? OFFSET ?" )
@@ -1934,6 +1958,11 @@ sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> ExperimentStore::listM
                                                 parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
@@ -2387,6 +2416,9 @@ ExperimentStore::listBenchmarkDefinitions( qint64 offset, qint64 limit ) const
                                                 count.error( m_impl->db ) ) );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM benchmark_definitions"
@@ -2409,6 +2441,11 @@ ExperimentStore::listBenchmarkDefinitions( qint64 offset, qint64 limit ) const
                 QStringLiteral( "stored benchmark definition does not parse" ) ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
