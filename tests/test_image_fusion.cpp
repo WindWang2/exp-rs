@@ -1189,3 +1189,87 @@ TEST_CASE( "Streaming brovey resampling with the classic -9999 sentinel keeps th
         CHECK( out2[static_cast<size_t>( i )] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
     }
 }
+
+// The SAME resample-then-mask closure on the quality-report path: the
+// fidelity statistics compare the fused output against the MS reference
+// resampled onto the pan grid, and that reference read goes through the
+// same NoData-blind GDAL bilinear kernel (processNativeFusion's second
+// readBandWindowScaled call). Pre-fix, the sentinel blended into the
+// reference stays finite and the (fused, reference) pairs at the void
+// quadrant are scored against contaminated reference values, skewing
+// per-band mean ratios away from the valid-pixel truth. Post-fix the
+// reference is washed before resampling too, so only the 12 valid pan
+// pixels contribute to the statistics.
+TEST_CASE( "Streaming brovey qualityReport excludes sentinel-blended reference pixels [r15a][nodata][resample]",
+           "[fusion][gdal][nodata]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "q_pan.tif" ) );
+    const QString msRawPath = dir.filePath( QStringLiteral( "q_ms_raw.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "q_ms.vrt" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "q_fused.tif" ) );
+    const QString reportPath = dir.filePath( QStringLiteral( "q_report.json" ) );
+
+    // Same fixture as the mild-sentinel case above: pan 4x4 @1m (uniform
+    // 10), MS 2x2 @2m with band 2 declaring -1 and carrying the void at the
+    // top-left MS pixel; band 1 is uniformly 4.0 with no declaration.
+    std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    std::array<double, 6> msGt = { 0.0, 2.0, 0.0, 0.0, 0.0, -2.0 };
+    GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
+                                           QStringLiteral( "EPSG:32648" ) );
+    GDALDatasetH msDs = createOutputTiff( msRawPath, 2, 2, 2, GDT_Float32, msGt,
+                                          QStringLiteral( "EPSG:32648" ) );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const std::vector<float> pan( 16, 10.0f );
+    const std::vector<float> ms1 = { 4.0f, 4.0f, 4.0f, 4.0f };
+    const std::vector<float> ms2 = { -1.0f, 2.0f, 2.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 4, 4,
+                           const_cast<float *>( pan.data() ), 4, 4, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms1.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( ms2.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+    {
+        QFile vrt( msPath );
+        REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        QTextStream ts( &vrt );
+        ts << "<VRTDataset rasterXSize=\"2\" rasterYSize=\"2\">\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">q_ms_raw.tif"
+              "</SourceFilename><SourceBand>1</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "  <VRTRasterBand dataType=\"Float32\" band=\"2\">\n";
+        ts << "    <NoDataValue>-1</NoDataValue>\n";
+        ts << "    <SimpleSource><SourceFilename relativeToVRT=\"1\">q_ms_raw.tif"
+              "</SourceFilename><SourceBand>2</SourceBand></SimpleSource>\n";
+        ts << "  </VRTRasterBand>\n";
+        ts << "</VRTDataset>\n";
+    }
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    params.qualityReportPath = reportPath;
+    rs::fusion::FusionQualityReport report;
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params,
+                                               &error, &report ) );
+    REQUIRE( error.isEmpty() );
+    REQUIRE( QFile::exists( reportPath ) );
+
+    // Only the 12 valid pan pixels contribute to the per-band statistics:
+    // band 1 fuses to 4/6*10 against a clean reference of 4.0, band 2 to
+    // 2/6*10 against a reference of 2.0 — both ratios are exactly 5/3.
+    // Pre-fix the void quadrant's contaminated reference values (finite
+    // blends of -1) are scored too, pushing the ratios well away from 5/3.
+    REQUIRE( report.meanRatio.size() == 2 );
+    CHECK( report.meanRatio[0] == Approx( ( 4.0 / 6.0 * 10.0 ) / 4.0 ).margin( 2e-3 ) );
+    CHECK( report.meanRatio[1] == Approx( ( 2.0 / 6.0 * 10.0 ) / 2.0 ).margin( 2e-3 ) );
+}
