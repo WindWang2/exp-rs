@@ -8,28 +8,15 @@
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
-#include <QDir>
-#include <QTemporaryFile>
-#include <QDateTime>
-#include <cerrno>
-#include <cstring>
-#include <fstream>
-#include <iostream>
 #include <sstream>
 
 #include "workflow_definition.h"
 #include "agent/spatial_tools/spatial_tool.h"
+#include "durable_file_write.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-
-#if defined(Q_OS_UNIX)
-#include <fcntl.h>
-#include <unistd.h>
-#elif defined(Q_OS_WIN)
-#include <io.h>
-#endif
 
 namespace sicnu::workflow::gui {
 
@@ -143,126 +130,27 @@ bool PipelineEditorDock::writePipelineDefinitionFile( const QString &filePath,
                                                      const Json::Value &root,
                                                      QString *errorOut )
 {
-  if ( filePath.isEmpty() )
-  {
-    if ( errorOut )
-      *errorOut = QObject::tr( "Target file path is empty." );
-    return false;
-  }
-
-  QFileInfo fileInfo( filePath );
-  if ( fileInfo.isDir() )
-  {
-    if ( errorOut )
-      *errorOut = QObject::tr( "Target is a directory: %1" ).arg( filePath );
-    return false;
-  }
-  QDir parentDir = fileInfo.dir();
-  if ( !parentDir.exists() )
-  {
-    if ( errorOut )
-      *errorOut = QObject::tr( "Directory does not exist: %1" ).arg( parentDir.absolutePath() );
-    return false;
-  }
-
-  QTemporaryFile tempFile( parentDir.filePath( QStringLiteral( "pipeline_save_XXXXXX.tmp" ) ) );
-  tempFile.setAutoRemove( true );
-  if ( !tempFile.open() )
-  {
-    if ( errorOut )
-      *errorOut = QObject::tr( "Cannot create temporary file: %1" ).arg( tempFile.errorString() );
-    return false;
-  }
-
+  // R14-D WP-B (#1487 remainder): the hand-rolled temp/fsync/rename/dir-fsync
+  // lane (and the Windows backup-then-rename dance with its target-absent
+  // window) is replaced by the shared crash-or-valid authority. Error strings
+  // for the tested paths are preserved verbatim ("Target file path is empty.",
+  // "Target is a directory: …", "Directory does not exist: …", "Cannot create
+  // temporary file: …" — see tests/test_workflow_pipeline_ui.cpp:698-863),
+  // and the lane GAINS: destination-permission preservation across the
+  // publish (T-d), symlink-referent resolution (T-e) and a single-syscall
+  // publish on Windows (T-a). fsync + dir-fsync semantics are unchanged.
   Json::StreamWriterBuilder builder;
   builder["indentation"] = "  ";
   const std::string text = Json::writeString( builder, root );
 
-  qint64 written = tempFile.write( text.data(), text.size() );
-  if ( written != static_cast<qint64>( text.size() ) || !tempFile.flush() )
+  const sicnu::DurableWriteResult result = sicnu::writeBytesDurably(
+    filePath, QByteArray( text.data(), static_cast<qsizetype>( text.size() ) ) );
+  if ( !result.ok )
   {
     if ( errorOut )
-      *errorOut = QObject::tr( "Failed to write complete data: %1" ).arg( tempFile.errorString() );
+      *errorOut = result.error;
     return false;
   }
-
-#if defined(Q_OS_UNIX)
-  if ( ::fsync( tempFile.handle() ) != 0 )
-  {
-    if ( errorOut )
-      *errorOut = QObject::tr( "Failed to fsync temporary file: %1" )
-                      .arg( QString::fromLocal8Bit( strerror( errno ) ) );
-    return false;
-  }
-#elif defined(Q_OS_WIN)
-  if ( ::_commit( tempFile.handle() ) != 0 )
-  {
-    if ( errorOut )
-      *errorOut = QObject::tr( "Failed to commit temporary file: %1" )
-                      .arg( QString::fromLocal8Bit( strerror( errno ) ) );
-    return false;
-  }
-#endif
-
-  const QString tempName = tempFile.fileName();
-  tempFile.close();
-
-  tempFile.setAutoRemove( false );
-#if defined(Q_OS_UNIX)
-  if ( ::rename( QFile::encodeName( tempName ).constData(),
-                 QFile::encodeName( filePath ).constData() ) != 0 )
-  {
-    tempFile.setAutoRemove( true );
-    if ( errorOut )
-      *errorOut = QObject::tr( "Failed to atomically publish pipeline file: %1" )
-                      .arg( QString::fromLocal8Bit( strerror( errno ) ) );
-    return false;
-  }
-
-  const QByteArray parentDirBytes = QFile::encodeName( QFileInfo( filePath ).absolutePath() );
-#if defined(O_DIRECTORY)
-  const int dirFd = ::open( parentDirBytes.constData(), O_RDONLY | O_DIRECTORY );
-#else
-  const int dirFd = ::open( parentDirBytes.constData(), O_RDONLY );
-#endif
-  if ( dirFd >= 0 )
-  {
-    ::fsync( dirFd );
-    ::close( dirFd );
-  }
-#else
-  if ( QFile::exists( filePath ) )
-  {
-    const QString backupPath = filePath + QStringLiteral( ".bak.%1" ).arg( QDateTime::currentMSecsSinceEpoch() );
-    if ( !QFile::rename( filePath, backupPath ) )
-    {
-      tempFile.setAutoRemove( true );
-      if ( errorOut )
-        *errorOut = QObject::tr( "Cannot backup existing file before replace: %1" ).arg( filePath );
-      return false;
-    }
-    if ( !QFile::rename( tempName, filePath ) )
-    {
-      QFile::rename( backupPath, filePath );
-      tempFile.setAutoRemove( true );
-      if ( errorOut )
-        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( filePath );
-      return false;
-    }
-    QFile::remove( backupPath );
-  }
-  else
-  {
-    if ( !QFile::rename( tempName, filePath ) )
-    {
-      tempFile.setAutoRemove( true );
-      if ( errorOut )
-        *errorOut = QObject::tr( "Failed to publish pipeline file: %1" ).arg( filePath );
-      return false;
-    }
-  }
-#endif
-
   return true;
 }
 

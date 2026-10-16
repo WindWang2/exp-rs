@@ -3,6 +3,7 @@
 #include "processing/algorithms/math_utils.h"
 #include "core/sicnu_logging.h"
 #include "rs_scan_pool.h"
+#include "durable_file_write.h"
 
 #include <qgsrasterlayer.h>
 #include <qgsrasterdataprovider.h>
@@ -95,12 +96,11 @@ void RoiStatisticsWidget::setupUi()
         QString path = QFileDialog::getSaveFileName(this, tr("Export Statistics"), QString(), tr("CSV (*.csv)"));
         if (path.isEmpty()) return;
 
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            QMessageBox::warning(this, tr("Error"), tr("Cannot open file for writing."));
-            return;
-        }
-        QTextStream out(&file);
+        // APP-10 (R14-D WP-B): serialize then publish through the shared
+        // crash-or-valid authority; the success message is shown only when the
+        // bytes actually landed.
+        QByteArray bytes;
+        QTextStream out(&bytes, QIODevice::WriteOnly);
         out << "Band,Min,Max,Mean,StdDev,Pixels\n";
         for (int i = 0; i < m_stats.size(); ++i) {
             out << (i + 1) << ","
@@ -110,7 +110,18 @@ void RoiStatisticsWidget::setupUi()
                 << m_stats[i].stddev << ","
                 << m_stats[i].pixelCount << "\n";
         }
-        file.close();
+        out.flush();
+#if defined(Q_OS_WIN)
+        // The old lane opened the file with QIODevice::Text (LF->CRLF on
+        // Windows); keep the published bytes byte-identical.
+        bytes.replace('\n', "\r\n");
+#endif
+        const sicnu::DurableWriteResult result = sicnu::writeBytesDurably(path, bytes);
+        if (!result.ok) {
+            QMessageBox::warning(this, tr("Error"),
+                                 tr("Cannot write file:\n%1\n%2").arg(path, result.error));
+            return;
+        }
         QMessageBox::information(this, tr("Export"), tr("Statistics exported to %1").arg(path));
     });
 }

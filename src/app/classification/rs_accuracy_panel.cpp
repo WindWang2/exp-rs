@@ -4,6 +4,7 @@
 
 #include "core/sicnu_logging.h"
 #include "dialogs/dialog_help_catalog.h"
+#include "durable_file_write.h"
 
 #include <QColor>
 #include <QFile>
@@ -249,14 +250,11 @@ bool RsAccuracyPanel::exportCsv()
   if ( path.isEmpty() )
     return false;
 
-  QFile f( path );
-  if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
-  {
-    QMessageBox::warning( this, tr( "Export Failed" ),
-                          tr( "Cannot write file: %1" ).arg( path ) );
-    return false;
-  }
-  QTextStream out( &f );
+  // APP-10 (R14-D WP-B): serialize then publish through the shared
+  // crash-or-valid authority (temp + fsync + atomic rename); the success log
+  // line is emitted only when the bytes actually landed.
+  QByteArray bytes;
+  QTextStream out( &bytes, QIODevice::WriteOnly );
 
   out << "Overall Accuracy," << mResult.overallAccuracy << "\n";
   out << "Kappa," << mResult.kappa << "\n\n";
@@ -289,7 +287,19 @@ bool RsAccuracyPanel::exportCsv()
         << mResult.userAcc.value( id ) << ","
         << mResult.f1.value( id ) << "\n";
   }
-  f.close();
+  out.flush();
+#if defined( Q_OS_WIN )
+  // The old lane opened the file with QIODevice::Text (LF->CRLF on Windows);
+  // keep the published bytes byte-identical to what it produced.
+  bytes.replace( '\n', "\r\n" );
+#endif
+  const sicnu::DurableWriteResult result = sicnu::writeBytesDurably( path, bytes );
+  if ( !result.ok )
+  {
+    QMessageBox::warning( this, tr( "Export Failed" ),
+                          tr( "Cannot write file: %1\n%2" ).arg( path, result.error ) );
+    return false;
+  }
   SICNU_LOG_INFO( SicnuLogTags::Classification,
                   QString( "Accuracy report exported: %1" ).arg( path ) );
   return true;
