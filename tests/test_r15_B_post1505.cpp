@@ -3,7 +3,11 @@
 // has merged, so each thread is checked against the live code here: a
 // thread already closed on master stays GREEN on first run (FIXED_ON_MASTER),
 // one that fails is fixed in this track (RED -> GREEN).
+#include "geospatial/cog/cog_validator.h"
+#include "geospatial/common.h"
+#include "geospatial/convert/raster_convert.h"
 #include "geospatial/io/param_guard.h"
+#include "geospatial/metadata/canonical_metadata.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -12,7 +16,10 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <gdal.h>
 
+#include <functional>
+#include <string>
 
 using sicnu::geo::ResourceKind;
 using sicnu::geo::ResourceUri;
@@ -82,3 +89,62 @@ TEST_CASE( "1505-T9: literal / malformed percent in a relative filename still re
   CHECK( ResourceUri::resolveAgainst( "/base", "a%00b.tif" ).kind == ResourceKind::Invalid );
 }
 
+// ---------------------------------------------------------------------------
+// Item 7: the B13 uncommitted-journal gate covered RasterReader/VectorReader
+// only. Metadata extraction (inspectRaster/inspectVector/inspectMultidim —
+// the B06 fact chain), COG validation and the convert inputs opened the same
+// possibly mixed-generation group without the gate.
+// ---------------------------------------------------------------------------
+namespace
+{
+std::string writeTinyTif( const QString &dir )
+{
+  GDALAllRegister();
+  const std::string path = QDir( dir ).filePath( QStringLiteral( "g.tif" ) ).toStdString();
+  GDALDriverH drv = GDALGetDriverByName( "GTiff" );
+  REQUIRE( drv != nullptr );
+  GDALDatasetH ds = GDALCreate( drv, path.c_str(), 4, 4, 1, GDT_Byte, nullptr );
+  REQUIRE( ds != nullptr );
+  GDALClose( ds );
+  return path;
+}
+void touch( const std::string &path )
+{
+  QFile f( QString::fromStdString( path ) );
+  REQUIRE( f.open( QIODevice::WriteOnly ) );
+  f.write( "{}" );
+}
+bool refusedAsInterrupted( const std::function<void()> &fn )
+{
+  try
+  {
+    fn();
+  }
+  catch ( const sicnu::geo::GeoError &e )
+  {
+    return std::string( e.what() ).find( "interrupted mid-publish" ) != std::string::npos;
+  }
+  return false;
+}
+} // namespace
+
+TEST_CASE( "Item7: metadata / COG / convert readers refuse an uncommitted publish journal",
+           "[r15b][item7][journal]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const std::string tif = writeTinyTif( tmp.path() );
+  const std::string out = QDir( tmp.path() ).filePath( QStringLiteral( "out.tif" ) ).toStdString();
+  touch( tif + ".publish-journal" );
+  CHECK( refusedAsInterrupted( [&] { sicnu::geo::inspectRaster( tif ); } ) );
+  CHECK( refusedAsInterrupted( [&] { sicnu::geo::inspectAny( tif ); } ) );
+  CHECK( refusedAsInterrupted( [&] { sicnu::geo::validateCog( tif ); } ) );
+  CHECK( refusedAsInterrupted( [&] { sicnu::geo::translateRaster( tif, out, sicnu::geo::TranslateOptions{} ); } ) );
+  CHECK_FALSE( QFile::exists( QString::fromStdString( out ) ) );
+
+  // A committed marker (only backup sweeping interrupted) does not block.
+  QFile::remove( QString::fromStdString( tif + ".publish-journal" ) );
+  touch( tif + ".publish-journal.committed" );
+  CHECK_NOTHROW( sicnu::geo::inspectRaster( tif ) );
+  CHECK_NOTHROW( sicnu::geo::validateCog( tif ) );
+}

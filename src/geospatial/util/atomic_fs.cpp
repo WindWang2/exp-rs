@@ -554,12 +554,21 @@ bool hasUncommittedPublishJournal( const std::string &targetMainPath )
          fileExists( targetMainPath + ".sicnu-journal" );
 }
 
-void throwIfInterruptedPublish( const std::string &localPath )
+bool interruptedPublishPending( const std::string &localPath )
 {
   if ( localPath.empty() || localPath.rfind( "/vsi", 0 ) == 0 || localPath.find( "://" ) != std::string::npos )
-    return;
-  if ( !hasUncommittedPublishJournal( localPath ) )
-    return;
+    return false;
+  return hasUncommittedPublishJournal( localPath );
+}
+
+void throwIfInterruptedPublish( const std::string &localPath )
+{
+  if ( interruptedPublishPending( localPath ) )
+    throwInterruptedPublish( localPath );
+}
+
+void throwInterruptedPublish( const std::string &localPath )
+{
   Json::Value details;
   details["path"] = localPath;
   details["reason"] = "interrupted_group_publish";

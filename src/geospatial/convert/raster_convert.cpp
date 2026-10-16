@@ -91,7 +91,16 @@ GDALDatasetH openRasterReadOnly( const std::string &path )
   ensureGdalRegistered();
   QuietCplErrors quiet;
   const std::string gdalPath = ResourceUri::toGdalPath( path );
+  // R15-B (item 7): a convert input is a reader too — never translate /
+  // warp / COG-ify a possibly mixed-generation group.
+  atomic_fs::throwIfInterruptedPublish( gdalPath );
   GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  // R15-B (item 7): post-open re-check narrows the check→open window.
+  if ( handle && atomic_fs::interruptedPublishPending( gdalPath ) )
+  {
+    GDALClose( handle );
+    atomic_fs::throwInterruptedPublish( gdalPath );
+  }
   if ( !handle )
     throwGdalFailure( ErrorCode::OpenFailed, "Cannot open raster input: " + path );
   return handle;

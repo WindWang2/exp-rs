@@ -11,6 +11,7 @@
 #include "geospatial/gdal_guard.h"
 #include "geospatial/remote/offline_gate.h"
 #include "geospatial/util/resource_uri.h"
+#include "geospatial/util/atomic_fs.h"
 
 #include <gdal.h>
 
@@ -77,7 +78,15 @@ CogValidationReport validateCog( const std::string &path )
 
   ensureGdalRegistered();
   QuietCplErrors quiet;
+  // R15-B (item 7): validating a mixed-generation group would certify it.
+  atomic_fs::throwIfInterruptedPublish( gdalPath );
   GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  // R15-B (item 7): post-open re-check narrows the check→open window.
+  if ( handle && atomic_fs::interruptedPublishPending( gdalPath ) )
+  {
+    GDALClose( handle );
+    atomic_fs::throwInterruptedPublish( gdalPath );
+  }
   if ( !handle )
   {
     Json::Value details;
