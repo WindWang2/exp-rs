@@ -16,6 +16,7 @@
 #include "data_result.h"
 
 #include <QDateTime>
+#include <QReadWriteLock>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -66,7 +67,11 @@ class WorkspaceCatalog
 
     bool open( const QString &dbPath, QString *errorOut = nullptr );
     void close();
-    bool isOpen() const { return m_impl != nullptr; }
+    bool isOpen() const
+    {
+        QReadLocker lifecycleGuard( &m_lifecycle );
+        return m_impl != nullptr;
+    }
 
     /// Upserts by assetId. @p aliases and @p tags replace the stored sets.
     /// Success may carry `catalog.alias_collision` Warning diagnostics: a
@@ -99,6 +104,13 @@ class WorkspaceCatalog
 
   private:
     struct Impl;
+    // R15-B (#1449): lifecycle lock OUTSIDE the Impl. Every member call holds
+    // it shared for its whole duration; open()/close() hold it exclusive, so
+    // close() waits for in-flight calls and no call can observe a deleted
+    // Impl (its mutex included) or a half-closed connection. Recursive: a
+    // member may call another member on the same thread. Calling close() or
+    // open() from INSIDE a member call on the same thread is not supported.
+    mutable QReadWriteLock m_lifecycle{ QReadWriteLock::Recursive };
     Impl *m_impl = nullptr;
 };
 

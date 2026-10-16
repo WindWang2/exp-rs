@@ -11,6 +11,7 @@
 
 #include <QDateTime>
 #include <QPair>
+#include <QReadWriteLock>
 #include <QString>
 #include <QVector>
 
@@ -31,7 +32,11 @@ class ExperimentStore
 
     bool open( const QString &dbPath, QString *errorOut = nullptr );
     void close();
-    bool isOpen() const { return m_impl != nullptr; }
+    bool isOpen() const
+    {
+        QReadLocker lifecycleGuard( &m_lifecycle );
+        return m_impl != nullptr;
+    }
     bool isReadOnly() const;
     QString schemaVersion() const;
     bool checkpointForBackup();
@@ -185,9 +190,13 @@ class ExperimentStore
     QVector<LineageEdge> outgoingEdges( const QString &kind, const QString &id,
                                         qint64 limit = 1000,
                                         const QString &edgeKind = QString(),
-                                        const QString &toKind = QString() ) const;
+                                        const QString &toKind = QString(),
+                                        QString *scanError = nullptr ) const;
+    /// R15-B (B07 tail): @p scanError (optional) receives the reason when a
+    /// mid-scan SQLite ERROR made the reader return an empty set.
     QVector<LineageEdge> incomingEdges( const QString &kind, const QString &id,
-                                        qint64 limit = 1000 ) const;
+                                        qint64 limit = 1000,
+                                        QString *scanError = nullptr ) const;
     /// Whole-table edge page (#1333 item 9): truncation is part of the
     /// return value, never silent — @p truncated with @p total lets the
     /// consumer decide, the way LineageQueryResult::budgetExhausted does.
@@ -196,6 +205,9 @@ class ExperimentStore
         QVector<LineageEdge> edges;
         qint64 total = 0;       ///< rows actually in the table
         bool truncated = false; ///< true when edges.size() < total
+        /// R15-B (B07 tail): the count or the scan itself hit a SQLite
+        /// ERROR — @c edges is a prefix of unknown size (truncated is set).
+        bool scanFailed = false;
     };
     LineageEdgePage lineageEdgePage( qint64 limit = 100000 ) const;
     /// Whole-table edge scan (graph assembly input; bounded by @p limit).
@@ -240,6 +252,13 @@ class ExperimentStore
     sicnu::data::Result<void> upsertRunImpl( const ExperimentRun &run );
 
     struct Impl;
+    // R15-B (#1449): lifecycle lock OUTSIDE the Impl. Every member call holds
+    // it shared for its whole duration; open()/close() hold it exclusive, so
+    // close() waits for in-flight calls and no call can observe a deleted
+    // Impl (its mutex included) or a half-closed connection. Recursive: a
+    // member may call another member on the same thread. Calling close() or
+    // open() from INSIDE a member call on the same thread is not supported.
+    mutable QReadWriteLock m_lifecycle{ QReadWriteLock::Recursive };
     Impl *m_impl = nullptr;
     QString m_storePath;
 };

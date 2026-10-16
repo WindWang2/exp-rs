@@ -6,6 +6,7 @@
 // and may only change while that version is Draft. Committed/deprecated
 // versions refuse writes with `dataset.not_draft` — the frozen-state rule
 // that makes version references meaningful.
+#include <QReadWriteLock>
 #include "dataset_store_impl.h"
 
 #include "../data/execution_fingerprint.h"
@@ -72,6 +73,7 @@ Diagnostic notDraft( const QString &versionId )
 
 sicnu::data::Result<void> DatasetStore::saveLabelSchema( const LabelSchema &schema )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -138,6 +140,7 @@ sicnu::data::Result<void> DatasetStore::saveLabelSchema( const LabelSchema &sche
 std::optional<LabelSchema> DatasetStore::labelSchema( const QString &schemaId,
                                                       quint64 version ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -153,16 +156,24 @@ std::optional<LabelSchema> DatasetStore::labelSchema( const QString &schemaId,
     return parsed ? std::optional<LabelSchema>( parsed.value() ) : std::nullopt;
 }
 
-QVector<QPair<quint64, QString>> DatasetStore::labelSchemaVersions( const QString &schemaId ) const
+QVector<QPair<quint64, QString>> DatasetStore::labelSchemaVersions( const QString &schemaId,
+    QString *scanError ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<QPair<quint64, QString>> versions;
     if ( !m_impl )
+    {
+        noteScanError( scanError, QStringLiteral( "store is not open" ) );
         return versions;
+    }
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "SELECT version, json FROM label_schemas WHERE schema_id=? ORDER BY version" ) );
     if ( !stmt )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
         return versions;
+    }
     stmt.bind( 1, schemaId );
     while ( stmt.stepRow() )
     {
@@ -173,6 +184,13 @@ QVector<QPair<quint64, QString>> DatasetStore::labelSchemaVersions( const QStrin
         versions.append( qMakePair( quint64( stmt.i64( 0 ) ),
                                     labelSchemaRowDigest( stmt.text( 1 ) ) ) );
     }
+    // R15-B (B07 tail, #1448/#1457): a scan that ended on an ERROR is not
+    // "no more rows" — refuse the partial result instead of returning it.
+    if ( stmt.stepFailed() )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
+        return {};
+    }
     return versions;
 }
 
@@ -180,6 +198,7 @@ QVector<QPair<quint64, QString>> DatasetStore::labelSchemaVersions( const QStrin
 
 sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> &samples )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -264,6 +283,7 @@ sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> 
 std::optional<SampleRecord> DatasetStore::sampleById( const DatasetVersionId &versionId,
                                                       const SampleId &sampleId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -282,6 +302,7 @@ std::optional<SampleRecord> DatasetStore::sampleById( const DatasetVersionId &ve
 sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesPage(
     const DatasetVersionId &versionId, qint64 offset, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -338,6 +359,7 @@ sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesP
 sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCursor(
     const DatasetVersionId &versionId, const QString &cursor, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<SampleCursorPage>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -431,43 +453,67 @@ sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCur
     return Result::success( page );
 }
 
-qint64 DatasetStore::sampleCount( const DatasetVersionId &versionId ) const
+qint64 DatasetStore::sampleCount( const DatasetVersionId &versionId, QString *scanError ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
+    {
+        noteScanError( scanError, QStringLiteral( "store is not open" ) );
         return 0;
+    }
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt count( m_impl->db, QStringLiteral(
         "SELECT COUNT(*) FROM samples WHERE dataset_version_id=?" ) );
     if ( !count )
+    {
+        noteScanError( scanError, count.error( m_impl->db ) );
         return 0;
+    }
     count.bind( 1, versionId.toString() );
     if ( count.stepRow() )
         return count.i64( 0 );
+    noteScanError( scanError, count.error( m_impl->db ) ); // R15-B (B07 tail)
     return 0;
 }
 
 QVector<QString> DatasetStore::sampleGroupIds( const DatasetVersionId &versionId,
-                                               qint64 limit ) const
+                                               qint64 limit,
+    QString *scanError ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<QString> groups;
     if ( !m_impl )
+    {
+        noteScanError( scanError, QStringLiteral( "store is not open" ) );
         return groups;
+    }
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "SELECT DISTINCT group_id FROM samples WHERE dataset_version_id=? AND group_id!=''"
         " ORDER BY group_id LIMIT ?" ) );
     if ( !stmt )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
         return groups;
+    }
     stmt.bind( 1, versionId.toString() );
     stmt.bind( 2, qBound<qint64>( qint64( 1 ), limit, 100000 ) );
     while ( stmt.stepRow() )
         groups.append( stmt.text( 0 ) );
+    // R15-B (B07 tail, #1448/#1457): a scan that ended on an ERROR is not
+    // "no more rows" — refuse the partial result instead of returning it.
+    if ( stmt.stepFailed() )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
+        return {};
+    }
     return groups;
 }
 
 sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &versionId,
                                                       const SampleId &sampleId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -562,6 +608,7 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
 
 sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &annotation )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -678,6 +725,7 @@ sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &a
 
 std::optional<AnnotationRecord> DatasetStore::annotationTip( const QString &annotationId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -692,16 +740,24 @@ std::optional<AnnotationRecord> DatasetStore::annotationTip( const QString &anno
     return parsed ? std::optional<AnnotationRecord>( parsed.value() ) : std::nullopt;
 }
 
-QVector<AnnotationRecord> DatasetStore::annotationHistory( const QString &annotationId ) const
+QVector<AnnotationRecord> DatasetStore::annotationHistory( const QString &annotationId,
+    QString *scanError ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<AnnotationRecord> history;
     if ( !m_impl )
+    {
+        noteScanError( scanError, QStringLiteral( "store is not open" ) );
         return history;
+    }
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM annotations WHERE annotation_id=? ORDER BY revision" ) );
     if ( !stmt )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
         return history;
+    }
     stmt.bind( 1, annotationId );
     while ( stmt.stepRow() )
     {
@@ -709,22 +765,37 @@ QVector<AnnotationRecord> DatasetStore::annotationHistory( const QString &annota
         if ( record )
             history.append( record.value() );
     }
+    // R15-B (B07 tail, #1448/#1457): a scan that ended on an ERROR is not
+    // "no more rows" — refuse the partial result instead of returning it.
+    if ( stmt.stepFailed() )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
+        return {};
+    }
     return history;
 }
 
 QVector<AnnotationRecord> DatasetStore::annotationsOfSample( const QString &sampleId,
-                                                             qint64 limit ) const
+                                                             qint64 limit,
+    QString *scanError ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<AnnotationRecord> tips;
     if ( !m_impl )
+    {
+        noteScanError( scanError, QStringLiteral( "store is not open" ) );
         return tips;
+    }
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM annotations AS a WHERE target_sample_id=? AND revision ="
         " (SELECT MAX(revision) FROM annotations AS b WHERE b.annotation_id = a.annotation_id)"
         " ORDER BY created_ms, annotation_id LIMIT ?" ) );
     if ( !stmt )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
         return tips;
+    }
     stmt.bind( 1, sampleId );
     stmt.bind( 2, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
     while ( stmt.stepRow() )
@@ -732,6 +803,13 @@ QVector<AnnotationRecord> DatasetStore::annotationsOfSample( const QString &samp
         auto record = AnnotationRecord::fromJson( textToJson( stmt.text( 0 ) ) );
         if ( record )
             tips.append( record.value() );
+    }
+    // R15-B (B07 tail, #1448/#1457): a scan that ended on an ERROR is not
+    // "no more rows" — refuse the partial result instead of returning it.
+    if ( stmt.stepFailed() )
+    {
+        noteScanError( scanError, stmt.error( m_impl->db ) );
+        return {};
     }
     return tips;
 }

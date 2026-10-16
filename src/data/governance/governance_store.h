@@ -19,6 +19,7 @@
 
 #include <QPair>
 #include <QSet>
+#include <QReadWriteLock>
 #include <QString>
 #include <QVector>
 
@@ -75,7 +76,11 @@ class GovernanceStore
     /// schema_version opens READ-ONLY (writes fail with store.read_only).
     bool open( const QString &dbPath, QString *errorOut = nullptr );
     void close();
-    bool isOpen() const { return m_impl != nullptr; }
+    bool isOpen() const
+    {
+        QReadLocker lifecycleGuard( &m_lifecycle );
+        return m_impl != nullptr;
+    }
     bool isReadOnly() const;
     QString schemaVersion() const;
     /// True when the last query iteration or statement step ended in an error
@@ -83,7 +88,11 @@ class GovernanceStore
     bool stepFailed() const;
     /// Path the store was opened with (remembered independently of the
     /// writable gov_meta table so read-only stores report it too).
-    QString storePath() const { return m_storePath; }
+    QString storePath() const
+    {
+        QReadLocker lifecycleGuard( &m_lifecycle );
+        return m_storePath;
+    }
     /// Folds the WAL into the main DB file (PRAGMA wal_checkpoint(TRUNCATE))
     /// so the DB file alone is safe to copy (backup/snapshot contract).
     /// Returns false when the store is closed or the checkpoint could not be
@@ -265,6 +274,13 @@ class GovernanceStore
 
   private:
     struct Impl;
+    // R15-B (#1449): lifecycle lock OUTSIDE the Impl. Every member call holds
+    // it shared for its whole duration; open()/close() hold it exclusive, so
+    // close() waits for in-flight calls and no call can observe a deleted
+    // Impl (its mutex included) or a half-closed connection. Recursive: a
+    // member may call another member on the same thread. Calling close() or
+    // open() from INSIDE a member call on the same thread is not supported.
+    mutable QReadWriteLock m_lifecycle{ QReadWriteLock::Recursive };
     Impl *m_impl = nullptr;
     QString m_storePath;
 };
