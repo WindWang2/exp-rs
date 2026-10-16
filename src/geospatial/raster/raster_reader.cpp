@@ -153,6 +153,12 @@ RasterReader RasterReader::open( const std::string &path )
   // R15-B (B13): never serve a group a crash left between generations.
   atomic_fs::throwIfInterruptedPublish( gdalPath );
   GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  // R15-B (item 7): post-open re-check narrows the check→open window.
+  if ( handle && atomic_fs::interruptedPublishPending( gdalPath ) )
+  {
+    GDALClose( handle );
+    atomic_fs::throwInterruptedPublish( gdalPath );
+  }
   if ( !handle )
   {
     Json::Value details;

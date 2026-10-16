@@ -10,6 +10,7 @@
 
 #include "geospatial/gdal_guard.h"
 #include "geospatial/util/resource_uri.h"
+#include "geospatial/util/atomic_fs.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -90,7 +91,17 @@ GDALDatasetH openReadOnlyOrThrow( const std::string &path, unsigned int openFlag
   QuietCplErrors quiet;
   ensureGdalRegistered();
   const std::string gdalPath = ResourceUri::toGdalPath( path );
+  // R15-B (item 7): metadata extraction (inspectRaster / inspectVector /
+  // inspectMultidim — the facts DataManager and the catalog record) must not
+  // read a group a crash or a live publish left between generations either.
+  atomic_fs::throwIfInterruptedPublish( gdalPath );
   GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | openFlags, nullptr, nullptr, nullptr );
+  // R15-B (item 7): post-open re-check narrows the check→open window.
+  if ( handle && atomic_fs::interruptedPublishPending( gdalPath ) )
+  {
+    GDALClose( handle );
+    atomic_fs::throwInterruptedPublish( gdalPath );
+  }
   if ( !handle )
   {
     Json::Value details;

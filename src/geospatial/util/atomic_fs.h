@@ -129,6 +129,17 @@ bool hasUncommittedPublishJournal( const std::string &targetMainPath );
 /// and remote paths are ignored.
 void throwIfInterruptedPublish( const std::string &localPath );
 
+/// R15-B (item 7): non-throwing form of the same predicate (same /vsi* and
+/// remote filter). Readers re-check it AFTER their GDALOpenEx so a publish
+/// that started while the dataset was being opened is refused too — this
+/// narrows the check→open window to a publish that both starts AND commits
+/// inside one open call (not closable without a reader/writer lock).
+bool interruptedPublishPending( const std::string &localPath );
+
+/// Throws the interrupted-publish GeoError unconditionally (used after a
+/// post-open re-check; never returns).
+[[noreturn]] void throwInterruptedPublish( const std::string &localPath );
+
 /// Recovers an interrupted multi-file publication for targetMainPath.
 /// If an uncommitted journal is found, rolls back published targets and restores backups.
 /// If a committed marker is found, cleans up leftover backups.
