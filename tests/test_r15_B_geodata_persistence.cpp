@@ -31,6 +31,7 @@
 
 #include <json/json.h>
 
+#include <cpl_error.h>
 #include <cpl_vsi.h>
 
 #include <dlfcn.h>
@@ -944,6 +945,7 @@ namespace
 {
 std::atomic<bool> g_rebindActive{ false };
 std::atomic<int> g_rebindCalls{ 0 };
+std::atomic<int> g_rebindPublicAnswers{ 1 }; // lookups answered public before rebinding
 constexpr const char *kRebindHost = "r15b-rebind.test";
 } // namespace
 
@@ -960,7 +962,7 @@ extern "C" int getaddrinfo( const char *node, const char *service, const struct 
     numeric.ai_family = AF_INET;
     numeric.ai_socktype = hints ? hints->ai_socktype : SOCK_STREAM;
     numeric.ai_flags = AI_NUMERICHOST;
-    return real( n == 0 ? "192.0.2.1" : "127.0.0.1", service, &numeric, res );
+    return real( n < g_rebindPublicAnswers.load() ? "192.0.2.1" : "127.0.0.1", service, &numeric, res );
   }
   return real( node, service, hints, res );
 }
@@ -979,6 +981,7 @@ TEST_CASE( "1505-T3: guarded fetch connects only to the address set the guard va
     return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
   };
   g_rebindCalls = 0;
+  g_rebindPublicAnswers = 1;
   g_rebindActive = true;
   bool threw = false;
   try
@@ -994,4 +997,70 @@ TEST_CASE( "1505-T3: guarded fetch connects only to the address set the guard va
   CHECK( g_rebindCalls.load() >= 1 );
   CHECK( server.requestCount() == 0 ); // never reached the rebound private address
   CHECK( threw );
+}
+
+// ---------------------------------------------------------------------------
+// R3-10: a TRANSPORT failure (not a policy refusal) of a guarded ranged
+// fetch degraded to the raw /vsicurl/ fallback, which re-resolves the name
+// with no private-network check and no pinning. A rebinding name makes the
+// guarded fetch fail (public TEST-NET answer, unroutable) and then points
+// the fallback's own lookup at 127.0.0.1. Fixed contract: under
+// blockPrivateNetworks the http fallback uses the same guarded, pinned
+// transport, so the fixture is never contacted.
+// ---------------------------------------------------------------------------
+TEST_CASE( "R3-10: a guarded fetch's transport failure never degrades to the unguarded fallback",
+           "[r15b][post1505][remote][ssrf][dns]" )
+{
+  using sicnu::geo::RangeCacheConfig;
+  using sicnu::geo::RemoteRangeCache;
+  RemoteRangeCache::clearEntries();
+  testsupport::HttpRangeServer server( std::vector<unsigned char>( 1024 * 1024, 0x6B ) );
+  server.setEtag( "\"r15b-r310\"" );
+  const std::string url = "http://" + std::string( kRebindHost ) + ":" + std::to_string( server.port() ) +
+                          "/fixture.tif";
+  RangeCacheConfig open;
+  open.blockSize = 64 * 1024;
+  open.maxSingleFetchBytes = 64 * 1024;
+  open.timeoutSeconds = 3;
+  open.connectTimeoutSeconds = 1;
+  open.maxRetries = 0;
+  RemoteRangeCache::install( open );
+  // Open phase: every lookup answers loopback, so the probe proves the
+  // identity (policy off) and a first read caches block 0.
+  g_rebindCalls = 0;
+  g_rebindPublicAnswers = 0;
+  g_rebindActive = true;
+  VSILFILE *fp = VSIFOpenL( RemoteRangeCache::cachedPath( url ).c_str(), "rb" );
+  REQUIRE( fp != nullptr );
+  unsigned char head[16] = {};
+  REQUIRE( VSIFReadL( head, 1, sizeof head, fp ) == sizeof head );
+
+  RangeCacheConfig guarded = open;
+  guarded.blockPrivateNetworks = true;
+  RemoteRangeCache::install( guarded );
+  // Guarded phase: the guarded fetch's own lookups answer public, so it
+  // passes every check and then fails at connect (TEST-NET is unroutable):
+  // fetchRangeOnce's host check, the hop guard's host check and the pinning
+  // resolution = 3 lookups (libcurl itself does not resolve a pinned name).
+  // Every later lookup answers loopback — the rebinding. The error check
+  // below proves the guarded fetch failed by TRANSPORT, not by a policy
+  // refusal (a miscounted calibration would make the case vacuous).
+  g_rebindCalls = 0;
+  g_rebindPublicAnswers = 3;
+  CPLErrorReset();
+  const int requests0 = server.requestCount();
+  std::vector<unsigned char> buf( 4096, 0 );
+  REQUIRE( VSIFSeekL( fp, 768 * 1024, SEEK_SET ) == 0 );
+  const size_t got = VSIFReadL( buf.data(), 1, buf.size(), fp );
+  g_rebindActive = false;
+  INFO( "lookups=" << g_rebindCalls.load() << " got=" << got
+                   << " fixture requests=" << server.requestCount() - requests0 );
+  CHECK( g_rebindCalls.load() >= 1 );
+  CHECK( server.requestCount() == requests0 ); // the rebound loopback origin is never contacted
+  CHECK( got == 0 );
+  CHECK( std::string( CPLGetLastErrorMsg() ).find( "origin fetch refused by the private-network policy" ) ==
+         std::string::npos );
+  VSIFCloseL( fp );
+  RemoteRangeCache::clearEntries();
+  RemoteRangeCache::install( RangeCacheConfig{} );
 }
