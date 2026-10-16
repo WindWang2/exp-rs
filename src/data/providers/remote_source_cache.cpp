@@ -1,9 +1,13 @@
 // remote_source_cache.cpp — see remote_source_cache.h for the contract.
 #include "remote_source_cache.h"
 #include "data/offline_mode.h"
+#include "geospatial/util/resource_uri.h"
 
 #include <QDateTime>
 #include <QDir>
+#include <QSet>
+#include <QUrl>
+#include <QUrlQuery>
 
 #include <algorithm>
 #include <chrono>
@@ -317,11 +321,71 @@ void RemoteDatasetPool::clear()
 
 namespace
 {
+/// R15-B (B15): the resource identity of a remote URL for validator
+/// bookkeeping — the URL minus its signing material. A presigned URL
+/// (S3 SigV4, GCS signed, Azure SAS, token query) names the SAME object under
+/// every re-signing; keying on the raw URL (a) persisted the signature /
+/// credential / session token in the artifact store and (b) started a fresh,
+/// never-validated record per rotation, so isStale() could never fire for
+/// signed sources. Userinfo is dropped for the same reason. Non-signing
+/// query parameters are kept: they can select different content.
+/// A URL with nothing to strip is returned verbatim (no key churn).
+QString resourceIdentity( const QString &url )
+{
+    QUrl parsed( url, QUrl::StrictMode );
+    if ( !parsed.isValid() || parsed.scheme().isEmpty() || parsed.host().isEmpty() )
+        return url;
+    bool changed = false;
+    if ( !parsed.userInfo().isEmpty() )
+    {
+        parsed.setUserInfo( QString() );
+        changed = true;
+    }
+    if ( parsed.hasQuery() )
+    {
+        const QUrlQuery query( parsed );
+        const auto items = query.queryItems( QUrl::FullyEncoded );
+        bool signedUrl = false;
+        for ( const auto &item : items )
+            signedUrl = signedUrl || sicnu::geo::isCredentialQueryKey( item.first.toStdString() );
+        // Companions of a signature that rotate with it (expiry/date/scope);
+        // stripped only when the URL is actually signed.
+        static const QSet<QString> kSigningCompanions = {
+            QStringLiteral( "expires" ), QStringLiteral( "se" ), QStringLiteral( "st" ),
+            QStringLiteral( "sp" ), QStringLiteral( "sv" ), QStringLiteral( "spr" ),
+            QStringLiteral( "sr" ), QStringLiteral( "ss" ), QStringLiteral( "srt" ),
+            QStringLiteral( "skoid" ), QStringLiteral( "sktid" ), QStringLiteral( "skt" ),
+            QStringLiteral( "ske" ), QStringLiteral( "sks" ), QStringLiteral( "skv" ),
+        };
+        QUrlQuery kept;
+        for ( const auto &item : items )
+        {
+            const QString lower = item.first.toLower();
+            const bool drop = sicnu::geo::isCredentialQueryKey( item.first.toStdString() ) ||
+                              ( signedUrl && ( lower.startsWith( QLatin1String( "x-amz-" ) ) ||
+                                               lower.startsWith( QLatin1String( "x-goog-" ) ) ||
+                                               kSigningCompanions.contains( lower ) ) );
+            if ( drop )
+                changed = true;
+            else
+                kept.addQueryItem( item.first, item.second );
+        }
+        if ( changed )
+        {
+            if ( kept.isEmpty() )
+                parsed.setQuery( QString() );
+            else
+                parsed.setQuery( kept.query( QUrl::FullyEncoded ), QUrl::StrictMode );
+        }
+    }
+    return changed ? parsed.toString( QUrl::FullyEncoded ) : url;
+}
+
 QString validatorKey( const QString &url )
 {
-    // One logical record per URL; the digest-free logical key keeps versions
-    // monotonic when a source's token legitimately changes.
-    return QStringLiteral( "remote-source/%1" ).arg( url );
+    // One logical record per resource; the digest-free logical key keeps
+    // versions monotonic when a source's token legitimately changes.
+    return QStringLiteral( "remote-source/%1" ).arg( resourceIdentity( url ) );
 }
 } // namespace
 
@@ -342,7 +406,8 @@ void RemoteSourceCache::recordKnownGood( const QString &url, const QString &toke
     reg.logicalKey = key;
     // Payload bookkeeping rows need no real payload; point them at the URL.
     reg.requireExistingPayload = false;
-    reg.storagePath = url;
+    // R15-B (B15): never persist the signing material of a presigned URL.
+    reg.storagePath = resourceIdentity( url );
     reg.kind = QStringLiteral( "remote_source" );
     reg.metadata = QJsonObject{
         { QStringLiteral( "validatorToken" ), token },

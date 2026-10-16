@@ -341,3 +341,72 @@ TEST_CASE( "B06: external content change re-derives metadata facts and flags unu
   CHECK( bandCountOf( *healed ) == 2 );
 }
 
+// ---------------------------------------------------------------------------
+// B15: RemoteSourceCache identity. The validator record was keyed on the RAW
+// URL, so (a) a presigned URL's signature / credential / expiry landed in the
+// artifact store (logical key + storage path), and (b) every signature
+// rotation of the SAME object started a fresh, never-validated record —
+// isStale() then answered "not stale" forever and a changed object was
+// served from cache. Oracle: identity = URL minus signing parameters;
+// non-credential query parameters still distinguish resources.
+// ---------------------------------------------------------------------------
+namespace
+{
+class FixedValidator : public sicnu::data::RemoteSourceValidator
+{
+  public:
+    QString token;
+    QString currentValidatorToken( const QString & ) override { return token; }
+};
+QByteArray readAll( const QString &path )
+{
+  QFile f( path );
+  return f.open( QIODevice::ReadOnly ) ? f.readAll() : QByteArray();
+}
+} // namespace
+
+TEST_CASE( "B15: remote source validator identity ignores rotating signatures and never persists them",
+           "[r15b][b15][cache]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString db = QDir( tmp.path() ).filePath( QStringLiteral( "artifacts.db" ) );
+  {
+    sicnu::data::ArtifactStore store;
+    REQUIRE( store.open( db ) );
+    sicnu::data::RemoteSourceCache cache( store );
+    FixedValidator validator;
+    cache.setValidator( &validator );
+
+    const QString signedA = QStringLiteral(
+      "https://bucket.example.org/scene/b04.tif?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+      "&X-Amz-Credential=AKIAR15BSECRETCRED&X-Amz-Date=20261016T000000Z&X-Amz-Expires=900"
+      "&X-Amz-SignedHeaders=host&X-Amz-Signature=R15BSIGNATUREAAAA" );
+    const QString signedB = QStringLiteral(
+      "https://bucket.example.org/scene/b04.tif?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+      "&X-Amz-Credential=AKIAR15BSECRETCRED&X-Amz-Date=20261016T010000Z&X-Amz-Expires=900"
+      "&X-Amz-SignedHeaders=host&X-Amz-Signature=R15BSIGNATUREBBBB" );
+    cache.recordKnownGood( signedA, QStringLiteral( "etag-1" ) );
+
+    // Same object, re-signed URL: the recorded state is found ...
+    CHECK( cache.recordedToken( signedB ) == QStringLiteral( "etag-1" ) );
+    // ... so a changed object is detected as stale ...
+    validator.token = QStringLiteral( "etag-2" );
+    CHECK( cache.isStale( signedB ) );
+    // ... and an unchanged one is not.
+    validator.token = QStringLiteral( "etag-1" );
+    CHECK_FALSE( cache.isStale( signedB ) );
+
+    // Non-credential query parameters still name different resources.
+    cache.recordKnownGood( QStringLiteral( "https://h.example.org/x.tif?band=1" ), QStringLiteral( "t1" ) );
+    CHECK( cache.recordedToken( QStringLiteral( "https://h.example.org/x.tif?band=1" ) ) == QStringLiteral( "t1" ) );
+    CHECK( cache.recordedToken( QStringLiteral( "https://h.example.org/x.tif?band=2" ) ).isEmpty() );
+    // Plain URLs keep working unchanged.
+    cache.recordKnownGood( QStringLiteral( "https://h.example.org/plain.tif" ), QStringLiteral( "p1" ) );
+    CHECK( cache.recordedToken( QStringLiteral( "https://h.example.org/plain.tif" ) ) == QStringLiteral( "p1" ) );
+  }
+  // The signing secret never reaches disk (db + WAL + journal).
+  QByteArray bytes = readAll( db ) + readAll( db + QStringLiteral( "-wal" ) ) + readAll( db + QStringLiteral( "-journal" ) );
+  CHECK_FALSE( bytes.contains( "R15BSIGNATUREAAAA" ) );
+  CHECK_FALSE( bytes.contains( "AKIAR15BSECRETCRED" ) );
+}
