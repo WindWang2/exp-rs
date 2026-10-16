@@ -79,10 +79,6 @@ bool sha256OfPath( const QString &path, std::string *sha256, long long *bytes )
     return total > 0 && !sha256->empty();
 }
 
-/// Deterministic per-page file names of a single-mode delivery, mirroring
-/// exportMapLayout / QgsLayoutExporter::generateFileName (page 0 →
-/// base.png, page N → base_<N+1>.png).
-
 /// Production hazard guard (observed as a REAL hang in this environment):
 /// QgsLayoutItemLegend::paint loops forever when an auto-update legend
 /// mirrors an EMPTY layer set — linked to a layer-less map frame, or
