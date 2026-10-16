@@ -337,6 +337,13 @@ void StdinReader::run()
         std::cin.getline( buffer.data(), kMaxMcpLine + 1 );
         if ( std::cin.fail() )
         {
+            // Clean end-of-input: getline extracted zero characters because
+            // the stream is exhausted (eofbit|failbit). That is not an
+            // overlong line — emit nothing and stop. Previously this fell
+            // into the sentinel branch and the server answered every normal
+            // shutdown with a bogus "-32700 line too long" (id:null).
+            if ( std::cin.eof() && std::cin.gcount() == 0 )
+                break;
             std::cin.clear();
             std::cin.ignore( std::numeric_limits<std::streamsize>::max(), '\n' );
             emit lineRead( QStringLiteral( "__MCP_LINE_TOO_LONG__" ) );

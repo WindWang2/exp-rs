@@ -8,6 +8,8 @@
 #include <thread>
 #include <array>
 #include <vector>
+#include <sstream>
+#include <iostream>
 
 #include "agent/mcp_server.h"
 #include "agent/tool_catalog/surface_registry.h"
@@ -2715,5 +2717,52 @@ TEST_CASE( "workflow tool gates return stable structured error codes", "[agent][
         CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
         CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
                == QStringLiteral( "INVALID_PARAMETER" ) );
+    }
+}
+
+TEST_CASE( "StdinReader treats clean EOF as end-of-input, not an overlong line",
+           "[agent][mcp][stdio]" )
+{
+    // Regression: at clean end-of-stdin (last frame newline-terminated, then
+    // EOF) getline extracts zero characters and sets eofbit|failbit. The fail
+    // branch used to emit "__MCP_LINE_TOO_LONG__", so every normal shutdown
+    // answered the peer with a bogus "-32700 Parse error: line too long"
+    // (id:null). Clean EOF must emit nothing — while a REAL overlong line
+    // still yields exactly one sentinel and later lines keep being served.
+    auto collect = []( const std::string &input ) {
+        std::istringstream stream( input );
+        std::streambuf *old = std::cin.rdbuf( stream.rdbuf() );
+        QStringList lines;
+        StdinReader reader;
+        // DirectConnection: the lambda runs in the reader thread; the list is
+        // only read after wait() joins it, so no mutex is needed.
+        QObject::connect( &reader, &StdinReader::lineRead, &reader,
+                          [&lines]( const QString &l ) { lines << l; },
+                          Qt::DirectConnection );
+        reader.start();
+        REQUIRE( reader.wait( 15000 ) );
+        std::cin.rdbuf( old );
+        return lines;
+    };
+
+    SECTION( "newline-terminated frames then EOF deliver exactly the frames" )
+    {
+        const QStringList lines = collect( "A\nB\n" );
+        CHECK( lines == QStringList{ QStringLiteral( "A" ), QStringLiteral( "B" ) } );
+        CHECK( !lines.contains( QStringLiteral( "__MCP_LINE_TOO_LONG__" ) ) );
+    }
+
+    SECTION( "a final unterminated frame is still delivered, no sentinel" )
+    {
+        const QStringList lines = collect( "A\nB" );
+        CHECK( lines == QStringList{ QStringLiteral( "A" ), QStringLiteral( "B" ) } );
+    }
+
+    SECTION( "a >4 MiB line yields one sentinel, then service continues" )
+    {
+        const std::string oversized( 5 * 1024 * 1024, 'x' );
+        const QStringList lines = collect( oversized + "\nC\n" );
+        CHECK( lines == QStringList{ QStringLiteral( "__MCP_LINE_TOO_LONG__" ),
+                                     QStringLiteral( "C" ) } );
     }
 }
