@@ -36,7 +36,9 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -644,4 +646,101 @@ TEST_CASE( "B07: ExperimentStore list scans report a mid-scan SQLITE_CORRUPT as 
   {
     SUCCEED( "mid-scan corruption surfaced as a typed failure" );
   }
+}
+
+// ---------------------------------------------------------------------------
+// B02 — full read == tiled stitch == block stitch (integer types, DEFLATE,
+// rotated grid, edge padding with declared NoData)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "B02: full read equals tile-walk and block stitches for integer compressed rotated rasters",
+           "[r15b][b02][raster][tiles]" )
+{
+  struct Case { const char *dtype; double lo; double hi; double nodata; };
+  const Case cases[] = {
+    { "Byte", 0.0, 255.0, 255.0 },
+    { "Int16", -32768.0, 32767.0, -32768.0 },
+    { "UInt16", 0.0, 65535.0, 0.0 },
+    { "Int32", -2147483648.0, 2147483647.0, -2147483648.0 },
+    { "UInt32", 0.0, 4294967295.0, 4294967295.0 },
+  };
+  const int width = 37, height = 23; // deliberately not block multiples
+  for ( const Case &c : cases )
+  {
+    INFO( "dtype=" << c.dtype );
+    const std::string dir = scratch( std::string( "b02_" ) + c.dtype );
+    const std::string target = ( fs::path( dir ) / "r.tif" ).string();
+    std::vector<double> band1( static_cast<std::size_t>( width ) * height );
+    std::vector<double> band2( band1.size() );
+    for ( int y = 0; y < height; ++y )
+      for ( int x = 0; x < width; ++x )
+      {
+        const std::size_t i = static_cast<std::size_t>( y ) * width + x;
+        // Hit both extremes plus a spread in between.
+        band1[i] = ( i % 11 == 0 ) ? c.lo : ( i % 13 == 0 ) ? c.hi : c.lo + std::fmod( i * 7919.0, c.hi - c.lo );
+        band2[i] = c.hi - std::fmod( i * 104729.0, c.hi - c.lo );
+      }
+    {
+      RasterBandSpec spec;
+      spec.dtype = c.dtype;
+      spec.hasNoData = true;
+      spec.noDataValue = c.nodata;
+      RasterWriter writer = RasterWriter::create(
+        target, width, height, { spec, spec },
+        { "GTiff", { "TILED=YES", "BLOCKXSIZE=16", "BLOCKYSIZE=16", "COMPRESS=DEFLATE" }, true } );
+      writer.setGeotransform( { 500000.0, 10.0, 2.5, 4200000.0, 1.5, -10.0 } ); // rotated/sheared
+      writer.setCrs( Crs::fromAuthid( "EPSG:32650" ) );
+      writer.writeWindow( 1, { 0, 0, width, height }, band1.data() );
+      writer.writeWindow( 2, { 0, 0, width, height }, band2.data() );
+      writer.finalize();
+    }
+    RasterReader reader = RasterReader::open( target );
+    const std::vector<double> full = reader.readFull( { 1, 2 }, 64ULL * 1024 * 1024 );
+    REQUIRE( full.size() == band1.size() * 2 );
+    CHECK( std::equal( band1.begin(), band1.end(), full.begin() ) );
+    CHECK( std::equal( band2.begin(), band2.end(), full.begin() + static_cast<std::ptrdiff_t>( band1.size() ) ) );
+
+    // Tile walk with a tile size unrelated to the native block.
+    std::vector<double> stitched( full.size(), -1.0 );
+    const TilePlan plan = planTileWalk( reader.metadata(), { 0, 0, width, height }, 7, 5 );
+    reader.iterateTiles( plan, { 1, 2 }, [&]( const TileSlice &slice, const std::vector<double> &values ) {
+      const TileSlice &w = slice;
+      const std::size_t plane = static_cast<std::size_t>( w.width ) * w.height;
+      REQUIRE( values.size() == plane * 2 );
+      for ( int b = 0; b < 2; ++b )
+        for ( int y = 0; y < w.height; ++y )
+          for ( int x = 0; x < w.width; ++x )
+            stitched[b * band1.size() + static_cast<std::size_t>( w.yOff + y ) * width + ( w.xOff + x )] =
+              values[b * plane + static_cast<std::size_t>( y ) * w.width + x];
+    } );
+    CHECK( stitched == full );
+
+    // Native blocks: edge blocks are padded with the declared NoData.
+    const auto [bw, bh] = reader.blockSize( 1 );
+    REQUIRE( bw == 16 );
+    REQUIRE( bh == 16 );
+    for ( int by = 0; by * bh < height; ++by )
+      for ( int bx = 0; bx * bw < width; ++bx )
+      {
+        const std::vector<double> block = reader.readBlock( 1, bx, by );
+        REQUIRE( block.size() == static_cast<std::size_t>( bw ) * bh );
+        for ( int y = 0; y < bh; ++y )
+          for ( int x = 0; x < bw; ++x )
+          {
+            const int gx = bx * bw + x, gy = by * bh + y;
+            const double got = block[static_cast<std::size_t>( y ) * bw + x];
+            if ( gx < width && gy < height )
+              REQUIRE( got == band1[static_cast<std::size_t>( gy ) * width + gx] );
+            else
+              REQUIRE( got == c.nodata );
+          }
+      }
+  }
+}
+
+TEST_CASE( "B16: #1485 octal and trailing-dot loopback spellings are private",
+           "[r15b][b16][remote][ssrf]" )
+{
+  CHECK( offline::isPrivateHost( "http://0177.0.0.1/x" ) );
+  CHECK( offline::isPrivateHost( "http://localhost./x" ) );
 }
