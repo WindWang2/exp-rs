@@ -1,0 +1,688 @@
+// test_r14_D_vector_edit_honesty.cpp — R14-D WP-A: vector editing honesty.
+//
+// The suite drives the REAL QgisDesktopWindow offscreen (the harness of
+// test_workbench_full_shell_lifecycle.cpp: hermetic QSettings, exposed
+// dialog-free entry points, modal QMessageBoxes answered by a scheduled
+// dismisser whose nested exec() runs the queued callbacks). A QgsApplication
+// (not a bare QApplication) is created and initQgis()'d so memory vector
+// providers exist.
+//
+// Deterministic failure injection — no chmod/permissions games:
+//   * commit failures: QgsVectorLayer::setAllowCommit(false), the same
+//     genuine-commit-failure idiom as test_edit_persistence.cpp:245;
+//   * delete failures: the edit buffer refuses to delete a fid that is
+//     already in its deleted set (seeded via a raw deleteFeatures call),
+//     while the public select() keeps it in the selection;
+//   * addFeature failures: the edit buffer rejects features whose attribute
+//     count differs from the layer fields ("wrong field count") — field
+//     constraints are NOT enforced at addFeature time, so a schema mismatch
+//     is the honest paste-failure mechanism.
+//
+// Contracts (survey .planning/r14-D/SURVEY_APP.md):
+//   APP-1  toggleEditing: failed commit surfaced, never "Stopped editing"
+//   APP-2  facade saveEdits: commit errors reach the message bar
+//   APP-5  editing actions follow currentLayerChanged (removal clears them)
+//   APP-6  deleteSelected: one undo step; failed delete rolled back+reported
+//   APP-7  cutFeatures: failed delete half reported, never "Cut N"
+//   APP-8  pasteFeatures: "Pasted X of Y", no undo step when zero land
+//   APP-9A saveEdits: failed commit never falls through to "Edits saved"
+//   APP-9B RsJobPanel: Load requires loadable outputs; loads counted honestly
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
+
+#include "support/qt_lifecycle.h"
+
+#include "main_window.h"
+#include "qgis_app_facade.h"
+#include "qgsclipboard.h"
+#include "shell/rs_job_panel.h"
+
+#include "jobs/job_engine.h"
+#include "processing/framework/task_center.h"
+
+#include <QAbstractButton>
+#include <QApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QMessageBox>
+#include <QPointer>
+#include <QPushButton>
+#include <QSettings>
+#include <QStatusBar>
+#include <QTemporaryDir>
+#include <QTimer>
+#include <QTreeWidget>
+#include <QtTest>
+
+#include <json/json.h>
+
+#include <qgsapplication.h>
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
+#include <qgsmapcanvas.h>
+#include <qgsmessagebar.h>
+#include <qgsmessagebaritem.h>
+#include <qgsproject.h>
+#include <qgsvectorlayer.h>
+
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
+
+namespace
+{
+
+int fake_argc = 1;
+char fake_argv0[] = "test_r14_D_vector_edit_honesty";
+char *fake_argv[] = { fake_argv0, nullptr };
+
+// Widgets (the shell window) AND QGIS providers (memory vector layers) are
+// needed: a QgsApplication provides both.
+QgsApplication *ensureApp()
+{
+  if ( !QCoreApplication::instance() )
+  {
+    qputenv( "QT_QPA_PLATFORM", "offscreen" );
+    QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-selftest" ) );
+    QCoreApplication::setApplicationName( QStringLiteral( "r14-D-vector-edit-honesty" ) );
+    QSettings::setDefaultFormat( QSettings::IniFormat );
+    QgsApplication *app = new QgsApplication( fake_argc, fake_argv, true );
+    QSettings().clear();
+    QgsApplication::initQgis();
+    return app;
+  }
+  return qobject_cast<QgsApplication *>( QCoreApplication::instance() );
+}
+
+/// Record and dismiss up to @p budget modal QMessageBoxes as they appear,
+/// clicking @p button when the box offers it (fallback: close). Mirrors the
+/// armModalAnswer dismisser of test_workbench_full_shell_lifecycle.cpp, also
+/// capturing each box text so honesty assertions can check WHAT was surfaced.
+void armModalRecorder( QStringList *seen, QMessageBox::StandardButton button,
+                       int budget = 6 )
+{
+  if ( budget <= 0 )
+    return;
+  QTimer::singleShot( 0, ensureApp(), [seen, button, budget] {
+    if ( QWidget *modal = QApplication::activeModalWidget() )
+    {
+      if ( QMessageBox *box = qobject_cast<QMessageBox *>( modal ) )
+      {
+        if ( seen )
+          *seen << box->text();
+        if ( button != QMessageBox::NoButton )
+        {
+          if ( QAbstractButton *target = box->button( button ) )
+            target->click();
+          else
+            box->close();
+        }
+        else
+        {
+          box->close();
+        }
+      }
+      else
+      {
+        modal->close();
+      }
+    }
+    armModalRecorder( seen, button, budget - 1 );
+  } );
+}
+
+bool anyModalContains( const QStringList &seen, const QString &needle )
+{
+  for ( const QString &text : seen )
+    if ( text.contains( needle, Qt::CaseInsensitive ) )
+      return true;
+  return false;
+}
+
+struct ShellFixture
+{
+  QgisDesktopWindow window;
+
+  ShellFixture()
+  {
+    window.show();
+    QTest::qWaitForWindowExposed( &window );
+  }
+};
+
+/// Drop any layers a failed earlier case leaked into the project singleton,
+/// through the same removal machinery the shell itself uses.
+void purgeProjectLayers()
+{
+  const auto layers = QgsProject::instance()->mapLayers();
+  for ( auto it = layers.cbegin(); it != layers.cend(); ++it )
+    QgsProject::instance()->removeMapLayer( it.key() );
+}
+
+QgsVectorLayer *makeMemoryLayer( const QString &fieldSpec, const QString &name,
+                                 int featureCount )
+{
+  const QString uri = fieldSpec.isEmpty()
+    ? QStringLiteral( "Point?crs=EPSG:4326" )
+    : QStringLiteral( "Point?crs=EPSG:4326&" ) + fieldSpec;
+  auto *layer = new QgsVectorLayer( uri, name, QStringLiteral( "memory" ) );
+  if ( !layer->isValid() )
+    return layer;
+  // addFeature() needs a live edit buffer; seed through the same
+  // start/commit cycle as test_edit_persistence.cpp's makeSampleLayer.
+  layer->startEditing();
+  const QgsFields fields = layer->fields();
+  for ( int i = 0; i < featureCount; ++i )
+  {
+    QgsFeature f( fields );
+    f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( i, i ) ) );
+    for ( const QgsField &field : fields )
+      f.setAttribute( field.name(), i );
+    layer->addFeature( f );
+  }
+  layer->commitChanges();
+  layer->updateExtents();
+  return layer;
+}
+
+/// Register the layer with the live shell: project membership + canvas
+/// current layer (currentVectorLayer()/activeLayer() both resolve through
+/// the canvas).
+void adoptInShell( QgisDesktopWindow &window, QgsVectorLayer *layer )
+{
+  QgsProject::instance()->addMapLayer( layer );
+  window.mapCanvas()->setCurrentLayer( layer );
+  QTest::qWait( 20 );
+}
+
+qlonglong countFeatures( QgsVectorLayer *layer )
+{
+  qlonglong n = 0;
+  QgsFeatureIterator it = layer->getFeatures();
+  QgsFeature f;
+  while ( it.nextFeature( f ) )
+    ++n;
+  return n;
+}
+
+QList<QgsFeatureId> featureIdsOf( QgsVectorLayer *layer )
+{
+  QList<QgsFeatureId> ids;
+  QgsFeatureIterator it = layer->getFeatures();
+  QgsFeature f;
+  while ( it.nextFeature( f ) )
+    ids.append( f.id() );
+  return ids;
+}
+
+} // namespace
+
+// ── APP-1 ──────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Toggle editing: failed commit is surfaced and never reported as Stopped editing",
+           "[app][vector_edit][r14_D][app1]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  QgsVectorLayer *layer =
+    makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "toggle_source" ), 0 );
+  REQUIRE( layer->isValid() );
+  adoptInShell( fx.window, layer );
+
+  REQUIRE( layer->startEditing() );
+  QgsFeature f( layer->fields() );
+  f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 1, 1 ) ) );
+  f.setAttribute( QStringLiteral( "kind" ), 7 );
+  REQUIRE( layer->addFeature( f ) );
+  REQUIRE( layer->isModified() );
+  layer->setAllowCommit( false ); // genuine commit rejection
+
+  QStringList modals;
+  armModalRecorder( &modals, QMessageBox::Save );
+  fx.window.toggleEditing();
+
+  // QGIS behavior: the layer stays in edit mode with the edits buffered.
+  CHECK( layer->isEditable() );
+  CHECK( layer->isModified() );
+
+  const QString status = fx.window.statusBar()->currentMessage();
+  CHECK_FALSE( status.contains( QStringLiteral( "Stopped editing" ) ) );
+  CHECK( status.contains( QStringLiteral( "Commit failed" ) ) );
+  CHECK( status.contains( QStringLiteral( "toggle_source" ) ) );
+
+  // The commit failure itself was surfaced (Save answered the Stop Editing
+  // question; the failure warning followed and was recorded on dismissal).
+  CHECK( anyModalContains( modals, QStringLiteral( "Failed to save edits" ) ) );
+
+  layer->setAllowCommit( true );
+  layer->rollBack();
+  QgsProject::instance()->removeMapLayer( layer->id() );
+}
+
+// ── APP-9A ─────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Save Edits: failed commit does not fall through to the Edits saved status",
+           "[app][vector_edit][r14_D][app9a]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  QgsVectorLayer *layer =
+    makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "save_source" ), 0 );
+  REQUIRE( layer->isValid() );
+  adoptInShell( fx.window, layer );
+
+  REQUIRE( layer->startEditing() );
+  QgsFeature f( layer->fields() );
+  f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 2, 2 ) ) );
+  f.setAttribute( QStringLiteral( "kind" ), 9 );
+  REQUIRE( layer->addFeature( f ) );
+  layer->setAllowCommit( false );
+
+  QStringList modals;
+  armModalRecorder( &modals, QMessageBox::Ok );
+  fx.window.saveEdits(); // non-modal internal path; warning box is dismissed
+
+  CHECK( layer->isEditable() );
+  CHECK( layer->isModified() );
+
+  const QString status = fx.window.statusBar()->currentMessage();
+  CHECK_FALSE( status.contains( QStringLiteral( "Edits saved" ) ) );
+  CHECK( status.contains( QStringLiteral( "Failed to save edits" ) ) );
+  CHECK( anyModalContains( modals, QStringLiteral( "Failed to save edits" ) ) );
+
+  layer->setAllowCommit( true );
+  layer->rollBack();
+  QgsProject::instance()->removeMapLayer( layer->id() );
+}
+
+// ── APP-2 ──────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Facade saveEdits: commit failure reaches the message bar and returns false",
+           "[app][vector_edit][r14_D][app2]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  QgsVectorLayer *layer =
+    makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "facade_source" ), 0 );
+  REQUIRE( layer->isValid() );
+  adoptInShell( fx.window, layer );
+
+  REQUIRE( layer->startEditing() );
+  QgsFeature f( layer->fields() );
+  f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 3, 3 ) ) );
+  f.setAttribute( QStringLiteral( "kind" ), 1 );
+  REQUIRE( layer->addFeature( f ) );
+  layer->setAllowCommit( false );
+
+  // Message-bar spy: the facade must route the failure through the bar the
+  // attribute table shows, not return it into silence.
+  QgsMessageBar *bar = QgisApp::instance()->messageBar();
+  REQUIRE( bar );
+  QStringList titles, texts;
+  QObject::connect( bar, &QgsMessageBar::widgetAdded,
+                     &fx.window, [&titles, &texts]( QgsMessageBarItem *item ) {
+                       if ( item )
+                       {
+                         titles << item->title();
+                         texts << item->text();
+                       }
+                     } );
+
+  const bool ok = QgisApp::instance()->saveEdits( layer, true, true );
+  CHECK_FALSE( ok ); // return value semantics preserved
+  REQUIRE( texts.size() == 1 );
+  CHECK( titles.first() == QStringLiteral( "Save Edits" ) );
+  CHECK( texts.first().contains( QStringLiteral( "Failed to save edits" ) ) );
+  CHECK( texts.first().contains( QStringLiteral( "facade_source" ) ) );
+
+  QObject::disconnect( bar, &QgsMessageBar::widgetAdded, &fx.window, nullptr );
+
+  layer->setAllowCommit( true );
+  layer->rollBack();
+  QgsProject::instance()->removeMapLayer( layer->id() );
+}
+
+// ── APP-5 ──────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Editing actions follow current-layer changes after layer removal",
+           "[app][vector_edit][r14_D][app5]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  QgsVectorLayer *layer =
+    makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "removal_target" ), 2 );
+  REQUIRE( layer->isValid() );
+  adoptInShell( fx.window, layer );
+
+  QAction *capture = fx.window.editingAction( QStringLiteral( "mActionCapturePoint" ) );
+  QAction *vertex = fx.window.editingAction( QStringLiteral( "mActionVertexTool" ) );
+  REQUIRE( capture );
+  REQUIRE( vertex );
+  CHECK_FALSE( capture->isEnabled() );
+
+  // Enter edit mode through the window's own toggle (acquires the lease,
+  // starts editing, refreshes the editing actions).
+  fx.window.toggleEditing();
+  CHECK( layer->isEditable() );
+  CHECK( capture->isEnabled() );
+  CHECK( vertex->isEnabled() );
+
+  // Removing the current editable layer clears the canvas current layer
+  // (SelectionContext::handleLayerWillBeRemoved) — currentLayerChanged must
+  // re-run the editing-UI refresh or the actions stay enabled as dead clicks.
+  QgsProject::instance()->removeMapLayer( layer->id() );
+  QTest::qWait( 50 );
+
+  CHECK( fx.window.mapCanvas()->currentLayer() == nullptr );
+  CHECK_FALSE( capture->isEnabled() );
+  CHECK_FALSE( vertex->isEnabled() );
+}
+
+// ── APP-6 ──────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Delete selected: one undo step, and rejected deletes are rolled back and reported",
+           "[app][vector_edit][r14_D][app6]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  SECTION( "happy path: one Delete-features undo step restores the batch" )
+  {
+    QgsVectorLayer *layer =
+      makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "delete_ok" ), 3 );
+    REQUIRE( layer->isValid() );
+    adoptInShell( fx.window, layer );
+    REQUIRE( layer->startEditing() );
+
+    const QList<QgsFeatureId> ids = featureIdsOf( layer );
+    REQUIRE( ids.size() == 3 );
+    layer->selectByIds( QgsFeatureIds{ ids.at( 0 ), ids.at( 1 ) } );
+
+    const int undoBefore = layer->undoStack()->count();
+    fx.window.deleteSelectedFeatures();
+
+    CHECK( fx.window.statusBar()->currentMessage()
+             .contains( QStringLiteral( "Deleted 2 feature(s)" ) ) );
+    CHECK( countFeatures( layer ) == 1 );
+    // The whole batch is ONE macro command — not one undo step per feature.
+    CHECK( layer->undoStack()->count() == undoBefore + 1 );
+
+    layer->undoStack()->undo();
+    CHECK( countFeatures( layer ) == 3 );
+
+    layer->rollBack();
+    QgsProject::instance()->removeMapLayer( layer->id() );
+  }
+
+  SECTION( "rejected deletes: rolled back, failure surfaced, no Deleted N" )
+  {
+    QgsVectorLayer *layer =
+      makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "delete_fail" ), 3 );
+    REQUIRE( layer->isValid() );
+    adoptInShell( fx.window, layer );
+    REQUIRE( layer->startEditing() );
+
+    const QList<QgsFeatureId> ids = featureIdsOf( layer );
+    REQUIRE( ids.size() == 3 );
+    layer->selectByIds( QgsFeatureIds{ ids.at( 0 ), ids.at( 1 ) } );
+    const int undoBefore = layer->undoStack()->count();
+
+    // Seed a raw delete of ids[0] OUTSIDE any window edit command, then put
+    // it back into the selection: the edit buffer now refuses to delete it a
+    // second time ("already in the deleted set") — a genuine per-feature
+    // provider-side rejection without a custom provider.
+    REQUIRE( layer->deleteFeatures( QgsFeatureIds{ ids.at( 0 ) } ) );
+    layer->select( ids.at( 0 ) );
+    REQUIRE( layer->selectedFeatureIds().size() == 2 );
+
+    QStringList modals;
+    armModalRecorder( &modals, QMessageBox::Ok );
+    fx.window.deleteSelectedFeatures();
+
+    const QString status = fx.window.statusBar()->currentMessage();
+    CHECK_FALSE( status.contains( QStringLiteral( "Deleted" ) ) );
+    CHECK( status.contains( QStringLiteral( "Failed to delete" ) ) );
+    CHECK( anyModalContains( modals, QStringLiteral( "Failed to delete the selected features" ) ) );
+
+    // The failed batch was destroyed wholesale: ids[1] is back, only the
+    // seeded raw delete remains on the undo stack.
+    CHECK( countFeatures( layer ) == 2 );
+    CHECK( layer->undoStack()->count() == undoBefore + 1 );
+
+    layer->rollBack();
+    QgsProject::instance()->removeMapLayer( layer->id() );
+  }
+}
+
+// ── APP-7 ──────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Cut: a failed delete half is reported, never claimed as Cut N",
+           "[app][vector_edit][r14_D][app7]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  SECTION( "happy path" )
+  {
+    QgsVectorLayer *layer =
+      makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "cut_ok" ), 2 );
+    REQUIRE( layer->isValid() );
+    adoptInShell( fx.window, layer );
+    REQUIRE( layer->startEditing() );
+
+    const QList<QgsFeatureId> ids = featureIdsOf( layer );
+    REQUIRE( ids.size() == 2 );
+    layer->selectByIds( QgsFeatureIds{ ids.at( 0 ) } );
+
+    const int undoBefore = layer->undoStack()->count();
+    fx.window.cutFeatures();
+
+    CHECK( fx.window.statusBar()->currentMessage()
+             .contains( QStringLiteral( "Cut 1 feature(s)" ) ) );
+    CHECK( countFeatures( layer ) == 1 );
+    CHECK( layer->undoStack()->count() == undoBefore + 1 );
+    CHECK_FALSE( QgisApp::instance()->clipboard()->isEmpty() );
+
+    layer->rollBack();
+    QgsProject::instance()->removeMapLayer( layer->id() );
+  }
+
+  SECTION( "failed delete half: source keeps the features, status says so" )
+  {
+    QgsVectorLayer *layer =
+      makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "cut_fail" ), 2 );
+    REQUIRE( layer->isValid() );
+    adoptInShell( fx.window, layer );
+    REQUIRE( layer->startEditing() );
+
+    const QList<QgsFeatureId> ids = featureIdsOf( layer );
+    REQUIRE( ids.size() == 2 );
+    layer->selectByIds( QgsFeatureIds{ ids.at( 0 ), ids.at( 1 ) } );
+
+    // Same seeded-refusal trick as APP-6: ids[0] is already in the deleted
+    // set, so the cut's delete half cannot complete for the selection.
+    REQUIRE( layer->deleteFeatures( QgsFeatureIds{ ids.at( 0 ) } ) );
+    layer->select( ids.at( 0 ) );
+
+    QStringList modals;
+    armModalRecorder( &modals, QMessageBox::Ok );
+    fx.window.cutFeatures();
+
+    const QString status = fx.window.statusBar()->currentMessage();
+    CHECK_FALSE( status.contains( QStringLiteral( "Cut 2" ) ) );
+    CHECK( status.contains( QStringLiteral( "Cut failed" ) ) );
+    // The clipboard holds a copy, but the source still contains the features.
+    CHECK_FALSE( QgisApp::instance()->clipboard()->isEmpty() );
+    CHECK( countFeatures( layer ) == 1 ); // ids[1] restored by the rollback
+  }
+}
+
+// ── APP-8 ──────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Paste: only landed features are counted; nothing is pushed when zero land",
+           "[app][vector_edit][r14_D][app8]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  SECTION( "schema mismatch: zero land, no undo step, honest 0 of N" )
+  {
+    QgsVectorLayer *source =
+      makeMemoryLayer( QStringLiteral( "field=a:int&field=b:int" ), QStringLiteral( "paste_src" ), 2 );
+    QgsVectorLayer *target =
+      makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "paste_tgt" ), 0 );
+    REQUIRE( source->isValid() );
+    REQUIRE( target->isValid() );
+    QgsProject::instance()->addMapLayer( source );
+    adoptInShell( fx.window, target );
+
+    source->selectAll();
+    fx.window.mapCanvas()->setCurrentLayer( source );
+    QTest::qWait( 20 );
+    fx.window.copyFeatures();
+
+    fx.window.mapCanvas()->setCurrentLayer( target );
+    QTest::qWait( 20 );
+    REQUIRE( target->startEditing() );
+    REQUIRE_FALSE( QgisApp::instance()->clipboard()->isEmpty() );
+
+    const int undoBefore = target->undoStack()->count();
+    QStringList modals;
+    armModalRecorder( &modals, QMessageBox::Ok );
+    fx.window.pasteFeatures();
+
+    // The buffer rejects every feature (attribute count 2 vs 1 field): the
+    // status must say 0 of 2, not "Pasted 2".
+    const QString status = fx.window.statusBar()->currentMessage();
+    CHECK( status.contains( QStringLiteral( "Pasted 0 of 2 feature(s)" ) ) );
+    CHECK_FALSE( status.contains( QStringLiteral( "Pasted 2 feature(s)" ) ) );
+    CHECK( anyModalContains( modals, QStringLiteral( "Pasted 0 of 2" ) ) );
+
+    // Nothing landed: no undo step, layer not modified.
+    CHECK( target->undoStack()->count() == undoBefore );
+    CHECK_FALSE( target->isModified() );
+    CHECK( countFeatures( target ) == 0 );
+
+    target->rollBack();
+    QgsProject::instance()->removeMapLayer( target->id() );
+    QgsProject::instance()->removeMapLayer( source->id() );
+  }
+
+  SECTION( "compatible schema: one paste step, undo empties the layer" )
+  {
+    QgsVectorLayer *source =
+      makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "paste_src2" ), 2 );
+    QgsVectorLayer *target =
+      makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "paste_tgt2" ), 0 );
+    REQUIRE( source->isValid() );
+    REQUIRE( target->isValid() );
+    QgsProject::instance()->addMapLayer( source );
+    adoptInShell( fx.window, target );
+
+    source->selectAll();
+    fx.window.mapCanvas()->setCurrentLayer( source );
+    QTest::qWait( 20 );
+    fx.window.copyFeatures();
+
+    fx.window.mapCanvas()->setCurrentLayer( target );
+    QTest::qWait( 20 );
+    REQUIRE( target->startEditing() );
+
+    const int undoBefore = target->undoStack()->count();
+    fx.window.pasteFeatures();
+
+    CHECK( fx.window.statusBar()->currentMessage()
+             .contains( QStringLiteral( "Pasted 2 feature(s)" ) ) );
+    CHECK( countFeatures( target ) == 2 );
+    CHECK( target->undoStack()->count() == undoBefore + 1 );
+
+    target->undoStack()->undo();
+    CHECK( countFeatures( target ) == 0 );
+
+    target->rollBack();
+    QgsProject::instance()->removeMapLayer( target->id() );
+    QgsProject::instance()->removeMapLayer( source->id() );
+  }
+}
+
+// ── APP-9B ─────────────────────────────────────────────────────────────────
+
+TEST_CASE( "RsJobPanel: Load requires loadable outputs and counts only successful loads",
+           "[app][task_center][r14_D][app9b]" )
+{
+  ensureApp();
+  sicnu::jobs::JobEngine::instance().shutdownForTests();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  RsJobPanel panel( &fx.window );
+  QTreeWidget *tree = panel.findChild<QTreeWidget *>();
+  QPushButton *load = panel.findChild<QPushButton *>( QStringLiteral( "rsJobLoadBtn" ) );
+  REQUIRE( tree );
+  REQUIRE( load );
+  CHECK_FALSE( load->isEnabled() ); // nothing selected
+
+  // A Completed task with NO outputs: Load must stay disabled (the old
+  // "|| Completed" clause enabled it and the click only produced an info box).
+  const long emptyTask = sicnu::TaskCenter::instance().enqueueTask(
+    QStringLiteral( "test:r14d_no_output" ),
+    QVariantMap{ { QStringLiteral( "INPUT" ), QVariant( QStringLiteral( "in.tif" ) ) } },
+    /*autoLoad=*/false );
+  REQUIRE( emptyTask > 0 );
+  sicnu::TaskCenter::instance().markTaskRunning( emptyTask );
+  sicnu::TaskCenter::instance().markTaskCompleted( emptyTask );
+
+  panel.onTaskAdded( sicnu::TaskCenter::instance().getTaskInfo( emptyTask ) );
+  REQUIRE( tree->topLevelItemCount() == 1 );
+  tree->setCurrentItem( tree->topLevelItem( 0 ) );
+  QTest::qWait( 20 );
+  CHECK_FALSE( load->isEnabled() );
+
+  // A Completed task WITH an output path: Load is enabled — and the click
+  // must count only loads that actually land. The "output" is a DIRECTORY
+  // with a .json name: QFileInfo::exists() passes (so loadPathsToMain
+  // attempts it), but no provider can open a directory as a vector source,
+  // so the load refuses and the panel must count 0 and honestly report
+  // "no loadable output".
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString garbagePath = tmp.filePath( QStringLiteral( "garbage_output.json" ) );
+  REQUIRE( QDir().mkpath( garbagePath ) );
+  REQUIRE( QFileInfo::exists( garbagePath ) );
+
+  const long garbageTask = sicnu::TaskCenter::instance().enqueueTask(
+    QStringLiteral( "test:r14d_bad_output" ),
+    QVariantMap{ { QStringLiteral( "INPUT" ), QVariant( QStringLiteral( "in.tif" ) ) } },
+    /*autoLoad=*/false );
+  REQUIRE( garbageTask > 0 );
+  sicnu::TaskCenter::instance().markTaskRunning( garbageTask );
+  Json::Value payload( Json::objectValue );
+  payload["output"] = garbagePath.toStdString();
+  sicnu::TaskCenter::instance().markTaskCompleted( garbageTask, QVariantMap{}, payload );
+
+  panel.onTaskAdded( sicnu::TaskCenter::instance().getTaskInfo( garbageTask ) );
+  REQUIRE( tree->topLevelItemCount() == 2 );
+  tree->setCurrentItem( tree->topLevelItem( 0 ) ); // upsert inserts at index 0
+  QTest::qWait( 20 );
+  CHECK( load->isEnabled() );
+
+  QStringList modals;
+  armModalRecorder( &modals, QMessageBox::Ok, 8 );
+  load->click();
+  QTest::qWait( 50 );
+
+  CHECK( anyModalContains( modals, QStringLiteral( "No loadable output path" ) ) );
+
+  sicnu::TaskCenter::instance().clearCompletedTasks();
+}

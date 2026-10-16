@@ -703,12 +703,25 @@ void QgsAttributeTableDialog::mActionOpenFieldCalculator_triggered()
 
 void QgsAttributeTableDialog::mActionSaveEdits_triggered()
 {
-  QgisApp::instance()->saveEdits( mLayer, true, true );
+  bool ok = QgisApp::instance()->saveEdits( mLayer, true, true );
   for ( const auto &referencingLayer : std::as_const( mReferencingLayers ) )
   {
     if ( referencingLayer )
     {
-      QgisApp::instance()->saveEdits( referencingLayer, true, true );
+      if ( !QgisApp::instance()->saveEdits( referencingLayer, true, true ) )
+        ok = false;
+    }
+  }
+  if ( !ok )
+  {
+    // The facade already surfaced the per-layer commit errors; state the
+    // consequence for this dialog instead of silently ignoring the false
+    // return (a failed save used to be indistinguishable from success).
+    if ( QgsMessageBar *bar = QgisApp::instance()->messageBar() )
+    {
+      bar->pushMessage( tr( "Save Edits" ),
+                        tr( "Some edits could not be saved. The affected layers remain in edit mode with the edits buffered." ),
+                        Qgis::MessageLevel::Warning );
     }
   }
 }

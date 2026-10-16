@@ -889,11 +889,16 @@ int RsJobPanel::loadPathsToMain( const QStringList &paths )
                               || lower.endsWith( QLatin1String( ".kml" ) )
                               || lower.endsWith( QLatin1String( ".gml" ) );
     // Always via main-window Data/Display seam (register Asset + main view).
+    // Count only loads that actually landed — "Loaded N" must not overstate.
     if ( preferVector )
-      mw->loadVectorLayer( path );
-    else
-      ( void ) mw->loadDataLayer( path );
-    ++loaded;
+    {
+      if ( mw->loadVectorLayer( path ) )
+        ++loaded;
+    }
+    else if ( mw->loadDataLayer( path ) )
+    {
+      ++loaded;
+    }
   }
   return loaded;
 }
@@ -931,7 +936,10 @@ void RsJobPanel::updateActionEnabled()
 
   const bool canLoad = ( status == sicnu::TaskStatus::Completed )
                        && !collectOutputPaths( id ).isEmpty();
-  m_loadBtn->setEnabled( canLoad || status == sicnu::TaskStatus::Completed );
+  // Load requires loadable outputs. The trailing "|| Completed" used to make
+  // canLoad dead code: every completed task got an enabled Load button even
+  // with no output to load (the click then only produced an info box).
+  m_loadBtn->setEnabled( canLoad );
 }
 
 void RsJobPanel::onTaskAdded( const sicnu::AlgorithmTaskInfo &info )

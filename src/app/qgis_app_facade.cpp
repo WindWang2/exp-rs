@@ -182,6 +182,20 @@ bool QgisApp::saveEdits( QgsVectorLayer *layer, bool leaveEditable, bool trigger
 {
   if ( !layer || !layer->isEditable() ) return false;
   bool ok = layer->commitChanges();
+  if ( !ok )
+  {
+    // Route commit errors to the message bar like the neighboring ported
+    // code (qgsattributetabledialog et al.): a failed commit used to be
+    // indistinguishable from success — the layer silently stayed/re-entered
+    // edit mode with the edits still buffered.
+    const QString details = layer->commitErrors().isEmpty()
+      ? tr( "The data source rejected the commit; the layer keeps the edits buffered." )
+      : layer->commitErrors().join( QLatin1Char( '\n' ) );
+    if ( mMessageBar )
+      mMessageBar->pushMessage( tr( "Save Edits" ),
+        tr( "Failed to save edits on layer '%1':\n%2" ).arg( layer->name(), details ),
+        Qgis::MessageLevel::Critical );
+  }
   if ( leaveEditable ) layer->startEditing();
   if ( triggerRepaint && mCanvas ) mCanvas->refresh();
   return ok;
@@ -254,7 +268,18 @@ void QgisApp::saveEdits()
   {
     if ( layer && layer->isEditable() && layer->isModified() )
     {
-      layer->commitChanges();
+      if ( !layer->commitChanges() )
+      {
+        // Same honesty as the per-layer overload: every failed commit is
+        // surfaced, never silently swallowed by the batch loop.
+        const QString details = layer->commitErrors().isEmpty()
+          ? tr( "The data source rejected the commit; the layer keeps the edits buffered." )
+          : layer->commitErrors().join( QLatin1Char( '\n' ) );
+        if ( mMessageBar )
+          mMessageBar->pushMessage( tr( "Save Edits" ),
+            tr( "Failed to save edits on layer '%1':\n%2" ).arg( layer->name(), details ),
+            Qgis::MessageLevel::Critical );
+      }
       layer->startEditing();
     }
   }
