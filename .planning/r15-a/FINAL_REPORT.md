@@ -1,7 +1,7 @@
 # R15-A FINAL_REPORT — 遥感科学算法后合并收敛（轨道 A）
 
 > 分支：`hardening/r15-A-science-processing`（worktree `exp-rs-r15-a-20261016`）
-> BASE：`origin/master = 46791bc6`（2026-10-16，Merge PR #1509）｜ HEAD：`5f55fc440`｜ 提交数：16
+> BASE：`origin/master = 46791bc6`（2026-10-16，Merge PR #1509）｜ HEAD：`eabd30f86`｜ 提交数：17
 > 所有权边界：✅ 全程合规——仅写 `src/analysis/**`、`src/processing/algorithms/**`、`src/operators/rs/**`、`tests/**`、`.planning/r15-a/**`、`.gitignore`（白名单 3 条规则）；**`src/processing/gdal/` 与 `src/data/` 零修改**（两轮独立评审确认）。
 
 ## 1. 执行摘要
@@ -59,7 +59,7 @@
 | both-unreferenced + 尺寸失配 | compareGrids 文档化回退仅做维度检查，融合未阻塞该组合的钳位垃圾——记录在案，建议后续统一治理（compareGrids 调用方公约） |
 | VRT fixture 经验 | 任何 VRT fixture 必须携带 GeoTransform + SRS，否则触发单位变换陷阱；已写入测试注释 |
 
-## 7. 提交清单（origin/master..HEAD，16 个）
+## 7. 提交清单（origin/master..HEAD，17 个）
 
 规划/记账：af488d482（M0 冻结）、16e095a01、80b1e468b、cffc966d9、a77e9ecde、530a566b5、005a39b13
-测试/修复：7aae63038→6d5672419（O1 RED→重定性关闭）、b4a7d148b→（同上）、9187cdc79→28a1445c5（A09 RED→修复）、96b85fef4（O2 双锁）、bf5a7d27a（A03-6 守卫 + 日志修复）、362dc61af（评审响应）、5f55fc440（M4 交付物）
+测试/修复：7aae63038→6d5672419（O1 RED→重定性关闭）、b4a7d148b→（同上）、9187cdc79→28a1445c5（A09 RED→修复）、96b85fef4（O2 双锁）、bf5a7d27a（A03-6 守卫 + 日志修复）、362dc61af（评审响应）、5f55fc440（M4 交付物）、eabd30f86（计数勘误）
