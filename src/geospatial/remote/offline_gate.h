@@ -41,6 +41,18 @@ std::string refusalMessage( const std::string &source );
 /// Accepts bare host/IP, [host]:port, or URLs (http(s)://..., /vsicurl/..., etc.).
 bool isPrivateHost( const std::string &hostOrUrl );
 
+/// R15-B (#1505 T3 / #1485): DNS-rebinding defence for a guarded transport.
+/// Resolves the host of the http(s) @p url ONCE and validates EVERY returned
+/// address with the same private-network predicate. On success returns an
+/// empty string and sets @p curlResolveEntry to a libcurl CURLOPT_RESOLVE
+/// entry ("host:port:addr[,addr...]") that pins the connection to exactly
+/// the validated set — empty when the host is already a literal address
+/// (nothing to re-resolve). Returns a refusal reason when any address is
+/// private or the name does not resolve (fail closed: an unresolvable
+/// answer here followed by a successful one in the transport is itself a
+/// rebinding shape). Proxies are out of scope (the proxy resolves).
+std::string resolvePinnedPublicAddresses( const std::string &url, std::string *curlResolveEntry );
+
 /// GDAL-level backstop: CPL_VSIL_CURL_ALLOWED_EXTENSIONS is set to an
 /// impossible extension so every network /vsi* open fails fast ("does not
 /// exist", no packet leaves the machine) even on open paths that bypass this

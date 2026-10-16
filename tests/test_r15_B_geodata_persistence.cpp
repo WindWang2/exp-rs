@@ -11,6 +11,7 @@
 #include "geospatial/fabric/catalog_service.h"
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/raster/raster_writer.h"
+#include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/offline_gate.h"
 #include "geospatial/remote/range_cache.h"
 #include "geospatial/remote/remote_identity_resolver.h"
@@ -32,6 +33,9 @@
 
 #include <cpl_vsi.h>
 
+#include <dlfcn.h>
+#include <netdb.h>
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -40,8 +44,10 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -923,4 +929,69 @@ TEST_CASE( "1505-T6: a private-network refusal is final, never served by the raw
   VSIFCloseL( fp );
   RemoteRangeCache::clearEntries();
   RemoteRangeCache::install( RangeCacheConfig{} );
+}
+
+// ---------------------------------------------------------------------------
+// #1505 T3 / #1485 (item 8): DNS rebinding. The guard resolved the hostname,
+// validated the answer and freed it; libcurl then resolved the SAME name
+// again and connected wherever the second answer pointed. Deterministic
+// rebinding resolver: getaddrinfo is interposed for one test-only name —
+// the first lookup answers a public TEST-NET address (192.0.2.1, never
+// routable), every later lookup answers 127.0.0.1 where the fixture listens.
+// A pinned transport never reaches the fixture.
+// ---------------------------------------------------------------------------
+namespace
+{
+std::atomic<bool> g_rebindActive{ false };
+std::atomic<int> g_rebindCalls{ 0 };
+constexpr const char *kRebindHost = "r15b-rebind.test";
+} // namespace
+
+extern "C" int getaddrinfo( const char *node, const char *service, const struct addrinfo *hints,
+                            struct addrinfo **res )
+{
+  using Fn = int ( * )( const char *, const char *, const struct addrinfo *, struct addrinfo ** );
+  static Fn real = reinterpret_cast<Fn>( dlsym( RTLD_NEXT, "getaddrinfo" ) );
+  if ( node && g_rebindActive.load() && std::strcmp( node, kRebindHost ) == 0 )
+  {
+    const int n = g_rebindCalls.fetch_add( 1 );
+    struct addrinfo numeric;
+    std::memset( &numeric, 0, sizeof numeric );
+    numeric.ai_family = AF_INET;
+    numeric.ai_socktype = hints ? hints->ai_socktype : SOCK_STREAM;
+    numeric.ai_flags = AI_NUMERICHOST;
+    return real( n == 0 ? "192.0.2.1" : "127.0.0.1", service, &numeric, res );
+  }
+  return real( node, service, hints, res );
+}
+
+TEST_CASE( "1505-T3: guarded fetch connects only to the address set the guard validated (DNS rebinding)",
+           "[r15b][post1505][remote][ssrf][dns]" )
+{
+  testsupport::HttpRangeServer server( std::vector<unsigned char>( 4096, 0x33 ) );
+  const std::string url = "http://" + std::string( kRebindHost ) + ":" + std::to_string( server.port() ) +
+                          "/fixture.tif";
+  HttpFetchOptions options;
+  options.timeoutSeconds = 3;
+  options.connectTimeoutSeconds = 1;
+  options.maxRetries = 0;
+  options.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+    return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
+  };
+  g_rebindCalls = 0;
+  g_rebindActive = true;
+  bool threw = false;
+  try
+  {
+    httpFetch( url, options );
+  }
+  catch ( const GeoError & )
+  {
+    threw = true;
+  }
+  g_rebindActive = false;
+  INFO( "lookups=" << g_rebindCalls.load() << " fixture requests=" << server.requestCount() );
+  CHECK( g_rebindCalls.load() >= 1 );
+  CHECK( server.requestCount() == 0 ); // never reached the rebound private address
+  CHECK( threw );
 }
