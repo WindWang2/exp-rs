@@ -1064,3 +1064,62 @@ TEST_CASE( "R3-10: a guarded fetch's transport failure never degrades to the ung
   RemoteRangeCache::clearEntries();
   RemoteRangeCache::install( RangeCacheConfig{} );
 }
+
+// ---------------------------------------------------------------------------
+// R4-01 (found by the T11 prefetch oracle): blockPrivateNetworks guarded only
+// the Open host check and the ranged fetch. The identity probe, the
+// revalidation and Stat used validatorOptions(config), which dropped the
+// flag — so VSIStatL on a private URL probed it, and a rebinding public
+// name was probed with an unguarded, unpinned request.
+// ---------------------------------------------------------------------------
+TEST_CASE( "R4-01: Stat under the private-network policy never probes a private origin",
+           "[r15b][post1505][remote][ssrf]" )
+{
+  using sicnu::geo::RangeCacheConfig;
+  using sicnu::geo::RemoteRangeCache;
+  RemoteRangeCache::clearEntries();
+  testsupport::HttpRangeServer server( std::vector<unsigned char>( 8192, 0x5C ) );
+  server.setEtag( "\"r15b-r401-stat\"" );
+  RangeCacheConfig guarded;
+  guarded.blockPrivateNetworks = true;
+  RemoteRangeCache::install( guarded );
+  VSIStatBufL st;
+  const int rc = VSIStatL( RemoteRangeCache::cachedPath( server.url() ).c_str(), &st );
+  CHECK( rc != 0 );
+  CHECK( server.requestCount() == 0 );
+  RemoteRangeCache::clearEntries();
+  RemoteRangeCache::install( RangeCacheConfig{} );
+}
+
+TEST_CASE( "R4-01: the open-time identity probe is guarded and pinned (DNS rebinding)",
+           "[r15b][post1505][remote][ssrf][dns]" )
+{
+  using sicnu::geo::RangeCacheConfig;
+  using sicnu::geo::RemoteRangeCache;
+  RemoteRangeCache::clearEntries();
+  testsupport::HttpRangeServer server( std::vector<unsigned char>( 8192, 0x5D ) );
+  server.setEtag( "\"r15b-r401-open\"" );
+  const std::string url = "http://" + std::string( kRebindHost ) + ":" + std::to_string( server.port() ) +
+                          "/fixture.tif";
+  RangeCacheConfig guarded;
+  guarded.blockPrivateNetworks = true;
+  guarded.timeoutSeconds = 3;
+  guarded.connectTimeoutSeconds = 1;
+  guarded.maxRetries = 0;
+  RemoteRangeCache::install( guarded );
+  // Open's host check sees the public answer; every later lookup (the
+  // probe's own resolution) answers loopback — the rebinding.
+  g_rebindCalls = 0;
+  g_rebindPublicAnswers = 1;
+  g_rebindActive = true;
+  VSILFILE *fp = VSIFOpenL( RemoteRangeCache::cachedPath( url ).c_str(), "rb" );
+  g_rebindActive = false;
+  INFO( "lookups=" << g_rebindCalls.load() << " fixture requests=" << server.requestCount() );
+  CHECK( g_rebindCalls.load() >= 2 ); // the probe did resolve the name again
+  CHECK( fp == nullptr );
+  CHECK( server.requestCount() == 0 );
+  if ( fp )
+    VSIFCloseL( fp );
+  RemoteRangeCache::clearEntries();
+  RemoteRangeCache::install( RangeCacheConfig{} );
+}
