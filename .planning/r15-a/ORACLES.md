@@ -13,6 +13,15 @@
 - **退出码**：RED=Catch2 rc=42；GREEN=rc=0 且两次独立运行一致。
 - **负面测试**：无 NoData 标签影像融合结果与 BASE_SHA 完全一致（不允许行为漂移）；单波段全 NoData → typed 失败而非伪造成功。
 
+### O1 策略决策（2026-10-16 定案，依据代码证据）
+
+1. **修复语义 = 家族部分空值惯例（Policy B）**：MS 核触及空值源的 pan 像元判空。证据：流式 brovey 的 any-void 规则（`msData[i]==nodata||isnan → validPixel=false`）与 #700"partially-NoData pixels invalidated like the kernel"、#611 的负和守卫。**不**采用"仅剔除空值源后平均"（Policy A）——那会与本家族其余部分语义不一致。
+2. **修复位置 = 先洗后重采样**（native read → 哨兵洗 NaN → MEM 数据集 → GDAL bilinear，NaN 经核传播）。GDAL 的 RasterIO 重采样不识别 NoData（`readBandWindowScaled` 直通 `GRIORA_Bilinear`，无 nodata 通道），后置 wash 只能抓精确匹配。
+3. **快路径保全行为逐位不变**：窗口内无任何空值（或该波段无有限声明哨兵）时走原 `readBandWindowScaled` 原样路径；MEM 子矩形映射逐行复刻 wrapper 的 clamped 映射，栅格边缘几何不变。
+4. **RED 驱动哨兵选择 = -1.0（温和哨兵）**：-9999 掺混后的负和被 #611 守卫掩盖成 NaN（BASE 输出"看起来干净"）；-1 掺混值 0.5 使和为正，污染以**看似合理的错误反射率**存活（8.889/7.619 而非 6.667）——这才是诚实的 RED 症状。-9999 变体作为哨兵无关性回归锁定（BASE 已绿，防修复只对特定哨兵有效）。
+5. **`src/processing/gdal/gdal_dataset_wrapper.cpp` 不在本轨可写范围**（可写范围为 `src/processing/algorithms/**`），故修复全部落在 `image_fusion.cpp` 内。
+6. **已知后果（如实记录）**：fidelity-report 路径（image_fusion.cpp 约 1845 行 `readBandWindowScaled` 参考图）存在同一掺混机制，但仅影响质量报告指标而非科学输出，本轮不动（P3，记录待后续）。
+
 ## O2 · sam_classify 与 spectral_similarity 的 NoData 方言分歧（WP-A02/A13，来源：R14-A 残留第 3 条）
 
 - **旧失败输入**：同一参考光谱 + 同一测试栅格，分别走 `rs_sam_classify_operator` 与 `rs_spectral_similarity_operator`；测试栅格含"未声明 NoData 的波段"与"含 -9999 的参考光谱"两种输入。
