@@ -468,6 +468,19 @@ TEST_CASE( "tool errors on hostile args", "[science_context]" )
     Json::Value args( Json::objectValue );
     args["passport_json"] = "{not json";
     CHECK_THROWS_AS( agent_adapter::dataAssetPassport( args ), std::runtime_error );
+
+    // Issue #1447: mismatched argument types must fall back gracefully without Json::LogicError
+    Json::Value typeMismatched( Json::objectValue );
+    typeMismatched["autonomy_level"] = 12345;
+    typeMismatched["offline"] = "false";
+    typeMismatched["max_bytes"] = "large";
+    typeMismatched["max_recipes"] = "many";
+    typeMismatched["use_cache"] = 999;
+    typeMismatched["goal"] = 42;
+    typeMismatched["intent"] = 42;
+    CHECK_NOTHROW( agent_adapter::scientificContext( typeMismatched ) );
+    CHECK_NOTHROW( agent_adapter::scientificCapabilities( typeMismatched ) );
+    CHECK_NOTHROW( agent_adapter::recipeSearch( typeMismatched ) );
 }
 
 // ---------------------------------------------------------------------------

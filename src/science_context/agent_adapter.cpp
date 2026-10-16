@@ -76,6 +76,27 @@ Json::Value requireObject( const Json::Value &args )
     return args;
 }
 
+std::string safeString( const Json::Value &v, const std::string &key, const std::string &fallback = {} )
+{
+    if ( v.isObject() && v.isMember( key ) && v[key].isString() )
+        return v[key].asString();
+    return fallback;
+}
+
+bool safeBool( const Json::Value &v, const std::string &key, bool fallback = false )
+{
+    if ( v.isObject() && v.isMember( key ) && v[key].isBool() )
+        return v[key].asBool();
+    return fallback;
+}
+
+int safeInt( const Json::Value &v, const std::string &key, int fallback = 0 )
+{
+    if ( v.isObject() && v.isMember( key ) && v[key].isInt() )
+        return v[key].asInt();
+    return fallback;
+}
+
 sicnu::state::RemoteSensingAssetState passportFromArgs( const Json::Value &args )
 {
     sicnu::state::RemoteSensingAssetState state;
@@ -129,8 +150,8 @@ Json::Value scientificContext( const Json::Value &argsIn )
 {
     const Json::Value args = requireObject( argsIn );
     SynthesizeRequest req;
-    req.goal = args.get( "goal", "" ).asString();
-    req.intent = args.get( "intent", "" ).asString();
+    req.goal = safeString( args, "goal" );
+    req.intent = safeString( args, "intent" );
     if ( args.isMember( "asset_keys" ) && args["asset_keys"].isArray() )
     {
         for ( const auto &k : args["asset_keys"] )
@@ -155,13 +176,13 @@ Json::Value scientificContext( const Json::Value &argsIn )
             req.passports.push_back( state );
         }
     }
-    req.constraints.autonomyLevel = args.get( "autonomy_level", "L2" ).asString();
-    req.constraints.offline = args.get( "offline", false ).asBool();
-    if ( args.isMember( "max_bytes" ) )
+    req.constraints.autonomyLevel = safeString( args, "autonomy_level", "L2" );
+    req.constraints.offline = safeBool( args, "offline", false );
+    if ( args.isMember( "max_bytes" ) && args["max_bytes"].isInt() )
         req.budget.maxBytes = args["max_bytes"].asInt();
-    if ( args.isMember( "max_recipes" ) )
+    if ( args.isMember( "max_recipes" ) && args["max_recipes"].isInt() )
         req.budget.maxRecipes = args["max_recipes"].asInt();
-    req.useCache = args.get( "use_cache", true ).asBool();
+    req.useCache = safeBool( args, "use_cache", true );
 
     auto result = sharedBroker().synthesize( req );
     Json::Value out = bundleToJson( result.bundle );
@@ -180,8 +201,8 @@ Json::Value scientificCapabilities( const Json::Value &argsIn )
 {
     const Json::Value args = requireObject( argsIn );
     CapabilityQuery q;
-    q.goal = args.get( "goal", "" ).asString();
-    q.intent = args.get( "intent", "" ).asString();
+    q.goal = safeString( args, "goal" );
+    q.intent = safeString( args, "intent" );
     // Route through the same capability authority the broker uses — without
     // this the tool would silently run on the builtin fallback table.
     q.facts = sharedBroker().capabilityFacts();
@@ -192,8 +213,8 @@ Json::Value scientificCapabilities( const Json::Value &argsIn )
     }
     else if ( args.isMember( "observed_state" ) )
         q.observedState = args["observed_state"];
-    q.constraints.autonomyLevel = args.get( "autonomy_level", "L2" ).asString();
-    q.limit = args.get( "limit", 8 ).asInt();
+    q.constraints.autonomyLevel = safeString( args, "autonomy_level", "L2" );
+    q.limit = safeInt( args, "limit", 8 );
     auto routed = routeCapabilities( q );
     Json::Value out( Json::objectValue );
     out["intent"] = routed.intent;
@@ -239,7 +260,9 @@ Json::Value scientificCapabilities( const Json::Value &argsIn )
 Json::Value dataAssetPassport( const Json::Value &argsIn )
 {
     const Json::Value args = requireObject( argsIn );
-    const std::string assetKey = args.get( "asset_id", args.get( "asset_key", "" ).asString() ).asString();
+    std::string assetKey = safeString( args, "asset_id" );
+    if ( assetKey.empty() )
+        assetKey = safeString( args, "asset_key" );
     AssetResolveResult resolved;
     bool inlinePassport = false;
     if ( args.isMember( "passport" ) || args.isMember( "passport_json" ) )
@@ -285,7 +308,7 @@ Json::Value dataAssetPassport( const Json::Value &argsIn )
     else
         out["source"] = contentSourceToString( ::sicnu::science_context::ContentSource::Unavailable );
     out["observed_state"] = observedStateFromPassport( resolved.state );
-    if ( args.get( "include_full", false ).asBool() )
+    if ( safeBool( args, "include_full", false ) )
         out["passport"] = sicnu::state::assetStateToJson( resolved.state );
     out["truncated"] = false;
     return out;
@@ -295,10 +318,12 @@ Json::Value recipeSearch( const Json::Value &argsIn )
 {
     const Json::Value args = requireObject( argsIn );
     RecipeQuery q;
-    q.intent = args.get( "intent", "" ).asString();
-    q.modality = args.get( "modality", "" ).asString();
-    q.text = args.get( "text", args.get( "goal", "" ).asString() ).asString();
-    q.limit = args.get( "limit", 5 ).asInt();
+    q.intent = safeString( args, "intent" );
+    q.modality = safeString( args, "modality" );
+    q.text = safeString( args, "text" );
+    if ( q.text.empty() )
+        q.text = safeString( args, "goal" );
+    q.limit = safeInt( args, "limit", 5 );
     if ( args.isMember( "observed_state" ) )
         q.observedState = args["observed_state"];
     else if ( args.isMember( "passport" ) || args.isMember( "passport_json" ) )

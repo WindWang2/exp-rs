@@ -236,6 +236,13 @@ TEST_CASE( "verifier14: canonical json is member-order independent and refuses u
     std::string deepText;
     REQUIRE( !canonicalJson( deep, deepText, error ) );
     REQUIRE( !error.empty() );
+
+    // Issue #1488: canonical serialization failure preserves out contract (untouched on failure)
+    std::string preservedOut = "PRESERVED";
+    std::string failErr;
+    REQUIRE( !canonicalJson( broken, preservedOut, failErr ) );
+    CHECK( preservedOut == "PRESERVED" );
+    CHECK( !failErr.empty() );
 }
 
 TEST_CASE( "verifier14: spec digest is stable and sensitive to real changes", "[verifier14][core]" )

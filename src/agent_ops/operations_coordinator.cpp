@@ -114,25 +114,34 @@ std::string OperationsCoordinator::armRepairApproval(const Json::Value &tokenDoc
     // Fail closed on a malformed token BEFORE touching the digest: jsoncpp's
     // asString() throws on a missing/non-string field, and a typed refusal is
     // the contract, not an exception escaping the approval path. (#1451)
-    if (!tokenDoc["digest"].isString())
+    if (!tokenDoc.isObject() || !tokenDoc["digest"].isString() ||
+        !tokenDoc["findings_digest"].isString())
         return "APPROVAL_MALFORMED";
-    // Replay first: a token this coordinator already consumed by a launch
-    // cannot arm again, whatever the current projection is — one approval
-    // authorizes exactly one repair launch.
-    const std::string tokenDigest = tokenDoc["digest"].asString();
-    for (const std::string &consumed : mConsumedApprovalDigests)
+
+    try
     {
-        if (consumed == tokenDigest)
-            return "APPROVAL_REPLAYED";
+        // Replay first: a token this coordinator already consumed by a launch
+        // cannot arm again, whatever the current projection is — one approval
+        // authorizes exactly one repair launch.
+        const std::string tokenDigest = tokenDoc["digest"].asString();
+        for (const std::string &consumed : mConsumedApprovalDigests)
+        {
+            if (consumed == tokenDigest)
+                return "APPROVAL_REPLAYED";
+        }
+
+        const std::string error = verifyApprovalAgainstLastProjection(tokenDoc, nowMs);
+        if (!error.empty())
+            return error;
+
+        mPendingRepairApproval =
+            ArmedApproval{tokenDoc, tokenDoc["findings_digest"].asString()};
+        return {};
     }
-
-    const std::string error = verifyApprovalAgainstLastProjection(tokenDoc, nowMs);
-    if (!error.empty())
-        return error;
-
-    mPendingRepairApproval =
-        ArmedApproval{tokenDoc, tokenDoc["findings_digest"].asString()};
-    return {};
+    catch (const std::exception &)
+    {
+        return "APPROVAL_MALFORMED";
+    }
 }
 
 bool OperationsCoordinator::hasPendingRepairApproval() const
@@ -339,15 +348,17 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         // Json::LogicError on a missing/non-string field; through OpsDriver
         // that degrades to INVALID_ARGS, but a direct coordinator caller
         // (the GUI dock worker thread) would terminate the process.
-        if (!request.repairApproval["digest"].isString())
+        if (!request.repairApproval["digest"].isString() ||
+            !request.repairApproval["findings_digest"].isString())
         {
-            approvalError = "APPROVAL_MALFORMED";
+            if (approvalError.empty())
+                approvalError = "APPROVAL_MALFORMED";
         }
         else
         {
-            // Single-use is symmetric: a driver-held token goes through the SAME
-            // consumed ring as an armed one — a consumed token presented with the
-            // request is a replay, never a second authorization.
+            // Single-use is symmetric: a driver-held token goes through the
+            // SAME consumed ring as an armed one — a consumed token presented
+            // with the request is a replay, never a second authorization.
             const std::string tokenDigest = request.repairApproval["digest"].asString();
             bool replayed = false;
             for (const std::string &consumed : mConsumedApprovalDigests)
@@ -394,7 +405,11 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         // approval must not arm a later launch.
         if (mConsumedApprovalDigests.size() >= kMaxConsumedDigests)
             mConsumedApprovalDigests.erase(mConsumedApprovalDigests.begin());
-        mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+        if (mPendingRepairApproval->token.isObject() &&
+            mPendingRepairApproval->token["digest"].isString())
+        {
+            mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+        }
         mPendingRepairApproval.reset();
     }
 
@@ -475,7 +490,10 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
             for (const auto &dec : result.summary.decisions)
             {
                 if (dec.stage != "diagnose" ||
-                    dec.inputs.get("root_cause_code", "").asString().empty())
+                    !dec.inputs.isObject() ||
+                    !dec.inputs.isMember("root_cause_code") ||
+                    !dec.inputs["root_cause_code"].isString() ||
+                    dec.inputs["root_cause_code"].asString().empty())
                     continue;
                 d.sources["journal_diagnose"] = dec.toJson();
                 d.evidence["decision_id"] = dec.decisionId;
@@ -698,7 +716,11 @@ RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &dia
         }
         if (mConsumedApprovalDigests.size() >= kMaxConsumedDigests)
             mConsumedApprovalDigests.erase(mConsumedApprovalDigests.begin());
-        mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+        if (mPendingRepairApproval->token.isObject() &&
+            mPendingRepairApproval->token["digest"].isString())
+        {
+            mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+        }
         mPendingRepairApproval.reset();
         tokenErrorOut = tokenError;
     }

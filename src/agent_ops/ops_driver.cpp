@@ -313,11 +313,11 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
 
     if (action == "reconcile")
     {
-        if (!args.isObject() || args.get("journal_directory", "").asString().empty() ||
-            args.get("session_id", "").asString().empty())
+        const std::string journalDir = getStringArg(args, "journal_directory");
+        const std::string sessId = getStringArg(args, "session_id");
+        if (journalDir.empty() || sessId.empty())
             return errorDoc(action, "MISSING_ARGS");
-        auto recon = mReconciler.reconcileFile(args["journal_directory"].asString(),
-                                               args["session_id"].asString());
+        auto recon = mReconciler.reconcileFile(journalDir, sessId);
         Json::Value doc(Json::objectValue);
         doc["schema"] = kOpsDriverSchema;
         doc["action"] = action;
