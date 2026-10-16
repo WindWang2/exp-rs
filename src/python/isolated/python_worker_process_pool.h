@@ -95,6 +95,9 @@ class PythonWorkerProcessPool : public QObject
     /// Single deep-module query returning a composite pool health snapshot (ADR 0045).
     PoolHealthSnapshot poolHealth() const;
 
+    /// Thread-safe lookup of a worker's active IPC server (DEF-RNT-01).
+    PythonIpcServer *serverForWorker( int id ) const;
+
   signals:
     /// Emitted whenever a node loses its worker — crash, clean self-exit with
     /// in-flight work, or protocol EOF — carrying the loss classification

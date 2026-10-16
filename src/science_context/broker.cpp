@@ -67,8 +67,37 @@ std::string assetDigestOf(
 
 } // namespace
 
+ScienceContextBroker::ScienceContextBroker( ScienceContextBroker &&other ) noexcept
+{
+    std::lock_guard<std::mutex> lock( other.mMutex );
+    mAssets = std::move( other.mAssets );
+    mRecipes = std::move( other.mRecipes );
+    mCache = std::move( other.mCache );
+    mObs = std::move( other.mObs );
+    mRecipeRegistry = other.mRecipeRegistry;
+    other.mRecipeRegistry = nullptr;
+    mCapFacts = std::move( other.mCapFacts );
+}
+
+ScienceContextBroker &ScienceContextBroker::operator=( ScienceContextBroker &&other ) noexcept
+{
+    if ( this != &other )
+    {
+        std::scoped_lock lock( mMutex, other.mMutex );
+        mAssets = std::move( other.mAssets );
+        mRecipes = std::move( other.mRecipes );
+        mCache = std::move( other.mCache );
+        mObs = std::move( other.mObs );
+        mRecipeRegistry = other.mRecipeRegistry;
+        other.mRecipeRegistry = nullptr;
+        mCapFacts = std::move( other.mCapFacts );
+    }
+    return *this;
+}
+
 void ScienceContextBroker::setCapabilityFacts( CapabilityFactsLookup lookup )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mCapFacts = std::move( lookup );
     // Bundles computed under the previous facts authority must not survive an
     // authority reinstall.
@@ -78,11 +107,13 @@ void ScienceContextBroker::setCapabilityFacts( CapabilityFactsLookup lookup )
 void ScienceContextBroker::setRecipeRegistry(
     sicnu::recipes::ScientificRecipeRegistry *registry )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mRecipeRegistry = registry;
 }
 
 bool ScienceContextBroker::refreshRecipes()
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     if ( !mRecipeRegistry )
         return false;
     const bool ok = mRecipes.loadFromRegistry( *mRecipeRegistry );
@@ -93,6 +124,7 @@ bool ScienceContextBroker::refreshRecipes()
 
 void ScienceContextBroker::invalidateAsset( const std::string &assetKey )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mAssets.invalidate( assetKey );
     // Bundles embedding this asset are keyed by its digest; drop them so a
     // re-synthesize picks up the mutated passport instead of a stale match.
@@ -101,18 +133,21 @@ void ScienceContextBroker::invalidateAsset( const std::string &assetKey )
 
 void ScienceContextBroker::invalidateAllAssets()
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mAssets.invalidateAll();
     mCache.clear();
 }
 
 void ScienceContextBroker::notifyProjectSwitch()
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     mAssets.invalidateAll();
     mCache.clear();
 }
 
 SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &request )
 {
+    std::lock_guard<std::mutex> lock( mMutex );
     SynthesizeResult result;
     ContextConstraints constraints = request.constraints;
     constraints.allowAutonomousExec = autonomyAllowsExec( constraints.autonomyLevel );
@@ -234,7 +269,7 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
             mergedObserved["grid_conflicted"] = true;
     }
 
-    const CapabilityFactsLookup *capFacts = capabilityFacts();
+    const CapabilityFactsLookup *capFacts = mCapFacts ? &*mCapFacts : nullptr;
     const bool haveCapProvider = capFacts && static_cast<bool>( capFacts->entriesForIntent );
     // One revision read per synthesize: cache key and provenance must agree
     // even if the authority reloads mid-flight.

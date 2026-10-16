@@ -1832,3 +1832,23 @@ TEST_CASE( "offline guard keeps loopback exempt from proxies",
   sicnu::testsupport::offline::ensureLoopbackProxyHygiene();
   CHECK( sicnu::testsupport::offline::loopbackProxyExempted() );
 }
+
+TEST_CASE( "range cache refuses private network target (DEF-GEO-02)",
+           "[io][remote][range_cache][ssrf]" )
+{
+  RemoteRangeCache::clearEntries();
+  RangeCacheConfig cfg;
+  cfg.blockPrivateNetworks = true;
+  RemoteRangeCache::install( cfg );
+
+  const std::string privateTarget = "/vsirangecache/http://169.254.169.254/latest/meta-data/data.tif";
+  VSILFILE *fp = VSIFOpenL( privateTarget.c_str(), "rb" );
+  CHECK( fp == nullptr );
+
+  const std::string loopbackTarget = "/vsirangecache/http://127.0.0.1:8000/data.tif";
+  VSILFILE *fp2 = VSIFOpenL( loopbackTarget.c_str(), "rb" );
+  CHECK( fp2 == nullptr );
+
+  RemoteRangeCache::clearEntries();
+  RemoteRangeCache::install( RangeCacheConfig{} );
+}

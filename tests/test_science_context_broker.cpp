@@ -1054,6 +1054,50 @@ TEST_CASE( "budget truncation preserves critical blocking questions over non-blo
     CHECK( bundle.truncation.droppedQuestions == 2 );
 }
 
+TEST_CASE( "ScienceContextBroker concurrent multi-threaded synthesize and invalidation",
+           "[science_context][concurrency]" )
+{
+    ScienceContextBroker broker = makeBroker();
+    auto state = makeOptical( "opt1", "reflectance", { "red", "nir" } );
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> successCount{ 0 };
+
+    constexpr int kNumThreads = 4;
+    std::vector<std::thread> workers;
+    workers.reserve( kNumThreads );
+
+    for ( int i = 0; i < kNumThreads; ++i )
+    {
+        workers.emplace_back( [&broker, &state, &stop, &successCount, i] {
+            while ( !stop.load( std::memory_order_relaxed ) )
+            {
+                if ( i == 0 )
+                {
+                    broker.invalidateAsset( "opt1" );
+                    std::this_thread::yield();
+                }
+                SynthesizeRequest req;
+                req.goal = "compute vegetation index";
+                req.intent = "ndvi";
+                req.passports.push_back( state );
+                req.useCache = true;
+                auto res = broker.synthesize( req );
+                if ( !res.bundle.bundleId.empty() )
+                    successCount.fetch_add( 1, std::memory_order_relaxed );
+            }
+        } );
+    }
+
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+    stop.store( true, std::memory_order_relaxed );
+
+    for ( auto &t : workers )
+        t.join();
+
+    CHECK( successCount.load() > 0 );
+}
+
 TEST_CASE( "RecipeRouter stays consistent under concurrent search and replacement (R14-E)",
            "[science_context][concurrency][r14e]" )
 {

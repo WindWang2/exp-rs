@@ -138,14 +138,47 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
         if ( step > 0 )
             ladder.push_back( step );
 
+    auto evictWarmSessions = [&]( size_t neededVramMb ) {
+        bool freed = false;
+        for ( auto it = m_impl->sessions.begin(); it != m_impl->sessions.end(); )
+        {
+            if ( it->session->deviceId == deviceId && it->released && it->session.use_count() == 1 )
+            {
+                m_impl->backend->freeVram( deviceId, it->vramMb );
+                used = used >= it->vramMb ? used - it->vramMb : 0;
+                it = m_impl->sessions.erase( it );
+                freed = true;
+                if ( neededVramMb > 0 && m_impl->vramBudgetMb > 0 &&
+                     used + neededVramMb <= m_impl->vramBudgetMb )
+                    break;
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        return freed;
+    };
+
     // Per-device warm-session bound: a secondary fairness guard behind the
     // VRAM budget (which is the primary limiter). Only when budget would
     // still admit a model do we stop the 5th warm session from loading.
-    const size_t deviceSessionCount =
+    size_t deviceSessionCount =
         std::count_if( m_impl->sessions.begin(), m_impl->sessions.end(),
                        [&]( const Impl::LiveSession &live ) {
                            return live.session->deviceId == deviceId;
                        } );
+
+    if ( deviceSessionCount >= kMaxSessionsPerDevice && !ladder.empty() )
+    {
+        evictWarmSessions( 0 );
+        deviceSessionCount =
+            std::count_if( m_impl->sessions.begin(), m_impl->sessions.end(),
+                           [&]( const Impl::LiveSession &live ) {
+                               return live.session->deviceId == deviceId;
+                           } );
+    }
+
     // NOTE the documented bypass: a footprint-less request (vramMb == 0 and
     // no ladder) cannot occupy VRAM, so the session-count bound does not
     // apply to it — it falls through the empty ladder to CpuFallback below.
@@ -158,9 +191,22 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
     for ( size_t mb : ladder )
     {
         if ( m_impl->vramBudgetMb > 0 && used + mb > m_impl->vramBudgetMb )
-            continue;
+        {
+            evictWarmSessions( mb );
+            if ( m_impl->vramBudgetMb > 0 && used + mb > m_impl->vramBudgetMb )
+                continue;
+        }
         if ( !m_impl->backend->allocateVram( deviceId, mb ) )
-            continue;
+        {
+            if ( evictWarmSessions( mb ) && m_impl->backend->allocateVram( deviceId, mb ) )
+            {
+                // Allocated after evicting warm sessions
+            }
+            else
+            {
+                continue;
+            }
+        }
         auto session = std::make_shared<ModelSession>();
         session->sessionId = makeSessionId();
         session->model = request.model;

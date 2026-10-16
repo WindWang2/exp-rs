@@ -26,6 +26,7 @@
 #include <limits>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -156,7 +157,7 @@ class TemporalCubeImpl final : public TemporalCube
         {
             for ( int tx = tx0; tx <= tx1; ++tx )
             {
-                const Tile &tile = ensureTile( tx, ty );
+                const TilePtr tile = ensureTile( tx, ty );
                 // Intersect the request with this tile.
                 const int rx0 = std::max( x, tx * kTileSize );
                 const int rx1 = std::min( x + width, ( tx + 1 ) * kTileSize );
@@ -166,11 +167,11 @@ class TemporalCubeImpl final : public TemporalCube
                 {
                     for ( int row = ry0; row < ry1; ++row )
                     {
-                        const float *src = tileValuePtr( tile, rx0 - tx * kTileSize,
+                        const float *src = tileValuePtr( *tile, rx0 - tx * kTileSize,
                                                          row - ty * kTileSize, tStart + k );
                         float *dst = out.data() +
                                      ( static_cast<std::size_t>( k ) * height + ( row - y ) ) *
-                                         width +
+                                          width +
                                      ( rx0 - x );
                         std::copy( src, src + ( rx1 - rx0 ), dst );
                     }
@@ -184,10 +185,10 @@ class TemporalCubeImpl final : public TemporalCube
     {
         if ( x < 0 || y < 0 || x >= mWidth || y >= mHeight )
             return {};
-        const Tile &tile = ensureTile( x / kTileSize, y / kTileSize );
+        const TilePtr tile = ensureTile( x / kTileSize, y / kTileSize );
         std::vector<float> series( mTimeline.size() );
         for ( std::size_t k = 0; k < mTimeline.size(); ++k )
-            series[k] = *tileValuePtr( tile, x % kTileSize, y % kTileSize, k );
+            series[k] = *tileValuePtr( *tile, x % kTileSize, y % kTileSize, k );
         return series;
     }
 
@@ -221,24 +222,40 @@ class TemporalCubeImpl final : public TemporalCube
         int height = 0;
     };
 
-    using LruIterator = std::list<std::pair<TileKey, Tile>>::iterator;
+    using TilePtr = std::shared_ptr<Tile>;
+    using LruIterator = std::list<std::pair<TileKey, TilePtr>>::iterator;
 
-    const Tile &ensureTile( int tx, int ty ) const
+    TilePtr ensureTile( int tx, int ty ) const
     {
         const TileKey key{ tx, ty };
-        auto found = mIndex.find( key );
-        if ( found != mIndex.end() )
         {
-            mLru.splice( mLru.begin(), mLru, found->second ); // move to MRU
-            return found->second->second;
+            std::lock_guard<std::mutex> lock( mCacheMutex );
+            auto found = mIndex.find( key );
+            if ( found != mIndex.end() )
+            {
+                mLru.splice( mLru.begin(), mLru, found->second ); // move to MRU
+                return found->second->second;
+            }
         }
 
         Tile tile = composeTile( tx, ty );
-        while ( !mLru.empty() && mLru.size() >= residentTileLimit() )
-            evictLru();
-        mLru.emplace_front( key, std::move( tile ) );
-        mIndex[key] = mLru.begin();
-        return mLru.front().second;
+        auto tilePtr = std::make_shared<Tile>( std::move( tile ) );
+
+        {
+            std::lock_guard<std::mutex> lock( mCacheMutex );
+            auto found = mIndex.find( key );
+            if ( found != mIndex.end() )
+            {
+                mLru.splice( mLru.begin(), mLru, found->second );
+                return found->second->second;
+            }
+
+            while ( !mLru.empty() && mLru.size() >= residentTileLimit() )
+                evictLru();
+            mLru.emplace_front( key, tilePtr );
+            mIndex[key] = mLru.begin();
+            return tilePtr;
+        }
     }
 
     void evictLru() const
@@ -369,6 +386,12 @@ class TemporalCubeImpl final : public TemporalCube
         if ( scene.hasCloud )
             bands.push_back( 2 );
         std::vector<double> values;
+        // Every thread's composeTile shares the same per-scene RasterReader
+        // (one GDALDataset handle); concurrent RasterIO on a single dataset
+        // is undefined — observed as read failures, hangs and heap
+        // corruption under concurrent readChunk. Serialize the raster I/O
+        // and the failure diagnostics; compositing math stays lock-free.
+        std::lock_guard<std::mutex> ioLock( mIoMutex );
         try
         {
             values = scene.reader.readWindow( bands, window );
@@ -419,7 +442,12 @@ class TemporalCubeImpl final : public TemporalCube
         }
     }
 
-    mutable std::list<std::pair<TileKey, Tile>> mLru; // front = MRU
+    mutable std::mutex mCacheMutex;
+    /// Guards shared-dataset raster reads in readScenePlane and the #1467
+    /// failure counters (mSceneReadFailures / readFailureLogged): a
+    /// GDALDataset handle must not serve concurrent RasterIO.
+    mutable std::mutex mIoMutex;
+    mutable std::list<std::pair<TileKey, TilePtr>> mLru; // front = MRU
     mutable std::unordered_map<TileKey, LruIterator, TileKeyHash> mIndex;
     /// #1467: scene-level window-read failures seen so far (diagnostics).
     mutable int mSceneReadFailures = 0;
