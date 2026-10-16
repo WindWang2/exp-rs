@@ -964,8 +964,13 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
   for ( const std::string &segment : splitSegments( normalizeSeparators( decodedTargetRef ) ) )
   {
     std::string decoded;
-    const bool isDecoded = percentDecode( segment, decoded );
-    if ( !isDecoded || decoded.find( '\0' ) != std::string::npos )
+    // R15-B (#1505 T9): a literal / malformed '%' ("100%_coverage.tif",
+    // "file%Q1.tif") is NOT a traversal — percentDecode keeps it verbatim
+    // and reports !clean. Refuse only what decodes to something unsafe
+    // (an embedded NUL here, '..' below); before this every such filename
+    // was rejected as a traversal attempt.
+    percentDecode( segment, decoded );
+    if ( decoded.find( '\0' ) != std::string::npos )
     {
       escaped = true;
       break;

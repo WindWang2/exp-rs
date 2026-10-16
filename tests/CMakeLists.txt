@@ -9855,6 +9855,15 @@ target_include_directories(test_r15_B_partition_metadata PRIVATE
 )
 sicnu_discover_tests(test_r15_B_partition_metadata TEST_PREFIX "test_r15_B_partition_metadata::")
 
+add_executable(test_r15_B_post1505 test_r15_B_post1505.cpp)
+target_link_libraries(test_r15_B_post1505 PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Sicnu::Geospatial GDAL::GDAL
+)
+target_include_directories(test_r15_B_post1505 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r15_B_post1505 TEST_PREFIX "test_r15_B_post1505::")
+
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites
