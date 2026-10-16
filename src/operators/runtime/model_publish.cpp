@@ -324,6 +324,41 @@ DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
     return;
   }
 
+  // R15-C C13 (F1): suffix-complete adoption. The park ladder moves the
+  // companions FIRST and the main file LAST, so a run killed between those
+  // renames leaves the previous product's companions (and, one step later,
+  // its provenance sidecar) parked at the backup names while the MAIN file
+  // is still at the final path. The adoption branch above is gated on the
+  // main being absent, so this suffix reached removeBackupFamily() and
+  // DELETED the only copies of the previous product's companions: an
+  // unopenable vector (a .shp with no .shx) that still passes provenance
+  // verification (the vector output block short-circuits the grid check).
+  //
+  // The fold is deliberately conservative — it restores ONLY what a mid-park
+  // crash can have taken away:
+  //   * the main was never parked (no backup main): the product at the final
+  //     path is the PREVIOUS one, so a parked member is a crash suffix;
+  //   * the member is MISSING at its final name: a parked member whose final
+  //     name is already occupied belongs to a COMPLETE product there (the new
+  //     one), and the backup is disarm-time litter (removeBackupFamily drops
+  //     the main backup first, then the companions, then the prov backup) —
+  //     folding it back would tear the new product with the old family.
+  if ( !QFile::exists( m_backup ) )
+  {
+    for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
+    {
+      if ( QFile::exists( companion ) )
+        continue;
+      const QString backupCompanion = companion + m_backupSuffix;
+      if ( QFile::exists( backupCompanion ) )
+        QFile::rename( backupCompanion, companion );
+    }
+    const QString strayBackupProv = m_backup + QStringLiteral( ".prov.json" );
+    if ( !QFile::exists( m_final + QStringLiteral( ".prov.json" ) )
+         && QFile::exists( strayBackupProv ) )
+      QFile::rename( strayBackupProv, m_final + QStringLiteral( ".prov.json" ) );
+  }
+
   // Park companions and the provenance sidecar FIRST, the main file LAST:
   // a throwing constructor never runs the destructor, so every park failure
   // rolls back its already-parked predecessors — the previous product stays
@@ -467,6 +502,25 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
     QFile::rename( backupProv, provPath );
     if ( !QFile::rename( m_backup, m_final ) )
       fail( "publish could not recover the previously parked product: " );
+  }
+  else if ( finalPresent && !backupPresent && !QFile::exists( provPath )
+            && QFile::exists( backupProv ) )
+  {
+    // Window C (R15-C C13 / F2): crash between the sidecar park and the main
+    // park. The ladder parks the sidecar FIRST and the main LAST, so this
+    // suffix leaves the previous (complete) product at the final path with
+    // its sidecar's ONLY copy parked at the backup name. Neither adoption
+    // branch above matches (the backup MAIN is absent), so this state used to
+    // reach removeBackupFamily() and destroy the parked sidecar — a later
+    // failure then restored the product WITHOUT its sidecar, downgrading a
+    // verified product to MissingSidecar. Fold the parked sidecar back so the
+    // pair is whole again; the park ladder below then re-parks it.
+    //
+    // The sidecar must be ABSENT at the final path: a sidecar that IS there
+    // belongs to a published (new) product, and the parked one is disarm-time
+    // litter — folding it back would staple a stale sidecar onto the new
+    // product.
+    QFile::rename( backupProv, provPath );
   }
 
   m_hadExisting = QFile::exists( m_final );
