@@ -92,10 +92,12 @@ export class McpBridge {
 
   readonly bin: string;
   readonly extraArgs: string[];
+  readonly startupTimeoutMs: number;
 
-  constructor(bin: string, extraArgs: string[]) {
+  constructor(bin: string, extraArgs: string[], options: { startupTimeoutMs?: number } = {}) {
     this.bin = bin;
     this.extraArgs = extraArgs;
+    this.startupTimeoutMs = options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     installExitHook();
     activeBridges.add(this);
   }
@@ -184,7 +186,10 @@ export class McpBridge {
     // (EventEmitter throws on an "error" event with no listener).
     child.on("error", (err) => {
       if (this.child !== child) return; // stale event from a previous child
-      this.startError = `exp-rs MCP server error: ${err?.message ?? err}`;
+      // The spawn-failure listener above records the more specific
+      // "Failed to launch <bin>: ..." first; don't clobber it with the
+      // generic wording — it is what exprs_status surfaces.
+      this.startError ??= `exp-rs MCP server error: ${err?.message ?? err}`;
     });
     const spawned = this.child;
     this.child.on("exit", (code) => {
@@ -221,10 +226,10 @@ export class McpBridge {
         () =>
           reject(
             new Error(
-              `exp-rs MCP server did not initialize within ${STARTUP_TIMEOUT_MS / 1000}s`,
+              `exp-rs MCP server did not initialize within ${this.startupTimeoutMs / 1000}s`,
             ),
           ),
-        STARTUP_TIMEOUT_MS,
+        this.startupTimeoutMs,
       );
       cancelStartupDeadline = () => clearTimeout(t);
       spawnFailure.catch(() => {}).finally(() => clearTimeout(t));
@@ -239,6 +244,9 @@ export class McpBridge {
         spawnFailure,
         startupDeadline,
       ]);
+    } catch (err) {
+      this.discardFailedStart(child, err);
+      throw err;
     } finally {
       // Clear on EVERY settle path: a healthy initialize used to leave the
       // 30s timer armed, pinning the event loop after every spawn/respawn.
@@ -251,6 +259,39 @@ export class McpBridge {
     // (R14-C FIX-4).
     this.fastCrashCount = 0;
     this.notify("notifications/initialized", {});
+  }
+
+  /** A generation whose handshake failed (spawn ENOENT/EACCES, initialize
+   * timeout) is DEAD, not "healthy": Node emits no "exit" for a child that
+   * never spawned, and a hung child stays alive. Leaving it as `this.child`
+   * with exited=false made start() short-circuit as "healthy", so every
+   * later request wrote into a destroyed/uninitialized stream with no
+   * respawn and exprs_status reported CONNECTED. Tear the generation down,
+   * book it as a fast crash for the circuit breaker, and let the next
+   * request respawn. */
+  private discardFailedStart(child: ChildProcess, err: unknown): void {
+    if (this.child !== child) return; // superseded by a newer generation
+    const message = err instanceof Error ? err.message : String(err);
+    this.child = null;
+    this.exited = true;
+    this.startError = this.startError ?? message;
+    this.lastExitError = `exp-rs MCP server failed to start: ${message}`;
+    this.fastCrashCount++;
+    const failure = new Error(this.lastExitError);
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(failure);
+    }
+    this.pending.clear();
+    try {
+      child.stdin?.destroy();
+    } catch {
+      // already gone
+    }
+    child.kill();
+    const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
+    killer.unref();
+    child.once("exit", () => clearTimeout(killer));
   }
 
   private onStdout(chunk: string): void {
