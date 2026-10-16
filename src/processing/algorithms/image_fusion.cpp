@@ -719,6 +719,27 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
         }
     }
 
+    // A03-6 (track finding; commit messages alias it "A14" — not the A14
+    // performance work package): exactly one side georeferenced is not
+    // co-registered.
+    // compareGrids returns no issues when EITHER side lacks a geotransform
+    // — its documented fallback covers BOTH-unreferenced synthetic rasters.
+    // The resample ratio below, however, is derived from the geotransforms:
+    // a GT-less raster reports GDAL's default identity transform, so an
+    // asymmetric pair silently routes through the same-resolution clamp
+    // path (readBandWindow clamps the pan-grid window to the smaller MS
+    // raster and pads the remainder with the declared sentinel) and voids
+    // most of the output with no error (the diag4 evidence). Refuse it.
+    if ( panDataset.hasGeoTransform() != msDataset.hasGeoTransform() )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Pan and multispectral rasters are not co-registered: %1" )
+                                .arg( panDataset.hasGeoTransform()
+                                          ? QStringLiteral( "the multispectral raster has no geotransform" )
+                                          : QStringLiteral( "the panchromatic raster has no geotransform" ) );
+        return false;
+    }
+
     const int w = panDataset.width();
     const int h = panDataset.height();
     const int msBands = msDataset.bandCount();
@@ -836,10 +857,15 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
     const bool resampleMs = ( std::abs( scaleX - 1.0 ) > 1e-9 || std::abs( scaleY - 1.0 ) > 1e-9 );
     if ( resampleMs )
     {
+        // QString::arg has no printf verbs — %.6g would print literally and
+        // warn ("Argument missing"). Format the numbers explicitly.
         SICNU_LOG_INFO( SicnuLogTags::Algorithms,
-                        QString( "Fusion: pan %.6g x %.6g vs MS %.6g x %.6g — MS tiles "
+                        QString( "Fusion: pan %1 x %2 vs MS %3 x %4 — MS tiles "
                                  "will be resampled to the pan grid" )
-                            .arg( panResX ).arg( panResY ).arg( msResX ).arg( msResY ) );
+                            .arg( panResX, 0, 'g', 6 )
+                            .arg( panResY, 0, 'g', 6 )
+                            .arg( msResX, 0, 'g', 6 )
+                            .arg( msResY, 0, 'g', 6 ) );
     }
 
     // readMsWindow: read MS @band (1-based) for the pan-grid tile at (xOff,
