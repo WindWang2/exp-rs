@@ -4,9 +4,9 @@
 
 | 项 | 值 |
 |---|---|
-| 分支 / PR | `hardening/r15-B-geodata-persistence` / #1513（Draft） |
+| 分支 / PR | `hardening/r15-B-geodata-persistence` / #1513（Ready for review，未合并） |
 | BASE_SHA | `46791bc6`（origin/master，最后一次 fetch 仍为最新，无需 rebase） |
-| 代码 HEAD | `f8e1f280`（之后只有文档提交） |
+| 代码 HEAD | `08d8b295`（之后只有文档提交） |
 | 工作树 | `<repo 父目录>/exp-rs-r15-b-20261016`；构建树 `build-r15-b`、`build-r15-b-tsan`、`build-r15-b-asan`；RED 工作树 `<repo 父目录>/exp-rs-r15-b-red` |
 | 工具 | `/teamwork-preview`、`/goal-loop`：未安装/等价执行（Oracle-Ledger 循环） |
 
@@ -29,33 +29,39 @@
 | #1505 T6 | P1 | 策略拒绝后回落到无守卫 /vsicurl/ → 拒绝即终局 | 7ed6dc02 |
 | #1505 T3 / #1485 | P1 | DNS rebinding → 再解析校验并以 CURLOPT_RESOLVE 钉住连接 | fc712c72 |
 | B09（TSan） | P2 | `GovernanceStore::stepFailed` 跨线程无锁读写 → atomic | f8e1f280 |
+| #1505 T11 | P1 | CLI 远端入口以不阻断的默认配置运行 → 默认阻断，提供显式开关 `--allow-private-network`（用户批准写 src/cli/**） | 84cfbf27 |
+| R3-10 | P1 | 受守卫的 fetch 传输失败后回落到无守卫 /vsicurl/（可借 rebinding 绕过）→ 回落走受守卫的传输 | 53941117 |
+| R4-01 | P1 | 策略开启时，探测/重新验证/Stat 仍无守卫（validatorOptions 丢掉了标志）→ 标志传到 validator；拒绝 = 静默 miss | 127ac320 |
+| R4-02 | P1 | prefetch 规划阶段以原始 /vsicurl/ 打开资产，且 identity 探测无守卫 → 先装受守卫缓存再规划；新增可选的 blockPrivateNetworks 规划/identity 选项 | 08d8b295 |
 
 只加 oracle（首跑即绿）：B02、B11（审计无引擎缺陷）、B16、#1481 T6/T7/T8/T9/T19（FIXED_ON_MASTER）。
 测量：B14（PERFORMANCE.md；PERF-2 的 keyset 改动实测更慢，已撤回）。审计记录：B03/B08/B09/B10（REVIEW_ROUND3.md）。
 
 ## 2. 测试（详见 TEST_RESULTS.md）
-- RED：原始 5 个修复与本轮全部修复都在本机 RED 工作树重新复现。
-- GREEN×2：本轨 3 个新测试 22/22；相关回归子集 211/211（两次）；`test_platform7_library`、`test_experiment_evaluation` 直接运行两次全部通过；`test_r12b_e2e_durability` 在子集内。
-- Sanitizer：TSan 发现 1 条真实 race 并修复，之后 0；ASan+UBSan 0。
-- `git diff --check`：通过。
+- RED：所有修复都在未修复代码上复现（§2、§5.1、§7.1）。
+- GREEN×2：相关回归子集 **218/218**；range cache / fabric / identity 扩展子集 **107/107**；`test_platform7_library`、`test_experiment_evaluation` 直接运行，全部通过。
+- Sanitizer（最终代码）：TSan、ASan+UBSan 在 4 个 test_r15_B_* 进程内测试上各运行两次，均 0 报告。
+- origin/master 仍为 `46791bc6`；`git diff --check` 通过。
 
 ## 3. 评审
-三轮（REVIEW_ROUND1/2/3）均为同一 agent 的等价自审，**不是独立评审**。
+四轮（REVIEW_ROUND1/2/3/4）均为同一 agent 的等价自审，**不是独立评审**。
 
-## 4. 仍未关闭
-- **P1：#1505 T11**（生产 CLI 安装点默认不开私网阻断）——安装点在 `src/cli/**`，不在本轨写权限；改结构体默认值会破坏大量 127.0.0.1 测试，属跨轨策略变更。补丁与 oracle 见 POST_1505_PATCHES.md §C。
-- P2：R3-07（run 遍历读失败时返回部分结果，返回类型无错误通道）、R3-10（传输失败仍回落无守卫 /vsicurl/）、PERF-1（run_ids 镜像重写，需改数据模型）、PERF-2（listRunsByCursor 每页 COUNT）。
-- P3：R1-05/06/07/09/10/11、R2-01、R3-01/02/03/04/08/09。开后复查无法消除"在一次 open 内开始并提交"的窗口。
+## 4. 仍未关闭（无 P0/P1）
+- P2：
+  - **R4-03**（本人判断为 P2，理由见 REVIEW_ROUND4）：range cache 之外的远端路径（`data inspect/doctor/probe/window/mirror materialize <http-url>`、remoteIdentityToken / data_locality / data_doctor 的库默认、src/operators 的 planFabric({})）仍不阻断私网。若视为 P1，请执行 `gh pr ready 1513 --undo`。
+  - R3-07：run 遍历读失败时返回部分结果。
+  - PERF-1、PERF-2。
+- P3：R4-04..07、R1-05/06/07/09/10/11、R2-01、R3-01/02/03/04/08/09。
 
 ## 5. NOT VERIFIED
 - Windows、macOS。
-- 全量 ctest；相关存储测试（test_store_fault_injection 等）的 sanitizer 构建。
+- 远端 CI，以及全量 ctest（由 CI 覆盖）。
+- 未运行（不在第四轮要求内）：重型存储测试的 sanitizer 构建。
 - #1505 T6 的"重定向跳"形态（同一代码路径，无单独 oracle）。
-- 远端 CI（按要求不等待）。
 
 ## 6. PR 状态
-存在未关闭的 P1（#1505 T11），且 NOT VERIFIED 不只是平台项 → 按规则保持 **Draft**，未合并。
+无未关闭的 P0/P1；剩余未验证项为平台/CI 项（另有上面列出的、不在本轮要求内的 sanitizer 范围）→ 已执行 `gh pr ready`，**未合并**。
 
 ## 7. 所有权与受保护文件
-写入限于 src/geospatial/**、src/data/**、src/dataset/**、src/experiment/** 与本轨测试；`tests/CMakeLists.txt` 只追加了 3 个测试块。
-#1505 合并后才修改了 resource_uri.cpp、range_cache.cpp、offline_gate.cpp。未触碰 src/core/temporal_cube.cpp、src/python/**、src/runtime/gpu/gpu_plane.cpp、src/operators/runtime/**、src/processing/**、src/app/**、GitHub Actions，未写 master。
+写入限于 src/geospatial/**、src/data/**、src/dataset/**、src/experiment/** 与本轨测试；
+#1505 合并后才修改了 resource_uri.cpp、range_cache.cpp、offline_gate.cpp。经用户批准，**仅为 T11** 修改了 `src/cli/cli_commands.cpp`；`tests/test_cli_commands_json.cpp` 有最小改动（局部 opt-in helper）；`tests/CMakeLists.txt` 共追加了 4 个测试块。未触碰 src/core/temporal_cube.cpp、src/python/**、src/runtime/gpu/gpu_plane.cpp、src/operators/runtime/**、src/processing/**、src/app/**、GitHub Actions，未写 master。

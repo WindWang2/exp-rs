@@ -93,8 +93,36 @@ RED 工作树 `exp-rs-r15-b-red`（本轨新建的独立 worktree + `build-red`�
 - `git diff --check 46791bc6..HEAD`：通过。
 - `git fetch origin master`：仍为 `46791bc6`（HEAD 的祖先），无需 rebase。
 
+## 7. 第四轮（2026-10-17 00:4x–02:xx UTC+8，本机实跑；T11 / R3-10 / R4-01 / R4-02）
+### 7.1 RED（先写测试，在未修复代码上运行）
+| 用例 | 修复前观测 |
+|---|---|
+| 1505-T11 data cache <url> 默认拒绝回环 | 退出码 0，ok=true，fixture 收到 2 次请求 |
+| 1505-T11 data identity 默认拒绝回环 | 退出码 0，ok=true，fixture 收到 1 次请求 |
+| R3-10 传输失败不回落无守卫通道 | 重绑定名先 3 次解析到公网（连接失败），回落后连到 127.0.0.1：fixture 收到 3 次请求，读出 4096 B |
+| R4-01 Stat 不探测私网 | `VSIStatL` 返回 0，fixture 收到 1 次请求 |
+| R4-01 open 时探测受守卫并钉住 | 重绑定名 open 返回句柄，fixture 收到 1 次请求 |
+| 1505-T11 prefetch 默认不访问回环资产 | 53941117 上 fixture 收到 6 次请求；R4-01 修复后仍有 2 次（规划阶段）；R4-02 修复后 0 次（opt-in 正对照 >0） |
+R3-10 用例另外断言"失败原因是传输失败，不是策略拒绝"，防止解析次数标定错误时测试空转。
+
+### 7.2 GREEN×2（代码 = `08d8b295`）
+- `test_r15_B_cli_private_network` 4/4（19 个断言）×2；`test_r15_B_geodata_persistence` 的 R3-10 / R4-01 / 1505-T* 用例 ×2。
+- 相关回归子集（第三轮的 211 个 + 本轮新增 7 个）：**218/218 ×2**。
+- range cache / fabric / identity 扩展子集（test_cli_commands_json、test_io_range_cache、test_io_fabric_*（object_store、identity_11、locality_11、plan、operators、multidim_11、scale、replay_11）、test_io_microbench、test_portability_contract、test_io_mirror_maintenance、test_io_identity）：**107/107 ×2**。
+- `test_platform7_library`（283 个断言）与 `test_experiment_evaluation`（501 个断言）直接运行 ×2，全部通过。
+
+### 7.3 Sanitizer（最终代码，各运行两次）
+| 构建 | 目标 | 结果 |
+|---|---|---|
+| TSan | test_r15_B_stores / post1505 / partition_metadata / geodata_persistence（18 个用例，含 R3-10、R4-01） | 0 报告，全部通过 |
+| ASan+UBSan（detect_leaks=1） | 同上 | 0 ASan / 0 LSan / 0 UBSan，全部通过 |
+`test_r15_B_cli_private_network` 通过 popen 驱动真实 CLI，sanitizer 只会插桩测试外壳本身，因此未做 sanitizer 构建。它覆盖的 range_cache 代码已由 geodata_persistence 的 sanitizer 运行覆盖。
+
+### 7.4 其他
+origin/master 仍为 `46791bc6`，无需 rebase；`git diff --check` 通过。
+
 ## 6. 未运行（NOT RUN）
 - Windows、macOS。
-- 全量 ctest（只跑了 211 条相关子集 + 两个直接运行的二进制）。
-- 相关存储测试的 sanitizer 构建（见 5.3）。
+- 全量 ctest（只跑了相关子集 218 条 + 扩展子集 107 条 + 两个直接运行的二进制；全量由远端 CI 覆盖）。
+- 重型存储测试（test_store_fault_injection 等）的 sanitizer 构建：第四轮只要求 test_r15_B_*，因此未运行（见 5.3）。
 - 远端 CI（按要求不等待）。
