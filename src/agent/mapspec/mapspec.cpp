@@ -842,8 +842,11 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       }
 
       // CARTO-6: extents are applied, not advisory — shape-check them so a
-      // typo cannot silently fall back to the full project extent.
-      if ( std::string( info->name ) == "map_frames" && item.isMember( "extent" ) )
+      // typo cannot silently fall back to the full project extent. Insets
+      // carry the same applied extent as map frames (review R14-D P3).
+      if ( ( std::string( info->name ) == "map_frames" ||
+             std::string( info->name ) == "insets" ) &&
+           item.isMember( "extent" ) )
         checkExtent( item, id, problems );
 
       // CARTO-3: the scale-bar unit vocabulary is closed — an unknown id
@@ -918,6 +921,13 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       // be a validation problem, not a silent theme switch.
       if ( style.isMember( "token_set" ) && style["token_set"].isString() &&
            !style["token_set"].asString().empty() &&
+           // Fail open ONLY when the registry itself is empty (the data
+           // directory did not load — a data-less runtime must not
+           // false-reject every spec as "unknown token set"). The built-in
+           // scientific-light set doubles as the loaded sentinel.
+           !sicnu::agent::cartography::TokenSetRegistry::instance()
+              .find( QStringLiteral( "scientific-light" ) )
+              .isNull() &&
            sicnu::agent::cartography::TokenSetRegistry::instance()
              .find( QString::fromStdString( style["token_set"].asString() ) )
              .isNull() )

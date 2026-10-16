@@ -451,6 +451,12 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   };
 
   // --- map frames first (legends/scale bars link to them) ------------------
+  // Review R14-D P2-4: refs accepted through a spec-level declaration with
+  // no backing layer compile but render NOTHING for that ref — record them
+  // on the layout so the produce chain can surface an honest warning
+  // instead of a silent subset render (hard-failing would break the
+  // MAP_LAYER_UNREFERENCED repair flow, which attaches such ids on purpose).
+  std::vector<std::string> declaredUnbackedRefs;
   std::vector<std::string> mapFrameIds;
   for ( const auto &frame : itemsOf( "map_frames" ) )
   {
@@ -473,6 +479,9 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       {
         if ( !ref.isString() )
           continue;
+        if ( resolveProjectLayer( ref.asString() ) == nullptr &&
+             declaredLayerIds.count( ref.asString() ) > 0 )
+          declaredUnbackedRefs.push_back( ref.asString() );
         if ( !layerRefResolvable( ref.asString() ) )
           missing.push_back( ref.asString() );
         layerRefs.append( resolveLayerRef( ref.asString() ).toStdString() );
@@ -561,6 +570,9 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       {
         if ( !ref.isString() )
           continue;
+        if ( resolveProjectLayer( ref.asString() ) == nullptr &&
+             declaredLayerIds.count( ref.asString() ) > 0 )
+          declaredUnbackedRefs.push_back( ref.asString() );
         if ( !layerRefResolvable( ref.asString() ) )
           missing.push_back( ref.asString() );
         layerRefs.append( resolveLayerRef( ref.asString() ).toStdString() );
@@ -1386,6 +1398,17 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     }
   }
 
+  // R14-D review P2-4: expose declaration-only layer refs (no backing layer)
+  // for post-compile gating by the produce chain.
+  if ( !declaredUnbackedRefs.empty() )
+  {
+    QStringList unbacked;
+    for ( const auto &ref : declaredUnbackedRefs )
+      if ( !unbacked.contains( QString::fromStdString( ref ) ) )
+        unbacked << QString::fromStdString( ref );
+    layout->setCustomProperty( QStringLiteral( "sicnu/declaredUnbackedLayerRefs" ),
+                               QVariant( unbacked ) );
+  }
   return layout;
 }
 

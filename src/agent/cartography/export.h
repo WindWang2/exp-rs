@@ -10,10 +10,13 @@
 //
 //   * png — QgsLayoutExporter::exportToImage; supports declared page
 //     selection (ImageExportSettings.pages on this QGIS build);
-//   * pdf — exportToPdf; exports ALL pages (PdfExportSettings has no page
-//     selection here): a request that declares pages is REFUSED, never
-//     silently reinterpreted;
-//   * svg — exportToSvg; same all-pages restriction as pdf.
+//   * pdf — exportToPdf; exports ALL pages into ONE flattened document
+//     (PdfExportSettings has no page selection here): a request that
+//     declares pages is REFUSED, never silently reinterpreted;
+//   * svg — exportToSvg has no page filter either, but per-page delivery is
+//     achievable by excluding every other page item for each export pass
+//     (setExcludeFromExports), so multi-page svg deliveries publish one
+//     deterministic file per page like png.
 //
 // Every export is ATOMIC: bytes land in a temp file in the target
 // directory, the exporter result is checked, the digest (SHA-256) and size
@@ -58,6 +61,11 @@ struct MapExportResult
     std::string path;             ///< final file path (absolute) when ok
     std::string sha256;           ///< digest of the written bytes when ok
     long long bytes = 0;          ///< written file size when ok
+    /// Every page file THIS run delivered (absolute, delivery order). Only
+    /// multi-page raster deliveries carry more than one entry; callers must
+    /// manifest exactly this set — never re-walk the directory (stale files
+    /// from earlier deliveries must not be re-manifested as fresh pages).
+    std::vector<std::string> pagePaths;
     QgsLayoutExporter::ExportResult exporterResult =
       QgsLayoutExporter::Success; ///< raw exporter verdict when a write ran
     /// Font-substitution diagnostics: one entry per layout label family

@@ -968,6 +968,15 @@ TEST_CASE( "MapSpec compiler refuses unresolvable frame layer references (CARTO-
   QgsPrintLayout *compiled = nullptr;
   REQUIRE_NOTHROW( compiled = MapSpecCompiler::compile( good, &error ) );
   CHECK( compiled != nullptr );
+
+  // R14-D review P2-4: the declaration-only ref is LEGAL, but the compile
+  // must record it so produce can warn that the frame renders without it —
+  // a fully-backed list carries no such marker.
+  const QVariant unbacked =
+    compiled->customProperty( QStringLiteral( "sicnu/declaredUnbackedLayerRefs" ) );
+  REQUIRE( unbacked.isValid() );
+  CHECK( unbacked.toStringList().contains( QStringLiteral( "layer-declarative" ) ) );
+  CHECK_FALSE( unbacked.toStringList().contains( QStringLiteral( "carto5-layer" ) ) );
 }
 
 TEST_CASE( "MapSpec validation rejects unknown token sets and malformed style overrides (CARTO-16)",

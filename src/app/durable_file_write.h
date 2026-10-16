@@ -55,6 +55,7 @@
 #define SICNU_APP_DURABLE_FILE_WRITE_H
 
 #include <QByteArray>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileDevice>
@@ -163,7 +164,11 @@ inline DurableWriteResult writeBytesDurably( const QString &targetPath, const QB
 #endif
   if ( dirFd >= 0 )
   {
-    ::fsync( dirFd );
+    if ( ::fsync( dirFd ) != 0 )
+      qWarning() << "durable_file_write: directory fsync failed for"
+                 << resolvedInfo.absolutePath()
+                 << QString::fromLocal8Bit( std::strerror( errno ) )
+                 << "(content is already durable; rename may not survive power loss)";
     ::close( dirFd );
   }
 #endif

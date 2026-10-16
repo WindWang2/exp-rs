@@ -201,6 +201,31 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     result.provenance = composeProvenance( working );
     result.quality = quality;
 
+    // R14-D review P2-4: refs the compiler accepted only through a spec-level
+    // declaration (no backing layer) render nothing — append an honest
+    // compile-observation warning to the quality report so the delivery says
+    // what actually rendered, instead of silently shipping a subset.
+    const QVariant unbacked =
+      layout->customProperty( QStringLiteral( "sicnu/declaredUnbackedLayerRefs" ) );
+    if ( !unbacked.isNull() )
+    {
+        Json::Value issue( Json::objectValue );
+        issue["code"] = "MAP_DECLARED_LAYER_UNBACKED";
+        issue["severity"] = "warning";
+        issue["message"] = "frame layer reference(s) accepted via spec declaration with no "
+                           "backing layer; the composition renders without them";
+        issue["repairable"] = false;
+        Json::Value refs( Json::arrayValue );
+        const QStringList list = unbacked.toStringList();
+        for ( const QString &ref : list )
+            refs.append( ref.toStdString() );
+        issue["refs"] = refs;
+        if ( !quality.isMember( "issues" ) || !quality["issues"].isArray() )
+            quality["issues"] = Json::Value( Json::arrayValue );
+        quality["issues"].append( issue );
+        result.quality = quality;
+    }
+
     // Declared-legend render hazard (see above) fires BEFORE any repair so
     // the refusal names the author's declaration, not repair-added furniture.
     const std::string legendHazard = legendAutoUpdateHazard( working );
@@ -395,29 +420,32 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
         return failed;
     }
     // CARTO-1: page_count reports the REAL delivery size — a multi-page
-    // "single" produce used to claim 1 page while the layout has N.
+    // "single" produce used to claim 1 page while the layout has N. Raster
+    // deliveries are one file per page (pagePaths); a pdf carries every page
+    // inside one flattened document, so its page count is the layout's.
     const int layoutPages = std::max( 1, layout->pageCollection()->pageCount() );
     result.mode = "single";
-    result.page_count = layoutPages;
+    result.page_count = ( request.format == "pdf" )
+                          ? layoutPages
+                          : std::max( 1, static_cast<int>( exported.pagePaths.size() ) );
     result.artifact_path = exported.path;
 
     // Every delivered file, for the manifest and the failure rollbacks.
     QStringList deliveredPaths;
     std::vector<ExportManifestPage> pageEntries;
-    if ( request.format == "png" && layoutPages > 1 )
+    if ( request.format != "pdf" && exported.pagePaths.size() > 1 )
     {
-        // CARTO-1: a multi-page png delivery is N deterministic files; the
-        // manifest must list and hash every one of them (exportMapLayout's
-        // result carries only the primary page).
+        // CARTO-1: a multi-page raster delivery is N deterministic files; the
+        // manifest lists and hashes exactly the set exportMapLayout delivered
+        // this run — re-walking the directory would re-manifest stale page
+        // files left over from earlier deliveries as fresh pages.
         bool complete = true;
-        for ( int page = 0; page < layoutPages; ++page )
+        for ( const std::string &delivered : exported.pagePaths )
         {
-            const QString pagePath = singleModePagePath( dir, baseName, page );
-            if ( !QFile::exists( pagePath ) )
-                continue; // page excluded from export (conditional page)
+            const QString pagePath = QString::fromStdString( delivered );
             std::string sha;
             long long bytes = 0;
-            if ( !sha256OfPath( pagePath, &sha, &bytes ) )
+            if ( !QFile::exists( pagePath ) || !sha256OfPath( pagePath, &sha, &bytes ) )
             {
                 complete = false;
                 break;
@@ -433,8 +461,8 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
             complete = false;
         if ( !complete )
         {
-            for ( int page = 0; page < layoutPages; ++page )
-                QFile::remove( singleModePagePath( dir, baseName, page ) );
+            for ( const QString &stale : deliveredPaths )
+                QFile::remove( stale );
             ProduceResult failed = refused(
                 "EXPORT_FAILED",
                 QStringLiteral( "multi-page delivery incomplete: page files missing or "

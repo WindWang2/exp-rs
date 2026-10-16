@@ -1229,6 +1229,31 @@ TEST_CASE( "produce single-mode multi-page delivery publishes and manifests ever
         const bool manifestSidecar = name == "produce-multi-map.png.manifest.json";
         CHECK( ( manifestSidecar || listedFiles.count( name ) == 1 ) );
     }
+
+    // R14-D review P1-1: multi-page svg deliveries get the same per-page
+    // treatment (exportToSvg has no page filter; the old path handed the
+    // exporter one temp path and orphaned pages 2..N as base.ABC123_2.svg
+    // siblings while the manifest claimed a single file).
+    QTemporaryDir svgDir;
+    REQUIRE( svgDir.isValid() );
+    ProduceRequest svgRequest;
+    svgRequest.mapspec = spec;
+    svgRequest.format = "svg";
+    svgRequest.dpi = 72.0;
+    svgRequest.directory = svgDir.path().toStdString();
+    const ProduceResult svgResult = produceMap( svgRequest );
+    REQUIRE( svgResult.ok );
+    CHECK( svgResult.page_count == 2 );
+    CHECK( QFile::exists( svgDir.filePath( QStringLiteral( "produce-multi-map.svg" ) ) ) );
+    CHECK( QFile::exists( svgDir.filePath( QStringLiteral( "produce-multi-map_2.svg" ) ) ) );
+    bool svgDigestOk = false;
+    const Json::Value svgManifest =
+      readExportManifest( svgDir.path().toStdString(), "produce-multi-map", "svg", &svgDigestOk, &error );
+    REQUIRE( !svgManifest.isNull() );
+    CHECK( svgDigestOk );
+    CHECK( svgManifest["page_count"].asInt() == 2 );
+    REQUIRE( svgManifest["pages"].isArray() );
+    CHECK( svgManifest["pages"].size() == 2 );
 }
 
 TEST_CASE( "vector series source refuses bad definitions with problems",

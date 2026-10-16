@@ -224,7 +224,8 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
   // orphan junk. Multi-page png is exported one page at a time through the
   // same temp → verify → publish discipline, each under its deterministic
   // name; any failure rolls back every page already delivered.
-  if ( request.format == "png" )
+  const bool rasterFormat = ( request.format == "png" || request.format == "svg" );
+  if ( rasterFormat )
   {
     std::vector<int> pages = request.pages;
     if ( pages.empty() )
@@ -249,11 +250,38 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
         const QString tempPath = temp.fileName();
         temp.close(); // the exporter writes its own handle
 
-        SingleNamePageExporter exporter( layout );
-        QgsLayoutExporter::ImageExportSettings settings;
-        settings.dpi = request.dpi;
-        settings.pages << page;
-        result.exporterResult = exporter.exportToImage( tempPath, settings );
+        // Per-page export. png: the settings page filter. svg: no filter
+        // exists, so every OTHER page item is excluded for this pass and the
+        // flags restored right after — a page the design itself excludes
+        // (saved flag true) is skipped like png's conditional pages.
+        result.exporterResult = QgsLayoutExporter::Success;
+        if ( request.format == "png" )
+        {
+          SingleNamePageExporter exporter( layout );
+          QgsLayoutExporter::ImageExportSettings settings;
+          settings.dpi = request.dpi;
+          settings.pages << page;
+          result.exporterResult = exporter.exportToImage( tempPath, settings );
+        }
+        else
+        {
+          const int pageCountAll = layout->pageCollection()->pageCount();
+          QList< QgsLayoutItemPage * > pageItems = layout->pageCollection()->pages();
+          if ( page >= pageCountAll || pageItems.at( page )->excludeFromExports() )
+            continue;
+          std::vector< bool > saved( pageCountAll, false );
+          for ( int other = 0; other < pageCountAll; ++other )
+          {
+            saved[ other ] = pageItems.at( other )->excludeFromExports();
+            pageItems.at( other )->setExcludeFromExports( other != page );
+          }
+          SingleNamePageExporter exporter( layout );
+          QgsLayoutExporter::SvgExportSettings settings;
+          settings.dpi = request.dpi;
+          result.exporterResult = exporter.exportToSvg( tempPath, settings );
+          for ( int other = 0; other < pageCountAll; ++other )
+            pageItems.at( other )->setExcludeFromExports( saved[ other ] );
+        }
         if ( result.exporterResult != QgsLayoutExporter::Success )
         {
           result.error = QStringLiteral( "exporter failed on page %1 with result %2" )
@@ -285,6 +313,7 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
           break;
         }
         delivered << finalPagePath;
+        result.pagePaths.push_back( QFileInfo( finalPagePath ).absoluteFilePath().toStdString() );
         if ( result.path.empty() )
         {
           // The primary artifact describes the first delivered page.
@@ -381,6 +410,7 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
 
   result.ok = true;
   result.path = QFileInfo( finalPath ).absoluteFilePath().toStdString();
+  result.pagePaths.push_back( result.path );
   result.fontDiagnostics = fontSubstitutionDiagnostics( layout );
   return result;
 }
