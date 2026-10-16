@@ -79,17 +79,21 @@ TEST_CASE( "WP-B migrated strings keep their zh_CN translations under the",
     const char *ctx;
     const char *src;
   };
-  // One representative per migrated context (contexts: moc short names).
+  // One representative per migrated context. Contexts are the RUNTIME ones:
+  // Qt 6 moc emits the namespace-qualified name in staticMetaObject (see the
+  // generated moc_cartography_dock.cpp string table), so the .ts must key the
+  // qualified names — the pre-R14-D short-name entries never matched a lookup.
+  // VaWorkbenchPanel's per-band string is authored via a QObject-context tr().
   const std::vector<Triple> triples = {
-    { "CartographyDock", "Cartography Workbench" },
-    { "AgentCopilotDockWidget", "AI Copilot Assistant" },
-    { "LabCockpitDock", "Capsule exported: %1 (%2 bytes)" },
-    { "VaWorkbenchPanel", "Per-band means (sampled estimate %1×%2)" },
-    { "VaCursorProbe", "Cursor coordinates could not be transformed to the layer CRS." },
-    { "LlmSettingsDialog", "Connection failed: %1" },
+    { "sicnu::app::CartographyDock", "Cartography Workbench" },
+    { "sicnu::agent::AgentCopilotDockWidget", "AI Copilot Assistant" },
+    { "sicnu::app::teaching::LabCockpitDock", "Capsule exported: %1 (%2 bytes)" },
+    { "QObject", "Per-band means (sampled estimate %1×%2)" },
+    { "sicnu::app::va::VaCursorProbe", "Cursor coordinates could not be transformed to the layer CRS." },
+    { "sicnu::agent::LlmSettingsDialog", "Connection failed: %1" },
     { "GuidedWorkflowWidget", "Run this step" },
-    { "StepExplanationPanel", "Cannot explain this step" },
-    { "RsOperatorCatalogPanel", "Remote Sensing Operator Catalog" },
+    { "sicnu::app::StepExplanationPanel", "Cannot explain this step" },
+    { "sicnu::app::RsOperatorCatalogPanel", "Remote Sensing Operator Catalog" },
     { "QgisDesktopWindow", "Undergraduate Lab Teaching Workbench" },
     { "QObject", "Undergraduate Lab Teaching Workbench" },
   };
