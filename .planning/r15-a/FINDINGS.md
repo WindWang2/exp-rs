@@ -33,7 +33,19 @@
 ## 其余工作包
 
 - A01 算法普查：进行中（所有权内 src/processing/algorithms ~90 cpp + src/operators/rs 128 cpp + src/analysis 6 子域）。
-- A04 辐射链 / A05 SAR / A06 时序 / A07 光谱 / A08 分类 / A09 OBIA / A10 GCP-CRS / A11 地形水文 / A12 变化检测 / A14 性能 / A15 确定性 / A16 回归门禁：待 L4/L5 构建循环间隙继续。
+- A04 辐射链 / A05 SAR / A07 光谱 / A08 分类 / A11 地形水文 / A14 性能 / A15 确定性 / A16 回归门禁：待 L4/L5 构建循环间隙继续。
+
+## M2 补充审计（A06/A09/A10）
+
+| # | 发现 | 状态 | 证据 |
+|---|---|---|---|
+| A06-1 | 时序数值域探针仅采正量程（#856）：未声明 -9999 到达探针不会翻转域判定；TemporalTileReader 仅屏蔽已声明 NoData（文档化） | ✅ | rs_temporal_index_operator.cpp:296-304 |
+| A06-2 | #1465 家族 temporal_change.cpp:218 有尺寸相等前置守卫 | ✅ | LEDGER L2 |
+| A06-3 | 确定性：bootstrap/分类种子均有固定默认值（bootstrapSeed=20260915、seed=42） | ✅ 静态 | rs_temporal_seasonal_breaks_operator.cpp:255、rs_supervised_classification_operator.cpp:238 |
+| A09-1 | multires 核心像素有效性谓词用 epsilon 匹配（abs(val-nodata)<1e-6），违反 nodata_utils.h 精确相等契约；仅内存重载 + 小哨兵可复现（生产路径洗 NaN；float32 无法表示 -9999+5e-7） | ❌→修复中 | rs_multires_segmenter.cpp:357；RED 测试 9187cdc79（pending build） |
+| A09-2 | rs_simple_segmenter NoData 完备（重归一化平滑 + 任意波段空值屏蔽 + 量化排除空值） | ✅ | rs_simple_segmenter.cpp:218-330 |
+| A09-3 | multires 文件入口按波段洗哨兵成 NaN（#1461 闭合），路由 isNoDataValue | ✅ | rs_multires_segmenter.cpp:702-723 |
+| A10-1 | gcp_manager 退化防护完备：重复点坍缩（1e-9）、monotone chain 退化点丢弃、shoelace 面积、Clark-Evans <2 点返回 0 | ✅ | gcp_manager.cpp:29-56,292-316,318-340 |
 
 ## 测试目标存在性（ninja -t targets，build-r15-a）
 
