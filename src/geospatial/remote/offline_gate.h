@@ -86,6 +86,20 @@ HostPinStatus resolveForPinning( const std::string &host, int port,
 /// exist", no packet leaves the machine) even on open paths that bypass this
 /// layer. Idempotent. Must run single-threaded at startup (GDAL global config
 /// is not synchronized).
+/// R15-B (#1505 T3 / #1485) spelling of the same defence: the narrow
+/// "give me one CURLOPT_RESOLVE entry for this URL, or a refusal" entry point
+/// the R4-03 policy code was written against.
+///
+/// It DELEGATES to resolveForPinning() rather than carrying a second copy of
+/// the address-validation list or of the entry syntax — two copies of that
+/// list is precisely how an egress filter grows a bypass.
+///
+/// @p curlResolveEntry receives the entry ("" when the host is already a
+/// literal address, i.e. there is nothing to pin). Returns "" when the hop may
+/// proceed, otherwise a refusal reason (private address, or a name that could
+/// not be proven public — fail closed).
+std::string resolvePinnedPublicAddresses( const std::string &url, std::string *curlResolveEntry );
+
 void applyGdalNetworkDeny();
 
 /// Inverse of applyGdalNetworkDeny (tests re-enabling networking).
