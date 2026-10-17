@@ -440,7 +440,18 @@ PackVerification PackVerifier::verify( const PackDocument &pack,
   {
     // #1186: confine input paths under the pack root — absolute / ../ paths
     // used to yield an existence+size+sha256 oracle outside the pack.
+    //
+    // R15-E: a leading separator has to be judged LEXICALLY. On Windows
+    // std::filesystem::path("/etc/passwd").is_absolute() is FALSE (it has a
+    // root directory but no root name), so a POSIX-absolute input in a pack
+    // authored elsewhere slipped past the check, resolved against the current
+    // drive root and was reported as "missing" instead of "outside root". A
+    // pack-relative input never starts with a separator on any platform.
+    const bool startsWithSeparator = !input.path.empty()
+                                     && ( input.path.front() == '/'
+                                          || input.path.front() == '\\' );
     if ( std::filesystem::path( pathFromUtf8( input.path ) ).is_absolute()
+         || startsWithSeparator
          || hasDotDotComponent( input.path ) )
     {
       Json::Value issue( Json::objectValue );

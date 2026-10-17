@@ -134,13 +134,15 @@ TEST_CASE( "a hidden student directory is a typed refusal, not a silent vanish",
     const QStringList refused = skipPaths( skips );
     CHECK( refused.contains( hiddenStudentDir ) );
     CHECK( skipReason( skips, hiddenStudentDir ).contains( QStringLiteral( "hidden" ) ) );
-    // ... and it must be attributable to the student whose work it is, so a
-    // teacher can find them.
+    // ... and it must be attributable to the directory the teacher has to
+    // look at, so they can find the work. studentId is the directory name
+    // verbatim — including the leading dot, because that IS the folder name
+    // on disk; a stripped name would not match anything in the file manager.
     bool attributed = false;
     for ( const DiscoverySkip &s : skips )
     {
         if ( s.path == hiddenStudentDir
-             && s.studentId == QString::fromUtf8( "\u5f20\u4e09" ) )
+             && s.studentId == QString::fromUtf8( ".\u5f20\u4e09" ) )
             attributed = true;
     }
     CHECK( attributed );
