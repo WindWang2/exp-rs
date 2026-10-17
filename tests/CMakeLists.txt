@@ -15934,3 +15934,19 @@ target_include_directories(test_r14_D_durable_writes PRIVATE
 sicnu_link_jsoncpp(test_r14_D_durable_writes)
 set_target_properties(test_r14_D_durable_writes PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r14_D_durable_writes TEST_PREFIX "test_r14_D_durable_writes::")
+
+# ── r16-c-t05: student lab session & learning-state hardening (append-only) ─
+# New suites for this track register ONLY here (repo issue #1494: orphan
+# unregistered tests). Patterns copied from test_lab_runtime (line ~11007)
+# and sicnu_add_teaching_test (line ~14273).
+add_executable(test_lab_session_store_r16_c_t05 test_lab_session_store_r16_c_t05.cpp)
+target_link_libraries(test_lab_session_store_r16_c_t05 PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+target_include_directories(test_lab_session_store_r16_c_t05 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_lab_session_store_r16_c_t05 TEST_PREFIX "test_lab_session_store_r16_c_t05::")
+

@@ -286,15 +286,25 @@ LabSessionStore::Listing LabSessionStore::listSessions() const
       break;
     if ( !labDir.is_directory() )
       continue;
+    // An unopenable lab directory skips with a warning — the Listing
+    // contract is "unreadable entries are skipped, not fatal". Sharing the
+    // outer error code here used to break the WHOLE scan, so one unreadable
+    // directory silently dropped every later student's sessions.
+    std::error_code innerEc;
     for ( const std::filesystem::directory_entry &entry :
-          std::filesystem::directory_iterator( labDir.path(), ec ) )
+          std::filesystem::directory_iterator( labDir.path(), innerEc ) )
     {
-      if ( ec )
+      if ( innerEc )
         break;
       if ( entry.is_regular_file() && entry.path().extension() == ".json" &&
            sicnu::portable::pathToUtf8( entry.path().filename() ).ends_with( ".session.json" ) )
         files.push_back( entry.path() );
     }
+    if ( innerEc )
+      listing.warnings.push_back( LabDiag{
+        "lab.session.io", "cannot scan store directory '" +
+                            sicnu::portable::pathToUtf8( labDir.path() ) + "': " +
+                            innerEc.message() } );
   }
 
   for ( const std::filesystem::path &file : files )
