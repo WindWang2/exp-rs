@@ -551,32 +551,19 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QSt
     // Class summary from the SAME published truth (the report on disk), not
     // from a parallel in-memory copy — read from the prefix the run STARTED
     // with, never from a (now impossible) mid-run edit of the field.
-    QFile f( outPrefix + QStringLiteral( ".json" ) );
-    if ( f.open( QIODevice::ReadOnly ) )
+    // Fail-closed: an unreadable/corrupt report is reported as such, never
+    // summarized as "0 submissions, 0% completion".
+    sicnu::teaching_admin::BatchAssessmentReport report;
+    QString error;
+    QString warning;
+    if ( !sicnu::teaching_admin::loadBatchReportFromFile( outPrefix + QStringLiteral( ".json" ), report, error, &warning ) )
     {
-        sicnu::teaching_admin::BatchAssessmentReport report;
-        const auto doc = QJsonDocument::fromJson( f.readAll() ).object();
-        report.labId = doc.value( QStringLiteral( "lab_id" ) ).toString();
-        report.total = doc.value( QStringLiteral( "total" ) ).toInt();
-        report.rubricVersion = doc.value( QStringLiteral( "rubric_version" ) ).toString();
-        report.labVersion = doc.value( QStringLiteral( "lab_version" ) ).toString();
-        report.softwareVersion = doc.value( QStringLiteral( "software_version" ) ).toString();
-        for ( const auto &rv : doc.value( QStringLiteral( "rows" ) ).toArray() )
-        {
-            const QJsonObject o = rv.toObject();
-            sicnu::teaching_admin::BatchRowResult row;
-            row.studentId = o.value( QStringLiteral( "student_id" ) ).toString();
-            row.labId = o.value( QStringLiteral( "lab_id" ) ).toString();
-            row.status = o.value( QStringLiteral( "status" ) ).toString();
-            row.score = o.value( QStringLiteral( "score" ) ).toDouble( -1 );
-            row.verdict = o.value( QStringLiteral( "verdict" ) ).toString();
-            row.message = o.value( QStringLiteral( "message" ) ).toString();
-            row.missingEvidence = o.value( QStringLiteral( "missing_evidence" ) ).toBool();
-            row.rubricVersion = o.value( QStringLiteral( "rubric_version" ) ).toString();
-            row.labVersion = o.value( QStringLiteral( "lab_version" ) ).toString();
-            row.softwareVersion = o.value( QStringLiteral( "software_version" ) ).toString();
-            report.rows.push_back( row );
-        }
+        appendLog( tr( "class summary skipped: %1" ).arg( error ) );
+    }
+    else
+    {
+        if ( !warning.isEmpty() )
+            appendLog( tr( "class summary warning: %1" ).arg( warning ) );
         appendLog( QString::fromUtf8( QJsonDocument(
           sicnu::teaching_admin::buildClassSummary( report ) ).toJson( QJsonDocument::Compact ) ) );
     }
@@ -609,35 +596,22 @@ void TeachingAdminDock::failBatchOnUiThread( const QString &why )
 
 void TeachingAdminDock::onBuildFeedbackAndSummary()
 {
-    QFile f( m_batchOutEdit->text() + QStringLiteral( ".json" ) );
-    if ( !f.open( QIODevice::ReadOnly ) )
+    // Fail-closed: an unreadable, truncated or non-batch JSON file must not
+    // produce a "0 submissions, 0% completion" summary that looks legitimate.
+    sicnu::teaching_admin::BatchAssessmentReport report;
+    QString error;
+    QString warning;
+    const QString reportPath = m_batchOutEdit->text() + QStringLiteral( ".json" );
+    if ( !sicnu::teaching_admin::loadBatchReportFromFile( reportPath, report, error, &warning ) )
     {
-        appendLog( tr( "no batch json at %1" ).arg( f.fileName() ) );
+        appendLog( tr( "no batch report at %1: %2" ).arg( reportPath, error ) );
         return;
     }
-    const auto doc = QJsonDocument::fromJson( f.readAll() ).object();
-    sicnu::teaching_admin::BatchAssessmentReport report;
-    report.labId = doc.value( QStringLiteral( "lab_id" ) ).toString();
-    report.total = doc.value( QStringLiteral( "total" ) ).toInt();
-    report.rubricVersion = doc.value( QStringLiteral( "rubric_version" ) ).toString();
-    report.labVersion = doc.value( QStringLiteral( "lab_version" ) ).toString();
-    report.softwareVersion = doc.value( QStringLiteral( "software_version" ) ).toString();
-    for ( const auto &rv : doc.value( QStringLiteral( "rows" ) ).toArray() )
-    {
-        const QJsonObject o = rv.toObject();
-        sicnu::teaching_admin::BatchRowResult row;
-        row.studentId = o.value( QStringLiteral( "student_id" ) ).toString();
-        row.labId = o.value( QStringLiteral( "lab_id" ) ).toString();
-        row.status = o.value( QStringLiteral( "status" ) ).toString();
-        row.score = o.value( QStringLiteral( "score" ) ).toDouble( -1 );
-        row.verdict = o.value( QStringLiteral( "verdict" ) ).toString();
-        row.message = o.value( QStringLiteral( "message" ) ).toString();
-        row.missingEvidence = o.value( QStringLiteral( "missing_evidence" ) ).toBool();
-        row.rubricVersion = o.value( QStringLiteral( "rubric_version" ) ).toString();
-        row.labVersion = o.value( QStringLiteral( "lab_version" ) ).toString();
-        row.softwareVersion = o.value( QStringLiteral( "software_version" ) ).toString();
-        report.rows.push_back( row );
+    if ( !warning.isEmpty() )
+        appendLog( tr( "batch report warning: %1" ).arg( warning ) );
 
+    for ( const sicnu::teaching_admin::BatchRowResult &row : report.rows )
+    {
         sicnu::teaching_admin::FeedbackPackInput fin;
         fin.row = row;
         const auto fb = sicnu::teaching_admin::buildFeedbackPack( fin );

@@ -9100,6 +9100,73 @@ sicnu_link_jsoncpp(test_rs_result_summary)
 set_target_properties(test_rs_result_summary PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_rs_result_summary)
 
+# R15-E / E05: result-artifact honesty — a reported output that does not
+# exist on disk must be inert, and a result that reports failure must not
+# render a green "finished" line.
+add_executable(test_r15_E_result_artifact_honesty
+  test_r15_E_result_artifact_honesty.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+)
+target_link_libraries(test_r15_E_result_artifact_honesty PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_r15_E_result_artifact_honesty PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r15_E_result_artifact_honesty)
+set_target_properties(test_r15_E_result_artifact_honesty PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r15_E_result_artifact_honesty TEST_PREFIX "test_r15_E_result_artifact_honesty::")
+
+# R15-E / E05: TaskPanelHost must not keep a previous run's success card
+# through a failure or a new run. Needs the desktop shell (TaskPanelHost lives
+# there), so it is the heavy lane; the progress-text rule has its own light
+# target below.
+add_executable(test_r15_E_task_panel_state
+  test_r15_E_task_panel_state.cpp
+)
+target_link_libraries(test_r15_E_task_panel_state PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  sicnu_task_center
+)
+target_include_directories(test_r15_E_task_panel_state PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r15_E_task_panel_state)
+set_target_properties(test_r15_E_task_panel_state PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r15_E_task_panel_state TEST_PREFIX "test_r15_E_task_panel_state::")
+
+# R15-E / E05 (light lane): the Task Center progress-text honesty rule is a
+# pure inline function — assertable without linking the desktop shell.
+add_executable(test_r15_E_progress_text
+  test_r15_E_progress_text.cpp
+)
+target_link_libraries(test_r15_E_progress_text PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_task_center
+)
+target_include_directories(test_r15_E_progress_text PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r15_E_progress_text PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r15_E_progress_text TEST_PREFIX "test_r15_E_progress_text::")
+
 # Keyboard conflict guardrail (UX 4.0 Milestone G)
 add_executable(test_shortcut_conflicts
   test_shortcut_conflicts.cpp
@@ -14292,6 +14359,28 @@ endfunction()
 
 sicnu_add_teaching_test(test_teaching_lab_cockpit)
 
+# R15-E / E08: teaching statistics must be derived, not copied — a corrupt or
+# stale overall_percent must not be rendered, and an assertion the engine
+# never evaluated must stay indeterminate instead of failing the student.
+sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
+
+# R15-E / E09: the lab-pack manifest parser needs an explicit byte cap and
+# nesting cap (it had neither). Links only the Qt-free leaf.
+add_executable(test_r15_E_lab_pack_bounds test_r15_E_lab_pack_bounds.cpp)
+target_link_libraries(test_r15_E_lab_pack_bounds PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_pack
+)
+target_include_directories(test_r15_E_lab_pack_bounds PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+set_target_properties(test_r15_E_lab_pack_bounds PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_r15_E_lab_pack_bounds TEST_PREFIX "test_r15_E_lab_pack_bounds::")
+
 # Undergraduate Lab Cockpit offscreen widget smoke (completion
 # teaching-cockpit-live-integration): drives the REAL dock widgets over the
 # REAL authorities — runtime registry probe, OutputVerifier grading engine
@@ -15162,6 +15251,12 @@ sicnu_add_teaching_admin_test(test_teaching_batch_r4)
 # file the discovery heuristics refuse must surface in the published
 # report/CSV instead of vanishing without a trace.
 sicnu_add_teaching_admin_test(test_teaching_batch_discovery_r10)
+
+# R15-E / E08+E09: every deliberate discovery refusal (hidden entry, nested
+# directory) must be ACCOUNTED in the published report rather than silently
+# dropped, and a corrupt/half-written batch report must be refused instead of
+# being summarized as "0 submissions / 0% completion".
+sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 
 # hardening/r4-teaching-lab (Track 12): authoring-family failure paths +
 # fixture/pack asset consistency through the SAME inventory entry.

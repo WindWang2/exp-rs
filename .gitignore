@@ -559,3 +559,8 @@ r6_dev.cmd
 !.planning/r14-A/
 .planning/r14-A/*
 !.planning/r14-A/*.md
+
+# hardening/r15-E-desktop-teaching-help (R15 track E): planning notes (markdown only; logs stay local).
+!.planning/r15-E/
+.planning/r15-E/*
+!.planning/r15-E/*.md

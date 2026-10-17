@@ -209,6 +209,21 @@ void OperatorHelpProvider::compose( const OperatorCatalogSource &source, const H
             }
         }
 
+        // R15-E: algorithm.keyParameters is what the help centre renders as
+        // "关键参数". It was the ONE reference type validateReferences() never
+        // checked, so a renamed or deleted parameter stayed in the curated
+        // page and sent the reader to a schema row that no longer exists
+        // (rs:pca still advertised the pre-rename "componentCount").
+        if ( d.algorithm.has_value() ) {
+            for ( const QString &keyParam : d.algorithm->keyParameters ) {
+                const QString keyParamId = parameterPrefix + keyParam;
+                if ( !schemaParamIds.contains( keyParamId ) ) {
+                    report( QStringLiteral( "algorithm keyParameter %1 does not exist in schema of %2" )
+                                .arg( keyParamId, d.id ) );
+                }
+            }
+        }
+
         QString error;
         if ( !out.upsertDescriptor( std::move( d ), &error ) )
             report( error );

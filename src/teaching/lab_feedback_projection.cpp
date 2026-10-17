@@ -287,9 +287,15 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
         cr.layer = "grader";
         // passed=true is the engine's own pass; anything else is a fail —
         // never promoted.
-        cr.status = e.isMember( "passed" ) && e["passed"].isBool() && e["passed"].asBool()
-                      ? "pass"
-                      : "fail";
+        //
+        // A missing / non-boolean "passed" is NOT a fail: the verifier folded
+        // every unknown status word to "indeterminate" elsewhere, but here it
+        // became "fail" and (via aggregate) flipped a whole lab to 未通过 over
+        // an assertion that was never actually evaluated.
+        if ( !e.isMember( "passed" ) || !e["passed"].isBool() )
+          cr.status = "indeterminate";
+        else
+          cr.status = e["passed"].asBool() ? "pass" : "fail";
         cr.statusZh = statusZh( cr.status );
         const auto msg = deductionMsg.find( cr.id );
         if ( msg != deductionMsg.end() && cr.status != "pass" ) cr.reasonZh = msg->second;

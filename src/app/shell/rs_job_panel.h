@@ -77,7 +77,9 @@ class RsJobPanel : public QgsDockWidget
     bool confirmDangerous( const QString &title, const QString &body ) const;
     bool passesFilter( const QString &stateText ) const;
     static QString statusToString( sicnu::TaskStatus status );
-    static QString formatProgress( double progress );
+    static QString formatProgress( double progress, sicnu::TaskStatus status );
+    /// Last observed percentage, regardless of status (detail view only).
+    static QString formatProgressObserved( double progress );
     static QString formatEta( const sicnu::AlgorithmTaskInfo &info );
     static QString prettyJson( const std::string &jsonText );
     static QString prettyJsonValue( const Json::Value &v );

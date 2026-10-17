@@ -4,8 +4,10 @@
 #include "grader/grader_sha256.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <fstream>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace sicnu::labpack
@@ -238,11 +240,43 @@ Json::Value PackInput::toJson() const
 PackLoadResult PackVerifier::loadFromBytes( const std::string &bytes,
                                             const std::string &errorContext )
 {
+  // A lab-pack manifest is a file index: bounded input plus an explicit
+  // nesting cap, so a hostile/corrupt pack cannot spend unbounded CPU or
+  // blow the parser stack before any schema check runs.
+  constexpr std::size_t kMaxManifestBytes = 8u * 1024u * 1024u;
+  if ( bytes.size() > kMaxManifestBytes )
+    return PackLoadResult::failure(
+      "lab.pack_schema",
+      contextError( errorContext,
+                    "manifest too large (" + std::to_string( bytes.size() )
+                      + " bytes > " + std::to_string( kMaxManifestBytes ) + ")" ) );
+
   Json::Value root;
   Json::CharReaderBuilder builder;
+  builder["stackLimit"] = 64; // deepest legal pack nesting is ~6
   std::string parseErrors;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-  if ( !reader->parse( bytes.data(), bytes.data() + bytes.size(), &root, &parseErrors ) )
+  // The reader THROWS rather than returning false once stackLimit is hit
+  // (Json::Exception "Exceeded stackLimit in readValue()"). Without this
+  // guard a nesting bomb escaped loadFromBytes()/load() as a process-level
+  // failure instead of the typed `lab.pack_schema` refusal this loader
+  // promises for corrupt payloads.
+  bool parsed = false;
+  try
+  {
+    parsed = reader->parse( bytes.data(), bytes.data() + bytes.size(), &root, &parseErrors );
+  }
+  catch ( const Json::Exception &e )
+  {
+    return PackLoadResult::failure(
+      "lab.pack_schema", contextError( errorContext, std::string( "unparsable JSON: " ) + e.what() ) );
+  }
+  catch ( const std::exception &e )
+  {
+    return PackLoadResult::failure(
+      "lab.pack_schema", contextError( errorContext, std::string( "unparsable JSON: " ) + e.what() ) );
+  }
+  if ( !parsed )
     return PackLoadResult::failure( "lab.pack_schema",
                                     contextError( errorContext, parseErrors ) );
 
