@@ -98882,6 +98882,10 @@ Can be used in a form/row context to filter the related features using a value f
       <translation>点=%1 已记录=%2 失败=%3 已取消=%4 缺失=%5</translation>
     </message>
     <message>
+      <source> (preview limited to first %1 of %2 rows)</source>
+      <translation> （预览仅显示前 %1 行，共 %2 行）</translation>
+    </message>
+    <message>
       <source>study run in progress — wait or cancel first</source>
       <translation>研究运行进行中 — 请等待或先取消</translation>
     </message>
