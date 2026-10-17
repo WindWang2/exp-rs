@@ -650,3 +650,64 @@ TEST_CASE( "loadCheckpoint refuses a poisoned gates element without throwing",
   REQUIRE( loaded == nullptr );
   REQUIRE( !err.isEmpty() );
 }
+
+TEST_CASE( "authority staged temps are swept only for dead runs and never confuse committed names",
+           "[workflow][v2][recovery][tmp-sweep]" )
+{
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  WorkflowCheckpointManager manager;
+
+  WorkflowDefinition def;
+  def.id = "wf_tmp_sweep";
+  def.title = "Tmp Sweep Test";
+  StepDef step;
+  step.id = "s1";
+  step.operatorId = "rs:test";
+  def.steps.push_back( step );
+
+  const auto writeFile = []( const QString &path ) {
+    QFile f( path );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    f.write( "{}" );
+  };
+
+  // A staged temp whose run is dead must be swept. The rng field is a full
+  // uint64 (mt19937_64): values above LLONG_MAX are real, and a toLongLong
+  // shape check would misclassify half of all temps — UINT64_MAX pinned
+  // deliberately.
+  const QString deadTmp = tmpDir.filePath(
+      QStringLiteral( "checkpoint_run-dead.4242.7.18446744073709551615.tmp.json" ) );
+  writeFile( deadTmp );
+
+  // A staged temp of a run whose lock is LIVE must never be swept. The
+  // dotted runId is the probe-order regression: the broken parser probed
+  // the lock of run "b" instead of "a.b" and would have deleted a live
+  // writer's in-flight temp.
+  const QString dottedTmp = tmpDir.filePath(
+      QStringLiteral( "checkpoint_a.b.1234.0.42.tmp.json" ) );
+  writeFile( dottedTmp );
+  WorkflowRunLock dottedLock(
+      WorkflowRunLock::lockPathForRun( tmpDir.path(), "a.b" ) );
+  REQUIRE( dottedLock.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
+
+  // A committed checkpoint whose runId merely ENDS in ".tmp" is not a
+  // staged temp: it stays listed and is never swept as an orphan.
+  auto tmpNamedRun = makeRunningRun( def, "x.tmp" );
+  const QString committedPath = manager.saveCheckpoint( *tmpNamedRun, tmpDir.path() );
+  REQUIRE( committedPath.endsWith( QStringLiteral( "checkpoint_x.tmp.json" ) ) );
+
+  auto recovered = manager.recoverInterruptedRuns( tmpDir.path() );
+  REQUIRE( recovered.size() == 1 );
+  REQUIRE( recovered.front()->runId() == "x.tmp" );
+
+  CHECK_FALSE( QFile::exists( deadTmp ) );
+  CHECK( QFile::exists( dottedTmp ) );
+  CHECK( QFile::exists( tmpDir.filePath( QStringLiteral( "checkpoint_x.tmp.json" ) ) ) );
+
+  // Owner gone: the temp is inert residue and the sweep removes it.
+  dottedLock.release();
+  manager.recoverInterruptedRuns( tmpDir.path() );
+  CHECK_FALSE( QFile::exists( dottedTmp ) );
+}

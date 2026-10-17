@@ -33,4 +33,9 @@ OUT_OF_SCOPE.
 ## Newly reproduced defects fixed by this branch
 
 F1 Pi failed-start liveness; F2 MCP EOF sentinel; F3 workflow gates/inputs
-fail-clos
+fail-closed + checkpoint exception conversion; F4 Windows junction escape;
+F5 snapshot leaf coercion; F6 worker write-gate fail-open; F7 executor
+isMember throw; F8 checkpoint temp-name family (dead sweep / wrong-run
+lock probe / rng>LLONG_MAX / staged temps listed as checkpoints /
+committed ".tmp"-runId hidden); F9 4 MiB boundary line + badbit spin;
+F10 gates.require/hint strictness. See ORACLES.md.

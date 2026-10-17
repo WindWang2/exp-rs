@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QVariantMap>
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <array>
@@ -1012,15 +1013,41 @@ struct CheckpointEnvGuard
         else
             qunsetenv( "SICNU_CHECKPOINT_DIR" );
     }
+    /// Mirror of workflow_checkpoint.cpp's isAuthorityTempName: the
+    /// durable-sidecar staged-temp shape
+    /// "checkpoint_<runId>.<pid>.<ctr>.<rng>.tmp.json" (three decimal
+    /// fields). A committed "checkpoint_x.tmp.json" (runId ending in
+    /// ".tmp") is NOT a temp and must still be counted.
+    static bool isCheckpointTempName( const QString &name )
+    {
+        if ( !name.startsWith( QLatin1String( "checkpoint_" ) )
+             || !name.endsWith( QLatin1String( ".tmp.json" ) ) )
+            return false;
+        const QString body =
+            name.mid( QStringLiteral( "checkpoint_" ).size(),
+                      name.size() - QStringLiteral( "checkpoint_" ).size()
+                          - QStringLiteral( ".tmp.json" ).size() );
+        const QStringList fields = body.split( QLatin1Char( '.' ) );
+        if ( fields.size() < 4 )
+            return false;
+        const auto digits = []( const QString &f ) {
+            return !f.isEmpty()
+                   && std::all_of( f.begin(), f.end(),
+                                   []( const QChar c ) { return c.isDigit(); } );
+        };
+        return digits( fields.at( fields.size() - 3 ) )
+               && digits( fields.at( fields.size() - 2 ) )
+               && digits( fields.at( fields.size() - 1 ) );
+    }
     QStringList checkpoints() const
     {
-        // Exclude in-flight atomic-save temps (checkpoint_<id>.<pid>.<n>.<rng>.tmp.json):
-        // they match "checkpoint_*.json" but are not committed checkpoints — counting
-        // them races the writer and flakes.
+        // Exclude in-flight atomic-save temps: they match "checkpoint_*.json"
+        // but are not committed checkpoints — counting them races the writer
+        // and flakes (assert landed mid-save ~50% of runs).
         QStringList names = QDir( dir.path() )
                                 .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
                                             QDir::Files );
-        names.removeIf( []( const QString &n ) { return n.contains( QStringLiteral( ".tmp." ) ); } );
+        names.removeIf( isCheckpointTempName );
         return names;
     }
     /// Checkpoints anywhere in the family: a COMPLETED run is archived into
@@ -1032,7 +1059,7 @@ struct CheckpointEnvGuard
         QStringList hist =
             QDir( dir.filePath( QStringLiteral( "history" ) ) )
                 .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
-        hist.removeIf( []( const QString &n ) { return n.contains( QStringLiteral( ".tmp." ) ); } );
+        hist.removeIf( isCheckpointTempName );
         return checkpoints().size() + hist.size();
     }
     /// Bounded wait for a run's LAST DURABLE STATE: a checkpoint carrying @p
@@ -2851,6 +2878,35 @@ TEST_CASE( "StdinReader treats clean EOF as end-of-input, not an overlong line",
     {
         const std::string oversized( 5 * 1024 * 1024, 'x' );
         const QStringList lines = collect( oversized + "\nC\n" );
+        CHECK( lines == QStringList{ QStringLiteral( "__MCP_LINE_TOO_LONG__" ),
+                                     QStringLiteral( "C" ) } );
+    }
+
+    SECTION( "a line of exactly 4 MiB is at the cap, not over it" )
+    {
+        // getline fills the buffer at kMaxMcpLine chars without seeing the
+        // delimiter and sets failbit — the off-by-one rejected the largest
+        // LEGAL line (the Pi bridge's outbound cap is the same 4 MiB, so a
+        // max-size request was falsely answered with id:null -32700).
+        const std::string exact( 4 * 1024 * 1024, 'x' );
+        const QStringList lines = collect( exact + "\nC\n" );
+        REQUIRE( lines.size() == 2 );
+        CHECK( lines.at( 0 ) == QString::fromStdString( exact ) );
+        CHECK( lines.at( 1 ) == QStringLiteral( "C" ) );
+    }
+
+    SECTION( "a line of exactly 4 MiB ending at EOF is delivered, then stops" )
+    {
+        const std::string exact( 4 * 1024 * 1024, 'x' );
+        const QStringList lines = collect( exact );
+        REQUIRE( lines.size() == 1 );
+        CHECK( lines.at( 0 ) == QString::fromStdString( exact ) );
+    }
+
+    SECTION( "4 MiB plus one char is overlong, exactly one sentinel" )
+    {
+        const std::string over( 4 * 1024 * 1024 + 1, 'x' );
+        const QStringList lines = collect( over + "\nC\n" );
         CHECK( lines == QStringList{ QStringLiteral( "__MCP_LINE_TOO_LONG__" ),
                                      QStringLiteral( "C" ) } );
     }

@@ -1045,7 +1045,7 @@ int main( int argc, char **argv )
                 // v1 behavior for manifests that make no capability claims.
                 // Fail closed: ANY parse error (e.g. a declared root that
                 // cannot expand under the worker's context) still turns the
-                // gate ON — an unexpansed declaration is not a grant.
+                // gate ON — an unexpanded declaration is not a grant.
                 policy.active = writeRootGateActive( access );
             }
 

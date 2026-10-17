@@ -12,7 +12,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 export const MAX_RESULT_CHARS = 50_000;
 export const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const STARTUP_TIMEOUT_MS = 30 * 1000;
-export const MAX_LINE_BUFFER_CHARS = 32 * 1024 * 1024;
+/** Inbound response-line cap in UTF-8 BYTES (desync detector — the server's
+ * own line cap is 4 MiB, so a runaway buffer means stdio framing broke).
+ * Byte-based like the outbound guard: JS string .length counts UTF-16 code
+ * units and under-reports a CJK flood by up to 3x. */
+export const MAX_LINE_BUFFER_BYTES = 32 * 1024 * 1024;
 /** The server's stdin line cap (McpServer kMaxMcpLine, 4 MiB). A request
  * payload larger than this is answered by a -32700 id:null error — which the
  * server cannot attribute to any single request, so the bridge-side handling
@@ -76,6 +80,7 @@ export class McpBridge {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private buffer = "";
+  private bufferBytes = 0;
   private startError: string | null = null;
   private exited = false;
   private stopped = false;
@@ -157,6 +162,10 @@ export class McpBridge {
     // reset the framing buffer and drop stdout chunks from any generation
     // that is no longer current.
     this.buffer = "";
+    this.bufferBytes = 0;
+    // Same replay reason as buffer: a new generation must not report the
+    // PREVIOUS child's crash output in its own exit error.
+    this.stderrTail = "";
     const child = (this.child = spawn(this.bin, ["--mcp", ...this.extraArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       env: childEnv,
@@ -166,7 +175,6 @@ export class McpBridge {
       if (this.child !== child) return; // stale generation
       this.onStdout(chunk);
     });
-    this.child = child;
     // spawn() reports late ENOENT/EACCES via an "error" event, not a throw.
     const spawnFailure = new Promise<never>((_, reject) => {
       child.once("error", (err) => {
@@ -283,6 +291,15 @@ export class McpBridge {
       p.reject(failure);
     }
     this.pending.clear();
+    this.terminateChild(child);
+  }
+
+  /** Shared teardown ladder: destroy stdin (the server exits on EOF even
+   * inside the process-exit hook, where timers never run), SIGTERM for a
+   * graceful Qt flush, then an armed SIGKILL so a stalled child cannot
+   * keep `exited` false forever. The killer is unref'd so an about-to-die
+   * bridge never pins the event loop for the 5s grace period. */
+  private terminateChild(child: ChildProcess): void {
     try {
       child.stdin?.destroy();
     } catch {
@@ -296,7 +313,8 @@ export class McpBridge {
 
   private onStdout(chunk: string): void {
     this.buffer += chunk;
-    if (this.buffer.length > MAX_LINE_BUFFER_CHARS) {
+    this.bufferBytes += Buffer.byteLength(chunk, "utf8");
+    if (this.bufferBytes > MAX_LINE_BUFFER_BYTES) {
       // A >32 MiB "line" means stdio framing is desynced (the server's own
       // line cap is 4 MiB). Without a terminating newline every later
       // response glues onto this one: each tool call would burn the full
@@ -305,7 +323,7 @@ export class McpBridge {
       // talking into a zombie stream (whole-repo review F-PI-1).
       this.failDesyncedStream(
         new Error(
-          `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_CHARS} chars; ` +
+          `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_BYTES} bytes; ` +
             `stdio framing desynced - respawning`,
         ),
       );
@@ -318,12 +336,16 @@ export class McpBridge {
       if (line) this.onLine(line);
       newline = this.buffer.indexOf("\n");
     }
+    // The post-consumption tail is usually tiny, so recounting it is cheap
+    // and immune to surrogate-pair drift across chunk boundaries.
+    this.bufferBytes = Buffer.byteLength(this.buffer, "utf8");
   }
 
   /** Shared desync teardown: reject everything, then tear the child down so
    * `exited` flips and lazy respawn replaces it (F-PI-1). */
   private failDesyncedStream(err: Error): void {
     this.buffer = "";
+    this.bufferBytes = 0;
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
       p.reject(err);
@@ -331,17 +353,9 @@ export class McpBridge {
     this.pending.clear();
     const child = this.child;
     if (child && !this.exited) {
-      try {
-        child.stdin?.destroy();
-      } catch {
-        // already gone
-      }
-      child.kill();
-      // Same escalation ladder as stop(): a child stalling in SIGTERM
-      // teardown would otherwise keep `exited` false forever and the lazy
-      // respawn would never fire (review R-B4).
-      const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
-      child.once("exit", () => clearTimeout(killer));
+      // A child stalling in SIGTERM teardown would otherwise keep `exited`
+      // false forever and the lazy respawn would never fire (review R-B4).
+      this.terminateChild(child);
     }
   }
 
@@ -384,7 +398,7 @@ export class McpBridge {
 
   request(method: string, params: any, signal?: AbortSignal): Promise<any> {
     return new Promise((resolve, reject) => {
-      if ((!this.child || this.exited) && this.stopped) {
+      if (this.stopped) {
         reject(new Error("exp-rs MCP bridge was stopped"));
         return;
       }
@@ -500,19 +514,10 @@ export class McpBridge {
     this.pending.clear();
     const child = this.child;
     if (child) {
-      // Grace ladder: SIGTERM lets the Qt app flush and tear down; escalate
-      // to SIGKILL after a grace period so stop() cannot leak the child.
-      // Destroying stdin first makes the server exit on EOF even when this
-      // runs inside the process-exit hook, where timers (SIGKILL escalation)
-      // never fire (#645).
-      try {
-        child.stdin?.destroy();
-      } catch {
-        // already gone
-      }
-      child.kill();
-      const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
-      child.once("exit", () => clearTimeout(killer));
+      // Destroying stdin first (inside terminateChild) makes the server
+      // exit on EOF even when this runs inside the process-exit hook,
+      // where timers (SIGKILL escalation) never fire (#645).
+      this.terminateChild(child);
     }
     activeBridges.delete(this);
     this.child = null;

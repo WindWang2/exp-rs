@@ -226,6 +226,14 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
             error = "step '" + step.id + "': 'gates' element must be an object";
             return false;
           }
+          for ( const char *field : { "require", "hint" } )
+          {
+            if ( gVal.isMember( field ) && !gVal[field].isNull() && !gVal[field].isString() )
+            {
+              error = "step '" + step.id + "': 'gates." + field + "' must be a string";
+              return false;
+            }
+          }
           GateDef gate;
           if ( gVal.isMember( "require" ) && gVal["require"].isString() )
             gate.require = gVal["require"].asString();

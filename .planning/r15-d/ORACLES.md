@@ -12,10 +12,12 @@ evidence. All RED/GREEN logs live OUTSIDE the repo under
 - Fix (`pi/mcp_bridge.ts`): `discardFailedStart` clears child state, marks
   exited, rejects pending requests, kills the process (SIGKILL fallback),
   counts the fast crash; `startError ??=` preserves the launch error;
-  startup timeout injectable; outbound size measured via
-  `Buffer.byteLength(payload,"utf8")` (UTF-16 `.length` under-counted CJK).
+  startup timeout injectable. The outbound `Buffer.byteLength` guard and
+  its CJK discriminating test are R14-C work (present at merge-base) —
+  this track re-verified them, it does not claim them.
 - GREEN: `node --test pi/test/` 37/37 twice under WSL (real spawn);
-  discriminating CJK test `"地".repeat(3_000_000)` passes the new guard.
+  the pre-existing CJK test `"地".repeat(3_000_000)` keeps the R14-C
+  byte-length guard honest.
 - LIMIT: native Windows `node --test` cannot exec the `.mjs` fake server
   (EFTYPE, no shebang) — live-child cases verified POSIX-only; the Windows
   suite runs a spawn canary and skips honestly.
@@ -104,3 +106,49 @@ evidence. All RED/GREEN logs live OUTSIDE the repo under
 - D09 IPC bounded queue/backpressure: `test_exprs_ipc` 28/28.
 - test_r14_C_mcp_workflow_cancel 2/2 passes but the PROCESS segfaults at
   teardown (rc 139) — reproduced on unmodified binary, pre-existing.
+
+## F8 (D07, P1, found by independent review R1) authority temp-name family broken three ways
+
+- RED (review-found, pre-existing "R6" code — verified by reading the parse
+  against the producer `durable_sidecar.cpp` "<stem>.<pid>.<ctr>.<rng>.tmp<ext>"):
+  (a) the `authorityTemps` recovery sweep counted "checkpoint_" as a field,
+  so a dot-free runId yielded 4 fields < the required 5 — the sweep NEVER
+  ran; (b) a dotted runId "a.b" probed the lock of run "b" — the WRONG run —
+  and could delete a live writer's in-flight temp; (c) rng was checked with
+  toLongLong which fails above LLONG_MAX, misclassifying ~half of real
+  temps (mt19937_64 is uint64).
+- Secondary: `listCheckpoints`' `*.json` glob admitted staged temps
+  (recovery could double-load a run: temp + committed predecessor carry the
+  same document runId), and the election's `.tmp.json` suffix exclusion
+  hid a COMMITTED "checkpoint_x.tmp.json" (runId literally ending ".tmp").
+- Fix (`workflow_checkpoint.cpp`): shared `isAuthorityTempName()` — strips
+  the checkpoint_ prefix AND .tmp.json suffix, requires >=4 dot fields with
+  the last three all-decimal-digits (pid non-zero); used by the sweep (with
+  live-owner lock probe), the election exclusion and listCheckpoints.
+- GREEN: new `[tmp-sweep]` case in `test_workflow_recovery.cpp` covers
+  dead-run sweep (UINT64_MAX rng), dotted-runId live-lock preservation,
+  committed ".tmp"-runId visibility, and post-release sweep.
+- Residual (documented): a committed runId ending
+  ".<digits>.<digits>.<digits>.tmp" is name-indistinguishable from a staged
+  temp of the dotted prefix run — noted in the code comment.
+
+## F9 (D02, P2, review R1) 4 MiB boundary line falsely rejected + badbit spin
+
+- RED: `istream::getline(buf, kMaxMcpLine+1)` sets failbit when it fills the
+  buffer without seeing the delimiter — so a line of EXACTLY 4 MiB + '
+'
+  (the largest legal line; the Pi bridge outbound cap is the same 4 MiB)
+  was answered with the -32700 id:null sentinel. A persistent badbit also
+  spun the loop emitting sentinels forever.
+- Fix (`mcp_server.cpp`): when gcount()==kMaxMcpLine, clear() then peek():
+  next=='
+' consumes it and delivers the line; next==EOF delivers and
+  stops; anything else is genuinely overlong. bad() breaks the loop.
+- GREEN: new [stdio] sections pin exact-cap-then-newline, exact-cap-at-EOF,
+  and cap+1 overlong (exactly one sentinel, service continues).
+
+## F10 (D06, P2, review R1) gates.require/hint wrong-typed leaves silently dropped
+
+- F3 made inputs.* leaves fail closed but left gates[].require/hint on the
+  old silent-drop read — asymmetric strictness in the same hunk. Both are
+  now typed errors naming step and field.

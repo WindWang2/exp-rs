@@ -61,6 +61,52 @@ bool parseBoundedCheckpointJson( const QByteArray &data, Json::Value *root, std:
   }
 }
 
+/// True when @p fileName has the durable-sidecar staged-temp shape
+/// "checkpoint_<runId>.<pid>.<ctr>.<rng>.tmp.json" (see
+/// sicnu::platform::sidecar): a non-empty runId, then THREE decimal-digit
+/// fields, then ".tmp.json". Digit checks rather than toLongLong: the rng
+/// field is a full uint64 and toLongLong fails above LLONG_MAX, which would
+/// misclassify ~half of all real temps. A committed
+/// "checkpoint_x.tmp.json" (a runId literally ending in ".tmp") is NOT a
+/// temp name — its tail has no pid/ctr/rng triple. When @p runIdOut is
+/// non-null it receives the embedded runId (dots preserved).
+/// Residual ambiguity, documented not fixable by name alone: a committed
+/// checkpoint for a runId ending ".<digits>.<digits>.<digits>.tmp" is
+/// indistinguishable from a staged temp of the dotted prefix run.
+bool isAuthorityTempName( const QString &fileName, QString *runIdOut = nullptr )
+{
+  static const QString kPrefix = QStringLiteral( "checkpoint_" );
+  static const QString kSuffix = QStringLiteral( ".tmp.json" );
+  if ( !fileName.startsWith( kPrefix ) || !fileName.endsWith( kSuffix ) )
+    return false;
+  const QString body =
+      fileName.mid( kPrefix.size(), fileName.size() - kPrefix.size() - kSuffix.size() );
+  const QStringList fields = body.split( QLatin1Char( '.' ) );
+  if ( fields.size() < 4 )
+    return false; // need at least <runId>.<pid>.<ctr>.<rng>
+  const auto allDigits = []( const QString &f ) {
+    if ( f.isEmpty() )
+      return false;
+    for ( const QChar c : f )
+      if ( !c.isDigit() )
+        return false;
+    return true;
+  };
+  // Last three fields are pid, counter, rng — all decimal in the producer.
+  // The pid field additionally cannot be "0".
+  const QString &pidField = fields.at( fields.size() - 3 );
+  if ( !allDigits( pidField ) || pidField == QLatin1String( "0" )
+       || !allDigits( fields.at( fields.size() - 2 ) )
+       || !allDigits( fields.at( fields.size() - 1 ) ) )
+    return false;
+  const QString runId = fields.mid( 0, fields.size() - 3 ).join( QLatin1Char( '.' ) );
+  if ( runId.isEmpty() )
+    return false;
+  if ( runIdOut )
+    *runIdOut = runId;
+  return true;
+}
+
 } // namespace
 
 QString WorkflowCheckpointManager::defaultCheckpointDirectory()
@@ -202,6 +248,11 @@ QStringList WorkflowCheckpointManager::listCheckpoints( const QString &directory
   result.reserve( entries.size() );
   for ( const QString &entry : entries )
   {
+    // A staged sidecar temp that survived a crashed save is not a
+    // checkpoint — loading it would recover the same run twice (the temp
+    // and its committed predecessor carry the same document runId).
+    if ( isAuthorityTempName( entry ) )
+      continue;
     result.append( d.absoluteFilePath( entry ) );
   }
   return result;
@@ -386,7 +437,9 @@ int WorkflowCheckpointManager::electCheckpoints( const QString &directoryPath )
                                              QDir::Files );
   QStringList realCheckpoints;
   for ( const QString &entry : entries )
-    if ( !entry.endsWith( QStringLiteral( ".tmp.json" ) ) )
+    // Shape match, not suffix: a runId may legitimately END in ".tmp", and
+    // "checkpoint_x.tmp.json" is then a COMMITTED name, not a staged temp.
+    if ( !isAuthorityTempName( entry ) )
       realCheckpoints.append( entry );
   for ( const QString &entry : realCheckpoints )
   {
@@ -506,21 +559,14 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
         QStringList{ QStringLiteral( "checkpoint_*.tmp.json" ) }, QDir::Files );
       for ( const QString &orphan : authorityTemps )
       {
-        const QString stem = orphan.left( orphan.size() -
-                                          QStringLiteral( ".tmp.json" ).size() );
-        const QStringList fields = stem.split( QLatin1Char( '.' ) );
-        if ( fields.size() < 5 )
-          continue; // checkpoint_<runId> + at least pid.ctr.rng
-        const QString &pidField = fields.at( fields.size() - 3 );
-        const QString &ctrField = fields.at( fields.size() - 2 );
-        const QString &rngField = fields.at( fields.size() - 1 );
-        bool pidOk = false, ctrOk = false, rngOk = false;
-        const qlonglong pidValue = pidField.toLongLong( &pidOk );
-        ctrField.toLongLong( &ctrOk );
-        rngField.toLongLong( &rngOk );
-        if ( !pidOk || !ctrOk || !rngOk || pidValue <= 0 )
+        // Parse through the shared shape matcher: the previous hand-rolled
+        // split counted "checkpoint_" as a field, so a dot-free runId
+        // yielded 4 fields < 5 and the sweep never ran at all, while a
+        // dotted runId "a.b" probed the lock of run "b" — the wrong run —
+        // and could delete a LIVE writer's in-flight temp.
+        QString runId;
+        if ( !isAuthorityTempName( orphan, &runId ) )
           continue; // not a name this writer family produces
-        QString runId = fields.mid( 1, fields.size() - 4 ).join( QLatin1Char( '.' ) );
         const WorkflowRunLock::OwnerProbe probe = WorkflowRunLock::probeOwner(
           WorkflowRunLock::lockPathForRun( dir, runId.toStdString() ) );
         if ( probe.state == WorkflowRunLock::OwnerProbe::State::LiveOwner )
