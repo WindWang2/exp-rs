@@ -128,3 +128,40 @@ TEST_CASE( "batch rows are attributed to the discovered student, never to a call
         CHECK( ( sid == QLatin1String( "s001" ) || sid == QLatin1String( "s002" ) ) );
     }
 }
+
+TEST_CASE( "an empty discovered id keeps the callable's attribution instead of publishing empty",
+           "[teaching_admin][batch][r16_c_t06]" )
+{
+    // Round-1 review P2: discovery yields an EMPTY student id for a flat
+    // root file named exactly "_submission.*" (the suffix strip empties the
+    // base name). The unconditional identity overwrite then published an
+    // unattributable empty id in the report/CSV. Discovery owns identity
+    // when it HAS one; when it does not, the callable's id (if any) is the
+    // only attribution available — strictly better than empty.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QDir root( dir.path() );
+    {
+        QFile f( root.filePath( QStringLiteral( "_submission.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArrayLiteral( "AAA" ) );
+    }
+
+    const BatchAssessmentConfig cfg = authorityConfig( dir.path() );
+    const auto report = runBatchAssessment(
+        cfg,
+        []( const SubmissionItem &item ) {
+            BatchRowResult row;
+            row.studentId = QStringLiteral( "callable_attributed" );
+            row.labId = QStringLiteral( "lab15" );
+            row.artifactPath = item.path;
+            row.status = QStringLiteral( "pass" );
+            row.verdict = QStringLiteral( "pass" );
+            row.score = 70.0;
+            return row;
+        } );
+
+    REQUIRE( report.rows.size() == 1 );
+    CHECK( report.rows.first().studentId == QLatin1String( "callable_attributed" ) );
+    CHECK( report.graded == 1 );
+}

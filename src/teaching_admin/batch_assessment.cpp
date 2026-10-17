@@ -600,8 +600,12 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
             // foreign studentId used to be published verbatim — a
             // callable bug then attributed one student's score to another
             // id in the report/CSV. Overwrite, never trust: the grade
-            // itself stays the callable's.
-            row.studentId = items[i].studentId;
+            // itself stays the callable's. Exception (round-1 review):
+            // a discovered id that is EMPTY (flat root file named exactly
+            // "_submission.*") must not blank the row — the callable's id
+            // is then the only attribution available.
+            if ( !items[i].studentId.isEmpty() )
+                row.studentId = items[i].studentId;
             if ( row.labId.isEmpty() )
                 row.labId = cfg.labId;
             if ( row.rubricVersion.isEmpty() )
