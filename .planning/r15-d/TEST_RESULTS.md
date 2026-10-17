@@ -17,7 +17,7 @@ logs under `../exp-rs-r15-d-scripts/logs/` (not committed).
 |---|---|---|
 | F1 Pi failed-start | `pi-bridge-RED.log`: alive===true after spawn ENOENT; handshake hang | `pi/test` 37/37 twice (WSL) incl. CJK byte-length guard |
 | F2 MCP EOF sentinel | pipe probe: sentinel emitted on clean EOF | stdio cases in `test_mcp_server`; 5 MiB -> exactly 1 sentinel; clean EOF -> clean shutdown |
-| F3 workflow gates/inputs | `run-red-exec-plane.log`, `run-red-recovery.log`: Json::LogicError / silent drop | `test_workflow_execution_plane` 8/8 x2; `test_workflow_recovery` 13/14 x2 (1 pre-existing WorkflowRunLock pid failure) |
+| F3 workflow gates/inputs | `run-red-exec-plane.log`, `run-red-recovery.log`: Json::LogicError / silent drop | `test_workflow_execution_plane` 8/8 x2; `test_workflow_recovery` 14/15 x2 (1 pre-existing WorkflowRunLock pid failure) |
 | F4 junction escape | all 3 escape assertions failed on unmodified header | junction test 3/3 outside; sandbox suite 4 pass/2 skip/0 fail x3 |
 | F5 snapshot leaf coercion | slot:1 -> "1"; resolved:"yes" -> LogicError | `test_agent_loop_seams` 10/10 x2 |
 | F6 worker write-gate | gateprobe: ok=0 errors=1 roots=0 oldGate=0 | `test_plugin_capabilities` 14/14 x2 |
@@ -54,3 +54,12 @@ logs under `../exp-rs-r15-d-scripts/logs/` (not committed).
 - test_workflow_pipeline_ui — Windows ACL/symlink fixture failures
 - test_workflow_recovery WorkflowRunLock pid case — 1 case, unrelated
 - NOT VERIFIED: hardware/GPU lanes, native-Windows Pi live-child spawn.
+
+## Review-round additions (R1/R2 follow-ups)
+
+| Change | Evidence |
+|---|---|
+| F8 authority temp-name family | `test_workflow_recovery` 14/15 x2 — new `[tmp-sweep]` case (UINT64_MAX rng sweep, dotted-runId live-lock, committed `.tmp` runId) passes; the 1 failure is the unchanged pre-existing pid case |
+| F9 4 MiB boundary + badbit | `test_mcp_server` 30 pass/0 fail/2 skip x2 — new sections: exact-cap+\n delivered, exact-cap@EOF delivered, cap+1 -> exactly one sentinel |
+| F10 gates.require/hint | `test_workflow_execution_plane` 8/8 x2 — badCases gains wrong-typed `require:5` / `hint:true` (R2 addition) |
+| bridge R1/R2 cleanups | `node --test pi/test/` 37/37 x2 (WSL, LF-synced tree; fixtures src/agent/harness/* + tests/surface_diff_snapshot.json) |

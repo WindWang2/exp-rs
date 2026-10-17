@@ -499,6 +499,8 @@ TEST_CASE("workflowDefinitionFromJson refuses wrong-typed gates/inputs (fail-clo
     {"gates", arrOf(Json::Value("x")), "gates"},
     {"gates", arrOf(Json::Value(Json::nullValue)), "gates"},
     {"gates", Json::Value("x"), "gates"},
+    {"gates", arrOf(inputConn({{"require", Json::Value(5)}})), "require"},
+    {"gates", arrOf(inputConn({{"hint", Json::Value(true)}})), "hint"},
     {"inputs", arrOf(Json::Value("stepA")), "inputs"},
     {"inputs", Json::Value("stepA"), "inputs"},
     {"inputs", arrOf(inputConn({{"fromStepId", Json::Value(5)}})), "fromStepId"},
