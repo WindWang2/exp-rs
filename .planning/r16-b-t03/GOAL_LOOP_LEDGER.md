@@ -13,8 +13,8 @@ Capacity note: the ≥3×10^8-token figure is a long-horizon capacity statement,
 
 | WP | Type | Oracle | State |
 | --- | --- | --- | --- |
-| WP-T03-1 | P1 fix | Deterministic test: facts snapshot obtained before an authority reinstall still answers `entriesForIntent` after it (throws `std::bad_function_call` on current master → RED; owned snapshot → GREEN) | planned |
-| WP-T03-2 | regression/test de-blinding | Stress test: `agent_adapter::recipeSearch` ∥ `RecipeRouter::setRecipes/clear` and `agent_adapter::scientificCapabilities` ∥ `setCapabilityFacts` complete without exception/corruption, results coherent (old-or-new authority, never mixed) | planned |
+| WP-T03-1 | P1 fix | Deterministic test: a facts view obtained before an authority reinstall keeps answering for its OWN authority afterwards (on master it silently answered for the NEW one → RED; owned snapshot → GREEN) | done |
+| WP-T03-2 | regression/test de-blinding | Stress test: `agent_adapter::recipeSearch` ∥ `RecipeRouter::setRecipes` and `agent_adapter::scientificCapabilities` ∥ `setCapabilityFacts` complete without exception/corruption, results coherent (old-or-new authority, never mixed) | done |
 | WP-T03-3 | evidence | verification ledger for already-fixed #1465/#1447 items (BASELINE.md table) | done |
 
 Out-of-scope guard: `src/help/terminology_provider.cpp` (#1465 item) is NOT in this track's ownership — recorded, untouched.
@@ -23,10 +23,11 @@ Out-of-scope guard: `src/help/terminology_provider.cpp` (#1465 item) is NOT in t
 
 ### WP-T03-1 capability facts lifetime (P1)
 
-- **RED (real run, pre-fix)**: `ctest -R test_science_context_broker` → `1/40 failed` — Test #880 `capability facts snapshot stays answerable across an authority reinstall`, 3 failed assertions:
-  - `snapshot->authority == "capability_knowledge.first"` failed (moved-from storage),
-  - `REQUIRE_NOTHROW( snapshot->entriesForIntent( "ndvi" ) )` failed (moved-from `std::function`),
-  - `snapshot->revision() == 7` failed with expansion `9 == 7` — the stale view answered for the NEW authority. Other 39 tests passed (baseline healthy).
+- **RED (real run, pre-fix)**: `ctest -R test_science_context_broker` → `1/40 failed` — Test #880 `capability facts snapshot stays answerable across an authority reinstall`, `assertions: 8 | 5 passed | 3 failed`, all three non-fatal CHECKs:
+  - `snapshot->authority == "capability_knowledge.first"` failed — the storage now answers `"capability_knowledge.second"` (the reinstall move-assigns into the optional's contained object),
+  - `snapshot->entriesForIntent( "ndvi" ).size() == 1` failed — the callable is the NEW authority's (it returns 0 entries),
+  - `snapshot->revision() == 7` failed with expansion `9 == 7` — the stale view answered for the NEW authority.
+  (`REQUIRE_NOTHROW` passed in the sequential case: the replaced callables remain invocable. The `std::bad_function_call` / torn-read mode lives in the CONCURRENT window — a reader between the member-wise moves, or calling a heap-allocated callable being destroyed — which is what churn regression TC_R16B_01 covers. Round-1 review correctly flagged that an earlier draft of this entry conflated the two modes; this entry now records what the run actually printed.) Other 39 tests passed (baseline healthy).
 - **Fix**: `ScienceContextBroker::mCapFacts` is now `std::shared_ptr<const CapabilityFactsLookup>`; `setCapabilityFacts` installs a fresh object (`make_shared`) and swaps the pointer under the lock; `capabilityFacts()` returns an owned snapshot; the `scientificCapabilities` tool holds the snapshot for the whole call (`agent_adapter.cpp`). `synthesize()` keeps its locked raw view — `mCapFacts` co-owns the object, so a concurrent reinstall cannot invalidate it.
 - **GREEN (run 1)**: `ctest -R test_science_context_broker` → `40/40 passed`.
 - **GREEN (run 2)**: same command repeated on the integration branch (see Phase 3).
@@ -46,4 +47,8 @@ Out-of-scope guard: `src/help/terminology_provider.cpp` (#1465 item) is NOT in t
 
 ## Phase 3/4 — integration & PR
 
-(filled from the integration worktree)
+- Both track commits cherry-picked onto `hardening/r16-b-scientific-decisions` with zero conflicts (source SHAs `0f003cc0d` → `a3465fc53`, `3bfab05d5` → `b9b8f257b`).
+- Round-1 independent review (fresh-context subagent): PASS_WITH_P2; all P2/P3 findings fixed in the review-fix commit (see `../r16-b/REVIEW_ROUND1.md`).
+- GREEN run 1 on integration (post review fixes): science_context + authority-invalidation **102/102**; track-04 families **196/196** (real outputs in `../r16-b/TEST_RESULTS.md`).
+- GREEN run 2 recorded in `../r16-b/TEST_RESULTS.md` after round-2 review.
+- `git diff --check` clean; `git diff origin/master...HEAD --stat` = code (5 files, +260/−7 net of review fixes) + planning markdown + .gitignore negations.

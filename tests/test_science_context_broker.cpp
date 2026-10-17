@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 
@@ -754,11 +755,14 @@ TEST_CASE( "capability facts snapshot stays answerable across an authority reins
 {
     // #1505 review P1: capabilityFacts() used to hand out a pointer into the
     // broker's optional storage. The agent tool (agent_adapter::
-    // scientificCapabilities) keeps that pointer past the broker lock, so a
+    // scientificCapabilities) keeps that view past the broker lock, so a
     // setCapabilityFacts reinstall move-assigned the stored lookup underneath
-    // it — the moved-from std::function then throws std::bad_function_call
-    // mid-tool-call. The broker hands the projection out, so it must own the
-    // handed-out lifetime.
+    // it. Sequentially the stale view then silently answers for the NEW
+    // authority (the three CHECKs below); concurrently the same window is a
+    // torn read / std::bad_function_call on a mid-move callable (covered by
+    // the churn regression in test_science_context_concurrency.cpp). The
+    // broker hands the projection out, so it must own the handed-out
+    // lifetime.
     ScienceContextBroker broker;
     CapabilityFactsLookup first;
     first.authority = "capability_knowledge.first";

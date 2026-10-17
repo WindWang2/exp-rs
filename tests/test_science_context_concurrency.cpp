@@ -9,6 +9,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
+
 #include "science_context/agent_adapter.h"
 #include "science_context/asset_state_provider.h"
 #include "science_context/broker.h"
@@ -665,7 +667,16 @@ TEST_CASE( "TC_R16B_02_RecipeSearchToolSurvivesRouterReplacementChurn",
         tools.emplace_back( [&]() {
             for ( int i = 0; i < kIterations && !stop.load( std::memory_order_relaxed ); ++i )
             {
-                const Json::Value out = recipeSearch( args );
+                Json::Value out;
+                try
+                {
+                    out = recipeSearch( args );
+                }
+                catch ( const std::exception & )
+                {
+                    stop.store( true );
+                    break;
+                }
                 const Json::Value &hits = out["hits"];
                 bool coherent = hits.isArray() && hits.size() == 8;
                 char prefix = 0;

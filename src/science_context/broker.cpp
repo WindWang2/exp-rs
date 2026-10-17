@@ -100,7 +100,9 @@ void ScienceContextBroker::setCapabilityFacts( CapabilityFactsLookup lookup )
     std::lock_guard<std::mutex> lock( mMutex );
     // Fresh object per install: outstanding capabilityFacts() snapshots keep
     // answering for the authority they were taken from (reinstall swaps the
-    // pointer, never mutates a handed-out projection).
+    // pointer, never mutates a handed-out projection). make_shared may throw
+    // bad_alloc under the lock — strong guarantee: the install aborts with
+    // mCapFacts and the cache untouched, and the previous authority stays.
     mCapFacts = std::make_shared<CapabilityFactsLookup>( std::move( lookup ) );
     // Bundles computed under the previous facts authority must not survive an
     // authority reinstall.
