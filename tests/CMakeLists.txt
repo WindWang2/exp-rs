@@ -15874,6 +15874,23 @@ foreach( LANE ${SICNU_VERIFIER_LANES} )
     sicnu_discover_tests( ${LANE_TARGET} TEST_PREFIX "${LANE_TARGET}::" )
 endforeach()
 
+# R16-A-T01: #1488/#1447 follow-up hardening lane (canonical budgets, jsoncpp
+# untyped-access escapes, digest determinism, locale independence). Source file
+# name follows the r16-a convention, so it is registered explicitly beside the
+# lane loop rather than by extending SICNU_VERIFIER_LANES (whose entries derive
+# the file name from the lane name).
+add_executable( test_verifier_r16a_14 test_r16_a_verifier.cpp )
+target_link_libraries( test_verifier_r16a_14 PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_verification
+)
+target_include_directories( test_verifier_r16a_14 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests( test_verifier_r16a_14 TEST_PREFIX "test_verifier_r16a_14::" )
+
 # The drift guard reads src/agent/harness/workflow_ir.cpp at run time and
 # compares its kFactKeys table against the mirror in the verifier, so it needs
 # to know where the source tree is. CMAKE_SOURCE_DIR is baked in as a define
