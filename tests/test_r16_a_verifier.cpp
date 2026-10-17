@@ -791,3 +791,24 @@ TEST_CASE( "r16a F: a document just under the node budget canonicalizes complete
     REQUIRE( !canonicalJson( over, text, error ) );
     REQUIRE( error.find( "node" ) != std::string::npos );
 }
+
+// R16-A review round 1, P2-3: readCount guarded the upper bound (uint64
+// above INT64_MAX) but not the LOWER one — a budget_usage member of -5
+// cast to a huge size_t while the error text claimed "non-negative
+// integer". The negative range check mirrors requireCount exactly.
+TEST_CASE( "r16a R1: budget_usage counts refuse negative integers",
+           "[verifier14][r16a][budget]" )
+{
+    Json::Value json{ Json::objectValue };
+    json["nodes"] = -5;
+    BudgetUsage usage;
+    std::string error;
+    REQUIRE( !BudgetUsage::fromJson( json, usage, error ) );
+    CHECK( error.find( "negative" ) != std::string::npos );
+
+    // The legal twin at the same shape still loads.
+    Json::Value legal{ Json::objectValue };
+    legal["nodes"] = 5;
+    REQUIRE( BudgetUsage::fromJson( legal, usage, error ) );
+    CHECK( usage.nodes == 5 );
+}

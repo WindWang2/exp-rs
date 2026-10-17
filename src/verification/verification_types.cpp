@@ -80,9 +80,11 @@ bool requireCount( const Json::Value &json, const char *name, std::size_t fallba
     // isIntegral() alone admits uint64 values above INT64_MAX (and ints outside
     // int32 where an int is read), for which asInt64()/asInt() THROW
     // Json::LogicError instead of converting — the #1488/#1447 defect family.
-    // Range-check through jsoncpp's own isInt64()/isInt() before converting;
-    // bools stay admissible exactly as before (asInt64() converts them).
-    if ( !member->isIntegral() || ( !member->isBool() && !member->isInt64() ) )
+    // Range-check through jsoncpp's own isInt64()/isInt() before converting.
+    // (isIntegral() is false for bools on every jsoncpp version, so bools are
+    // refused by the first clause alone — probed on 1.9.8, verified against
+    // upstream source; no isBool() escape hatch is needed or reachable.)
+    if ( !member->isIntegral() || !member->isInt64() )
     {
         error = std::string( "member '" ) + name + "' must be a non-negative integer";
         return false;

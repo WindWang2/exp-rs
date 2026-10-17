@@ -303,10 +303,10 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
         // operand with the wrong JSON type used to be silently skipped
         // ({"relation":"delta_ge","value":"0.5"} graded as delta >= 0 — a
         // vacuous pass on garbage), and jsoncpp parses "1e999" to ±Infinity
-        // with NO parse error, carrying a non-finite operand all the way
-        // into the report digest. Present operands are type- and
-        // finite-checked; absent operands keep their legacy defaults (the
-        // `changed` relation carries none).
+        // with NO parse error on 1.9.8 (older readers fail the text), which
+        // carried a non-finite operand all the way into the report digest.
+        // Present operands are type- and finite-checked; absent operands
+        // keep their legacy defaults (the `changed` relation carries none).
         if ( entry.isMember( "value" ) )
         {
             const Value &operand = entry["value"];

@@ -3,12 +3,14 @@
 //
 // grader_json's appendCanonical recursed per nesting level with NO depth
 // budget. Documents that arrive through parseJsonStrict are bounded by the
-// jsoncpp reader's default stackLimit (256 nesting levels — probed; deeper
-// text throws "Exceeded stackLimit" and is caught into a typed refusal),
-// but the engine is also a programmatic API: GradeEvidence value objects
-// are public, and evidence facts copied verbatim into toJson() reached the
-// unbudgeted walk — a ~100k-deep facts value crashed canonicalizeJson with
-// SIGSEGV inside grade()'s digest step (probe transcript, exit 139).
+// reader's PINNED stackLimit (256 nesting levels, set explicitly in
+// parseJsonStrict — jsoncpp's default is version-dependent: 1000 on
+// 1.9.5/1.9.6, incl. the Ubuntu 24.04 CI image, 256 on 1.9.8 — so the
+// pin, not the probe, is what keeps the invariant), but the engine is
+// also a programmatic API: GradeEvidence value objects are public, and
+// evidence facts copied verbatim into toJson() reached the unbudgeted
+// walk — a ~100k-deep facts value crashed canonicalizeJson with SIGSEGV
+// inside grade()'s digest step (probe transcript, exit 139).
 //
 // The budget is set at 512 canonical levels: double the reader's parse
 // bound, so every parse-legal document stays canonicalizable, and far
@@ -88,6 +90,36 @@ TEST_CASE( "r16-a grader: canonicalizeJson refuses pathologically deep values ty
     CHECK_FALSE( canonical.has_value() );
     CHECK( error.code == GraderErrorCode::SchemaShapeInvalid );
     CHECK( error.message.find( "depth" ) != std::string::npos );
+}
+
+TEST_CASE( "r16-a grader: parse ceiling is pinned below the canonical budget",
+           "[grader][r16a][canonical]" )
+{
+    // The stackLimit pin is what makes "every parse-legal document stays
+    // canonicalizable" hold on EVERY linked jsoncpp, not just the local
+    // one (1.9.8 defaults to 256 anyway; 1.9.5/1.9.6 — incl. Ubuntu 24.04
+    // CI — default to 1000 and would otherwise accept 513–1000-deep text
+    // the canonical walk must refuse). Version-independent lock: text
+    // under the pinned ceiling parses (jsoncpp throws AT the limit, so
+    // the effective max nesting is stackLimit-1 = 255 — probed); well
+    // past it is a typed refusal.
+    auto nestedText = []( int depth ) {
+        std::string text;
+        for ( int i = 0; i < depth; ++i )
+            text += "{\"n\":";
+        text += "1";
+        for ( int i = 0; i < depth; ++i )
+            text += "}";
+        return text;
+    };
+
+    GraderError error;
+    REQUIRE( parseJsonStrict( nestedText( 254 ), error ).has_value() );
+    CHECK( error.ok() );
+
+    const auto refused = parseJsonStrict( nestedText( 300 ), error );
+    CHECK_FALSE( refused.has_value() );
+    CHECK( error.code == GraderErrorCode::InvalidJson );
 }
 
 TEST_CASE( "r16-a grader: deep evidence facts are a typed refusal, not a crash in grade()",

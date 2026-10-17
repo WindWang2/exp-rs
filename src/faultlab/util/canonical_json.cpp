@@ -306,6 +306,15 @@ bool tryToCanonicalString( const Json::Value &value, std::string &out, std::stri
         error = walker.error;
         return false;
     }
+    // counted() samples the budget at node ENTRY, so a single scalar can
+    // still push the output past the ceiling mid-write (a control-char
+    // string amplifies ~6x through \uXXXX). The post-walk re-check closes
+    // that bypass: the byte budget is a hard cap, not a soft hint.
+    if ( walker.out.size() > kCanonicalMaxOutputBytes )
+    {
+        error = "canonical json exceeded the output byte budget";
+        return false;
+    }
     out = std::move( walker.out );
     return true;
 }

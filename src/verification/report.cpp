@@ -268,12 +268,21 @@ bool BudgetUsage::fromJson( const Json::Value &json, BudgetUsage &out, std::stri
         }
         // Range-guarded: asInt64() throws for uint64 above INT64_MAX, and a
         // hostile budget_usage member must be a typed refusal (#1447 family).
-        if ( !json[name].isIntegral() || ( !json[name].isBool() && !json[name].isInt64() ) )
+        // isIntegral() is false for bools, so the first clause refuses them;
+        // the negative range check below mirrors requireCount — without it a
+        // negative integer cast to size_t wraps into a huge positive count.
+        if ( !json[name].isIntegral() || !json[name].isInt64() )
         {
             error = std::string( "member '" ) + name + "' must be a non-negative integer";
             return false;
         }
-        target = static_cast<std::size_t>( json[name].asInt64() );
+        const Json::Int64 count = json[name].asInt64();
+        if ( count < 0 )
+        {
+            error = std::string( "member '" ) + name + "' must not be negative";
+            return false;
+        }
+        target = static_cast<std::size_t>( count );
         return true;
     };
     if ( !readCount( "checks_evaluated", loaded.checksEvaluated ) ||

@@ -4,9 +4,10 @@
 // Cross-track item (T01): faultlab's canonical writer diverged from the
 // verification/grader canonical families on exactly three points:
 //   1. non-finite numbers were written into digests as the pseudo-JSON
-//      literals "Infinity"/"-Infinity" (jsoncpp parses "1e999" to +Inf with
-//      NO parse error, so a scenario expectation operand carried it all the
-//      way into reportDigest);
+//      literals "Infinity"/"-Infinity" (on jsoncpp 1.9.8, "1e999" parses
+//      to +Inf with no parse error — older readers fail the text; the
+//      digest floor below guards both worlds), so a scenario expectation
+//      operand carried it all the way into reportDigest;
 //   2. negative zero serialized as "-0" while verification (roundSignificant,
 //      T01) and grader (canonicalNumber) both normalize it to "0";
 //   3. the canonical walk had no recursion budget — a programmatically
@@ -148,10 +149,13 @@ TEST_CASE( "r16-a faultlab: NaN keeps the no-data spelling, ±Infinity is refuse
 TEST_CASE( "r16-a faultlab: non-finite expectation operands are refused typed",
            "[faultlab][r16a][loader]" )
 {
-    // jsoncpp parses "1e999" to +Infinity WITHOUT a parse error (probed on
-    // the linked 1.9.x), so the operand sailed through isNumeric()/asDouble()
-    // into ExpectationResult.expected and from there into reportDigest as
-    // the literal "Infinity". The loader is the door: finite or refuse.
+    // jsoncpp parses "1e999" to +Infinity WITHOUT a parse error on 1.9.8
+    // (probed on the linked build; older readers like 1.9.5 fail the text
+    // instead — the value-level guard still matters for programmatic
+    // values on every version), so the operand sailed through
+    // isNumeric()/asDouble() into ExpectationResult.expected and from
+    // there into reportDigest as the literal "Infinity". The loader is
+    // the door: finite or refuse.
     SECTION( "delta_ge value = +Infinity" )
     {
         Json::Value doc = validScenarioDoc();
@@ -339,6 +343,26 @@ TEST_CASE( "r16-a faultlab: try* canonical forms carry the refusal reason",
     CHECK_FALSE( canonical::tryToCanonicalString( inf, text, error ) );
     CHECK( error.find( "non-finite" ) != std::string::npos );
     CHECK( text.empty() ); // a partial canonical form must not leak out
+}
+
+TEST_CASE( "r16-a faultlab: a single oversized scalar cannot bypass the output budget",
+           "[faultlab][r16a][canonical]" )
+{
+    // counted() samples the byte budget at node ENTRY, so the walk used to
+    // let one scalar blow straight past the 256 MiB ceiling mid-write: a
+    // control-char string amplifies ~6x through \uXXXX escaping. ~43 MiB of
+    // \x01 serializes to ~258 MiB — over budget, and it must be refused
+    // after the walk, not accepted (the post-walk re-check is the cap).
+    // One-shot ~400 MB transient RSS; cheap next to the budget it guards.
+    const std::string payload( 43 * 1024 * 1024, '\x01' );
+    Json::Value doc( Json::objectValue );
+    doc["big"] = payload;
+    std::string text;
+    std::string error;
+    CHECK_FALSE( canonical::tryToCanonicalString( doc, text, error ) );
+    CHECK( error.find( "output byte budget" ) != std::string::npos );
+    CHECK( text.empty() );
+    CHECK( canonical::sha256HexOf( doc ).empty() );
 }
 
 TEST_CASE( "r16-a faultlab: builtin fixture digests are unchanged by the alignment",

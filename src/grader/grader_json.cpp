@@ -55,15 +55,19 @@ void escapeStringInto( std::string &out, const std::string &text )
 }
 
 /// Depth ceiling for the canonical walk. Documents arriving through
-/// parseJsonStrict are already bounded by the jsoncpp reader's default
-/// stackLimit (256 nesting levels; deeper text throws "Exceeded
-/// stackLimit", which parseJsonStrict catches into a typed refusal), but
+/// parseJsonStrict are already bounded by the reader's PINNED stackLimit
+/// (jsoncpp throws AT the limit, so text nesting tops out at 255; the
+/// pin is set there explicitly because jsoncpp's default is
+/// version-dependent — 1000 on 1.9.5/1.9.6, 256 on 1.9.8 — and Ubuntu
+/// 24.04, the CI image, ships 1.9.5, where an unpinned reader would
+/// accept 513–1000-deep text that this walk would then refuse), but
 /// the engine is also a programmatic API — value-object authors can hand
 /// grade() an evidence bundle whose facts nest arbitrarily deep, and the
 /// unbudgeted recursion crashed with a stack overflow (SIGSEGV around
-/// 100k levels). 512 keeps every parse-legal document canonicalizable
-/// while staying far from any stack danger; over-budget depth is a typed
-/// refusal through the existing GraderError channel.
+/// 100k levels). 512 is double the parse ceiling, keeping every
+/// parse-legal document canonicalizable while staying far from any
+/// stack danger; over-budget depth is a typed refusal through the
+/// existing GraderError channel.
 constexpr int kMaxCanonicalDepth = 512;
 
 bool appendCanonical( const Json::Value &value, std::string &out, GraderError &error,
@@ -238,6 +242,14 @@ std::optional<Json::Value> parseJsonStrict( const std::string &text, GraderError
     builder["failIfExtra"] = true;
     builder["strictRoot"] = false;
     builder["allowComments"] = false;
+    // Pinned, not inherited: the jsoncpp default stackLimit is
+    // version-dependent (1000 on 1.9.5/1.9.6 — the Ubuntu 24.04 CI image's
+    // 1.9.5 among them — 256 on 1.9.8). Pinning keeps the parse ceiling
+    // (jsoncpp throws AT the limit, so the effective max nesting is 255)
+    // below the canonical walk's kMaxCanonicalDepth (512) on every
+    // linked version, so a document this reader accepts never fails
+    // canonicalization for depth alone.
+    builder["stackLimit"] = 256;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     Json::Value doc;
     std::string parseErrors;

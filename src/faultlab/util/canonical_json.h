@@ -15,7 +15,9 @@
 //   * ±Infinity is REFUSED. It has no feature meaning in this framework
 //     (noData is NaN; every transform operand is finite-gated) and cannot
 //     be spelled as JSON at all: an unhashable value must not reach a
-//     digest. jsoncpp parses "1e999" to +Inf with no parse error, so the
+//     digest. jsoncpp 1.9.8 parses "1e999" to +Inf with no parse error
+//     (older readers like 1.9.5 instead fail the text — either way the
+//     value-level API can still be handed a programmatic Inf), so the
 //     refusal lives here as the digest floor (the scenario loader refuses
 //     non-finite operands at the door as well).
 //   * -0.0 normalizes onto `0`, like both sibling canonicalizers.
