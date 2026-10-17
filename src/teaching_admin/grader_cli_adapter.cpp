@@ -224,12 +224,20 @@ GraderCliGrade gradeViaCli( const GraderCliConfig &cfg, const QString &artifactP
     }
 
     // The real CLI writes the transcript to --out and mirrors it on stdout;
-    // prefer the file, fall back to stdout.
+    // prefer the file, fall back to stdout. The file read is budgeted by the
+    // same maxBytes forwarded as --max-bytes: an unbounded readAll() here
+    // would let a hostile/buggy grader bypass the #1466 capture caps through
+    // the transcript channel — and an oversized transcript is a typed
+    // refusal, never a parsed grade.
     QByteArray raw;
     {
-        QFile f( transcriptPath );
-        if ( f.open( QIODevice::ReadOnly ) )
-            raw = f.readAll();
+        const qint64 budget = cfg.maxBytes > 0 ? cfg.maxBytes : GraderCliConfig{}.maxBytes;
+        const BoundedReadResult read = readBounded( transcriptPath, budget );
+        if ( read.oversize )
+            return unavailableGrade(
+              QStringLiteral( "grader_transcript_oversize" ),
+              QStringLiteral( "grader transcript exceeds the %1-byte budget" ).arg( budget ) );
+        raw = read.bytes;
     }
     if ( raw.isEmpty() )
         raw = sr.stdoutBytes;
