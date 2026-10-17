@@ -116,6 +116,13 @@ optional declared-provenance sections:
 - `files[]` covers **every regular file** in the bundle; verification recomputes bytes + sha256,
   re-walks the tree to flag unlisted files, rejects absolute/`..` manifest paths, and flags
   entries whose symlink resolves outside the bundle (the builders ship dereferenced trees).
+- **Executable-bit preservation** (additive, schema-/2 files[] entries): the POSIX builder records
+  `"exec": true` on every executable payload file (`bin/*`, `GRADE_ALL.sh`, `VERIFY.sh`, ...).
+  A transfer that strips the bit — zip without permissions, a FAT32 USB stick — leaves every byte
+  identical (digests stay green) while the bundle no longer runs; the canonical verifier therefore
+  fails with `exec bit lost: <path>` on POSIX when a declared bit is missing. The field is
+  enforced only when declared: legacy /1 manifests and Windows-built bundles (which have no POSIX
+  mode to record) verify unchanged, and the PS twin ignores it.
 - `size_ceiling_mb` is the declared ceiling (default 250 MB). `--max-mb` may lower it, never raise
   the default silently: a ceiling breach fails the build unless `--max-mb` explicitly overrides.
 - **Schema negotiation**: readers accept `/1` and `/2`; any other (in particular a future
