@@ -10970,6 +10970,15 @@ target_compile_definitions(test_faultlab_params_r8 PRIVATE
 )
 sicnu_discover_tests(test_faultlab_params_r8)
 
+# R16-A T02: canonical/digest fail-closed alignment + scenario loader operand
+# honesty (faultlab track; same leaf lane, no new links).
+add_executable(test_r16_a_faultlab test_r16_a_faultlab.cpp)
+target_link_libraries(test_r16_a_faultlab PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_faultlab
+)
+sicnu_discover_tests(test_r16_a_faultlab TEST_PREFIX "test_r16_a_faultlab::")
+
 # RS14-05 Process-aware Experiment Grader: engine/types/error/json/sha256
 # schema (sicnu_grader links jsoncpp PUBLIC).
 add_executable(test_grader_schema test_grader_schema.cpp)
