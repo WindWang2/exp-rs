@@ -30,13 +30,19 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "verification/canonical_json.h"
+#include "verification/check_runner.h"
 #include "verification/checks_numeric.h"
 #include "verification/digest.h"
+#include "verification/packs_builtin.h"
+#include "verification/providers.h"
+#include "verification/report.h"
+#include "verification/spec.h"
 
 #include <json/json.h>
 
 #include <limits>
 #include <string>
+#include <vector>
 
 using namespace sicnu::verification;
 
@@ -234,4 +240,174 @@ TEST_CASE( "r16a A-3: integer extremes serialize exactly and doubles pin to 12 d
     Json::Value negativeInf( -std::numeric_limits<double>::infinity() );
     REQUIRE( !canonicalJson( negativeInf, out, error ) );
     REQUIRE( !error.empty() );
+}
+
+// ---------------------------------------------------------------------------
+// B-1/B-2: jsoncpp untyped integer access in the fromJson loaders (#1447
+//          family) — behaviour fixes (RED first)
+//
+// isIntegral() says yes to uint64 values above INT64_MAX and to int64 values
+// outside int32, but asInt64()/asInt() then THROW Json::LogicError (probed on
+// the vendored jsoncpp 1.9.8: "LargestUInt out of Int64 range" / "LargestInt
+// out of Int range"). The loaders' contract is false + error on malformed
+// input; an escaping exception is the #1488 defect wearing a different member
+// name, and it hands the caller a crash instead of a typed refusal.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "r16a B-1: spec and report loaders refuse out-of-range integers instead of throwing",
+           "[verifier14][r16a]" )
+{
+    std::string error;
+
+    // A budget count above INT64_MAX (jsoncpp stores it as uint64).
+    Json::Value spec{ Json::objectValue };
+    spec["spec_id"] = "hostile.spec";
+    spec["budget"] = Json::Value{ Json::objectValue };
+    spec["budget"]["max_checks"] = Json::Value( Json::UInt64( 18446744073709551615ULL ) );
+    VerificationSpec specLoaded;
+    REQUIRE( !VerificationSpec::fromJson( spec, specLoaded, error ) );
+    REQUIRE( !error.empty() );
+
+    // A depth outside int32 where an int is read.
+    Json::Value deep = spec;
+    deep["budget"] = Json::Value{ Json::objectValue };
+    deep["budget"]["max_depth"] = Json::Value( Json::Int64( 3000000000LL ) );
+    REQUIRE( !VerificationSpec::fromJson( deep, specLoaded, error ) );
+    REQUIRE( !error.empty() );
+
+    // schema_version outside int32 on both loaders.
+    Json::Value specVersion = spec;
+    specVersion.removeMember( "budget" );
+    specVersion["schema_version"] = Json::Value( Json::Int64( 3000000000LL ) );
+    REQUIRE( !VerificationSpec::fromJson( specVersion, specLoaded, error ) );
+    REQUIRE( !error.empty() );
+
+    Json::Value report{ Json::objectValue };
+    report["schema_version"] = Json::Value( Json::Int64( 3000000000LL ) );
+    VerificationReport reportLoaded;
+    REQUIRE( !VerificationReport::fromJson( report, reportLoaded, error ) );
+    REQUIRE( !error.empty() );
+
+    report.removeMember( "schema_version" );
+    report["budget_usage"] = Json::Value{ Json::objectValue };
+    report["budget_usage"]["max_depth_seen"] = Json::Value( Json::Int64( 3000000000LL ) );
+    REQUIRE( !VerificationReport::fromJson( report, reportLoaded, error ) );
+    REQUIRE( !error.empty() );
+
+    report["budget_usage"] = Json::Value{ Json::objectValue };
+    report["budget_usage"]["checks_evaluated"] = Json::Value( Json::UInt64( 18446744073709551615ULL ) );
+    REQUIRE( !VerificationReport::fromJson( report, reportLoaded, error ) );
+    REQUIRE( !error.empty() );
+
+    // Sanity for the guard itself: in-range values keep loading.
+    Json::Value sane{ Json::objectValue };
+    sane["spec_id"] = "sane.spec";
+    sane["budget"] = Json::Value{ Json::objectValue };
+    sane["budget"]["max_checks"] = Json::Value( Json::Int64( 64 ) );
+    REQUIRE( VerificationSpec::fromJson( sane, specLoaded, error ) );
+}
+
+// ---------------------------------------------------------------------------
+// B-3: an artifact description whose "kind" is not a string cannot crash the
+//      runner — behaviour fix (RED first)
+//
+// checks_artifact.cpp read the kind via asString() without a type guard on the
+// path where no kind expectation was declared (required_keys-only checks);
+// an object/array kind escaped Json::LogicError straight through runSpec.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Describes exactly one artifact: the fixed facts handed to it at
+/// construction. Enough provider for the artifact seam; the others stay null.
+class FixedFactsProvider : public ArtifactProvider
+{
+  public:
+    explicit FixedFactsProvider( Json::Value facts ) : m_facts( std::move( facts ) ) {}
+
+    Availability describe( const std::string &, Json::Value &facts, std::string & ) const override
+    {
+        facts = m_facts;
+        return Availability::Found;
+    }
+
+  private:
+    Json::Value m_facts;
+};
+
+VerificationCheck artifactCheck( const std::string &id, Json::Value params )
+{
+    VerificationCheck check;
+    check.id = id;
+    check.kind = checkKindToWire( CheckKind::ArtifactShape );
+    check.title = "r16a " + id;
+    check.subject = SubjectRef{ "artifact", "product.tif" };
+    check.params = std::move( params );
+    return check;
+}
+
+VerificationInputs artifactInputs( const ArtifactProvider &provider )
+{
+    VerificationInputs inputs;
+    inputs.artifact = &provider;
+    inputs.sourceId = "r16a-fixture";
+    return inputs;
+}
+
+} // namespace
+
+TEST_CASE( "r16a B-3: a non-string artifact kind is an unreadable fact, never a crash",
+           "[verifier14][r16a]" )
+{
+    // kind as an object — the shape a tired or hostile producer can hand back.
+    Json::Value facts{ Json::objectValue };
+    facts["kind"] = Json::Value{ Json::objectValue };
+    facts["kind"]["surprise"] = true;
+    facts["dtype"] = "uint16";
+    const FixedFactsProvider provider( facts );
+
+    VerificationSpec spec;
+    spec.specId = "r16a.nonstring.kind";
+
+    // A check with no kind expectation: this is the path that reached the
+    // unguarded asString() before the fix.
+    Json::Value params{ Json::objectValue };
+    Json::Value required{ Json::arrayValue };
+    required.append( "dtype" );
+    params["required_keys"] = required;
+    spec.checks.push_back( artifactCheck( "artifact.dtype_present", params ) );
+
+    // A second check WITH a kind expectation, to pin the already-guarded path
+    // (an unreadable kind is Indeterminate there, not a throw).
+    Json::Value kindParams{ Json::objectValue };
+    kindParams["expect"]["kind"] = "raster";
+    spec.checks.push_back( artifactCheck( "artifact.kind_is_raster", kindParams ) );
+
+    const VerificationReport report = runSpecFlat( spec, artifactInputs( provider ) );
+    REQUIRE( report.results.size() == 2 );
+
+    // The dtype-only check asked one question and the artifact answered it
+    // (dtype is present); a garbage kind it was never asked about cannot
+    // retroactively fail that question — but the report as a whole may not
+    // read as Pass while any declared expectation stays unreadable.
+    REQUIRE( report.results.front().status == CheckStatus::Pass );
+    REQUIRE( report.results.back().status == CheckStatus::Indeterminate );
+    REQUIRE( report.results.back().failureCode == failure_codes::kArtifactSchemaMismatch );
+    REQUIRE( report.status == CheckStatus::Indeterminate );
+
+    // An array kind must fare the same as an object kind.
+    Json::Value arrayFacts{ Json::objectValue };
+    arrayFacts["kind"] = Json::Value{ Json::arrayValue };
+    arrayFacts["dtype"] = "uint16";
+    const FixedFactsProvider arrayProvider( arrayFacts );
+    const VerificationReport arrayReport = runSpecFlat( spec, artifactInputs( arrayProvider ) );
+    REQUIRE( arrayReport.results.size() == 2 );
+    REQUIRE( arrayReport.status == CheckStatus::Indeterminate );
+
+    // And the whole-report seam: nothing above may throw out of runSpec, so
+    // the digest must exist (empty digest means canonicalization refused).
+    std::string digestError;
+    REQUIRE( !reportDigest( report ).empty() );
+    (void)digestError;
 }

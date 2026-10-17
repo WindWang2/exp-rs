@@ -77,7 +77,12 @@ bool requireCount( const Json::Value &json, const char *name, std::size_t fallba
         out = fallback;
         return true;
     }
-    if ( !member->isIntegral() && !member->isUInt() )
+    // isIntegral() alone admits uint64 values above INT64_MAX (and ints outside
+    // int32 where an int is read), for which asInt64()/asInt() THROW
+    // Json::LogicError instead of converting — the #1488/#1447 defect family.
+    // Range-check through jsoncpp's own isInt64()/isInt() before converting;
+    // bools stay admissible exactly as before (asInt64() converts them).
+    if ( !member->isIntegral() || ( !member->isBool() && !member->isInt64() ) )
     {
         error = std::string( "member '" ) + name + "' must be a non-negative integer";
         return false;
@@ -170,7 +175,7 @@ bool Budget::fromJson( const Json::Value &json, Budget &out, std::string &error 
     const Json::Value *maxDepthMember = optionalMember( json, "max_depth" );
     if ( maxDepthMember != nullptr )
     {
-        if ( !maxDepthMember->isIntegral() )
+        if ( !maxDepthMember->isIntegral() || !maxDepthMember->isInt() )
         {
             error = "member 'max_depth' must be an integer";
             return false;
