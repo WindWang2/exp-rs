@@ -96,14 +96,27 @@ void HelpSearchIndex::build( const QVector<const HelpDescriptor *> &descriptors 
     m_documents.clear();
     m_topics = 0;
 
+    // id → dense index; a repeated id reuses its slot so scores merge and the
+    // last descriptor's display fields win — exactly the semantics the old
+    // id-keyed posting map had.
+    QHash<QString, int> indexOfId;
     for ( const HelpDescriptor *d : descriptors ) {
         if ( !d || d->id.isEmpty() )
             continue;
 
-        auto addField = [this, &id = d->id]( const QStringList &tokens, double weight ) {
+        int docIndex = indexOfId.value( d->id, -1 );
+        if ( docIndex < 0 ) {
+            docIndex = m_documents.size();
+            m_documents.push_back( d );
+            indexOfId.insert( d->id, docIndex );
+        } else {
+            m_documents[ docIndex ] = d;
+        }
+
+        auto addField = [this, docIndex]( const QStringList &tokens, double weight ) {
             for ( const QString &token : tokens ) {
-                QHash<QString, double> &doc = m_index[token];
-                doc[id] += weight; // repeated tokens accumulate — bounded by doc length
+                // repeated tokens accumulate — bounded by doc length
+                m_index[token][docIndex] += weight;
             }
         };
 
@@ -113,7 +126,6 @@ void HelpSearchIndex::build( const QVector<const HelpDescriptor *> &descriptors 
         for ( const QString &keyword : d->keywords )
             addField( tokenize( keyword ), kWeightKeyword );
 
-        m_documents.insert( d->id, d );
         ++m_topics;
     }
     m_built = true;
@@ -130,39 +142,67 @@ QVector<SearchHit> HelpSearchIndex::search( const QString &query, int maxResults
     if ( tokens.isEmpty() )
         return hits;
 
-    QHash<QString, double> scores;
+    // Dense per-document score vector: the token join touches only integer
+    // keys (no QString hashing per posting entry), and per-query allocation
+    // is one zeroed double per indexed document.
+    QVector<double> scores( m_documents.size(), 0.0 );
     for ( const QString &token : tokens ) {
         const auto it = m_index.constFind( token );
         if ( it == m_index.constEnd() )
             continue;
         for ( auto doc = it->constBegin(); doc != it->constEnd(); ++doc )
-            scores[doc.key()] += doc.value();
+            scores[ doc.key() ] += doc.value();
     }
-    if ( scores.isEmpty() )
-        return hits;
 
-    hits.reserve( scores.size() );
-    for ( auto it = scores.constBegin(); it != scores.constEnd(); ++it ) {
-        const HelpDescriptor *d = m_documents.value( it.key(), nullptr );
+    // Rank on trivially-copyable (score, descriptor) pairs and materialize
+    // SearchHit (two shared-string copies + fields) only for the surviving
+    // top-K: a query token hitting most of the corpus otherwise pays a full
+    // hit construction per matching document, per query.
+    struct Scored
+    {
+        double score;
+        const HelpDescriptor *d;
+    };
+    QVector<Scored> scored;
+    scored.reserve( scores.size() );
+    const double norm = std::sqrt( double( tokens.size() ) );
+    for ( int i = 0; i < scores.size(); ++i ) {
+        if ( scores[ i ] <= 0.0 )
+            continue;
+        const HelpDescriptor *d = m_documents[ i ];
         if ( !d )
             continue;
-        SearchHit hit;
-        hit.id = d->id;
-        hit.title = d->title;
-        hit.summary = d->summary;
         // normalize by query length so multi-term queries don't dominate purely
         // by token count; keep monotone in matches.
-        hit.score = it.value() / std::sqrt( double( tokens.size() ) );
-        hits.push_back( hit );
+        scored.push_back( { scores[ i ] / norm, d } );
     }
 
-    std::sort( hits.begin(), hits.end(), []( const SearchHit &a, const SearchHit &b ) {
+    static const auto byRank = []( const Scored &a, const Scored &b ) {
         if ( a.score != b.score )
             return a.score > b.score;
-        return a.id < b.id; // deterministic tie-break
-    } );
-    if ( hits.size() > maxResults )
-        hits.resize( maxResults );
+        return a.d->id < b.d->id; // deterministic tie-break
+    };
+    // Top-K selection: the rank order (score desc, id asc) is a TOTAL order
+    // (ids are unique), so the first-maxResults SET is uniquely determined and
+    // nth_element + sorting only the head is byte-identical to the old
+    // full-sort-then-truncate — at O(N + K log K) comparisons instead of
+    // O(N log N). A query token that hits most of the corpus (e.g. a common
+    // keyword) used to pay a full sort of every matching document per query.
+    if ( scored.size() > maxResults ) {
+        std::nth_element( scored.begin(), scored.begin() + maxResults, scored.end(), byRank );
+        scored.resize( maxResults );
+    }
+    std::sort( scored.begin(), scored.end(), byRank );
+
+    hits.reserve( scored.size() );
+    for ( const Scored &s : scored ) {
+        SearchHit hit;
+        hit.id = s.d->id;
+        hit.title = s.d->title;
+        hit.summary = s.d->summary;
+        hit.score = s.score;
+        hits.push_back( std::move( hit ) );
+    }
     return hits;
 }
 
