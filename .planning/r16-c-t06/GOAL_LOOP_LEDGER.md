@@ -33,3 +33,10 @@ No other packages were touched (`git diff --stat origin/master..HEAD`:
   final HEAD, re-read every diff, and found no defects requiring fix-ups.
 - `.gitignore` carries the standard 3-line planning-notes whitelist for
   `.planning/r16-c-t06/` (markdown only; logs stay local).
+
+## Round-1 review loop
+
+- Reviewer round 1 (independent, full diff, empirical probes): P0=0 P1=1 P2=4 → FAIL.
+- Fixes applied on integration branch (4 commits, RED→GREEN per commit message).
+- Re-verification: r16_c 23/23, combined family 67/67 ×2, verify family 12/12.
+- Awaiting round 2.

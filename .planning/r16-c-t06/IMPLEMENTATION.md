@@ -203,3 +203,23 @@ The worker overwrites `row.studentId = items[i].studentId` — discovery owns th
 None. All four fixes were re-read line-by-line, rebuilt, and re-run green twice
 on final HEAD; registration and whitespace (`git diff --check
 origin/master..HEAD` clean) verified. No minimal fix-ups were needed.
+
+## Round-1 review fixes (integration branch)
+
+Independent round-1 review (full-diff adversarial audit by a reviewer that did
+not implement the fixes) returned P0=0, P1=1, P2=4. All were addressed on the
+integration branch, each with RED on the pre-fix HEAD unless honestly noted:
+
+| Finding | Sev | Fix | Commit | RED |
+|---|---|---|---|---|
+| Head-only stamp adopts stale rows over tail-only same-stat swaps (>64 KiB artifacts) — empirically demonstrated by the reviewer's probe | P1 | stamp fingerprints head AND tail (second 64 KiB window seeked from the end; opaque encoding unchanged; old stamps fail closed to re-grading) | `6117694f9` | yes — 200 KiB artifact, tail byte flip + exact mtime restore: resumed=1/regrades=0, 4 assertion failures |
+| Unconditional identity overwrite publishes EMPTY id when discovery yields none (`_submission.*` flat root file) | P2 | overwrite only when the discovered id is non-empty; callable's id is then the only attribution | `6dd7afd6b` | yes — :165 empty row |
+| `toDouble(0.0)` silently coerces string weights to a legal 0.0 | P2 | JSON-number type check → typed malformed_grading_rule, both dialects | `636d9f9c9` | yes — both dialects (:176) |
+| `readBounded` unreadable ignored at transcript call site | P2 | typed `grader_transcript_unreadable` refusal when partial bytes were obtained (growth window); missing-file path KEEPS the stdout fallback, pinned by a new control test | `15e79bf1e` | honest note: the growth window is a two-line race inside readBounded, not deterministically triggerable via the public API — shipped without its own red test; fallback control GREEN both sides |
+| T05 test binaries land in `build/tests/` instead of build root | P2 | `RUNTIME_OUTPUT_DIRECTORY` set for both r16_c_t05 targets | `15e79bf1e` | n/a (build hygiene) |
+
+GREEN after all fixes: r16_c suites **23/23**; combined family
+(`r16_c_t05|r16_c_t06|test_teaching_admin_core$|test_teaching_batch_discovery_r10|test_teaching_admin_script_adapters_r8|^test_lab_runtime|test_teaching_lab_cockpit|test_teaching_parity_r4|test_teaching_foundation_e2e|test_lab_pack_boundaries_r4`)
+**67/67 ×2** identical counts; verify/portability family 12/12 (with
+`test_verify_adapters_grid` actually built this time — its earlier
+`_NOT_BUILT` placeholder was target selection, not a registration gap).
