@@ -15961,3 +15961,8 @@ target_include_directories(test_teaching_restore_r16_c_t05 PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_teaching_restore_r16_c_t05 TEST_PREFIX "test_teaching_restore_r16_c_t05::")
+
+# ── R16-C/T06: teacher batch assessment & classroom management hardening ──
+# Append-only registration block for this hardening track's new suites; one
+# line per work package, added in RED→GREEN order (docs: .planning/r16-c-t06).
+sicnu_add_teaching_admin_test(test_teaching_admin_checkpoint_stamp_r16_c_t06)

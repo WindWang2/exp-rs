@@ -44,18 +44,28 @@ QString batchConfigDigest( const BatchAssessmentConfig &cfg )
     return sha256Hex( canonicalJsonBytes( batchConfigDigestInput( cfg ) ) );
 }
 
-/// Artifact identity for checkpoint adoption: mtime + size, taken when a row
-/// is graded. A cheap stat proxy (not a content digest) — resume is a fast
-/// path, so it only has to catch re-submissions; the encoding can later be
-/// swapped for a digest without touching the checkpoint schema (#1448).
-/// Empty when the artifact is gone (unverifiable → re-grade on resume).
+/// Artifact identity for checkpoint adoption, taken when a row is graded:
+/// mtime + size + a bounded sha256 of the artifact's HEAD. The stat pair
+/// alone adopts a stale grade over a same-stat content swap (cp -p with a
+/// backdated mtime, or a same-length rewrite with the mtime restored —
+/// red test in test_teaching_admin_checkpoint_stamp_r16_c_t06), so the stamp
+/// also fingerprints content. The head bound keeps the resume fast path
+/// cheap for classroom rasters; the encoding stays opaque to the checkpoint
+/// schema (#1448 left it evolvable — old mtime:size stamps simply stop
+/// matching and fail closed to re-grading).
+/// Empty when the artifact is gone or unreadable (unverifiable → re-grade).
 QString artifactStamp( const QString &path )
 {
     const QFileInfo info( path );
     if ( !info.exists() )
         return QString();
+    constexpr qint64 kStampHeadBytes = 64 * 1024;
+    QFile f( path );
+    if ( !f.open( QIODevice::ReadOnly ) )
+        return QString();
     return QString::number( info.lastModified().toMSecsSinceEpoch() ) + QLatin1Char( ':' )
-         + QString::number( info.size() );
+         + QString::number( info.size() ) + QLatin1Char( ':' )
+         + sha256Hex( f.read( kStampHeadBytes ) );
 }
 
 /// A durable checkpoint row plus the artifact identity it was graded
