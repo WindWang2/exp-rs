@@ -28,6 +28,17 @@
 #include <QStringList>
 #include <QVector>
 
+// Wall-clock budgets are ~3.5x slower under the CI tier2 ASan+UBSan build
+// (review R1 P0-1: measured 40445 ms for the 3000-query loop vs 11580 ms
+// plain). tests/CMakeLists.txt injects scaled budgets when
+// ENABLE_SANITIZERS is on; the defaults below are the unsanitized ones.
+#ifndef SICNU_PERF_QUERY_BUDGET_MS
+#define SICNU_PERF_QUERY_BUDGET_MS 15000
+#endif
+#ifndef SICNU_PERF_TOKENIZE_BUDGET_MS
+#define SICNU_PERF_TOKENIZE_BUDGET_MS 10000
+#endif
+
 #include <cstdio>
 #include <random>
 
@@ -181,7 +192,7 @@ TEST_CASE( "search index build and query stay within linear-ish ceilings",
     const qint64 queryMs = timer.elapsed();
     std::fprintf( stderr, "[wp4] perf 3000 queries: %lld ms (%d non-empty)\n",
                   static_cast<long long>( queryMs ), nonEmpty );
-    CHECK( queryMs < 15000 );
+    CHECK( queryMs < SICNU_PERF_QUERY_BUDGET_MS );
     CHECK( nonEmpty > 2500 ); // nearly all queries should hit something
 
     // token cost on a 1 MiB VARIED CJK field stays bounded (single call).
@@ -198,6 +209,6 @@ TEST_CASE( "search index build and query stay within linear-ish ceilings",
     const qint64 tokenizeMs = tokenizeTimer.elapsed();
     std::fprintf( stderr, "[wp4] tokenize 1MiB CJK: %lld ms -> %d tokens\n",
                   static_cast<long long>( tokenizeMs ), tokens.size() );
-    CHECK( tokenizeMs < 10000 );
+    CHECK( tokenizeMs < SICNU_PERF_TOKENIZE_BUDGET_MS );
     CHECK( tokens.size() >= 10000 );
 }

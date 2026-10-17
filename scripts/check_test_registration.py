@@ -97,9 +97,9 @@ def cmake_text(tests_dir: str) -> str:
     for root, _dirs, files in os.walk(tests_dir):
         for f in files:
             if f == "CMakeLists.txt" and root != tests_dir:
-                # Subdirectory lists register sources under tests/ too (e.g.
-                # tests/support/CMakeLists.txt); fixture projects without any
-                # test_*.cpp references add nothing to the searchable text.
+                # Subdirectory lists register sources under tests/ too; fixture
+                # projects without any test_*.cpp references add nothing to
+                # the searchable text.
                 chunks.append(open(os.path.join(root, f), encoding="utf-8",
                                    errors="replace").read())
             elif f.endswith(".cmake"):
@@ -147,8 +147,11 @@ def main() -> int:
             continue
         if compiled and os.path.realpath(os.path.join(tests_root, f)) in compiled:
             continue
-        if f in templates:
-            template_ok.append((f, templates[f]))
+        if f in templates or os.path.basename(f) in templates:
+            # Template families are keyed on the bare filename the foreach
+            # names; collect_test_sources yields relative paths for files in
+            # subdirectories, so match the basename too (review R1 P2).
+            template_ok.append((f, templates.get(f) or templates[os.path.basename(f)]))
         else:
             orphans.append(f)
 

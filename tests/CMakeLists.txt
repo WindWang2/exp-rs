@@ -15990,6 +15990,16 @@ target_link_libraries(test_r16_E_help_search_perf PRIVATE
   Qt6::Core
   Sicnu::help
 )
+# Review R1 P0-1: ASan+UBSan (CI tier2, ENABLE_SANITIZERS=ON) slows the
+# wall-clock loops ~3.5x (measured 40445 ms vs 11580 ms) — scale the budgets
+# the same way instead of letting the tier fail deterministically. The
+# determinism and correctness assertions are unscaled on every lane.
+if(ENABLE_SANITIZERS)
+  target_compile_definitions(test_r16_E_help_search_perf PRIVATE
+    SICNU_PERF_QUERY_BUDGET_MS=52000
+    SICNU_PERF_TOKENIZE_BUDGET_MS=35000
+  )
+endif()
 set_target_properties(test_r16_E_help_search_perf PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )

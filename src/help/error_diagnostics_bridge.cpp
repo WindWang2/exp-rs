@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QRegularExpression>
+#include <QSet>
 
 #include <algorithm>
 
@@ -38,12 +39,18 @@ QStringList codeCandidates( const QString &message )
     static const QRegularExpression re(
         QStringLiteral( "\\b[A-Z][A-Z0-9_]{2,}\\b|\\b[A-Z][a-z]+(?:[A-Z][a-z]+){1,}\\b"
                         "|\\b[A-Z][a-z]{2,}\\b" ) );
+    // QSet dedup: the single-capitalized-word branch makes candidate counts
+    // O(distinct capitalized words) and a QStringList contains() scan is
+    // quadratic on hostile prose (review R1 P2).
+    QSet<QString> seen;
     QStringList tokens;
     auto it = re.globalMatch( message );
     while ( it.hasNext() ) {
         const QString token = it.next().captured( 0 );
-        if ( !tokens.contains( token ) )
+        if ( !seen.contains( token ) ) {
+            seen.insert( token );
             tokens << token;
+        }
     }
     std::stable_sort( tokens.begin(), tokens.end(),
                       []( const QString &a, const QString &b ) { return a.size() > b.size(); } );
@@ -65,8 +72,16 @@ QString ErrorDiagnosticsBridge::helpIdForCode( DiagnosticFamily family, const QS
 QString ErrorDiagnosticsBridge::helpIdFromMessage( const QString &message ) const
 {
     const QHash<QString, QHash<QString, QString>> table = curatedCodes( m_registry );
+    // Deterministic family order (review R1 P2): QHash iteration order is
+    // unspecified, so a code string that ever appears in two families would
+    // resolve differently across processes. Sorted keys make the first hit
+    // stable; today's curated codes are globally unique, this guards the
+    // future.
+    QList<QString> families = table.keys();
+    std::sort( families.begin(), families.end() );
     for ( const QString &token : codeCandidates( message ) ) {
-        for ( auto familyIt = table.constBegin(); familyIt != table.constEnd(); ++familyIt ) {
+        for ( const QString &family : families ) {
+            const auto familyIt = table.constFind( family );
             const auto codeIt = familyIt->constFind( token );
             if ( codeIt != familyIt->constEnd() )
                 return codeIt.value();

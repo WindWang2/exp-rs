@@ -41,12 +41,16 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# Fallback only: normally parsed from CMakeLists.txt's sicnu_i18n_update
-# target so the two can never disagree.
+# Fallback ONLY for --dirs-less invocations outside a repo checkout. In the
+# normal path the list is parsed from CMakeLists.txt's sicnu_i18n_update
+# target; only the DIRECTORY list is parsed that way — the lupdate flags
+# below in run_lupdate() are hardcoded to match that target and must be
+# updated together if the target's flags ever change.
 DEFAULT_LUPDATE_DIRS = [
     "src/app", "src/gui", "src/core", "src/processing", "src/analysis",
     "src/agent", "src/agent_ops", "src/workflow", "src/experiment_studio",
     "src/teaching_admin", "src/teaching", "src/operators", "src/ui",
+    "src/python",
 ]
 
 LUPDATE_CANDIDATES = [
@@ -317,6 +321,9 @@ def main() -> int:
                     help="tracked .ts (default: <root>/resources/translations/sicnu_zh_CN.ts)")
     ap.add_argument("--baseline-tolerance", type=int, default=0,
                     help="allowed number of unfinished entries in the tracked .ts")
+    ap.add_argument("--dirs", nargs="+", default=None,
+                    help="override the scanned source dirs (default: parsed "
+                         "from the sicnu_i18n_update target in CMakeLists.txt)")
     ap.add_argument("--selftest", action="store_true",
                     help="run constructive positive/negative fixtures and exit")
     args = ap.parse_args()
@@ -337,7 +344,20 @@ def main() -> int:
         print(f"ERROR: tracked .ts not found: {ts_path}", file=sys.stderr)
         return 2
 
-    dirs = lupdate_dirs_from_cmake(repo_root) or DEFAULT_LUPDATE_DIRS
+    if args.dirs:
+        dirs = args.dirs
+    else:
+        dirs = lupdate_dirs_from_cmake(repo_root)
+        if dirs is None:
+            # Fail loud (review R1 P2): silently falling back to
+            # DEFAULT_LUPDATE_DIRS could let a reworded sicnu_i18n_update
+            # target drift out of scope and the gate report a false PASS on
+            # a stale directory list.
+            print("ERROR: cannot parse the sicnu_i18n_update COMMAND line in "
+                  f"{repo_root / 'CMakeLists.txt'} — refusing to guess the "
+                  "lupdate scope; fix the parser or pass --dirs",
+                  file=sys.stderr)
+            return 2
     missing = [d for d in dirs if not (repo_root / d).is_dir()]
     if missing:
         print(f"ERROR: scanned directories missing under {repo_root}: {missing}",
