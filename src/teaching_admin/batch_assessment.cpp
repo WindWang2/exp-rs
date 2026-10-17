@@ -586,8 +586,13 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 row.message = QStringLiteral( "grader threw; isolated" );
                 row.artifactPath = items[i].path;
             }
-            if ( row.studentId.isEmpty() )
-                row.studentId = items[i].studentId;
+            // Identity authority (R16-C/T06 WP4): discovery owns the
+            // (student, artifact) pair. A callable answering with a
+            // foreign studentId used to be published verbatim — a
+            // callable bug then attributed one student's score to another
+            // id in the report/CSV. Overwrite, never trust: the grade
+            // itself stays the callable's.
+            row.studentId = items[i].studentId;
             if ( row.labId.isEmpty() )
                 row.labId = cfg.labId;
             if ( row.rubricVersion.isEmpty() )
