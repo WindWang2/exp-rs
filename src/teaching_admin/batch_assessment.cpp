@@ -45,27 +45,36 @@ QString batchConfigDigest( const BatchAssessmentConfig &cfg )
 }
 
 /// Artifact identity for checkpoint adoption, taken when a row is graded:
-/// mtime + size + a bounded sha256 of the artifact's HEAD. The stat pair
-/// alone adopts a stale grade over a same-stat content swap (cp -p with a
-/// backdated mtime, or a same-length rewrite with the mtime restored —
-/// red test in test_teaching_admin_checkpoint_stamp_r16_c_t06), so the stamp
-/// also fingerprints content. The head bound keeps the resume fast path
-/// cheap for classroom rasters; the encoding stays opaque to the checkpoint
-/// schema (#1448 left it evolvable — old mtime:size stamps simply stop
-/// matching and fail closed to re-grading).
+/// mtime + size + a bounded sha256 of the artifact's HEAD and TAIL. The
+/// stat pair alone adopts a stale grade over a same-stat content swap
+/// (cp -p with a backdated mtime, or a same-length rewrite with the mtime
+/// restored — red tests in test_teaching_admin_checkpoint_stamp_r16_c_t06),
+/// so the stamp also fingerprints content. Head-only hashing still adopted
+/// over tail-only rewrites on artifacts past the window (round-1 review):
+/// classroom rasters are typically far larger than one window with
+/// informative pixels throughout, so both ends are fingerprinted. The
+/// windows may overlap (files ≤ 2× window) — this is a fingerprint, not a
+/// dedup; the encoding stays opaque to the checkpoint schema (#1448 left
+/// it evolvable — old mtime:size and head-only stamps simply stop matching
+/// and fail closed to re-grading).
 /// Empty when the artifact is gone or unreadable (unverifiable → re-grade).
 QString artifactStamp( const QString &path )
 {
     const QFileInfo info( path );
     if ( !info.exists() )
         return QString();
-    constexpr qint64 kStampHeadBytes = 64 * 1024;
+    constexpr qint64 kStampWindowBytes = 64 * 1024;
     QFile f( path );
     if ( !f.open( QIODevice::ReadOnly ) )
         return QString();
+    QByteArray fingerprint = f.read( kStampWindowBytes );
+    const qint64 size = info.size();
+    if ( size > kStampWindowBytes
+         && f.seek( size - kStampWindowBytes ) )
+        fingerprint += f.read( kStampWindowBytes );
     return QString::number( info.lastModified().toMSecsSinceEpoch() ) + QLatin1Char( ':' )
-         + QString::number( info.size() ) + QLatin1Char( ':' )
-         + sha256Hex( f.read( kStampHeadBytes ) );
+         + QString::number( size ) + QLatin1Char( ':' )
+         + sha256Hex( fingerprint );
 }
 
 /// A durable checkpoint row plus the artifact identity it was graded

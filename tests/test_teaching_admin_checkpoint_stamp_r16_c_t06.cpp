@@ -195,3 +195,106 @@ TEST_CASE( "checkpoint stamp rejects a same-stat content swap",
               v.toObject().value( QStringLiteral( "artifact_stamp" ) ).toString().isEmpty() );
     }
 }
+
+TEST_CASE( "checkpoint stamp rejects a tail-only content swap beyond the head window",
+           "[teaching_admin][batch][checkpoint][r16_c_t06]" )
+{
+    // Round-1 review P1: hashing only the artifact's HEAD lets a same-length,
+    // same-mtime rewrite that touches ONLY bytes past the head window adopt
+    // the stale durable row — realistic for classroom rasters, which are
+    // typically far larger than the 64 KiB window with informative pixels
+    // throughout the file. The stamp must fingerprint the tail as well.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString submissions = QDir( dir.path() ).filePath( QStringLiteral( "submissions" ) );
+    const QString sid = QStringLiteral( "s001" );
+    REQUIRE( QDir( submissions ).mkpath( sid ) );
+    const QString artifact =
+      QDir( submissions ).filePath( sid + QStringLiteral( "/a.tif" ) );
+
+    // 200 KiB artifact: head window (64 KiB) all 'G', everything past it 'X'.
+    constexpr qint64 kTotal = 200 * 1024;
+    constexpr qint64 kTamperOffset = 150 * 1024;
+    {
+        QFile f( artifact );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( 64 * 1024, 'G' ) );
+        f.write( QByteArray( kTotal - 64 * 1024, 'X' ) );
+        REQUIRE( f.size() == kTotal );
+    }
+
+    // Tail-keyed grader: probe byte inside the tail window.
+    auto tailGrade = []( const SubmissionItem &item ) {
+        BatchRowResult row;
+        row.studentId = item.studentId;
+        row.labId = QStringLiteral( "lab15" );
+        row.artifactPath = item.path;
+        QFile f( item.path );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        REQUIRE( f.seek( kTamperOffset ) );
+        const char probe = f.read( 1 ).at( 0 );
+        if ( probe == 'X' )
+        {
+            row.status = QStringLiteral( "pass" );
+            row.verdict = QStringLiteral( "pass" );
+            row.score = 90.0;
+        }
+        else
+        {
+            row.status = QStringLiteral( "fail" );
+            row.verdict = QStringLiteral( "fail" );
+            row.score = 10.0;
+            row.message = QStringLiteral( "tail swapped content graded" );
+        }
+        return row;
+    };
+
+    const QString checkpoint = QDir( dir.path() ).filePath( QStringLiteral( "cp.json" ) );
+    BatchAssessmentConfig cfg;
+    cfg.labId = QStringLiteral( "lab15" );
+    cfg.submissionsDir = submissions;
+    cfg.rubricVersion = QStringLiteral( "r1" );
+    cfg.labVersion = QStringLiteral( "l1" );
+    cfg.softwareVersion = QStringLiteral( "sw1" );
+    cfg.maxConcurrency = 1;
+    cfg.maxSubmissions = -1;
+    cfg.checkpointPath = checkpoint;
+
+    const auto first = runBatchAssessment( cfg, tailGrade );
+    REQUIRE( first.graded == 1 );
+    REQUIRE( first.rows.first().score == 90.0 );
+
+    // Flip ONE tail byte (past the 64 KiB head window), keep the length,
+    // restore the exact mtime: stat + head fingerprint both unchanged.
+    const QDateTime mtime = QFileInfo( artifact ).lastModified();
+    {
+        QFile f( artifact );
+        REQUIRE( f.open( QIODevice::ReadWrite ) );
+        REQUIRE( f.seek( kTamperOffset ) );
+        REQUIRE( f.write( QByteArrayLiteral( "T" ) ) == 1 );
+        f.flush();
+    }
+    {
+        QFile f( artifact );
+        REQUIRE( f.open( QIODevice::ReadWrite ) );
+        REQUIRE( f.setFileTime( mtime, QFileDevice::FileModificationTime ) );
+    }
+    const QFileInfo after( artifact );
+    REQUIRE( after.size() == kTotal );
+    REQUIRE( after.lastModified().toMSecsSinceEpoch() == mtime.toMSecsSinceEpoch() );
+
+    int regrades = 0;
+    const auto second = runBatchAssessment(
+        cfg,
+        [&]( const SubmissionItem &item ) {
+            ++regrades;
+            return tailGrade( item );
+        } );
+    CHECK( second.resumed == 0 );
+    CHECK( regrades == 1 );
+
+    // The published row describes the tampered tail, never the stale grade.
+    REQUIRE( second.rows.size() == 1 );
+    CHECK( second.rows.first().status == QLatin1String( "fail" ) );
+    CHECK( second.rows.first().score == 10.0 );
+}
