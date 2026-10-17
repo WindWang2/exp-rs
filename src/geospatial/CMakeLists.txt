@@ -29,6 +29,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     remote/remote_identity_resolver.cpp
     remote/range_cache_disk.cpp
     remote/range_cache.cpp
+    remote/process_network_policy.cpp
     remote/vsi_object_identity.cpp
     remote/vsi_object_identity.h
     formats/format_profiles.cpp

@@ -29,6 +29,7 @@ namespace sicnu::geo::offline {
 namespace {
 
 std::atomic<bool> g_offline{ false };
+std::atomic<bool> g_blockPrivateNetworks{ false };
 
 constexpr const char *const kDenyExtension = ".__offline_blocked__";
 
@@ -363,6 +364,21 @@ bool enabledFromEnv()
     return envFlagEnabled( "SICNU_OFFLINE" );
 }
 
+void setBlockPrivateNetworks( bool block )
+{
+    g_blockPrivateNetworks.store( block );
+}
+
+bool blockPrivateNetworks()
+{
+    return g_blockPrivateNetworks.load();
+}
+
+bool blockPrivateNetworksFromEnv()
+{
+    return envFlagEnabled( "SICNU_BLOCK_PRIVATE_NETWORKS" );
+}
+
 bool isRemoteTarget( const std::string &source )
 {
     if ( source.empty() )
@@ -619,6 +635,93 @@ bool isPrivateHost( const std::string &hostOrUrl )
     }
 
     return false;
+}
+
+std::string resolvePinnedPublicAddresses( const std::string &url, std::string *curlResolveEntry )
+{
+    if ( curlResolveEntry )
+        curlResolveEntry->clear();
+    const std::size_t schemeEnd = url.find( "://" );
+    if ( schemeEnd == std::string::npos )
+        return std::string();
+    std::string scheme = url.substr( 0, schemeEnd );
+    std::transform( scheme.begin(), scheme.end(), scheme.begin(),
+                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+    const std::size_t authorityEnd = url.find_first_of( "/?#", schemeEnd + 3 );
+    std::string authority = url.substr( schemeEnd + 3, authorityEnd == std::string::npos
+                                                         ? std::string::npos
+                                                         : authorityEnd - schemeEnd - 3 );
+    const std::size_t at = authority.rfind( '@' );
+    if ( at != std::string::npos )
+        authority = authority.substr( at + 1 );
+    std::string host;
+    std::string port;
+    if ( !authority.empty() && authority[0] == '[' )
+        return std::string(); // bracketed IPv6 literal: nothing to re-resolve
+    const std::size_t colon = authority.rfind( ':' );
+    if ( colon != std::string::npos )
+    {
+        host = authority.substr( 0, colon );
+        port = authority.substr( colon + 1 );
+    }
+    else
+    {
+        host = authority;
+    }
+    if ( port.empty() )
+        port = scheme == "https" ? "443" : "80";
+    if ( host.empty() )
+        return "empty host";
+    if ( host.back() == '.' )
+        host.pop_back();
+    unsigned char probe[16];
+    if ( inet_pton( AF_INET, host.c_str(), probe ) == 1 || inet_pton( AF_INET6, host.c_str(), probe ) == 1 )
+        return std::string(); // literal address: the guard already judged it
+
+    struct addrinfo hints;
+    std::memset( &hints, 0, sizeof( hints ) );
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = nullptr;
+    if ( getaddrinfo( host.c_str(), nullptr, &hints, &res ) != 0 || res == nullptr )
+        return "host did not resolve under the private-network policy";
+    std::vector<std::string> addresses;
+    bool privateFound = false;
+    for ( struct addrinfo *p = res; p != nullptr; p = p->ai_next )
+    {
+        char text[INET6_ADDRSTRLEN] = {};
+        if ( p->ai_family == AF_INET )
+            inet_ntop( AF_INET, &reinterpret_cast<struct sockaddr_in *>( p->ai_addr )->sin_addr, text, sizeof text );
+        else if ( p->ai_family == AF_INET6 )
+            inet_ntop( AF_INET6, &reinterpret_cast<struct sockaddr_in6 *>( p->ai_addr )->sin6_addr, text, sizeof text );
+        else
+            continue;
+        const std::string literal( text );
+        if ( literal.empty() )
+            continue;
+        // Literal path of the shared predicate (no further DNS).
+        if ( isPrivateHost( p->ai_family == AF_INET6 ? "[" + literal + "]" : literal ) )
+        {
+            privateFound = true;
+            break;
+        }
+        const std::string spelled = p->ai_family == AF_INET6 ? "[" + literal + "]" : literal;
+        if ( std::find( addresses.begin(), addresses.end(), spelled ) == addresses.end() )
+            addresses.push_back( spelled );
+    }
+    freeaddrinfo( res );
+    if ( privateFound )
+        return "host resolves to a private network address";
+    if ( addresses.empty() )
+        return "host did not resolve under the private-network policy";
+    if ( curlResolveEntry )
+    {
+        std::string entry = host + ":" + port + ":";
+        for ( std::size_t i = 0; i < addresses.size(); ++i )
+            entry += ( i ? "," : "" ) + addresses[i];
+        *curlResolveEntry = entry;
+    }
+    return std::string();
 }
 
 void applyGdalNetworkDeny()

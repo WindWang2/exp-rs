@@ -131,8 +131,22 @@ RemoteValidatorOptions probeOptions()
 /// return the verdict token. Caller must NOT hold the cache mutex.
 std::string probeAndStore( SessionCache &cache, const std::string &url )
 {
-    auto validator = RemoteSourceValidator::probe( url, probeOptions() );
-    const std::string etag = strongEtagStd( validator.identity() );
+    // R15-B (B04): a typed refusal (SSRF private-host block, offline gate,
+    // transport failure) is "no proof", i.e. an EMPTY token — the header
+    // contract. Letting the GeoError escape would abort the caller's
+    // fingerprint collection (processing does not catch) instead of
+    // degrading the input to uncacheable. The drop below still runs, so a
+    // previously stored token is never reused after a failed probe (B15).
+    std::string etag;
+    try
+    {
+        auto validator = RemoteSourceValidator::probe( url, probeOptions() );
+        etag = strongEtagStd( validator.identity() );
+    }
+    catch ( const GeoError & )
+    {
+        etag.clear();
+    }
     std::lock_guard<std::mutex> lock( cache.mutex );
     if ( etag.empty() )
         cache.drop( url );
@@ -174,7 +188,15 @@ std::function<std::string( const std::string &path )> makeRemoteInputIdentityRes
                 return identity;
             }(),
             url );
-        const auto result = validator.revalidate( probeOptions() );
+        RevalidationResult result;
+        try
+        {
+            result = validator.revalidate( probeOptions() );
+        }
+        catch ( const GeoError & )
+        {
+            return {}; // inconclusive: no identity this submission (fail closed)
+        }
         if ( result.outcome == RevalidationOutcome::Unchanged )
         {
             std::lock_guard<std::mutex> lock( cache.mutex );

@@ -9818,6 +9818,66 @@ target_compile_definitions(test_r12b_e2e_durability PRIVATE
 set_target_properties(test_r12b_e2e_durability PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r12b_e2e_durability TEST_PREFIX "test_r12b_e2e_durability::")
 
+# R15-B geodata chain / stores / recoverable persistence oracles
+add_executable(test_r15_B_geodata_persistence
+  test_r15_B_geodata_persistence.cpp
+  support/http_stac_server.cpp
+  support/http_range_server.cpp
+)
+target_link_libraries(test_r15_B_geodata_persistence PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Sicnu::Geospatial Sicnu::dataset Sicnu::experiment
+  GDAL::GDAL SQLite::SQLite3
+)
+if(WIN32)
+  target_link_libraries(test_r15_B_geodata_persistence PRIVATE ws2_32)
+endif()
+sicnu_link_jsoncpp(test_r15_B_geodata_persistence)
+target_include_directories(test_r15_B_geodata_persistence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r15_B_geodata_persistence TEST_PREFIX "test_r15_B_geodata_persistence::")
+
+add_executable(test_r15_B_stores test_r15_B_stores.cpp)
+target_link_libraries(test_r15_B_stores PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Sicnu::data Sicnu::dataset Sicnu::experiment SQLite::SQLite3
+)
+target_include_directories(test_r15_B_stores PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r15_B_stores TEST_PREFIX "test_r15_B_stores::")
+
+add_executable(test_r15_B_partition_metadata test_r15_B_partition_metadata.cpp)
+target_link_libraries(test_r15_B_partition_metadata PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Sicnu::data Sicnu::dataset GDAL::GDAL SQLite::SQLite3
+)
+target_include_directories(test_r15_B_partition_metadata PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r15_B_partition_metadata TEST_PREFIX "test_r15_B_partition_metadata::")
+
+add_executable(test_r15_B_post1505 test_r15_B_post1505.cpp)
+target_link_libraries(test_r15_B_post1505 PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Sicnu::Geospatial GDAL::GDAL
+)
+target_include_directories(test_r15_B_post1505 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r15_B_post1505 TEST_PREFIX "test_r15_B_post1505::")
+
+# R15-B #1505 T11: CLI remote entry points block private networks by default
+# (popen of the real CLI against a loopback fixture, like test_cli_commands_json).
+if(NOT WIN32)
+add_executable(test_r15_B_cli_private_network test_r15_B_cli_private_network.cpp
+  support/http_range_server.cpp)
+target_link_libraries(test_r15_B_cli_private_network PRIVATE Catch2::Catch2WithMain)
+sicnu_link_jsoncpp(test_r15_B_cli_private_network)
+target_include_directories(test_r15_B_cli_private_network PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(test_r15_B_cli_private_network PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>")
+add_dependencies(test_r15_B_cli_private_network sicnu_geo_rs_cli)
+sicnu_discover_tests(test_r15_B_cli_private_network TEST_PREFIX "test_r15_B_cli_private_network::")
+endif()
+
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites

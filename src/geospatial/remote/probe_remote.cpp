@@ -96,6 +96,16 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
 
   if ( offline::enabled() )
     throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( uri.display() ) );
+  // R15-B (R4-03): CPLHTTPFetch has no per-hop guard; under the process
+  // policy a private origin is refused before dispatch (the GDAL-level
+  // fetch hook repeats the check for every CPLHTTPFetch).
+  if ( offline::blockPrivateNetworks() && offline::isPrivateHost( target ) )
+  {
+    Json::Value details;
+    details["url"] = uri.display();
+    throw GeoError( ErrorCode::PermissionDenied,
+                    "probeRemote: private / loopback / link-local hosts are blocked", details );
+  }
 
   // Option strings are built once, then the char* array — c_str() pointers
   // into a growing container dangle; assemble the array after the strings.

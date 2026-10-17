@@ -597,9 +597,38 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
                       "httpFetch: redirect target scheme must be http or https (got '" +
                         ( scheme.empty() ? std::string( "none" ) : scheme ) + "')" );
 
+    // R15-B (#1505 T3 / #1485): DNS rebinding. Every guard in this code
+    // base is the private-network predicate; it resolved the name, judged
+    // the answer and freed it, and libcurl then resolved the SAME name again
+    // and connected wherever that second answer pointed. Resolve once more
+    // here, validate every address, and pin the connection to exactly that
+    // set with CURLOPT_RESOLVE — libcurl never consults DNS for this hop.
+    std::string pinnedResolve;
+    if ( options.redirectGuard )
+    {
+      const std::string dnsRefusal = offline::resolvePinnedPublicAddresses( current, &pinnedResolve );
+      if ( !dnsRefusal.empty() )
+      {
+        Json::Value details;
+        details["url"] = uri.display();
+        details["hop"] = hop;
+        throw GeoError( ErrorCode::PermissionDenied,
+                        "httpFetch: egress policy refused the request" +
+                          ( hop > 0 ? " at redirect hop " + std::to_string( hop ) : std::string() ) +
+                          ": " + dnsRefusal,
+                        details );
+      }
+    }
+
     CURL *handle = curl_easy_init();
     if ( handle == nullptr )
       throw GeoError( ErrorCode::NetworkError, "httpFetch: transport could not be initialized" );
+    struct curl_slist *resolveList = nullptr;
+    if ( !pinnedResolve.empty() )
+    {
+      resolveList = curl_slist_append( nullptr, pinnedResolve.c_str() );
+      curl_easy_setopt( handle, CURLOPT_RESOLVE, resolveList );
+    }
     GuardedTransfer transfer;
     transfer.budget = budget;
     GuardedHeaders headers;
@@ -659,6 +688,7 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
       {
         curl_slist_free_all( requestHeaders );
         curl_easy_cleanup( handle );
+        curl_slist_free_all( resolveList );
         throw GeoError( ErrorCode::Timeout,
                         "httpFetch: request exceeded its time budget: " + uri.display() );
       }
@@ -725,6 +755,7 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
       location = locationIt->second;
     curl_slist_free_all( requestHeaders );
     curl_easy_cleanup( handle );
+    curl_slist_free_all( resolveList );
 
     if ( transfer.overBudget )
     {
@@ -812,22 +843,46 @@ Json::Value HttpFetchResult::toJson() const
   return json;
 }
 
-HttpFetchResult httpFetch( const std::string &url, const HttpFetchOptions &options )
+namespace
 {
+/// R15-B (R4-03): under the process-wide private-network policy a request
+/// without its own guard gets the private-network guard — and with it the
+/// guarded transport (per-hop policy + DNS pinning). A caller-supplied guard
+/// is kept as is (it is already the stricter, caller-specific policy).
+const HttpFetchOptions &effectiveOptions( const HttpFetchOptions &options, HttpFetchOptions &storage )
+{
+  if ( options.redirectGuard || !offline::blockPrivateNetworks() )
+    return options;
+  storage = options;
+  storage.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+    return offline::isPrivateHost( hopUrl ) ? "private network blocked (process policy)" : "";
+  };
+  return storage;
+}
+} // namespace
+
+HttpFetchResult httpFetch( const std::string &url, const HttpFetchOptions &requested )
+{
+  HttpFetchOptions storage;
+  const HttpFetchOptions &options = effectiveOptions( requested, storage );
   if ( options.redirectGuard )
     return guardedFetchImpl( url, options, true );
   return fetchImpl( url, options, true );
 }
 
-HttpFetchResult httpFetchStatus( const std::string &url, const HttpFetchOptions &options )
+HttpFetchResult httpFetchStatus( const std::string &url, const HttpFetchOptions &requested )
 {
+  HttpFetchOptions storage;
+  const HttpFetchOptions &options = effectiveOptions( requested, storage );
   if ( options.redirectGuard )
     return guardedFetchImpl( url, options, false );
   return fetchImpl( url, options, false );
 }
 
-Json::Value httpFetchJson( const std::string &url, const HttpFetchOptions &options )
+Json::Value httpFetchJson( const std::string &url, const HttpFetchOptions &requested )
 {
+  HttpFetchOptions storage;
+  const HttpFetchOptions &options = effectiveOptions( requested, storage );
   HttpFetchResult fetch = options.redirectGuard ? guardedFetchImpl( url, options, true )
                                                 : fetchImpl( url, options, true );
   if ( fetch.truncated )
