@@ -95,7 +95,10 @@ bool VerificationSpec::fromJson( const Json::Value &json, VerificationSpec &out,
     const Json::Value *versionMember = json.isMember( "schema_version" ) ? &json["schema_version"] : nullptr;
     if ( versionMember != nullptr )
     {
-        if ( !versionMember->isIntegral() )
+        // isInt() (not just isIntegral()): asInt() throws Json::LogicError for
+        // integers outside int32 range, and a hostile schema_version must be a
+        // typed refusal, not an escaping exception (#1447 family).
+        if ( !versionMember->isIntegral() || !versionMember->isInt() )
         {
             error = "member 'schema_version' must be an integer";
             return false;

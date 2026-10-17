@@ -10,6 +10,7 @@
 #include <json/json.h>
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <string>
 
@@ -212,6 +213,17 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
         {
             return fieldError( "base_fixture.params must be an object" );
         }
+        // makeFixture documents "v1 fixtures take no parameters" and ignores
+        // the object entirely — an author declaring {"width": 64} silently
+        // got the stock fixture. That is the #1464 accepted-but-inert shape
+        // (the transform-level cell_size was closed in R8); the fixture
+        // level refuses the same way. The empty object stays legal for
+        // schema symmetry.
+        if ( !fixture["params"].empty() )
+        {
+            return fieldError( "base_fixture.params must be empty: v1 fixtures take no "
+                               "parameters, declared params would be silently ignored" );
+        }
         scenario.fixtureParams = fixture["params"];
     }
     if ( !readSeed( fixture, "seed", scenario.fixtureSeed, seedError ) )
@@ -287,26 +299,63 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
                                  FaultSeverity::Error } );
             return result;
         }
-        if ( entry.isMember( "value" ) && entry["value"].isNumeric() )
+        // Operand honesty (#1464 doctrine at the loader door): a PRESENT
+        // operand with the wrong JSON type used to be silently skipped
+        // ({"relation":"delta_ge","value":"0.5"} graded as delta >= 0 — a
+        // vacuous pass on garbage), and jsoncpp parses "1e999" to ±Infinity
+        // with NO parse error on 1.9.8 (older readers fail the text), which
+        // carried a non-finite operand all the way into the report digest.
+        // Present operands are type- and finite-checked; absent operands
+        // keep their legacy defaults (the `changed` relation carries none).
+        if ( entry.isMember( "value" ) )
         {
-            expectation.value = entry["value"].asDouble();
-        }
-        if ( expectation.relation == ExpectationRelation::TruthIs )
-        {
-            if ( !entry.isMember( "value" ) || !entry["value"].isBool() )
+            const Value &operand = entry["value"];
+            if ( expectation.relation == ExpectationRelation::TruthIs )
             {
-                return fieldError( "truth_is expectation for '" + expectation.id +
-                                   "' needs a boolean value" );
+                if ( !operand.isBool() )
+                {
+                    return fieldError( "truth_is expectation for '" + expectation.id +
+                                       "' needs a boolean value" );
+                }
+                expectation.value = operand.asBool() ? 1.0 : 0.0;
             }
-            expectation.value = entry["value"].asBool() ? 1.0 : 0.0;
+            else if ( !operand.isNumeric() || !std::isfinite( operand.asDouble() ) )
+            {
+                return fieldError( "expectation '" + expectation.id +
+                                   "' value must be a finite number" );
+            }
+            else
+            {
+                expectation.value = operand.asDouble();
+            }
         }
-        if ( entry.isMember( "range_lo" ) && entry["range_lo"].isNumeric() )
+        else if ( expectation.relation == ExpectationRelation::TruthIs )
         {
-            expectation.rangeLo = entry["range_lo"].asDouble();
+            return fieldError( "truth_is expectation for '" + expectation.id +
+                               "' needs a boolean value" );
         }
-        if ( entry.isMember( "range_hi" ) && entry["range_hi"].isNumeric() )
+        const auto readRangeBound = [&]( const char *boundName, double &bound ) {
+            if ( !entry.isMember( boundName ) )
+            {
+                return true;
+            }
+            const Value &operand = entry[boundName];
+            if ( !operand.isNumeric() || !std::isfinite( operand.asDouble() ) )
+            {
+                return false;
+            }
+            bound = operand.asDouble();
+            return true;
+        };
+        if ( !readRangeBound( "range_lo", expectation.rangeLo ) )
         {
-            expectation.rangeHi = entry["range_hi"].asDouble();
+            return fieldError( "expectation '" + expectation.id +
+                               "' range_lo must be a finite number" );
+        }
+        if ( !readRangeBound( "range_hi", expectation.rangeHi ) )
+        {
+            return fieldError( "expectation '" + expectation.id +
+                               "' range_hi must be a finite number" );
         }
         if ( expectation.relation == ExpectationRelation::InRange &&
              expectation.rangeLo > expectation.rangeHi )
@@ -314,8 +363,12 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
             return fieldError( "in_range expectation for '" + expectation.id +
                                "' needs range_lo <= range_hi" );
         }
-        if ( entry.isMember( "text" ) && entry["text"].isString() )
+        if ( entry.isMember( "text" ) )
         {
+            if ( !entry["text"].isString() )
+            {
+                return fieldError( "expectation '" + expectation.id + "' text must be a string" );
+            }
             expectation.text = entry["text"].asString();
         }
         scenario.expectations.push_back( expectation );
