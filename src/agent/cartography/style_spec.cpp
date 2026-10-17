@@ -282,10 +282,20 @@ void checkVector( const Json::Value &vector, std::vector<std::string> &problems 
     if ( !scale.isObject() )
       problems.push_back( "vector.scaledenominator must be an object" );
     else
+    {
       for ( const char *field : { "min", "max" } )
         if ( scale.isMember( field ) && ( !scale[field].isNumeric() || scale[field].asDouble() < 0 ) )
           problems.push_back( std::string( "vector.scaledenominator." ) + field +
                               " must be a non-negative number" );
+      // Same 1:denominator semantics as raster.scale_ranges: the visibility
+      // window is non-empty only when min exceeds max (denominators shrink
+      // as the map zooms in) — the natural ascending order would silently
+      // render the layer never-visible while the apply report says applied.
+      if ( scale.isMember( "min" ) && scale.isMember( "max" ) && scale["min"].isNumeric() &&
+           scale["max"].isNumeric() && scale["min"].asDouble() <= scale["max"].asDouble() )
+        problems.push_back( "vector.scaledenominator.min must exceed max (1:scale "
+                            "denominators shrink as the map zooms in)" );
+    }
   }
   if ( vector.isMember( "rules" ) && static_cast<int>( vector["rules"].size() ) > kMaxRules )
     problems.push_back( "vector.rules exceeds the " + std::to_string( kMaxRules ) + " rule budget" );

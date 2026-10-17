@@ -45,6 +45,7 @@ QColor paletteColor( const Json::Value &style, int index )
 {
   if ( style.isObject() && style.isMember( "palette" ) && style["palette"].isArray() &&
        index < static_cast<int>( style["palette"].size() ) &&
+       style["palette"][index].isString() &&
        QColor::isValidColor( QString::fromStdString( style["palette"][index].asString() ) ) )
   {
     return QColor( QString::fromStdString( style["palette"][index].asString() ) );
@@ -65,7 +66,12 @@ std::vector<std::pair<QString, double>> inlineData( const Json::Value &chart, bo
   {
     if ( !entry.isObject() )
       continue;
-    const QString label = QString::fromStdString( entry.get( "label", "" ).asString() );
+    // jsoncpp's asString() throws on non-string values: type-guard the
+    // label before reading it (a numeric label falls back to empty).
+    const std::string rawLabel = entry.isMember( "label" ) && entry["label"].isString()
+                                   ? entry["label"].asString()
+                                   : std::string();
+    const QString label = QString::fromStdString( rawLabel );
     const double value = entry.isMember( "value" ) && entry["value"].isNumeric()
                            ? entry["value"].asDouble()
                            : entry.isMember( "y" ) && entry["y"].isNumeric() ? entry["y"].asDouble()
@@ -261,7 +267,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     QColor rampFrom( 0xed, 0xf2, 0xf9 );
     QColor rampTo( 0x21, 0x71, 0xb5 );
     if ( chart.isMember( "style" ) && chart["style"].isMember( "palette" ) &&
-         chart["style"]["palette"].isArray() && chart["style"]["palette"].size() >= 2 )
+         chart["style"]["palette"].isArray() && chart["style"]["palette"].size() >= 2 &&
+         chart["style"]["palette"][0].isString() &&
+         chart["style"]["palette"][chart["style"]["palette"].size() - 1].isString() )
     {
       const QString fromHex =
         QString::fromStdString( chart["style"]["palette"][0].asString() );
@@ -1038,6 +1046,39 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
       problems.push_back( "inline binding needs non-empty data array" );
     else if ( binding["data"].size() > 256 )
       problems.push_back( "inline binding capped at 256 data points" );
+    else
+    {
+      // R16-D T08 WP-1: jsoncpp's asString() throws on non-string labels —
+      // type-guard at validation so the render path never sees them raw.
+      int dataIndex = 0;
+      for ( const auto &entry : binding["data"] )
+      {
+        if ( entry.isObject() && entry.isMember( "label" ) && !entry["label"].isString() )
+          problems.push_back( "binding.data[" + std::to_string( dataIndex ) +
+                              "] label must be a string" );
+        ++dataIndex;
+      }
+    }
+  }
+  // R16-D T08 WP-1: palette entries feed QColor parsing via asString() —
+  // non-string entries must be reported, not thrown.
+  if ( chart.isMember( "style" ) && chart["style"].isObject() &&
+       chart["style"].isMember( "palette" ) )
+  {
+    const Json::Value &palette = chart["style"]["palette"];
+    if ( !palette.isArray() )
+      problems.push_back( "style.palette must be an array of color strings" );
+    else
+    {
+      int colorIndex = 0;
+      for ( const auto &entry : palette )
+      {
+        if ( !entry.isString() )
+          problems.push_back( "style.palette[" + std::to_string( colorIndex ) +
+                              "] must be a color string" );
+        ++colorIndex;
+      }
+    }
   }
   if ( mode == "vector_expression" )
   {
@@ -1243,8 +1284,13 @@ bool renderColorbarToFile( const Json::Value &colorbar, const QString &path, QSt
   font.setPointSizeF( fontPt );
   painter.setFont( font );
   painter.setPen( textColor );
-  const std::string minLabel = colorbar.isMember( "min" ) ? colorbar["min"].asString() : "min";
-  const std::string maxLabel = colorbar.isMember( "max" ) ? colorbar["max"].asString() : "max";
+  // jsoncpp's asString() throws on non-string values: a numeric min/max
+  // (the natural way to declare a data ramp) must fall back, not crash
+  // the compile — validateMapSpec reports the type problem separately.
+  const std::string minLabel =
+    colorbar.isMember( "min" ) && colorbar["min"].isString() ? colorbar["min"].asString() : "min";
+  const std::string maxLabel =
+    colorbar.isMember( "max" ) && colorbar["max"].isString() ? colorbar["max"].asString() : "max";
   painter.drawText( QRectF( 8, height - 18, width / 2 - 8, 16 ), Qt::AlignLeft,
                     QString::fromStdString( minLabel ) );
   painter.drawText( QRectF( width / 2, height - 18, width / 2 - 8, 16 ), Qt::AlignRight,

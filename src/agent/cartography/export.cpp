@@ -575,6 +575,11 @@ MapAtlasExportResult exportMapAtlas( QgsPrintLayout *layout, const MapAtlasExpor
     QgsLayoutExporter exporter( layout );
     QgsLayoutExporter::ImageExportSettings settings;
     settings.dpi = request.dpi;
+    // One delivery file per coverage feature: page 0 only. Without the
+    // filter the vendored exporter writes every layout page, leaving
+    // base_2.png siblings in the delivery directory that no manifest
+    // lists (generateFileName contract, see SingleNamePageExporter note).
+    settings.pages << 0;
     result.exporterResult = exporter.exportToImage( tempPath, settings );
     if ( result.exporterResult != QgsLayoutExporter::Success )
     {
