@@ -73,11 +73,20 @@ def uncommented(text: str) -> str:
 
 
 def collect_test_sources(tests_dir: str) -> list[str]:
-    return sorted(
-        f for f in os.listdir(tests_dir)
-        if f.startswith("test_") and f.endswith(".cpp")
-        and os.path.isfile(os.path.join(tests_dir, f))
-    )
+    """Walk the whole tests/ tree, not just its top level (#1494 follow-up).
+
+    A test_*.cpp drafted into tests/support/ or any other subdirectory used
+    to be invisible to the census — an orphan hiding one level down stayed
+    green forever. Subdirectory paths are reported relative ("support/x.cpp")
+    so the printed ORPHAN line names where the file actually is.
+    """
+    out = []
+    for root, _dirs, files in os.walk(tests_dir):
+        for f in sorted(files):
+            if f.startswith("test_") and f.endswith(".cpp"):
+                rel = os.path.relpath(os.path.join(root, f), tests_dir)
+                out.append(rel.replace(os.sep, "/"))
+    return sorted(out)
 
 
 def cmake_text(tests_dir: str) -> str:
@@ -87,7 +96,13 @@ def cmake_text(tests_dir: str) -> str:
         chunks.append(open(cm, encoding="utf-8", errors="replace").read())
     for root, _dirs, files in os.walk(tests_dir):
         for f in files:
-            if f.endswith(".cmake"):
+            if f == "CMakeLists.txt" and root != tests_dir:
+                # Subdirectory lists register sources under tests/ too (e.g.
+                # tests/support/CMakeLists.txt); fixture projects without any
+                # test_*.cpp references add nothing to the searchable text.
+                chunks.append(open(os.path.join(root, f), encoding="utf-8",
+                                   errors="replace").read())
+            elif f.endswith(".cmake"):
                 chunks.append(open(os.path.join(root, f), encoding="utf-8",
                                    errors="replace").read())
     return "\n".join(chunks)
@@ -124,10 +139,13 @@ def main() -> int:
 
     orphans, template_ok = [], []
     for f in collect_test_sources(args.tests_dir):
-        stem = f[:-4]
+        # Basename stem: a registration names the file either bare
+        # (add_executable(t test_x.cpp)) or prefixed (support/test_x.cpp);
+        # the basename-stem regex matches both.
+        stem = os.path.basename(f)[:-4]
         if re.search(r"(?<![A-Za-z0-9_])" + re.escape(stem) + r"(?![A-Za-z0-9_])", searchable):
             continue
-        if compiled and os.path.join(tests_root, f) in compiled:
+        if compiled and os.path.realpath(os.path.join(tests_root, f)) in compiled:
             continue
         if f in templates:
             template_ok.append((f, templates[f]))
