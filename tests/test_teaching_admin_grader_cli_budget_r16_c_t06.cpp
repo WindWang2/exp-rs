@@ -126,3 +126,45 @@ TEST_CASE( "gradeViaCli grades a within-budget transcript normally (control)",
     CHECK( g.reportDigest == QString::fromLatin1( kFakeDigest ) );
 #endif
 }
+
+TEST_CASE( "gradeViaCli still grades from stdout when the CLI writes no --out file (fallback contract)",
+           "[teaching_admin][grader][r16_c_t06]" )
+{
+    // Round-1 review P2 companion: readBounded() reports unreadable for a
+    // MISSING transcript; that must keep falling back to the stdout mirror —
+    // a CLI that only prints the transcript (never writes --out) is a legal
+    // grader shape. Guards the partial-bytes refusal added beside it: only
+    // a transcript that EXISTED and changed size mid-read is a typed
+    // refusal; the missing-file path stays the documented fallback.
+#ifdef Q_OS_WIN
+    SUCCEED( "POSIX-shell fake CLI — not runnable on Windows" );
+#else
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = QDir( dir.path() ).filePath( QStringLiteral( "stdout_only_cli.sh" ) );
+    {
+        QFile f( path );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        f.write( QStringLiteral(
+                   "#!/bin/sh\n"
+                   "body='{\"schema\":\"sicnu.lab.grade/1\",\"digest\":\"%1\","
+                   "\"generated_utc\":\"2026-01-01T00:00:00Z\","
+                   "\"report\":{\"verdict\":\"pass\",\"score\":77.0,"
+                   "\"deductions\":[]}}'\n"
+                   "printf '%s' \"$body\"\n"
+                   "exit 0\n" )
+                   .arg( QString::fromLatin1( kFakeDigest ) )
+                   .toUtf8() );
+    }
+    REQUIRE( QFile::setPermissions(
+        path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+                | QFileDevice::ExeGroup | QFileDevice::ExeOther ) );
+
+    const GraderCliGrade g = gradeViaCli(
+        budgetConfig( path, 1024 * 1024 ),
+        QDir( dir.path() ).filePath( QStringLiteral( "a.tif" ) ) );
+    CHECK( g.status == QLatin1String( "pass" ) );
+    CHECK( g.score == Catch::Approx( 77.0 ) );
+    CHECK( g.reportDigest == QString::fromLatin1( kFakeDigest ) );
+#endif
+}

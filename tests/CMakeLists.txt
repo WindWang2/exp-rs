@@ -15949,6 +15949,9 @@ target_include_directories(test_lab_session_store_r16_c_t05 PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_lab_session_store_r16_c_t05 TEST_PREFIX "test_lab_session_store_r16_c_t05::")
+set_target_properties(test_lab_session_store_r16_c_t05 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
 
 
 add_executable(test_teaching_restore_r16_c_t05 test_teaching_restore_r16_c_t05.cpp)
@@ -15961,6 +15964,9 @@ target_include_directories(test_teaching_restore_r16_c_t05 PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_teaching_restore_r16_c_t05 TEST_PREFIX "test_teaching_restore_r16_c_t05::")
+set_target_properties(test_teaching_restore_r16_c_t05 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
 
 # ── R16-C/T06: teacher batch assessment & classroom management hardening ──
 # Append-only registration block for this hardening track's new suites; one
