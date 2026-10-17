@@ -29,6 +29,7 @@ namespace sicnu::geo::offline {
 namespace {
 
 std::atomic<bool> g_offline{ false };
+std::atomic<bool> g_blockPrivateNetworks{ false };
 
 constexpr const char *const kDenyExtension = ".__offline_blocked__";
 
@@ -361,6 +362,21 @@ bool enabled()
 bool enabledFromEnv()
 {
     return envFlagEnabled( "SICNU_OFFLINE" );
+}
+
+void setBlockPrivateNetworks( bool block )
+{
+    g_blockPrivateNetworks.store( block );
+}
+
+bool blockPrivateNetworks()
+{
+    return g_blockPrivateNetworks.load();
+}
+
+bool blockPrivateNetworksFromEnv()
+{
+    return envFlagEnabled( "SICNU_BLOCK_PRIVATE_NETWORKS" );
 }
 
 bool isRemoteTarget( const std::string &source )

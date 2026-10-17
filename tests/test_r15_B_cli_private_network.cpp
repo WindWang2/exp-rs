@@ -145,3 +145,70 @@ TEST_CASE( "1505-T11: --allow-private-network is the explicit opt-in",
   CHECK_FALSE( envelope["data"]["config"].get( "block_private_networks", true ).asBool() );
   CHECK( server.requestCount() > 0 );
 }
+
+// ---------------------------------------------------------------------------
+// R4-03 (round 5): remote paths OUTSIDE the range cache — plain GDAL
+// /vsicurl/ and CPLHTTPFetch reads behind data inspect / doctor / probe /
+// window / mirror materialize, and the library-default identity / locality
+// / doctor probes. The CLI entry engages a process-wide private-network
+// policy (default on; --allow-private-network anywhere on the command line
+// opts out for that run). Each case proves the loopback fixture is NEVER
+// contacted; the positive control proves the oracle is not vacuous.
+// ---------------------------------------------------------------------------
+namespace
+{
+int requestsFor( const std::string &argsWithUrlPlaceholder, const std::string &suffix = "" )
+{
+  sicnu::geo::testsupport::HttpRangeServer server( std::vector<unsigned char>( 8192, 0x47 ) );
+  server.setEtag( "\"r15b-r403\"" );
+  std::string args = argsWithUrlPlaceholder;
+  const std::string marker = "@URL@";
+  const std::size_t at = args.find( marker );
+  REQUIRE( at != std::string::npos );
+  args.replace( at, marker.size(), server.url() );
+  const auto result = runCli( args + suffix );
+  INFO( args << suffix << " -> exit " << result.exitCode << ": " << result.output.substr( 0, 400 ) );
+  return server.requestCount();
+}
+} // namespace
+
+TEST_CASE( "R4-03: data inspect/doctor/probe never contact a loopback origin by default",
+           "[r15b][r403][cli][ssrf]" )
+{
+  CHECK( requestsFor( "data inspect --json @URL@" ) == 0 );
+  CHECK( requestsFor( "data inspect --json /vsicurl/@URL@" ) == 0 );
+  CHECK( requestsFor( "data doctor --json @URL@" ) == 0 );
+  CHECK( requestsFor( "data probe --json @URL@" ) == 0 );
+}
+
+TEST_CASE( "R4-03: data cube window / mirror materialize never contact a loopback asset by default",
+           "[r15b][r403][cli][ssrf]" )
+{
+  for ( const std::string verb : { std::string( "cube window" ), std::string( "mirror materialize" ) } )
+  {
+    for ( const bool optIn : { false, true } )
+    {
+      sicnu::geo::testsupport::HttpRangeServer server( std::vector<unsigned char>( 8192, 0x48 ) );
+      const std::string spec = writePrefetchFixture( server.url() );
+      const std::string out = std::filesystem::path( spec ).parent_path().string() +
+                              ( verb == "cube window" ? "/out.tif" : "/mirror" );
+      const auto result = runCli( "data " + verb + " " + spec + " -o " + out + " --json" +
+                                  ( optIn ? " --allow-private-network" : "" ) );
+      INFO( verb << ( optIn ? " (opt-in)" : "" ) << " -> exit " << result.exitCode << ": "
+                 << result.output.substr( 0, 400 ) );
+      if ( optIn )
+        CHECK( server.requestCount() > 0 ); // positive control: the case is not vacuous
+      else
+        CHECK( server.requestCount() == 0 );
+      std::error_code ec;
+      std::filesystem::remove_all( std::filesystem::path( spec ).parent_path(), ec );
+    }
+  }
+}
+
+TEST_CASE( "R4-03: --allow-private-network anywhere opts the whole run out (positive control)",
+           "[r15b][r403][cli][ssrf]" )
+{
+  CHECK( requestsFor( "data inspect --json @URL@", " --allow-private-network" ) > 0 );
+  CHECK( requestsFor( "--allow-private-network data probe --json @URL@" ) > 0 );
+}

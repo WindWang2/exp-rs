@@ -13,6 +13,8 @@
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/offline_gate.h"
+#include "geospatial/remote/process_network_policy.h"
+#include "geospatial/remote/remote_identity_token.h"
 #include "geospatial/remote/range_cache.h"
 #include "geospatial/remote/remote_identity_resolver.h"
 #include "geospatial/util/atomic_fs.h"
@@ -32,6 +34,7 @@
 #include <json/json.h>
 
 #include <cpl_error.h>
+#include <cpl_http.h>
 #include <cpl_vsi.h>
 
 #include <dlfcn.h>
@@ -1122,4 +1125,77 @@ TEST_CASE( "R4-01: the open-time identity probe is guarded and pinned (DNS rebin
     VSIFCloseL( fp );
   RemoteRangeCache::clearEntries();
   RemoteRangeCache::install( RangeCacheConfig{} );
+}
+
+// ---------------------------------------------------------------------------
+// R4-03 (round 5): the process-wide private-network policy. Library defaults
+// stay unchanged (first case); once an entry point engages the policy, every
+// remote path — our httpFetch without its own guard, the library-default
+// identity probe, plain GDAL /vsicurl/ (incl. a rebinding name) and
+// CPLHTTPFetch — refuses the private origin without contacting it.
+// ---------------------------------------------------------------------------
+TEST_CASE( "R4-03: library defaults are unchanged while no entry point engages the policy",
+           "[r15b][r403][remote][ssrf]" )
+{
+  REQUIRE_FALSE( sicnu::geo::network_policy::processPrivateNetworkBlockingEngaged() );
+  testsupport::HttpRangeServer server( std::vector<unsigned char>( 4096, 0x71 ) );
+  server.setEtag( "\"r15b-r403-default\"" );
+  const std::string token = sicnu::geo::remoteIdentityToken( server.url() );
+  CHECK_FALSE( token.empty() );
+  CHECK( server.requestCount() > 0 );
+}
+
+TEST_CASE( "R4-03: the engaged policy covers httpFetch, identity, /vsicurl/ and CPLHTTPFetch",
+           "[r15b][r403][remote][ssrf][dns]" )
+{
+  using sicnu::geo::RangeCacheConfig;
+  using sicnu::geo::RemoteRangeCache;
+  RemoteRangeCache::uninstall();
+  sicnu::geo::network_policy::engageProcessPrivateNetworkBlocking();
+  testsupport::HttpRangeServer server( std::vector<unsigned char>( 4096, 0x72 ) );
+  server.setEtag( "\"r15b-r403-engaged\"" );
+
+  bool threw = false;
+  try
+  {
+    httpFetch( server.url(), HttpFetchOptions{} );
+  }
+  catch ( const GeoError &error )
+  {
+    threw = error.code() == ErrorCode::PermissionDenied;
+  }
+  CHECK( threw );
+  CHECK( sicnu::geo::remoteIdentityToken( server.url() ).empty() );
+  CHECK( VSIFOpenL( ( "/vsicurl/" + server.url() ).c_str(), "rb" ) == nullptr );
+  VSIStatBufL st;
+  CHECK( VSIStatL( ( "/vsicurl/" + server.url() ).c_str(), &st ) != 0 );
+  CHECK( VSIFOpenL( ( "/vsicurl_streaming/" + server.url() ).c_str(), "rb" ) == nullptr );
+  CPLHTTPResult *result = CPLHTTPFetch( server.url().c_str(), nullptr );
+  REQUIRE( result != nullptr );
+  CHECK( result->nStatus != 0 );
+  CPLHTTPDestroyResult( result );
+
+  // Rebinding name through plain /vsicurl/: the re-route makes the read use
+  // the guarded, pinned transport, so the private answer is never contacted.
+  const std::string rebind = "http://" + std::string( kRebindHost ) + ":" + std::to_string( server.port() ) +
+                             "/fixture.tif";
+  g_rebindCalls = 0;
+  g_rebindPublicAnswers = 1;
+  g_rebindActive = true;
+  VSILFILE *fp = VSIFOpenL( ( "/vsicurl/" + rebind ).c_str(), "rb" );
+  g_rebindActive = false;
+  CHECK( fp == nullptr );
+  if ( fp )
+    VSIFCloseL( fp );
+  INFO( "fixture requests=" << server.requestCount() << " lookups=" << g_rebindCalls.load() );
+  CHECK( server.requestCount() == 0 );
+
+  sicnu::geo::network_policy::disengageProcessPrivateNetworkBlocking();
+  // Disengaged: the hooks pass through (the same /vsicurl/ read now works).
+  VSILFILE *open = VSIFOpenL( ( "/vsicurl/" + server.url() ).c_str(), "rb" );
+  CHECK( open != nullptr );
+  if ( open )
+    VSIFCloseL( open );
+  CHECK( server.requestCount() > 0 );
+  RemoteRangeCache::uninstall();
 }

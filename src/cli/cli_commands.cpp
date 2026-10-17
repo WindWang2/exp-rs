@@ -2100,9 +2100,13 @@ bool cliReadFileUtf8( const std::string &path, std::string &out )
 // that genuinely needs a private origin opts in per invocation with
 // --allow-private-network; the flag is consumed so it never reaches the
 // positional grammar.
+bool g_cliAllowPrivateNetwork = false;
+
 bool cliTakeAllowPrivateNetwork( QStringList &args )
 {
-    return takeFlag( args, QStringLiteral( "--allow-private-network" ) );
+    // The entry point (main_cli) consumes the flag process-wide first; an
+    // in-process caller of the command layer may still pass it per command.
+    return takeFlag( args, QStringLiteral( "--allow-private-network" ) ) || g_cliAllowPrivateNetwork;
 }
 
 sicnu::geo::RangeCacheConfig cliRangeCacheConfig( bool allowPrivateNetwork )
@@ -2697,6 +2701,11 @@ int commandCatalogExport( QStringList args, const CliIO &io )
 } // namespace
 
 namespace sicnu::cli {
+
+void setAllowPrivateNetwork( bool allow )
+{
+    g_cliAllowPrivateNetwork = allow;
+}
 
 // cliIsInterrupted() is defined in rs_pipeline_runner.cpp (#455) alongside
 // the g_cliInterrupted flag; declared in cli_commands.h.

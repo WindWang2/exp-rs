@@ -843,22 +843,46 @@ Json::Value HttpFetchResult::toJson() const
   return json;
 }
 
-HttpFetchResult httpFetch( const std::string &url, const HttpFetchOptions &options )
+namespace
 {
+/// R15-B (R4-03): under the process-wide private-network policy a request
+/// without its own guard gets the private-network guard — and with it the
+/// guarded transport (per-hop policy + DNS pinning). A caller-supplied guard
+/// is kept as is (it is already the stricter, caller-specific policy).
+const HttpFetchOptions &effectiveOptions( const HttpFetchOptions &options, HttpFetchOptions &storage )
+{
+  if ( options.redirectGuard || !offline::blockPrivateNetworks() )
+    return options;
+  storage = options;
+  storage.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+    return offline::isPrivateHost( hopUrl ) ? "private network blocked (process policy)" : "";
+  };
+  return storage;
+}
+} // namespace
+
+HttpFetchResult httpFetch( const std::string &url, const HttpFetchOptions &requested )
+{
+  HttpFetchOptions storage;
+  const HttpFetchOptions &options = effectiveOptions( requested, storage );
   if ( options.redirectGuard )
     return guardedFetchImpl( url, options, true );
   return fetchImpl( url, options, true );
 }
 
-HttpFetchResult httpFetchStatus( const std::string &url, const HttpFetchOptions &options )
+HttpFetchResult httpFetchStatus( const std::string &url, const HttpFetchOptions &requested )
 {
+  HttpFetchOptions storage;
+  const HttpFetchOptions &options = effectiveOptions( requested, storage );
   if ( options.redirectGuard )
     return guardedFetchImpl( url, options, false );
   return fetchImpl( url, options, false );
 }
 
-Json::Value httpFetchJson( const std::string &url, const HttpFetchOptions &options )
+Json::Value httpFetchJson( const std::string &url, const HttpFetchOptions &requested )
 {
+  HttpFetchOptions storage;
+  const HttpFetchOptions &options = effectiveOptions( requested, storage );
   HttpFetchResult fetch = options.redirectGuard ? guardedFetchImpl( url, options, true )
                                                 : fetchImpl( url, options, true );
   if ( fetch.truncated )
