@@ -68,8 +68,8 @@ export function installExitHook(): void {
   if (exitHookInstalled) return;
   exitHookInstalled = true;
   // During exit, timers never fire, so stop()'s SIGKILL escalation cannot
-  // run. Best-effort: SIGTERM + destroy stdin - the server exits on stdin
-  // EOF, and the OS reaps the child when the parent dies.
+  // run. Best-effort: SIGTERM + destroy stdin — the server exits on stdin
+  // EOF (an orphaned child would otherwise linger, not be reaped).
   process.on("exit", () => {
     for (const bridge of activeBridges) bridge.stop();
   });
@@ -132,13 +132,10 @@ export class McpBridge {
     // previous spawn's child is somehow still alive (e.g. an initialize
     // timeout left it hanging with exited=false), kill it before spawning a
     // replacement — otherwise it blocks every respawn while its stdio goes
-    // nowhere.
+    // nowhere. terminateChild, not a bare kill(): a hung child ignoring
+    // SIGTERM would keep its pipe handles open forever.
     if (this.child && !this.exited) {
-      try {
-        this.child.kill();
-      } catch {
-        /* already dead */
-      }
+      this.terminateChild(this.child);
     }
     this.lastSpawnAt = Date.now();
     // Clear the crash latch BEFORE any await: the initialize request below

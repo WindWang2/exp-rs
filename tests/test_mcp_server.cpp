@@ -1035,9 +1035,11 @@ struct CheckpointEnvGuard
                    && std::all_of( f.begin(), f.end(),
                                    []( const QChar c ) { return c.isDigit(); } );
         };
-        return digits( fields.at( fields.size() - 3 ) )
+        const QString &pidField = fields.at( fields.size() - 3 );
+        const QString runId = fields.mid( 0, fields.size() - 3 ).join( QLatin1Char( '.' ) );
+        return digits( pidField ) && pidField != QLatin1String( "0" )
                && digits( fields.at( fields.size() - 2 ) )
-               && digits( fields.at( fields.size() - 1 ) );
+               && digits( fields.at( fields.size() - 1 ) ) && !runId.isEmpty();
     }
     QStringList checkpoints() const
     {

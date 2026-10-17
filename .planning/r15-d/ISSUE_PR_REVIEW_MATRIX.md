@@ -12,7 +12,8 @@ OUT_OF_SCOPE.
 | #1509 (R13-K JsonCpp type safety) | MERGED (in 46791bc65) | locked 4 agent_ops cpp | merged before branch point; our F7 is a NEW site it missed (task_center_executor.cpp) |
 | #1512 (R14-D Qt/QGIS/cartography) | MERGED | locked cartography/mapspec/layout_tools | untouched |
 | #1507 (R14-C agent/workflow) | MERGED | prior D-area hardening (FIX-1..9) | regression-verified, not re-fixed |
-| #1513 (R15-B geodata) | OPEN draft, 0 reviews | data/dataset/experiment/geospatial/cli | disjoint file set |
+| #1513 (R15-B geodata) | OPEN, 0 reviews | data/dataset/experiment/geospatial/cli | disjoint file set |
+| #1515 (R15-C model runtime) | OPEN (seen at final refresh) | src/operators/, src/runtime/chunk/, tests/CMakeLists.txt, .gitignore | disjoint; only shared .gitignore tail (trivial) |
 | #1514 (R15-A science-processing) | OPEN, 0 reviews | analysis/operators/processing image fusion | disjoint file set |
 
 ## Issues (verdict against master, not issue state)
