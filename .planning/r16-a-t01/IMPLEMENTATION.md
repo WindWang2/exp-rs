@@ -67,7 +67,9 @@ evidence 拼写(`canonicalNumber` 直接用 roundSignificant)和不同 digest �
    直接穿出 runSpec,整个报告丢失(比误报 PASS 更早的失效:崩溃式 fail-open)。
 
 **修复(最小改动,语义只对原抛异常输入变化)**:
-1/2. 用 jsoncpp 自带 `isInt64()`/`isInt()` 做范围前置(bool 保持原可接受语义),错误消息不变;
+1/2. 用 jsoncpp 自带 `isInt64()`/`isInt()` 做范围前置(bool 在新旧代码均被拒绝:
+    isIntegral() 对 bool 返回 false —— 评审第二轮探针实证;初稿注释"bool 保持原可接受
+    语义"失实,死代码 isBool() 子句已随评审第一轮 P3-1 移除),错误消息不变;
 3. `requiredKeySet` 改为 `optionalMember`+`isString()` 守卫:不可读 kind 与任何可读非 raster
   kind 同待遇(不描述网格 → 不追加 size 必需键);声明了 kind 期望的路径原本已有守卫
   (Indeterminate),不变。修复后:只问 dtype 的检查凭已有证据照常结论(Pass 是诚实的 —— 问题

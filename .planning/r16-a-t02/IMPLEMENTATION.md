@@ -57,11 +57,15 @@ T01 移交的三个分叉点,全部先实证再修:
 
 ## WP-D — grader canonical 深度预算(295f507b2)
 
-实证:文本路径受 reader 默认 stackLimit=256 保护(probe5:>256 层文本 throw,
-parseJsonStrict 捕获为类型化拒绝),但引擎是程序化 API —— evidence.facts 逐字进
+实证:文本路径受 reader stackLimit 保护(probe5:>256 层文本 throw,parseJsonStrict
+捕获为类型化拒绝),但引擎是程序化 API —— evidence.facts 逐字进
 toJson() 后到无预算 walk,10 万层 facts 在 grade() 摘要步骤 SIGSEGV(探针)。修:
 512 层上限(两倍 parse 上界,合法文档摘要不变),走既有 GraderError 通道;
 grade() 端到端得到 SchemaShapeInvalid 类型化拒绝、无报告(新测试钉死)。
+评审第一轮 P1-1 更正与补修:该 stackLimit 当时是 jsoncpp **默认值**,版本相关
+(1.9.5/1.9.6=1000,含 Ubuntu 24.04 CI;1.9.8=256),默认 1000 时 513–1000 层文本
+可解析但此处预算拒绝。已在 parseJsonStrict 显式钉 stackLimit=256(jsoncpp 在到达
+限制值时抛出,有效上界 255),版本无关回归锁测试并入 test_r16_a_grader。
 
 ## WP-B — #1464 复核与判分语义(无代码改动,全部 FIXED 实证)
 

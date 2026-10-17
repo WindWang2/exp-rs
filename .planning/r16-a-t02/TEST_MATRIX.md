@@ -8,8 +8,10 @@ QT_QPA_PLATFORM=offscreen ctest -j1 -R <pattern> --output-on-failure`(管道会�
 - 指定正则 `^(test_faultlab|test_faultlab_params_r8|test_grader_schema|test_grader_engine|
   test_grader_adapters|test_grader_render)::` → **49/49 通过,EXIT=0**(/tmp/t02_baseline.txt)。
   注:该正则实际只选中带前缀的 grader 测试(14+17+12+6);faultlab 两个目标的 ctest 名
-  无前缀("fault lab: …" / params_r4 个名),真实回归面是 `-R "fault lab|params"` =
-  47 项 + r16a 新目标。本轮两个面都以全绿收尾。
+  无前缀("fault lab: …" 43 个 / params_r8 5 个裸名),真实回归面是
+  `-R "^fault lab:|^train_test_spatial_leakage|^wrong_scale_offset|^integral params|^every param"`
+  = **48 项**(评审第二轮更正:初稿"47 项"与"params 4 个"计数不准)。本轨道轮内以
+  全表面(106,构成见下)与集成轮 223 精确名双绿收尾。
 
 ## RED(修复前真实失败输出,关键行)
 
@@ -66,9 +68,11 @@ RUN1 EXIT=0   100% tests passed, 0 tests failed out of 106   (/tmp/t02_final_run
 RUN2 EXIT=0   100% tests passed, 0 tests failed out of 106   (/tmp/t02_final_run2.txt)
 ```
 
-106 的构成:49 个 grader 基线(未回归)+ 43 个 "fault lab:"(test_faultlab 35 +
-test_fault_matrix 8,含 NaN-safe 网格摘要、digest 稳定性等既有契约)+ 4 个
-params_r8 + 10 个 r16a faultlab 新增 + 若干 "params" 字面命中的无关既有测试。
+106 的构成:49 个 grader 基线(未回归)+ 43 个 "fault lab:"(全部来自 test_faultlab;
+初稿"35 + test_fault_matrix 8"分解失实——test_fault_matrix 是另一目标且未在本轮
+面内,评审第二轮更正)+ 5 个 params_r8(裸名)+ 10 个 r16a faultlab 新增(此后评审
+第一/二轮又各 +1/+0,见集成 TEST_RESULTS.md)。初稿"4 个 params_r8"计数失实,
+实为 5。
 
 指定正则(含新目标)单独计数:`^(test_faultlab|test_faultlab_params_r8|test_grader_*|
 test_r16_a_faultlab|test_r16_a_grader)::` = **61 项**(49 基线 + 12 新增)。

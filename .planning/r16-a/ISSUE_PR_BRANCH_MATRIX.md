@@ -1,15 +1,22 @@
-# R16-A Issue / PR / Branch Matrix(2026-10-17 现场重新采集)
+# R16-A Issue / PR / Branch Matrix(2026-10-17 现场采集;PR 面于推送前刷新)
 
-## 开放 PR(4 个)与文件冲突矩阵
+## 开放 PR 与文件冲突矩阵(推送前 gh 实测:7 个)
 
 | PR | 标题 | 状态 | 与本任务文件交集 |
 |---|---|---|---|
-| #1513 | r15-b 空间数据链路/数据集/实验存储(Draft) | open | 无(src/data、dataset、experiment、geospatial、cli) |
-| #1514 | r15-a 遥感科学算法收敛 | open | 无(src/analysis、operators、processing) |
-| #1515 | r15-c 模型推理/分块执行/GPU 容错 | open | **tests/CMakeLists.txt**(本任务新增测试注册须最小增量追加,不改写其改动区域) |
-| #1516 | r15-d Pi/MCP/Workflow | open | 无(pi、src/agent、agent_loop、agent_ops、plugins、sdk、workflow) |
+| #1513 | r15-b 空间数据链路/数据集/实验存储(Draft) | open | **tests/CMakeLists.txt**(初查 head-40 截断漏看,已亲核 count=1) |
+| #1514 | r15-a 遥感科学算法收敛 | open | 无 |
+| #1515 | r15-c 模型推理/分块执行/GPU 容错 | open | **tests/CMakeLists.txt** |
+| #1516 | r15-d Pi/MCP/Workflow | open | 无 |
+| #1517 | r15-e Qt/QGIS 工作台/教学/帮助(执行期间新开) | open | **tests/CMakeLists.txt** |
+| #1518 | r16-b science-context authority + decision-plane(执行期间新开) | open | 无 |
+| #1519 | r16-c 教学会话状态/批量评测(执行期间新开) | open | **tests/CMakeLists.txt** |
 
-结论:src/verification/**、src/grader/**、src/faultlab/** 不被任何开放 PR 触碰,所有权干净。
+- 7 个 PR 均不触碰 src/verification/**、src/grader/**、src/faultlab/**、data/faultlab/**(逐一
+  gh pr diff --name-only 亲核)——模块所有权干净。
+- tests/CMakeLists.txt 交集 4 个(#1513/#1515/#1517/#1519):本 PR 仅做纯追加注册
+  (三处:verifier lane 块后 20 行、faultlab 块后、grader 块后),合并时预期无语义冲突,
+  文本冲突由先合并方决定,后合并方 rebase 追加块即可。
 
 ## 远程分支分类(22 个)
 

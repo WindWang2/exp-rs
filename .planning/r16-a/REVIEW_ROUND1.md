@@ -15,9 +15,9 @@
 | P3-1 | isBool() 子句死代码 + 注释失实(实证 jsoncpp isIntegral() 对 bool=false,新旧代码均拒 bool) | 已修:移除两处死子句,注释改为实证表述 | 本机探针:bool isIntegral=0 isBool=1 |
 | P3-2 | "jsoncpp parses 1e999 无解析错误" 措辞普适化(1.9.5 实为解析错误) | 已修:四处注释加版本限定 | canonical_json.h / fault_scenario.cpp / test_r16_a_faultlab.cpp ×2 |
 | P3-3 | 仓库根未跟踪 r16a-init-cache.cmake | 已删(受控副本在 .planning/r16-a/) | git status 无该文件 |
-| P3-4 | faultlab 既有 47 项仅在 t02 worktree 复跑 | 联合面正则已含 ^test_faultlab::/^test_faultlab_params_r8::;本轮复跑 ×2 覆盖 | ctest 输出 174 项(171+新增 3)×2 全绿 |
+| P3-4 | faultlab 既有 47 项仅在 t02 worktree 复跑 | **初稿处置失实(评审第二轮更正)**:本文件的联合面正则 `^test_faultlab::` 实际匹配零个测试(该目标注册无 TEST_PREFIX,真实注册名为裸 "fault lab: …" 43 项 + params_r8 5 项),故 171/174 从未包含既有 faultlab 测试。已在集成轮以精确名模式复跑:legacy 48 项含入最终 223 面 ×2 全绿 | ctest -N 实名列表 + 223×2 EXIT=0 |
 | P3-5 | 深树析构为 jsoncpp 上游属性 | 不作为(两轨已如实注明) | — |
-| P3-6 | "depth 256 = 2×stackLimit128" 措辞精度 | 注释已随 P1-1 修一并精确化(计层口径差) | — |
+| P3-6 | "depth 256 = 2×stackLimit128" 措辞精度 | 无需动作(初稿"注释已精确化"表述失实——该编辑未发生;canonical_json.cpp 的预算注释按其自身口径计层本就自洽,评审第二轮判定无需改) | — |
 
 ## 修复后回归
 
