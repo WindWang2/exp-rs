@@ -378,7 +378,11 @@ LabFeedbackProjection LabFeedbackProjection::fromJson( const Json::Value &doc )
       cr.reasonZh = strOf( r, "reason_zh" );
       cr.countsAsPass = r.isMember( "counts_as_pass" ) && r["counts_as_pass"].isBool()
                           && r["counts_as_pass"].asBool();
-      if ( cr.status == "indeterminate" || cr.status.empty() ) cr.countsAsPass = false;
+      // INVARIANT (header): countsAsPass is only ever true for a "pass" row.
+      // The persisted flag is untrusted input on the restart path — a
+      // hand-edited session file must not smuggle a counted-as-pass row
+      // past the sweep the fromReports path derives from status.
+      if ( cr.status != "pass" ) cr.countsAsPass = false;
       if ( r.isMember( "evidence_ids" ) && r["evidence_ids"].isArray() )
         for ( const auto &e : r["evidence_ids"] )
           if ( e.isString() ) cr.evidenceIds.push_back( e.asString() );

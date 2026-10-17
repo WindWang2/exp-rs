@@ -15950,3 +15950,14 @@ target_include_directories(test_lab_session_store_r16_c_t05 PRIVATE
 )
 sicnu_discover_tests(test_lab_session_store_r16_c_t05 TEST_PREFIX "test_lab_session_store_r16_c_t05::")
 
+
+add_executable(test_teaching_restore_r16_c_t05 test_teaching_restore_r16_c_t05.cpp)
+target_link_libraries(test_teaching_restore_r16_c_t05 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+)
+target_include_directories(test_teaching_restore_r16_c_t05 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_teaching_restore_r16_c_t05 TEST_PREFIX "test_teaching_restore_r16_c_t05::")
