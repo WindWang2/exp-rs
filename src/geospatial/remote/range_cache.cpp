@@ -859,7 +859,11 @@ class CacheStore
     {
       std::lock_guard<std::mutex> lock( mMutex );
       configGeneration = this->configGeneration;
-      return config;
+      RangeCacheConfig effective = config;
+      // R15-B (R4-03): the process-wide policy forces the guard on.
+      if ( offline::blockPrivateNetworks() )
+        effective.blockPrivateNetworks = true;
+      return effective;
     }
 
     void updateConfig( const RangeCacheConfig &newConfig )

@@ -106,6 +106,11 @@ struct CliIO
 /// True when @p firstArg is a CLI 3.0 command (used by main to route).
 bool isCliCommand( const QString &firstArg );
 
+/// R15-B (#1505 T11 / R4-03): set by the entry point when the run was started
+/// with --allow-private-network; remote commands then build unguarded
+/// configs. Default false (guarded).
+void setAllowPrivateNetwork( bool allow );
+
 /// Cooperative interruption flag (SIGINT/SIGTERM), shared with the legacy
 /// pipeline runner.
 bool cliIsInterrupted();
