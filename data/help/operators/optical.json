@@ -232,8 +232,7 @@
         "除零/开方负数需自行保护（NoData 语义按实现）"
       ],
       "keyParameters": [
-        "expression",
-        "bands"
+        "expression"
       ]
     },
     "related": [
@@ -720,7 +719,7 @@
         "全局统计对流式场景代价高"
       ],
       "keyParameters": [
-        "componentCount"
+        "numComponents"
       ]
     },
     "related": [

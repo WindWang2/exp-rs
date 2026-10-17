@@ -378,10 +378,26 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
             recordSkip( skipped, sub, subInfo.absoluteFilePath(), reason );
             continue;
         }
-        // Root-level plain files belong to the flat pass below; hidden
-        // entries keep the old invisibility (QDir::Files/Dirs never
-        // listed them and the unfiltered enumeration here does).
-        if ( !subInfo.isDir() || subInfo.isHidden() )
+        // A hidden student DIRECTORY is a whole SUBMISSION, not a system
+        // artifact: it used to fall through a bare `continue` and disappear
+        // from rows, skipped_files, report.total AND the checkpoint at the
+        // same time — "graded 5 / 5" while the class had six students. One
+        // typed, attributable refusal instead of a silent vanish (#1466
+        // invariant: refusals are ACCOUNTED).
+        //
+        // Root-level hidden FILES are deliberately NOT handled here: they are
+        // not student directories, and the flat pass below owns them. Doing
+        // both would book the same path twice (once with the file name as a
+        // bogus studentId, once correctly with an empty one).
+        if ( subInfo.isHidden() && subInfo.isDir() )
+        {
+            recordSkip( skipped, sub, subInfo.absoluteFilePath(),
+                        QStringLiteral( "hidden entry refused: hidden submissions are not graded "
+                                        "(clear the hidden attribute to include them)" ) );
+            continue;
+        }
+        // Root-level plain files belong to the flat pass below.
+        if ( !subInfo.isDir() )
             continue;
         QDir sd( subInfo.absoluteFilePath() );
         const auto files = allEntries( sd );
@@ -394,8 +410,23 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
                 recordSkip( skipped, sub, fi.absoluteFilePath(), entryReason );
                 continue;
             }
-            if ( !fi.isFile() || fi.isHidden() )
-                continue; // hidden entries and nested dirs stay invisible
+            // A hidden submission, or a directory nested inside a student
+            // folder, is an anomaly rather than a system artifact — account
+            // for it so the student's work cannot evaporate unrecorded.
+            if ( fi.isHidden() )
+            {
+                recordSkip( skipped, sub, fi.absoluteFilePath(),
+                            QStringLiteral( "hidden entry refused: hidden submissions are not graded "
+                                            "(clear the hidden attribute to include them)" ) );
+                continue;
+            }
+            if ( !fi.isFile() )
+            {
+                recordSkip( skipped, sub, fi.absoluteFilePath(),
+                            QStringLiteral( "nested directory refused: only files directly inside the "
+                                            "student directory are submissions" ) );
+                continue;
+            }
             if ( name.startsWith( QLatin1String( "grades" ) )
                  || name.contains( QLatin1String( "batch" ) )
                  || name.contains( QLatin1String( "summary" ) )
@@ -421,12 +452,24 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
 
     // Flat files in root. Links and specials at the root were already
     // refused — and attributed to their name — by the student-directory
-    // pass above; only plain, visible files belong to this pass.
+    // pass above; only plain, visible files belong to this pass. A root-level
+    // hidden file (".张三.tif") is still accounted for: silently dropping it
+    // would hide a submission the teacher expects to see.
     const auto flat = allEntries( root );
     for ( const QFileInfo &fi : flat )
     {
-        if ( fi.isSymLink() || !fi.isFile() || fi.isHidden() )
+        // Hidden DIRECTORIES were already accounted (and attributed to their
+        // own name) by the student-directory pass; handling them here as well
+        // would book the same path twice.
+        if ( fi.isSymLink() || !fi.isFile() )
             continue;
+        if ( fi.isHidden() )
+        {
+            recordSkip( skipped, QString(), fi.absoluteFilePath(),
+                        QStringLiteral( "hidden entry refused: hidden submissions are not graded "
+                                        "(clear the hidden attribute to include them)" ) );
+            continue;
+        }
         if ( fi.fileName().startsWith( QLatin1String( "grades" ) ) )
         {
             // The console's own gradebook beside the submissions.
@@ -817,6 +860,73 @@ QJsonObject regradeTraceability( const BatchAssessmentReport &report )
         { QStringLiteral( "report_digest" ), sha256Hex( canonicalJsonBytes( outcome ) ) },
         { QStringLiteral( "row_count" ), report.rows.size() },
     };
+}
+
+bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report,
+                              QString &error, QString *warning )
+{
+    // Bounded read, same discipline as the checkpoint loader: a tampered
+    // multi-GB file beside the submissions degrades to a typed error rather
+    // than an OOM slurp.
+    constexpr qint64 kMaxReportBytes = 64 * 1024 * 1024;
+    const BoundedReadResult read = readBounded( path, kMaxReportBytes );
+    if ( read.oversize )
+    {
+        error = QStringLiteral( "batch report at %1 exceeds %2 bytes" )
+                  .arg( path ).arg( kMaxReportBytes );
+        return false;
+    }
+    if ( read.unreadable )
+    {
+        error = QStringLiteral( "cannot read batch report at %1" ).arg( path );
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson( read.bytes, &parseError );
+    if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+    {
+        error = QStringLiteral( "%1 is not valid JSON (offset %2: %3)" )
+                  .arg( path ).arg( parseError.offset ).arg( parseError.errorString() );
+        return false;
+    }
+    const QJsonObject o = doc.object();
+    if ( !o.value( QStringLiteral( "rows" ) ).isArray() )
+    {
+        error = QStringLiteral( "%1 is not a batch report (no rows array)" ).arg( path );
+        return false;
+    }
+
+    report = BatchAssessmentReport{};
+    report.labId = o.value( QStringLiteral( "lab_id" ) ).toString();
+    report.rubricVersion = o.value( QStringLiteral( "rubric_version" ) ).toString();
+    report.labVersion = o.value( QStringLiteral( "lab_version" ) ).toString();
+    report.softwareVersion = o.value( QStringLiteral( "software_version" ) ).toString();
+    const QJsonArray rows = o.value( QStringLiteral( "rows" ) ).toArray();
+    report.rows.reserve( rows.size() );
+    for ( const QJsonValue &rv : rows )
+    {
+        // A non-object row is a malformed report, not a row to skip: silently
+        // dropping it would understate the class just like the empty-summary
+        // bug this loader exists to prevent.
+        if ( !rv.isObject() )
+        {
+            error = QStringLiteral( "%1 has a non-object entry in rows[]" ).arg( path );
+            return false;
+        }
+        report.rows.push_back( BatchRowResult::fromJson( rv.toObject() ) );
+    }
+
+    const int declared = o.contains( QStringLiteral( "total" ) )
+                           ? o.value( QStringLiteral( "total" ) ).toInt( -1 )
+                           : -1;
+    report.total = declared >= 0 ? declared : report.rows.size();
+    if ( warning && declared >= 0 && declared != report.rows.size() )
+    {
+        *warning = QStringLiteral( "report declares total=%1 but carries %2 rows" )
+                     .arg( declared ).arg( report.rows.size() );
+    }
+    return true;
 }
 
 } // namespace sicnu::teaching_admin

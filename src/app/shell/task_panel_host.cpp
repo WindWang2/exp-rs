@@ -212,6 +212,10 @@ void TaskPanelHost::setRunning( bool running )
     m_progress->setRange( 0, 0 );
     m_hint->clear();
     applyHintStyle( false );
+    // A new run must not inherit the previous run's success card: the old
+    // "✓ Processing finished" block stayed on screen while the new run was
+    // still in flight (and after it failed), reading as a completion.
+    clearResultSummary();
     m_runBtn->setText( tr( "Stop" ) );
     m_runBtn->setEnabled( true ); // Stop stays clickable while running
   }
@@ -237,6 +241,17 @@ void TaskPanelHost::setFailed( const QString &message )
 {
   m_hint->setText( message );
   applyHintStyle( true );
+  // Honesty: a failure must never sit next to the previous run's green
+  // "✓ Processing finished" result card.
+  clearResultSummary();
+}
+
+void TaskPanelHost::clearResultSummary()
+{
+  if ( !m_resultSummary )
+    return;
+  m_resultSummary->clear();
+  m_resultSummary->hide();
 }
 
 Json::Value TaskPanelHost::formValues() const

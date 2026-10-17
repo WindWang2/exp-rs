@@ -1,6 +1,7 @@
 // rs_result_summary.cpp — shared structured-result renderer
 #include "rs_result_summary.h"
 
+#include <QFileInfo>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -27,6 +28,18 @@ bool isNonMetricKey( const std::string &key )
             return true;
     }
     return false;
+}
+
+// Terminal-failure vocabulary an operator result may carry in its own
+// "status" member. The summary must not paint a green "processing finished"
+// line over a result that says it failed.
+bool isFailureStatus( const QString &status )
+{
+    const QString s = status.trimmed().toLower();
+    return s == QLatin1String( "failed" ) || s == QLatin1String( "failure" )
+           || s == QLatin1String( "fail" ) || s == QLatin1String( "error" )
+           || s == QLatin1String( "aborted" ) || s == QLatin1String( "canceled" )
+           || s == QLatin1String( "cancelled" );
 }
 
 } // namespace
@@ -162,11 +175,22 @@ void RsResultSummary::rebuildUi()
         context << QObject::tr( "Elapsed %1 s" ).arg( m_elapsedMs / 1000.0, 0, 'f', 1 );
     if ( m_fromCache )
         context << QObject::tr( "Cache Hit" );
-    m_statusLine->setText( QObject::tr( "✓ Processing finished%1" )
-                               .arg( context.isEmpty()
-                                         ? QString()
-                                         : QStringLiteral( " · %1" ).arg( context.join( QStringLiteral( " · " ) ) ) ) );
-    m_statusLine->setProperty( "state", QStringLiteral( "ok" ) );
+    // Honesty: trust the result's own status field when it carries one. A
+    // result that reports failure must not render as a finished success.
+    const bool failed = m_result.isMember( "status" )
+                        && m_result["status"].isString()
+                        && isFailureStatus( QString::fromStdString( m_result["status"].asString() ) );
+    m_statusLine->setText( failed
+                               ? QObject::tr( "✗ Processing failed%1" )
+                                     .arg( context.isEmpty()
+                                               ? QString()
+                                               : QStringLiteral( " · %1" ).arg( context.join( QStringLiteral( " · " ) ) ) )
+                               : QObject::tr( "✓ Processing finished%1" )
+                                     .arg( context.isEmpty()
+                                               ? QString()
+                                               : QStringLiteral( " · %1" ).arg( context.join( QStringLiteral( " · " ) ) ) ) );
+    m_statusLine->setProperty( "state", failed ? QStringLiteral( "error" )
+                                               : QStringLiteral( "ok" ) );
     m_statusLine->style()->unpolish( m_statusLine );
     m_statusLine->style()->polish( m_statusLine );
     m_statusLine->show();
@@ -221,11 +245,15 @@ void RsResultSummary::rebuildUi()
         else
         {
             m_warnings->hide();
+            // Also drop the text: an empty-but-hidden label must not resurface
+            // with the previous document's warning woven into a later one.
+            m_warnings->clear();
         }
     }
     else
     {
         m_warnings->hide();
+        m_warnings->clear();
     }
 
     // Output artifacts: "output" string and/or "outputs" array.
@@ -245,16 +273,46 @@ void RsResultSummary::rebuildUi()
     }
     if ( !paths.isEmpty() )
     {
+        int missing = 0;
         for ( const QString &p : paths )
         {
             if ( p.isEmpty() )
                 continue;
-            QListWidgetItem *item = new QListWidgetItem( p, m_artifacts );
-            item->setData( Qt::UserRole, p );
-            item->setToolTip( QObject::tr( "Double-click to load into the main view" ) );
+            // An operator can report an output path it never wrote (or the
+            // file was moved/deleted afterwards). Listing it as a clickable
+            // artifact sends the shell into a load that cannot succeed —
+            // mark it missing and refuse to emit it.
+            const bool exists = QFileInfo::exists( p );
+            QListWidgetItem *item = new QListWidgetItem(
+                exists ? p : QObject::tr( "%1 — file not found" ).arg( p ), m_artifacts );
+            if ( exists )
+            {
+                item->setData( Qt::UserRole, p );
+                item->setToolTip( QObject::tr( "Double-click to load into the main view" ) );
+            }
+            else
+            {
+                ++missing;
+                // No UserRole: openPathRequested can never fire for it.
+                item->setFlags( item->flags() & ~Qt::ItemIsEnabled );
+                item->setToolTip( QObject::tr( "This output file was not produced (missing on disk)" ) );
+            }
             m_artifacts->addItem( item );
         }
         m_artifacts->show();
+        if ( missing > 0 && missing == m_artifacts->count() )
+        {
+            // Nothing on disk: say so instead of leaving a clean-looking
+            // card with a dead artifact row. Appended so real operator
+            // warnings are never clobbered (isVisible() is false while the
+            // parent panel is still hidden, so test the text, not the flag).
+            const QString note = QObject::tr(
+                "No output artifact exists on disk — the run reported paths that were never written." );
+            m_warnings->setText( m_warnings->text().isEmpty()
+                                     ? QObject::tr( "△ %1" ).arg( note )
+                                     : m_warnings->text() + QLatin1Char( '\n' ) + QObject::tr( "△ %1" ).arg( note ) );
+            m_warnings->show();
+        }
     }
     else
     {
