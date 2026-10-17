@@ -161,3 +161,25 @@ TEST_CASE( "checkWeightSum stays fail-closed on a NaN member",
                                                 std::numeric_limits<double>::quiet_NaN() } } } );
     CHECK_FALSE( c.matchesExpected );
 }
+
+TEST_CASE( "a string-typed weight is refused, not silently coerced to 0.0",
+           "[teaching_admin][rubric][r16_c_t06]" )
+{
+    // Round-1 review P2: toDouble(0.0) turned a NON-NUMERIC weight ("0.5x",
+    // true, null) into 0.0, which is finite and non-negative — a typo'd or
+    // hostile rubric slid through the per-item rule that round WP3 added.
+    // The weight must be a JSON number, on both rubric dialects.
+    QJsonObject stringLab = assertion( QStringLiteral( "a1" ), 60.0 );
+    stringLab.insert( QStringLiteral( "weight" ), QStringLiteral( "0.5x" ) );
+    const ValidationResult lab = validateLabRules(
+        labRules( QJsonArray{ stringLab, assertion( QStringLiteral( "a2" ), 40.0 ) } ) );
+    REQUIRE_FALSE( lab.ok );
+    CHECK( hasIssue( lab, QStringLiteral( "malformed_grading_rule" ) ) );
+
+    QJsonObject stringProc = criterion( QStringLiteral( "c1" ), 0.5 );
+    stringProc.insert( QStringLiteral( "weight" ), QStringLiteral( "0.5" ) );
+    const ValidationResult proc = validateProcessRubric(
+        processRubric( QJsonArray{ stringProc, criterion( QStringLiteral( "c2" ), 0.5 ) } ) );
+    REQUIRE_FALSE( proc.ok );
+    CHECK( hasIssue( proc, QStringLiteral( "malformed_grading_rule" ) ) );
+}

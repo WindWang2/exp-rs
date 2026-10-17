@@ -99,7 +99,13 @@ ValidationResult validateLabRules( const QJsonObject &rules )
         // finite and non-negative. A negative deduction weight cancels
         // against a bloated partner and passes an aggregate-only check,
         // and the grader would compute scores from nonsense arithmetic.
-        const double weight = a.value( QStringLiteral( "weight" ) ).toDouble( 0.0 );
+        // Type first (round-1 review): toDouble(0.0) coerced a non-numeric
+        // weight ("0.5x") to a legal 0.0 — the value must be a JSON number.
+        const QJsonValue weightValue = a.value( QStringLiteral( "weight" ) );
+        if ( !weightValue.isDouble() )
+            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
+                        QStringLiteral( "weight must be a number" ) );
+        const double weight = weightValue.toDouble( 0.0 );
         if ( !std::isfinite( weight ) || weight < 0.0 )
             r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
                         QStringLiteral( "weight must be finite and non-negative" ) );
@@ -157,8 +163,14 @@ ValidationResult validateProcessRubric( const QJsonObject &rubric )
                         QStringLiteral( "only stage|metric|fact|answer supported" ) );
         // Weight arithmetic (R16-C/T06 WP3): same per-item rule as lab
         // assertions — finite and non-negative; a NaN member made the
-        // aggregate |sum - 1.0| comparison silently false below.
-        const double weight = c.value( QStringLiteral( "weight" ) ).toDouble( 0.0 );
+        // aggregate |sum - 1.0| comparison silently false below. Type
+        // first (round-1 review): a non-numeric weight must be refused,
+        // not coerced to 0.0.
+        const QJsonValue weightValue = c.value( QStringLiteral( "weight" ) );
+        if ( !weightValue.isDouble() )
+            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
+                        QStringLiteral( "weight must be a number" ) );
+        const double weight = weightValue.toDouble( 0.0 );
         if ( !std::isfinite( weight ) || weight < 0.0 )
             r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
                         QStringLiteral( "weight must be finite and non-negative" ) );
