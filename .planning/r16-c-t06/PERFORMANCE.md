@@ -11,7 +11,7 @@ What was verified afresh on final HEAD:
   1000 submissions, `maxConcurrency = 4`, two full runs asserting identical
   report digests and a durable 1000-row checkpoint) — is **green in both
   verifier family runs** (64/64 ×2; see `TEST_MATRIX.md`).
-- WP1's stamp change adds a bounded (first 64 KiB) sha256 per graded artifact
+- WP1's stamp change adds a bounded sha256 of the head AND tail windows (up to 128 KiB per artifact; the middle of >128 KiB artifacts is deliberately not fingerprinted — see GOAL_LOOP_LEDGER residual note) per graded artifact
   on the resume fast path — a deliberate cost/robustness trade recorded in the
   commit, not a measured regression; the 1000-scale oracle above ran well
   within the family's ~5.2-5.4 s total wall time both runs (observed, not a
