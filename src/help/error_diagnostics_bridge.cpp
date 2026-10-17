@@ -25,13 +25,19 @@ QHash<QString, QHash<QString, QString>> curatedCodes( const HelpRegistry &regist
     return built;
 }
 
-/// Token-shaped code candidates: UPPER_SNAKE (harness/preflight codes) and
-/// CamelCase words (operator codes like FileNotFound). Longest first so a
-/// specific long code wins over a shorter one embedded in it.
+/// Token-shaped code candidates: UPPER_SNAKE (harness/preflight codes),
+/// CamelCase words (operator codes like FileNotFound) and single capitalized
+/// words (operator codes like "Cancelled"/"Unknown" — RSOperatorError::what()
+/// is "CodeName: message", and job_engine copies what() verbatim into the
+/// task error text this bridge scans). Longest first so a specific long code
+/// wins over a shorter one embedded in it. Prose safety: a candidate only
+/// resolves when it EXACTLY equals a curated code, so ordinary capitalized
+/// words that match no code stay inert ("no guessing" per F20).
 QStringList codeCandidates( const QString &message )
 {
     static const QRegularExpression re(
-        QStringLiteral( "\\b[A-Z][A-Z0-9_]{2,}\\b|\\b[A-Z][a-z]+(?:[A-Z][a-z]+){1,}\\b" ) );
+        QStringLiteral( "\\b[A-Z][A-Z0-9_]{2,}\\b|\\b[A-Z][a-z]+(?:[A-Z][a-z]+){1,}\\b"
+                        "|\\b[A-Z][a-z]{2,}\\b" ) );
     QStringList tokens;
     auto it = re.globalMatch( message );
     while ( it.hasNext() ) {
