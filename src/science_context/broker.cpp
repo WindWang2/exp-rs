@@ -98,7 +98,10 @@ ScienceContextBroker &ScienceContextBroker::operator=( ScienceContextBroker &&ot
 void ScienceContextBroker::setCapabilityFacts( CapabilityFactsLookup lookup )
 {
     std::lock_guard<std::mutex> lock( mMutex );
-    mCapFacts = std::move( lookup );
+    // Fresh object per install: outstanding capabilityFacts() snapshots keep
+    // answering for the authority they were taken from (reinstall swaps the
+    // pointer, never mutates a handed-out projection).
+    mCapFacts = std::make_shared<CapabilityFactsLookup>( std::move( lookup ) );
     // Bundles computed under the previous facts authority must not survive an
     // authority reinstall.
     mCache.clear();
@@ -269,7 +272,9 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
             mergedObserved["grid_conflicted"] = true;
     }
 
-    const CapabilityFactsLookup *capFacts = mCapFacts ? &*mCapFacts : nullptr;
+    // Raw view is safe for the locked synthesize body: mCapFacts co-owns the
+    // object, and a concurrent reinstall swaps the pointer without touching it.
+    const CapabilityFactsLookup *capFacts = mCapFacts.get();
     const bool haveCapProvider = capFacts && static_cast<bool>( capFacts->entriesForIntent );
     // One revision read per synthesize: cache key and provenance must agree
     // even if the authority reloads mid-flight.
