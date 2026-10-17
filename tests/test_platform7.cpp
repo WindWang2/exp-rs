@@ -1311,6 +1311,66 @@ TEST_CASE( "P7 solver: unsat core names the minimal conflicting subset",
   REQUIRE( sawCore );
 }
 
+TEST_CASE( "P7 solver: unsat-core budget is sliced per target (R16-D T08 WP-11)",
+           "[platform7][solver][r16d-t08]" )
+{
+  // A wide, unresolvable neighborhood first (8 constraints fighting over one
+  // follower: 4 belows vs 4 aboves — no ≤3-subset can satisfy any below, so
+  // its core search legitimately runs to the budget), then two DISJOINT
+  // simple conflicting pairs whose cores ARE findable at subset size 1.
+  // The old global counter let the wide neighborhood consume the whole
+  // simulation budget, starving the later pairs to zero evidence
+  // ("budget was exhausted" on a core one simulation away).
+  Json::Value spec = makeMapSpec( "p7-core-budget", Json::Value() );
+  spec["legends"].append( rectItem( "box", 20.0, 100.0, 40.0, 20.0 ) );
+  for ( int i = 0; i < 4; ++i )
+  {
+    spec["titles"].append( rectItem( "low" + std::to_string( i ), 20.0, 170.0, 60.0, 10.0 ) );
+    spec["source_notes"].append( rectItem( "high" + std::to_string( i ), 20.0, 20.0, 60.0, 10.0 ) );
+    spec["constraints"].append( constraint( "below" + std::to_string( i ), "below",
+                                             "low" + std::to_string( i ), "box", 2.0 ) );
+    spec["constraints"].append( constraint( "above" + std::to_string( i ), "above",
+                                             "high" + std::to_string( i ), "box", 2.0 ) );
+  }
+  // Witness pair 1 (the classic unsat-core fixture).
+  spec["titles"].append( rectItem( "t1", 20.0, 10.0, 60.0, 10.0 ) );
+  spec["source_notes"].append( rectItem( "note", 20.0, 180.0, 60.0, 10.0 ) );
+  spec["legends"].append( rectItem( "box1", 120.0, 100.0, 40.0, 20.0 ) );
+  spec["constraints"].append( constraint( "c1", "below", "t1", "box1", 2.0 ) );
+  spec["constraints"].append( constraint( "c2", "above", "note", "box1", 2.0 ) );
+  // Witness pair 2 (disjoint from pair 1).
+  spec["titles"].append( rectItem( "t2", 20.0, 10.0, 60.0, 10.0 ) );
+  spec["source_notes"].append( rectItem( "note2", 20.0, 180.0, 60.0, 10.0 ) );
+  spec["scale_bars"].append( rectItem( "box2", 180.0, 100.0, 40.0, 20.0 ) );
+  spec["constraints"].append( constraint( "c3", "below", "t2", "box2", 2.0 ) );
+  spec["constraints"].append( constraint( "c4", "above", "note2", "box2", 2.0 ) );
+
+  const CompositionResult result = resolveComposition( spec, 10.0 );
+  REQUIRE_FALSE( result.converged );
+  REQUIRE_FALSE( result.unsatCores.isNull() );
+
+  const auto entryFor = [ &result ]( const char *cid ) -> const Json::Value * {
+    for ( const auto &entry : result.unsatCores )
+      if ( entry.isObject() && entry["constraint"].asString() == cid )
+        return &entry;
+    return nullptr;
+  };
+  for ( const char *cid : { "c1", "c3" } )
+  {
+    const Json::Value *entry = entryFor( cid );
+    INFO( "looking for unsat-core entry of " << cid );
+    REQUIRE( entry != nullptr );
+    // Each witness got its per-target slice: the search ran and the
+    // size-1 conflicting subset was found — not starved out by the wide
+    // neighborhood that preceded it.
+    INFO( "explanation: " << ( *entry )["explanation"].asString() );
+    CHECK( ( *entry )["explanation"].asString().find( "budget was exhausted" ) ==
+           std::string::npos );
+    REQUIRE( ( *entry )["core"].isArray() );
+    CHECK( ( *entry )["core"].size() == 2 );
+  }
+}
+
 TEST_CASE( "P7 solver: anchor authority is reported as a decision",
            "[platform7][solver]" )
 {

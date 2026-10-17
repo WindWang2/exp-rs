@@ -32,6 +32,8 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgslayoutatlas.h>
+#include <qgslayoutitemlabel.h>
+#include <qgslayoutitempage.h>
 #include <qgslayoutpagecollection.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
@@ -850,6 +852,83 @@ TEST_CASE( "produce atlas mode delivers per-feature pages with a verifiable mani
     CHECK( manifest["manifest_digest"].asString().size() == 64 );
 }
 
+TEST_CASE( "atlas export of a multi-page layout delivers one file per feature (R16-D T08 WP-2)",
+           "[cp11][atlas][r16d-t08]" )
+{
+    // Direct exportMapAtlas oracle: a hand-built two-page layout WITHOUT any
+    // legend item, so the host's documented QgsLayoutItemLegend::paint hang
+    // (see skipIfHostRenderBroken) cannot mask the delivery contract. The
+    // old atlas branch passed no settings.pages to exportToImage, so every
+    // feature wrote page 0 to the temp file AND orphaned *_2.png siblings
+    // the caller never learns about.
+    QgsVectorLayer *coverage =
+      addAtlasCoverageLayer( QStringLiteral( "atlas-cities-mp" ),
+                             { { qMakePair( QString::fromUtf8( "Beijing" ), 2 ) },
+                               { qMakePair( QString::fromUtf8( "Anshan" ), 1 ) } } );
+    REQUIRE( coverage != nullptr );
+    REQUIRE( coverage->isValid() );
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    QgsPrintLayout layout( QgsProject::instance() );
+    // A fresh QgsPrintLayout has no initial page (LayoutService normally
+    // adds page 0) — build both physical pages explicitly.
+    auto *firstPage = new QgsLayoutItemPage( &layout );
+    firstPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( firstPage );
+    auto *extraPage = new QgsLayoutItemPage( &layout );
+    extraPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( extraPage );
+    std::unique_ptr<QgsLayoutItemLabel> page0Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page0Label->setText( QStringLiteral( "body page" ) );
+    page0Label->attemptSetSceneRect( QRectF( 10, 10, 80, 10 ) );
+    layout.addLayoutItem( page0Label.release() );
+    std::unique_ptr<QgsLayoutItemLabel> page1Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page1Label->setText( QStringLiteral( "second page" ) );
+    page1Label->attemptSetSceneRect( QRectF( 10, 220, 80, 10 ) );
+    layout.addLayoutItem( page1Label.release() );
+    REQUIRE( layout.pageCollection()->pageCount() == 2 );
+
+    layout.atlas()->setCoverageLayer( coverage );
+    layout.atlas()->setEnabled( true );
+    // Count-timing contract on this QGIS build: count() reports the last
+    // updateFeatures() pass — exportMapAtlas refreshes it itself (export.cpp).
+    REQUIRE( layout.atlas()->count() == 0 );
+
+    sicnu::agent::cartography::MapAtlasExportRequest request;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.file_name = "atlas-mp";
+
+    const auto result = sicnu::agent::cartography::exportMapAtlas( &layout, request );
+    REQUIRE( result.ok );
+    REQUIRE( result.pages.size() == 2 );  // one file per coverage feature
+
+    // Exactly the delivered files exist in the directory: no orphaned
+    // second-page siblings (*_2.png) outside the reported page set.
+    std::set<std::string> delivered;
+    for ( const auto &page : result.pages )
+        delivered.insert( page.file_name );
+    REQUIRE( delivered.size() == 2 );
+    const QStringList files = QDir( dir.path() ).entryList( QDir::Files );
+    for ( const QString &file : files )
+    {
+        INFO( "unexpected delivery file: " << file.toStdString() );
+        CHECK( delivered.count( file.toStdString() ) == 1 );
+    }
+    // Exactly the delivered files exist in the directory. The orphaned
+    // second-page siblings (RED: atlas-mp_output_2.ozORKr_2.png — a temp
+    // stem + page suffix the result never reports) fail the set check
+    // above; a "_2" SUFFIX alone is not proof of a stray (the stem
+    // disambiguator legitimately emits p1_2 when features share a
+    // fallback stem), so the set-membership check is the contract.
+    CHECK( files.size() == static_cast<int>( delivered.size() ) );
+}
+
 TEST_CASE( "atlas count contract: updateFeatures refreshes, count does not",
            "[cp11][atlas]" )
 {
@@ -1424,4 +1503,176 @@ TEST_CASE( "Schema and descriptor validation robustness against malformed types 
         REQUIRE_NOTHROW( problems = validateChartSpec( chart ) );
         CHECK_FALSE( problems.empty() );
     }
+}
+
+TEST_CASE( "series clones remap overlay_on to the page sibling (R16-D T08 WP-5)",
+           "[cp11][series][r16d-t08]" )
+{
+    // A chart that declares intentional coverage of the map frame
+    // (overlay_on) — the series clone keeps that intent against ITS page's
+    // frame, not the template page-0 frame.
+    Json::Value tmpl = frameSpec( "series-overlay" );
+    Json::Value chart( Json::objectValue );
+    chart["id"] = "chart-1";
+    Json::Value chartRect( Json::arrayValue );
+    chartRect.append( 40 );
+    chartRect.append( 60 );
+    chartRect.append( 60 );
+    chartRect.append( 40 );
+    chart["rect_mm"] = chartRect; // intersects map-1's [12,24,190,160]
+    chart["overlay_on"] = "map-1";
+    chart["chart"] = parse( R"({
+      "kind": "bar",
+      "binding": { "mode": "inline", "data": [ { "label": "a", "value": 1 } ] }
+    })" );
+    appendMapSpecItem( tmpl, "charts", chart );
+    REQUIRE( validateMapSpec( tmpl ).empty() );
+
+    Json::Value definition( Json::objectValue );
+    definition["type"] = "table";
+    definition["rows"] = parse( R"([
+      { "title": "North", "variables": { "region": "North" } },
+      { "title": "South", "variables": { "region": "South" } }
+    ])" );
+
+    std::vector<std::string> problems;
+    const Json::Value spec = planSeries( tmpl, definition, &problems );
+    REQUIRE( !spec.isNull() );
+    CHECK( problems.empty() );
+    REQUIRE( validateMapSpec( spec ).empty() );
+
+    // The page-1 clone's overlay intent points at the page-1 frame.
+    REQUIRE( spec["charts"].size() == 2 );
+    CHECK( spec["charts"][1]["page"].asInt() == 1 );
+    CHECK( spec["charts"][1]["overlay_on"].asString() == "map-1-p1" );
+
+    // Preflight honors the declared overlay on every page: no false
+    // MAP_CHART_OVER_MAP for the clone's declared coverage.
+    const Json::Value report = preflightMapSpec( spec );
+    for ( const auto &finding : report["issues"] )
+    {
+        INFO( "issue: " << finding["code"].asString() << " for "
+                        << finding["item_id"].asString() );
+        CHECK( finding["code"].asString() != "MAP_CHART_OVER_MAP" );
+    }
+}
+
+TEST_CASE( "structural digest folds pages[] geometry (R16-D T08 WP-7)",
+           "[cp11][manifest][r16d-t08]" )
+{
+    Json::Value spec = frameSpec( "digest-pages" );
+    spec["pages"] = parse( R"([ { "width_mm": 297, "height_mm": 210 } ])" );
+    const std::string digest = structuralDigest( spec );
+    REQUIRE( digest.size() == 64 );
+
+    // Deterministic: the same document digests identically.
+    CHECK( structuralDigest( spec ) == digest );
+
+    // Mutating a declared page's height changes the digest (a re-material-
+    // ized document with different page geometry is NOT the same delivery).
+    Json::Value taller = spec;
+    taller["pages"][0]["height_mm"] = 297.0;
+    CHECK( structuralDigest( taller ) != digest );
+
+    // Width participates too.
+    Json::Value wider = spec;
+    wider["pages"][0]["width_mm"] = 420.0;
+    CHECK( structuralDigest( wider ) != digest );
+
+    // A second declared page participates (removing it changes the digest).
+    Json::Value twoPages = spec;
+    twoPages["pages"].append( parse( R"({ "width_mm": 210, "height_mm": 148 })" ) );
+    CHECK( structuralDigest( twoPages ) != digest );
+}
+
+TEST_CASE( "vector series over a point layer refuses degenerate extents (R16-D T08 WP-8)",
+           "[cp11][series][r16d-t08]" )
+{
+    QgsVectorLayer *points = new QgsVectorLayer(
+      QStringLiteral( "Point?crs=EPSG:4326&field=name:string" ), QStringLiteral( "series-points" ),
+      QStringLiteral( "memory" ) );
+    points->startEditing();
+    for ( int i = 0; i < 2; ++i )
+    {
+        QgsFeature feature( points->fields() );
+        feature.setAttribute( QStringLiteral( "name" ),
+                              QStringLiteral( "p%1" ).arg( i ) );
+        feature.setGeometry(
+          QgsGeometry::fromPointXY( QgsPointXY( 116.0 + i * 0.1, 39.0 ) ) );
+        points->addFeature( feature );
+    }
+    points->commitChanges();
+    QgsProject::instance()->addMapLayer( points );
+
+    std::vector<std::string> problems;
+    const Json::Value planned =
+      planSeries( frameSpec( "series-points-map" ),
+                  parse( R"({ "type": "vector", "layer": "series-points" })" ), &problems );
+    QgsProject::instance()->removeMapLayer( points->id() );
+
+    // A point feature's bbox is degenerate (xmin == xmax): it cannot define
+    // a page extent. The planner refuses with a typed problem instead of
+    // stamping an extent validateMapSpec would reject downstream.
+    CHECK( planned.isNull() );
+    REQUIRE_FALSE( problems.empty() );
+    bool mentionsCause = false;
+    for ( const auto &problem : problems )
+        mentionsCause = mentionsCause || problem.find( "degenerate" ) != std::string::npos ||
+                         problem.find( "buffer" ) != std::string::npos;
+    CHECK( mentionsCause );
+
+    // Table series (explicit extents) and the atlas delivery path remain
+    // the honest tools for point-driven per-feature products.
+    Json::Value definition( Json::objectValue );
+    definition["type"] = "table";
+    definition["rows"] = parse( R"([ { "title": "A" } ])" );
+    std::vector<std::string> tableProblems;
+    CHECK( !planSeries( frameSpec( "series-table-ok" ), definition, &tableProblems ).isNull() );
+}
+
+TEST_CASE( "series index label derives its rect from the template page size (R16-D T08 WP-10)",
+           "[cp11][series][r16d-t08]" )
+{
+    // Portrait A4 template: the index label rect used to be hardcoded for
+    // A4 landscape (257 mm wide), firing MAP_OFF_PAGE on a 210 mm sheet.
+    Json::Value tmpl = frameSpec( "series-portrait" );
+    tmpl["page"]["width_mm"] = 210.0;
+    tmpl["page"]["height_mm"] = 297.0;
+    Json::Value definition( Json::objectValue );
+    definition["type"] = "table";
+    definition["rows"] = parse( R"([ { "title": "A" }, { "title": "B" } ])" );
+    definition["index_page"] = parse( R"({ "enabled": true, "title": "Index" })" );
+
+    std::vector<std::string> problems;
+    const Json::Value spec = planSeries( tmpl, definition, &problems );
+    REQUIRE( !spec.isNull() );
+    CHECK( problems.empty() );
+    REQUIRE( validateMapSpec( spec ).empty() );
+
+    const Json::Value report = preflightMapSpec( spec );
+    CHECK( report["error_count"].asInt() == 0 );
+
+    // The label rect fits the portrait sheet (20/30 mm margins kept).
+    const Json::Value &indexLabel = spec["labels"][spec["labels"].size() - 1];
+    CHECK( indexLabel["rect_mm"][0].asDouble() == Catch::Approx( 20.0 ) );
+    CHECK( indexLabel["rect_mm"][1].asDouble() == Catch::Approx( 30.0 ) );
+    CHECK( indexLabel["rect_mm"][0].asDouble() + indexLabel["rect_mm"][2].asDouble() <=
+           210.0 + 0.5 );
+    CHECK( indexLabel["rect_mm"][1].asDouble() + indexLabel["rect_mm"][3].asDouble() <=
+           297.0 + 0.5 );
+
+    // Landscape templates keep the historical geometry (regression).
+    Json::Value landscape = frameSpec( "series-landscape" );
+    Json::Value landscapeDefinition( Json::objectValue );
+    landscapeDefinition["type"] = "table";
+    landscapeDefinition["rows"] = parse( R"([ { "title": "A" }, { "title": "B" } ])" );
+    landscapeDefinition["index_page"] = parse( R"({ "enabled": true, "title": "Index" })" );
+    std::vector<std::string> landscapeProblems;
+    const Json::Value landscapeSpec = planSeries( landscape, landscapeDefinition, &landscapeProblems );
+    REQUIRE( !landscapeSpec.isNull() );
+    const Json::Value &landscapeLabel =
+      landscapeSpec["labels"][landscapeSpec["labels"].size() - 1];
+    CHECK( landscapeLabel["rect_mm"][2].asDouble() == Catch::Approx( 257.0 ) );
+    CHECK( landscapeLabel["rect_mm"][3].asDouble() == Catch::Approx( 150.0 ) );
+    CHECK( preflightMapSpec( landscapeSpec )["error_count"].asInt() == 0 );
 }
