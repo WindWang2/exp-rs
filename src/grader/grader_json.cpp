@@ -54,7 +54,20 @@ void escapeStringInto( std::string &out, const std::string &text )
     out.push_back( '"' );
 }
 
-bool appendCanonical( const Json::Value &value, std::string &out, GraderError &error, const std::string &path );
+/// Depth ceiling for the canonical walk. Documents arriving through
+/// parseJsonStrict are already bounded by the jsoncpp reader's default
+/// stackLimit (256 nesting levels; deeper text throws "Exceeded
+/// stackLimit", which parseJsonStrict catches into a typed refusal), but
+/// the engine is also a programmatic API — value-object authors can hand
+/// grade() an evidence bundle whose facts nest arbitrarily deep, and the
+/// unbudgeted recursion crashed with a stack overflow (SIGSEGV around
+/// 100k levels). 512 keeps every parse-legal document canonicalizable
+/// while staying far from any stack danger; over-budget depth is a typed
+/// refusal through the existing GraderError channel.
+constexpr int kMaxCanonicalDepth = 512;
+
+bool appendCanonical( const Json::Value &value, std::string &out, GraderError &error,
+                      const std::string &path, int depth );
 
 bool appendNumber( const Json::Value &value, std::string &out, GraderError &error, const std::string &path )
 {
@@ -73,8 +86,14 @@ bool appendNumber( const Json::Value &value, std::string &out, GraderError &erro
     return true;
 }
 
-bool appendCanonical( const Json::Value &value, std::string &out, GraderError &error, const std::string &path )
+bool appendCanonical( const Json::Value &value, std::string &out, GraderError &error,
+                      const std::string &path, int depth )
 {
+    if ( depth > kMaxCanonicalDepth ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                           "canonical json exceeded the depth budget (512 nesting levels)", path );
+        return false;
+    }
     switch ( value.type() ) {
     case Json::nullValue:
         out += "null";
@@ -96,7 +115,7 @@ bool appendCanonical( const Json::Value &value, std::string &out, GraderError &e
             if ( !first )
                 out.push_back( ',' );
             first = false;
-            if ( !appendCanonical( element, out, error, path ) )
+            if ( !appendCanonical( element, out, error, path, depth + 1 ) )
                 return false;
         }
         out.push_back( ']' );
@@ -115,7 +134,8 @@ bool appendCanonical( const Json::Value &value, std::string &out, GraderError &e
             first = false;
             escapeStringInto( out, entry.first );
             out.push_back( ':' );
-            if ( !appendCanonical( *entry.second, out, error, path.empty() ? entry.first : path + "." + entry.first ) )
+            if ( !appendCanonical( *entry.second, out, error,
+                                   path.empty() ? entry.first : path + "." + entry.first, depth + 1 ) )
                 return false;
         }
         out.push_back( '}' );
@@ -198,7 +218,7 @@ std::optional<std::string> canonicalNumber( double value, GraderError &error )
 std::optional<std::string> canonicalizeJson( const Json::Value &value, GraderError &error )
 {
     std::string out;
-    if ( !appendCanonical( value, out, error, {} ) )
+    if ( !appendCanonical( value, out, error, {}, 1 ) )
         return std::nullopt;
     return out;
 }

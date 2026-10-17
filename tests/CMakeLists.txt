@@ -10979,6 +10979,14 @@ target_link_libraries(test_r16_a_faultlab PRIVATE
 )
 sicnu_discover_tests(test_r16_a_faultlab TEST_PREFIX "test_r16_a_faultlab::")
 
+# R16-A T02: grader canonical-walk depth budget (grader track; jsoncpp leaf).
+add_executable(test_r16_a_grader test_r16_a_grader.cpp)
+target_link_libraries(test_r16_a_grader PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_r16_a_grader TEST_PREFIX "test_r16_a_grader::")
+
 # RS14-05 Process-aware Experiment Grader: engine/types/error/json/sha256
 # schema (sicnu_grader links jsoncpp PUBLIC).
 add_executable(test_grader_schema test_grader_schema.cpp)
