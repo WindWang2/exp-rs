@@ -43,12 +43,20 @@ bool tokenize( const std::string &expr, std::vector<Token> &tokens, std::string 
         ++i;
       token.kind = Token::Kind::Number;
       token.text = expr.substr( start, i - start );
+      // std::stod parses the numeric PREFIX, so "1.2.3" would silently
+      // compare as 1.2 — require the whole token to be one number.
+      size_t consumed = 0;
       try
       {
-        token.number = std::stod( token.text );
+        token.number = std::stod( token.text, &consumed );
         if ( !std::isfinite( token.number ) )
         {
           error = "non-finite number '" + token.text + "'";
+          return false;
+        }
+        if ( consumed != token.text.size() )
+        {
+          error = "malformed number '" + token.text + "'";
           return false;
         }
       }
@@ -623,6 +631,11 @@ std::set<std::string> conditionPaths( const std::string &expr )
 bool evaluateCondition( const std::string &expr, const Json::Value &context, bool *value,
                         std::string *error )
 {
+  // Failure never leaves a stale verdict behind: every error path clears
+  // *value so a caller that forgets to check the return cannot act on the
+  // previous call's answer.
+  if ( value )
+    *value = false;
   std::string localError;
   const ConditionPtr ast = compileOrEmpty( expr, localError );
   if ( ast == nullptr )
