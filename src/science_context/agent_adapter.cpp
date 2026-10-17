@@ -7,6 +7,7 @@
 #include "recipes/recipe_registry.h"
 #include "scientific_state/asset_state_json.h"
 
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 

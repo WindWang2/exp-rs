@@ -51,4 +51,4 @@ Out-of-scope guard: `src/help/terminology_provider.cpp` (#1465 item) is NOT in t
 - Round-1 independent review (fresh-context subagent): PASS_WITH_P2; all P2/P3 findings fixed in the review-fix commit (see `../r16-b/REVIEW_ROUND1.md`).
 - GREEN run 1 on integration (post review fixes): science_context + authority-invalidation **102/102**; track-04 families **196/196** (real outputs in `../r16-b/TEST_RESULTS.md`).
 - GREEN run 2 recorded in `../r16-b/TEST_RESULTS.md` after round-2 review.
-- `git diff --check` clean; `git diff origin/master...HEAD --stat` = code (5 files, +260/−7 net of review fixes) + planning markdown + .gitignore negations.
+- `git diff --check` clean; `git diff --numstat` over src/tests = 6 code files, +280/−8 (net of review fixes) + planning markdown + .gitignore negations.

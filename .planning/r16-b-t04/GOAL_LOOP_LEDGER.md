@@ -12,7 +12,7 @@ Host note: same as T03 — ZCode host, native worktree/oracle mechanism, no fabr
 
 ## Decision log
 
-- **No code change**: no confirmed defect in ownership; manufacturing one would violate the task's honesty constraints. The cross-track risk (broker `capabilityFacts()` signature change in T03) is verified here: `grep` shows no `capabilityFacts()` consumer inside `src/suitability|preflight|planner|repair_planner`; `tests/test_preflight_authority_invalidation.cpp` uses only `setCapabilityFacts` (21 hits) — compile-safe under the T03 change. Verified by running the family in WP-T04-2.
+- **No code change**: no confirmed defect in ownership; manufacturing one would violate the task's honesty constraints. The cross-track risk (broker `capabilityFacts()` signature change in T03) is verified here: `grep` shows no `capabilityFacts()` consumer inside `src/suitability|preflight|planner|repair_planner`; `tests/test_preflight_authority_invalidation.cpp` uses only `setCapabilityFacts` (7 occurrences) — compile-safe under the T03 change. Verified by running the family in WP-T04-2.
 
 ## Phase 2 log
 

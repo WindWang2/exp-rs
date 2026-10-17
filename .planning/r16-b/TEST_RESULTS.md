@@ -24,9 +24,14 @@ The following tests FAILED:
 
 Track-04 note: these 196 are the WP-T04-2 verification runs — the four modules' families pass against the integration branch that carries the T03 broker API change, proving no track-04 consumer of the seam regressed (grep had already shown `capabilityFacts()` has no consumer under `src/suitability|preflight|planner|repair_planner`).
 
-## GREEN run 2 (post round-2 review, same commands)
+## GREEN run 2 (post round-2 review fixes, same commands)
 
-(filled below after the second independent review round)
+| ctest -R pattern | Result |
+| --- | --- |
+| `test_science_context\|test_preflight_authority_invalidation` | **100% tests passed, 0 failed, 102 tests** |
+| `^(test_preflight\|test_scientific_planner_core\|…\|test_repair_planner_schema)` (same pattern as run 1) | **100% tests passed, 0 failed, 196 tests** |
+
+Identical results across run 1 and run 2 → the required double-GREEN. The only code delta between the runs was the round-2 hygiene fix (`#include <memory>` in `agent_adapter.cpp`); one target rebuild, all suites re-run.
 
 ## Coverage boundaries, honestly stated
 
