@@ -94288,6 +94288,13 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is 'Wha
     </message>
   </context>
   <context>
+    <name>SicnuPythonConsole</name>
+    <message>
+      <source>Enter Python code...</source>
+      <translation>输入 Python 代码...</translation>
+    </message>
+  </context>
+  <context>
     <name>SimpleLineMaterialWidgetBase</name>
     <message>
       <source>...</source>
