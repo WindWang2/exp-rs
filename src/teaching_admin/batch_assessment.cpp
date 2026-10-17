@@ -44,18 +44,37 @@ QString batchConfigDigest( const BatchAssessmentConfig &cfg )
     return sha256Hex( canonicalJsonBytes( batchConfigDigestInput( cfg ) ) );
 }
 
-/// Artifact identity for checkpoint adoption: mtime + size, taken when a row
-/// is graded. A cheap stat proxy (not a content digest) — resume is a fast
-/// path, so it only has to catch re-submissions; the encoding can later be
-/// swapped for a digest without touching the checkpoint schema (#1448).
-/// Empty when the artifact is gone (unverifiable → re-grade on resume).
+/// Artifact identity for checkpoint adoption, taken when a row is graded:
+/// mtime + size + a bounded sha256 of the artifact's HEAD and TAIL. The
+/// stat pair alone adopts a stale grade over a same-stat content swap
+/// (cp -p with a backdated mtime, or a same-length rewrite with the mtime
+/// restored — red tests in test_teaching_admin_checkpoint_stamp_r16_c_t06),
+/// so the stamp also fingerprints content. Head-only hashing still adopted
+/// over tail-only rewrites on artifacts past the window (round-1 review):
+/// classroom rasters are typically far larger than one window with
+/// informative pixels throughout, so both ends are fingerprinted. The
+/// windows may overlap (files ≤ 2× window) — this is a fingerprint, not a
+/// dedup; the encoding stays opaque to the checkpoint schema (#1448 left
+/// it evolvable — old mtime:size and head-only stamps simply stop matching
+/// and fail closed to re-grading).
+/// Empty when the artifact is gone or unreadable (unverifiable → re-grade).
 QString artifactStamp( const QString &path )
 {
     const QFileInfo info( path );
     if ( !info.exists() )
         return QString();
+    constexpr qint64 kStampWindowBytes = 64 * 1024;
+    QFile f( path );
+    if ( !f.open( QIODevice::ReadOnly ) )
+        return QString();
+    QByteArray fingerprint = f.read( kStampWindowBytes );
+    const qint64 size = info.size();
+    if ( size > kStampWindowBytes
+         && f.seek( size - kStampWindowBytes ) )
+        fingerprint += f.read( kStampWindowBytes );
     return QString::number( info.lastModified().toMSecsSinceEpoch() ) + QLatin1Char( ':' )
-         + QString::number( info.size() );
+         + QString::number( size ) + QLatin1Char( ':' )
+         + sha256Hex( fingerprint );
 }
 
 /// A durable checkpoint row plus the artifact identity it was graded
@@ -576,7 +595,16 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 row.message = QStringLiteral( "grader threw; isolated" );
                 row.artifactPath = items[i].path;
             }
-            if ( row.studentId.isEmpty() )
+            // Identity authority (R16-C/T06 WP4): discovery owns the
+            // (student, artifact) pair. A callable answering with a
+            // foreign studentId used to be published verbatim — a
+            // callable bug then attributed one student's score to another
+            // id in the report/CSV. Overwrite, never trust: the grade
+            // itself stays the callable's. Exception (round-1 review):
+            // a discovered id that is EMPTY (flat root file named exactly
+            // "_submission.*") must not blank the row — the callable's id
+            // is then the only attribution available.
+            if ( !items[i].studentId.isEmpty() )
                 row.studentId = items[i].studentId;
             if ( row.labId.isEmpty() )
                 row.labId = cfg.labId;

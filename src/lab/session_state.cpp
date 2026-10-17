@@ -748,6 +748,30 @@ LabResult<LabSession> sessionFromJson( const Json::Value &doc )
   else
     diags.push_back( LabDiag{ "lab.session.schema", "execution_refs must be an array" } );
 
+  // Identity coherence: the session id is the composite key the store
+  // derives its filesystem path from. A hand-edited document where
+  // session_id disagrees with the recorded lab/student identity would load
+  // fine and then report a lab it is not (store summaries, grading
+  // inputs) — refuse it like any other envelope violation. Legitimate
+  // sessions are built by startSession as "<labId>/<studentId>/<seq>".
+  if ( diags.empty() )
+  {
+    const std::string prefix = session.labId + "/" + session.studentId + "/";
+    bool coherent = false;
+    if ( session.sessionId.rfind( prefix, 0 ) == 0 && session.sessionId.size() > prefix.size() )
+    {
+      const std::string suffix = session.sessionId.substr( prefix.size() );
+      // 18-digit cap mirrors sessionPathFromId; digits only (no leading
+      // zeros are producible by std::to_string).
+      coherent = suffix.size() <= 18 &&
+                 suffix.find_first_not_of( "0123456789" ) == std::string::npos;
+    }
+    if ( !coherent )
+      diags.push_back( LabDiag{ "lab.session.identity",
+                                "session_id must be '<lab_id>/<student_id>/<sequence>' "
+                                "matching the recorded identity fields" } );
+  }
+
   // Sequence-envelope consistency (R14-E audit, teaching F2): every event
   // seq must lie in (0, last_seq]. A shape-valid document whose event
   // claims seq=500 while last_seq=3 would let a forged/stale "pass" win
