@@ -970,7 +970,7 @@ add_custom_command(
 )
 add_custom_target(sicnu_i18n DEPENDS "${SICNU_ZH_CN_QM}")
 add_custom_target(sicnu_i18n_update
-  COMMAND Qt6::lupdate -no-obsolete -locations none src/app src/gui src/core src/processing src/analysis src/agent src/agent_ops src/workflow src/experiment_studio src/teaching_admin src/teaching src/operators src/ui -ts resources/translations/sicnu_zh_CN.ts
+  COMMAND Qt6::lupdate -no-obsolete -locations none src/app src/gui src/core src/processing src/analysis src/agent src/agent_ops src/workflow src/experiment_studio src/teaching_admin src/teaching src/operators src/ui src/python -ts resources/translations/sicnu_zh_CN.ts
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   COMMENT "lupdate first-party sources -> resources/translations/sicnu_zh_CN.ts (D6 i18n)"
   VERBATIM
