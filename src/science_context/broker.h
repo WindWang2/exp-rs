@@ -10,8 +10,8 @@
 #include "science_context/recipe_router.h"
 #include "science_context/planner_projection.h"
 
-#include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -62,17 +62,10 @@ class ScienceContextBroker
 
     /// Live capability authority (installed by the embedding layer).
     void setCapabilityFacts( CapabilityFactsLookup lookup );
-    /// Owned snapshot of the live authority projection. The broker hands the
-    /// lookup out, so it owns the handed-out object's lifetime: a reinstall
-    /// swaps the stored pointer and never mutates an object a caller still
-    /// holds (#1505 review P1 — a raw view into the optional's storage kept
-    /// serving after a move-assign, silently answering for the NEW
-    /// authority). The snapshot pins the lookup seam object only; the
-    /// underlying authority data the closures read stays live, by design.
-    std::shared_ptr<const CapabilityFactsLookup> capabilityFacts() const
+    const CapabilityFactsLookup *capabilityFacts() const
     {
         std::lock_guard<std::mutex> lock( mMutex );
-        return mCapFacts;
+        return mCapFacts ? &*mCapFacts : nullptr;
     }
 
     /// Registry the broker syncs recipe projections from (not owned).
@@ -101,7 +94,7 @@ class ScienceContextBroker
     ContextCache mCache;
     BrokerObservability mObs;
     sicnu::recipes::ScientificRecipeRegistry *mRecipeRegistry = nullptr;
-    std::shared_ptr<const CapabilityFactsLookup> mCapFacts;
+    std::optional<CapabilityFactsLookup> mCapFacts;
 };
 
 } // namespace sicnu::science_context

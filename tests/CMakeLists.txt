@@ -15934,3 +15934,44 @@ target_include_directories(test_r14_D_durable_writes PRIVATE
 sicnu_link_jsoncpp(test_r14_D_durable_writes)
 set_target_properties(test_r14_D_durable_writes PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r14_D_durable_writes TEST_PREFIX "test_r14_D_durable_writes::")
+
+# ── r16-c-t05: student lab session & learning-state hardening (append-only) ─
+# New suites for this track register ONLY here (repo issue #1494: orphan
+# unregistered tests). Patterns copied from test_lab_runtime (line ~11007)
+# and sicnu_add_teaching_test (line ~14273).
+add_executable(test_lab_session_store_r16_c_t05 test_lab_session_store_r16_c_t05.cpp)
+target_link_libraries(test_lab_session_store_r16_c_t05 PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+target_include_directories(test_lab_session_store_r16_c_t05 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_lab_session_store_r16_c_t05 TEST_PREFIX "test_lab_session_store_r16_c_t05::")
+set_target_properties(test_lab_session_store_r16_c_t05 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+
+add_executable(test_teaching_restore_r16_c_t05 test_teaching_restore_r16_c_t05.cpp)
+target_link_libraries(test_teaching_restore_r16_c_t05 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+)
+target_include_directories(test_teaching_restore_r16_c_t05 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_teaching_restore_r16_c_t05 TEST_PREFIX "test_teaching_restore_r16_c_t05::")
+set_target_properties(test_teaching_restore_r16_c_t05 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+# ── R16-C/T06: teacher batch assessment & classroom management hardening ──
+# Append-only registration block for this hardening track's new suites; one
+# line per work package, added in RED→GREEN order (docs: .planning/r16-c-t06).
+sicnu_add_teaching_admin_test(test_teaching_admin_checkpoint_stamp_r16_c_t06)
+sicnu_add_teaching_admin_test(test_teaching_admin_grader_cli_budget_r16_c_t06)
+sicnu_add_teaching_admin_test(test_teaching_admin_rubric_weights_r16_c_t06)
+sicnu_add_teaching_admin_test(test_teaching_admin_student_id_authority_r16_c_t06)

@@ -7,7 +7,6 @@
 #include "recipes/recipe_registry.h"
 #include "scientific_state/asset_state_json.h"
 
-#include <memory>
 #include <mutex>
 #include <stdexcept>
 
@@ -205,13 +204,8 @@ Json::Value scientificCapabilities( const Json::Value &argsIn )
     q.goal = safeString( args, "goal" );
     q.intent = safeString( args, "intent" );
     // Route through the same capability authority the broker uses — without
-    // this the tool would silently run on the builtin fallback table. The
-    // snapshot is held for the whole call: routing must not dereference
-    // broker storage after the lock, and an authority reinstall mid-call must
-    // not swap the projection underneath it (#1505 review P1).
-    const std::shared_ptr<const CapabilityFactsLookup> factsSnapshot =
-        sharedBroker().capabilityFacts();
-    q.facts = factsSnapshot.get();
+    // this the tool would silently run on the builtin fallback table.
+    q.facts = sharedBroker().capabilityFacts();
     if ( args.isMember( "passport" ) || args.isMember( "passport_json" ) )
     {
         auto state = passportFromArgs( args );

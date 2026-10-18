@@ -224,12 +224,30 @@ GraderCliGrade gradeViaCli( const GraderCliConfig &cfg, const QString &artifactP
     }
 
     // The real CLI writes the transcript to --out and mirrors it on stdout;
-    // prefer the file, fall back to stdout.
+    // prefer the file, fall back to stdout. The file read is budgeted by the
+    // same maxBytes forwarded as --max-bytes: an unbounded readAll() here
+    // would let a hostile/buggy grader bypass the #1466 capture caps through
+    // the transcript channel — and an oversized transcript is a typed
+    // refusal, never a parsed grade.
     QByteArray raw;
     {
-        QFile f( transcriptPath );
-        if ( f.open( QIODevice::ReadOnly ) )
-            raw = f.readAll();
+        const qint64 budget = cfg.maxBytes > 0 ? cfg.maxBytes : GraderCliConfig{}.maxBytes;
+        const BoundedReadResult read = readBounded( transcriptPath, budget );
+        if ( read.oversize )
+            return unavailableGrade(
+              QStringLiteral( "grader_transcript_oversize" ),
+              QStringLiteral( "grader transcript exceeds the %1-byte budget" ).arg( budget ) );
+        // Unreadable WITH partial bytes = the file existed but changed size
+        // between the stat and the read (growth window): digesting a
+        // truncated prefix as the document would grade wrong bytes (round-1
+        // review). Unreadable with NO bytes (never written / unopenable)
+        // falls through to the stdout mirror below — a CLI that only prints
+        // the transcript is a legal grader shape.
+        if ( read.unreadable && !read.bytes.isEmpty() )
+            return unavailableGrade(
+              QStringLiteral( "grader_transcript_unreadable" ),
+              QStringLiteral( "grader transcript changed size while being read" ) );
+        raw = read.bytes;
     }
     if ( raw.isEmpty() )
         raw = sr.stdoutBytes;

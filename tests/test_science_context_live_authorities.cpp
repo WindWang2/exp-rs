@@ -32,7 +32,6 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>

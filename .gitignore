@@ -596,6 +596,18 @@ r6_dev.cmd
 !.planning/r16-b/
 .planning/r16-b/*
 !.planning/r16-b/*.md
+
+# hardening/r16-c-teaching-classroom: planning evidence (markdown only; logs/build stay local).
+# hardening/r16-c (teaching classroom reliability): track planning notes (markdown only; logs stay local).
+!.planning/r16-c/
+.planning/r16-c/*
+!.planning/r16-c/*.md
+!.planning/r16-c-t05/
+.planning/r16-c-t05/*
+!.planning/r16-c-t05/*.md
+!.planning/r16-c-t06/
+.planning/r16-c-t06/*
+!.planning/r16-c-t06/*.md
 .ps1_*_r15c.ps1
 .ps1_redgreen_r15c.ps1
 .syntaxcheck/
