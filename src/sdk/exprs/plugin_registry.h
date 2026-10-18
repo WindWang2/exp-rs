@@ -63,7 +63,11 @@ public:
     /// Installs options and performs the first refresh. Safe to call again
     /// (re-configures and rescans).
     void configure( const PluginRegistryOptions &options );
-    const PluginRegistryOptions &options() const { return mOptions; }
+    /// #1449: SNAPSHOT by value, taken under the registry lock. The previous
+    /// `const &` accessor handed out a reference to a member that
+    /// configure()/refreshUnlocked() rewrite while another thread reads it:/n    /// no longer the #943 use-after-free (records are snapshots now) but
+    /// still a torn read of workspaceRoot/dataDirectory/logSink mid-swap.
+    PluginRegistryOptions options() const;
 
     /// The sink that receives contributions from loaded plugins (owned by
     /// the host runtime). Must be set before any load().
@@ -116,7 +120,10 @@ public:
     std::string pluginDirectoryFor( const std::string &pluginId ) const;
     bool copyRecord( const std::string &pluginId, PluginRecord &out ) const;
     std::vector<std::string> pluginIds() const;
-    const PluginDiagnosticLog &diagnostics() const { return mDiagnostics; }
+    /// #1449: snapshot by value under the registry lock, same reasoning as
+    /// options(): refreshUnlocked() clears and re-fills mDiagnostics, so a
+    /// reference handed to another thread can observe a half-written log.
+    PluginDiagnosticLog diagnostics() const;
 
     // -- lifecycle ----------------------------------------------------------
     /// Loads a plugin (native). Returns true when the plugin ends up in

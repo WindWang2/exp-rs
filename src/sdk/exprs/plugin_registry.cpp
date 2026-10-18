@@ -316,6 +316,24 @@ std::vector<PluginRecord> PluginRegistry::records() const
     return mRecords;
 }
 
+PluginRegistryOptions PluginRegistry::options() const
+{
+    // #1449: copy under the lock instead of handing out a reference —
+    // configure() rewrites mOptions wholesale and refreshUnlocked() runs on
+    // the same mutex, so a reference held across either is a torn read.
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    return mOptions;
+}
+
+PluginDiagnosticLog PluginRegistry::diagnostics() const
+{
+    // #1449: same rule as options(). refreshUnlocked() clears mDiagnostics
+    // and re-fills it, so a caller holding a reference sees a log that is
+    // being rebuilt underneath it.
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    return mDiagnostics;
+}
+
 bool PluginRegistry::copyRecord( const std::string &pluginId, PluginRecord &out ) const
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
