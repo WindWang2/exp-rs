@@ -145,99 +145,213 @@ ClassicNumericLocale::~ClassicNumericLocale() = default;
 
 #endif
 
-void appendDouble( std::string &out, double value )
+bool appendDouble( std::string &out, double value, std::string &error )
 {
     if ( std::isnan( value ) )
     {
+        // The documented no-data spelling; the sign bit of a NaN is payload
+        // nobody controls, so it normalizes away (-nan must not differ).
         out += "NaN";
-        return;
+        return true;
     }
     if ( std::isinf( value ) )
     {
-        out += ( value < 0.0 ) ? "-Infinity" : "Infinity";
-        return;
+        // No feature meaning anywhere in the lab (noData is NaN, every
+        // transform operand is finite-gated) and not spellable as JSON: an
+        // unhashable value must not reach a digest under any circumstances
+        // (the same refusal the verification canonicalizer makes).
+        error = "canonical json refuses non-finite numbers (infinity)";
+        return false;
+    }
+    if ( value == 0.0 )
+    {
+        // -0.0 normalizes onto +0.0: verification's roundSignificant and
+        // grader's canonicalNumber both print "0" for either zero, and one
+        // numeric value must own one canonical spelling.
+        out += "0";
+        return true;
     }
     char buffer[40];
     std::snprintf( buffer, sizeof( buffer ), "%.17g", value );
     out += buffer;
+    return true;
 }
 
-void appendValue( std::string &out, const Json::Value &value )
+/// Walk budgets, sized for the lab's own payloads and nothing else:
+///   * depth 256 is double the scenario reader's stackLimit (128), so every
+///     document that parses stays digestible, while a programmatic nesting
+///     bomb (SIGSEGV at ~100k frames) is refused long before the stack is
+///     in danger;
+///   * nodes/output comfortably cover the largest legal teaching fixture
+///     (the 64 MiB sandbox ceiling ≈ 8.4M samples ≈ 210 MiB of %.17g text)
+///     yet cap a wide programmatic bomb's CPU/memory cost.
+inline constexpr int kCanonicalMaxDepth = 256;
+inline constexpr std::uint64_t kCanonicalMaxNodes = 10000000;
+inline constexpr std::uint64_t kCanonicalMaxOutputBytes = 256ull * 1024 * 1024;
+
+struct CanonicalWalker
 {
-    switch ( value.type() )
+    std::string out;
+    std::string error;
+    std::uint64_t nodes = 0;
+
+    bool fail( const char *reason )
     {
-        case Json::nullValue:
-            out += "null";
-            break;
-        case Json::booleanValue:
-            out += value.asBool() ? "true" : "false";
-            break;
-        case Json::intValue:
-            out += std::to_string( value.asInt64() );
-            break;
-        case Json::uintValue:
-            out += std::to_string( value.asUInt64() );
-            break;
-        case Json::realValue:
-            appendDouble( out, value.asDouble() );
-            break;
-        case Json::stringValue:
-            appendEscaped( out, value.asString() );
-            break;
-        case Json::arrayValue:
-        {
-            out.push_back( '[' );
-            bool first = true;
-            for ( const auto &element : value )
-            {
-                if ( !first )
-                {
-                    out.push_back( ',' );
-                }
-                first = false;
-                appendValue( out, element );
-            }
-            out.push_back( ']' );
-            break;
-        }
-        case Json::objectValue:
-        {
-            std::vector<std::string> keys = value.getMemberNames();
-            std::sort( keys.begin(), keys.end() );
-            out.push_back( '{' );
-            bool first = true;
-            for ( const auto &key : keys )
-            {
-                if ( !first )
-                {
-                    out.push_back( ',' );
-                }
-                first = false;
-                appendEscaped( out, key );
-                out.push_back( ':' );
-                appendValue( out, value[key] );
-            }
-            out.push_back( '}' );
-            break;
-        }
+        error = reason;
+        return false;
     }
-}
+
+    bool counted()
+    {
+        ++nodes;
+        if ( nodes > kCanonicalMaxNodes )
+        {
+            return fail( "canonical json exceeded the node budget" );
+        }
+        if ( out.size() > kCanonicalMaxOutputBytes )
+        {
+            return fail( "canonical json exceeded the output byte budget" );
+        }
+        return true;
+    }
+
+    bool appendValue( const Json::Value &value, int depth )
+    {
+        if ( depth > kCanonicalMaxDepth )
+        {
+            return fail( "canonical json exceeded the depth budget" );
+        }
+        if ( !counted() )
+        {
+            return false;
+        }
+        switch ( value.type() )
+        {
+            case Json::nullValue:
+                out += "null";
+                return true;
+            case Json::booleanValue:
+                out += value.asBool() ? "true" : "false";
+                return true;
+            case Json::intValue:
+                out += std::to_string( value.asInt64() );
+                return true;
+            case Json::uintValue:
+                out += std::to_string( value.asUInt64() );
+                return true;
+            case Json::realValue:
+                return appendDouble( out, value.asDouble(), error );
+            case Json::stringValue:
+                appendEscaped( out, value.asString() );
+                return true;
+            case Json::arrayValue:
+            {
+                out.push_back( '[' );
+                bool first = true;
+                for ( const auto &element : value )
+                {
+                    if ( !first )
+                    {
+                        out.push_back( ',' );
+                    }
+                    first = false;
+                    if ( !appendValue( element, depth + 1 ) )
+                    {
+                        return false;
+                    }
+                }
+                out.push_back( ']' );
+                return true;
+            }
+            case Json::objectValue:
+            {
+                std::vector<std::string> keys = value.getMemberNames();
+                std::sort( keys.begin(), keys.end() );
+                out.push_back( '{' );
+                bool first = true;
+                for ( const std::string &key : keys )
+                {
+                    if ( !first )
+                    {
+                        out.push_back( ',' );
+                    }
+                    first = false;
+                    appendEscaped( out, key );
+                    out.push_back( ':' );
+                    if ( !appendValue( value[key], depth + 1 ) )
+                    {
+                        return false;
+                    }
+                }
+                out.push_back( '}' );
+                return true;
+            }
+        }
+        return fail( "canonical json encountered an unsupported value type" );
+    }
+};
 
 } // namespace
 
-std::string toCanonicalString( const Json::Value &value )
+bool tryToCanonicalString( const Json::Value &value, std::string &out, std::string &error )
 {
     // One pin per canonical walk keeps every %.17g on the classic decimal
     // point; the pin restores the caller's locale before returning.
     const ClassicNumericLocale pin;
+    CanonicalWalker walker;
+    if ( !walker.appendValue( value, 1 ) )
+    {
+        // @p out stays untouched on failure: a partial canonical form must
+        // never be mistaken for a successful one.
+        error = walker.error;
+        return false;
+    }
+    // counted() samples the budget at node ENTRY, so a single scalar can
+    // still push the output past the ceiling mid-write (a control-char
+    // string amplifies ~6x through \uXXXX). The post-walk re-check closes
+    // that bypass: the byte budget is a hard cap, not a soft hint.
+    if ( walker.out.size() > kCanonicalMaxOutputBytes )
+    {
+        error = "canonical json exceeded the output byte budget";
+        return false;
+    }
+    out = std::move( walker.out );
+    return true;
+}
+
+bool trySha256HexOf( const Json::Value &value, std::string &out, std::string &error )
+{
+    std::string canonicalText;
+    if ( !tryToCanonicalString( value, canonicalText, error ) )
+    {
+        return false;
+    }
+    out = sha256Hex( canonicalText );
+    return true;
+}
+
+std::string toCanonicalString( const Json::Value &value )
+{
     std::string out;
-    appendValue( out, value );
+    std::string error;
+    if ( !tryToCanonicalString( value, out, error ) )
+    {
+        // The refusal spelling of the value-returning form: no legal value
+        // serializes to zero bytes, so empty can never be a real digest.
+        return std::string{};
+    }
     return out;
 }
 
 std::string sha256HexOf( const Json::Value &value )
 {
-    return sha256Hex( toCanonicalString( value ) );
+    std::string out;
+    std::string error;
+    if ( !trySha256HexOf( value, out, error ) )
+    {
+        return std::string{};
+    }
+    return out;
 }
 
 } // namespace sicnu::faultlab::canonical

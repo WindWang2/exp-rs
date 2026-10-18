@@ -75,7 +75,9 @@
           "description": "Deterministic fixture from the built-in factory (src/faultlab/fault_fixtures.cpp)."
         },
         "params": {
-          "type": "object"
+          "type": "object",
+          "maxProperties": 0,
+          "description": "Must be empty: built-in fixtures are deterministic (keyed by fixture_id + seed), so a non-empty params object is a typed refusal in the loader, not a silently ignored free-form bag."
         },
         "seed": {
           "type": "integer",

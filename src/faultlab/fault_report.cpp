@@ -59,11 +59,17 @@ Json::Value FaultRunReport::toJson() const
     return doc;
 }
 
+/// Canonical JSON text of the report (`sicnu.faultlab.report/1`); empty
+/// when the body cannot be canonicalized (a non-finite evidence number
+/// reached it) — an unhashable report gets no text, never a partial one.
 std::string faultReportToJson( const FaultRunReport &report )
 {
     return canonical::toCanonicalString( report.toJson() );
 }
 
+/// Lowercase hex SHA-256 of the canonical report body (64 chars); empty on
+/// the same refusal — consumers treat an empty digest as "unverifiable",
+/// mirroring the grader's no-digest policy.
 std::string faultReportDigest( const FaultRunReport &report )
 {
     return canonical::sha256HexOf( report.toJson() );
