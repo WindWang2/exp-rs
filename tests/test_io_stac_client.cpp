@@ -23,6 +23,8 @@
 #include <sstream>
 
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <system_error>
 #include <string>
 #include <thread>
@@ -1415,4 +1417,97 @@ TEST_CASE( "StacClient buildNextRequest falls back to selfBody when next body is
   StacPage second = client.nextPage( first );
   REQUIRE( second.items.size() == 1 );
   CHECK( second.items[0].id == "fb2" );
+}
+
+TEST_CASE( "a detached page fetch is registered, joined and reaped (#1456)",
+           "[io][stac][concurrency][teardown]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  StacRoute route;
+  route.delayMs = 300;   // hold the handler long enough to overlap the first drain
+  route.body = renderPage(
+    { renderItem( "d1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) }, "" );
+  server.setRoute( "/search", route );
+
+  StacClient client( server.url() );
+  const StacRequest request = client.buildSearchRequest( StacSearchQuery{} );
+
+  // --- fetch #1: the non-blocking drain reaps without joining ---------------
+  std::atomic<int> calls{ 0 };
+  std::string pageId;
+  std::promise<void> done;
+  auto future = done.get_future();
+  client.requestPageDetached(
+    request, [ &calls, &pageId, &done ]( StacPage page, const std::string &errorText ) {
+      calls.fetch_add( 1, std::memory_order_acq_rel );
+      if ( errorText.empty() && !page.items.empty() )
+        pageId = page.items[0].id;
+      try { done.set_value(); } catch ( ... ) {}
+    } );
+
+  // Non-blocking: only fetches whose callback already returned are collected,
+  // so this returns whether or not #1 is still in flight.
+  StacClient::drainDetachedRequests( false );
+
+  REQUIRE( future.wait_for( std::chrono::seconds( 10 ) ) == std::future_status::ready );
+  CHECK( calls.load( std::memory_order_acquire ) == 1 );   // exactly one invocation
+  CHECK( pageId == "d1" );
+  CHECK( !server.requests().empty() );
+
+  // #1 has now finished: the opportunistic reap must collect its handle
+  // instead of keeping it for the rest of the session.
+  StacClient::drainDetachedRequests( false );
+
+  // --- fetch #2: the WAITING drain must join an in-flight fetch -------------
+  std::atomic<int> calls2{ 0 };
+  std::string pageId2;
+  std::promise<void> done2;
+  auto future2 = done2.get_future();
+  client.requestPageDetached(
+    request, [ &calls2, &pageId2, &done2 ]( StacPage page, const std::string &errorText ) {
+      calls2.fetch_add( 1, std::memory_order_acq_rel );
+      if ( errorText.empty() && !page.items.empty() )
+        pageId2 = page.items[0].id;
+      try { done2.set_value(); } catch ( ... ) {}
+    } );
+
+  // Blocks until every outstanding fetch has returned. The #1456 hazard was a
+  // callback firing during static teardown; once this returns, none can.
+  StacClient::drainDetachedRequests( true );
+  CHECK( calls2.load( std::memory_order_acquire ) == 1 );
+  CHECK( pageId2 == "d1" );
+  CHECK( future2.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready );
+}
+
+TEST_CASE( "drainDetachedRequests refuses new detached work once closed (#1456)",
+           "[io][stac][concurrency][teardown]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  StacRoute route;
+  route.body = renderPage(
+    { renderItem( "d2", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) }, "" );
+  server.setRoute( "/search", route );
+
+  StacClient client( server.url() );
+  const StacRequest request = client.buildSearchRequest( StacSearchQuery{} );
+
+  // Closing the registry is a one-way door — exactly like application shutdown.
+  StacClient::drainDetachedRequests( true );
+
+  std::atomic<int> calls{ 0 };
+  std::string errorText;
+  client.requestPageDetached(
+    request, [ &calls, &errorText ]( StacPage page, const std::string &error ) {
+      calls.fetch_add( 1, std::memory_order_acq_rel );
+      errorText = error;
+      CHECK( page.items.empty() );
+    } );
+
+  // The refusal is synchronous on the calling thread: no worker is spawned, so
+  // nothing can fire later during teardown — and the origin never saw a request.
+  CHECK( calls.load( std::memory_order_acquire ) == 1 );
+  CHECK_THAT( errorText, ContainsSubstring( "shutting down" ) );
+  CHECK( server.requests().empty() );
 }
