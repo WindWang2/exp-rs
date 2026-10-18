@@ -2017,6 +2017,40 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
             ++validPixels;
         }
       }
+      // R15-C C07: the per-tile coverage gate (tiling.min_valid_coverage).
+      // The multi-input engine has always applied it; the single-input
+      // engine computed the per-tile valid count but consulted it only at
+      // BATCH granularity (all-NoData), so a documented manifest gate was
+      // silently ignored on this path — a low-coverage tile ran a full
+      // forward pass and wrote predictions where the contract promises
+      // NoData. Same semantics as the multi-input lane (and the #705 skip):
+      // decided per TILE over the CORE pixels, skipped tiles become NoData
+      // rows — never a resolution change, never a model change.
+      // Scope note (review R1 P3): with the DEFAULT gate (0) only
+      // validPixels==0 tiles are deferred, and they are now deferred
+      // individually BEFORE batching instead of running the forward inside a
+      // mixed batch and being masked afterwards. The written raster is
+      // unchanged; what changes is stats.tilesSkippedNoData and the
+      // forward-pass compute (an all-NoData tile inside a mixed batch no
+      // longer runs a forward whose output it would only overwrite) — the
+      // batch-level batchIsAllNoData skip below is the belt-and-braces
+      // remnant of the old shape.
+      {
+        const double minValidCoverage = std::clamp( m_model.tiling.minValidCoverage, 0.0, 1.0 );
+        const double coverage =
+          static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
+        if ( validPixels == 0 || ( minValidCoverage > 0.0 && coverage < minValidCoverage ) )
+        {
+          ++skipped;
+          ++stats.tilesSkippedNoData;
+          deferredNoData.push_back( t );
+          context.reportProgress(
+            static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+            "Tiled inference: " + std::to_string( done + skipped ) + "/"
+              + std::to_string( totalTiles ) );
+          continue;
+        }
+      }
       // nodata_policy "zero" (default; the only supported policy - others
       // are rejected at manifest parse, #646): non-finite samples become 0.
       const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
@@ -2775,6 +2809,29 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                            "model declares " + std::to_string( m_model.inputs.size() )
                              + " inputs but " + std::to_string( feeds.size() )
                              + " feeds were given" );
+
+  // R15-C C05 (B3): capability negotiation BEFORE the first forward. The
+  // session's declared capabilities are the contract consumers negotiate
+  // against; a manifest asking beyond them used to be discovered by the
+  // provider's own throw INSIDE the tile loop — after the input rasters were
+  // opened and read, and classified as a computation failure instead of a
+  // schema mismatch. Refuse here, where the seam is cheap and nothing ran.
+  // Either seam counts as a declaration: Platform 7.0 capabilities()
+  // (multiInput) or the historical supportsMultiInput() — a session that
+  // implements neither cannot feed several inputs in one pass.
+  // (The rank axis stays enforced by the provider's own inferNamed refusal:
+  // the default capabilities() describes the historical rank-4 contract and
+  // sessions that accept more do not re-declare it, so a preflight gate on
+  // maxRank would refuse legitimate N-D sessions.)
+  if ( feeds.size() > 1 && !m_runtime->capabilities().multiInput
+       && !m_runtime->supportsMultiInput() )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "session backend '" + m_runtime->backendName()
+        + "' does not support multi-input models (capabilities().multiInput and "
+          "supportsMultiInput() are both false) — the model declares "
+      + std::to_string( m_model.inputs.size() )
+      + " inputs; run it on a multi-input backend or one input at a time" );
 
   std::vector<std::size_t> feedContract( feeds.size() );
   for ( std::size_t f = 0; f < feeds.size(); ++f )
@@ -3975,6 +4032,16 @@ int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
                                              int tilePx, int fedChannels )
 {
   // Manifest request first; the budget can only lower it.
+  //
+  // R15-C C11 (F12, documented limitation): the ceiling is the ENV/per-device
+  // VRAM budget (SICNU_MODEL_VRAM_MB), never the live ledger occupancy
+  // (ModelRuntimeRegistry::vramLedger().freeMb(resolved device)). Two
+  // concurrent tiled inferences on one card therefore each size their batch
+  // for the full budget and can collectively over-commit — deliberately, so
+  // the OOM ladder (batch→tile-by-tile, never a resolution change) stays the
+  // single degradation authority instead of two engines bargaining over the
+  // ledger mid-run. Callers that need ledger-aware sizing must resolve the
+  // device first and pass a narrowed budget.
   int batch = std::max( 1, model.tiling.batchSize );
   const int tile = std::max( kMinTileSize, tilePx );
   // Per-sample working set: input blob + output planes + halo overhead.

@@ -321,7 +321,18 @@ class PythonWorkerSession final : public IModelRuntime
       throw std::runtime_error( "provider crashed: python worker exchange failed (unreachable)" );
     }
 
-    bool supportsMultiInput() const override { return true; }
+    bool supportsMultiInput() const override
+    {
+      // Platform 8.0 WP-F: the handshake-negotiated capability is
+      // authoritative. A worker that declared multi_input:false used to keep
+      // claiming the historical seam here, so the engine's capability
+      // preflight (R15-C C05/B3) let multi-input manifests through and the
+      // request failed on the wire instead. The two seams now agree.
+      std::lock_guard<std::mutex> stateLock( m_stateMutex );
+      if ( m_negotiated.contains( QStringLiteral( "multi_input" ) ) )
+        return m_negotiated.value( QStringLiteral( "multi_input" ) ).toBool( true );
+      return true;
+    }
 
     /// Historical cv::Mat fast path (bridges through the named surface).
     cv::Mat infer( const cv::Mat &nchwBlob ) override
