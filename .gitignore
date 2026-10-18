@@ -156,6 +156,10 @@ vendor/
 .planning/cli-surface-r4/*
 !.planning/r14-B/
 !.planning/cli-surface-r4/*.md
+# R15-A track (remote sensing science algorithms & numerical contracts) planning artifacts (markdown only).
+!.planning/r15-a/
+.planning/r15-a/*
+!.planning/r15-a/*.md
 # R6 persistence/sidecar/atomicity track planning notes (markdown only).
 !.planning/r6-persistence-sidecar-atomicity/
 .planning/r6-persistence-sidecar-atomicity/*
