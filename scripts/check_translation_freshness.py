@@ -143,7 +143,11 @@ def run_lupdate(lupdate: str, dirs: list[str], ts_out: Path, cwd: Path,
     # the COMMAND line the same way (the invocation this gate mirrors).
     cmd = [lupdate, "-no-obsolete", "-locations", "none", *(extra_args or []),
            *dirs, "-ts", str(ts_out)]
-    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=900)
+    # errors="replace": lupdate's stderr can carry locale-encoded bytes (e.g.
+    # file paths under a non-UTF-8 locale); a decode error here would exit 1
+    # looking like a gate failure (review R2 observation).
+    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
+                          errors="replace", timeout=900)
     # lupdate exits 0 even with extraction warnings; a missing ts file is the
     # real failure signal.
     if not ts_out.is_file():

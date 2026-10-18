@@ -207,8 +207,9 @@ TEST_CASE( "search index build and query stay within linear-ish ceilings",
     tokenizeTimer.start();
     const QStringList tokens = HelpSearchIndex::tokenize( mega );
     const qint64 tokenizeMs = tokenizeTimer.elapsed();
-    std::fprintf( stderr, "[wp4] tokenize 1MiB CJK: %lld ms -> %d tokens\n",
-                  static_cast<long long>( tokenizeMs ), tokens.size() );
+    std::fprintf( stderr, "[wp4] tokenize 1MiB CJK: %lld ms -> %lld tokens\n",
+                  static_cast<long long>( tokenizeMs ),
+                  static_cast<long long>( tokens.size() ) );
     CHECK( tokenizeMs < SICNU_PERF_TOKENIZE_BUDGET_MS );
     CHECK( tokens.size() >= 10000 );
 }
