@@ -200,7 +200,7 @@
       "whenToUse": "掩膜清理、水体/建筑图斑整形。",
       "keyParameters": [
         "op",
-        "iterations"
+        "window"
       ],
       "limitations": [
         "改变图斑边界精度"

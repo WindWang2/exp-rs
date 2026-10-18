@@ -584,6 +584,18 @@ r6_dev.cmd
 !.planning/r15-E/
 .planning/r15-E/*
 !.planning/r15-E/*.md
+
+# hardening/r16-b-scientific-decisions: planning evidence (markdown only; logs/build stay local).
+# hardening/r16-b (R16-B dual track): planning evidence (markdown only; logs/build stay local).
+!.planning/r16-b-t03/
+.planning/r16-b-t03/*
+!.planning/r16-b-t03/*.md
+!.planning/r16-b-t04/
+.planning/r16-b-t04/*
+!.planning/r16-b-t04/*.md
+!.planning/r16-b/
+.planning/r16-b/*
+!.planning/r16-b/*.md
 .ps1_*_r15c.ps1
 .ps1_redgreen_r15c.ps1
 .syntaxcheck/
