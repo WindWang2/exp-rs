@@ -337,40 +337,6 @@ void StdinReader::run()
         std::cin.getline( buffer.data(), kMaxMcpLine + 1 );
         if ( std::cin.fail() )
         {
-            // Clean end-of-input: getline extracted zero characters because
-            // the stream is exhausted (eofbit|failbit). That is not an
-            // overlong line — emit nothing and stop. Previously this fell
-            // into the sentinel branch and the server answered every normal
-            // shutdown with a bogus "-32700 line too long" (id:null).
-            if ( std::cin.eof() && std::cin.gcount() == 0 )
-                break;
-            // Exact-boundary line: the buffer filled at precisely
-            // kMaxMcpLine chars before the delimiter, so getline set
-            // failbit — but if the very next char IS the newline (or EOF)
-            // the line is exactly at the cap, not over it. Consume the
-            // delimiter and deliver it like any other frame. peek() needs a
-            // clear() first: on a failed stream it returns EOF blindly.
-            if ( std::cin.gcount() == kMaxMcpLine )
-            {
-                std::cin.clear();
-                const int next = std::cin.peek();
-                if ( next == '\n' || next == EOF )
-                {
-                    if ( next == '\n' )
-                        std::cin.get();
-                    const QString line = QString::fromUtf8( buffer.data() ).trimmed();
-                    if ( !line.isEmpty() )
-                        emit lineRead( line );
-                    if ( next == EOF )
-                        break;
-                    continue;
-                }
-            }
-            // Unrecoverable stream error (badbit): clear() cannot repair a
-            // broken streambuf — without this the loop spins emitting
-            // sentinels forever on a dead stdin.
-            if ( std::cin.bad() )
-                break;
             std::cin.clear();
             std::cin.ignore( std::numeric_limits<std::streamsize>::max(), '\n' );
             emit lineRead( QStringLiteral( "__MCP_LINE_TOO_LONG__" ) );

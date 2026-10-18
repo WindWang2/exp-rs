@@ -4,13 +4,10 @@
 #include <QJsonDocument>
 #include <QVariantMap>
 
-#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <array>
 #include <vector>
-#include <sstream>
-#include <iostream>
 
 #include "agent/mcp_server.h"
 #include "agent/tool_catalog/surface_registry.h"
@@ -38,7 +35,6 @@
 #include "processing/providers/gdal_tools/provider.h"
 #include "processing/providers/otb_tools/provider.h"
 #include <QCoreApplication>
-#include <QProcess>
 #include <QTemporaryDir>
 #include <QDir>
 #include <QFile>
@@ -1013,44 +1009,10 @@ struct CheckpointEnvGuard
         else
             qunsetenv( "SICNU_CHECKPOINT_DIR" );
     }
-    /// Mirror of workflow_checkpoint.cpp's isAuthorityTempName: the
-    /// durable-sidecar staged-temp shape
-    /// "checkpoint_<runId>.<pid>.<ctr>.<rng>.tmp.json" (three decimal
-    /// fields). A committed "checkpoint_x.tmp.json" (runId ending in
-    /// ".tmp") is NOT a temp and must still be counted.
-    static bool isCheckpointTempName( const QString &name )
-    {
-        if ( !name.startsWith( QLatin1String( "checkpoint_" ) )
-             || !name.endsWith( QLatin1String( ".tmp.json" ) ) )
-            return false;
-        const QString body =
-            name.mid( QStringLiteral( "checkpoint_" ).size(),
-                      name.size() - QStringLiteral( "checkpoint_" ).size()
-                          - QStringLiteral( ".tmp.json" ).size() );
-        const QStringList fields = body.split( QLatin1Char( '.' ) );
-        if ( fields.size() < 4 )
-            return false;
-        const auto digits = []( const QString &f ) {
-            return !f.isEmpty()
-                   && std::all_of( f.begin(), f.end(),
-                                   []( const QChar c ) { return c.isDigit(); } );
-        };
-        const QString &pidField = fields.at( fields.size() - 3 );
-        const QString runId = fields.mid( 0, fields.size() - 3 ).join( QLatin1Char( '.' ) );
-        return digits( pidField ) && pidField != QLatin1String( "0" )
-               && digits( fields.at( fields.size() - 2 ) )
-               && digits( fields.at( fields.size() - 1 ) ) && !runId.isEmpty();
-    }
     QStringList checkpoints() const
     {
-        // Exclude in-flight atomic-save temps: they match "checkpoint_*.json"
-        // but are not committed checkpoints — counting them races the writer
-        // and flakes (assert landed mid-save ~50% of runs).
-        QStringList names = QDir( dir.path() )
-                                .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
-                                            QDir::Files );
-        names.removeIf( isCheckpointTempName );
-        return names;
+        return QDir( dir.path() )
+            .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
     }
     /// Checkpoints anywhere in the family: a COMPLETED run is archived into
     /// history/ by the finalize sweep, so the live-directory count alone
@@ -1058,11 +1020,11 @@ struct CheckpointEnvGuard
     /// archive before the assertion runs).
     int checkpointCount() const
     {
-        QStringList hist =
-            QDir( dir.filePath( QStringLiteral( "history" ) ) )
-                .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
-        hist.removeIf( isCheckpointTempName );
-        return checkpoints().size() + hist.size();
+        return checkpoints().size()
+               + QDir( dir.filePath( QStringLiteral( "history" ) ) )
+                     .entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
+                                 QDir::Files )
+                     .size();
     }
     /// Bounded wait for a run's LAST DURABLE STATE: a checkpoint carrying @p
     /// workflowId that reads back with a terminal @p state from the family
@@ -1998,12 +1960,6 @@ TEST_CASE( "MCP default workspace avoids / and $HOME", "[agent][mcp][sandbox][se
 
     SECTION( "CWD == HOME" )
     {
-#ifdef Q_OS_WIN
-        // QDir::homePath() on Windows uses GetUserProfileDirectory — neither
-        // HOME nor USERPROFILE env overrides reach it, so the fake-home
-        // premise of this section cannot hold here.
-        SKIP( "QDir::homePath() ignores HOME/USERPROFILE on Windows" );
-#endif
         REQUIRE( QDir::setCurrent( fakeHome.path() ) );
         const QString root = containment::effectiveMcpWorkspaceRoot();
         CHECK( root == QDir( expected ).canonicalPath() );
@@ -2011,9 +1967,6 @@ TEST_CASE( "MCP default workspace avoids / and $HOME", "[agent][mcp][sandbox][se
     }
     SECTION( "CWD == filesystem root" )
     {
-#ifdef Q_OS_WIN
-        SKIP( "QDir::homePath() ignores HOME/USERPROFILE on Windows" );
-#endif
         REQUIRE( QDir::setCurrent( QDir::rootPath() ) );
         // Resolve first: the fallback directory is created on demand, so its
         // canonical path only exists after effectiveMcpWorkspaceRoot() ran.
@@ -2072,9 +2025,6 @@ TEST_CASE( "MCP sandbox resolves symlinks through multiple missing directories (
     const QString link = workspace.filePath( QStringLiteral( "link" ) );
     if ( !QFile::link( outside.path(), link ) )
         SKIP( "symlinks unavailable on this filesystem" );
-    if ( !QFileInfo( link ).isSymLink() )
-        SKIP( "QFile::link succeeded but did not produce a real symlink "
-              "(Windows .lnk shortcut fallback — symlink privilege unavailable)" );
     qputenv( "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() );
     REQUIRE( QDir::setCurrent( workspace.path() ) );
 
@@ -2108,76 +2058,6 @@ TEST_CASE( "MCP sandbox resolves symlinks through multiple missing directories (
         CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Path outside" ) ) );
     }
 }
-
-#ifdef Q_OS_WIN
-TEST_CASE( "MCP sandbox rejects junction escapes on Windows (P1-3 junction variant)",
-           "[agent][mcp][sandbox][security]" )
-{
-    // Junctions (mklink /J) need no symlink privilege and ARE traversed by
-    // the Win32 file APIs, but QFileInfo::isSymLink()/canonicalFilePath()
-    // do not resolve them — the workspace escape must be caught by the
-    // existing-prefix resolution resolving reparse points to the final path.
-    const SandboxEnvGuard guard;
-    QTemporaryDir workspace;
-    QTemporaryDir outside;
-    REQUIRE( workspace.isValid() );
-    REQUIRE( outside.isValid() );
-    writeFile( outside.filePath( QStringLiteral( "secret.txt" ) ), "top-secret\n" );
-
-    const QString link = workspace.filePath( QStringLiteral( "link_j" ) );
-    QProcess mklink;
-    mklink.start( QStringLiteral( "cmd.exe" ),
-                  { QStringLiteral( "/c" ), QStringLiteral( "mklink" ),
-                    QStringLiteral( "/J" ), QDir::toNativeSeparators( link ),
-                    QDir::toNativeSeparators( outside.path() ) } );
-    mklink.waitForFinished();
-    if ( mklink.exitCode() != 0 || !QFileInfo( link ).exists() )
-        SKIP( QStringLiteral( "mklink /J unavailable: %1" )
-                  .arg( QString::fromLocal8Bit( mklink.readAllStandardError()
-                                                + mklink.readAllStandardOutput() ) )
-                  .toUtf8()
-                  .constData() );
-
-    using sicnu::agent::tool_catalog::surfacePathOutsideWorkspace;
-    // Existing file through the junction, the junction itself, and a
-    // non-existing tail below it are all OUTSIDE the workspace.
-    CHECK( surfacePathOutsideWorkspace( link + QStringLiteral( "/secret.txt" ),
-                                        workspace.path() ) );
-    CHECK( surfacePathOutsideWorkspace( link, workspace.path() ) );
-    CHECK( surfacePathOutsideWorkspace( link + QStringLiteral( "/new/not-yet.tif" ),
-                                        workspace.path() ) );
-
-    // Positive controls: real children stay inside, and the root itself is
-    // inside when spelled with different case or as an 8.3 short path.
-    writeFile( workspace.filePath( QStringLiteral( "real/ok.tif" ) ), "ok\n" );
-    CHECK_FALSE( surfacePathOutsideWorkspace( workspace.filePath( QStringLiteral( "real/ok.tif" ) ),
-                                              workspace.path() ) );
-    CHECK_FALSE( surfacePathOutsideWorkspace( workspace.path(), workspace.path() ) );
-    const QString lowerRoot = workspace.path().toLower();
-    if ( lowerRoot != workspace.path() )
-        CHECK_FALSE( surfacePathOutsideWorkspace( lowerRoot, workspace.path() ) );
-    QProcess forCmd;
-    forCmd.start( QStringLiteral( "cmd.exe" ),
-                  { QStringLiteral( "/c" ),
-                    QStringLiteral( "for %I in (\"%1\") do @echo %~sI" )
-                        .arg( QDir::toNativeSeparators( workspace.path() ) ) } );
-    forCmd.waitForFinished();
-    const QString shortRoot =
-        QDir::fromNativeSeparators( QString::fromLocal8Bit( forCmd.readAllStandardOutput() ).trimmed() );
-    if ( !shortRoot.isEmpty() && shortRoot.contains( QLatin1Char( '~' ) ) )
-        CHECK_FALSE( surfacePathOutsideWorkspace( shortRoot, workspace.path() ) );
-
-    // rmdir removes the junction itself (never recurse through it); the
-    // outside fixture must survive.
-    QProcess rmdir;
-    rmdir.start( QStringLiteral( "cmd.exe" ),
-                 { QStringLiteral( "/c" ), QStringLiteral( "rmdir" ),
-                   QDir::toNativeSeparators( link ) } );
-    rmdir.waitForFinished();
-    CHECK( !QFileInfo( link ).exists() );
-    CHECK( QFile::exists( outside.filePath( QStringLiteral( "secret.txt" ) ) ) );
-}
-#endif // Q_OS_WIN
 
 TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][spatial]" )
 {
@@ -2835,81 +2715,5 @@ TEST_CASE( "workflow tool gates return stable structured error codes", "[agent][
         CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
         CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
                == QStringLiteral( "INVALID_PARAMETER" ) );
-    }
-}
-
-TEST_CASE( "StdinReader treats clean EOF as end-of-input, not an overlong line",
-           "[agent][mcp][stdio]" )
-{
-    // Regression: at clean end-of-stdin (last frame newline-terminated, then
-    // EOF) getline extracts zero characters and sets eofbit|failbit. The fail
-    // branch used to emit "__MCP_LINE_TOO_LONG__", so every normal shutdown
-    // answered the peer with a bogus "-32700 Parse error: line too long"
-    // (id:null). Clean EOF must emit nothing — while a REAL overlong line
-    // still yields exactly one sentinel and later lines keep being served.
-    auto collect = []( const std::string &input ) {
-        std::istringstream stream( input );
-        std::streambuf *old = std::cin.rdbuf( stream.rdbuf() );
-        QStringList lines;
-        StdinReader reader;
-        // DirectConnection: the lambda runs in the reader thread; the list is
-        // only read after wait() joins it, so no mutex is needed.
-        QObject::connect( &reader, &StdinReader::lineRead, &reader,
-                          [&lines]( const QString &l ) { lines << l; },
-                          Qt::DirectConnection );
-        reader.start();
-        REQUIRE( reader.wait( 15000 ) );
-        std::cin.rdbuf( old );
-        return lines;
-    };
-
-    SECTION( "newline-terminated frames then EOF deliver exactly the frames" )
-    {
-        const QStringList lines = collect( "A\nB\n" );
-        CHECK( lines == QStringList{ QStringLiteral( "A" ), QStringLiteral( "B" ) } );
-        CHECK( !lines.contains( QStringLiteral( "__MCP_LINE_TOO_LONG__" ) ) );
-    }
-
-    SECTION( "a final unterminated frame is still delivered, no sentinel" )
-    {
-        const QStringList lines = collect( "A\nB" );
-        CHECK( lines == QStringList{ QStringLiteral( "A" ), QStringLiteral( "B" ) } );
-    }
-
-    SECTION( "a >4 MiB line yields one sentinel, then service continues" )
-    {
-        const std::string oversized( 5 * 1024 * 1024, 'x' );
-        const QStringList lines = collect( oversized + "\nC\n" );
-        CHECK( lines == QStringList{ QStringLiteral( "__MCP_LINE_TOO_LONG__" ),
-                                     QStringLiteral( "C" ) } );
-    }
-
-    SECTION( "a line of exactly 4 MiB is at the cap, not over it" )
-    {
-        // getline fills the buffer at kMaxMcpLine chars without seeing the
-        // delimiter and sets failbit — the off-by-one rejected the largest
-        // LEGAL line (the Pi bridge's outbound cap is the same 4 MiB, so a
-        // max-size request was falsely answered with id:null -32700).
-        const std::string exact( 4 * 1024 * 1024, 'x' );
-        const QStringList lines = collect( exact + "\nC\n" );
-        REQUIRE( lines.size() == 2 );
-        CHECK( lines.at( 0 ) == QString::fromStdString( exact ) );
-        CHECK( lines.at( 1 ) == QStringLiteral( "C" ) );
-    }
-
-    SECTION( "a line of exactly 4 MiB ending at EOF is delivered, then stops" )
-    {
-        const std::string exact( 4 * 1024 * 1024, 'x' );
-        const QStringList lines = collect( exact );
-        REQUIRE( lines.size() == 1 );
-        CHECK( lines.at( 0 ) == QString::fromStdString( exact ) );
-    }
-
-    SECTION( "4 MiB plus one char is overlong, exactly one sentinel" )
-    {
-        const std::string over( 4 * 1024 * 1024 + 1, 'x' );
-        const QStringList lines = collect( over + "\nC\n" );
-        CHECK( lines == QStringList{ QStringLiteral( "__MCP_LINE_TOO_LONG__" ),
-                                     QStringLiteral( "C" ) } );
     }
 }

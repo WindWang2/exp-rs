@@ -55,37 +55,13 @@ std::optional< DataStateSnapshot > DataStateSnapshot::fromJson( const Json::Valu
     {
         if ( !assetDoc.isObject() )
             return fail( "data state snapshot: asset is not an object" );
-        // Type-check every present leaf before reading it: a wrong-typed
-        // leaf otherwise either throws Json::LogicError (asBool on a string)
-        // or silently coerces (asString on a number turns slot:1 into "1"),
-        // both violating this function's optional+error contract.
-        const auto stringLeaf = [ &fail ]( const Json::Value &obj, const char *name,
-                                         std::string *out ) -> bool {
-            if ( obj.isMember( name ) && !obj[ name ].isNull() )
-            {
-                if ( !obj[ name ].isString() )
-                {
-                    fail( std::string( "data state snapshot: asset '" ) + name
-                          + "' must be a string" );
-                    return false;
-                }
-                *out = obj[ name ].asString();
-            }
-            return true;
-        };
         AssetFact asset;
-        if ( !stringLeaf( assetDoc, "slot", &asset.slot )
-             || !stringLeaf( assetDoc, "ref", &asset.ref )
-             || !stringLeaf( assetDoc, "kind", &asset.kind )
-             || !stringLeaf( assetDoc, "resolution_error", &asset.resolutionError ) )
-            return std::optional< DataStateSnapshot >{};
-        if ( assetDoc.isMember( "resolved" ) && !assetDoc[ "resolved" ].isNull() )
-        {
-            if ( !assetDoc[ "resolved" ].isBool() )
-                return fail( "data state snapshot: asset 'resolved' must be a bool" );
-            asset.resolved = assetDoc[ "resolved" ].asBool();
-        }
+        asset.slot = assetDoc.get( "slot", "" ).asString();
+        asset.ref = assetDoc.get( "ref", "" ).asString();
+        asset.kind = assetDoc.get( "kind", "" ).asString();
+        asset.resolved = assetDoc.get( "resolved", false ).asBool();
         asset.facts = assetDoc.get( "facts", Json::Value( Json::objectValue ) );
+        asset.resolutionError = assetDoc.get( "resolution_error", "" ).asString();
         snapshot.assets.push_back( asset );
     }
     snapshot.summary = doc.get( "summary", Json::Value( Json::objectValue ) );

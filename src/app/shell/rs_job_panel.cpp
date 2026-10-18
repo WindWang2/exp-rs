@@ -4,6 +4,8 @@
 #include "rs_job_panel.h"
 
 #include "design_tokens.h"
+#include "task_progress_text.h"
+
 #include "widgets/rs_result_summary.h"
 
 #include "main_window.h"
@@ -102,6 +104,49 @@ void collectStringPaths( const Json::Value &v, QStringList &out )
     for ( const auto &name : v.getMemberNames() )
       collectStringPaths( v[name], out );
   }
+}
+
+/// Collects terminal rows for "Clear Finished" across the WHOLE tree.
+///
+/// Pipeline step tasks nest under their parent task row, so a top-level-only
+/// scan left every finished child behind while Task Center had already
+/// dropped the underlying task — the rows came back on the next refresh and
+/// the button looked broken.
+///
+/// Bottom-up: when a row and all of its children are terminal, the row is
+/// reported alone (deleting it removes the children with it), which keeps
+/// the returned list free of dangling child pointers.
+bool collectTerminalRows( QTreeWidgetItem *item, QList<QTreeWidgetItem *> &out )
+{
+  if ( !item )
+    return false;
+
+  bool allChildrenTerminal = true;
+  for ( int i = 0; i < item->childCount(); ++i )
+  {
+    if ( !collectTerminalRows( item->child( i ), out ) )
+      allChildrenTerminal = false;
+  }
+
+  const auto status = static_cast<sicnu::TaskStatus>( item->data( ColTitle, RoleState ).toInt() );
+  const bool selfTerminal = sicnu::isTerminalStatus( status );
+  if ( !selfTerminal )
+    return false;
+
+  if ( allChildrenTerminal && item->childCount() > 0 )
+  {
+    for ( int i = 0; i < item->childCount(); ++i )
+      out.removeAll( item->child( i ) );
+  }
+  else if ( !allChildrenTerminal )
+  {
+    // Keep the parent (it still has live children); its own row state is
+    // refreshed by the next refreshAll().
+    return false;
+  }
+
+  out.append( item );
+  return true;
 }
 
 bool isActiveStatus( sicnu::TaskStatus status )
@@ -351,13 +396,14 @@ QString RsJobPanel::statusToString( sicnu::TaskStatus status )
   return QObject::tr( "Unknown" );
 }
 
-QString RsJobPanel::formatProgress( double progress )
+QString RsJobPanel::formatProgress( double progress, sicnu::TaskStatus status )
 {
-  if ( progress < 0.0 )
-    return QStringLiteral( "…" );
-  if ( progress > 1.0 )
-    progress = 1.0;
-  return QStringLiteral( "%1%" ).arg( static_cast<int>( progress * 100.0 + 0.5 ) );
+  return sicnu::app::taskprogress::columnText( progress, status );
+}
+
+QString RsJobPanel::formatProgressObserved( double progress )
+{
+  return sicnu::app::taskprogress::observedText( progress );
 }
 
 QString RsJobPanel::formatEta( const sicnu::AlgorithmTaskInfo &info )
@@ -474,7 +520,7 @@ void RsJobPanel::refreshAll()
     item->setText( ColTitle, taskTitle( info ) );
     item->setText( ColState, state );
     item->setForeground( ColState, statusColor( info.status, dark ) );
-    item->setText( ColProgress, formatProgress( info.progressPercentage ) );
+    item->setText( ColProgress, formatProgress( info.progressPercentage, info.status ) );
     item->setText( ColEta, formatEta( info ) );
     item->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( info.taskId ) );
     item->setData( ColTitle, RoleState, static_cast<int>( info.status ) );
@@ -611,7 +657,7 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
   found->setText( ColTitle, taskTitle( info ) );
   found->setText( ColState, state );
   found->setForeground( ColState, statusColor( info.status, dark ) );
-  found->setText( ColProgress, formatProgress( info.progressPercentage ) );
+  found->setText( ColProgress, formatProgress( info.progressPercentage, info.status ) );
   found->setText( ColEta, formatEta( info ) );
   found->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( taskId ) );
   found->setData( ColTitle, RoleState, static_cast<int>( info.status ) );
@@ -729,7 +775,9 @@ void RsJobPanel::fillDetailsForTask( long taskId )
   if ( !info.jobId.empty() )
     lines << tr( "Internal jobId: %1" ).arg( QString::fromStdString( info.jobId ) );
   lines << tr( "Status: %1" ).arg( statusToString( info.status ) );
-  lines << tr( "Progress: %1" ).arg( formatProgress( info.progressPercentage ) );
+  // Detail view: the observed percentage is kept — it sits next to an
+  // explicit "Status: ..." line, so it cannot be mistaken for progress to wait on.
+  lines << tr( "Progress: %1" ).arg( formatProgressObserved( info.progressPercentage ) );
   lines << tr( "Loaded to main view on success: %1" )
              .arg( loadToMainPreference( taskId ) ? tr( "Yes" ) : tr( "No" ) );
   if ( info.startTime.isValid() )
@@ -934,12 +982,33 @@ void RsJobPanel::updateActionEnabled()
   const auto status = static_cast<sicnu::TaskStatus>( state );
   m_cancelBtn->setEnabled( isActiveStatus( status ) );
 
-  const bool canLoad = ( status == sicnu::TaskStatus::Completed )
-                       && !collectOutputPaths( id ).isEmpty();
   // Load requires loadable outputs. The trailing "|| Completed" used to make
   // canLoad dead code: every completed task got an enabled Load button even
   // with no output to load (the click then only produced an info box).
+  //
+  // "Has output paths" is not enough either: collectOutputPaths() also keeps
+  // raster/vector-suffixed paths that were never written, and loading those
+  // is a guaranteed no-op. Require at least one path that exists on disk so
+  // the enabled button always promises a load that can happen.
+  bool hasExistingOutput = false;
+  if ( status == sicnu::TaskStatus::Completed )
+  {
+    for ( const QString &p : collectOutputPaths( id ) )
+    {
+      if ( !p.isEmpty() && QFileInfo::exists( p ) )
+      {
+        hasExistingOutput = true;
+        break;
+      }
+    }
+  }
+  const bool canLoad = ( status == sicnu::TaskStatus::Completed ) && hasExistingOutput;
   m_loadBtn->setEnabled( canLoad );
+  m_loadBtn->setToolTip( canLoad
+                           ? QString()
+                           : ( status == sicnu::TaskStatus::Completed
+                                 ? tr( "No output file for this task exists on disk" )
+                                 : tr( "Outputs can only be loaded from a succeeded task" ) ) );
 }
 
 void RsJobPanel::onTaskAdded( const sicnu::AlgorithmTaskInfo &info )
@@ -1021,15 +1090,14 @@ void RsJobPanel::onCancelClicked()
 
 void RsJobPanel::onClearFinishedClicked()
 {
-  // Count terminal rows first so we can skip the dialog when there is nothing to clear.
-  int terminalCount = 0;
+  // Count terminal rows first so we can skip the dialog when there is nothing
+  // to clear. The scan walks nested pipeline children too (see
+  // collectTerminalRows) — a top-level-only pass missed every finished step.
+  QList<QTreeWidgetItem *> terminalRows;
   for ( int i = 0; i < m_jobTree->topLevelItemCount(); ++i )
-  {
-    const auto status = static_cast<sicnu::TaskStatus>(
-      m_jobTree->topLevelItem( i )->data( ColTitle, RoleState ).toInt() );
-    if ( isTerminalStatus( status ) )
-      ++terminalCount;
-  }
+    collectTerminalRows( m_jobTree->topLevelItem( i ), terminalRows );
+
+  const int terminalCount = terminalRows.size();
   if ( terminalCount == 0 )
     return;
   if ( !confirmDangerous( tr( "Clear Finished" ),
@@ -1038,13 +1106,12 @@ void RsJobPanel::onClearFinishedClicked()
     return;
 
   sicnu::TaskCenter::instance().clearCompletedTasks();
-  for ( int i = m_jobTree->topLevelItemCount() - 1; i >= 0; --i )
+  for ( QTreeWidgetItem *item : terminalRows )
   {
-    QTreeWidgetItem *item = m_jobTree->topLevelItem( i );
-    const auto status = static_cast<sicnu::TaskStatus>(
-      item->data( ColTitle, RoleState ).toInt() );
-    if ( !isTerminalStatus( status ) )
-      continue;
+    // Children disappear with the parent row, so their per-task preferences
+    // have to be dropped here or they outlive the task they describe.
+    for ( int i = 0; i < item->childCount(); ++i )
+      m_loadToMain.remove( item->child( i )->data( ColTitle, RoleTaskId ).toLongLong() );
     const long id = item->data( ColTitle, RoleTaskId ).toLongLong();
     delete item;
     m_loadToMain.remove( id );

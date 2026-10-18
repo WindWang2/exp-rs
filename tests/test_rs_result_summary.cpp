@@ -6,9 +6,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QFile>
 #include <QLabel>
 #include <QListWidget>
 #include <QPlainTextEdit>
+#include <QTemporaryDir>
 
 #include "widgets/rs_result_summary.h"
 
@@ -21,12 +23,33 @@ QApplication &testApp()
     return app;
 }
 
+// R15-E: this case used to feed a literal "/tmp/fused.tif" that does not
+// exist and then assert that double-clicking it emitted openPathRequested.
+// That assertion pinned the defect this file now guards against (a missing
+// artifact must be inert), so the fixture writes a real file instead.
+QString realTempTif( QTemporaryDir &dir, const QString &name )
+{
+    const QString path = dir.filePath( name );
+    QFile f( path );
+    if ( f.open( QIODevice::WriteOnly ) )
+    {
+        f.write( "x" );
+        f.close();
+    }
+    return path;
+}
+
 } // namespace
 
 TEST_CASE( "RsResultSummary renders output, metrics and context",
            "[ux4][result-summary]" )
 {
     testApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString fusedPath = realTempTif( dir, QStringLiteral( "fused.tif" ) );
+    REQUIRE( QFileInfo::exists( fusedPath ) );
+
     RsResultSummary summary;
 
     int openRequests = 0;
@@ -38,7 +61,7 @@ TEST_CASE( "RsResultSummary renders output, metrics and context",
                       } );
 
     Json::Value result( Json::objectValue );
-    result["output"] = "/tmp/fused.tif";
+    result["output"] = fusedPath.toStdString();
     result["mean"] = 0.42;
     result["changedPercent"] = 13.5;
     summary.setContext( QStringLiteral( "rs:image_fusion" ), 15200, true );
@@ -60,12 +83,11 @@ TEST_CASE( "RsResultSummary renders output, metrics and context",
         summary.findChild<QListWidget *>( QStringLiteral( "rsResultArtifacts" ) );
     REQUIRE( artifacts != nullptr );
     REQUIRE( artifacts->count() == 1 );
-    REQUIRE( artifacts->item( 0 )->data( Qt::UserRole ).toString()
-             == QStringLiteral( "/tmp/fused.tif" ) );
+    REQUIRE( artifacts->item( 0 )->data( Qt::UserRole ).toString() == fusedPath );
 
     emit artifacts->itemDoubleClicked( artifacts->item( 0 ) );
     REQUIRE( openRequests == 1 );
-    REQUIRE( requestedPath == QStringLiteral( "/tmp/fused.tif" ) );
+    REQUIRE( requestedPath == fusedPath );
 
     // Raw JSON is collapsible and off by default.
     QPlainTextEdit *raw = summary.findChild<QPlainTextEdit *>( QStringLiteral( "rsResultRawJson" ) );

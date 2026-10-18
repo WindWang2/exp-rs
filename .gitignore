@@ -577,6 +577,13 @@ r6_dev.cmd
 !.planning/r15-d/
 .planning/r15-d/*
 !.planning/r15-d/*.md
+
+# hardening/r15-E-desktop-teaching-help: planning evidence (markdown only; logs/build stay local).
+# hardening/r15-E-desktop-teaching-help: planning evidence (markdown only; logs/build stay local).
+# hardening/r15-E-desktop-teaching-help (R15 track E): planning notes (markdown only; logs stay local).
+!.planning/r15-E/
+.planning/r15-E/*
+!.planning/r15-E/*.md
 .ps1_*_r15c.ps1
 .ps1_redgreen_r15c.ps1
 .syntaxcheck/

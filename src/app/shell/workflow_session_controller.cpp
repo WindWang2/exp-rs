@@ -566,6 +566,32 @@ void WorkflowSessionController::cancelActiveRun()
     m_pendingTaskId = -1;
   }
 
+  // The ids are detached above, so any terminal task callback that arrives
+  // for this run can no longer match isSingleJob/isPipelineJob and would
+  // never move the step out of "running" — the DAG kept animating a step
+  // forever after Stop. Reset the visible step states here, using the same
+  // "idle" reset the submission path emits. Trade-off: a step that had
+  // already succeeded before the Stop also returns to "idle"; the panel's
+  // status line reports the stop, and a future run repaints every step
+  // anyway, so no permanent record is lost.
+  if ( !m_activeSession.isEmpty() )
+  {
+    std::string definitionId;
+    try
+    {
+      definitionId = m_runtime.state( m_activeSession.toStdString() ).definitionId;
+    }
+    catch ( const std::exception & )
+    {
+      definitionId.clear();
+    }
+    if ( const auto def = m_runtime.findDefinitionShared( definitionId ) )
+    {
+      for ( const auto &step : def->steps )
+        emit stepStatusChanged( QString::fromStdString( step.id ), "idle" );
+    }
+  }
+
   m_runInFlight = false;
   if ( m_panel )
     m_panel->setRunning( false );
@@ -707,6 +733,11 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
                             : tr( "Workflow finished end to end!" );
       if ( m_panel )
       {
+        // Terminal pipeline runs never reached the single-job branch that
+        // flips the Run/Stop button back, so the panel stayed "running"
+        // forever: Run read "Stop", the form stayed disabled and a second
+        // run was refused by the m_runInFlight guard.
+        m_panel->setRunning( false );
         if ( pipeInfo.isFailed )
           m_panel->setFailed( msg );
         else

@@ -32,10 +32,12 @@ struct SubmissionItem
 };
 
 /// A file the discovery heuristics refused to treat as a submission
-/// (reserved tool-output name: grades* prefix, or the batch/summary/
-/// feedback substrings). Refusals are deliberate — re-grading must not
-/// pick up the console's own outputs — but they are ACCOUNTED, never a
-/// silent vanish: every refusal reaches the published report (#1466).
+/// (hidden entry, nested directory, reserved tool-output name: grades*
+/// prefix or the batch/summary/feedback substrings). Refusals are
+/// deliberate — re-grading must not pick up the console's own outputs, and a
+/// hidden/nested entry is never silently treated as absent — but they are
+/// ACCOUNTED, never a silent vanish: every refusal reaches the published
+/// report (#1466).
 struct DiscoverySkip
 {
     QString studentId;   ///< owning one-level student dir; empty for root-level files
@@ -160,6 +162,19 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
 
 /// Atomically publish JSON + CSV (temp + rename). Returns false on I/O failure.
 bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QString &outPrefix );
+
+/// Fail-closed loader for a PUBLISHED batch report document (`<prefix>.json`).
+///
+/// The teacher console used to re-read that file with bare
+/// `doc.value("total").toInt()` calls, so a truncated, half-synced or
+/// unrelated JSON file produced a structurally valid
+/// "0 submissions / 0% completion" class summary — a read failure rendered
+/// as "this class really has no homework". Returns false on unreadable /
+/// unparsable / not-a-batch-report input and fills @p error. When the
+/// document's declared `total` disagrees with its row count, the mismatch is
+/// reported through @p warning instead of being silently reconciled.
+bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report,
+                              QString &error, QString *warning = nullptr );
 
 /// Deterministic regrade traceability block.
 QJsonObject regradeTraceability( const BatchAssessmentReport &report );

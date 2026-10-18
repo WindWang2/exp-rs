@@ -77,6 +77,10 @@ class TaskPanelHost : public QWidget
     void applyHintStyle( bool isError );
     void onActionButtonClicked();
     void updateRunButtonState();
+    /// Drop any previously rendered structured result card. Used whenever the
+    /// panel leaves a successful state so a stale green "✓ finished" summary
+    /// can never survive into a failed / cancelled / freshly-started run.
+    void clearResultSummary();
 
     bool m_running = false;
     bool m_validationBlocked = false;

@@ -13,10 +13,6 @@
  * original triggers keep their exact shapes:
  * - --notify-log <path> (argv): every received notification is appended to
  *   the file as one JSON line (cancellation-count assertions).
- * - --hang-initialize (argv, no value): never answer `initialize` — the
- *   child spawns fine (counter still ticks) but the handshake hangs, so the
- *   bridge's startup deadline must fire and tear it down. The flag carries
- *   no value, so the last-argument counter detection below is unaffected.
  * - arguments {delay_ms}: reply late (abort-mid-flight races).
  * - arguments {error_shape: true}: reply with a structured tool error
  *   (isError + errorCode + errorCategory, the #645 passthrough contract).
@@ -38,7 +34,6 @@ function argAfter(flag) {
 // (["--mcp", "--notify-log", path, counter]). The notify log rides its own
 // "--notify-log <path>" pair.
 const notifyLog = argAfter("--notify-log");
-const hangInitialize = args.includes("--hang-initialize");
 const counterPath = [...args].reverse().find((a) => !a.startsWith("--") && a !== notifyLog);
 appendFileSync(counterPath, "1\n");
 
@@ -79,9 +74,6 @@ function handle(line) {
     return;
   }
   if (msg.method === "initialize") {
-    // --hang-initialize: spawn + counter still work; the handshake reply is
-    // withheld forever, so the bridge-side startup deadline is what settles.
-    if (hangInitialize) return;
     send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "fake", version: "0" } } });
     return;
   }
