@@ -1,0 +1,12 @@
+# R16-D Baseline
+
+- Date: 2026-10-17. Host: linux x86_64, 40 cores, 62 GiB RSS (70% ≈ 43 GiB), 285 G free disk.
+- `origin/master` after `git fetch origin --prune`: `46791bc65c6f552ebbcf723bb91892736d56f319` (identical to task-brief reference SHA; working tree clean before worktree creation).
+- gh CLI authenticated as WindWang2 (keyring token). Push + PR creation available.
+- Build recipe (replicated from working r16-c Linux builds; verified CMakeCache parity):
+  `cmake -S . -B build-r16-d -G Ninja -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON -DENABLE_LOCAL_BUILD_SHORTCUTS=ON -DCMAKE_PREFIX_PATH=/home/kevin/pwb-sdks/root/usr -DSICNU_BUILD_OTB=OFF -DSICNU_EMBED_PYTHON=OFF -DSICNU_ENABLE_OPENVINO=OFF -DSICNU_ENABLE_TENSORRT=OFF -DSICNU_WITH_ONNX_RUNTIME=OFF -DSICNU_VENDOR_GDAL=OFF -DSICNU_TOLERANT_TEST_DISCOVERY=ON -DFETCHCONTENT_SOURCE_DIR_CATCH2=/home/kevin/.cache/exp-rs-fdeps/catch2-v3.7.1`
+  - First configure attempt FAILED: Catch2 FetchContent git-clone via unreachable local proxy (git global `http.https://github.com/.proxy socks5h://127.0.0.1:7890`). Fix: local Catch2 v3.7.1 source cache via `FETCHCONTENT_SOURCE_DIR_CATCH2` (same mechanism as r16-a/b/c builds). No network needed after that.
+  - Dependency record: Qt6 6.12.0 (system), GDAL 3.13.3 / PROJ 9.8.1 / GEOS 3.15.0 (pwb-sdks prefix), OpenCV 5.0.0, no Python embedding, no OTB/OpenVINO/TensorRT/ONNX.
+- Build lease: `flock -w < generous> /home/kevin/project/exp-rs-r16-build.lock` shared with concurrent r16-a/b/c agents; `-j4` hard cap (`CMAKE_BUILD_PARALLEL_LEVEL=4`), ctest `-j1`, `QT_QPA_PLATFORM=offscreen`.
+- Baseline test targets built per track (master, before any change): T08 → `test_mapspec`, `test_cartography_production_11`; T07 → `test_r14_D_vector_edit_honesty`, `test_qgis_display_manager`, `test_display_stretch`, `test_magic_wand_roi`, `test_workbench_host`. Baseline GREEN×1 recorded per track in TEST_MATRIX before RED phase (results in track ledgers).
+- Host-mechanism note: this prompt targets Google Antigravity `/teamwork-preview` + `/goal-loop`; the executing host is ZCode which has neither command. Per the brief's degradation rule, the semantics were implemented with native equivalents: parallel isolated sub-worktrees + subagents (audit agents per track, implementer per track, independent reviewer not involved in implementation), five-phase Oracle loop with per-track `GOAL_LOOP_LEDGER.md`. No command output was fabricated; all logged commands actually ran.
