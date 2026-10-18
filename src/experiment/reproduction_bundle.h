@@ -67,7 +67,11 @@ struct ReproductionBundleOptions
         Portable,  ///< additionally copy capped payload bytes into data/
     };
     Mode mode = Mode::Reference;
-    qint64 portableMaxBytes = 512LL * 1024 * 1024; // portable copy cap
+    // #1458: no portableMaxBytes here on purpose. Portable is refused below,
+    // so a cap field could never be honored and only advertised a capability
+    // this exporter does not have (the field used to sit here unused).
+    // The capped-payload implementation lives in data/governance/repro_bundle.h,
+    // which honours its own portableMaxBytes for the bundles it writes.
     /// Software revision of the EXPORTING build (stamped into software.json).
     QString currentSoftwareRevision;
 };
