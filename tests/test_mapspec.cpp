@@ -28,6 +28,7 @@
 #include <qgslayoutitemscalebar.h>
 #include <qgslayertree.h>
 #include <qgsprintlayout.h>
+#include <qgslayoutmanager.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
 
@@ -897,6 +898,29 @@ TEST_CASE( "Chart/colorbar string-typed fields are validated, not thrown (R16-D 
     QgsPrintLayout *layout = nullptr;
     REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
     CHECK( layout != nullptr );
+  }
+
+  SECTION( "review R16-D R1: numeric title / native-path strings degrade, never throw" )
+  {
+    Json::Value spec = minimalSpec( "chart-title-typed" );
+    Json::Value chartItem( Json::objectValue );
+    chartItem["id"] = "chart-3";
+    chartItem["rect_mm"] = rectOf( 210, 180, 70, 60 );
+    chartItem["chart"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["kind"] = "bar";
+    chartItem["chart"]["title"] = 42; // numeric title — renderChartToFile used to throw
+    chartItem["chart"]["binding"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["binding"]["mode"] = "inline";
+    Json::Value point( Json::objectValue );
+    point["label"] = "a";
+    point["value"] = 1;
+    chartItem["chart"]["binding"]["data"].append( point );
+    spec["charts"].append( chartItem );
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout != nullptr );
+    QgsProject::instance()->layoutManager()->removeLayout( layout );
   }
 
   SECTION( "chart style.palette entries must be color strings" )

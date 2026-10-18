@@ -194,8 +194,14 @@ std::vector<std::pair<QString, double>> deriveAccuracyRows( const Json::Value &b
 bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSizeF &size,
                         QString *error )
 {
-  const std::string kind = chart.get( "kind", "bar" ).asString();
-  const QString title = QString::fromStdString( chart.get( "title", "" ).asString() );
+  const std::string kind =
+    ( chart.isMember( "kind" ) && chart["kind"].isString() ? chart["kind"].asString()
+                                                           : std::string( "bar" ) );
+  // jsoncpp's get() returns the actual member when present — type-guard
+  // before asString() or a numeric title throws out of the render path.
+  const QString title = QString::fromStdString(
+    chart.isMember( "title" ) && chart["title"].isString() ? chart["title"].asString()
+                                                           : std::string() );
   const QColor textColor = styleTextColor( chart["style"] );
   bool showGrid = true;
   if ( chart.isMember( "style" ) && chart["style"].isMember( "show_grid" ) &&
@@ -258,7 +264,8 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         if ( cell.isNumeric() )
           maxCell = std::max( maxCell, cell.asDouble() );
     }
-    const bool diagonalEmphasis = chart["style"].get( "diagonal_emphasis", false ).asBool();
+    const Json::Value &emphasis = chart["style"].get( "diagonal_emphasis", Json::Value() );
+    const bool diagonalEmphasis = emphasis.isBool() ? emphasis.asBool() : false;
     const qreal labelW = painter.fontMetrics().horizontalAdvance( QStringLiteral( "8888" ) ) + 12;
     const qreal headerH = painter.fontMetrics().height() + 6;
     const qreal cellW = ( size.width() - labelW - 8 ) / n;
@@ -605,7 +612,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
                                : 0.0;
         if ( std::isfinite( value ) )
           maxPart = std::max( maxPart, std::fabs( value ) );
-        const QString label = QString::fromStdString( part.get( "label", "" ).asString() );
+        const QString label = QString::fromStdString(
+          part.isMember( "label" ) && part["label"].isString() ? part["label"].asString()
+                                                               : std::string() );
         if ( !label.isEmpty() && !seriesLabels.contains( label ) )
           seriesLabels << label;
       }
@@ -1314,7 +1323,16 @@ bool bindNativeChart( QgsLayoutItemChart *item, const Json::Value &chart, QStrin
     return false;
   }
   const Json::Value &binding = chart["binding"];
-  const QString layerRef = QString::fromStdString( binding.get( "layer", "" ).asString() );
+  // All string reads on user JSON are type-guarded (jsoncpp's get() returns
+  // the actual member when present — asString() throws on a numeric value
+  // and this path runs without validateChartSpec in front of it).
+  const auto guardedString = []( const Json::Value &parent, const char *key,
+                                 const char *fallback ) {
+    const Json::Value &value = parent.get( key, Json::Value( fallback ) );
+    return QString::fromStdString( value.isString() ? value.asString()
+                                                    : std::string( fallback ) );
+  };
+  const QString layerRef = guardedString( binding, "layer", "" );
   QgsMapLayer *layer = nullptr;
   if ( QgsProject *project = QgsProject::instance() )
   {
@@ -1333,7 +1351,9 @@ bool bindNativeChart( QgsLayoutItemChart *item, const Json::Value &chart, QStrin
   }
   item->setSourceLayer( vector );
 
-  const std::string kind = chart.get( "kind", "bar" ).asString();
+  const std::string kind =
+    ( chart.isMember( "kind" ) && chart["kind"].isString() ? chart["kind"].asString()
+                                                           : std::string( "bar" ) );
   Qgs2DPlot *plot = nullptr;
   if ( kind == "line" || kind == "area" || kind == "scatter" )
     plot = new QgsLineChartPlot();
@@ -1347,10 +1367,9 @@ bool bindNativeChart( QgsLayoutItemChart *item, const Json::Value &chart, QStrin
     plot = new QgsBarChartPlot();
   item->setPlot( plot );
 
-  QgsLayoutItemChart::SeriesDetails series(
-    QString::fromStdString( binding.get( "series_name", "series" ).asString() ) );
-  series.setXExpression( QString::fromStdString( binding.get( "x_expression", "" ).asString() ) );
-  series.setYExpression( QString::fromStdString( binding.get( "y_expression", "" ).asString() ) );
+  QgsLayoutItemChart::SeriesDetails series( guardedString( binding, "series_name", "series" ) );
+  series.setXExpression( guardedString( binding, "x_expression", "" ) );
+  series.setYExpression( guardedString( binding, "y_expression", "" ) );
   if ( binding.isMember( "filter" ) && binding["filter"].isString() )
     series.setFilterExpression( QString::fromStdString( binding["filter"].asString() ) );
   item->setSeriesList( { series } );
