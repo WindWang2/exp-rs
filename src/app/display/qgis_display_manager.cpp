@@ -1,6 +1,7 @@
 #include "qgis_display_manager.h"
 
 #include <map>
+#include <set>
 #include <utility>
 
 #include <QDebug>
@@ -267,6 +268,10 @@ struct QgisDisplayManager::Impl {
   /// erased on remove.
   QVector<DisplayViewId> viewOrder;
   std::map<QString, std::unique_ptr<LayerRecord>> layers;
+  /// Relocations deferred because the layer was mid-edit-session with
+  /// buffered edits (R16-D T07 WP-1): retried on the next assetChanged for
+  /// the asset, dropped when the layer is removed.
+  std::set<QString> pendingRelocations;
   DisplayViewId activeViewId;
   bool autoDisplayOnAssetAdded = false;
 
@@ -793,6 +798,21 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
   if (asset->state() != data::AssetState::Ready)
     return data::Result<void>::success();
 
+  // A layer mid-edit-session holds buffered (unsaved) edits in its edit
+  // buffer: swapping it out would silently destroy them, and any live edit
+  // session points at the old pointer (use-after-free once the window holds
+  // the Edit Lease). Defer the swap: the next assetChanged for this asset
+  // retries, and session end (no longer editable) lets it proceed.
+  if (!layerRecord->mapLayer.isNull() && layerRecord->mapLayer->isEditable()) {
+    m_impl->pendingRelocations.insert(layerId.toString());
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.relocate_deferred_editing"),
+        QStringLiteral("Relocation deferred: the layer is in an edit session "
+                       "with buffered edits; it will relocate when the "
+                       "session ends")));
+  }
+  m_impl->pendingRelocations.erase(layerId.toString());
+
   // Capture the authoritative runtime presentation state before replacing the
   // layer, so the relocated layer keeps its renderer.
   QgsMapLayerStyle presentation;
@@ -934,6 +954,7 @@ data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {
   }
 
   m_impl->layers.erase(layerIt);
+  m_impl->pendingRelocations.erase(layerId.toString());
   return data::Result<void>::success();
 }
 
@@ -1033,9 +1054,16 @@ data::Result<void> QgisDisplayManager::setLayerVisible(DisplayLayerId layerId, b
         QStringLiteral("View or layer tree unavailable")));
   }
   QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
-  if (node) {
-    node->setItemVisibilityChecked(visible);
+  if (!node) {
+    // R16-D T07 WP-5: a missing tree node means the request was dropped —
+    // reporting success would let linked-visibility controllers propagate a
+    // state that was never applied.
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.layer_tree_node_missing"),
+        QStringLiteral("The layer's tree node is not in the view's layer "
+                       "tree; the visibility request was not applied")));
   }
+  node->setItemVisibilityChecked(visible);
   return data::Result<void>::success();
 }
 
