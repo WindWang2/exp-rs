@@ -126,6 +126,14 @@ void QgisDesktopWindow::setupConnections()
         // tasks become Stale instead of pointing at nothing.
         reconcileMissionRuntimeAfterLayerChange();
     } );
+    // R16-D T07 WP-1: a removed layer cannot end its edit session through
+    // the normal slots — release its Edit Lease so the asset is not locked
+    // against the next editor.
+    connect( QgsProject::instance(),
+             qOverload<const QString &>( &QgsProject::layerWillBeRemoved ), this,
+             [this]( const QString &qgisLayerId ) {
+                 releaseEditLeaseForLayer( qgisLayerId );
+             } );
     const auto watchLayerName = [this]( QgsMapLayer *layer ) {
         if ( layer )
             connect( layer, &QgsMapLayer::nameChanged, this,

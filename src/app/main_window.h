@@ -9,6 +9,7 @@
 #include <QSettings>
 #include <QElapsedTimer>
 #include <QMap>
+#include <map>
 
 // QGIS includes
 #include <qgsmapcanvas.h>
@@ -39,6 +40,7 @@ class SecondaryMapSession;
 class QPainter;
 
 #include "display/qgis_display_manager.h"
+#include "data/data_manager.h"
 #include "app/workbench/mission_context.h"
 #include "app/workbench/mission_runtime_store.h"
 #include "agent/spatial_tools/spatial_tool.h"
@@ -553,6 +555,8 @@ private:
     void commitEditLease(QgsVectorLayer *vlayer);
     /** Release the Edit Lease without advancing the revision. */
     void rollbackEditLease(QgsVectorLayer *vlayer);
+    /** Drop a stored Edit Lease without touching the asset (layer removal). */
+    void releaseEditLeaseForLayer(const QString &qgisLayerId);
     /** Set every Display Layer of an asset read-only except the edit owner. */
     void setAssetLayersReadOnly(const sicnu::data::AssetId &assetId,
                                 QgsVectorLayer *exceptLayer, bool readOnly);
@@ -744,6 +748,12 @@ private:
     std::unique_ptr<class MapToolManager> m_toolManager;
     std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
     std::unique_ptr<ActiveViewHost> m_activeViewHost;
+
+    // R16-D T07 WP-1: held Edit Leases, keyed by QGIS layer id. The lease
+    // must outlive acquireEditLease() or the RAII handle releases at return
+    // and the one-editor-per-asset contract is inert (the second view then
+    // "acquires" successfully and commits always fail with no_edit_lease).
+    std::map<QString, sicnu::data::AssetLease> m_editLeases;
 
     // F-05/F-06 (ui-backend-state-parity-r4): session epoch for the async
     // landing policy. Bumped at every story boundary (open/new project,

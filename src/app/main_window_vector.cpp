@@ -73,6 +73,10 @@ bool QgisDesktopWindow::checkUnsavedChanges()
                                           v->commitErrors().join( QLatin1Char( '\n' ) ) ) );
                             return false;
                         }
+                        // Commit advances the asset revision, which may
+                        // relocate (and destroy) this layer's Display Layer —
+                        // release the lease and do not touch v afterwards.
+                        commitEditLease( v );
                     }
                 }
             }
@@ -83,7 +87,10 @@ bool QgisDesktopWindow::checkUnsavedChanges()
                 {
                     QgsVectorLayer *v = qobject_cast<QgsVectorLayer *>(l);
                     if (v && v->isEditable())
+                    {
                         v->rollBack();
+                        rollbackEditLease( v );
+                    }
                 }
             }
             break;
@@ -257,13 +264,95 @@ QgsVectorLayer *QgisDesktopWindow::currentVectorLayer()
     return qobject_cast<QgsVectorLayer*>(layer);
 }
 
+namespace
+{
+/// Geometry requirement per digitizing tool (WKB geometry type bit set).
+/// Tools operate at use time only in QGIS — the enablement contract must
+/// match or the action is enabled-but-will-fail (R16-D T07 WP-3).
+quint32 editingToolGeometryMask( const QString &actionName )
+{
+    // Rings are holes inside polygons — polygon geometry only.
+    if ( actionName == QLatin1String( "mActionAddRing" ) ||
+         actionName == QLatin1String( "mActionFillRing" ) )
+        return ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
+    if ( actionName == QLatin1String( "mActionOffsetCurve" ) ||
+         actionName == QLatin1String( "mActionReverseLine" ) )
+        return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) );
+    if ( actionName == QLatin1String( "mActionDeletePart" ) ||
+         actionName == QLatin1String( "mActionSplitFeatures" ) ||
+         actionName == QLatin1String( "mActionReshape" ) ||
+         actionName == QLatin1String( "mActionSimplify" ) )
+        return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) ) |
+               ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
+    return 0u; // geometry-agnostic (select/capture/node/move/rotate)
+}
+
+/// Publish why an editing action is unavailable (R16-D T07 WP-2): the
+/// reason rides the tooltip (kept restorable via the base tooltip property)
+/// and the sicnu/unavailableReason property the ribbon can project.
+void setActionUnavailableReason( QAction *a, const QString &reason )
+{
+    if ( !a )
+        return;
+    QString base = a->property( "sicnu/baseToolTip" ).toString();
+    if ( base.isEmpty() )
+    {
+        base = a->toolTip();
+        a->setProperty( "sicnu/baseToolTip", base );
+    }
+    if ( reason.isEmpty() )
+    {
+        a->setToolTip( base );
+        a->setProperty( "sicnu/unavailableReason", QVariant() );
+    }
+    else
+    {
+        a->setToolTip( QStringLiteral( "%1\n(%2)" ).arg( base, reason ) );
+        a->setProperty( "sicnu/unavailableReason", reason );
+    }
+}
+} // namespace
+
 void QgisDesktopWindow::updateEditingUI(QgsVectorLayer *vlayer)
 {
     bool editing = vlayer && vlayer->isEditable();
     if (m_toggleEditingAction) m_toggleEditingAction->setChecked(editing);
-    if (m_saveEditsAction) m_saveEditsAction->setEnabled(editing);
+    if (m_saveEditsAction)
+    {
+        setActionUnavailableReason(
+            m_saveEditsAction,
+            editing ? QString()
+                    : tr( "No editable vector layer — start editing first" ) );
+        m_saveEditsAction->setEnabled(editing);
+    }
+    quint32 layerGeometryMask = 0u;
+    if ( editing && vlayer )
+        layerGeometryMask = 1u << static_cast<int>( vlayer->geometryType() );
     for (QAction *a : m_editingToolActions)
-        a->setEnabled(editing);
+    {
+        QString reason;
+        if ( !editing )
+            reason = tr( "No editable vector layer — start editing first" );
+        else if ( vlayer && vlayer->readOnly() )
+            reason = tr( "Layer is read-only (edited in another view)" );
+        else
+        {
+            const quint32 required = editingToolGeometryMask( a->objectName() );
+            if ( required && !( required & layerGeometryMask ) )
+            {
+                const bool wantsLine =
+                  required & ( 1u << static_cast<int>( Qgis::GeometryType::Line ) );
+                const bool wantsPolygon =
+                  required & ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
+                reason = tr( "Needs a %1 layer" )
+                           .arg( wantsLine && wantsPolygon ? tr( "line or polygon" )
+                                                           : wantsPolygon ? tr( "polygon" )
+                                                                          : tr( "line" ) );
+            }
+        }
+        setActionUnavailableReason( a, reason );
+        a->setEnabled( reason.isEmpty() );
+    }
 }
 
 QAction *QgisDesktopWindow::editingAction( const QString &name ) const
@@ -300,11 +389,30 @@ bool QgisDesktopWindow::confirmSaveEdits(QgsVectorLayer *vl)
                               vl->commitErrors().join( QLatin1Char( '\n' ) ) ) );
                 return false;
             }
+            // The commit may relocate (and destroy) this layer's Display
+            // Layer: release the lease, then never touch vl again.
+            const QString resolvedId = vl->id();
+            const QString resolvedName = vl->name();
+            commitEditLease( vl );
+            QgsMapLayer *replacement =
+                QgsProject::instance()->mapLayer( resolvedId );
+            QgsVectorLayer *resolved =
+                qobject_cast<QgsVectorLayer *>( replacement );
+            updateEditingUI( resolved ? resolved : nullptr );
+            if ( !resolved )
+                statusBar()->showMessage(
+                    tr( "Edits saved for %1 — layer data was refreshed" )
+                        .arg( resolvedName ), 4000 );
+            return true;
         }
         else
+        {
             vl->rollBack();
+            rollbackEditLease( vl );
+        }
     } else {
         vl->rollBack();
+        rollbackEditLease( vl );
     }
     updateEditingUI(vl);
     return true;
@@ -326,6 +434,12 @@ void QgisDesktopWindow::toggleEditing()
     }
 
     if (vlayer->isEditable()) {
+        // Snapshot identity up front: a successful commit releases the
+        // Edit Lease, which fires assetChanged and may relocate (destroy)
+        // this layer's Display Layer before the epilogue touches it again.
+        const QString stoppedLayerId = vlayer->id();
+        const QString stoppedLayerName = vlayer->name();
+        bool stoppedLayerAlive = true;
         if (vlayer->isModified()) {
             int res = QMessageBox::question(this, tr("Stop Editing"),
                 tr("Do you want to save changes to %1?").arg(vlayer->name()),
@@ -334,6 +448,8 @@ void QgisDesktopWindow::toggleEditing()
             if (res == QMessageBox::Save) {
                 if (vlayer->commitChanges()) {
                     commitEditLease(vlayer);
+                    stoppedLayerAlive =
+                        QgsProject::instance()->mapLayer( stoppedLayerId ) != nullptr;
                 } else {
                     // #1084 pattern (saveEdits()/confirmSaveEdits()): surface
                     // commitErrors() instead of falling through. QGIS keeps
@@ -364,7 +480,29 @@ void QgisDesktopWindow::toggleEditing()
             vlayer->rollBack();
             rollbackEditLease(vlayer);
         }
-        vlayer->triggerRepaint();
+        if ( stoppedLayerAlive )
+        {
+            if ( QgsMapLayer *resolved = QgsProject::instance()->mapLayer( stoppedLayerId ) )
+            {
+                vlayer = qobject_cast<QgsVectorLayer *>( resolved );
+                if ( vlayer )
+                    vlayer->triggerRepaint();
+            }
+            else
+            {
+                stoppedLayerAlive = false;
+            }
+        }
+        if ( !stoppedLayerAlive )
+        {
+            // The committed layer was refreshed by the data authority: its
+            // replacement carries the new revision.
+            updateEditingUI( nullptr );
+            statusBar()->showMessage(
+                tr( "Stopped editing %1 — layer data was refreshed" )
+                    .arg( stoppedLayerName ), 4000 );
+            return;
+        }
     } else {
         // Acquire the exclusive Edit Lease before entering edit mode. A Display
         // Layer backed by a Data Asset may only be edited by one view at a time;
@@ -398,9 +536,52 @@ void QgisDesktopWindow::saveEdits()
     }
     else {
         // Committing advances the Asset Revision and releases the Edit Lease;
-        // re-acquire it because saving stays in edit mode.
+        // re-acquire it because saving stays in edit mode. The commit may
+        // relocate (and destroy) this layer's Display Layer — re-resolve by
+        // id and re-point the session at the replacement, never at a freed
+        // pointer.
+        const QString savedLayerId = vlayer->id();
+        const QString savedLayerName = vlayer->name();
+        // The commit's assetChanged may relocate the Display Layer: the
+        // replacement QGIS layer carries the same sicnu/displayLayerId, so
+        // the session re-points at it instead of a freed pointer.
+        const QString savedDisplayLayerId =
+            vlayer->customProperty( QStringLiteral( "sicnu/displayLayerId" ) ).toString();
         commitEditLease(vlayer);
-        ( void ) acquireEditLease(vlayer, /*showConflictWarning=*/false);
+        vlayer = qobject_cast<QgsVectorLayer *>(
+            QgsProject::instance()->mapLayer( savedLayerId ) );
+        if ( !vlayer && !savedDisplayLayerId.isEmpty() )
+        {
+            for ( QgsMapLayer *candidate : QgsProject::instance()->mapLayers() )
+            {
+                if ( candidate->customProperty(
+                         QStringLiteral( "sicnu/displayLayerId" ) ).toString()
+                     == savedDisplayLayerId )
+                {
+                    vlayer = qobject_cast<QgsVectorLayer *>( candidate );
+                    break;
+                }
+            }
+        }
+        if ( !vlayer )
+        {
+            // No replacement found (display layer removed across the commit
+            // window): the edit session ended with the swap.
+            statusBar()->showMessage(
+                tr( "Edits saved for %1 — layer data was refreshed" )
+                    .arg( savedLayerName ), 4000 );
+            return;
+        }
+        if ( !acquireEditLease( vlayer, /*showConflictWarning=*/false ) )
+        {
+            // Re-acquisition failed (another view took the lease across the
+            // commit window): stay out of edit mode rather than edit unlocked.
+            statusBar()->showMessage(
+                tr( "Edits saved for %1 — another view is editing it now" )
+                    .arg( savedLayerName ), 5000 );
+            updateEditingUI( vlayer );
+            return;
+        }
     }
     vlayer->startEditing();
     statusBar()->showMessage(tr("Edits saved for %1").arg(vlayer->name()), 3000);
@@ -535,6 +716,10 @@ bool QgisDesktopWindow::acquireEditLease( QgsVectorLayer *vlayer,
                                QStringLiteral( "Vector edit session" ) } );
     if ( acquired )
     {
+        // Hold the lease for the session: the RAII handle must outlive this
+        // call or the one-editor-per-asset contract never applies and every
+        // commit below reports no_edit_lease.
+        m_editLeases[vlayer->id()] = acquired.take();
         // This layer becomes the edit owner; all other Display Layers of the
         // same asset become read-only.
         setAssetLayersReadOnly( *assetId, vlayer, true );
@@ -562,7 +747,19 @@ void QgisDesktopWindow::commitEditLease( QgsVectorLayer *vlayer )
     if ( !assetId )
         return;
 
-    ( void ) m_projectContext->dataManager().commitEdit( *assetId );
+    const bool committed =
+        static_cast<bool>( m_projectContext->dataManager().commitEdit( *assetId ) );
+    if ( !committed )
+    {
+        statusBar()->showMessage(
+            tr( "Asset revision did not advance for %1 — other views may show "
+                "stale data until the next change" )
+                .arg( vlayer->name() ),
+            5000 );
+    }
+    // The stored handle releases the data-layer lease either way; commitEdit
+    // already consumed it on success (dropping it again is a no-op release).
+    m_editLeases.erase( vlayer->id() );
     // The edit session ended; other Display Layers of the asset are editable again.
     setAssetLayersReadOnly( *assetId, nullptr, false );
 }
@@ -578,5 +775,14 @@ void QgisDesktopWindow::rollbackEditLease( QgsVectorLayer *vlayer )
         return;
 
     ( void ) m_projectContext->dataManager().rollbackEdit( *assetId );
+    m_editLeases.erase( vlayer->id() );
     setAssetLayersReadOnly( *assetId, nullptr, false );
+}
+
+void QgisDesktopWindow::releaseEditLeaseForLayer( const QString &qgisLayerId )
+{
+    // A removed layer cannot end its session through the normal slots: drop
+    // the stored handle (releasing the data-layer lease) so the asset does
+    // not stay locked against the next editor.
+    m_editLeases.erase( qgisLayerId );
 }
