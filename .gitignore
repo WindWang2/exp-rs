@@ -156,6 +156,10 @@ vendor/
 .planning/cli-surface-r4/*
 !.planning/r14-B/
 !.planning/cli-surface-r4/*.md
+# R15-A track (remote sensing science algorithms & numerical contracts) planning artifacts (markdown only).
+!.planning/r15-a/
+.planning/r15-a/*
+!.planning/r15-a/*.md
 # R6 persistence/sidecar/atomicity track planning notes (markdown only).
 !.planning/r6-persistence-sidecar-atomicity/
 .planning/r6-persistence-sidecar-atomicity/*
@@ -560,7 +564,21 @@ r6_dev.cmd
 .planning/r14-A/*
 !.planning/r14-A/*.md
 
+# hardening/r15-C-model-runtime (R15 track C): planning notes (markdown only; logs stay local).
+!.planning/r15-c/
+.planning/r15-c/*
+!.planning/r15-c/*.md
+
+# r15-C local build/test driver scratch (evidence distilled into .planning/).
+
+# hardening/r15-E-desktop-teaching-help: planning evidence (markdown only; logs/build stay local).
 # hardening/r15-E-desktop-teaching-help (R15 track E): planning notes (markdown only; logs stay local).
 !.planning/r15-E/
 .planning/r15-E/*
 !.planning/r15-E/*.md
+.ps1_*_r15c.ps1
+.ps1_redgreen_r15c.ps1
+.syntaxcheck/
+.ccache/
+.configure_r15c.log
+.build_r15c_tests.log
