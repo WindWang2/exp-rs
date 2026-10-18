@@ -2,7 +2,7 @@
 
 Reviewer: fresh subagent (no implementation involvement), full diff `origin/master...HEAD` (11 commits at review time). Adversarial checklist: API/contract, lifetime/concurrency, type safety, semantics, tests, cross-PR safety, deferral design, external-layer regression.
 
-## Verdict at review time: 0 P0 / 1 P1 / 5 P2 / 7 P3
+## Verdict at review time: 0 P0 / 1 P1 / 4 P2 (fixed) + 4 P3 fixed/noted below — counts as tabulated
 
 ## Findings and dispositions (all P1 + all actionable P2/P3-table fixed in commits 3adca1967, 49a07a62c)
 

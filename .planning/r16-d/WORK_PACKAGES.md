@@ -27,7 +27,7 @@ Sources: two independent read-only audit reports against master @ 46791bc65 (T07
 | WP-T08-5 | F05: series clones don't remap overlay_on → false MAP_CHART_OVER_MAP per page | P2 | series_planner.cpp | clone overlay_on == remapped frame id; preflight clean |
 | WP-T08-6 | F07: anchors + MAP_OFF_PAGE/MAP_MARGIN use page-0 dims; compiler honors per-page sizes | P2 | composition.cpp, quality.cpp | 2-page spec: item off smaller page-1 flagged; anchor resolves vs page-1 dims |
 | WP-T08-7 | F08: structuralDigest ignores pages[] geometry | P2 | quality.cpp | mutate pages[0].height_mm → digest changes |
-| WP-T08-8 | F09: vector series over point layer → degenerate extent → VALIDATION_FAILED on planner output | P2 | series_planner.cpp | point-layer planSeries → validateMapSpec empty |
+| WP-T08-8 | F09: vector series over point layer → degenerate extent → VALIDATION_FAILED downstream on an extent the user never authored | P2 | series_planner.cpp | point-layer planSeries → typed refusal naming the degenerate geometry + remediation (fail-closed, matching checkExtent's contract); table series unaffected |
 | WP-T08-9 | F01: condition tokenizer accepts `1.2.3` as 1.2 silently | P2 | mapspec_conditions.cpp | validateConditionSyntax("a > 1.2.3") false |
 | WP-T08-10 | F10: series index label hardcoded A4-landscape rect → MAP_OFF_PAGE on portrait templates | P3 | series_planner.cpp | portrait template → zero preflight errors |
 | WP-T08-11 | F12: searchCores per-target budget dead code | P3 | composition.cpp | two disjoint conflicts → each core ≥1 simulation |

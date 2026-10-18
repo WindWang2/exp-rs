@@ -27,9 +27,9 @@ Oracle protocol: RED (real failing run on master, captured) → fix → GREEN×2
 ## WP status
 | WP | RED | Fix | GREEN×2 |
 |----|-----|-----|---------|
-| WP-T07-1 lease lifecycle + relocation guard | RED×2 incl. SIGSEGV×2 | m_editLeases hold; all commit/rollback paths routed; layerWillBeRemoved hook; relocateLayer defers editable layers (typed display.relocate_deferred_editing, retried next assetChanged); saveEdits/toggleEditing/confirmSaveEdits re-resolve by layer id + displayLayerId | ✅ |
+| WP-T07-1 lease lifecycle + relocation guard | RED×2 incl. SIGSEGV×2 | m_editLeases hold; all commit/rollback paths routed; layerWillBeRemoved hook; relocateLayer defers editable layers (typed display.relocate_deferred_editing; retried via retryPendingRelocations at every lease release — R1; success-only marker clear — R2); saveEdits/toggleEditing/confirmSaveEdits (save AND discard paths — R2) re-resolve by layer id + displayLayerId | ✅ |
 | WP-T07-2 disabled-without-reason | RED | reason channel (tooltip suffix + sicnu/unavailableReason, restorable base); ribbon keeps accessibleDescription in both states | ✅ |
-| WP-T07-3 geometry gating | RED | per-action masks (rings polygon-only; offset/reverse line-only; split/reshape/simplify/delete-part line+polygon) | ✅ |
+| WP-T07-3 geometry gating | RED | per-action masks (rings polygon-only; reverse line-only; offset line+polygon [polygon mode]; split/reshape/simplify line+polygon; delete-part geometry-agnostic — corrected in review R1) | ✅ |
 | WP-T07-4 ribbon fallback raster | family | currentRasterLayer() drops first-raster fallback | ✅ |
 | WP-T07-5 setLayerVisible fake success | RED | typed display.layer_tree_node_missing | ✅ |
 | WP-T07-6 workbench:context mutation | family | projection local; no m_mission write | ✅ |
