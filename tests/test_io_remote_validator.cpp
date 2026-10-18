@@ -659,3 +659,42 @@ TEST_CASE( "offline::isPrivateHost validates alternative IPv4 encodings (SEC-05)
   CHECK( isPrivateHost( "http://local%68ost:8080/data.tif" ) );
   CHECK( isPrivateHost( "local%68ost" ) );
 }
+
+TEST_CASE( "resolveForPinning fails closed and never pins a private address",
+           "[geospatial][egress][r17]" )
+{
+    // #1485: the policy check (isPrivateHost) and libcurl's own resolution
+    // are two independent lookups. Pinning the validated addresses with
+    // CURLOPT_RESOLVE closes that window; failing CLOSED on an unresolvable
+    // host removes the other half of the hole (isPrivateHost used to fall
+    // through to "public" when getaddrinfo failed).
+    std::vector<std::string> entries;
+    std::string error;
+
+    // Loopback / metadata names are refused without any resolution.
+    CHECK( offline::resolveForPinning( "localhost", 443, entries, error ) ==
+           offline::HostPinStatus::PrivateAddress );
+    CHECK( offline::resolveForPinning( "LOCALHOST.", 443, entries, error ) ==
+           offline::HostPinStatus::PrivateAddress ); // trailing dot normalized
+    CHECK( offline::resolveForPinning( "metadata.google.internal", 80, entries, error ) ==
+           offline::HostPinStatus::PrivateAddress );
+
+    // IP literals: isPrivateHost() already judges them, nothing to pin.
+    CHECK( offline::resolveForPinning( "127.0.0.1", 8000, entries, error ) ==
+           offline::HostPinStatus::NoResolutionNeeded );
+    CHECK( offline::resolveForPinning( "169.254.169.254", 80, entries, error ) ==
+           offline::HostPinStatus::NoResolutionNeeded );
+
+    // Empty host and an out-of-range port are refusals, never silent passes.
+    CHECK( offline::resolveForPinning( "", 443, entries, error ) ==
+           offline::HostPinStatus::PrivateAddress );
+    CHECK( offline::resolveForPinning( "example.com", 0, entries, error ) ==
+           offline::HostPinStatus::Unresolved );
+
+    // .invalid is reserved by RFC 2606 and can never resolve, so this is
+    // deterministic without network access: the host is NOT proven public.
+    CHECK( offline::resolveForPinning( "nonexistent-host.invalid", 443, entries, error ) ==
+           offline::HostPinStatus::Unresolved );
+    CHECK_FALSE( error.empty() );
+    CHECK( entries.empty() );
+}

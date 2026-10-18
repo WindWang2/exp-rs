@@ -318,6 +318,77 @@ bool isPrivateIpv4( std::uint32_t v4 )
     return false;
 }
 
+/// Private/loopback/metadata classification for a parsed IPv6 address.
+/// Factored out of isPrivateHost() so the DNS pinning path (#1485) judges a
+/// getaddrinfo result with exactly the same rule as a literal host - two
+/// subtly different copies of this list is how an egress filter grows a hole.
+bool isPrivateIpv6( const unsigned char v6[16] )
+{
+    bool unspecified = true;
+    for ( int i = 0; i < 16; ++i )
+        unspecified = unspecified && ( v6[i] == 0 );
+    if ( unspecified )
+        return true;
+
+    bool ipv4Mapped = v6[10] == 0xFF && v6[11] == 0xFF;
+    for ( int i = 0; i < 10 && ipv4Mapped; ++i )
+        ipv4Mapped = ( v6[i] == 0 );
+    if ( ipv4Mapped )
+    {
+        const std::uint32_t embedded =
+            ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
+            ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
+        return isPrivateIpv4( embedded );
+    }
+
+    // IPv4-compatible ::a.b.c.d (96 zero bits)
+    bool ipv4Compatible = true;
+    for ( int i = 0; i < 12; ++i )
+        ipv4Compatible = ipv4Compatible && ( v6[i] == 0 );
+    if ( ipv4Compatible )
+    {
+        const std::uint32_t embedded =
+            ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
+            ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
+        if ( embedded == 0 )
+            return true; // :: (unspecified / 0.0.0.0 equivalent, routes to loopback on POSIX)
+        if ( embedded > 1 )
+            return isPrivateIpv4( embedded );
+    }
+
+    bool loopback = true;
+    for ( int i = 0; i < 15; ++i )
+        loopback = loopback && ( v6[i] == 0 );
+    loopback = loopback && ( v6[15] == 1 );
+    if ( loopback )
+        return true;
+
+    // Multicast ff00::/8
+    if ( v6[0] == 0xFF )
+        return true;
+
+    // NAT64 Well-Known Prefix 64:ff9b::/96 (RFC 6052)
+    bool nat64 = ( v6[0] == 0x00 && v6[1] == 0x64 && v6[2] == 0xFF && v6[3] == 0x9B );
+    for ( int i = 4; i < 12 && nat64; ++i )
+        nat64 = ( v6[i] == 0 );
+    if ( nat64 )
+    {
+        const std::uint32_t embedded =
+            ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
+            ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
+        if ( embedded == 0 )
+            return true;
+        return isPrivateIpv4( embedded );
+    }
+
+    // fe80::/10 link-local, fc00::/7 unique-local
+    if ( v6[0] == 0xFE && ( v6[1] & 0xC0 ) == 0x80 )
+        return true;
+    if ( ( v6[0] & 0xFE ) == 0xFC )
+        return true;
+    return false;
+}
+
 std::string percentDecode( const std::string &input )
 {
     std::string out;
@@ -487,70 +558,7 @@ bool isPrivateHost( const std::string &hostOrUrl )
 
     unsigned char v6[16] = {};
     if ( parseIpv6( host, v6 ) )
-    {
-        bool unspecified = true;
-        for ( int i = 0; i < 16; ++i )
-            unspecified = unspecified && ( v6[i] == 0 );
-        if ( unspecified )
-            return true;
-
-        bool ipv4Mapped = v6[10] == 0xFF && v6[11] == 0xFF;
-        for ( int i = 0; i < 10 && ipv4Mapped; ++i )
-            ipv4Mapped = ( v6[i] == 0 );
-        if ( ipv4Mapped )
-        {
-            const std::uint32_t embedded =
-                ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
-                ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
-            return isPrivateIpv4( embedded );
-        }
-
-        // IPv4-compatible ::a.b.c.d (96 zero bits)
-        bool ipv4Compatible = true;
-        for ( int i = 0; i < 12; ++i )
-            ipv4Compatible = ipv4Compatible && ( v6[i] == 0 );
-        if ( ipv4Compatible )
-        {
-            const std::uint32_t embedded =
-                ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
-                ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
-            if ( embedded == 0 )
-                return true; // :: (unspecified / 0.0.0.0 equivalent, routes to loopback on POSIX)
-            if ( embedded > 1 )
-                return isPrivateIpv4( embedded );
-        }
-
-        bool loopback = true;
-        for ( int i = 0; i < 15; ++i )
-            loopback = loopback && ( v6[i] == 0 );
-        loopback = loopback && ( v6[15] == 1 );
-        if ( loopback )
-            return true;
-
-        // Multicast ff00::/8
-        if ( v6[0] == 0xFF )
-            return true;
-
-        // NAT64 Well-Known Prefix 64:ff9b::/96 (RFC 6052)
-        bool nat64 = ( v6[0] == 0x00 && v6[1] == 0x64 && v6[2] == 0xFF && v6[3] == 0x9B );
-        for ( int i = 4; i < 12 && nat64; ++i )
-            nat64 = ( v6[i] == 0 );
-        if ( nat64 )
-        {
-            const std::uint32_t embedded =
-                ( static_cast<std::uint32_t>( v6[12] ) << 24 ) | ( static_cast<std::uint32_t>( v6[13] ) << 16 ) |
-                ( static_cast<std::uint32_t>( v6[14] ) << 8 ) | static_cast<std::uint32_t>( v6[15] );
-            if ( embedded == 0 )
-                return true;
-            return isPrivateIpv4( embedded );
-        }
-
-        if ( v6[0] == 0xFE && ( v6[1] & 0xC0 ) == 0x80 )
-            return true;
-        if ( ( v6[0] & 0xFE ) == 0xFC )
-            return true;
-        return false;
-    }
+        return isPrivateIpv6( v6 );
 
     // Unparsed hostname: perform DNS resolution to block private/loopback/cloud-metadata targets (DEF-GEO-01).
     struct addrinfo hints;
@@ -619,6 +627,122 @@ bool isPrivateHost( const std::string &hostOrUrl )
     }
 
     return false;
+}
+
+HostPinStatus resolveForPinning( const std::string &host, int port,
+                                 std::vector<std::string> &entries,
+                                 std::string &errorMessage )
+{
+    entries.clear();
+    errorMessage.clear();
+
+    std::string lowered;
+    lowered.reserve( host.size() );
+    for ( const char c : host )
+        lowered += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+    while ( !lowered.empty() && lowered.back() == '.' )
+        lowered.pop_back();
+
+    if ( lowered.empty() )
+    {
+        errorMessage = "empty host";
+        return HostPinStatus::PrivateAddress;
+    }
+
+    // IP literals: isPrivateHost() already judges them verbatim, and there is
+    // nothing for libcurl to resolve — pinning would only add a second,
+    // redundant source of truth.
+    std::uint32_t v4 = 0;
+    unsigned char v6[16] = {};
+    if ( parseIpv4( lowered, v4 ) || parseIpv6( lowered, v6 ) )
+        return HostPinStatus::NoResolutionNeeded;
+
+    // Names that are loopback/metadata by definition, before any resolution.
+    if ( lowered == "localhost" ||
+         lowered == "localhost.localdomain" ||
+         lowered == "ip6-localhost" ||
+         lowered == "ip6-loopback" ||
+         lowered == "metadata.google.internal" ||
+         lowered == "instance-data" ||
+         ( lowered.size() > 10 && lowered.compare( lowered.size() - 10, 10, ".localhost" ) == 0 ) )
+    {
+        errorMessage = "host '" + lowered + "' is a private/loopback name";
+        return HostPinStatus::PrivateAddress;
+    }
+
+    if ( port <= 0 || port > 65535 )
+    {
+        errorMessage = "port out of range for '" + lowered + "'";
+        return HostPinStatus::Unresolved;
+    }
+
+    struct addrinfo hints;
+    std::memset( &hints, 0, sizeof( hints ) );
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo *res = nullptr;
+    if ( getaddrinfo( lowered.c_str(), nullptr, &hints, &res ) != 0 || res == nullptr )
+    {
+        if ( res != nullptr )
+            freeaddrinfo( res );
+        // FAIL CLOSED (#1485): an unresolvable host cannot be proven public.
+        // Returning "public" here (the previous behaviour) meant a resolver
+        // outage or an NXDOMAIN answer opened the egress gate.
+        errorMessage = "DNS resolution failed for '" + lowered + "'";
+        return HostPinStatus::Unresolved;
+    }
+
+    bool privateFound = false;
+    std::string addresses;
+    for ( struct addrinfo *p = res; p != nullptr && !privateFound; p = p->ai_next )
+    {
+        if ( p->ai_family == AF_INET )
+        {
+            auto *sa = reinterpret_cast<struct sockaddr_in *>( p->ai_addr );
+            if ( isPrivateIpv4( ntohl( sa->sin_addr.s_addr ) ) )
+            {
+                privateFound = true;
+                break;
+            }
+        }
+        else if ( p->ai_family == AF_INET6 )
+        {
+            auto *sa6 = reinterpret_cast<struct sockaddr_in6 *>( p->ai_addr );
+            if ( isPrivateIpv6( reinterpret_cast<const unsigned char *>( &sa6->sin6_addr ) ) )
+            {
+                privateFound = true;
+                break;
+            }
+        }
+        else
+        {
+            continue;
+        }
+
+        char text[NI_MAXHOST] = {};
+        if ( getnameinfo( p->ai_addr, static_cast<socklen_t>( p->ai_addrlen ), text, sizeof( text ),
+                          nullptr, 0, NI_NUMERICHOST ) != 0 )
+            continue;
+        if ( !addresses.empty() )
+            addresses += ',';
+        addresses += text;
+    }
+    freeaddrinfo( res );
+
+    if ( privateFound )
+    {
+        errorMessage = "host '" + lowered + "' resolves to a private/loopback/metadata address";
+        return HostPinStatus::PrivateAddress;
+    }
+    if ( addresses.empty() )
+    {
+        errorMessage = "DNS resolution produced no usable address for '" + lowered + "'";
+        return HostPinStatus::Unresolved;
+    }
+
+    entries.push_back( lowered + ":" + std::to_string( port ) + ":" + addresses );
+    return HostPinStatus::Ok;
 }
 
 void applyGdalNetworkDeny()
