@@ -844,7 +844,7 @@ TEST_CASE( "Digitizing tools gate on geometry type and expose reasons (R16-D T07
     CHECK( reasonOf( node ).isEmpty() );
     for ( const char *name :
           { "mActionOffsetCurve", "mActionReverseLine", "mActionAddRing",
-            "mActionFillRing", "mActionDeletePart" } )
+            "mActionFillRing", "mActionSplitFeatures" } )
     {
       QAction *a = fx.window.editingAction( QLatin1String( name ) );
       INFO( name );
@@ -871,6 +871,8 @@ TEST_CASE( "Digitizing tools gate on geometry type and expose reasons (R16-D T07
     QgsVectorLayer *layer =
       adoptEditing( QStringLiteral( "Polygon" ), QStringLiteral( "polys" ) );
     CHECK( fx.window.editingAction( QStringLiteral( "mActionAddRing" ) )->isEnabled() );
+    // Offset curve carries a polygon mode in this QGIS build — enabled here.
+    CHECK( fx.window.editingAction( QStringLiteral( "mActionOffsetCurve" ) )->isEnabled() );
     QAction *rev = fx.window.editingAction( QStringLiteral( "mActionReverseLine" ) );
     CHECK_FALSE( rev->isEnabled() );
     CHECK_FALSE( reasonOf( rev ).isEmpty() );

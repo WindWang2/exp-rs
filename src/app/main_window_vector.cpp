@@ -59,25 +59,35 @@ bool QgisDesktopWindow::checkUnsavedChanges()
             {
                 // Save all modified vector layers — fail closed on commit
                 // errors (#1084): a dropped return used to discard edits silently.
+                // Iterate by id and re-resolve each layer: a commit relocates
+                // (and destroys) sibling Display Layers of the same asset, so
+                // the remaining snapshot pointers may be freed (review R16-D R1).
+                QStringList editableIds;
                 for (QgsMapLayer *l : layers)
                 {
                     QgsVectorLayer *v = qobject_cast<QgsVectorLayer *>(l);
                     if (v && v->isEditable() && v->isModified())
+                        editableIds.append( v->id() );
+                }
+                for (const QString &layerId : editableIds)
+                {
+                    QgsVectorLayer *v = qobject_cast<QgsVectorLayer *>(
+                        QgsProject::instance()->mapLayer( layerId ) );
+                    if (!v || !v->isEditable() || !v->isModified())
+                        continue; // relocated across an earlier commit
+                    if ( !v->commitChanges() )
                     {
-                        if ( !v->commitChanges() )
-                        {
-                            QMessageBox::warning(
-                                this, tr( "Save Edits" ),
-                                tr( "Failed to save edits on layer '%1':\n%2" )
-                                    .arg( v->name(),
-                                          v->commitErrors().join( QLatin1Char( '\n' ) ) ) );
-                            return false;
-                        }
-                        // Commit advances the asset revision, which may
-                        // relocate (and destroy) this layer's Display Layer —
-                        // release the lease and do not touch v afterwards.
-                        commitEditLease( v );
+                        QMessageBox::warning(
+                            this, tr( "Save Edits" ),
+                            tr( "Failed to save edits on layer '%1':\n%2" )
+                                .arg( v->name(),
+                                      v->commitErrors().join( QLatin1Char( '\n' ) ) ) );
+                        return false;
                     }
+                    // Commit advances the asset revision, which may
+                    // relocate (and destroy) this layer's Display Layer —
+                    // release the lease and do not touch v afterwards.
+                    commitEditLease( v );
                 }
             }
             else
@@ -275,16 +285,17 @@ quint32 editingToolGeometryMask( const QString &actionName )
     if ( actionName == QLatin1String( "mActionAddRing" ) ||
          actionName == QLatin1String( "mActionFillRing" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
-    if ( actionName == QLatin1String( "mActionOffsetCurve" ) ||
-         actionName == QLatin1String( "mActionReverseLine" ) )
+    if ( actionName == QLatin1String( "mActionReverseLine" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) );
-    if ( actionName == QLatin1String( "mActionDeletePart" ) ||
+    // Offset curve offsets lines AND polygon boundaries (the tool carries a
+    // polygon mode); split/reshape/simplify operate on line/polygon geometry.
+    if ( actionName == QLatin1String( "mActionOffsetCurve" ) ||
          actionName == QLatin1String( "mActionSplitFeatures" ) ||
          actionName == QLatin1String( "mActionReshape" ) ||
          actionName == QLatin1String( "mActionSimplify" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) ) |
                ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
-    return 0u; // geometry-agnostic (select/capture/node/move/rotate)
+    return 0u; // geometry-agnostic (select/capture/node/move/rotate/delete-part)
 }
 
 /// Publish why an editing action is unavailable (R16-D T07 WP-2): the
@@ -747,6 +758,12 @@ void QgisDesktopWindow::commitEditLease( QgsVectorLayer *vlayer )
     if ( !assetId )
         return;
 
+    // Snapshot identity: a successful commitEdit emits assetChanged, which
+    // may relocate (and destroy) this layer's Display Layer synchronously —
+    // vlayer must not be touched after the call (review R16-D R1 P1).
+    const QString layerId = vlayer->id();
+    const QString layerName = vlayer->name();
+
     const bool committed =
         static_cast<bool>( m_projectContext->dataManager().commitEdit( *assetId ) );
     if ( !committed )
@@ -754,14 +771,17 @@ void QgisDesktopWindow::commitEditLease( QgsVectorLayer *vlayer )
         statusBar()->showMessage(
             tr( "Asset revision did not advance for %1 — other views may show "
                 "stale data until the next change" )
-                .arg( vlayer->name() ),
+                .arg( layerName ),
             5000 );
     }
     // The stored handle releases the data-layer lease either way; commitEdit
     // already consumed it on success (dropping it again is a no-op release).
-    m_editLeases.erase( vlayer->id() );
-    // The edit session ended; other Display Layers of the asset are editable again.
+    m_editLeases.erase( layerId );
+    // The edit session ended; other Display Layers of the asset are editable
+    // again, and a relocation deferred by the edit session can proceed.
     setAssetLayersReadOnly( *assetId, nullptr, false );
+    if ( m_projectContext )
+        m_projectContext->displayManager().retryPendingRelocations( *assetId );
 }
 
 void QgisDesktopWindow::rollbackEditLease( QgsVectorLayer *vlayer )
@@ -777,12 +797,26 @@ void QgisDesktopWindow::rollbackEditLease( QgsVectorLayer *vlayer )
     ( void ) m_projectContext->dataManager().rollbackEdit( *assetId );
     m_editLeases.erase( vlayer->id() );
     setAssetLayersReadOnly( *assetId, nullptr, false );
+    // Rollback emits no assetChanged (data unchanged on disk), so a
+    // relocation deferred by the edit session would never retry on its own.
+    m_projectContext->displayManager().retryPendingRelocations( *assetId );
 }
 
 void QgisDesktopWindow::releaseEditLeaseForLayer( const QString &qgisLayerId )
 {
     // A removed layer cannot end its session through the normal slots: drop
     // the stored handle (releasing the data-layer lease) so the asset does
-    // not stay locked against the next editor.
-    m_editLeases.erase( qgisLayerId );
+    // not stay locked against the next editor. Sibling Display Layers that
+    // were marked read-only for the session become editable again (the
+    // lease itself carries the asset id — the layer is going away).
+    const auto it = m_editLeases.find( qgisLayerId );
+    if ( it == m_editLeases.end() )
+        return;
+    const sicnu::data::AssetId assetId = it->second.assetId();
+    m_editLeases.erase( it );
+    if ( !assetId.isNull() && m_projectContext )
+    {
+        setAssetLayersReadOnly( assetId, nullptr, false );
+        m_projectContext->displayManager().retryPendingRelocations( assetId );
+    }
 }

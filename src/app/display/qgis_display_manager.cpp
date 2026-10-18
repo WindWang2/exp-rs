@@ -805,6 +805,9 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
   // retries, and session end (no longer editable) lets it proceed.
   if (!layerRecord->mapLayer.isNull() && layerRecord->mapLayer->isEditable()) {
     m_impl->pendingRelocations.insert(layerId.toString());
+    qWarning() << "display: relocation of layer"
+               << layerRecord->snapshot.qgisLayerId()
+               << "deferred (edit session active; retried when the session ends)";
     return data::Result<void>::failure(displayDiagnostic(
         QStringLiteral("display.relocate_deferred_editing"),
         QStringLiteral("Relocation deferred: the layer is in an edit session "
@@ -902,6 +905,23 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
   layerRecord->lease = acquired.take();
 
   return data::Result<void>::success();
+}
+
+void QgisDisplayManager::retryPendingRelocations(data::AssetId assetId) {
+  if (QThread::currentThread() != thread())
+    return;
+  if (m_impl->pendingRelocations.empty())
+    return;
+  QVector<DisplayLayerId> pending;
+  for (const QString &key : m_impl->pendingRelocations) {
+    const auto it = m_impl->layers.find(key);
+    if (it == m_impl->layers.end())
+      continue;
+    if (it->second->snapshot.assetId() == assetId)
+      pending.append(it->second->snapshot.id());
+  }
+  for (const DisplayLayerId layerId : pending)
+    (void)relocateLayer(layerId);
 }
 
 data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {

@@ -1277,9 +1277,15 @@ TEST_CASE( "Relocation defers while the layer holds an edit session (R16-D T07 W
     CHECK(watched->isModified());
   }
 
-  // Session end (rollback = discard buffer): the next change relocates.
+  // Retry while STILL editing keeps deferring (no data-loss window).
+  displayManager.retryPendingRelocations(assetId);
+  CHECK_FALSE(watched.isNull());
+
+  // Session end (rollback = discard buffer): the shell's lease release calls
+  // the same retry API (rollbackEdit emits no assetChanged) — the deferred
+  // swap proceeds without a further asset change.
   layer->rollBack();
-  dataManager.notifyExternalContentChange(assetId);
+  displayManager.retryPendingRelocations(assetId);
   CHECK(watched.isNull());
   // The Display Layer identity survives with a fresh QGIS layer.
   QgsMapLayer *replacement = displayManager.mapLayer(layerId);
