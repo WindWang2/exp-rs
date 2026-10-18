@@ -298,3 +298,105 @@ TEST_CASE( "checkpoint stamp rejects a tail-only content swap beyond the head wi
     CHECK( second.rows.first().status == QLatin1String( "fail" ) );
     CHECK( second.rows.first().score == 10.0 );
 }
+
+TEST_CASE( "checkpoint stamp rejects a middle-only content swap (fixed-stride interior sampling)",
+           "[teaching_admin][batch][checkpoint][r16_c_t06][r17]" )
+{
+    // #1520: the head+tail windows leave the INTERIOR of a >2x-window
+    // artifact unfingerprinted. 256 KiB is the worst case — the exact
+    // midpoint (128 KiB) sits outside both the head window [0,64 KiB) and
+    // the tail window [192 KiB,256 KiB), so a same-stat, same-length flip
+    // there was adopted as the graded original. The stamp must sample the
+    // interior at a fixed stride so the flip is caught.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString submissions = QDir( dir.path() ).filePath( QStringLiteral( "submissions" ) );
+    const QString sid = QStringLiteral( "s001" );
+    REQUIRE( QDir( submissions ).mkpath( sid ) );
+    const QString artifact =
+      QDir( submissions ).filePath( sid + QStringLiteral( "/a.tif" ) );
+
+    constexpr qint64 kTotal = 256 * 1024;
+    constexpr qint64 kMidpoint = 128 * 1024; // strictly between both end windows
+    {
+        QFile f( artifact );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( kTotal, 'G' ) );
+        REQUIRE( f.size() == kTotal );
+    }
+
+    // Midpoint-keyed grader: probe the byte the tamper is going to touch.
+    auto midGrade = [kMidpoint]( const SubmissionItem &item ) {
+        BatchRowResult row;
+        row.studentId = item.studentId;
+        row.labId = QStringLiteral( "lab15" );
+        row.artifactPath = item.path;
+        QFile f( item.path );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        REQUIRE( f.seek( kMidpoint ) );
+        const char probe = f.read( 1 ).at( 0 );
+        if ( probe == 'G' )
+        {
+            row.status = QStringLiteral( "pass" );
+            row.verdict = QStringLiteral( "pass" );
+            row.score = 90.0;
+        }
+        else
+        {
+            row.status = QStringLiteral( "fail" );
+            row.verdict = QStringLiteral( "fail" );
+            row.score = 10.0;
+            row.message = QStringLiteral( "middle swapped content graded" );
+        }
+        return row;
+    };
+
+    const QString checkpoint = QDir( dir.path() ).filePath( QStringLiteral( "cp.json" ) );
+    BatchAssessmentConfig cfg;
+    cfg.labId = QStringLiteral( "lab15" );
+    cfg.submissionsDir = submissions;
+    cfg.rubricVersion = QStringLiteral( "r1" );
+    cfg.labVersion = QStringLiteral( "l1" );
+    cfg.softwareVersion = QStringLiteral( "sw1" );
+    cfg.maxConcurrency = 1;
+    cfg.maxSubmissions = -1;
+    cfg.checkpointPath = checkpoint;
+
+    const auto first = runBatchAssessment( cfg, midGrade );
+    REQUIRE( first.graded == 1 );
+    REQUIRE( first.rows.first().score == 90.0 );
+
+    // Flip ONE middle byte, keep the length, restore the exact mtime: the
+    // stat proxy AND the head/tail fingerprint all stay unchanged.
+    const QDateTime mtime = QFileInfo( artifact ).lastModified();
+    {
+        QFile f( artifact );
+        REQUIRE( f.open( QIODevice::ReadWrite ) );
+        REQUIRE( f.seek( kMidpoint ) );
+        REQUIRE( f.write( QByteArrayLiteral( "M" ) ) == 1 );
+        f.flush();
+    }
+    {
+        QFile f( artifact );
+        REQUIRE( f.open( QIODevice::ReadWrite ) );
+        REQUIRE( f.setFileTime( mtime, QFileDevice::FileModificationTime ) );
+    }
+    const QFileInfo after( artifact );
+    REQUIRE( after.size() == kTotal );
+    REQUIRE( after.lastModified().toMSecsSinceEpoch() == mtime.toMSecsSinceEpoch() );
+
+    int regrades = 0;
+    const auto second = runBatchAssessment(
+        cfg,
+        [&]( const SubmissionItem &item ) {
+            ++regrades;
+            return midGrade( item );
+        } );
+    CHECK( second.resumed == 0 );
+    CHECK( regrades == 1 );
+
+    // The published row describes the tampered interior, never the stale grade.
+    REQUIRE( second.rows.size() == 1 );
+    CHECK( second.rows.first().status == QLatin1String( "fail" ) );
+    CHECK( second.rows.first().score == 10.0 );
+}

@@ -45,18 +45,26 @@ QString batchConfigDigest( const BatchAssessmentConfig &cfg )
 }
 
 /// Artifact identity for checkpoint adoption, taken when a row is graded:
-/// mtime + size + a bounded sha256 of the artifact's HEAD and TAIL. The
+/// mtime + size + a bounded sha256 over sampled content windows. The
 /// stat pair alone adopts a stale grade over a same-stat content swap
 /// (cp -p with a backdated mtime, or a same-length rewrite with the mtime
 /// restored — red tests in test_teaching_admin_checkpoint_stamp_r16_c_t06),
 /// so the stamp also fingerprints content. Head-only hashing still adopted
 /// over tail-only rewrites on artifacts past the window (round-1 review):
 /// classroom rasters are typically far larger than one window with
-/// informative pixels throughout, so both ends are fingerprinted. The
-/// windows may overlap (files ≤ 2× window) — this is a fingerprint, not a
-/// dedup; the encoding stays opaque to the checkpoint schema (#1448 left
-/// it evolvable — old mtime:size and head-only stamps simply stop matching
-/// and fail closed to re-grading).
+/// informative pixels throughout, so both ends are fingerprinted.
+///
+/// #1520: head+tail alone left the INTERIOR of a >2×-window artifact
+/// unfingerprinted (a same-stat, same-length rewrite confined to the middle
+/// was adopted as the graded original, and the #1448 re-grade gate never
+/// fired). The interior is now sampled at fixed stride: kStampMiddleWindows
+/// evenly spaced windows between the two end windows. The windows may
+/// overlap (files ≲ 8× window are fully covered) — this is a fingerprint,
+/// not a dedup — and the bytes read stay bounded at
+/// (kStampMiddleWindows + 2) × window regardless of artifact size.
+/// The encoding stays opaque to the checkpoint schema (#1448 left it
+/// evolvable — old mtime:size, head-only and head+tail stamps simply stop
+/// matching and fail closed to re-grading).
 /// Empty when the artifact is gone or unreadable (unverifiable → re-grade).
 QString artifactStamp( const QString &path )
 {
@@ -64,11 +72,25 @@ QString artifactStamp( const QString &path )
     if ( !info.exists() )
         return QString();
     constexpr qint64 kStampWindowBytes = 64 * 1024;
+    constexpr int kStampMiddleWindows = 6;
     QFile f( path );
     if ( !f.open( QIODevice::ReadOnly ) )
         return QString();
-    QByteArray fingerprint = f.read( kStampWindowBytes );
     const qint64 size = info.size();
+    QByteArray fingerprint = f.read( kStampWindowBytes );
+    if ( size > 2 * kStampWindowBytes )
+    {
+        // Fixed-stride interior sampling: stride is chosen so every sample
+        // offset lands strictly inside [head window, tail window).
+        const qint64 interior = size - 2 * kStampWindowBytes;
+        const qint64 stride = interior / ( kStampMiddleWindows + 1 );
+        for ( int i = 1; i <= kStampMiddleWindows; ++i )
+        {
+            if ( !f.seek( kStampWindowBytes + i * stride ) )
+                return QString();
+            fingerprint += f.read( kStampWindowBytes );
+        }
+    }
     if ( size > kStampWindowBytes
          && f.seek( size - kStampWindowBytes ) )
         fingerprint += f.read( kStampWindowBytes );
