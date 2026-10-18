@@ -68,6 +68,8 @@
 #include <qgsmessagebaritem.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
+#include <qgslayertreeview.h>
+#include <qgslayertree.h>
 #include <qgsrasterlayer.h>
 
 CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
@@ -879,5 +881,89 @@ TEST_CASE( "Digitizing tools gate on geometry type and expose reasons (R16-D T07
     layer->rollBack();
   }
 
+  purgeProjectLayers();
+}
+
+// ── R16-D T07 review R2 P1: discard path survives a pending relocation ─────
+
+TEST_CASE( "Layer switch during a deferred relocation does not crash (R16-D T07 R2)",
+           "[app][vector_edit][r16d_t07][deferred_switch]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  REQUIRE( fx.window.projectContext() != nullptr );
+  sicnu::data::DataManager &dataManager = fx.window.projectContext()->dataManager();
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = QStringLiteral( "ogr" );
+  source.canonicalSource = vector_test_fixtures::syntheticGeoJsonPath();
+  const auto registered = dataManager.registerSource(
+    sicnu::data::RegisterRequest{ source } );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  const sicnu::data::AssetId assetId = registered.assetId;
+  QTest::qWait( 100 );
+
+  QgsVectorLayer *assetLayer = nullptr;
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+  {
+    auto *v = qobject_cast<QgsVectorLayer *>( l );
+    if ( v && sicnu::data::AssetId::fromString(
+                  v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) &&
+         *sicnu::data::AssetId::fromString(
+            v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) == assetId )
+    {
+      assetLayer = v;
+      break;
+    }
+  }
+  REQUIRE( assetLayer != nullptr );
+  fx.window.mapCanvas()->setCurrentLayer( assetLayer );
+  QTest::qWait( 20 );
+  fx.window.toggleEditing();
+  REQUIRE( assetLayer->isEditable() );
+
+  // An asset change mid-session defers the relocation (buffered edits kept).
+  dataManager.notifyExternalContentChange( assetId );
+
+  // Switching the current layer drives confirmSaveEdits' not-modified path:
+  // rollBack + rollbackEditLease -> the deferred relocation proceeds and
+  // destroys the editing layer synchronously. The switch (and this test)
+  // must survive it (review R16-D R2 P1).
+  QPointer<QgsVectorLayer> doomed( assetLayer );
+  auto *other = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                    QStringLiteral( "switch_target" ),
+                                    QStringLiteral( "memory" ) );
+  QgsProject::instance()->addMapLayer( other );
+  QTest::qWait( 20 );
+  // Drive the REAL switch path: onLayerTreeClicked (the only caller of
+  // confirmSaveEdits). The tree view carries no model in this fixture
+  // (ActiveViewHost wires it per view), so a null index walks the same
+  // branch a real click on a non-layer row takes: index2node -> null ->
+  // newLayer(null) != currentVl -> confirmSaveEdits.
+  QVERIFY( QMetaObject::invokeMethod( &fx.window, "onLayerTreeClicked",
+                                      Q_ARG( QModelIndex, QModelIndex() ) ) );
+  QTest::qWait( 50 );
+
+  CHECK( doomed.isNull() ); // relocated under the session end
+  // The Display Layer identity survives with a fresh, non-editing layer.
+  bool replacementPresent = false;
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+  {
+    auto *v = qobject_cast<QgsVectorLayer *>( l );
+    if ( v && sicnu::data::AssetId::fromString(
+                  v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) &&
+         *sicnu::data::AssetId::fromString(
+            v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) == assetId )
+    {
+      replacementPresent = true;
+      CHECK_FALSE( v->isEditable() );
+    }
+  }
+  CHECK( replacementPresent );
+
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+    if ( auto *v = qobject_cast<QgsVectorLayer *>( l ) )
+      v->rollBack();
   purgeProjectLayers();
 }

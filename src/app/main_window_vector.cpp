@@ -419,11 +419,21 @@ bool QgisDesktopWindow::confirmSaveEdits(QgsVectorLayer *vl)
         else
         {
             vl->rollBack();
+            // rollbackEditLease retries deferred relocations, which may
+            // relocate (and destroy) THIS layer synchronously — snapshot
+            // identity and re-resolve (review R16-D R2 P1; same hazard the
+            // Save path above already handles).
+            const QString discardId = vl->id();
             rollbackEditLease( vl );
+            vl = qobject_cast<QgsVectorLayer *>(
+                QgsProject::instance()->mapLayer( discardId ) );
         }
     } else {
         vl->rollBack();
+        const QString discardId = vl->id();
         rollbackEditLease( vl );
+        vl = qobject_cast<QgsVectorLayer *>(
+            QgsProject::instance()->mapLayer( discardId ) );
     }
     updateEditingUI(vl);
     return true;

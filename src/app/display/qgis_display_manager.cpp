@@ -814,7 +814,9 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
                        "with buffered edits; it will relocate when the "
                        "session ends")));
   }
-  m_impl->pendingRelocations.erase(layerId.toString());
+  // A deferred marker is cleared only at the success return below — a
+  // mid-flight failure keeps it so the next assetChanged (or lease release)
+  // retries instead of silently dropping the swap (review R16-D R2 P3).
 
   // Capture the authoritative runtime presentation state before replacing the
   // layer, so the relocated layer keeps its renderer.
@@ -904,6 +906,7 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
   layerRecord->mapLayer = storedLayer;
   layerRecord->lease = acquired.take();
 
+  m_impl->pendingRelocations.erase(layerId.toString());
   return data::Result<void>::success();
 }
 
