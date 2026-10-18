@@ -571,6 +571,14 @@ r6_dev.cmd
 
 # r15-C local build/test driver scratch (evidence distilled into .planning/).
 
+# hardening/r15-D-pi-mcp-workflow: planning evidence (markdown only; logs/build stay local).
+# hardening/r15-D-pi-mcp-workflow: planning evidence (markdown only; logs/build stay local).
+# hardening/r15-D-pi-mcp-workflow (R15 track D): planning notes (markdown only; logs stay local).
+!.planning/r15-d/
+.planning/r15-d/*
+!.planning/r15-d/*.md
+
+# hardening/r15-E-desktop-teaching-help: planning evidence (markdown only; logs/build stay local).
 # hardening/r15-E-desktop-teaching-help: planning evidence (markdown only; logs/build stay local).
 # hardening/r15-E-desktop-teaching-help (R15 track E): planning notes (markdown only; logs stay local).
 !.planning/r15-E/
