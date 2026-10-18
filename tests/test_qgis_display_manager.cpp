@@ -31,6 +31,8 @@
 #include <qgsvectorlayer.h>
 
 #include "app/display/qgis_display_manager.h"
+
+#include <cmath>
 #include "app/map_tools/swipe_map_tool.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
@@ -1229,4 +1231,133 @@ TEST_CASE( "Removing a Display Layer settles the swipe tool's registered compare
   QTest::qWait(50); // any late finished/deleteLater callbacks
   REQUIRE_FALSE(tool.hasPendingCompareRender());
   tool.deactivate();
+}
+
+// ── R16-D T07: relocation vs edit sessions; typed visibility; piecewise ───
+
+#include "app/display/piecewise_linear_enhancement.h"
+
+#include <QPointer>
+
+TEST_CASE( "Relocation defers while the layer holds an edit session (R16-D T07 WP-1)",
+          "[qgis_display_manager][r16d_t07][relocate_editing]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewId = createView(displayManager, canvas, layerTree, layerStore);
+  const sicnu::data::AssetId assetId = registerVector(dataManager);
+
+  const auto added = displayManager.addLayer(viewId, assetId);
+  REQUIRE(added);
+  const DisplayLayerId layerId = added.value();
+  auto *layer = qobject_cast<QgsVectorLayer *>(displayManager.mapLayer(layerId));
+  REQUIRE(layer != nullptr);
+
+  // Buffer an edit (no commit): the layer is mid-session.
+  layer->startEditing();
+  QgsFeature f(layer->fields());
+  f.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(1, 1)));
+  REQUIRE(layer->addFeature(f));
+  REQUIRE(layer->isEditable());
+  REQUIRE(layer->isModified());
+
+  QPointer<QgsVectorLayer> watched(layer);
+  const QString qgisId = layer->id();
+
+  // The asset changed under the session: the swap must DEFER, not destroy
+  // the editing layer (buffered edits survive; the pointer stays valid).
+  dataManager.notifyExternalContentChange(assetId);
+  CHECK_FALSE(watched.isNull());
+  if (!watched.isNull()) {
+    CHECK(watched->isEditable());
+    CHECK(watched->isModified());
+  }
+
+  // Session end (rollback = discard buffer): the next change relocates.
+  layer->rollBack();
+  dataManager.notifyExternalContentChange(assetId);
+  CHECK(watched.isNull());
+  // The Display Layer identity survives with a fresh QGIS layer.
+  QgsMapLayer *replacement = displayManager.mapLayer(layerId);
+  REQUIRE(replacement != nullptr);
+  CHECK(replacement->id() != qgisId);
+}
+
+TEST_CASE( "setLayerVisible fails typed when the tree node is missing (R16-D T07 WP-5)",
+          "[qgis_display_manager][r16d_t07][visible]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewId = createView(displayManager, canvas, layerTree, layerStore);
+  const sicnu::data::AssetId assetId = registerVector(dataManager);
+  const auto added = displayManager.addLayer(viewId, assetId);
+  REQUIRE(added);
+  const DisplayLayerId layerId = added.value();
+  auto *layer = displayManager.mapLayer(layerId);
+  REQUIRE(layer != nullptr);
+
+  // A happy-path toggle still applies and succeeds.
+  REQUIRE(displayManager.setLayerVisible(layerId, false));
+  CHECK_FALSE(displayManager.isLayerVisible(layerId));
+  REQUIRE(displayManager.setLayerVisible(layerId, true));
+  CHECK(displayManager.isLayerVisible(layerId));
+
+  // Remove the tree node out-of-band: the request cannot apply, so it must
+  // FAIL typed — reporting success would let linked-visibility propagate a
+  // state that was never applied.
+  if (QgsLayerTreeLayer *node = layerTree.findLayer(layer->id()))
+    if (QgsLayerTreeGroup *parent = qobject_cast<QgsLayerTreeGroup *>(node->parent()))
+      parent->removeChildNode(node);
+  const auto result = displayManager.setLayerVisible(layerId, true);
+  REQUIRE_FALSE(result);
+  CHECK(result.diagnostics().first().code ==
+        QStringLiteral("display.layer_tree_node_missing"));
+}
+
+TEST_CASE( "PiecewiseLinearEnhancement bisection matches the linear-scan reference (R16-D T07 WP-7)",
+          "[display][r16d_t07][piecewise]" )
+{
+  using rs::display::PiecewiseLinearEnhancement;
+  using rs::display::ControlPoint;
+
+  // 257 monotone points — the shape gamma/equalization curves inject.
+  std::vector<ControlPoint> points;
+  for (int i = 0; i <= 256; ++i)
+    points.push_back(ControlPoint{ i * 8.0, i / 2.0 });
+
+  // Linear-scan reference (the pre-bisection semantics).
+  const auto reference = [ & ]( double v ) {
+    if (v <= points.front().x)
+      return static_cast<int>(std::lround(points.front().y));
+    if (v >= points.back().x)
+      return static_cast<int>(std::lround(points.back().y));
+    for (size_t i = 0; i + 1 < points.size(); ++i) {
+      if (v >= points[i].x && v <= points[i + 1].x) {
+        const double t = (points[i + 1].x > points[i].x)
+                           ? (v - points[i].x) / (points[i + 1].x - points[i].x) : 0.0;
+        return static_cast<int>(std::lround(points[i].y + t * (points[i + 1].y - points[i].y)));
+      }
+    }
+    return 0;
+  };
+
+  PiecewiseLinearEnhancement enhancement(Qgis::DataType::Float32, 0.0, 2048.0, points);
+  for (double v = -10.0; v <= 2060.0; v += 0.37)
+  {
+    INFO("value " << v);
+    CHECK(enhancement.enhance(v) == reference(v));
+  }
+  // Exact control points and segment midpoints.
+  for (int i = 0; i <= 256; ++i) {
+    CHECK(enhancement.enhance(i * 8.0) == reference(i * 8.0));
+    CHECK(enhancement.enhance(i * 8.0 + 4.0) == reference(i * 8.0 + 4.0));
+  }
 }

@@ -33,6 +33,8 @@
 
 #include "support/qt_lifecycle.h"
 
+#include "vector_test_fixtures.h"
+
 #include "main_window.h"
 #include "qgis_app_facade.h"
 #include "qgsclipboard.h"
@@ -66,6 +68,7 @@
 #include <qgsmessagebaritem.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h>
 
 CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
@@ -685,4 +688,194 @@ TEST_CASE( "RsJobPanel: Load requires loadable outputs and counts only successfu
   CHECK( anyModalContains( modals, QStringLiteral( "No loadable output path" ) ) );
 
   sicnu::TaskCenter::instance().clearCompletedTasks();
+}
+
+// ── R16-D T07 WP-1: edit-lease lifecycle ───────────────────────────────────
+
+#include "project_context.h"
+#include "data/data_manager.h"
+
+TEST_CASE( "Edit lease is held for the session, exclusive, and committed (R16-D T07 WP-1)",
+           "[app][vector_edit][r16d_t07][lease]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  REQUIRE( fx.window.projectContext() != nullptr );
+  sicnu::data::DataManager &dataManager = fx.window.projectContext()->dataManager();
+
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = QStringLiteral( "ogr" );
+  source.canonicalSource = vector_test_fixtures::syntheticGeoJsonPath();
+  const auto registered = dataManager.registerSource(
+    sicnu::data::RegisterRequest{ source } );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  const sicnu::data::AssetId assetId = registered.assetId;
+  // Auto-display policy presents the asset on the main view.
+  QTest::qWait( 100 );
+
+  QgsVectorLayer *assetLayer = nullptr;
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+  {
+    auto *v = qobject_cast<QgsVectorLayer *>( l );
+    if ( v && sicnu::data::AssetId::fromString(
+                  v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) &&
+         *sicnu::data::AssetId::fromString(
+            v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) == assetId )
+    {
+      assetLayer = v;
+      break;
+    }
+  }
+  REQUIRE( assetLayer != nullptr );
+  fx.window.mapCanvas()->setCurrentLayer( assetLayer );
+  QTest::qWait( 20 );
+
+  const auto revisionBefore = dataManager.asset( assetId )->revision();
+
+  // Start editing through the shell: the lease must be HELD, not acquired
+  // and released inside acquireEditLease().
+  fx.window.toggleEditing();
+  REQUIRE( assetLayer->isEditable() );
+  CHECK( dataManager.hasActiveEditLease( assetId ) );
+
+  // Exclusivity: a second editor is refused while the session holds the
+  // lease (the conflict dialog path in acquireEditLease).
+  const auto second = dataManager.acquire(
+    sicnu::data::AssetRef{ assetId, revisionBefore },
+    sicnu::data::AssetUse{ sicnu::data::LeaseKind::Edit,
+                           QStringLiteral( "other view" ) } );
+  CHECK_FALSE( second );
+
+  // saveEdits: the commit advances the asset revision (stale sibling
+  // layers refresh) and the session continues under a re-acquired lease.
+  QgsFeature f( assetLayer->fields() );
+  f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 2, 2 ) ) );
+  if ( !assetLayer->isEditable() )
+    REQUIRE( assetLayer->startEditing() );
+  REQUIRE( assetLayer->addFeature( f ) );
+  REQUIRE( assetLayer->isModified() );
+  fx.window.saveEdits();
+  const auto revisionAfterSave = dataManager.asset( assetId )->revision();
+  CHECK( revisionAfterSave.value() > revisionBefore.value() );
+  CHECK( dataManager.hasActiveEditLease( assetId ) );
+
+  // Stop editing (no pending edits after the save): the lease is released.
+  // The session now lives on the relocated replacement layer — re-select it
+  // as the canvas current layer (the shell cleared the stale pointer when
+  // the old layer was removed) before stopping, exactly as a user would.
+  QgsVectorLayer *replacement = nullptr;
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+  {
+    auto *v = qobject_cast<QgsVectorLayer *>( l );
+    if ( v && sicnu::data::AssetId::fromString(
+                  v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) &&
+         *sicnu::data::AssetId::fromString(
+            v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) == assetId &&
+         v->isEditable() )
+    {
+      replacement = v;
+      break;
+    }
+  }
+  REQUIRE( replacement != nullptr );
+  fx.window.mapCanvas()->setCurrentLayer( replacement );
+  QTest::qWait( 20 );
+  fx.window.toggleEditing();
+  CHECK_FALSE( dataManager.hasActiveEditLease( assetId ) );
+
+  // Cleanup: end any edit state the re-resolved replacement layer holds.
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+    if ( auto *v = qobject_cast<QgsVectorLayer *>( l ) )
+      v->rollBack();
+  purgeProjectLayers();
+}
+
+// ── R16-D T07 WP-2/WP-3: action gating + unavailability reasons ────────────
+
+TEST_CASE( "Digitizing tools gate on geometry type and expose reasons (R16-D T07 WP-2/WP-3)",
+           "[app][vector_edit][r16d_t07][gating]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  const auto reasonOf = []( QAction *a ) {
+    return a->property( "sicnu/unavailableReason" ).toString();
+  };
+
+  SECTION( "no editable layer: disabled with a reason" )
+  {
+    // currentLayerChanged drives updateEditingUI (main_window_connections);
+    // a null current layer does not always emit, so drive it the way a user
+    // does: select a non-vector layer.
+    auto *raster = new QgsRasterLayer(
+      QStringLiteral( "wms:?crs=EPSG:4326" ), QStringLiteral( "no_vector_sel" ),
+      QStringLiteral( "wms" ) );
+    QgsProject::instance()->addMapLayer( raster );
+    fx.window.mapCanvas()->setCurrentLayer( raster );
+    QTest::qWait( 20 );
+    QAction *node = fx.window.editingAction( QStringLiteral( "mActionVertexTool" ) );
+    REQUIRE( node != nullptr );
+    CHECK_FALSE( node->isEnabled() );
+    CHECK_FALSE( reasonOf( node ).isEmpty() );
+    CHECK( node->toolTip().contains( reasonOf( node ) ) );
+  }
+
+  const auto adoptEditing = [ &fx ]( const QString &geomType, const QString &name ) {
+    auto *layer = new QgsVectorLayer(
+      geomType + QStringLiteral( "?crs=EPSG:4326" ), name, QStringLiteral( "memory" ) );
+    REQUIRE( layer->isValid() );
+    QgsProject::instance()->addMapLayer( layer );
+    fx.window.mapCanvas()->setCurrentLayer( layer );
+    QTest::qWait( 20 );
+    fx.window.toggleEditing();
+    REQUIRE( layer->isEditable() );
+    return layer;
+  };
+
+  SECTION( "point layer: line/polygon-only tools disabled with reasons" )
+  {
+    QgsVectorLayer *layer =
+      adoptEditing( QStringLiteral( "Point" ), QStringLiteral( "pts" ) );
+    QAction *node = fx.window.editingAction( QStringLiteral( "mActionVertexTool" ) );
+    CHECK( node->isEnabled() );
+    CHECK( reasonOf( node ).isEmpty() );
+    for ( const char *name :
+          { "mActionOffsetCurve", "mActionReverseLine", "mActionAddRing",
+            "mActionFillRing", "mActionDeletePart" } )
+    {
+      QAction *a = fx.window.editingAction( QLatin1String( name ) );
+      INFO( name );
+      REQUIRE( a != nullptr );
+      CHECK_FALSE( a->isEnabled() );
+      CHECK_FALSE( reasonOf( a ).isEmpty() );
+    }
+    layer->rollBack();
+  }
+
+  SECTION( "line layer: ring tools stay disabled, line tools enabled" )
+  {
+    QgsVectorLayer *layer =
+      adoptEditing( QStringLiteral( "LineString" ), QStringLiteral( "lins" ) );
+    CHECK( fx.window.editingAction( QStringLiteral( "mActionOffsetCurve" ) )->isEnabled() );
+    QAction *ring = fx.window.editingAction( QStringLiteral( "mActionAddRing" ) );
+    CHECK_FALSE( ring->isEnabled() );
+    CHECK_FALSE( reasonOf( ring ).isEmpty() );
+    layer->rollBack();
+  }
+
+  SECTION( "polygon layer: ring tools enabled, reverse-line disabled" )
+  {
+    QgsVectorLayer *layer =
+      adoptEditing( QStringLiteral( "Polygon" ), QStringLiteral( "polys" ) );
+    CHECK( fx.window.editingAction( QStringLiteral( "mActionAddRing" ) )->isEnabled() );
+    QAction *rev = fx.window.editingAction( QStringLiteral( "mActionReverseLine" ) );
+    CHECK_FALSE( rev->isEnabled() );
+    CHECK_FALSE( reasonOf( rev ).isEmpty() );
+    layer->rollBack();
+  }
+
+  purgeProjectLayers();
 }
