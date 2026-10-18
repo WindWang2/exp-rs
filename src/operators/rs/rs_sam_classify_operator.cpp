@@ -68,11 +68,6 @@ Json::Value RsSamClassifyOperator::metadata() const {
                                   "band grid when wavelength metadata is present." );
     meta["limitations"].append( "SID requires non-negative reflectance-like spectra (a zero or negative "
                                 "band invalidates the pair)." );
-    meta["limitations"].append( "Bands without a declared NoData are matched on non-finite values only "
-                                "(NaN-only policy): a -9999 sample in an undeclared band is treated as "
-                                "data, not a void. This deliberately differs from rs:spectral_similarity's "
-                                "family fallback (-9999 voids when no band declares a sentinel) — declare "
-                                "NoData explicitly to unify both paths." );
     return meta;
 }
 

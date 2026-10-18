@@ -354,11 +354,7 @@ RsSegmentMap RsMultiresSegmenter::segment(
             for ( int b = 0; b < bandCount; ++b )
             {
                 float val = bands[b][idx];
-                // A09: exact float-cast equality via the shared contract —
-                // an epsilon match silently voids legitimate values near the
-                // sentinel (a 5e-7 reflectance next to a 0.0 nodata raster)
-                // while the contract's exact compare keeps them valid.
-                if ( sicnu::rs::isNoDataValue( val, nodata ) )
+                if ( !std::isfinite( val ) || ( !std::isnan( nodata ) && std::abs( val - nodata ) < 1e-6f ) )
                 {
                     isPixelNodata = true;
                     break;

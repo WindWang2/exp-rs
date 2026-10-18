@@ -33,20 +33,31 @@ test("the shared bridge tears the child down on stream desync (F-PI-1)", () => {
   );
   // The kill assertion is scoped to the failDesyncedStream BODY (from the
   // signature to the next method boundary) — an unbounded wildcard would
-  // false-pass by matching stop()'s child.kill() instead (review R-B1).
+  // false-pass by matching stop()'s kill instead (review R-B1). The ladder
+  // itself lives in the shared terminateChild() helper (stdin destroy +
+  // SIGTERM + armed SIGKILL), pinned below on that helper's own body.
   const teardown = bridgeSource.match(
     /failDesyncedStream\(err: Error\): void \{[^]*?\n  \}\n/,
   );
   assert.ok(teardown, "failDesyncedStream body not found");
   assert.match(
     teardown[0],
+    /terminateChild\(child\)/,
+    "failDesyncedStream must tear the child down so lazy respawn replaces it",
+  );
+  const ladder = bridgeSource.match(
+    /terminateChild\(child: ChildProcess\): void \{[^]*?\n  \}\n/,
+  );
+  assert.ok(ladder, "terminateChild body not found");
+  assert.match(
+    ladder[0],
     /child\.kill\(\)/,
-    "failDesyncedStream must kill the child so lazy respawn replaces it",
+    "terminateChild must SIGTERM the child",
   );
   assert.match(
-    teardown[0],
+    ladder[0],
     /kill\("SIGKILL"\)/,
-    "failDesyncedStream must escalate to SIGKILL (review R-B4)",
+    "terminateChild must escalate to SIGKILL (review R-B4)",
   );
   // Exactly one overflow rejection path: one call site plus the shared
   // teardown definition, and no leftover inline buffer-clear-and-return.

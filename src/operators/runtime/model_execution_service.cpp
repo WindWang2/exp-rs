@@ -188,37 +188,8 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   const ModelReadiness runtimeReadiness =
     evaluateRuntimeReadiness( model, hw, &runtimeReason );
   if ( runtimeReadiness != ModelReadiness::Ready )
-  {
-    // R15-C C11 (F11): a VRAM-BUDGET refusal is a resource/deployment
-    // condition (manifest estimate vs host budget), not invalid input data —
-    // the chunk bridge already projects the same class onto
-    // ResourceBudgetExceeded, and a user reading "invalid input data" for a
-    // host-budget condition would go audit their raster. Hardware-availability
-    // verdicts (no CUDA, unaddressable device) keep InvalidInputData.
-    // The match targets the readiness layer's own spellings ("model requires
-    // N MiB VRAM but the host budget is M MiB", "model needs N MiB VRAM but
-    // the budget is M MiB and cpu_fallback is disabled") — both carry the
-    // contiguous "VRAM but"; a reword of either must update this test-pinned
-    // contract (test_r15_C_provider_degradation).
-    //
-    // Known spelling gaps (review R2 P3; a string projection is inherently
-    // brittle — a typed reason out of evaluateRuntimeReadiness is the real
-    // fix, deferred as a signature change):
-    //   * resolveDevice's "no fitting CUDA device and cpu_fallback is
-    //     disabled" (reachable only via an explicit runtime.device token) is
-    //     a MIXED condition (no device at all vs no device with room) and
-    //     deliberately stays InvalidInputData — calling it a budget error
-    //     would misdirect a no-GPU host.
-    //   * a fallback chain whose PRIMARY candidate failed for a non-budget
-    //     reason while a FALLBACK candidate failed on budget accumulates both
-    //     into the reason while the verdict stays the primary's, so the
-    //     projection can read the fallback's "VRAM but". The chain-wide trail
-    //     is documented behavior; the primary verdict wins.
-    const bool vramBudget = runtimeReason.find( "VRAM but" ) != std::string::npos;
-    throw RSOperatorError( vramBudget ? ErrorCode::ResourceBudgetExceeded
-                                      : ErrorCode::InvalidInputData,
+    throw RSOperatorError( ErrorCode::InvalidInputData,
                            "Model '" + model.name + "' cannot execute: " + runtimeReason );
-  }
 
   if ( multiInput && request.asDetection )
     throw RSOperatorError( ErrorCode::InvalidInputData,
@@ -309,29 +280,9 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
        && ( request.confOverride >= 0.0 || request.nmsIouOverride >= 0.0 ) )
   {
     if ( request.confOverride >= 0.0 )
-    {
-      // R15-C C14 (B5): an APPLIED override must satisfy the decode
-      // contract's own bounds — the operator schema declares conf/nms_iou in
-      // [0,1] / (0,1] but nothing enforced it, so conf=2.5 used to produce a
-      // silent EMPTY product with exit code 0 (the user concludes the model
-      // is broken) and nms_iou=0 disabled suppression and then tripped the
-      // misleading "raise the cap or lower the conf_threshold" guard. Refuse
-      // typed here, at the single seam every entry (CLI/SDK/Agent/UI) funnels
-      // through, instead of trusting each caller's validation.
-      if ( request.confOverride > 1.0 )
-        throw RSOperatorError( ErrorCode::InvalidParameter,
-                               "conf must be in [0, 1] (declared "
-                                 + std::to_string( request.confOverride ) + ")" );
       effectiveModel.output.detection.confThreshold = request.confOverride;
-    }
     if ( request.nmsIouOverride >= 0.0 )
-    {
-      if ( request.nmsIouOverride <= 0.0 || request.nmsIouOverride > 1.0 )
-        throw RSOperatorError( ErrorCode::InvalidParameter,
-                               "nms_iou must be in (0, 1] (declared "
-                                 + std::to_string( request.nmsIouOverride ) + ")" );
       effectiveModel.output.detection.nmsIou = request.nmsIouOverride;
-    }
   }
 
   TileInferenceRunOptions options;

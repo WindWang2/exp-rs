@@ -56,21 +56,11 @@ TileRunSpec makeSpec( const std::string &operatorId, const Json::Value &canonica
     return spec;
 }
 
-/// Hard RAM admission gate. Returns the queue capacity the run must use:
-/// the requested one when the plan admits it, the planner's RECOMMENDED
-/// capacity when the plan is ReduceConcurrency (a reduced plan admitted at
-/// the requested capacity would execute above the run's own budget — the
-/// exact failure the gate exists to prevent), and throws AdmissionRefused
-/// (→ ResourceBudgetExceeded through the chunk error bridge) on Refuse.
-/// The Spill rung stays unreachable here by design: this adoption kit's
-/// gate is RAM-only and request.allowSpill is deliberately left unset —
-/// external-memory operators opt in through the governor directly.
-std::uint32_t admitThroughGovernor( const ChunkedRunOptions &options,
-                                    const TileRunPartition &partition,
-                                    std::uint32_t queueCapacity )
+void admitThroughGovernor( const ChunkedRunOptions &options, const TileRunPartition &partition,
+                           std::uint32_t queueCapacity )
 {
     if ( options.ramBudgetBytes == 0 )
-        return queueCapacity;
+        return;
     // Pure planning (no filesystem side effects): the planner IS the gate;
     // the governor object exists for hosts that also need its enforced
     // scratch/write budgets, not for this decision.
@@ -85,11 +75,6 @@ std::uint32_t admitThroughGovernor( const ChunkedRunOptions &options,
     const TileMemoryPlan plan = planTileMemory( request );
     if ( plan.action == TileMemoryPlan::Action::Refuse )
         throw sicnu::runtime::exec::AdmissionRefused( plan.reason );
-    if ( plan.action == TileMemoryPlan::Action::ReduceConcurrency
-         && plan.recommendedQueueCapacity > 0
-         && plan.recommendedQueueCapacity < queueCapacity )
-        return plan.recommendedQueueCapacity;
-    return queueCapacity;
 }
 
 ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &context,
@@ -231,8 +216,7 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
 ChunkedRunResult runPipelineMode( const TileRunSpec &spec, RSOperatorContext &context,
                                   const ChunkTileKernel &kernel,
                                   const std::function<void( const TilePayload & )> &sink,
-                                  const ChunkedRunOptions &options,
-                                  std::uint32_t queueCapacity )
+                                  const ChunkedRunOptions &options )
 {
     const ChunkCancelBridge bridge( context );
     const std::uint64_t total = spec.partition.totalTiles();
@@ -253,7 +237,7 @@ ChunkedRunResult runPipelineMode( const TileRunSpec &spec, RSOperatorContext &co
     };
 
     ChunkPipeline::Config cfg;
-    cfg.queueCapacity = queueCapacity;
+    cfg.queueCapacity = options.pipelineQueueCapacity;
     ChunkPipeline pipeline( producer, {}, [&bridge, &sink]( TilePayload &&p ) {
         bridge.throwIfCancelled();
         sink( p );
@@ -346,22 +330,17 @@ ChunkedRunResult runChunkedOperator(
     const TileRunSpec spec = makeSpec( operatorId, canonicalParams, partition, determinism );
 
     // Hard admission first (fail before any work): AdmissionRefused maps to
-    // ResourceBudgetExceeded through the chunk error bridge below. The gate
-    // also returns the queue capacity the planner recommends when the budget
-    // only fits a reduced shape — the pipeline runs at THAT capacity, never
-    // above the run's own budget (R15-C C11/C12 F1).
-    std::uint32_t effectiveQueueCapacity = options.pipelineQueueCapacity;
+    // ResourceBudgetExceeded through the chunk error bridge below.
     runWithChunkErrorTranslation( [&] {
-        effectiveQueueCapacity = admitThroughGovernor(
-            options, partition,
-            options.mode == ChunkedRunOptions::Mode::Pipeline
-                ? options.pipelineQueueCapacity
-                : 1 );
+        admitThroughGovernor( options, partition,
+                              options.mode == ChunkedRunOptions::Mode::Pipeline
+                                  ? options.pipelineQueueCapacity
+                                  : 1 );
         return 0;
     } );
 
     if ( options.mode == ChunkedRunOptions::Mode::Pipeline )
-        return runPipelineMode( spec, context, kernel, sink, options, effectiveQueueCapacity );
+        return runPipelineMode( spec, context, kernel, sink, options );
     return runResumable( spec, context, kernel, sink, options );
 }
 

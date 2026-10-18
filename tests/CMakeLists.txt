@@ -3041,30 +3041,6 @@ sicnu_add_test(test_model_catalog_v2)
 # contracts, closed-vocabulary unknown-key refusal (QtCore only).
 sicnu_add_test(test_model_manifest7)
 
-# R15-C WP-C02: registration-time cross-constraints (detection fixed-frame
-# contract, square-head explicit-definition rule, heads dtype vocabulary).
-# QtCore only, like the manifest tests above.
-sicnu_add_test(test_r15_C_manifest_contracts)
-
-# R15-C WP-C13: publish crash-suffix adoption (companion-parked detection
-# suffix, sidecar-parked raster suffix) — guard-level, no provider needed.
-sicnu_add_test(test_r15_C_publish_recovery)
-
-# R15-C WP-C11/C12: RAM admission ladder (ReduceConcurrency honored) + the
-# VRAM ledger's overflow/phantom-holder/partial-release contracts.
-sicnu_add_test(test_r15_C_chunk_admission)
-
-# R15-C WP-C05/C14/C16: provider degradation diagnostics, cross-provider
-# failure taxonomy, and the multi-input capability preflight.
-sicnu_add_test(test_r15_C_provider_degradation)
-
-# R15-C WP-C07: the single-input engine's per-tile coverage gate.
-sicnu_add_test(test_r15_C_runtime_contracts)
-
-# R15-C WP-C06/C08: deterministic golden contracts for the detection
-# postprocess surface (pure functions — dedup key width, NMS boundaries).
-sicnu_add_test(test_r15_C_detection_decode)
-
 # Model runtime registry, ONNX provider, tile inference engine and rs:infer
 # integration (needs OpenCV for the cv::dnn surface).
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND)

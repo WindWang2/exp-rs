@@ -141,8 +141,6 @@ class ChunkGraph
         SinkFn sink;
         std::vector<NodeId> inputs;   ///< stage/join/sink: input node ids (ordered)
         std::shared_ptr<BoundedChunkQueue<TilePayload>> out; ///< null for the sink
-        int sourceIndex = -1;         ///< assigned by run(): this source's slot
-                                      ///< in m_perSourceTiles (-1 for non-sources)
     };
 
     using QueuePtr = std::shared_ptr<BoundedChunkQueue<TilePayload>>;
@@ -184,13 +182,6 @@ class ChunkGraph
     mutable RunState m_state; ///< reset by run(); mutable: const observers lock it
     std::atomic<size_t> m_completedTiles{ 0 };
     std::atomic<int> m_sourceTileCount{ 0 }; ///< total tiles any source emitted
-    /// Per-source emission counts (R15-C C12 / F7). The progress denominator
-    /// for a JOIN is ONE aligned source's count, never the sum over all
-    /// sources: a 2-input join consumes 2N source tiles and completes N, so
-    /// the sum capped progress at 0.5 and never reported 1.0. A linear chain
-    /// has a single source, so its denominator is unchanged.
-    std::unique_ptr<std::atomic<int>[]> m_perSourceTiles;
-    int m_perSourceCount = 0;
     std::atomic<double> m_lastProgress{ 0.0 }; ///< monotonic progress clamp (F-A-9)
     std::vector<std::thread> m_threads;
     bool m_ran = false; ///< one-run guard (F-A-18): threads are joined and

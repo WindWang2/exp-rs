@@ -509,15 +509,6 @@ class ModelRuntimeRegistry
     /// Traits for a registered framework (nullopt when unregistered) — used by
     /// readiness evaluation so cuda:N readiness matches what acquire enforces.
     std::optional<ProviderTraits> providerTraits( const std::string &framework ) const;
-    /// Actionable degradation text for a framework whose provider is NOT
-    /// registered in this build (R15-C C16/B2): each optional provider spells
-    /// its own recovery path ("rebuild with ONNX Runtime", "use the onnx
-    /// framework here", …). Empty when the framework has no optional provider
-    /// (built-ins are always registered) or the provider IS registered — the
-    /// caller composes it onto the generic unavailability message so a user
-    /// on a host without CUDA/ORT/OpenVINO/TRT gets a recoverable path
-    /// instead of an opaque "no runtime provider available".
-    std::string unavailableReason( const std::string &framework ) const;
 
     /// Current hardware capabilities (env-overridable detection; re-detected
     /// per call so admission sees live free VRAM — no caching by design).

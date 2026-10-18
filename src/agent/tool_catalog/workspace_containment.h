@@ -34,9 +34,43 @@
 #include <QUrl>
 
 #include <utility>
+#ifdef Q_OS_WIN
+#include <filesystem>
+#include <system_error>
+#endif
 
 namespace sicnu::agent::tool_catalog::containment
 {
+
+/// Canonical form of an EXISTING filesystem entry (the "deepest existing
+/// ancestor" in weaklyCanonicalPath). QFileInfo::canonicalFilePath() does
+/// not resolve Windows directory junctions — QFileInfo::isSymLink() reports
+/// false for mount-point reparse points — while the OS still traverses them,
+/// so a junction inside the workspace would silently escape the sandbox.
+/// std::filesystem::canonical resolves every reparse point to its final
+/// path on MSVC. Empty result = fail closed, same as a failed
+/// canonicalFilePath().
+inline QString canonicalExistingPath( const QFileInfo &info )
+{
+#ifdef Q_OS_WIN
+    std::error_code ec;
+    const std::filesystem::path resolved =
+        std::filesystem::canonical( std::filesystem::path( info.filePath().toStdWString() ), ec );
+    if ( ec )
+        return QString();
+    QString canon = QString::fromStdWString( resolved.lexically_normal().wstring() );
+    // GetFinalPathNameByHandle (which canonical() is built on) may return a
+    // verbatim \\?\ / \\?\UNC\ path; normalize back to the forward-slash,
+    // drive-letter form the rest of this header uses.
+    if ( canon.startsWith( QStringLiteral( "\\\\?\\UNC\\" ) ) )
+        canon = QStringLiteral( "//" ) + canon.mid( 8 );
+    else if ( canon.startsWith( QStringLiteral( "\\\\?\\" ) ) )
+        canon = canon.mid( 4 );
+    return QDir::fromNativeSeparators( canon );
+#else
+    return info.canonicalFilePath();
+#endif
+}
 
 inline Qt::CaseSensitivity pathCaseSensitivity()
 {
@@ -73,7 +107,7 @@ inline QString weaklyCanonicalPath( const QString &path )
         const QFileInfo info( head );
         if ( info.exists() )
         {
-            QString base = info.canonicalFilePath();
+            QString base = canonicalExistingPath( info );
             if ( base.isEmpty() )
                 return QString();
             for ( const QString &component : std::as_const( tail ) )

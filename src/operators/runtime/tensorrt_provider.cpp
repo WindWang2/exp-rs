@@ -24,12 +24,8 @@
 #include <opencv2/core.hpp>
 
 #include <QDebug>
-#include <QFileInfo>
-#include <QString>
 
 #include <algorithm>
-#include <atomic>
-#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -82,7 +78,7 @@ class TensorRtRuntime final : public IModelRuntime
 {
   public:
     TensorRtRuntime( const std::string &enginePath, int cudaIndex )
-      : mArtifact( enginePath ), m_cudaIndex( cudaIndex ) {}
+      : m_cudaIndex( cudaIndex ) { ( void )enginePath; }
 
     bool load( const std::string &enginePath, std::string *error )
     {
@@ -129,7 +125,6 @@ class TensorRtRuntime final : public IModelRuntime
           *error = "cudaStreamCreate failed";
         return false;
       }
-      mLoaded = true;
       return true;
     }
 
@@ -299,48 +294,16 @@ class TensorRtRuntime final : public IModelRuntime
       cudaFree( deviceInput );
       cudaFree( deviceOutput );
       if ( !ok )
-      {
-        m_failures.fetch_add( 1, std::memory_order_relaxed );
         throw RSOperatorError( ErrorCode::RuntimeProviderFailed,
                                "TensorRT inference failed — see the runtime log" );
-      }
-      m_forwards.fetch_add( 1, std::memory_order_relaxed );
       return out;
     }
 
-    // R15-C C05 (B9): honest health/memory reporting — the base class
-    // defaults marked every healthy TensorRT session UNHEALTHY with unknown
-    // weights, so provider-classified diagnostics disagreed with reality.
-    SessionHealth health() const override
-    {
-      SessionHealth health;
-      health.ok = mLoaded;
-      health.forwardsCompleted = m_forwards.load( std::memory_order_relaxed );
-      health.failures = m_failures.load( std::memory_order_relaxed );
-      return health;
-    }
-
-    SessionMemoryEstimate memoryEstimate() const override
-    {
-      // Honest estimate: the serialized engine plan is known; the device
-      // working set is not discoverable here — 0 = unknown, never invented.
-      SessionMemoryEstimate estimate;
-      const QFileInfo info( QString::fromStdString( mArtifact ) );
-      if ( info.exists() && info.isFile() )
-        estimate.weightsMb = static_cast<int>( ( info.size() + ( 1 << 20 ) - 1 ) >> 20 );
-      return estimate;
-    }
-
   private:
-    std::string mArtifact; ///< the engine file this session loaded (R15-C C05/B8:
-                           ///< was the hardcoded placeholder "tensorrt-engine",
-                           ///< a fabricated identity for payload consumers)
+    std::string mArtifact = "tensorrt-engine";
     int m_cudaIndex = 0;
     cudaStream_t mStream = nullptr;
     std::mutex m_inferMutex;
-    std::atomic<bool> mLoaded{ false };
-    std::atomic<std::uint64_t> m_forwards{ 0 };
-    std::atomic<std::uint64_t> m_failures{ 0 };
     std::unique_ptr<nvinfer1::IRuntime> mRuntime;
     std::unique_ptr<nvinfer1::ICudaEngine, EngineDeleter> mEngine;
     std::unique_ptr<nvinfer1::IExecutionContext, EngineDeleter> mContext;

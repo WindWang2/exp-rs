@@ -4,7 +4,6 @@
 #include "operators/runtime/model_runtime.h"
 
 #include <algorithm>
-#include <cstdint>
 
 namespace sicnu::operators::runtime {
 
@@ -82,25 +81,11 @@ bool VramLedger::tryReserve( int deviceIndex, int vramMb, const std::string &hol
     entry.reservedMb -= previousMb;
     entry.holders.erase( existing );
   }
-  // R15-C C11 (F2): the capacity check runs in 64-bit so an absurd estimate
-  // (a manifest may declare estimated_vram_mb = 2147483647 — the catalog
-  // clamps negatives to 0 but lets INT_MAX through) cannot wrap the int sum
-  // negative and be ADMITTED by the admission authority, after which the
-  // ledger would admit everything until a release clamped it back. The
-  // overflow used to be UB; now it is a typed refusal with honest numbers.
-  const std::int64_t projected =
-    static_cast<std::int64_t>( entry.reservedMb ) + static_cast<std::int64_t>( vramMb );
-  if ( projected > static_cast<std::int64_t>( entry.capacityMb ) )
+  if ( entry.reservedMb + vramMb > entry.capacityMb )
   {
     // Restore the previous reservation — a refused upgrade must not lose it.
-    // R15-C C11 (F3): restore ONLY when there WAS one; a refused first-time
-    // reservation must not leave a 0-MiB holder behind, or snapshot() /
-    // deviceReport() count failed attempts as live sessions.
-    if ( previousMb > 0 )
-    {
-      entry.holders[holder] = previousMb;
-      entry.reservedMb += previousMb;
-    }
+    entry.holders[holder] = previousMb;
+    entry.reservedMb += previousMb;
     if ( why )
       *why = "cuda:" + std::to_string( deviceIndex ) + " has " +
              std::to_string( entry.capacityMb - entry.reservedMb ) + " MiB free of " +
@@ -123,17 +108,9 @@ void VramLedger::release( int deviceIndex, int vramMb, const std::string &holder
   const auto holderIt = entry.holders.find( holder );
   if ( holderIt == entry.holders.end() )
     return; // idempotent release by contract
-  // R15-C C11 (F4): honor the amount handed in (clamped to the holder's own
-  // reservation) instead of always erasing the whole holder. Every production
-  // caller passes the exact reserved amount, so their observable behavior is
-  // unchanged; a partial release now keeps the remainder accounted instead of
-  // over-freeing the device, and an over-release still drops the holder.
   const int released = std::min( holderIt->second, std::max( 0, vramMb ) );
   entry.reservedMb = std::max( 0, entry.reservedMb - released );
-  if ( released >= holderIt->second )
-    entry.holders.erase( holderIt );
-  else
-    holderIt->second -= released;
+  entry.holders.erase( holderIt );
 }
 
 int VramLedger::reservedMb( int deviceIndex ) const

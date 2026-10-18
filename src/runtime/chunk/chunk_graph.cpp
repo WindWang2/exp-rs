@@ -148,11 +148,6 @@ void ChunkGraph::runSource( Node &node )
                 return; // graph unwinding downstream — drop the tile
             payload = TilePayload{};
             m_sourceTileCount.fetch_add( 1, std::memory_order_relaxed );
-            // R15-C C12 (F7): per-source count feeds the join progress
-            // denominator (see runSink).
-            if ( node.sourceIndex >= 0 && m_perSourceTiles )
-                m_perSourceTiles[static_cast<size_t>( node.sourceIndex )].fetch_add(
-                    1, std::memory_order_relaxed );
         }
         // Close on BOTH exits (EOF and cancel): downstream pop() must wake.
         node.out->close();
@@ -277,21 +272,7 @@ void ChunkGraph::runSink( Node &node )
             m_completedTiles.fetch_add( 1, std::memory_order_relaxed );
             if ( m_progress && !isCancelling() )
             {
-                // R15-C C12 (F7): the denominator is ONE aligned source's
-                // emission when the graph joins (min over sources — the join
-                // cannot complete more tiles than its slowest input), and the
-                // single source's count otherwise. The old sum-over-sources
-                // denominator counted every join tile once per input, capping
-                // progress at 1/inputs forever.
-                int emitted = m_sourceTileCount.load( std::memory_order_relaxed );
-                if ( m_perSourceCount > 1 && m_perSourceTiles )
-                {
-                    emitted = m_perSourceTiles[0].load( std::memory_order_relaxed );
-                    for ( int s = 1; s < m_perSourceCount; ++s )
-                        emitted = std::min(
-                            emitted, m_perSourceTiles[static_cast<size_t>( s )].load(
-                                         std::memory_order_relaxed ) );
-                }
+                const int emitted = m_sourceTileCount.load( std::memory_order_relaxed );
                 if ( emitted > 0 )
                 {
                     // Monotonic clamp (F-A-9): the denominator is a moving
@@ -343,24 +324,12 @@ void ChunkGraph::run()
     sinkNode.inputs = { m_sinkInput };
     m_nodes.push_back( std::move( sinkNode ) );
 
-    // Per-source emission counters (R15-C C12 / F7): sized before any source
-    // thread starts, indexed by the source's position among the Source nodes.
-    int sourceCount = 0;
-    for ( const auto &node : m_nodes )
-        if ( node.kind == Node::Kind::Source )
-            ++sourceCount;
-    m_perSourceCount = sourceCount;
-    m_perSourceTiles.reset( sourceCount > 0 ? new std::atomic<int>[static_cast<size_t>( sourceCount )]()
-                                            : nullptr );
-
-    int nextSourceIndex = 0;
     for ( size_t i = 0; i < m_nodes.size(); ++i )
     {
         Node &node = m_nodes[i];
         switch ( node.kind )
         {
         case Node::Kind::Source:
-            node.sourceIndex = nextSourceIndex++;
             m_threads.emplace_back( [this, &node] { runSource( node ); } );
             break;
         case Node::Kind::Stage:

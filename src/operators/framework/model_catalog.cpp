@@ -830,20 +830,6 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       }
       if ( head.role == "detection" && !info.output.detectionDeclared )
         markInvalid( "output.heads role 'detection' requires the output.detection decode contract" );
-      // #646 discipline: heads[].dtype is a declared knob — an unknown token is
-      // a manifest error at registration, never a value the runtime guesses.
-      // The vocabulary mirrors the runtime TensorDType tokens (tensor_blob.h);
-      // the catalog stays backend-agnostic (no OpenCV include) by spelling the
-      // closed set here. Enforcement of a DECLARED dtype at the provider
-      // boundary stays where the bytes are (provider_wire / TensorBlob).
-      if ( !head.dtype.empty() && head.dtype != "float32" && head.dtype != "float64"
-           && head.dtype != "float16" && head.dtype != "int32" && head.dtype != "int64"
-           && head.dtype != "uint8" && head.dtype != "int8" )
-        markInvalid( "output.heads" + ( head.name.empty() ? std::string( "" )
-                                                          : "('" + head.name + "')" )
-                       + ".dtype '" + head.dtype
-                       + "' is unsupported (supported: float32, float64, float16, int32, "
-                         "int64, uint8, int8)");
     }
     // The flat single-head surface stays the heads[0] mirror: a tensor_names
     // list that contradicts heads[0].name means the two vocabularies disagree.
@@ -1111,50 +1097,6 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   {
     if ( const std::string detectionError = info.output.detection.validate(); !detectionError.empty() )
       markInvalid( detectionError );
-    // R15-C C02: the decode contract's fixed-frame requirement is enforced at
-    // REGISTRATION, not only at the engine boundary. A detection manifest that
-    // can never run (no to_input resize, no fixed input extent, or multimodal
-    // -only preprocess knobs) used to pass the catalog and fail the operator
-    // after the artifact was loaded — the same checks
-    // DetectionTileEngine::checkContract applies before the first forward.
-    if ( info.preprocess.resize != "to_input" )
-      markInvalid( "output.detection requires preprocess.resize 'to_input' (the head decodes "
-                   "boxes in the fixed input frame; declared resize '"
-                   + ( info.preprocess.resize.empty() ? std::string( "none" )
-                                                      : info.preprocess.resize )
-                   + "')" );
-    if ( info.input.width <= 0 || info.input.height <= 0 )
-      markInvalid( "output.detection requires a fixed input.width/height (the head decodes "
-                   "boxes in the fixed input frame) - declare input.width and input.height" );
-    if ( info.preprocess.pad > 0 || !std::isnan( info.preprocess.clampMin )
-         || !std::isnan( info.preprocess.clampMax ) )
-      markInvalid( "preprocess.pad / clamp_min / clamp_max are executed by the multi-input "
-                   "engine; this detection model must drop them from the manifest" );
-    // R15-C C02: the square-head ambiguity (R14-B A3). The engine feeds every
-    // detection window at the declared input extent, so a dense per-pixel head
-    // emits exactly width*height candidates; when the head's channel count C
-    // equals that product the (1,C,N)/(1,N,C) axis is ambiguous and the C<=N
-    // 'auto' heuristic has no answer (the runtime refuses it at decode time).
-    // Registration now fails the manifest with an actionable token: declare
-    // tensor_layout explicitly. Non-square heads keep the documented 'auto'
-    // default bit-identically (yolo-ship-detection: C=6 vs 640*640).
-    if ( info.output.detection.tensorLayout == "auto" && info.input.width > 0
-         && info.input.height > 0 )
-    {
-      const int headChannels =
-        ( info.output.detection.layout == "xywh_objectness" ? 5 : 4 )
-        + static_cast<int>( info.output.detection.classes.size() );
-      const long long fedPixels =
-        static_cast<long long>( info.input.width ) * static_cast<long long>( info.input.height );
-      if ( headChannels == fedPixels )
-        markInvalid( "output.detection.tensor_layout 'auto' is ambiguous for this model: the "
-                     "head carries "
-                     + std::to_string( headChannels )
-                     + " channels and the declared input frame "
-                     + std::to_string( info.input.width ) + "x" + std::to_string( info.input.height )
-                     + " feeds the same number of candidates for a dense head — declare "
-                       "tensor_layout 'channels_first' or 'channels_last' explicitly" );
-    }
     if ( info.postprocess.nms )
     {
       // The legacy spelling folds into the detection contract (its nms_iou
