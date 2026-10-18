@@ -708,15 +708,17 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                 // D18: bounded mission summary for Agent grounding (GOAL §9).
                 // Prefer the live session mission (studio publishes + IR2 identity),
                 // then overlay the current selection projection.
+                // R16-D T07 WP-6: workbench:context is declared read-only —
+                // the projection (including a derived mission id for the
+                // report only) stays local; the session's m_mission is not
+                // written by a read.
                 sicnu::app::MissionContext mission =
                     sicnu::app::missionContextFromSelection( snap, self->m_mission );
                 if ( self->m_temporalPanel )
                     mission.temporal = self->m_temporalPanel->exportTemporalContext();
                 if ( !self->m_mission.activeWorkflow.isNull() )
                     mission.activeWorkflow = self->m_mission.activeWorkflow;
-                self->m_mission = mission;
-                sicnu::app::ensureMissionId( self->m_mission );
-                mission = self->m_mission;
+                sicnu::app::ensureMissionId( mission );
                 const QJsonObject summary = sicnu::app::missionSummaryJson( mission );
                 const QByteArray bytes =
                     QJsonDocument( summary ).toJson( QJsonDocument::Compact );

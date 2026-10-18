@@ -143,14 +143,12 @@ QgsRasterLayer *RibbonController::currentRasterLayer() const
 {
   if ( !m_window || !m_window->mapCanvas() )
     return nullptr;
-  if ( auto *rl = qobject_cast<QgsRasterLayer *>( m_window->mapCanvas()->currentLayer() ) )
-    return rl;
-  for ( QgsMapLayer *l : m_window->mapCanvas()->layers() )
-  {
-    if ( auto *rl = qobject_cast<QgsRasterLayer *>( l ) )
-      return rl;
-  }
-  return nullptr;
+  // The CURRENT layer only (R16-D T07 WP-4): the old fallback returned the
+  // first canvas raster whenever the selection was not a raster, so band
+  // combos and brightness/contrast sliders silently mutated — and repainted
+  // — a layer the user had not selected. With no current raster the combos
+  // and sliders are disabled by sync() instead.
+  return qobject_cast<QgsRasterLayer *>( m_window->mapCanvas()->currentLayer() );
 }
 
 QWidget *RibbonController::makeTabPage()
@@ -339,7 +337,12 @@ QToolButton *RibbonController::addActionButton( GroupHost &group,
     btn->setChecked( action->isChecked() );
     btn->setToolTip( action->toolTip() );
     btn->setStatusTip( action->statusTip() );
-    btn->setAccessibleDescription( action->isEnabled() ? QString() : action->toolTip() );
+    // Keep a meaningful description in BOTH states (R16-D T07 WP-2): the
+    // old form cleared it when enabled and, when disabled, published the
+    // static usage tooltip as if it were the unavailability reason. Actions
+    // that carry an explicit sicnu/unavailableReason put it in their tooltip
+    // already, so the tooltip is the honest description either way.
+    btn->setAccessibleDescription( action->toolTip() );
   };
   syncFromAction();
   connect( action, &QAction::changed, btn, syncFromAction );
