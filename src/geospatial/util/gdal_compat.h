@@ -20,6 +20,9 @@
 //   SICNU_GDAL_VSI_REMOVE_HANDLER           (>= 3.9: VSIFileManager::
 //                                            RemoveHandler)
 //   SICNU_GDAL_INT64_DATATYPES              (>= 3.5: GDT_Int64/GDT_UInt64)
+//   SICNU_GDAL_VSI_ISLOCAL_CONST            (>= 3.12: VSIFilesystemHandler::
+//                                            IsLocal() is a const member —
+//                                            empty qualifier before that)
 //
 // The header is SELF-CONTAINED apart from <gdal_version.h> (which defines
 // GDAL_VERSION_NUM / GDAL_COMPUTE_VERSION): including it must not force a
@@ -35,6 +38,16 @@
 #define SICNU_GDAL_VSI_OPEN_RETURNS_UNIQUE_PTR 1
 #else
 #define SICNU_GDAL_VSI_OPEN_RETURNS_UNIQUE_PTR 0
+#endif
+
+// GDAL 3.12 turned VSIFilesystemHandler::IsLocal() into a const member
+// function; before that it was not (Ubuntu CI's 3.8 vs Homebrew/vcpkg's
+// 3.12+). Overrides must match the base declaration per build GDAL, so the
+// qualifier is selected here rather than hard-coded at the override site.
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 12, 0 )
+#define SICNU_GDAL_VSI_ISLOCAL_CONST const
+#else
+#define SICNU_GDAL_VSI_ISLOCAL_CONST
 #endif
 
 #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 13, 0 )

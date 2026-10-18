@@ -52,7 +52,18 @@ TEST_CASE( "1481-T8: CheckedPath opens the decoded file-URI path, not the URI", 
   }
   const std::string uri = "file://" + QDir( tmp.path() ).absolutePath().toStdString() + "/a%20b.tif";
   const auto checked = sicnu::geo::io::checkSourcePath( uri );
+  // The decoded local path (space, never %20) in both spellings.
+  CHECK( checked.gdalTarget == file.toStdString() );
+#ifdef _WIN32
+  // openPath() prefers the "\\?\" long-path spelling on Windows (the #1186
+  // MAX_PATH mitigation); the decoded tail must survive the rewrite.
+  const std::string open = checked.openPath();
+  CHECK( open.rfind( "\\\\?\\", 0 ) == 0 );
+  CHECK( open.find( "a b.tif" ) != std::string::npos );
+  CHECK( open.find( "%20" ) == std::string::npos );
+#else
   CHECK( checked.openPath() == file.toStdString() );
+#endif
 }
 
 TEST_CASE( "1481-T9: an absolute file URI in a catalog is anchored, not joined", "[r15b][post1505]" )

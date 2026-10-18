@@ -37,8 +37,15 @@
 #include <cpl_http.h>
 #include <cpl_vsi.h>
 
+#ifndef _WIN32
 #include <dlfcn.h>
 #include <netdb.h>
+#else
+// Windows: the rebinding oracle below interposes getaddrinfo via
+// dlsym(RTLD_NEXT), which has no Windows equivalent, so the whole case is
+// compiled out there (see the #ifndef _WIN32 guard around it).
+#include <ws2tcpip.h>
+#endif
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -935,6 +942,11 @@ TEST_CASE( "1505-T6: a private-network refusal is final, never served by the raw
   RemoteRangeCache::install( RangeCacheConfig{} );
 }
 
+#ifndef _WIN32
+// POSIX-only: the oracle redefines getaddrinfo and resolves the real one
+// through dlsym(RTLD_NEXT). Windows has neither, so the case is compiled
+// out there; the pinning rule it guards is covered on every platform by
+// the deterministic contract cases in test_io_remote_validator.
 // ---------------------------------------------------------------------------
 // #1505 T3 / #1485 (item 8): DNS rebinding. The guard resolved the hostname,
 // validated the answer and freed it; libcurl then resolved the SAME name
@@ -1001,6 +1013,7 @@ TEST_CASE( "1505-T3: guarded fetch connects only to the address set the guard va
   CHECK( server.requestCount() == 0 ); // never reached the rebound private address
   CHECK( threw );
 }
+#endif // !_WIN32
 
 // ---------------------------------------------------------------------------
 // R3-10: a TRANSPORT failure (not a policy refusal) of a guarded ranged
@@ -1011,6 +1024,11 @@ TEST_CASE( "1505-T3: guarded fetch connects only to the address set the guard va
 // blockPrivateNetworks the http fallback uses the same guarded, pinned
 // transport, so the fixture is never contacted.
 // ---------------------------------------------------------------------------
+#ifndef _WIN32
+// POSIX-only: drives the rebinding oracle above (getaddrinfo interposition
+// has no Windows equivalent); the pinning rule it guards is covered on
+// every platform by the deterministic contract cases in
+// test_io_remote_validator.
 TEST_CASE( "R3-10: a guarded fetch's transport failure never degrades to the unguarded fallback",
            "[r15b][post1505][remote][ssrf][dns]" )
 {
@@ -1067,6 +1085,7 @@ TEST_CASE( "R3-10: a guarded fetch's transport failure never degrades to the ung
   RemoteRangeCache::clearEntries();
   RemoteRangeCache::install( RangeCacheConfig{} );
 }
+#endif // !_WIN32
 
 // ---------------------------------------------------------------------------
 // R4-01 (found by the T11 prefetch oracle): blockPrivateNetworks guarded only
@@ -1094,6 +1113,11 @@ TEST_CASE( "R4-01: Stat under the private-network policy never probes a private 
   RemoteRangeCache::install( RangeCacheConfig{} );
 }
 
+#ifndef _WIN32
+// POSIX-only: drives the rebinding oracle above (getaddrinfo interposition
+// has no Windows equivalent); the pinning rule it guards is covered on
+// every platform by the deterministic contract cases in
+// test_io_remote_validator.
 TEST_CASE( "R4-01: the open-time identity probe is guarded and pinned (DNS rebinding)",
            "[r15b][post1505][remote][ssrf][dns]" )
 {
@@ -1126,6 +1150,7 @@ TEST_CASE( "R4-01: the open-time identity probe is guarded and pinned (DNS rebin
   RemoteRangeCache::clearEntries();
   RemoteRangeCache::install( RangeCacheConfig{} );
 }
+#endif // !_WIN32
 
 // ---------------------------------------------------------------------------
 // R4-03 (round 5): the process-wide private-network policy. Library defaults
@@ -1175,6 +1200,7 @@ TEST_CASE( "R4-03: the engaged policy covers httpFetch, identity, /vsicurl/ and 
   CHECK( result->nStatus != 0 );
   CPLHTTPDestroyResult( result );
 
+#ifndef _WIN32
   // Rebinding name through plain /vsicurl/: the re-route makes the read use
   // the guarded, pinned transport, so the private answer is never contacted.
   const std::string rebind = "http://" + std::string( kRebindHost ) + ":" + std::to_string( server.port() ) +
@@ -1188,6 +1214,9 @@ TEST_CASE( "R4-03: the engaged policy covers httpFetch, identity, /vsicurl/ and 
   if ( fp )
     VSIFCloseL( fp );
   INFO( "fixture requests=" << server.requestCount() << " lookups=" << g_rebindCalls.load() );
+#else
+  INFO( "fixture requests=" << server.requestCount() );
+#endif
   CHECK( server.requestCount() == 0 );
 
   sicnu::geo::network_policy::disengageProcessPrivateNetworkBlocking();

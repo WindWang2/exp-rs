@@ -89,6 +89,16 @@ else()
     target_link_libraries(sicnu_geospatial PUBLIC ${CURL_LIBRARIES})
 endif()
 
+# offline_gate.cpp calls getaddrinfo / getnameinfo / freeaddrinfo / ntohl
+# directly (private-network predicate and the DNS pinning entry point). Those
+# live in ws2_32 on Windows, so the dependency is PUBLIC: every consumer of
+# sicnu_geospatial has to see it, not just the tests that happen to link it by
+# hand (that hand-linking is how test_r15_B_post1505 ended up with an
+# unresolved __imp_getaddrinfo).
+if(WIN32)
+    target_link_libraries(sicnu_geospatial PUBLIC ws2_32)
+endif()
+
 # Product adapters parse Sentinel/Landsat XML with expat (already a global
 # dependency; GDAL does not re-export its own copy).
 find_package(EXPAT REQUIRED)

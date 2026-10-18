@@ -134,7 +134,15 @@ class PolicyHandler final : public VSIFilesystemHandler
     }
     const char *GetActualURL( const char *pszFilename ) override { return mOriginal->GetActualURL( pszFilename ); }
     const char *GetOptions() override { return mOriginal->GetOptions(); }
-    bool IsLocal( const char *pszPath ) override { return mOriginal->IsLocal( pszPath ); }
+    // GDAL 3.12 declares this one const (cpl_vsi_virtual.h) while its
+    // neighbours are not; the qualifier is version-selected in gdal_compat.h
+    // so the override compiles against Ubuntu CI's 3.8 (non-const) and
+    // vcpkg/Homebrew's 3.12+ (const) alike. A missing qualifier is a C3668,
+    // and dropping `override` instead would silently shadow the base.
+    bool IsLocal( const char *pszPath ) SICNU_GDAL_VSI_ISLOCAL_CONST override
+    {
+      return mOriginal->IsLocal( pszPath );
+    }
     bool SupportsRead( const char *pszPath ) override { return mOriginal->SupportsRead( pszPath ); }
 
   private:

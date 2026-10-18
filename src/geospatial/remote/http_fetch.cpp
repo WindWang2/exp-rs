@@ -741,7 +741,6 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
       {
         curl_slist_free_all( requestHeaders );
         curl_easy_cleanup( handle );
-        curl_slist_free_all( resolveList );
         throw GeoError( ErrorCode::Timeout,
                         "httpFetch: request exceeded its time budget: " + uri.display() );
       }
@@ -809,7 +808,6 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     curl_slist_free_all( requestHeaders );
     curl_slist_free_all( resolveEntries );
     curl_easy_cleanup( handle );
-    curl_slist_free_all( resolveList );
 
     if ( transfer.overBudget )
     {
