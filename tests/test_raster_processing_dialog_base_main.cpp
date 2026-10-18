@@ -39,5 +39,10 @@ int main(int argc, char *argv[])
     const int result = session.run();
     sicnu::TaskCenter::instance().shutdown();
     app.processEvents();
-    _exit(result);
+    // #1468: the hard process exit skipped the stack QApplication's
+    // destructor - the very
+    // thing this file's header comment says must run before the process
+    // leaves, so pending posted events were never flushed while the Qt
+    // statics were still alive. Returning runs the teardown.
+    return result;
 }

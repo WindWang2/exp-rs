@@ -40,11 +40,7 @@ int main(int argc, char *argv[]) {
     }
 
     int result = Catch::Session().run(argc, argv);
-    #ifdef _WIN32
-  _exit( result );
-#else
   return result;
-#endif
 }
 
 TEST_CASE("Color ramps loaded from default style", "[colormap]")
