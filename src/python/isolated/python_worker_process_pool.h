@@ -117,12 +117,19 @@ class PythonWorkerProcessPool : public QObject
     /// replays. A clean exit WITHOUT in-flight work never enters here — that
     /// is a worker retiring, not a channel failure.
     void handleWorkerLoss( WorkerNode *node, const QString &reason );
-    void bindNodeSignals( WorkerNode *node );
+    /// @p worker / @p server are the objects the caller installed under
+    /// m_nodesMutex; pass them on the restart path so the binding never
+    /// re-reads node->worker / node->server unlocked while a concurrent
+    /// handleWorkerLoss() can replace them (#1486). The defaults keep the
+    /// creation path (which owns the node exclusively) unchanged.
+    void bindNodeSignals( WorkerNode *node, PythonWorkerProcess *worker = nullptr,
+                          PythonIpcServer *server = nullptr );
     /// Arms the one-shot connect-handshake watchdog for a freshly (re)spawned
     /// worker: no client attached within the window means the node is treated
     /// as lost (restart-or-retire) instead of parking in acquire-unavailable
-    /// limbo while still counting as available.
-    void armHandshakeWatchdog( WorkerNode *node );
+    /// limbo while still counting as available. @p server is the server the
+    /// caller installed under the lock (#1486).
+    void armHandshakeWatchdog( WorkerNode *node, PythonIpcServer *server = nullptr );
     WorkerNode *findNodeById( int id ) const;
     /// Answers every recovered request with an explicit, per-cause typed
     /// error so callers never wait forever on a dead worker.

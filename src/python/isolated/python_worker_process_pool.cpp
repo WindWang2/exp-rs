@@ -391,14 +391,23 @@ WorkerNode *PythonWorkerProcessPool::findNodeById( int id ) const
   return nullptr;
 }
 
-void PythonWorkerProcessPool::bindNodeSignals( WorkerNode *node )
+void PythonWorkerProcessPool::bindNodeSignals( WorkerNode *node, PythonWorkerProcess *worker,
+                                                PythonIpcServer *server )
 {
   if ( !node )
+    return;
+  // #1486: on the restart path the caller hands over the pair it installed
+  // under m_nodesMutex. Reading node->worker / node->server here would race
+  // the handleWorkerLoss() restart that replaces them (and, in the old
+  // shape, bind the signals to the NEXT cycle's objects).
+  PythonWorkerProcess *workerPtr = worker ? worker : node->worker;
+  PythonIpcServer *serverPtr = server ? server : node->server;
+  if ( !workerPtr || !serverPtr )
     return;
   const int id = node->id;
   // setPoolSize may delete a WorkerNode while one of these handlers is still
   // queued — every handler re-resolves the node from m_nodes by id (#1095a).
-  connect( node->worker, &PythonWorkerProcess::workerCrashed, this, [this, id]() {
+  connect( workerPtr, &PythonWorkerProcess::workerCrashed, this, [this, id]() {
     if ( WorkerNode *live = findNodeById( id ) )
       handleWorkerCrash( live );
   } );
@@ -406,7 +415,7 @@ void PythonWorkerProcessPool::bindNodeSignals( WorkerNode *node )
   // emits no workerCrashed) while requests are still unanswered is a channel
   // failure all the same — protocol EOF, not a crash. Without this handler
   // the pool never recovers those in-flight callers.
-  connect( node->worker, &PythonWorkerProcess::workerFinished, this, [this, id]( int exitCode, QProcess::ExitStatus ) {
+  connect( workerPtr, &PythonWorkerProcess::workerFinished, this, [this, id]( int exitCode, QProcess::ExitStatus ) {
     WorkerNode *live = findNodeById( id );
     if ( !live || m_shuttingDown || live->isRestarting )
       return;
@@ -426,7 +435,7 @@ void PythonWorkerProcessPool::bindNodeSignals( WorkerNode *node )
   // spurious workerCrashed. Defer one grace turn — an exiting worker's
   // finished() lands well inside it and its lane owns the node (retirement
   // when idle, loss when requests were in flight).
-  connect( node->server, &PythonIpcServer::clientDisconnected, this, [this, id]() {
+  connect( serverPtr, &PythonIpcServer::clientDisconnected, this, [this, id]() {
     WorkerNode *live = findNodeById( id );
     if ( !live || m_shuttingDown || live->isRestarting )
       return;
@@ -453,17 +462,25 @@ void PythonWorkerProcessPool::bindNodeSignals( WorkerNode *node )
   } );
 }
 
-void PythonWorkerProcessPool::armHandshakeWatchdog( WorkerNode *node )
+void PythonWorkerProcessPool::armHandshakeWatchdog( WorkerNode *node, PythonIpcServer *server )
 {
-  if ( !node || !node->server )
+  if ( !node )
+    return;
+  // #1486: on the restart path the caller passes the server it installed
+  // under m_nodesMutex. Reading node->server here instead would race the
+  // handleWorkerLoss() restart that replaces it — and would parent the
+  // watchdog to the NEXT cycle's server, which is precisely what the
+  // identity re-check below exists to defend against.
+  PythonIpcServer *serverPtr = server ? server : node->server;
+  if ( !serverPtr )
     return;
   // Parented to THIS cycle's server so any earlier teardown (next loss
   // cycle, resize, shutdown) kills the timer with it; the server-identity
   // re-check at fire time closes the same-dispatcher-pass deleteLater
   // window — the same discipline as the recovery-request watchdog.
-  QPointer<PythonIpcServer> myServer( node->server );
+  QPointer<PythonIpcServer> myServer( serverPtr );
   const int id = node->id;
-  auto *watchdog = new QTimer( node->server );
+  auto *watchdog = new QTimer( serverPtr );
   watchdog->setSingleShot( true );
   connect( watchdog, &QTimer::timeout, this, [this, id, myServer]() {
     WorkerNode *live = findNodeById( id );
@@ -606,14 +623,20 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
 
   if ( newServer->listen( socketName ) )
   {
+    // #1486: take the installed pair under the SAME lock that published it.
+    // Everything below this point runs after isRestarting is cleared, i.e.
+    // with handleWorkerLoss()/resize free to replace node->server — so the
+    // rest of this cycle must use the snapshot, never re-read the members.
+    PythonIpcServer *restartedServer = nullptr;
     {
       QMutexLocker lock( &m_nodesMutex );
       node->server = newServer;
       node->worker = newWorker;
       node->isBusy.store( wasBusy, std::memory_order_release );
+      restartedServer = node->server;
     }
-    bindNodeSignals( node );
-    const bool started = node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
+    bindNodeSignals( node, newWorker, restartedServer );
+    const bool started = newWorker->startWorker( socketName, m_pythonPath, m_scriptPath );
     node->isRestarting.store( false, std::memory_order_release );
     if ( !started )
     {
@@ -656,7 +679,7 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
     }
     qInfo() << "Successfully auto-healed and restarted worker process id:" << id;
     emit workerRestarted( id );
-    armHandshakeWatchdog( node );
+    armHandshakeWatchdog( node, restartedServer );
 
     if ( borrowed != m_pendingRecovery.end() && !borrowed->second->empty() )
     {
@@ -688,10 +711,12 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
         if ( consumed != m_pendingRecovery.end() && consumed->second == sharedPending )
           m_pendingRecovery.erase( consumed );
       };
-      if ( node->server->hasClient() )
+      if ( !restartedServer )
+        return;
+      if ( restartedServer->hasClient() )
         replay();
       else
-        connect( node->server, &PythonIpcServer::clientConnected, this, [replay]() { replay(); } );
+        connect( restartedServer, &PythonIpcServer::clientConnected, this, [replay]() { replay(); } );
 
       // Watchdog: if the restarted worker never connects (dies during
       // startup), fail the pending callbacks instead of leaking them. The
@@ -703,8 +728,8 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
       // the server-identity check closes the residual same-dispatcher-pass
       // window (deleteLater of the old server and an already-expired timer
       // can fire within one event pass).
-      QPointer<PythonIpcServer> myServer( node->server );
-      auto *watchdog = new QTimer( node->server );
+      QPointer<PythonIpcServer> myServer( restartedServer );
+      auto *watchdog = new QTimer( restartedServer );
       watchdog->setSingleShot( true );
       connect( watchdog, &QTimer::timeout, this, [this, id, myServer]() {
         // Only answer while THIS recovery's server is still the node's live
