@@ -845,7 +845,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       // typo cannot silently fall back to the full project extent. Insets
       // carry the same applied extent as map frames (review R14-D P3).
       if ( ( std::string( info->name ) == "map_frames" ||
-             std::string( info->name ) == "insets" ) &&
+             std::string( info->name ) == "inset_maps" ) &&
            item.isMember( "extent" ) )
         checkExtent( item, id, problems );
 
@@ -886,6 +886,18 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       else if ( std::string( info->name ) == "charts" && item["chart"].isMember( "dual_axis" ) &&
                 !item["chart"]["dual_axis"].isBool() )
         problems.push_back( id + ": chart.dual_axis must be a boolean" );
+
+      // R16-D T08 WP-1: colorbar min/max are label strings. A numeric
+      // declaration (the natural way to write a data ramp) used to reach
+      // renderColorbarToFile's unguarded asString() and crash the compile
+      // with a Json::LogicError — refuse it typed here instead.
+      if ( std::string( info->name ) == "colorbars" )
+      {
+        for ( const char *field : { "min", "max" } )
+          if ( item.isMember( field ) && !item[field].isString() )
+            problems.push_back( std::string( id ) + ": colorbar '" + field +
+                                "' must be a string (label text), not a number" );
+      }
 
       // Platform 8.0: NoData legend declaration shape (label/color strings).
       if ( std::string( info->name ) == "legends" && item.isMember( "nodata" ) )

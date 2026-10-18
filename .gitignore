@@ -75,8 +75,6 @@ data/*
 # D3 lab content track: LabSpecs/pipelines/data-specs/grading intents are
 # tracked config, not rasters. Generated fixtures stay untracked via the
 # data/labs/_tmp/ rule at the end of this file (last match wins).
-!data/labs/
-!data/labs/**
 
 # D6 unified RS glossary (terminology layer shared by i18n, help and the
 # agent) is tracked config, not local raster data.
@@ -154,7 +152,6 @@ vendor/
 !.planning/r14-B/
 !.planning/cli-surface-r4/
 .planning/cli-surface-r4/*
-!.planning/r14-B/
 !.planning/cli-surface-r4/*.md
 # R15-A track (remote sensing science algorithms & numerical contracts) planning artifacts (markdown only).
 !.planning/r15-a/
@@ -283,8 +280,6 @@ run_sicnu_geo_rs.bat
 
 # Re-ignore Python caches: the "!tests/data/**" negation above would otherwise
 # un-ignore them again (last match wins).
-__pycache__/
-*.pyc
 
 # Plugin discovery manifest index cache
 .exprs-manifest-index.json
@@ -564,6 +559,10 @@ r6_dev.cmd
 .planning/r14-A/*
 !.planning/r14-A/*.md
 
+# R16-D workbench/cartography hardening evidence (PR hardening/r16-d-workbench-cartography)
+!.planning/r16-d/
+!.planning/r16-d-t07/
+!.planning/r16-d-t08/
 # hardening/r15-C-model-runtime (R15 track C): planning notes (markdown only; logs stay local).
 !.planning/r15-c/
 .planning/r15-c/*
@@ -572,13 +571,11 @@ r6_dev.cmd
 # r15-C local build/test driver scratch (evidence distilled into .planning/).
 
 # hardening/r15-D-pi-mcp-workflow: planning evidence (markdown only; logs/build stay local).
-# hardening/r15-D-pi-mcp-workflow: planning evidence (markdown only; logs/build stay local).
 # hardening/r15-D-pi-mcp-workflow (R15 track D): planning notes (markdown only; logs stay local).
 !.planning/r15-d/
 .planning/r15-d/*
 !.planning/r15-d/*.md
 
-# hardening/r15-E-desktop-teaching-help: planning evidence (markdown only; logs/build stay local).
 # hardening/r15-E-desktop-teaching-help: planning evidence (markdown only; logs/build stay local).
 # hardening/r15-E-desktop-teaching-help (R15 track E): planning notes (markdown only; logs stay local).
 !.planning/r15-E/

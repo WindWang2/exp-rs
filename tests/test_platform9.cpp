@@ -1031,6 +1031,65 @@ TEST_CASE( "M5: raster scale_ranges validate and reject nonsense",
   REQUIRE( flagged );
 }
 
+TEST_CASE( "M5: vector scaledenominator min/max ordering mirrors raster (R16-D T08 WP-4)",
+           "[platform9][thematic][scale][r16d-t08]" )
+{
+  auto style = [] {
+    Json::Value doc( Json::objectValue );
+    doc["schema_version"] = "1.0";
+    doc["kind"] = "style_spec";
+    doc["id"] = "m5-vector-scale";
+    doc["version"] = 1;
+    doc["applies_to"] = "vector";
+    doc["vector"] = Json::Value( Json::objectValue );
+    doc["vector"]["renderertype"] = "simple";
+    return doc;
+  };
+
+  // Declared visibility window is non-empty iff min > max (1:scale
+  // denominators shrink when zooming in) — same semantics the raster
+  // sibling enforces on scale_ranges.
+  Json::Value doc = style();
+  doc["vector"]["scaledenominator"] = [] {
+    Json::Value s( Json::objectValue );
+    s["min"] = 5000.0;
+    s["max"] = 100000.0;
+    return s;
+  }();
+  bool flagged = false;
+  for ( const auto &problem : validateStyleSpec( doc ) )
+    flagged = flagged || problem.find( "min must exceed max" ) != std::string::npos;
+  REQUIRE( flagged );
+
+  // The honest declaration (large min, small max) stays clean.
+  doc = style();
+  doc["vector"]["scaledenominator"] = [] {
+    Json::Value s( Json::objectValue );
+    s["min"] = 100000.0;
+    s["max"] = 5000.0;
+    return s;
+  }();
+  CHECK( validateStyleSpec( doc ).empty() );
+
+  // Shape checks stay (non-object / negative entries).
+  doc = style();
+  doc["vector"]["scaledenominator"] = "300000";
+  flagged = false;
+  for ( const auto &problem : validateStyleSpec( doc ) )
+    flagged = flagged || problem.find( "must be an object" ) != std::string::npos;
+  REQUIRE( flagged );
+  doc = style();
+  doc["vector"]["scaledenominator"] = [] {
+    Json::Value s( Json::objectValue );
+    s["min"] = -1.0;
+    return s;
+  }();
+  flagged = false;
+  for ( const auto &problem : validateStyleSpec( doc ) )
+    flagged = flagged || problem.find( "non-negative" ) != std::string::npos;
+  REQUIRE( flagged );
+}
+
 TEST_CASE( "M5: bivariate requires the explicit semantic contract",
            "[platform9][thematic][bivariate]" )
 {

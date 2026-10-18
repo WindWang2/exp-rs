@@ -158,6 +158,10 @@ public:
   /// the Display Layer identity, tree position, and presentation state. Emitted
   /// automatically when the Data Manager reports the asset changed.
   data::Result<void> relocateLayer(DisplayLayerId layerId);
+  /// Retry relocations that were deferred because their layer was mid-edit
+  /// session (R16-D T07 WP-1). Rollback emits no assetChanged, so the edit
+  /// session's end must explicitly re-attempt deferred swaps for the asset.
+  void retryPendingRelocations(data::AssetId assetId);
   data::Result<void> removeLayer(DisplayLayerId layerId);
 
   data::Result<void> setLayerVisible(DisplayLayerId layerId, bool visible);

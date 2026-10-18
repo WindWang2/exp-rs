@@ -161,6 +161,15 @@ void applyRowToItem( Json::Value &spec, const char *collection, int indexInColle
             if ( it != idMap.end() )
                 clone["map_ref"] = it->second;
         }
+        // Declared chart-over-map overlays follow their frame to the page:
+        // an unremapped overlay_on can never match a same-page frame, so
+        // preflight would flag the declared coverage as MAP_CHART_OVER_MAP.
+        if ( clone.isMember( "overlay_on" ) && clone["overlay_on"].isString() )
+        {
+            const auto it = idMap.find( clone["overlay_on"].asString() );
+            if ( it != idMap.end() )
+                clone["overlay_on"] = it->second;
+        }
         if ( clone.isMember( "locator" ) && clone["locator"].isObject() &&
              clone["locator"].isMember( "target" ) && clone["locator"]["target"].isString() )
         {
@@ -453,6 +462,20 @@ Json::Value seriesDefinitionToRowsVector( const Json::Value &definition,
         if ( feature.hasGeometry() && !feature.geometry().isEmpty() )
         {
             const QgsRectangle box = feature.geometry().boundingBox();
+            // checkExtent requires xmin < xmax and ymin < ymax: a point or
+            // axis-aligned line bbox is degenerate and cannot define a page
+            // extent. Refuse here with the cause instead of stamping an
+            // extent validateMapSpec would reject downstream.
+            if ( box.xMaximum() <= box.xMinimum() || box.yMaximum() <= box.yMinimum() )
+            {
+                addProblem( problems, "vector series feature " + std::to_string( feature.id() ) +
+                                      " on layer '" + definition["layer"].asString() +
+                                      "' has a degenerate bounding box (point/axis-aligned "
+                                      "geometry) — buffer the layer or declare explicit "
+                                      "extents/table rows" );
+                iterator.close();
+                return Json::Value( Json::nullValue );
+            }
             Json::Value extent( Json::arrayValue );
             extent.append( box.xMinimum() );
             extent.append( box.yMinimum() );
@@ -665,11 +688,24 @@ Json::Value planSeries( const Json::Value &template_spec, const Json::Value &def
         // last pages entry (the index row) renders on physical page
         // pages.size().
         label["page"] = spec["pages"].size();
+        // The label spans the sheet between fixed 20/30 mm margins instead
+        // of a hardcoded A4-landscape rect (a 210 mm portrait sheet would
+        // fire MAP_OFF_PAGE on the planner's own output).
+        const double pageW = template_spec.isMember( "page" ) &&
+                                     template_spec["page"].isMember( "width_mm" ) &&
+                                     template_spec["page"]["width_mm"].isNumeric()
+                               ? template_spec["page"]["width_mm"].asDouble()
+                               : 297.0;
+        const double pageH = template_spec.isMember( "page" ) &&
+                                     template_spec["page"].isMember( "height_mm" ) &&
+                                     template_spec["page"]["height_mm"].isNumeric()
+                               ? template_spec["page"]["height_mm"].asDouble()
+                               : 210.0;
         Json::Value rect( Json::arrayValue );
         rect.append( 20.0 );
         rect.append( 30.0 );
-        rect.append( 257.0 );
-        rect.append( 150.0 );
+        rect.append( std::max( 40.0, pageW - 40.0 ) );
+        rect.append( std::max( 30.0, pageH - 60.0 ) );
         label["rect_mm"] = rect;
         label["text"] = buildIndexText( parsed, indexTitle );
         spec["labels"].append( label );

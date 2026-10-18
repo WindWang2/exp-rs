@@ -190,6 +190,63 @@ TEST_CASE( "Declared page margins are enforced and repairable",
   CHECK_FALSE( hasCode( preflightMapSpec( noMargin ), "MAP_MARGIN_VIOLATION" ) );
 }
 
+TEST_CASE( "Off-page and margin rules use the item's own page geometry (R16-D T08 WP-6)",
+           "[cartography][quality][pages][r16d-t08]" )
+{
+  // Heterogeneous 2-page document: body 297x210 (A4 landscape), physical
+  // page 1 = pages[0] = 210x148 (A5 landscape). Engine convention: item
+  // page P >= 1 lives on pages[P-1].
+  Json::Value spec = fullSpec( "per-page-map" );
+  Json::Value pages( Json::arrayValue );
+  Json::Value page1( Json::objectValue );
+  page1["width_mm"] = 210.0;
+  page1["height_mm"] = 148.0;
+  pages.append( page1 );
+  spec["pages"] = pages;
+  REQUIRE( validateMapSpec( spec ).empty() );
+
+  // A page-1 item whose rect fits the BODY page but not the smaller
+  // pages[0] sheet: 250 + 40 = 290 > 210. The rule used page-0 dims
+  // everywhere and stayed silent.
+  Json::Value label( Json::objectValue );
+  label["id"] = "label-p1-over";
+  label["text"] = "x";
+  Json::Value labelRect( Json::arrayValue );
+  labelRect.append( 250 );
+  labelRect.append( 10 );
+  labelRect.append( 40 );
+  labelRect.append( 10 );
+  label["rect_mm"] = labelRect;
+  label["page"] = 1;
+  spec["labels"].append( label );
+  const Json::Value report = preflightMapSpec( spec );
+  CHECK( hasCode( report, "MAP_OFF_PAGE", "label-p1-over" ) );
+
+  // The same rect moved onto the small sheet stays clean (no false
+  // positive from the LARGER body dims either): 20 + 40 = 60 <= 210.
+  spec["labels"][spec["labels"].size() - 1]["rect_mm"][0] = 20;
+  CHECK_FALSE( hasCode( preflightMapSpec( spec ), "MAP_OFF_PAGE", "label-p1-over" ) );
+
+  // Page-0 items are still judged against the body page (regression):
+  // 280 + 20 = 300 > 297.
+  Json::Value bodyLabel( Json::objectValue );
+  bodyLabel["id"] = "label-p0-over";
+  bodyLabel["text"] = "x";
+  Json::Value bodyRect( Json::arrayValue );
+  bodyRect.append( 280 );
+  bodyRect.append( 10 );
+  bodyRect.append( 20 );
+  bodyRect.append( 10 );
+  bodyLabel["rect_mm"] = bodyRect;
+  spec["labels"].append( bodyLabel );
+  CHECK( hasCode( preflightMapSpec( spec ), "MAP_OFF_PAGE", "label-p0-over" ) );
+
+  // Repair converges on the heterogeneous document.
+  Json::Value repairReport = preflightMapSpec( spec );
+  repairMapSpec( spec, repairReport );
+  CHECK_FALSE( hasCode( preflightMapSpec( spec ), "MAP_OFF_PAGE" ) );
+}
+
 TEST_CASE( "Legend density grows the legend or adds columns",
            "[cartography][quality][density]" )
 {

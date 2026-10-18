@@ -338,8 +338,14 @@ void GeorefDualWindow::refitTransform()
             mDisplayedRmse = mGcpManager.computeGlobalRmse();
         }
     }
-    if (mRmseLabel)
-        mRmseLabel->setText(tr("RMSE: %1 px").arg(mDisplayedRmse, 0, 'f', 4));
+    if (mRmseLabel) {
+        // "RMSE: 0.0000 px" with no fit (too few GCPs / failed solve) would
+        // claim a zero-pixel error that was never computed.
+        if (mFitted.success && mDisplayedRmse > 0.0)
+            mRmseLabel->setText(tr("RMSE: %1 px").arg(mDisplayedRmse, 0, 'f', 4));
+        else
+            mRmseLabel->setText(tr("RMSE: — (no fit)"));
+    }
 }
 
 void GeorefDualWindow::refreshGcpTable()
@@ -364,10 +370,12 @@ void GeorefDualWindow::refreshGcpTable()
         cell(4, QString::number(point.targetY, 'f', 3));
         auto* residualItem = cell(5, QString::number(point.residualTotal, 'f', 4));
         // Gross-blunder highlight: residual beyond three sigma of the fit.
+        // Base brush comes from the palette (theme-correct under dark QSS;
+        // hardcoded white used to glare there).
         if (point.enabled && rmse > 0.0 && point.residualTotal > 3.0 * rmse)
             residualItem->setBackground(Qt::red);
         else
-            residualItem->setBackground(Qt::white);
+            residualItem->setBackground(mGcpTable->palette().base());
     }
 }
 

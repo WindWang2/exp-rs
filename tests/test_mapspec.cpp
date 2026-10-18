@@ -28,6 +28,7 @@
 #include <qgslayoutitemscalebar.h>
 #include <qgslayertree.h>
 #include <qgsprintlayout.h>
+#include <qgslayoutmanager.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
 
@@ -571,6 +572,37 @@ TEST_CASE( "MapSpec validation and condition parser robustness (R13-G WP-01/WP-0
     REQUIRE_FALSE( problems.empty() );
   }
 
+  SECTION( "Multi-dot numbers are tokenizer problems, not silent truncation (R16-D T08 WP-9)" )
+  {
+    // "1.2.3" used to tokenize as the number 1.2 (std::stod parses the
+    // prefix) and the ".3" tail vanished — a typo compared equal to nothing.
+    std::vector<std::string> problems;
+    CHECK_FALSE( validateConditionSyntax( "a > 1.2.3", &problems ) );
+    REQUIRE_FALSE( problems.empty() );
+    bool mentionsToken = false;
+    for ( const auto &problem : problems )
+      mentionsToken = mentionsToken || problem.find( "1.2.3" ) != std::string::npos;
+    CHECK( mentionsToken );
+
+    bool value = true;
+    std::string error;
+    CHECK_FALSE( evaluateCondition( "v == 1.2.3", Json::Value( Json::objectValue ), &value,
+                                    &error ) );
+    CHECK_FALSE( value );
+    CHECK_FALSE( error.empty() );
+
+    // Well-formed decimals (and negatives) still tokenize (regression).
+    std::vector<std::string> clean;
+    CHECK( validateConditionSyntax( "a >= 1.25 and b < -0.5", &clean ) );
+    CHECK( clean.empty() );
+    Json::Value context( Json::objectValue );
+    context["a"] = 1.25;
+    context["b"] = -1.0;
+    bool okValue = false;
+    REQUIRE( evaluateCondition( "a >= 1.25 and b < -0.5", context, &okValue, &error ) );
+    CHECK( okValue );
+  }
+
   SECTION( "Compiler rejects non-string expressions (WP-03)" )
   {
     Json::Value spec = minimalSpec( "expr-type-test" );
@@ -775,8 +807,182 @@ TEST_CASE( "MapSpec validation rejects malformed map frame extents (CARTO-6)",
   REQUIRE_FALSE( problems.empty() );
   CHECK( anyProblemMentions( problems, "xmin < xmax" ) );
 
+  // --- R16-D T08 WP-3: inset extents share the map-frame contract ----------
+  // The check used to compare the collection name against "insets" while the
+  // declared collection is "inset_maps" — dead code: a crossed/NaN/string
+  // inset extent passed validation silently.
+  const auto insetExtentProblems = []( const Json::Value &extent ) {
+    Json::Value spec = minimalSpec( "inset-extent-check" );
+    Json::Value inset( Json::objectValue );
+    inset["id"] = "inset-1";
+    inset["rect_mm"] = rectOf( 210, 24, 60, 40 );
+    inset["extent"] = extent;
+    spec["inset_maps"].append( inset );
+    return validateMapSpec( spec );
+  };
+  problems = insetExtentProblems( crossedExtent );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "xmin < xmax" ) );
+
+  problems = insetExtentProblems( nanExtent );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "finite" ) );
+
+  problems = insetExtentProblems( stringExtent );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "extent entries must be numbers" ) );
+
+  Json::Value cleanInsetExtent( Json::arrayValue );
+  cleanInsetExtent.append( 116.0 );
+  cleanInsetExtent.append( 39.0 );
+  cleanInsetExtent.append( 116.5 );
+  cleanInsetExtent.append( 39.5 );
+  CHECK( insetExtentProblems( cleanInsetExtent ).empty() );
+
   // The valid minimalSpec extent stays clean (regression).
   CHECK( validateMapSpec( minimalSpec( "extent-valid" ) ).empty() );
+}
+
+TEST_CASE( "Chart/colorbar string-typed fields are validated, not thrown (R16-D T08 WP-1)",
+           "[mapspec][validation][r16d-t08]" )
+{
+  SECTION( "colorbar min/max labels must be strings (numeric min/max is the natural typo)" )
+  {
+    Json::Value spec = minimalSpec( "colorbar-typed" );
+    Json::Value colorbar( Json::objectValue );
+    colorbar["id"] = "colorbar-1";
+    colorbar["rect_mm"] = rectOf( 12, 190, 80, 8 );
+    colorbar["min"] = 0;
+    colorbar["max"] = 100;
+    spec["colorbars"].append( colorbar );
+
+    const auto problems = validateMapSpec( spec );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "must be a string" ) );
+
+    // The compiler refuses the document before any render — jsoncpp's
+    // LogicError must never escape compile through renderColorbarToFile's
+    // unguarded asString().
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout == nullptr );
+    CHECK( compileError.contains( QStringLiteral( "must be a string" ) ) );
+  }
+
+  SECTION( "chart binding.data[].label must be a string" )
+  {
+    Json::Value spec = minimalSpec( "chart-label-typed" );
+    Json::Value chartItem( Json::objectValue );
+    chartItem["id"] = "chart-1";
+    chartItem["rect_mm"] = rectOf( 210, 24, 70, 60 );
+    chartItem["chart"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["kind"] = "bar";
+    chartItem["chart"]["binding"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["binding"]["mode"] = "inline";
+    Json::Value point( Json::objectValue );
+    point["label"] = 5; // numeric label — inlineData() used to throw here
+    point["value"] = 3;
+    chartItem["chart"]["binding"]["data"].append( point );
+    spec["charts"].append( chartItem );
+    CHECK( validateMapSpec( spec ).empty() ); // item-level shape is valid
+
+    // The chart-level validator owns the typed report...
+    const auto chartProblems =
+      sicnu::agent::cartography::validateChartSpec( chartItem["chart"] );
+    REQUIRE_FALSE( chartProblems.empty() );
+    CHECK( anyProblemMentions( chartProblems, "label" ) );
+
+    // ...and the render path degrades to a typed error instead of throwing.
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout != nullptr );
+  }
+
+  SECTION( "review R16-D R1: numeric title / native-path strings degrade, never throw" )
+  {
+    Json::Value spec = minimalSpec( "chart-title-typed" );
+    Json::Value chartItem( Json::objectValue );
+    chartItem["id"] = "chart-3";
+    chartItem["rect_mm"] = rectOf( 210, 180, 70, 60 );
+    chartItem["chart"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["kind"] = "bar";
+    chartItem["chart"]["title"] = 42; // numeric title — renderChartToFile used to throw
+    chartItem["chart"]["binding"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["binding"]["mode"] = "inline";
+    Json::Value point( Json::objectValue );
+    point["label"] = "a";
+    point["value"] = 1;
+    chartItem["chart"]["binding"]["data"].append( point );
+    spec["charts"].append( chartItem );
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout != nullptr );
+    QgsProject::instance()->layoutManager()->removeLayout( layout );
+  }
+
+  SECTION( "chart style.palette entries must be color strings" )
+  {
+    Json::Value spec = minimalSpec( "chart-palette-typed" );
+    Json::Value chartItem( Json::objectValue );
+    chartItem["id"] = "chart-2";
+    chartItem["rect_mm"] = rectOf( 210, 100, 70, 60 );
+    chartItem["chart"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["kind"] = "bar";
+    chartItem["chart"]["binding"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["binding"]["mode"] = "inline";
+    Json::Value point( Json::objectValue );
+    point["label"] = "a";
+    point["value"] = 1;
+    chartItem["chart"]["binding"]["data"].append( point );
+    Json::Value palette( Json::arrayValue );
+    palette.append( 1 );
+    palette.append( 2 );
+    chartItem["chart"]["style"]["palette"] = palette;
+    spec["charts"].append( chartItem );
+
+    const auto chartProblems =
+      sicnu::agent::cartography::validateChartSpec( chartItem["chart"] );
+    REQUIRE_FALSE( chartProblems.empty() );
+    CHECK( anyProblemMentions( chartProblems, "palette" ) );
+
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout != nullptr );
+
+    // The matrix ramp reads palette[0]/palette[last] raw: same contract.
+    Json::Value matrixChart = chartItem["chart"];
+    matrixChart["kind"] = "matrix";
+    matrixChart.removeMember( "binding" );
+    matrixChart["binding"] = Json::Value( Json::objectValue );
+    matrixChart["binding"]["mode"] = "inline";
+    matrixChart["binding"]["matrix"] = Json::Value( Json::objectValue );
+    matrixChart["binding"]["matrix"]["labels"].append( "A" );
+    matrixChart["binding"]["matrix"]["labels"].append( "B" );
+    Json::Value row( Json::arrayValue );
+    row.append( 1 );
+    row.append( 2 );
+    matrixChart["binding"]["matrix"]["rows"].append( row );
+    Json::Value row2( Json::arrayValue );
+    row2.append( 2 );
+    row2.append( 1 );
+    matrixChart["binding"]["matrix"]["rows"].append( row2 );
+    matrixChart["style"]["palette"] = palette;
+    const auto matrixProblems =
+      sicnu::agent::cartography::validateChartSpec( matrixChart );
+    REQUIRE_FALSE( matrixProblems.empty() );
+    CHECK( anyProblemMentions( matrixProblems, "palette" ) );
+    bool rendered = false;
+    QString renderError;
+    REQUIRE_NOTHROW(
+      rendered = sicnu::agent::cartography::renderChartToFile(
+        matrixChart, QStringLiteral( "/tmp/t08-matrix-palette.png" ), &renderError ) );
+    CHECK_FALSE( rendered );
+    CHECK( renderError.contains( QStringLiteral( "palette" ) ) );
+  }
 }
 
 TEST_CASE( "MapSpec validation rejects non-finite font sizes and bad grid declarations (CARTO-7/CARTO-11)",

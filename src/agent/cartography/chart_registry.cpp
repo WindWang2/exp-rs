@@ -45,6 +45,7 @@ QColor paletteColor( const Json::Value &style, int index )
 {
   if ( style.isObject() && style.isMember( "palette" ) && style["palette"].isArray() &&
        index < static_cast<int>( style["palette"].size() ) &&
+       style["palette"][index].isString() &&
        QColor::isValidColor( QString::fromStdString( style["palette"][index].asString() ) ) )
   {
     return QColor( QString::fromStdString( style["palette"][index].asString() ) );
@@ -65,7 +66,12 @@ std::vector<std::pair<QString, double>> inlineData( const Json::Value &chart, bo
   {
     if ( !entry.isObject() )
       continue;
-    const QString label = QString::fromStdString( entry.get( "label", "" ).asString() );
+    // jsoncpp's asString() throws on non-string values: type-guard the
+    // label before reading it (a numeric label falls back to empty).
+    const std::string rawLabel = entry.isMember( "label" ) && entry["label"].isString()
+                                   ? entry["label"].asString()
+                                   : std::string();
+    const QString label = QString::fromStdString( rawLabel );
     const double value = entry.isMember( "value" ) && entry["value"].isNumeric()
                            ? entry["value"].asDouble()
                            : entry.isMember( "y" ) && entry["y"].isNumeric() ? entry["y"].asDouble()
@@ -188,8 +194,14 @@ std::vector<std::pair<QString, double>> deriveAccuracyRows( const Json::Value &b
 bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSizeF &size,
                         QString *error )
 {
-  const std::string kind = chart.get( "kind", "bar" ).asString();
-  const QString title = QString::fromStdString( chart.get( "title", "" ).asString() );
+  const std::string kind =
+    ( chart.isMember( "kind" ) && chart["kind"].isString() ? chart["kind"].asString()
+                                                           : std::string( "bar" ) );
+  // jsoncpp's get() returns the actual member when present — type-guard
+  // before asString() or a numeric title throws out of the render path.
+  const QString title = QString::fromStdString(
+    chart.isMember( "title" ) && chart["title"].isString() ? chart["title"].asString()
+                                                           : std::string() );
   const QColor textColor = styleTextColor( chart["style"] );
   bool showGrid = true;
   if ( chart.isMember( "style" ) && chart["style"].isMember( "show_grid" ) &&
@@ -252,7 +264,8 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         if ( cell.isNumeric() )
           maxCell = std::max( maxCell, cell.asDouble() );
     }
-    const bool diagonalEmphasis = chart["style"].get( "diagonal_emphasis", false ).asBool();
+    const Json::Value &emphasis = chart["style"].get( "diagonal_emphasis", Json::Value() );
+    const bool diagonalEmphasis = emphasis.isBool() ? emphasis.asBool() : false;
     const qreal labelW = painter.fontMetrics().horizontalAdvance( QStringLiteral( "8888" ) ) + 12;
     const qreal headerH = painter.fontMetrics().height() + 6;
     const qreal cellW = ( size.width() - labelW - 8 ) / n;
@@ -261,7 +274,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     QColor rampFrom( 0xed, 0xf2, 0xf9 );
     QColor rampTo( 0x21, 0x71, 0xb5 );
     if ( chart.isMember( "style" ) && chart["style"].isMember( "palette" ) &&
-         chart["style"]["palette"].isArray() && chart["style"]["palette"].size() >= 2 )
+         chart["style"]["palette"].isArray() && chart["style"]["palette"].size() >= 2 &&
+         chart["style"]["palette"][0].isString() &&
+         chart["style"]["palette"][chart["style"]["palette"].size() - 1].isString() )
     {
       const QString fromHex =
         QString::fromStdString( chart["style"]["palette"][0].asString() );
@@ -597,7 +612,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
                                : 0.0;
         if ( std::isfinite( value ) )
           maxPart = std::max( maxPart, std::fabs( value ) );
-        const QString label = QString::fromStdString( part.get( "label", "" ).asString() );
+        const QString label = QString::fromStdString(
+          part.isMember( "label" ) && part["label"].isString() ? part["label"].asString()
+                                                               : std::string() );
         if ( !label.isEmpty() && !seriesLabels.contains( label ) )
           seriesLabels << label;
       }
@@ -1038,6 +1055,39 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
       problems.push_back( "inline binding needs non-empty data array" );
     else if ( binding["data"].size() > 256 )
       problems.push_back( "inline binding capped at 256 data points" );
+    else
+    {
+      // R16-D T08 WP-1: jsoncpp's asString() throws on non-string labels —
+      // type-guard at validation so the render path never sees them raw.
+      int dataIndex = 0;
+      for ( const auto &entry : binding["data"] )
+      {
+        if ( entry.isObject() && entry.isMember( "label" ) && !entry["label"].isString() )
+          problems.push_back( "binding.data[" + std::to_string( dataIndex ) +
+                              "] label must be a string" );
+        ++dataIndex;
+      }
+    }
+  }
+  // R16-D T08 WP-1: palette entries feed QColor parsing via asString() —
+  // non-string entries must be reported, not thrown.
+  if ( chart.isMember( "style" ) && chart["style"].isObject() &&
+       chart["style"].isMember( "palette" ) )
+  {
+    const Json::Value &palette = chart["style"]["palette"];
+    if ( !palette.isArray() )
+      problems.push_back( "style.palette must be an array of color strings" );
+    else
+    {
+      int colorIndex = 0;
+      for ( const auto &entry : palette )
+      {
+        if ( !entry.isString() )
+          problems.push_back( "style.palette[" + std::to_string( colorIndex ) +
+                              "] must be a color string" );
+        ++colorIndex;
+      }
+    }
   }
   if ( mode == "vector_expression" )
   {
@@ -1243,8 +1293,13 @@ bool renderColorbarToFile( const Json::Value &colorbar, const QString &path, QSt
   font.setPointSizeF( fontPt );
   painter.setFont( font );
   painter.setPen( textColor );
-  const std::string minLabel = colorbar.isMember( "min" ) ? colorbar["min"].asString() : "min";
-  const std::string maxLabel = colorbar.isMember( "max" ) ? colorbar["max"].asString() : "max";
+  // jsoncpp's asString() throws on non-string values: a numeric min/max
+  // (the natural way to declare a data ramp) must fall back, not crash
+  // the compile — validateMapSpec reports the type problem separately.
+  const std::string minLabel =
+    colorbar.isMember( "min" ) && colorbar["min"].isString() ? colorbar["min"].asString() : "min";
+  const std::string maxLabel =
+    colorbar.isMember( "max" ) && colorbar["max"].isString() ? colorbar["max"].asString() : "max";
   painter.drawText( QRectF( 8, height - 18, width / 2 - 8, 16 ), Qt::AlignLeft,
                     QString::fromStdString( minLabel ) );
   painter.drawText( QRectF( width / 2, height - 18, width / 2 - 8, 16 ), Qt::AlignRight,
@@ -1268,7 +1323,16 @@ bool bindNativeChart( QgsLayoutItemChart *item, const Json::Value &chart, QStrin
     return false;
   }
   const Json::Value &binding = chart["binding"];
-  const QString layerRef = QString::fromStdString( binding.get( "layer", "" ).asString() );
+  // All string reads on user JSON are type-guarded (jsoncpp's get() returns
+  // the actual member when present — asString() throws on a numeric value
+  // and this path runs without validateChartSpec in front of it).
+  const auto guardedString = []( const Json::Value &parent, const char *key,
+                                 const char *fallback ) {
+    const Json::Value &value = parent.get( key, Json::Value( fallback ) );
+    return QString::fromStdString( value.isString() ? value.asString()
+                                                    : std::string( fallback ) );
+  };
+  const QString layerRef = guardedString( binding, "layer", "" );
   QgsMapLayer *layer = nullptr;
   if ( QgsProject *project = QgsProject::instance() )
   {
@@ -1287,7 +1351,9 @@ bool bindNativeChart( QgsLayoutItemChart *item, const Json::Value &chart, QStrin
   }
   item->setSourceLayer( vector );
 
-  const std::string kind = chart.get( "kind", "bar" ).asString();
+  const std::string kind =
+    ( chart.isMember( "kind" ) && chart["kind"].isString() ? chart["kind"].asString()
+                                                           : std::string( "bar" ) );
   Qgs2DPlot *plot = nullptr;
   if ( kind == "line" || kind == "area" || kind == "scatter" )
     plot = new QgsLineChartPlot();
@@ -1301,10 +1367,9 @@ bool bindNativeChart( QgsLayoutItemChart *item, const Json::Value &chart, QStrin
     plot = new QgsBarChartPlot();
   item->setPlot( plot );
 
-  QgsLayoutItemChart::SeriesDetails series(
-    QString::fromStdString( binding.get( "series_name", "series" ).asString() ) );
-  series.setXExpression( QString::fromStdString( binding.get( "x_expression", "" ).asString() ) );
-  series.setYExpression( QString::fromStdString( binding.get( "y_expression", "" ).asString() ) );
+  QgsLayoutItemChart::SeriesDetails series( guardedString( binding, "series_name", "series" ) );
+  series.setXExpression( guardedString( binding, "x_expression", "" ) );
+  series.setYExpression( guardedString( binding, "y_expression", "" ) );
   if ( binding.isMember( "filter" ) && binding["filter"].isString() )
     series.setFilterExpression( QString::fromStdString( binding["filter"].asString() ) );
   item->setSeriesList( { series } );

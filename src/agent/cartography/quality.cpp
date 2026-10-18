@@ -267,6 +267,28 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
 
   const double pageW = spec["page"]["width_mm"].asDouble();
   const double pageH = spec["page"]["height_mm"].asDouble();
+  // R16-D T08 WP-6: heterogeneous sheets are valid — an item with page P >= 1
+  // renders on pages[P-1] (engine convention; the compiler takes per-page
+  // sizes from pages[]). Rect and margin rules judge each item against its
+  // own sheet, not the page-0 envelope.
+  const auto itemPageSize = [ & ]( const Json::Value &item ) {
+    double w = pageW;
+    double h = pageH;
+    const int page = itemPage( item );
+    if ( page >= 1 && spec.isMember( "pages" ) && spec["pages"].isArray() &&
+         page <= static_cast<int>( spec["pages"].size() ) )
+    {
+      const Json::Value &sheet = spec["pages"][page - 1];
+      if ( sheet.isObject() )
+      {
+        if ( sheet.isMember( "width_mm" ) && sheet["width_mm"].isNumeric() )
+          w = sheet["width_mm"].asDouble();
+        if ( sheet.isMember( "height_mm" ) && sheet["height_mm"].isNumeric() )
+          h = sheet["height_mm"].asDouble();
+      }
+    }
+    return std::make_pair( w, h );
+  };
   const std::string mapRef = mainMapRef( spec );
   const double margin = declaredMargin( spec );
   const double printDpi = declaredPrintDpi( spec );
@@ -533,17 +555,20 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
         const double y = r[1].asDouble();
         const double w = r[2].asDouble();
         const double h = r[3].asDouble();
+        const auto itemSheet = itemPageSize( item );
+        const double sheetW = itemSheet.first;
+        const double sheetH = itemSheet.second;
         if ( w <= 0 || h <= 0 )
           issues.push_back( issue( "MAP_INVALID_RECT", "error",
                                    id + ": rect width/height must be positive", false, id,
                                    nullptr ) );
-        else if ( x < -0.5 || y < -0.5 || x + w > pageW + 0.5 || y + h > pageH + 0.5 )
+        else if ( x < -0.5 || y < -0.5 || x + w > sheetW + 0.5 || y + h > sheetH + 0.5 )
           issues.push_back( issue( "MAP_OFF_PAGE", "error",
                                    id + ": rect exceeds the page bounds", true, id,
                                    "move_in_page" ) );
         else if ( margin > 0 && collectionName != "map_frames" && collectionName != "inset_maps" &&
-                  ( x < margin - 0.5 || y < margin - 0.5 || x + w > pageW - margin + 0.5 ||
-                    y + h > pageH - margin + 0.5 ) )
+                  ( x < margin - 0.5 || y < margin - 0.5 || x + w > sheetW - margin + 0.5 ||
+                    y + h > sheetH - margin + 0.5 ) )
           issues.push_back( issue( "MAP_MARGIN_VIOLATION", "warning",
                                    id + ": item violates the declared page margin "
                                         "(page.margin_mm)",
@@ -1238,16 +1263,19 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
   {
     const int pageCount =
       spec.isMember( "pages" ) && spec["pages"].isArray()
-        ? std::max( 1, static_cast<int>( spec["pages"].size() ) )
+        ? std::max( 1, static_cast<int>( spec["pages"].size() ) ) + 1
         : 1;
     for ( int page = 0; page < std::min( pageCount, 10 ); ++page )
     {
       double pageWidth = pageW;
-      if ( spec.isMember( "pages" ) && spec["pages"].isArray() &&
-           page < static_cast<int>( spec["pages"].size() ) &&
-           spec["pages"][page].isMember( "width_mm" ) &&
-           spec["pages"][page]["width_mm"].isNumeric() )
-        pageWidth = spec["pages"][page]["width_mm"].asDouble();
+      // Engine convention (R16-D T08 WP-6): item page P >= 1 renders on
+      // pages[P-1]; page-0 items stay on the body sheet from spec.page.
+      if ( page >= 1 && spec.isMember( "pages" ) && spec["pages"].isArray() &&
+           page <= static_cast<int>( spec["pages"].size() ) &&
+           spec["pages"][page - 1].isObject() &&
+           spec["pages"][page - 1].isMember( "width_mm" ) &&
+           spec["pages"][page - 1]["width_mm"].isNumeric() )
+        pageWidth = spec["pages"][page - 1]["width_mm"].asDouble();
       bool any = false;
       double minX = 0.0;
       double maxX = 0.0;
@@ -2170,6 +2198,26 @@ std::string structuralDigest( const Json::Value &spec )
                      std::to_string( static_cast<long long>( std::llround( pageW * 100.0 ) ) ) +
                      "x" +
                      std::to_string( static_cast<long long>( std::llround( pageH * 100.0 ) ) ) );
+
+  // R16-D T08 WP-7: per-page sheets are delivery geometry too — fold each
+  // declared page's size into the digest (same 0.01 mm rounding), so two
+  // documents differing only in a non-first page's size cannot share a
+  // structural identity.
+  if ( spec.isObject() && spec.isMember( "pages" ) && spec["pages"].isArray() )
+  {
+    for ( Json::Value::ArrayIndex i = 0; i < spec["pages"].size(); ++i )
+    {
+      const Json::Value &sheet = spec["pages"][i];
+      const double sheetW = sheet.isObject() ? sheet.get( "width_mm", 0.0 ).asDouble() : 0.0;
+      const double sheetH = sheet.isObject() ? sheet.get( "height_mm", 0.0 ).asDouble() : 0.0;
+      entries.push_back( "pages[" + std::to_string( i ) + "]:" +
+                         std::to_string(
+                           static_cast<long long>( std::llround( sheetW * 100.0 ) ) ) +
+                         "x" +
+                         std::to_string(
+                           static_cast<long long>( std::llround( sheetH * 100.0 ) ) ) );
+    }
+  }
 
   auto round2 = []( double v ) {
     return std::round( v * 100.0 ) / 100.0;

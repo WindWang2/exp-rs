@@ -49,21 +49,20 @@ int PiecewiseLinearEnhancement::enhance( double value )
   if ( value >= m_points.back().x )
     return qBound( 0, static_cast<int>( std::lround( m_points.back().y ) ), 255 );
 
-  for ( size_t i = 0; i + 1 < m_points.size(); ++i )
-  {
-    const double x1 = m_points[i].x;
-    const double y1 = m_points[i].y;
-    const double x2 = m_points[i + 1].x;
-    const double y2 = m_points[i + 1].y;
-    if ( value >= x1 && value <= x2 )
-    {
-      const double t = ( x2 > x1 ) ? ( value - x1 ) / ( x2 - x1 ) : 0.0;
-      const double y = y1 + t * ( y2 - y1 );
-      return qBound( 0, static_cast<int>( std::lround( y ) ), 255 );
-    }
-  }
-
-  return 0;
+  // m_points is sorted by x (constructor); find the segment [i, i+1] that
+  // contains value with a binary search — the linear scan paid ~n
+  // comparisons per pixel on float rasters where QGIS builds no LUT
+  // (gamma/equalization curves inject ~257 points).
+  const auto upper = std::lower_bound(
+    m_points.begin(), m_points.end(), value,
+    []( const ControlPoint &p, double v ) { return p.x < v; } );
+  if ( upper == m_points.begin() || upper == m_points.end() )
+    return 0; // unreachable after the endpoint guards; keep honest
+  const ControlPoint &right = *upper;
+  const ControlPoint &left = *( upper - 1 );
+  const double t = ( right.x > left.x ) ? ( value - left.x ) / ( right.x - left.x ) : 0.0;
+  const double y = left.y + t * ( right.y - left.y );
+  return qBound( 0, static_cast<int>( std::lround( y ) ), 255 );
 }
 
 bool PiecewiseLinearEnhancement::isValueInDisplayableRange( double value )

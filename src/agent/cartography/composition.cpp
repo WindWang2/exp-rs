@@ -290,6 +290,11 @@ class Solver
     // page-aware pin evidence on keep_with / avoid_overlap.
     std::map<int, double> mPageHeights;
 
+    // R16-D T08 WP-6: page index → width (mm). The compiler honors
+    // per-page sizes from pages[]; anchors must resolve against the
+    // item's own page, not page-0 geometry.
+    std::map<int, double> mPageWidths;
+
     // Platform 9.0: scoped re-solve focus (empty = whole document).
     std::set<std::string> mFocusIds;
 
@@ -334,6 +339,8 @@ void Solver::normalize()
   // follower's bottom bound is the height of ITS declared page.
   mPageHeights.clear();
   mPageHeights[0] = mPageH;
+  mPageWidths.clear();
+  mPageWidths[0] = mPageW;
   if ( mSpec.isObject() && mSpec.isMember( "pages" ) && mSpec["pages"].isArray() )
   {
     for ( Json::Value::ArrayIndex i = 0; i < mSpec["pages"].size(); ++i )
@@ -343,6 +350,10 @@ void Solver::normalize()
         mPageHeights[static_cast<int>( i ) + 1] = page["height_mm"].asDouble();
       else
         mPageHeights[static_cast<int>( i ) + 1] = mPageH;
+      if ( page.isObject() && page.isMember( "width_mm" ) && page["width_mm"].isNumeric() )
+        mPageWidths[static_cast<int>( i ) + 1] = page["width_mm"].asDouble();
+      else
+        mPageWidths[static_cast<int>( i ) + 1] = mPageW;
     }
   }
   for ( int c = 0; c < mapspec::kCollectionCount; ++c )
@@ -619,8 +630,16 @@ bool Solver::resolveAnchors()
       }
       double x = 0.0;
       double y = 0.0;
-      anchorPoint( edge, anchorMargin( anchor, mMargin ), mPageW, mPageH, rect.w, rect.h, x, y );
-      if ( x < 0 || y < 0 || x + rect.w > mPageW || y + rect.h > mPageH )
+      // Anchors resolve against the geometry of the page the item is
+      // declared on (pages[] may carry per-page sizes; page-0 fallback).
+      const int anchorPage =
+        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+      const auto pageWIt = mPageWidths.find( anchorPage );
+      const double pageW = pageWIt != mPageWidths.end() ? pageWIt->second : mPageW;
+      const auto pageHIt = mPageHeights.find( anchorPage );
+      const double pageH = pageHIt != mPageHeights.end() ? pageHIt->second : mPageH;
+      anchorPoint( edge, anchorMargin( anchor, mMargin ), pageW, pageH, rect.w, rect.h, x, y );
+      if ( x < 0 || y < 0 || x + rect.w > pageW || y + rect.h > pageH )
       {
         // Reported, never written: writing an off-page rect would make the
         // repair loop clamp and re-pin forever.
@@ -1437,6 +1456,17 @@ void Solver::searchCores()
   // constraint be satisfied. The search re-runs the bounded hard sweep on the
   // pre-solve geometry with the subset disabled — a bounded, honest witness,
   // never claimed to be a global minimum.
+  //
+  // R16-D T08 WP-11: the simulation budget is SLICED per target so a wide,
+  // legitimately-unresolvable neighborhood cannot starve later targets to
+  // zero evidence ("budget was exhausted" on a core one simulation away).
+  // The global cap still bounds the whole searchCores pass.
+  int pendingTargets = 0;
+  for ( const auto &counted : mConstraints )
+    if ( !counted.isSoft && !counted.disabled && !holds( counted ) )
+      ++pendingTargets;
+  const int perTargetBudget =
+    std::max( 1, kMaxCoreSimulations / std::max( 1, pendingTargets ) );
   for ( const auto &target : mConstraints )
   {
     if ( target.isSoft || target.disabled || mSimulating )
@@ -1470,9 +1500,13 @@ void Solver::searchCores()
     std::vector<int> chosen;
     const int n = static_cast<int>( candidates.size() );
     const int maxSubset = std::min( kMaxCoreSubsetSize, n );
-    int targetBudget = kMaxCoreSimulations - mSimulations; // per-target slice
-    if ( targetBudget < 0 )
-      targetBudget = 0;
+    // Per-target slice: at least one witness attempt while any global
+    // budget remains (a target one simulation from its core must not be
+    // starved by an earlier neighborhood), capped by the global budget.
+    int targetBudget = std::min( perTargetBudget, kMaxCoreSimulations - mSimulations );
+    if ( targetBudget < 1 && mSimulations < kMaxCoreSimulations )
+      targetBudget = 1;
+    int targetSpent = 0;
     for ( int size = 1; size <= maxSubset && !found; ++size )
     {
       std::vector<int> combination( size );
@@ -1480,7 +1514,9 @@ void Solver::searchCores()
         combination[i] = i;
       while ( !found )
       {
-        if ( ++mSimulations > kMaxCoreSimulations )
+        ++mSimulations;
+        ++targetSpent;
+        if ( mSimulations > kMaxCoreSimulations || targetSpent > targetBudget )
         {
           bounded = true;
           break;
