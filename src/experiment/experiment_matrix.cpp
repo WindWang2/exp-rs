@@ -318,9 +318,16 @@ Result<QStringList> MatrixLedger::runsForCell( const QString &cellId, qint64 lim
             QStringLiteral( "ledger page limit must be positive and below the"
                             " store's 10000-row page clamp, so overflow stays"
                             " detectable" ) ) );
+    QString scanError;
     const auto edges =
         m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit + 1,
-                               QStringLiteral( "recorded" ), QStringLiteral( "run" ) );
+                               QStringLiteral( "recorded" ), QStringLiteral( "run" ), &scanError );
+    // R15-B (B07 tail): an unreadable ledger is a typed failure, never an
+    // empty/short run list that statistics would silently be computed over.
+    if ( !scanError.isEmpty() )
+        return Result<QStringList>::failure( matrixError(
+            QStringLiteral( "experiment.store_scan_failed" ),
+            QStringLiteral( "ledger of cell %1 could not be read: %2" ).arg( cellId, scanError ) ) );
     if ( edges.size() > limit )
     {
         return Result<QStringList>::failure( matrixError(

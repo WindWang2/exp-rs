@@ -75,6 +75,14 @@ class StoreStmt
     mutable int m_lastRc = SQLITE_OK;
 };
 
+/// R15-B (B07 tail): records a scan failure for the additive `scanError`
+/// out-parameter of the bare-container readers (null = caller not asking).
+inline void noteScanError( QString *scanError, const QString &message )
+{
+    if ( scanError )
+        *scanError = message.isEmpty() ? QStringLiteral( "sqlite scan failed" ) : message;
+}
+
 inline Diagnostic storeDiag( QString code, QString message )
 {
     return Diagnostic{ std::move( code ), std::move( message ), DiagnosticSeverity::Error };

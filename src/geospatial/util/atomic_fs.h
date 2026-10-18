@@ -114,6 +114,32 @@ std::uintmax_t fileSize( const std::string &path );
 /// Checks whether an uncommitted journal or committed marker exists for the given main target.
 bool hasPendingJournal( const std::string &targetMainPath );
 
+/// R15-B (B13): true only for an UNCOMMITTED journal (".publish-journal" /
+/// ".sicnu-journal" without the ".committed" suffix). Such a group may be a
+/// mix of generations (a crash between sidecar and main renames); readers
+/// must refuse it instead of serving it. A committed marker means the new
+/// group is complete (only backup sweeping was interrupted).
+bool hasUncommittedPublishJournal( const std::string &targetMainPath );
+
+/// R15-B (B13): reader-side gate. Throws GeoError(IoError) when @p localPath
+/// carries an uncommitted publish journal. Side-effect free: recovery is the
+/// writer's (publishStagedGroup/publishStagedMembers auto-recover) or an
+/// explicit recoverDatasetGroup() call — a reader must never roll back a
+/// publish that another thread/process may still be performing. /vsi*
+/// and remote paths are ignored.
+void throwIfInterruptedPublish( const std::string &localPath );
+
+/// R15-B (item 7): non-throwing form of the same predicate (same /vsi* and
+/// remote filter). Readers re-check it AFTER their GDALOpenEx so a publish
+/// that started while the dataset was being opened is refused too — this
+/// narrows the check→open window to a publish that both starts AND commits
+/// inside one open call (not closable without a reader/writer lock).
+bool interruptedPublishPending( const std::string &localPath );
+
+/// Throws the interrupted-publish GeoError unconditionally (used after a
+/// post-open re-check; never returns).
+[[noreturn]] void throwInterruptedPublish( const std::string &localPath );
+
 /// Recovers an interrupted multi-file publication for targetMainPath.
 /// If an uncommitted journal is found, rolls back published targets and restores backups.
 /// If a committed marker is found, cleans up leftover backups.

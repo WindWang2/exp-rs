@@ -1120,6 +1120,58 @@ Result<void> DataManager::notifyExternalContentChange( AssetId id )
   if ( QThread::currentThread() != thread() )
     return Result<void>::failure( wrongThreadDiagnostic() );
 
+  const Impl::AssetRecord *current = m_impl->records.find( id );
+  if ( !current )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "asset.unknown" ),
+                  QStringLiteral( "No registered asset matches the requested id" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // R15-B (B06): the bytes changed, so the metadata facts derived from them
+  // (structure: size/bands/CRS; state; capabilities) are invalid too. Keeping
+  // the old snapshot under a NEW revision served stale facts as current (a
+  // re-published raster with a different band count kept advertising the old
+  // one). Re-derive them through the provider seam — the same resolution
+  // registerSource's #687 update path uses. When the new content does not
+  // resolve, the asset is flagged unusable (state Error) instead of staying
+  // Ready on facts that no longer describe its bytes. Virtual rasters
+  // (recipe-derived structure) and remote maps keep their snapshot.
+  AssetState state = current->snapshot.state();
+  AssetCapabilities capabilities = current->snapshot.capabilities();
+  AssetKind kind = current->snapshot.kind();
+  StorageKind storageKind = current->snapshot.storageKind();
+  AssetStructure structure = current->snapshot.structure();
+  QVector<Diagnostic> diagnostics;
+  if ( !current->virtualRecipe.has_value() && kind != AssetKind::RemoteMap )
+  {
+    const Result<internal::ResolvedSource> resolved =
+      m_impl->providers->resolve( current->snapshot.source() );
+    if ( resolved )
+    {
+      state = resolved.value().state;
+      capabilities = capabilities | resolved.value().capabilities;
+      kind = resolved.value().kind;
+      storageKind = resolved.value().storageKind;
+      structure = resolved.value().structure;
+      diagnostics = resolved.diagnostics();
+    }
+    else
+    {
+      state = AssetState::Error;
+      diagnostics.append(
+        Diagnostic{ QStringLiteral( "asset.content_unreadable" ),
+                    QStringLiteral( "The changed source content no longer resolves; the asset is"
+                                    " marked unusable until it does" ),
+                    DiagnosticSeverity::Warning } );
+      for ( const Diagnostic &cause : resolved.diagnostics() )
+        diagnostics.append( Diagnostic{ cause.code, cause.message, DiagnosticSeverity::Warning } );
+    }
+  }
+
+  // The provider call cannot touch the record store, but take mutable access
+  // only now (it copies the owning shard) and re-check the record exists.
   Impl::AssetRecord *recordIt = m_impl->records.findMutable( id );
   if ( !recordIt )
   {
@@ -1128,24 +1180,23 @@ Result<void> DataManager::notifyExternalContentChange( AssetId id )
                   QStringLiteral( "No registered asset matches the requested id" ),
                   DiagnosticSeverity::Error } );
   }
-
   const AssetRevision newRevision = recordIt->snapshot.revision().next();
   recordIt->snapshot = AssetSnapshot{ recordIt->snapshot.id(),
                                       newRevision,
                                       recordIt->snapshot.source(),
-                                      recordIt->snapshot.kind(),
-                                      recordIt->snapshot.state(),
-                                      recordIt->snapshot.capabilities(),
+                                      kind,
+                                      state,
+                                      capabilities,
                                       recordIt->snapshot.persistence(),
-                                      recordIt->snapshot.storageKind(),
+                                      storageKind,
                                       recordIt->snapshot.displayName(),
-                                      recordIt->snapshot.structure(),
+                                      structure,
                                       recordIt->snapshot.acquisitionTime(),
                                       recordIt->snapshot.parentCollectionId() };
 
   m_impl->publishSnapshot();
   emit assetChanged( id );
-  return Result<void>::success();
+  return Result<void>::success( diagnostics );
 }
 
 Result<void> DataManager::rollbackEdit( AssetId id )
