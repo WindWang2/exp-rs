@@ -532,3 +532,43 @@ TEST_CASE( "terminology provider assigns distinct unique ids to duplicate en/slu
     // And related lookup must resolve without dangling references
     CHECK( registry.validateReferences().isEmpty() );
 }
+
+TEST_CASE( "summary truncation never splits a UTF-16 surrogate pair",
+           "[help][descriptor][r17]" )
+{
+    // #1522: QString::left() counts CODE UNITS, so a cut landing between a
+    // high and a low surrogate leaves a lone surrogate that renders as
+    // U+FFFD. Both summary producers (DiagnosticCatalog::fallback() and the
+    // curated mirror in HelpContentStore) must use truncateSummary() so the
+    // boundary rule cannot drift apart again.
+    using sicnu::help::truncateSummary;
+
+    // 119 units of 'a', then one astral character (surrogate pair) occupying
+    // units 119 and 120 — i.e. exactly straddling the 120-unit bound.
+    QString text( 119, QLatin1Char( 'a' ) );
+    text.append( QChar( 0xD83D ) ); // high surrogate
+    text.append( QChar( 0xDE00 ) ); // low surrogate
+    REQUIRE( text.size() == 121 );
+
+    // The pre-fix behaviour, pinned so the regression cannot come back
+    // silently: left(120) really does orphan the high surrogate.
+    const QString naive = text.left( 120 );
+    REQUIRE( naive.size() == 120 );
+    REQUIRE( naive.at( 119 ).isHighSurrogate() );
+
+    const QString truncated = truncateSummary( text );
+    CHECK( truncated.size() == 119 );
+    REQUIRE_FALSE( truncated.isEmpty() );
+    // No lone surrogate at either end of the result.
+    CHECK_FALSE( truncated.at( truncated.size() - 1 ).isHighSurrogate() );
+    CHECK_FALSE( truncated.at( truncated.size() - 1 ).isLowSurrogate() );
+    CHECK( truncated == QString( 119, QLatin1Char( 'a' ) ) );
+
+    // A cut that does NOT straddle a pair is left at the full bound.
+    const QString plain = truncateSummary( QString( 500, QLatin1Char( 'b' ) ) );
+    CHECK( plain.size() == sicnu::help::kHelpSummaryMaxChars );
+
+    // Shorter than the bound is returned untouched.
+    const QString shortText = QStringLiteral( "short" );
+    CHECK( truncateSummary( shortText ) == shortText );
+}
