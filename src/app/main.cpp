@@ -35,6 +35,7 @@
 #include "data/execution_identity_bridge.h"
 #include "data/governance/workspace_service.h"
 #include "geospatial/remote/offline_gate.h"
+#include "geospatial/stac/stac_client.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -634,6 +635,11 @@ int main(int argc, char *argv[])
     // Without this, plugins unload in the registry static destructor after
     // `delete app`, executing plugin code in a dead-Qt process.
     exprs::PluginRegistry::instance().unloadAll();
+    // Same reasoning, #1456: detached STAC page fetches marshal their result
+    // back onto the application thread and touch Qt objects, so they must be
+    // joined while that world is still alive. drainDetachedRequests() also
+    // refuses any further detached work from here on.
+    sicnu::geo::StacClient::drainDetachedRequests();
     window.reset();
     delete logFile;
     delete app;

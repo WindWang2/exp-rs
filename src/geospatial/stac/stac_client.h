@@ -235,9 +235,22 @@ class StacClient
     /// exactly once from the worker thread; the CALLER owns cross-thread
     /// marshalling (the Qt adapter does the UI-thread hop). Destroying the
     /// caller is safe: the worker owns a private client copy.
-    /// Detached-on-exit caveat: a fetch still in flight when the process
-    /// exits is abandoned (bounded by the timeout budget, same as CPL).
+    /// #1456: the fetch is now REGISTERED rather than abandoned, so
+    /// drainDetachedRequests() can join it — see below.
     void requestPageDetached( const StacRequest &request, const PageCallback &onDone ) const;
+
+    /// #1456: quiesces detached page fetches. With @p wait it stops accepting
+    /// new detached work and then joins every outstanding fetch, so no
+    /// callback can fire while the process is tearing statics down (the old
+    /// `.detach()` left those fetches completely unbounded). With
+    /// `wait == false` it only reaps the fetches that have already finished —
+    /// non-blocking, for periodic housekeeping.
+    ///
+    /// Call the waiting form from the application shutdown sequence, BEFORE
+    /// widget/app destruction, next to TaskCenter/JobEngine/PluginRegistry
+    /// shutdown: the callbacks marshal onto the application thread and touch
+    /// Qt objects that must still be alive.
+    static void drainDetachedRequests( bool wait = true );
 
     // --- shared href/egress safety (R6 convergence: single home) ----------
     /// SSRF egress verdict for an outgoing http(s) url: "" when fetchable,
