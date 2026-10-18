@@ -28,6 +28,9 @@ namespace fs = std::filesystem;
 #include <set>
 #include <sstream>
 #include <thread>
+#include <chrono>
+#include <mutex>
+#include <vector>
 #include <utility>
 #include "platform/portable.h"
 
@@ -756,6 +759,47 @@ StacPage StacClient::nextPage( const StacPage &page ) const
   return executeSearch( request.method, request.url, request.body );
 }
 
+namespace
+{
+/// #1456: registry of in-flight detached page fetches. `.detach()` threw away
+/// the only handle to the worker, so a fetch still running when the process
+/// exited could fire its callback during static teardown — a use-after-free
+/// against whatever the callback captured. Keeping the handles lets
+/// drainDetachedRequests() join them before the world goes away.
+///
+/// The per-fetch flag is published as the LAST thing the worker does, so a
+/// joiner that observes it knows the callback has already returned. Workers
+/// never take gDetachedMutex, so joining under it cannot deadlock.
+struct DetachedFetch
+{
+  std::thread thread;
+  std::shared_ptr<std::atomic<bool>> finished;
+};
+
+std::mutex gDetachedMutex;
+std::vector<DetachedFetch> gDetached;
+std::atomic<bool> gDetachedClosed{ false };
+
+/// Joins and drops every fetch whose callback has already returned. Caller
+/// must hold gDetachedMutex.
+void reapDetachedUnlocked()
+{
+  for ( auto it = gDetached.begin(); it != gDetached.end(); )
+  {
+    if ( it->finished->load( std::memory_order_acquire ) )
+    {
+      if ( it->thread.joinable() )
+        it->thread.join();
+      it = gDetached.erase( it );
+    }
+    else
+    {
+      ++it;
+    }
+  }
+}
+} // namespace
+
 void StacClient::requestPageDetached( const StacRequest &request, const PageCallback &onDone ) const
 {
   if ( !onDone )
@@ -779,8 +823,27 @@ void StacClient::requestPageDetached( const StacRequest &request, const PageCall
     onDone( StacPage{}, error.what() );
     return;
   }
-  std::thread(
-    [ worker, request, onDone ]() {
+  // #1456: refuse to spawn into a process that is already tearing down. The
+  // hazard is WHEN the callback runs, not whether its QPointer guard is
+  // still valid: during static teardown the captures themselves are going
+  // away.
+  {
+    std::lock_guard<std::mutex> lock( gDetachedMutex );
+    if ( gDetachedClosed.load( std::memory_order_acquire ) )
+    {
+      onDone( StacPage{}, "StacClient: shutting down; detached page fetch refused" );
+      return;
+    }
+  }
+
+  auto finished = std::make_shared<std::atomic<bool>>( false );
+  std::thread workerThread(
+    [ worker, request, onDone, finished ]() {
+      struct Completion
+      {
+        std::shared_ptr<std::atomic<bool>> flag;
+        ~Completion() { flag->store( true, std::memory_order_release ); }
+      } completion{ finished };
       try
       {
         StacPage page = worker->executeSearch( request.method, request.url, request.body );
@@ -798,8 +861,31 @@ void StacClient::requestPageDetached( const StacRequest &request, const PageCall
       {
         onDone( StacPage{}, "StacClient: unknown fetch failure" );
       }
-    } )
-    .detach();
+    } );
+
+  {
+    std::lock_guard<std::mutex> lock( gDetachedMutex );
+    // Opportunistic reap: without it the registry would keep one handle per
+    // completed fetch for the whole session.
+    reapDetachedUnlocked();
+    gDetached.push_back( DetachedFetch{ std::move( workerThread ), finished } );
+  }
+}
+
+void StacClient::drainDetachedRequests( bool wait )
+{
+  std::unique_lock<std::mutex> lock( gDetachedMutex );
+  if ( wait )
+    gDetachedClosed.store( true, std::memory_order_release );
+  for ( ;; )
+  {
+    reapDetachedUnlocked();
+    if ( !wait || gDetached.empty() )
+      break;
+    lock.unlock();
+    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    lock.lock();
+  }
 }
 
 StacSearchAllResult StacClient::searchAll( const StacSearchQuery &query ) const
