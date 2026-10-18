@@ -280,9 +280,12 @@ ApplyStretchResult QgsRasterDisplayTarget::apply( void *layerToken,
     }
     else if ( resolved.kind == StretchKind::StdDev )
     {
+      // Sample-capped statistics (#634 family): the uncapped call computed
+      // a full first-time scan per band on the GUI thread from every Apply.
       const QgsRasterBandStats stats = provider->bandStatistics(
         band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max
-              | Qgis::RasterBandStatistic::Mean | Qgis::RasterBandStatistic::StdDev );
+              | Qgis::RasterBandStatistic::Mean | Qgis::RasterBandStatistic::StdDev,
+        QgsRectangle(), 250000 );
       if ( std::isfinite( stats.mean ) && std::isfinite( stats.stdDev )
            && stats.stdDev > 0.0 )
       {
@@ -387,14 +390,18 @@ StretchResult<BandStats> QgsBandStatsSource::stats( void *layerToken, int band )
     return StretchResult<BandStats>::fail( StretchErrorCode::InvalidSpec, "band out of range" );
 
   BandStats out;
+  // Sample-capped statistics (#634 family): both moments calls used to run
+  // uncapped full scans per band.
   const QgsRasterBandStats minMax = provider->bandStatistics(
-    band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max );
+    band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
+    QgsRectangle(), 250000 );
   out.min = minMax.minimumValue;
   out.max = minMax.maximumValue;
   out.hasMinMax = ( out.max > out.min ) || std::isfinite( out.min );
 
   const QgsRasterBandStats moments = provider->bandStatistics(
-    band, Qgis::RasterBandStatistic::Mean | Qgis::RasterBandStatistic::StdDev );
+    band, Qgis::RasterBandStatistic::Mean | Qgis::RasterBandStatistic::StdDev,
+    QgsRectangle(), 250000 );
   out.mean = moments.mean;
   out.stdDev = moments.stdDev;
   out.hasMeanStd = std::isfinite( out.mean ) && std::isfinite( out.stdDev );
