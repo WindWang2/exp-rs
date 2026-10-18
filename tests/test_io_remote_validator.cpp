@@ -691,10 +691,29 @@ TEST_CASE( "resolveForPinning fails closed and never pins a private address",
     CHECK( offline::resolveForPinning( "example.com", 0, entries, error ) ==
            offline::HostPinStatus::Unresolved );
 
-    // .invalid is reserved by RFC 2606 and can never resolve, so this is
-    // deterministic without network access: the host is NOT proven public.
-    CHECK( offline::resolveForPinning( "nonexistent-host.invalid", 443, entries, error ) ==
+    // A name getaddrinfo must reject (spaces are never legal in a host):
+    // deterministic without network access, and the refusal must be typed
+    // and empty-handed - the old isPrivateHost() fell through to "public"
+    // on exactly this path.
+    CHECK( offline::resolveForPinning( "not a resolvable host name", 443, entries, error ) ==
            offline::HostPinStatus::Unresolved );
     CHECK_FALSE( error.empty() );
     CHECK( entries.empty() );
+
+    // Whatever a real resolver answers, the contract holds: Unresolved is
+    // always empty-handed and explained, Ok always yields exactly one
+    // "host:port:addr[,addr]" entry naming the port that will be connected
+    // to (the resolver here may wildcard, so the STATUS is not pinned).
+    const auto wildcardStatus =
+      offline::resolveForPinning( "nonexistent-host.invalid", 8443, entries, error );
+    if ( wildcardStatus == offline::HostPinStatus::Unresolved )
+    {
+      CHECK_FALSE( error.empty() );
+      CHECK( entries.empty() );
+    }
+    else if ( wildcardStatus == offline::HostPinStatus::Ok )
+    {
+      REQUIRE( entries.size() == 1 );
+      CHECK( entries.front().find( "nonexistent-host.invalid:8443:" ) == 0 );
+    }
 }
