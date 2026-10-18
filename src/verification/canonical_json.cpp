@@ -213,6 +213,14 @@ struct CanonicalWriter
 
 std::string roundSignificant( double value, int digits )
 {
+    // IEEE says -0.0 == 0.0, so two runs that compute one and the other have
+    // computed the same value; formatting them as "-0" and "0" would fork every
+    // digest and evidence spelling built on them. RFC 8785 (JCS) makes the same
+    // normalisation for the same reason. Only the sign bit of zero is affected.
+    if ( value == 0.0 )
+    {
+        value = 0.0;
+    }
     std::ostringstream stream;
     stream.imbue( std::locale::classic() );
     stream << std::setprecision( digits ) << value;

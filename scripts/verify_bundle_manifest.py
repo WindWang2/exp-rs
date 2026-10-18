@@ -216,6 +216,17 @@ def verify_bundle(root):
             continue
         if digest != entry.get("sha256"):
             bad.append("sha256 mismatch %s" % rel)
+        # Executable-bit preservation (POSIX builder declares "exec": true per
+        # executable payload file): a transfer that strips the bit — zip
+        # without permissions, a FAT32 USB stick — leaves every byte
+        # identical, so the digest lane stays green while ./RUN.sh no longer
+        # runs. Enforced only when the manifest declares it: a manifest
+        # without the field (legacy /1, Windows-built) verifies as before.
+        # Literal True only — the field is a builder declaration, but a
+        # truthy non-bool ("yes", 1) must not flip verification semantics.
+        if entry.get("exec") is True and os.name == "posix" \
+                and not os.access(target, os.X_OK):
+            bad.append("exec bit lost: %s" % rel)
 
     # files[] must cover EVERY regular file: re-walk and flag unlisted ones.
     # A symlinked directory is pruned and flagged rather than silently skipped

@@ -95,7 +95,21 @@ ValidationResult validateLabRules( const QJsonObject &rules )
         if ( !a.contains( QStringLiteral( "weight" ) ) )
             r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
                         QStringLiteral( "weight required" ) );
-        weightSum += a.value( QStringLiteral( "weight" ) ).toDouble( 0.0 );
+        // Weight arithmetic (R16-C/T06 WP3): per-item weights must be
+        // finite and non-negative. A negative deduction weight cancels
+        // against a bloated partner and passes an aggregate-only check,
+        // and the grader would compute scores from nonsense arithmetic.
+        // Type first (round-1 review): toDouble(0.0) coerced a non-numeric
+        // weight ("0.5x") to a legal 0.0 — the value must be a JSON number.
+        const QJsonValue weightValue = a.value( QStringLiteral( "weight" ) );
+        if ( !weightValue.isDouble() )
+            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
+                        QStringLiteral( "weight must be a number" ) );
+        const double weight = weightValue.toDouble( 0.0 );
+        if ( !std::isfinite( weight ) || weight < 0.0 )
+            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
+                        QStringLiteral( "weight must be finite and non-negative" ) );
+        weightSum += weight;
         // Evidence / metric vocabulary soft checks
         if ( a.contains( QStringLiteral( "evidence" ) )
              && a.value( QStringLiteral( "evidence" ) ).toString().isEmpty() )
@@ -104,9 +118,14 @@ ValidationResult validateLabRules( const QJsonObject &rules )
     }
 
     // Lab rules historically use weights that sum to ~100 or ~1; flag mismatch vs 100 as warning if far.
-    if ( assertions.size() > 0 && weightSum <= 0.0 )
+    // Non-finite sums (overflow to inf, or a NaN member) must be refused
+    // too: "sum > 0" alone holds for +inf and is silently false-compared
+    // for NaN.
+    if ( assertions.size() > 0 && ( !std::isfinite( weightSum ) || weightSum <= 0.0 ) )
         r.addError( QStringLiteral( "weight_mismatch" ), QStringLiteral( "assertions" ),
-                    QStringLiteral( "assertion weights must sum to a positive total" ) );
+                    std::isfinite( weightSum )
+                      ? QStringLiteral( "assertion weights must sum to a positive total" )
+                      : QStringLiteral( "assertion weights must sum to a finite total" ) );
 
     return r;
 }
@@ -142,7 +161,20 @@ ValidationResult validateProcessRubric( const QJsonObject &rubric )
         if ( !kinds.contains( kind ) )
             r.addError( QStringLiteral( "unsupported_criterion_kind" ), path + QStringLiteral( ".kind" ),
                         QStringLiteral( "only stage|metric|fact|answer supported" ) );
-        sum += c.value( QStringLiteral( "weight" ) ).toDouble( 0.0 );
+        // Weight arithmetic (R16-C/T06 WP3): same per-item rule as lab
+        // assertions — finite and non-negative; a NaN member made the
+        // aggregate |sum - 1.0| comparison silently false below. Type
+        // first (round-1 review): a non-numeric weight must be refused,
+        // not coerced to 0.0.
+        const QJsonValue weightValue = c.value( QStringLiteral( "weight" ) );
+        if ( !weightValue.isDouble() )
+            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
+                        QStringLiteral( "weight must be a number" ) );
+        const double weight = weightValue.toDouble( 0.0 );
+        if ( !std::isfinite( weight ) || weight < 0.0 )
+            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
+                        QStringLiteral( "weight must be finite and non-negative" ) );
+        sum += weight;
 
         if ( kind == QLatin1String( "metric" )
              && c.value( QStringLiteral( "metricKey" ) ).toString().isEmpty()
@@ -151,7 +183,9 @@ ValidationResult validateProcessRubric( const QJsonObject &rubric )
                         QStringLiteral( "metric criterion requires metricKey" ) );
     }
 
-    if ( criteria.size() > 0 && std::fabs( sum - 1.0 ) > 1e-6 )
+    // !isfinite first: |NaN - 1.0| > eps is FALSE, so a NaN sum used to
+    // pass this aggregate check unseen.
+    if ( criteria.size() > 0 && ( !std::isfinite( sum ) || std::fabs( sum - 1.0 ) > 1e-6 ) )
         r.addError( QStringLiteral( "weight_mismatch" ), QStringLiteral( "criteria" ),
                     QStringLiteral( "criterion weights must sum to 1.0 (got " )
                         + QString::number( sum ) + QStringLiteral( ")" ) );

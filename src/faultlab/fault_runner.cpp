@@ -20,15 +20,26 @@ namespace
 /// Cleanup + re-digest, shared by every exit path so sandbox and source
 /// facts are always reported honestly. A null source means the fixture
 /// never materialized: nothing to verify, so source immutability is not
-/// claimed.
+/// claimed. A source that cannot be digested (canonical refusal) is the
+/// same honesty rule: immutability is provable only against a digest.
 void finishRun( FaultSandbox &sandbox, const FaultGrid *source, FaultRunReport &report )
 {
     sandbox.cleanup();
     report.sandboxRemoved = sandbox.verifyNoResidue();
     if ( source != nullptr )
     {
-        report.sourceDigestAfter = canonical::sha256HexOf( source->toJson() );
-        report.sourceUnchanged = report.sourceDigestBefore == report.sourceDigestAfter;
+        std::string digestError;
+        if ( !canonical::trySha256HexOf( source->toJson(), report.sourceDigestAfter, digestError ) )
+        {
+            report.sourceUnchanged = false;
+            report.diagnostics.push_back(
+                FaultDiagnostic{ "faultlab.digest_failed",
+                                 "cannot digest the source fixture after the run: " + digestError,
+                                 FaultSeverity::Error } );
+            return;
+        }
+        report.sourceUnchanged =
+            !report.sourceDigestBefore.empty() && report.sourceDigestBefore == report.sourceDigestAfter;
         if ( !report.sourceUnchanged )
         {
             report.diagnostics.push_back(
@@ -72,7 +83,19 @@ FaultResult<FaultRunReport> runFaultScenario( const FaultScenario &scenario,
         return makeOk( std::move( report ) );
     }
     const FaultGrid source = fixture.value;
-    report.sourceDigestBefore = canonical::sha256HexOf( source.toJson() );
+    {
+        std::string digestError;
+        if ( !canonical::trySha256HexOf( source.toJson(), report.sourceDigestBefore, digestError ) )
+        {
+            report.diagnostics.push_back(
+                FaultDiagnostic{ "faultlab.digest_failed",
+                                 "cannot digest the source fixture: " + digestError,
+                                 FaultSeverity::Error } );
+            finishRun( sandbox.value, nullptr, report ); // nothing verifiable
+            report.passed = false;
+            return makeOk( std::move( report ) );
+        }
+    }
 
     // --- copy within the byte budget, then inject into the copy only ---
     const auto copy = FaultSandbox::copyWithinBudget( source, scenario.maxBytes );
@@ -109,12 +132,26 @@ FaultResult<FaultRunReport> runFaultScenario( const FaultScenario &scenario,
     }
 
     // --- deterministic replay: inject a second time, compare digests ---
-    const std::string faultedDigest = canonical::sha256HexOf( faulted.toJson() );
     FaultGrid replay = FaultSandbox::copyOf( source );
     const FaultOutcome replayed = applyFault( replay, scenario.fault );
-    report.replayDigest = canonical::sha256HexOf( replay.toJson() );
-    report.replayDeterministic =
-        replayed.ok == injected.ok && report.replayDigest == faultedDigest;
+    std::string faultedDigest;
+    std::string digestError;
+    if ( !canonical::trySha256HexOf( faulted.toJson(), faultedDigest, digestError ) ||
+         !canonical::trySha256HexOf( replay.toJson(), report.replayDigest, digestError ) )
+    {
+        // An unhashable faulted state cannot prove replay determinism: two
+        // empty digests would compare equal, so the claim is refused.
+        report.diagnostics.push_back(
+            FaultDiagnostic{ "faultlab.digest_failed",
+                             "cannot digest the faulted/replayed fixture: " + digestError,
+                             FaultSeverity::Error } );
+        report.replayDeterministic = false;
+    }
+    else
+    {
+        report.replayDeterministic =
+            replayed.ok == injected.ok && report.replayDigest == faultedDigest;
+    }
 
     // --- cleanup + source immutability ---
     finishRun( sandbox.value, &source, report );

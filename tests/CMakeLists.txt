@@ -10970,6 +10970,23 @@ target_compile_definitions(test_faultlab_params_r8 PRIVATE
 )
 sicnu_discover_tests(test_faultlab_params_r8)
 
+# R16-A T02: canonical/digest fail-closed alignment + scenario loader operand
+# honesty (faultlab track; same leaf lane, no new links).
+add_executable(test_r16_a_faultlab test_r16_a_faultlab.cpp)
+target_link_libraries(test_r16_a_faultlab PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_faultlab
+)
+sicnu_discover_tests(test_r16_a_faultlab TEST_PREFIX "test_r16_a_faultlab::")
+
+# R16-A T02: grader canonical-walk depth budget (grader track; jsoncpp leaf).
+add_executable(test_r16_a_grader test_r16_a_grader.cpp)
+target_link_libraries(test_r16_a_grader PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_r16_a_grader TEST_PREFIX "test_r16_a_grader::")
+
 # RS14-05 Process-aware Experiment Grader: engine/types/error/json/sha256
 # schema (sicnu_grader links jsoncpp PUBLIC).
 add_executable(test_grader_schema test_grader_schema.cpp)
@@ -15874,6 +15891,23 @@ foreach( LANE ${SICNU_VERIFIER_LANES} )
     sicnu_discover_tests( ${LANE_TARGET} TEST_PREFIX "${LANE_TARGET}::" )
 endforeach()
 
+# R16-A-T01: #1488/#1447 follow-up hardening lane (canonical budgets, jsoncpp
+# untyped-access escapes, digest determinism, locale independence). Source file
+# name follows the r16-a convention, so it is registered explicitly beside the
+# lane loop rather than by extending SICNU_VERIFIER_LANES (whose entries derive
+# the file name from the lane name).
+add_executable( test_verifier_r16a_14 test_r16_a_verifier.cpp )
+target_link_libraries( test_verifier_r16a_14 PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_verification
+)
+target_include_directories( test_verifier_r16a_14 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests( test_verifier_r16a_14 TEST_PREFIX "test_verifier_r16a_14::" )
+
 # The drift guard reads src/agent/harness/workflow_ir.cpp at run time and
 # compares its kFactKeys table against the mirror in the verifier, so it needs
 # to know where the source tree is. CMAKE_SOURCE_DIR is baked in as a define
@@ -15934,3 +15968,145 @@ target_include_directories(test_r14_D_durable_writes PRIVATE
 sicnu_link_jsoncpp(test_r14_D_durable_writes)
 set_target_properties(test_r14_D_durable_writes PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r14_D_durable_writes TEST_PREFIX "test_r14_D_durable_writes::")
+
+# ---------------------------------------------------------------------------
+# R16-E T09 (hardening/r16-e-t09-help-i18n) — Help knowledge hints + i18n
+# consistency lane. Append-only block; every target is light: Catch2 +
+# Qt6::Core + Sicnu::help (same link set as test_i18n) so the gates run
+# without the GUI shell or the operator runtime.
+# ---------------------------------------------------------------------------
+# WP1: data/help cross-file audit (unique ids, resolvable references in the
+# composed universe, title/summary floor, diagnostics code<->catalog/bridge
+# mapping, doc refs).
+add_executable(test_r16_E_help_data_integrity test_r16_E_help_data_integrity.cpp)
+target_link_libraries(test_r16_E_help_data_integrity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+target_compile_definitions(test_r16_E_help_data_integrity PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r16_E_help_data_integrity PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_data_integrity
+  COMMAND test_r16_E_help_data_integrity
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_data_integrity PROPERTIES TIMEOUT 300)
+
+# WP3: parsing robustness oracles (deep nesting, BOMs, invalid UTF-8, huge
+# fields, hostile regex input). The deep-nesting terminology case is RED on
+# master (uncaught Json::LogicError) — fixed in this track.
+add_executable(test_r16_E_help_parsing_robustness test_r16_E_help_parsing_robustness.cpp)
+target_link_libraries(test_r16_E_help_parsing_robustness PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+target_compile_definitions(test_r16_E_help_parsing_robustness PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r16_E_help_parsing_robustness PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_parsing_robustness
+  COMMAND test_r16_E_help_parsing_robustness
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_parsing_robustness PROPERTIES TIMEOUT 300)
+
+# WP4: search index performance + scoring determinism oracle (fixed synthetic
+# corpus, CJK+EN mixed; generous ceilings, exact measurements printed to
+# stderr and recorded in .planning/r16-e-t09/PERFORMANCE.md).
+add_executable(test_r16_E_help_search_perf test_r16_E_help_search_perf.cpp)
+target_link_libraries(test_r16_E_help_search_perf PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+# Review R1 P0-1: ASan+UBSan (CI tier2, ENABLE_SANITIZERS=ON) slows the
+# wall-clock loops ~3.5x (measured 40445 ms vs 11580 ms) — scale the budgets
+# the same way instead of letting the tier fail deterministically. The
+# determinism and correctness assertions are unscaled on every lane.
+if(ENABLE_SANITIZERS)
+  target_compile_definitions(test_r16_E_help_search_perf PRIVATE
+    SICNU_PERF_QUERY_BUDGET_MS=52000
+    SICNU_PERF_TOKENIZE_BUDGET_MS=35000
+  )
+endif()
+set_target_properties(test_r16_E_help_search_perf PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_search_perf
+  COMMAND test_r16_E_help_search_perf
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_search_perf PROPERTIES TIMEOUT 600)
+
+# WP5: #1465 terminology dedup regression pins.
+add_executable(test_r16_E_help_terminology_regression
+  test_r16_E_help_terminology_regression.cpp)
+target_link_libraries(test_r16_E_help_terminology_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+set_target_properties(test_r16_E_help_terminology_regression PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_terminology_regression
+  COMMAND test_r16_E_help_terminology_regression
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_terminology_regression PROPERTIES TIMEOUT 120)
+
+# WP2: #1489 residual — .ts freshness gate. Re-runs the exact lupdate
+# invocation from the sicnu_i18n_update target into a temp file and fails on
+# new untranslated messages / unfinished entries beyond the baseline (0).
+if(Python_EXECUTABLE)
+  add_test(NAME test_r16_E_i18n_translation_freshness
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/scripts/check_translation_freshness.py"
+            "--repo-root" "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(test_r16_E_i18n_translation_freshness PROPERTIES
+    TIMEOUT 900
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+# ── r16-c-t05: student lab session & learning-state hardening (append-only) ─
+# New suites for this track register ONLY here (repo issue #1494: orphan
+# unregistered tests). Patterns copied from test_lab_runtime (line ~11007)
+# and sicnu_add_teaching_test (line ~14273).
+add_executable(test_lab_session_store_r16_c_t05 test_lab_session_store_r16_c_t05.cpp)
+target_link_libraries(test_lab_session_store_r16_c_t05 PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+target_include_directories(test_lab_session_store_r16_c_t05 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_lab_session_store_r16_c_t05 TEST_PREFIX "test_lab_session_store_r16_c_t05::")
+set_target_properties(test_lab_session_store_r16_c_t05 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+
+add_executable(test_teaching_restore_r16_c_t05 test_teaching_restore_r16_c_t05.cpp)
+target_link_libraries(test_teaching_restore_r16_c_t05 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+)
+target_include_directories(test_teaching_restore_r16_c_t05 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_teaching_restore_r16_c_t05 TEST_PREFIX "test_teaching_restore_r16_c_t05::")
+set_target_properties(test_teaching_restore_r16_c_t05 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+# ── R16-C/T06: teacher batch assessment & classroom management hardening ──
+# Append-only registration block for this hardening track's new suites; one
+# line per work package, added in RED→GREEN order (docs: .planning/r16-c-t06).
+sicnu_add_teaching_admin_test(test_teaching_admin_checkpoint_stamp_r16_c_t06)
+sicnu_add_teaching_admin_test(test_teaching_admin_grader_cli_budget_r16_c_t06)
+sicnu_add_teaching_admin_test(test_teaching_admin_rubric_weights_r16_c_t06)
+sicnu_add_teaching_admin_test(test_teaching_admin_student_id_authority_r16_c_t06)

@@ -94288,6 +94288,13 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is 'Wha
     </message>
   </context>
   <context>
+    <name>SicnuPythonConsole</name>
+    <message>
+      <source>Enter Python code...</source>
+      <translation>输入 Python 代码...</translation>
+    </message>
+  </context>
+  <context>
     <name>SimpleLineMaterialWidgetBase</name>
     <message>
       <source>...</source>
@@ -98880,6 +98887,10 @@ Can be used in a form/row context to filter the related features using a value f
     <message>
       <source>points=%1 recorded=%2 failed=%3 cancelled=%4 missing=%5</source>
       <translation>点=%1 已记录=%2 失败=%3 已取消=%4 缺失=%5</translation>
+    </message>
+    <message>
+      <source> (preview limited to first %1 of %2 rows)</source>
+      <translation> （预览仅显示前 %1 行，共 %2 行）</translation>
     </message>
     <message>
       <source>study run in progress — wait or cancel first</source>
