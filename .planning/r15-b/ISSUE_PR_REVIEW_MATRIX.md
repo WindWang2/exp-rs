@@ -6,6 +6,21 @@
 ## 1. 开放 PR
 无（2026-10-16 20:00 UTC+8 `gh pr list --state open` = `[]`）。因此不存在 COVERED_BY_OPEN_PR 项；与 #1505/#1509/#1512 的去重以"已合并内容不重做"为准。
 
+### 1.1 2026-10-18 复查（`gh pr view N --json files`，15:3x UTC+8）
+新出现的开放 PR 与 #1513 的文件重叠如下（只读核对，未修改它们的任何文件）：
+| PR | 分支 | 文件数 | 与 #1513 重叠 | 处理 |
+|---|---|---|---|---|
+| #1515 | hardening/r15-C-model-runtime | 41 | tests/CMakeLists.txt | 都只追加测试块：合并时可能有文本冲突，无语义重叠 |
+| #1516 | hardening/r15-D-pi-mcp-workflow | 31 | 无 | — |
+| #1517 | hardening/r15-E-desktop-teaching-help | 36 | tests/CMakeLists.txt | 同 #1515 |
+| #1518 | hardening/r16-b-scientific-decisions | 21 | 无 | — |
+| #1519 | hardening/r16-c-teaching-classroom | 26 | tests/CMakeLists.txt | 同 #1515 |
+| #1521 | hardening/r16-a-evidence-verification | 32 | tests/CMakeLists.txt | 同 #1515 |
+| #1523 | hardening/r16-e-help-delivery | 36 | tests/CMakeLists.txt | 同 #1515 |
+| #1524 | hardening/r16-d-workbench-cartography | 42 | 无 | — |
+
+以上 PR 都没有改 src/cli、src/geospatial、src/data、src/dataset、src/experiment，因此不存在 COVERED_BY_OPEN_PR 项。
+
 ## 2. 线索 issue（本轨相关）
 
 | Issue / 子项 | 分类 | 证据 |
