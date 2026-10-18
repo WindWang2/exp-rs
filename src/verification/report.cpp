@@ -266,12 +266,23 @@ bool BudgetUsage::fromJson( const Json::Value &json, BudgetUsage &out, std::stri
         {
             return true;
         }
-        if ( !json[name].isIntegral() )
+        // Range-guarded: asInt64() throws for uint64 above INT64_MAX, and a
+        // hostile budget_usage member must be a typed refusal (#1447 family).
+        // isIntegral() is false for bools, so the first clause refuses them;
+        // the negative range check below mirrors requireCount — without it a
+        // negative integer cast to size_t wraps into a huge positive count.
+        if ( !json[name].isIntegral() || !json[name].isInt64() )
         {
             error = std::string( "member '" ) + name + "' must be a non-negative integer";
             return false;
         }
-        target = static_cast<std::size_t>( json[name].asInt64() );
+        const Json::Int64 count = json[name].asInt64();
+        if ( count < 0 )
+        {
+            error = std::string( "member '" ) + name + "' must not be negative";
+            return false;
+        }
+        target = static_cast<std::size_t>( count );
         return true;
     };
     if ( !readCount( "checks_evaluated", loaded.checksEvaluated ) ||
@@ -283,7 +294,7 @@ bool BudgetUsage::fromJson( const Json::Value &json, BudgetUsage &out, std::stri
     }
     if ( json.isMember( "max_depth_seen" ) )
     {
-        if ( !json["max_depth_seen"].isIntegral() )
+        if ( !json["max_depth_seen"].isIntegral() || !json["max_depth_seen"].isInt() )
         {
             error = "member 'max_depth_seen' must be an integer";
             return false;
@@ -436,7 +447,9 @@ bool VerificationReport::fromJson( const Json::Value &json, VerificationReport &
     }
     if ( json.isMember( "schema_version" ) )
     {
-        if ( !json["schema_version"].isIntegral() )
+        // isInt(): asInt() throws outside int32 range — refuse with the typed
+        // error instead (#1447 family).
+        if ( !json["schema_version"].isIntegral() || !json["schema_version"].isInt() )
         {
             error = "member 'schema_version' must be an integer";
             return false;

@@ -10970,6 +10970,23 @@ target_compile_definitions(test_faultlab_params_r8 PRIVATE
 )
 sicnu_discover_tests(test_faultlab_params_r8)
 
+# R16-A T02: canonical/digest fail-closed alignment + scenario loader operand
+# honesty (faultlab track; same leaf lane, no new links).
+add_executable(test_r16_a_faultlab test_r16_a_faultlab.cpp)
+target_link_libraries(test_r16_a_faultlab PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_faultlab
+)
+sicnu_discover_tests(test_r16_a_faultlab TEST_PREFIX "test_r16_a_faultlab::")
+
+# R16-A T02: grader canonical-walk depth budget (grader track; jsoncpp leaf).
+add_executable(test_r16_a_grader test_r16_a_grader.cpp)
+target_link_libraries(test_r16_a_grader PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_r16_a_grader TEST_PREFIX "test_r16_a_grader::")
+
 # RS14-05 Process-aware Experiment Grader: engine/types/error/json/sha256
 # schema (sicnu_grader links jsoncpp PUBLIC).
 add_executable(test_grader_schema test_grader_schema.cpp)
@@ -15873,6 +15890,23 @@ foreach( LANE ${SICNU_VERIFIER_LANES} )
     # selects nothing reports success. Every other lane in this file passes it.
     sicnu_discover_tests( ${LANE_TARGET} TEST_PREFIX "${LANE_TARGET}::" )
 endforeach()
+
+# R16-A-T01: #1488/#1447 follow-up hardening lane (canonical budgets, jsoncpp
+# untyped-access escapes, digest determinism, locale independence). Source file
+# name follows the r16-a convention, so it is registered explicitly beside the
+# lane loop rather than by extending SICNU_VERIFIER_LANES (whose entries derive
+# the file name from the lane name).
+add_executable( test_verifier_r16a_14 test_r16_a_verifier.cpp )
+target_link_libraries( test_verifier_r16a_14 PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_verification
+)
+target_include_directories( test_verifier_r16a_14 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests( test_verifier_r16a_14 TEST_PREFIX "test_verifier_r16a_14::" )
 
 # The drift guard reads src/agent/harness/workflow_ir.cpp at run time and
 # compares its kFactKeys table against the mirror in the verifier, so it needs

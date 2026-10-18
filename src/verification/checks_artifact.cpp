@@ -235,7 +235,15 @@ std::vector<std::string> requiredKeySet( const std::vector<std::string> &declare
                                          const Expectation &expectation,
                                          const Json::Value &facts )
 {
-    const bool describesGrid = !facts.isMember( "kind" ) || facts["kind"].asString() == "raster";
+    // Type-guarded read: asString() on an object/array kind throws
+    // Json::LogicError straight through runSpec (no barrier catches it), and a
+    // producer handing back a garbage kind must get an honest verdict, not a
+    // crash. An unreadable kind is treated like any readable non-raster kind:
+    // it does not describe a grid, so the grid requirement below does not fire.
+    const Json::Value *kindMember = optionalMember( facts, "kind" );
+    const bool describesGrid =
+        kindMember == nullptr ||
+        ( kindMember->isString() ? kindMember->asString() == "raster" : false );
 
     std::vector<std::string> keys = declared;
     if ( expectation.hasKind )
