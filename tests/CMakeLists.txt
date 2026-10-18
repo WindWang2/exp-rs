@@ -15969,6 +15969,107 @@ sicnu_link_jsoncpp(test_r14_D_durable_writes)
 set_target_properties(test_r14_D_durable_writes PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r14_D_durable_writes TEST_PREFIX "test_r14_D_durable_writes::")
 
+# ---------------------------------------------------------------------------
+# R16-E T09 (hardening/r16-e-t09-help-i18n) — Help knowledge hints + i18n
+# consistency lane. Append-only block; every target is light: Catch2 +
+# Qt6::Core + Sicnu::help (same link set as test_i18n) so the gates run
+# without the GUI shell or the operator runtime.
+# ---------------------------------------------------------------------------
+# WP1: data/help cross-file audit (unique ids, resolvable references in the
+# composed universe, title/summary floor, diagnostics code<->catalog/bridge
+# mapping, doc refs).
+add_executable(test_r16_E_help_data_integrity test_r16_E_help_data_integrity.cpp)
+target_link_libraries(test_r16_E_help_data_integrity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+target_compile_definitions(test_r16_E_help_data_integrity PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r16_E_help_data_integrity PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_data_integrity
+  COMMAND test_r16_E_help_data_integrity
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_data_integrity PROPERTIES TIMEOUT 300)
+
+# WP3: parsing robustness oracles (deep nesting, BOMs, invalid UTF-8, huge
+# fields, hostile regex input). The deep-nesting terminology case is RED on
+# master (uncaught Json::LogicError) — fixed in this track.
+add_executable(test_r16_E_help_parsing_robustness test_r16_E_help_parsing_robustness.cpp)
+target_link_libraries(test_r16_E_help_parsing_robustness PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+target_compile_definitions(test_r16_E_help_parsing_robustness PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r16_E_help_parsing_robustness PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_parsing_robustness
+  COMMAND test_r16_E_help_parsing_robustness
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_parsing_robustness PROPERTIES TIMEOUT 300)
+
+# WP4: search index performance + scoring determinism oracle (fixed synthetic
+# corpus, CJK+EN mixed; generous ceilings, exact measurements printed to
+# stderr and recorded in .planning/r16-e-t09/PERFORMANCE.md).
+add_executable(test_r16_E_help_search_perf test_r16_E_help_search_perf.cpp)
+target_link_libraries(test_r16_E_help_search_perf PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+# Review R1 P0-1: ASan+UBSan (CI tier2, ENABLE_SANITIZERS=ON) slows the
+# wall-clock loops ~3.5x (measured 40445 ms vs 11580 ms) — scale the budgets
+# the same way instead of letting the tier fail deterministically. The
+# determinism and correctness assertions are unscaled on every lane.
+if(ENABLE_SANITIZERS)
+  target_compile_definitions(test_r16_E_help_search_perf PRIVATE
+    SICNU_PERF_QUERY_BUDGET_MS=52000
+    SICNU_PERF_TOKENIZE_BUDGET_MS=35000
+  )
+endif()
+set_target_properties(test_r16_E_help_search_perf PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_search_perf
+  COMMAND test_r16_E_help_search_perf
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_search_perf PROPERTIES TIMEOUT 600)
+
+# WP5: #1465 terminology dedup regression pins.
+add_executable(test_r16_E_help_terminology_regression
+  test_r16_E_help_terminology_regression.cpp)
+target_link_libraries(test_r16_E_help_terminology_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+set_target_properties(test_r16_E_help_terminology_regression PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_r16_E_help_terminology_regression
+  COMMAND test_r16_E_help_terminology_regression
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_r16_E_help_terminology_regression PROPERTIES TIMEOUT 120)
+
+# WP2: #1489 residual — .ts freshness gate. Re-runs the exact lupdate
+# invocation from the sicnu_i18n_update target into a temp file and fails on
+# new untranslated messages / unfinished entries beyond the baseline (0).
+if(Python_EXECUTABLE)
+  add_test(NAME test_r16_E_i18n_translation_freshness
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/scripts/check_translation_freshness.py"
+            "--repo-root" "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(test_r16_E_i18n_translation_freshness PROPERTIES
+    TIMEOUT 900
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
 # ── r16-c-t05: student lab session & learning-state hardening (append-only) ─
 # New suites for this track register ONLY here (repo issue #1494: orphan
 # unregistered tests). Patterns copied from test_lab_runtime (line ~11007)

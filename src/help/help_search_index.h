@@ -50,13 +50,10 @@ class HelpSearchIndex
     static QStringList tokenize( const QString &text );
 
   private:
-    struct Posting
-    {
-        double weight = 0.0;
-    };
-    // token → (descriptor id → weight in that document)
-    QHash<QString, QHash<QString, double>> m_index;
-    QHash<QString, const HelpDescriptor *> m_documents;
+    // token → (dense document index → weight in that document). Dense int
+    // keys keep the per-query score join off QString hashing entirely.
+    QHash<QString, QHash<int, double>> m_index;
+    QVector<const HelpDescriptor *> m_documents; // dense index → descriptor
     int m_topics = 0;
     bool m_built = false;
 };

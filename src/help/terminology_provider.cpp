@@ -83,14 +83,31 @@ TerminologyProvider::LoadResult TerminologyProvider::loadFromJson( const QByteAr
     Json::Value root;
     Json::CharReaderBuilder builder;
     builder[ "collectComments" ] = false;
+    // (review #1447 discipline, matches HelpContentStore::loadJsonFile) the
+    // glossary shape is array → entry → flat payload (depth ≤ 4), so a small
+    // recursion bound still accepts everything real while hostile deep
+    // nesting cannot eat stack. jsoncpp signals a stackLimit violation by
+    // THROWING (Json::LogicError), so the parse must be guarded to surface
+    // it as a typed load error instead of escaping this boundary —
+    // composeHelpSystem calls loadFromResources on the startup path.
+    builder[ "stackLimit" ] = 64;
     std::string jsonErrors;
     {
         const std::string raw = std::string( text.constData(), static_cast<size_t>( text.size() ) );
         std::istringstream stream( raw );
-        if ( !Json::parseFromStream( builder, stream, &root, &jsonErrors ) )
+        try
+        {
+            if ( !Json::parseFromStream( builder, stream, &root, &jsonErrors ) )
+            {
+                result.errors << QStringLiteral( "%1: JSON parse error: %2" )
+                                     .arg( context, QString::fromStdString( jsonErrors ) );
+                return result;
+            }
+        }
+        catch ( const std::exception &e )
         {
             result.errors << QStringLiteral( "%1: JSON parse error: %2" )
-                                 .arg( context, QString::fromStdString( jsonErrors ) );
+                                 .arg( context, QString::fromUtf8( e.what() ) );
             return result;
         }
     }

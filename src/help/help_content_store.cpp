@@ -198,6 +198,13 @@ HelpDescriptor HelpContentStore::parseEntry( const Json::Value &entry, QStringLi
         info.technicalNote = readString( entry, "technicalNote" );
         if ( d.title.isEmpty() )
             d.title = info.originCode;
+        // Mirror DiagnosticCatalog::fallback(): a curated page keeps a one-line
+        // summary derived from whatHappened so tooltips, status tips, compact
+        // agent summaries and search hit curated and generated pages equally
+        // (163 curated diagnostics shipped with an empty summary, blanking
+        // HelpPresenter::tooltip/statusTip and the search summary weight).
+        if ( d.summary.isEmpty() )
+            d.summary = info.whatHappened.left( 120 );
         d.diagnostic = info;
         break;
     }

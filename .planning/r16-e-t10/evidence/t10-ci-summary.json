@@ -1,0 +1,19 @@
+{
+ "schema": "exp.ci-status.v1",
+ "branch": "master",
+ "event": "push",
+ "runs": 25,
+ "counts": {
+  "cancelled": 10,
+  "failed-unknown": 15
+ },
+ "latest_completed": {
+  "id": 38843229045,
+  "event": "push",
+  "branch": "master",
+  "sha": "46791bc6",
+  "createdAt": "2026-10-16T02:59:24Z",
+  "class": "failed-unknown"
+ },
+ "gate": "fail"
+}

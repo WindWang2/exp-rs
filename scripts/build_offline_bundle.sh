@@ -204,8 +204,14 @@ for base, _dirs, names in os.walk(bundle):
         rel = os.path.relpath(p, bundle).replace(os.sep, "/")
         if rel == "manifest.json":
             continue
-        files.append({"path": rel, "bytes": os.path.getsize(p),
-                      "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()})
+        entry = {"path": rel, "bytes": os.path.getsize(p),
+                 "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()}
+        # Record the executable bit so verification can catch a transfer that
+        # strips it (zip without permissions, FAT32) while every byte still
+        # matches. Additive optional field: readers ignore it when absent.
+        if os.stat(p).st_mode & 0o111:
+            entry["exec"] = True
+        files.append(entry)
 files.sort(key=lambda f: f["path"])
 required = ["bin/", "data/samples/", "data/labs/grading/", "data/fonts/",
             "data/runtime/proj/", "labs/lab1/", "RUN.cmd",

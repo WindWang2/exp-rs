@@ -58,6 +58,12 @@ def main() -> int:
         all(str(p.get("binaryDir", "")).startswith("${sourceDir}") for p in conf),
         "binaryDir is ${sourceDir}-relative (no absolute paths)",
     )
+    # Two configure presets sharing a binaryDir silently clobber each other's
+    # CMakeCache (the second configure rewrites the first's generator/flags),
+    # so uniqueness is asserted, not just presence.
+    bdirs = [p.get("binaryDir") for p in conf]
+    check(len(bdirs) == len(set(bdirs)), "configure preset binaryDirs unique",
+          str(bdirs))
 
     # profile coverage: a dev lane, a CI lane, an offline/lab lane
     lab = [p for p in conf if str(p.get("cacheVariables", {}).get("SICNU_LAB_PROFILE")) == "ON"]

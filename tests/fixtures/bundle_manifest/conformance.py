@@ -271,6 +271,33 @@ def scenario_symlink_escape(script, work):
     check("escaping symlink flagged", rc == 1 and "symlink escapes bundle" in out, out)
 
 
+def scenario_exec_bit(script, work):
+    """Executable-bit preservation: the POSIX builder records "exec": true per
+    executable payload file. A transfer that strips the bit (zip without
+    permissions, a FAT32 USB stick) leaves every BYTE identical — the digest
+    lane stays green — while ./RUN.sh no longer runs. Verification must fail.
+    POSIX-only lane: Windows hosts have no POSIX mode to strip."""
+    if os.name != "posix":
+        print("  not-executed: exec-bit lane (non-POSIX host)")
+        return
+    root = os.path.join(work, "exec-bit")
+    os.makedirs(root)
+    files = build_valid_tree(root, "sicnu.offline_bundle/2")
+    run = os.path.join(root, "RUN.sh")
+    os.chmod(run, 0o755)
+    for f in files:
+        if f["path"] == "RUN.sh":
+            f["exec"] = True
+    write_manifest(root, "sicnu.offline_bundle/2", files,
+                   ["data/samples/", "tools/", "RUN.sh", "manifest.json"])
+    rc, out = run_verifier(script, root, work)
+    check("declared exec bit present verifies", rc == 0 and PASS in out, out)
+    os.chmod(run, 0o644)  # every byte still matches the manifest
+    rc, out = run_verifier(script, root, work)
+    check("exec bit stripped fails despite matching bytes",
+          rc == 1 and "exec bit lost: RUN.sh" in out, out)
+
+
 def scenario_ps_lane(script, work):
     """Mirror the identical expectations through scripts/bundle_manifest.ps1
     Test-Bundle. Skipped (not-executed) where pwsh is absent."""
@@ -304,7 +331,8 @@ def main():
                          scenario_unsafe_required,
                          scenario_ceiling, scenario_future_schema,
                          scenario_min_reader, scenario_missing_manifest,
-                         scenario_symlink_escape, scenario_ps_lane):
+                         scenario_symlink_escape, scenario_exec_bit,
+                         scenario_ps_lane):
             print("[%s]" % scenario.__name__)
             scenario(ns.script, work)
     finally:
