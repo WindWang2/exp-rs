@@ -204,7 +204,7 @@ HelpDescriptor HelpContentStore::parseEntry( const Json::Value &entry, QStringLi
         // (163 curated diagnostics shipped with an empty summary, blanking
         // HelpPresenter::tooltip/statusTip and the search summary weight).
         if ( d.summary.isEmpty() )
-            d.summary = info.whatHappened.left( 120 );
+            d.summary = truncateSummary( info.whatHappened );
         d.diagnostic = info;
         break;
     }

@@ -157,6 +157,32 @@ struct HelpDescriptor
     std::optional<DiagnosticInfo> diagnostic;
 };
 
+/// Summary bound shared by EVERY summary producer (the generated fallback in
+/// DiagnosticCatalog::fallback() and the curated mirror in
+/// HelpContentStore), so a curated and a generated page for the same code
+/// truncate identically.
+inline constexpr int kHelpSummaryMaxChars = 120;
+
+/// Truncates @p text to at most @p maxChars UTF-16 code units without
+/// splitting a surrogate pair. QString::left() counts CODE UNITS, so a cut
+/// landing between a high and a low surrogate orphans half of the pair and
+/// the tail renders as U+FFFD (#1522). Cosmetic only — no functional impact
+/// — but every summary producer must use this helper rather than left()
+/// so the boundary rule cannot drift apart again.
+inline QString truncateSummary( const QString &text, int maxChars = kHelpSummaryMaxChars )
+{
+    if ( maxChars <= 0 )
+        return QString();
+    if ( text.size() <= maxChars )
+        return text;
+    int end = maxChars;
+    // A low surrogate at the cut means its high half is the unit before it:
+    // drop that too instead of leaving a lone surrogate behind.
+    if ( text.at( end ).isLowSurrogate() && text.at( end - 1 ).isHighSurrogate() )
+        --end;
+    return text.left( end );
+}
+
 /// Version of the descriptor contract; bumped on breaking field changes.
 inline constexpr int kHelpDescriptorVersion = 1;
 
