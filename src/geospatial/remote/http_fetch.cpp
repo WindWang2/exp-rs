@@ -465,6 +465,56 @@ std::string urlAuthorityOf( const std::string &url )
                                        : authorityEnd - authorityAt - 3 );
 }
 
+/// Bare host of an absolute URL: authority minus userinfo, brackets and port.
+std::string urlHostOf( const std::string &url )
+{
+  std::string authority = urlAuthorityOf( url );
+  const std::size_t at = authority.rfind( '@' );
+  if ( at != std::string::npos )
+    authority = authority.substr( at + 1 );
+  if ( !authority.empty() && authority.front() == '[' )
+  {
+    const std::size_t close = authority.find( ']' );
+    return ( close == std::string::npos ) ? authority.substr( 1 )
+                                          : authority.substr( 1, close - 1 );
+  }
+  const std::size_t colon = authority.rfind( ':' );
+  return ( colon == std::string::npos ) ? authority : authority.substr( 0, colon );
+}
+
+/// Port the transport will actually connect to: the explicit authority port,
+/// else the scheme default. CURLOPT_RESOLVE entries are keyed by host+port,
+/// so a mismatched port would be silently ignored by libcurl (#1485).
+int urlPortOf( const std::string &url )
+{
+  const int fallback = ( urlSchemeOf( url ) == "https" ) ? 443 : 80;
+  std::string authority = urlAuthorityOf( url );
+  const std::size_t at = authority.rfind( '@' );
+  if ( at != std::string::npos )
+    authority = authority.substr( at + 1 );
+  std::size_t colon = std::string::npos;
+  if ( !authority.empty() && authority.front() == '[' )
+  {
+    const std::size_t close = authority.find( ']' );
+    if ( close == std::string::npos )
+      return fallback;
+    colon = authority.find( ':', close );
+  }
+  else
+  {
+    colon = authority.rfind( ':' );
+  }
+  if ( colon == std::string::npos )
+    return fallback;
+  const std::string digits = authority.substr( colon + 1 );
+  if ( digits.empty() || digits.find_first_not_of( "0123456789" ) != std::string::npos )
+    return fallback;
+  const long value = std::strtol( digits.c_str(), nullptr, 10 );
+  if ( value <= 0 || value > 65535 )
+    return fallback;
+  return static_cast<int>( value );
+}
+
 /// RFC 3986 §5-style resolution of a Location reference against the URL the
 /// response came from — absolute, network-path ("//host/…"), absolute-path
 /// and same-directory relative forms, with a LEXICALLY bounded "./" ".."
@@ -629,6 +679,38 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
         curl_slist_append( requestHeaders, ( "Range: " + options.range ).c_str() );
     curl_easy_setopt( handle, CURLOPT_URL, current.c_str() );
     curl_easy_setopt( handle, CURLOPT_FOLLOWLOCATION, 0L );
+    // #1485: pin this hop to the addresses the egress policy just accepted.
+    // Without it libcurl performs its OWN resolution at connect time, so a
+    // short-TTL record (or an attacker-controlled resolver) can answer the
+    // policy check with a public address and the connect with
+    // 169.254.169.254 — the TOCTOU window between isPrivateHost() and the
+    // socket. Resolution failure fails CLOSED: a host that cannot be proven
+    // public is not fetched. An IP literal target has nothing to resolve.
+    struct curl_slist *resolveEntries = nullptr;
+    if ( options.pinResolvedAddresses )
+    {
+      std::vector<std::string> pins;
+      std::string pinError;
+      const auto pinStatus =
+        offline::resolveForPinning( urlHostOf( current ), urlPortOf( current ), pins, pinError );
+      if ( pinStatus == offline::HostPinStatus::PrivateAddress )
+      {
+        curl_slist_free_all( requestHeaders );
+        curl_easy_cleanup( handle );
+        throw GeoError( ErrorCode::PermissionDenied,
+                        "httpFetch: egress policy refused the request: " + pinError );
+      }
+      if ( pinStatus == offline::HostPinStatus::Unresolved )
+      {
+        curl_slist_free_all( requestHeaders );
+        curl_easy_cleanup( handle );
+        throw GeoError( ErrorCode::NetworkError, "httpFetch: " + pinError );
+      }
+      for ( const std::string &entry : pins )
+        resolveEntries = curl_slist_append( resolveEntries, entry.c_str() );
+      if ( resolveEntries != nullptr )
+        curl_easy_setopt( handle, CURLOPT_RESOLVE, resolveEntries );
+    }
     curl_easy_setopt( handle, CURLOPT_NOSIGNAL, 1L );
     curl_easy_setopt( handle, CURLOPT_USERAGENT, "SICNU-Geo-HTTP/7.0" );
     curl_easy_setopt( handle, CURLOPT_HTTPHEADER, requestHeaders );
@@ -724,6 +806,7 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     if ( locationIt != headers.map.end() )
       location = locationIt->second;
     curl_slist_free_all( requestHeaders );
+    curl_slist_free_all( resolveEntries );
     curl_easy_cleanup( handle );
 
     if ( transfer.overBudget )

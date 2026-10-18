@@ -82,6 +82,16 @@ struct HttpFetchOptions
     /// Authorization headers are dropped on cross-host hops exactly as
     /// libcurl's auto-follow would.
     std::function<std::string( const std::string &hopUrl )> redirectGuard;
+    /// #1485: pin the guarded transport to the addresses the egress policy
+    /// just accepted (CURLOPT_RESOLVE). Without it libcurl resolves the host
+    /// a SECOND time at connect, so a short-TTL record can answer the policy
+    /// check with a public address and the connect with 169.254.169.254
+    /// (DNS rebinding). Resolution failure fails CLOSED — a host that cannot
+    /// be proven public is not fetched (isPrivateHost() used to fall through
+    /// to "public" on exactly that path). An IP literal target has nothing
+    /// to pin, so literal-URL fetches are unaffected. Only the guarded
+    /// transport pins; the CPL path is left byte-for-byte unchanged.
+    bool pinResolvedAddresses = true;
 };
 
 struct HttpFetchResult
