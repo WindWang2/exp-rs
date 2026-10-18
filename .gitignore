@@ -611,3 +611,8 @@ r6_dev.cmd
 .ccache/
 .configure_r15c.log
 .build_r15c_tests.log
+
+# R18-B model-runtime hardening: planning notes (markdown only; logs/build stay local).
+!.planning/r18-b-model/
+.planning/r18-b-model/*
+!.planning/r18-b-model/*.md
