@@ -70,7 +70,9 @@ int main( int argc, char *argv[] )
   }
   const int result = Catch::Session().run( utf8Argv.empty() ? argc : static_cast<int>( utf8Argv.size() - 1 ),
                                            utf8Argv.empty() ? argv : utf8Argv.data() );
-  _exit( result );
+  // #1468: return instead of the hard process exit so the Catch2/Qt
+  // static teardown runs.
+  return result;
 #else
   const int result = Catch::Session().run( argc, argv );
   return result;

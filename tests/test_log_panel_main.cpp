@@ -27,9 +27,5 @@ int main(int argc, char *argv[])
     if (rc != 0)
         return rc;
     const int result = session.run();
-#ifdef _WIN32
-  _exit( result );
-#else
   return result;
-#endif
 }

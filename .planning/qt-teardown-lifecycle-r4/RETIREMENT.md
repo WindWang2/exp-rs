@@ -44,7 +44,11 @@ Rolling counts: **退役 27 / 语义保留 4 / 保留 0** (31/31 adjudicated). R
 
 ## Out-of-scope note (Phase-5 review P2)
 
-Lowercase `_exit(` sites in `tests/` (~20 Windows-only `#ifdef _WIN32` main tails, e.g. `tests/sicnu_test_main.cpp:54`, plus fork-child `::_exit(` in `tests/helper_external_process.cpp` / `tests/fixtures/isolation_plugin/`) are NOT part of this adjudication: the measured Linux baseline (§BASELINE 6) is the uppercase `_Exit(` family. The Windows tails mask teardown on Windows exactly as the retired defense did on Linux and are hereby **named as a follow-up track candidate** (they are inert on this Linux CI path).
+Lowercase `_exit(` sites in `tests/` (~20 Windows-only `#ifdef _WIN32` main tails, e.g. `tests/sicnu_test_main.cpp:54`, plus fork-child `::_exit(` in `tests/helper_external_process.cpp` / `tests/fixtures/isolation_plugin/`) are NOT part of this adjudication: the measured Linux baseline (§BASELINE 6) is the uppercase `_Exit(` family. The Windows tails mask teardown on Windows exactly as the retired defense did on Linux and are hereby **named as a follow-up track candidate** — **closed by #1468 (2026-10-18)**: the
+19 Windows-only main tails now `return result;` so the Catch2/Qt static teardown runs and
+the per-pid %TEMP% scratch directories are reclaimed. The fork-child hard exits in
+`tests/helper_external_process.cpp` and `tests/test_fault_injection.cpp` are inter-process
+contract markers and were deliberately left alone. (they are inert on this Linux CI path).
 
 ## Residual re-evaluation (2026-10-01, #1395)
 
