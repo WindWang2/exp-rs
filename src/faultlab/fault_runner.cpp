@@ -63,10 +63,6 @@ FaultResult<FaultRunReport> runFaultScenario( const FaultScenario &scenario,
     report.fixtureSeed = scenario.fixtureSeed;
     report.fixtureId = scenario.fixtureId;
     report.expectedDiagnosisSignature = scenario.expectedDiagnosisSignature;
-    // R18-E V6: a declared expected.verifier block is LOADED and stored but
-    // this runner does not evaluate it. Surfaced here so the declaration
-    // is visible in every report instead of silently dropped.
-    report.verifierDeclUnevaluated = scenario.verifier.isObject() && !scenario.verifier.empty();
 
     auto sandbox = FaultSandbox::create( options.sandboxRoot );
     if ( !sandbox.ok )

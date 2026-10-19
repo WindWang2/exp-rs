@@ -297,9 +297,14 @@ TEST_CASE( "r18e V3c: a delta relation without its operand is refused at load",
 // V6 — the declared verifier block is surfaced, never silently dropped
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "r18e V6: a declared expected.verifier marks the report unevaluated",
-           "[faultlab][runner][r18_e]" )
+TEST_CASE( "r18e V6: a declared expected.verifier block is refused at load",
+           "[faultlab][loader][r18_e]" )
 {
+    // A scenario declaring verifier rules must not grade passed:true over
+    // declarations nothing consumes (the #1464 accepted-but-inert shape).
+    // Master's resolution refuses the declaration at the loader; this pin
+    // keeps the fail-closed line (the earlier track-local variant marked
+    // the report instead — the merged baseline's door-close is stricter).
     Json::Value doc = validScenarioDoc();
     Json::Value verifier( Json::objectValue );
     verifier["rules_ref"] = "labs/grading/ndvi_basics.rules.json";
@@ -308,21 +313,17 @@ TEST_CASE( "r18e V6: a declared expected.verifier marks the report unevaluated",
     verifier["assertion_ids"] = ids;
     doc["expected"]["verifier"] = verifier;
 
-    const auto scenario = loadFaultScenario( doc );
-    REQUIRE( scenario.ok );
+    const auto refused = loadFaultScenario( doc );
+    CHECK_FALSE( refused.ok );
 
-    const auto run = runFaultScenario( scenario.value );
+    // The empty object stays legal for schema symmetry.
+    Json::Value legal = validScenarioDoc();
+    legal["expected"]["verifier"] = Json::Value( Json::objectValue );
+    const auto ok = loadFaultScenario( legal );
+    CHECK( ok.ok );
+    const auto run = runFaultScenario( ok.value );
     REQUIRE( run.ok );
-    // The declared verifier expectations were NOT evaluated by this runner —
-    // the report must say so instead of letting the block vanish.
-    CHECK( run.value.verifierDeclUnevaluated );
-    const Json::Value body = run.value.toJson();
-    CHECK( body.get( "verifier_decl_unevaluated", Json::Value( false ) ).asBool() );
-
-    // Without a declared block the flag stays quiet.
-    const auto quiet = runFaultScenario( loadFaultScenario( validScenarioDoc() ).value );
-    REQUIRE( quiet.ok );
-    CHECK_FALSE( quiet.value.verifierDeclUnevaluated );
+    CHECK( run.value.passed );
 }
 
 // ---------------------------------------------------------------------------
