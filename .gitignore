@@ -611,3 +611,5 @@ r6_dev.cmd
 .ccache/
 .configure_r15c.log
 .build_r15c_tests.log
+# R18-C track (Pi/MCP agent harness) planning artifacts (markdown only).
+!.planning/r18-c-agent/
