@@ -189,7 +189,20 @@ QMap<quint32, int> RsRoiLabeler::labelByMajority( const RsSegmentMap &segMap,
         if ( qg.isNull() || qg.isEmpty() )
             continue;
 
-        const QSet<quint64> px = RsPixelRasterizer::rasterize( qg, gt, w, h );
+        // rs_pixel_rasterizer.h contract: callers that train on the coverage
+        // MUST pass \a ok and fail closed when it is false (R10-A/AN-7) —
+        // without it a MEM-driver/rasterize failure is indistinguishable from
+        // "zero coverage" and this polygon's votes silently vanish (#1056
+        // failure mode; the training-extraction path already fails closed).
+        bool rasterizeOk = true;
+        const QSet<quint64> px = RsPixelRasterizer::rasterize( qg, gt, w, h, &rasterizeOk );
+        if ( !rasterizeOk )
+        {
+            GDALClose( vecDs );
+            return fail( QStringLiteral(
+                "labelByMajority: coverage rasterization failed (MEM driver or "
+                "GDALRasterizeGeometries error) — refusing to vote with partial coverage" ) );
+        }
         for ( quint64 idx : px )
         {
             if ( idx >= static_cast<quint64>( labels.size() ) )

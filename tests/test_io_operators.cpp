@@ -23,9 +23,11 @@ using Catch::Approx;
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -603,4 +605,114 @@ TEST_CASE( "dual-capability drivers route by input kind (netCDF raster export pr
   }(), context );
   CHECK( result["output"].asString() == out );
   CHECK( sicnu::geo::atomic_fs::fileExists( out ) );
+}
+
+// --- R10-A: io:warp `bounds` contract — the schema-documented string form ---
+// --- and numeric-string items must behave exactly like the double array    ---
+// --- form; a failed gdal:reproject must not destroy a pre-existing output --
+
+namespace
+{
+
+double warpBoundsCase( const std::string &name, const Json::Value &bounds )
+{
+  const std::string dir = scratch( name );
+  const std::string raster = makeTinyRaster( dir, "geo.tif" );
+  const std::string output = ( fs::path( dir ) / "warped.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:warp" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = raster;
+    params["output"] = output;
+    params["targetCrs"] = "EPSG:32648";
+    params["bounds"] = bounds; // target-CRS metres; -te lands verbatim in GT[0]
+    return params;
+  }(), context );
+
+  const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( output );
+  return meta.minX;
+}
+
+} // namespace
+
+TEST_CASE( "io:warp honours the schema-documented string bounds form (R10-A/PR-1)",
+           "[io][operators][warp][r10a]" )
+{
+  Json::Value arrayBounds( Json::arrayValue );
+  arrayBounds.append( 300000.0 );
+  arrayBounds.append( 3400000.0 );
+  arrayBounds.append( 320000.0 );
+  arrayBounds.append( 3420000.0 );
+  const double arrayMinX = warpBoundsCase( "warp_bounds_array", arrayBounds );
+  REQUIRE( arrayMinX == Catch::Approx( 300000.0 ).margin( 1e-6 ) ); // anchor: array form
+
+  // The schema documents bounds as a string "[minX,minY,maxX,maxY] in target
+  // CRS"; the string form must not be silently dropped (pre-fix: the warp
+  // covers the full source extent and the requested clip is lost).
+  const double stringMinX = warpBoundsCase( "warp_bounds_string",
+                                            Json::Value( "300000,3400000,320000,3420000" ) );
+  CHECK( stringMinX == Catch::Approx( arrayMinX ).margin( 1e-6 ) );
+
+  // Numeric-string items pass schema validation (schema_validator accepts
+  // numeric strings for Number ports); the operator must parse them instead
+  // of letting jsoncpp throw LogicError through the parameter contract.
+  Json::Value stringItems( Json::arrayValue );
+  stringItems.append( "300000" );
+  stringItems.append( "3400000" );
+  stringItems.append( "320000" );
+  stringItems.append( "3420000" );
+  const double parsedMinX = warpBoundsCase( "warp_bounds_string_items", stringItems );
+  CHECK( parsedMinX == Catch::Approx( arrayMinX ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "gdal:reproject failure leaves a pre-existing output intact (staged-output contract, R10-A/PR-2)",
+           "[io][operators][gdal][warp][r10a]" )
+{
+  const std::string dir = scratch( "warp_preserve_old" );
+  const std::string raster = makeTinyRaster( dir, "geo.tif" );
+  const std::string output = ( fs::path( dir ) / "old_product.tif" ).string();
+
+  // A legitimate earlier product already lives at the target path.
+  const std::string sentinel = "PRE-EXISTING PRODUCT BYTES";
+  {
+    std::ofstream out( output, std::ios::binary );
+    out << sentinel;
+  }
+  REQUIRE( fs::file_size( output ) == sentinel.size() );
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "gdal:reproject" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  std::atomic<bool> cancelled{ true };
+  context.setCancelFlag( &cancelled );
+
+  bool threw = false;
+  try
+  {
+    op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = raster;
+      params["output"] = output;
+      params["dstCrs"] = "EPSG:32648";
+      return params;
+    }(), context );
+  }
+  catch ( const sicnu::operators::RSOperatorError & )
+  {
+    threw = true; // a cancelled run must fail, never "succeed"
+  }
+  REQUIRE( threw );
+
+  // #617 contract: a failed run leaves no half-written output AND does not
+  // destroy what was already at the path (pre-fix: GDALWarp truncated the
+  // path, then the cancel branch QFile::remove'd it).
+  REQUIRE( fs::exists( output ) );
+  std::ifstream in( output, std::ios::binary );
+  const std::string bytes( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+  CHECK( bytes == sentinel );
 }

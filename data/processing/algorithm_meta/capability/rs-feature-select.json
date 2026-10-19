@@ -75,11 +75,15 @@
           "type" : "boolean"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "ids",
           "required" : false,
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "integer",
           "name" : "indices",
           "required" : false,
           "type" : "integer"
@@ -90,6 +94,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "roles",
           "required" : false,
           "type" : "string"

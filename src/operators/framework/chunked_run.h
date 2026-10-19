@@ -106,6 +106,20 @@ struct ChunkedRunOptions
     bool cleanupScratchOnSuccess = true;
 };
 
+/// Parses one chunked-execution mode parameter value (R10-A/PR-5).
+///
+/// Accepted shapes: "pipeline"/"resumable" strings, or a bool (true
+/// normalizes to resumable — the crash-safe default; false leaves @p mode
+/// at its current/default value). A JSON null counts as unset. Every other
+/// shape throws RSOperatorError(InvalidParameter) naming @p paramName and
+/// the received value/type — mode switches are reproducibility-relevant and
+/// must never silently fall back to the default mode.
+///
+/// @return true when the value was recognized (applied or normalized),
+///         false when unset (absent/null — caller leaves the default).
+bool parseChunkedModeValue( const Json::Value &value, const char *paramName,
+                            ChunkedRunOptions::Mode *mode );
+
 struct ChunkedRunResult
 {
     std::uint64_t totalTiles = 0;

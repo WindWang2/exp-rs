@@ -180,3 +180,50 @@ TEST_CASE("DOS2 dark-object floor, sentinels and guards", "[atmospheric][dos2]")
     REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, 45.0, 0.0, 1.0));   // esun <= 0
     REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, -20.0, 1500.0, 1.0)); // night
 }
+
+// R10-A/AN-9: locateTable must guard non-finite axis values the same way
+// locateUniform does. A NaN atmospheric parameter (aod/water vapor/angle)
+// used to fall through every clamp comparison, land on the first cell with
+// frac=NaN, and silently poison all four interpolated coefficients with
+// NaN — instead of clamping to the first grid node like every other
+// out-of-range value.
+TEST_CASE("6S LUT clamps non-finite axis parameters to the first node, never NaN (R10-A/AN-9)",
+          "[atmospheric][6s][lut][r10a]")
+{
+    // Reference for each hostile case: the SAME parameters with the hostile
+    // axis replaced by a below-minimum value (-1 is below every axis, all of
+    // which start at >= 0) — i.e. the documented first-node clamp.
+    const auto hostileAxisBehavesLikeFirstNode =
+        []( Atmosphere6sParams hostile, double Atmosphere6sParams::*axis,
+            const char *what ) {
+        Atmosphere6sParams reference = hostile;
+        reference.*axis = -1.0;
+        const Lut6sEntry expected = Fast6sLookup::interpolateCoefficients(550.0, reference);
+        const Lut6sEntry got = Fast6sLookup::interpolateCoefficients(550.0, hostile);
+        INFO(what);
+        REQUIRE(std::isfinite(got.atmosphericReflectance));
+        REQUIRE(std::isfinite(got.downwardTransmittance));
+        REQUIRE(std::isfinite(got.upwardTransmittance));
+        REQUIRE(std::isfinite(got.sphericalAlbedo));
+        REQUIRE_THAT(got.atmosphericReflectance,
+                     WithinRel(expected.atmosphericReflectance, 1e-5f));
+        REQUIRE_THAT(got.downwardTransmittance,
+                     WithinRel(expected.downwardTransmittance, 1e-5f));
+        REQUIRE_THAT(got.upwardTransmittance,
+                     WithinRel(expected.upwardTransmittance, 1e-5f));
+        REQUIRE_THAT(got.sphericalAlbedo,
+                     WithinRel(expected.sphericalAlbedo, 1e-5f));
+    };
+
+    Atmosphere6sParams nanAod;     // RED on master: NaN aod → NaN coefficients
+    nanAod.aod550 = std::numeric_limits<double>::quiet_NaN();
+    hostileAxisBehavesLikeFirstNode(nanAod, &Atmosphere6sParams::aod550, "NaN aod550");
+
+    Atmosphere6sParams infWv;      // +Inf water vapor clamps like locateUniform
+    infWv.waterVaporGcm2 = std::numeric_limits<double>::infinity();
+    hostileAxisBehavesLikeFirstNode(infWv, &Atmosphere6sParams::waterVaporGcm2, "Inf waterVaporGcm2");
+
+    Atmosphere6sParams nanAngle;   // NaN solar zenith → same first-node clamp
+    nanAngle.solarZenithDeg = std::numeric_limits<double>::quiet_NaN();
+    hostileAxisBehavesLikeFirstNode(nanAngle, &Atmosphere6sParams::solarZenithDeg, "NaN solarZenithDeg");
+}
