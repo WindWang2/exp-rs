@@ -424,3 +424,24 @@ TEST_CASE( "r18e V10b: all_negative_index never fires without a clean baseline",
     ObservableSet cleanOk = setOf( "index_max", 0.3 );
     CHECK( diagnoseTransition( cleanOk, faulted ) == "all_negative_index" );
 }
+
+TEST_CASE( "r18e V3d: a text operand on a number observable fails closed",
+           "[faultlab][expectations][r18_e]" )
+{
+    // R2 review P2: the loader's text-operand carve-out (legitimate for
+    // text observables) let {"relation":"equals","text":"0.5"} through on
+    // a NUMBER observable, where checkNumber read only the silent value
+    // default 0.0 — a vacuous pass. The engine now refuses to evaluate.
+    ObservableExpectation e;
+    e.id = "index_mean";
+    e.relation = ExpectationRelation::Equals;
+    e.text = "0.5"; // numeric operand absent
+
+    const ObservableSet clean = setOf( "index_mean", 0.5 );
+    const ObservableSet faulted = setOf( "index_mean", 0.5 );
+
+    const auto results = checkExpectations( clean, faulted, { e } );
+    REQUIRE( results.size() == 1 );
+    CHECK_FALSE( results[0].passed );
+    CHECK( results[0].note.find( "text operand" ) != std::string::npos );
+}

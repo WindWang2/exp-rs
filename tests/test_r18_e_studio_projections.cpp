@@ -161,6 +161,8 @@ TEST_CASE( "r18e CSV: leading-whitespace formula bait is neutralized",
     const QStringList baits = { QStringLiteral( " =cmd|'/c calc'!A0" ),
                                 QStringLiteral( "\t+HYPERLINK(\"x\")" ),
                                 QStringLiteral( "-123" ),
+                                QStringLiteral( " -123" ),
+                                QStringLiteral( "\t-42.5" ),
                                 QStringLiteral( "normal text" ) };
     QJsonArray rows;
     for ( const QString &bait : baits )
@@ -177,8 +179,12 @@ TEST_CASE( "r18e CSV: leading-whitespace formula bait is neutralized",
     // Every bait cell is apostrophe-prefixed (before the whitespace).
     CHECK( csv.contains( QStringLiteral( "' =cmd" ) ) );
     CHECK( csv.contains( QStringLiteral( "'\t+HYPERLINK" ) ) );
-    // A plain negative number and ordinary text survive verbatim.
+    // Plain and PADDED negative numbers survive verbatim (numeric typing
+    // preserved — R2 review P3-1), as does ordinary text.
     CHECK( csv.contains( QStringLiteral( "-123" ) ) );
+    CHECK( csv.contains( QStringLiteral( " -123" ) ) );
+    CHECK( csv.contains( QStringLiteral( "\t-42.5" ) ) );
+    CHECK_FALSE( csv.contains( QStringLiteral( "' -123" ) ) );
     CHECK( csv.contains( QStringLiteral( "normal text" ) ) );
     // No CELL starts (after optional padding) with formula bait: the
     // escaped text still contains the bait substring after the apostrophe

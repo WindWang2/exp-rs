@@ -124,6 +124,12 @@ TEST_CASE( "r18e T302: an artifact swapped mid-grade degrades and re-grades on r
     REQUIRE( row != nullptr );
     CHECK( row->status == QStringLiteral( "unavailable" ) );
     CHECK( row->message.contains( QStringLiteral( "changed" ) ) );
+    // No grade payload survives the demotion (R2 review P3-2): the
+    // aborted grade's score/digest/deduction describe ungraded bytes.
+    CHECK( row->score < 0.0 );
+    CHECK( row->graderDigest.isEmpty() );
+    CHECK( row->topDeduction.isEmpty() );
+    CHECK_FALSE( row->unavailableReason.isEmpty() );
 
     // Restart over the re-submitted bytes: the swapped-mid-grade row must
     // be re-graded, not adopted.

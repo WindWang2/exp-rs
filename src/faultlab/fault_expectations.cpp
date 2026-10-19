@@ -36,6 +36,17 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
     // Text and Truth already carry). The old fallback fabricated
     // delta = 0.0, so `equals 0` / `delta_ge -1` / `delta_le 1` passed
     // vacuously on zero evidence.
+    // A text operand on a NUMBER observable cannot be evaluated — the
+    // numeric relations below read expectation.value only, so a
+    // value-less equals with a stray "text" member used to grade against
+    // the silent 0.0 default (a vacuous pass, R2 review). Fail closed.
+    if ( !expectation.text.empty() && expectation.relation != ExpectationRelation::InRange )
+    {
+        result.passed = false;
+        result.note = "text operand declared for a numeric relation on a number observable";
+        return result;
+    }
+
     const bool hasBaseline = clean != nullptr;
     const double delta = hasBaseline ? faulted->number - clean->number : 0.0;
     result.delta = delta;

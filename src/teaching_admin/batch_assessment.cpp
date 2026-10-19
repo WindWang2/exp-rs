@@ -653,6 +653,13 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 if ( row.softwareVersion.isEmpty() )
                     row.softwareVersion = cfg.softwareVersion;
                 row.missingEvidence = false;
+                // No grade payload survives a demotion: score/digest/
+                // deduction describe bytes nobody graded (R2 review P3-2).
+                row.score = -1.0;
+                row.graderDigest.clear();
+                row.topDeduction.clear();
+                row.unavailableReason =
+                  QStringLiteral( "artifact changed during grading" );
                 stamp.clear(); // empty stamps are never adopted (#1448)
             }
             // Identity authority (R16-C/T06 WP4): discovery owns the

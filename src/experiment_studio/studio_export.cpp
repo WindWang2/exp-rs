@@ -97,12 +97,12 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
                 // '-' only when NOT a plain negative number ("-123" must
                 // survive verbatim — NDVI/coordinates are negative every
                 // day); "=cmd", "+x", "@sum" and "-cmd" are formula bait.
-                const bool negativeNumber = first == QLatin1Char( '-' ) && t.size() > 1
-                                                && t.at( 1 ).isDigit();
+                const bool negativeNumber = first == QLatin1Char( '-' )
+                                                && firstMeaningful + 1 < t.size()
+                                                && t.at( firstMeaningful + 1 ).isDigit();
                 const bool dangerous =
                     first == QLatin1Char( '=' ) || first == QLatin1Char( '+' )
-                    || first == QLatin1Char( '@' ) || first == QLatin1Char( '\t' )
-                    || first == QLatin1Char( '\r' )
+                    || first == QLatin1Char( '@' )
                     || ( first == QLatin1Char( '-' ) && !negativeNumber );
                 if ( dangerous )
                     t.prepend( QLatin1Char( '\'' ) );
