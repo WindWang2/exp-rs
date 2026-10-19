@@ -112,6 +112,11 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
                 // Missing value: let the typed MISSING_ARGS path report it.
                 return QString();
             }
+            // Never eat another flag as this flag's value: `--approve --json`
+            // leaves `--json` for its own parse (the cli_commands.cpp
+            // takeValue rule), so an approval is never silently dropped.
+            if ( arguments.at( i + 1 ).startsWith( QStringLiteral( "--" ) ) )
+                return QString();
             return arguments.at( ++i );
         };
         if ( flag == QStringLiteral( "--goal" ) )

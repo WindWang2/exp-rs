@@ -949,7 +949,13 @@ int commandPlugin( QStringList args, const CliIO &io )
         data["id"] = pluginId;
         data["enabled"] = sub == "enable";
         data["loaded"] = registry.isLoaded( pluginId );
-        return io.finish( ok, "plugin", data, ok ? 0 : 1, registry.diagnostics().toJson(), error );
+        // Typed-exit-code parity with install/uninstall: a refused disable
+        // (drain gate) or a failed reload is an execution failure, not the
+        // bare GenericError(1) this path used to collapse them into.
+        return io.finish( ok, "plugin", data,
+                          ok ? 0
+                             : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
+                          registry.diagnostics().toJson(), error );
     }
 
     if ( sub == "install" )
@@ -2339,11 +2345,28 @@ int commandData( QStringList args, const CliIO &io )
                     continue;
                 if ( args[i] == "--cloud-max" )
                 {
+                    // Parse-ok parity with --max-bytes/--bytes: a failed
+                    // toDouble() used to yield 0.0, which passes
+                    // CatalogQuery::validate and then excludes every record.
+                    bool parsed = false;
+                    const double value = args[i + 1].toDouble( &parsed );
+                    if ( !parsed )
+                        return io.finish( false, "data", {},
+                                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                          {}, "--cloud-max needs a number" );
                     query.hasCloudCoverMax = true;
-                    query.cloudCoverMax = args[i + 1].toDouble();
+                    query.cloudCoverMax = value;
                 }
                 else if ( args[i] == "--limit" )
-                    query.limit = args[i + 1].toInt();
+                {
+                    bool parsed = false;
+                    const int value = args[i + 1].toInt( &parsed );
+                    if ( !parsed )
+                        return io.finish( false, "data", {},
+                                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                          {}, "--limit needs an integer" );
+                    query.limit = value;
+                }
                 else if ( args[i] == "--max-items" )
                     query.maxItems = args[i + 1].toInt();
                 else if ( args[i] == "--platform" )
@@ -2658,7 +2681,11 @@ int commandCatalogExport( QStringList args, const CliIO &io )
         outDir.toStdString(), descriptors, &error );
     if ( written < 0 )
     {
-        return io.finish( false, "catalog", {}, 1, {}, "failed to export catalog: " + error );
+        // Typed-exit-code parity: the export step failed at run time
+        // (uncreatable directory / short write) — not a bare GenericError(1).
+        return io.finish( false, "catalog", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ), {},
+                          "failed to export catalog: " + error );
     }
     Json::Value data( Json::objectValue );
     data["written"] = written;
