@@ -15,3 +15,6 @@
 
 ## CT-4 (→ #1513 继任者/store 维护者) 信息
 - 原开放 PR #1513 已合并; 本轨全程未改其写集; studio 投影仅消费 StudyReport 只读接口。
+
+## CT-5 (→ verification 维护者 / #1662 后续) master 既有红: r16a G pin 未随 pack 词表重写同步
+- master e12a9afbc 重写 builtin packs 到求值器真实词表（可真实评定），但 tests/test_r16_a_verifier.cpp 的 G 用例仍 pin「builtin packs 永不 Pass」——全能 provider（其 completeness 提供 inputs 维度）下 provenance.inputs_resolved 合法 Pass → REQUIRE(Indeterminate) 红。本轨以最小跨轨修正对齐 pin（Pass 必须携带真实期望 / 否则 Indeterminate），PR 正文标注。
