@@ -1,13 +1,12 @@
 // Stub implementation for QScintilla classes.
-// Defines the key virtual functions (destructors + MOC stubs) out-of-line so
+// Defines the key virtual functions (destructors) out-of-line so
 // the compiler emits typeinfo and vtable symbols into libqgis_gui.so.
 // Without these, ASAN-enabled builds fail at runtime with:
 //   symbol lookup error: undefined symbol: _ZTV15QsciLexerPython etc.
 //
-// These stubs have Q_OBJECT macros but their headers live in src/stubs/Qsci/,
-// outside the gui source tree. AUTOMOC cannot process headers from outside the
-// target's source directory, so we manually provide the MOC key functions
-// (metaObject, qt_metacast, qt_metacall) to force vtable/typeinfo emission.
+// These stubs have Q_OBJECT macros; their headers under src/stubs/Qsci/ are
+// listed in src/gui/CMakeLists.txt so AUTOMOC generates their meta-objects.
+// This file itself only supplies the out-of-line destructors (see below).
 #include "qsciscintillabase.h"
 #include "qsciscintilla.h"
 #include "qscilexer.h"
@@ -31,13 +30,13 @@ QsciLexerJavaScript::~QsciLexerJavaScript() {}
 QsciLexerJSON::~QsciLexerJSON() {}
 QsciAPIs::~QsciAPIs() {}
 
-// --- MOC Stubs for classes outside AUTOMOC scan scope ---
-// HAZARD (#634): these fake metaObject()s alias the BASE class meta-object,
-// so qobject_cast<QsciLexerHTML*>(any QsciLexer*) succeeds and distinct
-// lexer subclasses are indistinguishable. Safe only while the stub lexers
-// have no virtual behavior and nobody qobject_casts to a subclass; if these
-// classes are ever really enabled, give each its own Q_OBJECT meta-object.
-// HTML / JavaScript / JSON: their headers ARE listed for AUTOMOC (see
-// src/gui/CMakeLists.txt), so the generated moc provides real per-class
-// meta-objects (metaObject/qt_metacast/qt_metacall/staticMetaObject/tr).
-// No hand-written aliases here - they would collide (LNK2005).
+// --- MOC: AUTOMOC owns the meta-objects; no hand-written aliases here ---
+// Every stub header (qsciscintillabase, qsciscintilla, qscilexer, the
+// CSS / SQL / Python / HTML / JavaScript / JSON lexers, and qsciapis) is
+// listed in src/gui/CMakeLists.txt, so AUTOMOC emits a real per-class
+// meta-object for each - not just the HTML / JavaScript / JSON trio the old
+// note named (CSS / SQL / Python joined the list in de1ea0d4ae). No
+// hand-written metaObject/qt_metacast aliases are kept here - they would
+// shadow the generated ones and collide (LNK2005). The #634 warning about
+// fake metaObject()s aliasing the BASE class described the pre-listing state
+// and no longer applies.

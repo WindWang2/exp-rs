@@ -86,13 +86,14 @@ public:
     virtual int lines() const { return m_text.isEmpty() ? 0 : m_text.count(QLatin1Char('\n')) + 1; }
     virtual int lineLength(int line) const { return text(line).length(); }
     // Position-accurate editing (#651): the stub models text as a QString and
-    // keeps a linear selection range over it, implementing the contracts the
-    // live QgsCodeEditor features rely on (toggleComment's
-    // setSelection + removeSelectedText, insertText's replaceSelectedText and
-    // insertAt). Lines and columns are 0-based, matching the QScintilla
-    // line/index convention used at those call sites. The previous stub
-    // appended at the end / no-op'd / clobbered the buffer, so
-    // ToggleComment corrupted editor content.
+    // keeps a linear selection range over it. Lines and columns are 0-based,
+    // matching the QScintilla line/index convention. No live caller remains:
+    // every QgsCodeEditor translation unit is removed from the build (see
+    // REMOVE_ITEM in src/gui/CMakeLists.txt) and QgsCodeEditor::insertText /
+    // toggleComment are empty stubs, so this surface is unexecuted and
+    // untested. The out-of-range append fallback below keeps the legacy
+    // end-append behaviour - the very corruption #651 set out to remove - and
+    // is likewise unreachable today.
     virtual void insertAt(const QString &s, int line, int index)
     {
         const int pos = positionFromLineIndex( line, index );
@@ -164,10 +165,9 @@ public:
     virtual void selectAll(bool = true) {}
     virtual void clearSelections() { m_selStart = 0; m_selEnd = 0; }
 
-    // Removal/undo contracts exercised by QgsCodeEditor's comment/replace
-    // flows. The stub keeps no cursor model: insert() appends (the sole live
-    // call path empties the buffer via selectAll()+removeSelectedText()
-    // first, so position is irrelevant there).
+    // Removal/undo surface. The stub keeps no cursor model, so insert()
+    // appends. As with the editing primitives above, no live caller remains
+    // once every QgsCodeEditor translation unit is removed from the build.
     virtual void removeSelectedText()
     {
         if ( !hasSelectedText() )
