@@ -266,7 +266,8 @@ sicnu::agent_loop::ExecutionOutcome TaskCenterExecutor::poll( const sicnu::agent
             {
                 outcome.artifacts.push_back( info.outputLayerPath.toStdString() );
             }
-            if ( info.resultPayload.isMember( "artifacts" ) && info.resultPayload[ "artifacts" ].isArray() )
+            if ( info.resultPayload.isObject() && info.resultPayload.isMember( "artifacts" )
+                 && info.resultPayload[ "artifacts" ].isArray() )
             {
                 for ( const auto &art : info.resultPayload[ "artifacts" ] )
                 {

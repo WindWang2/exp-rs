@@ -194,20 +194,22 @@ void drainEvents(int attempts = 400)
 // ---------------------------------------------------------------------------
 TEST_CASE("Progress rate limiter bounds emissions", "[surface][progress]")
 {
-    progress::RateLimiter limiter(5.0);
+    // Contract domain: TaskCenter progress is a 0..1 fraction (R18-C C03);
+    // the 0.05 min-delta is ~5 percentage points on that scale.
+    progress::RateLimiter limiter(0.05);
     // First tick always emits.
     REQUIRE(limiter.shouldEmit(0.0, false, "running"));
-    // Sub-treshold movement is swallowed.
-    REQUIRE_FALSE(limiter.shouldEmit(1.0, false, "running"));
-    REQUIRE_FALSE(limiter.shouldEmit(4.9, false, "running"));
+    // Sub-threshold movement is swallowed.
+    REQUIRE_FALSE(limiter.shouldEmit(0.01, false, "running"));
+    REQUIRE_FALSE(limiter.shouldEmit(0.049, false, "running"));
     // Threshold crossing emits.
-    REQUIRE(limiter.shouldEmit(5.0, false, "running"));
+    REQUIRE(limiter.shouldEmit(0.05, false, "running"));
     // State change emits even below threshold.
-    REQUIRE(limiter.shouldEmit(6.0, false, "waiting_resource"));
+    REQUIRE(limiter.shouldEmit(0.06, false, "waiting_resource"));
     // Terminal emits exactly once, even repeatedly reported.
-    REQUIRE(limiter.shouldEmit(100.0, true, "completed"));
-    REQUIRE_FALSE(limiter.shouldEmit(100.0, true, "completed"));
-    REQUIRE(limiter.lastEmitted() == 100.0);
+    REQUIRE(limiter.shouldEmit(1.0, true, "completed"));
+    REQUIRE_FALSE(limiter.shouldEmit(1.0, true, "completed"));
+    REQUIRE(limiter.lastEmitted() == 1.0);
 }
 
 // ---------------------------------------------------------------------------

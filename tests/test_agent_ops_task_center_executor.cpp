@@ -583,3 +583,28 @@ TEST_CASE( "TC_BND_PLN_07_SingleStepPlanStillStarts", "[agent_ops][boundary]" )
     CHECK( start.started );
     CHECK( start.runId.rfind( "task-", 0 ) == 0 );
 }
+
+TEST_CASE( "TC_BND_PAY_01_NonObjectResultPayloadDoesNotThrow", "[agent_ops][boundary][payload]" )
+{
+    TestCleaner cleaner;
+    TaskCenterExecutor executor;
+    const PlanDraft plan = makeTestPlan();
+    const ExecutionStart start = executor.begin( plan );
+    REQUIRE( start.started );
+
+    const long taskId = TaskCenterExecutor::parseTaskId( start.runId );
+    REQUIRE( taskId > 0 );
+    // An adapter that completes a task with a non-object Json::Value (a bare
+    // string here) must not crash the executor: every other resultPayload
+    // reader guards with isObject() before isMember — an unguarded isMember
+    // throws Json::LogicError on scalar payloads.
+    TaskCenter::instance().markTaskCompleted(
+        taskId, QVariantMap(), Json::Value( "just-a-string" ) );
+
+    ExecutionOutcome outcome;
+    REQUIRE_NOTHROW( outcome = executor.poll( start, 1000 ) );
+    CHECK( outcome.finished );
+    CHECK( outcome.succeeded );
+    CHECK( outcome.state == "succeeded" );
+    CHECK( outcome.artifacts.empty() );
+}
