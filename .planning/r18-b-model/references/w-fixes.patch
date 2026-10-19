@@ -5,7 +5,7 @@ index 4e6dbb010..84d376f19 100644
 @@ -2,6 +2,7 @@
  // authority for the model runtime lanes (see the header for the contract).
  #include "operators/runtime/model_publish.h"
- 
+
 +#include "geospatial/util/atomic_fs.h"
  #include "operators/framework/rs_operator_error.h"
  #include "platform/portable.h"
@@ -41,7 +41,7 @@ index 4e6dbb010..84d376f19 100644
 +                                                  .toStdString() );
    return true;
  }
- 
+
 @@ -600,6 +619,19 @@ ProductPublishGuard::~ProductPublishGuard()
  void ProductPublishGuard::publishStaged( const QString &stagePath, const char *swapFaultPoint,
                                           const std::string &errorWhat )
@@ -69,7 +69,7 @@ index 4e6dbb010..84d376f19 100644
 +  sicnu::portable::syncDirectoryBestEffortUtf8(
 +    QFileInfo( m_final ).absolutePath().toStdString() );
  }
- 
+
  void ProductPublishGuard::disarm()
 diff --git a/src/operators/runtime/opencv_dnn_runtime.cpp b/src/operators/runtime/opencv_dnn_runtime.cpp
 index 9c36b88a8..2aa5c6960 100644
@@ -100,7 +100,7 @@ index 9c36b88a8..2aa5c6960 100644
 -  return output.clone();
 +  return output;
  }
- 
+
  std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> &namedBlobs )
 diff --git a/src/operators/runtime/python_worker_provider.cpp b/src/operators/runtime/python_worker_provider.cpp
 index ddd86a5c7..8e1ecb7e8 100644
@@ -128,7 +128,7 @@ index ddd86a5c7..8e1ecb7e8 100644
 +          throw std::runtime_error( "python worker stopped accepting requests (write deadline, "
 +                                    "broken pipe)" );
          }
- 
+
          QJsonObject response;
 diff --git a/src/operators/runtime/tile_inference_engine.cpp b/src/operators/runtime/tile_inference_engine.cpp
 index 5c02e3293..9476b0943 100644
@@ -187,13 +187,13 @@ index 5c02e3293..9476b0943 100644
        deferredNoData.clear();
        return;
 @@ -1626,7 +1649,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
- 
+
      // The writer exists now, so NoData tiles deferred by earlier all-nodata
      // batches can go straight to disk.
 -    flushDeferredNoData( currentTileIndex );
 +    flushDeferredNoData( currentTileIndex,
 +                         std::max( 0, batchCores.front().y - halo ) );
- 
+
      // Per-tile class planes of head 0, collected for the derived output
      // modes (labels/mask/confidence) and written as ONE band per tile.
 @@ -2212,7 +2236,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
@@ -202,13 +202,13 @@ index 5c02e3293..9476b0943 100644
    if ( !deferredNoData.empty() )
 -    flushDeferredNoData( totalTiles - 1 );
 +    flushDeferredNoData( totalTiles - 1, rasterH );
- 
+
    }
    catch ( ... )
 @@ -2348,10 +2372,6 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string
    const std::string headName = m_model.output.tensorNames.empty() ? std::string()
                                                                    : m_model.output.tensorNames.front();
- 
+
 -  // EO domain preflight (same contract as run()).
 -  if ( m_model.eo.declared )
 -    m_lastEoPreflight = enforceEoPreflight( m_model, inputPath ).toJson();
@@ -219,7 +219,7 @@ index 5c02e3293..9476b0943 100644
 @@ -2864,6 +2884,29 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                 + "...)" );
    }
- 
+
 +  // Platform 10.0: EO domain preflight per feed — enforced against each
 +  // feed's BOUND contract and ITS effective band selection, after the
 +  // by-name/positional binding above, BEFORE any tile is read (and therefore
@@ -249,7 +249,7 @@ index 5c02e3293..9476b0943 100644
 @@ -4001,25 +4044,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
      publishGuard.disarm();
    }
- 
+
 -  // Platform 10.0: EO domain preflight per feed — enforced against each
 -  // feed's BOUND contract and ITS effective band selection, after the
 -  // by-name/positional binding above, before any tile is read.
@@ -290,7 +290,7 @@ index 0e64c14db..4fc9f356a 100644
 +            "consumes it; fan-out would silently split tiles); use an "
 +            "explicit copy stage" );
  }
- 
+
  ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
 @@ -84,6 +93,9 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
  void ChunkGraph::addSink( NodeId input, SinkFn fn )
@@ -343,4 +343,4 @@ index 65b494857..37301e829 100644
 +                                + " elements)" );
  }
  } // namespace
- 
+
