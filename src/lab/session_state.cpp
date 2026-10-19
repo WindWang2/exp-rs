@@ -824,19 +824,24 @@ LabResult<LabSession> sessionFromJson( const Json::Value &doc )
     for ( const ExecutionRef &ref : session.executionRefs )
       seqs.push_back( ref.seq );
     std::sort( seqs.begin(), seqs.end() );
-    // Contiguous, strictly increasing (no duplicate draws), and the newest
-    // draw equals last_seq (every recorder sets lastSeq to the seq it just
-    // drew). A genuine fresh session (startSession seq >= 1, no events
-    // yet) has an empty ledger and is accepted.
+    // The full ledger shape: events are EXACTLY the draws 1..last_seq, each
+    // once (startSession initializes lastSeq to 0 and every recorder draws
+    // lastSeq+1, so the first draw is always 1 and the newest equals
+    // last_seq). Enforced: prefix (a truncated history would reset the
+    // attempt/hint budgets computed from the ledger), suffix (an inflated
+    // last_seq), duplicates, and interior gaps. An empty ledger is genuine
+    // only for a fresh session (last_seq == 0).
     bool dense = true;
     for ( std::size_t i = 1; i < seqs.size(); ++i )
       dense = dense && seqs[ i ] == seqs[ i - 1 ] + 1;
-    dense = dense && ( seqs.empty() || seqs.back() == session.lastSeq );
+    dense = dense
+            && ( seqs.empty() ? session.lastSeq == 0
+                              : ( seqs.front() == 1 && seqs.back() == session.lastSeq ) );
     if ( !dense )
     {
       diags.push_back( LabDiag{ "lab.session.schema",
-                                "seq ledger must be contiguous with the newest draw "
-                                "at last_seq (inflated, gapped or duplicated ledgers "
+                                "seq ledger must be exactly the draws 1..last_seq "
+                                "(truncated, inflated, gapped or duplicated ledgers "
                                 "are refused)" } );
     }
   }

@@ -113,13 +113,22 @@ ValidationResult validateLabRules( const QJsonObject &rules )
         if ( !std::isfinite( weight ) || weight <= 0.0 || weight > 100.0 )
             r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
                         QStringLiteral( "weight must lie in (0,100] — the grader refuses anything else at batch time" ) );
-        // severity, when declared, is the grader's closed vocabulary; an
-        // unknown spelling is a batch-time refusal here already.
-        const QString severity = a.value( QStringLiteral( "severity" ) ).toString();
-        if ( !severity.isEmpty() && severity != QLatin1String( "normal" )
-             && severity != QLatin1String( "blocking" ) )
-            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".severity" ),
-                        QStringLiteral( "severity must be normal|blocking" ) );
+        // severity, when PRESENT, is the grader's closed vocabulary — the
+        // authority (output_verifier) refuses an empty or unknown spelling
+        // at load time, so a present-but-invalid member must fail preflight
+        // too, not just a non-empty one (round-1 review P1-3: "" used to
+        // sail through here and fail the whole class at batch time).
+        if ( a.contains( QStringLiteral( "severity" ) ) )
+        {
+            const QJsonValue severityValue = a.value( QStringLiteral( "severity" ) );
+            const bool legal = severityValue.isString()
+                               && ( severityValue.toString() == QLatin1String( "normal" )
+                                    || severityValue.toString() == QLatin1String( "blocking" ) );
+            if ( !legal )
+                r.addError( QStringLiteral( "malformed_grading_rule" ),
+                            path + QStringLiteral( ".severity" ),
+                            QStringLiteral( "severity must be the string normal|blocking when present" ) );
+        }
         weightSum += weight;
         // Evidence / metric vocabulary soft checks
         if ( a.contains( QStringLiteral( "evidence" ) )

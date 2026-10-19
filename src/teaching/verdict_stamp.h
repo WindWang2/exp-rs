@@ -11,7 +11,13 @@
 // session save authority when a verdict is recorded, and re-derived on
 // load. It is NOT a trust root (same discipline as lab/sha256.h): it
 // detects drift and tampering against a file the student controls, where
-// the alternative is detecting nothing at all.
+// the alternative is detecting nothing at all. Two bounds to know:
+// (1) an attacker who can EDIT BOTH the session file and the artifact can
+//     recompute this public unkeyed stamp consistently — the stamp raises
+//     the bar from "edit one field" to "recompute two digests over the
+//     right bytes", nothing more; (2) the content digest samples head,
+//     interior and tail 64 KiB windows, so a rewrite confined to an
+//     unsampled region of a >~512 KiB artifact does not trip drift.
 //
 // Encoding: "v1:<summary-sha256>:<size>:<content-sha256>"
 //   - summary-sha256 binds the stamp to the exact summary document, so a

@@ -313,14 +313,23 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
         // legacy defaults ONLY for the relations that judge the faulted
         // value itself (in_range reads its own bounds; changed carries no
         // operand by design).
-        if ( !entry.isMember( "value" )
-             && ( expectation.relation == ExpectationRelation::DeltaGe
-                  || expectation.relation == ExpectationRelation::DeltaLe
-                  || expectation.relation == ExpectationRelation::Equals
-                  || expectation.relation == ExpectationRelation::NotEquals ) )
+        // A numeric relation without a numeric operand is refused — it
+        // graded against the silent 0.0 default (a vacuous pass for
+        // equals/delta_le <= 0, R18-E V3). Text observables legitimately
+        // carry the `text` operand instead (checkText), so a declared text
+        // satisfies equals/not_equals here; in_range reads its own bounds.
+        const bool numericRelation = expectation.relation == ExpectationRelation::DeltaGe
+                                     || expectation.relation == ExpectationRelation::DeltaLe
+                                     || expectation.relation == ExpectationRelation::Equals
+                                     || expectation.relation == ExpectationRelation::NotEquals;
+        if ( numericRelation && !entry.isMember( "value" )
+             && !( entry.isMember( "text" )
+                   && ( expectation.relation == ExpectationRelation::Equals
+                        || expectation.relation == ExpectationRelation::NotEquals ) ) )
         {
             return fieldError( "delta/equals expectation for '" + expectation.id +
-                               "' needs a numeric value (no silent 0 default)" );
+                               "' needs a numeric value (or text for text observables; "
+                               "no silent 0 default)" );
         }
         if ( entry.isMember( "value" ) )
         {

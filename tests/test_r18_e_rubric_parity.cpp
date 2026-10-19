@@ -135,3 +135,29 @@ TEST_CASE( "r18e T304e: passing_score outside [0,100] is refused", "[rubric][r18
   negative.insert( QStringLiteral( "passing_score" ), -5.0 );
   CHECK( hasErrorWith( validateLabRules( negative ), QStringLiteral( "malformed_grading_rule" ) ) );
 }
+
+TEST_CASE( "r18e T304f: a present-but-empty severity is refused (parity with the grader)",
+           "[rubric][r18_e]" )
+{
+    // R1 review P1-3: the grading authority refuses a PRESENT empty
+    // severity member at load time (get("severity","normal") yields ""),
+    // so "" sailed through preflight and failed the whole class at batch.
+    QJsonObject rules = validRules();
+    QJsonArray assertions = rules.value( QStringLiteral( "assertions" ) ).toArray();
+    QJsonObject a = assertions.at( 0 ).toObject();
+    a.insert( QStringLiteral( "severity" ), QStringLiteral( "" ) );
+    assertions.replace( 0, a );
+    rules.insert( QStringLiteral( "assertions" ), assertions );
+
+    const ValidationResult r = validateLabRules( rules );
+    CHECK( hasErrorWith( r, QStringLiteral( "malformed_grading_rule" ) ) );
+
+    // A non-string severity is the same defect.
+    QJsonObject nonString = validRules();
+    QJsonArray arr2 = nonString.value( QStringLiteral( "assertions" ) ).toArray();
+    QJsonObject b = arr2.at( 0 ).toObject();
+    b.insert( QStringLiteral( "severity" ), 3 );
+    arr2.replace( 0, b );
+    nonString.insert( QStringLiteral( "assertions" ), arr2 );
+    CHECK( hasErrorWith( validateLabRules( nonString ), QStringLiteral( "malformed_grading_rule" ) ) );
+}

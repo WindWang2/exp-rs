@@ -22,6 +22,7 @@
 #include "study/study_analysis.h"
 
 #include <QJsonArray>
+#include <QRegularExpression>
 #include <QJsonObject>
 
 using namespace sicnu::experiment_studio;
@@ -139,5 +140,62 @@ TEST_CASE( "r18e T502: replicate-missing flags evidence, not spec-echo spelling"
             if ( issue.contains( QStringLiteral( "seed_replicates" ) ) )
                 hints = true;
         CHECK( hints );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T-p2-4 (H2): CSV formula-injection guard sees through leading whitespace
+// ---------------------------------------------------------------------------
+
+#include "experiment_studio/studio_export.h"
+
+TEST_CASE( "r18e CSV: leading-whitespace formula bait is neutralized",
+           "[studio][export][csv][r18_e]" )
+{
+    // R1 review P2-4: spreadsheet engines trim leading blanks before
+    // formula evaluation, so " =cmd|..." executed while a position-0 scan
+    // saw a space. The apostrophe guard must land before the padding.
+    using namespace sicnu::experiment_studio;
+    QJsonObject report;
+    report.insert( QStringLiteral( "study_id" ), QStringLiteral( "s1" ) );
+    const QStringList baits = { QStringLiteral( " =cmd|'/c calc'!A0" ),
+                                QStringLiteral( "\t+HYPERLINK(\"x\")" ),
+                                QStringLiteral( "-123" ),
+                                QStringLiteral( "normal text" ) };
+    QJsonArray rows;
+    for ( const QString &bait : baits )
+    {
+        QJsonObject row;
+        row.insert( QStringLiteral( "point_id" ), bait );
+        row.insert( QStringLiteral( "status" ), QStringLiteral( "failed" ) );
+        row.insert( QStringLiteral( "error_summary" ), QStringLiteral( "ok" ) );
+        rows.append( row );
+    }
+    report.insert( QStringLiteral( "run_table" ), rows );
+
+    const QString csv = studyRunTableToCsv( report );
+    // Every bait cell is apostrophe-prefixed (before the whitespace).
+    CHECK( csv.contains( QStringLiteral( "' =cmd" ) ) );
+    CHECK( csv.contains( QStringLiteral( "'\t+HYPERLINK" ) ) );
+    // A plain negative number and ordinary text survive verbatim.
+    CHECK( csv.contains( QStringLiteral( "-123" ) ) );
+    CHECK( csv.contains( QStringLiteral( "normal text" ) ) );
+    // No CELL starts (after optional padding) with formula bait: the
+    // escaped text still contains the bait substring after the apostrophe
+    // — the guard is about the cell's first effective character.
+    const QStringList lines = csv.split( QLatin1Char( '\n' ) );
+    for ( const QString &line : lines )
+    {
+        const int effective = line.indexOf( QRegularExpression( QStringLiteral( "\\S" ) ) );
+        if ( effective < 0 )
+            continue;
+        const QChar c = line.at( effective );
+        INFO( "line: " << line.toStdString() );
+        CHECK( c != QLatin1Char( '=' ) );
+        CHECK( c != QLatin1Char( '+' ) );
+        CHECK( c != QLatin1Char( '@' ) );
+        // A negative number cell legitimately starts with '-'.
+        if ( c == QLatin1Char( '-' ) )
+            CHECK( line.at( effective + 1 ).isDigit() );
     }
 }

@@ -123,3 +123,39 @@ TEST_CASE( "r18e T201d: a duplicate seq is refused",
   const auto loaded = sessionFromJson( doc );
   CHECK_FALSE( loaded.ok );
 }
+
+TEST_CASE( "r18e T201e: a prefix-truncated ledger is refused (budget resets are not free)",
+           "[lab][session][seq][r18_e]" )
+{
+    // R1 review P1-1: deleting the event prefix (earlier attempts/hints)
+    // used to load fine and silently reset the attempt/hint budgets the
+    // ledger computes. A genuine ledger's first draw is always 1.
+    Json::Value doc = validSessionDoc();
+    doc["checkpoint_results"][0]["seq"] = 3;
+    doc["question_answers"][0]["seq"] = 4;
+    doc["question_answers"].append( parse( R"({"question_id":"q3","answer":"x","seq":5})" ) );
+    doc["last_seq"] = 5;
+
+    const auto loaded = sessionFromJson( doc );
+    CHECK_FALSE( loaded.ok );
+}
+
+TEST_CASE( "r18e T201f: an empty ledger with an inflated last_seq is refused",
+           "[lab][session][seq][r18_e]" )
+{
+    // A fresh genuine session has last_seq == 0 and no events; anything
+    // else with an empty ledger is a fabrication.
+    Json::Value doc = validSessionDoc();
+    doc["checkpoint_results"] = Json::Value( Json::arrayValue );
+    doc["question_answers"] = Json::Value( Json::arrayValue );
+    doc["last_seq"] = 999999;
+
+    const auto loaded = sessionFromJson( doc );
+    CHECK_FALSE( loaded.ok );
+
+    // The genuine fresh shape loads.
+    Json::Value fresh = doc;
+    fresh["last_seq"] = 0;
+    const auto ok = sessionFromJson( fresh );
+    CHECK( ok.ok );
+}

@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include "platform/durable_sidecar.h"
+#include <QRegularExpression>
 #include <QTextStream>
 
 namespace sicnu::experiment_studio
@@ -83,9 +84,16 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
             // first character is =, +, - or @ — an operator-supplied error
             // summary (or asset path) must not become a live formula in the
             // exported table.
-            if ( !t.isEmpty() )
+            // Leading whitespace is trimmed BEFORE the first-character
+            // test (R18-E H2): spreadsheet engines trim leading blanks
+            // before formula evaluation, so " =cmd|..." executed while
+            // looking harmless to a position-0 scan. The cell keeps its
+            // original text when safe — only the test sees through the
+            // padding.
+            const int firstMeaningful = t.indexOf( QRegularExpression( QStringLiteral( "\\S" ) ) );
+            if ( firstMeaningful >= 0 )
             {
-                const QChar first = t.at( 0 );
+                const QChar first = t.at( firstMeaningful );
                 // '-' only when NOT a plain negative number ("-123" must
                 // survive verbatim — NDVI/coordinates are negative every
                 // day); "=cmd", "+x", "@sum" and "-cmd" are formula bait.

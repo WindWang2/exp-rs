@@ -17,8 +17,12 @@
 //
 // Trust discipline mirrors the session file: strict schema, unknown keys
 // refused, entries re-verified against the referenced session's recorded
-// verdict digest on load — a hand-edited ledger (or a ledger entry whose
-// session verdict later went stale) does not survive as completion truth.
+// verdict digest on load. This catches INDEPENDENT tampering — a stale
+// session verdict, a vanished session, a copy-pasted entry — the same way
+// the verdict stamp does. It is not a trust root: an attacker who edits
+// the ledger AND the session file consistently (recomputing the public
+// unkeyed digests) still passes; binding verdict provenance needs a keyed
+// MAC, recorded as future work in DECISIONS.md.
 #pragma once
 
 #include "teaching/lab_session_state.h"

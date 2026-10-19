@@ -29,6 +29,7 @@
 
 #include "faultlab/fault_expectations.h"
 #include "faultlab/fault_observables.h"
+#include "faultlab/fault_diagnosis.h"
 #include "faultlab/fault_report.h"
 #include "faultlab/fault_runner.h"
 #include "faultlab/fault_types.h"
@@ -112,8 +113,8 @@ TEST_CASE( "r18e V1: AtMost with a linear window awards the declared partial cre
     CHECK( o.rawEarned < 50.01 );
     CHECK( o.reasonCodes[0] == "grader:metric-partial-window" );
 
-    // Inside the ramp but near the full edge: 1.25 sits one-eighth into
-    // [1.2, 1.6] from the top — (1.6-1.25)/0.4 = 0.875 of the points.
+    // Inside the ramp: 1.25 sits one-eighth into [1.2, 1.6] from the top
+    // — (1.6-1.25)/0.4 = 0.875 of the points.
     const GradeOutcome nearFull = grade( rubric, metricEvidence( 1.25 ) );
     REQUIRE( nearFull.ok );
     const CriterionOutcome &n = nearFull.report.dimensions[0].criteria[0];
@@ -121,12 +122,18 @@ TEST_CASE( "r18e V1: AtMost with a linear window awards the declared partial cre
     CHECK( n.rawEarned > 87.4 );
     CHECK( n.rawEarned < 87.6 );
 
-    // At the window floor: earned nothing (the exact AtLeast mirror —
-    // "at/below windowFrom earns nothing" pins 0.60 the same way).
-    const GradeOutcome floor = grade( rubric, metricEvidence( 1.2 ) );
-    REQUIRE( floor.ok );
-    CHECK( floor.report.dimensions[0].criteria[0].status == OutcomeStatus::NotEarned );
-    CHECK( floor.report.dimensions[0].criteria[0].rawEarned == 0.0 );
+    // The gap between the full band (<=1.0) and windowFrom (1.2) earns
+    // FULL credit via the clamp — the exact AtLeast mirror, where the
+    // (windowTo, threshold) gap earns full the same way.
+    for ( const double gapValue : { 1.05, 1.19, 1.2 } )
+    {
+        const GradeOutcome gap = grade( rubric, metricEvidence( gapValue ) );
+        REQUIRE( gap.ok );
+        const CriterionOutcome &g = gap.report.dimensions[0].criteria[0];
+        INFO( "value=" << gapValue << " earned=" << g.rawEarned );
+        CHECK( g.rawEarned > 99.9 );
+        CHECK( g.rawEarned <= 100.0 );
+    }
 
     // Beyond the window: zero.
     const GradeOutcome far = grade( rubric, metricEvidence( 1.7 ) );
@@ -396,4 +403,24 @@ TEST_CASE( "r18e V8: a stage criterion without a stage block is refused at parse
     const auto withoutStage = GradingRubric::fromJson( buildDoc( false ), error );
     CHECK_FALSE( withoutStage.has_value() );
     CHECK( error.message.find( "expectedState" ) != std::string::npos );
+}
+
+// ---------------------------------------------------------------------------
+// V10b — the diagnosis rules need a clean baseline, not just a faulted value
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "r18e V10b: all_negative_index never fires without a clean baseline",
+           "[faultlab][diagnosis][r18_e]" )
+{
+    // R1 review P2-7: the rule used to accept "!cleanPresent || clean>=0" —
+    // a MISSING clean observable satisfied it, fabricating the signature
+    // from no evidence (the vacuous class the expectation engine closed).
+    ObservableSet clean; // no index_max at all
+    ObservableSet faulted = setOf( "index_max", -0.5 );
+
+    const std::string signature = diagnoseTransition( clean, faulted );
+    CHECK( signature != "all_negative_index" );
+
+    ObservableSet cleanOk = setOf( "index_max", 0.3 );
+    CHECK( diagnoseTransition( cleanOk, faulted ) == "all_negative_index" );
 }

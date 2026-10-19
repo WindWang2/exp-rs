@@ -149,14 +149,17 @@ TEST_CASE( "r18e T303: adopted checkpoint rows are published as resumed, not as 
     REQUIRE( phaseA.resumed == 0 );
     REQUIRE( hasRow( phaseA, QStringLiteral( "s01" ) ) );
 
-    // Phase B: resume adopts the durable row — and the PUBLISHED row must
-    // carry the marker so report consumers can tell adoption from grading.
+    // Phase B: resume adopts the durable row — the report-level counter
+    // is the published visibility (the row document stays byte-stable so
+    // a resumed run publishes identical rows to an uninterrupted one).
     const BatchAssessmentReport phaseB =
       runBatchAssessment( cfg, []( const SubmissionItem &item ) { return passingRow( item ); },
                           nullptr, nullptr );
     REQUIRE( phaseB.resumed == 1 );
+    CHECK( phaseB.rows.at( 0 ).resumed );
 
-    // The marker lives in the published JSON (additive schema field).
+    // Byte identity: a resumed run and a fresh run over the same final
+    // state publish the same row document (the restart-identity oracle).
     const QString prefix = tree.submissions.path() + QStringLiteral( "/batch_report" );
     REQUIRE( publishBatchOutputsAtomic( phaseB, prefix ) );
     QFile published( prefix + QStringLiteral( ".json" ) );
@@ -164,5 +167,59 @@ TEST_CASE( "r18e T303: adopted checkpoint rows are published as resumed, not as 
     const QJsonObject doc = QJsonDocument::fromJson( published.readAll() ).object();
     const QJsonArray rows = doc.value( QStringLiteral( "rows" ) ).toArray();
     REQUIRE( rows.size() == 1 );
-    CHECK( rows.at( 0 ).toObject().value( QStringLiteral( "resumed" ) ).toBool() == true );
+    CHECK_FALSE( rows.at( 0 ).toObject().contains( QStringLiteral( "resumed" ) ) );
+}
+
+TEST_CASE( "r18e T302b: an artifact that APPEARS during grading is demoted too",
+           "[teaching][batch][checkpoint][r18_e]" )
+{
+    // R1 review P2-1: the demotion used to fire only on a non-empty
+    // pre-stamp changing — a file absent at the pre-stamp and present
+    // after the call bound a fresh stamp over bytes the grade never saw,
+    // and restart adopted it.
+    //
+    // Construction (single worker, discovery order s00 < s01): s00's grade
+    // deletes s01's file, so s01's PRE-stamp is empty; s01's callable then
+    // recreates it — post-stamp non-empty over ungraded bytes.
+    SubmissionTree tree( { QStringLiteral( "s00" ), QStringLiteral( "s01" ) } );
+    const auto cfg = baseConfig( tree.submissions.path(), tree.checkpointPath() );
+
+    const auto appearingGrade = [&]( const SubmissionItem &item ) {
+        if ( item.studentId == QStringLiteral( "s00" ) )
+        {
+            const QDir dir( tree.submissions.path() + QStringLiteral( "/s01" ) );
+            const auto entries = dir.entryList( QDir::Files );
+            for ( const QString &name : entries )
+                QFile::remove( dir.filePath( name ) );
+        }
+        else
+        {
+            QFile f( item.path );
+            REQUIRE( f.open( QIODevice::WriteOnly ) );
+            f.write( "appeared mid-grade" );
+            f.close();
+        }
+        return passingRow( item );
+    };
+    const BatchAssessmentReport report = runBatchAssessment( cfg, appearingGrade, nullptr, nullptr );
+
+    const BatchRowResult *row = rowOf( report, QStringLiteral( "s01" ) );
+    REQUIRE( row != nullptr );
+    CHECK( row->status == QStringLiteral( "unavailable" ) );
+    CHECK( row->message.contains( QStringLiteral( "changed" ) ) );
+
+    // Restart: s00's row was legitimately graded over unchanged bytes and
+    // resumes (resumed == 1); s01's demoted row carried an EMPTY stamp and
+    // must be re-graded — its published row is the fresh pass.
+    const BatchAssessmentReport second =
+      runBatchAssessment( cfg, []( const SubmissionItem &item ) { return passingRow( item ); },
+                          nullptr, nullptr );
+    CHECK( second.resumed == 1 );
+    const BatchRowResult *freshS00 = rowOf( second, QStringLiteral( "s00" ) );
+    REQUIRE( freshS00 != nullptr );
+    CHECK( freshS00->resumed );
+    const BatchRowResult *freshS01 = rowOf( second, QStringLiteral( "s01" ) );
+    REQUIRE( freshS01 != nullptr );
+    CHECK( freshS01->status == QStringLiteral( "pass" ) );
+    CHECK_FALSE( freshS01->resumed );
 }

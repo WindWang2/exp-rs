@@ -66,7 +66,10 @@ struct BatchRowResult
     /// missing-evidence rows.
     QString unavailableReason;
     /// True when the row was adopted from a durable checkpoint rather than
-    /// graded by the publishing run (R18-E D3 — adoption is visible).
+    /// graded by the publishing run (R18-E D3). Orchestrator-level state:
+    /// deliberately NOT serialized into the row document, so a resumed run
+    /// publishes byte-identical rows to an uninterrupted one; published
+    /// visibility is the report-level `resumed` counter.
     bool resumed = false;
 
     QJsonObject toJson() const;

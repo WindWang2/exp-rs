@@ -206,7 +206,6 @@ QJsonObject BatchRowResult::toJson() const
         { QStringLiteral( "grader_digest" ), graderDigest },
         { QStringLiteral( "top_deduction" ), topDeduction },
         { QStringLiteral( "unavailable_reason" ), unavailableReason },
-        { QStringLiteral( "resumed" ), resumed },
     } );
 }
 
@@ -227,7 +226,6 @@ BatchRowResult BatchRowResult::fromJson( const QJsonObject &o )
     row.graderDigest = o.value( QStringLiteral( "grader_digest" ) ).toString();
     row.topDeduction = o.value( QStringLiteral( "top_deduction" ) ).toString();
     row.unavailableReason = o.value( QStringLiteral( "unavailable_reason" ) ).toString();
-    row.resumed = o.value( QStringLiteral( "resumed" ) ).toBool( false );
     return row;
 }
 
@@ -570,9 +568,11 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
             if ( stamp.isEmpty() || stamp != it.value().artifactStamp )
                 continue;
             BatchRowResult adopted = it.value().row;
-            // R18-E D3: the published row says it was adopted from a
-            // durable checkpoint, not graded by this run — adoption is the
-            // durable-resume contract, but it must be visible to consumers.
+            // R18-E D3: adopted rows carry the in-memory resumed flag (the
+            // report-level resumed counter is the published visibility);
+            // the row document itself stays byte-stable so a resumed run
+            // publishes byte-identical output to an uninterrupted one
+            // (restart-identity oracle).
             adopted.resumed = true;
             rowSlot[static_cast<std::size_t>( i )] = adopted;
             stampSlot[static_cast<std::size_t>( i )] = stamp;
@@ -633,7 +633,11 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 row.artifactPath = items[i].path;
             }
             QString stamp = artifactStamp( items[i].path );
-            if ( !preStamp.isEmpty() && stamp != preStamp )
+            // Both directions (round-1 review P2-1): an artifact that
+            // APPEARED during the call binds a stamp over bytes the grade
+            // never saw, exactly like a swap; "" == "" (absent throughout)
+            // is the only non-demotion.
+            if ( stamp != preStamp )
             {
                 row.studentId = items[i].studentId;
                 row.labId = cfg.labId;
