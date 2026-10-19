@@ -880,6 +880,28 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
         problems.push_back( id + ": title needs 'text'" );
       if ( std::string( info->name ) == "source_notes" && !item.isMember( "text" ) )
         problems.push_back( id + ": source note needs 'text'" );
+      // R18-D: text furniture 'text' is label text — a numeric declaration
+      // (the natural way to write a year or a code) used to pass validation
+      // and then die inside LayoutService's label setter, whose exception
+      // was swallowed as an ignored property: the sheet rendered the
+      // "Map title" PLACEHOLDER and skipped every property declared after
+      // text. Refuse it typed, exactly like the colorbar min/max contract
+      // (R16-D T08 WP-1) and the expression contract in the compiler.
+      for ( const char *textCollection :
+            { "titles", "labels", "source_notes", "annotations" } )
+      {
+        if ( std::string( info->name ) == textCollection && item.isMember( "text" ) &&
+             !item["text"].isString() )
+          problems.push_back( std::string( id ) + ": " + textCollection +
+                              " 'text' must be a string, not a number" );
+      }
+      // R18-D: a numeric legend 'title' aborted the property sequence at the
+      // title setter — before linked_map applied — so the legend silently
+      // bound to the reference map instead of the declared map_ref and
+      // mirrored the wrong layer set. Same typed refusal as the text above.
+      if ( std::string( info->name ) == "legends" && item.isMember( "title" ) &&
+           !item["title"].isString() )
+        problems.push_back( id + ": legend 'title' must be a string, not a number" );
       if ( std::string( info->name ) == "charts" &&
            ( !item.isMember( "chart" ) || !item["chart"].isObject() ) )
         problems.push_back( id + ": chart needs a 'chart' object" );

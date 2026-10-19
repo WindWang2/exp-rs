@@ -732,6 +732,29 @@ TEST_CASE( "LayoutService robustness: null layouts, non-finite properties and bo
 
     LayoutService::instance().deleteLayout( QStringLiteral( "RobustnessTest" ) );
   }
+
+  SECTION( "exportLayout rejects a NaN dpi instead of allocating NaN-sized rasters (R18-D)" )
+  {
+    REQUIRE( run( "layout:create", R"({"name":"NanDpiTest"})" ).success );
+    QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "NanDpiTest" ) );
+    REQUIRE( layout != nullptr );
+
+    // NaN fails BOTH comparisons of `dpi <= 0 || dpi > 1200`, so the guard
+    // used to wave it through into NaN-sized raster math (the governed
+    // cartography chain rejects the same value — export.cpp uses the
+    // negated-range NaN-safe form). The refusal must come from THIS guard:
+    // its error names the DPI bound; a downstream QGIS exporter failure
+    // (NaN-sized image) would carry a different, nondescript message.
+    error.clear();
+    const bool ok = LayoutService::instance().exportLayout(
+      layout, QStringLiteral( "/tmp/r18d-nan-dpi.png" ), QStringLiteral( "png" ),
+      std::numeric_limits<double>::quiet_NaN(), /*maxBytes=*/0, &error );
+    CHECK_FALSE( ok );
+    REQUIRE( !error.isEmpty() );
+    CHECK( error.contains( QStringLiteral( "DPI" ), Qt::CaseInsensitive ) );
+
+    LayoutService::instance().deleteLayout( QStringLiteral( "NanDpiTest" ) );
+  }
 }
 
 // ---------------------------------------------------------------------------
