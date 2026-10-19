@@ -77,6 +77,18 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
     AssemblyResult result;
     ContractGraph &g = result.graph;
 
+    // The command surface reads three hardcoded sources. A missing file must
+    // be reported as a bounded assembly gap (graph_assembly.h: missing files
+    // are surfaced in assemblyNotes) — otherwise a renamed/moved path
+    // silently empties the registered-command vocabulary with no reason in
+    // the snapshot diff.
+    auto readSurface = [ &result ]( const std::string &path ) {
+        std::error_code ec;
+        if ( !std::filesystem::exists( path, ec ) )
+            result.notes.push_back( "missing command source: " + path );
+        return readFile( path );
+    };
+
     // ── operators (live registry + scanner facts) ────────────────────────
     OperatorParamScanner scanner( sourceRoot );
     const auto operatorScans = scanner.scanAll();
@@ -100,9 +112,9 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
         joinPath( sourceRoot, "src/app/workbench/command_defs.cpp" );
     const std::string workbenchWindow =
         joinPath( sourceRoot, "src/app/main_window_workbench.cpp" );
-    cmdScanner.scanRegistered( readFile( commandDefs ), "command_defs.cpp",
+    cmdScanner.scanRegistered( readSurface( commandDefs ), "command_defs.cpp",
                                refs );
-    cmdScanner.scanRegistered( readFile( workbenchWindow ),
+    cmdScanner.scanRegistered( readSurface( workbenchWindow ),
                                "main_window_workbench.cpp", refs );
     for ( const auto &id : refs.registeredIds )
     {
@@ -122,7 +134,7 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
     }
     const std::string preflightFile =
         joinPath( sourceRoot, "src/agent/harness/scientific_preflight.cpp" );
-    cmdScanner.scanPreflightActions( readFile( preflightFile ),
+    cmdScanner.scanPreflightActions( readSurface( preflightFile ),
                                      "scientific_preflight.cpp", refs );
     for ( const auto &id : refs.lookupIds )
         g.addEdge( { "surface_lookup", id, id, refs.evidence[id] } );
