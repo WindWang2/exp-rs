@@ -1076,7 +1076,9 @@ void McpServer::handleRequest(const QVariantMap &request)
                             m_progressSubscriptions, executionId->taskId(),
                             ProgressSubscription{
                                 progressToken,
-                                sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) },
+                                // 0.05 on the 0..1 fraction contract — ~5
+                                // percentage points between emissions.
+                                sicnu::agent::tool_catalog::progress::RateLimiter( 0.05 ) },
                             256 );
                     }
                 }
@@ -1272,10 +1274,14 @@ void McpServer::onTaskUpdated(const sicnu::AlgorithmTaskInfo &info)
         return;
 
     // MCP 2024-11-05 notifications/progress: {progressToken, progress,
-    // total}. Progress is TaskCenter's 0..100 projected onto total=1.0.
+    // total}. TaskCenter progress is already the 0..1 fraction the wire
+    // shape wants (total=1.0) — relay it unchanged. It used to be divided
+    // by 100 here, so a completed task (1.0) announced progress 0.01 while
+    // the 5-point limiter (in the same 0..100 misunderstanding) suppressed
+    // every intermediate step (R18-C C03).
     QVariantMap params;
     params[QStringLiteral( "progressToken" )] = it->progressToken;
-    params[QStringLiteral( "progress" )] = qBound( 0.0, progress / 100.0, 1.0 );
+    params[QStringLiteral( "progress" )] = qBound( 0.0, progress, 1.0 );
     params[QStringLiteral( "total" )] = 1.0;
     sendNotification( QStringLiteral( "notifications/progress" ), params );
 
