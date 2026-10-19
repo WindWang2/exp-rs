@@ -50,3 +50,12 @@
 - SICNU_CP11_RENDER=1 的 5 个渲染 gate 用例（produce/atlas 渲染路径）：本机 QgsLayoutItemLegend::paint 对空层集存在已知挂起风险（skipIfHostRenderBroken 的文档化原因），未在本轮执行；C1 的直接 exportMapAtlas/exportMapLayout 契约已由非渲染路径覆盖。
 - headful/手动视觉审查：无显示环境，NOT_EXECUTED（offscreen 语义等价覆盖交互态）。
 - sanitizer/race 构建：构建资源已被五轨排满，本轮未跑；本轮改动全部为 UI 线程内信号/纯函数，无新增锁或线程。
+
+## R1/R2 修复后的最终数字（2026-10-19）
+- test_r14_D_vector_edit_honesty [r18d]: **188/188 ×2**（19 项菜单 gate + 菜单孪生直接断言）
+- test_r14_D_vector_edit_honesty 全量: **340/340**（16 用例）
+- test_cartography_production_11 [r18d]: **19/19 ×2**（含字段级 atlas 反例）; 全量 241/241
+- test_mapspec [r18d]: 23/23 ×2; 全量 2830/2830
+- test_layout_tools: robustness 24/24 ×2; 全量 1304/1304
+- 8 个 app 回归二进制: 全 GREEN（full_shell_lifecycle 126/126、host 50/50、state_model 29/29、shutdown 54/54、interactive 18/18、maptool 7/7、georef_dw 28/28、qgis_display 6490/6490）
+- Review: R1 REQUEST_CHANGES→修复（de0db471d）；R2 APPROVE_WITH_P2P3→P3 全处置（见 REVIEW_R1/R2.md）
