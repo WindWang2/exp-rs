@@ -206,3 +206,28 @@ TEST_CASE( "Registry scans never throw on over-deep JSON", "[registry][negative]
     REQUIRE( registry.loadProblems().size() == 1 );
     fs::remove_all( dir );
 }
+
+TEST_CASE( "Registry refuses oversize recipe files without slurping", "[registry][negative][r14e]" )
+{
+    // #1648 (R14-E audit F5): the registry is a directory scanner over
+    // untrusted files — a >16 MiB document beside the real recipes is a
+    // recorded load problem, not an unbounded rdbuf slurp into memory.
+    const fs::path dir = fs::temp_directory_path() / "recipes_oversize_r14e";
+    fs::remove_all( dir );
+    fs::create_directories( dir );
+    {
+        std::ofstream out( dir / "huge.json", std::ios::binary );
+        const std::string chunk( 1024 * 1024, 'x' );
+        for ( int i = 0; i < 17; ++i )
+            out << chunk;
+    }
+    REQUIRE( fs::file_size( dir / "huge.json" ) > 16ull * 1024ull * 1024ull );
+
+    ScientificRecipeRegistry registry;
+    registry.setDirectory( dir.string() );
+    REQUIRE( registry.reload() == 0 );
+    REQUIRE( registry.status() == "unavailable" );
+    REQUIRE( registry.loadProblems().size() == 1 );
+    REQUIRE( registry.loadProblems()[0].find( "16 MiB" ) != std::string::npos );
+    fs::remove_all( dir );
+}
