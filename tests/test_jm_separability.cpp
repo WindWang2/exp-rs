@@ -229,3 +229,25 @@ TEST_CASE( "JM: samples-per-class below band count returns -1.0 instead of satur
   REQUIRE( jm >= 0.0 );
   REQUIRE( jm <= 2.0 );
 }
+
+TEST_CASE( "JM: wide-band determinant overflow saturates instead of collapsing to 0.0 (#1550)",
+           "[classify][jm]" )
+{
+  // #1550 - the opposite failure direction from #287, and a silent one:
+  // 300 well-sampled classes in 100 bands with per-band variances of 1e4
+  // (class A) and 1e8 (class B) push det(covA) ~ 1e391 and det(covB) ~ 1e791
+  // past double infinity. The determinant-ratio form of term2 then evaluated
+  // inf / inf = NaN, log(NaN) = NaN, and the !isfinite guard clamped B to
+  // 0.0 — reporting a perfectly separable pair as JM = 0.0, the worst-case
+  // red cell in the JM matrix. The log-domain form keeps every intermediate
+  // finite (term2 ~ 195.7 nat), so the pair correctly saturates to ~2.0.
+  cv::theRNG() = cv::RNG( 4242 );
+  const int d = 100;
+  cv::Mat a( 300, d, CV_32F );
+  cv::Mat b( 300, d, CV_32F );
+  cv::randn( a, cv::Scalar( 0.0 ), cv::Scalar( 100.0 ) );    // variance 1e4
+  cv::randn( b, cv::Scalar( 0.0 ), cv::Scalar( 10000.0 ) );  // variance 1e8
+  const double jm = RsJmSeparability::pairJm( a, b );
+  REQUIRE( jm > 1.95 );
+  REQUIRE( jm <= 2.0 );
+}
