@@ -243,6 +243,24 @@ static int mcpPageLimit(int requested)
     return qBound(1, requested, 500);
 }
 
+/// Map key for the per-request cancel bookkeeping. JSON-RPC 2.0 ids are
+/// numbers OR strings (#644) and QVariant::toString() collapses numeric 5 and
+/// string "5" onto "5" — one request's cancel then fired the OTHER request's
+/// task and consumed its one-shot map entry. The key must carry the id's
+/// type (R18-C C05). JSON parsing yields Double for numbers, QString for
+/// strings, so the metatype discriminates reliably at both the arming and
+/// the notifications/cancelled side.
+static QString rpcCancelMapKey(const QVariant &id)
+{
+    const auto t = id.userType();
+    if (t == QMetaType::Double || t == QMetaType::Float || t == QMetaType::Int
+        || t == QMetaType::UInt || t == QMetaType::Long || t == QMetaType::ULong
+        || t == QMetaType::LongLong || t == QMetaType::ULongLong || t == QMetaType::Short
+        || t == QMetaType::UShort)
+        return QStringLiteral("n:%1").arg(id.toDouble());
+    return QStringLiteral("s:%1").arg(id.toString());
+}
+
 /// Attaches the ADR 0122 algorithm catalog sidecar (task/input/output/gpu/
 /// accuracy) to a discovery entry when a manifest exists for the id. The
 /// store loads data/processing/algorithm_meta/*.json once per process.
@@ -641,12 +659,16 @@ void McpServer::handleRequest(const QVariantMap &request)
         // The params form is authoritative; the top-level form is accepted as
         // a defensive fallback (pre-spec clients, #645).
         const QVariantMap cancelledParams = request.value(QStringLiteral("params")).toMap();
-        QString cancelledRpcId = cancelledParams.value(QStringLiteral("requestId")).toString();
-        if (cancelledRpcId.isEmpty())
-            cancelledRpcId = request.value(QStringLiteral("requestId")).toString();
+        // The map key must be derived from the TYPED requestId variant, not
+        // its toString(): numeric 5 and string "5" are distinct JSON-RPC ids
+        // (#644) and must stay cancellable independently (R18-C C05).
+        QVariant cancelledRequestId = cancelledParams.value(QStringLiteral("requestId"));
+        if (cancelledRequestId.isNull() || !cancelledRequestId.isValid())
+            cancelledRequestId = request.value(QStringLiteral("requestId"));
         QVariantMap cancelledInfo = request.value(QStringLiteral("requestInfo")).toMap();
         Q_UNUSED(cancelledInfo)
-        if ( !cancelledRpcId.isEmpty() )
+        const QString cancelledRpcId = rpcCancelMapKey(cancelledRequestId);
+        if ( !cancelledRequestId.toString().isEmpty() || cancelledRequestId.userType() == QMetaType::Double )
         {
             const long taskId = m_cancelledRequestTasks.value( cancelledRpcId, -1 );
             if ( taskId > 0 )
@@ -1059,7 +1081,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                  && !id.toString().isEmpty() )
             {
                 insertBoundedKeepingNewest(
-                    m_cancelledRequestPipelines, id.toString(),
+                    m_cancelledRequestPipelines, rpcCancelMapKey(id),
                     resultData.value( QStringLiteral( "pipeline_id" ) ).toLongLong(), 1024 );
             }
             if ( resultData.contains( QStringLiteral( "execution_id" ) ) )
@@ -1072,7 +1094,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                     // both must be cancellable (#644). Keep the map bounded;
                     // the eviction preserves the JUST-INSERTED in-flight
                     // request (#1452), mirroring the progress map below.
-                    insertBoundedKeepingNewest( m_cancelledRequestTasks, id.toString(),
+                    insertBoundedKeepingNewest( m_cancelledRequestTasks, rpcCancelMapKey(id),
                                                 executionId->taskId(), 1024 );
 
                     // Surface-11 progress subscription: a client requesting
