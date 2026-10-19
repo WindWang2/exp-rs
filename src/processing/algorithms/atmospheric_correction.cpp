@@ -350,12 +350,12 @@ bool quac(const float *const *dnBands, float *const *outBands,
                 *errorMessage = QStringLiteral("QUAC: band %1 has no valid pixels").arg(b + 1);
             return false;
         }
-        // Single-copy optimization: partition once and derive both percentiles from the same scratch buffer.
-        // Avoids the ~2.4 GB transient (2 full-band copies per band on large scenes).
-        std::vector<float> scratch = valid;
-        auto validEnd = std::partition(scratch.begin(), scratch.end(),
-                                       [](float v) { return !std::isnan(v); });
-        const size_t nValid = static_cast<size_t>(std::distance(scratch.begin(), validEnd));
+        // Single-buffer optimization (R18-A): the extra `scratch = valid`
+        // copy was a second full-band transient per band; the partition is
+        // a no-op (valid is isfinite-filtered, so nothing is NaN) — run
+        // nth_element in place on `valid` and derive both percentiles.
+        auto &scratch = valid;
+        const size_t nValid = scratch.size();
         // Use nth_element twice on the same partitioned range (single allocation/copy).
         const size_t rankDark = static_cast<size_t>(1.0f / 100.0f * (nValid - 1));
         const size_t rankBright = static_cast<size_t>(99.0f / 100.0f * (nValid - 1));
