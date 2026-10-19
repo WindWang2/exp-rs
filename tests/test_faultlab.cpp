@@ -495,6 +495,31 @@ TEST_CASE( "fault lab: band role swap exchanges exactly the two roles", "[faultl
     CHECK( before.at( "band_roles" ).text != after.at( "band_roles" ).text );
 }
 
+TEST_CASE( "fault lab: a non-string index pair is skipped, not thrown", "[faultlab]" )
+{
+    // jsoncpp's asString() throws on array/object values, and the observable
+    // path is documented as never throwing (#1447): a malformed pair must be
+    // skipped instead of escaping as Json::LogicError (#1611).
+    SECTION( "numerator is an array" )
+    {
+        FaultGrid grid = indexPairGrid();
+        Json::Value numerator( Json::arrayValue );
+        numerator.append( "nir" );
+        grid.extras["index_pair"]["numerator"] = numerator;
+        const auto observables = measureObservables( grid );
+        CHECK( observables.count( "index_mean" ) == 0 );
+    }
+    SECTION( "denominator is an object" )
+    {
+        FaultGrid grid = indexPairGrid();
+        Json::Value denominator( Json::objectValue );
+        denominator["role"] = "red";
+        grid.extras["index_pair"]["denominator"] = denominator;
+        const auto observables = measureObservables( grid );
+        CHECK( observables.count( "index_mean" ) == 0 );
+    }
+}
+
 TEST_CASE( "fault lab: band role swap refuses unsafe targets and params", "[faultlab]" )
 {
     SECTION( "role absent from the fixture" )
@@ -1066,6 +1091,32 @@ TEST_CASE( "fault lab: threshold misuse rewrites the decision cut", "[faultlab]"
         CHECK_FALSE( refused.ok );
         CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
     }
+}
+
+TEST_CASE( "fault lab: kappa pairs score and truth by original index", "[faultlab]" )
+{
+    // A non-numeric score entry must drop its own pair, not re-pair the
+    // filtered survivors against the unfiltered truth array: with the old
+    // filtered-vector indexing, (0.9,1) and (0.1,1) — truth[2]==0 lost — gave
+    // kappa 0 instead of 1 (#1612).
+    FaultGrid grid = sampleGrid();
+    Json::Value score( Json::arrayValue );
+    score.append( 0.9 );
+    score.append( "x" );
+    score.append( 0.1 );
+    Json::Value truth( Json::arrayValue );
+    truth.append( 1 );
+    truth.append( 1 );
+    truth.append( 0 );
+    grid.extras["score"] = score;
+    grid.extras["truth"] = truth;
+    grid.extras["threshold"] = 0.5;
+
+    const auto observables = measureObservables( grid );
+    // Surviving pairs are (0.9,1) and (0.1,0): perfect agreement.
+    CHECK( observables.at( "kappa" ).number == Catch::Approx( 1.0 ) );
+    // positive_fraction still counts the numeric scores above the threshold.
+    CHECK( observables.at( "positive_fraction" ).number == Catch::Approx( 0.5 ) );
 }
 
 TEST_CASE( "fault lab: model channel mismatch permutes the channel order", "[faultlab]" )
