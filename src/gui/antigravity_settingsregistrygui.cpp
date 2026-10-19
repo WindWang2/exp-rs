@@ -1,7 +1,11 @@
 // ANTIGRAVITY: Replacement for settings/qgssettingsregistrygui.cpp.
-// The original file includes qgscodeeditor.h (Qsci) and Qwt headers which are
-// not available in this build. This stub defines all static members and
-// provides a no-op constructor (migration copyValueFromKey calls are skipped).
+// The original file includes qgscodeeditor.h (Qsci), which is not available in
+// this build, so QgsCodeEditor::settingFont{Family,Size} cannot be migrated
+// here: their only definition lives in codeeditors/qgscodeeditor.cpp, which is
+// removed from this build and has no stub. Every other old-key migration of the
+// upstream constructor is kept, including the ones whose owning class is only
+// stubbed (QgsHistogramWidget, QgsGradientColorRampDialog) — those static
+// members are really defined in antigravity_codeeditor_stubs.cpp.
 
 #include "settings/qgssettingsregistrygui.h"
 #include "qgssettingstree.h"
@@ -9,6 +13,22 @@
 #include "qgssettingsentryimpl.h"
 #include "qgssettingsentryenumflag.h"
 #include "qgsabstractgeometry.h"
+
+// ANTIGRAVITY: extra includes beyond the original stub — needed by the restored
+// old-key migrations. qgshistogramwidget.h / qgsgradientcolorrampdialog.h only
+// forward declare Qwt types, so they compile without Qwt installed.
+#include "qgsabstractdbsourceselect.h"
+#include "qgsaddtaborgroup.h"
+#include "qgsadvanceddigitizingdockwidget.h"
+#include "qgscolorwidgets.h"
+#include "qgsdualview.h"
+#include "qgsfeaturefiltermodel.h"
+#include "qgsgradientcolorrampdialog.h"
+#include "qgshistogramwidget.h"
+#include "qgsmapcanvas.h"
+#include "qgsmaptool.h"
+#include "qgsmaptoolidentify.h"
+#include "qgsrenderermeshpropertieswidget.h"
 
 #include <QColor>
 #include <QString>
@@ -80,8 +100,82 @@ const QgsSettingsEntryEnumFlag<QgsAbstractGeometry::SegmentationToleranceType> *
 QgsSettingsRegistryGui::QgsSettingsRegistryGui()
     : QgsSettingsRegistry()
 {
-    // Migration of old settings keys is skipped in the ANTIGRAVITY build
-    // (no QgsCodeEditor, QgsHistogramWidget, QgsGradientColorRampDialog, etc.)
+    // copy values from old keys to new keys and delete the old ones
+    // for backward compatibility, old keys are recreated when the registry gets deleted
+
+    // TODO: remove in QGIS 4.4 (after LTR 4.2)
+
+    QgsSettings::holdFlush();
+
+    // single settings - added in 3.30
+    settingsRespectScreenDPI->copyValueFromKey( u"gui/qgis/respect_screen_dpi"_s, {}, true );
+
+    // single settings - added in 4.2
+    settingsCadFloaterActive->copyValueFromKey( u"/Cad/Floater"_s, true );
+    QgsAdvancedDigitizingDockWidget::settingsCadCommonAngle->copyValueFromKey( u"/Cad/CommonAngle"_s, true );
+    QgsMapCanvas::settingsCustomCoordinateCrs->copyValueFromKey( u"qgis/custom_coordinate_crs"_s, true );
+    QgsGradientColorRampDialog::settingsPlotHue->copyValueFromKey( u"GradientEditor/plotHue"_s, true );
+    QgsGradientColorRampDialog::settingsPlotLightness->copyValueFromKey( u"GradientEditor/plotLightness"_s, true );
+    QgsGradientColorRampDialog::settingsPlotSaturation->copyValueFromKey( u"GradientEditor/plotSaturation"_s, true );
+    QgsGradientColorRampDialog::settingsPlotAlpha->copyValueFromKey( u"GradientEditor/plotAlpha"_s, true );
+    QgsColorTextWidget::settingsTextFormat->copyValueFromKey( u"ColorWidgets/textWidgetFormat"_s, true );
+    QgsRendererMeshPropertiesWidget::settingsTab->copyValueFromKey( u"/Windows/RendererMeshProperties/tab"_s, true );
+    QgsMapToolIdentify::settingIdentifyMode->copyValueFromKey( u"Map/identifyMode"_s, true );
+    QgsMapToolIdentify::settingIdentifyMode->copyValueFromKey( u"/Map/identifyMode"_s, true );
+    QgsHistogramWidget::settingsHistogramShowMean->copyValueFromKey( u"HistogramWidget/showMean"_s, true );
+    QgsHistogramWidget::settingsHistogramShowStdev->copyValueFromKey( u"HistogramWidget/showStdev"_s, true );
+    settingsRasterHistogramShowMarkers->copyValueFromKey( u"Raster/histogram/showMarkers"_s, true );
+    settingsRasterHistogramZoomToMinMax->copyValueFromKey( u"Raster/histogram/zoomToMinMax"_s, true );
+    settingsRasterHistogramUpdateStyleToMinMax->copyValueFromKey( u"Raster/histogram/updateStyleToMinMax"_s, true );
+    settingsRasterHistogramDrawLines->copyValueFromKey( u"Raster/histogram/drawLines"_s, true );
+    settingsZoomFactor->copyValueFromKey( u"qgis/zoom_factor"_s, true );
+    settingsZoomFactor->copyValueFromKey( u"/qgis/zoom_factor"_s, true );
+    settingsReverseWheelZoom->copyValueFromKey( u"qgis/reverse_wheel_zoom"_s, true );
+    settingsReverseWheelZoom->copyValueFromKey( u"/qgis/reverse_wheel_zoom"_s, true );
+    settingsNewLayersVisible->copyValueFromKey( u"qgis/new_layers_visible"_s, true );
+    settingsNewLayersVisible->copyValueFromKey( u"/qgis/new_layers_visible"_s, true );
+    settingsRasterDefaultPalette->copyValueFromKey( u"Raster/defaultPalette"_s, true );
+    settingsRasterDefaultPalette->copyValueFromKey( u"/Raster/defaultPalette"_s, true );
+    settingsMessageTimeout->copyValueFromKey( u"qgis/messageTimeout"_s, true );
+    settingsMessageTimeout->copyValueFromKey( u"/qgis/messageTimeout"_s, true );
+    settingsEnableAntiAliasing->copyValueFromKey( u"qgis/enable_anti_aliasing"_s, true );
+    settingsEnableAntiAliasing->copyValueFromKey( u"/qgis/enable_anti_aliasing"_s, true );
+    settingsNativeColorDialogs->copyValueFromKey( u"qgis/native_color_dialogs"_s, true );
+    settingsNativeColorDialogs->copyValueFromKey( u"/qgis/native_color_dialogs"_s, true );
+    settingsFormatLayerName->copyValueFromKey( u"qgis/formatLayerName"_s, true );
+    settingsFormatLayerName->copyValueFromKey( u"/qgis/formatLayerName"_s, true );
+    settingsOpenSublayersInGroup->copyValueFromKey( u"qgis/openSublayersInGroup"_s, true );
+    settingsOpenSublayersInGroup->copyValueFromKey( u"/qgis/openSublayersInGroup"_s, true );
+    settingsMapUpdateInterval->copyValueFromKey( u"qgis/map_update_interval"_s, true );
+    settingsMapUpdateInterval->copyValueFromKey( u"/qgis/map_update_interval"_s, true );
+    settingsMagnifierFactorDefault->copyValueFromKey( u"qgis/magnifier_factor_default"_s, true );
+    settingsMagnifierFactorDefault->copyValueFromKey( u"/qgis/magnifier_factor_default"_s, true );
+    settingsSegmentationTolerance->copyValueFromKey( u"qgis/segmentationTolerance"_s, true );
+    settingsSegmentationTolerance->copyValueFromKey( u"/qgis/segmentationTolerance"_s, true );
+    settingsDefaultMeasureColor->copyValueFromKeys( u"qgis/default_measure_color_red"_s, u"qgis/default_measure_color_green"_s, u"qgis/default_measure_color_blue"_s, QString(), true );
+    settingsDefaultMeasureColor->copyValueFromKeys( u"/qgis/default_measure_color_red"_s, u"/qgis/default_measure_color_green"_s, u"/qgis/default_measure_color_blue"_s, QString(), true );
+    settingsSegmentationToleranceType->copyValueFromKey( u"qgis/segmentationToleranceType"_s, true );
+    settingsSegmentationToleranceType->copyValueFromKey( u"/qgis/segmentationToleranceType"_s, true );
+    QgsFeatureFilterModel::settingsMaxEntriesRelationWidget->copyValueFromKey( u"gui/maxEntriesRelationWidget"_s, true );
+    // ANTIGRAVITY: QgsCodeEditor::settingFont{Family,Size} are the only upstream
+    // migrations that cannot be restored here — their sole definition is in
+    // codeeditors/qgscodeeditor.cpp, which is removed from this build (QScintilla)
+    // and has no stub, so the symbols do not exist in the library.
+    QgsMapTool::settingSearchRadiusMM->copyValueFromKey( u"Map/searchRadiusMM"_s, true );
+    QgsMapTool::settingSearchRadiusMM->copyValueFromKey( u"/Map/searchRadiusMM"_s, true );
+    QgsAddAttributeFormContainerDialog::settingsDefaultTabColumnCount->copyValueFromKey( u"qgis/attributeForm/defaultTabColumnCount"_s, true );
+    QgsAddAttributeFormContainerDialog::settingsDefaultTabColumnCount->copyValueFromKey( u"/qgis/attributeForm/defaultTabColumnCount"_s, true );
+    QgsAddAttributeFormContainerDialog::settingsDefaultGroupColumnCount->copyValueFromKey( u"qgis/attributeForm/defaultGroupColumnCount"_s, true );
+    QgsAddAttributeFormContainerDialog::settingsDefaultGroupColumnCount->copyValueFromKey( u"/qgis/attributeForm/defaultGroupColumnCount"_s, true );
+    QgsDualView::settingsFeatureListHighlightFeature->copyValueFromKey( u"qgis/attributeTable/featureListHighlightFeature"_s, true );
+    QgsDualView::settingsFeatureListHighlightFeature->copyValueFromKey( u"/qgis/attributeTable/featureListHighlightFeature"_s, true );
+    QgsAbstractDbSourceSelect::settingHoldDialogOpen->copyValueFromKey( u"ogr/GPKGSourceSelect/HoldDialogOpen"_s, { u"ogr/GPKGSourceSelect"_s }, true );
+    QgsAbstractDbSourceSelect::settingHoldDialogOpen->copyValueFromKey( u"ogr/SQLiteSourceSelect/HoldDialogOpen"_s, { u"ogr/SQLiteSourceSelect"_s }, true );
+    QgsAbstractDbSourceSelect::settingHoldDialogOpen->copyValueFromKey( u"Windows/MSSQLSourceSelect/HoldDialogOpen"_s, { u"MSSQLSourceSelect"_s }, true );
+    QgsAbstractDbSourceSelect::settingHoldDialogOpen->copyValueFromKey( u"Windows/PgSourceSelect/HoldDialogOpen"_s, { u"PgSourceSelect"_s }, true );
+    QgsAbstractDbSourceSelect::settingHoldDialogOpen->copyValueFromKey( u"Windows/SpatiaLiteSourceSelect/HoldDialogOpen"_s, { u"SpatiaLiteSourceSelect"_s }, true );
+
+    QgsSettings::releaseFlush();
 }
 
 QgsSettingsRegistryGui::~QgsSettingsRegistryGui()

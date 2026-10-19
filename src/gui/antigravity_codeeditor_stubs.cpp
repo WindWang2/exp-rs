@@ -12,6 +12,16 @@
 #include "codeeditors/qgscodeeditorhtml.h"
 #include "codeeditors/qgscodeeditorjson.h"
 #include "codeeditors/qgscodeeditorpython.h"
+// ANTIGRAVITY: the settings entries defined below mirror the real entries of the
+// removed upstream TUs (see codeeditors/qgscodeeditorpython.cpp, qgshistogramwidget.cpp,
+// qgsgradientcolorrampdialog.cpp, qgsqueryresultwidget.cpp) — they must be real
+// QgsSettingsEntry instances, not nullptr, so the keys stay registered in
+// QgsSettingsTree and any dereference cannot segfault.
+#include "qgssettingstree.h"
+#include "qgssettingsentryimpl.h"
+#include "qgssettingsentryenumflag.h"
+
+using namespace Qt::StringLiterals;
 
 QgsCodeEditorColorScheme::QgsCodeEditorColorScheme(const QString &id, const QString &name)
     : mId(id), mThemeName(name) {}
@@ -70,13 +80,15 @@ const QMetaObject QgsCodeEditorJson::staticMetaObject = QsciScintilla::staticMet
 const QMetaObject QgsCodeEditorPython::staticMetaObject = QsciScintilla::staticMetaObject;
 const QMetaObject QgsCodeEditorSQL::staticMetaObject = QsciScintilla::staticMetaObject;
 
-const QgsSettingsEntryString *QgsCodeEditorPython::settingCodeFormatter = nullptr;
-const QgsSettingsEntryInteger *QgsCodeEditorPython::settingMaxLineLength = nullptr;
-const QgsSettingsEntryBool *QgsCodeEditorPython::settingSortImports = nullptr;
-const QgsSettingsEntryInteger *QgsCodeEditorPython::settingAutopep8Level = nullptr;
-const QgsSettingsEntryBool *QgsCodeEditorPython::settingBlackNormalizeQuotes = nullptr;
-const QgsSettingsEntryString *QgsCodeEditorPython::settingExternalPythonEditorCommand = nullptr;
-const QgsSettingsEntryEnumFlag<Qgis::DocumentationBrowser> *QgsCodeEditorPython::settingContextHelpBrowser = nullptr;
+// ANTIGRAVITY: real entries mirroring upstream codeeditors/qgscodeeditorpython.cpp
+// (nullptr statics would segfault on dereference and drop the keys from QgsSettingsTree)
+const QgsSettingsEntryString *QgsCodeEditorPython::settingCodeFormatter = new QgsSettingsEntryString( u"formatter"_s, sTreePythonCodeEditor, u"autopep8"_s, u"Python code autoformatter"_s );
+const QgsSettingsEntryInteger *QgsCodeEditorPython::settingMaxLineLength = new QgsSettingsEntryInteger( u"max-line-length"_s, sTreePythonCodeEditor, 80, u"Maximum line length"_s );
+const QgsSettingsEntryBool *QgsCodeEditorPython::settingSortImports = new QgsSettingsEntryBool( u"sort-imports"_s, sTreePythonCodeEditor, true, u"Whether imports should be sorted when auto-formatting code"_s );
+const QgsSettingsEntryInteger *QgsCodeEditorPython::settingAutopep8Level = new QgsSettingsEntryInteger( u"autopep8-level"_s, sTreePythonCodeEditor, 1, u"Autopep8 aggressive level"_s );
+const QgsSettingsEntryBool *QgsCodeEditorPython::settingBlackNormalizeQuotes = new QgsSettingsEntryBool( u"black-normalize-quotes"_s, sTreePythonCodeEditor, true, u"Whether quotes should be normalized when auto-formatting code using black"_s );
+const QgsSettingsEntryString *QgsCodeEditorPython::settingExternalPythonEditorCommand = new QgsSettingsEntryString( u"external-editor"_s, sTreePythonCodeEditor, QString(), u"Command to launch an external Python code editor. Use the token <file> to insert the filename, <line> to insert line number, and <col> to insert the column number."_s );
+const QgsSettingsEntryEnumFlag<Qgis::DocumentationBrowser> *QgsCodeEditorPython::settingContextHelpBrowser = new QgsSettingsEntryEnumFlag<Qgis::DocumentationBrowser>( u"context-help-browser"_s, sTreePythonCodeEditor, Qgis::DocumentationBrowser::DeveloperToolsPanel, u"Web browser used to display the api documentation"_s );
 
 QgsCodeInterpreter::~QgsCodeInterpreter() = default;
 
@@ -385,8 +397,10 @@ QgsExpressionTreeView *QgsExpressionBuilderWidget::expressionTree() const { retu
 // --- QgsHistogramWidget ---
 #include "qgshistogramwidget.h"
 
-const QgsSettingsEntryBool *QgsHistogramWidget::settingsHistogramShowMean = nullptr;
-const QgsSettingsEntryBool *QgsHistogramWidget::settingsHistogramShowStdev = nullptr;
+// ANTIGRAVITY: real entries mirroring upstream qgshistogramwidget.cpp
+// (nullptr statics would segfault on dereference and drop the keys from QgsSettingsTree)
+const QgsSettingsEntryBool *QgsHistogramWidget::settingsHistogramShowMean = new QgsSettingsEntryBool( u"histogram-show-mean"_s, QgsSettingsTree::sTreeHistogram, false );
+const QgsSettingsEntryBool *QgsHistogramWidget::settingsHistogramShowStdev = new QgsSettingsEntryBool( u"histogram-show-stdev"_s, QgsSettingsTree::sTreeHistogram, false );
 
 QgsHistogramWidget::QgsHistogramWidget( QWidget *parent, QgsVectorLayer *layer, const QString &fieldOrExp )
   : QWidget( parent )
@@ -467,10 +481,12 @@ QPointF QgsCurveEditorPlotEventFilter::mapPoint( QPointF point ) const { return 
 // --- QgsGradientColorRampDialog ---
 #include "qgsgradientcolorrampdialog.h"
 
-const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotHue = nullptr;
-const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotLightness = nullptr;
-const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotSaturation = nullptr;
-const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotAlpha = nullptr;
+// ANTIGRAVITY: real entries mirroring upstream qgsgradientcolorrampdialog.cpp
+// (nullptr statics would segfault on dereference and drop the keys from QgsSettingsTree)
+const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotHue = new QgsSettingsEntryBool( u"plot-hue"_s, QgsSettingsTree::sTreeGradientEditor, false );
+const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotLightness = new QgsSettingsEntryBool( u"plot-lightness"_s, QgsSettingsTree::sTreeGradientEditor, true );
+const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotSaturation = new QgsSettingsEntryBool( u"plot-saturation"_s, QgsSettingsTree::sTreeGradientEditor, false );
+const QgsSettingsEntryBool *QgsGradientColorRampDialog::settingsPlotAlpha = new QgsSettingsEntryBool( u"plot-alpha"_s, QgsSettingsTree::sTreeGradientEditor, false );
 
 QgsGradientColorRampDialog::QgsGradientColorRampDialog( const QgsGradientColorRamp &ramp, QWidget *parent )
   : QDialog( parent )
@@ -581,16 +597,40 @@ void QgsSensorThingsSubsetEditor::lstFieldsDoubleClicked( const QModelIndex & ) 
 #include "layout/qgslayouthtmlwidget.h"
 #include "layout/qgslayoutframe.h"
 #include "layout/qgslayoutitemhtml.h"
+#include "layout/qgslayoutitemregistry.h"
 
+// ANTIGRAVITY: mirrors upstream qgslayouthtmlwidget.cpp — hand the frame's multiframe
+// to the base widget so QgsLayoutConfigObject is built on the real layout object
+// (upstream's setupUi()/Qsci editor wiring cannot be reproduced in the stub).
 QgsLayoutHtmlWidget::QgsLayoutHtmlWidget( QgsLayoutFrame *frame )
-  : QgsLayoutItemBaseWidget( nullptr, nullptr )
+  : QgsLayoutItemBaseWidget( nullptr, frame ? qobject_cast<QgsLayoutItemHtml *>( frame->multiFrame() ) : nullptr )
+  , mHtml( frame ? qobject_cast<QgsLayoutItemHtml *>( frame->multiFrame() ) : nullptr )
   , mFrame( frame )
 {
   setLayout( new QVBoxLayout( this ) );
 }
 
 void QgsLayoutHtmlWidget::setMasterLayout( QgsMasterLayoutInterface * ) {}
-bool QgsLayoutHtmlWidget::setNewItem( QgsLayoutItem * ) { return true; }
+// ANTIGRAVITY: mirrors the upstream acceptance test (frame -> multiframe -> Html type).
+// Returning true unconditionally made the layout designer accept any item as an HTML
+// item and never report the failure.
+bool QgsLayoutHtmlWidget::setNewItem( QgsLayoutItem *item )
+{
+  QgsLayoutFrame *frame = qobject_cast<QgsLayoutFrame *>( item );
+  if ( !frame )
+    return false;
+
+  QgsLayoutMultiFrame *multiFrame = frame->multiFrame();
+  if ( !multiFrame )
+    return false;
+
+  if ( multiFrame->type() != QgsLayoutItemRegistry::LayoutHtml )
+    return false;
+
+  mHtml = qobject_cast<QgsLayoutItemHtml *>( multiFrame );
+  mFrame = frame;
+  return true;
+}
 void QgsLayoutHtmlWidget::mUrlLineEdit_editingFinished() {}
 void QgsLayoutHtmlWidget::mFileToolButton_clicked() {}
 void QgsLayoutHtmlWidget::mResizeModeComboBox_currentIndexChanged( int ) {}
@@ -727,7 +767,9 @@ void QgsSQLComposerDialog::accept() { QDialog::accept(); }
 // --- QgsQueryResultWidget & dialogs ---
 #include "qgsqueryresultwidget.h"
 
-const QgsSettingsEntryString *QgsQueryResultWidget::settingLastSourceFolder = nullptr;
+// ANTIGRAVITY: real entry mirroring upstream qgsqueryresultwidget.cpp
+// (a nullptr static would segfault on dereference and drop the key from QgsSettingsTree)
+const QgsSettingsEntryString *QgsQueryResultWidget::settingLastSourceFolder = new QgsSettingsEntryString( u"last-source-folder"_s, sTreeSqlQueries, QString(), u"Last used folder for SQL source files"_s );
 
 QgsQueryResultItemDelegate::QgsQueryResultItemDelegate( QObject *parent )
   : QStyledItemDelegate( parent ) {}
