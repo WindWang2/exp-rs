@@ -30,17 +30,36 @@ std::string getStringArg(const Json::Value &args, const char *key)
     return args[key].asString();
 }
 
-/// Strict boolean: only real JSON booleans pass; anything else throws
-/// Json::LogicError, which the apply() boundary translates into the typed
-/// INVALID_ARGS refusal (jsoncpp would otherwise coerce a "false" string
-/// to true and silently arm an approval — fail-open).
-bool getBoolArg(const Json::Value &args, const char *key)
+/// Reads the run/resume approval arguments into the request. The human
+/// repair gate is a bound, single-use token (`repair_approval`) plus the
+/// driver clock that proves it unexpired at launch (`approval_now_ms`) —
+/// the SAME token+clock path the session surface reads (#1539). The legacy
+/// bare-bool `approve_pending_repair` spelling is refused explicitly: an
+/// approval that binds nothing is exactly what this driver must never
+/// accept (the coordinator reads no such field). A driver-held token is
+/// verified — and, when it survives, armed — by the coordinator at launch.
+/// Returns a typed refusal code, or an empty string on success (including
+/// no approval at all).
+std::string readApprovalArgs(const std::string &action, const Json::Value &args,
+                             OpsRunRequest &request)
 {
-    if (!args.isObject() || !args.isMember(key))
-        return false;
-    if (!args[key].isBool())
-        throw Json::LogicError(std::string(key) + " must be a boolean");
-    return args[key].asBool();
+    if (args.isObject() && args.isMember("approve_pending_repair"))
+        return "APPROVAL_TOKEN_REQUIRED";
+    if (!args.isObject())
+        return {};
+    // A malformed token document is a typed refusal, never a silent drop.
+    if (args.isMember("repair_approval") && !args["repair_approval"].isNull() &&
+        !args["repair_approval"].isObject())
+        return "APPROVAL_MALFORMED";
+    // resume() never evaluates the recovery bridge, so an approval could
+    // not be consumed honestly there — refuse instead of ignoring.
+    if (action == "resume" && args.isMember("repair_approval"))
+        return "APPROVAL_TOKEN_REQUIRED";
+    if (args["repair_approval"].isObject())
+        request.repairApproval = args["repair_approval"];
+    if (args["approval_now_ms"].isInt64())
+        request.approvalNowMs = args["approval_now_ms"].asInt64();
+    return {};
 }
 
 /// Bounded scan of a journal directory: non-terminal journals with SUBMITTED
@@ -57,7 +76,13 @@ Json::Value scanRestartHazards(const std::string &directory, ResumeReconciler &r
     std::size_t scanned = 0;
     for (; it != end && scanned < kMaxScanned; it.increment(ec))
     {
-        if (ec || !it->is_regular_file() || it->path().extension() != ".json")
+        // is_regular_file() is the THROWING overload by default: a stat
+        // failure on a DT_UNKNOWN or unreadable entry would escape the typed
+        // wire contract as std::filesystem_error. Use the error_code overload
+        // like the iterator construction/increment above (#1574). A dedicated
+        // ec keeps the loop's own error state (a failed increment) untouched.
+        std::error_code fileEc;
+        if (ec || !it->is_regular_file(fileEc) || it->path().extension() != ".json")
             continue;
         ++scanned;
         const std::string stem = it->path().stem().string();
@@ -221,16 +246,27 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
                 doc["reconcile"] = recon.toJson();
                 return doc;
             }
-            if (!recon.ok &&
-                std::filesystem::exists(std::filesystem::path(journalDirectory) /
-                                        (namedSession + ".json")))
+            if (!recon.ok)
             {
-                // A journal file that exists but cannot be loaded is never
-                // bypassed by a silent fresh launch: the operator named THIS
-                // session; the corrupted evidence gets a typed refusal.
-                Json::Value doc = errorDoc(action, "CORRUPTED_OR_MISSING_JOURNAL");
-                doc["reconcile"] = recon.toJson();
-                return doc;
+                // std::filesystem::exists is the THROWING overload by default:
+                // a stat failure on the journal path (e.g. EACCES on the
+                // directory) would escape the typed wire contract as
+                // std::filesystem_error (#1574). Use the error_code overload;
+                // an undeterminable existence simply does not trip the
+                // corrupted-journal refusal (any real write failure surfaces
+                // through the launch's own checkpoint error instead).
+                std::error_code existsEc;
+                const std::filesystem::path journalPath =
+                    std::filesystem::path(journalDirectory) / (namedSession + ".json");
+                if (std::filesystem::exists(journalPath, existsEc))
+                {
+                    // A journal file that exists but cannot be loaded is never
+                    // bypassed by a silent fresh launch: the operator named THIS
+                    // session; the corrupted evidence gets a typed refusal.
+                    Json::Value doc = errorDoc(action, "CORRUPTED_OR_MISSING_JOURNAL");
+                    doc["reconcile"] = recon.toJson();
+                    return doc;
+                }
             }
             if (recon.ok && !recon.resumable && recon.duplicateSubmitRisk)
             {
@@ -260,7 +296,11 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
                              ? std::string("research")
                              : getStringArg(args, "domain");
         request.role = getStringArg(args, "role");
-        request.approvePendingRepair = getBoolArg(args, "approve_pending_repair");
+        // Human repair approval rides the wire as a bound token + clock,
+        // never the bare boolean spelling (#1539).
+        const std::string approvalError = readApprovalArgs(action, args, request);
+        if (!approvalError.empty())
+            return errorDoc(action, approvalError);
         OpsRunResult result = mCoordinator.run(request);
         remember(result);
         Json::Value doc = statusFor(result, action);
@@ -302,7 +342,11 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
                              ? std::string("research")
                              : getStringArg(args, "domain");
         request.role = getStringArg(args, "role");
-        request.approvePendingRepair = getBoolArg(args, "approve_pending_repair");
+        // Human repair approval rides the wire as a bound token + clock,
+        // never the bare boolean spelling (#1539).
+        const std::string approvalError = readApprovalArgs(action, args, request);
+        if (!approvalError.empty())
+            return errorDoc(action, approvalError);
         OpsRunResult result = mCoordinator.resume(journalDirectory, sessionId, request);
         // A refused resume carries no session result (typed refusal only),
         // so remember() is a no-op there and a previously tracked session

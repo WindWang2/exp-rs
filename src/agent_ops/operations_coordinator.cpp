@@ -42,6 +42,105 @@ std::string approvalCheckToError(const char *check)
     return "APPROVAL_MALFORMED";
 }
 
+/// Budget parity for the two launch paths: run() and resume() must start the
+/// session under the SAME bounds the caller asked for, never silently under
+/// policy defaults. One definition so the paths cannot drift apart. (#1629)
+sicnu::agent_loop::SessionPolicy launchPolicy(const OpsRunRequest &request)
+{
+    sicnu::agent_loop::SessionPolicy policy = request.policy;
+    policy.maxReplans = request.budgets.maxReplans;
+    policy.noProgressThreshold = request.budgets.noProgressThreshold;
+    if (request.budgets.resourceBudgetMb > 0)
+        policy.resourceBudgetMb = request.budgets.resourceBudgetMb;
+    return policy;
+}
+
+/// The autonomy gate both launch paths share: a fresh launch ("ops:run") and
+/// a continued one ("ops:resume") pass the SAME gate — a resumed session can
+/// execute exactly like a fresh launch, so refusing one and not the other
+/// would let an execute-capable resume bypass the policy. Returns false with
+/// `reasonCode` set when the policy refuses.
+bool gateLaunchAutonomy(const OperationsCoordinator::Dependencies &deps, const char *actionKey,
+                        const OpsRunRequest &request, std::string &reasonCode)
+{
+    OpsAutonomyRequest ar;
+    ar.mutateKind = ops_mutate::kExecute;
+    ar.domain = request.domain;
+    ar.role = request.role;
+    ar.intent = request.session.intent;
+    ar.actionKey = actionKey;
+    const auto gate = gateMutatingOp(deps.autonomyPolicy, ar);
+    if (gate.allowed)
+        return true;
+    reasonCode = gate.reasonCode;
+    return false;
+}
+
+/// The typed refusal a gated launch returns: the session never starts and the
+/// recovery carrier reports the abort with its reason, so every driver (CLI /
+/// MCP / panel) routes it the same way.
+OpsRunResult autonomyDenial(const std::string &reasonCode)
+{
+    OpsRunResult denied;
+    denied.ok = false;
+    denied.error = reasonCode;
+    denied.lastRecovery = RecoveryDecision{};
+    denied.lastRecovery->action = recovery_action::kAbort;
+    denied.lastRecovery->reasonCode = reasonCode;
+    denied.lastRecovery->autonomyAllowed = false;
+    denied.lastRecovery->autonomyReasonCode = reasonCode;
+    return denied;
+}
+
+/// A cancel that arrived before launch must reach the session before its
+/// first stage: the loop's cooperative flag is the only stop an in-flight run
+/// honors, and this pre-launch arming is the last chance to set it. A cancel
+/// arriving mid-run is covered separately by the active-session registration
+/// (RAII guard at the call site). (#1451)
+void applyPendingCancel(sicnu::agent_loop::ScientificAgentSession &session,
+                        const std::atomic<bool> &cancelRequested)
+{
+    if (cancelRequested.load())
+        session.requestCancel();
+}
+
+/// The bridge cache is evidence about ONE diagnose invocation; a stale entry
+/// from a previous session must never be attributed to this launch. Both
+/// launch paths reset it for the same reason. (#1629)
+void resetLaunchDiagnostic(BridgedDiagnoser &diagnoser)
+{
+    diagnoser.resetLastDiagnostic();
+}
+
+/// Installs the crash-evidence checkpoint sink on a launching session: the
+/// journal is flushed after EVERY append, so a hard kill at any stage (not
+/// only at terminal) leaves a loadable prefix on disk. The reconciler reads
+/// that prefix to refuse unsafe resumes (e.g. submitted runs that a blind
+/// restart would duplicate).
+///
+/// Why the by-reference `checkpointErr` capture is safe: ScientificAgentSession
+/// invokes the sink SYNCHRONOUSLY from note()/recordDecision()
+/// (scientific_agent_session.cpp), which only run inside session.run(), and
+/// the session that owns the sink is a LOCAL of run()/resume(), destroyed
+/// when that scope ends. Every invocation therefore happens while the
+/// caller's checkpointErr is still alive, and the sink never outlives it —
+/// the safety rests on that synchronous invocation, not on the session
+/// outliving the scope (it does not). The directory is copied into the
+/// closure so the sink never depends on a caller-owned buffer. (#1629)
+void installCheckpointSink(sicnu::agent_loop::ScientificAgentSession &session,
+                           const std::string &journalDirectory,
+                           const LiveSessionRecorder &recorder, std::string &checkpointErr)
+{
+    session.setCheckpointSink(
+        [&recorder, dir = journalDirectory,
+         &checkpointErr](const sicnu::agent_loop::SessionJournal &journal)
+        {
+            std::string err;
+            if (!recorder.persistJournal(journal, dir, &err))
+                checkpointErr = err.empty() ? "JOURNAL_CHECKPOINT_FAILED" : err;
+        });
+}
+
 } // namespace
 
 OperationsCoordinator::OperationsCoordinator(Dependencies deps,
@@ -307,24 +406,9 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     // Autonomy gate before execute-capable modes.
     if (request.policy.mode == sicnu::agent_loop::RunMode::ExecuteWithVerify)
     {
-        OpsAutonomyRequest ar;
-        ar.mutateKind = ops_mutate::kExecute;
-        ar.domain = request.domain;
-        ar.role = request.role;
-        ar.intent = request.session.intent;
-        ar.actionKey = "ops:run";
-        const auto gate = gateMutatingOp(mDeps.autonomyPolicy, ar);
-        if (!gate.allowed)
-        {
-            denied.ok = false;
-            denied.error = gate.reasonCode;
-            denied.lastRecovery = RecoveryDecision{};
-            denied.lastRecovery->action = recovery_action::kAbort;
-            denied.lastRecovery->reasonCode = gate.reasonCode;
-            denied.lastRecovery->autonomyAllowed = false;
-            denied.lastRecovery->autonomyReasonCode = gate.reasonCode;
-            return denied;
-        }
+        std::string reasonCode;
+        if (!gateLaunchAutonomy(mDeps, "ops:run", request, reasonCode))
+            return autonomyDenial(reasonCode);
     }
 
     // Wire bridged diagnoser when an inner diagnoser is present.
@@ -413,42 +497,18 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         mPendingRepairApproval.reset();
     }
 
-    sicnu::agent_loop::SessionPolicy policy = request.policy;
-    policy.maxReplans = request.budgets.maxReplans;
-    policy.noProgressThreshold = request.budgets.noProgressThreshold;
-    if (request.budgets.resourceBudgetMb > 0)
-        policy.resourceBudgetMb = request.budgets.resourceBudgetMb;
+    sicnu::agent_loop::SessionPolicy policy = launchPolicy(request);
 
     sicnu::agent_loop::ScientificAgentSession session(policy, seams);
-    if (mCancelRequested.load())
-        session.requestCancel();
+    applyPendingCancel(session, mCancelRequested);
     // Propagate a cancel that arrives while the loop runs (RAII: the
     // registration ends with session.run()'s scope even if a seam throws,
     // so propagation never dereferences a dead session). (#1451)
     ActiveSessionGuard activeSessionGuard(*this, &session);
-    // Crash-evidence checkpointing: with a journal directory configured, the
-    // journal is flushed after EVERY append, so a hard kill at any stage
-    // (not only at terminal) leaves a loadable prefix on disk. The reconciler
-    // reads that prefix to refuse unsafe resumes (e.g. submitted runs that a
-    // blind restart would duplicate).
     std::string checkpointErr;
     if (!request.journalDirectory.empty())
-    {
-        // The directory is captured BY VALUE: the session (and its sink)
-        // outlives this scope, so a by-reference capture would dangle the
-        // moment run() left this block.
-        session.setCheckpointSink(
-            [this, dir = request.journalDirectory,
-             &checkpointErr](const sicnu::agent_loop::SessionJournal &journal)
-            {
-                std::string err;
-                if (!mRecorder.persistJournal(journal, dir, &err))
-                    checkpointErr = err.empty() ? "JOURNAL_CHECKPOINT_FAILED" : err;
-            });
-    }
-    // The bridge cache is evidence about one diagnose invocation only; a
-    // stale entry from a previous session must never be attributed here.
-    mBridgedDiagnoser.resetLastDiagnostic();
+        installCheckpointSink(session, request.journalDirectory, mRecorder, checkpointErr);
+    resetLaunchDiagnostic(mBridgedDiagnoser);
 
     // Note: pause is checked at launch (above); cancel is the hard stop
     // inside the loop and now also reaches a mid-run session through the
@@ -576,24 +636,9 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
     // could be bypassed by parking a journal and resuming it.
     if (request.policy.mode == sicnu::agent_loop::RunMode::ExecuteWithVerify)
     {
-        OpsAutonomyRequest ar;
-        ar.mutateKind = ops_mutate::kExecute;
-        ar.domain = request.domain;
-        ar.role = request.role;
-        ar.intent = request.session.intent;
-        ar.actionKey = "ops:resume";
-        const auto gate = gateMutatingOp(mDeps.autonomyPolicy, ar);
-        if (!gate.allowed)
-        {
-            out.ok = false;
-            out.error = gate.reasonCode;
-            out.lastRecovery = RecoveryDecision{};
-            out.lastRecovery->action = recovery_action::kAbort;
-            out.lastRecovery->reasonCode = gate.reasonCode;
-            out.lastRecovery->autonomyAllowed = false;
-            out.lastRecovery->autonomyReasonCode = gate.reasonCode;
-            return out;
-        }
+        std::string reasonCode;
+        if (!gateLaunchAutonomy(mDeps, "ops:resume", request, reasonCode))
+            return autonomyDenial(reasonCode);
     }
 
     std::string loadErr;
@@ -638,13 +683,7 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
     if (seams.diagnoser)
         seams.diagnoser = &mBridgedDiagnoser;
 
-    // Budget parity with run(): a resumed session must run under the SAME
-    // bounds the caller asked for, not silently under policy defaults.
-    sicnu::agent_loop::SessionPolicy policy = request.policy;
-    policy.maxReplans = request.budgets.maxReplans;
-    policy.noProgressThreshold = request.budgets.noProgressThreshold;
-    if (request.budgets.resourceBudgetMb > 0)
-        policy.resourceBudgetMb = request.budgets.resourceBudgetMb;
+    sicnu::agent_loop::SessionPolicy policy = launchPolicy(request);
     auto resumed = sicnu::agent_loop::ScientificAgentSession::resume(*journal, policy, seams);
     if (!resumed)
     {
@@ -652,27 +691,14 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
         out.error = "RESUME_REJECTED";
         return out;
     }
-    if (mCancelRequested.load())
-        resumed->requestCancel();
+    applyPendingCancel(*resumed, mCancelRequested);
     // Same in-flight cancel propagation as run(): a cancel arriving during
     // the resumed leg must reach the live loop. (#1451)
     ActiveSessionGuard activeSessionGuard(*this, &*resumed);
-    mBridgedDiagnoser.resetLastDiagnostic();
-
-    // Checkpoint the continued journal exactly like a fresh launch: a kill
-    // during the resumed leg must leave the same loadable evidence trail.
+    resetLaunchDiagnostic(mBridgedDiagnoser);
     std::string checkpointErr;
     if (!request.journalDirectory.empty())
-    {
-        resumed->setCheckpointSink(
-            [this, dir = journalDirectory,
-             &checkpointErr](const sicnu::agent_loop::SessionJournal &journal)
-            {
-                std::string err;
-                if (!mRecorder.persistJournal(journal, dir, &err))
-                    checkpointErr = err.empty() ? "JOURNAL_CHECKPOINT_FAILED" : err;
-            });
-    }
+        installCheckpointSink(*resumed, journalDirectory, mRecorder, checkpointErr);
 
     // The loop restarts at the journal's final stage (pre-plan only) and
     // re-executes no journalled work; run() must restate the journalled goal.

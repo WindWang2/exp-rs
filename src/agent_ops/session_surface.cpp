@@ -43,8 +43,13 @@ Json::Value sessionSurfaceStatus(const OpsRunResult &result)
 Json::Value sessionSurfaceActions()
 {
     Json::Value actions(Json::arrayValue);
+    // The published vocabulary is what drivers can discover: `actions` was
+    // implemented but unadvertised, so it was invisible to them — and the
+    // parity test only walks THIS list, so it could not catch the omission.
+    // Keep the list in sync with the dispatch below (the legacy
+    // resume_clear_pause alias is deliberately unadvertised). (#1629)
     for (const char *a : {"run", "pause", "cancel", "clear_pause", "clear_cancel", "resume",
-                          "approve_repair", "export", "timeline", "status"})
+                          "approve_repair", "export", "timeline", "status", "actions"})
         actions.append(a);
     Json::Value doc(Json::objectValue);
     doc["schema"] = kSessionSurfaceSchema;
