@@ -66,14 +66,19 @@ PYBIND11_MODULE(_sicnu_operators, m) {
     // -------------------------------------------------------------------------
     // cv::Mat conversion helpers (also exercise the type_caster)
     // -------------------------------------------------------------------------
-    m.def("to_numpy", [](const cv::Mat& mat) -> py::object {
-        // The type_caster takes care of zero-copy conversion.
-        return py::cast(mat);
+    m.def("to_numpy", [](py::array arr) -> py::object {
+        // The type_caster takes care of zero-copy conversion. A cv::Mat loaded
+        // from a numpy buffer owns no pixel data, so the source array is handed
+        // to the caster as the cast parent: the returned view keeps it alive as
+        // its base instead of dangling once the source is collected.
+        return py::cast(arr.cast<cv::Mat>(), py::return_value_policy::automatic, arr);
     }, py::arg("mat"), "Convert a cv::Mat to a numpy ndarray (zero-copy).");
 
-    m.def("to_cv_mat", [](py::array_t<uint8_t, py::array::c_style | py::array::forcecast> arr) -> cv::Mat {
-        // The type_caster converts the numpy array to cv::Mat.
-        return arr.cast<cv::Mat>();
+    m.def("to_cv_mat", [](py::array_t<uint8_t, py::array::c_style | py::array::forcecast> arr) -> py::object {
+        // The type_caster converts the numpy array to cv::Mat. The source array
+        // is handed to the caster as the cast parent so the returned view keeps
+        // it alive as its base instead of dangling once the source is collected.
+        return py::cast(arr.cast<cv::Mat>(), py::return_value_policy::automatic, arr);
     }, py::arg("array"), "Convert a numpy ndarray to a cv::Mat (zero-copy, C-contiguous uint8).");
 
     // -------------------------------------------------------------------------

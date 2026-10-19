@@ -321,6 +321,18 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
     }
   }
   const int bandCount = static_cast<int>( bandList.size() );
+  // #1541: CV_MAKETYPE packs the channel count into the type bits modulo
+  // CV_CN_MAX — a >CV_CN_MAX-band selection (e.g. a hyperspectral raster
+  // with bands unset) wraps CV_32FC(bandCount), so the Mat strides a
+  // SMALLER channel count than the one fed below: cv::split returns the
+  // wrapped capacity while the loops still run to bandCount, so
+  // channels[c] reads past the split vector. Typed refusal at the seam,
+  // mirroring the raster engine (tile_inference_engine.cpp).
+  if ( bandCount <= 0 || bandCount > CV_CN_MAX )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "input selection carries " + std::to_string( bandCount )
+                             + " bands but cv::Mat supports at most " + std::to_string( CV_CN_MAX )
+                             + " channels — declare input.bands to select a subset" );
   if ( const std::string dtypeError =
          TileInferenceEngine::inputDTypeMismatch( m_model, bandList,
                                                   [ &ds ]( int band ) { return ds.bandDataType( band ); } );

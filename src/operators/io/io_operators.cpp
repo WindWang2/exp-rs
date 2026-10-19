@@ -64,7 +64,12 @@ ErrorCode mapGeoCode( sicnu::geo::ErrorCode code )
   return ErrorCode::Unknown;
 }
 
+} // namespace
+
 /// Runs `body`, translating foundation GeoError into RSOperatorError.
+/// Single mapping authority for the whole io family: the fabric adapters
+/// (io_fabric_operators.cpp) call THIS one instead of keeping a mirrored copy,
+/// so a new geo::ErrorCode value has to be mapped exactly once (#1642).
 Json::Value guarded( const std::function<Json::Value()> &body )
 {
   try
@@ -75,6 +80,37 @@ Json::Value guarded( const std::function<Json::Value()> &body )
   {
     throw RSOperatorError( mapGeoCode( error.code() ), error.what(), error.details() );
   }
+}
+
+namespace
+{
+
+/// JSON-Schema item description for one scalar element type.
+Json::Value scalarItem( const std::string &type )
+{
+  Json::Value item( Json::objectValue );
+  item["type"] = type;
+  return item;
+}
+
+/// Array-typed parameter: rs_schema.h ships no array helper, and every one of
+/// these members is read back as a JSON array at run time — declaring them
+/// "string" made schema-validating agents and UIs reject legal input (#1642).
+/// `items` is the JSON-Schema item description (scalarItem() for scalars);
+/// minItems/maxItems are omitted when non-positive.
+Json::Value arrayParam( const std::string &name, const std::string &description,
+                        const Json::Value &items, int minItems = 0, int maxItems = 0 )
+{
+  Json::Value param( Json::objectValue );
+  param["name"] = name;
+  param["type"] = "array";
+  param["description"] = description;
+  param["items"] = items;
+  if ( minItems > 0 )
+    param["minItems"] = minItems;
+  if ( maxItems > 0 )
+    param["maxItems"] = maxItems;
+  return param;
 }
 
 std::vector<std::string> creationOptionsFrom( const Json::Value &params )
@@ -143,8 +179,9 @@ Json::Value IoTranslateOperator::schema() const
   params["input"] = makeRasterParam( "input", "Input raster path" );
   params["output"] = makeOutputParam( "output", "Output raster path" );
   params["driver"] = makeStringParam( "driver", "Output GDAL driver short name", "GTiff" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options (NAME=VALUE array)" );
-  params["bands"] = makeStringParam( "bands", "1-based band indices to keep" );
+  params["creationOptions"] =
+    arrayParam( "creationOptions", "Driver creation options (NAME=VALUE array)", scalarItem( "string" ) );
+  params["bands"] = arrayParam( "bands", "1-based band indices to keep", scalarItem( "string" ) );
   params["width"] = makeIntegerParam( "width", "Target width (with height)" );
   params["height"] = makeIntegerParam( "height", "Target height (with width)" );
   params["targetCrs"] = makeStringParam( "targetCrs", "Assign/override CRS explicitly (EPSG:xxxx or WKT)" );
@@ -221,9 +258,10 @@ Json::Value IoWarpOperator::schema() const
                                         { "near", "bilinear", "cubic", "cubicspline", "lanczos", "average", "mode" },
                                         "near" );
   params["resolution"] = makeNumberParam( "resolution", "Target pixel size in target CRS units" );
-  params["bounds"] = makeStringParam( "bounds", "Target extent [minX,minY,maxX,maxY] in target CRS" );
+  params["bounds"] =
+    arrayParam( "bounds", "Target extent [minX,minY,maxX,maxY] in target CRS", scalarItem( "number" ), 4, 4 );
   params["targetAlignedPixels"] = makeBooleanParam( "targetAlignedPixels", "Align target grid (-tap)", false );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Driver creation options", scalarItem( "string" ) );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Warped raster", "tif" );
   Json::Value root = makeRootSchema( "Warp Raster", description(), params, outputs );
@@ -361,9 +399,10 @@ Json::Value IoClipOperator::schema() const
   Json::Value params;
   params["input"] = makeRasterParam( "input", "Input raster path" );
   params["output"] = makeOutputParam( "output", "Output raster path" );
-  params["bounds"] = makeStringParam( "bounds", "Clip extent [minX,minY,maxX,maxY] — mandatory" );
+  params["bounds"] =
+    arrayParam( "bounds", "Clip extent [minX,minY,maxX,maxY] — mandatory", scalarItem( "number" ), 4, 4 );
   params["srcCrsOverride"] = makeStringParam( "srcCrsOverride", "Declare the source CRS when the file carries none" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Driver creation options", scalarItem( "string" ) );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Clipped raster", "tif" );
   Json::Value root = makeRootSchema( "Clip Raster", description(), params, outputs );
@@ -461,7 +500,7 @@ Json::Value IoConvertFormatOperator::schema() const
   params["input"] = makeRasterParam( "input", "Input dataset (raster or vector)" );
   params["output"] = makeOutputParam( "output", "Output dataset path" );
   params["driver"] = makeStringParam( "driver", "Output GDAL driver short name (GTiff/GPKG/GeoJSON/...)", "GTiff" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Driver creation options", scalarItem( "string" ) );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Converted dataset", "" );
   Json::Value root = makeRootSchema( "Convert Format", description(), params, outputs );
@@ -543,7 +582,8 @@ Json::Value IoBuildOverviewsOperator::schema() const
   using namespace sicnu::operators::schema;
   Json::Value params;
   params["input"] = makeRasterParam( "input", "Raster path (modified in place)" );
-  params["levels"] = makeStringParam( "levels", "Overview levels (powers of two, e.g. [2,4,8,16])" );
+  params["levels"] =
+    arrayParam( "levels", "Overview levels (powers of two, e.g. [2,4,8,16])", scalarItem( "integer" ) );
   params["resampling"] = makeEnumParam( "resampling", "Overview resampling",
                                         { "NEAREST", "AVERAGE", "GAUSS", "CUBIC", "MODE" }, "GAUSS" );
   Json::Value root = makeRootSchema( "Build Overviews", description(), params, Json::Value() );
@@ -607,7 +647,7 @@ Json::Value IoMakeCogOperator::schema() const
                                     { "lossless_scientific", "visualization", "categorical",
                                       "continuous_float", "sar" },
                                     "lossless_scientific" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Extra COG creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Extra COG creation options", scalarItem( "string" ) );
   params["blocksize"] = makeIntegerParam( "blocksize", "Tile blocksize override (power of two, 128..4096)" );
   params["overviews"] = makeBooleanParam( "overviews", "Build overviews inside the COG (default true)" );
   params["deterministic"] = makeBooleanParam(
@@ -704,7 +744,8 @@ Json::Value IoVectorConvertOperator::schema() const
   params["layer"] = makeStringParam( "layer", "Layer name (default first)" );
   params["targetCrs"] = makeStringParam( "targetCrs", "Reproject features to this declared CRS" );
   params["where"] = makeStringParam( "where", "Attribute filter (OGR SQL WHERE)" );
-  params["clipBounds"] = makeStringParam( "clipBounds", "Clip box [minX,minY,maxX,maxY] in layer CRS" );
+  params["clipBounds"] =
+    arrayParam( "clipBounds", "Clip box [minX,minY,maxX,maxY] in layer CRS", scalarItem( "number" ), 4, 4 );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Converted vector", "" );
   Json::Value root = makeRootSchema( "Convert Vector", description(), params, outputs );
@@ -915,7 +956,11 @@ Json::Value IoMetadataPatchOperator::schema() const
   using namespace sicnu::operators::schema;
   Json::Value params;
   params["input"] = makeRasterParam( "input", "Target dataset (update-capable driver required)" );
-  params["patches"] = makeStringParam( "patches", "Array of {band, field, value} (band 0 = dataset stamp)" );
+  // One patch is {band?, field, value} — the exact shape run() enforces.
+  Json::Value patchItem( Json::objectValue );
+  patchItem["type"] = "object";
+  params["patches"] =
+    arrayParam( "patches", "Array of {band, field, value} (band 0 = dataset stamp)", patchItem );
   Json::Value outputs;
   outputs["report"] = makeOutputParam( "report", "Applied fields and manifest status", "" );
   Json::Value root = makeRootSchema( "Patch Metadata", description(), params, outputs );

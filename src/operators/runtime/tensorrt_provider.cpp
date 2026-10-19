@@ -78,7 +78,9 @@ class TensorRtRuntime final : public IModelRuntime
 {
   public:
     TensorRtRuntime( const std::string &enginePath, int cudaIndex )
-      : m_cudaIndex( cudaIndex ) { ( void )enginePath; }
+      : m_artifactPath( enginePath ), m_cudaIndex( cudaIndex )
+    {
+    }
 
     bool load( const std::string &enginePath, std::string *error )
     {
@@ -140,7 +142,7 @@ class TensorRtRuntime final : public IModelRuntime
     {
       return m_cudaIndex > 0 ? "cuda:" + std::to_string( m_cudaIndex ) : "cuda";
     }
-    std::string artifactPath() const override { return mArtifact; }
+    std::string artifactPath() const override { return m_artifactPath; }
 
     ProviderRuntimeDetails providerDetails() const override
     {
@@ -300,7 +302,11 @@ class TensorRtRuntime final : public IModelRuntime
     }
 
   private:
-    std::string mArtifact = "tensorrt-engine";
+    // The engine file this session was deserialized from — the IModelRuntime
+    // artifactPath() contract (cache keys / payloads / provenance), never a
+    // hardcoded label: the registry hands the factory the resolved path and
+    // load() below deserializes exactly those bytes.
+    std::string m_artifactPath;
     int m_cudaIndex = 0;
     cudaStream_t mStream = nullptr;
     std::mutex m_inferMutex;

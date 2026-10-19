@@ -216,6 +216,18 @@ class PythonWorkerSession final : public IModelRuntime
           if ( attempt == 0 && m_process->state() != QProcess::Running )
             continue; // dead worker → the bounded restart above
           recordFailure( "python worker stopped accepting requests (broken pipe)" );
+          // QProcess::write is ASYNCHRONOUS: the timeout means the request
+          // line may be PARTLY in the pipe already. The worker will still
+          // read the truncated request and answer it — on the shared session
+          // that line would be served to the NEXT request (outputs of one
+          // tile attributed to another — the desync the oversized/malformed/
+          // read-timeout branches above refuse). Stop the worker so the
+          // stream dies with it, and mark the session dead FOR GOOD like
+          // those branches: the registry recycles a session only when
+          // permanentlyUnavailable() is true (model_runtime.cpp), so without
+          // the flag the poisoned session would be served forever.
+          m_permanentlyDead.store( true, std::memory_order_release );
+          stopWorker();
           throw std::runtime_error( "python worker stopped accepting requests (broken pipe)" );
         }
 

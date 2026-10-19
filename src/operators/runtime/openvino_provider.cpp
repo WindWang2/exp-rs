@@ -2,8 +2,10 @@
 //
 // Framework token "openvino": the artifact is an IR (.xml, with .bin beside
 // it) or a directly readable ONNX model. Execution: ov::Core::read_model →
-// compile (device from the platform's device planner: "CPU" fallback, "GPU"
-// when the manifest asked for it) → one infer request per forward. CPU
+// compile (device follows the registry's resolution verdict — the single
+// repair that verdict cannot make is supplied here: a GPU-wanting manifest
+// demoted to cpu only because the host has no CUDA is served by OpenVINO's
+// own GPU plugin when one is exposed) → one infer request per forward. CPU
 // inference is deterministic per build; the provider details record the
 // OpenVINO version honestly.
 #include "operators/runtime/openvino_provider.h"
@@ -18,6 +20,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -29,12 +32,16 @@ namespace {
 class OpenVinoRuntime final : public IModelRuntime
 {
   public:
-    bool load( const ModelInfo &model, std::string *error )
+    bool load( const ModelInfo &model, const ModelHardwareCapabilities &hw, std::string *error )
     {
       try
       {
         mCore = std::make_unique<ov::Core>();
         const std::string &path = model.resolvedArtifactPath;
+        // The IModelRuntime artifactPath() contract: the session reports the
+        // file it was actually loaded from (cache keys / payloads /
+        // provenance), never a hardcoded label.
+        m_artifactPath = path;
         // read_model handles both IR (.xml, with .bin beside it) and ONNX
         // directly; no format branch is needed.
         mModel = mCore->read_model( path );
@@ -44,7 +51,9 @@ class OpenVinoRuntime final : public IModelRuntime
             *error = "OpenVINO read_model failed for: " + path;
           return false;
         }
-        const std::string device = model.runtime.gpu ? "GPU" : "CPU";
+        const std::string device = selectDevice( model, hw, error );
+        if ( device.empty() )
+          return false; // typed refusal — selectDevice filled *error
         mCompiled = mCore->compile_model( mModel, device );
         mInfer = mCompiled.create_infer_request();
         mDevice = device;
@@ -65,7 +74,7 @@ class OpenVinoRuntime final : public IModelRuntime
     std::string framework() const override { return "openvino"; }
     std::string backendName() const override { return "openvino"; }
     std::string deviceName() const override { return mDevice; }
-    std::string artifactPath() const override { return mArtifact; }
+    std::string artifactPath() const override { return m_artifactPath; }
 
     ProviderRuntimeDetails providerDetails() const override
     {
@@ -128,7 +137,77 @@ class OpenVinoRuntime final : public IModelRuntime
     }
 
   private:
-    std::string mArtifact = "openvino-model";
+    // Device selection. The registry's resolution verdict (runtime.gpu as
+    // rewritten by acquire, model_runtime.cpp:1098-1100) is authoritative
+    // for the GPU direction: it already priced in an explicit cpu request
+    // (operator --device or the manifest's runtime.device token), a
+    // recorded capacity demotion and the host's CUDA reality — and the
+    // cache key plus the VRAM ledger booking were built from it. Re-deriving
+    // the device from the manifest's intent fields would silently run a
+    // different device than the one booked: an explicit cpu honored as
+    // "GPU", or a capacity demotion undone while its ledger ticket stands.
+    //
+    // The ONE thing that verdict cannot see is a non-CUDA GPU: the
+    // registry's resolution is CUDA-centric (cudaAvailable is promoted
+    // only for CUDA-addressed backends), so on a host without CUDA an
+    // auto request from a GPU-wanting manifest demotes to cpu and the
+    // manifest's GPU demand never reaches the provider (#1576). That
+    // demotion — and only that one — is repaired here: hw.cudaAvailable
+    // separates it from every other cpu verdict, because an explicit cpu
+    // request or a capacity demotion is only ever recorded where CUDA
+    // exists. The device itself still comes from OpenVINO's own plugin
+    // registry (its "GPU" token is the Intel plugin, never a CUDA index).
+    // Returns "" with *error set when the request cannot be honored.
+    std::string selectDevice( const ModelInfo &model,
+                              const ModelHardwareCapabilities &hw, std::string *error )
+    {
+      bool gpu = model.runtime.gpu; // the registry's verdict
+      if ( !gpu && !hw.cudaAvailable && model.gpu && !manifestPinsCpu( model ) )
+        gpu = true; // the repairable CUDA-absence demotion (#1576)
+      if ( !gpu )
+        return "CPU";
+      const std::vector<std::string> devices = mCore->get_available_devices();
+      if ( std::find( devices.begin(), devices.end(), "GPU" ) != devices.end() )
+        return "GPU";
+      if ( model.runtime.gpu )
+      {
+        // The verdict resolved (and booked) a GPU device; a build without
+        // the GPU plugin cannot execute it — refuse instead of silently
+        // dropping to CPU underneath a live GPU reservation.
+        if ( error )
+          *error = "device resolution selected a GPU device but this OpenVINO build "
+                   "exposes no GPU plugin (available devices: " + joinDevices( devices ) + ")";
+        return {};
+      }
+      // The repairable demotion has no Intel plugin to land on either:
+      // CPU is the only device this build can offer for it.
+      return "CPU";
+    }
+
+    // True when the manifest's runtime.device token explicitly asks for
+    // CPU. An operator-side --device override never reaches the factory
+    // (model_execution_service.cpp passes it as explicitDevice), so it is
+    // honored through the verdict, never re-derived here.
+    static bool manifestPinsCpu( const ModelInfo &model )
+    {
+      RequestedDevice request;
+      return !model.runtime.device.empty()
+             && RequestedDevice::parse( model.runtime.device, &request )
+             && request.kind == RequestedDevice::Kind::Cpu;
+    }
+
+    static std::string joinDevices( const std::vector<std::string> &devices )
+    {
+      std::string joined;
+      for ( const std::string &device : devices )
+        joined += ( joined.empty() ? "" : ", " ) + device;
+      return joined.empty() ? std::string( "none" ) : joined;
+    }
+
+    // The artifact this session was loaded from (IModelRuntime contract:
+    // cache keys / payloads / provenance) — the resolved path load() read,
+    // never a hardcoded label.
+    std::string m_artifactPath;
     std::string mDevice = "CPU";
     std::string mInputName;
     std::string mOutputName;
@@ -151,9 +230,8 @@ ModelRuntimePtr makeOpenVinoRuntime( const ModelInfo &model,
     return nullptr;
   }
   auto session = std::make_shared<OpenVinoRuntime>();
-  if ( !session->load( model, errorMessage ) )
+  if ( !session->load( model, hw, errorMessage ) )
     return nullptr;
-  ( void )hw;
   return session;
 }
 
@@ -166,6 +244,18 @@ bool openVinoProviderAvailable()
 
 void registerOpenVinoProvider( ModelRuntimeRegistry &registry )
 {
+  // ProviderTraits{} (maxAddressableCudaIndex 0): OpenVINO addresses NO
+  // CUDA device — its "GPU" token is the Intel plugin, reached through
+  // OpenVINO's own device registry, not a CUDA index. Declaring a
+  // multi-device index here would make the registry promote cudaAvailable
+  // for this framework and let a manifest book NVIDIA VRAM (cuda:N) this
+  // backend can never touch, while the CUDA-centric resolution still
+  // cannot SEE an Intel GPU. The registry's verdict therefore stays
+  // authoritative; the provider only supplies the one repair that
+  // resolution cannot make (selectDevice above): on a host without CUDA
+  // an auto request from a GPU-wanting manifest is demoted to cpu there,
+  // and OpenVINO's own device list decides whether the Intel plugin can
+  // take it.
   registry.registerProvider( "openvino", makeOpenVinoRuntime, ProviderTraits{} );
 }
 

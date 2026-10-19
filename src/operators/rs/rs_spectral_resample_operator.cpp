@@ -10,6 +10,7 @@
 #include "processing/algorithms/spectral_resampling.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <QFile>
 #include <QString>
 
 #include <gdal.h>
@@ -41,6 +42,31 @@ std::vector<float> parseFloatArray(const Json::Value& array, const char* label)
     }
     return values;
 }
+
+// RAII for the raw GDALDatasetH createOutputTiff hands back: the caller owns
+// closing it, and every early exit (read/write failure, cancellation via
+// throwIfCancelled) used to skip the manual GDALClose — leaking the dataset
+// handle and its file descriptors and leaving a half-written GeoTIFF at the
+// output path (#1544). Same shape as rs_change_streaming.cpp's DatasetFileGuard:
+// destruction closes the handle and discards the partial file unless the run
+// committed it.
+struct DatasetFileGuard
+{
+    GDALDatasetH ds = nullptr;
+    QString path;
+    bool committed = false;
+
+    ~DatasetFileGuard()
+    {
+        if ( ds )
+        {
+            GDALClose( ds );
+            ds = nullptr;
+        }
+        if ( !committed && !path.isEmpty() )
+            QFile::remove( path );
+    }
+};
 
 } // anonymous namespace
 
@@ -235,6 +261,7 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
     if (!outDs)
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create resampled raster: " + outErr.toStdString());
+    DatasetFileGuard outGuard{outDs, QString::fromStdString(outputPath), false};
 
     for (int t = 0; t < dstBands; ++t)
     {
@@ -259,7 +286,6 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
             {
                 if (!ds.readBandWindow(b + 1, x, y, w, h, bandScratch.data()))
                 {
-                    GDALClose(outDs);
                     throw RSOperatorError(ErrorCode::GdalError,
                                           "Failed to read input tile at (" +
                                               std::to_string(x) + ", " + std::to_string(y) + ")");
@@ -305,7 +331,6 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
                 if (GDALRasterIO(outBand, GF_Write, x, y, w, h, bandTile.data(),
                                  w, h, GDT_Float32, 0, 0) != CE_None)
                 {
-                    GDALClose(outDs);
                     throw RSOperatorError(ErrorCode::FileNotWritable,
                                           "Failed to write resampled tile at (" +
                                               std::to_string(x) + ", " + std::to_string(y) + ")");
@@ -324,6 +349,8 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
         GDALSetMetadataItem(GDALGetRasterBand(outDs, t + 1), "WAVELENGTH_UNITS", "nm", nullptr);
     }
     GDALClose(outDs);
+    outGuard.ds = nullptr;
+    outGuard.committed = true;
     ds.close();
     context.reportProgress(1.0, "Spectral resampling complete");
 

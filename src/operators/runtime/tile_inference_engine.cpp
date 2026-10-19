@@ -3977,9 +3977,26 @@ int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
   // Manifest request first; the budget can only lower it.
   int batch = std::max( 1, model.tiling.batchSize );
   const int tile = std::max( kMinTileSize, tilePx );
+  const int halo = std::max( 0, effectiveHalo( model ) );
+  // #1575: the per-sample blob is the FED window — tile + 2*halo per side,
+  // not the bare core tile — and preprocess.resize="to_input" replaces that
+  // geometry with the fixed graph input (both engines resize the halo window
+  // to model.input.width/height before the forward pass). The RAM admission
+  // estimate (#689, rs_inference_operator.cpp) counts exactly this; this
+  // function must not contradict it. Estimate on the LARGER of the two
+  // geometries so neither the halo window nor the fed tensor is under-counted
+  // (a small tile_size with a large graph input under-estimated VRAM by 4x+).
+  long long fedW = static_cast<long long>( tile ) + 2 * halo;
+  long long fedH = fedW;
+  if ( model.preprocess.resize == "to_input"
+       && model.input.width > 0 && model.input.height > 0 )
+  {
+    fedW = std::max<long long>( fedW, model.input.width );
+    fedH = std::max<long long>( fedH, model.input.height );
+  }
   // Per-sample working set: input blob + output planes + halo overhead.
   const unsigned long long perSampleBytes =
-    4ULL * static_cast<unsigned long long>( tile ) * tile
+    4ULL * static_cast<unsigned long long>( fedW ) * static_cast<unsigned long long>( fedH )
       * static_cast<unsigned long long>( std::max( 1, fedChannels ) ) * 4ULL;
   // GPU VRAM budget (when reported via SICNU_MODEL_VRAM_MB) is the only
   // enforced ceiling here; CPU-side RAM admission is owned by TaskCenter's

@@ -1,5 +1,7 @@
 #include "rs_operator_registry.h"
 
+#include <utility>
+
 namespace sicnu::operators {
 
 namespace rs { void initBuiltinRsOperators(); }
@@ -83,10 +85,24 @@ std::vector<std::string> RSOperatorRegistry::operatorNames() const {
     return names;
 }
 
-Json::Value RSOperatorRegistry::listSchemas() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
+Json::Value RSOperatorRegistry::listSchemas() const
+{
+    // Take the factories out under the lock, then build every operator OUTSIDE
+    // it — the discipline create() follows above. m_mutex is a plain
+    // (non-recursive) std::mutex, so a factory or a schema() that re-enters the
+    // registry (hasOperator/create/registerOperator) self-deadlocks here, and
+    // N constructions would otherwise serialize all registration traffic
+    // behind this call.
+    std::vector<std::pair<std::string, FactoryFn>> factories;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        factories.reserve(m_factories.size());
+        for (const auto& pair : m_factories) {
+            factories.emplace_back(pair.first, pair.second);
+        }
+    }
     Json::Value array(Json::arrayValue);
-    for (const auto& pair : m_factories) {
+    for (const auto& pair : factories) {
         auto op = pair.second();
         if (op) {
             Json::Value entry = op->schema();
