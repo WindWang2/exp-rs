@@ -2,6 +2,7 @@
 // authority for the model runtime lanes (see the header for the contract).
 #include "operators/runtime/model_publish.h"
 
+#include "geospatial/util/atomic_fs.h"
 #include "operators/framework/rs_operator_error.h"
 #include "platform/portable.h"
 #include "runtime/observability/fault_point.h"
@@ -249,6 +250,22 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
       *error = "failed to write the provenance sidecar: " + stagePath.toStdString();
     return false;
   }
+  // R18-B durability parity with the detection lane (#1174 family): a rename
+  // is only as durable as the data beneath it. Without fsync of the staged
+  // document (and the parent directory after the swap) a power loss could
+  // leave a zero-length or truncated sidecar behind an intact rename — the
+  // provenance verifier's mtime ordering would then pass on garbage.
+  try
+  {
+    sicnu::geo::atomic_fs::fsyncFile( stagePath.toStdString() );
+  }
+  catch ( const std::exception & )
+  {
+    stage.remove();
+    if ( error )
+      *error = "failed to flush the provenance sidecar: " + stagePath.toStdString();
+    return false;
+  }
   QFile::remove( sidecarPath ); // Windows rename does not overwrite
   if ( !QFile::rename( stagePath, sidecarPath ) )
   {
@@ -257,6 +274,8 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
       *error = "failed to publish the provenance sidecar: " + sidecarPath.toStdString();
     return false;
   }
+  sicnu::portable::syncDirectoryBestEffortUtf8( QFileInfo( sidecarPath ).absolutePath()
+                                                  .toStdString() );
   return true;
 }
 
@@ -600,6 +619,19 @@ ProductPublishGuard::~ProductPublishGuard()
 void ProductPublishGuard::publishStaged( const QString &stagePath, const char *swapFaultPoint,
                                          const std::string &errorWhat )
 {
+  // R18-B durability parity with the detection lane: the staged raster must
+  // be on disk before the rename makes it the product — the streaming writer
+  // only close()d it. Flush failures abort BEFORE any park/swap state changes
+  // (the staged file is still removable litter).
+  try
+  {
+    sicnu::geo::atomic_fs::fsyncFile( stagePath.toStdString() );
+  }
+  catch ( const std::exception & )
+  {
+    QFile::remove( stagePath );
+    throw RSOperatorError( ErrorCode::FileNotWritable, errorWhat );
+  }
   const bool swapFailed = ( swapFaultPoint && SICNU_FAULT_POINT( swapFaultPoint ) )
                           || !QFile::rename( stagePath, m_final );
   if ( swapFailed )
@@ -607,6 +639,8 @@ void ProductPublishGuard::publishStaged( const QString &stagePath, const char *s
     QFile::remove( stagePath );
     throw RSOperatorError( ErrorCode::FileNotWritable, errorWhat );
   }
+  sicnu::portable::syncDirectoryBestEffortUtf8(
+    QFileInfo( m_final ).absolutePath().toStdString() );
 }
 
 void ProductPublishGuard::disarm()

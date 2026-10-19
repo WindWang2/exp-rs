@@ -49,6 +49,15 @@ void ChunkGraph::requireFreeConsumerLocked( NodeId input ) const
                 throw std::logic_error(
                     "chunk graph: node has more than one consumer (fan-out "
                     "would silently split tiles); use an explicit copy stage" );
+    // R18-B: the sink is a consumer too, whether it was registered before or
+    // after the stage/join being checked — the sink node materializes into
+    // m_nodes only at run(), so without this check either registration order
+    // silently shared the producer's queue between the stage and the sink.
+    if ( m_sinkInput == input )
+        throw std::logic_error(
+            "chunk graph: node has more than one consumer (the sink already "
+            "consumes it; fan-out would silently split tiles); use an "
+            "explicit copy stage" );
 }
 
 ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
@@ -84,6 +93,9 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
 void ChunkGraph::addSink( NodeId input, SinkFn fn )
 {
     assert( input >= 0 && input < static_cast<NodeId>( m_nodes.size() ) );
+    if ( m_sink )
+        throw std::logic_error( "chunk graph: only one sink is supported" );
+    requireFreeConsumerLocked( input );
     m_sinkInput = input;
     m_sink = std::move( fn );
 }
@@ -140,10 +152,13 @@ void ChunkGraph::runSource( Node &node )
             // contract breach — a typed error, never a null dereference.
             const size_t expected = payload.spec.bufferElementCount();
             const size_t actual = payload.pixels ? payload.pixels->size() : 0;
-            if ( actual != expected )
-                throw std::logic_error( "chunk graph source: tile buffer size " +
-                                        std::to_string( actual ) + " != spec size " +
-                                        std::to_string( expected ) );
+            // R18-B: a fully-default payload (null pixels, empty spec) used to
+            // pass 0 == 0 — the very producer breach this gate exists for.
+            if ( !payload.pixels || actual != expected )
+                throw std::logic_error( "chunk graph source: producer returned a tile without "
+                                        "a pixel buffer ("
+                                        + std::to_string( actual ) + " of "
+                                        + std::to_string( expected ) + " elements)" );
             if ( !node.out->push( std::move( payload ) ) )
                 return; // graph unwinding downstream — drop the tile
             payload = TilePayload{};

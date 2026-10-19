@@ -215,8 +215,21 @@ class PythonWorkerSession final : public IModelRuntime
           // hang, and replaying into it could double-execute the forward.
           if ( attempt == 0 && m_process->state() != QProcess::Running )
             continue; // dead worker → the bounded restart above
-          recordFailure( "python worker stopped accepting requests (broken pipe)" );
-          throw std::runtime_error( "python worker stopped accepting requests (broken pipe)" );
+          // R18-B: a LIVE worker that missed the write deadline fails the
+          // session closed, exactly like the oversized/malformed/read-timeout
+          // branches below. The (possibly partial) request line is still in
+          // the pipe: the worker will eventually drain and answer it, and the
+          // protocol has no request correlation — that stale answer would be
+          // served to the NEXT request on this shared session. Stop the
+          // worker so the stream dies with it, and mark the session dead for
+          // good (a stopped worker is not restartable mid-request).
+          recordFailure( "python worker stopped accepting requests (write deadline, broken "
+                         "pipe); stderr: "
+                         + drainStderr() );
+          m_permanentlyDead.store( true, std::memory_order_release );
+          stopWorker();
+          throw std::runtime_error( "python worker stopped accepting requests (write deadline, "
+                                    "broken pipe)" );
         }
 
         QJsonObject response;

@@ -26,10 +26,15 @@ void validateBuffer( const TilePayload &p, const char *where )
 {
     const size_t expected = p.spec.bufferElementCount();
     const size_t actual = p.pixels ? p.pixels->size() : 0;
-    if ( actual != expected )
-        throw std::logic_error( std::string( where ) + ": tile buffer size " +
-                                std::to_string( actual ) + " != spec size " +
-                                std::to_string( expected ) );
+    // R18-B: a fully-default payload (null pixels, empty spec) used to pass
+    // 0 == 0 — the producer breach this gate exists to catch
+    // (resumable_tile_run checks !pixels explicitly; this seam must refuse it
+    // just the same).
+    if ( !p.pixels || actual != expected )
+        throw std::logic_error( std::string( where ) + ": producer returned a tile without "
+                                               "a pixel buffer ("
+                                + std::to_string( actual ) + " of " + std::to_string( expected )
+                                + " elements)" );
 }
 } // namespace
 
