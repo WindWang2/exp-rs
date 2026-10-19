@@ -31,7 +31,13 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
     result.expected = expectation.value;
     result.observed = faulted->number;
 
-    const double delta = clean != nullptr ? faulted->number - clean->number : 0.0;
+    // Delta relations judge a CHANGE; without a clean baseline the change
+    // is unprovable, not zero (R18-E V3 — the same discipline Changed,
+    // Text and Truth already carry). The old fallback fabricated
+    // delta = 0.0, so `equals 0` / `delta_ge -1` / `delta_le 1` passed
+    // vacuously on zero evidence.
+    const bool hasBaseline = clean != nullptr;
+    const double delta = hasBaseline ? faulted->number - clean->number : 0.0;
     result.delta = delta;
 
     // delta_ge/delta_le/equals/not_equals are all statements about the
@@ -59,22 +65,46 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
     switch ( expectation.relation )
     {
         case ExpectationRelation::Changed:
-            result.passed = std::fabs( delta ) > kObservableTolerance;
-            if ( clean == nullptr )
+            result.passed = hasBaseline && std::fabs( delta ) > kObservableTolerance;
+            if ( !hasBaseline )
             {
                 result.note = "clean baseline for this observable is absent";
             }
             break;
         case ExpectationRelation::DeltaGe:
+            if ( !hasBaseline )
+            {
+                result.passed = false;
+                result.note = "clean baseline for this observable is absent";
+                break;
+            }
             result.passed = delta >= expectation.value - kObservableTolerance;
             break;
         case ExpectationRelation::DeltaLe:
+            if ( !hasBaseline )
+            {
+                result.passed = false;
+                result.note = "clean baseline for this observable is absent";
+                break;
+            }
             result.passed = delta <= expectation.value + kObservableTolerance;
             break;
         case ExpectationRelation::Equals:
+            if ( !hasBaseline )
+            {
+                result.passed = false;
+                result.note = "clean baseline for this observable is absent";
+                break;
+            }
             result.passed = std::fabs( delta - expectation.value ) <= kObservableTolerance;
             break;
         case ExpectationRelation::NotEquals:
+            if ( !hasBaseline )
+            {
+                result.passed = false;
+                result.note = "clean baseline for this observable is absent";
+                break;
+            }
             result.passed = std::fabs( delta - expectation.value ) > kObservableTolerance;
             break;
         case ExpectationRelation::InRange:

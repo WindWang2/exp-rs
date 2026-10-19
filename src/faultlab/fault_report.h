@@ -48,6 +48,11 @@ struct FaultRunReport
 
     std::vector<FaultDiagnostic> diagnostics;
 
+    /// A declared expected.verifier block exists but this runner does not
+    /// evaluate it (R18-E V6): the declaration is surfaced, never silently
+    /// dropped.
+    bool verifierDeclUnevaluated = false;
+
     bool passed = false;
 
     Json::Value toJson() const;

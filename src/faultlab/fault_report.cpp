@@ -52,6 +52,8 @@ Json::Value FaultRunReport::toJson() const
     }
     doc["diagnostics"] = diagnostics;
 
+    doc["verifier_decl_unevaluated"] = verifierDeclUnevaluated;
+
     doc["verdict"] = Json::Value( Json::objectValue );
     doc["verdict"]["passed"] = passed;
     doc["verdict"]["source_unchanged"] = sourceUnchanged;

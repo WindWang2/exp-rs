@@ -307,6 +307,21 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
         // carried a non-finite operand all the way into the report digest.
         // Present operands are type- and finite-checked; absent operands
         // keep their legacy defaults (the `changed` relation carries none).
+        // Delta relations judge a CHANGE against a declared magnitude; an
+        // operand-less one graded against the 0.0 default (a vacuous pass
+        // for equals/delta_le ≤ 0 — R18-E V3). Present operands keep the
+        // legacy defaults ONLY for the relations that judge the faulted
+        // value itself (in_range reads its own bounds; changed carries no
+        // operand by design).
+        if ( !entry.isMember( "value" )
+             && ( expectation.relation == ExpectationRelation::DeltaGe
+                  || expectation.relation == ExpectationRelation::DeltaLe
+                  || expectation.relation == ExpectationRelation::Equals
+                  || expectation.relation == ExpectationRelation::NotEquals ) )
+        {
+            return fieldError( "delta/equals expectation for '" + expectation.id +
+                               "' needs a numeric value (no silent 0 default)" );
+        }
         if ( entry.isMember( "value" ) )
         {
             const Value &operand = entry["value"];
