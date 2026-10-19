@@ -90,17 +90,6 @@ void waitForTerminalStatus( long taskId, int attempts = 1200, int sleepMs = 5 )
     }
 }
 
-bool waitForCondition( const std::function<bool()> &predicate, int attempts = 1200, int sleepMs = 5 )
-{
-    for ( int i = 0; i < attempts; ++i )
-    {
-        if ( predicate() )
-            return true;
-        std::this_thread::sleep_for( std::chrono::milliseconds( sleepMs ) );
-    }
-    return predicate();
-}
-
 sicnu::jobs::JobRequest ep8Request( const char *algorithmId )
 {
     sicnu::jobs::JobRequest r;
@@ -132,13 +121,17 @@ struct StartOrderRecorder
     }
 };
 
+/// Status/gate observations elsewhere in this suite share one short budget:
+/// the 6 s the former local helper polled for (1200 x 5 ms), now stated as a
+/// time budget for the shared sicnu_test::waitUntil primitive.
+constexpr int kStatusWaitBudgetMs = 6000;
+
 /// Bounded waits in the bucketed-queue case state their budget explicitly
-/// instead of inheriting the 6 s default: this suite runs on shared CI hosts
+/// instead of taking that short default: this suite runs on shared CI hosts
 /// where a load spike can stall worker-thread start (and every gate-open
-/// handshake below) for seconds. 6000 x 10 ms = 60 s, an order of magnitude
-/// over what an idle host needs and still far inside the case's ctest timeout.
-constexpr int kQueueWaitAttempts = 6000;
-constexpr int kQueueWaitSleepMs = 10;
+/// handshake below) for seconds. 60 s is an order of magnitude over what an
+/// idle host needs and still far inside the case's ctest timeout.
+constexpr int kQueueWaitBudgetMs = 60000;
 
 /// Opens a set of per-job start gates on destruction. Jobs that park inside
 /// their executor hold a worker for the whole case, so any early exit (a failed
@@ -209,9 +202,10 @@ TEST_CASE( "Priority order holds through the ready heap under a single slot",
     // Holder occupies the only slot (Normal priority, id smaller than the rest).
     const long holder = center.submitJob( ep8Request( "ep8:holder" ) );
     REQUIRE( holder > 0 );
-    REQUIRE( waitForCondition( [&] {
-        return center.getTaskInfo( holder ).status == sicnu::TaskStatus::Running;
-    } ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] { return center.getTaskInfo( holder ).status == sicnu::TaskStatus::Running; },
+        kStatusWaitBudgetMs,
+        [] { return "ep8:holder never reached Running"; } ) );
 
     // Queue order of submission: LOW first, then NORMAL, then HIGH. With the
     // single slot busy, all three sit in the ready heap; on release they must
@@ -232,11 +226,14 @@ TEST_CASE( "Priority order holds through the ready heap under a single slot",
 
     // All three held for admission (one slot busy). The head candidate is
     // surfaced as WaitingResource; deep candidates stay queued.
-    REQUIRE( waitForCondition( [&] {
-        const auto st = center.getTaskInfo( high ).status;
-        return st == sicnu::TaskStatus::WaitingResource
-               || st == sicnu::TaskStatus::Dispatching;
-    } ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] {
+            const auto st = center.getTaskInfo( high ).status;
+            return st == sicnu::TaskStatus::WaitingResource
+                   || st == sicnu::TaskStatus::Dispatching;
+        },
+        kStatusWaitBudgetMs,
+        [] { return "ep8:high never held for admission (WaitingResource/Dispatching)"; } ) );
 
     releaseGate.store( true );
     waitForTerminalStatus( holder );
@@ -289,9 +286,10 @@ TEST_CASE( "Cancelling an admission-held task leaves no stranded work",
 
     const long holder = center.submitJob( ep8Request( "ep8:holder" ) );
     REQUIRE( holder > 0 );
-    REQUIRE( waitForCondition( [&] {
-        return center.getTaskInfo( holder ).status == sicnu::TaskStatus::Running;
-    } ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] { return center.getTaskInfo( holder ).status == sicnu::TaskStatus::Running; },
+        kStatusWaitBudgetMs,
+        [] { return "ep8:holder never reached Running"; } ) );
 
     // Two candidates queue on the single slot; cancel the FIRST one while
     // it sits in the ready heap (its heap entry must be lazily invalidated —
@@ -303,9 +301,12 @@ TEST_CASE( "Cancelling an admission-held task leaves no stranded work",
     const long survivor = center.submitJob( ep8Request( "ep8:survivor" ) );
     REQUIRE( canceled > 0 );
     REQUIRE( survivor > 0 );
-    REQUIRE( waitForCondition( [&] {
-        return center.getTaskInfo( canceled ).status == sicnu::TaskStatus::WaitingResource;
-    } ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] {
+            return center.getTaskInfo( canceled ).status == sicnu::TaskStatus::WaitingResource;
+        },
+        kStatusWaitBudgetMs,
+        [] { return "ep8:canceled never surfaced as WaitingResource"; } ) );
     CHECK( sicnu::isTerminalStatus( center.getTaskInfo( survivor ).status ) == false );
 
     REQUIRE( center.cancelTask( canceled ) );
@@ -537,8 +538,9 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     sicnu::jobs::JobRequest parkB = ep8Request( "ep8:parkB" );
     parkB.params["i"] = 6;
     const std::string parkBId = engine.submit( parkB );
-    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() == 2; },
-                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return recorder.snapshot().size() == 2; },
+                                    kQueueWaitBudgetMs,
+                                    [] { return "ep8:both park jobs never started"; } ) );
 
     sicnu::jobs::JobRequest lowA = ep8Request( "ep8:lowA" );
     lowA.priority = 2;
@@ -589,13 +591,15 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     // exclusive start.
     startGate[0].store( true );
     startGate[6].store( true );
-    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 3; },
-                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return recorder.snapshot().size() >= 3; },
+                                    kQueueWaitBudgetMs,
+                                    [] { return "ep8:exclusive never started after the parks drained"; } ) );
     // ... and it runs ALONE. Everything else is terminal or queued behind the
     // exclusive, so this holds for as long as the exclusive is parked — again a
     // scheduler invariant rather than a snapshot race.
-    REQUIRE( waitForCondition( [&] { return onlyRunningJob( engine, exclusiveId ); },
-                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return onlyRunningJob( engine, exclusiveId ); },
+                                    kQueueWaitBudgetMs,
+                                    [] { return "ep8:exclusive never ran alone (drain-then-exclusive violated)"; } ) );
 
     // Release the exclusive: both workers go idle and pick back to back, so
     // the next two picks are the best-paying buckets, HIGH(3) then NORMAL(2).
@@ -603,8 +607,9 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     // starts is fixed, because those two jobs hold both workers and no
     // lower-priority pick can overtake them.
     startGate[5].store( true );
-    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 5; },
-                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return recorder.snapshot().size() >= 5; },
+                                    kQueueWaitBudgetMs,
+                                    [] { return "ep8:HIGH/NORMAL never started after the exclusive was released"; } ) );
     const auto midOrder = recorder.snapshot();
     REQUIRE( midOrder.size() == 5 );
     REQUIRE( ( ( midOrder[3] == 3 && midOrder[4] == 2 )
@@ -616,29 +621,34 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     // in isolation, so FIFO order inside a bucket is asserted HERE instead of
     // being inferred from two instant jobs racing on two workers.
     startGate[static_cast<std::size_t>( midOrder[3] )].store( true );
-    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 6; },
-                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return recorder.snapshot().size() >= 6; },
+                                    kQueueWaitBudgetMs,
+                                    [] { return "ep8:FIFO head (lowA) never started on the freed worker"; } ) );
     startGate[static_cast<std::size_t>( midOrder[4] )].store( true );
-    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() >= 7; },
-                               kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return recorder.snapshot().size() >= 7; },
+                                    kQueueWaitBudgetMs,
+                                    [] { return "ep8:last queued job (lowD) never started"; } ) );
 
     // Every gate is open, so nothing is parked any more and the remaining work
     // only completes: wait for the engine's own terminal state per job instead
     // of a fixed sleep.
     const std::vector<std::string> allIds{ parkAId, parkBId, lowAId, normalBId,
                                            highCId, lowDId, exclusiveId };
-    REQUIRE( waitForCondition( [&] {
-        for ( const std::string &id : allIds )
-        {
-            const auto rec = engine.snapshot( id );
-            if ( !rec.has_value()
-                 || ( rec->state != sicnu::jobs::JobState::Succeeded
-                      && rec->state != sicnu::jobs::JobState::Failed
-                      && rec->state != sicnu::jobs::JobState::Cancelled ) )
-                return false;
-        }
-        return true;
-    }, kQueueWaitAttempts, kQueueWaitSleepMs ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] {
+            for ( const std::string &id : allIds )
+            {
+                const auto rec = engine.snapshot( id );
+                if ( !rec.has_value()
+                     || ( rec->state != sicnu::jobs::JobState::Succeeded
+                          && rec->state != sicnu::jobs::JobState::Failed
+                          && rec->state != sicnu::jobs::JobState::Cancelled ) )
+                    return false;
+            }
+            return true;
+        },
+        kQueueWaitBudgetMs,
+        [] { return "ep8:not every submitted job reached a terminal state"; } ) );
 
     const auto order = recorder.snapshot();
     {
@@ -848,9 +858,10 @@ TEST_CASE( "Raising a resource limit admits held work without a task transition"
     center.setGlobalConcurrencyLimit( 1 );
     const long holder = center.submitJob( ep8Request( "ep8:holder" ) );
     REQUIRE( holder > 0 );
-    REQUIRE( waitForCondition( [&] {
-        return center.getTaskInfo( holder ).status == sicnu::TaskStatus::Running;
-    } ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] { return center.getTaskInfo( holder ).status == sicnu::TaskStatus::Running; },
+        kStatusWaitBudgetMs,
+        [] { return "ep8:holder never reached Running"; } ) );
 
     const long held = center.submitJob( ep8Request( "ep8:held" ) );
     REQUIRE( held > 0 );
@@ -863,9 +874,10 @@ TEST_CASE( "Raising a resource limit admits held work without a task transition"
     // Dynamic availability (8.0 WP-B): raising the limit must re-run
     // admission immediately — no task transition happens here.
     center.setGlobalConcurrencyLimit( 2 );
-    REQUIRE( waitForCondition( [&] {
-        return center.getTaskInfo( held ).status == sicnu::TaskStatus::Running;
-    } ) );
+    REQUIRE( sicnu_test::waitUntil(
+        [&] { return center.getTaskInfo( held ).status == sicnu::TaskStatus::Running; },
+        kStatusWaitBudgetMs,
+        [] { return "ep8:held never reached Running after the limit was raised"; } ) );
 
     releaseGate.store( true );
     waitForTerminalStatus( holder );
