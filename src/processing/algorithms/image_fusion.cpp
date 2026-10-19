@@ -947,11 +947,17 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
     if ( params.method == QStringLiteral( "linear" ) )
     {
+        // Clamp panWeight to [0,1] exactly like the in-memory kernel
+        // (linearWeighted): the ms weights are clamped below and the
+        // equal-weight default (1 - panWeight) assumes the same domain; an
+        // out-of-range value used to weight the pan unclamped on this
+        // streaming route (R18-A, review R1 P2).
+        const float panW = std::clamp( params.panWeight, 0.0f, 1.0f );
         QVector<float> weights = params.msWeights;
         if ( weights.isEmpty() )
         {
             weights.resize( nMsBands );
-            float defaultMsWeight = 1.0f - params.panWeight;
+            float defaultMsWeight = 1.0f - panW;
             for ( int b = 0; b < nMsBands; ++b )
                 weights[b] = defaultMsWeight;
         }
@@ -960,7 +966,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
             // A non-empty weight list shorter than the band count would read
             // weights[b] out of bounds below (#677). Pad with the same
             // equal-weight default the empty case uses and report it.
-            const float defaultMsWeight = 1.0f - params.panWeight;
+            const float defaultMsWeight = 1.0f - panW;
             QString paddedBands;
             for ( int b = weights.size(); b < nMsBands; ++b )
             {
@@ -1009,7 +1015,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         }
                         else
                         {
-                            outData[i] = msW * msData[i] + params.panWeight * panBuf[i];
+                            outData[i] = msW * msData[i] + panW * panBuf[i];
                         }
                     }
                     if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outData ) )

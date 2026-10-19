@@ -1742,3 +1742,47 @@ TEST_CASE( "Streaming PCA fusion reports why an all-NoData scene fails [r18a][wp
     CHECK( !error.isEmpty() ); // the refusal carries a reason
     CHECK( !QFile::exists( outputPath ) ); // no partial product staged
 }
+
+// R18-A review-R1 P2: the streaming linear route must clamp panWeight exactly
+// like the in-memory kernel (linearWeighted).
+TEST_CASE( "Streaming linear fusion clamps an out-of-range panWeight [r18a][r1]",
+           "[fusion][gdal][r18a]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_pw.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_pw.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_pw.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 1, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 1, 1, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    std::vector<float> pan = { 10.0f, 10.0f };
+    std::vector<float> ms = { 1.0f, 1.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           pan.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           ms.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "linear" );
+    params.panWeight = 1.5f; // clamped to 1.0: output tracks the pan only
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> out1( 2 );
+    REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
+    CHECK( out1[0] == Approx( 10.0f ).margin( 1e-4 ) );
+    CHECK( out1[1] == Approx( 10.0f ).margin( 1e-4 ) );
+}

@@ -456,7 +456,7 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
                         const size_t inRowOffset = static_cast<size_t>(r) * isec.iw;
                         for (int c = 0; c < isec.iw; ++c) {
                             const float val = tileIn[inRowOffset + c];
-                            const bool valid = !std::isnan(val) && (std::isnan(nodata) || val != nodata);
+                            const bool valid = std::isfinite(val) && (std::isnan(nodata) || val != nodata);
                             if (valid) {
                                 tileOut[outRowOffset + c] = val;
                             }

@@ -278,7 +278,8 @@ bool dos1Histogram(const float *dn, float *surface, size_t count, float gain, fl
 
     const float darkLevel = findDarkObjectByHistogram(radiance.data(), count);
     for (size_t i = 0; i < count; ++i)
-        surface[i] = radiance[i] - darkLevel;
+        surface[i] = std::isfinite(radiance[i]) ? radiance[i] - darkLevel
+                                                : std::numeric_limits<float>::quiet_NaN();
     return true;
 }
 
@@ -356,19 +357,15 @@ bool quac(const float *const *dnBands, float *const *outBands,
         // nth_element in place on `valid` and derive both percentiles.
         auto &scratch = valid;
         const size_t nValid = scratch.size();
-        // Use nth_element twice on the same partitioned range (single allocation/copy).
         const size_t rankDark = static_cast<size_t>(1.0f / 100.0f * (nValid - 1));
         const size_t rankBright = static_cast<size_t>(99.0f / 100.0f * (nValid - 1));
-        if (nValid == 0) {
-            dark[b] = 0.0f;
-            bright[b] = 0.0f;
-        } else if (nValid == 1) {
+        if (nValid == 1) {
             dark[b] = scratch[0];
             bright[b] = scratch[0];
         } else {
-            std::nth_element(scratch.begin(), scratch.begin() + rankDark, validEnd);
+            std::nth_element(scratch.begin(), scratch.begin() + rankDark, scratch.end());
             dark[b] = scratch[rankDark];
-            std::nth_element(scratch.begin(), scratch.begin() + rankBright, validEnd);
+            std::nth_element(scratch.begin(), scratch.begin() + rankBright, scratch.end());
             bright[b] = scratch[rankBright];
         }
     }
@@ -397,8 +394,8 @@ bool quac(const float *const *dnBands, float *const *outBands,
         const float *src = dnBands[b];
         float *dst = outBands[b];
         for (size_t i = 0; i < pixels; ++i) {
-            float v = std::isnan(src[i]) ? std::numeric_limits<float>::quiet_NaN()
-                                         : gain * src[i] + offset;
+            float v = std::isfinite(src[i]) ? gain * src[i] + offset
+                                         : std::numeric_limits<float>::quiet_NaN();
             // Clamp only the negative side (#632): hard-clipping the upper
             // bound destroyed bright targets (clouds, bright soils with true
             // reflectance > 1 after the gain stretch), biasing downstream
