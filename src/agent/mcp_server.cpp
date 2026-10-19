@@ -702,10 +702,25 @@ void McpServer::handleRequest(const QVariantMap &request)
         // tool, #643).
         const bool includeSchemas = params.value(QStringLiteral("includeSchemas")).toBool();
         const int listLimit = params.value(QStringLiteral("limit")).toInt();
+        // This server's cursors are numeric (its own nextCursor emits them);
+        // a non-numeric cursor is a client contract violation and must be a
+        // typed refusal — silently rewinding to page 0 hid client pagination
+        // bugs behind an apparently successful re-listing (R18-C C01).
         int listCursor = 0;
         const QString rawCursor = params.value(QStringLiteral("cursor")).toString();
         if (!rawCursor.isEmpty())
-            listCursor = qMax(0, rawCursor.toInt());
+        {
+            bool cursorOk = false;
+            const int parsedCursor = rawCursor.toInt(&cursorOk);
+            if (!cursorOk || parsedCursor < 0)
+            {
+                sendError(id, -32602,
+                          QStringLiteral("tools/list: cursor must be a non-negative integer, got: %1")
+                              .arg(rawCursor.left(64)));
+                return;
+            }
+            listCursor = parsedCursor;
+        }
 
         QVariantMap result;
         QVariantList tools;
@@ -2508,23 +2523,35 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
 QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
 {
     using namespace sicnu::agent::tool_catalog;
+    // Discovery-authority order (R18-C C01): the union projection is the
+    // SAME source tools/list renders, so an exact surface hit is answered
+    // from it FIRST. The bare aliases (list_layers / describe_dataset) exist
+    // in the meta table AND as catalog data: entries with DIFFERENT schemas
+    // and descriptions — resolving them through findTool() answered with the
+    // catalog copy while tools/list showed the meta copy, an unattributable
+    // drift for every client that fetches schemas for what it discovered.
+    // findTool() (with its underscore-normalization fallback) remains the
+    // last resort for names the projection does not list.
+    if ( auto surface = findSurfaceTool( toolId.toStdString() ) )
+    {
+        QVariantMap surfaceResult;
+        surfaceResult[QStringLiteral("category")] =
+            surface->source == SurfaceToolSource::MetaProtocol
+                ? QStringLiteral("Meta")
+                : ( surface->source == SurfaceToolSource::DataPlatform
+                        ? QStringLiteral("Data")
+                        : QStringLiteral("Processing") );
+        surfaceResult[QStringLiteral("name")] = QString::fromStdString(surface->name);
+        surfaceResult[QStringLiteral("displayName")] = QString::fromStdString(surface->name);
+        surfaceResult[QStringLiteral("description")] =
+            QString::fromStdString(surface->description);
+        surfaceResult[QStringLiteral("schema")] =
+            sicnu::processing::jsonValueToVariant(surface->inputSchema);
+        return surfaceResult;
+    }
+
     auto tool = AgentToolCatalog::instance().findTool(toolId.toStdString());
     if (!tool) {
-        // Union-projection fallback: meta protocol tools and data-platform
-        // tools are dispatchable via tools/call but are not catalog entries;
-        // their schemas come from the same tables tools/list renders.
-        // Parity rule: every name tools/list exposes MUST resolve here.
-        auto surface = findSurfaceTool(toolId.toStdString());
-        if (surface && surface->source != SurfaceToolSource::Catalog) {
-            QVariantMap metaResult;
-            metaResult[QStringLiteral("category")] = surface->source == SurfaceToolSource::MetaProtocol
-                ? QStringLiteral("Meta") : QStringLiteral("Data");
-            metaResult[QStringLiteral("name")] = QString::fromStdString(surface->name);
-            metaResult[QStringLiteral("displayName")] = QString::fromStdString(surface->name);
-            metaResult[QStringLiteral("description")] = QString::fromStdString(surface->description);
-            metaResult[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(surface->inputSchema);
-            return metaResult;
-        }
         throw std::runtime_error(QStringLiteral("Unknown tool: %1").arg(toolId).toStdString());
     }
 
