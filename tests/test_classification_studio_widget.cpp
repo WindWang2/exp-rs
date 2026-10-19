@@ -9,6 +9,7 @@
 
 #include <QComboBox>
 #include <QImage>
+#include <QLabel>
 #include <QPoint>
 #include <QPolygonF>
 #include <QSignalSpy>
@@ -154,16 +155,18 @@ TEST_CASE( "Studio 11 panels are created with the shell and survive a paint",
 
   // Feed data and force a paint pass on each panel (offscreen).
   w.probabilityPanel()->setProbabilityRow( { 1, 2, 5 }, { 0.6, 0.3, 0.1 }, 1 );
-  w.probabilityPanel()->grab();
+  REQUIRE( !w.probabilityPanel()->grab().toImage().isNull() );
   w.reliabilityWidget()->setSeries( { 0.25, 0.75 }, { 0.2, 0.9 }, { 40, 40 }, false );
   w.reliabilityWidget()->setSeries( { 0.25, 0.75 }, { 0.3, 0.7 }, { 40, 40 }, true );
-  w.reliabilityWidget()->grab();
+  REQUIRE( !w.reliabilityWidget()->grab().toImage().isNull() );
   w.confusionPairsWidget()->setPairs( { 1, 3 }, { 2, 2 }, { 30, 12 } );
-  w.confusionPairsWidget()->grab();
+  REQUIRE( !w.confusionPairsWidget()->grab().toImage().isNull() );
   w.featureImportanceWidget()->setImportances( { "b1", "b2", "glcm" }, { 0.5, 0.3, 0.2 } );
-  w.featureImportanceWidget()->grab();
+  REQUIRE( !w.featureImportanceWidget()->grab().toImage().isNull() );
   w.setConfidenceSummary( 0.734 );
-  REQUIRE( true ); // reaching here without an assertion storm is the smoke gate
+  auto *summaryLabel = w.findChild<QLabel *>();
+  REQUIRE( summaryLabel != nullptr );
+  CHECK( summaryLabel->text().contains( QStringLiteral( "73.4" ) ) );
 }
 
 TEST_CASE( "Probability panel filters non-finite and negative probabilities "
@@ -220,9 +223,16 @@ TEST_CASE( "Confidence summary ignores non-finite input", "[f12][studio]" )
 {
   ensureQgisApplication();
   ClassificationStudioWidget w;
+  auto *summaryLabel = w.findChild<QLabel *>();
+  REQUIRE( summaryLabel != nullptr );
+
   const double nan = std::numeric_limits<double>::quiet_NaN();
   w.setConfidenceSummary( nan );
+  CHECK( summaryLabel->text().isEmpty() ); // non-finite never reaches the label
+
   w.setConfidenceSummary( 2.0 ); // clamped to 100%
+  CHECK( summaryLabel->text().endsWith( QStringLiteral( "<b>100.0%</b>" ) ) );
+
   w.setConfidenceSummary( -1.0 ); // clamped to 0%
-  REQUIRE( true );
+  CHECK( summaryLabel->text().endsWith( QStringLiteral( "<b>0.0%</b>" ) ) );
 }
