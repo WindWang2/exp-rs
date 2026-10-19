@@ -11,3 +11,5 @@
 
 3. **Issue #1467 的 core-fork cluster**：非本轨（src/core/processing），未动。
 4. **layout:export 与 cartography:export 的 DPI 下限不一致**（1 vs 72）：C7 换成否定区间式后，(0,1) 的旧放行值（如 0.5）现在按既有错误文案 "between 1 and 1200" 拒绝（文案与行为终于一致；已核对 layout_tools.cpp 默认 300、无调用方/测试依赖 sub-1 dpi）。区间本身（1 vs 72）未动——对齐决策留给 layout owner。
+
+5. **Edit 菜单无工具栏孪生的编辑命令仍未 gate（R2 P3-5，既有非回归）**：mActionDeleteSelectedFeatures 与 Cut/Paste Features（menus.cpp:206 一带）在无编辑会话时恒 enabled；use-time 有 statusBar 诚实拒绝（vector.cpp:670+）。属 R1/R2 声明范围（"有 gated toolbar twin 的命令"）之外，留待后续 WP。

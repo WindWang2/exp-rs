@@ -249,6 +249,10 @@ public:
     /// Vector editing infrastructure accessors
     QAction *editingAction( const QString &name ) const;
     const QList<QAction *> &editingToolActions() const { return m_editingToolActions; }
+    // R18-D R2 P3-2: direct surface for the MENU twins so tests can pin the
+    // menu side itself (editingAction() prefers the toolbar action for the
+    // 12 duplicated objectNames).
+    const QList<QAction *> &menuDigitizingActions() const { return m_menuDigitizingActions; }
     /// Workbench 9.0 M1: explicit coarse-state model (phase/tool/task facts).
     sicnu::app::WorkbenchStateModel *workbenchState() const { return m_workbenchState; }
     /// Workbench 9.0 M2: registry workflow.* command handlers forward here.
@@ -649,10 +653,12 @@ private:
     QAction *m_toggleEditingAction = nullptr;
     QAction *m_saveEditsAction = nullptr;
     QList<QAction *> m_editingToolActions;
-    // R18-D: Digitizing MENU entries (Scale/Split Part/Add Part/Delete Ring/
-    // Trim-Extend/Chamfer-Fillet/Feature Array) — registered in setupMenu,
-    // gated by the same updateEditingUI contract as the toolbar twins. They
-    // used to sit outside the gate entirely (enabled-but-will-fail).
+    // R18-D: ALL Digitizing MENU commands (19: capture/node/move/rotate/
+    // scale/offset/reverse/reshape/split-features/split-part/simplify/
+    // add-ring/add-part/fill-ring/delete-part/delete-ring/trim-extend/
+    // chamfer-fillet/feature-array) — registered in setupMenu, gated by the
+    // same updateEditingUI contract as the toolbar twins. They used to sit
+    // outside the gate entirely (enabled-but-will-fail).
     QList<QAction *> m_menuDigitizingActions;
 
     // Dock widgets

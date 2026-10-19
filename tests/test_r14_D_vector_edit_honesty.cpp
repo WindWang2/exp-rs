@@ -1018,6 +1018,18 @@ TEST_CASE( "Digitizing menu actions follow the editing availability gate (R18-D)
       CHECK_FALSE( reasonOf( a ).isEmpty() );
       CHECK( a->toolTip().contains( reasonOf( a ) ) );
     }
+
+    // Pin the MENU twins themselves (R2 P3-2): editingAction() prefers the
+    // toolbar action for the 12 duplicated objectNames, so a menu-side
+    // regression would otherwise stay invisible to the loop above.
+    const QList<QAction *> menuTwins = fx.window.menuDigitizingActions();
+    REQUIRE( menuTwins.size() == static_cast<int>( menuGated.size() ) );
+    for ( QAction *a : menuTwins )
+    {
+      INFO( a->objectName().toStdString() );
+      CHECK_FALSE( a->isEnabled() );
+      CHECK_FALSE( reasonOf( a ).isEmpty() );
+    }
   }
 
   SECTION( "polygon edit session unlocks matching tools, geometry still gates" )

@@ -383,7 +383,10 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         // resolved coverage layer (the expression prepares against its
         // fields); with none, the atlas cannot run at all and the export
         // path refuses typed on its own — keep compile permissive exactly
-        // as before in that shape.
+        // as before in that shape. Deliberately enforced even when the
+        // atlas block says enabled=false: a declared-but-broken expression
+        // is a document defect worth refusing while it is checkable
+        // (review R18-D R2 P3-4).
         QString expressionError;
         QgsVectorLayer *const atlasCoverage = atlas->coverageLayer();
         if ( atlasCoverage &&
