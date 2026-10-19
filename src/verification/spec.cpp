@@ -279,7 +279,28 @@ Json::Value canonicalProjection( const VerificationSpec &spec )
                    {
                        return leftKind < rightKind;
                    }
-                   return left.get( "title", "" ).asString() < right.get( "title", "" ).asString();
+                   const std::string leftTitle = left.get( "title", "" ).asString();
+                   const std::string rightTitle = right.get( "title", "" ).asString();
+                   if ( leftTitle != rightTitle )
+                   {
+                       return leftTitle < rightTitle;
+                   }
+                   // Full-text tiebreak (R18-E V9): checks tied on
+                   // (id, kind, title) but differing in params sorted as
+                   // "equivalent", so composing A+B vs B+A could emit the
+                   // tied pair in either order and fork the digest. The
+                   // canonical text is a total order over distinct checks
+                   // (uncanonicalizable entries fall back to equal, keeping
+                   // the old behaviour for documents the digest refuses).
+                   std::string leftText;
+                   std::string rightText;
+                   std::string ignore;
+                   if ( canonicalJson( left, leftText, ignore )
+                        && canonicalJson( right, rightText, ignore ) )
+                   {
+                       return leftText < rightText;
+                   }
+                   return false;
                } );
 
     Json::Value sorted{ Json::arrayValue };
