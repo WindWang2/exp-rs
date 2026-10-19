@@ -422,6 +422,30 @@ TEST_CASE( "journal persists atomically and reloads identically", "[agent_loop][
     REQUIRE_FALSE( error.empty() );
 }
 
+TEST_CASE( "journal refuses a depth-bomb document instead of crashing (#1552)",
+           "[agent_loop][core]" )
+{
+    // A journal document nested far past any legal shape: the writer's own
+    // documents are ~6 levels deep (root -> entries -> entry -> decision ->
+    // alternatives -> leaf). Pre-fix, load parsed planted bytes with
+    // jsoncpp's default builder, whose recursion THROWS an escaping
+    // Json::Exception ("Exceeded stackLimit") instead of returning false —
+    // an uncaught terminate that broke the documented fail-closed contract.
+    // The bounded reader must refuse it; this test finishing at all is the
+    // other half of the contract (the process survives the bomb).
+    const std::string dir = uniqueTempDir( "depthbomb" );
+    {
+        std::ofstream bomb( fs::path( dir ) / "sess-bomb.json" );
+        bomb << std::string( 100000, '[' ) << std::string( 100000, ']' );
+    }
+
+    std::string error;
+    const auto loaded = SessionJournal::load( dir, "sess-bomb", &error );
+    REQUIRE_FALSE( loaded.has_value() );
+    REQUIRE_FALSE( error.empty() );
+    REQUIRE( error.rfind( "session journal: corrupt document", 0 ) == 0 );
+}
+
 TEST_CASE( "journal rejects unsafe session ids", "[agent_loop][core]" )
 {
     const std::string dir = uniqueTempDir( "unsafe" );
