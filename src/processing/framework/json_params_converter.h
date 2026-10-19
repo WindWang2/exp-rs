@@ -57,8 +57,6 @@ inline QVariantMap jsonParamsToVariantMap( const Json::Value &params )
 
 /// Lossless JSON object → QVariantMap (recursive). Shared by the MCP server
 /// (operator metadata/schemas/results) and any Json↔QVariant adapter.
-inline QVariant jsonValueToVariant( const Json::Value &value );
-inline QVariantMap jsonObjectToVariantMap( const Json::Value &obj );
 
 inline QVariantMap jsonObjectToVariantMap( const Json::Value &obj )
 {

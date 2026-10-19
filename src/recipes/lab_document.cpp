@@ -5,6 +5,9 @@
 
 #include <json/json.h>
 
+#include <cstdint>
+#include <exception>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -12,6 +15,11 @@
 namespace sicnu::recipes {
 
 namespace {
+
+/// Bounded read (R14-E audit F5): lab documents are authored JSON, but the
+/// lab directory is a scan surface like the recipe registry — an oversize
+/// file is a typed refusal, never an unbounded rdbuf slurp into memory.
+constexpr std::uintmax_t kMaxLabDocumentBytes = 16ull * 1024ull * 1024ull;
 
 bool fail( const std::string &path, const std::string &reason,
            LabDocumentError *error )
@@ -283,8 +291,19 @@ bool parseLabDocument( const std::string &jsonText, const std::string &path,
   builder["stackLimit"] = 256;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   std::string errors;
-  if ( !reader->parse( jsonText.data(), jsonText.data() + jsonText.size(), &root, &errors ) )
-    return fail( path, "invalid JSON: " + errors, error );
+  // jsoncpp signals a stackLimit violation by THROWING out of parse()
+  // rather than returning false (scientific_recipe.cpp documents the same
+  // shape); the lab directory is a scan surface, so the refusal dies here
+  // as a typed parse failure (#1607).
+  try
+  {
+    if ( !reader->parse( jsonText.data(), jsonText.data() + jsonText.size(), &root, &errors ) )
+      return fail( path, "invalid JSON: " + errors, error );
+  }
+  catch ( const std::exception &e )
+  {
+    return fail( path, "invalid JSON: " + std::string( e.what() ), error );
+  }
   if ( !root.isObject() )
     return fail( path, "root must be an object", error );
 
@@ -306,6 +325,13 @@ bool parseLabDocument( const std::string &jsonText, const std::string &path,
 bool loadLabDocumentFile( const std::string &path, LabDocument &out,
                           LabDocumentError *error )
 {
+  // Stat-before-read (R14-E audit F5): the read is refused BEFORE any
+  // allocation proportional to the file, so the memory ceiling stays at the
+  // budget whatever the on-disk size.
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size( path, ec );
+  if ( !ec && size > kMaxLabDocumentBytes )
+    return fail( path, "file exceeds the 16 MiB read budget", error );
   std::ifstream in( path, std::ios::binary );
   if ( !in )
     return fail( path, "cannot open file", error );

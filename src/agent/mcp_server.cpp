@@ -161,15 +161,57 @@ bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &works
     return sicnu::agent::tool_catalog::surfacePathOutsideWorkspace(pathValue, workspaceRoot, detail);
 }
 
-bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot, QString *detail)
+/// Free-text argument slots: their content is caller prose that tools persist
+/// or echo verbatim (audit notes, error detail, provenance echoes) — never a
+/// filesystem slot the tool opens. Scanning them as paths rejected whole
+/// calls whose note/error_message/provenance merely CONTAINED an absolute
+/// path or URL (mission:advance, spatial:assess_result), with a misleading
+/// PATH_OUTSIDE_WORKSPACE. Exact key names only: an unknown key stays
+/// scanned (fail-closed), so a path slot can never be exempted by accident.
+bool isFreeTextSlot(const QString &key)
 {
+    static const QSet<QString> kFreeText = {
+        QStringLiteral("note"),
+        QStringLiteral("notes"),
+        QStringLiteral("error_message"),
+        QStringLiteral("errorMessage"),
+        QStringLiteral("error_code"),
+        QStringLiteral("errorCode"),
+        QStringLiteral("provenance"), // echo object (algorithm/params/inputs)
+        QStringLiteral("goal"),
+        QStringLiteral("intent"),
+        QStringLiteral("description"),
+        QStringLiteral("reason"),
+        QStringLiteral("detail"),
+        QStringLiteral("details"),
+        QStringLiteral("message"),
+        QStringLiteral("comment"),
+        QStringLiteral("comments"),
+        QStringLiteral("summary"),
+        QStringLiteral("prompt"),
+        QStringLiteral("instructions"),
+        QStringLiteral("text"),
+        QStringLiteral("label"),
+        QStringLiteral("title"),
+    };
+    return kFreeText.contains( key );
+}
+
+bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot, QString *detail,
+                             const QString &key = QString())
+{
+    // Free-text slots are prose, not path candidates (see isFreeTextSlot).
+    // The WHOLE subtree is exempt: a provenance echo object carries caller
+    // text (algorithm/params/inputs) that tools persist or echo, never open.
+    if (!key.isEmpty() && isFreeTextSlot(key))
+        return false;
     if (value.userType() == QMetaType::QString) {
         return absolutePathOutsideWorkspace(value.toString(), workspaceRoot, detail);
     }
     if (value.userType() == QMetaType::QVariantList) {
         const QVariantList list = value.toList();
         for (const QVariant &item : list) {
-            if (collectOutsideWorkspace(item, workspaceRoot, detail))
+            if (collectOutsideWorkspace(item, workspaceRoot, detail, key))
                 return true;
         }
         return false;
@@ -177,7 +219,7 @@ bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot
     if (value.userType() == QMetaType::QVariantMap) {
         const QVariantMap map = value.toMap();
         for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
-            if (collectOutsideWorkspace(it.value(), workspaceRoot, detail))
+            if (collectOutsideWorkspace(it.value(), workspaceRoot, detail, it.key()))
                 return true;
         }
         return false;

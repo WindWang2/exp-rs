@@ -8,6 +8,7 @@
 
 #include <opencv2/core.hpp>
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -25,8 +26,11 @@ namespace py = pybind11;
  *   - cv::Mat -> NumPy: a copy of the cv::Mat header is stored inside a
  *     pybind11 capsule attached to the ndarray. The capsule deletes the header
  *     when the ndarray is garbage-collected, releasing the OpenCV reference
- *     count on the shared data buffer. This is zero-copy and safe as long as
- *     the original cv::Mat uses OpenCV's reference-counted storage.
+ *     count on the shared data buffer. This is zero-copy. A cv::Mat that does
+ *     not own reference-counted storage (u == nullptr — e.g. the header the
+ *     NumPy -> cv::Mat direction builds over a numpy buffer) cannot keep the
+ *     pixel buffer alive that way, so such a view is attached to the numpy
+ *     array owning the buffer (the cast parent) as its base instead.
  *
  * Only C-contiguous 2-D (grayscale) and 3-D (multi-channel) arrays are
  * supported in the NumPy -> cv::Mat direction.
@@ -74,7 +78,7 @@ public:
         return true;
     }
 
-    static handle cast(const cv::Mat& m, return_value_policy /*policy*/, handle /*parent*/) {
+    static handle cast(const cv::Mat& m, return_value_policy /*policy*/, handle parent) {
         if (m.empty()) {
             return py::array().release();
         }
@@ -97,6 +101,17 @@ public:
             strides = {static_cast<size_t>(m.step[0]), static_cast<size_t>(m.step[1])};
         }
 
+        // A cv::Mat without reference-counted storage (u == nullptr) owns no
+        // pixel data, so the capsule below would keep nothing alive and the
+        // returned ndarray would dangle as soon as the real owner of the
+        // buffer releases it. Such a view must instead be kept alive by the
+        // numpy array that owns the buffer: the cast parent.
+        if (m.u == nullptr) {
+            array owner = borrowOwningArray(parent, m);
+            py::array array(dt, shape, strides, m.data, owner);
+            return array.release();
+        }
+
         // Store a copy of the cv::Mat header in a capsule. The copy shares the
         // pixel data and increments OpenCV's internal reference count, keeping
         // the buffer alive for the lifetime of the returned ndarray.
@@ -110,6 +125,31 @@ public:
     }
 
 private:
+    /**
+     * Validate that @p parent is the numpy array whose buffer the non-owning
+     * cv::Mat @p m views, and return it (borrowed). Throws otherwise: handing
+     * out a view whose base keeps nothing alive is a use-after-free waiting to
+     * happen, so it is refused instead.
+     */
+    static array borrowOwningArray(handle parent, const cv::Mat& m) {
+        if (!isinstance<array>(parent)) {
+            throw std::runtime_error(
+                "cv::Mat does not own its pixel data; pass the owning numpy "
+                "array as the parent of the cast");
+        }
+        array owner = reinterpret_borrow<array>(parent);
+        buffer_info info = owner.request();
+        const auto ownerBegin = reinterpret_cast<uintptr_t>(info.ptr);
+        const auto ownerEnd = ownerBegin + static_cast<uintptr_t>(info.size * info.itemsize);
+        const auto viewBegin = reinterpret_cast<uintptr_t>(m.data);
+        const auto viewEnd = viewBegin + m.total() * m.elemSize();
+        if (viewBegin < ownerBegin || viewEnd > ownerEnd) {
+            throw std::runtime_error(
+                "parent numpy array does not own the pixel data of the cv::Mat");
+        }
+        return owner;
+    }
+
     static int formatToCvType(const std::string& format, int channels) {
         if (format == pybind11::format_descriptor<uint8_t>::format()) return CV_8UC(channels);
         if (format == pybind11::format_descriptor<int8_t>::format()) return CV_8SC(channels);

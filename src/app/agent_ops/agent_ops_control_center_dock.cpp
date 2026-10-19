@@ -133,19 +133,13 @@ void AgentOpsControlCenterDock::requestResume()
 
 void AgentOpsControlCenterDock::requestApproveRepair()
 {
-    if (!m_pendingRepairApprovalToken.isNull())
-    {
-        // The verifier treats nowMs <= 0 as an unusable clock and fails
-        // closed (expired), so a zero clock could never arm an approval —
-        // arm at the real wall clock. (#1451)
-        const std::string error = armRepairApproval(
-            m_pendingRepairApprovalToken, QDateTime::currentMSecsSinceEpoch());
-        // The typed refusal must not vanish: qWarning reaches the
-        // application message log, so the operator sees why the approval
-        // did not arm. (#1451)
-        if (!error.empty())
-            qWarning("agent ops: repair approval not armed: %s", error.c_str());
-    }
+    // Nothing is armed from here: the coordinator's approval state (armed
+    // approval, consumed digests, last projection, lastResult) belongs to
+    // the coordinator thread — the worker inside run()/resume() — so arming
+    // it on the GUI thread would race the in-flight session (#1540; the
+    // contract in operations_coordinator.h). The token remembered by
+    // armRepairApproval() is armed by the worker at the next launch
+    // (startSession), which is also the launch that consumes it.
     emit approveRepairRequested();
 }
 
@@ -263,7 +257,27 @@ void AgentOpsControlCenterDock::startSession(const sicnu::agent_ops::OpsRunReque
         return;
     }
     coord->clearCancel();
-    startWorker([this, coord, request](const std::atomic<bool> &) {
+    // Hand the remembered approval token to the worker BY VALUE: the copy
+    // happens on this (GUI) thread before the worker starts, and the worker
+    // arms it on the coordinator thread immediately before the run() that
+    // consumes it. Arming it here on the GUI thread would race the in-flight
+    // session's run()/finish() — the coordinator's approval state is
+    // coordinator-thread state (#1540; contract in operations_coordinator.h).
+    const Json::Value approvalToken = m_pendingRepairApprovalToken;
+    startWorker([this, coord, request, approvalToken](const std::atomic<bool> &) {
+        if (!approvalToken.isNull())
+        {
+            // The verifier treats nowMs <= 0 as an unusable clock and fails
+            // closed (expired), so a zero clock could never arm an approval —
+            // arm at the real wall clock. (#1451)
+            // The typed refusal must not vanish: qWarning reaches the
+            // application message log, so the operator sees why the approval
+            // did not arm. (#1451)
+            const std::string error = coord->armRepairApproval(
+                approvalToken, QDateTime::currentMSecsSinceEpoch());
+            if (!error.empty())
+                qWarning("agent ops: repair approval not armed: %s", error.c_str());
+        }
         sicnu::agent_ops::OpsRunResult res = coord->run(request);
         QMetaObject::invokeMethod(this, [this, res]() {
             if (m_panel)
@@ -301,14 +315,20 @@ void AgentOpsControlCenterDock::startResume(const std::string &journalDirectory,
 
 std::string AgentOpsControlCenterDock::armRepairApproval(const Json::Value &tokenDoc, long long nowMs)
 {
+    // Remember the token; the worker thread arms it on the coordinator at the
+    // next launch (see startSession). The coordinator's approval state
+    // (armed approval, consumed digests, last projection, lastResult)
+    // belongs to the coordinator thread — the thread inside run()/resume(),
+    // i.e. this dock's worker — so calling coord->armRepairApproval() here on
+    // the GUI thread would race the in-flight session's run()/finish()
+    // (#1540; contract in operations_coordinator.h). The typed refusal
+    // therefore surfaces from the worker at launch (qWarning) rather than
+    // from this call, and the launch-time wall clock is the verification
+    // clock (nowMs <= 0 would fail closed as an unusable clock anyway).
+    (void)nowMs;
     m_pendingRepairApprovalToken = tokenDoc;
-    if (auto *coord = coordinator())
-    {
-        m_lastApprovalResult = coord->armRepairApproval(tokenDoc, nowMs);
-        return m_lastApprovalResult;
-    }
-    m_lastApprovalResult = "NO_COORDINATOR";
-    return m_lastApprovalResult;
+    m_lastApprovalResult.clear();
+    return {};
 }
 
 void AgentOpsControlCenterDock::setProjection(const sicnu::agent_ops::OpsProjection &projection)

@@ -91,6 +91,30 @@ Json::Value paramToJson( const ContractParam &p )
     return o;
 }
 
+// Shared reader for one canonical param entry ("params" and "outputs" carry
+// the identical shape, and both must survive the toJson round-trip).
+void paramFromJson( const Json::Value &p, ContractParam &out )
+{
+    out.name = p.get( "name", "" ).asString();
+    out.type = p.get( "type", "" ).asString();
+    out.description = p.get( "description", "" ).asString();
+    out.required = p.get( "required", false ).asBool();
+    if ( p.isMember( "default" ) )
+    {
+        out.hasDefault = true;
+        out.defaultValue = jsonToString( p["default"] );
+    }
+    if ( p.isMember( "enum" ) && p["enum"].isArray() )
+        for ( const auto &e : p["enum"] )
+            out.enumValues.push_back( e.asString() );
+    if ( p.isMember( "minimum" ) || p.isMember( "maximum" ) )
+    {
+        out.hasRange = true;
+        out.minimum = p.get( "minimum", 0.0 ).asDouble();
+        out.maximum = p.get( "maximum", 0.0 ).asDouble();
+    }
+}
+
 void sortParams( std::vector<ContractParam> &params )
 {
     std::sort( params.begin(), params.end(),
@@ -233,34 +257,14 @@ bool ContractDescriptor::fromCanonicalJson( const Json::Value &json,
         for ( const auto &p : json["params"] )
         {
             ContractParam cp;
-            cp.name = p.get( "name", "" ).asString();
-            cp.type = p.get( "type", "" ).asString();
-            cp.description = p.get( "description", "" ).asString();
-            cp.required = p.get( "required", false ).asBool();
-            if ( p.isMember( "default" ) )
-            {
-                cp.hasDefault = true;
-                cp.defaultValue = jsonToString( p["default"] );
-            }
-            if ( p.isMember( "enum" ) && p["enum"].isArray() )
-                for ( const auto &e : p["enum"] )
-                    cp.enumValues.push_back( e.asString() );
-            if ( p.isMember( "minimum" ) || p.isMember( "maximum" ) )
-            {
-                cp.hasRange = true;
-                cp.minimum = p.get( "minimum", 0.0 ).asDouble();
-                cp.maximum = p.get( "maximum", 0.0 ).asDouble();
-            }
+            paramFromJson( p, cp );
             out.params.push_back( std::move( cp ) );
         }
     if ( json.isMember( "outputs" ) && json["outputs"].isArray() )
         for ( const auto &p : json["outputs"] )
         {
             ContractParam cp;
-            cp.name = p.get( "name", "" ).asString();
-            cp.type = p.get( "type", "" ).asString();
-            cp.description = p.get( "description", "" ).asString();
-            cp.required = p.get( "required", false ).asBool();
+            paramFromJson( p, cp );
             out.outputs.push_back( std::move( cp ) );
         }
     if ( json.isMember( "required" ) && json["required"].isArray() )

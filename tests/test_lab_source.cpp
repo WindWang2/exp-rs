@@ -138,3 +138,65 @@ TEST_CASE( "Missing directory yields empty scan without crash", "[labsrc]" )
   const auto entries = loadLabDirectory( "/nonexistent/dir", "", errors );
   REQUIRE( entries.empty() );
 }
+
+TEST_CASE( "Oversize lab-registry degrades to absent, not a slurp", "[labsrc][r14e]" )
+{
+  // #1648 (R14-E audit F5): a >16 MiB registry file reads as absent — the
+  // same typed degradation as a corrupt one. The wrapper stays an explicit
+  // step-less gap and the D3 source ships standalone under its own id.
+  const fs::path root = fs::temp_directory_path() / "labsrc_registry_oversize";
+  fs::remove_all( root );
+  const fs::path labs = root / "data" / "labs";
+  write( labs / "lab12_sar_processing.lab.json", kWrapper );
+  write( labs / "lab9_sar_processing.labspec.json", kD3 );
+  {
+    std::ofstream out( labs / "lab-registry.json", std::ios::binary );
+    const std::string chunk( 1024 * 1024, 'x' );
+    for ( int i = 0; i < 17; ++i )
+      out << chunk;
+  }
+
+  std::vector<LabDocumentError> errors;
+  const auto entries =
+    loadLabDirectory( labs.string(), ( labs / "lab-registry.json" ).string(), errors );
+  REQUIRE( errors.empty() );
+  REQUIRE( entries.size() == 2 );
+  // Sorted by canonical id: the unresolved wrapper first, the standalone D3 second.
+  REQUIRE( entries[0].canonicalId == "lab12_sar_processing" );
+  REQUIRE( entries[0].document.steps.empty() );
+  REQUIRE_FALSE( entries[0].resolvedViaRegistry );
+  REQUIRE( entries[1].canonicalId == "lab9_sar_processing" );
+  REQUIRE( entries[1].document.steps.size() == 1 );
+  fs::remove_all( root );
+}
+
+TEST_CASE( "Over-deep lab-registry degrades to absent, not a throw", "[labsrc][r14e]" )
+{
+  // #1607: jsoncpp THROWS out of parse() on a stackLimit violation, and
+  // lab-registry.json is untrusted scan input — the parse must degrade to
+  // "registry absent" instead of escaping loadLabDirectory().
+  const fs::path root = fs::temp_directory_path() / "labsrc_registry_deep";
+  fs::remove_all( root );
+  const fs::path labs = root / "data" / "labs";
+  write( labs / "lab12_sar_processing.lab.json", kWrapper );
+  write( labs / "lab9_sar_processing.labspec.json", kD3 );
+  {
+    std::string deep;
+    for ( int i = 0; i < 400; ++i )
+      deep += "{\"a\":";
+    deep += "1";
+    for ( int i = 0; i < 400; ++i )
+      deep += "}";
+    write( labs / "lab-registry.json", deep );
+  }
+
+  std::vector<LabDocumentError> errors;
+  const auto entries =
+    loadLabDirectory( labs.string(), ( labs / "lab-registry.json" ).string(), errors );
+  REQUIRE( errors.empty() );
+  REQUIRE( entries.size() == 2 );
+  REQUIRE( entries[0].canonicalId == "lab12_sar_processing" );
+  REQUIRE( entries[0].document.steps.empty() );
+  REQUIRE_FALSE( entries[0].resolvedViaRegistry );
+  fs::remove_all( root );
+}

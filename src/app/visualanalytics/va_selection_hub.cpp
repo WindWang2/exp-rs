@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "va_selection_hub.h"
 
+#include "help/help_descriptor.h"
+
 #include <qmath.h>
 
 #include <algorithm>
@@ -14,7 +16,10 @@ namespace
 {
 QString clampText( const QString &text )
 {
-    return text.left( VaSelectionHub::kMaxTextChars );
+    // Same UTF-16-safe truncation as every help summary producer (#1522):
+    // a cut landing between a high and a low surrogate orphans half a pair,
+    // and the tail then renders as U+FFFD.
+    return sicnu::help::truncateSummary( text, VaSelectionHub::kMaxTextChars );
 }
 
 bool finite( double v )

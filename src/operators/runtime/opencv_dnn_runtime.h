@@ -85,7 +85,10 @@ class OpenCvDnnRuntime final : public IModelRuntime
     ModelHardwareCapabilities m_hw;
     cv::dnn::Net m_net;
     std::string m_deviceName = "cpu";
-    std::mutex m_inferMutex;
+    // mutable (like m_healthMutex below): the const outputTensorNames()
+    // enumerates the net's output names under this lock too, and casting the
+    // const away there would be UB for a genuinely const session.
+    mutable std::mutex m_inferMutex;
     // #1056: health()/infer()/outputTensorNames() read the loaded flag on
     // foreign threads while load() writes it once — atomic so the shared
     // session's health probe has no data race with the load. The flag is

@@ -122,11 +122,15 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
         QStringLiteral( "config" ),  QStringLiteral( "seed" ),
         QStringLiteral( "environment" ),
     };
+    bool identityDiffers = false;
     for ( const RunDiffItem &item : comparison.dimensions )
     {
         if ( item.differs && kIdentityDimensions.contains( item.dimension ) )
+        {
+            identityDiffers = true;
             report.deviations.append(
                 QStringLiteral( "pin '%1' differs: %2" ).arg( item.dimension, item.detail ) );
+        }
     }
     // Diagnostics (artifacts/runtime) still surface — as deviations of
     // record when identity is equal, without deciding the verdict alone.
@@ -152,8 +156,13 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
     {
         report.verdict = ReplayDeviationReport::Verdict::Incomplete;
     }
-    else if ( !report.deviations.isEmpty() )
+    else if ( identityDiffers )
     {
+        // Identity-only gate, per the header contract: "deviated" means at
+        // least one identity pin differs. The artifacts/runtime diagnostics
+        // above ride along as deviations of record — wall time beyond the
+        // jitter policy or a digest-set drift on equal pins is reported, but
+        // never flips a same-identity replay by itself.
         report.verdict = ReplayDeviationReport::Verdict::Deviated;
     }
     else if ( original->resultFingerprint() == replay->resultFingerprint() )

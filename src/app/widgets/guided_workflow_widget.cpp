@@ -20,6 +20,11 @@
 
 namespace {
 
+/// Rows the aggregate load-failure entry occupies at the top of the workflow
+/// list: exactly one, however many specs failed — the entry shows the failure
+/// count inside that single row, never as one row per failure (#1536).
+constexpr int kLoadErrorEntryRows = 1;
+
 /// Render one LabSpec as the widget's display model.
 Workflow toWorkflow( const lab::LabSpec &spec )
 {
@@ -152,6 +157,8 @@ void GuidedWorkflowWidget::populateWorkflowList()
     if ( errorCount > 0 )
     {
         // Typed error entry pinned to the top: selecting it shows the reasons.
+        // It always occupies exactly kLoadErrorEntryRows row — row->lab math
+        // in labIndexOfRow() depends on that.
         m_workflowList->addItem( tr( "⚠ Experiment spec load failures (%1)" ).arg( errorCount ) );
         QListWidgetItem *errorItem = m_workflowList->item( 0 );
         errorItem->setToolTip( m_loadResult.errors.first().toString() );
@@ -164,8 +171,14 @@ void GuidedWorkflowWidget::populateWorkflowList()
         m_workflowList->setCurrentRow( 0 );
 }
 
-/// Rows [0 .. errorCount-1] are the error entry; labs follow.
-static int labIndexOfRow( int row, int errorCount ) { return row - errorCount; }
+/// Row 0 is the load-failure entry only when at least one spec failed to load
+/// (errorCount > 0), and that entry always occupies exactly
+/// kLoadErrorEntryRows row: lab i then sits at row i + kLoadErrorEntryRows.
+/// With no failures there is no error row and lab i sits at row i (#1536).
+static int labIndexOfRow( int row, int errorCount )
+{
+    return row - ( errorCount > 0 ? kLoadErrorEntryRows : 0 );
+}
 
 void GuidedWorkflowWidget::onWorkflowSelected(int index)
 {

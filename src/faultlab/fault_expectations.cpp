@@ -34,6 +34,28 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
     const double delta = clean != nullptr ? faulted->number - clean->number : 0.0;
     result.delta = delta;
 
+    // delta_ge/delta_le/equals/not_equals are all statements about the
+    // change, so a missing clean baseline makes them unprovable, not
+    // vacuously true: with delta fabricated as 0.0 they could pass on
+    // zero evidence (delta_le with a non-negative operand, delta_ge with
+    // a non-positive one, equals/not_equals around 0). Same
+    // baseline-absent discipline as Changed above and the text/truth
+    // paths — an expectation that only exists after fault injection must
+    // not pass on zero evidence. in_range needs no baseline: it bounds
+    // the faulted value itself.
+    const bool deltaNeedsBaseline =
+        clean == nullptr &&
+        ( expectation.relation == ExpectationRelation::DeltaGe ||
+          expectation.relation == ExpectationRelation::DeltaLe ||
+          expectation.relation == ExpectationRelation::Equals ||
+          expectation.relation == ExpectationRelation::NotEquals );
+    if ( deltaNeedsBaseline )
+    {
+        result.passed = false;
+        result.note = "clean baseline for this observable is absent";
+        return result;
+    }
+
     switch ( expectation.relation )
     {
         case ExpectationRelation::Changed:

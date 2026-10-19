@@ -197,11 +197,21 @@ class OperationsCoordinator {
         OperationsCoordinator &mCoordinator;
         sicnu::agent_loop::ScientificAgentSession *mSession;
     };
-    // Control/mutable state below is NOT atomic: approval arming and
-    // lastResult (like run() itself) belong to the driver's coordinator
-    // thread; pause/cancel are safe to request cross-thread, and the active
-    // session registry they propagate through is the one mutex-guarded
-    // exception.
+    // THREADING CONTRACT — an invariant to uphold, not a hint: the state
+    // below is plain and unsynchronized (approval arming, the
+    // consumed-digest ring, the last projected findings digest, lastResult —
+    // like run()/resume() themselves). It belongs to exactly ONE thread: the
+    // coordinator thread, i.e. whichever thread is executing run()/resume()
+    // (a driver's worker). Every entry point that touches this state
+    // (armRepairApproval, hasPendingRepairApproval,
+    // lastProjectedFindingsDigest, lastResult, evaluateRecovery, run,
+    // resume) must be called FROM that thread; a surface on another thread
+    // (the GUI) hands its request to the coordinator thread instead of
+    // calling in — the Control Center dock arms a remembered approval token
+    // inside its worker task, immediately before the launch that consumes
+    // it. pause/cancel remain the cross-thread-safe exceptions (atomics),
+    // and the active-session registry they propagate through is the one
+    // mutex-guarded exception.
     const long long mInstanceId;
     struct ArmedApproval {
         Json::Value token;

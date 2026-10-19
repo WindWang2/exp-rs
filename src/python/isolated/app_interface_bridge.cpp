@@ -35,13 +35,26 @@ namespace {
 /// the worker still sees the whole raster zero-copy (one array per tile).
 constexpr int kSegmentHeightCap = 1024;
 
+/// Failure-path cleanup for the ADR 0064 opt-in flag. Every early return of
+/// migrateRasterInputToShm() past the opt-in check must drop `__shm_key__`
+/// from \a params: the leftover boolean `true` survives
+/// json_params_converter untouched, and the worker daemon's truthy check then
+/// tries to mount a shared-memory segment literally named `True` — a
+/// TypeError the daemon does not catch, so the promised fallback to GDAL
+/// never happened (#1556). Same cleanup the success paths apply below.
+void dropShmOptInFlag( QVariantMap &params )
+{
+  params.remove( QStringLiteral( "__shm_key__" ) );
+}
+
 /// ADR 0064 opt-in zero-copy delivery. When a caller sets
 /// `__shm_key__: true` on the request (the opt-in flag) alongside a raster
 /// file-path input, migrate that raster into shared-memory segment(s) so the
 /// Python worker receives it as zero-copy numpy arrays instead of opening the
 /// file itself. Returns the segments (kept alive for the duration of the RPC)
 /// or an empty vector if migration did not apply / failed (on failure the path
-/// is left untouched so the plugin falls back to GDAL).
+/// is left untouched and the opt-in flag dropped so the plugin falls back to
+/// GDAL).
 ///
 /// Rasters not taller than kSegmentHeightCap migrate as ONE segment, delivered
 /// as `__shm_array__` (key + __shm_width__/__shm_height__/__shm_bands__/__shm_dtype__
@@ -66,20 +79,32 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
   // The conventional raster input key is "input" (see operators/framework/rs_schema.h
   // makeRasterParam("input", ...)). Only migrate when it is present and looks like a path.
   if ( !execParams.isMember( "input" ) || !execParams["input"].isString() )
+  {
+    dropShmOptInFlag( params );
     return {};
+  }
   const QString path = QString::fromStdString( execParams["input"].asString() );
   if ( path.isEmpty() )
+  {
+    dropShmOptInFlag( params );
     return {};
+  }
 
   GdalDatasetWrapper ds;
   if ( !ds.open( path ) || !ds.isValid() )
-    return {}; // let the plugin surface the GDAL error itself
+  {
+    dropShmOptInFlag( params ); // let the plugin surface the GDAL error itself
+    return {};
+  }
 
   const int width = ds.width();
   const int height = ds.height();
   const int bands = ds.bandCount();
   if ( width <= 0 || height <= 0 || bands <= 0 )
+  {
+    dropShmOptInFlag( params );
     return {};
+  }
 
   // Map the band's native GDAL type to a segment dtype. Byte/UInt16/Int32/
   // Float32/Float64 map 1:1 (preserving the source dtype, byte-exact); any
@@ -123,7 +148,10 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
     const int tileRows = std::min( tileHeight, height - rowStart );
     auto seg = std::make_unique<SharedMemorySegment>();
     if ( !seg->create( width, tileRows, bands, segDtype ) )
+    {
+      dropShmOptInFlag( params );
       return {};
+    }
 
     char *payload = static_cast<char *>( seg->payload() );
     // Pre-read each band's window for this tile, then interleave per row.
@@ -133,7 +161,10 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
       {
         nativeTileBuf.resize( static_cast<size_t>( width ) * tileRows * elemSize );
         if ( !ds.readBandWindowNative( b + 1, 0, rowStart, width, tileRows, nativeTileBuf.data() ) )
+        {
+          dropShmOptInFlag( params );
           return {};
+        }
         for ( int y = 0; y < tileRows; ++y )
         {
           const unsigned char *srcRow = nativeTileBuf.data() + static_cast<size_t>( y ) * width * elemSize;
@@ -148,7 +179,10 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
       {
         floatTileBuf.resize( static_cast<size_t>( width ) * tileRows );
         if ( !ds.readBandWindow( b + 1, 0, rowStart, width, tileRows, floatTileBuf.data() ) )
+        {
+          dropShmOptInFlag( params );
           return {};
+        }
         float *floatPayload = reinterpret_cast<float *>( payload );
         for ( int y = 0; y < tileRows; ++y )
         {
@@ -185,7 +219,7 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
     for ( const QVariantMap &tile : tileManifest )
       manifest.append( tile );
     params.insert( QStringLiteral( "__shm_tiles__" ), manifest );
-    params.remove( QStringLiteral( "__shm_key__" ) );
+    dropShmOptInFlag( params );
   }
   else
   {
@@ -655,28 +689,34 @@ bool AppInterfaceBridge::dispatchIpcMessage( const QJsonObject &message, QJsonOb
   const QString method = message[QStringLiteral( "method" )].toString();
   const QJsonObject params = message[QStringLiteral( "params" )].toObject();
 
-  using HandlerFn = std::function<void( const QJsonObject &p, QJsonObject &r )>;
-  const QHash<QString, HandlerFn> handlers = {
-    { QStringLiteral( "catalog.get_active_layer" ), [this]( const QJsonObject &, QJsonObject &r ) {
-        r = getActiveLayerSummary().toJsonObject();
+  // The dispatch table is a compile-time-constant set of six capture-free
+  // handlers that take the bridge as their first argument: build it ONCE
+  // (thread-safe static initialization) instead of reconstructing the QHash,
+  // its keys and six std::function objects on every IPC message (#1647).
+  // One shared table serves every bridge instance; handlers stay pure
+  // functions of (bridge, params).
+  using HandlerFn = std::function<void( AppInterfaceBridge *, const QJsonObject &, QJsonObject & )>;
+  static const QHash<QString, HandlerFn> handlers = {
+    { QStringLiteral( "catalog.get_active_layer" ), []( AppInterfaceBridge *self, const QJsonObject &, QJsonObject &r ) {
+        r = self->getActiveLayerSummary().toJsonObject();
       } },
-    { QStringLiteral( "catalog.set_active_layer" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+    { QStringLiteral( "catalog.set_active_layer" ), []( AppInterfaceBridge *self, const QJsonObject &p, QJsonObject &r ) {
         const QString assetIdText = p[QStringLiteral( "asset_id" )].toString();
         const std::optional<sicnu::data::AssetId> assetId = sicnu::data::AssetId::fromString( assetIdText );
-        const bool ok = assetId.has_value() && setActiveAsset( *assetId );
+        const bool ok = assetId.has_value() && self->setActiveAsset( *assetId );
         r[QStringLiteral( "status" )] = ok ? QStringLiteral( "ok" ) : QStringLiteral( "unknown_asset" );
         r[QStringLiteral( "asset_id" )] = assetIdText;
       } },
-    { QStringLiteral( "data.add_layer" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+    { QStringLiteral( "data.add_layer" ), []( AppInterfaceBridge *self, const QJsonObject &p, QJsonObject &r ) {
         const QString path = p[QStringLiteral( "path" )].toString();
-        const bool ok = openPath( path );
+        const bool ok = self->openPath( path );
         r[QStringLiteral( "status" )] = ok ? QStringLiteral( "added" ) : QStringLiteral( "failed" );
         r[QStringLiteral( "path" )] = path;
       } },
-    { QStringLiteral( "canvas.get_state" ), [this]( const QJsonObject &, QJsonObject &r ) {
-        r = getCanvasViewportSummary().toJsonObject();
+    { QStringLiteral( "canvas.get_state" ), []( AppInterfaceBridge *self, const QJsonObject &, QJsonObject &r ) {
+        r = self->getCanvasViewportSummary().toJsonObject();
       } },
-    { QStringLiteral( "ui.push_message_bar" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+    { QStringLiteral( "ui.push_message_bar" ), []( AppInterfaceBridge *self, const QJsonObject &p, QJsonObject &r ) {
         const QString title = p[QStringLiteral( "title" )].toString();
         const QString text = p[QStringLiteral( "text" )].toString();
         int level = 0;
@@ -697,22 +737,22 @@ bool AppInterfaceBridge::dispatchIpcMessage( const QJsonObject &message, QJsonOb
         {
           level = levelVal.toInt();
         }
-        const bool ok = pushMessageBarAlert( title, text, level );
+        const bool ok = self->pushMessageBarAlert( title, text, level );
         r[QStringLiteral( "status" )] = ok ? QStringLiteral( "pushed" ) : QStringLiteral( "failed" );
       } },
-    { QStringLiteral( "processing.register_algorithm" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+    { QStringLiteral( "processing.register_algorithm" ), []( AppInterfaceBridge *self, const QJsonObject &p, QJsonObject &r ) {
         const QString algoId = p[QStringLiteral( "id" )].toString();
         const QString name = p[QStringLiteral( "name" )].toString();
         const QString group = p[QStringLiteral( "group" )].toString();
         const QString desc = p[QStringLiteral( "description" )].toString();
 
         bool registered = false;
-        if ( m_algoRegisterHandler )
+        if ( self->m_algoRegisterHandler )
         {
-          registered = m_algoRegisterHandler( algoId, name, group, desc );
+          registered = self->m_algoRegisterHandler( algoId, name, group, desc );
         }
-        if ( registered && !m_registeredAlgorithmIds.contains( algoId ) )
-          m_registeredAlgorithmIds.append( algoId );
+        if ( registered && !self->m_registeredAlgorithmIds.contains( algoId ) )
+          self->m_registeredAlgorithmIds.append( algoId );
         r[QStringLiteral( "status" )] = registered ? QStringLiteral( "registered" ) : QStringLiteral( "failed" );
         r[QStringLiteral( "id" )] = algoId;
       } }
@@ -721,7 +761,7 @@ bool AppInterfaceBridge::dispatchIpcMessage( const QJsonObject &message, QJsonOb
   const auto it = handlers.constFind( method );
   if ( it != handlers.constEnd() )
   {
-    it.value()( params, response );
+    it.value()( this, params, response );
     return true;
   }
 

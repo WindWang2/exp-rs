@@ -219,6 +219,31 @@ Json::Value opticalPassportJson( const std::string &assetId,
     return passport;
 }
 
+/// Passport declaring the given temporal collection references. The reader
+/// sorts the refs but keeps duplicates as declared (asset_state_json.cpp
+/// sorts and never uniques), and `refsTruncated` projects the passport's own
+/// "the ref list I carry is not the whole declaration" flag.
+Json::Value seriesPassportJson( const std::string &assetId,
+                                const std::vector<std::string> &collectionIds,
+                                bool refsTruncated = false )
+{
+    Json::Value passport = opticalPassportJson( assetId );
+    Json::Value temporal( Json::objectValue );
+    temporal["present"] = true;
+    temporal["truncated"] = refsTruncated;
+    Json::Value refs( Json::arrayValue );
+    for ( const auto &collectionId : collectionIds )
+    {
+        Json::Value ref( Json::objectValue );
+        ref["collection_id"] = collectionId;
+        ref["role"] = "series";
+        refs.append( ref );
+    }
+    temporal["refs"] = refs;
+    passport["temporal"] = temporal;
+    return passport;
+}
+
 /// Spectral-index capability entry with parameter-conditional variants — the
 /// shape data/agent/capabilities ships (variants override band_roles).
 Json::Value indexCapabilityJson()
@@ -470,6 +495,123 @@ TEST_CASE( "temporal provider: order, invalid times, missing collections and "
         REQUIRE( truncated.size() == 1 );
         REQUIRE( truncated[0].evidence["invalid_time_scenes"].asInt() == 2 );
         REQUIRE( findingsOf( check, "SPF_TEMPORAL_TIME_INCOMPLETE" ).empty() );
+    }
+}
+
+TEST_CASE( "temporal provider: declared collections left unmerged stay partial, "
+           "never silent", "[preflight][runtime]" )
+{
+    MapAuthority authority;
+    Json::Value entry = indexCapabilityJson();
+    Json::Value temporal( Json::objectValue );
+    temporal["min_scenes"] = 3;
+    temporal["requires_acquisition_time"] = true;
+    temporal["max_gap_days"] = 40;
+    entry["temporal"] = temporal;
+    authority.set( "rs:index", entry );
+
+    const Json::Value args =
+        checkArgs( "rs:index", makeVariantParams( "index", "NDVI" ), { { "primary", "scene-a" } } );
+
+    // Two declared collections, the second missing from the store: the series
+    // facts cover col-1 only, so the partiality must be reported instead of
+    // reading as the complete declaration.
+    {
+        PassportFactsProvider facts;
+        facts.set( "scene-a",
+                   seriesPassportJson( "asset-two", { "col-1", "col-2" } ).toStyledString() );
+        std::map<std::string, Collection> store;
+        store["col-1"] = { { "2026-01-01", "2026-01-15", "2026-02-01" }, 0 };
+        const TemporalFactsLookup lookup = storeLookup( store );
+        const Json::Value check = preflightCheckJson( args, facts, authority.provider(), &lookup );
+        const auto truncated = findingsOf( check, "SPF_TEMPORAL_DATES_TRUNCATED" );
+        REQUIRE( truncated.size() == 1 );
+        REQUIRE( truncated[0].evidence["declared_scenes"].asInt() == 3 );
+        REQUIRE( check["report"]["verdict"].asString() == "requires_ack" );
+    }
+
+    // The FIRST declared collection is the unresolvable one: resolving a later
+    // reference must not bury the declared-but-missing one.
+    {
+        PassportFactsProvider facts;
+        facts.set( "scene-a",
+                   seriesPassportJson( "asset-two-b", { "col-1", "col-2" } ).toStyledString() );
+        std::map<std::string, Collection> store;
+        store["col-2"] = { { "2026-01-01", "2026-01-15", "2026-02-01" }, 0 };
+        const TemporalFactsLookup lookup = storeLookup( store );
+        const Json::Value check = preflightCheckJson( args, facts, authority.provider(), &lookup );
+        const auto truncated = findingsOf( check, "SPF_TEMPORAL_DATES_TRUNCATED" );
+        REQUIRE( truncated.size() == 1 );
+        REQUIRE( truncated[0].evidence["declared_scenes"].asInt() == 3 );
+        REQUIRE( check["report"]["verdict"].asString() == "requires_ack" );
+    }
+
+    // Both collections resolve: neither is merged implicitly, so the declared
+    // scene count is the SUM of the two and the order/gap judgment is skipped
+    // rather than made on one collection's dates. col-2 predates col-1, so a
+    // future implicit merge would surface as a non-ascending series here.
+    {
+        PassportFactsProvider facts;
+        facts.set( "scene-a",
+                   seriesPassportJson( "asset-both", { "col-1", "col-2" } ).toStyledString() );
+        std::map<std::string, Collection> store;
+        store["col-1"] = { { "2026-01-01", "2026-01-15", "2026-02-01" }, 0 };
+        store["col-2"] = { { "2025-11-01", "2025-11-15" }, 0 };
+        const TemporalFactsLookup lookup = storeLookup( store );
+        const Json::Value check = preflightCheckJson( args, facts, authority.provider(), &lookup );
+        const auto truncated = findingsOf( check, "SPF_TEMPORAL_DATES_TRUNCATED" );
+        REQUIRE( truncated.size() == 1 );
+        REQUIRE( truncated[0].evidence["declared_scenes"].asInt() == 5 );
+        REQUIRE( truncated[0].evidence["invalid_time_scenes"].asInt() == 2 );
+        REQUIRE( check["report"]["verdict"].asString() == "requires_ack" );
+        REQUIRE( findingsOf( check, "SPF_TEMPORAL_ORDER_INVALID" ).empty() );
+        REQUIRE( findingsOf( check, "SPF_TEMPORAL_GAP_EXCEEDED" ).empty() );
+    }
+
+    // A collection declared twice is declared once: the repeat neither
+    // fabricates a partiality nor inflates the counted scenes.
+    {
+        PassportFactsProvider facts;
+        facts.set( "scene-a", seriesPassportJson( "asset-dup", { "col-1", "col-1" } )
+                                .toStyledString() );
+        std::map<std::string, Collection> store;
+        store["col-1"] = { { "2026-01-01", "2026-01-15", "2026-02-01" }, 0 };
+        const TemporalFactsLookup lookup = storeLookup( store );
+        const Json::Value check = preflightCheckJson( args, facts, authority.provider(), &lookup );
+        REQUIRE( findingsOf( check, "SPF_TEMPORAL_DATES_TRUNCATED" ).empty() );
+        REQUIRE( check["report"]["verdict"].asString() == "ok" );
+    }
+
+    // Same duplicate on an UNMERGED reference: counted once, not twice.
+    {
+        PassportFactsProvider facts;
+        facts.set( "scene-a", seriesPassportJson( "asset-dup2", { "col-1", "col-2", "col-2" } )
+                                .toStyledString() );
+        std::map<std::string, Collection> store;
+        store["col-1"] = { { "2026-01-01", "2026-01-15", "2026-02-01" }, 0 };
+        store["col-2"] = { { "2025-11-01", "2025-11-15" }, 0 };
+        const TemporalFactsLookup lookup = storeLookup( store );
+        const Json::Value check = preflightCheckJson( args, facts, authority.provider(), &lookup );
+        const auto truncated = findingsOf( check, "SPF_TEMPORAL_DATES_TRUNCATED" );
+        REQUIRE( truncated.size() == 1 );
+        REQUIRE( truncated[0].evidence["declared_scenes"].asInt() == 5 );
+        REQUIRE( truncated[0].evidence["invalid_time_scenes"].asInt() == 2 );
+    }
+
+    // The passport's own ref-list truncation survives a resolved collection:
+    // a narrowed declaration must never read as complete.
+    {
+        PassportFactsProvider facts;
+        facts.set( "scene-a",
+                   seriesPassportJson( "asset-narrow", { "col-1" }, true ).toStyledString() );
+        std::map<std::string, Collection> store;
+        store["col-1"] = { { "2026-01-01", "2026-01-15", "2026-02-01" }, 0 };
+        const TemporalFactsLookup lookup = storeLookup( store );
+        const Json::Value check = preflightCheckJson( args, facts, authority.provider(), &lookup );
+        const auto truncated = findingsOf( check, "SPF_TEMPORAL_DATES_TRUNCATED" );
+        REQUIRE( truncated.size() == 1 );
+        REQUIRE( truncated[0].evidence["declared_scenes"].asInt() == 3 );
+        REQUIRE( check["report"]["verdict"].asString() == "requires_ack" );
     }
 }
 

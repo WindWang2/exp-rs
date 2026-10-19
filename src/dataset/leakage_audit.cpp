@@ -426,12 +426,11 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             const auto otherIt = byId.constFind( sample.pairCounterpartId );
             if ( otherIt == byId.constEnd() )
                 continue;
+            const AuditSample &other = samples.at( *otherIt );
             // Each unordered pair once: both endpoints carry the counterpart
             // id, and emitting from both sides duplicated the finding (the
             // kind count read as two contacts where one existed).
-            if ( !( sample.input.sampleId < samples.at( *otherIt ).input.sampleId ) )
-                continue;
-            const AuditSample &other = samples.at( *otherIt );
+            //
             // Dedup only genuinely SYMMETRIC pairs (both endpoints link
             // back): emit once, anchored on the lower id. A one-sided
             // reference — the counterpart does not link back, e.g.
@@ -601,7 +600,13 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                         addFinding( report, LeakageKind::BufferOverlap, left, right, evidence,
                                     foldBased );
                     }
-                    if ( overlapCheck && left.windowWidth > 0.0 && left.windowHeight > 0.0 )
+                    // Patch overlap needs window evidence on BOTH sides:
+                    // left/right follow bucket enumeration order (self cell
+                    // first, then right/lower neighbors), so gating on one
+                    // side alone makes the same pair's report depend on which
+                    // sample happened to land in the earlier bucket.
+                    if ( overlapCheck && left.windowWidth > 0.0 && left.windowHeight > 0.0 &&
+                         right.windowWidth > 0.0 && right.windowHeight > 0.0 )
                     {
                         // Overlap fraction on the ground bounds relative to
                         // the smaller footprint area.

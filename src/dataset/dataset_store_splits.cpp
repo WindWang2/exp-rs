@@ -244,16 +244,34 @@ sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &
         return Result::failure( storeDiag( QStringLiteral( "dataset.leakage_report_invalid" ),
                                            QStringLiteral( "report carries no split manifest id" ) ) );
 
-    StoreStmt split( m_impl->db, QStringLiteral(
-        "SELECT 1 FROM split_manifests WHERE manifest_id=?" ) );
-    if ( !split )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           split.error( m_impl->db ) ) );
-    split.bind( 1, report.splitManifestId() );
-    if ( !split.stepRow() )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.split_not_found" ),
-                                           QStringLiteral( "split manifest %1 is not stored" )
-                                               .arg( report.splitManifestId() ) ) );
+    // Existence check + append ride ONE transaction (BEGIN IMMEDIATE, same
+    // shape as saveQaReport below) so a report can never attach to a split
+    // manifest deleted between the check and the insert: a draft version can
+    // carry a split manifest, and deleteDataset cascades to split_manifests
+    // while this table keeps no FK — the previous check-then-insert raced
+    // across connections and left the inserted row an orphan that nothing can
+    // ever cascade away.
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
+    {
+        StoreStmt split( m_impl->db, QStringLiteral(
+            "SELECT 1 FROM split_manifests WHERE manifest_id=?" ) );
+        if ( !split )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               split.error( m_impl->db ) ) );
+        }
+        split.bind( 1, report.splitManifestId() );
+        if ( !split.stepRow() )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.split_not_found" ),
+                                               QStringLiteral( "split manifest %1 is not stored" )
+                                                   .arg( report.splitManifestId() ) ) );
+        }
+    }
 
     // The stored row keeps the Compact text (stored text may stay Compact);
     // the DIGEST input is the ONE canonical form (#1387) — the same bytes
@@ -267,19 +285,33 @@ sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &
     const QString digest = contentDigest(
         QString::fromUtf8( sicnu::data::canonicalizeJsonRfc8785( report.toJson() ) ) );
 
-    StoreStmt insert( m_impl->db, QStringLiteral(
-        "INSERT OR IGNORE INTO leakage_reports(split_manifest_id, report_digest,"
-        " json, created_ms) VALUES(?,?,?,?)" ) );
-    if ( !insert )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           insert.error( m_impl->db ) ) );
-    insert.bind( 1, report.splitManifestId() );
-    insert.bind( 2, digest );
-    insert.bind( 3, json );
-    insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
-    if ( !insert.step() )
+    {
+        StoreStmt insert( m_impl->db, QStringLiteral(
+            "INSERT OR IGNORE INTO leakage_reports(split_manifest_id, report_digest,"
+            " json, created_ms) VALUES(?,?,?,?)" ) );
+        if ( !insert )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               insert.error( m_impl->db ) ) );
+        }
+        insert.bind( 1, report.splitManifestId() );
+        insert.bind( 2, digest );
+        insert.bind( 3, json );
+        insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
+        if ( !insert.step() )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               insert.error( m_impl->db ) ) );
+        }
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           QStringLiteral( "commit transaction failed" ) ) );
+    }
     return Result::success();
 }
 

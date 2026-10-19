@@ -434,6 +434,15 @@ void LlmStreamingClient::onReplyFinished()
     return;
   QNetworkReply *reply = m_currentReply;
   m_currentReply = nullptr;
+  // #1572: read the final error state BEFORE deleteLater and before any
+  // signal emission below. A direct-connected consumer may re-enter
+  // sendChatCompletion from the toolCallParsed emitted here, and a nested
+  // event loop in that slot would dispatch the DeferredDelete posted on the
+  // next line and destroy the reply — the checks after the emission must not
+  // dereference a freed object (cancel() guards the same race with a
+  // QPointer; this path only needs the captured values).
+  const QNetworkReply::NetworkError networkError = reply->error();
+  const QString networkErrorString = reply->errorString();
   reply->deleteLater();
 
   // Captured before any signal emission below: like the [DONE] path, this
@@ -462,11 +471,11 @@ void LlmStreamingClient::onReplyFinished()
   if ( !m_finishedEmitted )
     emitParsedToolCallOnce();
 
-  if (reply->error() != QNetworkReply::NoError && reply->error() != QNetworkReply::OperationCanceledError)
+  if (networkError != QNetworkReply::NoError && networkError != QNetworkReply::OperationCanceledError)
   {
     if (!m_finishedEmitted && m_streamGeneration == generation)
     {
-      emit errorOccurred(reply->errorString());
+      emit errorOccurred(networkErrorString);
     }
   }
   if ( !m_finishedEmitted && m_streamGeneration == generation )
@@ -478,14 +487,28 @@ void LlmStreamingClient::onReplyFinished()
 
 void LlmStreamingClient::onReplyError( QNetworkReply::NetworkError code )
 {
-  if ( code != QNetworkReply::OperationCanceledError && m_currentReply )
+  if ( code == QNetworkReply::OperationCanceledError )
+    return;
+
+  // #1573: the terminal-state guard the other paths carry. The generation is
+  // captured BEFORE emitting and the error is read from the reply that
+  // signalled it, never from m_currentReply: a direct-connected consumer may
+  // re-enter sendChatCompletion from errorOccurred, which posts a new reply
+  // and resets m_finishedEmitted — a late error of the superseded stream
+  // would then be attributed to the new one (its empty errorString) and end
+  // it early (#1452). The QPointer matches cancel(): a nested event loop in a
+  // consumer slot may dispatch the DeferredDelete posted on the old reply.
+  const int generation = m_streamGeneration;
+  QPointer<QNetworkReply> reply = m_currentReply;
+  if ( !reply )
+    return;
+
+  emit errorOccurred( reply->errorString() );
+
+  if ( !m_finishedEmitted && m_streamGeneration == generation )
   {
-    emit errorOccurred( m_currentReply->errorString() );
-    if (!m_finishedEmitted)
-    {
-      m_finishedEmitted = true;
-      emit finished();
-    }
+    m_finishedEmitted = true;
+    emit finished();
   }
 }
 

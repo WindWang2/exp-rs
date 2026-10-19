@@ -51,6 +51,11 @@ void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
 
     // Create async task
     m_task = new QgsProcessingAlgRunnerTask(algorithm, parameters, context, feedback);
+    // The task manager owns m_task and keeps it alive past this runner, and
+    // the task's worker thread dereferences feedback until finished() runs.
+    // Parenting feedback to this short-lived runner would free it underneath
+    // the still-running background thread, so ownership is handed to the task.
+    feedback->setParent(m_task);
     sicnu::TaskCenter::instance().attachQgsTask(centerTaskId, m_task);
     sicnu::TaskCenter::instance().markTaskRunning(centerTaskId);
 

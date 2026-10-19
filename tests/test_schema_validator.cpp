@@ -45,6 +45,18 @@ AlgorithmDescriptor makeTestDescriptor()
     bands.required = false;
     desc.inputs.push_back( bands );
 
+    PortDescriptor label;
+    label.name = "label";
+    label.type = DataType::String;
+    label.required = false;
+    desc.inputs.push_back( label );
+
+    PortDescriptor extra;
+    extra.name = "extra";
+    extra.type = DataType::Any;
+    extra.required = false;
+    desc.inputs.push_back( extra );
+
     return desc;
 }
 
@@ -115,6 +127,90 @@ TEST_CASE( "validateParameters accepts numeric strings for numeric ports", "[pro
     params["threshold"] = "0.25"; // LLMs often pass numbers as strings
     const auto result = validateParameters( params, desc );
     REQUIRE( result.ok() );
+}
+
+TEST_CASE( "validateParameters rejects null/object/array on String ports", "[processing][schema_validator]" )
+{
+    const AlgorithmDescriptor desc = makeTestDescriptor();
+
+    // Explicit null is a type violation: it would otherwise be stringified
+    // downstream into the literal "null" (#1566).
+    Json::Value nullParams( Json::objectValue );
+    nullParams["input"] = "/tmp/a.tif";
+    nullParams["label"] = Json::nullValue;
+    const auto nullResult = validateParameters( nullParams, desc );
+    REQUIRE_FALSE( nullResult.ok() );
+    REQUIRE( nullResult.errors.front().code == "type_mismatch" );
+    REQUIRE( nullResult.errors.front().parameter == "label" );
+    REQUIRE( nullResult.errors.front().expected == "string" );
+
+    Json::Value objParams( Json::objectValue );
+    objParams["input"] = "/tmp/a.tif";
+    Json::Value obj( Json::objectValue );
+    obj["path"] = "/tmp/a.tif";
+    objParams["label"] = obj;
+    const auto objResult = validateParameters( objParams, desc );
+    REQUIRE_FALSE( objResult.ok() );
+    REQUIRE( objResult.errors.front().code == "type_mismatch" );
+    REQUIRE( objResult.errors.front().parameter == "label" );
+
+    Json::Value arrParams( Json::objectValue );
+    arrParams["input"] = "/tmp/a.tif";
+    Json::Value arr( Json::arrayValue );
+    arr.append( "a" );
+    arrParams["label"] = arr;
+    const auto arrResult = validateParameters( arrParams, desc );
+    REQUIRE_FALSE( arrResult.ok() );
+    REQUIRE( arrResult.errors.front().code == "type_mismatch" );
+    REQUIRE( arrResult.errors.front().parameter == "label" );
+}
+
+TEST_CASE( "validateParameters rejects explicit null but keeps structured values on Any ports", "[processing][schema_validator]" )
+{
+    const AlgorithmDescriptor desc = makeTestDescriptor();
+
+    Json::Value nullParams( Json::objectValue );
+    nullParams["input"] = "/tmp/a.tif";
+    nullParams["extra"] = Json::nullValue;
+    const auto nullResult = validateParameters( nullParams, desc );
+    REQUIRE_FALSE( nullResult.ok() );
+    REQUIRE( nullResult.errors.front().code == "type_mismatch" );
+    REQUIRE( nullResult.errors.front().parameter == "extra" );
+    REQUIRE( nullResult.errors.front().expected == "non-null value" );
+
+    // "Any" keeps structured values — only null has no lossless mapping.
+    Json::Value objParams( Json::objectValue );
+    objParams["input"] = "/tmp/a.tif";
+    Json::Value obj( Json::objectValue );
+    obj["key"] = "value";
+    objParams["extra"] = obj;
+    REQUIRE( validateParameters( objParams, desc ).ok() );
+
+    Json::Value arrParams( Json::objectValue );
+    arrParams["input"] = "/tmp/a.tif";
+    Json::Value arr( Json::arrayValue );
+    arr.append( 1 );
+    arrParams["extra"] = arr;
+    REQUIRE( validateParameters( arrParams, desc ).ok() );
+}
+
+TEST_CASE( "validateParameters accepts scalars on String ports", "[processing][schema_validator]" )
+{
+    const AlgorithmDescriptor desc = makeTestDescriptor();
+
+    Json::Value params( Json::objectValue );
+    params["input"] = "/tmp/a.tif";
+    params["label"] = "out.tif";
+    REQUIRE( validateParameters( params, desc ).ok() );
+
+    params["label"] = 5; // LLMs often pass numbers where strings are expected
+    REQUIRE( validateParameters( params, desc ).ok() );
+
+    params["label"] = "5";
+    REQUIRE( validateParameters( params, desc ).ok() );
+
+    params["label"] = true;
+    REQUIRE( validateParameters( params, desc ).ok() );
 }
 
 TEST_CASE( "unknown parameter policy: Error vs Warn vs Ignore", "[processing][schema_validator]" )

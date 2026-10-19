@@ -4,7 +4,6 @@
 #pragma once
 
 #include "raster_processing_dialog_base.h"
-#include <QFutureWatcher>
 
 class QComboBox;
 class QDoubleSpinBox;
@@ -23,11 +22,14 @@ protected:
     bool validateInputs() override;
     void onRun() override;
 
-private slots:
-    void onAnalysisFinished();
-
 private:
     void setupUi();
+
+    /// Default output path derived from the input DEM: same file directory,
+    /// the input's complete base name, the product id and ".tif". One
+    /// derivation for the validation pass and the run pass, so the two
+    /// paths cannot drift apart on the base-name semantics.
+    QString defaultOutputPath( const QgsRasterLayer *layer ) const;
 
     QComboBox *mLayerCombo = nullptr;
     QComboBox *mAnalysisCombo = nullptr;
@@ -43,5 +45,4 @@ private:
     QDoubleSpinBox *mDayOfYearSpin = nullptr;
     QDoubleSpinBox *mLatitudeSpin = nullptr;
     QLabel *mStatusLabel = nullptr;
-    QFutureWatcher<bool> *mWatcher = nullptr;
 };

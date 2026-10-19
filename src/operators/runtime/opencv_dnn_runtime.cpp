@@ -215,7 +215,7 @@ std::vector<std::string> OpenCvDnnRuntime::outputTensorNames() const
 {
   // cv::dnn::Net is not thread-safe: serialize against concurrent forward
   // passes on the shared cached session.
-  std::lock_guard<std::mutex> lock( *const_cast<std::mutex *>( &m_inferMutex ) );
+  std::lock_guard<std::mutex> lock( m_inferMutex );
   std::vector<std::string> names;
   if ( !m_loaded.load( std::memory_order_acquire ) )
     return names;

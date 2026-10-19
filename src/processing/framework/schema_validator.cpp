@@ -248,9 +248,27 @@ bool validateValue( const PortDescriptor &port, const Json::Value &value,
       }
       break;
     case DataType::String:
+      // Same scalar-only contract as String array items above: null and
+      // structured values have no lossless mapping and would be stringified
+      // downstream (null becomes the literal "null") instead of rejected.
+      valid = value.isString() || value.isNumeric() || value.isBool();
+      if ( !valid )
+      {
+        addIssue( errors, "type_mismatch", path, "string", value,
+                  "Parameter '" + path + "' must be a string." );
+      }
+      break;
     case DataType::Any:
     default:
-      valid = true;
+      // "Any" keeps structured values, but an explicit null is a type
+      // violation: jsonParamsToVariantMap renders it as the literal "null",
+      // turning an omitted value into a real one (#1566).
+      valid = !value.isNull();
+      if ( !valid )
+      {
+        addIssue( errors, "type_mismatch", path, "non-null value", value,
+                  "Parameter '" + path + "' must not be null." );
+      }
       break;
   }
   if ( !valid ) return false;

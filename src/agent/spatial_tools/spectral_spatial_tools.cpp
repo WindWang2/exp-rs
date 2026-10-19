@@ -166,9 +166,11 @@ namespace exp_agent
     props["library_path"] = libraryPath;
 
     schema["properties"] = props;
-    Json::Value required( Json::arrayValue );
-    required.append( "layer_id" );
-    schema["required"] = required; // path is an accepted alternative at runtime
+    // No "required": the raster resolves from EITHER layer_id or path
+    // (resolveRasterPath). The MCP gate enforces the flat required array, so
+    // declaring either key would reject the documented alternative — path is
+    // the only usable form on a headless server with no project layers. A
+    // call with neither fails in execute() with a structured INVALID_PARAMETER.
     return schema;
   }
 
@@ -332,9 +334,9 @@ namespace exp_agent
     props["expected_surface"] = surface;
 
     schema["properties"] = props;
-    Json::Value required( Json::arrayValue );
-    required.append( "layer_id" );
-    schema["required"] = required;
+    // No "required" — same either/or raster resolution as spectral_inspect
+    // (layer_id or path, see resolveRasterPath); a call with neither fails in
+    // execute() with a structured INVALID_PARAMETER.
     return schema;
   }
 

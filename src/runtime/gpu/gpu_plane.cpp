@@ -45,16 +45,22 @@ ModelSessionPool::~ModelSessionPool()
 {
     if ( !m_impl )
         return;
-    if ( !m_impl->backend )
+    // Same lock discipline as every other method that touches sessions
+    // (acquireSession/releaseSession/evictStale — the header promises
+    // "Thread-safe."), so a concurrent evictStale cannot freeVram+erase
+    // under this walk. The guard's scope ends before delete: unlocking a
+    // mutex inside a destroyed Impl would be UB.
     {
-        delete m_impl;
-        m_impl = nullptr;
-        return;
+        std::lock_guard<std::mutex> lock( m_impl->mutex );
+        if ( m_impl->backend )
+        {
+            // Free all VRAM accounting before teardown.
+            for ( const auto &live : m_impl->sessions )
+                m_impl->backend->freeVram( live.session->deviceId, live.vramMb );
+        }
     }
-    // Free all VRAM accounting before teardown.
-    for ( const auto &live : m_impl->sessions )
-        m_impl->backend->freeVram( live.session->deviceId, live.vramMb );
     delete m_impl;
+    m_impl = nullptr;
 }
 
 AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )

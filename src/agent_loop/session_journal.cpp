@@ -310,15 +310,33 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
     buffer << in.rdbuf();
     const std::string body = buffer.str();
 
+    // Bounded parse for on-disk journal bytes (#1552): the document is
+    // untrusted input, and jsoncpp's default builder bounds nothing — a
+    // deeply-nested payload makes parse THROW Json::Exception ("Exceeded
+    // stackLimit") instead of returning false, and an exception escaping
+    // here would terminate the process rather than honor the documented
+    // fail-closed nullopt. The 128 bound sits far above every legal
+    // document (root → entries → entry → payload/decision are shallow).
     Json::CharReaderBuilder builder;
+    builder[ "stackLimit" ] = 128;
     Json::Value doc;
     std::string parseError;
     const std::unique_ptr< Json::CharReader > reader( builder.newCharReader() );
-    if ( !reader->parse( body.data(), body.data() + body.size(), &doc, &parseError ) )
+    try
+    {
+        if ( !reader->parse( body.data(), body.data() + body.size(), &doc, &parseError ) )
+        {
+            if ( error )
+                *error = "session journal: corrupt document " +
+                         sicnu::portable::pathToUtf8( path ) + ": " + parseError;
+            return std::nullopt;
+        }
+    }
+    catch ( const Json::Exception &exception )
     {
         if ( error )
             *error = "session journal: corrupt document " +
-                     sicnu::portable::pathToUtf8( path ) + ": " + parseError;
+                     sicnu::portable::pathToUtf8( path ) + ": " + exception.what();
         return std::nullopt;
     }
     return fromJson( doc, error );

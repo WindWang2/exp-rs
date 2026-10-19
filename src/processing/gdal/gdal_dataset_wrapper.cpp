@@ -67,8 +67,13 @@ GdalDatasetWrapper::~GdalDatasetWrapper() { close(); }
 
 GdalDatasetWrapper::GdalDatasetWrapper(GdalDatasetWrapper &&other) noexcept
     : m_dataset(other.m_dataset)
+    , m_lastError(std::move(other.m_lastError))
 {
+    // The last error travels with the dataset: open()/create() write it before
+    // any failure, and a moved-to wrapper whose lastError() silently returned
+    // empty would drop the diagnostic the caller is about to report.
     other.m_dataset = nullptr;
+    other.m_lastError.clear();
 }
 
 GdalDatasetWrapper &GdalDatasetWrapper::operator=(GdalDatasetWrapper &&other) noexcept
@@ -76,7 +81,9 @@ GdalDatasetWrapper &GdalDatasetWrapper::operator=(GdalDatasetWrapper &&other) no
     if (this != &other) {
         close();
         m_dataset = other.m_dataset;
+        m_lastError = std::move(other.m_lastError);
         other.m_dataset = nullptr;
+        other.m_lastError.clear();
     }
     return *this;
 }

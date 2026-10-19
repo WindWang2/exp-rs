@@ -154,15 +154,17 @@ Json::Value parse( const std::string &json )
 }
 
 
-/// Host render-path gate. On this host, QgsLayoutItemLegend::paint hangs
-/// inside ANY legend-bearing layout render (observed identically on the
-/// untouched master [visual][determinism] suite — differential evidence in
-/// .planning/cartography-production-11/EVIDENCE.md). Render-dependent
-/// cases are SKIPped unless the caller opts in with SICNU_CP11_RENDER=1
-/// (a healthy host must run them).
+/// Host render-path gate. QgsLayoutItemLegend::paint hangs inside ANY
+/// legend-bearing layout render on SOME hosts (differential evidence in
+/// .planning/cartography-production-11/EVIDENCE.md: a parallel healthy host
+/// ran this very suite green the same night). A healthy host is the norm,
+/// so these cases RUN by default — every automated lane (ci.yml fast and
+/// sanitizer tiers) covers the render path, giving the "a healthy host
+/// must run them" contract an owner. A caller who knows their host hangs
+/// opts out with SICNU_CP11_RENDER=0.
 void skipIfHostRenderBroken()
 {
-    if ( !qEnvironmentVariableIsSet( "SICNU_CP11_RENDER" ) )
+    if ( qgetenv( "SICNU_CP11_RENDER" ) == QByteArrayLiteral( "0" ) )
         SKIP();
 }
 

@@ -43,21 +43,20 @@ ChunkGraph::NodeId ChunkGraph::addSource( SourceFn fn )
 
 void ChunkGraph::requireFreeConsumerLocked( NodeId input ) const
 {
+    const auto rejectFanOut = [] {
+        throw std::logic_error( "chunk graph: node has more than one consumer (fan-out "
+                                "would silently split tiles); use an explicit copy stage" );
+    };
     for ( const auto &node : m_nodes )
         for ( const NodeId id : node.inputs )
             if ( id == input )
-                throw std::logic_error(
-                    "chunk graph: node has more than one consumer (fan-out "
-                    "would silently split tiles); use an explicit copy stage" );
-    // R18-B: the sink is a consumer too, whether it was registered before or
-    // after the stage/join being checked — the sink node materializes into
-    // m_nodes only at run(), so without this check either registration order
-    // silently shared the producer's queue between the stage and the sink.
-    if ( m_sinkInput == input )
-        throw std::logic_error(
-            "chunk graph: node has more than one consumer (the sink already "
-            "consumes it; fan-out would silently split tiles); use an "
-            "explicit copy stage" );
+                rejectFanOut();
+    // The sink node is materialized only in run(), so its pending input
+    // occupies the single-consumer slot from addSink onward: without this
+    // check addSink(x) followed by addStage(x)/addJoin({x}) would still fan
+    // the queue out to two poppers (F-A-10).
+    if ( input == m_sinkInput )
+        rejectFanOut();
 }
 
 ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
@@ -93,9 +92,13 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
 void ChunkGraph::addSink( NodeId input, SinkFn fn )
 {
     assert( input >= 0 && input < static_cast<NodeId>( m_nodes.size() ) );
-    if ( m_sink )
-        throw std::logic_error( "chunk graph: only one sink is supported" );
-    requireFreeConsumerLocked( input );
+    // Same single-consumer guard as addStage/addJoin (F-A-10): the sink edge
+    // counts as a consumer from build time, in either build order. Replacing
+    // the sink with the SAME input is legal (header contract: "calling twice
+    // replaces the sink") — the old edge is dropped, not doubled, so only a
+    // different input needs the check.
+    if ( input != m_sinkInput )
+        requireFreeConsumerLocked( input );
     m_sinkInput = input;
     m_sink = std::move( fn );
 }

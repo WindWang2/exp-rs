@@ -10,6 +10,7 @@
 #include "workflow/workflow_definition.h"
 #include "workflow/placeholder_grammar.h"
 #include "jobs/job_types.h"
+#include "gdal/gdal_dataset_wrapper.h"
 
 #include <QMetaObject>
 #include <QString>
@@ -135,6 +136,10 @@ void stampPlanResultProvenance( data::DataManager *dataManager, long pipelineId,
 
     // Kind probe (same contract as the CLI runner): raster vs vector by the
     // openable band count; an unopenable output is not registered.
+    // ensureGdalInit() (not a bare GDALOpen on unregistered drivers): this runs
+    // on the executor's event-loop thread, and the one-shot also caps OpenCV's
+    // nested parallelism (#692).
+    ensureGdalInit();
     GDALDatasetH ds = GDALOpen( task.outputLayerPath.toUtf8().constData(), GA_ReadOnly );
     const bool isRaster = ds != nullptr && GDALGetRasterCount( ds ) > 0;
     if ( ds )

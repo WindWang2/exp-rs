@@ -533,28 +533,41 @@ void PythonWorkerProcessPool::handleWorkerLoss( WorkerNode *node, const QString 
   // buffer, and the death/data notifiers have no ordering guarantee —
   // draining here turns "worker died on request X" into "request X actually
   // completed" whenever the bytes made it out.
-  std::vector<PythonIpcServer::PendingRequest> pending;
+  //
+  // Detach the pair from the node UNDER the lock, then tear it down OUTSIDE
+  // it — the discipline shutdown() and the setPoolSize shrink path follow
+  // (#1462; m_nodesMutex must never be held across pending-request
+  // callbacks, which may re-enter the pool and would self-deadlock on the
+  // non-recursive QMutex). drainBufferedResponses() parses buffered bytes
+  // and INVOKES those callbacks, and stopWorker() blocks up to ~1 s in
+  // terminate/waitForFinished/kill — neither may hold the lock. The lock's
+  // only job here is the pointer publication (#1486).
+  PythonIpcServer *server = nullptr;
+  PythonWorkerProcess *worker = nullptr;
   {
     QMutexLocker lock( &m_nodesMutex );
-    if ( node->server )
-    {
-      node->server->drainBufferedResponses();
-      pending = node->server->takeInFlightRequests();
-    }
-    if ( node->worker )
-    {
-      node->worker->disconnect();
-      node->worker->stopWorker();
-      node->worker->deleteLater();
-      node->worker = nullptr;
-    }
-    if ( node->server )
-    {
-      node->server->disconnect();
-      node->server->close();
-      node->server->deleteLater();
-      node->server = nullptr;
-    }
+    server = node->server;
+    node->server = nullptr;
+    worker = node->worker;
+    node->worker = nullptr;
+  }
+  std::vector<PythonIpcServer::PendingRequest> pending;
+  if ( server )
+  {
+    server->drainBufferedResponses();
+    pending = server->takeInFlightRequests();
+  }
+  if ( worker )
+  {
+    worker->disconnect();
+    worker->stopWorker();
+    worker->deleteLater();
+  }
+  if ( server )
+  {
+    server->disconnect();
+    server->close();
+    server->deleteLater();
   }
 
   if ( node->crashBudgetLeft <= 0 )

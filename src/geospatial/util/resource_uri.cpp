@@ -359,6 +359,7 @@ const char *resourceKindName( ResourceKind kind )
     case ResourceKind::RemoteHttp: return "remote_http";
     case ResourceKind::VsiRemote: return "vsi_remote";
     case ResourceKind::VsiVirtual: return "vsi_virtual";
+    case ResourceKind::VirtualDataset: return "virtual_dataset";
     case ResourceKind::Subdataset: return "subdataset";
     case ResourceKind::StacAsset: return "stac_asset";
     case ResourceKind::InMemory: return "in_memory";

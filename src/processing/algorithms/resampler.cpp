@@ -1,6 +1,8 @@
 // resampler.cpp — D14 Package E implementation (ADR 0159).
 #include "processing/algorithms/resampler.h"
 
+#include "processing/algorithms/nodata_utils.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -14,8 +16,11 @@ constexpr double kHalfValidWeight = 0.5;
 
 bool isNoData(double value, double noDataValue)
 {
-    // Exact comparison on purpose: the sentinel is written verbatim.
-    return value == noDataValue || std::isnan(value);
+    // Delegates to the module-wide predicate owner (nodata_utils.h, #A1):
+    // exact sentinel equality plus non-finite = invalid. This file used to
+    // carry its own copy that accepted ±Inf, which drifted from every other
+    // kernel's invalid-value test.
+    return sicnu::rs::isNoDataValue(value, noDataValue);
 }
 
 double sampleClamped(const float* buffer, int width, int height, int x, int y)

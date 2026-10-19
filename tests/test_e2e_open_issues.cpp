@@ -74,6 +74,7 @@
 #include "agent/mapspec/mapspec_conditions.h"
 #include "agent/harness/recipe_catalog.h"
 
+#include <chrono>
 #include <cmath>
 #include <future>
 #include <numeric>
@@ -813,8 +814,34 @@ TEST_CASE( "Tier 1 - #799: TaskCenter job submission and task mapping race-free"
            "[e2e][tier1][m5][issue-799]" )
 {
     // Issue #799: Rapid job completion drops notification before m_taskByJobId mapped.
+    // The task↔job map must exist BEFORE the engine can run the job, so an
+    // instantly-completing executor is still observed by the listener and
+    // drives its task terminal; the old order (submit → register) could strand
+    // the task in Dispatching forever. A burst of instant jobs maximizes
+    // exposure of that window.
+    ensureApp();
+    auto &engine = JobEngine::instance();
+    engine.shutdownForTests();
+    engine.setMaxWorkers( 2 );
     auto &tc = sicnu::TaskCenter::instance();
-    CHECK( tc.allTasks().size() >= 0 );
+
+    for ( int i = 0; i < 50; ++i )
+    {
+        JobRequest req;
+        req.algorithmId = "callable:e2e_799_instant";
+        const long taskId = tc.submitJob(
+            req, []( const JobRequest &, sicnu::operators::RSOperatorContext & ) {
+                return Json::Value( Json::objectValue );
+            } );
+        REQUIRE( taskId > 0 );
+
+        // A dropped mapping strands the task in Dispatching; the bounded wait
+        // must observe a terminal, Completed task for every submission.
+        const auto info = tc.waitForTask( taskId, std::chrono::milliseconds( 2000 ) );
+        REQUIRE( sicnu::isTerminalStatus( info.status ) );
+        CHECK( info.status == sicnu::TaskStatus::Completed );
+    }
+    engine.waitUntilIdleForTests();
 }
 
 TEST_CASE( "Tier 1 - #800: DataManager const accessor thread affinity assertions",
@@ -867,8 +894,170 @@ TEST_CASE( "Tier 1 - #784: Recipe parameter gating branch independence",
 {
     // Issue #784: Global anyGateClosed forces skipped parameters across parallel branches.
     // Each step's parameter resolution must depend solely on its own gate.
-    const auto &catalog = sicnu::agent::harness::RecipeCatalog::instance();
-    CHECK( catalog.listRecipes().size() >= 0 );
+    QTemporaryDir dir;
+    const QString recipePath = dir.filePath( QStringLiteral( "test_e2e_gates.json" ) );
+    const std::string recipeJson = R"JSON({
+    "schema_version": "2.0",
+    "kind": "harness_recipe",
+    "recipe_id": "test.e2e_gates",
+    "title": "branch gate test",
+    "intent": "test",
+    "slots": [
+      { "name": "optical", "required": false },
+      { "name": "sar", "required": false }
+    ],
+    "outputs": [],
+    "steps": [
+      { "id": "optical_index", "operator_id": "op.optical", "when_param": "enable_optical",
+        "params": { "input": "$optical.path", "output": "$outputs.optical_index_out",
+                    "mode": "full", "threshold": 0.5 } },
+      { "id": "optical_post", "operator_id": "op.post", "inputs": [ { "step": "optical_index" } ],
+        "params": { "input": "$outputs.optical_index_out", "mode": "full", "threshold": 0.5 },
+        "params_when_skipped": { "input": "", "mode": "degraded", "threshold": 0 } },
+      { "id": "sar_index", "operator_id": "op.sar", "when_param": "enable_sar",
+        "params": { "input": "$sar.path", "output": "$outputs.sar_index_out",
+                    "mode": "full", "threshold": 0.5 } },
+      { "id": "sar_post", "operator_id": "op.post", "inputs": [ { "step": "sar_index" } ],
+        "params": { "input": "$outputs.sar_index_out", "mode": "full", "threshold": 0.5 },
+        "params_when_skipped": { "input": "", "mode": "degraded", "threshold": 0 } },
+      { "id": "fuse", "operator_id": "op.fuse", "inputs": [ { "step": "optical_post" }, { "step": "sar_post" } ],
+        "params": { "mode": "full", "threshold": 0.5 },
+        "params_when_skipped": { "mode": "degraded", "threshold": 0 } }
+    ]
+  })JSON";
+    QFile recipeFile( recipePath );
+    REQUIRE( recipeFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    recipeFile.write( recipeJson.data(), static_cast<qint64>( recipeJson.size() ) );
+    recipeFile.close();
+
+    // Both slots carry real data — only the parameter gates vary per scenario,
+    // so any template flip below is attributable to gate state alone.
+    QTemporaryDir dataDir;
+    auto writeDummy = [&dataDir]( const QString &name ) {
+        QFile file( dataDir.filePath( name ) );
+        if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+            return false;
+        file.write( "x" );
+        file.close();
+        return true;
+    };
+    REQUIRE( writeDummy( QStringLiteral( "optical.tif" ) ) );
+    REQUIRE( writeDummy( QStringLiteral( "sar.tif" ) ) );
+
+    auto &catalog = sicnu::agent::harness::RecipeCatalog::instance();
+    catalog.setDirectory( dir.path().toStdString() );
+    catalog.reload();
+    // Sanity: the fixture actually loaded (a validation failure would make
+    // every instantiation below silently return an empty plan).
+    const Json::Value loadedRecipes = catalog.listRecipes();
+    REQUIRE( loadedRecipes.size() == 1 );
+    REQUIRE( loadedRecipes[0]["recipe_id"].asString() == "test.e2e_gates" );
+
+    auto instantiate = [&]( bool enableOptical, bool enableSar ) {
+        Json::Value bindings( Json::objectValue );
+        bindings["slots"]["optical"] = dataDir.filePath( QStringLiteral( "optical.tif" ) ).toStdString();
+        bindings["slots"]["sar"] = dataDir.filePath( QStringLiteral( "sar.tif" ) ).toStdString();
+        bindings["params"]["enable_optical"] = enableOptical;
+        bindings["params"]["enable_sar"] = enableSar;
+        bindings["output_dir"] = dir.filePath( QStringLiteral( "out" ) ).toStdString();
+        sicnu::agent::harness::HarnessError error;
+        return catalog.instantiateRecipe( "test.e2e_gates", bindings, error );
+    };
+    auto findStep = []( const Json::Value &plan, const std::string &id ) -> const Json::Value * {
+        if ( !plan.isMember( "steps" ) || !plan["steps"].isArray() )
+            return nullptr;
+        for ( const auto &step : plan["steps"] )
+            if ( step["id"].asString() == id )
+                return &step;
+        return nullptr;
+    };
+    // Field-by-field: every parameter of the surviving template must equal the
+    // full one — a global gate leak flips exactly these values.
+    auto expectFull = [&findStep]( const Json::Value &plan, const std::string &id,
+                                   const std::string &inputFragment ) {
+        const Json::Value *step = findStep( plan, id );
+        REQUIRE( step != nullptr );
+        CHECK( (*step)["params"]["mode"].asString() == "full" );
+        CHECK( (*step)["params"]["threshold"].asDouble() == Approx( 0.5 ) );
+        CHECK( (*step)["params"]["input"].asString().find( inputFragment ) != std::string::npos );
+    };
+    auto expectDegraded = [&findStep]( const Json::Value &plan, const std::string &id ) {
+        const Json::Value *step = findStep( plan, id );
+        REQUIRE( step != nullptr );
+        const Json::Value &params = (*step)["params"];
+        CHECK( params["mode"].asString() == "degraded" );
+        CHECK( params["threshold"].asDouble() == Approx( 0.0 ) );
+        CHECK( ( !params.isMember( "input" ) || params["input"].asString().empty() ) );
+    };
+
+    // Control: no gate closed anywhere — every step runs its full template.
+    {
+        const Json::Value plan = instantiate( true, true );
+        REQUIRE( plan.isObject() );
+        CHECK( plan["steps"].size() == 5 );
+        expectFull( plan, "optical_index", "optical.tif" );
+        expectFull( plan, "optical_post", "optical_index_out" );
+        expectFull( plan, "sar_index", "sar.tif" );
+        expectFull( plan, "sar_post", "sar_index_out" );
+        const Json::Value *fuse = findStep( plan, "fuse" );
+        REQUIRE( fuse != nullptr );
+        CHECK( (*fuse)["params"]["mode"].asString() == "full" );
+        CHECK( (*fuse)["params"]["threshold"].asDouble() == Approx( 0.5 ) );
+    }
+
+    // Regression: the SAR gate is closed, so the SAR branch degrades — but the
+    // parallel optical branch keeps its own full template field for field.
+    {
+        const Json::Value plan = instantiate( true, false );
+        REQUIRE( plan.isObject() );
+        CHECK( findStep( plan, "sar_index" ) == nullptr );
+        expectDegraded( plan, "sar_post" );
+        expectFull( plan, "optical_index", "optical.tif" );
+        expectFull( plan, "optical_post", "optical_index_out" );
+        // The fusion step depends on the degraded branch -> degraded as well.
+        expectDegraded( plan, "fuse" );
+        // The degradation record attributes the flip to the closed gate only;
+        // no optical step is ever listed as degraded.
+        bool sarGateClosed = false;
+        bool opticalDegraded = false;
+        if ( plan.isMember( "degradations" ) )
+            for ( const auto &degradation : plan["degradations"] )
+            {
+                if ( degradation["step"].asString() == "sar_index" &&
+                     degradation["reason"].asString() == "gate_closed" )
+                    sarGateClosed = true;
+                if ( degradation["step"].asString().rfind( "optical", 0 ) == 0 )
+                    opticalDegraded = true;
+            }
+        CHECK( sarGateClosed );
+        CHECK_FALSE( opticalDegraded );
+    }
+
+    // Mirror image: the optical gate closed — the SAR branch stays full.
+    {
+        const Json::Value plan = instantiate( false, true );
+        REQUIRE( plan.isObject() );
+        CHECK( findStep( plan, "optical_index" ) == nullptr );
+        expectDegraded( plan, "optical_post" );
+        expectFull( plan, "sar_index", "sar.tif" );
+        expectFull( plan, "sar_post", "sar_index_out" );
+        expectDegraded( plan, "fuse" );
+    }
+
+    // Both gates closed: both branch heads drop, both posts degrade.
+    {
+        const Json::Value plan = instantiate( false, false );
+        REQUIRE( plan.isObject() );
+        CHECK( findStep( plan, "optical_index" ) == nullptr );
+        CHECK( findStep( plan, "sar_index" ) == nullptr );
+        expectDegraded( plan, "optical_post" );
+        expectDegraded( plan, "sar_post" );
+        expectDegraded( plan, "fuse" );
+    }
+
+    // Restore the default catalog for any later consumer.
+    catalog.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/recipes" );
+    catalog.reload();
 }
 
 TEST_CASE( "Tier 1 - #802: Condition evaluation accepts external context",

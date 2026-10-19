@@ -487,8 +487,19 @@ int commandLab( QStringList arguments, const CliIO &io )
             return labError( io, "lab: cannot write report file: " + outPath.toStdString(),
                              kInvalidInputLab, outPath.toStdString() );
         }
-        out.write( Json::writeString( prettyWriter(), document ).c_str() );
-        out.write( "\n" );
+        // A truncated report is worse than no report: the write() results and
+        // the flush() status ride along so a full disk cannot leave a
+        // half-written transcript behind a pass exit code.
+        const std::string report = Json::writeString( prettyWriter(), document );
+        const qint64 reportBytes = static_cast<qint64>( report.size() );
+        const bool flushed = out.write( report.data(), reportBytes ) == reportBytes
+                             && out.write( "\n", 1 ) == 1 && out.flush();
+        out.close();   // QFileDevice::close() returns void in Qt6 — flush() above is the check
+        if ( !flushed )
+        {
+            return labError( io, "lab: cannot write report file: " + outPath.toStdString(),
+                             kInvalidInputLab, outPath.toStdString() );
+        }
     }
 
     if ( !result.graded )

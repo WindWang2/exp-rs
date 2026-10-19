@@ -158,7 +158,14 @@ void RsSampleEraseTool::canvasMoveEvent( QgsMapMouseEvent *e )
     }
     mStamps.append( disc );
     ++mStampCount;
-    mRubber->addGeometry( disc, mLayer.data() );
+    // The cap has to sit on what actually grows per stroke: the rubber
+    // band's buffered disc geometry. mStamps is write-only bookkeeping
+    // (nothing reads its content — finishStroke() consumes mHitIds), so
+    // bounding that vector protected nothing while a long drag kept
+    // appending geometry to the band. Same bound as the sister
+    // RsSampleBrushTool, keyed on the stroke's stamp counter.
+    if ( mStampCount <= kMaxStampsPerStroke )
+        mRubber->addGeometry( disc, mLayer.data() );
     collectHits( disc );
 }
 

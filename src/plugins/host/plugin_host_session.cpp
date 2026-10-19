@@ -699,28 +699,41 @@ void PluginHostProcessSession::killProcess( const char *reason )
 #else
     const bool wasAlive = mProcessAlive.exchange( false );
     const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
+    // Read the group from mLastKnownGroup, never from mProcessGroupId: the
+    // exchange winner clears mProcessGroupId while a loser of the same
+    // exchange is still inside this function, and that member is a plain
+    // long long guarded by no mutex — reading or writing it here would be a
+    // data race (UB) no matter how idempotent POSIX kill() is. mLastKnownGroup
+    // is written once at spawn (startWorkerProcess) and never again, so every
+    // caller can read it safely; it is the same snapshot processGroupState()
+    // probes, and it equals mProcessGroupId for as long as the worker has not
+    // been reaped.
+    const long long group = mLastKnownGroup;
     if ( wasAlive && pid > 0 )
     {
         // Process-group kill first: worker-spawned grandchildren (fork/exec
         // inside plugin code) die WITH the worker, not as orphans. The
         // group exists because the child ran setpgid(0,0) before exec.
-        if ( mProcessGroupId > 0 )
-            ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
+        if ( group > 0 )
+            ::kill( static_cast<pid_t>( -group ), SIGKILL );
         ::kill( pid, SIGKILL );
         int status = 0;
         while ( ::waitpid( pid, &status, 0 ) < 0 && errno == EINTR )
         {
         }
         mProcessHandle = nullptr;
+        // Only the exchange winner reaches this point, and it is the sole
+        // writer of the live member: every other caller is a loser that
+        // never touches it (see the snapshot above).
         mProcessGroupId = -1;
     }
-    else if ( mProcessGroupId > 0 )
+    else if ( group > 0 )
     {
         // Worker died by itself (crash): reap the rest of its group. POSIX
         // kills are idempotent (ESRCH), so a concurrent loser of the
-        // liveness exchange can safely run this too.
-        ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
-        mProcessGroupId = -1;
+        // liveness exchange can safely run this too — and it does so off the
+        // write-once snapshot, so no loser ever writes mProcessGroupId.
+        ::kill( static_cast<pid_t>( -group ), SIGKILL );
     }
 #endif
     if ( mChannel )
@@ -1107,13 +1120,22 @@ bool PluginHostProcessSession::shutdownImpl( int timeoutMs,
         // the Windows worker was never terminated (handles leaked) and POSIX
         // never waitpid()ed (zombie).
 #ifndef _WIN32
-        if ( exited && mProcessGroupId > 0 )
+        // Same discipline as killProcess: take the group id from the
+        // write-once mLastKnownGroup snapshot, never from mProcessGroupId.
+        // This thread can reach here having LOST the close election to a
+        // concurrent killProcess() winner (confirmProcessDeath() answering
+        // "a concurrent closer already released everything"), and that winner
+        // may still sit between its liveness exchange and its
+        // mProcessGroupId = -1 store — reading the plain long long here would
+        // race with that store. The snapshot equals the live group id for as
+        // long as the worker has not been reaped.
+        if ( exited && mLastKnownGroup > 0 )
         {
             // The worker exited cleanly, but plugin-spawned grandchildren
             // survive a plain exit (they would be reparented to init).
             // Windows kills them via job close at this same point; reap the
             // group here for parity.
-            ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
+            ::kill( static_cast<pid_t>( -mLastKnownGroup ), SIGKILL );
         }
 #endif
         if ( !exited )

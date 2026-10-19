@@ -39,8 +39,16 @@
 
 class QgsMacNative::QgsUserNotificationCenter {
 public:
-  QgsUserNotificationCenterDelegate *_qgsUserNotificationCenter;
-  NSImage *_qgisIcon;
+  ~QgsUserNotificationCenter() {
+    // Compiled without ARC (MRC): both members are bare pointers, so the
+    // objects are owned here and must be released explicitly.
+    // NSUserNotificationCenter's delegate property is non-retaining, so
+    // setDelegate:nil alone does not release the delegate (#1557, #1641).
+    [_qgsUserNotificationCenter release];
+    [_qgisIcon release];
+  }
+  QgsUserNotificationCenterDelegate *_qgsUserNotificationCenter = nullptr;
+  NSImage *_qgisIcon = nullptr;
 };
 
 QgsMacNative::QgsMacNative()
@@ -58,11 +66,16 @@ QgsMacNative::~QgsMacNative() {
 }
 
 void QgsMacNative::setIconPath(const QString &iconPath) {
-  // autorelease: the property assignment retains, so a bare alloc here both
-  // leaks the new image and (on repeat calls) the previous one (#634).
-  mQgsUserNotificationCenter->_qgisIcon =
-      [[[NSImage alloc] initWithCGImage:QPixmap(iconPath).toImage().toCGImage()
-                                  size:NSZeroSize] autorelease];
+  // No ARC here and _qgisIcon is a bare pointer, not an @property, so the
+  // assignment retains nothing: an autorelease pool drain would leave it
+  // dangling before showDesktopNotification() hands it to
+  // notification.contentImage. This class owns the image — release the
+  // previous one here, the last one in ~QgsUserNotificationCenter (#1557).
+  NSImage *icon =
+      [[NSImage alloc] initWithCGImage:QPixmap(iconPath).toImage().toCGImage()
+                                  size:NSZeroSize];
+  [mQgsUserNotificationCenter->_qgisIcon release];
+  mQgsUserNotificationCenter->_qgisIcon = icon;
 }
 
 const char *QgsMacNative::currentAppLocalizedName() {

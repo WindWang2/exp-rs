@@ -4,6 +4,7 @@
 #include "verify/verify_locale.h"
 
 #include <fstream>
+#include <limits>
 #include <system_error>
 
 namespace sicnu::verify_adapters
@@ -39,7 +40,8 @@ IoResult readFileBounded( const std::string &path, const std::uint64_t capBytes 
         return result;
     }
     // Stat-then-open is inherently racy; the cap is enforced on what is
-    // actually READ (cap+1 sentinel byte), not on the stat result.
+    // actually READ (cap+1 sentinel byte), not on the stat result — the
+    // stat only decides how big the buffer starts.
     std::ifstream file( fsPath, std::ios::binary );
     if ( !file )
     {
@@ -47,9 +49,28 @@ IoResult readFileBounded( const std::string &path, const std::uint64_t capBytes 
         result.detail = "cannot open file";
         return result;
     }
+    // Size the buffer from the file, not from the cap: probing a small
+    // sidecar must not allocate (and zero-fill) the whole digest budget
+    // before reading a few hundred bytes.
+    const std::uintmax_t statSize = std::filesystem::file_size( fsPath, ec );
+    if ( ec )
+    {
+        result.failure = IoFailure::StatFailed;
+        result.detail = "cannot stat file size";
+        return result;
+    }
+    // A cap past what this platform can address clamps, never truncates to
+    // a size_t buffer smaller than the cap the caller believes is enforced
+    // (size_t is 32-bit on 32-bit builds); the -1 keeps room for the
+    // sentinel byte below.
+    constexpr std::uint64_t kAddressableBytes =
+        static_cast<std::uint64_t>( std::numeric_limits<std::size_t>::max() ) - 1;
+    const std::uint64_t effectiveCap = capBytes < kAddressableBytes ? capBytes : kAddressableBytes;
+    const std::uint64_t readBytes =
+        ( statSize < effectiveCap ? statSize : effectiveCap ) + 1;
     std::string buffer;
-    buffer.resize( static_cast<std::size_t>( capBytes ) + 1 );
-    file.read( buffer.data(), static_cast<std::streamsize>( buffer.size() ) );
+    buffer.resize( static_cast<std::size_t>( readBytes ) );
+    file.read( buffer.data(), static_cast<std::streamsize>( readBytes ) );
     if ( file.bad() )
     {
         result.failure = IoFailure::ReadError;
@@ -57,7 +78,7 @@ IoResult readFileBounded( const std::string &path, const std::uint64_t capBytes 
         return result;
     }
     buffer.resize( static_cast<std::size_t>( file.gcount() ) );
-    if ( buffer.size() > capBytes )
+    if ( buffer.size() > effectiveCap )
     {
         result.failure = IoFailure::OverCap;
         result.detail = "file exceeds the read cap";

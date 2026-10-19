@@ -36,6 +36,19 @@ QString gdalErrorMarker()
 {
   return QStringLiteral( "\x01SICNU_ERR\x01" );
 }
+
+// True while the handle's task sits in the cooperative cancel-in-progress
+// state (TaskStatus::Cancelling): a cancel was requested and the worker has
+// not reported its terminal record yet. Lets reject() tell "running" from
+// "cancelling" without the handle exposing the status (#1560).
+bool jobCancelInFlight( const sicnu::app::GuiJobHandle &handle )
+{
+  const long taskId = handle.taskId();
+  if ( taskId < 0 )
+    return false;
+  const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  return info.taskId == taskId && info.status == sicnu::TaskStatus::Cancelling;
+}
 } // namespace
 
 RasterProcessingDialogBase::RasterProcessingDialogBase( QWidget *parent )
@@ -68,8 +81,14 @@ QSize RasterProcessingDialogBase::sizeHint() const
 
 void RasterProcessingDialogBase::reject()
 {
-  // Guard close/Cancel while a GDAL or algorithm task is in flight.
-  if ( isRunning() )
+  // Guard close/Cancel while a GDAL or algorithm task is in flight — except
+  // once the user has already asked to cancel (#1560): the cooperative flag
+  // is armed and the worker observes it at its next checkpoint, so the
+  // "Cancelling..." state must not trap the user in the dialog for the whole
+  // remaining GDAL I/O. The handle keeps the task busy (isRunning() stays
+  // true until the terminal record lands), so Run remains disabled and
+  // closing here cannot restart a run against the same output path (#696).
+  if ( isRunning() && !jobCancelInFlight( m_jobHandle ) )
     return;
   QDialog::reject();
 }
@@ -407,8 +426,12 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
       return out;
     },
     []() {
-      // Cancel hook wired — JobEngine arms ctx flag; executor polls it.
-      // For GDAL, progress callbacks should forward isCancelled().
+      // No task-side cancel channel exists on this seam: the task lambda is
+      // opaque (std::function<QString()>), so nothing here can interrupt the
+      // GDAL I/O mid-flight. JobEngine arms the cooperative flag and the
+      // executor observes it at its next checkpoint (after task() returns);
+      // a prompt abort needs the task itself to poll ctx.isCancelled() from
+      // its GDAL progress callback (#1560).
     },
     /*autoLoad=*/false,
     [this]( const QString &outPath, const Json::Value & ) {

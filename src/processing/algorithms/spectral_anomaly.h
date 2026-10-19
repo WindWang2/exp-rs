@@ -31,8 +31,10 @@ namespace SpectralAnomaly
     /// When @a skipNonFinite is set, pixels containing any invalid band value are
     /// skipped and do not contribute to the count or the sums. A band value is
     /// invalid when it is non-finite (NaN/Inf) or — when @a noDataBands is
-    /// provided and that band has declared NoData (@a hasNoDataBands) — within
-    /// tolerance of that band's declared NoData value, so the mean reflects valid pixels only.
+    /// provided and that band has declared NoData (@a hasNoDataBands) — exactly
+    /// equal to that band's declared NoData value (exact float equality, never
+    /// an epsilon: nodata_utils.h owns the predicate), so the mean reflects
+    /// valid pixels only.
     void accumulateMean( const float *pixels, size_t count, int bands,
                          BackgroundStats *stats, bool skipNonFinite = false,
                          const float *noDataBands = nullptr,

@@ -162,3 +162,45 @@ TEST_CASE( "fnv1a64Hex is deterministic and 16-char", "[labdoc]" )
   REQUIRE( a == fnv1a64Hex( "hello" ) );
   REQUIRE( a != fnv1a64Hex( "hellp" ) );
 }
+
+TEST_CASE( "Over-deep lab JSON is a typed parse failure, not a throw", "[labdoc][r14e]" )
+{
+  // #1607: jsoncpp signals a stackLimit violation by THROWING out of parse()
+  // (scientific_recipe.cpp documents the same shape), and the lab directory
+  // is a scan surface — the refusal must die here as a typed parse failure.
+  std::string deep;
+  for ( int i = 0; i < 400; ++i )
+    deep += "{\"a\":";
+  deep += "1";
+  for ( int i = 0; i < 400; ++i )
+    deep += "}";
+
+  LabDocument doc;
+  LabDocumentError err;
+  REQUIRE_FALSE( parseLabDocument( deep, "deep.lab.json", doc, &err ) );
+  REQUIRE( err.reason.find( "invalid JSON" ) != std::string::npos );
+}
+
+TEST_CASE( "Oversize lab document is refused before the read", "[labdoc][r14e]" )
+{
+  // #1648 (R14-E audit F5): the lab directory is a scan surface — a >16 MiB
+  // file beside the real labs is a typed refusal, not an unbounded rdbuf
+  // slurp into memory.
+  const fs::path dir = fs::temp_directory_path() / "labdoc_oversize";
+  fs::remove_all( dir );
+  fs::create_directories( dir );
+  const fs::path huge = dir / "huge.lab.json";
+  {
+    std::ofstream out( huge, std::ios::binary );
+    const std::string chunk( 1024 * 1024, 'x' );
+    for ( int i = 0; i < 17; ++i )
+      out << chunk;
+  }
+  REQUIRE( fs::file_size( huge ) > 16ull * 1024ull * 1024ull );
+
+  LabDocument doc;
+  LabDocumentError err;
+  REQUIRE_FALSE( loadLabDocumentFile( huge.string(), doc, &err ) );
+  REQUIRE( err.reason.find( "16 MiB" ) != std::string::npos );
+  fs::remove_all( dir );
+}

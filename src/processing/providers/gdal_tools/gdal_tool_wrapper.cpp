@@ -66,6 +66,95 @@ QVariantMap resolveDestinationParameters( const QgsProcessingAlgorithm *algorith
     }
     return resolved;
 }
+
+// Runs the external tool and, on failure, writes the detailed diagnostic
+// (start failure, timeout seconds, signal crash, exit code + tool output) to
+// \a errorMessage so the caller can carry it on the thrown exception instead
+// of discarding it (#1569). Same contract as GenericCliAlgorithm, where these
+// diagnostics travel on the QgsProcessingException.
+bool runGdalToolWithError( const QString &program, const QStringList &args,
+                           QgsProcessingFeedback *feedback,
+                           QByteArray *capturedStdout,
+                           QString *errorMessage )
+{
+    QString cmdLine = joinCommandLine( program, args );
+    if (feedback) feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
+    SICNU_LOG_INFO( SicnuLogTags::GDAL, cmdLine );
+
+    QProcess proc;
+    proc.setProcessChannelMode(QProcess::MergedChannels);
+    proc.start(program, args);
+
+    if (!proc.waitForStarted(5000)) {
+        QString err = QObject::tr("Failed to start tool: %1").arg(proc.errorString());
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+        if (errorMessage) *errorMessage = err;
+        return false;
+    }
+
+    // Watchdog + graceful cancel ladder (#618): terminate first, escalate to
+    // kill after a grace period; classify signal deaths as crashes.
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 timeoutMs = 30 * 60 * 1000;
+    while (proc.state() == QProcess::Running) {
+        if (feedback && feedback->isCanceled()) {
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            const QString err = QObject::tr("Tool execution canceled by user.");
+            feedback->reportError(err);
+            if (errorMessage) *errorMessage = err;
+            return false;
+        }
+        if (watchdog.elapsed() > timeoutMs) {
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            const QString err = QObject::tr("Tool timed out after %1 s and was terminated.")
+                                    .arg(timeoutMs / 1000);
+            if (feedback) feedback->reportError(err);
+            SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+            if (errorMessage) *errorMessage = err;
+            return false;
+        }
+        proc.waitForReadyRead(100);
+        QByteArray output = proc.readAllStandardOutput();
+        if (!output.isEmpty()) {
+            if (capturedStdout)
+                capturedStdout->append(output);
+            QString msg = QString::fromUtf8(output);
+            if (feedback) feedback->pushInfo(msg);
+            SICNU_LOG_INFO( SicnuLogTags::GDAL, msg );
+        }
+    }
+
+    QByteArray remaining = proc.readAllStandardOutput();
+    if (!remaining.isEmpty() && capturedStdout) {
+        capturedStdout->append(remaining);
+    }
+
+    if (proc.exitStatus() == QProcess::CrashExit) {
+        const QString err = QObject::tr("Tool crashed (killed by signal).");
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+        if (errorMessage) *errorMessage = err;
+        return false;
+    }
+
+    if (proc.exitCode() != 0) {
+        QString err = QObject::tr("Tool failed with exit code %1: %2")
+            .arg(proc.exitCode())
+            .arg(QString::fromUtf8(remaining));
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_WARN( SicnuLogTags::GDAL, err );
+        if (errorMessage) *errorMessage = err;
+        return false;
+    }
+
+    return true;
+}
 } // namespace
 
 QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
@@ -94,8 +183,14 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
 
     SICNU_LOG_INFO( SicnuLogTags::GDAL, QString( "Executing GDAL tool: %1" ).arg( toolName() ) );
     QByteArray capturedStdout;
-    if (!runExternalTool(program, args, feedback, &capturedStdout)) {
-        const QString err = QObject::tr("GDAL tool '%1' failed").arg(toolName());
+    QString toolError;
+    if (!runGdalToolWithError(program, args, feedback, &capturedStdout, &toolError)) {
+        // Carry the runner's diagnostic on the exception so GUI/CLI/Agent can
+        // recover the failure reason (exit code + tool output, crash, timeout)
+        // without digging through the log; matches GenericCliAlgorithm (#1569).
+        const QString err = toolError.isEmpty()
+            ? QObject::tr("GDAL tool '%1' failed").arg(toolName())
+            : QObject::tr("GDAL tool '%1' failed: %2").arg(toolName()).arg(toolError);
         SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
         throw QgsProcessingException(err);
     }
@@ -185,77 +280,7 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
                                        QgsProcessingFeedback *feedback,
                                        QByteArray *capturedStdout)
 {
-    QString cmdLine = joinCommandLine( program, args );
-    if (feedback) feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
-    SICNU_LOG_INFO( SicnuLogTags::GDAL, cmdLine );
-
-    QProcess proc;
-    proc.setProcessChannelMode(QProcess::MergedChannels);
-    proc.start(program, args);
-
-    if (!proc.waitForStarted(5000)) {
-        QString err = QObject::tr("Failed to start tool: %1").arg(proc.errorString());
-        if (feedback) feedback->reportError(err);
-        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
-        return false;
-    }
-
-    // Watchdog + graceful cancel ladder (#618): terminate first, escalate to
-    // kill after a grace period; classify signal deaths as crashes.
-    QElapsedTimer watchdog;
-    watchdog.start();
-    const qint64 timeoutMs = 30 * 60 * 1000;
-    while (proc.state() == QProcess::Running) {
-        if (feedback && feedback->isCanceled()) {
-            proc.terminate();
-            if (!proc.waitForFinished(5000))
-                proc.kill();
-            feedback->reportError(QObject::tr("Tool execution canceled by user."));
-            return false;
-        }
-        if (watchdog.elapsed() > timeoutMs) {
-            proc.terminate();
-            if (!proc.waitForFinished(5000))
-                proc.kill();
-            const QString err = QObject::tr("Tool timed out after %1 s and was terminated.")
-                                    .arg(timeoutMs / 1000);
-            if (feedback) feedback->reportError(err);
-            SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
-            return false;
-        }
-        proc.waitForReadyRead(100);
-        QByteArray output = proc.readAllStandardOutput();
-        if (!output.isEmpty()) {
-            if (capturedStdout)
-                capturedStdout->append(output);
-            QString msg = QString::fromUtf8(output);
-            if (feedback) feedback->pushInfo(msg);
-            SICNU_LOG_INFO( SicnuLogTags::GDAL, msg );
-        }
-    }
-
-    QByteArray remaining = proc.readAllStandardOutput();
-    if (!remaining.isEmpty() && capturedStdout) {
-        capturedStdout->append(remaining);
-    }
-
-    if (proc.exitStatus() == QProcess::CrashExit) {
-        const QString err = QObject::tr("Tool crashed (killed by signal).");
-        if (feedback) feedback->reportError(err);
-        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
-        return false;
-    }
-
-    if (proc.exitCode() != 0) {
-        QString err = QObject::tr("Tool failed with exit code %1: %2")
-            .arg(proc.exitCode())
-            .arg(QString::fromUtf8(remaining));
-        if (feedback) feedback->reportError(err);
-        SICNU_LOG_WARN( SicnuLogTags::GDAL, err );
-        return false;
-    }
-
-    return true;
+    return runGdalToolWithError( program, args, feedback, capturedStdout, nullptr );
 }
 
 QString GdalToolWrapper::rasterLayerSource(const QVariant &var)

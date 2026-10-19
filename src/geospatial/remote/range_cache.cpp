@@ -1974,7 +1974,20 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else
         {
-          entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
+          try
+          {
+            entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
+          }
+          catch ( const GeoError &error )
+          {
+            if ( error.code() != ErrorCode::PermissionDenied )
+              throw;
+            // Egress policy refused the probe (a redirect left the allowed
+            // range): report it the way this open's first-hop check does
+            // instead of letting the throw escape into VSIFOpenL.
+            CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: %s", error.what() );
+            return nullptr;
+          }
           if ( entry == nullptr )
           {
             // Missing (ENOENT) or unreachable: a quiet null like any local

@@ -13,16 +13,21 @@ void ErrorCodeScanner::scanEnum( std::string_view headerSrc,
                                  const std::string &enumName,
                                  ErrorCodeReport &out ) const
 {
-    // Enums have no parameter list: locate `enum class Name` then the body
-    // brace directly.
-    const std::string token = "enum class " + enumName;
-    const size_t pos = headerSrc.find( token );
-    if ( pos == std::string_view::npos )
+    // Enums have no parameter list: locate `enum class Name` at a code
+    // position (a commented-out or quoted mention must not shadow the real
+    // declaration), then the next code '{' opens the body. Both hops run
+    // through text_scan so a brace inside a comment cannot desynchronize the
+    // extraction.
+    const std::string reDecl = "enum\\s+class\\s+" + enumName + "\\b";
+    const auto decls =
+        findMatchesWithPos( headerSrc, { 0, headerSrc.size() }, reDecl );
+    if ( decls.empty() )
         return;
-    const size_t brace = headerSrc.find( '{', pos );
-    if ( brace == std::string_view::npos )
+    const auto braces = findMatchesWithPos(
+        headerSrc, { decls.front().pos, headerSrc.size() }, "\\{" );
+    if ( braces.empty() )
         return;
-    const Span body = matchBrace( headerSrc, brace );
+    const Span body = matchBrace( headerSrc, braces.front().pos );
     if ( !body.valid() )
         return;
     const std::string_view bodyView = headerSrc.substr(
@@ -56,7 +61,14 @@ void ErrorCodeScanner::scanToStringSwitch( std::string_view src,
     std::regex re( reStr );
     for ( auto it = std::sregex_iterator( text.begin(), text.end(), re );
           it != std::sregex_iterator(); ++it )
+    {
+        // text_scan discipline: a case label that starts inside a comment or
+        // literal is quoted documentation, never a real switch arm.
+        if ( insideLiteralOrComment(
+                 src, static_cast<size_t>( it->position() ) ) )
+            continue;
         out.caseMap[( *it )[1].str()] = ( *it )[2].str();
+    }
 }
 
 void ErrorCodeScanner::scanHarnessCodes( std::string_view headerSrc,
@@ -67,7 +79,13 @@ void ErrorCodeScanner::scanHarnessCodes( std::string_view headerSrc,
     const std::string text( headerSrc );
     for ( auto it = std::sregex_iterator( text.begin(), text.end(), re );
           it != std::sregex_iterator(); ++it )
+    {
+        // text_scan discipline: skip a constant quoted inside a comment.
+        if ( insideLiteralOrComment(
+                 headerSrc, static_cast<size_t>( it->position() ) ) )
+            continue;
         out.harnessCodes[( *it )[1].str()] = ( *it )[2].str();
+    }
 }
 
 void ErrorCodeScanner::scanHarnessErrorTable( std::string_view src,

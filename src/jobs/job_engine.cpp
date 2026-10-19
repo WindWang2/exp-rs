@@ -978,7 +978,58 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     notify( copy );
   } );
 
-  auto finishSuccess = [&]( Json::Value result ) {
+  // #1640: the four finish* paths below each carried a verbatim copy of the
+  // same locked terminal transition (m_jobs lookup + early-out → cancel
+  // decision → state/status/error/log → finishJobLocked → copy → notify), so a
+  // change to the cancel semantics or to the finish bookkeeping had to be
+  // replayed by hand in all four. Describe the outcome as data and apply it in
+  // one place instead.
+  struct TerminalOutcome
+  {
+    bool cancelled = false;             ///< Cancelled wins over `state`
+    JobState state = JobState::Failed;  ///< terminal state when not cancelled
+    std::string statusMessage;
+    std::optional<std::string> error;   ///< nullopt keeps the record's error
+    JobLogLevel logLevel = JobLogLevel::Error;
+    std::string logText;
+    bool complete = false;              ///< success path reports progress == 1.0
+    bool hasResult = false;             ///< only the success path carries a result
+    Json::Value result;
+  };
+
+  /// Cancel decision in one place (#1640): an operator-reported Cancelled code,
+  /// or a flag armed by cancel()/shutdown (which may race ahead of the worker).
+  auto wasCancelled = [&]( bool operatorReportedCancel = false ) {
+    return operatorReportedCancel || ( cancelFlag && cancelFlag->load() );
+  };
+
+  /// Outcome of a failed / cancelled run (#1640): state, status message, error
+  /// and log line all follow from the cancel decision, so they are derived once
+  /// here instead of being spelled out per finish* path. `cancelLogText` is
+  /// passed explicitly because the unknown-exception path logs its message
+  /// verbatim while the others prefix it with "Cancelled: ".
+  auto failureOutcome = []( bool cancelled, const std::string &failedMessage,
+                            const std::string &cancelMessage,
+                            const std::string &cancelLogText ) {
+    TerminalOutcome outcome;
+    if ( cancelled )
+    {
+      outcome.cancelled = true;
+      outcome.statusMessage = "Cancelled";
+      outcome.error = cancelMessage;
+      outcome.logLevel = JobLogLevel::Info;
+      outcome.logText = cancelLogText;
+      return outcome;
+    }
+    outcome.state = JobState::Failed;
+    outcome.statusMessage = "Failed";
+    outcome.error = failedMessage;
+    outcome.logText = failedMessage;
+    return outcome;
+  };
+
+  /// The single locked terminal transition shared by every finish* path.
+  auto finishTerminal = [&]( TerminalOutcome outcome ) {
     JobRecord copy;
     {
       std::lock_guard<std::mutex> lock( m_mutex );
@@ -986,112 +1037,57 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       if ( it == m_jobs.end() )
         return;
       JobRecord &rec = it->second;
-      rec.result = std::move( result );
-      if ( cancelFlag && cancelFlag->load() )
-      {
-        rec.state = JobState::Cancelled;
-        rec.statusMessage = "Cancelled";
-        appendLog( rec, JobLogLevel::Info, "Cancelled" );
-      }
-      else
-      {
-        rec.state = JobState::Succeeded;
+      rec.state = outcome.cancelled ? JobState::Cancelled : outcome.state;
+      rec.statusMessage = std::move( outcome.statusMessage );
+      if ( outcome.error )
+        rec.error = std::move( *outcome.error );
+      if ( outcome.complete )
         rec.progress = 1.0;
-        rec.statusMessage = "Succeeded";
-        appendLog( rec, JobLogLevel::Info, "Succeeded" );
-      }
+      if ( outcome.hasResult )
+        rec.result = std::move( outcome.result );
+      appendLog( rec, outcome.logLevel, outcome.logText );
       finishJobLocked( rec, wasExclusive );
       copy = rec;
     }
     notify( copy );
+  };
+
+  auto finishSuccess = [&]( Json::Value result ) {
+    if ( wasCancelled() )
+    {
+      finishTerminal( { .cancelled = true,
+                        .statusMessage = "Cancelled",
+                        .logLevel = JobLogLevel::Info,
+                        .logText = "Cancelled" } );
+      return;
+    }
+    finishTerminal( { .state = JobState::Succeeded,
+                      .statusMessage = "Succeeded",
+                      .logLevel = JobLogLevel::Info,
+                      .logText = "Succeeded",
+                      .complete = true,
+                      .hasResult = true,
+                      .result = std::move( result ) } );
   };
 
   auto finishError = [&]( const sicnu::operators::RSOperatorError &e ) {
-    JobRecord copy;
-    {
-      std::lock_guard<std::mutex> lock( m_mutex );
-      auto it = m_jobs.find( jobId );
-      if ( it == m_jobs.end() )
-        return;
-      JobRecord &rec = it->second;
-      const bool cancelled = ( e.code() == sicnu::operators::ErrorCode::Cancelled )
-                             || ( cancelFlag && cancelFlag->load() );
-      if ( cancelled )
-      {
-        rec.state = JobState::Cancelled;
-        rec.statusMessage = "Cancelled";
-        rec.error = e.message();
-        appendLog( rec, JobLogLevel::Info, "Cancelled: " + e.message() );
-      }
-      else
-      {
-        rec.state = JobState::Failed;
-        rec.statusMessage = "Failed";
-        rec.error = e.message();
-        appendLog( rec, JobLogLevel::Error, e.message() );
-      }
-      finishJobLocked( rec, wasExclusive );
-      copy = rec;
-    }
-    notify( copy );
+    const std::string &message = e.message();
+    finishTerminal( failureOutcome(
+      wasCancelled( e.code() == sicnu::operators::ErrorCode::Cancelled ),
+      message, message, "Cancelled: " + message ) );
   };
 
   auto finishStdException = [&]( const std::exception &e ) {
-    JobRecord copy;
-    {
-      std::lock_guard<std::mutex> lock( m_mutex );
-      auto it = m_jobs.find( jobId );
-      if ( it == m_jobs.end() )
-        return;
-      JobRecord &rec = it->second;
-      const bool cancelled = ( cancelFlag && cancelFlag->load() );
-      if ( cancelled )
-      {
-        rec.state = JobState::Cancelled;
-        rec.statusMessage = "Cancelled";
-        rec.error = e.what();
-        appendLog( rec, JobLogLevel::Info, "Cancelled: " + std::string( e.what() ) );
-      }
-      else
-      {
-        rec.state = JobState::Failed;
-        rec.statusMessage = "Failed";
-        rec.error = e.what();
-        appendLog( rec, JobLogLevel::Error, e.what() );
-      }
-      finishJobLocked( rec, wasExclusive );
-      copy = rec;
-    }
-    notify( copy );
+    const std::string message = e.what();
+    finishTerminal(
+      failureOutcome( wasCancelled(), message, message, "Cancelled: " + message ) );
   };
 
   auto finishUnknownException = [&]() {
-    JobRecord copy;
-    {
-      std::lock_guard<std::mutex> lock( m_mutex );
-      auto it = m_jobs.find( jobId );
-      if ( it == m_jobs.end() )
-        return;
-      JobRecord &rec = it->second;
-      const bool cancelled = ( cancelFlag && cancelFlag->load() );
-      if ( cancelled )
-      {
-        rec.state = JobState::Cancelled;
-        rec.statusMessage = "Cancelled";
-        rec.error = "Unknown exception occurred during cancellation";
-        appendLog( rec, JobLogLevel::Info, rec.error );
-      }
-      else
-      {
-        rec.state = JobState::Failed;
-        rec.statusMessage = "Failed";
-        rec.error = "Unknown non-std exception";
-        appendLog( rec, JobLogLevel::Error, rec.error );
-      }
-      finishJobLocked( rec, wasExclusive );
-      copy = rec;
-    }
-    notify( copy );
+    const std::string cancelMessage = "Unknown exception occurred during cancellation";
+    finishTerminal( failureOutcome( wasCancelled(),
+                                    "Unknown non-std exception",
+                                    cancelMessage, cancelMessage ) );
   };
 
   try

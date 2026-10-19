@@ -60,6 +60,18 @@ const char *counterName( Counter counter )
     }
     return "unknown";
 }
+
+// Write cursor of the fixed-capacity event ring held in
+// ExecutionTelemetry::m_events. The telemetry object is a process-wide
+// singleton (instance()), so the cursor lives here rather than as a member.
+// Invariant: the cursor is non-zero only while m_events.size() ==
+// kEventCapacity, and slot `cursor` then holds the oldest event; clearEvents()
+// resets both.
+size_t &eventRingCursor()
+{
+    static size_t cursor = 0;
+    return cursor;
+}
 } // namespace
 
 ExecutionTelemetry &ExecutionTelemetry::instance()
@@ -85,16 +97,23 @@ void ExecutionTelemetry::record( const TelemetryEvent &event )
     if ( !m_enabled.load( std::memory_order_relaxed ) )
         return;
     std::lock_guard<std::mutex> lock( m_mutex );
-    if ( m_events.size() >= kEventCapacity )
-    {
-        m_events.erase( m_events.begin(),
-                        m_events.begin() + ( m_events.size() / 4 ) ); // drop oldest quarter
-        m_overflowWarned.store( true, std::memory_order_relaxed );
-    }
     TelemetryEvent bounded = event;
     if ( bounded.detail.size() > 512 )
         bounded.detail.resize( 512 );
-    m_events.push_back( std::move( bounded ) );
+    if ( m_events.size() < kEventCapacity )
+    {
+        m_events.push_back( std::move( bounded ) );
+        return;
+    }
+    // Ring full: overwrite the oldest slot in place. One slot write per record
+    // — evicting a quarter of the vector here instead would move O(capacity)
+    // events on every post-capacity record, quadratic over a run.
+    size_t &cursor = eventRingCursor();
+    if ( cursor >= kEventCapacity )
+        cursor = 0;
+    m_events[cursor] = std::move( bounded );
+    ++cursor;
+    m_overflowWarned.store( true, std::memory_order_relaxed );
 }
 
 void ExecutionTelemetry::recordSimple( EventKind kind, long taskId, int64_t valueNanos,
@@ -134,7 +153,18 @@ std::map<std::string, uint64_t> ExecutionTelemetry::counters() const
 std::vector<TelemetryEvent> ExecutionTelemetry::events() const
 {
     std::lock_guard<std::mutex> lock( m_mutex );
-    return m_events;
+    const size_t cursor = eventRingCursor();
+    if ( cursor == 0 || m_events.size() < kEventCapacity )
+        return m_events; // ring never wrapped: slots already run oldest-first
+    // Ring wrapped: slot `cursor` holds the oldest event, so the log reads
+    // from there to the end and continues from the front.
+    std::vector<TelemetryEvent> out;
+    out.reserve( m_events.size() );
+    for ( size_t i = cursor; i < m_events.size(); ++i )
+        out.push_back( m_events[i] );
+    for ( size_t i = 0; i < cursor; ++i )
+        out.push_back( m_events[i] );
+    return out;
 }
 
 std::string ExecutionTelemetry::dumpJson() const
@@ -204,6 +234,7 @@ void ExecutionTelemetry::clearEvents()
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     m_events.clear();
+    eventRingCursor() = 0;
     m_overflowWarned.store( false, std::memory_order_relaxed );
 }
 

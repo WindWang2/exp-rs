@@ -2131,7 +2131,11 @@
           "levels" : 
           {
             "description" : "Overview levels (powers of two, e.g. [2,4,8,16])",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "integer"
+            },
+            "type" : "array"
           },
           "resampling" : 
           {
@@ -2215,7 +2219,11 @@
           "bounds" : 
           {
             "description" : "Spatial filter [minX,minY,maxX,maxY] (JSON array)",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "number"
+            },
+            "type" : "array"
           },
           "catalog" : 
           {
@@ -2277,12 +2285,20 @@
           "bounds" : 
           {
             "description" : "Clip extent [minX,minY,maxX,maxY] \u2014 mandatory",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "number"
+            },
+            "type" : "array"
           },
           "creationOptions" : 
           {
             "description" : "Driver creation options",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "input" : 
           {
@@ -2324,7 +2340,11 @@
           "creationOptions" : 
           {
             "description" : "Driver creation options",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "driver" : 
           {
@@ -2522,7 +2542,11 @@
           "creationOptions" : 
           {
             "description" : "Extra COG creation options",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "deflateLevel" : 
           {
@@ -2596,7 +2620,11 @@
           "patches" : 
           {
             "description" : "Array of {band, field, value} (band 0 = dataset stamp)",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           }
         },
         "required" : 
@@ -2714,12 +2742,20 @@
           "bands" : 
           {
             "description" : "1-based band indices to keep",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "creationOptions" : 
           {
             "description" : "Driver creation options (NAME=VALUE array)",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "driver" : 
           {
@@ -2794,7 +2830,11 @@
           "clipBounds" : 
           {
             "description" : "Clip box [minX,minY,maxX,maxY] in layer CRS",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "number"
+            },
+            "type" : "array"
           },
           "driver" : 
           {
@@ -2882,12 +2922,20 @@
           "bounds" : 
           {
             "description" : "Target extent [minX,minY,maxX,maxY] in target CRS",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "number"
+            },
+            "type" : "array"
           },
           "creationOptions" : 
           {
             "description" : "Driver creation options",
-            "type" : "string"
+            "items" : 
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "input" : 
           {
@@ -17889,10 +17937,6 @@
             "type" : "array"
           }
         },
-        "required" : 
-        [
-          "layer_id"
-        ],
         "type" : "object"
       },
       "name" : "spatial:spectral_inspect"
@@ -18032,10 +18076,6 @@
             "type" : "array"
           }
         },
-        "required" : 
-        [
-          "layer_id"
-        ],
         "type" : "object"
       },
       "name" : "spatial:validate_boa_physics"

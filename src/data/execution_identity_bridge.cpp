@@ -155,11 +155,13 @@ QString cachedRemoteIdentity( const QString &canonicalPath )
   if ( canonicalPath.isEmpty() )
     return QString();
   SessionEntry entry;
+  bool known = false;
   {
     std::lock_guard<std::mutex> lock( sessionCache().mutex );
-    if ( !sessionCache().find( canonicalPath, &entry ) )
-      return probeAndStore( canonicalPath ); // first sight: probe unlocked
+    known = sessionCache().find( canonicalPath, &entry );
   }
+  if ( !known )
+    return probeAndStore( canonicalPath ); // first sight: probe unlocked
   const auto age = std::chrono::steady_clock::now() - entry.lastChecked;
   if ( age < revalidateTtl() )
     return entry.token; // recent knowledge: no network under any lock

@@ -57,17 +57,8 @@ void VaCursorProbe::request( const QgsPointXY &point, const QString &crsWkt, int
         ++m_stats.coalesced;
     m_pending = PendingPoint{ true, point.x(), point.y(), crsWkt, band };
     ++m_stats.requests;
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    const qint64 sinceStart = m_lastStartMs == 0 ? kDwellThrottleMs : now - m_lastStartMs;
     if ( m_busy.load( std::memory_order_acquire ) )
         return; // completion path drains the pending point
-    if ( sinceStart < kDwellThrottleMs )
-    {
-        // Re-arm when the dwell window closes.
-        QTimer::singleShot( kDwellThrottleMs - sinceStart, this,
-                            [this] { startPending(); } );
-        return;
-    }
     startPending();
 }
 
@@ -77,6 +68,19 @@ void VaCursorProbe::startPending()
         return;
     if ( m_busy.load( std::memory_order_acquire ) )
         return; // a newer start will drain it on completion
+    // Dwell throttle is enforced HERE, not only in request(): the completion
+    // callback drains the pending point through this very function, so a
+    // busy request() never even reaches a throttle check and a fast job
+    // would otherwise chain straight into the next 1×1 read.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 sinceStart = m_lastStartMs == 0 ? kDwellThrottleMs : now - m_lastStartMs;
+    if ( sinceStart < kDwellThrottleMs )
+    {
+        // Re-arm when the dwell window closes.
+        QTimer::singleShot( kDwellThrottleMs - sinceStart, this,
+                            [this] { startPending(); } );
+        return;
+    }
     const PendingPoint pending = m_pending;
     m_pending.valid = false;
 
