@@ -45,3 +45,17 @@
    band=0 静默改 1（P2）；SAR 地形对 DEM 仅查 dims（P2）；SAR terrain 无取消钩子（P2）等。
 
 审计由 3 个独立只读 Explore 子代理完成（未参与后续实现，可用作 R1 reviewer 候选隔离基础）。
+
+## 基线漂移记录（交付前 LIVE 复查，2026-10-19 深夜）
+
+- 交付时 `git fetch --prune` 后 `origin/master` = `e12a9afbc`（较本轨基点 2d2881631
+  前进 145 提交：含 r18-d、#1662 fix/full-review-sweep 等）。
+- 交集核查：本轨 17 个改动文件与新 master 改动交集仅 2 个——
+  `rs_mosaic_operator.cpp`（试验合并**自动合并成功**，双方 hunk 不相交，isfinite 修复存活）
+  与 `.gitignore`（双方 EOF 追加块 → **唯一冲突点**，一行级琐碎冲突，与 R2 P3-2 预测一致）。
+- 新 master 的 6942ed100（Inf 治理 GREEN wave）覆盖的是**不同文件集**
+  （simple_segmenter/segment_features/pixel_ignore/fast_6s/sieve/kmeans RNG），与本轨
+  互补无重复；其 kmeans RNG per-fit 重播种正是本轨 WP8b 缓办项——已由该提交处理，
+  缓办决策与实时查重一致。
+- 处置：按任务书 §8.3，PR 记 needs-rebase（.gitignore 一处），不假装零冲突；
+  未做 rebase+全量重测（避免在上下文尾部半途而废），交由维护者裁定。
