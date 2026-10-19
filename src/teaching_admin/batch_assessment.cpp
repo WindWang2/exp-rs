@@ -206,6 +206,7 @@ QJsonObject BatchRowResult::toJson() const
         { QStringLiteral( "grader_digest" ), graderDigest },
         { QStringLiteral( "top_deduction" ), topDeduction },
         { QStringLiteral( "unavailable_reason" ), unavailableReason },
+        { QStringLiteral( "resumed" ), resumed },
     } );
 }
 
@@ -226,6 +227,7 @@ BatchRowResult BatchRowResult::fromJson( const QJsonObject &o )
     row.graderDigest = o.value( QStringLiteral( "grader_digest" ) ).toString();
     row.topDeduction = o.value( QStringLiteral( "top_deduction" ) ).toString();
     row.unavailableReason = o.value( QStringLiteral( "unavailable_reason" ) ).toString();
+    row.resumed = o.value( QStringLiteral( "resumed" ) ).toBool( false );
     return row;
 }
 
@@ -567,7 +569,12 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
             const QString stamp = artifactStamp( items[i].path );
             if ( stamp.isEmpty() || stamp != it.value().artifactStamp )
                 continue;
-            rowSlot[static_cast<std::size_t>( i )] = it.value().row;
+            BatchRowResult adopted = it.value().row;
+            // R18-E D3: the published row says it was adopted from a
+            // durable checkpoint, not graded by this run — adoption is the
+            // durable-resume contract, but it must be visible to consumers.
+            adopted.resumed = true;
+            rowSlot[static_cast<std::size_t>( i )] = adopted;
             stampSlot[static_cast<std::size_t>( i )] = stamp;
             filled[static_cast<std::size_t>( i )] = true;
             report.resumed += 1;
@@ -604,6 +611,14 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 continue; // adopted from the checkpoint — do not re-grade
             int newlyDone = 0;
             BatchRowResult row;
+            // Artifact identity BEFORE the callable (R18-E D4): the stamp
+            // used to be taken only after grading, so an artifact swapped
+            // DURING the call bound the old verdict to the new bytes and a
+            // restart adopted the stale grade (#1448/#1525's class,
+            // reopened through a race window). A changed stamp demotes the
+            // row to typed unavailable and checkpoints an EMPTY stamp, so
+            // resume re-grades instead of adopting.
+            const QString preStamp = artifactStamp( items[i].path );
             try
             {
                 row = grade( items[i] );
@@ -616,6 +631,25 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 row.verdict = QStringLiteral( "error" );
                 row.message = QStringLiteral( "grader threw; isolated" );
                 row.artifactPath = items[i].path;
+            }
+            QString stamp = artifactStamp( items[i].path );
+            if ( !preStamp.isEmpty() && stamp != preStamp )
+            {
+                row.studentId = items[i].studentId;
+                row.labId = cfg.labId;
+                row.status = QStringLiteral( "unavailable" );
+                row.verdict = QStringLiteral( "unavailable" );
+                row.message = QStringLiteral(
+                  "artifact changed during grading — not graded; restart re-grades" );
+                row.artifactPath = items[i].path;
+                if ( row.rubricVersion.isEmpty() )
+                    row.rubricVersion = cfg.rubricVersion;
+                if ( row.labVersion.isEmpty() )
+                    row.labVersion = cfg.labVersion;
+                if ( row.softwareVersion.isEmpty() )
+                    row.softwareVersion = cfg.softwareVersion;
+                row.missingEvidence = false;
+                stamp.clear(); // empty stamps are never adopted (#1448)
             }
             // Identity authority (R16-C/T06 WP4): discovery owns the
             // (student, artifact) pair. A callable answering with a
@@ -638,9 +672,6 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 row.softwareVersion = cfg.softwareVersion;
             if ( row.artifactPath.isEmpty() )
                 row.artifactPath = items[i].path;
-            // Stamp after the callable so the checkpoint records the
-            // artifact as it was read, not as it was discovered (#1448).
-            const QString stamp = artifactStamp( items[i].path );
             {
                 // Publish under the checkpoint mutex: checkpointAll() reads
                 // ALL slots while holding it, so the writers must take it

@@ -65,6 +65,9 @@ struct BatchRowResult
     /// (vocabulary of src/cli/lab_batch_runner.h); never set for
     /// missing-evidence rows.
     QString unavailableReason;
+    /// True when the row was adopted from a durable checkpoint rather than
+    /// graded by the publishing run (R18-E D3 — adoption is visible).
+    bool resumed = false;
 
     QJsonObject toJson() const;
     /// Rebuilds a row from toJson()'s output (checkpoint round-trip).
