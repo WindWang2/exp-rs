@@ -6,6 +6,8 @@
 #include "recipes/recipe_compiler.h"
 #include "recipes/scientific_recipe.h"
 
+#include <filesystem>
+#include <fstream>
 #include <set>
 
 using namespace sicnu::recipes;
@@ -293,4 +295,43 @@ TEST_CASE( "params stay verbatim — data/ and outputs/ paths unresolved", "[com
   const Json::Value &params = result.recipe["stages"][2]["params"];
   REQUIRE( params["input"].asString() == "data/samples/landsat_sample.tif" );
   REQUIRE( params["output"].asString() == "outputs/lab02_ndvi.tif" );
+}
+
+TEST_CASE( "Sidecar catalog skips oversize and over-deep documents", "[compiler][r14e]" )
+{
+  // #1607 / #1648: the sidecar directories are a scan surface — jsoncpp
+  // THROWS on a stackLimit violation and an unbounded read would slurp any
+  // size, so both shapes must be skipped like an unparseable sidecar instead
+  // of aborting the scan.
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "sidecar_refusals_r14e";
+  fs::remove_all( dir );
+  fs::create_directories( dir );
+  {
+    std::ofstream out( dir / "ok.json", std::ios::binary );
+    out << R"({"id":"rs:spectral_index"})";
+  }
+  {
+    std::string deep;
+    for ( int i = 0; i < 400; ++i )
+      deep += "{\"a\":";
+    deep += "1";
+    for ( int i = 0; i < 400; ++i )
+      deep += "}";
+    std::ofstream out( dir / "deep.json", std::ios::binary );
+    out << deep;
+  }
+  {
+    std::ofstream out( dir / "huge.json", std::ios::binary );
+    const std::string chunk( 1024 * 1024, 'x' );
+    for ( int i = 0; i < 17; ++i )
+      out << chunk;
+  }
+
+  const SidecarOperatorCatalog ops( std::vector<std::string>{ dir.string() } );
+  const auto ids = ops.operatorIds();
+  REQUIRE( ids.size() == 1 );
+  REQUIRE( ids[0] == "rs:spectral_index" );
+  REQUIRE( ops.hasOperator( "rs:spectral_index" ) );
+  fs::remove_all( dir );
 }
