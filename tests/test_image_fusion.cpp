@@ -1482,3 +1482,263 @@ TEST_CASE( "ImageFusion still accepts a both-unreferenced synthetic pair [r15a][
         CHECK( out2[static_cast<size_t>( i )] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
     }
 }
+
+// ===========================================================================
+// R18-A WP2: ±Inf inputs are washed at the fusion read boundary like any
+// other invalid sample (band_math.cpp and the atmospheric streaming paths
+// already treat !isfinite as void). Before this contract the read boundary
+// washed only declared finite sentinels, so an Inf pan pixel leaked into the
+// fused product (brovey: ±Inf output) and an Inf neighbour poisoned HPF box
+// means (ms − Inf = −Inf two pixels away from the bad sample).
+// ===========================================================================
+
+TEST_CASE( "Streaming brovey washes an Inf pan pixel to NoData instead of emitting Inf [r18a][wp2]",
+           "[fusion][gdal][r18a]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_inf.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_inf.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_inf.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 1, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 1, 2, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> pan = { inf, 10.0f };
+    std::vector<float> ms1 = { 4.0f, 4.0f };
+    std::vector<float> ms2 = { 2.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           pan.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           ms1.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 1,
+                           ms2.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> out1( 2 );
+    REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
+    CHECK( std::isnan( out1[0] ) ); // Inf pan pixel is a void, never ±Inf data
+    CHECK( !std::isinf( out1[0] ) );
+    // The clean pixel still fuses: (4/6)*10.
+    CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+}
+
+TEST_CASE( "Streaming hpf does not poison neighbours of an Inf pan pixel [r18a][wp2]",
+           "[fusion][gdal][r18a]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_inf_hpf.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_inf_hpf.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_inf_hpf.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    // 3x1 scene, pan centre Inf: the HPF box mean around it used to become
+    // Inf, so the centre's NEIGHBOUR came out as ms − Inf = −Inf.
+    GDALDatasetH panDs = createOutputTiff( panPath, 3, 1, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 3, 1, 1, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> pan = { 10.0f, inf, 10.0f };
+    std::vector<float> ms = { 100.0f, 100.0f, 100.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 3, 1,
+                           pan.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 3, 1,
+                           ms.data(), 3, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "hpf" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> out1( 3 );
+    REQUIRE( out.readBandData( 1, out1.data(), 3, 1 ) );
+    for ( int i = 0; i < 3; ++i )
+    {
+        // Every pixel is finite or NaN — an Inf sample never propagates as
+        // ±Inf data into neighbours.
+        CHECK( !std::isinf( out1[i] ) );
+    }
+}
+
+TEST_CASE( "Streaming brovey washes an Inf MS pixel to NoData in every band [r18a][wp2]",
+           "[fusion][gdal][r18a]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_msinf.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_msinf.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_msinf.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 1, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 1, 2, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> pan = { 10.0f, 10.0f };
+    std::vector<float> ms1 = { inf, 4.0f };
+    std::vector<float> ms2 = { 2.0f, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           pan.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           ms1.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 1,
+                           ms2.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> out1( 2 ), out2( 2 );
+    REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
+    REQUIRE( out.readBandData( 2, out2.data(), 2, 1 ) );
+    // A partially-invalid pixel is void in every band (#700 semantics applied
+    // to Inf): never a band-1-only Inf product.
+    CHECK( std::isnan( out1[0] ) );
+    CHECK( std::isnan( out2[0] ) );
+    CHECK( !std::isinf( out1[0] ) );
+    CHECK( !std::isinf( out2[0] ) );
+    CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+}
+
+// ===========================================================================
+// R18-A WP5: linearWeighted input guards. Every sibling kernel (brovey,
+// pcaFusion, gramSchmidt) validates its band pointers; linearWeighted used to
+// dereference msBands[b] for b < nBands with no null/size check (QVector OOB
+// is UB), and clamped the per-band ms weight to [0,1] while letting an
+// out-of-range panWeight pass through unclamped — an asymmetric contract.
+// ===========================================================================
+
+TEST_CASE( "Linear fusion returns empty on a null band pointer instead of UB [r18a][wp5]",
+           "[fusion][r18a]" )
+{
+    constexpr int W = 2, H = 1;
+    std::vector<float> b1 = { 1.0f, 2.0f };
+    std::vector<float> pan = { 10.0f, 20.0f };
+    QVector<const float *> ms = { b1.data(), nullptr };
+
+    const auto result = ImageFusion::linearWeighted( ms, 2, pan.data(), W, H, NODATA,
+                                                     {}, 0.5f );
+    CHECK( result.isEmpty() );
+}
+
+TEST_CASE( "Linear fusion returns empty when nBands exceeds the msBands list [r18a][wp5]",
+           "[fusion][r18a]" )
+{
+    constexpr int W = 2, H = 1;
+    std::vector<float> b1 = { 1.0f, 2.0f };
+    std::vector<float> pan = { 10.0f, 20.0f };
+    QVector<const float *> ms = { b1.data() }; // one band handed to a 2-band call
+
+    const auto result = ImageFusion::linearWeighted( ms, 2, pan.data(), W, H, NODATA,
+                                                     {}, 0.5f );
+    CHECK( result.isEmpty() );
+}
+
+TEST_CASE( "Linear fusion clamps an out-of-range panWeight like the ms weights [r18a][wp5]",
+           "[fusion][r18a]" )
+{
+    constexpr int W = 2, H = 1;
+    std::vector<float> b1 = { 1.0f, 2.0f };
+    std::vector<float> pan = { 10.0f, 20.0f };
+    QVector<const float *> ms = { b1.data() };
+
+    // panWeight = 1.5 used to flow into out = msW*ms + 1.5*pan unclamped
+    // while msW was clamped to [0,1]. Clamp both to the same domain.
+    auto result = ImageFusion::linearWeighted( ms, 1, pan.data(), W, H, NODATA,
+                                               {}, 1.5f );
+    REQUIRE( result.size() == 1 );
+    // Default ms weight = 1 - clamp(1.5) = 0 -> output tracks the pan only.
+    CHECK( result[0][0] == Approx( 10.0f ).margin( 1e-4 ) );
+    CHECK( result[0][1] == Approx( 20.0f ).margin( 1e-4 ) );
+
+    auto resultNeg = ImageFusion::linearWeighted( ms, 1, pan.data(), W, H, NODATA,
+                                                  {}, -0.5f );
+    REQUIRE( resultNeg.size() == 1 );
+    // Default ms weight = 1 - clamp(-0.5) = 1 -> output tracks the ms only.
+    CHECK( resultNeg[0][0] == Approx( 1.0f ).margin( 1e-4 ) );
+    CHECK( resultNeg[0][1] == Approx( 2.0f ).margin( 1e-4 ) );
+}
+
+// ===========================================================================
+// R18-A WP6: distinguishable failure states. The streaming PCA path returned
+// false with an EMPTY error string when the scene had zero valid pixels —
+// callers could not tell "bad input" from anything else (Oracle-D: a
+// recognizable state, never a silent pseudo-success).
+// ===========================================================================
+
+TEST_CASE( "Streaming PCA fusion reports why an all-NoData scene fails [r18a][wp6]",
+           "[fusion][gdal][r18a]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_allnd.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_allnd.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_allnd.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 2, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 2, 2, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    const std::vector<float> allNd( 4, NODATA );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( allNd.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( panDs, 1 ), NODATA ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( allNd.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 2,
+                           const_cast<float *>( allNd.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 1 ), NODATA ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 2 ), NODATA ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "pca" );
+    QString error;
+    REQUIRE_FALSE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    CHECK( !error.isEmpty() ); // the refusal carries a reason
+    CHECK( !QFile::exists( outputPath ) ); // no partial product staged
+}
