@@ -571,6 +571,23 @@ ReplayValidation validateReplay( const AgentCase &caseValue, const AgentTrace &t
 	{
 		const TraceStep &step = trace.steps[i];
 		const std::string where = "steps[" + std::to_string( i ) + "]";
+
+		// Usage is accounted for every step the agent executed, including
+		// steps on tools outside the case allow-list (#1630): a rogue call
+		// still consumed budget, and skipping its counts made the budget
+		// check and the reported usage optimistic on exactly the traces
+		// that already carry a scope violation.
+		validation.usage.toolCalls++;
+		validation.usage.tokens += step.tokens;
+
+		// A retry is a post-failure repeat of an identical (tool, input).
+		if ( i > 0 )
+		{
+			const TraceStep &previous = trace.steps[i - 1];
+			if ( !previous.success && step.tool == previous.tool && deterministicSerialize( step.input ) == deterministicSerialize( previous.input ) )
+				validation.usage.retries++;
+		}
+
 		if ( std::find( caseValue.allowedTools.begin(), caseValue.allowedTools.end(), step.tool ) == caseValue.allowedTools.end() )
 		{
 			ReplayViolation violation;
@@ -583,17 +600,6 @@ ReplayValidation validateReplay( const AgentCase &caseValue, const AgentTrace &t
 		}
 		collectPathViolations( step.input, roots, where + ".input", validation.violations );
 		collectPathViolations( step.payload, roots, where + ".payload", validation.violations );
-
-		validation.usage.toolCalls++;
-		validation.usage.tokens += step.tokens;
-
-		// A retry is a post-failure repeat of an identical (tool, input).
-		if ( i > 0 )
-		{
-			const TraceStep &previous = trace.steps[i - 1];
-			if ( !previous.success && step.tool == previous.tool && deterministicSerialize( step.input ) == deterministicSerialize( previous.input ) )
-				validation.usage.retries++;
-		}
 	}
 
 	for ( const TraceEvidence &item : trace.evidence )
