@@ -97,3 +97,11 @@
 - 5 笔原子 commit：41fd31b57（WP1）、3f2608543（WP2/5/6a）、d7d7b7adc（WP3）、
   97d78c585（WP4）、77802cf37（WP6b/c）。
 - 下一步：性能批次（WP9/WP10）→ WP8b → 独立 R1 → PR。
+
+## L08 R1 独立评审与修复
+- R1（新 context）：P0×1（validEnd 悬空，F4 证伪成功）+ P1×1（rs:mosaic 生产路线）+
+  P2×3（quac 输出谓词 / 流式 panWeight / dos1Histogram）+ P3×5。
+- 教训④（重要）：构建竞态假绿——GREEN 后必须验证 .o mtime > 源 mtime；管道退出码陷阱再犯
+  一次（`make | tail; echo $?` 捕获的是 tail）。
+- 修复 commit 529481e72；11 套件 ×2 全绿；基准第 3 次一致。
+- 下一步：R2 复审 → review_pack → push → PR。
