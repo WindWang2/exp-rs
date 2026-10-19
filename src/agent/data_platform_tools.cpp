@@ -68,46 +68,20 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 
 namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
-// D19 benchmark tool wrappers call BenchmarkService unqualified and the TU
-// compiled only where another header leaked the directive; make it explicit
-// so the file builds on every platform (build-unblock, execution 11.0).
+// The D19 benchmark wrappers reach sicnu::experiment names; every use in
+// this TU is qualified today, so this single directive is the whole
+// dependency. It used to be stacked three times next to three
+// using-declarations of BenchmarkService, each comment claiming to be THE
+// build-unblock fix — a using-directive is idempotent, so one copy covers
+// every use; keep it here and nowhere else.
 using namespace sicnu::experiment;
-// F11 unblocking fix (pre-existing master break, D19 merge): this TU was
-// never compiled locally after the D19 merge; the unqualified names below
-// resolve into sicnu::experiment only via these declarations. See
-// .planning/qgis-editing-annotation-11/EVIDENCE.md OUT_OF_SCOPE.
-using sicnu::experiment::BenchmarkService;
-using sicnu::experiment::benchmarkRunStatusToString;
-using namespace sicnu::experiment;
-// Pre-existing master break (D19): BenchmarkService is used unqualified below
-// but sicnu::experiment was never imported — the file never compiled on this
-// host since the D19 merge. Minimal unblocking fix (F13 track).
-using sicnu::experiment::BenchmarkService;
-// Master build-unblock (P0, out of scope; same minimal fix PR #1009 carries):
-// the D19 benchmark tool paths reference sicnu::experiment::BenchmarkService /
-// benchmarkRunStatusToString unqualified, which GCC rejects (master
-// a5b11b7f10 does not compile sicnu_agent without this line).
-// Master build repair (pre-existing, D19 merge): unqualified names below
-// resolve into sicnu::experiment only with this using-directive restored.
-// D19 benchmark tool wrappers (benchmarkList et al) call BenchmarkService
-// unqualified; it lives in sicnu::experiment and no using-directive covers
-// it, so the TU fails to compile without this (build-unblock; see PR #1009).
-// master build-unblock (MSVC): benchmarkList et al. use sicnu::experiment
-// names but D19 landed no using-directive for them (same local fix as the
-// execution-runtime track; out-of-scope, recorded in track EVIDENCE).
-using namespace sicnu::experiment;
-// P0 host-portability unblock (Platform 11.0): the D19 benchmark tools use
-// BenchmarkService unqualified, which MSVC rejects (undeclared identifier);
-// ExperimentStore is already reached through its experiment/ includes.
-// MSVC: BenchmarkService is used unqualified below and no transitively
-// included header re-exports it — a pre-existing master build break.
-using sicnu::experiment::BenchmarkService;
 
 namespace
 {
@@ -1457,6 +1431,47 @@ void refreshScienceRecipesIfRequested( const QVariantMap &arguments )
     }
 }
 
+// Production half of the broker's invalidation chain — the seams broker.h
+// declares ("Mutation seams: invalidate projections derived from mutated
+// authority": invalidateAsset / invalidateAllAssets / notifyProjectSwitch).
+// They used to fire only from tests, so a passport mutated after its first
+// resolve kept serving the cached projection for the rest of the session:
+// AssetStateProvider's cache is keyed by assetKey alone and, once resolved,
+// never re-consulted the authority. The workspace catalog IS the mutation
+// authority the passport resolver reads through, so every science-context
+// consumption syncs it into the broker BEFORE resolving:
+//   * a replaced catalog (project switch) is a full invalidation —
+//     notifyProjectSwitch(), because a fresh DataManager can report a
+//     generation the previous one already passed (a generation compare
+//     alone would miss the switch);
+//   * a bumped generation on the same catalog (re-import, removal, record
+//     edit) drops the stale passport entries and re-keys the bundle cache —
+//     setCatalogGeneration clears the provider cache and the broker's cache
+//     key embeds the generation.
+void syncWorkspaceCatalogInvalidation()
+{
+    auto *broker = &sicnu::science_context::agent_adapter::sharedBroker();
+    sicnu::data::DataManager *catalog = sicnu::temporal::workspaceCatalog();
+    static std::mutex syncMutex;
+    std::lock_guard<std::mutex> lock( syncMutex );
+    static sicnu::data::DataManager *lastCatalog = nullptr;
+    static std::uint64_t lastGeneration = 0;
+    if ( catalog != lastCatalog )
+    {
+        if ( lastCatalog != nullptr )
+            broker->notifyProjectSwitch();
+        lastCatalog = catalog;
+        lastGeneration = 0;
+    }
+    if ( !catalog )
+        return;
+    const auto generation = static_cast<std::uint64_t>( catalog->catalogGeneration() );
+    if ( generation == lastGeneration )
+        return;
+    lastGeneration = generation;
+    broker->assets().setCatalogGeneration( generation );
+}
+
 // Install the live authorities on the shared science broker once: capability
 // facts (with the live content revision) from harness CapabilityKnowledge,
 // operator/tool presence from the registries those surfaces dispatch through,
@@ -1526,6 +1541,11 @@ void ensureScienceContextAuthorities()
         return true;
     }();
     (void)wired;
+    // The one-time wire above must not become a one-time invalidation: sync
+    // the workspace catalog's mutation state on EVERY call so re-imported
+    // passports are re-resolved instead of answered from the pre-mutation
+    // cache entry (the invalidation chain broker.h declares).
+    syncWorkspaceCatalogInvalidation();
 }
 
 Json::Value variantArgsToJson( const QVariantMap &arguments )
@@ -1632,6 +1652,13 @@ inlinePassportsFromArgs( const Json::Value &args )
 QVariantMap preflightCheck( const QVariantMap &arguments )
 {
     const Json::Value args = variantArgsToJson( arguments );
+
+    // preflight:check resolves its facts through the shared broker's live
+    // passport resolver: sync the workspace catalog's invalidation state
+    // FIRST so a re-imported/rewritten passport is re-resolved instead of
+    // answered from the pre-mutation cache entry (the invalidation chain
+    // broker.h declares).
+    syncWorkspaceCatalogInvalidation();
 
     const std::map<std::string, sicnu::state::RemoteSensingAssetState> inlinePassports =
         inlinePassportsFromArgs( args );

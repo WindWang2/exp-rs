@@ -84,29 +84,50 @@ bool WorkspaceCommandStack::commit( const QString &transactionId, QString *error
 
 bool WorkspaceCommandStack::undo()
 {
-  QMutexLocker lock( &mMutex );
-  if ( mUndoStack.empty() )
-    return false;
-  Transaction transaction = mUndoStack.back();
-  mUndoStack.pop_back();
+  Transaction transaction;
+  {
+    QMutexLocker lock( &mMutex );
+    if ( mUndoStack.empty() )
+      return false;
+    transaction = mUndoStack.back();
+    mUndoStack.pop_back();
+  }
+
+  // Callbacks run outside the lock, same as commit(): mMutex is not
+  // recursive and a callback may re-enter the stack from this thread.
   bool ok = true;
   for ( auto it = transaction.commands.rbegin(); it != transaction.commands.rend(); ++it )
     ok = it->undo() && ok;
-  mRedoStack.push_back( std::move( transaction ) );
+
+  QMutexLocker lock( &mMutex );
+  // A partially rolled-back transaction is not a faithful undo, so it must
+  // not land on the redo stack as if it were redoable.
+  if ( ok )
+    mRedoStack.push_back( std::move( transaction ) );
   return ok;
 }
 
 bool WorkspaceCommandStack::redo()
 {
-  QMutexLocker lock( &mMutex );
-  if ( mRedoStack.empty() )
-    return false;
-  Transaction transaction = mRedoStack.back();
-  mRedoStack.pop_back();
+  Transaction transaction;
+  {
+    QMutexLocker lock( &mMutex );
+    if ( mRedoStack.empty() )
+      return false;
+    transaction = mRedoStack.back();
+    mRedoStack.pop_back();
+  }
+
+  // Callbacks run outside the lock, same as commit() (see undo()).
   bool ok = true;
   for ( auto &command : transaction.commands )
     ok = command.redo() && ok;
-  mUndoStack.push_back( std::move( transaction ) );
+
+  QMutexLocker lock( &mMutex );
+  // Mirror of undo(): a partially re-applied transaction must not become
+  // undoable.
+  if ( ok )
+    mUndoStack.push_back( std::move( transaction ) );
   return ok;
 }
 

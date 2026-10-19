@@ -12,6 +12,8 @@
 
 #include <cmath>
 #include <map>
+#include <mutex>
+#include <optional>
 
 namespace sicnu::agent
 {
@@ -48,6 +50,18 @@ double monthMidDoy( int month0Based )
     return 15.5 + 30.4 * month0Based;
 }
 
+/// The series catalog is process-global mutable state (a function-local
+/// static shared by every thread in the process). Production wiring is a
+/// declared follow-up (DECISIONS D-160-1), but the concurrency seam exists
+/// NOW: every mutation AND every lookup runs under this mutex, and
+/// findSeries' raw pointer into the map is consumed only inside a locked
+/// region (executeTool copies the record out before reading it).
+std::mutex &catalogMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
 } // namespace
 
 void TemporalSpatialTool::ingestSeries( const std::string &metric, double lon, double lat,
@@ -57,14 +71,18 @@ void TemporalSpatialTool::ingestSeries( const std::string &metric, double lon, d
     SeriesRecord record;
     record.startYear = startYear;
     record.monthly = monthlyValues;
+    std::lock_guard<std::mutex> lock( catalogMutex() );
     catalog()[key] = std::move( record );
 }
 
 void TemporalSpatialTool::clearSeries()
 {
+    std::lock_guard<std::mutex> lock( catalogMutex() );
     catalog().clear();
 }
 
+/// Callers MUST hold catalogMutex() and must not let the returned pointer
+/// escape the locked region — it aliases the shared map.
 TemporalSpatialTool::SeriesRecord *TemporalSpatialTool::findSeries( const std::string &metric,
                                                                     double lon, double lat )
 {
@@ -166,12 +184,26 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         return rejected( "metric is required" );
     const std::string metric = arguments["metric"].asString();
 
-    SeriesRecord *record = findSeries( metric, arguments["lon"].asDouble(),
-                                       arguments["lat"].asDouble() );
-    if ( !record || record->monthly.empty() )
+    // Copy the record out UNDER the catalog lock: findSeries hands back a
+    // raw pointer into the shared map, and every later read (phenology
+    // extraction, trend test, anomaly screen) happens outside any lock — a
+    // concurrent ingest/clear would race it. The copy is small (12 · years
+    // floats), so paying it per call is cheaper than the data race.
+    std::optional<SeriesRecord> ingested;
+    {
+        std::lock_guard<std::mutex> lock( catalogMutex() );
+        if ( SeriesRecord *record = findSeries( metric, arguments["lon"].asDouble(),
+                                                arguments["lat"].asDouble() ) )
+        {
+            if ( !record->monthly.empty() )
+                ingested = *record;
+        }
+    }
+    if ( !ingested )
         return rejected( "no series ingested for this pixel and metric" );
+    const SeriesRecord &record = *ingested;
 
-    const int years = static_cast<int>( record->monthly.size() / 12 );
+    const int years = static_cast<int>( record.monthly.size() / 12 );
     if ( years < 1 )
         return rejected( "series shorter than one year" );
 
@@ -184,7 +216,7 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
     if ( toolName == "temporal:phenology_query" )
     {
         const int year = arguments["year"].asInt();
-        const int offset = year - record->startYear;
+        const int offset = year - record.startYear;
         if ( offset < 0 || offset >= years )
             return rejected( "year outside the ingested range" );
 
@@ -193,7 +225,7 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         for ( int m = 0; m < 12; ++m )
         {
             values[static_cast<std::size_t>( m )] =
-                record->monthly[static_cast<std::size_t>( offset * 12 + m )];
+                record.monthly[static_cast<std::size_t>( offset * 12 + m )];
             t[static_cast<std::size_t>( m )] = monthMidDoy( m );
         }
         const sicnu::temporal::PhenologyMetrics metrics =
@@ -219,14 +251,14 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         // a strongly seasonal series reads seasonality as significance —
         // callers should deseasonalize (or request seasonal MK) for trend
         // claims on such series.
-        const std::size_t count = record->monthly.size();
+        const std::size_t count = record.monthly.size();
         std::vector<float> values( count );
         std::vector<double> t( count );
         for ( int y = 0; y < years; ++y )
             for ( int m = 0; m < 12; ++m )
             {
                 const std::size_t i = static_cast<std::size_t>( y * 12 + m );
-                values[i] = record->monthly[i];
+                values[i] = record.monthly[i];
                 t[i] = 365.25 * y + monthMidDoy( m );
             }
         const sicnu::temporal::MannKendallResult trend =
@@ -248,7 +280,7 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
     if ( toolName == "temporal:anomaly_alert" )
     {
         const int year = arguments["year"].asInt();
-        const int offset = year - record->startYear;
+        const int offset = year - record.startYear;
         if ( offset < 0 || offset >= years )
             return rejected( "year outside the ingested range" );
         if ( years < 2 )
@@ -263,7 +295,7 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         for ( int y = 0; y < years; ++y )
             for ( int m = 0; m < 12; ++m )
             {
-                const double v = record->monthly[static_cast<std::size_t>( y * 12 + m )];
+                const double v = record.monthly[static_cast<std::size_t>( y * 12 + m )];
                 if ( !std::isfinite( v ) )
                     continue;
                 mean[m] += v;
@@ -284,7 +316,7 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         int run = 0;
         for ( int m = 0; m < 12; ++m )
         {
-            const double v = record->monthly[static_cast<std::size_t>( offset * 12 + m )];
+            const double v = record.monthly[static_cast<std::size_t>( offset * 12 + m )];
             if ( !std::isfinite( v ) )
                 return rejected( "target year contains non-finite months" );
             const double z = sigma[m] > 1e-9 ? ( v - mean[m] ) / sigma[m] : 0.0;
