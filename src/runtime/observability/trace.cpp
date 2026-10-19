@@ -255,6 +255,23 @@ void RingTraceSink::clear()
 // FileTraceSink
 // ---------------------------------------------------------------------------
 
+namespace
+{
+
+/// The writer thread's open handle. FileTraceSink spawns exactly one writer
+/// thread per instance and only that thread performs file I/O, so
+/// thread-local storage is per-sink state: the handle is opened once and
+/// reused across records instead of an open+write+close pair per event
+/// (trace.h: "throughput over durability"). It is destroyed — and its buffer
+/// flushed — when the writer thread exits, which the destructor joins.
+std::ofstream &writerStream()
+{
+    static thread_local std::ofstream stream;
+    return stream;
+}
+
+} // namespace
+
 FileTraceSink::FileTraceSink( Options options )
     : m_options( std::move( options ) )
 {
@@ -311,6 +328,7 @@ void FileTraceSink::writerLoop()
     {
         TraceEvent event;
         bool has = false;
+        bool drained = false;
         {
             std::unique_lock<std::mutex> lock( m_queueMutex );
             m_queueCv.wait( lock, [this] { return m_stopping.load( std::memory_order_acquire ) || !m_queue.empty(); } );
@@ -319,6 +337,7 @@ void FileTraceSink::writerLoop()
                 event = m_queue.front();
                 m_queue.pop_front();
                 has = true;
+                drained = m_queue.empty(); // nothing pending after this record
             }
             else if ( m_stopping.load( std::memory_order_acquire ) )
             {
@@ -332,18 +351,39 @@ void FileTraceSink::writerLoop()
         const std::string line = encodeNdjson( event );
         {
             std::lock_guard<std::mutex> ioLock( m_io );
+            std::ofstream &file = writerStream();
             rotateIfNeeded_locked();
             openFile_locked();
             if ( !m_activePath.empty() )
             {
-                std::ofstream file( sicnu::portable::pathFromUtf8( m_activePath ),
-                                    std::ios::app | std::ios::binary );
-                if ( file.good() )
+                if ( !file.is_open() )
+                {
+                    file.clear(); // drop any failbit left by a previous failure
+                    file.open( sicnu::portable::pathFromUtf8( m_activePath ),
+                               std::ios::app | std::ios::binary );
+                }
+                if ( file )
                 {
                     file << line << "\n";
                     m_activeBytes += line.size() + 1;
                 }
+                if ( !file )
+                {
+                    // Open or write failed (unusable directory, full disk):
+                    // release the handle and clear the state so the next
+                    // record retries the open instead of feeding a dead
+                    // stream. The record is lost uncounted — the same
+                    // accounting an open failure had before.
+                    if ( file.is_open() )
+                        file.close();
+                    file.clear();
+                }
             }
+            // Writer going idle: hand the buffer to the OS so a live reader
+            // sees the record without waiting for the next event. Still no
+            // fsync — throughput over durability.
+            if ( drained && file.is_open() )
+                file.flush();
         }
     }
 }
@@ -352,6 +392,15 @@ void FileTraceSink::rotateIfNeeded_locked()
 {
     if ( m_activeBytes < m_options.maxFileBytes )
         return;
+    // The renames below move the active file out from under the writer:
+    // release the handle first so the reopen after rotation lands on the
+    // fresh .ndjson (and because Windows refuses to rename an open file).
+    std::ofstream &file = writerStream();
+    if ( file.is_open() )
+    {
+        file.close(); // flushes the buffered records into the renamed file
+        file.clear();
+    }
     std::error_code ec;
     // shift .maxFiles-1 → .maxFiles, … .1 → .2
     for ( uint32_t i = m_options.maxFiles; i >= 2; --i )

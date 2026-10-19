@@ -34,6 +34,17 @@ namespace
 std::mutex g_lastLeakMutex;
 std::string g_lastLeakReportJson;
 
+// RSS throttling is soft backpressure, not admission: it parks the caller
+// until resident memory decays below the low watermark. When no cancel
+// predicate is armed (ChunkPipeline's default cancel flag is nullptr) RSS
+// decay is the only exit, so a host that stays above the watermark would
+// pin the producer — and the JobEngine worker that joins it at shutdown —
+// forever. Bound the wait: past this deadline the throttle degrades to
+// proceed-under-pressure (the planner's model is an UPPER BOUND) and the
+// give-up is recorded in telemetry. Long enough for genuine memory pressure
+// to clear, short enough that a stuck watermark cannot hang a worker.
+constexpr std::chrono::milliseconds kRssThrottleDeadline{ 30 * 1000 };
+
 std::uint64_t defaultCurrentRssBytes()
 {
 #if defined( __linux__ )
@@ -569,6 +580,14 @@ void ExecutionGovernor::throttleWait( const std::function<bool()> &cancelPredica
         pollInterval = std::chrono::milliseconds( 1 );
 
     const auto t0 = std::chrono::steady_clock::now();
+    const auto deadline = t0 + kRssThrottleDeadline;
+    // Iteration backstop implied by the deadline (the deadline is the
+    // authoritative bound; this keeps the loop honest if a caller passes a
+    // pathologically large pollInterval).
+    const std::uint64_t maxPolls =
+        static_cast<std::uint64_t>( kRssThrottleDeadline / pollInterval ) + 1;
+    std::uint64_t polls = 0;
+    bool deadlineExceeded = false;
 
     while ( true )
     {
@@ -578,6 +597,14 @@ void ExecutionGovernor::throttleWait( const std::function<bool()> &cancelPredica
         rss = currentRssBytes();
         if ( rss == 0 || rss < lowWatermark )
             break;
+
+        if ( ++polls >= maxPolls || std::chrono::steady_clock::now() >= deadline )
+        {
+            // Watermark never cleared and no cancel predicate can rescue us:
+            // degrade to proceed-under-pressure instead of parking forever.
+            deadlineExceeded = true;
+            break;
+        }
 
         std::this_thread::sleep_for( pollInterval );
     }
@@ -590,6 +617,14 @@ void ExecutionGovernor::throttleWait( const std::function<bool()> &cancelPredica
     {
         telemetry.recordSimple( observability::EventKind::ResourceWait, -1,
                                 elapsedNanos, "exec.governor.rss_throttle" );
+    }
+
+    if ( deadlineExceeded && telemetry.isEnabled() )
+    {
+        // Distinct subject so operators can tell a throttled wait that cleared
+        // from one that timed out and proceeded under pressure.
+        telemetry.recordSimple( observability::EventKind::ResourceWait, -1,
+                                elapsedNanos, "exec.governor.rss_throttle_deadline" );
     }
 }
 
