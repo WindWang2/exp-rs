@@ -30,6 +30,12 @@ silently REVERTED the entire merged r15-C track (#1515): all 14 src fixes, 6
 new test files, 4 modified test files (-3893 lines), while zero later commits
 touched those files. R18-B (the model-runtime domain successor) restores that
 content verbatim from the #1515 merge commit f326d8ca9 as its first commit.
+Verification note (R1 review): confirm restoration fidelity with the TWO-STEP
+form — `git diff f326d8ca9 a6ac18bcd -- <the 35 restored paths>` (empty ⇒
+byte-faithful) and `git log --oneline f326d8ca9..2d2881631 -- <same paths>`
+(empty ⇒ no master interaction). A single `git diff f326d8ca9 HEAD -- src/`
+sweeps in ~60 unrelated post-r15-C master files and over-reports.
+
 This adds ONE framework file beyond the nominal write-set —
 `src/operators/framework/chunked_run.cpp` — which r15-C changed for the chunk
 admission census (C11/C12); it is inference-admission-specific and no other

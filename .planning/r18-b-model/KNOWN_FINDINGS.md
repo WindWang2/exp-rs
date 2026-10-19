@@ -22,3 +22,11 @@ marked). Recorded for follow-up tracks; none blocks the current fixes.
 | K14 | P3 | openvino/tensorrt providers | `mArtifact` never set (artifactPath placeholder); `infer` throws RSOperatorError (std::exception family) though the IModelRuntime contract documents std::runtime_error; TRT load() deserializes the engine before `cudaSetDevice(m_cudaIndex)`. Compile-only lanes — disclosed. |
 | K15 | P3 | eo_preflight scene lane (fixed here as W5) — keep: single-input run() vs runMultiInput vs scene now consistent | (resolved) |
 | K16 | P3 | nvml_inventory.cpp:114-118 | Failed middle-index NVML handles compact the device list; real device indexes ≥ devices.size() are dropped with skewed slots (honest-unknown degradation preferred). |
+
+## From R1 review (recorded, not fixed here)
+
+- R1-8 (P3, pre-existing): `publishProvenanceSidecar`'s rename-failure branch
+  does not remove the staged file (the new fsync-failure branch does) —
+  asymmetric litter on that one failure path.
+- R1-5/R1-6 (P3): W1/W2 pins cost 2.5 s / ~8 s wall respectively — acceptable
+  for the regression value; flagged for CI budget watchers.

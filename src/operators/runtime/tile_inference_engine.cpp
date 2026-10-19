@@ -777,10 +777,17 @@ class FeatherAccumulator
       }
     }
 
-    /// Finalizes rows [m_top, rowExclusive) through the writer.
+    /// Finalizes rows [m_top, rowExclusive) through the writer. The window
+    /// never holds more than m_span rows, so the finalize is CLAMPED to the
+    /// window bottom — finalizeRows would otherwise read past the Mats if a
+    /// caller ever advanced more than one window at once (today the per-tile
+    /// and deferred-tile walks advance by at most one tile row, but the bound
+    /// is enforced here structurally, not by distant invariants — R1 review).
+    /// finish() relies on the deferred-tile walk having advanced the window
+    /// for tall NoData tails before the final flush (same bound).
     void flushThrough( int rowExclusive, GdalStreamingOutput &writer )
     {
-      const int last = std::min( rowExclusive, m_rasterH );
+      const int last = std::min( { rowExclusive, m_rasterH, m_top + m_span } );
       if ( last <= m_top )
         return;
       finalizeRows( m_top, last, writer );
