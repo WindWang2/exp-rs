@@ -527,6 +527,11 @@ class ChangeStackRuntime final : public IModelRuntime
     std::string deviceName() const override { return "cpu"; }
     std::string artifactPath() const override { return "change-stack"; }
     cv::Mat infer( const cv::Mat & ) override { return {}; }
+    // This fake feeds several named inputs in ONE forward pass through its
+    // inferNamed override, so it declares the capability the engine's
+    // preflight (R15-C C05/B3) negotiates against — an undeclared override
+    // used to reach the wire and fail there.
+    bool supportsMultiInput() const override { return true; }
 
     std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
                                          const std::vector<std::string> &outputNames ) override
@@ -1005,15 +1010,26 @@ TEST_CASE( "WP-C: optional deployment providers degrade typed when absent",
            "[eo10][providers]" )
 {
   auto &registry = sicnu::operators::runtime::ModelRuntimeRegistry::instance();
-  if ( sicnu::operators::runtime::tensorRTProviderAvailable()
-       && sicnu::operators::runtime::openVinoProviderAvailable() )
-    return; // capability-gated: full-deployment host executes the real lanes
+  const bool trtAvailable = sicnu::operators::runtime::tensorRTProviderAvailable();
+  const bool ovAvailable = sicnu::operators::runtime::openVinoProviderAvailable();
+  if ( trtAvailable && ovAvailable )
+  {
+    // R15-C C16 (B10): full-deployment host. The historical early `return`
+    // made this case pass with ZERO assertions — "green" without testing
+    // anything. Assert the positive contract instead: both providers are
+    // registered and their unavailable-reason seams are silent (nothing to
+    // recover from), so the case has teeth on every host shape.
+    CHECK( registry.hasProvider( "tensorrt" ) );
+    CHECK( registry.hasProvider( "openvino" ) );
+    CHECK( sicnu::operators::runtime::tensorRTUnavailableReason().empty() );
+    CHECK( sicnu::operators::runtime::openVinoUnavailableReason().empty() );
+    return;
+  }
 
   ModelInfo model;
   model.name = "trt-engine";
   model.task = "segmentation";
-  model.framework = sicnu::operators::runtime::tensorRTProviderAvailable() ? "openvino"
-                                                                           : "tensorrt";
+  model.framework = trtAvailable ? "openvino" : "tensorrt";
   model.readiness = ModelReadiness::Ready;
 
   std::string reason;
@@ -1031,9 +1047,9 @@ TEST_CASE( "WP-C: optional deployment providers degrade typed when absent",
   // The typed per-provider unavailability reason (the stub contract).
   const std::string trtReason = sicnu::operators::runtime::tensorRTUnavailableReason();
   const std::string ovReason = sicnu::operators::runtime::openVinoUnavailableReason();
-  if ( !sicnu::operators::runtime::tensorRTProviderAvailable() )
+  if ( !trtAvailable )
     CHECK( trtReason.find( "without TensorRT" ) != std::string::npos );
-  if ( !sicnu::operators::runtime::openVinoProviderAvailable() )
+  if ( !ovAvailable )
     CHECK( ovReason.find( "without OpenVINO" ) != std::string::npos );
 }
 
@@ -1180,4 +1196,89 @@ TEST_CASE( "WP-G: verifyProductAgainstModel checks identity, digest and stalenes
     const auto verdict = sicnu::operators::runtime::verifyProductProvenance( output.toStdString() );
     CHECK( verdict.state == sicnu::operators::runtime::ProvenanceVerdict::State::MissingSidecar );
   }
+}
+
+// ---------------------------------------------------------------------------
+// R18-B: the scene lane's wavelength preflight checks the FED physical bands
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Scene head fake for the R18-B preflight case: a fixed (1, 3) logit row —
+/// the scene lane consumes a 2-D class row, not an NCHW plane.
+class SceneRowRuntime final : public sicnu::operators::runtime::IModelRuntime
+{
+  public:
+    std::string framework() const override { return "eo10scfw"; }
+    std::string backendName() const override { return "scene_row"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return "scene-row"; }
+    cv::Mat infer( const cv::Mat & ) override
+    {
+      cv::Mat out( 1, 3, CV_32F );
+      out.ptr<float>( 0 )[0] = 0.1f;
+      out.ptr<float>( 0 )[1] = 0.5f;
+      out.ptr<float>( 0 )[2] = 0.2f;
+      return out;
+    }
+};
+
+struct SceneRowProviderGuard
+{
+    SceneRowProviderGuard()
+    {
+      auto &registry = ModelRuntimeRegistry::instance();
+      registry.registerProvider( "eo10scfw", []( const ModelInfo &,
+                                                 const sicnu::operators::runtime::ModelHardwareCapabilities &,
+                                                 std::string * ) -> sicnu::operators::runtime::ModelRuntimePtr {
+        return std::make_shared<SceneRowRuntime>();
+      } );
+      registry.releaseAll();
+    }
+    ~SceneRowProviderGuard() { ModelRuntimeRegistry::instance().releaseAll(); }
+};
+
+} // namespace
+
+TEST_CASE( "#r18B scene wavelength windows verify the selected physical band",
+           "[eo10][preflight][r18B]" )
+{
+  // A 2-band raster whose band 1 centers at 490 nm and band 2 at 860 nm; the
+  // model's nir window is [830, 880]. Feeding band 2 with bands={2} is
+  // in-window and must PASS; the preflight used to check role 0 against file
+  // band 1 (490 nm — wrong refusal). The mirrored case feeds band 1
+  // (out of window) — it must be REFUSED, not waved through by the same
+  // wrong mapping.
+  SceneRowProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = dir.filePath( QStringLiteral( "scene-in.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder( 16, 16, 2, GDT_Float32 )
+    .withCrs( QStringLiteral( "EPSG:4326" ) )
+    .writeToDisk( input );
+  stampEoMetadata( input, QString(), { 490.0, 860.0 } );
+
+  ModelInfo model;
+  model.name = "eo10-scene-nir";
+  model.task = "scene_classification";
+  model.framework = "eo10scfw";
+  model.readiness = ModelReadiness::Ready;
+  model.tiling.tileSize = 16;
+  model.output.classes = { "water", "land", "cloud" }; // match the 3-plane fake runtime
+  model.output.type = "labels";
+  model.input.bandRoles = { "nir" };
+  model.eo.declared = true;
+  model.eo.wavelengthsNm = { { "nir", { 830.0, 880.0 } } };
+
+  TileInferenceEngine engine( model, ModelRuntimeRegistry::instance().acquire( model ) );
+  RSOperatorContext context;
+
+  // Fed band 2 (860 nm) is inside the nir window → runs.
+  const auto inWindow = engine.classifyScene( input.toStdString(), { 2 }, context );
+  CHECK( inWindow.probabilities.size() == 3 );
+
+  // Fed band 1 (490 nm) is outside the nir window → typed refusal (the
+  // historical mapping checked band 1 for BOTH selections and got each
+  // verdict backwards).
+  REQUIRE_THROWS_AS( engine.classifyScene( input.toStdString(), { 1 }, context ),
+                     sicnu::operators::RSOperatorError );
 }

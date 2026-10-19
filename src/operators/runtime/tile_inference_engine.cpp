@@ -756,6 +756,11 @@ class FeatherAccumulator
         const int wy = y - ( core.y - halo ); // window-plane row
         if ( wy < 0 || wy >= windowH )
           continue;
+        // Flush-then-add contract made loud (R2 review): the write offset
+        // must land inside the sliding window — a caller that ever advanced
+        // the window out of contract would otherwise write past the Mats
+        // silently (the read side is clamped in flushThrough).
+        CV_Assert( y >= m_top && y < m_top + m_span );
         const float *srcRow = windowPlane.ptr<float>( wy );
         float *sumRow = sum.ptr<float>( y - m_top );
         float *weightRow = m_weight.ptr<float>( y - m_top );
@@ -777,20 +782,39 @@ class FeatherAccumulator
       }
     }
 
-    /// Finalizes rows [m_top, rowExclusive) through the writer.
+    /// Finalizes rows [m_top, rowExclusive) through the writer. The window
+    /// never holds more than m_span rows, so the finalize is CLAMPED to the
+    /// window bottom — finalizeRows would otherwise read past the Mats if a
+    /// caller ever advanced more than one window at once (today the per-tile
+    /// and deferred-tile walks advance by at most one tile row, but the bound
+    /// is enforced here structurally, not by distant invariants — R1 review).
+    /// finish() relies on the deferred-tile walk having advanced the window
+    /// for tall NoData tails before the final flush (same bound).
     void flushThrough( int rowExclusive, GdalStreamingOutput &writer )
     {
-      const int last = std::min( rowExclusive, m_rasterH );
+      const int last = std::min( { rowExclusive, m_rasterH, m_top + m_span } );
       if ( last <= m_top )
         return;
       finalizeRows( m_top, last, writer );
-      // Clear the finalized rows' accumulators (they are reusable window rows).
+      // The window is a LINEAR offset map: pending row y lives at offset
+      // y - m_top. Finalizing [m_top, last) frees the first (last - m_top)
+      // offsets, so every still-pending row's data must MOVE UP by the same
+      // amount — after the slide the old offsets would name DIFFERENT rows,
+      // blending one row's weights/marks into another (R18-B: every feather
+      // run taller than one window (tile + 2·halo rows) corrupted its output
+      // this way; the M5 regression raster is single-window and never slid).
       const int cleared = std::min( last - m_top, m_span );
+      const int keep = m_span - cleared;
+      const auto slideUp = [ this, keep, cleared ]( cv::Mat &m ) {
+        for ( int row = 0; row < keep; ++row )
+          std::memcpy( m.ptr<float>( row ), m.ptr<float>( row + cleared ),
+                       static_cast<std::size_t>( m.cols ) * sizeof( float ) );
+        m( cv::Range( keep, m_span ), cv::Range::all() ) = 0.0f;
+      };
       for ( int s = 0; s < m_slots; ++s )
-        m_sum[static_cast<std::size_t>( s )]
-         ( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
-      m_weight( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
-      m_invalid( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
+        slideUp( m_sum[static_cast<std::size_t>( s )] );
+      slideUp( m_weight );
+      slideUp( m_invalid );
       m_top = last;
     }
 
@@ -921,8 +945,10 @@ class FeatherAccumulator
           const float *invalidRow = m_invalid.ptr<float>( r );
           float *outRow = unc.ptr<float>( r );
           for ( int x = 0; x < m_rasterW; ++x )
+          {
             outRow[x] = ( weightRow[x] > 0.0f && invalidRow[x] <= 0.0f )
                           ? sumRow[x] / weightRow[x] : m_writeNoData;
+          }
         }
         if ( !writer.writeTile( 2, bandTile, unc.ptr<float>() ) )
           throw RSOperatorError( ErrorCode::FileNotWritable,
@@ -1289,8 +1315,11 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // Writes NoData directly for tiles whose forward pass was skipped (#705):
   // every core pixel of these tiles is invalid, so every output channel is
   // the writer's NoData value — the same NaN the mask restore writes for
-  // partially invalid tiles.
-  auto flushDeferredNoData = [ & ]( int currentTileIndex )
+  // partially invalid tiles. @p flushCeiling caps the blended-path row
+  // flush: mid-run it is the CURRENT batch's window top (rows below it can
+  // still receive the batch's own contributions); the end-of-run tail passes
+  // the raster height.
+  auto flushDeferredNoData = [ & ]( int currentTileIndex, int flushCeiling )
   {
     // Platform 9.0 (M5): under feather blending the accumulator owns every
     // written pixel; an all-nodata tile contributes nothing and its pixels
@@ -1302,8 +1331,23 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       // Platform 9.0 (A4): under blending a deferred all-nodata tile must
       // still declare its cores invalid, or neighbor halos would inpaint
       // them with predictions (the stitched path writes NoData directly).
+      // R18-B: a deferred run can be TALLER than the accumulator's sliding
+      // window (tile + 2·halo rows) — addInvalidMask drops marks outside
+      // [m_top, m_top + m_span), so marks on the far rows silently vanished
+      // and the next valid tile's halo finalized fabricated predictions over
+      // NoData ground (an end-of-run tail past the window additionally made
+      // finish() read rows the accumulator never held). Advancing the window
+      // to each tile's top (capped at @p flushCeiling) before marking keeps
+      // every mark in-window for arbitrarily tall runs; NoData still wins by
+      // A4 wherever a later valid tile's halo reaches a marked core.
       for ( const CoreTile &dt : deferredNoData )
       {
+        // Bring the window to this tile's TOP before marking it: rows above
+        // are final (earlier deferred tiles' marks already landed and are
+        // consumed by the finalize) while same-row peers stay untouched —
+        // flushing past a tile's top instead DROPPED the marks of every
+        // deferred tile sharing its rows.
+        accumulator->flushThrough( std::min( dt.y, flushCeiling ), *writer );
         cv::Mat allInvalid( dt.h, dt.w, CV_8UC1, cv::Scalar( 1 ) );
         accumulator->addInvalidMask( allInvalid, dt, halo );
       }
@@ -1626,7 +1670,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 
     // The writer exists now, so NoData tiles deferred by earlier all-nodata
     // batches can go straight to disk.
-    flushDeferredNoData( currentTileIndex );
+    flushDeferredNoData( currentTileIndex,
+                         std::max( 0, batchCores.front().y - halo ) );
 
     // Per-tile class planes of head 0, collected for the derived output
     // modes (labels/mask/confidence) and written as ONE band per tile.
@@ -2017,6 +2062,40 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
             ++validPixels;
         }
       }
+      // R15-C C07: the per-tile coverage gate (tiling.min_valid_coverage).
+      // The multi-input engine has always applied it; the single-input
+      // engine computed the per-tile valid count but consulted it only at
+      // BATCH granularity (all-NoData), so a documented manifest gate was
+      // silently ignored on this path — a low-coverage tile ran a full
+      // forward pass and wrote predictions where the contract promises
+      // NoData. Same semantics as the multi-input lane (and the #705 skip):
+      // decided per TILE over the CORE pixels, skipped tiles become NoData
+      // rows — never a resolution change, never a model change.
+      // Scope note (review R1 P3): with the DEFAULT gate (0) only
+      // validPixels==0 tiles are deferred, and they are now deferred
+      // individually BEFORE batching instead of running the forward inside a
+      // mixed batch and being masked afterwards. The written raster is
+      // unchanged; what changes is stats.tilesSkippedNoData and the
+      // forward-pass compute (an all-NoData tile inside a mixed batch no
+      // longer runs a forward whose output it would only overwrite) — the
+      // batch-level batchIsAllNoData skip below is the belt-and-braces
+      // remnant of the old shape.
+      {
+        const double minValidCoverage = std::clamp( m_model.tiling.minValidCoverage, 0.0, 1.0 );
+        const double coverage =
+          static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
+        if ( validPixels == 0 || ( minValidCoverage > 0.0 && coverage < minValidCoverage ) )
+        {
+          ++skipped;
+          ++stats.tilesSkippedNoData;
+          deferredNoData.push_back( t );
+          context.reportProgress(
+            static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+            "Tiled inference: " + std::to_string( done + skipped ) + "/"
+              + std::to_string( totalTiles ) );
+          continue;
+        }
+      }
       // nodata_policy "zero" (default; the only supported policy - others
       // are rejected at manifest parse, #646): non-finite samples become 0.
       const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
@@ -2178,7 +2257,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     flushBatch( totalTiles - 1 );
   }
   if ( !deferredNoData.empty() )
-    flushDeferredNoData( totalTiles - 1 );
+    flushDeferredNoData( totalTiles - 1, rasterH );
 
   }
   catch ( ... )
@@ -2314,10 +2393,6 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string 
   const std::string headName = m_model.output.tensorNames.empty() ? std::string()
                                                                   : m_model.output.tensorNames.front();
 
-  // EO domain preflight (same contract as run()).
-  if ( m_model.eo.declared )
-    m_lastEoPreflight = enforceEoPreflight( m_model, inputPath ).toJson();
-
   GdalDatasetWrapper ds;
   if ( !ds.open( QString::fromStdString( inputPath ) ) )
     throw RSOperatorError( ErrorCode::GdalError, "failed to open input raster: " + inputPath );
@@ -2348,6 +2423,14 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string 
                            "input selection carries " + std::to_string( bandCount )
                              + " bands but cv::Mat supports at most " + std::to_string( CV_CN_MAX )
                              + " channels — declare input.bands to select a subset" );
+
+  // EO domain preflight (same contract as run()): AFTER the effective band
+  // selection resolves, so wavelength windows verify the PHYSICAL bands the
+  // caller actually fed (R18-B: passing no band list checked role i against
+  // file band i+1 — wrong refusals for band-selected inputs and false passes
+  // for out-of-window fed bands).
+  if ( m_model.eo.declared )
+    m_lastEoPreflight = enforceEoPreflight( m_model, inputPath, bandList ).toJson();
 
   if ( const std::string dtypeError =
          inputDTypeMismatch( m_model, bandList,
@@ -2776,6 +2859,29 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                              + " inputs but " + std::to_string( feeds.size() )
                              + " feeds were given" );
 
+  // R15-C C05 (B3): capability negotiation BEFORE the first forward. The
+  // session's declared capabilities are the contract consumers negotiate
+  // against; a manifest asking beyond them used to be discovered by the
+  // provider's own throw INSIDE the tile loop — after the input rasters were
+  // opened and read, and classified as a computation failure instead of a
+  // schema mismatch. Refuse here, where the seam is cheap and nothing ran.
+  // Either seam counts as a declaration: Platform 7.0 capabilities()
+  // (multiInput) or the historical supportsMultiInput() — a session that
+  // implements neither cannot feed several inputs in one pass.
+  // (The rank axis stays enforced by the provider's own inferNamed refusal:
+  // the default capabilities() describes the historical rank-4 contract and
+  // sessions that accept more do not re-declare it, so a preflight gate on
+  // maxRank would refuse legitimate N-D sessions.)
+  if ( feeds.size() > 1 && !m_runtime->capabilities().multiInput
+       && !m_runtime->supportsMultiInput() )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "session backend '" + m_runtime->backendName()
+        + "' does not support multi-input models (capabilities().multiInput and "
+          "supportsMultiInput() are both false) — the model declares "
+      + std::to_string( m_model.inputs.size() )
+      + " inputs; run it on a multi-input backend or one input at a time" );
+
   std::vector<std::size_t> feedContract( feeds.size() );
   for ( std::size_t f = 0; f < feeds.size(); ++f )
   {
@@ -2805,6 +2911,29 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                      ? std::string( "<unnamed>" )
                                      : m_model.inputs[0].name )
                                + "...)" );
+  }
+
+  // Platform 10.0: EO domain preflight per feed — enforced against each
+  // feed's BOUND contract and ITS effective band selection, after the
+  // by-name/positional binding above, BEFORE any tile is read (and therefore
+  // before any product is staged or published — R18-B: this gate used to run
+  // after publishStaged/publishProvenanceSidecar/disarm, so an enforced
+  // calibration refusal left a fully published product behind a "failed" run).
+  if ( m_model.eo.declared )
+  {
+    Json::Value perFeed( Json::arrayValue );
+    for ( std::size_t f = 0; f < feeds.size(); ++f )
+    {
+      const ModelInputContract &contract = m_model.inputs[feedContract[f]];
+      for ( const std::string &feedPath : feeds[f].paths )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["path"] = feedPath;
+        entry["report"] = enforceEoPreflight( m_model, feedPath, feeds[f].bands, &contract ).toJson();
+        perFeed.append( entry );
+      }
+    }
+    m_lastEoPreflight = perFeed;
   }
 
   // Platform 9.0 (M3): each feed resolves its EFFECTIVE preprocessing — the
@@ -3944,25 +4073,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     publishGuard.disarm();
   }
 
-  // Platform 10.0: EO domain preflight per feed — enforced against each
-  // feed's BOUND contract and ITS effective band selection, after the
-  // by-name/positional binding above, before any tile is read.
-  if ( m_model.eo.declared )
-  {
-    Json::Value perFeed( Json::arrayValue );
-    for ( std::size_t f = 0; f < feeds.size(); ++f )
-    {
-      const ModelInputContract &contract = m_model.inputs[feedContract[f]];
-      for ( const std::string &feedPath : feeds[f].paths )
-      {
-        Json::Value entry( Json::objectValue );
-        entry["path"] = feedPath;
-        entry["report"] = enforceEoPreflight( m_model, feedPath, feeds[f].bands, &contract ).toJson();
-        perFeed.append( entry );
-      }
-    }
-    m_lastEoPreflight = perFeed;
-  }
   context.reportProgressForced( 1.0, "Tiled multi-input inference complete" );
   stats.tilesProcessed = done;
   stats.eoPreflight = m_lastEoPreflight;
@@ -3975,6 +4085,16 @@ int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
                                              int tilePx, int fedChannels )
 {
   // Manifest request first; the budget can only lower it.
+  //
+  // R15-C C11 (F12, documented limitation): the ceiling is the ENV/per-device
+  // VRAM budget (SICNU_MODEL_VRAM_MB), never the live ledger occupancy
+  // (ModelRuntimeRegistry::vramLedger().freeMb(resolved device)). Two
+  // concurrent tiled inferences on one card therefore each size their batch
+  // for the full budget and can collectively over-commit — deliberately, so
+  // the OOM ladder (batch→tile-by-tile, never a resolution change) stays the
+  // single degradation authority instead of two engines bargaining over the
+  // ledger mid-run. Callers that need ledger-aware sizing must resolve the
+  // device first and pass a narrowed budget.
   int batch = std::max( 1, model.tiling.batchSize );
   const int tile = std::max( kMinTileSize, tilePx );
   // Per-sample working set: input blob + output planes + halo overhead.
