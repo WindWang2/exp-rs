@@ -143,7 +143,10 @@ Json::Value probeRasterDataset( const std::string &path )
   }
 
   // Non-local (VSI / connection string / remote URI): probe via GDAL directly.
-  GDALAllRegister();
+  // ensureGdalInit() (not a bare GDALAllRegister): preflight runs on JobEngine
+  // runner threads, so registration must go through the process-wide
+  // call_once that also caps OpenCV's nested parallelism (#692).
+  ensureGdalInit();
   CPLErrorReset();
   GDALDatasetH hDS = GDALOpenEx( path.c_str(),
                                  GDAL_OF_RASTER | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
@@ -281,7 +284,9 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       }
       else
       {
-        GDALAllRegister();
+        // Same init contract as the raster probe above: the one-shot
+        // ensureGdalInit() instead of a bare GDALAllRegister() (#692).
+        ensureGdalInit();
         CPLErrorReset();
         GDALDatasetH hDS = GDALOpenEx( path.c_str(),
                                        GDAL_OF_VECTOR | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,

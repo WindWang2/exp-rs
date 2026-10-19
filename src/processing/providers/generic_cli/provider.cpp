@@ -82,8 +82,21 @@ void GenericCliProvider::loadToolsFromDirectory(const QString &dir)
             continue;
         }
 
+        // Skip tools whose id is already registered: the same id can appear in
+        // more than one of the scanned directories (e.g. a user JSON shadowing
+        // a shipped tool), and the first one loaded wins
+        if ( algorithm( toolId ) ) {
+            QgsMessageLog::logMessage(
+                QObject::tr("Skipping tool %1 in %2: duplicate id").arg(toolId, fileInfo.fileName()),
+                QStringLiteral("generic_cli"), Qgis::MessageLevel::Warning);
+            continue;
+        }
+
         // Create and register the algorithm
         auto *algorithm = new GenericCliAlgorithm(config, id());
-        addAlgorithm(algorithm);
+        if ( !addAlgorithm(algorithm) ) {
+            // addAlgorithm() rejects duplicates without taking ownership
+            delete algorithm;
+        }
     }
 }

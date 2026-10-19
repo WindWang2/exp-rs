@@ -119,19 +119,13 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
              || type == QgsProcessingParameterFileDestination::typeName() )
         {
             const QString outPath = resolvedParameters.value( param->name() ).toString();
-            QString actualPath = outPath;
-            if ( !outPath.isEmpty() && !QFileInfo::exists( actualPath ) )
-            {
-                for ( const QString &ext : { QStringLiteral( ".tif" ), QStringLiteral( ".shp" ), QStringLiteral( ".xml" ), QStringLiteral( ".txt" ) } )
-                {
-                    if ( QFileInfo::exists( outPath + ext ) )
-                    {
-                        actualPath = outPath + ext;
-                        break;
-                    }
-                }
-            }
-            if ( !outPath.isEmpty() && !QFileInfo::exists( actualPath ) )
+            if ( outPath.isEmpty() )
+                continue;
+            // Only the declared path counts as the output: a sidecar such as
+            // an OGR out.shp.xml (or any other declared-path + extension file)
+            // must not be mistaken for the output itself when the main output
+            // is missing (#1568).
+            if ( !QFileInfo::exists( outPath ) )
             {
                 const QString err = QObject::tr(
                                       "Tool reported success but output file is missing: %1" )
@@ -141,7 +135,7 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
                 SICNU_LOG_ERROR( SicnuLogTags::OTB, err );
                 throw QgsProcessingException(err);
             }
-            results.insert( param->name(), actualPath );
+            results.insert( param->name(), outPath );
         }
     }
     return results;
