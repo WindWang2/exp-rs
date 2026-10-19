@@ -1,0 +1,581 @@
+diff --git a/src/operators/rs/rs_inference_operator.cpp b/src/operators/rs/rs_inference_operator.cpp
+index 6a42f2da0..280c48d6a 100644
+--- a/src/operators/rs/rs_inference_operator.cpp
++++ b/src/operators/rs/rs_inference_operator.cpp
+@@ -34,6 +34,24 @@ namespace {
+ 
+ using namespace params;
+ 
++/// Reads an optional string field from an EXTERNAL STAC document
++/// (R10-A/PR-9): `.get(key, "")` only defaults MISSING keys, so a
++/// present-but-nonstring value used to reach bare asString() — jsoncpp then
++/// threw LogicError (object/array) or silently stringified (numbers/bools)
++/// into a garbage path. Hostile documents must fail typed instead; missing
++/// keys keep the "" default (callers decide what an absent field means).
++std::string stacStringField( const Json::Value &object, const char *key,
++                             const std::string &where )
++{
++  const Json::Value &field = object.get( key, Json::Value::nullSingleton() );
++  if ( field.isNull() )
++    return std::string();
++  if ( !field.isString() )
++    throw RSOperatorError( ErrorCode::InvalidInputData,
++                           "STAC " + where + ": '" + key + "' must be a string" );
++  return field.asString();
++}
++
+ /// Platform 8.0 WP-D: expands a LOCAL STAC Collection/Item document into a
+ /// time-ordered frame list for a temporal feed. Items come from a collection's
+ /// `links` with rel "item" (relative paths resolve against the document) or a
+@@ -88,7 +106,8 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
+     // the ITEM (which may live in a subdirectory of the collection), not
+     // the top-level document.
+     const QFileInfo itemInfo( QString::fromStdString( itemPath ) );
+-    const std::string datetime = item["properties"].get( "datetime", "" ).asString();
++    const std::string datetime =
++      stacStringField( item["properties"], "datetime", "item properties (" + itemPath + ")" );
+     if ( datetime.empty() )
+       throw RSOperatorError( ErrorCode::InvalidInputData,
+                              "STAC item carries no properties.datetime: " + itemPath );
+@@ -98,18 +117,18 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
+                              "STAC item carries no assets: " + itemPath );
+     std::string href;
+     if ( !assetKey.empty() && assets.isMember( assetKey ) )
+-      href = assets[assetKey].get( "href", "" ).asString();
++      href = stacStringField( assets[assetKey], "href", "asset '" + assetKey + "' (" + itemPath + ")" );
+     else
+     {
+       // Documented fallback order: "COG" → "data" → "image" → first entry.
+       for ( const char *key : { "COG", "data", "image" } )
+         if ( assets.isMember( key ) )
+         {
+-          href = assets[key].get( "href", "" ).asString();
++          href = stacStringField( assets[key], "href", std::string( "asset '" ) + key + "' (" + itemPath + ")" );
+           break;
+         }
+       if ( href.empty() )
+-        href = assets.begin()->get( "href", "" ).asString();
++        href = stacStringField( *assets.begin(), "href", "first asset (" + itemPath + ")" );
+     }
+     if ( href.empty() )
+       throw RSOperatorError(
+@@ -123,7 +142,7 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
+     frames.emplace_back( datetime, href );
+   };
+ 
+-  const std::string type = parsed.get( "type", "" ).asString();
++  const std::string type = stacStringField( parsed, "type", "document (" + documentPath + ")" );
+   if ( type == "Collection" )
+   {
+     const Json::Value &links = parsed["links"];
+@@ -133,14 +152,14 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
+     constexpr std::size_t kMaxStacItems = 1024; // mirrors the engine frame cap
+     for ( const auto &link : links )
+     {
+-      if ( link.get( "rel", "" ).asString() != "item" )
++      if ( stacStringField( link, "rel", "collection link (" + documentPath + ")" ) != "item" )
+         continue;
+       if ( frames.size() >= kMaxStacItems )
+         throw RSOperatorError( ErrorCode::InvalidParameter,
+                                "STAC collection resolves to more than "
+                                  + std::to_string( kMaxStacItems )
+                                  + " items: " + documentPath + " (coarsen the series)" );
+-      std::string href = link.get( "href", "" ).asString();
++      std::string href = stacStringField( link, "href", "collection link (" + documentPath + ")" );
+       if ( href.empty() )
+         continue;
+       if ( QFileInfo( QString::fromStdString( href ) ).isRelative() )
+@@ -303,6 +322,14 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params )
+     const int halo = TileInferenceEngine::effectiveHalo( model );
+     const std::uint64_t batch = static_cast<std::uint64_t>( std::max( 1, model.tiling.batchSize ) );
+ 
++    // R10-A/A1-D2: bands is schema-declared as an array; a scalar used to be
++    // silently ignored here (all-bands estimate) and by parseBands() on the
++    // run path — refuse it typed so estimate and run agree on the contract.
++    if ( params.isObject() && params.isMember( "bands" ) && !params["bands"].isNull()
++         && !params["bands"].isArray() )
++        throw RSOperatorError( ErrorCode::InvalidParameter,
++                               "bands must be an array of 1-based band indices" );
++
+     std::uint64_t bands = 4; // conservative default when the raster is unknown
+     GdalDatasetWrapper ds;
+     if ( !inputPath.empty() && ds.open( QString::fromStdString( inputPath ) ) )
+@@ -503,6 +530,13 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
+       if ( bandCount <= 0 )
+         throw RSOperatorError( ErrorCode::GdalError,
+                                "Failed to read band count from input raster" );
++      // R10-A/A1-D2: parseBands() silently widens a scalar bands value to
++      // all bands — refuse the non-array shape typed before it gets there
++      // (mirrors the named-inputs guard above).
++      if ( params.isMember( "bands" ) && !params["bands"].isNull()
++           && !params["bands"].isArray() )
++        throw RSOperatorError( ErrorCode::InvalidParameter,
++                               "bands must be an array of 1-based band indices" );
+       request.bands = parseBands( params, bandCount );
+     }
+ 
+diff --git a/src/operators/rs/rs_sar_network_inversion_operator.cpp b/src/operators/rs/rs_sar_network_inversion_operator.cpp
+index df9e52f18..51ebbaf3d 100644
+--- a/src/operators/rs/rs_sar_network_inversion_operator.cpp
++++ b/src/operators/rs/rs_sar_network_inversion_operator.cpp
+@@ -139,6 +139,14 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
+         throw RSOperatorError( ErrorCode::InvalidParameter,
+                                "displacementInputs must be a non-empty JSON array of "
+                                "raster paths" );
++    // R10-A/PR-9: validate every item up front — a non-string item used to
++    // reach bare asString() deep in the dataset loop (object → jsoncpp
++    // LogicError; number → silently stringified into a garbage raster path).
++    for ( Json::ArrayIndex i = 0; i < inputsJson.size(); ++i )
++        if ( !inputsJson[i].isString() )
++            throw RSOperatorError( ErrorCode::InvalidParameter,
++                                   "displacementInputs[" + std::to_string( i )
++                                       + "] must be a raster path string" );
+     if ( !pairsJson.isArray() || pairsJson.empty() )
+         throw RSOperatorError( ErrorCode::InvalidParameter,
+                                "pairs must be a non-empty JSON array of "
+diff --git a/src/processing/features/feature_cube.cpp b/src/processing/features/feature_cube.cpp
+index 5ba22fc28..5d4095f1f 100644
+--- a/src/processing/features/feature_cube.cpp
++++ b/src/processing/features/feature_cube.cpp
+@@ -147,10 +147,15 @@ Json::Value FeatureCubeContract::toJson() const
+ bool FeatureCubeContract::fromJson( const Json::Value &v, FeatureCubeContract *out,
+                                     QString *error )
+ {
+-  if ( !v.isObject() || !v.isMember( "version" ) || v["version"].asInt() != 1 )
++  // R10-A/PR-10: asInt() on a string throws Json::LogicError and on a real
++  // silently truncates (1.9 → v1). Require an integer version through the
++  // error channel — never an exception, never a truncated accept.
++  if ( !v.isObject() || !v.isMember( "version" ) || !v["version"].isInt()
++       || v["version"].asInt() != 1 )
+   {
+     if ( error )
+-      *error = QStringLiteral( "unsupported feature cube contract version" );
++      *error = QStringLiteral( "unsupported feature cube contract version "
++                               "(must be the integer 1)" );
+     return false;
+   }
+   out->bands.clear();
+diff --git a/src/operators/rs/rs_stack_register_operator.cpp b/src/operators/rs/rs_stack_register_operator.cpp
+index 191a41241..992c1c2b0 100644
+--- a/src/operators/rs/rs_stack_register_operator.cpp
++++ b/src/operators/rs/rs_stack_register_operator.cpp
+@@ -138,8 +138,17 @@ Json::Value RsStackRegisterOperator::run(const Json::Value& p, RSOperatorContext
+             for (const auto& v : doc.array())
+                 ids.push_back(v.toString());
+         } else if (p["scenes"].isArray()) {
+-            for (const auto& v : p["scenes"])
++            for (const auto& v : p["scenes"]) {
++                // R10-A/PR-11: scenes items are user JSON — a non-string item
++                // must refuse typed (an object used to throw jsoncpp
++                // LogicError, a number was silently stringified into a scene
++                // id).
++                if (!v.isString())
++                    throw RSOperatorError(ErrorCode::InvalidParameter,
++                                          "scenes entries must be strings (got a non-string "
++                                          "JSON value); use scene ids like [\"A\", \"B\"]");
+                 ids.push_back(QString::fromStdString(v.asString()));
++            }
+         }
+     }
+     std::vector<sicnu::registration::StackPairObservation> obs;
+diff --git a/src/operators/rs/rs_recode_operator.cpp b/src/operators/rs/rs_recode_operator.cpp
+index e4a18ceda..c5363e6e0 100644
+--- a/src/operators/rs/rs_recode_operator.cpp
++++ b/src/operators/rs/rs_recode_operator.cpp
+@@ -107,16 +107,29 @@ QMap<int, int> parseRecodeMap( const Json::Value &params )
+   {
+     for ( const auto &key : mapValue.getMemberNames() )
+     {
++      // R10-A/PR-12: distinguish key errors from value errors. A non-numeric
++      // key maps nothing and stays tolerable; a malformed VALUE used to be
++      // swallowed by the same catch(...) and the class remapping silently
++      // vanished (classification semantics changed with exit success).
++      // Value errors now refuse the whole mapping typed: integers only —
++      // strings throw asInt(), fractional reals silently truncate.
++      int srcId = 0;
+       try
+       {
+-        int srcId = std::stoi( key );
+-        int dstId = mapValue[key].asInt();
+-        map[srcId] = dstId;
++        srcId = std::stoi( key );
+       }
+       catch ( ... )
+       {
+-        // Skip invalid keys
++        continue; // non-numeric key: maps nothing (tolerated as before)
+       }
++      const Json::Value &dst = mapValue[key];
++      if ( !dst.isInt() )
++        throw RSOperatorError(
++          ErrorCode::InvalidParameter,
++          "recode mapping '" + key + "' has a non-integer target value; class "
++            "remappings must be integer -> integer (whole mapping refused, "
++            "entries are never silently dropped)" );
++      map[srcId] = dst.asInt();
+     }
+   }
+ 
+diff --git a/src/operators/framework/chunked_run.h b/src/operators/framework/chunked_run.h
+index 985df3e58..7dd82d6dd 100644
+--- a/src/operators/framework/chunked_run.h
++++ b/src/operators/framework/chunked_run.h
+@@ -106,6 +106,20 @@ struct ChunkedRunOptions
+     bool cleanupScratchOnSuccess = true;
+ };
+ 
++/// Parses one chunked-execution mode parameter value (R10-A/PR-5).
++///
++/// Accepted shapes: "pipeline"/"resumable" strings, or a bool (true
++/// normalizes to resumable — the crash-safe default; false leaves @p mode
++/// at its current/default value). A JSON null counts as unset. Every other
++/// shape throws RSOperatorError(InvalidParameter) naming @p paramName and
++/// the received value/type — mode switches are reproducibility-relevant and
++/// must never silently fall back to the default mode.
++///
++/// @return true when the value was recognized (applied or normalized),
++///         false when unset (absent/null — caller leaves the default).
++bool parseChunkedModeValue( const Json::Value &value, const char *paramName,
++                            ChunkedRunOptions::Mode *mode );
++
+ struct ChunkedRunResult
+ {
+     std::uint64_t totalTiles = 0;
+diff --git a/src/operators/framework/chunked_run.cpp b/src/operators/framework/chunked_run.cpp
+index 3d8cc3cb5..ced536b9b 100644
+--- a/src/operators/framework/chunked_run.cpp
++++ b/src/operators/framework/chunked_run.cpp
+@@ -344,4 +344,67 @@ ChunkedRunResult runChunkedOperator(
+     return runResumable( spec, context, kernel, sink, options );
+ }
+ 
++namespace
++{
++
++/// jsoncpp 1.9.6 has no Value::typeName(); name the received shape for the
++/// typed parameter errors below.
++const char *jsonTypeName( const Json::Value &value )
++{
++    switch ( value.type() )
++    {
++        case Json::nullValue: return "null";
++        case Json::intValue:
++        case Json::uintValue: return "integer";
++        case Json::realValue: return "number";
++        case Json::stringValue: return "string";
++        case Json::booleanValue: return "boolean";
++        case Json::arrayValue: return "array";
++        case Json::objectValue: return "object";
++    }
++    return "unknown";
++}
++
++} // namespace
++
++bool parseChunkedModeValue( const Json::Value &value, const char *paramName,
++                            ChunkedRunOptions::Mode *mode )
++{
++    if ( value.isNull() )
++        return false;
++    if ( value.isBool() )
++    {
++        // Bool form normalizes explicitly (R10-A/PR-5): true = resumable
++        // (the crash-safe default), false = keep the default — a bool is
++        // never silently stringified into a non-matching pseudo-enum.
++        if ( value.asBool() )
++            *mode = ChunkedRunOptions::Mode::Resumable;
++        return true;
++    }
++    if ( value.isString() )
++    {
++        const std::string m = value.asString();
++        if ( m == "pipeline" )
++        {
++            *mode = ChunkedRunOptions::Mode::Pipeline;
++            return true;
++        }
++        if ( m == "resumable" )
++        {
++            *mode = ChunkedRunOptions::Mode::Resumable;
++            return true;
++        }
++        throw RSOperatorError( ErrorCode::InvalidParameter,
++                               std::string( paramName )
++                                   + " must be \"pipeline\" or \"resumable\" (or a bool); got "
++                                     "string \""
++                                   + m + "\"" );
++    }
++    throw RSOperatorError( ErrorCode::InvalidParameter,
++                           std::string( paramName )
++                               + " must be \"pipeline\" or \"resumable\" (or a bool); got "
++                                 "a non-string "
++                           + jsonTypeName( value ) + " value" );
++}
++
+ } // namespace sicnu::operators
+diff --git a/src/operators/rs/rs_change_detection_operator.cpp b/src/operators/rs/rs_change_detection_operator.cpp
+index 5f1d99e13..bc1a00f9e 100644
+--- a/src/operators/rs/rs_change_detection_operator.cpp
++++ b/src/operators/rs/rs_change_detection_operator.cpp
+@@ -331,14 +331,11 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
+     canonParams["kernelVersion"] = 1;
+     opts.canonicalParams = canonParams;
+ 
++    // R10-A/PR-5: mode switches refuse non-enum shapes typed (bools
++    // normalize explicitly) — never a silent fallback to the default mode.
+     if ( params.isMember( "chunkedMode" ) )
+-    {
+-        const std::string m = params["chunkedMode"].asString();
+-        if ( m == "pipeline" )
+-            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+-        else if ( m == "resumable" )
+-            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+-    }
++        sicnu::operators::parseChunkedModeValue( params["chunkedMode"], "chunkedMode",
++                                                 &opts.executionMode );
+     if ( params.isMember( "resumeStateBase" ) && params["resumeStateBase"].isString() )
+     {
+         opts.resumeStateBase = params["resumeStateBase"].asString();
+diff --git a/src/operators/rs/rs_change_primitives.cpp b/src/operators/rs/rs_change_primitives.cpp
+index 29de7179a..51246aad1 100644
+--- a/src/operators/rs/rs_change_primitives.cpp
++++ b/src/operators/rs/rs_change_primitives.cpp
+@@ -129,14 +129,11 @@ Json::Value runPrimitive( ChangeMetric metric, const std::string &label,
+     canonParams["kernelVersion"] = 1;
+     opts.canonicalParams = canonParams;
+ 
++    // R10-A/PR-5: mode switches refuse non-enum shapes typed (bools
++    // normalize explicitly) — never a silent fallback to the default mode.
+     if ( params.isMember( "chunkedMode" ) )
+-    {
+-        const std::string m = params["chunkedMode"].asString();
+-        if ( m == "pipeline" )
+-            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+-        else if ( m == "resumable" )
+-            opts.executionMode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+-    }
++        sicnu::operators::parseChunkedModeValue( params["chunkedMode"], "chunkedMode",
++                                                 &opts.executionMode );
+     if ( params.isMember( "resumeStateBase" ) && params["resumeStateBase"].isString() )
+     {
+         opts.resumeStateBase = params["resumeStateBase"].asString();
+diff --git a/src/operators/rs/rs_spectral_index_operator.cpp b/src/operators/rs/rs_spectral_index_operator.cpp
+index 5081c533e..5b3774cbb 100644
+--- a/src/operators/rs/rs_spectral_index_operator.cpp
++++ b/src/operators/rs/rs_spectral_index_operator.cpp
+@@ -514,18 +514,15 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
+         : (allowIndexOverride ? "rs:spectral_index" : ("rs:" + QString::fromStdString(defaultIndex).toLower().toStdString()));
+ 
+     sicnu::operators::ChunkedRunOptions runOpts = options;
++    // R10-A/PR-5: mode switches refuse non-enum shapes typed (bools
++    // normalize explicitly) — never a silent fallback to the default mode.
++    // executionMode takes precedence over the legacy chunkedMode spelling.
+     if (params.isMember("executionMode")) {
+-        const std::string m = params["executionMode"].asString();
+-        if (m == "pipeline")
+-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+-        else if (m == "resumable")
+-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
++        sicnu::operators::parseChunkedModeValue(params["executionMode"], "executionMode",
++                                                &runOpts.mode);
+     } else if (params.isMember("chunkedMode")) {
+-        const std::string m = params["chunkedMode"].asString();
+-        if (m == "pipeline")
+-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
+-        else if (m == "resumable")
+-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
++        sicnu::operators::parseChunkedModeValue(params["chunkedMode"], "chunkedMode",
++                                                &runOpts.mode);
+     }
+     if (params.isMember("ramBudgetBytes") && params["ramBudgetBytes"].isUInt64()) {
+         runOpts.ramBudgetBytes = params["ramBudgetBytes"].asUInt64();
+diff --git a/src/operators/rs/rs_zonal_stats_operator.cpp b/src/operators/rs/rs_zonal_stats_operator.cpp
+index f478086ad..eee47d15b 100644
+--- a/src/operators/rs/rs_zonal_stats_operator.cpp
++++ b/src/operators/rs/rs_zonal_stats_operator.cpp
+@@ -125,13 +125,27 @@ Json::Value RsZonalStatsOperator::run( const Json::Value &params, RSOperatorCont
+ 
+     // Bands: JSON array of 1-based ints (default [1]).
+     std::vector<int> bands;
+-    if ( params.isMember( "bands" ) && params["bands"].isArray() && !params["bands"].empty() )
++    // R10-A/A1-D2: the schema declares bands as an array; a scalar value
++    // used to fall through the isArray() fast path and silently default to
++    // [1] (the capability catalog even advertises it as a scalar) — refuse
++    // the non-array shape typed instead of silently zoning the wrong band.
++    if ( params.isMember( "bands" ) && !params["bands"].isNull() )
+     {
+-        for ( const auto &b : params["bands"] )
++        if ( !params["bands"].isArray() )
++            throw RSOperatorError( ErrorCode::InvalidParameter,
++                                   "bands must be a JSON array of 1-based band numbers" );
++        if ( !params["bands"].empty() )
++        {
++            for ( const auto &b : params["bands"] )
++            {
++                if ( !b.isNumeric() )
++                    throw RSOperatorError( ErrorCode::InvalidParameter, "bands entries must be integers" );
++                bands.push_back( b.asInt() );
++            }
++        }
++        else
+         {
+-            if ( !b.isNumeric() )
+-                throw RSOperatorError( ErrorCode::InvalidParameter, "bands entries must be integers" );
+-            bands.push_back( b.asInt() );
++            bands.push_back( 1 );
+         }
+     }
+     else
+diff --git a/src/analysis/atmospheric/fast_6s_lookup.cpp b/src/analysis/atmospheric/fast_6s_lookup.cpp
+index 64e82e085..0fbdc37cf 100644
+--- a/src/analysis/atmospheric/fast_6s_lookup.cpp
++++ b/src/analysis/atmospheric/fast_6s_lookup.cpp
+@@ -193,6 +193,12 @@ namespace exp_radiometric
+ 
+     AxisLocation locateTable( double value, const double *axis, int steps )
+     {
++      // R10-A/AN-9: NaN fails every comparison below, so it fell through the
++      // clamps and produced frac=NaN (poisoning every interpolated
++      // coefficient). Guard exactly like locateUniform: non-finite axis
++      // values clamp to the first grid node, never UB or NaN weights.
++      if ( !std::isfinite( value ) )
++        return {}; // NaN/Inf clamps to the first grid node (never UB casts)
+       if ( value <= axis[0] )
+         return {};
+       if ( value >= axis[steps - 1] )
+diff --git a/src/processing/framework/algorithm_preflight.cpp b/src/processing/framework/algorithm_preflight.cpp
+index 0ea28a9ca..8518c7c55 100644
+--- a/src/processing/framework/algorithm_preflight.cpp
++++ b/src/processing/framework/algorithm_preflight.cpp
+@@ -2,6 +2,7 @@
+ #include "algorithm_preflight.h"
+ 
+ #include "atomic_algorithm_registry.h"
++#include "data/raster_grid_compat.h"
+ #include "gdal/gdal_dataset_wrapper.h"
+ #include "resource_estimation.h"
+ #include "runtime/chunk/memory_planner.h"
+@@ -129,6 +130,17 @@ Json::Value probeRasterDataset( const std::string &path )
+     }
+     info["crs"] = ds.projection().toStdString();
+ 
++    // R10-A/PR-4: record the geotransform so the same-grid compatibility
++    // pass can compare resolution/origin with the runtime gate's semantics.
++    info["hasGeoTransform"] = ds.hasGeoTransform();
++    if ( ds.hasGeoTransform() )
++    {
++      Json::Value gtJson( Json::arrayValue );
++      for ( const double coefficient : ds.geoTransform() )
++        gtJson.append( coefficient );
++      info["geoTransform"] = gtJson;
++    }
++
+     // Dataset-level radiometric state metadata (importers write this).
+     if ( void *h = ds.dataset() )
+     {
+@@ -180,6 +192,19 @@ Json::Value probeRasterDataset( const std::string &path )
+     info["crs"] = proj;
+   else
+     info["crs"] = "";
++  // R10-A/PR-4: geotransform facts for the same-grid compatibility pass
++  // (non-local branch — see the local branch above).
++  {
++    double gt[6] = { 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
++    info["hasGeoTransform"] = GDALGetGeoTransform( hDS, gt ) == CE_None;
++    if ( info["hasGeoTransform"].asBool() )
++    {
++      Json::Value gtJson( Json::arrayValue );
++      for ( const double coefficient : gt )
++        gtJson.append( coefficient );
++      info["geoTransform"] = gtJson;
++    }
++  }
+   if ( const char *rs = GDALGetMetadataItem( hDS, "SICNU_RADIOMETRIC_STATE", nullptr ) )
+     info["radiometricState"] = rs;
+   extendProbeWithContractFacts( info, GDALGetRasterCount( hDS ), hDS );
+@@ -198,6 +223,27 @@ void addIssue( Json::Value &issues, const std::string &code, const std::string &
+   issues.append( item );
+ }
+ 
++/// Relative scalar equality with the runtime gate's tolerance
++/// (raster_grid_compat.cpp sameScalar/kGridTolerance) — R10-A/PR-4 mirrors
++/// it so preflight never disagrees with compareGrids on borderline values.
++bool sameGridScalar( double a, double b )
++{
++  const double scale = std::max( { std::abs( a ), std::abs( b ), 1.0 } );
++  return std::abs( a - b ) <= 1e-9 * scale;
++}
++
++/// Reads a probe's recorded geotransform; false when the probe carries none
++/// (unopened dataset, or a raster without georeferencing).
++bool probeGeoTransform( const Json::Value &info, double ( &gt )[6] )
++{
++  if ( !info.isMember( "geoTransform" ) || !info["geoTransform"].isArray()
++       || info["geoTransform"].size() != 6 )
++    return false;
++  for ( int i = 0; i < 6; ++i )
++    gt[i] = info["geoTransform"][static_cast<Json::ArrayIndex>( i )].asDouble();
++  return true;
++}
++
+ } // namespace
+ 
+ Json::Value preflightAlgorithm( const std::string &algorithmId, const Json::Value &params )
+@@ -342,13 +388,56 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
+       }
+       const std::string crsA = first["crs"].asString();
+       const std::string crsB = other["crs"].asString();
+-      if ( !crsA.empty() && !crsB.empty() && crsA != crsB )
++      // R10-A/PR-4: semantic CRS equality (OSRIsSame through the shared
++      // data-side service) — a raw WKT string compare flagged dialect
++      // differences (ESRI vs OGC encodings of one CRS) that the runtime
++      // gate accepts, telling the agent "not runnable" for runnable inputs.
++      if ( !crsA.empty() && !crsB.empty()
++           && !sicnu::data::isSameCrs( QString::fromStdString( crsA ),
++                                       QString::fromStdString( crsB ) ) )
+       {
+         addIssue( compatIssues, "crs_mismatch",
+                   "Raster inputs '" + probedRasters.front().first + "' and '"
+                   + probedRasters[i].first + "' have different CRS (" + crsA
+                   + " vs " + crsB + ")." );
+       }
++      // R10-A/PR-4: resolution/origin drift used to be invisible here (only
++      // width/height were compared) while the runtime gate blocks it — the
++      // agent got valid=true and paid for a refused run. Mirror the runtime
++      // tolerances (compareGrids: relative 1e-9 pixel-size equality,
++      // 1e-6-pixel origin snap). Compared only when BOTH probes recorded a
++      // geotransform: absent facts never fabricate issues (fail-closed
++      // without false positives).
++      double gtA[6], gtB[6];
++      if ( probeGeoTransform( first, gtA ) && probeGeoTransform( other, gtB ) )
++      {
++        const double psxA = std::abs( gtA[1] ), psyA = std::abs( gtA[5] );
++        const double psxB = std::abs( gtB[1] ), psyB = std::abs( gtB[5] );
++        if ( !sameGridScalar( psxA, psxB ) || !sameGridScalar( psyA, psyB ) )
++        {
++          addIssue( compatIssues, "pixel_size_mismatch",
++                    "Raster inputs '" + probedRasters.front().first + "' and '"
++                    + probedRasters[i].first + "' use different pixel grids ("
++                    + std::to_string( psxA ) + " x " + std::to_string( psyA )
++                    + " vs " + std::to_string( psxB ) + " x " + std::to_string( psyB )
++                    + "); resample them onto a common grid before running." );
++        }
++        else if ( psxA > 0.0 && psyA > 0.0 )
++        {
++          // Same lattice: origins must land on the same pixel corners; a
++          // sub-pixel offset shifts every pixel's footprint (runtime
++          // OriginMisalignment semantics).
++          const double dxPx = ( gtB[0] - gtA[0] ) / psxA;
++          const double dyPx = ( gtB[3] - gtA[3] ) / psyA;
++          if ( std::abs( dxPx - std::round( dxPx ) ) > 1e-6
++               || std::abs( dyPx - std::round( dyPx ) ) > 1e-6 )
++            addIssue( compatIssues, "origin_misalignment",
++                      "Raster inputs '" + probedRasters.front().first + "' and '"
++                      + probedRasters[i].first + "' have sub-pixel offset origins ("
++                      + std::to_string( dxPx ) + ", " + std::to_string( dyPx )
++                      + " pixels); align both rasters to a common grid before running." );
++        }
++      }
+     }
+   }
+ 

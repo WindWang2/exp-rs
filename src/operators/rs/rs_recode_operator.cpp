@@ -107,16 +107,29 @@ QMap<int, int> parseRecodeMap( const Json::Value &params )
   {
     for ( const auto &key : mapValue.getMemberNames() )
     {
+      // R10-A/PR-12: distinguish key errors from value errors. A non-numeric
+      // key maps nothing and stays tolerable; a malformed VALUE used to be
+      // swallowed by the same catch(...) and the class remapping silently
+      // vanished (classification semantics changed with exit success).
+      // Value errors now refuse the whole mapping typed: integers only —
+      // strings throw asInt(), fractional reals silently truncate.
+      int srcId = 0;
       try
       {
-        int srcId = std::stoi( key );
-        int dstId = mapValue[key].asInt();
-        map[srcId] = dstId;
+        srcId = std::stoi( key );
       }
       catch ( ... )
       {
-        // Skip invalid keys
+        continue; // non-numeric key: maps nothing (tolerated as before)
       }
+      const Json::Value &dst = mapValue[key];
+      if ( !dst.isInt() )
+        throw RSOperatorError(
+          ErrorCode::InvalidParameter,
+          "recode mapping '" + key + "' has a non-integer target value; class "
+            "remappings must be integer -> integer (whole mapping refused, "
+            "entries are never silently dropped)" );
+      map[srcId] = dst.asInt();
     }
   }
 

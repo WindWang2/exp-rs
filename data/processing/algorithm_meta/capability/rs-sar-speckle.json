@@ -79,6 +79,8 @@
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "companionScenes",
           "required" : false,
           "type" : "string"

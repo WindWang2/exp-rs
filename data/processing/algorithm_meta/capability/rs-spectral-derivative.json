@@ -80,6 +80,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "numeric",
           "name" : "wavelengths",
           "required" : false,
           "type" : "numeric"

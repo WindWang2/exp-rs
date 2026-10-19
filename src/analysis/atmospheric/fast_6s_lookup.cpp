@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <vector>
 #include <cmath>
 #include <limits>
 
@@ -134,8 +135,13 @@ namespace exp_radiometric
 
     struct GridHolder
     {
-      std::array<Lut6sEntry, kGridSize> cells;
-      explicit GridHolder( std::array<Lut6sEntry, kGridSize> &&c ) : cells( std::move( c ) ) {}
+      // Heap storage (R10-A): a std::array member would put ~3.8 MB
+      // (44*6*6*6*5*5 cells x 16 B) on the STACK inside grid()'s static
+      // initializer — a guaranteed overflow under MSVC's 1 MB default
+      // thread stack, so the first interpolation call crashed (SIGSEGV)
+      // on every Windows build.
+      std::vector<Lut6sEntry> cells;
+      explicit GridHolder( std::vector<Lut6sEntry> &&c ) : cells( std::move( c ) ) {}
     };
 
     size_t cellIndex( int wl, int aod, int wv, int solar, int view, int azimuth )
@@ -148,7 +154,7 @@ namespace exp_radiometric
     const GridHolder &grid()
     {
       static const GridHolder holder = [] {
-        std::array<Lut6sEntry, kGridSize> cells;
+        std::vector<Lut6sEntry> cells( kGridSize );
         for ( int wl = 0; wl < kWlCount; ++wl )
           for ( int aod = 0; aod < kAodSteps; ++aod )
             for ( int wv = 0; wv < kWvSteps; ++wv )
@@ -193,6 +199,12 @@ namespace exp_radiometric
 
     AxisLocation locateTable( double value, const double *axis, int steps )
     {
+      // R10-A/AN-9: NaN fails every comparison below, so it fell through the
+      // clamps and produced frac=NaN (poisoning every interpolated
+      // coefficient). Guard exactly like locateUniform: non-finite axis
+      // values clamp to the first grid node, never UB or NaN weights.
+      if ( !std::isfinite( value ) )
+        return {}; // NaN/Inf clamps to the first grid node (never UB casts)
       if ( value <= axis[0] )
         return {};
       if ( value >= axis[steps - 1] )

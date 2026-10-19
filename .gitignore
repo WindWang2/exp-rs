@@ -615,3 +615,14 @@ r6_dev.cmd
 !.planning/r18-d-desktop/
 .planning/r18-d-desktop/*
 !.planning/r18-d-desktop/*.md
+# R18-C track (Pi/MCP agent harness) planning artifacts (markdown only).
+!.planning/r18-c-agent/
+
+# R18-B model-runtime hardening: planning notes (markdown only; logs/build stay local).
+!.planning/r18-b-model/
+.planning/r18-b-model/*
+!.planning/r18-b-model/*.md
+# The recovered r15-C reference docs are part of the audit trail (gitignore '*'
+# does not cross '/', so subdirectory negation needs its own pair).
+!.planning/r18-b-model/references/
+!.planning/r18-b-model/references/*.md

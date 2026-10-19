@@ -601,3 +601,78 @@ TEST_CASE( "wire failure classification pins the protocol families",
            "provider crashed: python worker crashed and the session restart budget is exhausted" ) )
          == sicnu::operators::ErrorCode::RuntimeProviderFailed );
 }
+
+// ---------------------------------------------------------------------------
+// R18-B: write-deadline on a LIVE worker fails the session closed
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "#r18B a live worker that stops accepting writes fails the session "
+           "closed — no stale answer for the next caller",
+           "[models][python][r18B]" )
+{
+  ( void )ensureApp();
+  QTemporaryDir dir;
+  const std::string script =
+    ( QFileInfo( __FILE__ ).absolutePath()
+      + QStringLiteral( "/data/py_worker_slow_start.py" ) )
+      .toStdString();
+  ModelInfo model = makeWorkerModel( dir, script, "slowstart.bin" );
+  // Short deadline so the RED run stays fast; the worker sleeps 6 s.
+  model.runtime.provider.timeoutMs = 1500;
+  std::string error;
+  const auto session =
+    ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
+  INFO( "acquire error: " << error );
+  REQUIRE( session );
+
+  // Request A: far larger than the 64 KiB pipe buffer, so waitForBytesWritten
+  // cannot hand it to the OS while the worker sleeps without draining stdin.
+  constexpr int kBigElements = 200000;
+  std::vector<float> big( static_cast<std::size_t>( kBigElements ), 0.0f );
+  big.back() = 111.0f; // the worker's known answer for A
+  std::vector<NamedTensor> inputA;
+  inputA.push_back(
+    NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 200, 1000 }, big.data(),
+                                               big.size() ) } );
+  try
+  {
+    session->inferNamed( inputA, {} );
+    FAIL( "expected the write deadline to fail request A" );
+  }
+  catch ( const std::exception &e )
+  {
+    // The throw itself happens on master too; the assertion that matters is
+    // the fail-closed state checked below.
+    INFO( "request A failed as expected: " << e.what() );
+  }
+
+  // Fail-closed parity with the read-side branches (oversized / malformed /
+  // read-timeout all stop the worker and mark it dead for good): the session
+  // must never serve again after a live-worker write deadline.
+  CHECK( session->permanentlyUnavailable() );
+
+  // Give the abandoned worker time to wake and answer request A into the
+  // pipe, then prove the stale line can no longer be attributed to request B.
+  std::this_thread::sleep_for( std::chrono::seconds( 6 ) );
+  std::vector<float> small = { 222.0f };
+  std::vector<NamedTensor> inputB;
+  inputB.push_back(
+    NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, small.data(), 1 ) } );
+  bool served = false;
+  float value = -1.0f;
+  try
+  {
+    const auto outputs = session->inferNamed( inputB, {} );
+    served = !outputs.empty();
+    if ( served )
+      value = outputs.front().second.dataFloat32()[0];
+  }
+  catch ( const std::exception &e )
+  {
+    INFO( "request B refused: " << e.what() );
+  }
+  // The desync contract: B is never answered at all — and most especially
+  // never with A's 111.0.
+  CHECK_FALSE( served );
+  CHECK( value != 111.0f );
+}

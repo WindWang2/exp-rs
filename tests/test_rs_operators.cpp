@@ -4017,6 +4017,94 @@ TEST_CASE("recode refuses non-integer label values instead of casting sentinels"
     CHECK_FALSE(QFile::exists(tmp.path() + "/recoded.tif"));
 }
 
+// R10-A/PR-12: a malformed mapping VALUE used to be swallowed by the
+// catch(...) around stoi/asInt, silently dropping that class remapping (or,
+// with a mixed map, re-mapping only the surviving entries — classification
+// semantics changed with exit success). Value type errors must refuse the
+// whole mapping typed; non-numeric KEYS stay tolerable (they map nothing).
+TEST_CASE("recode typed-refuses non-integer mapping values, never drops entries silently (R10-A/PR-12)",
+          "[operators][rs][recode][r10a]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    const QString inputPath = tmp.path() + "/labels.tif";
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    GDALDatasetH ds = createOutputTiff(inputPath, W, H, 1, GDT_Byte, gt, QString());
+    REQUIRE(ds != nullptr);
+    std::vector<uint8_t> labels(W * H, 1);
+    labels[0] = 5;
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                         labels.data(), W, H, GDT_Byte, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:recode");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+
+    // Mixed map with one string value → the WHOLE mapping must refuse typed
+    // (RED on master: the "5"->"6" entry silently vanished and the run
+    // succeeded with only 1->2 applied).
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/rec_str.tif").toStdString();
+        Json::Value map(Json::objectValue);
+        map["1"] = 2;
+        map["5"] = "6";
+        params["recode_map"] = map;
+        REQUIRE_THROWS_AS(op->run(params, ctx), RSOperatorError);
+        CHECK_FALSE(QFile::exists(tmp.path() + "/rec_str.tif"));
+    }
+
+    // Fractional value → refused whole, not silently truncated to 2
+    // (RED on master: 5->2.5 truncated to 5->2 with exit success).
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/rec_frac.tif").toStdString();
+        Json::Value map(Json::objectValue);
+        map["5"] = 2.5;
+        params["recode_map"] = map;
+        REQUIRE_THROWS_AS(op->run(params, ctx), RSOperatorError);
+        CHECK_FALSE(QFile::exists(tmp.path() + "/rec_frac.tif"));
+    }
+
+    // Legacy string-form mapping with a string value → same typed refusal
+    // naming the malformed value (RED on master: the single entry silently
+    // dropped and the run failed with the misleading "must contain at least
+    // one valid mapping" message instead).
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/rec_legacy.tif").toStdString();
+        params["recode_map"] = "{\"5\": \"6\"}";
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("non-integer"));
+        CHECK_FALSE(QFile::exists(tmp.path() + "/rec_legacy.tif"));
+    }
+
+    // Non-numeric KEY stays tolerable (it maps nothing); the valid entry
+    // still applies (pin against over-rejecting).
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/rec_ok.tif").toStdString();
+        Json::Value map(Json::objectValue);
+        map["not-a-number"] = 9;
+        map["5"] = 6;
+        params["recode_map"] = map;
+        REQUIRE_NOTHROW(op->run(params, ctx));
+        GdalDatasetWrapper out;
+        REQUIRE(out.open(tmp.path() + "/rec_ok.tif"));
+        std::vector<float> outLabels(static_cast<size_t>(W) * H);
+        REQUIRE(out.readBandData(1, outLabels.data(), W, H));
+        REQUIRE(outLabels[0] == 6.0f);   // 5 -> 6 applied
+        REQUIRE(outLabels[1] == 1.0f);   // untouched class passes through
+    }
+}
+
 TEST_CASE("majority filter treats the 2^31 float boundary as non-voting", "[operators][rs][majority][hardening16]") {
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());

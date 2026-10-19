@@ -195,6 +195,8 @@
           "type" : "boolean"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "scenes",
           "required" : false,
           "type" : "string"

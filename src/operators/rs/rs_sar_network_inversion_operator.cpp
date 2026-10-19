@@ -139,6 +139,14 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "displacementInputs must be a non-empty JSON array of "
                                "raster paths" );
+    // R10-A/PR-9: validate every item up front — a non-string item used to
+    // reach bare asString() deep in the dataset loop (object → jsoncpp
+    // LogicError; number → silently stringified into a garbage raster path).
+    for ( Json::ArrayIndex i = 0; i < inputsJson.size(); ++i )
+        if ( !inputsJson[i].isString() )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "displacementInputs[" + std::to_string( i )
+                                       + "] must be a raster path string" );
     if ( !pairsJson.isArray() || pairsJson.empty() )
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "pairs must be a non-empty JSON array of "

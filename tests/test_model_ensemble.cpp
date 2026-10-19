@@ -581,6 +581,77 @@ TEST_CASE( "weighted_vote resolves ties to the lowest class and honors weights",
   CHECK( rasterBandCount( output ) == 2 );
 }
 
+TEST_CASE( "weighted_vote writes the NoData sentinel into the agreement band",
+           "[models][ensemble][vote][r15-c]" )
+{
+  // R15-C C09: the agreement band's NoData pixels must carry the documented
+  // sentinel (255 in the Byte label domain). The quantizer used to gate on
+  // std::isnan(agreement) — dead code, because NoData is the FINITE sentinel
+  // — so a NoData pixel was quantized as floor(255×254+0.5)=64770: a value
+  // outside the band's dtype that GDAL's Float32→Byte conversion then clamps
+  // (masking the bug) or wraps (turning NoData into a plausible agreement).
+  RegistryReset reset;
+  const ScaleProviderGuard guardA( "ensfw-a", 1.0 );
+  const ScaleProviderGuard guardB( "ensfw-b", -1.0 );
+  QTemporaryDir dir;
+  registerMember( "vote-a", "ensfw-a", dir );
+  registerMember( "vote-b", "ensfw-b", dir );
+
+  Json::Value json( Json::objectValue );
+  json["name"] = "ens-vote-nd";
+  json["task"] = "segmentation";
+  json["framework"] = "onnx";
+  json["output"]["classes"].append( "bg" );
+  json["output"]["classes"].append( "fore" );
+  Json::Value &ensemble = json["ensemble"] = Json::Value( Json::objectValue );
+  Json::Value members( Json::arrayValue );
+  Json::Value a( Json::objectValue );
+  a["model"] = "vote-a";
+  a["weight"] = 3.0;
+  members.append( a );
+  Json::Value b( Json::objectValue );
+  b["model"] = "vote-b";
+  b["weight"] = 1.0;
+  members.append( b );
+  ensemble["members"] = members;
+  ensemble["combination"] = "weighted_vote";
+  ensemble["uncertainty"] = "agreement";
+  std::string error;
+  REQUIRE( ModelCatalog::instance().registerManifestJson(
+    Json::writeString( Json::StreamWriterBuilder(), json ),
+    dir.filePath( QStringLiteral( "vote-nd/model.json" ) ).toStdString(), &error ) );
+
+  // Two-band raster (band 1 = 1, band 2 = 3) with a 4x4 NoData block in the
+  // top-left corner (declared sentinel on both bands).
+  const QString input = dir.filePath( QStringLiteral( "vote_nd_input.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 2, GDT_Float32 );
+  builder.withConstantValue( 1, 1.0f ).withConstantValue( 2, 3.0f );
+  builder.withNoData( -9999.0 );
+  builder.withRect( 1, 0, 0, 4, 4, -9999.0f );
+  builder.withRect( 2, 0, 0, 4, 4, -9999.0f );
+  builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
+  const QString output = dir.filePath( QStringLiteral( "vote_nd_out.tif" ) );
+
+  ModelExecutionRequest request =
+    rasterRequest( input.toStdString(), output.toStdString(), "ens-vote-nd" );
+  RSOperatorContext context;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
+
+  bool ok = false;
+  // A valid pixel still quantizes its winning share (3/4 → 191).
+  const float agreementValid = readPixel( output, 2, 8, 8, &ok );
+  REQUIRE( ok );
+  CHECK( agreementValid == Catch::Approx( 191.0f ).margin( 1e-3f ) );
+  // THE ORACLE: the NoData pixel carries the sentinel, never the quantized
+  // out-of-range value.
+  const float labelNoData = readPixel( output, 1, 2, 2, &ok );
+  REQUIRE( ok );
+  CHECK( labelNoData == 255.0f );
+  const float agreementNoData = readPixel( output, 2, 2, 2, &ok );
+  REQUIRE( ok );
+  CHECK( agreementNoData == 255.0f );
+}
+
 TEST_CASE( "ensemble failures are atomic — no partial output, no residue",
            "[models][ensemble][failure]" )
 {

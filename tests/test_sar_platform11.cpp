@@ -813,3 +813,61 @@ TEST_CASE( "rs:sar_coregister_local aligns a shifted slave through the "
     REQUIRE( tight >= checked - checked / 100 ); // >= 99% within 0.3
     REQUIRE( maxAbsDiff < 1.5 );                 // bounded interpolation tail
 }
+
+// R10-A/PR-9: displacementInputs array items are external JSON — a
+// non-string item must be a typed InvalidParameter naming the parameter,
+// never a Json::LogicError (object item) and never a silently stringified
+// number that later fails as a confusing "failed to open raster 5".
+TEST_CASE( "rs:sar_network_inversion refuses non-string displacementInputs items (R10-A/PR-9)",
+           "[sar][insar11][operator][inversion][r10a]" )
+{
+    const AppInit app;
+
+    Json::Value pairs( Json::arrayValue );
+    Json::Value pair( Json::arrayValue );
+    pair.append( 1 );
+    pair.append( 0 );
+    pairs.append( pair );
+
+    // Object item → typed refusal during parameter parsing (RED on master:
+    // Json::LogicError escapes inputsJson[i].asString()).
+    {
+        Json::Value params( Json::objectValue );
+        params["displacementInputs"] = Json::Value( Json::arrayValue );
+        params["displacementInputs"].append( Json::Value( Json::objectValue ) );
+        params["pairs"] = pairs;
+        params["velocityOutput"] = "unused.tif";
+        try
+        {
+            RSOperatorContext ctx;
+            runOperator( "rs:sar_network_inversion", params, ctx );
+            FAIL( "object-valued displacementInputs item must refuse" );
+        }
+        catch ( const RSOperatorError &e )
+        {
+            CHECK( e.code() == ErrorCode::InvalidParameter );
+            CHECK( std::string( e.what() ).find( "displacementInputs" ) != std::string::npos );
+        }
+    }
+
+    // Number item → same typed parameter refusal (RED on master: silently
+    // becomes the path "5" and fails as a GDAL open error instead).
+    {
+        Json::Value params( Json::objectValue );
+        params["displacementInputs"] = Json::arrayValue;
+        params["displacementInputs"].append( 5 );
+        params["pairs"] = pairs;
+        params["velocityOutput"] = "unused.tif";
+        try
+        {
+            RSOperatorContext ctx;
+            runOperator( "rs:sar_network_inversion", params, ctx );
+            FAIL( "number-valued displacementInputs item must refuse" );
+        }
+        catch ( const RSOperatorError &e )
+        {
+            CHECK( e.code() == ErrorCode::InvalidParameter );
+            CHECK( std::string( e.what() ).find( "displacementInputs" ) != std::string::npos );
+        }
+    }
+}

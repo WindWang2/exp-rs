@@ -19,7 +19,7 @@ struct RsPixelIgnoreOptions
 {
     /// Honor GDAL GetNoDataValue() on each selected source band.
     bool useSourceNodata = true;
-    /// Treat IEEE NaN as ignore.
+    /// Treat non-finite values (NaN and ±Inf) as ignore.
     bool ignoreNaN = true;
     /// Extra values to ignore (any band match, subject to \a mode).
     QVector<double> ignoreValues;
@@ -49,7 +49,11 @@ struct RsPixelIgnoreOptions
 
     bool isIgnoreScalar( double v, bool hasBandNodata, double bandNodata ) const
     {
-      if ( ignoreNaN && std::isnan( v ) )
+      // Non-finite discipline (rs_multires_segmenter / rs_feature_scaler): a
+      // ±Inf band value (band-math divide-by-zero residue) is exactly as
+      // invalid as NaN — with Config.fitScaler defaulting to false this is
+      // the only finite gate on the default training/prediction path.
+      if ( ignoreNaN && !std::isfinite( v ) )
         return true;
       if ( useSourceNodata && hasBandNodata && nearlyEqual( v, bandNodata, valueTolerance ) )
         return true;

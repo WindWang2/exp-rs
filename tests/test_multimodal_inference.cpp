@@ -482,3 +482,69 @@ TEST_CASE( "the coverage gate is per tile under batching", "[models][multimodal]
         CHECK( v == Catch::Approx( 4.0f ).margin( 1e-4 ) );
     }
 }
+
+// ---------------------------------------------------------------------------
+// R18-B: the multi-input EO preflight runs BEFORE the product is published
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Stamps a dataset-level radiometric state (the calibration operators'
+/// metadata contract) onto a written raster.
+void stampRadiometricState( const QString &path, const QString &state )
+{
+  GDALDataset *ds = static_cast<GDALDataset *>( GDALOpen( path.toUtf8().constData(), GA_Update ) );
+  REQUIRE( ds );
+  ds->SetMetadataItem( "SICNU_RADIOMETRIC_STATE", state.toUtf8().constData() );
+  GDALClose( ds );
+}
+
+} // namespace
+
+TEST_CASE( "#r18B multi-input EO preflight refuses before any product exists",
+           "[models][multimodal][r18B]" )
+{
+  // An enforced eo.calibration state on a model whose SECOND feed carries no
+  // SICNU_RADIOMETRIC_STATE must refuse the run up front. The preflight used
+  // to run AFTER publishStaged/publishProvenanceSidecar/disarm — the operator
+  // reported the typed refusal while a complete product (+ sidecar) sat at
+  // the caller's output path: a failed run that had already "succeeded" on
+  // disk.
+  QTemporaryDir dir;
+  auto before = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 2, GDT_Float32 )
+                  .withConstantValue( 1, 5.0f )
+                  .withConstantValue( 2, 7.0f )
+                  .writeToDisk( dir.filePath( QStringLiteral( "before.tif" ) ) );
+  auto after = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 2, GDT_Float32 )
+                 .withConstantValue( 1, 1.0f )
+                 .withConstantValue( 2, 3.0f )
+                 .writeToDisk( dir.filePath( QStringLiteral( "after.tif" ) ) );
+  REQUIRE_FALSE( before.isEmpty() );
+  REQUIRE_FALSE( after.isEmpty() );
+  // Feed 1 carries the enforced state; feed 2 does not.
+  stampRadiometricState( before, QStringLiteral( "toa_reflectance" ) );
+
+  ModelInfo model = changeModel( /*tile*/ 16, /*halo*/ 4 );
+  model.eo.declared = true;
+  model.eo.calibrationState = "toa_reflectance";
+  model.eo.calibrationEnforced = true;
+
+  TileInferenceEngine engine( model, std::make_shared<ChangeFakeRuntime>() );
+  RSOperatorContext context;
+  std::vector<NamedRasterFeed> feeds = {
+    NamedRasterFeed{ "before", { before.toStdString() }, {} },
+    NamedRasterFeed{ "after", { after.toStdString() }, {} }
+  };
+  const QString out = dir.filePath( QStringLiteral( "refused.tif" ) );
+  REQUIRE_THROWS_AS( engine.runMultiInput( feeds, out.toStdString(), context, {} ),
+                     RSOperatorError );
+
+  // The refusal must leave NO artifact behind — neither the product nor its
+  // provenance sidecar nor a parked stage.
+  CHECK_FALSE( QFile::exists( out ) );
+  CHECK_FALSE( QFile::exists( out + QStringLiteral( ".prov.json" ) ) );
+  CHECK_FALSE( QFile::exists( out + QStringLiteral( ".stage~" ) ) );
+  QDir outDir( dir.path() );
+  const QStringList leftovers = outDir.entryList( { QStringLiteral( "refused*" ) } );
+  CHECK( leftovers.isEmpty() );
+}

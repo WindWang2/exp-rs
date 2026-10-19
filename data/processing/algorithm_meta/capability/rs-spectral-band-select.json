@@ -62,11 +62,15 @@
       "parameters" : 
       [
         {
+          "array" : true,
+          "item_type" : "integer",
           "name" : "bands",
           "required" : false,
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "json",
           "name" : "excludeRanges",
           "required" : false,
           "type" : "json"

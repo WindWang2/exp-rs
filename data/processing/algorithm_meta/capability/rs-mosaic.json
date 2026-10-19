@@ -71,6 +71,8 @@
       "parameters" : 
       [
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "inputs",
           "required" : true,
           "type" : "string"

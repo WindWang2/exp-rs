@@ -35,6 +35,7 @@
 #include <QTemporaryDir>
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
@@ -1017,4 +1018,93 @@ TEST_CASE( "M6: labels products tally per-product-class pixels into payload meta
   REQUIRE( stats.classPixelCounts.size() == 2 );
   CHECK( stats.classPixelCounts[0] == 8 * 16 );
   CHECK( stats.classPixelCounts[1] == 8 * 16 );
+}
+
+// ---------------------------------------------------------------------------
+// R18-B: feather blending keeps NoData verdicts when a nodata run exceeds
+// the accumulator's row window
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "#r18B feather blending never inpaints an all-nodata run taller "
+           "than the row window",
+           "[model9][blend][r18B]" )
+{
+  // A4's contract: a tile whose core is entirely NoData declares its cores
+  // invalid and NoData WINS over any neighbor halo prediction. The deferred
+  // NoData marks used to be dropped whenever the deferred run exceeded the
+  // accumulator's sliding window (tile + 2·halo rows): the trailing rows of
+  // the nodata run then finalized with the NEXT valid tile's halo weights —
+  // fabricated predictions over ground the engine itself classified NoData.
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  // 32×48 raster, tileSize 16, halo 4 → window span 24 rows. The top 32
+  // rows (two full tile-rows) are all NaN, the bottom 16 rows carry data.
+  const float kNaN = std::numeric_limits<float>::quiet_NaN();
+  // withRect's x1/y1 are EXCLUSIVE: 32/32/48 covers the full extents (the
+  // constructor zero-fills, and a stray finite row would legitimately
+  // un-NoData its tile).
+  sicnu::testing::RsSyntheticRasterBuilder builder( 32, 48, 1, GDT_Float32 );
+  builder.withRect( 1, 0, 0, 32, 32, kNaN );
+  builder.withRect( 1, 0, 32, 32, 48, 10.0f );
+  const QString raster = builder.writeToDisk( dir.filePath( QStringLiteral( "nodata.tif" ) ) );
+  REQUIRE_FALSE( raster.isEmpty() );
+
+  ModelInfo model;
+  model.name = "m9-blend-nodata";
+  model.framework = "m9-fake";
+  model.task = "segmentation";
+  model.tiling.tileSize = 16;
+  model.tiling.halo = 4;
+  model.tiling.batchSize = 1; // defer each all-nodata tile on its own
+  model.output.classes = { "class" };
+
+  TileInferenceRunOptions feather;
+  feather.blend = TileBlend::Feather;
+  const QString blendedPath = dir.filePath( QStringLiteral( "blended.tif" ) );
+  TileInferenceEngine engine( model, std::make_shared<StepConstantRuntime>() );
+  RSOperatorContext context;
+  engine.run( raster.toStdString(), {}, blendedPath.toStdString(), context, feather );
+
+  int w = 0;
+  int h = 0;
+  const std::vector<float> blended = readBand( blendedPath, 1, w, h );
+  REQUIRE( w == 32 );
+  REQUIRE( h == 48 );
+  auto at = [ & ]( int x, int y ) {
+    return blended[static_cast<std::size_t>( y ) * 32 + x];
+  };
+
+  // Every row of the 32-row nodata run must stay NoData (NaN) — most
+  // urgently the last halo-width rows right above the first valid tile,
+  // which the valid tile's halo reaches with near-core weights.
+  for ( int y = 0; y < 32; ++y )
+    for ( int x = 8; x < 24; ++x )
+    {
+      INFO( "row " << y << " col " << x << " value " << at( x, y ) );
+      CHECK( std::isnan( at( x, y ) ) );
+    }
+  // The valid rows keep their prediction.
+  CHECK( at( 16, 40 ) == Catch::Approx( 10.0f ).margin( 1e-3 ) );
+
+  // Mirror case — a nodata TAIL taller than the window (rows 16..47 all
+  // NaN): the end-of-run flush must not read past the window while writing
+  // the remaining NoData rows.
+  sicnu::testing::RsSyntheticRasterBuilder tail( 32, 48, 1, GDT_Float32 );
+  tail.withRect( 1, 0, 0, 32, 16, 10.0f );
+  tail.withRect( 1, 0, 16, 32, 48, kNaN );
+  const QString tailRaster = tail.writeToDisk( dir.filePath( QStringLiteral( "tail.tif" ) ) );
+  REQUIRE_FALSE( tailRaster.isEmpty() );
+  const QString tailOut = dir.filePath( QStringLiteral( "tail-blended.tif" ) );
+  TileInferenceEngine tailEngine( model, std::make_shared<StepConstantRuntime>() );
+  tailEngine.run( tailRaster.toStdString(), {}, tailOut.toStdString(), context, feather );
+  const std::vector<float> tailBlended = readBand( tailOut, 1, w, h );
+  REQUIRE( w == 32 );
+  REQUIRE( h == 48 );
+  for ( int y = 16; y < 48; ++y )
+    for ( int x = 8; x < 24; ++x )
+    {
+      INFO( "tail row " << y << " col " << x << " value "
+                        << tailBlended[static_cast<std::size_t>( y ) * 32 + x] );
+      CHECK( std::isnan( tailBlended[static_cast<std::size_t>( y ) * 32 + x] ) );
+    }
 }

@@ -107,6 +107,8 @@
       "parameters" : 
       [
         {
+          "array" : true,
+          "item_type" : "integer",
           "name" : "bands",
           "required" : false,
           "type" : "integer"
@@ -140,6 +142,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "json",
           "name" : "named_inputs",
           "required" : false,
           "type" : "json"

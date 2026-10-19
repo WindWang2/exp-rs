@@ -13,6 +13,19 @@
  * original triggers keep their exact shapes:
  * - --notify-log <path> (argv): every received notification is appended to
  *   the file as one JSON line (cancellation-count assertions).
+ * - --hang-initialize (argv, no value): never answer `initialize` — the
+ *   child spawns fine (counter still ticks) but the handshake hangs, so the
+ *   bridge's startup deadline must fire and tear it down. The flag carries
+ *   no value, so the last-argument counter detection below is unaffected.
+ * - --hang-tool-calls (argv, no value): answer `initialize` normally but
+ *   never answer `tools/call` — the per-request timeout must fire
+ *   client-side, and (R18-C C05) the bridge must then send
+ *   notifications/cancelled so server-side work stops too. Other methods
+ *   still answer, so post-timeout bridge health is observable via ping.
+ * - arguments {id_null_error: true}: instead of answering, emit an id:null
+ *   JSON-RPC error frame (-32700, the server's unattributable parse-fault
+ *   shape). The bridge must reject ALL pending requests on it and stay
+ *   usable afterwards (R18-C C09).
  * - arguments {delay_ms}: reply late (abort-mid-flight races).
  * - arguments {error_shape: true}: reply with a structured tool error
  *   (isError + errorCode + errorCategory, the #645 passthrough contract).
@@ -34,6 +47,8 @@ function argAfter(flag) {
 // (["--mcp", "--notify-log", path, counter]). The notify log rides its own
 // "--notify-log <path>" pair.
 const notifyLog = argAfter("--notify-log");
+const hangInitialize = args.includes("--hang-initialize");
+const hangToolCalls = args.includes("--hang-tool-calls");
 const counterPath = [...args].reverse().find((a) => !a.startsWith("--") && a !== notifyLog);
 appendFileSync(counterPath, "1\n");
 
@@ -74,12 +89,26 @@ function handle(line) {
     return;
   }
   if (msg.method === "initialize") {
+    // --hang-initialize: spawn + counter still work; the handshake reply is
+    // withheld forever, so the bridge-side startup deadline is what settles.
+    if (hangInitialize) return;
     send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "fake", version: "0" } } });
     return;
   }
   if (msg.method === "tools/call") {
+    // --hang-tool-calls: the handshake completed, so the bridge is healthy;
+    // every tools/call is then withheld forever — the client-side request
+    // timeout is the only way the call settles (R18-C C05 trigger).
+    if (hangToolCalls) return;
     const a = msg.params ?? {};
     const args = a.arguments ?? {};
+    if (args.id_null_error) {
+      // Unattributable protocol fault: id:null errors cannot be matched to
+      // a request, so the bridge must fail EVERY pending call (and must not
+      // treat the frame as a notification to silently drop).
+      send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+      return;
+    }
     if (a.crash || args.crash) {
       // Crash mid-run without replying — the exact #669 trigger shape.
       process.exit(1);

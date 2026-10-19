@@ -1656,9 +1656,16 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
         }
     }
     // Ghost checkpoint IO, outside m_mutex (#1459) and still before the swap
-    // persists below.
+    // persists below. A failed unlink is not fatal (electCheckpoints
+    // quarantines ghosts on the next sweep) but must be visible — an
+    // unreported leftover is indistinguishable from a healthy cleanup.
     for ( const QString &ghostCheckpoint : ghostCheckpointsToUnlink )
-        QFile::remove( ghostCheckpoint );
+    {
+        if ( !QFile::remove( ghostCheckpoint ) && QFile::exists( ghostCheckpoint ) )
+            qWarning() << "[workflow] resume ghost checkpoint unlink failed (the next "
+                          "election sweep will quarantine it):"
+                       << ghostCheckpoint;
+    }
     // Lineage envelope (Track 13): the swapped-in original carries the whole
     // lineage under one runId; the explicit attempt counter records how many
     // resume attempts have run. Incremented BEFORE the persists below so the

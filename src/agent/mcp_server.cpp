@@ -243,6 +243,49 @@ static int mcpPageLimit(int requested)
     return qBound(1, requested, 500);
 }
 
+/// Map key for the per-request cancel bookkeeping. JSON-RPC 2.0 ids are
+/// numbers OR strings (#644) and QVariant::toString() collapses numeric 5 and
+/// string "5" onto "5" — one request's cancel then fired the OTHER request's
+/// task and consumed its one-shot map entry. The key must carry the id's
+/// type (R18-C C05). JSON parsing yields Double for numbers, QString for
+/// strings, so the metatype discriminates reliably at both the arming and
+/// the notifications/cancelled side.
+/// Typed cursor extraction for the paginated list tools: cursors are
+/// numeric (nextCursor emits them as numbers); a non-numeric cursor is a
+/// client contract violation and throws a typed refusal instead of the old
+/// silent rewind to page 0 that hid pagination bugs (R18-C C01, same rule
+/// as the tools/list method handler).
+static int mcpTypedCursor( const QVariantMap &arguments, const QString &toolName )
+{
+    const QString raw = arguments.value( QStringLiteral( "cursor" ) ).toString();
+    if ( raw.isEmpty() )
+        return 0;
+    bool ok = false;
+    const int parsed = raw.toInt( &ok );
+    if ( !ok || parsed < 0 )
+        throw McpToolError(
+            QStringLiteral( "%1: cursor must be a non-negative integer, got: %2" )
+                .arg( toolName, raw.left( 64 ) ),
+            QStringLiteral( "INVALID_PARAMETER" ),
+            QStringLiteral( "validation" ) );
+    return parsed;
+}
+
+static QString rpcCancelMapKey(const QVariant &id)
+{
+    const auto t = id.userType();
+    if (t == QMetaType::Double || t == QMetaType::Float || t == QMetaType::Int
+        || t == QMetaType::UInt || t == QMetaType::Long || t == QMetaType::ULong
+        || t == QMetaType::LongLong || t == QMetaType::ULongLong || t == QMetaType::Short
+        || t == QMetaType::UShort)
+        // 'g' with 17 significant digits: round-trippable for every double, so
+    // distinct numeric ids cannot collide onto one key (the default 6-digit
+    // formatting collapsed e.g. 1234567 and 1234568 onto "n:1.23457e+06",
+    // and the bounded map OVERWRITES duplicates — R18-C R2 F1).
+    return QStringLiteral("n:%1").arg(QString::number(id.toDouble(), 'g', 17));
+    return QStringLiteral("s:%1").arg(id.toString());
+}
+
 /// Attaches the ADR 0122 algorithm catalog sidecar (task/input/output/gpu/
 /// accuracy) to a discovery entry when a manifest exists for the id. The
 /// store loads data/processing/algorithm_meta/*.json once per process.
@@ -337,6 +380,40 @@ void StdinReader::run()
         std::cin.getline( buffer.data(), kMaxMcpLine + 1 );
         if ( std::cin.fail() )
         {
+            // Clean end-of-input: getline extracted zero characters because
+            // the stream is exhausted (eofbit|failbit). That is not an
+            // overlong line — emit nothing and stop. Previously this fell
+            // into the sentinel branch and the server answered every normal
+            // shutdown with a bogus "-32700 line too long" (id:null).
+            if ( std::cin.eof() && std::cin.gcount() == 0 )
+                break;
+            // Exact-boundary line: the buffer filled at precisely
+            // kMaxMcpLine chars before the delimiter, so getline set
+            // failbit — but if the very next char IS the newline (or EOF)
+            // the line is exactly at the cap, not over it. Consume the
+            // delimiter and deliver it like any other frame. peek() needs a
+            // clear() first: on a failed stream it returns EOF blindly.
+            if ( std::cin.gcount() == kMaxMcpLine )
+            {
+                std::cin.clear();
+                const int next = std::cin.peek();
+                if ( next == '\n' || next == EOF )
+                {
+                    if ( next == '\n' )
+                        std::cin.get();
+                    const QString line = QString::fromUtf8( buffer.data() ).trimmed();
+                    if ( !line.isEmpty() )
+                        emit lineRead( line );
+                    if ( next == EOF )
+                        break;
+                    continue;
+                }
+            }
+            // Unrecoverable stream error (badbit): clear() cannot repair a
+            // broken streambuf — without this the loop spins emitting
+            // sentinels forever on a dead stdin.
+            if ( std::cin.bad() )
+                break;
             std::cin.clear();
             std::cin.ignore( std::numeric_limits<std::streamsize>::max(), '\n' );
             emit lineRead( QStringLiteral( "__MCP_LINE_TOO_LONG__" ) );
@@ -607,12 +684,16 @@ void McpServer::handleRequest(const QVariantMap &request)
         // The params form is authoritative; the top-level form is accepted as
         // a defensive fallback (pre-spec clients, #645).
         const QVariantMap cancelledParams = request.value(QStringLiteral("params")).toMap();
-        QString cancelledRpcId = cancelledParams.value(QStringLiteral("requestId")).toString();
-        if (cancelledRpcId.isEmpty())
-            cancelledRpcId = request.value(QStringLiteral("requestId")).toString();
+        // The map key must be derived from the TYPED requestId variant, not
+        // its toString(): numeric 5 and string "5" are distinct JSON-RPC ids
+        // (#644) and must stay cancellable independently (R18-C C05).
+        QVariant cancelledRequestId = cancelledParams.value(QStringLiteral("requestId"));
+        if (cancelledRequestId.isNull() || !cancelledRequestId.isValid())
+            cancelledRequestId = request.value(QStringLiteral("requestId"));
         QVariantMap cancelledInfo = request.value(QStringLiteral("requestInfo")).toMap();
         Q_UNUSED(cancelledInfo)
-        if ( !cancelledRpcId.isEmpty() )
+        const QString cancelledRpcId = rpcCancelMapKey(cancelledRequestId);
+        if ( !cancelledRequestId.toString().isEmpty() || cancelledRequestId.userType() == QMetaType::Double )
         {
             const long taskId = m_cancelledRequestTasks.value( cancelledRpcId, -1 );
             if ( taskId > 0 )
@@ -668,10 +749,25 @@ void McpServer::handleRequest(const QVariantMap &request)
         // tool, #643).
         const bool includeSchemas = params.value(QStringLiteral("includeSchemas")).toBool();
         const int listLimit = params.value(QStringLiteral("limit")).toInt();
+        // This server's cursors are numeric (its own nextCursor emits them);
+        // a non-numeric cursor is a client contract violation and must be a
+        // typed refusal — silently rewinding to page 0 hid client pagination
+        // bugs behind an apparently successful re-listing (R18-C C01).
         int listCursor = 0;
         const QString rawCursor = params.value(QStringLiteral("cursor")).toString();
         if (!rawCursor.isEmpty())
-            listCursor = qMax(0, rawCursor.toInt());
+        {
+            bool cursorOk = false;
+            const int parsedCursor = rawCursor.toInt(&cursorOk);
+            if (!cursorOk || parsedCursor < 0)
+            {
+                sendError(id, -32602,
+                          QStringLiteral("tools/list: cursor must be a non-negative integer, got: %1")
+                              .arg(rawCursor.left(64)));
+                return;
+            }
+            listCursor = parsedCursor;
+        }
 
         QVariantMap result;
         QVariantList tools;
@@ -789,7 +885,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleListAlgorithms(
                     mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
-                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
+                    mcpTypedCursor(arguments, QStringLiteral("list_algorithms")));
             }
             else if (toolName == QStringLiteral("search_algorithms"))
             {
@@ -812,7 +908,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleListOperators(
                     mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
-                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
+                    mcpTypedCursor(arguments, QStringLiteral("list_operators")));
             }
             else if (toolName == QStringLiteral("get_operator_schema"))
             {
@@ -864,7 +960,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                                                  ? arguments.value(QStringLiteral("compact")).toBool()
                                                  : true,
                                              arguments.value(QStringLiteral("limit")).toInt(),
-                                             arguments.value(QStringLiteral("cursor")).toInt());
+                                             mcpTypedCursor(arguments, QStringLiteral("list_tools")));
             }
             else if (toolName == QStringLiteral("search_tools"))
             {
@@ -926,7 +1022,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                         ? arguments.value(QStringLiteral("compact")).toBool()
                         : true,
                     arguments.value(QStringLiteral("limit")).toInt(),
-                    arguments.value(QStringLiteral("cursor")).toInt(),
+                    mcpTypedCursor(arguments, QStringLiteral("search_tools")),
                     facets);
             }
             else if (toolName == QStringLiteral("get_tool_schema"))
@@ -1010,7 +1106,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                  && !id.toString().isEmpty() )
             {
                 insertBoundedKeepingNewest(
-                    m_cancelledRequestPipelines, id.toString(),
+                    m_cancelledRequestPipelines, rpcCancelMapKey(id),
                     resultData.value( QStringLiteral( "pipeline_id" ) ).toLongLong(), 1024 );
             }
             if ( resultData.contains( QStringLiteral( "execution_id" ) ) )
@@ -1023,7 +1119,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                     // both must be cancellable (#644). Keep the map bounded;
                     // the eviction preserves the JUST-INSERTED in-flight
                     // request (#1452), mirroring the progress map below.
-                    insertBoundedKeepingNewest( m_cancelledRequestTasks, id.toString(),
+                    insertBoundedKeepingNewest( m_cancelledRequestTasks, rpcCancelMapKey(id),
                                                 executionId->taskId(), 1024 );
 
                     // Surface-11 progress subscription: a client requesting
@@ -1042,7 +1138,9 @@ void McpServer::handleRequest(const QVariantMap &request)
                             m_progressSubscriptions, executionId->taskId(),
                             ProgressSubscription{
                                 progressToken,
-                                sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) },
+                                // 0.05 on the 0..1 fraction contract — ~5
+                                // percentage points between emissions.
+                                sicnu::agent::tool_catalog::progress::RateLimiter( 0.05 ) },
                             256 );
                     }
                 }
@@ -1238,10 +1336,14 @@ void McpServer::onTaskUpdated(const sicnu::AlgorithmTaskInfo &info)
         return;
 
     // MCP 2024-11-05 notifications/progress: {progressToken, progress,
-    // total}. Progress is TaskCenter's 0..100 projected onto total=1.0.
+    // total}. TaskCenter progress is already the 0..1 fraction the wire
+    // shape wants (total=1.0) — relay it unchanged. It used to be divided
+    // by 100 here, so a completed task (1.0) announced progress 0.01 while
+    // the 5-point limiter (in the same 0..100 misunderstanding) suppressed
+    // every intermediate step (R18-C C03).
     QVariantMap params;
     params[QStringLiteral( "progressToken" )] = it->progressToken;
-    params[QStringLiteral( "progress" )] = qBound( 0.0, progress / 100.0, 1.0 );
+    params[QStringLiteral( "progress" )] = qBound( 0.0, progress, 1.0 );
     params[QStringLiteral( "total" )] = 1.0;
     sendNotification( QStringLiteral( "notifications/progress" ), params );
 
@@ -1556,7 +1658,7 @@ QVariantMap McpServer::handleSearchAlgorithms(const QVariantMap &arguments)
     query.largeRasterSafeOnly =
         arguments.value(QStringLiteral("large_raster_safe")).toBool();
     query.limit = mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt());
-    query.cursor = qMax(0, arguments.value(QStringLiteral("cursor")).toInt());
+    query.cursor = mcpTypedCursor(arguments, QStringLiteral("search_algorithms"));
 
     // Search universe mirrors list_algorithms exactly: registry descriptors
     // plus provider algorithms (gdal:/otb:/native:/qgis:) reachable through
@@ -2468,23 +2570,37 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
 QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
 {
     using namespace sicnu::agent::tool_catalog;
+    // Discovery-authority order (R18-C C01): for Meta/Data surface entries
+    // the union projection is the SAME source tools/list renders, so an
+    // exact hit is answered from it FIRST — the bare aliases (list_layers /
+    // describe_dataset) exist in the meta table AND as catalog data:
+    // entries with DIFFERENT schemas and descriptions (list_layers,
+    // describe_dataset, get_lineage), and findTool() answered with the
+    // catalog copy while tools/list showed the meta copy.
+    // Catalog-source hits keep the richer catalog branch below (real
+    // category vocabulary + human displayName); the projection renders the
+    // same normalized schema, so parity is preserved either way. findTool()
+    // (with its underscore-normalization fallback) remains the last resort
+    // for names the projection does not list.
+    const auto surface = findSurfaceTool( toolId.toStdString() );
+    if ( surface && surface->source != SurfaceToolSource::Catalog )
+    {
+        QVariantMap surfaceResult;
+        surfaceResult[QStringLiteral("category")] =
+            surface->source == SurfaceToolSource::MetaProtocol
+                ? QStringLiteral("Meta")
+                : QStringLiteral("Data");
+        surfaceResult[QStringLiteral("name")] = QString::fromStdString(surface->name);
+        surfaceResult[QStringLiteral("displayName")] = QString::fromStdString(surface->name);
+        surfaceResult[QStringLiteral("description")] =
+            QString::fromStdString(surface->description);
+        surfaceResult[QStringLiteral("schema")] =
+            sicnu::processing::jsonValueToVariant(surface->inputSchema);
+        return surfaceResult;
+    }
+
     auto tool = AgentToolCatalog::instance().findTool(toolId.toStdString());
     if (!tool) {
-        // Union-projection fallback: meta protocol tools and data-platform
-        // tools are dispatchable via tools/call but are not catalog entries;
-        // their schemas come from the same tables tools/list renders.
-        // Parity rule: every name tools/list exposes MUST resolve here.
-        auto surface = findSurfaceTool(toolId.toStdString());
-        if (surface && surface->source != SurfaceToolSource::Catalog) {
-            QVariantMap metaResult;
-            metaResult[QStringLiteral("category")] = surface->source == SurfaceToolSource::MetaProtocol
-                ? QStringLiteral("Meta") : QStringLiteral("Data");
-            metaResult[QStringLiteral("name")] = QString::fromStdString(surface->name);
-            metaResult[QStringLiteral("displayName")] = QString::fromStdString(surface->name);
-            metaResult[QStringLiteral("description")] = QString::fromStdString(surface->description);
-            metaResult[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(surface->inputSchema);
-            return metaResult;
-        }
         throw std::runtime_error(QStringLiteral("Unknown tool: %1").arg(toolId).toStdString());
     }
 
@@ -2493,7 +2609,19 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     result[QStringLiteral("name")] = QString::fromStdString(tool->name);
     result[QStringLiteral("displayName")] = QString::fromStdString(tool->displayName);
     result[QStringLiteral("description")] = QString::fromStdString(tool->description);
-    result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->normalizedInputSchema());
+    // Same malformed-registration tolerance as the projection (R18-C R2 F3):
+    // a registration whose raw schema is malformed keeps the RAW value here
+    // too, so tools/list and get_tool_schema stay in parity instead of the
+    // detail endpoint answering a generic tool-error for a listed tool.
+    try
+    {
+        result[QStringLiteral("schema")] =
+            sicnu::processing::jsonValueToVariant(tool->normalizedInputSchema());
+    }
+    catch (const std::invalid_argument &)
+    {
+        result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->inputSchema);
+    }
     return result;
 }
 

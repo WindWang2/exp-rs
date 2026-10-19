@@ -2878,6 +2878,108 @@ target_include_directories(test_surface_protocol PRIVATE
 target_compile_definitions(test_surface_protocol PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 sicnu_discover_tests(test_surface_protocol)
 
+# R18-C C03: TaskCenter progress-contract pin. TaskCenter progress is a 0..1
+# fraction (rs_operator_context.h, completion stamps 1.0); the
+# notifications/progress relay must emit true-scale values and honour the
+# 5-point rate limiter in that domain. Same in-process harness pattern as
+# test_surface_protocol.
+add_executable(test_r18_c_progress_units test_r18_c_progress_units.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r18_c_progress_units PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r18_c_progress_units PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r18_c_progress_units PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r18_c_progress_units PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r18_c_progress_units PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r18_c_progress_units)
+
+# R18-C C05: JSON-RPC id type namespace in the cancel bookkeeping. Same
+# in-process harness pattern as test_r14_C_mcp_workflow_cancel.
+add_executable(test_r18_c_rpc_cancel_id_namespace test_r18_c_rpc_cancel_id_namespace.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r18_c_rpc_cancel_id_namespace PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r18_c_rpc_cancel_id_namespace PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r18_c_rpc_cancel_id_namespace PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r18_c_rpc_cancel_id_namespace PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r18_c_rpc_cancel_id_namespace PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r18_c_rpc_cancel_id_namespace)
+
+# R18-C C01: discovery-surface authority (cursor typing + cross-surface
+# schema parity). Same in-process harness pattern as test_surface_protocol.
+add_executable(test_r18_c_surface_pagination test_r18_c_surface_pagination.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r18_c_surface_pagination PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r18_c_surface_pagination PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r18_c_surface_pagination PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r18_c_surface_pagination PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r18_c_surface_pagination PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r18_c_surface_pagination)
+
 # Surface-11 WP-H: real stdio E2E. The host binary speaks the wire protocol
 # through the same mcp_server.cpp the desktop binary hosts; the test spawns
 # it and drives the full agent loop twice.
@@ -3040,6 +3142,32 @@ sicnu_add_test(test_model_catalog_v2)
 # Platform 7.0 manifest surface: multimodal inputs, typed heads, provider
 # contracts, closed-vocabulary unknown-key refusal (QtCore only).
 sicnu_add_test(test_model_manifest7)
+
+# R15-C WP-C02: registration-time cross-constraints (detection fixed-frame
+# contract, square-head explicit-definition rule, heads dtype vocabulary).
+# QtCore only, like the manifest tests above.
+# (Restored by R18-B: these six regression files were dropped from the
+# #1515 merge — the source fixes landed but their tests never did.)
+sicnu_add_test(test_r15_C_manifest_contracts)
+
+# R15-C WP-C13: publish crash-suffix adoption (companion-parked detection
+# suffix, sidecar-parked raster suffix) — guard-level, no provider needed.
+sicnu_add_test(test_r15_C_publish_recovery)
+
+# R15-C WP-C11/C12: RAM admission ladder (ReduceConcurrency honored) + the
+# VRAM ledger's overflow/phantom-holder/partial-release contracts.
+sicnu_add_test(test_r15_C_chunk_admission)
+
+# R15-C WP-C05/C14/C16: provider degradation diagnostics, cross-provider
+# failure taxonomy, and the multi-input capability preflight.
+sicnu_add_test(test_r15_C_provider_degradation)
+
+# R15-C WP-C07: the single-input engine's per-tile coverage gate.
+sicnu_add_test(test_r15_C_runtime_contracts)
+
+# R15-C WP-C06/C08: deterministic golden contracts for the detection
+# postprocess surface (pure functions — dedup key width, NMS boundaries).
+sicnu_add_test(test_r15_C_detection_decode)
 
 # Model runtime registry, ONNX provider, tile inference engine and rs:infer
 # integration (needs OpenCV for the cv::dnn surface).
