@@ -241,13 +241,19 @@ class SelectionContext : public QObject
     /// Immediate recompute + broadcast (tests / forced refresh).
     void refreshNow();
 
+    /// Coalesced (≤150 ms) recompute request. R18-D: public so the shell can
+    /// forward lifecycle events that are not selection/canvas inputs — e.g.
+    /// TaskCenter taskAdded/taskUpdated, which flip the injected
+    /// hasInFlightTask fact; without a refresh trigger the fact stayed
+    /// idle-stale until the user happened to touch a layer.
+    void scheduleRefresh();
+
   signals:
     /// Coalesced (≤150 ms) re-projection of every attached source.
     void changed( const sicnu::app::SelectionContextSnapshot &snapshot );
 
   private:
     SelectionContextSnapshot computeSnapshot() const;
-    void scheduleRefresh();
     /// #778: a layer announced its removal — purge it from every cached
     /// projection immediately and re-broadcast so consumers never observe the
     /// doomed pointer.

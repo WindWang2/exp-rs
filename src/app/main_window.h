@@ -649,6 +649,11 @@ private:
     QAction *m_toggleEditingAction = nullptr;
     QAction *m_saveEditsAction = nullptr;
     QList<QAction *> m_editingToolActions;
+    // R18-D: Digitizing MENU entries (Scale/Split Part/Add Part/Delete Ring/
+    // Trim-Extend/Chamfer-Fillet/Feature Array) — registered in setupMenu,
+    // gated by the same updateEditingUI contract as the toolbar twins. They
+    // used to sit outside the gate entirely (enabled-but-will-fail).
+    QList<QAction *> m_menuDigitizingActions;
 
     // Dock widgets
     QgsDockWidget *m_layersDock = nullptr;
