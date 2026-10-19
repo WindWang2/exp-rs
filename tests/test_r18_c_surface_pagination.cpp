@@ -156,6 +156,25 @@ TEST_CASE( "tools/list rejects a non-numeric cursor instead of silently rewindin
     }
 }
 
+TEST_CASE( "the list_tools meta tool refuses a non-numeric cursor too",
+           "[agent][mcp][surface][r18c]" )
+{
+    ProtocolServer &s = server();
+    // Same rule as the tools/list method handler: a garbage cursor must not
+    // silently rewind to page 0 — it is a typed tool-error refusal.
+    const QVariantMap result =
+        s.call( 20, QStringLiteral( "list_tools" ),
+                QVariantMap{ { QStringLiteral( "cursor" ), QStringLiteral( "abc" ) } } );
+    REQUIRE( result.value( QStringLiteral( "isError" ) ).toBool() == true );
+    const QString text = result.value( QStringLiteral( "content" ) )
+                             .toList()
+                             .value( 0 )
+                             .toMap()
+                             .value( QStringLiteral( "text" ) )
+                             .toString();
+    CHECK( text.contains( QStringLiteral( "cursor" ) ) );
+}
+
 TEST_CASE( "get_tool_schema and tools/list agree on every tool's schema",
            "[agent][mcp][surface][r18c]" )
 {

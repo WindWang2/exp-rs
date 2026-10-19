@@ -250,6 +250,27 @@ static int mcpPageLimit(int requested)
 /// type (R18-C C05). JSON parsing yields Double for numbers, QString for
 /// strings, so the metatype discriminates reliably at both the arming and
 /// the notifications/cancelled side.
+/// Typed cursor extraction for the paginated list tools: cursors are
+/// numeric (nextCursor emits them as numbers); a non-numeric cursor is a
+/// client contract violation and throws a typed refusal instead of the old
+/// silent rewind to page 0 that hid pagination bugs (R18-C C01, same rule
+/// as the tools/list method handler).
+static int mcpTypedCursor( const QVariantMap &arguments, const QString &toolName )
+{
+    const QString raw = arguments.value( QStringLiteral( "cursor" ) ).toString();
+    if ( raw.isEmpty() )
+        return 0;
+    bool ok = false;
+    const int parsed = raw.toInt( &ok );
+    if ( !ok || parsed < 0 )
+        throw McpToolError(
+            QStringLiteral( "%1: cursor must be a non-negative integer, got: %2" )
+                .arg( toolName, raw.left( 64 ) ),
+            QStringLiteral( "INVALID_PARAMETER" ),
+            QStringLiteral( "validation" ) );
+    return parsed;
+}
+
 static QString rpcCancelMapKey(const QVariant &id)
 {
     const auto t = id.userType();
@@ -860,7 +881,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleListAlgorithms(
                     mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
-                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
+                    mcpTypedCursor(arguments, QStringLiteral("list_algorithms")));
             }
             else if (toolName == QStringLiteral("search_algorithms"))
             {
@@ -883,7 +904,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleListOperators(
                     mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
-                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
+                    mcpTypedCursor(arguments, QStringLiteral("list_operators")));
             }
             else if (toolName == QStringLiteral("get_operator_schema"))
             {
@@ -935,7 +956,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                                                  ? arguments.value(QStringLiteral("compact")).toBool()
                                                  : true,
                                              arguments.value(QStringLiteral("limit")).toInt(),
-                                             arguments.value(QStringLiteral("cursor")).toInt());
+                                             mcpTypedCursor(arguments, QStringLiteral("list_tools")));
             }
             else if (toolName == QStringLiteral("search_tools"))
             {
@@ -997,7 +1018,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                         ? arguments.value(QStringLiteral("compact")).toBool()
                         : true,
                     arguments.value(QStringLiteral("limit")).toInt(),
-                    arguments.value(QStringLiteral("cursor")).toInt(),
+                    mcpTypedCursor(arguments, QStringLiteral("search_tools")),
                     facets);
             }
             else if (toolName == QStringLiteral("get_tool_schema"))
@@ -2545,24 +2566,25 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
 QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
 {
     using namespace sicnu::agent::tool_catalog;
-    // Discovery-authority order (R18-C C01): the union projection is the
-    // SAME source tools/list renders, so an exact surface hit is answered
-    // from it FIRST. The bare aliases (list_layers / describe_dataset) exist
-    // in the meta table AND as catalog data: entries with DIFFERENT schemas
-    // and descriptions — resolving them through findTool() answered with the
-    // catalog copy while tools/list showed the meta copy, an unattributable
-    // drift for every client that fetches schemas for what it discovered.
-    // findTool() (with its underscore-normalization fallback) remains the
-    // last resort for names the projection does not list.
-    if ( auto surface = findSurfaceTool( toolId.toStdString() ) )
+    // Discovery-authority order (R18-C C01): for Meta/Data surface entries
+    // the union projection is the SAME source tools/list renders, so an
+    // exact hit is answered from it FIRST — the bare aliases (list_layers /
+    // describe_dataset) exist in the meta table AND as catalog data:
+    // entries with DIFFERENT schemas and descriptions, and findTool()
+    // answered with the catalog copy while tools/list showed the meta copy.
+    // Catalog-source hits keep the richer catalog branch below (real
+    // category vocabulary + human displayName); the projection renders the
+    // same normalized schema, so parity is preserved either way. findTool()
+    // (with its underscore-normalization fallback) remains the last resort
+    // for names the projection does not list.
+    const auto surface = findSurfaceTool( toolId.toStdString() );
+    if ( surface && surface->source != SurfaceToolSource::Catalog )
     {
         QVariantMap surfaceResult;
         surfaceResult[QStringLiteral("category")] =
             surface->source == SurfaceToolSource::MetaProtocol
                 ? QStringLiteral("Meta")
-                : ( surface->source == SurfaceToolSource::DataPlatform
-                        ? QStringLiteral("Data")
-                        : QStringLiteral("Processing") );
+                : QStringLiteral("Data");
         surfaceResult[QStringLiteral("name")] = QString::fromStdString(surface->name);
         surfaceResult[QStringLiteral("displayName")] = QString::fromStdString(surface->name);
         surfaceResult[QStringLiteral("description")] =
