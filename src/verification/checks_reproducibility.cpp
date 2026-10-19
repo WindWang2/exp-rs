@@ -18,6 +18,7 @@
 #include "verification/checks_reproducibility.h"
 
 #include "verification/availability.h"
+#include "verification/checks_numeric.h"
 #include "verification/evidence.h"
 #include "verification/failure_codes.h"
 #include "verification/status_lattice.h"
@@ -31,19 +32,6 @@ namespace sicnu::verification
 
 namespace
 {
-
-CheckResult beginResult( const VerificationCheck &check, const VerificationInputs &inputs )
-{
-    CheckResult result;
-    result.checkId = check.id;
-    result.kind = check.kind;
-    result.title = check.title;
-    result.hints = check.hints.isObject() ? check.hints : Json::Value{ Json::objectValue };
-    result.evidence.kind = check.kind;
-    result.evidence.sourceId = inputs.sourceId;
-    result.evidence.coverage = EvidenceCoverage::Unavailable;
-    return result;
-}
 
 void readPin( const Json::Value &params, std::string &algorithm, std::string &digest )
 {

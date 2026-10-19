@@ -1,4 +1,14 @@
-# src/verification — Unified Scientific Verifier (RS14-10, ADR 0172)
+# src/verification — parallel verifier core: the module ADR 0172's decision
+# text originally named; superseded by src/verify — see split notice below.
+#
+# Split notice (#1601): the verifier authority is src/verify (target
+# sicnu_verifier) — the src/verify_adapters provider TUs include its headers
+# and the hardening recon names it the master authority. This directory is the
+# parallel core ADR 0172's decision text names: no production TU includes its
+# headers and it is wired only for its test suite (tests/CMakeLists.txt, the
+# test_verifier_* lanes). The split also duplicated the digest primitive —
+# this module compiles the repo's single sha256 TU (below), while src/verify
+# carries its own (src/verify/verify_sha256.cpp).
 #
 # Three-valued verification (Pass / Fail / Indeterminate) over declared
 # expectations. Plain C++20 + jsoncpp; deliberately NO Qt, no QGIS, no I/O, no
