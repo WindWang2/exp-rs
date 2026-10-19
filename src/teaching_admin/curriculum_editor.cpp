@@ -3,7 +3,6 @@
 
 #include <QDir>
 #include <QHash>
-#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QQueue>
@@ -221,6 +220,10 @@ ValidationResult validateCurriculum( const QJsonObject &manifest, const QSet<QSt
 QSet<QString> discoverKnownLabIds( const CurriculumPaths &paths )
 {
     QSet<QString> ids;
+    // Bounded read (R14-E audit F5): the labs dir and the registry are
+    // scanned, not trusted — an oversize document is skipped, never slurped
+    // whole into memory (same budget as the pack inventory).
+    constexpr qint64 kMaxLabJsonBytes = 16 * 1024 * 1024;
     QDir labs( paths.labsDir );
     if ( labs.exists() )
     {
@@ -228,19 +231,19 @@ QSet<QString> discoverKnownLabIds( const CurriculumPaths &paths )
                                              QDir::Files );
         for ( const QString &name : entries )
         {
-            QFile f( labs.filePath( name ) );
-            if ( !f.open( QIODevice::ReadOnly ) )
+            const BoundedReadResult bounded = readBounded( labs.filePath( name ), kMaxLabJsonBytes );
+            if ( bounded.oversize || bounded.unreadable )
                 continue;
-            const auto doc = QJsonDocument::fromJson( f.readAll() );
+            const auto doc = QJsonDocument::fromJson( bounded.bytes );
             const QString id = doc.object().value( QStringLiteral( "id" ) ).toString();
             if ( !id.isEmpty() )
                 ids.insert( id );
         }
     }
-    QFile reg( paths.registryPath );
-    if ( reg.open( QIODevice::ReadOnly ) )
+    const BoundedReadResult registry = readBounded( paths.registryPath, kMaxLabJsonBytes );
+    if ( !registry.oversize && !registry.unreadable )
     {
-        const auto doc = QJsonDocument::fromJson( reg.readAll() ).object();
+        const auto doc = QJsonDocument::fromJson( registry.bytes ).object();
         const QJsonObject canonical = doc.value( QStringLiteral( "canonical" ) ).toObject();
         for ( auto it = canonical.begin(); it != canonical.end(); ++it )
         {

@@ -54,7 +54,13 @@ ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QS
         while ( it.hasNext() )
         {
             const QString m = it.next().captured();
-            if ( m == QLatin1String( "student_id" ) || m == studentId )
+            // The match carries the "student_" prefix (e.g. "student_alice"),
+            // so the owner's own token must be compared against the prefixed
+            // spelling as well; otherwise a pack that legitimately mentions
+            // its own student trips a false cross_student_leak. The bare form
+            // stays for ids that already begin with "student_".
+            if ( m == QLatin1String( "student_id" ) || m == studentId
+                 || m == QStringLiteral( "student_" ) + studentId )
                 continue;
             {
                 r.addError( QStringLiteral( "cross_student_leak" ), QStringLiteral( "body" ),
