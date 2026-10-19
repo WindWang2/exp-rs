@@ -1197,3 +1197,88 @@ TEST_CASE( "WP-G: verifyProductAgainstModel checks identity, digest and stalenes
     CHECK( verdict.state == sicnu::operators::runtime::ProvenanceVerdict::State::MissingSidecar );
   }
 }
+
+// ---------------------------------------------------------------------------
+// R18-B: the scene lane's wavelength preflight checks the FED physical bands
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Scene head fake for the R18-B preflight case: a fixed (1, 3) logit row —
+/// the scene lane consumes a 2-D class row, not an NCHW plane.
+class SceneRowRuntime final : public sicnu::operators::runtime::IModelRuntime
+{
+  public:
+    std::string framework() const override { return "eo10scfw"; }
+    std::string backendName() const override { return "scene_row"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return "scene-row"; }
+    cv::Mat infer( const cv::Mat & ) override
+    {
+      cv::Mat out( 1, 3, CV_32F );
+      out.ptr<float>( 0 )[0] = 0.1f;
+      out.ptr<float>( 0 )[1] = 0.5f;
+      out.ptr<float>( 0 )[2] = 0.2f;
+      return out;
+    }
+};
+
+struct SceneRowProviderGuard
+{
+    SceneRowProviderGuard()
+    {
+      auto &registry = ModelRuntimeRegistry::instance();
+      registry.registerProvider( "eo10scfw", []( const ModelInfo &,
+                                                 const sicnu::operators::runtime::ModelHardwareCapabilities &,
+                                                 std::string * ) -> sicnu::operators::runtime::ModelRuntimePtr {
+        return std::make_shared<SceneRowRuntime>();
+      } );
+      registry.releaseAll();
+    }
+    ~SceneRowProviderGuard() { ModelRuntimeRegistry::instance().releaseAll(); }
+};
+
+} // namespace
+
+TEST_CASE( "#r18B scene wavelength windows verify the selected physical band",
+           "[eo10][preflight][r18B]" )
+{
+  // A 2-band raster whose band 1 centers at 490 nm and band 2 at 860 nm; the
+  // model's nir window is [830, 880]. Feeding band 2 with bands={2} is
+  // in-window and must PASS; the preflight used to check role 0 against file
+  // band 1 (490 nm — wrong refusal). The mirrored case feeds band 1
+  // (out of window) — it must be REFUSED, not waved through by the same
+  // wrong mapping.
+  SceneRowProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = dir.filePath( QStringLiteral( "scene-in.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder( 16, 16, 2, GDT_Float32 )
+    .withCrs( QStringLiteral( "EPSG:4326" ) )
+    .writeToDisk( input );
+  stampEoMetadata( input, QString(), { 490.0, 860.0 } );
+
+  ModelInfo model;
+  model.name = "eo10-scene-nir";
+  model.task = "scene_classification";
+  model.framework = "eo10scfw";
+  model.readiness = ModelReadiness::Ready;
+  model.tiling.tileSize = 16;
+  model.output.classes = { "water", "land", "cloud" }; // match the 3-plane fake runtime
+  model.output.type = "labels";
+  model.input.bandRoles = { "nir" };
+  model.eo.declared = true;
+  model.eo.wavelengthsNm = { { "nir", { 830.0, 880.0 } } };
+
+  TileInferenceEngine engine( model, ModelRuntimeRegistry::instance().acquire( model ) );
+  RSOperatorContext context;
+
+  // Fed band 2 (860 nm) is inside the nir window → runs.
+  const auto inWindow = engine.classifyScene( input.toStdString(), { 2 }, context );
+  CHECK( inWindow.probabilities.size() == 3 );
+
+  // Fed band 1 (490 nm) is outside the nir window → typed refusal (the
+  // historical mapping checked band 1 for BOTH selections and got each
+  // verdict backwards).
+  REQUIRE_THROWS_AS( engine.classifyScene( input.toStdString(), { 1 }, context ),
+                     sicnu::operators::RSOperatorError );
+}
