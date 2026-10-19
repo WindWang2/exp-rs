@@ -5,6 +5,7 @@
 #include "processing/algorithms/mosaic.h"
 
 #include <vector>
+#include <limits>
 #include <cmath>
 #include <cstring>
 
@@ -145,4 +146,39 @@ TEST_CASE("RsMosaicOperator production path smoke", "[processing][mosaic][operat
     // s1[0]=1 valid, s2[0]=NaN (nodata) -> 1; s1[1]=NaN, s2[1]=2 -> 2
     CHECK(out[0] == Approx(1.0f));
     CHECK(out[1] == Approx(2.0f));
+}
+
+// --- R18-A WP6: Mosaic never paints ±Inf as data ---------------------------
+// isValid checked NaN and the declared sentinel only, so an Inf sample was
+// copied into the canvas as if it were a valid measurement. The operator
+// family treats non-finite as void (band_math, fusion wash, change masks);
+// the kernel must not be the one surface that leaks it.
+
+TEST_CASE("mosaic rejects an Inf sample instead of painting it as data [r18a][wp6]")
+{
+    constexpr size_t W = 2, H = 1;
+    std::vector<float> good = { 1.0f, 2.0f };
+    std::vector<float> bad = { std::numeric_limits<float>::infinity(), 5.0f };
+    MosaicSource srcGood{ good.data(), W, H, 0, 0, std::numeric_limits<float>::quiet_NaN() };
+    MosaicSource srcBad{ bad.data(), W, H, 0, 0, std::numeric_limits<float>::quiet_NaN() };
+
+    MosaicSource sources[] = { srcGood, srcBad };
+    std::vector<float> out( W * H, 0.0f );
+    REQUIRE( Mosaic::merge( sources, 2, out.data(), W, H ) );
+
+    // Later-source-wins used to paint +Inf here; the void sample must be
+    // skipped so the earlier source's value survives.
+    REQUIRE( out[0] == 1.0f );
+    REQUIRE( out[1] == 5.0f );
+}
+
+TEST_CASE("mosaic rejects a -Inf sample instead of painting it as data [r18a][wp6]")
+{
+    constexpr size_t W = 1, H = 1;
+    std::vector<float> bad = { -std::numeric_limits<float>::infinity() };
+    MosaicSource src{ bad.data(), W, H, 0, 0, -9999.0f };
+
+    std::vector<float> out( W * H, 0.0f );
+    REQUIRE( Mosaic::merge( &src, 1, out.data(), W, H ) );
+    REQUIRE( std::isnan( out[0] ) ); // -Inf is a void, canvas stays NaN
 }

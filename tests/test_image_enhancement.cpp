@@ -495,3 +495,25 @@ TEST_CASE( "Streaming band ratio and IHS tiles match point kernels", "[enhanceme
         }
     }
 }
+
+// --- R18-A WP6: ChunkedProcessor refuses degenerate raster dims -------------
+// width/height <= 0 used to build zero chunks and have process() return true:
+// "nothing to do" and "invalid input" were indistinguishable to callers
+// (GDAL rasters are always >= 1x1, so a non-positive dimension is bad input).
+
+TEST_CASE("ChunkedProcessor returns false for non-positive dimensions [r18a][wp6]",
+          "[enhancement][chunked][r18a]") {
+    ChunkedProcessor zero(0, 0, 0);
+    bool invoked = false;
+    REQUIRE_FALSE(zero.process([&](const ChunkedProcessor::Chunk &) {
+        invoked = true;
+        return true;
+    }));
+    REQUIRE_FALSE(invoked);
+
+    ChunkedProcessor negative(-4, 100, 0);
+    REQUIRE_FALSE(negative.process([&](const ChunkedProcessor::Chunk &) { return true; }));
+
+    ChunkedProcessor zeroHeight(100, 0, 0);
+    REQUIRE_FALSE(zeroHeight.process([&](const ChunkedProcessor::Chunk &) { return true; }));
+}
