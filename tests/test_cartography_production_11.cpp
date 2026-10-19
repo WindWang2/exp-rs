@@ -1014,6 +1014,20 @@ TEST_CASE( "atlas filename_expression is compile-checked, never silently degrade
     if ( goodLayout )
         sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
           QStringLiteral( "atlas-good-expr" ) );
+
+    // Field-level refusal (review R18-D R1 P2-2): the expression PARSES but
+    // references a field the coverage layer does not carry — the parser
+    // alone would wave it through; prepare() against the resolved coverage
+    // layer must refuse it at compile time, not at export time.
+    Json::Value missingField =
+      atlasSpec( "atlas-missing-field", QStringLiteral( "atlas-cities-badexpr" ) );
+    missingField["page"]["atlas"]["filename_expression"] = "'page_' || no_such_field";
+    QString missingFieldError;
+    QgsPrintLayout *missingFieldLayout = nullptr;
+    REQUIRE_NOTHROW( missingFieldLayout =
+                       MapSpecCompiler::compile( missingField, &missingFieldError ) );
+    CHECK( missingFieldLayout == nullptr );
+    CHECK( missingFieldError.contains( QStringLiteral( "filename_expression" ) ) );
 }
 
 TEST_CASE( "atlas count contract: updateFeatures refreshes, count does not",

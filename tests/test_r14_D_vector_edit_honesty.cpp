@@ -983,15 +983,20 @@ TEST_CASE( "Digitizing menu actions follow the editing availability gate (R18-D)
     return a->property( "sicnu/unavailableReason" ).toString();
   };
 
-  // The 7 menu-registered digitizing actions used to bypass the gate
-  // entirely (enabled-but-will-fail): Scale Features, Split Part, Add Part,
-  // Delete Ring, Trim/Extend, Chamfer/Fillet, Feature Array. The toolbar
-  // twins already enforce the contract the shell documents — "Tools operate
-  // at use time only in QGIS — the enablement contract must match".
+  // The digitizing MENU actions used to bypass the gate entirely
+  // (enabled-but-will-fail). Review R18-D R1 P2-1 extended the gate from the
+  // first 7 to every menu command whose toolbar twin is gated (Add Feature,
+  // Node, Move, Rotate, Scale, Offset, Reverse, Reshape, Split Features,
+  // Split Part, Simplify, Add/Fill/Delete Ring, Add/Delete Part, Trim/Extend,
+  // Chamfer/Fillet, Feature Array).
   const std::vector<const char *> menuGated = {
-    "mActionScaleFeature", "mActionSplitParts",   "mActionAddPart",
-    "mActionDeleteRing",   "mActionTrimExtendFeature",
-    "mActionChamferFillet", "mActionFeatureArray",
+    "mActionCapturePoint",   "mActionVertexTool",    "mActionMoveFeature",
+    "mActionRotateFeature",  "mActionScaleFeature",  "mActionOffsetCurve",
+    "mActionReverseLine",    "mActionReshape",       "mActionSplitFeatures",
+    "mActionSplitParts",     "mActionSimplify",      "mActionAddRing",
+    "mActionAddPart",        "mActionFillRing",      "mActionDeletePart",
+    "mActionDeleteRing",     "mActionTrimExtendFeature",
+    "mActionChamferFillet",  "mActionFeatureArray",
   };
 
   SECTION( "no editable layer: menu digitizing actions are disabled with a reason" )
@@ -1029,20 +1034,32 @@ TEST_CASE( "Digitizing menu actions follow the editing availability gate (R18-D)
 
     // Polygon-capable and geometry-agnostic menu tools unlock…
     for ( const char *name :
-          { "mActionScaleFeature", "mActionDeleteRing", "mActionFeatureArray",
-            "mActionSplitParts", "mActionAddPart", "mActionChamferFillet" } )
+          { "mActionCapturePoint", "mActionVertexTool", "mActionMoveFeature",
+            "mActionScaleFeature", "mActionDeleteRing", "mActionFeatureArray",
+            "mActionSplitParts", "mActionAddPart", "mActionChamferFillet",
+            "mActionTrimExtendFeature", "mActionOffsetCurve",
+            "mActionSplitFeatures", "mActionReshape", "mActionSimplify",
+            "mActionAddRing", "mActionFillRing", "mActionDeletePart" } )
     {
       INFO( name );
       QAction *a = fx.window.editingAction( QLatin1String( name ) );
       REQUIRE( a != nullptr );
       CHECK( a->isEnabled() );
     }
-    // …while the line-only trim/extend stays honestly disabled.
+    // …and trim/extend squares polygon boundaries too (FeatureFilter accepts
+    // any edge match — review R18-D R1 P1: the tool is NOT line-only).
     QAction *trim =
       fx.window.editingAction( QStringLiteral( "mActionTrimExtendFeature" ) );
     REQUIRE( trim != nullptr );
-    CHECK_FALSE( trim->isEnabled() );
-    CHECK( reasonOf( trim ).contains( QStringLiteral( "line" ) ) );
+    CHECK( trim->isEnabled() );
+    CHECK( reasonOf( trim ).isEmpty() );
+
+    // The line-only reverse stays honestly disabled on a polygon layer.
+    QAction *reverse =
+      fx.window.editingAction( QStringLiteral( "mActionReverseLine" ) );
+    REQUIRE( reverse != nullptr );
+    CHECK_FALSE( reverse->isEnabled() );
+    CHECK( reasonOf( reverse ).contains( QStringLiteral( "line" ) ) );
 
     poly->rollBack();
   }

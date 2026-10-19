@@ -286,11 +286,13 @@ quint32 editingToolGeometryMask( const QString &actionName )
          actionName == QLatin1String( "mActionFillRing" ) ||
          actionName == QLatin1String( "mActionDeleteRing" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
-    if ( actionName == QLatin1String( "mActionReverseLine" ) ||
-         actionName == QLatin1String( "mActionTrimExtendFeature" ) )
+    if ( actionName == QLatin1String( "mActionReverseLine" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) );
-    // Chamfer/fillet squares line AND polygon corners.
-    if ( actionName == QLatin1String( "mActionChamferFillet" ) )
+    // Trim/extend squares line ends AND polygon boundaries (the tool's
+    // FeatureFilter accepts any edge match — polygon rings included; review
+    // R18-D R1 P1); chamfer/fillet squares corners of both.
+    if ( actionName == QLatin1String( "mActionTrimExtendFeature" ) ||
+         actionName == QLatin1String( "mActionChamferFillet" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) ) |
                ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
     // Offset curve offsets lines AND polygon boundaries (the tool carries a

@@ -10,4 +10,4 @@
    - 关联：R16-D T08 已修的 legend 空层集拒绝只覆盖"声明也为空"的形状。
 
 3. **Issue #1467 的 core-fork cluster**：非本轨（src/core/processing），未动。
-4. **layout:export 与 cartography:export 的 DPI 下限不一致**（1 vs 72）：本轨 C7 只做 NaN 安全化，不改区间（改区间会破坏 layout:export 既有低 DPI 用户路径），对齐决策留给 layout owner。
+4. **layout:export 与 cartography:export 的 DPI 下限不一致**（1 vs 72）：C7 换成否定区间式后，(0,1) 的旧放行值（如 0.5）现在按既有错误文案 "between 1 and 1200" 拒绝（文案与行为终于一致；已核对 layout_tools.cpp 默认 300、无调用方/测试依赖 sub-1 dpi）。区间本身（1 vs 72）未动——对齐决策留给 layout owner。
