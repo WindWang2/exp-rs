@@ -1,12 +1,12 @@
-# hardening(r18-b): 既有遥感 AI 模型推理 — 恢复被合并事故回滚的 r15-C 全部工作 + feather/发布/分块 P0-P2 修复
+# hardening(r18-b): 既有遥感 AI 模型推理 — 恢复被回滚的 r15-C + feather/发布/分块修复
 
-Generated: 2026-10-19T02:54:27Z
+Generated: 2026-10-19T02:56:56Z
 
 ## Baseline
 
 - base `origin/master` @ `a60c8831c9cc4e64701d17bde2ace67a74a9b7a0` (Merge pull request #1513 from WindWang2/hardening/r15-B-geodata-persistence)
-- head `HEAD` @ `1b535e5c1073f50172e36ab006fa5035180a837e` (chore(r18-b): strip trailing whitespace from the reference patches (diff --check clean))
-- commits in range: 8
+- head `HEAD` @ `7efd33264a4494575890ae2fdd42433f5f8fc25b` (chore(r18-b): drop the reference patches' EOF blank line)
+- commits in range: 10
 
 ## Scope
 
@@ -81,7 +81,7 @@ overlap evidence for this diff's 67 paths:
  .planning/r18-b-model/OWNERSHIP.md                 |  42 +++
  .planning/r18-b-model/PERFORMANCE.md               |  39 +++
  .planning/r18-b-model/PR_BODY.md                   |  43 +++
- .planning/r18-b-model/PR_PACK.md                   | 152 ++++++++
+ .planning/r18-b-model/PR_PACK.md                   | 154 ++++++++
  .planning/r18-b-model/REVIEW_R1.md                 |  21 ++
  .planning/r18-b-model/REVIEW_R2.md                 |  34 ++
  .planning/r18-b-model/TASKS.md                     |  17 +
@@ -97,8 +97,8 @@ overlap evidence for this diff's 67 paths:
  .../r18-b-model/references/r15-c-REVIEW_ROUND1.md  |  41 +++
  .../r18-b-model/references/r15-c-REVIEW_ROUND2.md  |  30 ++
  .../r18-b-model/references/r15-c-TEST_RESULTS.md   |  90 +++++
- .planning/r18-b-model/references/w-fixes-v2.patch  | 389 +++++++++++++++++++++
- .planning/r18-b-model/references/w-fixes.patch     | 346 ++++++++++++++++++
+ .planning/r18-b-model/references/w-fixes-v2.patch  | 388 +++++++++++++++++++++
+ .planning/r18-b-model/references/w-fixes.patch     | 345 ++++++++++++++++++
  src/operators/framework/chunked_run.cpp            |  43 ++-
  src/operators/framework/model_catalog.cpp          |  58 +++
  src/operators/runtime/detection_postprocess.cpp    |  17 +-
@@ -143,6 +143,8 @@ overlap evidence for this diff's 67 paths:
 ## Commits
 
 ```
+7efd33264 chore(r18-b): drop the reference patches' EOF blank line
+f9885f3fa docs(r18-b): review pack
 1b535e5c1 chore(r18-b): strip trailing whitespace from the reference patches (diff --check clean)
 0557dc22f docs(r18-b): final report
 0592b1913 fix(review-r2): apply the three R2 P3s — real span correction, tracked r15-C references, write-side window guard
