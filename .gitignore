@@ -611,3 +611,9 @@ r6_dev.cmd
 .ccache/
 .configure_r15c.log
 .build_r15c_tests.log
+
+# R18-A track (remote sensing science algorithms: numerical correctness, quality
+# contracts and throughput): planning notes (markdown only; logs/builds stay local).
+!.planning/r18-a-science/
+.planning/r18-a-science/*
+!.planning/r18-a-science/*.md
