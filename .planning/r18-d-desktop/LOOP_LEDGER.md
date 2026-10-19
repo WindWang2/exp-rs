@@ -14,3 +14,8 @@
 - FIX×11 | main_window_vector.cpp(W4+W2 gate+mask)、main_window_menus.cpp(W2 注册7动作)、main_window.h(W2 成员)、selection_context.cpp/.h(W3+scheduleRefresh public)、main_window_connections.cpp(W6+W1a)、mapspec.cpp(C2+C5)、quality.cpp(C3 itemSheet×6 handler)、export.cpp(C1)、mapspec_compiler.cpp(C6)、layout_service.cpp(C7) | src 修复 | build17 EXIT=0 | 0 | 通过 | 回归发现 C6 过严
 - 回归修复 | C6 加 coverage-layer 前提（无 coverage 时保持原宽容；export 路径自会 typed 拒绝）→ test_mapspec 全量 4 失败清零 | mapspec_compiler.cpp | build18 + 全量重跑 | 0 | 2830/2830 GREEN | 完成
 - GREEN×2 | r14D[r18d] 76/76 ×2; mapspec[r18d] 23/23 ×2; prod11[r18d] 16/16 ×2; layout robustness 24/24 ×2 | - | 直接运行 | 0 | 全 GREEN | 回归批次见 TEST_RESULTS
+
+## 第3轮（Review + 交付）
+- R1 | 独立 reviewer（新 context）审 6 commits | REQUEST_CHANGES: P1-1 trim/extend mask + P2-1/P2-2 | de0db471d 全修 | 修复后 [r18d] 149/149×2 + 全量绿 | 通过
+- R2 | 再新 context 审 7 commits | APPROVE_WITH_P2P3（零阻断） | c889bbb4f 处置 P3（菜单孪生测试面/注释/故意严格声明/CROSS_TRACK#5） | [r18d] 188/188×2 + 340/340 | 通过
+- 交付 | 10 commits push 成功（代理 3 次重试）；PR #1661 创建成功 | https://github.com/WindWang2/exp-rs/pull/1661 | 0 | 完成 | 不等线上 CI；未达项见 TEST_RESULTS NOT_EXECUTED
