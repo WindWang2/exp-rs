@@ -26,7 +26,11 @@ static float findMin(const float *data, size_t count)
     float minVal = std::numeric_limits<float>::max();
     bool found = false;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isnan(data[i])) {
+        // Non-finite samples are invalid, not extreme: a single -Inf used to
+        // win as the dark object and turn the whole band into +Inf surface
+        // reflectance (R18-A). Matches the isfinite filtering of
+        // findDarkObjectByHistogram and the QUAC/streaming paths.
+        if (std::isfinite(data[i])) {
             if (data[i] < minVal) {
                 minVal = data[i];
                 found = true;
@@ -63,7 +67,8 @@ bool dos1(const float *dn, float *surface, size_t count, float gain, float bias)
         return false;
 
     for (size_t i = 0; i < count; i++) {
-        surface[i] = std::isnan(radiance[i]) ? std::numeric_limits<float>::quiet_NaN() : (radiance[i] - minRadiance);
+        surface[i] = std::isfinite(radiance[i]) ? (radiance[i] - minRadiance)
+                                                : std::numeric_limits<float>::quiet_NaN();
     }
     return true;
 }
@@ -291,7 +296,8 @@ bool dos2(const float *dn, float *surface, size_t count, float gain, float bias,
         return false;
 
     for (size_t i = 0; i < count; i++) {
-        surface[i] = std::isnan(radiance[i]) ? std::numeric_limits<float>::quiet_NaN() : ((radiance[i] - pathRadiance) / transmittance);
+        surface[i] = std::isfinite(radiance[i]) ? ((radiance[i] - pathRadiance) / transmittance)
+                                                : std::numeric_limits<float>::quiet_NaN();
     }
     return true;
 }

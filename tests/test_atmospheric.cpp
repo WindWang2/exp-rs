@@ -8,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 #include <numeric>
+#include <limits>
 
 // --- DN to Radiance ---
 
@@ -739,4 +740,47 @@ TEST_CASE("processFileMultiBand QUAC declares NaN NoData on every output band (#
         REQUIRE(std::isfinite(band1[i]));
         REQUIRE(std::isfinite(band2[i]));
     }
+}
+
+// --- R18-A WP3: in-memory DOS kernels must not let one -Inf sample poison ---
+// the whole band. findMin skipped NaN only, so a single -Inf pixel became the
+// dark object: surface = radiance - (-Inf) = +Inf everywhere. The streaming
+// paths and dos1Histogram/QUAC already filter !isfinite (#634 wash); the
+// in-memory kernels must match that family contract.
+
+TEST_CASE("dos1 treats a -Inf sample as invalid instead of the dark object [r18a][wp3]",
+          "[atm][dos]")
+{
+    std::vector<float> dn = {5.0f, -std::numeric_limits<float>::infinity(), 7.0f};
+    std::vector<float> out(3, 0.0f);
+
+    REQUIRE(AtmosphericCorrection::dos1(dn.data(), out.data(), 3, 1.0f, 0.0f));
+    // Dark object over finite radiance only: min = 5.
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isnan(out[1])); // -Inf input stays an invalid sample
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(2.0f, 1e-6f));
+}
+
+TEST_CASE("dos2 treats a -Inf sample as invalid instead of the path radiance [r18a][wp3]",
+          "[atm][dos]")
+{
+    std::vector<float> dn = {5.0f, -std::numeric_limits<float>::infinity(), 7.0f};
+    std::vector<float> out(3, 0.0f);
+
+    REQUIRE(AtmosphericCorrection::dos2(dn.data(), out.data(), 3, 1.0f, 0.0f, 0.5f));
+    // Path radiance over finite radiance only: min = 5 -> (L - 5)/0.5.
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isnan(out[1]));
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(4.0f, 1e-6f));
+}
+
+TEST_CASE("dos1 treats a +Inf sample as invalid too [r18a][wp3]", "[atm][dos]")
+{
+    std::vector<float> dn = {5.0f, std::numeric_limits<float>::infinity(), 7.0f};
+    std::vector<float> out(3, 0.0f);
+
+    REQUIRE(AtmosphericCorrection::dos1(dn.data(), out.data(), 3, 1.0f, 0.0f));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isnan(out[1])); // +Inf never participates as data
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(2.0f, 1e-6f));
 }
