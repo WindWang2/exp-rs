@@ -285,6 +285,15 @@ RemoteValidatorOptions validatorOptions( const RangeCacheConfig &config )
   options.timeoutSeconds = config.timeoutSeconds;
   options.connectTimeoutSeconds = config.connectTimeoutSeconds;
   options.maxRetries = config.maxRetries;
+  // DEF-GEO-02: the egress policy travels WITH the identity probe. Without
+  // it the probe — and every revalidation built from it — ran on the
+  // unguarded CPL transport, so a public URL 302-ing into 169.254.169.254
+  // or an RFC 1918 host was probed even though the data-plane fetch
+  // (fetchRangeOnce) and Open's first hop refuse exactly that. Propagating
+  // the flag arms RemoteSourceValidator's own first-hop check AND its
+  // redirectGuard, so the probe rides the same controlled transport as the
+  // ranged GET.
+  options.blockPrivateNetworks = config.blockPrivateNetworks;
   return options;
 }
 
@@ -1772,7 +1781,24 @@ std::shared_ptr<ResourceEntry> applyTrustPolicy( CacheStore &cache, const std::s
   cache.revalidations.fetch_add( 1 );
   RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
     cache.snapshotIdentity( entry ), requestUrl );
-  const RevalidationResult result = validator.revalidate( validatorOptions( config ) );
+  RevalidationResult result;
+  try
+  {
+    result = validator.revalidate( validatorOptions( config ) );
+  }
+  catch ( const GeoError &error )
+  {
+    if ( error.code() != ErrorCode::PermissionDenied )
+      throw;
+    // The egress policy refused the revalidation hop (the stored origin is
+    // itself private now, or a redirect left the allowed range). The
+    // identity cannot be re-proven, so neither can the cached blocks: drop
+    // the entry and let the caller's normal no-entry path refuse the
+    // resource — the same shape as a Changed verdict. A GDAL VSI callback
+    // must never let the throw escape into its C entry point.
+    cache.invalidate( key );
+    return nullptr;
+  }
   if ( result.outcome == RevalidationOutcome::Changed )
   {
     // The cached identity is proven stale: invalidate and let the
@@ -1876,7 +1902,20 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else
         {
-          entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
+          try
+          {
+            entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
+          }
+          catch ( const GeoError &error )
+          {
+            if ( error.code() != ErrorCode::PermissionDenied )
+              throw;
+            // Egress policy refused the probe (a redirect left the allowed
+            // range): report it the way this open's first-hop check does
+            // instead of letting the throw escape into VSIFOpenL.
+            CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: %s", error.what() );
+            return nullptr;
+          }
           if ( entry == nullptr )
           {
             // Missing (ENOENT) or unreachable: a quiet null like any local
@@ -1949,8 +1988,21 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else
         {
-          RemoteSourceValidator validator =
-            RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) );
+          RemoteSourceValidator validator;
+          try
+          {
+            validator = RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) );
+          }
+          catch ( const GeoError &error )
+          {
+            if ( error.code() != ErrorCode::PermissionDenied )
+              throw;
+            // Egress policy refused the probe (a private target, or a
+            // redirect that left the allowed range): answer with the CPL
+            // error instead of letting the throw escape into VSIStatL.
+            CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: %s", error.what() );
+            return -1;
+          }
           const RemoteSourceIdentity &identity = validator.identity();
           // Gone / unusable / unreachable: a quiet stat miss — speculative
           // sibling probes (\.aux, \.ovr, …) are normal GDAL behavior and

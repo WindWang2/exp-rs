@@ -359,6 +359,7 @@ const char *resourceKindName( ResourceKind kind )
     case ResourceKind::RemoteHttp: return "remote_http";
     case ResourceKind::VsiRemote: return "vsi_remote";
     case ResourceKind::VsiVirtual: return "vsi_virtual";
+    case ResourceKind::VirtualDataset: return "virtual_dataset";
     case ResourceKind::Subdataset: return "subdataset";
     case ResourceKind::StacAsset: return "stac_asset";
     case ResourceKind::InMemory: return "in_memory";
@@ -964,8 +965,12 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
   for ( const std::string &segment : splitSegments( normalizeSeparators( decodedTargetRef ) ) )
   {
     std::string decoded;
-    const bool isDecoded = percentDecode( segment, decoded );
-    if ( !isDecoded || decoded.find( '\0' ) != std::string::npos )
+    percentDecode( segment, decoded );
+    // A malformed escape keeps its literal '%' verbatim (percentDecode's
+    // contract); only an embedded NUL is a genuine refusal here — the actual
+    // '..' traversal guard is the segment/decoded == ".." test below, which
+    // already covers the %2e%2e spellings (tests/test_io_uri.cpp:241-248).
+    if ( decoded.find( '\0' ) != std::string::npos )
     {
       escaped = true;
       break;
