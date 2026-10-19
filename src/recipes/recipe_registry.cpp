@@ -5,6 +5,7 @@
 #include "recipes/scientific_recipe.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +15,15 @@
 namespace sicnu::recipes {
 
 namespace fs = std::filesystem;
+
+namespace {
+
+/// Bounded read (R14-E audit F5): the registry is a directory scanner over
+/// untrusted files (scientific_recipe.cpp) — an oversize document is a
+/// recorded load problem, never an unbounded rdbuf slurp into memory.
+constexpr std::uintmax_t kMaxRecipeBytes = 16ull * 1024ull * 1024ull;
+
+} // namespace
 
 void ScientificRecipeRegistry::setDirectory( const std::string &directory )
 {
@@ -90,6 +100,15 @@ int ScientificRecipeRegistry::reload()
   for ( const auto &path : files )
   {
     const std::string filename = path.filename().string();
+    // Stat-before-read (R14-E audit F5): refuse before any allocation
+    // proportional to the file size.
+    std::error_code sizeEc;
+    const std::uintmax_t size = std::filesystem::file_size( path, sizeEc );
+    if ( !sizeEc && size > kMaxRecipeBytes )
+    {
+      mLoadProblems.push_back( filename + ": file exceeds the 16 MiB read budget" );
+      continue;
+    }
     std::ifstream in( path, std::ios::binary );
     if ( !in )
     {
