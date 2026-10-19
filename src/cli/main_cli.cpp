@@ -4,6 +4,7 @@
 #include "help_cli_projections.h"
 
 #include "data/offline_mode.h"
+#include "geospatial/remote/process_network_policy.h"
 
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -205,6 +206,14 @@ int main(int argc, char *argv[])
         "either way. Env twin: SICNU_OFFLINE=1.");
     parser.addOption(offlineOption);
 
+    // R15-B (#1505 T11 / R4-03): private-network blocking is the process
+    // default; this flag (any position, either routing mode) opts one run out.
+    const QCommandLineOption allowPrivateNetworkOption(
+        QStringList() << "allow-private-network",
+        "Allow remote reads/probes of loopback, RFC 1918, CGNAT, link-local "
+        "and metadata hosts (blocked by default).");
+    parser.addOption(allowPrivateNetworkOption);
+
     const QCommandLineOption exportCatalogOption(
         QStringList() << "export-catalog",
         "Regenerate the algorithm catalog sidecars from the descriptor-resolved "
@@ -229,6 +238,23 @@ int main(int argc, char *argv[])
         qputenv( "SICNU_OFFLINE", "1" );
         std::cerr << "offline mode enabled (--offline / SICNU_OFFLINE): "
                      "remote inputs will be refused\n";
+    }
+
+    // R15-B (#1505 T11 / R4-03): process-wide private-network policy, engaged
+    // before routing like the offline gate. Covers our own transport
+    // (httpFetch, range cache) and the GDAL-level paths (/vsicurl/,
+    // CPLHTTPFetch). Exported so spawned workers engage it too.
+    const bool allowPrivateNetwork =
+        routedArguments.removeAll( QStringLiteral( "--allow-private-network" ) ) > 0;
+    sicnu::cli::setAllowPrivateNetwork( allowPrivateNetwork );
+    if ( allowPrivateNetwork )
+    {
+        qunsetenv( "SICNU_BLOCK_PRIVATE_NETWORKS" );
+    }
+    else
+    {
+        sicnu::geo::network_policy::engageProcessPrivateNetworkBlocking();
+        qputenv( "SICNU_BLOCK_PRIVATE_NETWORKS", "1" );
     }
 
     // CLI 3.0 commands carry their own parsers and global flags (--json etc.);

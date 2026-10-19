@@ -91,6 +91,8 @@
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "numeric",
           "name" : "msWeights",
           "required" : false,
           "type" : "numeric"

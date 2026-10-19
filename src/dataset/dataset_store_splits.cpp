@@ -12,6 +12,7 @@
 // append-only audit history keyed by content digest; identical content
 // re-runs are idempotent. Split manifests may attach to any version status
 // (they are derived evidence ABOUT a version, not mutations of it).
+#include <QReadWriteLock>
 #include "dataset_store_impl.h"
 #include <QJsonArray>
 #include <QDebug>
@@ -42,6 +43,7 @@ QString contentDigest( const QString &canonicalJson )
 
 sicnu::data::Result<void> DatasetStore::saveSplitManifest( const SplitManifest &manifest )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -143,6 +145,7 @@ sicnu::data::Result<void> DatasetStore::saveSplitManifest( const SplitManifest &
 
 std::optional<SplitManifest> DatasetStore::splitManifestById( const QString &manifestId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -169,6 +172,7 @@ std::optional<SplitManifest> DatasetStore::splitManifestById( const QString &man
 QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
     const DatasetVersionId &versionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<SplitManifest> manifests;
     if ( !m_impl )
         return manifests;
@@ -227,6 +231,7 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
 
 sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &report )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -313,6 +318,7 @@ sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &
 std::optional<LeakageReport> DatasetStore::latestLeakageReport(
     const QString &splitManifestId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -333,6 +339,7 @@ std::optional<LeakageReport> DatasetStore::latestLeakageReport(
 QVector<LeakageReport> DatasetStore::leakageReportsForSplit( const QString &splitManifestId,
                                                              qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<LeakageReport> reports;
     if ( !m_impl )
         return reports;
@@ -364,6 +371,7 @@ QVector<LeakageReport> DatasetStore::leakageReportsForSplit( const QString &spli
 
 sicnu::data::Result<void> DatasetStore::saveQaReport( const DatasetQaReport &report )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -435,6 +443,7 @@ sicnu::data::Result<void> DatasetStore::saveQaReport( const DatasetQaReport &rep
 sicnu::data::Result<QVector<DatasetStore::QaReportRecord>> DatasetStore::qaReportsForVersion(
     const DatasetVersionId &versionId, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<QVector<QaReportRecord>>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -477,6 +486,7 @@ sicnu::data::Result<QVector<DatasetStore::QaReportRecord>> DatasetStore::qaRepor
 sicnu::data::Result<std::optional<DatasetStore::QaReportRecord>> DatasetStore::latestQaReport(
     const DatasetVersionId &versionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<std::optional<QaReportRecord>>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),

@@ -245,9 +245,17 @@ ModelHardwareCapabilities ModelHardwareCapabilities::detect()
   if ( vramOk && vramMb > 0 )
     caps.vramBudgetMb = vramMb;
   bool devicesOk = false;
-  const int devices = env.value( QStringLiteral( "SICNU_MODEL_CUDA_DEVICES" ) ).toInt( &devicesOk );
+  int devices = env.value( QStringLiteral( "SICNU_MODEL_CUDA_DEVICES" ) ).toInt( &devicesOk );
   if ( devicesOk && devices >= 0 )
   {
+    // R15-C C04 (F5): the count is bounded — DeviceInventory::fromHardware
+    // materializes one entry per index, so an absurd override (a mistyped or
+    // hostile 2000000000) used to attempt a ~2e9-entry vector (100+ GB)
+    // and kill the process instead of degrading. The ceiling matches the
+    // widest addressable backend (ORT: 63) plus the always-present device 0.
+    constexpr int kMaxDeclaredCudaDevices = 64;
+    if ( devices > kMaxDeclaredCudaDevices )
+      devices = kMaxDeclaredCudaDevices;
     // Keep the per-device inventory entries that survive the resize — a
     // shrunken list drops tail devices, a grown list extends with unknowns.
     const std::size_t newSize = static_cast<std::size_t>( devices );
@@ -271,6 +279,15 @@ ModelHardwareCapabilities ModelHardwareCapabilities::detect()
     }
     caps.cudaDeviceCount =
       std::max( caps.cudaDeviceCount, static_cast<int>( parts.size() ) );
+    // R15-C C04 (F6): keep every per-device vector at least as long as the
+    // declared device count. A CSV shorter than SICNU_MODEL_CUDA_DEVICES
+    // used to leave the tail devices with silently dropped capacity/name/
+    // free data (bounds-checked, so no OOB — but the probed NVML totals
+    // for those devices vanished from the inventory).
+    const std::size_t declared = static_cast<std::size_t>( caps.cudaDeviceCount );
+    caps.deviceFreeVramMb.resize( declared, -1 );
+    caps.deviceNames.resize( declared );
+    caps.deviceTotalVramMb.resize( declared, 0 );
   }
 
   // Consistency: an OpenCV-CUDA claim implies at least one device; a real
@@ -534,12 +551,34 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
     return InferenceFailureKind::DeviceUnavailable;
   if ( contains( "schema" ) || contains( "contract" ) || contains( "manifest" )
        || contains( "not part of" ) || contains( "does not declare" )
-       || contains( "no runtime provider available" ) || contains( "wire protocol" ) || contains( "matches no graph" ) )
+       || contains( "no runtime provider available" ) || contains( "wire protocol" ) || contains( "matches no graph" )
+       // R15-C C05 (B4): a DTYPE refusal is a contract the runtime cannot
+       // honor (the provider declares input_dtypes and the caller fed
+       // something else). The opencv/ORT spellings used to fall through to
+       // Unknown, so one user mistake produced three ErrorCodes across
+       // providers (Unknown / InvalidInputData / InvalidInputData-with-
+       // ShapeMismatch) and the recovery hint keyed off the wrong class.
+       || contains( "input_dtypes" ) || contains( "float16 transport refused" ) )
     return InferenceFailureKind::IncompatibleSchema;
   if ( contains( "not loaded" ) )
     return InferenceFailureKind::NotLoaded;
   if ( contains( "shape" ) || contains( "dimension" ) || contains( "size mismatch" )
-       || contains( "wrong input" ) || contains( "channels" ) )
+       || contains( "wrong input" ) || contains( "channels" )
+       // R15-C C05 (B4): the remaining provider spellings of the same user
+       // error — a fed tensor that does not fit the graph's declared input
+       // (TensorRT "fed blob size does not match the ... input binding",
+       // ONNX Runtime "rank N exceeds this provider's maximum rank", the
+       // rank-4 NCHW fast-path refusals "must be a 4-D NCHW blob" / "must be
+       // 4-D CV_32F NCHW"). Normalized onto ShapeMismatch so every backend
+       // projects the same ErrorCode for one mistake. The patterns are the
+       // FED-BLOB spellings: "size does not match" (not the bare "does not
+       // match" — a load-time "engine/plan file does not match this TensorRT
+       // build" is a different failure class) and the "must be ... nchw"
+       // pair (not a bare "nchw" — the rank-4 OUTPUT refusal "is not 4-D
+       // NCHW" is a different failure class).
+       || contains( "size does not match" ) || contains( "input binding" )
+       || contains( "maximum rank" )
+       || ( contains( "must be" ) && contains( "nchw" ) ) )
     return InferenceFailureKind::ShapeMismatch;
   // Platform 7.0: a forward that RAN but produced an unusable output is an
   // output-validity failure, not an unknown crash.
@@ -596,8 +635,16 @@ ModelReadiness evaluateRuntimeReadinessForFramework( const ModelInfo &model,
   };
 
   if ( !ModelRuntimeRegistry::instance().hasProvider( framework ) )
-    return fail( ModelReadiness::UnsupportedRuntime,
-                 "no runtime provider available for framework '" + framework + "' in this build" );
+  {
+    // R15-C C16 (B2): compose the provider's own recovery text onto the
+    // generic verdict — a host without CUDA/ORT/OpenVINO/TRT must tell the
+    // user what to install or which framework to switch to.
+    std::string why = "no runtime provider available for framework '" + framework + "' in this build";
+    const std::string hint = ModelRuntimeRegistry::instance().unavailableReason( framework );
+    if ( !hint.empty() )
+      why += " — " + hint;
+    return fail( ModelReadiness::UnsupportedRuntime, why );
+  }
 
   // Platform 4.0: an explicit runtime.device token is evaluated through the
   // same deterministic resolution acquire uses, so readiness and execution
@@ -798,7 +845,15 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     {
       lock.unlock();
       if ( errorMessage )
+      {
+        // R15-C C16 (B2): the generic sentence plus the provider's own
+        // recovery text (empty for built-in frameworks and when the optional
+        // provider IS compiled in).
         *errorMessage = "no runtime provider available for framework '" + framework + "' in this build";
+        const std::string hint = unavailableReason( framework );
+        if ( !hint.empty() )
+          *errorMessage += " — " + hint;
+      }
       return nullptr;
     }
     factory = provider->second.factory;
@@ -1570,6 +1625,24 @@ std::optional<ProviderTraits> ModelRuntimeRegistry::providerTraits( const std::s
   if ( it == m_providers.end() )
     return std::nullopt;
   return it->second.traits;
+}
+
+std::string ModelRuntimeRegistry::unavailableReason( const std::string &framework ) const
+{
+  // R15-C C16 (B2): the optional providers each spell their own recovery
+  // path; without this dispatch that text was dead code and every
+  // degraded-build user got the same opaque sentence. The functions return
+  // an empty string when the provider IS compiled in (nothing to recover
+  // from) and when the framework has no optional provider at all.
+  if ( framework == "onnxruntime" )
+    return onnxRuntimeUnavailableReason();
+  if ( framework == "tensorrt" )
+    return tensorRTUnavailableReason();
+  if ( framework == "openvino" )
+    return openVinoUnavailableReason();
+  if ( framework == "http" )
+    return httpProviderUnavailableReason();
+  return {};
 }
 
 ModelHardwareCapabilities ModelRuntimeRegistry::hardware() const

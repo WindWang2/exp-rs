@@ -146,7 +146,9 @@ public:
                 return error;
             }
             std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
-            ctx.reportProgress( i * 100.0 / slices, "sleeping" );
+            // Contract units: RSOperatorContext progress is a 0..1 fraction
+            // (rs_operator_context.h), like every production operator.
+            ctx.reportProgress( double( i + 1 ) / slices, "sleeping" );
         }
         Json::Value result( Json::objectValue );
         result["output"] = "/tmp/r14_c_sleep.tif";

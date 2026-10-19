@@ -34,6 +34,24 @@ namespace {
 
 using namespace params;
 
+/// Reads an optional string field from an EXTERNAL STAC document
+/// (R10-A/PR-9): `.get(key, "")` only defaults MISSING keys, so a
+/// present-but-nonstring value used to reach bare asString() — jsoncpp then
+/// threw LogicError (object/array) or silently stringified (numbers/bools)
+/// into a garbage path. Hostile documents must fail typed instead; missing
+/// keys keep the "" default (callers decide what an absent field means).
+std::string stacStringField( const Json::Value &object, const char *key,
+                             const std::string &where )
+{
+  const Json::Value &field = object.get( key, Json::Value::nullSingleton() );
+  if ( field.isNull() )
+    return std::string();
+  if ( !field.isString() )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "STAC " + where + ": '" + key + "' must be a string" );
+  return field.asString();
+}
+
 /// Platform 8.0 WP-D: expands a LOCAL STAC Collection/Item document into a
 /// time-ordered frame list for a temporal feed. Items come from a collection's
 /// `links` with rel "item" (relative paths resolve against the document) or a
@@ -88,7 +106,8 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
     // the ITEM (which may live in a subdirectory of the collection), not
     // the top-level document.
     const QFileInfo itemInfo( QString::fromStdString( itemPath ) );
-    const std::string datetime = item["properties"].get( "datetime", "" ).asString();
+    const std::string datetime =
+      stacStringField( item["properties"], "datetime", "item properties (" + itemPath + ")" );
     if ( datetime.empty() )
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "STAC item carries no properties.datetime: " + itemPath );
@@ -98,18 +117,18 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
                              "STAC item carries no assets: " + itemPath );
     std::string href;
     if ( !assetKey.empty() && assets.isMember( assetKey ) )
-      href = assets[assetKey].get( "href", "" ).asString();
+      href = stacStringField( assets[assetKey], "href", "asset '" + assetKey + "' (" + itemPath + ")" );
     else
     {
       // Documented fallback order: "COG" → "data" → "image" → first entry.
       for ( const char *key : { "COG", "data", "image" } )
         if ( assets.isMember( key ) )
         {
-          href = assets[key].get( "href", "" ).asString();
+          href = stacStringField( assets[key], "href", std::string( "asset '" ) + key + "' (" + itemPath + ")" );
           break;
         }
       if ( href.empty() )
-        href = assets.begin()->get( "href", "" ).asString();
+        href = stacStringField( *assets.begin(), "href", "first asset (" + itemPath + ")" );
     }
     if ( href.empty() )
       throw RSOperatorError(
@@ -123,7 +142,7 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
     frames.emplace_back( datetime, href );
   };
 
-  const std::string type = parsed.get( "type", "" ).asString();
+  const std::string type = stacStringField( parsed, "type", "document (" + documentPath + ")" );
   if ( type == "Collection" )
   {
     const Json::Value &links = parsed["links"];
@@ -133,14 +152,14 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
     constexpr std::size_t kMaxStacItems = 1024; // mirrors the engine frame cap
     for ( const auto &link : links )
     {
-      if ( link.get( "rel", "" ).asString() != "item" )
+      if ( stacStringField( link, "rel", "collection link (" + documentPath + ")" ) != "item" )
         continue;
       if ( frames.size() >= kMaxStacItems )
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "STAC collection resolves to more than "
                                  + std::to_string( kMaxStacItems )
                                  + " items: " + documentPath + " (coarsen the series)" );
-      std::string href = link.get( "href", "" ).asString();
+      std::string href = stacStringField( link, "href", "collection link (" + documentPath + ")" );
       if ( href.empty() )
         continue;
       if ( QFileInfo( QString::fromStdString( href ) ).isRelative() )
@@ -302,6 +321,14 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) 
     const int tile = TileInferenceEngine::effectiveTileSize( model );
     const int halo = TileInferenceEngine::effectiveHalo( model );
     const std::uint64_t batch = static_cast<std::uint64_t>( std::max( 1, model.tiling.batchSize ) );
+
+    // R10-A/A1-D2: bands is schema-declared as an array; a scalar used to be
+    // silently ignored here (all-bands estimate) and by parseBands() on the
+    // run path — refuse it typed so estimate and run agree on the contract.
+    if ( params.isObject() && params.isMember( "bands" ) && !params["bands"].isNull()
+         && !params["bands"].isArray() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "bands must be an array of 1-based band indices" );
 
     std::uint64_t bands = 4; // conservative default when the raster is unknown
     GdalDatasetWrapper ds;
@@ -503,6 +530,13 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
       if ( bandCount <= 0 )
         throw RSOperatorError( ErrorCode::GdalError,
                                "Failed to read band count from input raster" );
+      // R10-A/A1-D2: parseBands() silently widens a scalar bands value to
+      // all bands — refuse the non-array shape typed before it gets there
+      // (mirrors the named-inputs guard above).
+      if ( params.isMember( "bands" ) && !params["bands"].isNull()
+           && !params["bands"].isArray() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "bands must be an array of 1-based band indices" );
       request.bands = parseBands( params, bandCount );
     }
 

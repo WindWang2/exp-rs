@@ -215,20 +215,21 @@ class PythonWorkerSession final : public IModelRuntime
           // hang, and replaying into it could double-execute the forward.
           if ( attempt == 0 && m_process->state() != QProcess::Running )
             continue; // dead worker → the bounded restart above
-          recordFailure( "python worker stopped accepting requests (broken pipe)" );
-          // QProcess::write is ASYNCHRONOUS: the timeout means the request
-          // line may be PARTLY in the pipe already. The worker will still
-          // read the truncated request and answer it — on the shared session
-          // that line would be served to the NEXT request (outputs of one
-          // tile attributed to another — the desync the oversized/malformed/
-          // read-timeout branches above refuse). Stop the worker so the
-          // stream dies with it, and mark the session dead FOR GOOD like
-          // those branches: the registry recycles a session only when
-          // permanentlyUnavailable() is true (model_runtime.cpp), so without
-          // the flag the poisoned session would be served forever.
+          // R18-B: a LIVE worker that missed the write deadline fails the
+          // session closed, exactly like the oversized/malformed/read-timeout
+          // branches below. The (possibly partial) request line is still in
+          // the pipe: the worker will eventually drain and answer it, and the
+          // protocol has no request correlation — that stale answer would be
+          // served to the NEXT request on this shared session. Stop the
+          // worker so the stream dies with it, and mark the session dead for
+          // good (a stopped worker is not restartable mid-request).
+          recordFailure( "python worker stopped accepting requests (write deadline, broken "
+                         "pipe); stderr: "
+                         + drainStderr() );
           m_permanentlyDead.store( true, std::memory_order_release );
           stopWorker();
-          throw std::runtime_error( "python worker stopped accepting requests (broken pipe)" );
+          throw std::runtime_error( "python worker stopped accepting requests (write deadline, "
+                                    "broken pipe)" );
         }
 
         QJsonObject response;
@@ -333,7 +334,18 @@ class PythonWorkerSession final : public IModelRuntime
       throw std::runtime_error( "provider crashed: python worker exchange failed (unreachable)" );
     }
 
-    bool supportsMultiInput() const override { return true; }
+    bool supportsMultiInput() const override
+    {
+      // Platform 8.0 WP-F: the handshake-negotiated capability is
+      // authoritative. A worker that declared multi_input:false used to keep
+      // claiming the historical seam here, so the engine's capability
+      // preflight (R15-C C05/B3) let multi-input manifests through and the
+      // request failed on the wire instead. The two seams now agree.
+      std::lock_guard<std::mutex> stateLock( m_stateMutex );
+      if ( m_negotiated.contains( QStringLiteral( "multi_input" ) ) )
+        return m_negotiated.value( QStringLiteral( "multi_input" ) ).toBool( true );
+      return true;
+    }
 
     /// Historical cv::Mat fast path (bridges through the named surface).
     cv::Mat infer( const cv::Mat &nchwBlob ) override

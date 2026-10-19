@@ -10,12 +10,14 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QReadWriteLock>
 
 #include <sqlite3.h>
 
 #include <QHash>
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 
 namespace sicnu::workspace
@@ -235,10 +237,26 @@ struct GovernanceStore::Impl
     mutable std::mutex mutex;
     QString schemaVersion;
     bool readOnly = false;
-    mutable bool stepFailed = false;
+    // R15-B (TSan): written under Impl::mutex by every reader, read by
+    // stepFailed() without it — atomic so the store-level flag is race-free.
+    mutable std::atomic<bool> stepFailed{ false };
     // Text of the last failing sqlite call (empty when nothing failed); lets
     // writers build actionable diagnostics instead of opaque failures.
     mutable QString lastError;
+
+    // R15-B (B07 tail, #1448/#1457, PR #1481 Thread #14): a scan loop that
+    // ended on an ERROR (CORRUPT/IOERR/BUSY) is not "no more rows". Raises the
+    // store's stepFailed() flag (reset at the start of each public read) so a
+    // caller can tell a complete answer from a silently partial one.
+    template <typename S>
+    void noteScan( const S &stmt, const char *where ) const
+    {
+        if ( !stmt.stepFailed() )
+            return;
+        stepFailed = true;
+        lastError = stmt.error();
+        qWarning( "governance_store.scan_failed(%s): %s", where, qUtf8Printable( lastError ) );
+    }
 
     bool exec( const char *sql ) const
     {
@@ -618,6 +636,7 @@ struct GovernanceStore::Impl
                     in.role = i.text( 2 );
                     r.inputs.append( in );
                 }
+                noteScan( i, "readResult.inputs" ); // R15-B (B07 tail)
             }
             StmtView a( cached( "SELECT path, role, digest, size_bytes FROM result_artifacts WHERE result_id=?" ) );
             if ( a )
@@ -632,6 +651,7 @@ struct GovernanceStore::Impl
                     art.sizeBytes = a.i64( 3 );
                     r.artifacts.append( art );
                 }
+                noteScan( a, "readResult.artifacts" ); // R15-B (B07 tail)
             }
         }
         return r;
@@ -658,6 +678,7 @@ struct GovernanceStore::Impl
                 o.bind( 1, r.id );
                 while ( o.stepRow() )
                     r.outputAssetIds.append( o.text( 0 ) );
+                noteScan( o, "readRun.outputs" ); // R15-B (B07 tail)
             }
         }
         return r;
@@ -685,6 +706,7 @@ struct GovernanceStore::Impl
                     variant.value = textToJson( v.text( 1 ) );
                     e.variants.append( variant );
                 }
+                noteScan( v, "readExperiment.variants" ); // R15-B (B07 tail)
             }
             StmtView r( cached( "SELECT run_id FROM experiment_runs WHERE experiment_id=?" ) );
             if ( r )
@@ -692,6 +714,7 @@ struct GovernanceStore::Impl
                 r.bind( 1, e.id.toString() );
                 while ( r.stepRow() )
                     e.runIds.append( r.text( 0 ) );
+                noteScan( r, "readExperiment.runs" ); // R15-B (B07 tail)
             }
         }
         return e;
@@ -734,6 +757,7 @@ GovernanceStore::~GovernanceStore()
 
 bool GovernanceStore::open( const QString &dbPath, QString *errorOut )
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     close();
     m_storePath = dbPath;
     m_impl = new Impl;
@@ -781,6 +805,7 @@ bool GovernanceStore::open( const QString &dbPath, QString *errorOut )
 
 void GovernanceStore::close()
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return;
     {
@@ -799,21 +824,25 @@ void GovernanceStore::close()
 
 bool GovernanceStore::isReadOnly() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     return m_impl ? m_impl->readOnly : false;
 }
 
 QString GovernanceStore::schemaVersion() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     return m_impl ? m_impl->schemaVersion : QString();
 }
 
 bool GovernanceStore::stepFailed() const
 {
-    return m_impl ? m_impl->stepFailed : false;
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
+    return m_impl ? m_impl->stepFailed.load() : false;
 }
 
 bool GovernanceStore::checkpointForBackup()
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return false;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -835,11 +864,13 @@ bool GovernanceStore::checkpointForBackup()
 
 Result<void> GovernanceStore::upsertAsset( const GovernedAsset &asset )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     return upsertAssets( { asset } );
 }
 
 Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return Result<void>::failure( govDiag( QStringLiteral( "store.closed" ), QStringLiteral( "governance store not open" ) ) );
     if ( m_impl->readOnly )
@@ -999,6 +1030,7 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
 QVector<GovernanceStore::AssetReference> GovernanceStore::collectAssetReferences(
     const QString &assetId, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     // Evidence for the removeAsset guard (12.0): every row that would be
     // silently unlinked by a cascade removal, one bounded query per
     // relationship family. Read-only, so the store mutex is the only
@@ -1007,6 +1039,7 @@ QVector<GovernanceStore::AssetReference> GovernanceStore::collectAssetReferences
     if ( !m_impl || assetId.isEmpty() || limit <= 0 )
         return references;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     const qint64 capped = qMin<qint64>( limit, 10000 );
     auto collect = [ & ]( const char *sql, const QString &kind, bool detailFromThirdColumn )
     {
@@ -1024,6 +1057,7 @@ QVector<GovernanceStore::AssetReference> GovernanceStore::collectAssetReferences
             if ( qint64( references.size() ) < capped )
                 references.append( reference );
         }
+        m_impl->noteScan( stmt, "collectAssetReferences" ); // R15-B (B07 tail)
     };
     collect( "SELECT dataset_id, asset_id, '' FROM dataset_members WHERE asset_id=? LIMIT ?",
              QStringLiteral( "dataset_member" ), false );
@@ -1042,6 +1076,7 @@ QVector<GovernanceStore::AssetReference> GovernanceStore::collectAssetReferences
 
 Result<void> GovernanceStore::removeAsset( const QString &assetId, RemoveAssetPolicy policy )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return Result<void>::failure( govDiag( QStringLiteral( "store.closed" ), QStringLiteral( "governance store not open" ) ) );
     if ( m_impl->readOnly )
@@ -1181,6 +1216,7 @@ Result<void> GovernanceStore::removeAsset( const QString &assetId, RemoveAssetPo
 
 std::optional<GovernedAsset> GovernanceStore::assetById( const QString &assetId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || assetId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1195,6 +1231,7 @@ std::optional<GovernedAsset> GovernanceStore::assetById( const QString &assetId 
 
 std::optional<GovernedAsset> GovernanceStore::assetByPath( const QString &path ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || path.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1214,6 +1251,7 @@ std::optional<GovernedAsset> GovernanceStore::assetByPath( const QString &path )
 
 QVector<GovernedAsset> GovernanceStore::assetsByFingerprint( const QString &digest, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<GovernedAsset> out;
     if ( !m_impl || digest.isEmpty() )
         return out;
@@ -1237,6 +1275,7 @@ QVector<GovernedAsset> GovernanceStore::assetsByFingerprint( const QString &dige
 
 QVector<GovernedAsset> GovernanceStore::allAssets( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<GovernedAsset> out;
     if ( !m_impl )
         return out;
@@ -1273,20 +1312,24 @@ QVector<GovernedAsset> GovernanceStore::allAssets( qint64 limit ) const
 
 QVector<QString> GovernanceStore::assetIds() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<QString> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db, "SELECT asset_id FROM assets" );
     if ( !s )
         return out;
     while ( s.stepRow() )
         out.append( s.text( 0 ) );
+    m_impl->noteScan( s, "assetIds" ); // R15-B (B07 tail)
     return out;
 }
 
 qint64 GovernanceStore::assetCount() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return 0;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1296,6 +1339,7 @@ qint64 GovernanceStore::assetCount() const
 
 GovernanceStore::EntityCounts GovernanceStore::entityCounts() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     EntityCounts counts;
     if ( !m_impl )
         return counts;
@@ -1330,6 +1374,7 @@ GovernanceStore::EntityCounts GovernanceStore::entityCounts() const
 
 Result<void> GovernanceStore::setTags( const QString &entityKind, const QString &entityId, const QStringList &tags )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return Result<void>::failure( govDiag( QStringLiteral( "store.closed" ), QStringLiteral( "governance store not open" ) ) );
     if ( m_impl->readOnly )
@@ -1380,6 +1425,7 @@ Result<void> GovernanceStore::setTags( const QString &entityKind, const QString 
 
 Result<void> GovernanceStore::addTag( const QString &entityKind, const QString &entityId, const QString &tag )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1409,10 +1455,12 @@ Result<void> GovernanceStore::addTag( const QString &entityKind, const QString &
 
 QStringList GovernanceStore::tagsOf( const QString &entityKind, const QString &entityId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QStringList out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db, "SELECT tag FROM tags WHERE entity_kind=? AND entity_id=?" );
     if ( !s )
         return out;
@@ -1420,25 +1468,30 @@ QStringList GovernanceStore::tagsOf( const QString &entityKind, const QString &e
     s.bind( 2, entityId );
     while ( s.stepRow() )
         out.append( s.text( 0 ) );
+    m_impl->noteScan( s, "tagsOf" ); // R15-B (B07 tail)
     return out;
 }
 
 QVector<GovernanceStore::TagRow> GovernanceStore::allTags() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<TagRow> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db, "SELECT entity_kind, entity_id, tag FROM tags ORDER BY entity_kind, entity_id, tag" );
     if ( !s )
         return out;
     while ( s.stepRow() )
         out.append( TagRow{ s.text( 0 ), s.text( 1 ), s.text( 2 ) } );
+    m_impl->noteScan( s, "allTags" ); // R15-B (B07 tail)
     return out;
 }
 
 Result<qint64> GovernanceStore::bulkTag( const QVector<QString> &entityIds, const QString &entityKind, const QString &tag )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<qint64>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     if ( tag.isEmpty() )
@@ -1481,6 +1534,7 @@ Result<qint64> GovernanceStore::bulkTag( const QVector<QString> &entityIds, cons
 
 Result<void> GovernanceStore::upsertDataset( const DatasetRecord &dataset )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1553,6 +1607,7 @@ Result<void> GovernanceStore::upsertDataset( const DatasetRecord &dataset )
 
 Result<void> GovernanceStore::removeDataset( const QString &datasetId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1594,6 +1649,7 @@ Result<void> GovernanceStore::removeDataset( const QString &datasetId )
 
 std::optional<DatasetRecord> GovernanceStore::datasetById( const QString &datasetId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || datasetId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1609,10 +1665,12 @@ std::optional<DatasetRecord> GovernanceStore::datasetById( const QString &datase
 
 QVector<DatasetRecord> GovernanceStore::datasets( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<DatasetRecord> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     const bool bounded = limit > 0;
     Stmt s( m_impl->db, bounded
             ? "SELECT dataset_id, kind, name, revision, status, metadata_json, created_ms, updated_ms"
@@ -1625,6 +1683,7 @@ QVector<DatasetRecord> GovernanceStore::datasets( qint64 limit ) const
         s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readDataset( s ) );
+    m_impl->noteScan( s, "datasets" ); // R15-B (B07 tail)
     return out;
 }
 
@@ -1632,6 +1691,7 @@ QVector<DatasetRecord> GovernanceStore::datasets( qint64 limit ) const
 
 Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1739,6 +1799,7 @@ Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
 
 Result<void> GovernanceStore::removeResult( const QString &resultId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1788,6 +1849,7 @@ Result<void> GovernanceStore::removeResult( const QString &resultId )
 
 std::optional<ResultRecord> GovernanceStore::resultById( const QString &resultId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || resultId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1804,10 +1866,12 @@ std::optional<ResultRecord> GovernanceStore::resultById( const QString &resultId
 
 QVector<ResultRecord> GovernanceStore::results( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<ResultRecord> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     const bool bounded = limit > 0;
     Stmt s( m_impl->db, bounded
             ? "SELECT result_id, semantic_type, name, status, revision, producer_json, run_id,"
@@ -1824,15 +1888,18 @@ QVector<ResultRecord> GovernanceStore::results( qint64 limit ) const
         s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readResult( s ) );
+    m_impl->noteScan( s, "results" ); // R15-B (B07 tail)
     return out;
 }
 
 QVector<ResultRecord> GovernanceStore::resultsDependingOnAsset( const QString &assetId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<ResultRecord> out;
     if ( !m_impl || assetId.isEmpty() )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db,
             "SELECT DISTINCT r.result_id, r.semantic_type, r.name, r.status, r.revision, r.producer_json,"
             " r.run_id, r.metrics_json, r.quality_json, r.metadata_json, r.tags_json, r.superseded_by,"
@@ -1843,15 +1910,18 @@ QVector<ResultRecord> GovernanceStore::resultsDependingOnAsset( const QString &a
     s.bind( 1, assetId );
     while ( s.stepRow() )
         out.append( m_impl->readResult( s ) );
+    m_impl->noteScan( s, "resultsDependingOnAsset" ); // R15-B (B07 tail)
     return out;
 }
 
 QVector<ResultRecord> GovernanceStore::resultsDependingOnAssets( const QStringList &assetIds ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<ResultRecord> out;
     if ( !m_impl || assetIds.isEmpty() )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     // IN-lists are chunked at 500 (SQLite var limit headroom): the caller
     // passes a width-unbounded downstream set, and a single oversized
     // statement would fail to PREPARE past the engine's host-parameter limit
@@ -1890,12 +1960,14 @@ QVector<ResultRecord> GovernanceStore::resultsDependingOnAssets( const QStringLi
             seen.insert( id );
             out.append( m_impl->readResult( s ) );
         }
+        m_impl->noteScan( s, "resultsDependingOnAssets" ); // R15-B (B07 tail)
     }
     return out;
 }
 
 QVector<ResultRecord> GovernanceStore::orphanResults() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     // An orphan result has neither a producing run row nor a registered
     // producing operator anchor in its producer JSON — and, truthfully
     // (issue #754), a run that FAILED/CANCELED/INTERRUPTED no longer
@@ -1904,6 +1976,7 @@ QVector<ResultRecord> GovernanceStore::orphanResults() const
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db,
             "SELECT r.result_id, r.semantic_type, r.name, r.status, r.revision, r.producer_json,"
             " r.run_id, r.metrics_json, r.quality_json, r.metadata_json, r.tags_json, r.superseded_by,"
@@ -1916,6 +1989,7 @@ QVector<ResultRecord> GovernanceStore::orphanResults() const
         return out;
     while ( s.stepRow() )
         out.append( m_impl->readResult( s ) );
+    m_impl->noteScan( s, "orphanResults" ); // R15-B (B07 tail)
     return out;
 }
 
@@ -1923,6 +1997,7 @@ QVector<ResultRecord> GovernanceStore::orphanResults() const
 
 Result<void> GovernanceStore::upsertRun( const RunRecord &run )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1969,6 +2044,7 @@ Result<void> GovernanceStore::upsertRun( const RunRecord &run )
 
 std::optional<RunRecord> GovernanceStore::runById( const QString &runId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || runId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -1984,10 +2060,12 @@ std::optional<RunRecord> GovernanceStore::runById( const QString &runId ) const
 
 QVector<RunRecord> GovernanceStore::runs( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<RunRecord> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     const bool bounded = limit > 0;
     Stmt s( m_impl->db, bounded
             ? "SELECT run_id, workflow_id, state, name, started_ms, finished_ms, definition_json,"
@@ -2002,11 +2080,13 @@ QVector<RunRecord> GovernanceStore::runs( qint64 limit ) const
         s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readRun( s ) );
+    m_impl->noteScan( s, "runs" ); // R15-B (B07 tail)
     return out;
 }
 
 Result<void> GovernanceStore::addRunOutputs( const QVector<QPair<QString, QString>> &pairs )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2042,6 +2122,7 @@ Result<void> GovernanceStore::addRunOutputs( const QVector<QPair<QString, QStrin
 
 Result<void> GovernanceStore::linkRunOutput( const QString &runId, const QString &assetId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly || runId.isEmpty() || assetId.isEmpty() )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2066,6 +2147,7 @@ Result<void> GovernanceStore::linkRunOutput( const QString &runId, const QString
 
 Result<void> GovernanceStore::upsertExperiment( const ExperimentRecord &experiment )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2158,6 +2240,7 @@ Result<void> GovernanceStore::upsertExperiment( const ExperimentRecord &experime
 
 Result<void> GovernanceStore::removeExperiment( const QString &experimentId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2207,6 +2290,7 @@ Result<void> GovernanceStore::removeExperiment( const QString &experimentId )
 
 std::optional<ExperimentRecord> GovernanceStore::experimentById( const QString &experimentId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || experimentId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2222,10 +2306,12 @@ std::optional<ExperimentRecord> GovernanceStore::experimentById( const QString &
 
 QVector<ExperimentRecord> GovernanceStore::experiments( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<ExperimentRecord> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     const bool bounded = limit > 0;
     Stmt s( m_impl->db, bounded
             ? "SELECT experiment_id, name, objective, metadata_json, tags_json, created_ms, updated_ms"
@@ -2238,6 +2324,7 @@ QVector<ExperimentRecord> GovernanceStore::experiments( qint64 limit ) const
         s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readExperiment( s ) );
+    m_impl->noteScan( s, "experiments" ); // R15-B (B07 tail)
     return out;
 }
 
@@ -2245,6 +2332,7 @@ QVector<ExperimentRecord> GovernanceStore::experiments( qint64 limit ) const
 
 Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges, bool replaceOutgoing )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2312,10 +2400,12 @@ Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges
 
 QVector<QVariantMap> GovernanceStore::lineageUpstream( const QString &assetId, int maxDepth ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<QVariantMap> out;
     if ( !m_impl || assetId.isEmpty() )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     // UNION dedups (node, depth); GROUP BY node collapses depth duplicates a
     // cycle would otherwise produce; the root never re-enters its own result.
     Stmt s( m_impl->db,
@@ -2337,15 +2427,18 @@ QVector<QVariantMap> GovernanceStore::lineageUpstream( const QString &assetId, i
         row.insert( QStringLiteral( "depth" ), s.i64( 1 ) );
         out.append( row );
     }
+    m_impl->noteScan( s, "lineageUpstream" ); // R15-B (B07 tail)
     return out;
 }
 
 QVector<QVariantMap> GovernanceStore::lineageDownstream( const QString &assetId, int maxDepth ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<QVariantMap> out;
     if ( !m_impl || assetId.isEmpty() )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     // UNION dedups (node, depth); GROUP BY node collapses depth duplicates;
     // the root never re-enters its own result.
     Stmt s( m_impl->db,
@@ -2367,15 +2460,18 @@ QVector<QVariantMap> GovernanceStore::lineageDownstream( const QString &assetId,
         row.insert( QStringLiteral( "depth" ), s.i64( 1 ) );
         out.append( row );
     }
+    m_impl->noteScan( s, "lineageDownstream" ); // R15-B (B07 tail)
     return out;
 }
 
 QVector<GovernanceStore::LineageEdge> GovernanceStore::directEdges( const QString &assetId, bool outgoing ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<LineageEdge> out;
     if ( !m_impl || assetId.isEmpty() )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db, outgoing
             ? "SELECT output_asset_id, input_asset_id, input_revision, operator_id, run_id, step_id, fingerprint"
               " FROM lineage_edges WHERE output_asset_id=?"
@@ -2396,6 +2492,7 @@ QVector<GovernanceStore::LineageEdge> GovernanceStore::directEdges( const QStrin
         e.fingerprint = s.text( 6 );
         out.append( e );
     }
+    m_impl->noteScan( s, "directEdges" ); // R15-B (B07 tail)
     return out;
 }
 
@@ -2403,6 +2500,7 @@ QVector<GovernanceStore::LineageEdge> GovernanceStore::directEdges( const QStrin
 
 Result<void> GovernanceStore::upsertSmartCollection( const SmartCollectionRecord &collection )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2445,6 +2543,7 @@ Result<void> GovernanceStore::upsertSmartCollection( const SmartCollectionRecord
 
 Result<void> GovernanceStore::removeSmartCollection( const QString &collectionId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2473,6 +2572,7 @@ Result<void> GovernanceStore::removeSmartCollection( const QString &collectionId
 
 std::optional<SmartCollectionRecord> GovernanceStore::smartCollectionById( const QString &collectionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || collectionId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2488,16 +2588,19 @@ std::optional<SmartCollectionRecord> GovernanceStore::smartCollectionById( const
 
 QVector<SmartCollectionRecord> GovernanceStore::smartCollections() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<SmartCollectionRecord> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db, "SELECT collection_id, name, predicate_json, metadata_json, created_ms, updated_ms"
                         " FROM smart_collections ORDER BY name" );
     if ( !s )
         return out;
     while ( s.stepRow() )
         out.append( m_impl->readSmart( s ) );
+    m_impl->noteScan( s, "smartCollections" ); // R15-B (B07 tail)
     return out;
 }
 
@@ -2505,6 +2608,7 @@ QVector<SmartCollectionRecord> GovernanceStore::smartCollections() const
 
 Result<void> GovernanceStore::upsertExport( const ExportRecord &record )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2540,10 +2644,12 @@ Result<void> GovernanceStore::upsertExport( const ExportRecord &record )
 
 QVector<ExportRecord> GovernanceStore::exports( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<ExportRecord> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     const bool bounded = limit > 0;
     Stmt s( m_impl->db, bounded
             ? "SELECT export_id, kind, target, result_id, name, metadata_json, created_ms, updated_ms"
@@ -2556,11 +2662,13 @@ QVector<ExportRecord> GovernanceStore::exports( qint64 limit ) const
         s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readExport( s ) );
+    m_impl->noteScan( s, "exports" ); // R15-B (B07 tail)
     return out;
 }
 
 Result<void> GovernanceStore::upsertPathMapping( const PathMapping &mapping )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -2589,15 +2697,18 @@ Result<void> GovernanceStore::upsertPathMapping( const PathMapping &mapping )
 
 QVector<PathMapping> GovernanceStore::pathMappings() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<PathMapping> out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
     Stmt s( m_impl->db, "SELECT kind, from_path, to_path FROM path_mappings" );
     if ( !s )
         return out;
     while ( s.stepRow() )
         out.append( PathMapping{ s.text( 0 ), s.text( 1 ), s.text( 2 ) } );
+    m_impl->noteScan( s, "pathMappings" ); // R15-B (B07 tail)
     return out;
 }
 
@@ -2605,10 +2716,12 @@ QVector<PathMapping> GovernanceStore::pathMappings() const
 
 WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString &facetField ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     WorkspacePage out;
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->stepFailed = false; // R15-B: per-call scan status
 
     const qint64 clampedLimit = std::clamp<qint64>( query.limit, 1, kMaxPageSize );
     const qint64 clampedOffset = std::max<qint64>( query.offset, 0 );
@@ -2718,6 +2831,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
                         continue;
                     out.facets.append( FacetCount{ value, s.i64( 1 ) } );
                 }
+                m_impl->noteScan( s, "query" ); // R15-B (B07 tail)
             }
             return out;
         }
@@ -2733,6 +2847,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
                 bindAll( s );
                 while ( s.stepRow() )
                     out.facets.append( FacetCount{ s.text( 0 ), s.i64( 1 ) } );
+                m_impl->noteScan( s, "query" ); // R15-B (B07 tail)
             }
             return out;
         }
@@ -3001,6 +3116,7 @@ Result<void> GovernanceStore::appendAudit( const QString &actor, const QString &
                                            const QString &entityKind, const QString &entityId,
                                            const QJsonObject &detail )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -3032,6 +3148,7 @@ Result<void> GovernanceStore::appendAudit( const QString &actor, const QString &
 
 QVector<GovernanceStore::AuditEntry> GovernanceStore::auditTail( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<AuditEntry> out;
     if ( !m_impl )
         return out;
@@ -3065,6 +3182,7 @@ QVector<GovernanceStore::AuditEntry> GovernanceStore::auditTail( qint64 limit ) 
 
 void GovernanceStore::setMeta( const QString &key, const QString &value )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -3083,6 +3201,7 @@ void GovernanceStore::setMeta( const QString &key, const QString &value )
 
 QString GovernanceStore::meta( const QString &key ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return QString();
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -3095,6 +3214,7 @@ QString GovernanceStore::meta( const QString &key ) const
 
 GovernanceDiagnostic GovernanceStore::integrityCheck() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     GovernanceDiagnostic d;
     d.entityKind = QStringLiteral( "workspace" );
     d.kind = DiagnosticKind::StoreCorruption;
@@ -3133,6 +3253,7 @@ GovernanceDiagnostic GovernanceStore::integrityCheck() const
 
 Result<void> GovernanceStore::clearDocumentEntities()
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -3162,6 +3283,7 @@ Result<void> GovernanceStore::clearDocumentEntities()
 
 Result<void> GovernanceStore::clearOutgoingLineage( const QString &outputAssetId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -3186,6 +3308,7 @@ Result<void> GovernanceStore::clearOutgoingLineage( const QString &outputAssetId
 
 Result<void> GovernanceStore::clearAll()
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );

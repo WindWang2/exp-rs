@@ -23,6 +23,15 @@ static constexpr int kKMeansMaxIter   = 100;
 static constexpr double kKMeansEps    = 1e-4;
 static constexpr int kKMeansAttempts  = 3;
 
+// Deterministic seeding (R10-A/AN-4): cv::kmeans draws its kmeans++ initial
+// centres from OpenCV's thread-local global RNG. Without resetting it, a
+// second fit inside the same process (GUI re-train, a CV factory that
+// rebuilds the backend per fold) inherits an advanced RNG state and may
+// converge to a different split — bypassing the pipeline's documented
+// determinism policy. A fixed seed makes every fit of identical data
+// reproducible, run after run.
+static constexpr uint64_t kKMeansSeed = 42ull;
+
 bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat &y )
 {
   if ( X.empty() || X.rows < m_k )
@@ -74,7 +83,7 @@ bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat &y )
     // (and the Hungarian remap onto class ids) differ run-to-run on the same
     // data (r14-A determinism; the repo's own test hedged with "centre
     // ordering is non-deterministic"). Same seed every fit → same centers.
-    cv::setRNGSeed( 42 );
+    cv::setRNGSeed( static_cast<int>( kKMeansSeed ) );
     cv::kmeans( data, m_k, labels, term, kKMeansAttempts, cv::KMEANS_PP_CENTERS, m_centers );
     SICNU_LOG_SUCCESS( SicnuLogTags::Classification, "KMeans training complete" );
     return !m_centers.empty();

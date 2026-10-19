@@ -44,6 +44,14 @@ RunResult runCli( const std::string &args )
     return result;
 }
 
+// R15-B (#1505 T11): the CLI's remote entry points refuse private-network
+// origins by default. The cases below drive an in-test LOOPBACK fixture, so
+// they opt in explicitly through this one helper (never a global switch).
+RunResult runCliLoopback( const std::string &args )
+{
+    return runCli( args + " --allow-private-network" );
+}
+
 Json::Value parseEnvelope( const std::string &text )
 {
     Json::Value root;
@@ -115,7 +123,7 @@ TEST_CASE( "data identity reports a redacted, provable remote identity",
     // the output — this is the redaction contract, made falsifiable.
     const std::string secret = "srv1signature9f2cSECRETvalue";
     const std::string signedUrl = server.url() + "?X-Goog-Signature=" + secret;
-    const auto result = runCli( "data identity --json " + signedUrl );
+    const auto result = runCliLoopback( "data identity --json " + signedUrl );
     REQUIRE( result.exitCode == 0 );
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE( envelope.get( "ok", false ).asBool() );
@@ -134,7 +142,7 @@ TEST_CASE( "data identity folds offline origins into an honest state",
 {
     // Port 1 on loopback: nothing listens there; the probe must answer with
     // an offline identity, not a crash or a fabricated fresh state.
-    const auto result = runCli( "data identity --json http://127.0.0.1:1/offline.tif" );
+    const auto result = runCliLoopback( "data identity --json http://127.0.0.1:1/offline.tif" );
     REQUIRE( result.exitCode == 0 );
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE( envelope.get( "ok", false ).asBool() );
@@ -148,7 +156,7 @@ TEST_CASE( "data cache reports byte accounting through the range cache",
     sicnu::geo::testsupport::HttpRangeServer server( std::vector<unsigned char>( 8192, 0x22 ) );
     server.setEtag( "\"cli-cache-1\"" );
 
-    const auto result = runCli( "data cache --json " + server.url() + " --bytes 2048" );
+    const auto result = runCliLoopback( "data cache --json " + server.url() + " --bytes 2048" );
     REQUIRE( result.exitCode == 0 );
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE( envelope.get( "ok", false ).asBool() );

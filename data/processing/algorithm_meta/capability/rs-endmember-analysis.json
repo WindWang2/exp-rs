@@ -99,6 +99,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "integer",
           "name" : "ppiCounts",
           "required" : false,
           "type" : "integer"

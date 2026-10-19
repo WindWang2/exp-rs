@@ -404,8 +404,13 @@ TEST_CASE( "the session identity resolver returns on first sight, never deadlock
 
   const auto status = future.wait_for( std::chrono::seconds( 30 ) );
   REQUIRE( status == std::future_status::ready );
-  // First sight probes the origin; a strong ETag comes back as the token.
-  CHECK( future.get() == "\"resolver-first-sight-1\"" );
+  // First sight probes the origin. Since R12-B (#1504) the production
+  // resolver blocks private networks, so this LOOPBACK origin is refused
+  // before dispatch; R15-B (B04) makes that refusal fail closed as the
+  // documented EMPTY token (uncacheable) instead of an escaping GeoError.
+  // The publish lock is still taken after the probe on the first-sight
+  // path, so the never-deadlocks regression stays exercised.
+  CHECK( future.get().empty() );
 }
 
 TEST_CASE( "offline::isPrivateHost identifies private, loopback and IPv4-mapped IPv6 targets (Oracle-B2.1)",

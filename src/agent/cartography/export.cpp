@@ -378,11 +378,18 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
   QgsLayoutExporter exporter( layout );
   if ( request.format == "png" )
   {
+    // R18-D: a single selected page (or a one-page layout) must deliver
+    // exactly the requested page's bytes at the declared name. The base
+    // exporter's generateFileName renames every non-zero page to a
+    // "_<page+1>" SIBLING of the temp path — the single-page form of the
+    // CARTO-1 orphan bug: the temp stayed empty, the export failed with
+    // "file is empty", and the sibling survived in the delivery directory.
+    SingleNamePageExporter singleNameExporter( layout );
     QgsLayoutExporter::ImageExportSettings settings;
     settings.dpi = request.dpi;
     for ( const int page : request.pages )
       settings.pages << page;
-    result.exporterResult = exporter.exportToImage( tempPath, settings );
+    result.exporterResult = singleNameExporter.exportToImage( tempPath, settings );
   }
   else if ( request.format == "pdf" )
   {

@@ -539,9 +539,22 @@ TEST_CASE("Every registered spatial tool is allow-listed and listing-visible",
         REQUIRE(surfaceIdAllowed(QString::fromStdString(name)));
         REQUIRE(projected.count(name) == 1);
         // The projection's schema is the registry tool's own schema — the
-        // provider must not publish a diverging copy.
-        REQUIRE(canonicalJson(projected[name].inputSchema)
-                == canonicalJson(tool->inputSchema()));
+        // provider must not publish a diverging copy. The projection renders
+        // the NORMALIZED schema (R18-C C01: tools/list and get_tool_schema
+        // share one authority); normalizedInputSchema() materializes
+        // `type:"object"` and an empty `properties:{}` that a raw
+        // registration may omit — equivalent, not diverging.
+        Json::Value projectedSchema = projected[name].inputSchema;
+        Json::Value registrySchema = tool->inputSchema();
+        for ( Json::Value *schema : { &projectedSchema, &registrySchema } )
+        {
+            if ( schema->isMember( "properties" ) && ( *schema )["properties"].isObject()
+                 && ( *schema )["properties"].empty() )
+                schema->removeMember( "properties" );
+            if ( schema->isObject() && !schema->isMember( "type" ) )
+                ( *schema )["type"] = "object";
+        }
+        REQUIRE( canonicalJson( projectedSchema ) == canonicalJson( registrySchema ) );
     }
 }
 

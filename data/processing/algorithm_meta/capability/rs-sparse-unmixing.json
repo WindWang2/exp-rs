@@ -111,6 +111,8 @@
           "type" : "numeric"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "endmembers",
           "required" : false,
           "type" : "string"
@@ -132,6 +134,8 @@
           "type" : "numeric"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "libraryMaterials",
           "required" : false,
           "type" : "string"

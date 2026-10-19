@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -330,4 +331,78 @@ TEST_CASE( "#r14B VRAM ledger conserves under randomized acquire/release pressur
   for ( const auto &state : registry.deviceReport() )
     if ( state.index == 0 )
       CHECK( state.holders == 0 );
+}
+
+// ---------------------------------------------------------------------------
+// R18-B: OpenCV DNN infer() detachment race (single-input lane)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "#r18B OpenCV infer detaches the output under the session lock",
+           "[models][providers][r18B]" )
+{
+  // The addmul fixture is a real 4-op graph (unlike the pass-through Identity
+  // fixture). infer() used to clone AFTER m_inferMutex released — under
+  // OpenCV 4.x semantics (forward() returns a header onto the net's internal
+  // output blob, exactly what the code's own comment and the r14-B inferMulti
+  // fix describe) the next worker's forward on the shared cached session
+  // overwrote the blob under the first caller's clone. This host runs
+  // OpenCV 5.0.0, whose graph engine allocates a FRESH buffer per forward
+  // (probe evidence in .planning/r18-b-model/TEST_RESULTS.md), so the runtime
+  // race is not locally reproducible — like the r14-B inferMulti case above,
+  // this test pins the CONTRACT (detachment happens under the session lock);
+  // the fix aligns infer() with the audited-correct inferMulti pattern.
+  const QString fixture = QFileInfo( __FILE__ ).absolutePath()
+                          + QStringLiteral( "/data/test_infer_addmul.onnx" );
+  REQUIRE( QFile::exists( fixture ) );
+
+  OpenCvDnnRuntime runtime( fixture.toStdString(), /*modelWantsGpu=*/false,
+                            ModelHardwareCapabilities{} );
+  std::string loadError;
+  REQUIRE( runtime.load( &loadError ) );
+  INFO( loadError );
+
+  constexpr int kSide = 512;
+  const auto blobOf = []( float value ) {
+    const int dims[4] = { 1, 1, kSide, kSide };
+    cv::Mat blob( 4, dims, CV_32F );
+    blob.setTo( cv::Scalar( value ) );
+    return blob;
+  };
+  // (x + 1.5) * 3.0 + 0.5 — two well-separated answers so any torn or swapped
+  // buffer is far outside the tolerance.
+  const auto expectedOf = []( float v ) { return ( v + 1.5f ) * 3.0f + 0.5f; };
+
+  std::atomic<bool> stop{ false };
+  std::atomic<long long> tears{ 0 };
+  const auto hammer = [ & ]( float value ) {
+    const cv::Mat blob = blobOf( value );
+    const float expected = expectedOf( value );
+    while ( !stop.load( std::memory_order_relaxed ) )
+    {
+      const cv::Mat out = runtime.infer( blob );
+      // Full-plane scan: a tear shows up as pixels from the OTHER request's
+      // answer or a mid-write mix of both.
+      const int rows = out.size[2];
+      const int cols = out.size[3];
+      const float *p = out.ptr<float>();
+      const std::size_t plane = static_cast<std::size_t>( rows ) * cols;
+      for ( std::size_t i = 0; i < plane; ++i )
+      {
+        if ( std::abs( p[i] - expected ) > 1e-3f )
+        {
+          tears.fetch_add( 1, std::memory_order_relaxed );
+          break;
+        }
+      }
+    }
+  };
+  std::vector<std::thread> workers;
+  for ( int t = 0; t < 3; ++t )
+    workers.emplace_back( hammer, t % 2 == 0 ? 0.25f : 0.75f );
+  std::this_thread::sleep_for( std::chrono::milliseconds( 2500 ) );
+  stop.store( true );
+  for ( auto &w : workers )
+    w.join();
+
+  CHECK( tears.load() == 0 );
 }

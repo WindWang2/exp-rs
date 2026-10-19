@@ -142,7 +142,20 @@ std::vector<SurfaceTool> collectSurfaceTools( const SurfaceQuery &query )
         tool.description = catalogTool.description;
         tool.family = surfaceToolFamily( catalogTool.name );
         tool.source = SurfaceToolSource::Catalog;
-        tool.inputSchema = catalogTool.inputSchema;
+        // Same authority as get_tool_schema and the exports: the NORMALIZED
+        // schema. Emitting the raw inputSchema here made tools/list disagree
+        // with get_tool_schema for every tool whose registered schema wasn't
+        // already in normalized shape (R18-C C01). Malformed registrations
+        // keep the raw value — normalizedInputSchema() would throw, and the
+        // projection is a read-only view that must not fail the listing.
+        try
+        {
+            tool.inputSchema = catalogTool.normalizedInputSchema();
+        }
+        catch ( const std::invalid_argument & )
+        {
+            tool.inputSchema = catalogTool.inputSchema;
+        }
         tools.push_back( std::move( tool ) );
     }
     return tools;

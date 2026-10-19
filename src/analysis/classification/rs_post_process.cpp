@@ -122,14 +122,13 @@ int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId
           continue;
         if ( cc.at<int>( nr, nc ) == compId )
           continue;
-        const int v = pixelAt( labels, nr, nc );
-        // Label 0 is the segmenters' NoData and does not vote: letting it
-        // participate could grow NoData into valid areas (same policy as
-        // modeOfWindow below). Excluded here it also cannot win the
-        // smaller-id tie-break and rewrite a classified speck as NoData.
-        if ( v == 0 )
+        // Label 0 is the segmenters' NoData and does not vote (modeOfWindow
+        // discipline, #612/#700): letting it participate lets NoData eat
+        // valid isolated patches surrounded mostly by background.
+        const int vote = pixelAt( labels, nr, nc );
+        if ( vote == 0 )
           continue;
-        ++freq[v];
+        ++freq[vote];
       }
     }
   }
@@ -261,11 +260,14 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
     }
   }
 
-  // Record replacements against the original work image (single pass).
-  // Build a destination copy and apply after computing all replacements so
-  // neighbor majority is based on pre-sieve labels.
-  cv::Mat out = work.clone();
-  const cv::Mat orig = work;
+  // Sequential working-copy semantics (gdal_sieve discipline, R10-A/AN-2):
+  // the majority for a small component is read from the CURRENT work image,
+  // so a replacement applied earlier is what later components see as their
+  // neighbourhood. The frozen `orig` (component masks are still built from
+  // it — a component's own pixels never change identity) previously fed the
+  // majority too, which let two adjacent small patches each vote the OTHER
+  // as majority and silently SWAP classes.
+  const cv::Mat orig = work.clone();
 
   for ( int classId : classIds )
   {
@@ -292,7 +294,7 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
       const int area = stats.at<int>( comp, cv::CC_STAT_AREA );
       if ( area >= threshold )
         continue;
-      const int replacement = borderNeighborMajority( orig, cc, comp, stats, connectedness, classId );
+      const int replacement = borderNeighborMajority( work, cc, comp, stats, connectedness, classId );
       const int top = stats.at<int>( comp, cv::CC_STAT_TOP );
       const int left = stats.at<int>( comp, cv::CC_STAT_LEFT );
       const int height = stats.at<int>( comp, cv::CC_STAT_HEIGHT );
@@ -300,7 +302,7 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
       for ( int r = top; r < top + height; ++r )
       {
         const int *ccRow = cc.ptr<int>( r );
-        int *outRow = out.ptr<int>( r );
+        int *outRow = work.ptr<int>( r );
         for ( int c = left; c < left + width; ++c )
         {
           if ( ccRow[c] == comp )
@@ -310,7 +312,7 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
     }
   }
 
-  dst = out;
+  dst = work;
   return true;
 }
 

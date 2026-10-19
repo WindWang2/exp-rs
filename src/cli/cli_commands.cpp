@@ -2099,6 +2099,28 @@ bool cliReadFileUtf8( const std::string &path, std::string &out )
     out = buffer.str();
     return true;
 }
+
+// R15-B (#1505 T11): the production default of every CLI remote entry point
+// is to REFUSE loopback / RFC 1918 / CGNAT / link-local / metadata origins
+// (the range cache and validator guards, DNS-pinned per fc712c72). A caller
+// that genuinely needs a private origin opts in per invocation with
+// --allow-private-network; the flag is consumed so it never reaches the
+// positional grammar.
+bool g_cliAllowPrivateNetwork = false;
+
+bool cliTakeAllowPrivateNetwork( QStringList &args )
+{
+    // The entry point (main_cli) consumes the flag process-wide first; an
+    // in-process caller of the command layer may still pass it per command.
+    return takeFlag( args, QStringLiteral( "--allow-private-network" ) ) || g_cliAllowPrivateNetwork;
+}
+
+sicnu::geo::RangeCacheConfig cliRangeCacheConfig( bool allowPrivateNetwork )
+{
+    sicnu::geo::RangeCacheConfig config;
+    config.blockPrivateNetworks = !allowPrivateNetwork;
+    return config;
+}
 } // namespace
 
 // Geospatial I/O Foundation 4.0 (Phase 10): read-only dataset inspection and
@@ -2111,6 +2133,7 @@ int commandData( QStringList args, const CliIO &io )
         return usageError( io, "data",
                           "usage: data inspect|doctor|probe|capabilities|product describe|plan|"
                           "stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]|"
+                          "[--allow-private-network] (identity, cache <url>, cache prefetch)|"
                           "cube plan|window <spec.json> [-o out.tif]|mirror materialize|stats" );
     // Fabric 8.0 (D8): `data cache status|clear`. Claimed ONLY in the exact
     // single-argument form — `status`/`clear` must be the first token after
@@ -2127,6 +2150,7 @@ int commandData( QStringList args, const CliIO &io )
          args.first() == QStringLiteral( "prefetch" ) )
     {
         args.removeFirst();   // "prefetch" — the rest is <spec.json> + flags
+        const bool allowPrivateNetwork = cliTakeAllowPrivateNetwork( args );
         const std::string specPath = args.takeFirst().toStdString();
         std::string specText;
         if ( !cliReadFileUtf8( specPath, specText ) )
@@ -2162,14 +2186,19 @@ int commandData( QStringList args, const CliIO &io )
         {
             sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
             sicnu::geo::CancelToken cancel;
-            const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
-            sicnu::geo::PrefetchOptions options;
-            options.maxBytes = maxBytes;
+            // T11: the guarded cache is installed BEFORE planning — chunk
+            // planning opens the first asset through fabricCachedPath(),
+            // which without an installed cache is raw (unguarded) /vsicurl/.
             struct CacheGuard
             {
                 ~CacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
             } cacheGuard;
-            sicnu::geo::RemoteRangeCache::install();
+            sicnu::geo::RemoteRangeCache::install( cliRangeCacheConfig( allowPrivateNetwork ) );
+            sicnu::geo::FabricPlanOptions planOptions;
+            planOptions.blockPrivateNetworks = !allowPrivateNetwork; // planner identity probes
+            const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, planOptions, cancel );
+            sicnu::geo::PrefetchOptions options;
+            options.maxBytes = maxBytes;
             const Json::Value before = sicnu::geo::RemoteRangeCache::telemetryJson();
             const sicnu::geo::PrefetchReport report =
               sicnu::geo::prefetchChunks( plan, options, cancel );
@@ -2559,6 +2588,7 @@ int commandData( QStringList args, const CliIO &io )
         if ( sub == "identity" )
         {
             sicnu::geo::RemoteValidatorOptions identityOptions;
+            identityOptions.blockPrivateNetworks = !cliTakeAllowPrivateNetwork( args );
             const bool revalidate = takeFlag( args, "--revalidate" );
             Json::Value out;
             sicnu::geo::RemoteSourceValidator validator = sicnu::geo::RemoteSourceValidator::probe( stdPath, identityOptions );
@@ -2581,6 +2611,7 @@ int commandData( QStringList args, const CliIO &io )
         if ( sub == "cache" )
         {
             std::uint64_t readBytes = 1024 * 1024;
+            const bool allowPrivateNetwork = cliTakeAllowPrivateNetwork( args );
             for ( int i = 0; i + 1 < args.size(); ++i )
             {
                 if ( args[i] == QStringLiteral( "--bytes" ) )
@@ -2602,7 +2633,8 @@ int commandData( QStringList args, const CliIO &io )
             {
                 ~CacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
             } cacheGuard;
-            sicnu::geo::RemoteRangeCache::install(); // default bounded config
+            // Default bounded config with the private-network guard on (T11).
+            sicnu::geo::RemoteRangeCache::install( cliRangeCacheConfig( allowPrivateNetwork ) );
             Json::Value out;
             // Report the REDACTED display form — a signed URL passed on the
             // command line must not be echoed verbatim into logs/output.
@@ -2696,6 +2728,11 @@ int commandCatalogExport( QStringList args, const CliIO &io )
 } // namespace
 
 namespace sicnu::cli {
+
+void setAllowPrivateNetwork( bool allow )
+{
+    g_cliAllowPrivateNetwork = allow;
+}
 
 // cliIsInterrupted() is defined in rs_pipeline_runner.cpp (#455) alongside
 // the g_cliInterrupted flag; declared in cli_commands.h.

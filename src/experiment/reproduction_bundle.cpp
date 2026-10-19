@@ -83,8 +83,17 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
     QStringList listed;
     const QString canonicalDir = QFileInfo( bundleDir ).canonicalFilePath();
-    for ( const QString &line : lines )
+    for ( QString line : lines )
     {
+        // R15-B (item 7): tolerate CRLF line endings (a checksums.txt that
+        // went through a Windows checkout / autocrlf). Only ONE trailing CR
+        // is stripped; the digests themselves are unaffected, so integrity
+        // is not weakened — before this, every name kept a trailing '\r'
+        // and an intact bundle was refused as "checksum mismatch".
+        if ( line.endsWith( QLatin1Char( '\r' ) ) )
+            line.chop( 1 );
+        if ( line.isEmpty() )
+            continue;
         const int split = line.indexOf( QStringLiteral( "  " ) );
         if ( split != 64 )
         {

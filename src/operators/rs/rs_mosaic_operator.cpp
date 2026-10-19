@@ -7,6 +7,8 @@
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "geospatial/util/atomic_fs.h"
+
 #include <QFile>
 #include <QString>
 
@@ -360,9 +362,14 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
 
     GdalDatasetWrapper outDs;
     QString outErr;
+    // Staged publication (R10-A/PR-2, #617 contract): the mosaic dataset is
+    // created beside the target; only a completed, fsynced mosaic is
+    // published over it (never truncate a pre-existing product in place).
+    const std::string stagedMosaicPath =
+        sicnu::geo::atomic_fs::reservedStagedPathFor(outputPath);
     OutputFileCleaner cleaner;
     cleaner.ds = &outDs;
-    cleaner.path = QString::fromStdString(outputPath);
+    cleaner.path = QString::fromStdString(stagedMosaicPath);
 
     if (!outDs.create(cleaner.path, outWidth, outHeight, bandCount,
                       static_cast<int>(GDT_Float32), outGT, metaList[0].projection, &outErr)) {
@@ -484,6 +491,8 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         throw RSOperatorError(ErrorCode::GdalError,
                               closeErr.isEmpty() ? "Failed to finalize mosaic output" : closeErr.toStdString());
     }
+    sicnu::geo::atomic_fs::fsyncFile(stagedMosaicPath);
+    sicnu::geo::atomic_fs::publishStagedFile(stagedMosaicPath, outputPath);
     cleaner.committed = true;
     context.reportProgress(1.0, "Mosaic complete");
 

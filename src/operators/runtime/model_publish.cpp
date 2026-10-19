@@ -2,6 +2,7 @@
 // authority for the model runtime lanes (see the header for the contract).
 #include "operators/runtime/model_publish.h"
 
+#include "geospatial/util/atomic_fs.h"
 #include "operators/framework/rs_operator_error.h"
 #include "platform/portable.h"
 #include "runtime/observability/fault_point.h"
@@ -249,6 +250,22 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
       *error = "failed to write the provenance sidecar: " + stagePath.toStdString();
     return false;
   }
+  // R18-B durability parity with the detection lane (#1174 family): a rename
+  // is only as durable as the data beneath it. Without fsync of the staged
+  // document (and the parent directory after the swap) a power loss could
+  // leave a zero-length or truncated sidecar behind an intact rename — the
+  // provenance verifier's mtime ordering would then pass on garbage.
+  try
+  {
+    sicnu::geo::atomic_fs::fsyncFile( stagePath.toStdString() );
+  }
+  catch ( const std::exception & )
+  {
+    stage.remove();
+    if ( error )
+      *error = "failed to flush the provenance sidecar: " + stagePath.toStdString();
+    return false;
+  }
   QFile::remove( sidecarPath ); // Windows rename does not overwrite
   if ( !QFile::rename( stagePath, sidecarPath ) )
   {
@@ -257,15 +274,27 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
       *error = "failed to publish the provenance sidecar: " + sidecarPath.toStdString();
     return false;
   }
+  sicnu::portable::syncDirectoryBestEffortUtf8( QFileInfo( sidecarPath ).absolutePath()
+                                                  .toStdString() );
   return true;
 }
 
 void DetectionPublishGuard::removeBackupFamily()
 {
-  QFile::remove( m_backup );
+  // R15-C C13 (review R1 P2): delete the sidecars/companions FIRST and the
+  // main backup LAST — the mirror of the park ladder. The ctor's
+  // suffix-complete adoption (below) fires only when the MAIN was never
+  // parked; with the historical main-first order a crash inside the
+  // disarm's partial-deletion window left no main backup while the product
+  // at the final path was already the NEW one, and the fold would have
+  // stapled the old product's companions (e.g. a stale .prj) onto it. With
+  // this order a mid-disarm crash always leaves the main backup present, so
+  // the fold stays blocked and the litter is simply incomplete — the next
+  // successful publish pre-cleans it.
   for ( const QString &companion : detectionSidecarsFor( m_final, m_backupSuffix ) )
     QFile::remove( companion );
   QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+  QFile::remove( m_backup );
 }
 
 DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
@@ -322,6 +351,48 @@ DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
     // (Windows rename does not overwrite).
     removeBackupFamily();
     return;
+  }
+
+  // R15-C C13 (F1): suffix-complete adoption. The park ladder moves the
+  // companions FIRST and the main file LAST, so a run killed between those
+  // renames leaves the previous product's companions (and, one step later,
+  // its provenance sidecar) parked at the backup names while the MAIN file
+  // is still at the final path. The adoption branch above is gated on the
+  // main being absent, so this suffix reached removeBackupFamily() and
+  // DELETED the only copies of the previous product's companions: an
+  // unopenable vector (a .shp with no .shx) that still passes provenance
+  // verification (the vector output block short-circuits the grid check).
+  //
+  // The fold is deliberately conservative — it restores ONLY what a mid-park
+  // crash can have taken away:
+  //   * the main was never parked (no backup main): the product at the final
+  //     path is the PREVIOUS one, so a parked member is a crash suffix;
+  //   * the member is MISSING at its final name: a parked member whose final
+  //     name is already occupied belongs to a COMPLETE product there (the new
+  //     one), and the backup is disarm-time litter — folding it back would
+  //     tear the new product with the old family.
+  // The second gate is what makes the first safe: removeBackupFamily deletes
+  // the companions and the prov backup FIRST and the main backup LAST (the
+  // mirror of the park ladder, R15-C review R1 P2), so a crash inside the
+  // disarm's partial-deletion window ALWAYS leaves the main backup present
+  // and this fold stays blocked. Do not "simplify" that removal order back to
+  // main-first: the "no main backup + parked companions + a complete product
+  // at the final path" state would become reachable again, and the fold would
+  // staple the old product's companions onto the new one.
+  if ( !QFile::exists( m_backup ) )
+  {
+    for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
+    {
+      if ( QFile::exists( companion ) )
+        continue;
+      const QString backupCompanion = companion + m_backupSuffix;
+      if ( QFile::exists( backupCompanion ) )
+        QFile::rename( backupCompanion, companion );
+    }
+    const QString strayBackupProv = m_backup + QStringLiteral( ".prov.json" );
+    if ( !QFile::exists( m_final + QStringLiteral( ".prov.json" ) )
+         && QFile::exists( strayBackupProv ) )
+      QFile::rename( strayBackupProv, m_final + QStringLiteral( ".prov.json" ) );
   }
 
   // Park companions and the provenance sidecar FIRST, the main file LAST:
@@ -403,8 +474,16 @@ void DetectionPublishGuard::disarm()
 
 void ProductPublishGuard::removeBackupFamily()
 {
-  QFile::remove( m_backup );
+  // R15-C C13 (review R1 P2, mirror of DetectionPublishGuard): the prov
+  // backup goes FIRST, the main backup LAST. Window C's adoption (below)
+  // requires the main backup to be ABSENT and the sidecar to be missing at
+  // the final path; with the historical main-first order a crash inside the
+  // disarm's partial-deletion window produced exactly that shape while the
+  // final product was already the NEW one — folding the parked sidecar back
+  // would staple a stale sidecar onto it. With this order a mid-disarm crash
+  // always leaves the main backup present, so Window C stays blocked.
   QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+  QFile::remove( m_backup );
 }
 
 ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QString &backupSuffix,
@@ -468,6 +547,25 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
     if ( !QFile::rename( m_backup, m_final ) )
       fail( "publish could not recover the previously parked product: " );
   }
+  else if ( finalPresent && !backupPresent && !QFile::exists( provPath )
+            && QFile::exists( backupProv ) )
+  {
+    // Window C (R15-C C13 / F2): crash between the sidecar park and the main
+    // park. The ladder parks the sidecar FIRST and the main LAST, so this
+    // suffix leaves the previous (complete) product at the final path with
+    // its sidecar's ONLY copy parked at the backup name. Neither adoption
+    // branch above matches (the backup MAIN is absent), so this state used to
+    // reach removeBackupFamily() and destroy the parked sidecar — a later
+    // failure then restored the product WITHOUT its sidecar, downgrading a
+    // verified product to MissingSidecar. Fold the parked sidecar back so the
+    // pair is whole again; the park ladder below then re-parks it.
+    //
+    // The sidecar must be ABSENT at the final path: a sidecar that IS there
+    // belongs to a published (new) product, and the parked one is disarm-time
+    // litter — folding it back would staple a stale sidecar onto the new
+    // product.
+    QFile::rename( backupProv, provPath );
+  }
 
   m_hadExisting = QFile::exists( m_final );
   if ( !m_hadExisting )
@@ -521,6 +619,19 @@ ProductPublishGuard::~ProductPublishGuard()
 void ProductPublishGuard::publishStaged( const QString &stagePath, const char *swapFaultPoint,
                                          const std::string &errorWhat )
 {
+  // R18-B durability parity with the detection lane: the staged raster must
+  // be on disk before the rename makes it the product — the streaming writer
+  // only close()d it. Flush failures abort BEFORE any park/swap state changes
+  // (the staged file is still removable litter).
+  try
+  {
+    sicnu::geo::atomic_fs::fsyncFile( stagePath.toStdString() );
+  }
+  catch ( const std::exception & )
+  {
+    QFile::remove( stagePath );
+    throw RSOperatorError( ErrorCode::FileNotWritable, errorWhat );
+  }
   const bool swapFailed = ( swapFaultPoint && SICNU_FAULT_POINT( swapFaultPoint ) )
                           || !QFile::rename( stagePath, m_final );
   if ( swapFailed )
@@ -528,6 +639,8 @@ void ProductPublishGuard::publishStaged( const QString &stagePath, const char *s
     QFile::remove( stagePath );
     throw RSOperatorError( ErrorCode::FileNotWritable, errorWhat );
   }
+  sicnu::portable::syncDirectoryBestEffortUtf8(
+    QFileInfo( m_final ).absolutePath().toStdString() );
 }
 
 void ProductPublishGuard::disarm()

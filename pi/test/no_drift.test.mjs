@@ -30,7 +30,7 @@ test("the extension shell imports the shared bridge (no second implementation)",
   // The transport must live in exactly one file: none of these may be
   // re-declared in the extension shell.
   assert.doesNotMatch(extensionSource, /class\s+McpBridge/);
-  assert.doesNotMatch(extensionSource, /MAX_LINE_BUFFER_CHARS\s*=/);
+  assert.doesNotMatch(extensionSource, /MAX_LINE_BUFFER_(CHARS|BYTES)\s*=/);
   assert.doesNotMatch(extensionSource, /STARTUP_TIMEOUT_MS\s*=/);
   assert.doesNotMatch(extensionSource, /REQUEST_TIMEOUT_MS\s*=/);
   assert.doesNotMatch(extensionSource, /new Set<McpBridge>/);
@@ -43,7 +43,7 @@ test("the shared bridge kills the child on a runaway line (F-PI-1 behavior ancho
   // (pinned by bridge_parity.test.mjs); `exited` flips via the child exit
   // handler so lazy respawn replaces the dead generation.
   const overflowBranch = bridgeSource.slice(
-    bridgeSource.indexOf("MAX_LINE_BUFFER_CHARS) {"),
+    bridgeSource.indexOf("MAX_LINE_BUFFER_BYTES) {"),
     bridgeSource.indexOf("private onLine"),
   );
   assert.ok(overflowBranch.length > 0, "overflow branch not found");

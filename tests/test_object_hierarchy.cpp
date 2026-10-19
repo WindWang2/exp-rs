@@ -14,6 +14,7 @@
 #include "analysis/segmentation/rs_otb_segmenter.h"
 #include "analysis/segmentation/rs_majority_vote.h"
 #include "analysis/segmentation/rs_roi_labeler.h"
+#include "analysis/classification/rs_pixel_rasterizer.h"
 
 #include <QDir>
 #include <QFile>
@@ -1068,4 +1069,30 @@ TEST_CASE( "SegmentFeatures reports the failure cause via the error channel",
     REQUIRE_FALSE( r.ok );
     REQUIRE( r.errorMessage.contains( QStringLiteral( "band 99" ) ) );
     REQUIRE( r.errorMessage.contains( QStringLiteral( "does not exist" ) ) );
+}
+
+TEST_CASE( "RsRoiLabeler fails closed when rasterization infrastructure fails (R10-A/AN-7)",
+           "[hierarchy][roi][labeler][r10a]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString ref = writeTinyRefRaster( tmp.path() );
+  const QString vec = tmp.path() + QStringLiteral( "/train.gpkg" );
+  writeTrainingSquare( vec, QStringLiteral( "class_id" ), 7, 100.0, 196.1, 101.9, 199.9 );
+
+  auto fine = makeFineMap();
+
+  // rs_pixel_rasterizer.h contract: "callers that train on the coverage MUST
+  // pass \a ok and fail closed when it is false". A MEM-driver / rasterize
+  // failure must surface as a typed error — never as "zero coverage" that
+  // silently drops the polygon's votes (the #1056 failure mode, fixed on the
+  // training-extraction path but not here).
+  RsPixelRasterizer::sForceRasterizeGeometriesFailure = []() { return true; };
+  QString err;
+  QMap<quint32, int> labels = RsRoiLabeler::labelByMajority(
+      fine, ref, vec, QStringLiteral( "class_id" ), 1, &err );
+  RsPixelRasterizer::sForceRasterizeGeometriesFailure = nullptr;
+
+  REQUIRE( labels.isEmpty() );
+  REQUIRE( !err.isEmpty() );
 }

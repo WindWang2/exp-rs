@@ -965,11 +965,12 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
   for ( const std::string &segment : splitSegments( normalizeSeparators( decodedTargetRef ) ) )
   {
     std::string decoded;
+    // R15-B (#1505 T9): a literal / malformed '%' ("100%_coverage.tif",
+    // "file%Q1.tif") is NOT a traversal — percentDecode keeps it verbatim
+    // and reports !clean. Refuse only what decodes to something unsafe
+    // (an embedded NUL here, '..' below); before this every such filename
+    // was rejected as a traversal attempt.
     percentDecode( segment, decoded );
-    // A malformed escape keeps its literal '%' verbatim (percentDecode's
-    // contract); only an embedded NUL is a genuine refusal here — the actual
-    // '..' traversal guard is the segment/decoded == ".." test below, which
-    // already covers the %2e%2e spellings (tests/test_io_uri.cpp:241-248).
     if ( decoded.find( '\0' ) != std::string::npos )
     {
       escaped = true;

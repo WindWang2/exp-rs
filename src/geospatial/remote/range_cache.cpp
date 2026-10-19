@@ -41,6 +41,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <list>
 #include <map>
 #include <memory>
@@ -285,14 +286,9 @@ RemoteValidatorOptions validatorOptions( const RangeCacheConfig &config )
   options.timeoutSeconds = config.timeoutSeconds;
   options.connectTimeoutSeconds = config.connectTimeoutSeconds;
   options.maxRetries = config.maxRetries;
-  // DEF-GEO-02: the egress policy travels WITH the identity probe. Without
-  // it the probe — and every revalidation built from it — ran on the
-  // unguarded CPL transport, so a public URL 302-ing into 169.254.169.254
-  // or an RFC 1918 host was probed even though the data-plane fetch
-  // (fetchRangeOnce) and Open's first hop refuse exactly that. Propagating
-  // the flag arms RemoteSourceValidator's own first-hop check AND its
-  // redirectGuard, so the probe rides the same controlled transport as the
-  // ranged GET.
+  // R15-B R4-01: the probe / revalidation / Stat requests of a guarded
+  // cache are guarded too (host check + redirect guard + DNS pinning) — the
+  // policy is the cache's, not only its ranged fetch's.
   options.blockPrivateNetworks = config.blockPrivateNetworks;
   return options;
 }
@@ -466,7 +462,22 @@ class CacheStore
                                                   const RemoteValidatorOptions &options )
     {
       revalidations.fetch_add( 1 );
-      RemoteSourceValidator validator = RemoteSourceValidator::probe( requestUrl, options );
+      std::optional<RemoteSourceValidator> probed;
+      try
+      {
+        probed.emplace( RemoteSourceValidator::probe( requestUrl, options ) );
+      }
+      catch ( const GeoError &error )
+      {
+        // R4-01: a private-network refusal (incl. a rebinding answer at
+        // the probe's own resolution) is a quiet miss, never an exception
+        // through the GDAL handler boundary.
+        if ( error.code() != ErrorCode::PermissionDenied )
+          throw;
+        errno = EACCES;
+        return nullptr;
+      }
+      const RemoteSourceValidator &validator = *probed;
       const RemoteSourceIdentity &identity = validator.identity();
       // Offline: the origin never answered — nothing to cache against.
       // Unknown WITHOUT size or validators: a gone (404) or otherwise
@@ -848,7 +859,11 @@ class CacheStore
     {
       std::lock_guard<std::mutex> lock( mMutex );
       configGeneration = this->configGeneration;
-      return config;
+      RangeCacheConfig effective = config;
+      // R15-B (R4-03): the process-wide policy forces the guard on.
+      if ( offline::blockPrivateNetworks() )
+        effective.blockPrivateNetworks = true;
+      return effective;
     }
 
     void updateConfig( const RangeCacheConfig &newConfig )
@@ -1421,6 +1436,11 @@ class RangeCacheHandle final : public VSIVirtualHandle
         mSizeKnown = true;
         return true;
       }
+      // R15-B R3-10: under the private-network policy an http entry never
+      // opens the raw /vsicurl/ handle (unguarded, unpinned) just to learn
+      // its size — the size stays unknown and the read fails honestly.
+      if ( guardedHttpFallback() )
+        return false;
       // Fall back to the underlying handle's own size (Seek END probe).
       VSIVirtualHandle *underlying = fallbackHandle();
       if ( underlying == nullptr )
@@ -1573,6 +1593,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
 
       std::vector<unsigned char> bytes;
       bool transportFailed = false;
+      bool policyRefused = false;
       try
       {
         // 13.0: the in-flight byte admission covers ONE origin transfer.
@@ -1594,14 +1615,29 @@ class RangeCacheHandle final : public VSIVirtualHandle
                               cache, mEntry );
         }
       }
-      catch ( const GeoError & )
+      catch ( const GeoError &error )
       {
-        transportFailed = true;
+        // R15-B (#1505 T6): a policy refusal (private-network origin or
+        // redirect hop) is FINAL. The fallback opens the same URL through raw
+        // /vsicurl/, which applies no private-network guard and follows the
+        // redirect unguarded — degrading to it would contact exactly the
+        // target the guard just refused.
+        if ( error.code() == ErrorCode::PermissionDenied )
+          policyRefused = true;
+        else
+          transportFailed = true;
       }
 
       fetchLock.lock();
       mEntry->fetchInProgress = false;
       mEntry->fetchCv.notify_all();
+
+      if ( policyRefused )
+      {
+        CPLError( CE_Failure, CPLE_AppDefined,
+                  "vsirangecache: origin fetch refused by the private-network policy" );
+        return 0; // readThroughCache reports the short read truthfully
+      }
 
       if ( transportFailed )
       {
@@ -1654,8 +1690,47 @@ class RangeCacheHandle final : public VSIVirtualHandle
       return usable;
     }
 
+    /// R15-B R3-10: true when this handle's degraded reads must stay on the
+    /// guarded transport — an http entry under blockPrivateNetworks. Raw
+    /// /vsicurl/ re-resolves the name with no private-network check and no
+    /// address pinning and follows redirects unguarded, so a transport
+    /// failure (which a rebinding resolver can provoke) must not become a
+    /// way around the guard. Object (VSI) entries keep their own signed
+    /// spelling and are unaffected.
+    bool guardedHttpFallback()
+    {
+      if ( mEntry->vsiObject )
+        return false;
+      std::uint64_t configGeneration = 0;
+      return store().snapshotConfig( configGeneration ).blockPrivateNetworks;
+    }
+
     std::size_t fallbackRead( unsigned char *destination, std::uint64_t position, std::uint64_t length )
     {
+      std::uint64_t configGeneration = 0;
+      const RangeCacheConfig config = store().snapshotConfig( configGeneration );
+      if ( !mEntry->vsiObject && config.blockPrivateNetworks )
+      {
+        // Same guarded, DNS-pinned single attempt as the cached path; the
+        // bytes answer this reader only (never inserted into the cache).
+        store().fallbackReads.fetch_add( 1 );
+        try
+        {
+          const std::vector<unsigned char> bytes =
+            fetchRangeOnce( mEntry->requestUrl, position, position + length, config );
+          const std::size_t usable =
+            static_cast<std::size_t>( std::min<std::uint64_t>( bytes.size(), length ) );
+          if ( usable > 0 )
+            std::memcpy( destination, bytes.data(), usable );
+          return usable;
+        }
+        catch ( const GeoError & )
+        {
+          CPLError( CE_Failure, CPLE_AppDefined,
+                    "vsirangecache: guarded fallback read failed (private-network policy active)" );
+          return 0;
+        }
+      }
       VSIVirtualHandle *underlying = fallbackHandle();
       if ( underlying == nullptr )
         throw GeoError( ErrorCode::IoError, "range_cache: fallback path unavailable" );
@@ -1788,14 +1863,11 @@ std::shared_ptr<ResourceEntry> applyTrustPolicy( CacheStore &cache, const std::s
   }
   catch ( const GeoError &error )
   {
+    // R4-01: the policy refused the origin (e.g. it now resolves private):
+    // the entry is not re-provable — drop it and let the caller's probe
+    // answer (which the same policy refuses quietly).
     if ( error.code() != ErrorCode::PermissionDenied )
       throw;
-    // The egress policy refused the revalidation hop (the stored origin is
-    // itself private now, or a redirect left the allowed range). The
-    // identity cannot be re-proven, so neither can the cached blocks: drop
-    // the entry and let the caller's normal no-entry path refuse the
-    // resource — the same shape as a Changed verdict. A GDAL VSI callback
-    // must never let the throw escape into its C entry point.
     cache.invalidate( key );
     return nullptr;
   }
@@ -1957,6 +2029,13 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       // copies so Stat never reads a racing live field.
       std::uint64_t statConfigGeneration = 0;
       const RangeCacheConfig config = cache.snapshotConfig( statConfigGeneration );
+      // R4-01: Stat is subject to the same private-network policy as Open.
+      if ( config.blockPrivateNetworks && !vsiObject && offline::isPrivateHost( requestUrl ) )
+      {
+        CPLErrorReset();
+        errno = ENOENT;
+        return -1;
+      }
       // 13.0: Stat answers from the SAME trust horizon as Open — an entry
       // past its TTL is re-proven, and RevalidateOnOpen revalidates
       // (unchanged → refreshed horizon; changed → invalidate + the normal
@@ -1988,22 +2067,20 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else
         {
-          RemoteSourceValidator validator;
+          std::optional<RemoteSourceValidator> probed;
           try
           {
-            validator = RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) );
+            probed.emplace( RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) ) );
           }
           catch ( const GeoError &error )
           {
             if ( error.code() != ErrorCode::PermissionDenied )
               throw;
-            // Egress policy refused the probe (a private target, or a
-            // redirect that left the allowed range): answer with the CPL
-            // error instead of letting the throw escape into VSIStatL.
-            CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: %s", error.what() );
-            return -1;
+            CPLErrorReset();
+            errno = ENOENT;
+            return -1; // R4-01: refused by the policy — a quiet stat miss
           }
-          const RemoteSourceIdentity &identity = validator.identity();
+          const RemoteSourceIdentity &identity = probed->identity();
           // Gone / unusable / unreachable: a quiet stat miss — speculative
           // sibling probes (\.aux, \.ovr, …) are normal GDAL behavior and
           // must stay silent, never pollute the CPL error state.
@@ -2023,6 +2100,12 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       {
         // Range-ignoring oversized origin: learn the size from the
         // underlying handle (open + Seek END — no content transfer).
+        // R4-01: never through raw (unguarded) /vsicurl/ under the policy.
+        if ( config.blockPrivateNetworks && !vsiObject )
+        {
+          errno = ENOENT;
+          return -1;
+        }
         const std::string underlyingSpelling =
           vsiObject ? vsiPath : std::string( "/vsicurl/" ) + requestUrl;
         VSIVirtualHandleUniquePtr underlying = openReadonlyVsi( underlyingSpelling.c_str() );

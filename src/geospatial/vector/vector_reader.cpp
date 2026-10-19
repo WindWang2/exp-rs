@@ -11,6 +11,7 @@
 #include <cpl_error.h>
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/util/atomic_fs.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <gdal.h>
@@ -58,7 +59,15 @@ VectorReader VectorReader::open( const std::string &path, const std::string &lay
   ensureGdalRegistered();
   QuietCplErrors quiet;
   const std::string gdalPath = ResourceUri::toGdalPath( path );
+  // R15-B (B13): never serve a group a crash left between generations.
+  atomic_fs::throwIfInterruptedPublish( gdalPath );
   GDALDatasetH handle = GDALOpenEx( gdalPath.c_str(), GDAL_OF_READONLY | GDAL_OF_VECTOR, nullptr, nullptr, nullptr );
+  // R15-B (item 7): post-open re-check narrows the check→open window.
+  if ( handle && atomic_fs::interruptedPublishPending( gdalPath ) )
+  {
+    GDALClose( handle );
+    atomic_fs::throwInterruptedPublish( gdalPath );
+  }
   if ( !handle )
   {
     Json::Value details;

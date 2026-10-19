@@ -728,6 +728,26 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
         }
     }
 
+    // R18-D: the tree∩canvas intersection above misses the shape every
+    // programmatic current-layer switch produces (classification windows,
+    // session workspaces): an editable canvas current layer that is NOT in
+    // the tree selection. The projection used to report "no edit session"
+    // while one was running — the shell's toggle action read unchecked and
+    // a re-click offered to discard the live session. The canvas current
+    // layer is what the shell's editing slots act on, so it must carry the
+    // active-editing facts on its own.
+    if ( !snap.activeEditable && snap.activeLayer )
+    {
+        if ( auto *vector = qobject_cast<QgsVectorLayer *>( snap.activeLayer ) )
+        {
+            if ( vector->isEditable() )
+            {
+                snap.activeEditable = true;
+                snap.activeModified = vector->isModified();
+            }
+        }
+    }
+
     // SAR predicate: override wins, else the conservative product-token probe.
     if ( !snap.hasSar )
     {

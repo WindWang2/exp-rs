@@ -2,6 +2,7 @@
 #include "algorithm_preflight.h"
 
 #include "atomic_algorithm_registry.h"
+#include "data/raster_grid_compat.h"
 #include "gdal/gdal_dataset_wrapper.h"
 #include "resource_estimation.h"
 #include "runtime/chunk/memory_planner.h"
@@ -129,6 +130,31 @@ Json::Value probeRasterDataset( const std::string &path )
     }
     info["crs"] = ds.projection().toStdString();
 
+    // R10-A/PR-4: record the geotransform so the same-grid compatibility
+    // pass can compare resolution/origin with the runtime gate's semantics.
+    // (GdalDatasetWrapper exposes no hasGeoTransform(); the raw GDAL call on
+    // its dataset() handle is the wrapper's own pattern.)
+    if ( void *h = ds.dataset() )
+    {
+      double gt[6] = { 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
+      if ( GDALGetGeoTransform( static_cast<GDALDatasetH>( h ), gt ) == CE_None )
+      {
+        info["hasGeoTransform"] = true;
+        Json::Value gtJson( Json::arrayValue );
+        for ( const double coefficient : gt )
+          gtJson.append( coefficient );
+        info["geoTransform"] = gtJson;
+      }
+      else
+      {
+        info["hasGeoTransform"] = false;
+      }
+    }
+    else
+    {
+      info["hasGeoTransform"] = false;
+    }
+
     // Dataset-level radiometric state metadata (importers write this).
     if ( void *h = ds.dataset() )
     {
@@ -183,6 +209,19 @@ Json::Value probeRasterDataset( const std::string &path )
     info["crs"] = proj;
   else
     info["crs"] = "";
+  // R10-A/PR-4: geotransform facts for the same-grid compatibility pass
+  // (non-local branch — see the local branch above).
+  {
+    double gt[6] = { 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
+    info["hasGeoTransform"] = GDALGetGeoTransform( hDS, gt ) == CE_None;
+    if ( info["hasGeoTransform"].asBool() )
+    {
+      Json::Value gtJson( Json::arrayValue );
+      for ( const double coefficient : gt )
+        gtJson.append( coefficient );
+      info["geoTransform"] = gtJson;
+    }
+  }
   if ( const char *rs = GDALGetMetadataItem( hDS, "SICNU_RADIOMETRIC_STATE", nullptr ) )
     info["radiometricState"] = rs;
   extendProbeWithContractFacts( info, GDALGetRasterCount( hDS ), hDS );
@@ -199,6 +238,27 @@ void addIssue( Json::Value &issues, const std::string &code, const std::string &
   item["code"] = code;
   item["message"] = message;
   issues.append( item );
+}
+
+/// Relative scalar equality with the runtime gate's tolerance
+/// (raster_grid_compat.cpp sameScalar/kGridTolerance) — R10-A/PR-4 mirrors
+/// it so preflight never disagrees with compareGrids on borderline values.
+bool sameGridScalar( double a, double b )
+{
+  const double scale = std::max( { std::abs( a ), std::abs( b ), 1.0 } );
+  return std::abs( a - b ) <= 1e-9 * scale;
+}
+
+/// Reads a probe's recorded geotransform; false when the probe carries none
+/// (unopened dataset, or a raster without georeferencing).
+bool probeGeoTransform( const Json::Value &info, double ( &gt )[6] )
+{
+  if ( !info.isMember( "geoTransform" ) || !info["geoTransform"].isArray()
+       || info["geoTransform"].size() != 6 )
+    return false;
+  for ( int i = 0; i < 6; ++i )
+    gt[i] = info["geoTransform"][static_cast<Json::ArrayIndex>( i )].asDouble();
+  return true;
 }
 
 } // namespace
@@ -347,12 +407,55 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       }
       const std::string crsA = first["crs"].asString();
       const std::string crsB = other["crs"].asString();
-      if ( !crsA.empty() && !crsB.empty() && crsA != crsB )
+      // R10-A/PR-4: semantic CRS equality (OSRIsSame through the shared
+      // data-side service) — a raw WKT string compare flagged dialect
+      // differences (ESRI vs OGC encodings of one CRS) that the runtime
+      // gate accepts, telling the agent "not runnable" for runnable inputs.
+      if ( !crsA.empty() && !crsB.empty()
+           && !sicnu::data::isSameCrs( QString::fromStdString( crsA ),
+                                       QString::fromStdString( crsB ) ) )
       {
         addIssue( compatIssues, "crs_mismatch",
                   "Raster inputs '" + probedRasters.front().first + "' and '"
                   + probedRasters[i].first + "' have different CRS (" + crsA
                   + " vs " + crsB + ")." );
+      }
+      // R10-A/PR-4: resolution/origin drift used to be invisible here (only
+      // width/height were compared) while the runtime gate blocks it — the
+      // agent got valid=true and paid for a refused run. Mirror the runtime
+      // tolerances (compareGrids: relative 1e-9 pixel-size equality,
+      // 1e-6-pixel origin snap). Compared only when BOTH probes recorded a
+      // geotransform: absent facts never fabricate issues (fail-closed
+      // without false positives).
+      double gtA[6], gtB[6];
+      if ( probeGeoTransform( first, gtA ) && probeGeoTransform( other, gtB ) )
+      {
+        const double psxA = std::abs( gtA[1] ), psyA = std::abs( gtA[5] );
+        const double psxB = std::abs( gtB[1] ), psyB = std::abs( gtB[5] );
+        if ( !sameGridScalar( psxA, psxB ) || !sameGridScalar( psyA, psyB ) )
+        {
+          addIssue( compatIssues, "pixel_size_mismatch",
+                    "Raster inputs '" + probedRasters.front().first + "' and '"
+                    + probedRasters[i].first + "' use different pixel grids ("
+                    + std::to_string( psxA ) + " x " + std::to_string( psyA )
+                    + " vs " + std::to_string( psxB ) + " x " + std::to_string( psyB )
+                    + "); resample them onto a common grid before running." );
+        }
+        else if ( psxA > 0.0 && psyA > 0.0 )
+        {
+          // Same lattice: origins must land on the same pixel corners; a
+          // sub-pixel offset shifts every pixel's footprint (runtime
+          // OriginMisalignment semantics).
+          const double dxPx = ( gtB[0] - gtA[0] ) / psxA;
+          const double dyPx = ( gtB[3] - gtA[3] ) / psyA;
+          if ( std::abs( dxPx - std::round( dxPx ) ) > 1e-6
+               || std::abs( dyPx - std::round( dyPx ) ) > 1e-6 )
+            addIssue( compatIssues, "origin_misalignment",
+                      "Raster inputs '" + probedRasters.front().first + "' and '"
+                      + probedRasters[i].first + "' have sub-pixel offset origins ("
+                      + std::to_string( dxPx ) + ", " + std::to_string( dyPx )
+                      + " pixels); align both rasters to a common grid before running." );
+        }
       }
     }
   }
