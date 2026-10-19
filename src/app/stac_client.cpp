@@ -71,8 +71,15 @@ public:
     std::string domainRoot;
 
     /// The page that produced the current results — its continuation
-    /// descriptor feeds searchNext() (#634).
+    /// descriptor feeds searchNext() (#634). It belongs to exactly one
+    /// search generation: a newer search (or cancelInFlight) strands it,
+    /// and a stranded continuation must never be re-fetched under the new
+    /// generation (F-02 parity — superseded results never deliver).
     std::unique_ptr<StacPage> lastPage;
+
+    /// The search generation that landed lastPage (0 while none has).
+    /// searchNext() continues only a same-generation page.
+    quint64 lastPageGeneration = 0;
 
     /// Transport budget: the pre-convergence client used a 10 s transfer
     /// timeout, a 5 s connect budget and exactly one attempt (no retries);
@@ -217,7 +224,14 @@ void StacClient::search(const QString &endpoint, const QString &collection,
 
 void StacClient::searchNext()
 {
-    if (!d->lastPage || !d->lastPage->hasMore())
+    // F-02: only the current query's page may be continued. search() and
+    // cancelInFlight() bump searchGeneration, which strands the cached
+    // continuation of the superseded query; re-fetching it would stamp that
+    // page with the new generation and deliver the old query's results as
+    // the new query's. A stranded continuation is a no-op, exactly like
+    // "no next page".
+    if (!d->lastPage || d->lastPageGeneration != d->searchGeneration ||
+        !d->lastPage->hasMore())
         return;
     try
     {
@@ -281,6 +295,7 @@ void StacClient::deliverPage(const std::shared_ptr<PageDelivery> &delivery)
     }
 
     d->lastPage = std::move(delivery->page);
+    d->lastPageGeneration = delivery->generation;
 
     QVariantList features;
     features.reserve(static_cast<int>(d->lastPage->items.size()));

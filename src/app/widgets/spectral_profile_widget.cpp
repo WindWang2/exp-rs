@@ -13,6 +13,9 @@
 #include <QBrush>
 #include <QFont>
 #include <QFontMetrics>
+#include <QMouseEvent>
+#include <QPolygonF>
+#include <QThreadPool>
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -37,8 +40,111 @@ QString formatValue( double v )
     return QString::number( v, 'g', 5 );
 }
 
+/// Bounded worker pool for the widget's off-GUI-thread sampling. A
+/// UI-triggered GDAL scan must never ride QThreadPool::globalInstance(): one
+/// scene-wide scan used to saturate every global worker and starve canvas
+/// rendering (#797), so this pool caps sampling concurrency instead. It is
+/// deliberately file-local rather than the shared RsScanPool: this
+/// translation unit is also compiled stand-alone, and the requirement here
+/// is only that a UI scan never lands on the global pool.
+QThreadPool &samplingPool()
+{
+    static struct Pool
+    {
+        QThreadPool pool;
+        Pool() { pool.setMaxThreadCount( 1 ); }
+    } instance;
+    return instance.pool;
+}
+
+/// True when a source string is network-backed (/vsicurl/, /vsis3/, … or a
+/// bare URL): every GDAL call on it can cost a network round trip, so its
+/// sampling must not run on the GUI thread (#1561). Same rule as
+/// project_context.cpp's isRemoteSource(), which guards the legacy
+/// QGIS-layer adoption path only.
+bool isNetworkSource( const QString &source )
+{
+    return source.startsWith( QLatin1String( "/vsicurl/" ) )
+        || source.startsWith( QLatin1String( "/vsis3/" ) )
+        || source.startsWith( QLatin1String( "/vsigs/" ) )
+        || source.startsWith( QLatin1String( "/vsiaz/" ) )
+        || source.startsWith( QLatin1String( "http://" ) )
+        || source.startsWith( QLatin1String( "https://" ) );
+}
+
+/// Worker-side sampling for network-backed sources: opens its OWN GDAL handle
+/// (a dataset must never be shared across threads) and reads one pixel across
+/// all bands plus the band description / WAVELENGTH / FWHM metadata. Free
+/// function — no QGIS object participates on the worker thread, only plain
+/// values cross back. @p layerPoint is already in the layer CRS.
+SpectralProfileWidget::ProfileSample sampleProfileGdal( const QString &sourcePath,
+                                                        const QgsPointXY &layerPoint )
+{
+    SpectralProfileWidget::ProfileSample sample;
+
+    GDALDatasetH dataset = GDALOpen( sourcePath.toUtf8().constData(), GA_ReadOnly );
+    if ( !dataset )
+        return sample;
+
+    double adfGeoTransform[6];
+    if ( GDALGetGeoTransform( dataset, adfGeoTransform ) == CE_None
+         && std::abs( adfGeoTransform[1] ) >= 1e-12 && std::abs( adfGeoTransform[5] ) >= 1e-12 )
+    {
+        // North-up affine inverse (world file convention, gt[2] = gt[4] = 0),
+        // same pixel mapping as the inline path.
+        const double col = ( layerPoint.x() - adfGeoTransform[0] ) / adfGeoTransform[1];
+        const double row = ( layerPoint.y() - adfGeoTransform[3] ) / adfGeoTransform[5];
+        if ( col >= 0 && col < GDALGetRasterXSize( dataset )
+             && row >= 0 && row < GDALGetRasterYSize( dataset ) )
+        {
+            const int bandCount = GDALGetRasterCount( dataset );
+            const int pixelX = static_cast<int>( col );
+            const int pixelY = static_cast<int>( row );
+            sample.values.resize( bandCount );
+            sample.bandLabels.resize( bandCount );
+            sample.wavelengths.resize( bandCount );
+            sample.fwhm.resize( bandCount );
+            for ( int i = 0; i < bandCount; ++i )
+            {
+                GDALRasterBandH band = GDALGetRasterBand( dataset, i + 1 );
+
+                double pixelValue = 0.0;
+                if ( GDALRasterIO( band, GF_Read, pixelX, pixelY, 1, 1, &pixelValue, 1, 1,
+                                   GDT_Float64, 0, 0 ) == CE_None )
+                    sample.values[i] = pixelValue;
+                else
+                    sample.values[i] = std::numeric_limits<double>::quiet_NaN();
+
+                const char *desc = GDALGetDescription( band );
+                // Empty when the band carries no description: the translated
+                // "Band N" fallback is filled in on the GUI thread, so no
+                // translation lookup runs on the worker.
+                sample.bandLabels[i] = ( desc && desc[0] != '\0' )
+                    ? QString::fromUtf8( desc ) : QString();
+
+                // Wavelength-aware X axis: read the band's WAVELENGTH metadata
+                // (nm) written by product stacking (ADR 0065); 0 when absent.
+                const char *wl = GDALGetMetadataItem( band, "WAVELENGTH", nullptr );
+                bool wlOk = false;
+                const double wlValue = wl ? QString::fromUtf8( wl ).toDouble( &wlOk ) : 0.0;
+                sample.wavelengths[i] = ( wlOk && wlValue > 0.0 ) ? wlValue : 0.0;
+
+                // FWHM metadata (nm), 0 when absent (D1 surface for library
+                // matching).
+                const char *fwhm = GDALGetMetadataItem( band, "FWHM", nullptr );
+                bool fwhmOk = false;
+                const double fwhmValue = fwhm ? QString::fromUtf8( fwhm ).toDouble( &fwhmOk ) : 0.0;
+                sample.fwhm[i] = ( fwhmOk && fwhmValue > 0.0 ) ? fwhmValue : 0.0;
+            }
+            sample.ok = true;
+        }
+    }
+
+    GDALClose( dataset );
+    return sample;
+}
+
 } // namespace
-#include <limits>
 
 // ── Constructor / Destructor ─────────────────────────────────────────────────
 
@@ -54,10 +160,32 @@ SpectralProfileWidget::SpectralProfileWidget( QWidget *parent )
                  if ( !m_rasterLayerId.isEmpty() && m_rasterLayerId == layerId ) {
                      m_rasterLayer = nullptr;
                      m_rasterLayerId.clear();
+                     // Drop any sample still in flight for the removed layer:
+                     // bumping the generation makes its landing a no-op.
+                     ++m_samplingGeneration;
                      closeDataset();
                      clear();
                  }
              } );
+
+    // Network-backed sources are sampled off the GUI thread (#1561): the
+    // identify slot that calls setProfile() must not block on network round
+    // trips. The sample lands here, on the GUI thread.
+    connect( &m_sampler, &QFutureWatcher<ProfileSample>::finished, this, [this] {
+        if ( m_sampler.isCanceled() )
+        {
+            update();
+            return;
+        }
+        // finished() implies the future is done: the result is available.
+        const ProfileSample sample = m_sampler.result();
+        if ( sample.generation != m_samplingGeneration )
+        {
+            update(); // superseded by a newer request while in flight
+            return;
+        }
+        landSample( sample );
+    } );
 }
 
 SpectralProfileWidget::~SpectralProfileWidget()
@@ -78,10 +206,89 @@ void SpectralProfileWidget::closeDataset()
 
 void SpectralProfileWidget::setProfile( const QgsPointXY &point, QgsRasterLayer *layer )
 {
+    // Supersede whatever sample is still in flight BEFORE deciding how this
+    // request is served: the local path lands synchronously, so without this
+    // bump a network sample from an earlier click would repaint over the
+    // result this call just produced (#1561).
+    ++m_samplingGeneration;
+
     m_point = point;
     m_rasterLayer = layer;
     m_rasterLayerId = layer ? layer->id() : QString();
+
+    if ( layer && isNetworkSource( layer->source() ) )
+    {
+        // A network-backed source (a /vsicurl/ COG fetched through STAC, say)
+        // can cost a network round trip per GDAL call: sampling it here would
+        // freeze the identify slot that called us (#1561). The worker opens
+        // its own handle; the chart repaints when the sample lands.
+        SICNU_LOG_INFO( SicnuLogTags::Widgets, QString( "Extracting spectral profile off the GUI thread: layer=%1, point=(%2, %3)" )
+            .arg( layer->name() ).arg( point.x(), 0, 'f', 4 ).arg( point.y(), 0, 'f', 4 ) );
+        startRemoteSampling( layer->source(), point, layer );
+        return;
+    }
+
     extractProfile( point, layer );
+    update();
+}
+
+void SpectralProfileWidget::startRemoteSampling( const QString &source, const QgsPointXY &point,
+                                                 QgsRasterLayer *layer )
+{
+    // The project→layer CRS transform is pure computation and stays here; the
+    // worker only reads pixels. The generation was already bumped by the
+    // caller (setProfile), which supersedes any sample still in flight;
+    // bumping once more keeps the invariant local to this seam. Every entry
+    // point that replaces the chart state (setProfile, setSpectrum, clear,
+    // layer removal) bumps it, so a stale landing can never overwrite a newer
+    // request's result.
+    const QgsPointXY layerPoint = toLayerCrs( point, layer );
+    const QString layerName = layer->name();
+    const quint64 generation = ++m_samplingGeneration;
+    const QPointer<SpectralProfileWidget> self( this );
+
+    resetProfileState();
+    m_layerName = layerName;
+
+    m_sampler.setFuture( QtConcurrent::run( &samplingPool(),
+        [self, generation, source, layerPoint]() -> ProfileSample {
+            ProfileSample sample;
+            if ( !self )
+                return sample; // widget died mid-flight: nothing to land on
+            sample = sampleProfileGdal( source, layerPoint );
+            sample.generation = generation;
+            return sample;
+        } ) );
+    update();
+}
+
+void SpectralProfileWidget::landSample( const ProfileSample &sample )
+{
+    resetProfileState();
+    if ( !sample.ok )
+    {
+        update();
+        return;
+    }
+
+    m_values = sample.values;
+    m_bandLabels = sample.bandLabels;
+    m_wavelengths = sample.wavelengths;
+    m_fwhm = sample.fwhm;
+    for ( int i = 0; i < m_bandLabels.size(); ++i )
+    {
+        if ( m_bandLabels[i].isEmpty() )
+            m_bandLabels[i] = QObject::tr( "Band %1" ).arg( i + 1 );
+    }
+    // Same range accounting as the inline path: a failed band read carries
+    // NaN, whose comparisons are false and so never moves the range.
+    for ( double v : m_values )
+    {
+        if ( v < m_minValue ) m_minValue = v;
+        if ( v > m_maxValue ) m_maxValue = v;
+    }
+
+    finalizeProfile();
     update();
 }
 
@@ -90,6 +297,11 @@ void SpectralProfileWidget::setSpectrum( const QVector<double> &values,
                                          const QVector<QString> &labels,
                                          const QString &layerName )
 {
+    // Same supersede rule as setProfile(): an ROI mean spectrum (or any other
+    // precomputed spectrum) lands here on the GUI thread, and a network sample
+    // still in flight from an earlier click must not repaint over it (#1561).
+    ++m_samplingGeneration;
+
     // Display a precomputed spectrum (e.g. an ROI mean spectrum from the
     // SpectralRoiProfile kernel) in the same chart as a point profile.
     m_values = values;
@@ -172,6 +384,9 @@ QVector<double> SpectralProfileWidget::displayValues() const
 
 void SpectralProfileWidget::clear()
 {
+    // A cleared chart must not be repainted by a sample that is still in
+    // flight: bumping the generation makes its landing a no-op (#1561).
+    ++m_samplingGeneration;
     m_values.clear();
     m_bandLabels.clear();
     m_wavelengths.clear();
@@ -213,14 +428,59 @@ double SpectralProfileWidget::xFractionForBand( int i, int bandCount ) const
         : 0.5;
 }
 
-void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLayer *layer )
+void SpectralProfileWidget::resetProfileState()
 {
     m_values.clear();
     m_bandLabels.clear();
     m_wavelengths.clear();
+    m_fwhm.clear();
     m_hasData = false;
     m_minValue = (std::numeric_limits<double>::max)();
     m_maxValue = std::numeric_limits<double>::lowest();
+}
+
+void SpectralProfileWidget::finalizeProfile()
+{
+    bool anyValid = false;
+    for ( int i = 0; i < m_values.size(); ++i )
+    {
+        if ( !std::isnan( m_values[i] ) ) { anyValid = true; break; }
+    }
+
+    m_hasData = anyValid;
+    if ( m_minValue >= m_maxValue )
+        m_maxValue = m_minValue + 1.0;
+    m_displayDirty = true;
+
+    SICNU_LOG_DEBUG( SicnuLogTags::Widgets, QString( "Spectral profile extracted: %1 bands, hasData=%2" )
+        .arg( m_values.size() ).arg( anyValid ) );
+}
+
+QgsPointXY SpectralProfileWidget::toLayerCrs( const QgsPointXY &point, QgsRasterLayer *layer ) const
+{
+    QgsPointXY srcPt = point;
+    if ( !layer )
+        return srcPt;
+    const QgsCoordinateReferenceSystem srcCrs = QgsProject::instance() ? QgsProject::instance()->crs() : QgsCoordinateReferenceSystem();
+    const QgsCoordinateReferenceSystem dstCrs = layer->crs();
+    if ( srcCrs.isValid() && dstCrs.isValid() && srcCrs != dstCrs )
+    {
+      try
+      {
+        QgsCoordinateTransform ct( srcCrs, dstCrs, QgsProject::instance() );
+        srcPt = ct.transform( point );
+      }
+      catch ( ... )
+      {
+        // Keep original point on transform failure.
+      }
+    }
+    return srcPt;
+}
+
+void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLayer *layer )
+{
+    resetProfileState();
 
     if ( !layer )
         return;
@@ -251,21 +511,7 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     if ( GDALGetGeoTransform( dataset, adfGeoTransform ) != CE_None )
         return;
 
-    QgsPointXY srcPt = point;
-    const QgsCoordinateReferenceSystem srcCrs = QgsProject::instance() ? QgsProject::instance()->crs() : QgsCoordinateReferenceSystem();
-    const QgsCoordinateReferenceSystem dstCrs = layer->crs();
-    if ( srcCrs.isValid() && dstCrs.isValid() && srcCrs != dstCrs )
-    {
-      try
-      {
-        QgsCoordinateTransform ct( srcCrs, dstCrs, QgsProject::instance() );
-        srcPt = ct.transform( point );
-      }
-      catch ( ... )
-      {
-        // Keep original point on transform failure.
-      }
-    }
+    const QgsPointXY srcPt = toLayerCrs( point, layer );
     double x = srcPt.x();
     double y = srcPt.y();
     if ( std::abs( adfGeoTransform[1] ) < 1e-12 || std::abs( adfGeoTransform[5] ) < 1e-12 )
@@ -328,19 +574,7 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
         m_fwhm[i] = ( fwhmOk && fwhmValue > 0.0 ) ? fwhmValue : 0.0;
     }
 
-    bool anyValid = false;
-    for ( int i = 0; i < bandCount; ++i )
-    {
-        if ( !std::isnan( m_values[i] ) ) { anyValid = true; break; }
-    }
-
-    m_hasData = anyValid;
-    if ( m_minValue >= m_maxValue )
-        m_maxValue = m_minValue + 1.0;
-    m_displayDirty = true;
-
-    SICNU_LOG_DEBUG( SicnuLogTags::Widgets, QString( "Spectral profile extracted: %1 bands, hasData=%2" )
-        .arg( bandCount ).arg( anyValid ) );
+    finalizeProfile();
 }
 
 // ── Painting ─────────────────────────────────────────────────────────────────
@@ -588,8 +822,6 @@ void SpectralProfileWidget::drawAxes( QPainter &painter, const QRect &chartRect 
 }
 
 // ─── D13 · exp_gui spectral workbench seam ─────────────────────────────────
-#include <QMouseEvent>
-#include <QPolygonF>
 
 namespace exp_gui
 {
@@ -711,7 +943,10 @@ namespace exp_gui
     const int bandCount = layer->bandCount();
     const QString layerName = m_layerName;
     const QPointer<SpectralProfileWidget> self( this );
-    m_sampler.setFuture( QtConcurrent::run( [self, sourcePath, point, bandCount, layerName]() -> ProfileSample {
+    // Bounded scan pool, never QThreadPool::globalInstance(): one scene-wide
+    // GDAL scan used to saturate every global worker and starve canvas
+    // rendering (#797).
+    m_sampler.setFuture( QtConcurrent::run( &samplingPool(), [self, sourcePath, point, bandCount, layerName]() -> ProfileSample {
       ProfileSample sample;
       if ( !self )
         return sample; // widget died mid-flight: nothing to land on

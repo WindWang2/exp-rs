@@ -8,6 +8,11 @@
 
 #include <qgspointxy.h>
 
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
+
+#include <atomic>
+
 class QgsRasterLayer;
 
 // Opaque GDAL handle
@@ -37,8 +42,31 @@ public:
      *
      * The point is expected in the project/map CRS and is transformed to
      * the layer CRS when they differ.
+     *
+     * Local sources are sampled inline. A network-backed source (/vsicurl/,
+     * /vsis3/, … or a bare URL) is sampled on a worker thread instead: a
+     * GDAL read on such a source can cost a network round trip, and the
+     * identify slot that calls this must not block on it (#1561). For those
+     * sources the chart clears immediately and repaints when the sample
+     * lands; hasData() stays false until then.
      */
     void setProfile( const QgsPointXY &point, QgsRasterLayer *layer );
+
+    /**
+     * Worker-thread payload landed back through m_sampler for network-backed
+     * sources. Plain values only — no QGIS object crosses the thread
+     * boundary (the worker opens its own GDAL handle, since a dataset must
+     * never be shared across threads).
+     */
+    struct ProfileSample
+    {
+        QVector<double> values;
+        QVector<QString> bandLabels;
+        QVector<double> wavelengths;
+        QVector<double> fwhm;
+        quint64 generation = 0;
+        bool ok = false;
+    };
 
     /**
      * Display a precomputed spectrum (e.g. an ROI mean spectrum from the
@@ -102,6 +130,22 @@ private:
     void drawLine( QPainter &painter, const QRect &chartRect );
     void closeDataset();
 
+    /// Clears the per-band chart state before an extraction starts.
+    void resetProfileState();
+    /// Finalizes an extraction: hasData, the plot range sanity fix, the
+    /// display-cache invalidation and the debug trace. Both the inline and
+    /// the worker-thread paths end here.
+    void finalizeProfile();
+    /// Project/map CRS → layer CRS (identity when the two agree). Pure
+    /// computation: it stays on the GUI thread even when the band reads do
+    /// not (#1561).
+    QgsPointXY toLayerCrs( const QgsPointXY &point, QgsRasterLayer *layer ) const;
+    /// Starts the off-GUI-thread sampling for a network-backed source.
+    void startRemoteSampling( const QString &source, const QgsPointXY &point,
+                              QgsRasterLayer *layer );
+    /// Lands a worker sample on the GUI thread (dropped when superseded).
+    void landSample( const ProfileSample &sample );
+
     /// Fractional X position of band @p i across the chart width: scaled by
     /// the wavelength grid when all bands carry WAVELENGTH metadata, else by
     /// band index.
@@ -114,6 +158,11 @@ private:
     // Cached GDAL dataset handle — avoids reopening on every click
     GDALDatasetH m_cachedDataset = nullptr;
     QString m_cachedSource;
+
+    // Off-GUI-thread sampling for network-backed sources (#1561). Local
+    // sources never touch these: they keep their inline extraction.
+    QFutureWatcher<ProfileSample> m_sampler;
+    quint64 m_samplingGeneration = 0;
 
     // Per-band data
     QVector<double> m_values;          // pixel value per band
@@ -147,10 +196,6 @@ private:
 //  - 60 FPS QPainter rendering with crosshair tracking (no QtCharts);
 //  - featureSelected(wavelength, depth) where depth is the relative depth
 //    inside the current plot range.
-#include <atomic>
-
-#include <QFutureWatcher>
-#include <QtConcurrent/QtConcurrentRun>
 
 namespace exp_gui
 {

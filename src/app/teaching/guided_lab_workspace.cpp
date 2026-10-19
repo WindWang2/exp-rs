@@ -149,8 +149,8 @@ void GuidedLabWorkspace::setAutonomy( const sicnu::teaching::AutonomyEffectiveDi
       .arg( a.ladderLabelsZh.empty()
               ? QString()
               : QString::fromStdString(
-                  a.ladderLabelsZh[static_cast<size_t>(
-                    std::clamp( a.effectiveOrdinal, 0, 5 ) )] ) );
+                  a.ladderLabelsZh[static_cast<size_t>( std::clamp(
+                    a.effectiveOrdinal, 0, static_cast<int>( a.ladderLabelsZh.size() ) - 1 ) )] ) );
   // Policy issues (parse failures, undeclared authority) surface on the
   // label itself — a tooltip-only honesty note is too easy to miss.
   if ( !a.issuesZh.empty() )
