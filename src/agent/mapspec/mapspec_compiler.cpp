@@ -374,9 +374,31 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       }
       if ( atlasSpec.isMember( "filename_expression" ) && atlasSpec["filename_expression"].isString() )
       {
+        // R18-D: an unparseable filename expression is a compile failure,
+        // never a silent p1/p2 stem fallback with empty manifest labels —
+        // the same contract the text-furniture expressions enforce ("An
+        // unparseable expression is a compile failure, never silently
+        // static text"). setFilenameExpression's return value and error
+        // string used to be dropped entirely. Enforcement requires a
+        // resolved coverage layer (the expression prepares against its
+        // fields); with none, the atlas cannot run at all and the export
+        // path refuses typed on its own — keep compile permissive exactly
+        // as before in that shape.
         QString expressionError;
-        atlas->setFilenameExpression(
-          QString::fromStdString( atlasSpec["filename_expression"].asString() ), expressionError );
+        QgsVectorLayer *const atlasCoverage = atlas->coverageLayer();
+        if ( atlasCoverage &&
+             !atlas->setFilenameExpression(
+               QString::fromStdString( atlasSpec["filename_expression"].asString() ),
+               expressionError ) )
+        {
+          if ( error )
+            *error = QStringLiteral( "%1: invalid atlas filename_expression: %2" )
+                       .arg( QString::fromStdString( spec["layout_name"].asString() ),
+                             expressionError );
+          LayoutService::instance().deleteLayout(
+            QString::fromStdString( spec["layout_name"].asString() ) );
+          return nullptr;
+        }
       }
       // v3 atlas surface: filter, sort, per-feature margin fraction.
       if ( atlasSpec.isMember( "filter" ) && atlasSpec["filter"].isString() &&
