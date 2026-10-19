@@ -367,21 +367,54 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
     for ( int i = 0; i < labels.size(); ++i )
         labelIndex.insert( labels.at( i ), i );
 
+    // Coverage accounting (#1582): unmatched rows used to vanish silently, so
+    // a run that matched 5 of 10000 samples looked identical to a full
+    // evaluation once stored. Count every skip reason by name — the same
+    // "name the gap" honesty as the duplicate-row refusal above.
     qint64 matched = 0;
+    qint64 predictionsWithoutTruth = 0;
+    qint64 predictionsWithUnknownTruthLabel = 0;
+    qint64 predictionsWithUnknownPredictedLabel = 0;
+    qint64 predictionsIgnoredByLabel = 0;
+    QSet<QString> matchedIds;
     for ( const BenchmarkPrediction &pred : request.predictions )
     {
         const auto it = truthById.constFind( pred.sampleId );
         if ( it == truthById.constEnd() )
+        {
+            ++predictionsWithoutTruth;
             continue;
+        }
         const int t = labelIndex.value( *it, -1 );
         const int p = labelIndex.value( pred.predictedClass, -1 );
-        if ( t < 0 || p < 0 )
+        if ( t < 0 )
+        {
+            ++predictionsWithUnknownTruthLabel;
             continue;
+        }
+        if ( p < 0 )
+        {
+            ++predictionsWithUnknownPredictedLabel;
+            continue;
+        }
         // Honor ignore labels from protocol.
         if ( def.protocol().ignoreLabels().contains( *it ) )
+        {
+            ++predictionsIgnoredByLabel;
             continue;
+        }
         matrix.increment( t, p );
+        matchedIds.insert( pred.sampleId );
         ++matched;
+    }
+
+    // Truth rows that contributed no matrix cell: either no prediction row
+    // exists for the sample, or its prediction was skipped above.
+    qint64 truthRowsWithoutMatrixCell = 0;
+    for ( const BenchmarkTruth &truth : request.truths )
+    {
+        if ( !matchedIds.contains( truth.sampleId ) )
+            ++truthRowsWithoutMatrixCell;
     }
 
     if ( matched == 0 )
@@ -405,7 +438,30 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
     result.setSoftwareRevision( request.softwareRevision );
     result.setExperimentRunId( request.experimentRunId );
     result.setProtocol( def.protocol() );
-    result.setRawMetrics( matrix.toJson() );
+    // The coverage record rides along with the confusion matrix in
+    // raw_metrics: input scale plus per-reason skip counts, so a stored
+    // Completed result always shows how much of its input it actually
+    // evaluated (#1582). fromJson preserves raw_metrics verbatim, so the
+    // counts survive the store round-trip.
+    QJsonObject rawMetrics = matrix.toJson();
+    QJsonObject coverage;
+    coverage.insert( QStringLiteral( "truth_rows" ), qint64( request.truths.size() ) );
+    coverage.insert( QStringLiteral( "prediction_rows" ),
+                     qint64( request.predictions.size() ) );
+    coverage.insert( QStringLiteral( "matched_samples" ), matched );
+    coverage.insert( QStringLiteral( "unmatched_prediction_rows" ),
+                     qint64( request.predictions.size() ) - matched );
+    coverage.insert( QStringLiteral( "unmatched_truth_rows" ), truthRowsWithoutMatrixCell );
+    coverage.insert( QStringLiteral( "predictions_without_truth_row" ),
+                     predictionsWithoutTruth );
+    coverage.insert( QStringLiteral( "predictions_with_unknown_truth_label" ),
+                     predictionsWithUnknownTruthLabel );
+    coverage.insert( QStringLiteral( "predictions_with_unknown_predicted_label" ),
+                     predictionsWithUnknownPredictedLabel );
+    coverage.insert( QStringLiteral( "predictions_skipped_by_ignore_labels" ),
+                     predictionsIgnoredByLabel );
+    rawMetrics.insert( QStringLiteral( "coverage" ), coverage );
+    result.setRawMetrics( rawMetrics );
     result.metrics() =
         metricResultsFromConfusion( matrix, def.metricNames(),
                                     QStringLiteral( "subset:%1" ).arg( def.protocol().subset() ) );

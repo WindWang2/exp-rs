@@ -392,25 +392,30 @@ Result<double> boundaryFScore( const QVector<qint64> &truthBoundary,
 
     const int radius = int( std::ceil( tolerancePx ) );
     const qint64 cellSize = qMax<qint64>( 1, radius );
-    QHash<qint64, QVector<qint64>> predictedCells;
-    for ( const qint64 index : predictedBoundary )
-    {
-        const qint64 x = index % imageWidth;
-        const qint64 y = index / imageWidth;
-        predictedCells[( y / cellSize ) * 1000003 + ( x / cellSize )].append( index );
-    }
-    auto nearMatch = [&]( qint64 index ) {
+    const double tolerance2 = tolerancePx * tolerancePx;
+    auto buildCells = [&]( const QVector<qint64> &boundary ) {
+        QHash<qint64, QVector<qint64>> cells;
+        for ( const qint64 index : boundary )
+        {
+            const qint64 x = index % imageWidth;
+            const qint64 y = index / imageWidth;
+            cells[( y / cellSize ) * 1000003 + ( x / cellSize )].append( index );
+        }
+        return cells;
+    };
+    // A pixel matches when some bucketed pixel of the other boundary lies
+    // within tolerance; the 3x3 scan covers every cell the tolerance can reach.
+    auto nearInCells = [&]( const QHash<qint64, QVector<qint64>> &cells, qint64 index ) {
         const qint64 x = index % imageWidth;
         const qint64 y = index / imageWidth;
         const qint64 cx = x / cellSize;
         const qint64 cy = y / cellSize;
-        const double tolerance2 = tolerancePx * tolerancePx;
         for ( qint64 dy = -1; dy <= 1; ++dy )
         {
             for ( qint64 dx = -1; dx <= 1; ++dx )
             {
-                const auto it = predictedCells.constFind( ( cy + dy ) * 1000003 + ( cx + dx ) );
-                if ( it == predictedCells.constEnd() )
+                const auto it = cells.constFind( ( cy + dy ) * 1000003 + ( cx + dx ) );
+                if ( it == cells.constEnd() )
                     continue;
                 for ( const qint64 candidate : it.value() )
                 {
@@ -425,53 +430,21 @@ Result<double> boundaryFScore( const QVector<qint64> &truthBoundary,
         return false;
     };
 
+    const QHash<qint64, QVector<qint64>> predictedCells = buildCells( predictedBoundary );
     qint64 truthMatched = 0;
     for ( const qint64 index : truthBoundary )
     {
-        if ( nearMatch( index ) )
+        if ( nearInCells( predictedCells, index ) )
             ++truthMatched;
     }
     // Precision needs the REVERSE direction: how many PREDICTED boundary
     // pixels lie near some truth pixel. Counting truth matches only would
     // reward spraying predictions.
-    const qint64 predictedCellSize = qMax<qint64>( 1, radius );
-    QHash<qint64, QVector<qint64>> truthCells;
-    for ( const qint64 index : truthBoundary )
-    {
-        const qint64 x = index % imageWidth;
-        const qint64 y = index / imageWidth;
-        truthCells[( y / predictedCellSize ) * 1000003 + ( x / predictedCellSize )]
-            .append( index );
-    }
-    auto nearTruth = [&]( qint64 index ) {
-        const qint64 x = index % imageWidth;
-        const qint64 y = index / imageWidth;
-        const qint64 cx = x / cellSize;
-        const qint64 cy = y / cellSize;
-        const double tolerance2 = tolerancePx * tolerancePx;
-        for ( qint64 dy = -1; dy <= 1; ++dy )
-        {
-            for ( qint64 dx = -1; dx <= 1; ++dx )
-            {
-                const auto it = truthCells.constFind( ( cy + dy ) * 1000003 + ( cx + dx ) );
-                if ( it == truthCells.constEnd() )
-                    continue;
-                for ( const qint64 candidate : it.value() )
-                {
-                    const double px = double( candidate % imageWidth );
-                    const double py = double( candidate / imageWidth );
-                    const double dist2 = ( px - x ) * ( px - x ) + ( py - y ) * ( py - y );
-                    if ( dist2 <= tolerance2 )
-                        return true;
-                }
-            }
-        }
-        return false;
-    };
+    const QHash<qint64, QVector<qint64>> truthCells = buildCells( truthBoundary );
     qint64 predictedMatched = 0;
     for ( const qint64 index : predictedBoundary )
     {
-        if ( nearTruth( index ) )
+        if ( nearInCells( truthCells, index ) )
             ++predictedMatched;
     }
     const double precision = safeDivide( double( predictedMatched ),

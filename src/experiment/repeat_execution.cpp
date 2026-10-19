@@ -212,7 +212,6 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
             // ref-matched row is Deviation evidence being destroyed — the
             // same all-unreadable refusal as the twin scan, never a
             // confident "New" (#1333 item 11).
-            int unreadableByRef = 0;
             for ( const QString &runId : byRef )
             {
                 const auto recorded = m_store->runRecordById( runId );
