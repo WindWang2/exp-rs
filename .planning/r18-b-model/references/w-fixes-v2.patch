@@ -1,0 +1,389 @@
+diff --git a/src/operators/runtime/model_publish.cpp b/src/operators/runtime/model_publish.cpp
+index 4e6dbb010..84d376f19 100644
+--- a/src/operators/runtime/model_publish.cpp
++++ b/src/operators/runtime/model_publish.cpp
+@@ -2,6 +2,7 @@
+ // authority for the model runtime lanes (see the header for the contract).
+ #include "operators/runtime/model_publish.h"
+ 
++#include "geospatial/util/atomic_fs.h"
+ #include "operators/framework/rs_operator_error.h"
+ #include "platform/portable.h"
+ #include "runtime/observability/fault_point.h"
+@@ -249,6 +250,22 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
+       *error = "failed to write the provenance sidecar: " + stagePath.toStdString();
+     return false;
+   }
++  // R18-B durability parity with the detection lane (#1174 family): a rename
++  // is only as durable as the data beneath it. Without fsync of the staged
++  // document (and the parent directory after the swap) a power loss could
++  // leave a zero-length or truncated sidecar behind an intact rename — the
++  // provenance verifier's mtime ordering would then pass on garbage.
++  try
++  {
++    sicnu::geo::atomic_fs::fsyncFile( stagePath.toStdString() );
++  }
++  catch ( const std::exception & )
++  {
++    stage.remove();
++    if ( error )
++      *error = "failed to flush the provenance sidecar: " + stagePath.toStdString();
++    return false;
++  }
+   QFile::remove( sidecarPath ); // Windows rename does not overwrite
+   if ( !QFile::rename( stagePath, sidecarPath ) )
+   {
+@@ -257,6 +274,8 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
+       *error = "failed to publish the provenance sidecar: " + sidecarPath.toStdString();
+     return false;
+   }
++  sicnu::portable::syncDirectoryBestEffortUtf8( QFileInfo( sidecarPath ).absolutePath()
++                                                  .toStdString() );
+   return true;
+ }
+ 
+@@ -600,6 +619,19 @@ ProductPublishGuard::~ProductPublishGuard()
+ void ProductPublishGuard::publishStaged( const QString &stagePath, const char *swapFaultPoint,
+                                          const std::string &errorWhat )
+ {
++  // R18-B durability parity with the detection lane: the staged raster must
++  // be on disk before the rename makes it the product — the streaming writer
++  // only close()d it. Flush failures abort BEFORE any park/swap state changes
++  // (the staged file is still removable litter).
++  try
++  {
++    sicnu::geo::atomic_fs::fsyncFile( stagePath.toStdString() );
++  }
++  catch ( const std::exception & )
++  {
++    QFile::remove( stagePath );
++    throw RSOperatorError( ErrorCode::FileNotWritable, errorWhat );
++  }
+   const bool swapFailed = ( swapFaultPoint && SICNU_FAULT_POINT( swapFaultPoint ) )
+                           || !QFile::rename( stagePath, m_final );
+   if ( swapFailed )
+@@ -607,6 +639,8 @@ void ProductPublishGuard::publishStaged( const QString &stagePath, const char *s
+     QFile::remove( stagePath );
+     throw RSOperatorError( ErrorCode::FileNotWritable, errorWhat );
+   }
++  sicnu::portable::syncDirectoryBestEffortUtf8(
++    QFileInfo( m_final ).absolutePath().toStdString() );
+ }
+ 
+ void ProductPublishGuard::disarm()
+diff --git a/src/operators/runtime/opencv_dnn_runtime.cpp b/src/operators/runtime/opencv_dnn_runtime.cpp
+index 9c36b88a8..2aa5c6960 100644
+--- a/src/operators/runtime/opencv_dnn_runtime.cpp
++++ b/src/operators/runtime/opencv_dnn_runtime.cpp
+@@ -96,6 +96,13 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
+       throw std::runtime_error( "inference canceled before the forward pass" );
+     m_net.setInput( nchwBlob );
+     output = outputName.empty() ? m_net.forward() : m_net.forward( outputName );
++    // forward() returns a header onto the net's internal output blob: the next
++    // forward() overwrites it. Detach WHILE THE LOCK IS STILL HELD — cloning
++    // after the try block let the next worker's forward on this shared cached
++    // session tear the buffer under the clone (inferMulti detaches under the
++    // lock for the same reason; one tile-sized copy, negligible next to the
++    // forward pass itself).
++    output = output.clone();
+   }
+   catch ( const cv::Exception &e )
+   {
+@@ -123,11 +130,7 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
+     m_lastError.clear();
+   }
+   m_forwards.fetch_add( 1, std::memory_order_relaxed );
+-  // forward() returns a header onto the net's internal output blob: the next
+-  // forward() overwrites it. TTA averaging and multi-head stacking hold the
+-  // result across further forwards, so detach (one tile-sized copy,
+-  // negligible next to the forward pass itself).
+-  return output.clone();
++  return output;
+ }
+ 
+ std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> &namedBlobs )
+diff --git a/src/operators/runtime/python_worker_provider.cpp b/src/operators/runtime/python_worker_provider.cpp
+index ddd86a5c7..8e1ecb7e8 100644
+--- a/src/operators/runtime/python_worker_provider.cpp
++++ b/src/operators/runtime/python_worker_provider.cpp
+@@ -215,8 +215,21 @@ class PythonWorkerSession final : public IModelRuntime
+           // hang, and replaying into it could double-execute the forward.
+           if ( attempt == 0 && m_process->state() != QProcess::Running )
+             continue; // dead worker → the bounded restart above
+-          recordFailure( "python worker stopped accepting requests (broken pipe)" );
+-          throw std::runtime_error( "python worker stopped accepting requests (broken pipe)" );
++          // R18-B: a LIVE worker that missed the write deadline fails the
++          // session closed, exactly like the oversized/malformed/read-timeout
++          // branches below. The (possibly partial) request line is still in
++          // the pipe: the worker will eventually drain and answer it, and the
++          // protocol has no request correlation — that stale answer would be
++          // served to the NEXT request on this shared session. Stop the
++          // worker so the stream dies with it, and mark the session dead for
++          // good (a stopped worker is not restartable mid-request).
++          recordFailure( "python worker stopped accepting requests (write deadline, broken "
++                         "pipe); stderr: "
++                         + drainStderr() );
++          m_permanentlyDead.store( true, std::memory_order_release );
++          stopWorker();
++          throw std::runtime_error( "python worker stopped accepting requests (write deadline, "
++                                    "broken pipe)" );
+         }
+ 
+         QJsonObject response;
+diff --git a/src/operators/runtime/tile_inference_engine.cpp b/src/operators/runtime/tile_inference_engine.cpp
+index 5c02e3293..478c2caf6 100644
+--- a/src/operators/runtime/tile_inference_engine.cpp
++++ b/src/operators/runtime/tile_inference_engine.cpp
+@@ -784,13 +784,25 @@ class FeatherAccumulator
+       if ( last <= m_top )
+         return;
+       finalizeRows( m_top, last, writer );
+-      // Clear the finalized rows' accumulators (they are reusable window rows).
++      // The window is a LINEAR offset map: pending row y lives at offset
++      // y - m_top. Finalizing [m_top, last) frees the first (last - m_top)
++      // offsets, so every still-pending row's data must MOVE UP by the same
++      // amount — after the slide the old offsets would name DIFFERENT rows,
++      // blending one row's weights/marks into another (R18-B: every feather
++      // run taller than one window (tile + 2·halo rows) corrupted its output
++      // this way; the M5 regression raster is single-window and never slid).
+       const int cleared = std::min( last - m_top, m_span );
++      const int keep = m_span - cleared;
++      const auto slideUp = [ this, keep, cleared ]( cv::Mat &m ) {
++        for ( int row = 0; row < keep; ++row )
++          std::memcpy( m.ptr<float>( row ), m.ptr<float>( row + cleared ),
++                       static_cast<std::size_t>( m.cols ) * sizeof( float ) );
++        m( cv::Range( keep, m_span ), cv::Range::all() ) = 0.0f;
++      };
+       for ( int s = 0; s < m_slots; ++s )
+-        m_sum[static_cast<std::size_t>( s )]
+-         ( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
+-      m_weight( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
+-      m_invalid( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
++        slideUp( m_sum[static_cast<std::size_t>( s )] );
++      slideUp( m_weight );
++      slideUp( m_invalid );
+       m_top = last;
+     }
+ 
+@@ -921,8 +933,10 @@ class FeatherAccumulator
+           const float *invalidRow = m_invalid.ptr<float>( r );
+           float *outRow = unc.ptr<float>( r );
+           for ( int x = 0; x < m_rasterW; ++x )
++          {
+             outRow[x] = ( weightRow[x] > 0.0f && invalidRow[x] <= 0.0f )
+                           ? sumRow[x] / weightRow[x] : m_writeNoData;
++          }
+         }
+         if ( !writer.writeTile( 2, bandTile, unc.ptr<float>() ) )
+           throw RSOperatorError( ErrorCode::FileNotWritable,
+@@ -1123,6 +1137,14 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
+                                "band " + std::to_string( b ) + " out of range (1.." + std::to_string( rasterBands ) + ")" );
+     }
+   }
++  // EO domain preflight (same contract as run()): AFTER the effective band
++  // selection resolves, so wavelength windows verify the PHYSICAL bands the
++  // caller actually fed (R18-B: passing no band list checked role i against
++  // file band i+1 — wrong refusals for band-selected inputs and false passes
++  // for out-of-window fed bands).
++  if ( m_model.eo.declared )
++    m_lastEoPreflight = enforceEoPreflight( m_model, inputPath, bandList ).toJson();
++
+   const int bandCount = static_cast<int>( bandList.size() );
+   // CV_MAKETYPE packs the channel count into 9 bits: a >512-band selection
+   // (e.g. hyperspectral rasters with bands unset) wraps the cv::Mat type —
+@@ -1289,8 +1311,11 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
+   // Writes NoData directly for tiles whose forward pass was skipped (#705):
+   // every core pixel of these tiles is invalid, so every output channel is
+   // the writer's NoData value — the same NaN the mask restore writes for
+-  // partially invalid tiles.
+-  auto flushDeferredNoData = [ & ]( int currentTileIndex )
++  // partially invalid tiles. @p flushCeiling caps the blended-path row
++  // flush: mid-run it is the CURRENT batch's window top (rows below it can
++  // still receive the batch's own contributions); the end-of-run tail passes
++  // the raster height.
++  auto flushDeferredNoData = [ & ]( int currentTileIndex, int flushCeiling )
+   {
+     // Platform 9.0 (M5): under feather blending the accumulator owns every
+     // written pixel; an all-nodata tile contributes nothing and its pixels
+@@ -1302,8 +1327,23 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
+       // Platform 9.0 (A4): under blending a deferred all-nodata tile must
+       // still declare its cores invalid, or neighbor halos would inpaint
+       // them with predictions (the stitched path writes NoData directly).
++      // R18-B: a deferred run can be TALLER than the accumulator's sliding
++      // window (tile + 2·halo rows) — addInvalidMask drops marks outside
++      // [m_top, m_top + m_span), so marks on the far rows silently vanished
++      // and the next valid tile's halo finalized fabricated predictions over
++      // NoData ground (an end-of-run tail past the window additionally made
++      // finish() read rows the accumulator never held). Advancing the window
++      // to each tile's top (capped at @p flushCeiling) before marking keeps
++      // every mark in-window for arbitrarily tall runs; NoData still wins by
++      // A4 wherever a later valid tile's halo reaches a marked core.
+       for ( const CoreTile &dt : deferredNoData )
+       {
++        // Bring the window to this tile's TOP before marking it: rows above
++        // are final (earlier deferred tiles' marks already landed and are
++        // consumed by the finalize) while same-row peers stay untouched —
++        // flushing past a tile's top instead DROPPED the marks of every
++        // deferred tile sharing its rows.
++        accumulator->flushThrough( std::min( dt.y, flushCeiling ), *writer );
+         cv::Mat allInvalid( dt.h, dt.w, CV_8UC1, cv::Scalar( 1 ) );
+         accumulator->addInvalidMask( allInvalid, dt, halo );
+       }
+@@ -1626,7 +1666,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
+ 
+     // The writer exists now, so NoData tiles deferred by earlier all-nodata
+     // batches can go straight to disk.
+-    flushDeferredNoData( currentTileIndex );
++    flushDeferredNoData( currentTileIndex,
++                         std::max( 0, batchCores.front().y - halo ) );
+ 
+     // Per-tile class planes of head 0, collected for the derived output
+     // modes (labels/mask/confidence) and written as ONE band per tile.
+@@ -2212,7 +2253,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
+     flushBatch( totalTiles - 1 );
+   }
+   if ( !deferredNoData.empty() )
+-    flushDeferredNoData( totalTiles - 1 );
++    flushDeferredNoData( totalTiles - 1, rasterH );
+ 
+   }
+   catch ( ... )
+@@ -2348,10 +2389,6 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string
+   const std::string headName = m_model.output.tensorNames.empty() ? std::string()
+                                                                   : m_model.output.tensorNames.front();
+ 
+-  // EO domain preflight (same contract as run()).
+-  if ( m_model.eo.declared )
+-    m_lastEoPreflight = enforceEoPreflight( m_model, inputPath ).toJson();
+-
+   GdalDatasetWrapper ds;
+   if ( !ds.open( QString::fromStdString( inputPath ) ) )
+     throw RSOperatorError( ErrorCode::GdalError, "failed to open input raster: " + inputPath );
+@@ -2864,6 +2901,29 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
+                                + "...)" );
+   }
+ 
++  // Platform 10.0: EO domain preflight per feed — enforced against each
++  // feed's BOUND contract and ITS effective band selection, after the
++  // by-name/positional binding above, BEFORE any tile is read (and therefore
++  // before any product is staged or published — R18-B: this gate used to run
++  // after publishStaged/publishProvenanceSidecar/disarm, so an enforced
++  // calibration refusal left a fully published product behind a "failed" run).
++  if ( m_model.eo.declared )
++  {
++    Json::Value perFeed( Json::arrayValue );
++    for ( std::size_t f = 0; f < feeds.size(); ++f )
++    {
++      const ModelInputContract &contract = m_model.inputs[feedContract[f]];
++      for ( const std::string &feedPath : feeds[f].paths )
++      {
++        Json::Value entry( Json::objectValue );
++        entry["path"] = feedPath;
++        entry["report"] = enforceEoPreflight( m_model, feedPath, feeds[f].bands, &contract ).toJson();
++        perFeed.append( entry );
++      }
++    }
++    m_lastEoPreflight = perFeed;
++  }
++
+   // Platform 9.0 (M3): each feed resolves its EFFECTIVE preprocessing — the
+   // per-input override when the manifest declares one, else the global
+   // contract. The shared `pre`/`meanStd`/`hasClamp` locals below remain the
+@@ -4001,25 +4061,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
+     publishGuard.disarm();
+   }
+ 
+-  // Platform 10.0: EO domain preflight per feed — enforced against each
+-  // feed's BOUND contract and ITS effective band selection, after the
+-  // by-name/positional binding above, before any tile is read.
+-  if ( m_model.eo.declared )
+-  {
+-    Json::Value perFeed( Json::arrayValue );
+-    for ( std::size_t f = 0; f < feeds.size(); ++f )
+-    {
+-      const ModelInputContract &contract = m_model.inputs[feedContract[f]];
+-      for ( const std::string &feedPath : feeds[f].paths )
+-      {
+-        Json::Value entry( Json::objectValue );
+-        entry["path"] = feedPath;
+-        entry["report"] = enforceEoPreflight( m_model, feedPath, feeds[f].bands, &contract ).toJson();
+-        perFeed.append( entry );
+-      }
+-    }
+-    m_lastEoPreflight = perFeed;
+-  }
+   context.reportProgressForced( 1.0, "Tiled multi-input inference complete" );
+   stats.tilesProcessed = done;
+   stats.eoPreflight = m_lastEoPreflight;
+diff --git a/src/runtime/chunk/chunk_graph.cpp b/src/runtime/chunk/chunk_graph.cpp
+index 0e64c14db..4fc9f356a 100644
+--- a/src/runtime/chunk/chunk_graph.cpp
++++ b/src/runtime/chunk/chunk_graph.cpp
+@@ -49,6 +49,15 @@ void ChunkGraph::requireFreeConsumerLocked( NodeId input ) const
+                 throw std::logic_error(
+                     "chunk graph: node has more than one consumer (fan-out "
+                     "would silently split tiles); use an explicit copy stage" );
++    // R18-B: the sink is a consumer too, whether it was registered before or
++    // after the stage/join being checked — the sink node materializes into
++    // m_nodes only at run(), so without this check either registration order
++    // silently shared the producer's queue between the stage and the sink.
++    if ( m_sinkInput == input )
++        throw std::logic_error(
++            "chunk graph: node has more than one consumer (the sink already "
++            "consumes it; fan-out would silently split tiles); use an "
++            "explicit copy stage" );
+ }
+ 
+ ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
+@@ -84,6 +93,9 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
+ void ChunkGraph::addSink( NodeId input, SinkFn fn )
+ {
+     assert( input >= 0 && input < static_cast<NodeId>( m_nodes.size() ) );
++    if ( m_sink )
++        throw std::logic_error( "chunk graph: only one sink is supported" );
++    requireFreeConsumerLocked( input );
+     m_sinkInput = input;
+     m_sink = std::move( fn );
+ }
+@@ -140,10 +152,13 @@ void ChunkGraph::runSource( Node &node )
+             // contract breach — a typed error, never a null dereference.
+             const size_t expected = payload.spec.bufferElementCount();
+             const size_t actual = payload.pixels ? payload.pixels->size() : 0;
+-            if ( actual != expected )
+-                throw std::logic_error( "chunk graph source: tile buffer size " +
+-                                        std::to_string( actual ) + " != spec size " +
+-                                        std::to_string( expected ) );
++            // R18-B: a fully-default payload (null pixels, empty spec) used to
++            // pass 0 == 0 — the very producer breach this gate exists for.
++            if ( !payload.pixels || actual != expected )
++                throw std::logic_error( "chunk graph source: producer returned a tile without "
++                                        "a pixel buffer ("
++                                        + std::to_string( actual ) + " of "
++                                        + std::to_string( expected ) + " elements)" );
+             if ( !node.out->push( std::move( payload ) ) )
+                 return; // graph unwinding downstream — drop the tile
+             payload = TilePayload{};
+diff --git a/src/runtime/chunk/chunk_pipeline.cpp b/src/runtime/chunk/chunk_pipeline.cpp
+index 65b494857..37301e829 100644
+--- a/src/runtime/chunk/chunk_pipeline.cpp
++++ b/src/runtime/chunk/chunk_pipeline.cpp
+@@ -26,10 +26,15 @@ void validateBuffer( const TilePayload &p, const char *where )
+ {
+     const size_t expected = p.spec.bufferElementCount();
+     const size_t actual = p.pixels ? p.pixels->size() : 0;
+-    if ( actual != expected )
+-        throw std::logic_error( std::string( where ) + ": tile buffer size " +
+-                                std::to_string( actual ) + " != spec size " +
+-                                std::to_string( expected ) );
++    // R18-B: a fully-default payload (null pixels, empty spec) used to pass
++    // 0 == 0 — the producer breach this gate exists to catch
++    // (resumable_tile_run checks !pixels explicitly; this seam must refuse it
++    // just the same).
++    if ( !p.pixels || actual != expected )
++        throw std::logic_error( std::string( where ) + ": producer returned a tile without "
++                                               "a pixel buffer ("
++                                + std::to_string( actual ) + " of " + std::to_string( expected )
++                                + " elements)" );
+ }
+ } // namespace
+ 

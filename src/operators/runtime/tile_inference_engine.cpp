@@ -756,6 +756,11 @@ class FeatherAccumulator
         const int wy = y - ( core.y - halo ); // window-plane row
         if ( wy < 0 || wy >= windowH )
           continue;
+        // Flush-then-add contract made loud (R2 review): the write offset
+        // must land inside the sliding window — a caller that ever advanced
+        // the window out of contract would otherwise write past the Mats
+        // silently (the read side is clamped in flushThrough).
+        CV_Assert( y >= m_top && y < m_top + m_span );
         const float *srcRow = windowPlane.ptr<float>( wy );
         float *sumRow = sum.ptr<float>( y - m_top );
         float *weightRow = m_weight.ptr<float>( y - m_top );

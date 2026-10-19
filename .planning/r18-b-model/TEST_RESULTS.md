@@ -93,7 +93,7 @@ Instrumented builds (temporary fprintf, removed before commit) traced:
 `flushThrough(exc=12) top=0` finalizing rows [0,12) while pending marks sat at
 linear offsets 12-15 — after `m_top=12` those offsets named rows 24-27, i.e.
 one row's weights/marks were reinterpreted as another's. The M5 regression
-raster (16 rows) is single-window (span=24) and never slid, which is why the
+raster (16 rows) holds span = clamp(16+2·4, 1, 16) = 16 — exactly one window — and never slid, which is why the
 defect was invisible since Platform 9.0. Fixed rows are now physically slid up
 by the flushed amount (`memcpy` per accumulator row, tail zeroed).
 
