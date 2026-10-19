@@ -746,3 +746,70 @@ TEST_CASE( "ChunkGraphCancelled is caught as the pipeline's ChunkCancelled (shar
         // A pipeline-era catch clause keeps working (F-A-8).
     }
 }
+
+// ---------------------------------------------------------------------------
+// R18-B: sink fan-out guard both registration orders + producer payload gate
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "#r18B the sink participates in the fan-out guard, in both orders",
+           "[chunk][graph][r18B]" )
+{
+    // Stage-after-sink: addSink(src) then addStage(src, …) must refuse —
+    // the sink node materializes into m_nodes only at run(), so the stage's
+    // requireFreeConsumerLocked used to miss it and both consumers silently
+    // shared src's queue (each got an arbitrary interleaved subset of tiles).
+    {
+        ChunkGraph graph;
+        auto src = graph.addSource( countingSource( 4, 1.0f ) );
+        graph.addSink( src, []( TilePayload && ) { return true; } );
+        REQUIRE_THROWS_AS(
+            graph.addStage( src, []( TilePayload && p ) { return std::move( p ); } ),
+            std::logic_error );
+    }
+    // Sink-after-stage: the mirror order must refuse as well.
+    {
+        ChunkGraph graph;
+        auto src = graph.addSource( countingSource( 4, 1.0f ) );
+        (void)graph.addStage( src, []( TilePayload && p ) { return std::move( p ); } );
+        REQUIRE_THROWS_AS( graph.addSink( src, []( TilePayload && ) { return true; } ),
+                           std::logic_error );
+    }
+}
+
+TEST_CASE( "#r18B a graph source returning true without a pixel buffer is refused",
+           "[chunk][graph][r18B]" )
+{
+    ChunkGraph graph;
+    // The producer contract gate used to pass a fully-default payload
+    // (null pixels, empty spec → 0 == 0) and flow null tiles into consumers.
+    graph.addSource( []( TilePayload & ) { return true; } );
+    bool sawNull = false;
+    graph.addSink( 0, [ & ]( TilePayload &&p ) {
+        if ( !p.pixels )
+            sawNull = true;
+        return true;
+    } );
+    REQUIRE_THROWS_AS( graph.run(), std::logic_error );
+    CHECK_FALSE( sawNull );
+}
+
+TEST_CASE( "#r18B a pipeline producer returning true without a pixel buffer is refused",
+           "[chunk][pipeline][r18B]" )
+{
+    std::atomic<bool> cancel{ false };
+    std::atomic<bool> sawNull{ false };
+    ChunkPipeline::Config cfg;
+    cfg.queueCapacity = 2;
+    ChunkPipeline pipeline(
+        []( TilePayload & ) { return true; }, // breach: true with no buffer
+        {},
+        [ & ]( TilePayload &&p ) {
+            if ( !p.pixels )
+                sawNull.store( true );
+            return true;
+        },
+        cfg );
+    pipeline.setCancelFlag( &cancel );
+    REQUIRE_THROWS_AS( pipeline.run(), std::logic_error );
+    CHECK_FALSE( sawNull.load() );
+}

@@ -962,3 +962,153 @@ TEST_CASE( "Chunked Operator Parity: OutputCommitter Integration",
         FAIL( report.detail );
     REQUIRE( report.identical );
 }
+
+// ---------------------------------------------------------------------------
+// R10-A/PR-5: chunkedMode/executionMode are reproducibility-relevant mode
+// switches. A bool used to be silently stringified ("true") and then
+// silently ignored (falling back to the default mode); any other non-enum
+// shape either fell through the same way or escaped as Json::LogicError.
+// Contract: bool normalizes explicitly (true = resumable, false = default),
+// "pipeline"/"resumable" pass, everything else is a typed InvalidParameter
+// whose message names the received value/type.
+// ---------------------------------------------------------------------------
+TEST_CASE( "Chunked mode-switch parameters refuse non-enum values typed (R10-A/PR-5)",
+           "[operators][rs][chunked][mode][r10a]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    constexpr int W = 64;
+    constexpr int H = 64;
+    const QString before = tmp.path() + "/before.tif";
+    const QString after = tmp.path() + "/after.tif";
+    const QString out = tmp.path() + "/diff.tif";
+    std::vector<std::vector<float>> bBands( 1 ), aBands( 1 );
+    bBands[0].resize( static_cast<size_t>( W ) * H, 10.0f );
+    aBands[0].resize( static_cast<size_t>( W ) * H, 12.0f );
+    REQUIRE( writeTestRaster( before, W, H, bBands ).empty() );
+    REQUIRE( writeTestRaster( after, W, H, aBands ).empty() );
+
+    auto changeParams = [&before, &after, &out]( const Json::Value &modeValue ) {
+        Json::Value params( Json::objectValue );
+        params["before"] = before.toStdString();
+        params["after"] = after.toStdString();
+        params["output"] = out.toStdString();
+        params["chunkedMode"] = modeValue;
+        return params;
+    };
+
+    // Unknown enum string → typed refusal naming the allowed values and the
+    // received string (RED on master: silently ran in the default mode).
+    {
+        RSOperatorContext ctx;
+        auto op = RSOperatorRegistry::instance().create( "rs:change_difference" );
+        REQUIRE( op != nullptr );
+        try
+        {
+            op->run( changeParams( Json::Value( "turbo" ) ), ctx );
+            FAIL( "unknown chunkedMode string must refuse" );
+        }
+        catch ( const RSOperatorError &e )
+        {
+            CHECK( e.code() == ErrorCode::InvalidParameter );
+            const std::string msg = e.what();
+            CHECK( msg.find( "pipeline" ) != std::string::npos );
+            CHECK( msg.find( "resumable" ) != std::string::npos );
+            CHECK( msg.find( "turbo" ) != std::string::npos );
+        }
+    }
+
+    // Object form → typed refusal naming the received type (RED on master:
+    // Json::LogicError escaped asString()).
+    {
+        RSOperatorContext ctx;
+        auto op = RSOperatorRegistry::instance().create( "rs:change_difference" );
+        REQUIRE( op != nullptr );
+        try
+        {
+            op->run( changeParams( Json::Value( Json::objectValue ) ), ctx );
+            FAIL( "object chunkedMode must refuse" );
+        }
+        catch ( const RSOperatorError &e )
+        {
+            CHECK( e.code() == ErrorCode::InvalidParameter );
+            const std::string msg = e.what();
+            CHECK( msg.find( "chunkedMode" ) != std::string::npos );
+            CHECK( msg.find( "object" ) != std::string::npos );
+        }
+    }
+
+    // Bool forms normalize explicitly and still run (true = resumable, the
+    // crash-safe default; false = default) — pin against over-rejecting.
+    {
+        RSOperatorContext ctx;
+        auto op = RSOperatorRegistry::instance().create( "rs:change_difference" );
+        REQUIRE( op != nullptr );
+        REQUIRE_NOTHROW( op->run( changeParams( Json::Value( true ) ), ctx ) );
+        REQUIRE( QFile::exists( out ) );
+    }
+
+    // rs:spectral_index executionMode (number form) → typed refusal naming
+    // the parameter and the received type (RED on master: silently
+    // stringified to "7" and ignored).
+    {
+        const QString indexOut = tmp.path() + "/ndvi_mode.tif";
+        std::vector<std::vector<float>> bands( 4 );
+        for ( auto &b : bands )
+            b.resize( static_cast<size_t>( W ) * H, 10.0f );
+        bands[2][0] = 5.0f;  // red
+        bands[3][0] = 15.0f; // nir
+        const QString inPath = tmp.path() + "/in_mode.tif";
+        REQUIRE( writeTestRaster( inPath, W, H, bands ).empty() );
+
+        auto op = RSOperatorRegistry::instance().create( "rs:spectral_index" );
+        REQUIRE( op != nullptr );
+        Json::Value params( Json::objectValue );
+        params["input"] = inPath.toStdString();
+        params["output"] = indexOut.toStdString();
+        params["index"] = "NDVI";
+        params["nir"] = 4;
+        params["red"] = 3;
+        params["executionMode"] = 7;
+        try
+        {
+            RSOperatorContext ctx;
+            op->run( params, ctx );
+            FAIL( "number executionMode must refuse" );
+        }
+        catch ( const RSOperatorError &e )
+        {
+            CHECK( e.code() == ErrorCode::InvalidParameter );
+            const std::string msg = e.what();
+            CHECK( msg.find( "executionMode" ) != std::string::npos );
+            CHECK( ( msg.find( "number" ) != std::string::npos
+                     || msg.find( "integer" ) != std::string::npos ) );
+        }
+    }
+
+    // Bool executionMode true runs the index (pin).
+    {
+        const QString indexOut = tmp.path() + "/ndvi_mode_bool.tif";
+        std::vector<std::vector<float>> bands( 4 );
+        for ( auto &b : bands )
+            b.resize( static_cast<size_t>( W ) * H, 10.0f );
+        bands[2][0] = 5.0f;
+        bands[3][0] = 15.0f;
+        const QString inPath = tmp.path() + "/in_mode_bool.tif";
+        REQUIRE( writeTestRaster( inPath, W, H, bands ).empty() );
+
+        auto op = RSOperatorRegistry::instance().create( "rs:spectral_index" );
+        REQUIRE( op != nullptr );
+        Json::Value params( Json::objectValue );
+        params["input"] = inPath.toStdString();
+        params["output"] = indexOut.toStdString();
+        params["index"] = "NDVI";
+        params["nir"] = 4;
+        params["red"] = 3;
+        params["executionMode"] = true;
+        RSOperatorContext ctx;
+        REQUIRE_NOTHROW( op->run( params, ctx ) );
+        REQUIRE( QFile::exists( indexOut ) );
+    }
+}

@@ -365,6 +365,16 @@ Json::Value ioRow( const std::string &kind, const sicnu::processing::PortDescrip
   {
     row[ "type" ] = dataTypeKind( port.type );
     row[ "required" ] = port.required;
+    // Array parameters carry the schema's array shape too (R10-A/A1-D1
+    // generator fix): the sidecar rows are authored from schema(), so the
+    // derivation must echo array/item_type or the committed-vs-derived
+    // drift gate fails on every operator with an array-typed parameter.
+    if ( port.isArray )
+    {
+      row[ "array" ] = true;
+      if ( port.itemType != sicnu::processing::DataType::Any )
+        row[ "item_type" ] = dataTypeKind( port.itemType );
+    }
     if ( !port.defaultValue.empty() )
       row[ "default" ] = port.defaultValue;
     if ( !port.enumOptions.empty() )

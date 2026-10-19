@@ -243,3 +243,42 @@ TEST_CASE("rs:stack_register refuses with no observations", "[f13][operator][neg
     params["observations"] = Json::Value(Json::arrayValue);
     REQUIRE_THROWS_AS(runOperator("rs:stack_register", params), RSOperatorError);
 }
+
+// R10-A/PR-11: scenes array items are user JSON — a non-string item must be
+// a typed InvalidParameter naming "scenes", never a Json::LogicError (object
+// item) and never a silently stringified number used as a scene id.
+TEST_CASE("rs:stack_register refuses non-string scenes entries typed (R10-A/PR-11)",
+          "[f13][operator][negative][r10a]")
+{
+    // Object item → typed parameter refusal (RED on master: jsoncpp
+    // LogicError escapes the asString() loop).
+    {
+        Json::Value params(Json::objectValue);
+        params["scenes"] = Json::Value(Json::arrayValue);
+        params["scenes"].append(Json::Value(Json::objectValue));
+        params["observations"] = Json::Value(Json::arrayValue);
+        try {
+            runOperator("rs:stack_register", params);
+            FAIL("object-valued scenes entry must refuse");
+        } catch (const RSOperatorError &e) {
+            CHECK(e.code() == ErrorCode::InvalidParameter);
+            CHECK(std::string(e.what()).find("scenes") != std::string::npos);
+        }
+    }
+
+    // Number item → same typed parameter refusal (RED on master: silently
+    // becomes the scene id "5").
+    {
+        Json::Value params(Json::objectValue);
+        params["scenes"] = Json::Value(Json::arrayValue);
+        params["scenes"].append(5);
+        params["observations"] = Json::Value(Json::arrayValue);
+        try {
+            runOperator("rs:stack_register", params);
+            FAIL("number-valued scenes entry must refuse");
+        } catch (const RSOperatorError &e) {
+            CHECK(e.code() == ErrorCode::InvalidParameter);
+            CHECK(std::string(e.what()).find("scenes") != std::string::npos);
+        }
+    }
+}

@@ -1200,3 +1200,197 @@ TEST_CASE( "tile engines typed-refuse a memory-unbounded tile+halo+pad window (#
     CHECK_FALSE( QFile::exists( out ) );
   }
 }
+
+// ---------------------------------------------------------------------------
+// R10-A/PR-9: external STAC documents are hostile input (#1447 threat
+// model). A PRESENT-but-nonstring field (datetime/href/rel) must surface as
+// RSOperatorError(InvalidInputData) naming the field — never as a jsoncpp
+// Json::LogicError escaping the operator seam, and never silently
+// stringified into a garbage path.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+void writeStacTextFile( const QString &path, const QByteArray &text )
+{
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::WriteOnly ) );
+  REQUIRE( file.write( text ) == text.size() );
+  file.close();
+}
+} // namespace
+
+TEST_CASE( "rs:infer typed-refuses hostile STAC item and link fields (R10-A/PR-9)",
+           "[models][operator8][stac][r10a]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  REQUIRE( QDir().mkpath( dir.filePath( QStringLiteral( "items" ) ) ) );
+
+  // Runs the operator against a freshly written collection/item pair. The
+  // hostile-field refusals below all fire during feed parsing — before any
+  // model resolution — so a placeholder model id is sufficient.
+  const auto runStac = [&dir]( const QByteArray &itemJson, const QByteArray &collectionJson ) {
+    writeStacTextFile( dir.filePath( QStringLiteral( "items/scene.json" ) ), itemJson );
+    writeStacTextFile( dir.filePath( QStringLiteral( "collection.json" ) ), collectionJson );
+    sicnu::operators::rs::RsInferenceOperator op;
+    RSOperatorContext context;
+    Json::Value params;
+    params["model"] = "r10a-placeholder-model";
+    params["output"] = dir.filePath( QStringLiteral( "out.tif" ) ).toStdString();
+    Json::Value feeds( Json::arrayValue );
+    Json::Value feed;
+    feed["name"] = "before";
+    feed["stac_collection"] = dir.filePath( QStringLiteral( "collection.json" ) ).toStdString();
+    feeds.append( feed );
+    params["named_inputs"] = feeds;
+    return op.run( params, context );
+  };
+
+  const QByteArray collection = QByteArray( R"({"type":"Collection","stac_version":"1.0.0",
+    "links":[{"rel":"item","href":"items/scene.json"}]})" );
+
+  // properties.datetime as an OBJECT → typed InvalidInputData naming
+  // "datetime" (RED on master: Json::LogicError escapes asString()).
+  {
+    INFO( "datetime as object must be a typed refusal naming the field" );
+    try
+    {
+      runStac( QByteArray( R"({"type":"Feature","stac_version":"1.0.0",
+        "properties":{"datetime":{}},"assets":{"data":{"href":"x.tif"}}})" ),
+               collection );
+      FAIL( "object-valued STAC datetime must refuse" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      CHECK( e.code() == sicnu::operators::ErrorCode::InvalidInputData );
+      CHECK( std::string( e.what() ).find( "datetime" ) != std::string::npos );
+    }
+  }
+
+  // Asset href as an ARRAY (named-asset path) → typed refusal naming "href".
+  {
+    INFO( "asset href as array must be a typed refusal naming the field" );
+    try
+    {
+      runStac( QByteArray( R"({"type":"Feature","stac_version":"1.0.0",
+        "properties":{"datetime":"2024-01-01T00:00:00Z"},
+        "assets":{"data":{"href":[]}}})" ),
+               collection );
+      FAIL( "array-valued STAC asset href must refuse" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      CHECK( e.code() == sicnu::operators::ErrorCode::InvalidInputData );
+      CHECK( std::string( e.what() ).find( "href" ) != std::string::npos );
+    }
+  }
+
+  // First-asset fallback href as an ARRAY (no COG/data/image key) → typed
+  // refusal naming "href" (RED on master: LogicError at the fallback read).
+  {
+    INFO( "fallback asset href as array must be a typed refusal" );
+    try
+    {
+      runStac( QByteArray( R"({"type":"Feature","stac_version":"1.0.0",
+        "properties":{"datetime":"2024-01-01T00:00:00Z"},
+        "assets":{"custom":{"href":[]}}})" ),
+               collection );
+      FAIL( "array-valued fallback href must refuse" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      CHECK( e.code() == sicnu::operators::ErrorCode::InvalidInputData );
+      CHECK( std::string( e.what() ).find( "href" ) != std::string::npos );
+    }
+  }
+
+  // Collection link "rel" as an OBJECT → typed refusal naming "rel".
+  {
+    INFO( "link rel as object must be a typed refusal naming the field" );
+    try
+    {
+      runStac( QByteArray( R"({"type":"Feature","stac_version":"1.0.0",
+        "properties":{"datetime":"2024-01-01T00:00:00Z"},
+        "assets":{"data":{"href":"x.tif"}}})" ),
+               QByteArray( R"({"type":"Collection","stac_version":"1.0.0",
+                 "links":[{"rel":{},"href":"items/scene.json"}]})" ) );
+      FAIL( "object-valued link rel must refuse" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      CHECK( e.code() == sicnu::operators::ErrorCode::InvalidInputData );
+      CHECK( std::string( e.what() ).find( "rel" ) != std::string::npos );
+    }
+  }
+
+  // Collection link "href" as an OBJECT → typed refusal naming "href".
+  {
+    INFO( "link href as object must be a typed refusal naming the field" );
+    try
+    {
+      runStac( QByteArray( R"({"type":"Feature","stac_version":"1.0.0",
+        "properties":{"datetime":"2024-01-01T00:00:00Z"},
+        "assets":{"data":{"href":"x.tif"}}})" ),
+               QByteArray( R"({"type":"Collection","stac_version":"1.0.0",
+                 "links":[{"rel":"item","href":{}}]})" ) );
+      FAIL( "object-valued link href must refuse" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      CHECK( e.code() == sicnu::operators::ErrorCode::InvalidInputData );
+      CHECK( std::string( e.what() ).find( "href" ) != std::string::npos );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// R10-A/A1-D2: the rs:infer "bands" parameter is schema-declared as an
+// ARRAY of 1-based indices. A scalar bands value used to fall through the
+// isArray() fast paths and silently widen to all bands (the capability
+// catalog even advertises bands as a scalar) — it must be a typed refusal
+// on both the estimate and the run surfaces.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "rs:infer refuses scalar bands values - the contract is an array (R10-A/A1-D2)",
+           "[models][operator8][r10a]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  auto raster = sicnu::testing::RsSyntheticRasterBuilder( 8, 8, 3, GDT_Float32 )
+                  .withConstantValue( 1, 1.0f )
+                  .writeToDisk( dir.filePath( QStringLiteral( "in.tif" ) ) );
+  REQUIRE_FALSE( raster.isEmpty() );
+
+  sicnu::operators::rs::RsInferenceOperator op;
+  RSOperatorContext context;
+
+  // estimateExecution surface: scalar bands must refuse typed, not silently
+  // estimate an all-bands run.
+  {
+    Json::Value params;
+    params["bands"] = 3;
+    REQUIRE_THROWS_WITH( op.estimateExecution( params ),
+                         Catch::Matchers::ContainsSubstring( "bands must be an array" ) );
+  }
+
+  // run() single-input surface: the refusal must fire during parameter
+  // parsing (before any model resolution), naming the parameter contract.
+  {
+    Json::Value params;
+    params["input"] = raster.toStdString();
+    params["model"] = "r10a-placeholder-model";
+    params["output"] = dir.filePath( QStringLiteral( "out.tif" ) ).toStdString();
+    params["bands"] = "1,2";
+    REQUIRE_THROWS_WITH( op.run( params, context ),
+                         Catch::Matchers::ContainsSubstring( "bands must be an array" ) );
+  }
+
+  // Pin: an honest array still parses on the estimate surface.
+  {
+    Json::Value params;
+    params["bands"] = Json::Value( Json::arrayValue );
+    params["bands"].append( 1 );
+    REQUIRE( op.estimateExecution( params ).isObject() );
+  }
+}

@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <sstream>
 
 namespace sicnu::operators::io
 {
@@ -75,6 +76,88 @@ Json::Value guarded( const std::function<Json::Value()> &body )
   {
     throw RSOperatorError( mapGeoCode( error.code() ), error.what(), error.details() );
   }
+}
+
+/// Parses a 4-number bounds/extent parameter (R10-A/PR-1 + PR-8).
+///
+/// Accepted shapes: a 4-item array (canonical), the schema-documented string
+/// form "[minX,minY,maxX,maxY]" (comma- or space-separated), or a string of
+/// the same produced by a GUI/agent. Numeric-string ITEMS are accepted
+/// because schema_validator accepts them for Number ports — refusing them
+/// here would let jsoncpp throw LogicError through the parameter contract.
+/// Every other shape/type fails typed; an empty result never silently means
+/// "no bounds" (callers decide absence via isMember).
+std::vector<double> parseBounds( const Json::Value &v, const char *paramName )
+{
+  std::vector<double> out;
+  auto pushItem = [&]( const Json::Value &item ) -> bool {
+    if ( item.isNumeric() )
+    {
+      out.push_back( item.asDouble() );
+      return true;
+    }
+    if ( item.isString() && !item.asString().empty() )
+    {
+      try
+      {
+        out.push_back( std::stod( item.asString() ) );
+        return true;
+      }
+      catch ( const std::exception & )
+      {
+        return false;
+      }
+    }
+    return false;
+  };
+
+  if ( v.isArray() )
+  {
+    if ( v.size() != 4 )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             std::string( paramName ) + " must be [minX,minY,maxX,maxY]" );
+    for ( const Json::Value &item : v )
+    {
+      if ( !pushItem( item ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               std::string( paramName ) + " entries must be numbers" );
+    }
+    return out;
+  }
+  if ( v.isString() )
+  {
+    std::string text = v.asString();
+    // Comma- or whitespace-separated (optionally mixed, trailing commas ok).
+    for ( char &ch : text )
+      if ( ch == ',' )
+        ch = ' ';
+    std::vector<std::string> parts;
+    std::istringstream ss( text );
+    std::string tok;
+    while ( ss >> tok )
+      parts.push_back( tok );
+    if ( parts.size() != 4 )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             std::string( paramName ) +
+                               " string form must be \"minX,minY,maxX,maxY\"" );
+    for ( const std::string &part : parts )
+    {
+      try
+      {
+        out.push_back( std::stod( part ) );
+      }
+      catch ( const std::exception & )
+      {
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               std::string( paramName ) +
+                                 " string entries must be numbers (got \"" + part + "\")" );
+      }
+    }
+    return out;
+  }
+  throw RSOperatorError( ErrorCode::InvalidParameter,
+                         std::string( paramName ) + " must be [minX,minY,maxX,maxY] "
+                         "(array or \"minX,minY,maxX,maxY\" string)" );
 }
 
 std::vector<std::string> creationOptionsFrom( const Json::Value &params )
@@ -255,11 +338,8 @@ Json::Value IoWarpOperator::run( const Json::Value &params, RSOperatorContext &c
       options.targetResolutionX = params::getDouble( params, "resolution", 0.0 );
       options.targetResolutionY = options.targetResolutionX;
     }
-    if ( params.isMember( "bounds" ) && params["bounds"].isArray() && params["bounds"].size() == 4 )
-    {
-      for ( const Json::Value &bound : params["bounds"] )
-        options.targetBounds.push_back( bound.asDouble() );
-    }
+    if ( params.isMember( "bounds" ) )
+      options.targetBounds = parseBounds( params["bounds"], "bounds" );
     options.targetAlignedPixels = params::getBool( params, "targetAlignedPixels", false ) ? "YES" : "NO";
     options.creationOptions = creationOptionsFrom( params );
     options.creationOptions.emplace_back( "COMPRESS=LZW" );
@@ -397,11 +477,8 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
                              "input raster carries no CRS; declare srcCrsOverride to clip anyway", details );
     }
     std::vector<double> bounds;
-    if ( params.isMember( "bounds" ) && params["bounds"].isArray() && params["bounds"].size() == 4 )
-    {
-      for ( const Json::Value &bound : params["bounds"] )
-        bounds.push_back( bound.asDouble() );
-    }
+    if ( params.isMember( "bounds" ) )
+      bounds = parseBounds( params["bounds"], "bounds" );
     if ( bounds.size() != 4 )
       throw RSOperatorError( ErrorCode::MissingRequiredParameter,
                              "bounds must be [minX,minY,maxX,maxY]" );
@@ -570,7 +647,28 @@ Json::Value IoBuildOverviewsOperator::run( const Json::Value &params, RSOperator
     if ( params.isMember( "levels" ) && params["levels"].isArray() )
     {
       for ( const Json::Value &level : params["levels"] )
-        levels.push_back( level.asInt() );
+      {
+        // Numeric strings pass schema validation for Integer ports — accept
+        // them here instead of letting jsoncpp throw LogicError (#1447
+        // pattern); anything else fails typed.
+        if ( level.isInt() )
+          levels.push_back( level.asInt() );
+        else if ( level.isString() )
+        {
+          try
+          {
+            levels.push_back( std::stoi( level.asString() ) );
+          }
+          catch ( const std::exception & )
+          {
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "levels entries must be integers" );
+          }
+        }
+        else
+          throw RSOperatorError( ErrorCode::InvalidParameter,
+                                 "levels entries must be integers" );
+      }
     }
     if ( levels.empty() )
     {
@@ -729,11 +827,8 @@ Json::Value IoVectorConvertOperator::run( const Json::Value &params, RSOperatorC
 {
   return guarded( [ & ] {
     std::vector<double> clipBounds;
-    if ( params.isMember( "clipBounds" ) && params["clipBounds"].isArray() && params["clipBounds"].size() == 4 )
-    {
-      for ( const Json::Value &bound : params["clipBounds"] )
-        clipBounds.push_back( bound.asDouble() );
-    }
+    if ( params.isMember( "clipBounds" ) )
+      clipBounds = parseBounds( params["clipBounds"], "clipBounds" );
     ContextProgress progress( context );
     const sicnu::geo::io::CheckedPath target =
       sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );

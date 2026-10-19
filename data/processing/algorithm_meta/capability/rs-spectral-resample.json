@@ -67,11 +67,15 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "numeric",
           "name" : "sourceWavelengths",
           "required" : false,
           "type" : "numeric"
         },
         {
+          "array" : true,
+          "item_type" : "numeric",
           "name" : "wavelengths",
           "required" : true,
           "type" : "numeric"

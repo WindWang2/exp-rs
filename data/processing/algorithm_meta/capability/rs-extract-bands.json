@@ -63,6 +63,8 @@
       "parameters" : 
       [
         {
+          "array" : true,
+          "item_type" : "integer",
           "name" : "bands",
           "required" : true,
           "type" : "integer"

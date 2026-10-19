@@ -125,13 +125,27 @@ Json::Value RsZonalStatsOperator::run( const Json::Value &params, RSOperatorCont
 
     // Bands: JSON array of 1-based ints (default [1]).
     std::vector<int> bands;
-    if ( params.isMember( "bands" ) && params["bands"].isArray() && !params["bands"].empty() )
+    // R10-A/A1-D2: the schema declares bands as an array; a scalar value
+    // used to fall through the isArray() fast path and silently default to
+    // [1] (the capability catalog even advertises it as a scalar) — refuse
+    // the non-array shape typed instead of silently zoning the wrong band.
+    if ( params.isMember( "bands" ) && !params["bands"].isNull() )
     {
-        for ( const auto &b : params["bands"] )
+        if ( !params["bands"].isArray() )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "bands must be a JSON array of 1-based band numbers" );
+        if ( !params["bands"].empty() )
         {
-            if ( !b.isNumeric() )
-                throw RSOperatorError( ErrorCode::InvalidParameter, "bands entries must be integers" );
-            bands.push_back( b.asInt() );
+            for ( const auto &b : params["bands"] )
+            {
+                if ( !b.isNumeric() )
+                    throw RSOperatorError( ErrorCode::InvalidParameter, "bands entries must be integers" );
+                bands.push_back( b.asInt() );
+            }
+        }
+        else
+        {
+            bands.push_back( 1 );
         }
     }
     else

@@ -8,6 +8,8 @@
 #include "operators/framework/rs_operator_error.h"
 #include "processing/tools/tool_path_manager.h"
 
+#include "geospatial/util/atomic_fs.h"
+
 #include <QElapsedTimer>
 #include <QFile>
 #include <QProcess>
@@ -81,10 +83,17 @@ Json::Value GdalPanSharpenOperator::run(const Json::Value& params,
                               "gdal_pansharpen.py is not configured; set the GDAL tool path first");
     }
 
+    // Staged publication (R10-A/PR-2, #617 contract): the subprocess writes
+    // beside the target; only a completed run is published over it, so a
+    // cancelled/failed run can neither leave a truncated product at the
+    // target nor destroy a pre-existing one.
+    const std::string stagedPath =
+        sicnu::geo::atomic_fs::reservedStagedPathFor( outputPath );
+
     QStringList args;
     args << QString::fromStdString( panPath )
          << QString::fromStdString( msPath )
-         << QString::fromStdString( outputPath )
+         << QString::fromStdString( stagedPath )
          << QStringLiteral( "-r" ) << QStringLiteral( "bilinear" )
          << QStringLiteral( "-of" ) << QStringLiteral( "GTiff" )
          << QStringLiteral( "-co" ) << QStringLiteral( "COMPRESS=LZW" );
@@ -95,7 +104,7 @@ Json::Value GdalPanSharpenOperator::run(const Json::Value& params,
         QString path;
         bool committed = false;
         ~OutputCleanup() { if (!path.isEmpty() && !committed) QFile::remove(path); }
-    } cleanup{ QString::fromStdString( outputPath ) };
+    } cleanup{ QString::fromStdString( stagedPath ) };
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
@@ -154,6 +163,8 @@ Json::Value GdalPanSharpenOperator::run(const Json::Value& params,
                                   + std::to_string(proc.exitCode()));
     }
 
+    sicnu::geo::atomic_fs::fsyncFile( stagedPath );
+    sicnu::geo::atomic_fs::publishStagedFile( stagedPath, outputPath );
     cleanup.committed = true;
     context.reportProgress(1.0, "Pan-sharpening complete");
 

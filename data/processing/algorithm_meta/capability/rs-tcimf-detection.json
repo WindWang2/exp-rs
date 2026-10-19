@@ -73,6 +73,8 @@
       "parameters" : 
       [
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "interference",
           "required" : false,
           "type" : "string"
@@ -83,6 +85,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "libraryMaterials",
           "required" : false,
           "type" : "string"
@@ -104,6 +108,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "target",
           "required" : false,
           "type" : "string"

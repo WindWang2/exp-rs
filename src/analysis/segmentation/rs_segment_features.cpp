@@ -118,6 +118,9 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                 if ( !validMask[base + i] ) continue;
                 const float v = bandBuf[i];
                 const float sentinel = hasNoData[b] ? static_cast<float>( bandNoData[b] ) : std::numeric_limits<float>::quiet_NaN();
+                // isNoDataValue voids the non-finite (rs_multires_segmenter
+                // discipline): ±Inf poisons mean/stddev/min/max and UB-casts
+                // through the GLCM quantizer below — void it exactly like NaN.
                 if ( sicnu::rs::isNoDataValue( v, sentinel ) )
                     validMask[base + i] = 0;
             }
@@ -369,7 +372,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                     // validMask guarantees not NaN/NoData, but keep guard for safety
                     const float sentinel = hasNoData[b] ? static_cast<float>( bandNoData[b] ) : std::numeric_limits<float>::quiet_NaN();
                     if ( sicnu::rs::isNoDataValue( val1, sentinel ) ) continue;
-                    const size_t level1 = static_cast<size_t>( std::clamp( static_cast<int>( ( val1 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
+                    // Clamp the FLOAT before the int cast: casting ±Inf/NaN
+                    // first is UB even inside std::clamp.
+                    const double q1 = std::clamp( static_cast<double>( val1 - minV ) / rangeV * ( nLevels - 1 ), 0.0, static_cast<double>( nLevels - 1 ) );
+                    const size_t level1 = static_cast<size_t>( static_cast<int>( q1 ) );
                     const int drs[] = { 0, 1 };
                     const int dcs[] = { 1, 0 };
                     for ( int d = 0; d < 2; ++d )
@@ -382,7 +388,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                         if ( !validMask[nIdx] ) continue;
                         const float val2 = chunkVal( nr, nc );
                         if ( sicnu::rs::isNoDataValue( val2, sentinel ) ) continue;
-                        const size_t level2 = static_cast<size_t>( std::clamp( static_cast<int>( ( val2 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
+                        // Clamp the FLOAT before the int cast: casting ±Inf/NaN
+                        // first is UB even inside std::clamp.
+                        const double q2 = std::clamp( static_cast<double>( val2 - minV ) / rangeV * ( nLevels - 1 ), 0.0, static_cast<double>( nLevels - 1 ) );
+                        const size_t level2 = static_cast<size_t>( static_cast<int>( q2 ) );
                         glcm[level1][level2] += 1.0;
                         glcm[level2][level1] += 1.0;
                         pairCount += 2;
