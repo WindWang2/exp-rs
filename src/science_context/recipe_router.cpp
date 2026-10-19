@@ -285,13 +285,16 @@ RecipeRouterResult RecipeRouter::search( const RecipeQuery &query ) const
         {
             for ( const auto &kw : doc.keywords )
             {
+                if ( kw.empty() )
+                    continue; // std::string::find("") is 0, not npos: a fake hit
                 if ( text.find( lower( kw ) ) != std::string::npos )
                 {
                     score += 1.0;
                     matched.push_back( "kw:" + kw );
                 }
             }
-            if ( text.find( lower( doc.title ) ) != std::string::npos )
+            if ( !doc.title.empty() &&
+                 text.find( lower( doc.title ) ) != std::string::npos )
             {
                 score += 0.5;
                 matched.push_back( "title" );
