@@ -45,6 +45,27 @@ export PROJ_LIB=$V/share/proj PROJ_DATA=$V/share/proj GDAL_DATA=$V/share/gdal
 |---|---|---|
 | test_image_fusion | 43 用例 / 1676 断言 全过 | 同 |
 | test_atmospheric | 43 / 37498 全过 | 同 |
+
+（上表为 WP 修复后首双跑；R1 修复 commit 529481e72 之后的最终树全量双跑见下表，
+数字为新基线——atmospheric +2 用例（dos1Histogram/quac Inf）、fusion +1（流式
+panWeight 钳制）、corpus +1（rs:mosaic Inf）。）
+
+| 套件（最终树 529481e72+46e7485d3） | 双跑结果 |
+|---|---|
+| test_image_fusion | 44 用例 / 1687 断言 全过 ×2 |
+| test_atmospheric | 45 / 37507 全过 ×2 |
+| test_known_answer_corpus_r4 | 9 / 288 全过 ×2 |
+| test_obia_segmentation | 14 / 850 全过 ×2 |
+| test_mosaic | 10 / 38 全过 ×2 |
+| test_image_enhancement | 14 / 6224 全过 ×2 |
+| test_raster_spatial5 | 13 / 87 全过 ×2 |
+| test_spectral_classification | 30 / 197 全过 ×2 |
+| test_fusion_quality_report | 7 / 41 全过 ×2 |
+| test_change_detection | 41 / 888684 全过 ×2 |
+| test_band_math | 49 / 130277 全过 ×2 |
+
+构建新鲜度核验（R1 教训④）：atmospheric_correction.cpp.o mtime（21:40）> 源码
+mtime（21:17），全链重编译确认为真。
 | test_raster_spatial5 | 13 / 87 全过 | 同 |
 | test_mosaic | 10 / 38 全过 | 同 |
 | test_image_enhancement | 14 / 6224 全过 | 同 |
