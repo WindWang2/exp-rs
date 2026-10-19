@@ -36,7 +36,17 @@ QJsonObject StudioSessionState::toJson() const
 
 StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
 {
+    // Fail-closed schema gate (R18-E T202): the reader used to ignore the
+    // marker entirely, so a foreign or future session document imported as
+    // if it were current — the same rule the sibling export reader
+    // (studio_export.cpp) already enforces. A refused document imports
+    // NOTHING: adopting the fields that happen to parse would let a future
+    // reader silently resurrect stale data.
     StudioSessionState s;
+    const QString schema = json.value( QStringLiteral( "schema" ) ).toString();
+    if ( schema != QString::fromUtf8( kStudioSessionSchema ) )
+        return s; // ok stays false
+    s.ok = true;
     s.studyId = json.value( QStringLiteral( "study_id" ) ).toString();
     s.experimentId = json.value( QStringLiteral( "experiment_id" ) ).toString();
     s.algorithmId = json.value( QStringLiteral( "algorithm_id" ) ).toString();

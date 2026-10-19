@@ -799,6 +799,48 @@ LabResult<LabSession> sessionFromJson( const Json::Value &doc )
                                 "event seq outside the (0, last_seq] envelope" } );
   }
 
+  // Sequence-ledger density (R18-E D8): every recorder draws
+  // nextSeq() = lastSeq + 1 exactly once, so a genuine ledger's events
+  // are precisely the seqs 1..last_seq, each used once. The envelope
+  // above only bounds seqs by last_seq — which is itself file-controlled,
+  // so an inflated last_seq with a planted high-seq pass satisfied it and
+  // then won every latest-wins gate forever while genuine events drew
+  // later-but-smaller seqs. Refusing non-dense ledgers closes the
+  // inflated envelope and the gapped/duplicated variants alike.
+  if ( diags.empty() )
+  {
+    std::vector< long long > seqs;
+    seqs.reserve( session.checkpointResults.size() + session.questionAnswers.size()
+                  + session.hintEvents.size() + session.toolChoices.size()
+                  + session.executionRefs.size() );
+    for ( const CheckpointResult &result : session.checkpointResults )
+      seqs.push_back( result.seq );
+    for ( const QuestionAnswer &answer : session.questionAnswers )
+      seqs.push_back( answer.seq );
+    for ( const HintEvent &event : session.hintEvents )
+      seqs.push_back( event.seq );
+    for ( const ToolChoice &choice : session.toolChoices )
+      seqs.push_back( choice.seq );
+    for ( const ExecutionRef &ref : session.executionRefs )
+      seqs.push_back( ref.seq );
+    std::sort( seqs.begin(), seqs.end() );
+    // Contiguous, strictly increasing (no duplicate draws), and the newest
+    // draw equals last_seq (every recorder sets lastSeq to the seq it just
+    // drew). A genuine fresh session (startSession seq >= 1, no events
+    // yet) has an empty ledger and is accepted.
+    bool dense = true;
+    for ( std::size_t i = 1; i < seqs.size(); ++i )
+      dense = dense && seqs[ i ] == seqs[ i - 1 ] + 1;
+    dense = dense && ( seqs.empty() || seqs.back() == session.lastSeq );
+    if ( !dense )
+    {
+      diags.push_back( LabDiag{ "lab.session.schema",
+                                "seq ledger must be contiguous with the newest draw "
+                                "at last_seq (inflated, gapped or duplicated ledgers "
+                                "are refused)" } );
+    }
+  }
+
   if ( !diags.empty() )
     return LabResult<LabSession>::failure( std::move( diags ) );
   return LabResult<LabSession>::success( std::move( session ) );
