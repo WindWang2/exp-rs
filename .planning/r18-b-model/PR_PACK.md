@@ -1,19 +1,19 @@
 # hardening(r18-b): 既有遥感 AI 模型推理 — 恢复被合并事故回滚的 r15-C 全部工作 + feather/发布/分块 P0-P2 修复
 
-Generated: 2026-10-19T02:53:37Z
+Generated: 2026-10-19T02:54:27Z
 
 ## Baseline
 
 - base `origin/master` @ `a60c8831c9cc4e64701d17bde2ace67a74a9b7a0` (Merge pull request #1513 from WindWang2/hardening/r15-B-geodata-persistence)
-- head `HEAD` @ `0557dc22f87f61dc88083faa8882404c5f245df4` (docs(r18-b): final report)
-- commits in range: 7
+- head `HEAD` @ `1b535e5c1073f50172e36ab006fa5035180a837e` (chore(r18-b): strip trailing whitespace from the reference patches (diff --check clean))
+- commits in range: 8
 
 ## Scope
 
 - sources (15): `src/operators/framework/chunked_run.cpp`, `src/operators/framework/model_catalog.cpp`, `src/operators/runtime/detection_postprocess.cpp`, `src/operators/runtime/device_planner.cpp`, `src/operators/runtime/model_ensemble.cpp`, `src/operators/runtime/model_execution_service.cpp`, `src/operators/runtime/model_publish.cpp`, `src/operators/runtime/model_runtime.cpp`, `src/operators/runtime/opencv_dnn_runtime.cpp`, `src/operators/runtime/openvino_provider.cpp`, `src/operators/runtime/python_worker_provider.cpp`, `src/operators/runtime/tensorrt_provider.cpp` …
 - public_headers (4): `src/operators/runtime/model_runtime.h`, `src/runtime/chunk/chunk_graph.h`, `src/runtime/chunk/chunk_pipeline.h`, `src/runtime/chunk/memory_planner.h`
 - tests (19): `tests/CMakeLists.txt`, `tests/data/gen_test_infer_addmul.py`, `tests/data/py_worker_slow_start.py`, `tests/data/test_infer_addmul.onnx`, `tests/test_chunk_graph.cpp`, `tests/test_eo_platform_10.cpp`, `tests/test_model_ensemble.cpp`, `tests/test_model_runtime_9.cpp`, `tests/test_model_runtime_bench.cpp`, `tests/test_model_tasks.cpp`, `tests/test_multimodal_inference.cpp`, `tests/test_provider_python.cpp` …
-- docs (25): `.planning/r18-b-model/BASELINE.md`, `.planning/r18-b-model/CROSS_TRACK_FINDINGS.md`, `.planning/r18-b-model/DECISIONS.md`, `.planning/r18-b-model/FINAL_REPORT.md`, `.planning/r18-b-model/KNOWN_FINDINGS.md`, `.planning/r18-b-model/LOOP_LEDGER.md`, `.planning/r18-b-model/ORACLES.md`, `.planning/r18-b-model/OWNERSHIP.md`, `.planning/r18-b-model/PERFORMANCE.md`, `.planning/r18-b-model/PR_BODY.md`, `.planning/r18-b-model/REVIEW_R1.md`, `.planning/r18-b-model/REVIEW_R2.md` …
+- docs (26): `.planning/r18-b-model/BASELINE.md`, `.planning/r18-b-model/CROSS_TRACK_FINDINGS.md`, `.planning/r18-b-model/DECISIONS.md`, `.planning/r18-b-model/FINAL_REPORT.md`, `.planning/r18-b-model/KNOWN_FINDINGS.md`, `.planning/r18-b-model/LOOP_LEDGER.md`, `.planning/r18-b-model/ORACLES.md`, `.planning/r18-b-model/OWNERSHIP.md`, `.planning/r18-b-model/PERFORMANCE.md`, `.planning/r18-b-model/PR_BODY.md`, `.planning/r18-b-model/PR_PACK.md`, `.planning/r18-b-model/REVIEW_R1.md` …
 - other (3): `.gitignore`, `.planning/r18-b-model/references/w-fixes-v2.patch`, `.planning/r18-b-model/references/w-fixes.patch`
 
 ## Non-goals
@@ -46,7 +46,7 @@ Generated: 2026-10-19T02:53:37Z
 
 ## Conflict hotspots
 
-overlap evidence for this diff's 66 paths:
+overlap evidence for this diff's 67 paths:
 - open_prs: 0
 - merged_prs: 11
   - `hardening/r16-d-workbench-cartography` touches 1 of these paths
@@ -81,6 +81,7 @@ overlap evidence for this diff's 66 paths:
  .planning/r18-b-model/OWNERSHIP.md                 |  42 +++
  .planning/r18-b-model/PERFORMANCE.md               |  39 +++
  .planning/r18-b-model/PR_BODY.md                   |  43 +++
+ .planning/r18-b-model/PR_PACK.md                   | 152 ++++++++
  .planning/r18-b-model/REVIEW_R1.md                 |  21 ++
  .planning/r18-b-model/REVIEW_R2.md                 |  34 ++
  .planning/r18-b-model/TASKS.md                     |  17 +
@@ -136,12 +137,13 @@ overlap evidence for this diff's 66 paths:
  tests/test_r15_C_provider_degradation.cpp          | 257 ++++++++++++++
  tests/test_r15_C_publish_recovery.cpp              | 196 +++++++++++
  tests/test_r15_C_runtime_contracts.cpp             | 162 +++++++++
- 66 files changed, 4679 insertions(+), 91 deletions(-)
+ 67 files changed, 4831 insertions(+), 91 deletions(-)
 ```
 
 ## Commits
 
 ```
+1b535e5c1 chore(r18-b): strip trailing whitespace from the reference patches (diff --check clean)
 0557dc22f docs(r18-b): final report
 0592b1913 fix(review-r2): apply the three R2 P3s — real span correction, tracked r15-C references, write-side window guard
 e0d334384 docs(review): record R1 verdict (PASS-WITH-NITS, 8 P3) and dispositions
