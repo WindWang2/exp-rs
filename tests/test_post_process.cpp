@@ -56,6 +56,52 @@ TEST_CASE( "PostProcess: sieve preserves isolated component when no border neigh
   REQUIRE( dst.at<int>( 1, 1 ) == 5 );
 }
 
+TEST_CASE( "PostProcess: sieve does not let label 0 (NoData) win the border vote (#1590)",
+           "[classify][post][post_process][1590]" )
+{
+  // Label 0 is the segmenters' NoData and does not vote — the same policy
+  // modeOfWindow legislates for the majority filter (#612/#700). Counting it
+  // in the border majority let sieve rewrite classified pixels as the NoData
+  // sentinel, and the smaller-id tie-break made 0 a stable winner on ties.
+  SECTION( "NoData outnumbers the valid class" )
+  {
+    // Class-2 speck (area 4 < threshold 5) borders 0:6 vs 1:3; only the
+    // valid class 1 may win.
+    cv::Mat src = ( cv::Mat_<int>( 5, 5 ) <<
+                    2, 2, 2, 0, 0,
+                    2, 0, 1, 1, 1,
+                    0, 0, 1, 1, 1,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0 );
+    cv::Mat dst;
+    REQUIRE( RsPostProcess::sieve( src, dst, 5, 8, nullptr ) );
+    CHECK( dst.at<int>( 0, 0 ) == 1 );
+    CHECK( dst.at<int>( 0, 1 ) == 1 );
+    CHECK( dst.at<int>( 0, 2 ) == 1 );
+    CHECK( dst.at<int>( 1, 0 ) == 1 );
+    // Large NoData and class-1 regions survive the sieve untouched.
+    CHECK( dst.at<int>( 1, 1 ) == 0 );
+    CHECK( dst.at<int>( 3, 0 ) == 0 );
+    CHECK( dst.at<int>( 4, 4 ) == 0 );
+    CHECK( dst.at<int>( 1, 2 ) == 1 );
+    CHECK( dst.at<int>( 2, 4 ) == 1 );
+  }
+
+  SECTION( "NoData ties the valid class — tie-break must not favor 0" )
+  {
+    // Lone class-2 pixel whose 8 neighbors are exactly four NoData (0) and
+    // four class-1 pixels: equal counts, so the old smaller-id rule
+    // deterministically picked 0 whichever way the map iterated.
+    cv::Mat src = ( cv::Mat_<int>( 3, 3 ) <<
+                    0, 1, 0,
+                    1, 2, 1,
+                    0, 1, 0 );
+    cv::Mat dst;
+    REQUIRE( RsPostProcess::sieve( src, dst, 2, 8, nullptr ) );
+    CHECK( dst.at<int>( 1, 1 ) == 1 );
+  }
+}
+
 namespace
 {
 
