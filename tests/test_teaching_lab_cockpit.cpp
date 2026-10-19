@@ -399,6 +399,21 @@ TEST_CASE( "12 corrupted session fail-closed", "[teaching][session][failclosed]"
   auto badJson = LabSessionState::deserialize( "{not json" );
   REQUIRE_FALSE( badJson.ok );
 
+  // #1607: a hand-crafted over-deep document used to escape deserialize() as
+  // an unhandled Json::RuntimeError (jsoncpp THROWS at stackLimit) and take
+  // the process down; the pinned reader must refuse it typed. Session files
+  // are hand-editable input — lab/session_state.cpp defends tampering on the
+  // same documents.
+  std::string deep;
+  for ( int i = 0; i < 400; ++i )
+    deep += "{\"a\":";
+  deep += "1";
+  for ( int i = 0; i < 400; ++i )
+    deep += "}";
+  const auto deepDoc = LabSessionState::deserialize( deep );
+  REQUIRE_FALSE( deepDoc.ok );
+  REQUIRE_FALSE( deepDoc.issuesZh.empty() );
+
   auto missing = LabSessionState::loadFromFile( "/tmp/sicnu_no_such_session_file_42.json" );
   REQUIRE_FALSE( missing.ok );
 }
