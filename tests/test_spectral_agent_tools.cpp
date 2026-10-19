@@ -283,11 +283,22 @@ TEST_CASE("Agent tools validate their parameter schemas", "[agent][spectral_tool
 {
     SpectralInspectTool inspect;
     REQUIRE( inspect.name() == "spatial:spectral_inspect" );
-    REQUIRE( !inspect.inputSchema()["required"].empty() );
-    REQUIRE( inspect.inputSchema()["type"].asString() == "object" );
+    // #1570: layer_id and path are EITHER/or alternatives — declaring either
+    // as required would reject the other at the MCP gate, and path is the
+    // only usable form on a headless server with no project layers. Neither
+    // may therefore appear in a required array; both must stay declared.
+    const Json::Value inspectSchema = inspect.inputSchema();
+    REQUIRE( inspectSchema["type"].asString() == "object" );
+    REQUIRE( inspectSchema["properties"].isMember( "layer_id" ) );
+    REQUIRE( inspectSchema["properties"].isMember( "path" ) );
+    REQUIRE( ( !inspectSchema.isMember( "required" ) || inspectSchema["required"].empty() ) );
 
     ValidateBoaPhysicsTool audit;
     REQUIRE( audit.name() == "spatial:validate_boa_physics" );
+    const Json::Value auditSchema = audit.inputSchema();
+    REQUIRE( auditSchema["properties"].isMember( "layer_id" ) );
+    REQUIRE( auditSchema["properties"].isMember( "path" ) );
+    REQUIRE( ( !auditSchema.isMember( "required" ) || auditSchema["required"].empty() ) );
 
     // Neither layer_id nor path → validation failure with machine code.
     auto missing = audit.execute( Json::Value( Json::objectValue ) );
