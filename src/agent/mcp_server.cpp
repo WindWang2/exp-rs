@@ -278,7 +278,11 @@ static QString rpcCancelMapKey(const QVariant &id)
         || t == QMetaType::UInt || t == QMetaType::Long || t == QMetaType::ULong
         || t == QMetaType::LongLong || t == QMetaType::ULongLong || t == QMetaType::Short
         || t == QMetaType::UShort)
-        return QStringLiteral("n:%1").arg(id.toDouble());
+        // 'g' with 17 significant digits: round-trippable for every double, so
+    // distinct numeric ids cannot collide onto one key (the default 6-digit
+    // formatting collapsed e.g. 1234567 and 1234568 onto "n:1.23457e+06",
+    // and the bounded map OVERWRITES duplicates — R18-C R2 F1).
+    return QStringLiteral("n:%1").arg(QString::number(id.toDouble(), 'g', 17));
     return QStringLiteral("s:%1").arg(id.toString());
 }
 
@@ -1654,7 +1658,7 @@ QVariantMap McpServer::handleSearchAlgorithms(const QVariantMap &arguments)
     query.largeRasterSafeOnly =
         arguments.value(QStringLiteral("large_raster_safe")).toBool();
     query.limit = mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt());
-    query.cursor = qMax(0, arguments.value(QStringLiteral("cursor")).toInt());
+    query.cursor = mcpTypedCursor(arguments, QStringLiteral("search_algorithms"));
 
     // Search universe mirrors list_algorithms exactly: registry descriptors
     // plus provider algorithms (gdal:/otb:/native:/qgis:) reachable through
@@ -2570,8 +2574,9 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     // the union projection is the SAME source tools/list renders, so an
     // exact hit is answered from it FIRST — the bare aliases (list_layers /
     // describe_dataset) exist in the meta table AND as catalog data:
-    // entries with DIFFERENT schemas and descriptions, and findTool()
-    // answered with the catalog copy while tools/list showed the meta copy.
+    // entries with DIFFERENT schemas and descriptions (list_layers,
+    // describe_dataset, get_lineage), and findTool() answered with the
+    // catalog copy while tools/list showed the meta copy.
     // Catalog-source hits keep the richer catalog branch below (real
     // category vocabulary + human displayName); the projection renders the
     // same normalized schema, so parity is preserved either way. findTool()
@@ -2604,7 +2609,19 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     result[QStringLiteral("name")] = QString::fromStdString(tool->name);
     result[QStringLiteral("displayName")] = QString::fromStdString(tool->displayName);
     result[QStringLiteral("description")] = QString::fromStdString(tool->description);
-    result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->normalizedInputSchema());
+    // Same malformed-registration tolerance as the projection (R18-C R2 F3):
+    // a registration whose raw schema is malformed keeps the RAW value here
+    // too, so tools/list and get_tool_schema stay in parity instead of the
+    // detail endpoint answering a generic tool-error for a listed tool.
+    try
+    {
+        result[QStringLiteral("schema")] =
+            sicnu::processing::jsonValueToVariant(tool->normalizedInputSchema());
+    }
+    catch (const std::invalid_argument &)
+    {
+        result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->inputSchema);
+    }
     return result;
 }
 
