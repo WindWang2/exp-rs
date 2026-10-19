@@ -37,9 +37,26 @@ bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat &y )
   // non-zero label means the caller trained against true labels (GUI ROI
   // path); an all-zero y is the unsupervised operator's dummy and keeps raw
   // 1..K cluster ids verbatim.
+  // Validate y before touching it: at<int> on a non-CV_32S, multi-column or
+  // row-mismatched matrix is a type-punning read, and Mat::empty() is
+  // total()==0 — so a (rows>0, cols==0) matrix passes every empty() guard
+  // while at<int>(i,0) lands on no data. An empty label matrix is the
+  // documented unsupervised dummy and keeps raw cluster ids; anything else
+  // malformed is a caller bug and fails closed like
+  // RsClassifierCvBackend::fit.
   m_remapNeeded = false;
-  for ( int i = 0; i < y.rows && !m_remapNeeded; ++i )
-    m_remapNeeded = ( y.at<int>( i, 0 ) != 0 );
+  if ( !y.empty() )
+  {
+    if ( y.type() != CV_32S || y.cols != 1 || y.rows != X.rows )
+    {
+      SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                       QStringLiteral( "KMeans::fit — label matrix must be single-column CV_32S with one row per sample: got %1x%2 (type %3), X has %4 rows" )
+                         .arg( y.rows ).arg( y.cols ).arg( y.type() ).arg( X.rows ) );
+      return false;
+    }
+    for ( int i = 0; i < y.rows && !m_remapNeeded; ++i )
+      m_remapNeeded = ( y.at<int>( i, 0 ) != 0 );
+  }
 
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "KMeans training: %1 samples, %2 features, k=%3" )
       .arg( X.rows ).arg( X.cols ).arg( m_k ) );

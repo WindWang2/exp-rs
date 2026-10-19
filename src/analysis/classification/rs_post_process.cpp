@@ -122,7 +122,14 @@ int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId
           continue;
         if ( cc.at<int>( nr, nc ) == compId )
           continue;
-        ++freq[pixelAt( labels, nr, nc )];
+        const int v = pixelAt( labels, nr, nc );
+        // Label 0 is the segmenters' NoData and does not vote: letting it
+        // participate could grow NoData into valid areas (same policy as
+        // modeOfWindow below). Excluded here it also cannot win the
+        // smaller-id tie-break and rewrite a classified speck as NoData.
+        if ( v == 0 )
+          continue;
+        ++freq[v];
       }
     }
   }
