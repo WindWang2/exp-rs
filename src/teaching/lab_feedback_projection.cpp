@@ -356,6 +356,21 @@ LabFeedbackProjection LabFeedbackProjection::fromJson( const Json::Value &doc )
   // INVARIANT sweep on restore: an indeterminate summary can never pass.
   if ( p.overallStatus != "pass" ) p.overallCountsAsPass = false;
 
+  // R18-E T102f: a pass document with zero rows is not a record — every
+  // real projection carries at least one row (verifier.overall and/or
+  // grader.overall). A hand-written pass with an empty row list is a
+  // forgery of shape, refused to indeterminate like the rest.
+  if ( p.overallStatus == "pass" )
+  {
+    const bool hasRows = doc.isMember( "rows" ) && doc["rows"].isArray()
+                         && doc["rows"].size() > 0;
+    if ( !hasRows )
+    {
+      p.issuesZh.push_back( "通过摘要缺少任何检查行（按不确定处理）" );
+      p.overallStatus = "indeterminate";
+      p.overallCountsAsPass = false;
+    }
+  }
   p.techValidationSummaryZh = strOf( doc, "tech_validation_summary_zh" );
   p.scienceValidationSummaryZh = strOf( doc, "science_validation_summary_zh" );
   p.capsuleExportRef = strOf( doc, "capsule_export_ref" );
