@@ -21,6 +21,7 @@
 #include "agent/cartography/registry.h"
 #include "agent/mapspec/mapspec.h"
 #include "agent/mapspec/mapspec_compiler.h"
+#include "agent/layout_tools/layout_service.h"
 #include "agent/mapspec/series_planner.h"
 #include "agent/spatial_tools/spatial_tool.h"
 
@@ -927,6 +928,92 @@ TEST_CASE( "atlas export of a multi-page layout delivers one file per feature (R
     // disambiguator legitimately emits p1_2 when features share a
     // fallback stem), so the set-membership check is the contract.
     CHECK( files.size() == static_cast<int>( delivered.size() ) );
+}
+
+TEST_CASE( "Single-page png selection of a non-first page delivers that page atomically (R18-D)",
+           "[cp11][export][r18d]" )
+{
+    // Hand-built two-page layout WITHOUT a legend (same discipline as the
+    // atlas test above): the base exporter's generateFileName appends
+    // "_<page+1>" for any non-zero page, so a single selected non-first
+    // page used to write the bytes to a temp SIBLING — the declared temp
+    // stayed empty ("exported file is empty or unreadable") and the sibling
+    // survived as an orphan the result never reports.
+    QgsPrintLayout layout( QgsProject::instance() );
+    auto *firstPage = new QgsLayoutItemPage( &layout );
+    firstPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( firstPage );
+    auto *extraPage = new QgsLayoutItemPage( &layout );
+    extraPage->setPageSize( QgsLayoutSize( 210.0, 148.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( extraPage );
+    std::unique_ptr<QgsLayoutItemLabel> page1Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page1Label->setText( QStringLiteral( "second page" ) );
+    page1Label->attemptSetSceneRect( QRectF( 10, 220, 80, 10 ) );
+    layout.addLayoutItem( page1Label.release() );
+    REQUIRE( layout.pageCollection()->pageCount() == 2 );
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    sicnu::agent::cartography::MapExportRequest request;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.file_name = "selected-page";
+    request.pages = { 1 };
+
+    const auto result = sicnu::agent::cartography::exportMapLayout( &layout, request );
+    REQUIRE( result.ok );
+    CHECK( result.bytes > 0 );
+    CHECK( result.sha256.size() == 64 );
+    CHECK( QFile::exists( QString::fromStdString( result.path ) ) );
+
+    // Exactly the delivered file exists: no orphaned *_2.png sibling and no
+    // temp litter survives a single-page selection.
+    const QStringList files = QDir( dir.path() ).entryList( QDir::Files );
+    REQUIRE( files.size() == 1 );
+    INFO( "delivered: " << files.first().toStdString() );
+    CHECK( files.first() == QStringLiteral( "selected-page.png" ) );
+
+    // Determinism: the same selection reproduces the same digest.
+    const auto second = sicnu::agent::cartography::exportMapLayout( &layout, request );
+    REQUIRE( second.ok );
+    CHECK( second.sha256 == result.sha256 );
+}
+
+TEST_CASE( "atlas filename_expression is compile-checked, never silently degraded (R18-D)",
+           "[cp11][atlas][r18d]" )
+{
+    // An unparseable filename expression used to be swallowed at compile
+    // time (setFilenameExpression's return value and error string were both
+    // dropped): the export silently fell back to p1/p2 stems with EMPTY
+    // manifest labels, and the user's declared naming never applied. The
+    // text-furniture precedent ("An unparseable expression is a compile
+    // failure, never silently static text") applies verbatim.
+    QgsVectorLayer *coverage =
+      addAtlasCoverageLayer( QStringLiteral( "atlas-cities-badexpr" ),
+                             { { qMakePair( QString::fromUtf8( "One" ), 1 ) } } );
+    REQUIRE( coverage != nullptr );
+    REQUIRE( coverage->isValid() );
+
+    Json::Value spec = atlasSpec( "atlas-bad-expr", QStringLiteral( "atlas-cities-badexpr" ) );
+    spec["page"]["atlas"]["filename_expression"] = "1 + * 2"; // parse error
+
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout == nullptr );
+    CHECK( compileError.contains( QStringLiteral( "filename_expression" ) ) );
+
+    // The valid expression still compiles (control).
+    Json::Value good = atlasSpec( "atlas-good-expr", QStringLiteral( "atlas-cities-badexpr" ) );
+    QString goodError;
+    QgsPrintLayout *goodLayout = MapSpecCompiler::compile( good, &goodError );
+    CHECK( goodLayout != nullptr );
+    if ( goodLayout )
+        sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
+          QStringLiteral( "atlas-good-expr" ) );
 }
 
 TEST_CASE( "atlas count contract: updateFeatures refreshes, count does not",
