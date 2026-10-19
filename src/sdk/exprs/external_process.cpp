@@ -1175,6 +1175,16 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     if ( ::pipe( stdoutPipe ) != 0 || ::pipe( stderrPipe ) != 0 || ::pipe( errorPipe ) != 0 )
     {
         result.error = "pipe() failed: " + std::string( std::strerror( errno ) );
+        // A partial failure leaves the earlier pipes open: EMFILE/ENFILE can
+        // strike on the second or third call, leaking up to 4 fds (the
+        // Windows branch and the fork() cleanup below close everything).
+        // Close whatever succeeded — a pipe that failed keeps its -1
+        // initializer. The message is built first so close() cannot clobber
+        // the errno it was captured from.
+        for ( int fd : { stdoutPipe[0], stdoutPipe[1], stderrPipe[0], stderrPipe[1],
+                         errorPipe[0], errorPipe[1] } )
+            if ( fd >= 0 )
+                ::close( fd );
         return result;
     }
 

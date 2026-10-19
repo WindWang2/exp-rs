@@ -277,7 +277,24 @@ IpcChannel::Outcome IpcChannel::request( const std::string &method, const Json::
                 // protocolFailure(), nextRequest(), ... all take mMutex),
                 // and the non-recursive mutex would self-deadlock.
                 lock.unlock();
-                const bool stop = cancelPredicate();
+                bool stop = false;
+                try
+                {
+                    stop = cancelPredicate();
+                }
+                catch ( ... )
+                {
+                    // A predicate that throws (it runs caller-supplied,
+                    // potentially plugin-side code) must not strand this id:
+                    // every other exit erases the entry (answer/timeout/
+                    // close), so without this the Pending would leak for the
+                    // channel's lifetime. Reclaim it before the exception
+                    // escapes — the session layer's noexcept boundary still
+                    // types the throw as E6005.
+                    lock.lock();
+                    mPending.erase( id );
+                    throw;
+                }
                 lock.lock();
                 if ( stop )
                 {
