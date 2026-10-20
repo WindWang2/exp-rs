@@ -1,7 +1,7 @@
 # R19-02 FINAL_REPORT — Pi/MCP Harness、工具契约、科学决策与 Workflow 闭环可靠性
 
 ## 分支与基线
-- Branch: `agent/r19-02-pi-mcp-workflow-20261020T102409Z`（worktree 独立；PR 待创建时填充编号）
+- Branch: `agent/r19-02-pi-mcp-workflow-20261020T102409Z`（worktree 独立；PR #1666）
 - BASE `e12a9afbc` = 推送前最后一次 LIVE 核对的 origin/master（gh api 复核）；rebase 无需
 - 10 commits：1 检测器 + 1 恢复 + 3 行为修复 + 1 快照权威 + 2 评审修复轮 + 2 文档
 

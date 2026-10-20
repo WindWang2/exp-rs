@@ -63,3 +63,7 @@ Goal-loop 账本（单一事实源；任务书指定路径）。每轮：`第N�
 - master 复核未动（e12a9afbc）；与 #1663/#1665 零重叠、与 #1664 仅 tests/CMakeLists.txt 双方 append-only（merge-tree 0 冲突）；diff --check clean；46 文件全在区内。
 - 终验矩阵见 TEST_RESULTS（14 套族 ×2 + pi 39/39 ×2 + unittest ×2；唯一红=surface_snapshot registry 腿 CT-6 红区确定性失败，已跨轨记录）。
 - 动作：push 分支 → gh pr create → FINAL_REPORT。
+
+### 终局 | PR #1666 创建成功 | 通过
+- https://github.com/WindWang2/exp-rs/pull/1666（OPEN，master ← agent/r19-02-pi-mcp-workflow-20261020T102409Z，10 commits，49 files）
+- 全部 Oracle 达成：O-T3/T0/T1/T2/T6/T7/BASE/PI；R1+R2 READY 且 P2/P3 闭环；diff --check clean；ownership 全区内心；CT-6 跨轨移交记录在案。
