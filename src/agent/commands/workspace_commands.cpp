@@ -178,8 +178,14 @@ class WorkspaceUndoTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "undo", "command" }; }
     Json::Value inputSchema() const override
     {
+      // Normalization-canonical shape: the surface projection (tools/list,
+      // get_tool_schema, the committed snapshot) adds "properties": {} to
+      // property-less schemas while the snapshot's registry leg pins the
+      // RAW schema — the two legs only agree when the raw form carries the
+      // key already.
       Json::Value schema( Json::objectValue );
       schema["type"] = "object";
+      schema["properties"] = Json::Value( Json::objectValue );
       return schema;
     }
     Json::Value outputSchema() const override
@@ -209,8 +215,10 @@ class WorkspaceRedoTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "redo", "command" }; }
     Json::Value inputSchema() const override
     {
+      // Same normalization-canonical shape as workspace:undo above.
       Json::Value schema( Json::objectValue );
       schema["type"] = "object";
+      schema["properties"] = Json::Value( Json::objectValue );
       return schema;
     }
     Json::Value outputSchema() const override
