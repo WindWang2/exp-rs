@@ -5,6 +5,7 @@
 
 #include "rs_operator_context.h"
 #include "rs_operator_error.h"
+#include "rs_param_validation.h"
 #include "rs_schema.h"
 
 #include <json/json.h>
@@ -223,14 +224,20 @@ public:
      * Refuses params that violate their schema-declared numeric ranges
      * (#1578) with a typed InvalidParameter error before run() sees them.
      * execute() applies this automatically; production funnels that call
-     * run() directly (the processing algorithm adapter, the job engine)
-     * must call it at their entry — a setRange declaration was display-only
-     * metadata before this gate existed.
+     * run() directly (the processing algorithm adapter, the job engine,
+     * the isolated worker main) call it at their entry too — a setRange
+     * declaration was display-only metadata before this gate existed.
+     * Inline delegation to the sicnu_operators_core leaf keeps it
+     * linkable from leaf-only consumers (no sicnu_operators.so symbol).
      *
      * Opt-in per declaration: params without minimum/maximum, non-numeric
      * values and absent params are not touched here.
      */
-    void validateParams(const Json::Value& params) const;
+    void validateParams(const Json::Value& params) const
+    {
+        validateDeclaredRanges(schema(), params);
+    }
+
 
     /**
      * Convenience wrapper that runs the operator and automatically records

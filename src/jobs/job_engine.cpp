@@ -4,7 +4,6 @@
 #include "runtime/observability/trace.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_error.h"
-#include "operators/framework/rs_param_validation.h"
 #include "operators/framework/rs_operator_registry.h"
 
 #include <algorithm>
@@ -1098,10 +1097,9 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       result = executor( request, ctx );
     else
     {
-      // Direct run() funnel: apply the schema range gate (#1578) via the
-      // core-leaf free function — the typed RSOperatorError propagates
-      // through finishError below.
-      sicnu::operators::validateDeclaredRanges( op->schema(), request.params );
+      // Direct run() funnel: apply the schema range gate (#1578) — the
+      // typed RSOperatorError propagates through finishError below.
+      op->validateParams( request.params );
       result = op->run( request.params, ctx );
     }
     finishSuccess( std::move( result ) );

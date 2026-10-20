@@ -3,7 +3,6 @@
  ***************************************************************************/
 #include "rs_operator.h"
 #include "rs_operation_logger.h"
-#include "rs_param_validation.h"
 
 namespace sicnu::operators {
 
@@ -58,11 +57,9 @@ Json::Value RSOperator::estimateExecution(const Json::Value& /*params*/) const {
 // so an out-of-range knob reached the algorithm (or an otbcli subprocess)
 // as an unbounded value instead of a typed InvalidParameter refusal. The
 // check itself lives in the sicnu_operators_core leaf
-// (rs_param_validation) so run()-calling funnels that link only the leaf
-// can share the exact same gate.
-void RSOperator::validateParams(const Json::Value& params) const {
-    validateDeclaredRanges(schema(), params);
-}
+// (rs_param_validation) and RSOperator::validateParams (rs_operator.h,
+// inline) delegates to it, so run()-calling funnels that link only the
+// leaf share the exact same gate.
 
 Json::Value RSOperator::execute(const Json::Value& params, RSOperatorContext& context) {
     auto& logger = RSOperationLogger::instance();

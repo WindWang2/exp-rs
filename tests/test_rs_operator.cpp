@@ -420,6 +420,10 @@ class RangedStubOperator : public RSOperator {
         setRange( threshold, 0.0, 1.0 );
         params["threshold"] = threshold;
         params["gain"] = makeNumberParam( "gain", "No range declared", 1.0 );
+        Json::Value badBound = makeNumberParam( "badBound", "String bounds", 1.0 );
+        badBound["minimum"] = "not-a-number";
+        badBound["maximum"] = "also-not-a-number";
+        params["badBound"] = badBound;
 
         Json::Value outputs( Json::objectValue );
         outputs["result"] = makeNumberParam( "result", "Echo" );
@@ -489,6 +493,16 @@ TEST_CASE( "execute enforces schema-declared numeric ranges with typed refusals 
   // values actually supplied.
   {
     Json::Value params( Json::objectValue );
+    Json::Value result = op.execute( params, context );
+    CHECK( result["echo"].asInt() == 5 );
+  }
+
+  // A hand-written non-numeric bound is a schema defect, not a value
+  // refusal: the gate skips it instead of letting Json::LogicError escape
+  // from execute() (R1-P3 hardening, pinned here).
+  {
+    Json::Value params( Json::objectValue );
+    params["badBound"] = 5;
     Json::Value result = op.execute( params, context );
     CHECK( result["echo"].asInt() == 5 );
   }

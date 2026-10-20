@@ -154,6 +154,29 @@ TEST_CASE( "generic rasters take only declared metadata; unknown adapters fail s
   CHECK_THROWS_AS( sicnu::geo::readProductMetadataAuto( safe.string() ), sicnu::geo::GeoError );
 }
 
+TEST_CASE( "an oversized Sentinel-1 manifest is refused typed, never slurped (#1637-3)",
+           "[io][products][bounds]" )
+{
+  // The generic product adapters stream manifest.safe with the same
+  // unbounded `buffer << in.rdbuf()` the CN reader had — the bound must
+  // hold on this path too (R2-P3 twin closure).
+  const std::string dir = scratch( "s1_oversized" );
+  const fs::path safe = fs::path( dir ) / "S1A_IW_GRDH_1SDV_HUGE.SAFE";
+  fs::create_directories( safe );
+  const std::string pad( 5 * 1024 * 1024, 'x' );
+  writeText( ( safe / "manifest.safe" ).string(),
+             "<?xml version=\"1.0\"?>\n<safe: oasis=" + pad + "/>" );
+  try
+  {
+    ( void )sicnu::geo::readProductMetadataAuto( safe.string() );
+    FAIL( "a >4 MiB manifest.safe must be refused, not parsed" );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    CHECK( error.code() == sicnu::geo::ErrorCode::InvalidMetadata );
+  }
+}
+
 TEST_CASE( "an oversized CN metadata sidecar is refused typed, never slurped (#1637-3)",
            "[io][products][cn][bounds]" )
 {

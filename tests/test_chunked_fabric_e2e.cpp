@@ -1468,11 +1468,12 @@ TEST_CASE( "Tier 4: Scenario 5 - Memory-Governed TB-Scale Streaming Workflow",
     RSOperatorContext ctx( dir.generic_string() );
 
     // ExecutionGovernor with active budgets. 16 MiB keeps the full-capacity
-    // admission under the F-A-13 in-hand accounting: peak = queue(2×2) +
-    // in-hand(2·stages+2 = 6) + drain(1) = 11 tiles × 1 MiB. The old 10 MiB
-    // budget assumed the pre-F-A-13 7-tile peak and degraded to
-    // ReduceConcurrency, contradicting this scenario's Admitted-workflow
-    // intent.
+    // admission under the F-A-13 in-hand accounting: peak = queue
+    // ((stages+1)·cap·inputs = 3×2×1 = 6) + in-hand(2·stages+2 = 6) +
+    // drain(1) = 13 tiles × 1 MiB. The old 10 MiB budget assumed the
+    // pre-F-A-13 7-tile peak and degraded to ReduceConcurrency (minimal
+    // peak 10 MiB is not < 10 MiB), contradicting this scenario's
+    // Admitted-workflow intent.
     ExecutionGovernor::Config govCfg;
     govCfg.ramBytes = 16 * 1024 * 1024; // 16 MiB RAM cap
     govCfg.scratchBytes = 100 * 1024 * 1024; // 100 MiB Scratch cap
