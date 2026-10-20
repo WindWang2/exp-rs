@@ -1,6 +1,6 @@
 # hardening(r19-02): Pi MCP harness, workflow and plugin contract closure
 
-**BASE_SHA** `e12a9afbc8883a474dc9ffcaf3345ae55863dc71` · **HEAD** `<fill at PR time>` · 9 commits
+**BASE_SHA** `e12a9afbc8883a474dc9ffcaf3345ae55863dc71` · **HEAD** `ba503cee1`（code head 5b5d8b733 + docs）
 
 ## 职责边界
 R19-02 轨（Pi/MCP Agent Harness、工具契约、科学决策与 Workflow 闭环可靠性）。全部改动在本轨 OWNERSHIP 区（`.planning/r19-02/OWNERSHIP.md`）；`tests/CMakeLists.txt` 纯 append-only；与开放 PR #1663/#1664/#1665 零文件冲突（merge-tree 验证）。

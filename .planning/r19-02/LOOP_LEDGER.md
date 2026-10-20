@@ -57,3 +57,9 @@ Goal-loop 账本（单一事实源；任务书指定路径）。每轮：`第N�
 - 全族 14 套 ×2：11 全绿；parity/e2e 在补建 CLI/host 二进制后全绿；snapshot 仅 registry 腿红区 1 败（确定性，失败信息自诊断）。
 - pi 全套 39/39 ×2；scripts unittest OK ×2。
 - 下一步：R2 评审 → fetch 复核/rebase → push → PR → FINAL_REPORT。
+
+### 第7轮 | R2 评审 + P2 修正 + PR 就绪 | 通过
+- R2（第二 fresh 子代理，全范围）：READY 无 P0/P1；P2×1=CT-6 失败集枚举错误（5→7 工具、两类缺项、lint_catalog 本就 canonical）→ CROSS_TRACK/PR_BODY/ORACLES/TEST_RESULTS 四处修正 + REVIEW_R2.md 存档（5b5d8b733）；R2 P3×2（ClearGuard 竞态→RISK R12；.tif 残留→已删）。
+- master 复核未动（e12a9afbc）；与 #1663/#1665 零重叠、与 #1664 仅 tests/CMakeLists.txt 双方 append-only（merge-tree 0 冲突）；diff --check clean；46 文件全在区内。
+- 终验矩阵见 TEST_RESULTS（14 套族 ×2 + pi 39/39 ×2 + unittest ×2；唯一红=surface_snapshot registry 腿 CT-6 红区确定性失败，已跨轨记录）。
+- 动作：push 分支 → gh pr create → FINAL_REPORT。
