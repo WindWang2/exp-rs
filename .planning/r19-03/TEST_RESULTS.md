@@ -50,6 +50,14 @@
 
 - test_cartography_production_11：3/28 失败（:811 atlas REQUIRE result.ok、:1160 e2e sha、:1296 corpus，错误形态 "atlas … no coverage layer" / 渲染相关）。**本 diff 零编图文件**（git diff --stat 核对：src/app 菜单/对话框、src/help、tests 三文件）；#1655 已在 master 把门反转为默认运行（SICNU_CP11_RENDER=0 才跳过），本机离屏渲染字体/图例路径即触发。记录待编图 owner 在带显示环境复核；SICNU_CP11_RENDER=1 探针 EXIT=42（同 3 失败，非挂起）。
 
+## R1/R2 处置复测（commit 6104933e6 后，R2 reviewer 独立重跑亦证实）
+
+- `test_help_core [r19d]`: 7/7 ×2（强化后含 left(119) 边界断言）
+- `test_r14_D_vector_edit_honesty [menu_session_gate]`: 30/30 ×2
+- `test_m2_batch_a_dialogs`: 132/132 ×2
+- 全量 r14D: 370/370；全量 help_core: 2173/2173
+- R2 判定：APPROVE（零 P0/P1/P2；4×P3 均已处置：注释 121、证据回填、setSpectrum 换参修复、tooltip 文案变化记录于 PR）
+
 ## NOT_EXECUTED
 
 - Windows/macOS 路径（C12）：本机仅 Linux offscreen

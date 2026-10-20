@@ -339,7 +339,7 @@ TEST_CASE( "Batch A: SpectralLibraryDialog matching and summary updates", "[batc
 
     QVector<double> wavelengths = { 450.0, 550.0, 650.0, 850.0 };
     QVector<double> values = { 0.05, 0.08, 0.04, 0.45 };
-    dialog.setSpectrum( wavelengths, values );
+    dialog.setSpectrum( values, wavelengths );
     CHECK( summary->text().contains( QStringLiteral( "4" ) ) );
     CHECK( matchBtn->isEnabledTo( &dialog ) );
   }

@@ -585,7 +585,7 @@ TEST_CASE( "terminology descriptors respect the shared summary bound and surroga
     t.en = QStringLiteral( "oversized definition term" );
     t.zh = QStringLiteral( "超长定义术语" );
     // 119 CJK chars (code units 0..118) + an astral char whose surrogate
-    // pair occupies code units 119-120: size 122 exceeds the 120 bound AND
+    // pair occupies code units 119-120: size 121 exceeds the 120 bound AND
     // the naive left(120) cut lands exactly BETWEEN the pair's halves,
     // stranding the high surrogate. truncateSummary must back off to 119.
     t.definitionZh = QString( 119, QChar( 0x5B9A ) );
