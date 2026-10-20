@@ -155,9 +155,6 @@ def main() -> int:
                         help="follow first-parent history only (trunk merges)")
     parser.add_argument("--max-merges", type=int, default=0,
                         help="bound the audit to the N most recent merges (0 = all)")
-    parser.add_argument("--fail-on-findings", action="store_true",
-                        help="exit 1 when findings exist (default behaviour "
-                             "already exits 1; kept for gate-script symmetry)")
     args = parser.parse_args()
 
     repo = Path.cwd()

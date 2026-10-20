@@ -76,8 +76,7 @@ class MergeLossAuditTest(unittest.TestCase):
     def test_clean_merge_reports_nothing(self) -> None:
         with TempRepo() as fx:
             diverge_and_merge(fx.repo, resolve="recursive")
-            # 'recursive' with an exclusive change keeps it; force a real
-            # merge commit shape by re-running on trunk (already merged above).
+            # 'recursive' keeps a one-sided change, so the merge is clean.
             proc = run_tool("merge_loss_audit.py", ["--json"], cwd=fx.repo)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             data = json.loads(proc.stdout)
@@ -101,6 +100,7 @@ class MergeLossAuditTest(unittest.TestCase):
             hits = [f for f in data["findings"] if f["path"] == "new_file.cpp"]
             self.assertEqual(len(hits), 1, data)
             self.assertEqual(hits[0]["change"], "A")
+            self.assertEqual(hits[0]["lost_parent"], 2)
 
     def test_lost_deletion_is_reported(self) -> None:
         with TempRepo() as fx:
@@ -124,6 +124,7 @@ class MergeLossAuditTest(unittest.TestCase):
             hits = [f for f in data["findings"] if f["path"] == "doomed.cpp"]
             self.assertEqual(len(hits), 1, data)
             self.assertEqual(hits[0]["change"], "D")
+            self.assertEqual(hits[0]["lost_parent"], 2)
 
     def test_both_sides_conflict_resolution_is_not_reported(self) -> None:
         with TempRepo() as fx:
