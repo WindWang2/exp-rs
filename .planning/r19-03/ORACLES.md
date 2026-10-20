@@ -2,10 +2,10 @@
 
 | ID | 触发源/风险 | 测试/探针命令 | baseline RED | fix commit | GREEN-1 | GREEN-2 | negative test | reviewer | post-rebase |
 |---|---|---|---|---|---|---|---|---|---|
-| O-1 | Edit 菜单 Cut/Paste/Delete Selected 无会话恒可用（r18-D R2 P3-5 遗留；C01） | `test_r14_D_vector_edit_honesty [menu_session_gate]` | 待录（editingAction 查无 → REQUIRE 失败） | 待 | 待 | 待 | 无会话 raster 当前层 + 会话开启/回滚两段 | 待 | 待 |
-| O-2 | terminology summary 无 120 上界（#1639-2；C11/O-C4 契约） | `test_help_core [r19d][terms]` | 待录（300 字 summary > 120） | 待 | 待 | 待 | 超长 + 尾部星面字符（代理对边界）；短定义无损 | 待 | 待 |
-| O-3 | m2_batch_a 两处 CHECK(true) 恒真（#1621 残余；O-C5） | `test_m2_batch_a_dialogs`（DataManager toggle / Set spectral curve profile 两 SECTION） | 待录（summary 标签查无 objectName → REQUIRE 失败） | 待 | 待 | 待 | 空态文本 + 按钮禁用前置；断言可红探针（mutation：注释 updateSpectrumSummary 调用） | 待 | 待 |
-| O-4 | #1655 渲染门永久熄灭（证据性） | `SICNU_CP11_RENDER=1 timeout 300 test_cartography_production_11` | N/A（探针） | 无代码 | — | — | 挂起即 timeout 124 如实记录 | N/A | N/A |
+| O-1 | Edit 菜单 Cut/Paste/Delete Selected 无会话恒可用（r18-D R2 P3-5 遗留；C01） | `test_r14_D_vector_edit_honesty [menu_session_gate]` | :1313/:1347 `nullptr != nullptr`（mActionCutFeatures） | 04e81fac0 | 30/30 | 30/30 | raster 当前层禁用+reason；会话开启解锁、rollback 复锁 | 待 R1 | 待 |
+| O-2 | terminology summary 无 120 上界（#1639-2；C11 契约） | `test_help_core [r19d][terms]` | :608 `302 (0x12e) <= 120` | 04e81fac0 | 6/6 | 6/6 | 300 字 CJK+星面尾（代理边界）；短定义无损 | 待 R1 | 待 |
+| O-3 | m2_batch_a 两处 CHECK(true) 恒真（#1621 残余；O-C5） | `test_m2_batch_a_dialogs` 两 SECTION | `spectralSummaryLabel` 查无 `nullptr != nullptr` | 04e81fac0 | 132/132 | 132/132 | 空态文本+按钮禁用前置；**变异探针**：移除 ctor updateSpectrumSummary → 1 用例红（131/132） | 待 R1 | 待 |
+| O-4 | #1655 渲染门归属（证据性） | `SICNU_CP11_RENDER=1 ./test_cartography_production_11` | N/A | 无代码 | — | — | 探针 EXIT=42（3 渲染失败非挂起）→ KNOWN_BASELINE_FAIL（diff 零编图文件） | N/A | N/A |
 
 ## 门禁清单（PR 前逐项核）
 

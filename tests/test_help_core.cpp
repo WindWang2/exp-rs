@@ -584,11 +584,11 @@ TEST_CASE( "terminology descriptors respect the shared summary bound and surroga
     TermEntry t;
     t.en = QStringLiteral( "oversized definition term" );
     t.zh = QStringLiteral( "超长定义术语" );
-    // 300 CJK chars — far past the 120 bound.
-    t.definitionZh = QString( 300, QChar( 0x5B9A ) );
-    // End with an astral char (U+20BB7, outside the BMP) so any naive
-    // code-unit cut at exactly the bound could strand a lone surrogate.
-    // Spelled as its explicit surrogate pair D842 DFB7.
+    // 119 CJK chars (code units 0..118) + an astral char whose surrogate
+    // pair occupies code units 119-120: size 122 exceeds the 120 bound AND
+    // the naive left(120) cut lands exactly BETWEEN the pair's halves,
+    // stranding the high surrogate. truncateSummary must back off to 119.
+    t.definitionZh = QString( 119, QChar( 0x5B9A ) );
     t.definitionZh += QString( QChar( 0xD842 ) ) + QChar( 0xDFB7 );
     t.category = QStringLiteral( "spectral" );
 
@@ -606,7 +606,11 @@ TEST_CASE( "terminology descriptors respect the shared summary bound and surroga
     REQUIRE( d != nullptr );
 
     CHECK( d->summary.size() <= kHelpSummaryMaxChars );
-    // The shared boundary rule: the cut must never orphan a surrogate half.
+    // The boundary rule through appendDescriptors: the cut backs off the
+    // straddling pair, so the summary is exactly the 119 CJK prefix and
+    // contains no surrogate halves at all.
+    CHECK( d->summary == t.definitionZh.left( 119 ) );
+    // Belt-and-braces: no orphaned surrogate half anywhere in the summary.
     // (A COMPLETE astral char inside the window is fine — only a high
     // surrogate without its low partner, or a stray low, is an orphan.)
     bool orphan = false;

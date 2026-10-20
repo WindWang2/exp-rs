@@ -6,13 +6,13 @@
 
 | 路径 | 依据 | 备注 |
 |---|---|---|
-| `src/app/main_window*.cpp/.h`、`src/app/workbench/**`、`src/app/panels/**`、`src/app/dialogs/**`、`src/app/widgets/**`、`src/app/editing/**`、`src/app/classification/**`、`src/app/visualanalytics/**`、`src/app/shell/**`、`src/app/log_panel.*`、`src/app/stac_client.*` | 任务书 C01–C06/C09/C10/C13 | #1662 大多已修，仅动实证残留 |
+| `src/app/main_window*.cpp/.h`、`src/app/workbench/**`、`src/app/panels/**`、`src/app/dialogs/**`、`src/app/widgets/**`、`src/app/editing/**`、`src/app/classification/**`、`src/app/visualanalytics/**`、`src/app/shell/**`（含 ribbon_controller.cpp：R1 P2-1 处置——Cut/Paste/Delete 改用既有 addActionButton 门控投影）、`src/app/log_panel.*`、`src/app/stac_client.*` | 任务书 C01–C06/C09/C10/C13 | #1662 大多已修，仅动实证残留 |
 | `src/agent/cartography/**`、`src/agent/mapspec/**`、`src/agent/layout_tools/**`、`src/agent/symbology/**` | 任务书 C07/C08 | produce legend 守卫（r18-d C4 遗留）在此 |
 | `src/agent/commands/workspace_commands.*` | ~~扩界声明~~ **撤销**：#1571 经实读已在 master 修复（undo/redo 锁外回调 + 部分失败不入 redo 栈），本轮不改 | 见 LOOP_LEDGER 轮2 |
 | `src/agent/agent_copilot_dock_widget.*`、`src/agent/view_control_service.*`、`src/agent/raster_display_service.*` | 任务书 | |
 | `src/help/**` **排除** `help_content_store.cpp` | 任务书（#1664 红线） | #1639 两项在 help_presenter / terminology_provider |
 | `resources/styles.qss`、`resources/styles-dark.qss` | 任务书 C09 | 本轮不动（无截图 oracle 前禁"美化"） |
-| `tests/test_r14_D_vector_edit_honesty.cpp`、`tests/test_e2e_open_issues.cpp`、`tests/test_cartography_production_11.cpp`、`tests/test_m2_batch_a_dialogs.cpp`、`tests/test_m2_batch_b_dialogs.cpp`、`tests/test_classification_studio_widget.cpp`、`tests/test_spectral_profile_widget.cpp`、`tests/test_pipeline_canvas_widget.cpp`、`tests/test_georef_dual_window_workbench.cpp`、`tests/test_m2_dialog_stress.cpp` | 既有测试文件内容修改（不改注册）；#1663/#1664 文件集均不含它们（已核） | #1558/#1621/#1622/#1657 |
+| `tests/test_r14_D_vector_edit_honesty.cpp`、`tests/test_e2e_open_issues.cpp`、`tests/test_cartography_production_11.cpp`、`tests/test_m2_batch_a_dialogs.cpp`、`tests/test_m2_batch_b_dialogs.cpp`、`tests/test_classification_studio_widget.cpp`、`tests/test_spectral_profile_widget.cpp`、`tests/test_pipeline_canvas_widget.cpp`、`tests/test_georef_dual_window_workbench.cpp`、`tests/test_m2_dialog_stress.cpp`、`tests/test_help_core.cpp`（R1 P1-1 补记：T7 术语上界用例落点，#1663/#1664 文件集均不含它） | 既有测试文件内容修改（不改注册） | |
 | `.gitignore` | r18-d 先例：append-only 本轨 planning 白名单块 | 已加 3 行 |
 
 ## 本轨只读（含红线）
