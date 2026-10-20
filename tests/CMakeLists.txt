@@ -16298,3 +16298,26 @@ sicnu_add_teaching_admin_test(test_teaching_admin_checkpoint_stamp_r16_c_t06)
 sicnu_add_teaching_admin_test(test_teaching_admin_grader_cli_budget_r16_c_t06)
 sicnu_add_teaching_admin_test(test_teaching_admin_rubric_weights_r16_c_t06)
 sicnu_add_teaching_admin_test(test_teaching_admin_student_id_authority_r16_c_t06)
+
+# ── R19-02: Pi/MCP harness, workflow and plugin contract closure ──
+# Append-only registration block for this track's new suites (docs:
+# .planning/r19-02). One line per work package, added in RED→GREEN order.
+add_executable(test_r19_02_workflow_cancel_order test_r19_02_workflow_cancel_order.cpp)
+target_link_libraries(test_r19_02_workflow_cancel_order PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_workflow
+    sicnu_workflow_runtime
+    sicnu_operators
+    sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    Sicnu::data
+    Qt6::Core
+    qgis_core
+    GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r19_02_workflow_cancel_order PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r19_02_workflow_cancel_order PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_r19_02_workflow_cancel_order)

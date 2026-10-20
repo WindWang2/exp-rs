@@ -79,6 +79,11 @@ class WorkflowRuntime
     /// Per-session cooperative cancellation flag (created in open()).
     std::shared_ptr<std::atomic<bool>> cancelFlag( const std::string &sessionId );
 
+    /// Same lookup for a caller already holding m_mutex — runStep's stale
+    /// consume and requestCancel's store are ordered through that one lock
+    /// (the #1654 residual window).
+    std::shared_ptr<std::atomic<bool>> cancelFlagLocked( const std::string &sessionId );
+
     Json::Value runStepSync( const std::string &sessionId, const std::string &stepId,
                              const StepDef *step, const Json::Value &params,
                              std::shared_ptr<WorkflowSession> sessionPtr,
