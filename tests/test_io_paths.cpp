@@ -438,6 +438,44 @@ TEST_CASE( "FormatRegistry profileForPath decodes percent-escapes and strips que
   CHECK( profileC->id == "GeoPackage" );
 }
 
+TEST_CASE( "FormatRegistry profileForPath resolves two-segment extensions without shadowing (#1637-2)",
+           "[formats][profiles][zarr]" )
+{
+  const auto &registry = sicnu::geo::FormatRegistry::instance();
+
+  // A Zarr v3 store root is "…zarr.json": the declared two-segment extension
+  // must win over the earlier-registered GeoJSON "json". The old
+  // last-dot-first-match resolution made every "zarr.json" declaration
+  // unreachable (extension after the last dot is plain "json").
+  const auto *zarrDoc = registry.profileForPath( "/data/store.zarr.json" );
+  REQUIRE( zarrDoc != nullptr );
+  CHECK( zarrDoc->id == "Zarr" );
+
+  // Directory-shaped Zarr stores keep resolving through the single-segment
+  // declaration.
+  const auto *zarrDir = registry.profileForPath( "/data/cube.zarr" );
+  REQUIRE( zarrDir != nullptr );
+  CHECK( zarrDir->id == "Zarr" );
+
+  // Remote + query + uppercase: the suffix match must compose with the
+  // percent-decode, query-strip and case-folding the single-segment path
+  // already guarantees.
+  const auto *zarrRemote =
+    registry.profileForPath( "/vsicurl/https://example.com/sst.zarr.json?token=a.b" );
+  REQUIRE( zarrRemote != nullptr );
+  CHECK( zarrRemote->id == "Zarr" );
+  const auto *zarrUpper = registry.profileForPath( "file:///data/STORE.ZARR.JSON" );
+  REQUIRE( zarrUpper != nullptr );
+  CHECK( zarrUpper->id == "Zarr" );
+
+  // Compat pin: a bare ".json" stays GeoJSON — extension guessing cannot
+  // distinguish a STAC Item from a GeoJSON FeatureCollection, and GeoJSON
+  // is the earlier-registered, equal-length declaration.
+  const auto *plainJson = registry.profileForPath( "/data/item.json" );
+  REQUIRE( plainJson != nullptr );
+  CHECK( plainJson->id == "GeoJSON" );
+}
+
 TEST_CASE( "SEC-09: Uncovered GDAL open call sites accept file:// URIs seamlessly",
            "[geospatial][sec09]" )
 {
