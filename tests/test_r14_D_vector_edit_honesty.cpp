@@ -1274,3 +1274,88 @@ TEST_CASE( "Layer switch during a deferred relocation does not crash (R16-D T07 
       v->rollBack();
   purgeProjectLayers();
 }
+
+// ── R19-03: Edit-menu session commands ride the editing availability gate ──
+// r18-D gated the 19 Digitizing twins but left the Edit menu's own
+// Cut/Paste/Delete Selected as plain addAction entries: enabled with no
+// edit session, honest only at use time (status-bar refusal). They join
+// the same gate (no geometry mask — any editable geometry qualifies).
+
+TEST_CASE( "Edit menu session commands gate on the editing session (R19-03)",
+           "[app][vector_edit][r19d][menu_session_gate]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  const auto reasonOf = []( QAction *a ) {
+    return a->property( "sicnu/unavailableReason" ).toString();
+  };
+
+  const std::vector<const char *> sessionGated = {
+    "mActionCutFeatures",
+    "mActionPasteFeatures",
+    "mActionDeleteSelectedFeatures",
+  };
+
+  SECTION( "no editable layer: session commands are disabled with a reason" )
+  {
+    auto *raster = new QgsRasterLayer(
+      QStringLiteral( "wms:?crs=EPSG:4326" ), QStringLiteral( "session_gate_none" ),
+      QStringLiteral( "wms" ) );
+    QgsProject::instance()->addMapLayer( raster );
+    fx.window.mapCanvas()->setCurrentLayer( raster );
+    QTest::qWait( 20 );
+
+    // RED phase note: the lookup itself is the failing surface today — the
+    // three Edit-menu entries carry no objectName and no gate registration,
+    // so editingAction() finds nothing. The findChildren scan below then
+    // pins the MENU entries by objectName (they have no toolbar twins, so
+    // unlike the digitizing case no dedicated accessor is needed).
+    const QList<QAction *> registered = fx.window.findChildren<QAction *>();
+    for ( const char *name : sessionGated )
+    {
+      INFO( name );
+      QAction *a = fx.window.editingAction( QLatin1String( name ) );
+      REQUIRE( a != nullptr );
+      // The registered action must be the menu entry (no toolbar twin).
+      QAction *menuEntry = nullptr;
+      for ( QAction *c : registered )
+        if ( c->objectName() == QLatin1String( name ) )
+          menuEntry = c;
+      REQUIRE( menuEntry != nullptr );
+      CHECK_FALSE( menuEntry->isEnabled() );
+      CHECK_FALSE( reasonOf( menuEntry ).isEmpty() );
+      CHECK( menuEntry->toolTip().contains( reasonOf( menuEntry ) ) );
+    }
+    purgeProjectLayers();
+  }
+
+  SECTION( "an edit session unlocks them; rollback re-locks" )
+  {
+    QgsVectorLayer *layer =
+      makeMemoryLayer( QString(), QStringLiteral( "session_gate_vec" ), 1 );
+    REQUIRE( layer->isValid() );
+    adoptInShell( fx.window, layer );
+    fx.window.toggleEditing();
+    REQUIRE( layer->isEditable() );
+
+    for ( const char *name : sessionGated )
+    {
+      INFO( name );
+      QAction *a = fx.window.editingAction( QLatin1String( name ) );
+      REQUIRE( a != nullptr );
+      CHECK( a->isEnabled() );
+      CHECK( reasonOf( a ).isEmpty() );
+    }
+
+    layer->rollBack();
+    CHECK_FALSE( layer->isEditable() );
+    for ( const char *name : sessionGated )
+    {
+      INFO( name );
+      CHECK_FALSE( fx.window.editingAction( QLatin1String( name ) )->isEnabled() );
+    }
+    purgeProjectLayers();
+  }
+}

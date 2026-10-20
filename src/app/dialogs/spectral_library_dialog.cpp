@@ -27,6 +27,9 @@ SpectralLibraryDialog::SpectralLibraryDialog( QWidget *parent )
   setWindowTitle( tr( "Spectral Library Matching" ) );
   setMinimumWidth( 620 );
   setupUi();
+  // Honest state before the first show: with no spectrum collected the
+  // match/save actions must start disabled, not wait for showEvent.
+  updateSpectrumSummary();
 }
 
 void SpectralLibraryDialog::setupUi()
@@ -45,6 +48,7 @@ void SpectralLibraryDialog::setupUi()
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_spectrumSummary = new QLabel( tr( "(no spectrum collected)" ), inputGroup );
+  m_spectrumSummary->setObjectName( QStringLiteral( "spectralSummaryLabel" ) );
   m_spectrumSummary->setWordWrap( true );
   form->addRow( tr( "Current Profile" ), m_spectrumSummary );
 
