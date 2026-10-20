@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <iterator>
 #include <cmath>
 #include <cstdlib>
@@ -124,11 +125,26 @@ std::vector<std::string> listDirectoryBounded( const std::string &dir, int maxEn
   return names;
 }
 
+/// Real CRESDA/PMI sidecars are a few KB; a "metadata" XML past this bound
+/// is a misidentified or hostile file and must be refused BEFORE the whole
+/// file is streamed into memory (#1637-3).
+constexpr std::uintmax_t kMaxMetadataXmlBytes = 4ull * 1024 * 1024;
+
 bool readFileText( const std::string &path, std::string &out )
 {
+  const std::filesystem::path native = sicnu::portable::pathFromUtf8( path );
+  // Bounded read: size the file first and refuse the oversized case typed
+  // (never slurp first, ask later). A stat failure (special file) keeps the
+  // legacy read path — the bound is a guard, not an existence check.
+  std::error_code sizeError;
+  const std::uintmax_t size = std::filesystem::file_size( native, sizeError );
+  if ( !sizeError && size > kMaxMetadataXmlBytes )
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    "product metadata exceeds the 4 MiB bound (" +
+                      std::to_string( size ) + " bytes), refused before read: " + path );
   // Open through the wide-char filesystem path: a narrow std::ifstream on
   // Windows cannot address product directories with non-ANSI (Chinese) names.
-  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
+  std::ifstream in( native, std::ios::binary );
   if ( !in.is_open() )
     return false;
   std::ostringstream buffer;
