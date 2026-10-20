@@ -15,7 +15,7 @@
 | O-PI | pi 全套 | `node --test test/*.test.mjs` ×2 | 38/39（T6 RED） | 7944fa75a | 39/39 | 39/39 | — | R1 | 待 |
 
 ## KNOWN_BASELINE_FAIL / NOT_EXECUTED
-- KNOWN_BASELINE_FAIL: test_surface_snapshot registry 腿 × cartography 5 工具（CT-6，轨 03 红区 src 需补 `"properties": {}`；本轨已把同型的 workspace:undo/redo 修复并在快照中给出权威形态）。
+- KNOWN_BASELINE_FAIL: test_surface_snapshot registry 腿 × cartography 7 工具（CT-6 R2 修正版，轨 03 红区：catalog_index/chart_list/list_rules/list_token_sets 缺 `properties:{}`；diff_templates/export/explain 缺 `type:"object"`；lint_catalog 已 canonical 通过。REQUIRE 首个不匹配中止故单轮显示 1 败）。本轨已把同型的 workspace:undo/redo 修复并在快照中给出权威形态。
 - NOT_EXECUTED: CI（#1491 全仓失效）；Windows/macOS lane（无宿主）；plugin_host 全进程族（本轮目标集未含，留 R2 后跟进轮）。
 
 ## 完成定义核查（PR 时逐项打钩）

@@ -25,7 +25,12 @@ merge_loss_audit.py 全史审计（540 merges, 224 findings）中不属于本轨
 - merge 5e14bd1d7b（science_context 6 文件，#1518/#1505-P1 修复）→ 本轨 T0 恢复（a29f935e0）。
 - merge 29596c913（30 路径）→ 已由 r18-c (#1660) 恢复，检测器用作校准基准。
 
-## CT-6 [轨 03 / cartography 源码] surface 快照两腿契约在 5 个 cartography 工具上互斥
-- r18-C (#1660) 的规范化投影让 tools/list/get_tool_schema/快照对 property-less schema 自动补 `"properties": {}`；而 test_surface_snapshot 的 registry 腿钉的是 **raw** SpatialToolRegistry schema。两腿只有 raw 本身规范化形态一致时才同时成立。
-- `workspace:undo/redo`（本轨区）已在 3ff4e0ba4 修为 canonical 形态；**cartography:{catalog_index,chart_list,lint_catalog,list_rules,list_token_sets}** 的 raw schema（src/agent/cartography/**，轨 03 红区）仍缺 properties → registry 腿确定性失败（KNOWN_BASELINE_FAIL，失败信息含工具名与 regen 提示）。
-- 建议归属：轨 03 / r18-d 后续 —— 5 个工具的 inputSchema() 补 `"properties": {}`（与 workspace 工具同型，一行式修复），无需动测试或快照。
+## CT-6 [轨 03 / cartography 源码] surface 快照两腿契约在 7 个 cartography 工具上互斥（R2 修正版）
+- r18-C (#1660) 的规范化投影让 tools/list/get_tool_schema/快照对缺项 schema 自动补齐（`agent_tool.cpp:124-162`：缺 `"type"` 补 `type:"object"`，缺/非对象 `"properties"` 补 `properties:{}`）；而 test_surface_snapshot 的 registry 腿钉的是 **raw** SpatialToolRegistry schema。两腿只有 raw 本身规范化形态一致时才同时成立。
+- `workspace:undo/redo`（本轨区）已在 3ff4e0ba4 修为 canonical 形态。
+- **src/agent/cartography/cartography_tools.cpp（轨 03 红区）需修 7 个工具，两类缺项**（R2 静态核对 + 基线快照实证）：
+  - 缺 `"properties": {}`（4 个）：`cartography:catalog_index`、`cartography:chart_list`、`cartography:list_rules`、`cartography:list_token_sets`
+  - 缺 `"type": "object"`（3 个）：`cartography:diff_templates`、`cartography:export`、`cartography:explain`
+  - `cartography:lint_catalog` **已 canonical，无需修改**（基线快照与 raw 均已含 type+properties）
+- registry 腿当前确定性失败（REQUIRE 在首个不匹配处中止；按注册序首个为 list_token_sets），KNOWN_BASELINE_FAIL，失败信息含工具名与 regen 提示。
+- 建议归属：轨 03 / r18-d 后续 —— 按上表两类缺项各补一行式 schema 键，无需动测试或快照；修完 registry 腿即全绿。

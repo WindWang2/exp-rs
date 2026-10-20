@@ -32,7 +32,7 @@
 | test_mcp_server | 31例/9686 ✓ | ✓ |
 | test_surface_parity | 12例/5484 ✓ | ✓ |
 | test_surface_e2e | 1例/4202→4296 ✓ | ✓ |
-| test_surface_snapshot（T7） | projection+wire 腿 ✓；registry 腿 1 败（CT-6 红区） | 同（确定性） |
+| test_surface_snapshot（T7） | projection+wire 腿 ✓；registry 腿 1 败（CT-6 红区 7 工具，REQUIRE 首个不匹配中止） | 同（确定性） |
 | test_surface_protocol / protocol_r4 | 10例/70-74、11例/2609 ✓ | ✓ |
 | test_workflow_execution_plane / recovery | 8例/96、15例/163 ✓ | ✓ |
 | test_r14_C_mcp_workflow_cancel | 2例/21 ✓ | ✓ |

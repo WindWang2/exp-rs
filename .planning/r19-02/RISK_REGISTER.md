@@ -13,3 +13,4 @@
 | R9 | get_tool_schema 每调用投影无缓存（B11 记账，无实测瓶颈） | mcp_server | 仅在 benchmark 证明 p95 超标时立项 |
 | R10 | temporal phenology 工具未接线暴露无锁 static store（接线前无害） | spatial_tools | DEBT 记录；接线工作属 D-160-1 后续 |
 | R11 | CI 全仓失效（#1491，2026-10-11 起） | 交付 | 全部本地验证 + TEST_RESULTS 全量记录（任务书允许） |
+| R12 | 同会话并发 runStep 时 ClearGuard 按 key 清 m_activeTaskIds，互相清掉对方 taskId（R2 P3，取消退化为仍有效的 flag-only 路径） | workflow_runtime | 后续轮：per-run guard token 或引用计数 |
