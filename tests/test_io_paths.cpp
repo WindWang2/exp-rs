@@ -474,6 +474,15 @@ TEST_CASE( "FormatRegistry profileForPath resolves two-segment extensions withou
   const auto *plainJson = registry.profileForPath( "/data/item.json" );
   REQUIRE( plainJson != nullptr );
   CHECK( plainJson->id == "GeoJSON" );
+
+  // Negative pins: a dot with no declared extension behind it stays
+  // nullptr, and a two-segment name with NO dot before its tail keeps the
+  // tail's resolution (same as before this fix — the anchor is REQUIRED).
+  CHECK( registry.profileForPath( "/data/archive.tar.gz" ) == nullptr );
+  CHECK( registry.profileForPath( "/data/noextension" ) == nullptr );
+  const auto *bareZarr = registry.profileForPath( "zarr.json" );
+  REQUIRE( bareZarr != nullptr );
+  CHECK( bareZarr->id == "GeoJSON" );
 }
 
 TEST_CASE( "SEC-09: Uncovered GDAL open call sites accept file:// URIs seamlessly",

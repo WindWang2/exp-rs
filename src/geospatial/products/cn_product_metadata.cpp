@@ -126,29 +126,37 @@ std::vector<std::string> listDirectoryBounded( const std::string &dir, int maxEn
 }
 
 /// Real CRESDA/PMI sidecars are a few KB; a "metadata" XML past this bound
-/// is a misidentified or hostile file and must be refused BEFORE the whole
-/// file is streamed into memory (#1637-3).
+/// is a misidentified or hostile file and must be refused typed (#1637-3).
 constexpr std::uintmax_t kMaxMetadataXmlBytes = 4ull * 1024 * 1024;
 
 bool readFileText( const std::string &path, std::string &out )
 {
-  const std::filesystem::path native = sicnu::portable::pathFromUtf8( path );
-  // Bounded read: size the file first and refuse the oversized case typed
-  // (never slurp first, ask later). A stat failure (special file) keeps the
-  // legacy read path — the bound is a guard, not an existence check.
-  std::error_code sizeError;
-  const std::uintmax_t size = std::filesystem::file_size( native, sizeError );
-  if ( !sizeError && size > kMaxMetadataXmlBytes )
-    throw GeoError( ErrorCode::InvalidMetadata,
-                    "product metadata exceeds the 4 MiB bound (" +
-                      std::to_string( size ) + " bytes), refused before read: " + path );
   // Open through the wide-char filesystem path: a narrow std::ifstream on
   // Windows cannot address product directories with non-ANSI (Chinese) names.
-  std::ifstream in( native, std::ios::binary );
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in.is_open() )
     return false;
+  // Genuinely bounded read: stream in chunks and refuse as soon as the
+  // total EXCEEDS the bound. Unlike a stat-then-slurp (which a FIFO or a
+  // file growing between stat and read bypasses), the process never holds
+  // more than bound+chunk bytes of "metadata" regardless of file type.
   std::ostringstream buffer;
-  buffer << in.rdbuf();
+  char chunk[65536];
+  std::uintmax_t total = 0;
+  while ( in.read( chunk, sizeof chunk ) || in.gcount() > 0 )
+  {
+    const std::streamsize got = in.gcount();
+    if ( got > 0 )
+    {
+      total += static_cast<std::uintmax_t>( got );
+      if ( total > kMaxMetadataXmlBytes )
+        throw GeoError( ErrorCode::InvalidMetadata,
+                        "product metadata exceeds the 4 MiB bound, refused while reading: " + path );
+      buffer.write( chunk, got );
+    }
+    if ( in.eof() )
+      break;
+  }
   out = buffer.str();
   return true;
 }

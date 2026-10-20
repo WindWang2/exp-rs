@@ -2,6 +2,7 @@
 #include "atomic_algorithm_adapter.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_param_validation.h"
 #include <cmath>
 #include <unordered_set>
 
@@ -359,6 +360,12 @@ Json::Value RsOperatorAdapter::execute( const Json::Value &params, ProgressCallb
                                       "Cancelled before run: " + mOp->name() );
   }
 
+  // The adapter is the production funnel for operator execution (main,
+  // job adapter, dispatcher) and calls run() directly — apply the schema
+  // range gate here too (#1578), same as RSOperator::execute() does. The
+  // leaf free function keeps this resolvable from sicnu_operators_core
+  // (this lib links the leaf, not the operators .so).
+  operators::validateDeclaredRanges( mOp->schema(), params );
   return mOp->run( params, ctx );
 }
 

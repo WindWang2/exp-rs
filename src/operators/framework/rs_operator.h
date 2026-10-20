@@ -213,11 +213,24 @@ public:
      * @param params  Algorithm parameters as Json::Value object.
      * @param context Execution context for progress, logs, cancellation, temp files.
      * @return        Algorithm results as Json::Value (commonly an object with
-     *                "output" path and other derived values).
+     *                "output" path and other derived values.
      * @throws RSOperatorError on validation or execution failure.
      */
     virtual Json::Value run(const Json::Value& params,
                             RSOperatorContext& context) = 0;
+
+    /**
+     * Refuses params that violate their schema-declared numeric ranges
+     * (#1578) with a typed InvalidParameter error before run() sees them.
+     * execute() applies this automatically; production funnels that call
+     * run() directly (the processing algorithm adapter, the job engine)
+     * must call it at their entry — a setRange declaration was display-only
+     * metadata before this gate existed.
+     *
+     * Opt-in per declaration: params without minimum/maximum, non-numeric
+     * values and absent params are not touched here.
+     */
+    void validateParams(const Json::Value& params) const;
 
     /**
      * Convenience wrapper that runs the operator and automatically records

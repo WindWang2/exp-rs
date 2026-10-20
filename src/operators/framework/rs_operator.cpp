@@ -3,47 +3,9 @@
  ***************************************************************************/
 #include "rs_operator.h"
 #include "rs_operation_logger.h"
+#include "rs_param_validation.h"
 
 namespace sicnu::operators {
-namespace {
-
-// #1578: setRange declarations used to be display-only metadata — 72
-// declarations across the operator families were never checked at runtime,
-// so an out-of-range knob reached the algorithm (or an otbcli subprocess)
-// as an unbounded value instead of a typed InvalidParameter refusal.
-// Enforcement is opt-in per declaration: parameters without minimum/
-// maximum, non-numeric values and absent parameters keep their legacy
-// handling (defaults and typed accessors inside run()).
-void validateDeclaredRanges(const Json::Value& schemaRoot, const Json::Value& params) {
-    if (!params.isObject())
-        return;
-    const Json::Value& properties = schemaRoot["properties"];
-    if (!properties.isObject())
-        return;
-    for (const std::string& name : params.getMemberNames()) {
-        if (!properties.isMember(name))
-            continue;
-        const Json::Value& declaration = properties[name];
-        if (!declaration.isMember("minimum") || !declaration.isMember("maximum"))
-            continue;
-        const Json::Value& value = params[name];
-        if (!value.isNumeric())
-            continue;
-        const double numeric = value.asDouble();
-        const double minimum = declaration["minimum"].asDouble();
-        const double maximum = declaration["maximum"].asDouble();
-        if (numeric < minimum || numeric > maximum) {
-            throw RSOperatorError(ErrorCode::InvalidParameter,
-                                  "parameter '" + name + "' value " +
-                                      std::to_string(numeric) +
-                                      " is outside the declared [" +
-                                      std::to_string(minimum) + "," +
-                                      std::to_string(maximum) + "] range");
-        }
-    }
-}
-
-} // namespace
 
 
 std::string RSOperator::displayName() const {
@@ -91,6 +53,17 @@ Json::Value RSOperator::estimateExecution(const Json::Value& /*params*/) const {
     return executionEstimate();
 }
 
+// #1578: setRange declarations used to be display-only metadata — 72
+// declarations across the operator families were never checked at runtime,
+// so an out-of-range knob reached the algorithm (or an otbcli subprocess)
+// as an unbounded value instead of a typed InvalidParameter refusal. The
+// check itself lives in the sicnu_operators_core leaf
+// (rs_param_validation) so run()-calling funnels that link only the leaf
+// can share the exact same gate.
+void RSOperator::validateParams(const Json::Value& params) const {
+    validateDeclaredRanges(schema(), params);
+}
+
 Json::Value RSOperator::execute(const Json::Value& params, RSOperatorContext& context) {
     auto& logger = RSOperationLogger::instance();
     const size_t handle = logger.beginRun(name(), params);
@@ -98,7 +71,7 @@ Json::Value RSOperator::execute(const Json::Value& params, RSOperatorContext& co
     const auto start = std::chrono::steady_clock::now();
 
     try {
-        validateDeclaredRanges(schema(), params);
+        validateParams(params);
         Json::Value result = run(params, context);
         const auto end = std::chrono::steady_clock::now();
         const double durationMs =
