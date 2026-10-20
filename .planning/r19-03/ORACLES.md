@@ -9,11 +9,11 @@
 
 ## 门禁清单（PR 前逐项核）
 
-- [ ] `git diff --check` clean
-- [ ] 分支未写共享/红线目录（`git diff origin/master...HEAD --name-only` 对照 OWNERSHIP）
-- [ ] 无新增恒真断言（新断言均有可红证明或 mutation 探针）
-- [ ] 无把依赖缺失/构建失败记为通过；NOT_EXECUTED 如实标注
-- [ ] 本机复现所改模块核心路径 GREEN×2
-- [ ] 两轮独立 reviewer P0/P1 闭环（REVIEW_R1/R2）
-- [ ] rebase 后相关 RED/GREEN 重跑
-- [ ] PR 已创建（URL 回填）
+- [x] `git diff --check` clean（origin/master...HEAD 实测）
+- [x] 分支未写共享/红线目录（20 文件 vs OWNERSHIP/#1663/#1664 核对）（`git diff origin/master...HEAD --name-only` 对照 OWNERSHIP）
+- [x] 无新增恒真断言（RED×3 + 变异探针可红证明；两处旧 CHECK(true) 被移除）（新断言均有可红证明或 mutation 探针）
+- [x] 无把依赖缺失/构建失败记为通过（KNOWN_BASELINE_FAIL/NOT_EXECUTED 如实）；NOT_EXECUTED 如实标注
+- [x] 本机复现所改模块核心路径 GREEN×2（R1/R2 reviewer 独立重跑）
+- [x] 两轮独立 reviewer P0/P1 闭环（R1 条件→处置；R2 APPROVE 零 P0/P1/P2）（REVIEW_R1/R2）
+- [x] rebase 检查：fetch 实测 0 behind（master 未动，无需 rebase）；终态门全部重跑
+- [x] PR 已创建：https://github.com/WindWang2/exp-rs/pull/1665

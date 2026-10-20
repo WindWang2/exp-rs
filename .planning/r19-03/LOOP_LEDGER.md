@@ -15,4 +15,4 @@
 | 4 | RED×3 实证（302>120 / editingAction nullptr×2 / summary 标签 nullptr）→ 三处最小修复 → GREEN×2（6/6、30/30、132/132）→ 变异探针（移除 ctor 调用→131/132 红→恢复）→ 全量回归 15 二进制 + mapspec 2830/2830；production_11 3 渲染失败判明基线既有（diff 零编图文件）→ KNOWN_BASELINE_FAIL | commit 04e81fac0 | 通过 | review R1 |
 | 5 | R1（独立子代理逆向）：APPROVE with conditions——P1-1 OWNERSHIP 漏列 test_help_core、P2-1 ribbon 孪生旁路、P2-2 证据未入库、P3-1 代理对未压切点 | 全部处置：ribbon addActionButton 投影、OWNERSHIP 补记、证据入库、切点强化；复测 7/7×2、30/30×2、132/132×2、370/370、2173/2173 | 通过 | commit 6104933e6 → review R2 |
 | 6 | R2（新独立子代理）：**APPROVE 零 P0/P1/P2**、4×P3（注释 121/证据回填/换参/tooltip 文案）；reviewer 亲跑五组复测证实 | P3 全处置（注释、回填、setSpectrum 换参、PR 记录）；复测 7/7、132/132 | 通过 | commit d1a89fe9f → 终检 + PR |
-| 7 | 终检：fetch 后 master=e12a9afbc 未动（0 behind，免 rebase）；`git diff --check` 干净；20 文件全在 OWNERSHIP 写集、与 #1663/#1664 零交集 | push + gh pr create | 进行中 | PR URL 回填 |
+| 7 | 终检：fetch 后 master=e12a9afbc 未动（0 behind，免 rebase）；`git diff --check` 干净；20 文件全在 OWNERSHIP 写集、与 #1663/#1664 零交集 | push 成功；**gh pr create → https://github.com/WindWang2/exp-rs/pull/1665** | 通过 | 交付完成 |

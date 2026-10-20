@@ -4,7 +4,7 @@
 
 - 分支 `agent/r19-03-qt-cartography-ux-20261020T102458Z`（BASE e12a9afbc = origin/master，fetch 实测 0 behind）
 - 提交 3 个：04e81fac0（修复）/ 6104933e6（R1 处置）/ d1a89fe9f（R2 处置）
-- PR：<待 gh pr create 后回填>
+- PR：https://github.com/WindWang2/exp-rs/pull/1665
 
 ## 修复（全部 RED 实证 → GREEN×2）
 
