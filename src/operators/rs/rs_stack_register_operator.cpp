@@ -138,8 +138,17 @@ Json::Value RsStackRegisterOperator::run(const Json::Value& p, RSOperatorContext
             for (const auto& v : doc.array())
                 ids.push_back(v.toString());
         } else if (p["scenes"].isArray()) {
-            for (const auto& v : p["scenes"])
+            for (const auto& v : p["scenes"]) {
+                // R10-A/PR-11: scenes items are user JSON — a non-string item
+                // must refuse typed (an object used to throw jsoncpp
+                // LogicError, a number was silently stringified into a scene
+                // id).
+                if (!v.isString())
+                    throw RSOperatorError(ErrorCode::InvalidParameter,
+                                          "scenes entries must be strings (got a non-string "
+                                          "JSON value); use scene ids like [\"A\", \"B\"]");
                 ids.push_back(QString::fromStdString(v.asString()));
+            }
         }
     }
     std::vector<sicnu::registration::StackPairObservation> obs;

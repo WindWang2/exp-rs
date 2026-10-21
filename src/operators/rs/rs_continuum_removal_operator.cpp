@@ -12,6 +12,7 @@
 
 #include <gdal.h>
 
+#include <QFile>
 #include <QString>
 
 #include <algorithm>
@@ -22,6 +23,35 @@
 namespace sicnu::operators::rs {
 
 using namespace params;
+
+namespace {
+
+// RAII for the raw GDALDatasetH createOutputTiff hands back: the caller owns
+// closing it, and every early exit (read/write failure, cancellation via
+// throwIfCancelled) used to skip the manual GDALClose — leaking the dataset
+// handle and its file descriptors and leaving a half-written GeoTIFF at the
+// output path (#1544). Same shape as rs_change_streaming.cpp's DatasetFileGuard:
+// destruction closes the handle and discards the partial file unless the run
+// committed it.
+struct DatasetFileGuard
+{
+    GDALDatasetH ds = nullptr;
+    QString path;
+    bool committed = false;
+
+    ~DatasetFileGuard()
+    {
+        if ( ds )
+        {
+            GDALClose( ds );
+            ds = nullptr;
+        }
+        if ( !committed && !path.isEmpty() )
+            QFile::remove( path );
+    }
+};
+
+} // anonymous namespace
 
 Json::Value RsContinuumRemovalOperator::schema() const {
     using namespace schema;
@@ -198,6 +228,7 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     if ( !outDs )
         throw RSOperatorError( ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + outErr.toStdString() );
+    DatasetFileGuard outGuard{ outDs, QString::fromStdString( outputPath ), false };
 
     // Output tagging is CONDITIONAL (#473): when any input band declared
     // NoData, or a void spectrum was actually produced, the output declares
@@ -229,7 +260,6 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
             {
                 if ( !ds.readBandWindow( b + 1, x, y, w, h, bandScratch.data() ) )
                 {
-                    GDALClose( outDs );
                     throw RSOperatorError( ErrorCode::GdalError,
                                           "Failed to read input tile at (" +
                                               std::to_string( x ) + ", " + std::to_string( y ) + ")" );
@@ -299,7 +329,6 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
                 if ( GDALRasterIO( outBand, GF_Write, x, y, w, h, bandTile.data(),
                                  w, h, GDT_Float32, 0, 0 ) != CE_None )
                 {
-                    GDALClose( outDs );
                     throw RSOperatorError( ErrorCode::FileNotWritable,
                                           "Failed to write tile at (" +
                                               std::to_string( x ) + ", " + std::to_string( y ) + ")" );
@@ -319,6 +348,8 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     }
 
     GDALClose( outDs );
+    outGuard.ds = nullptr;
+    outGuard.committed = true;
     ds.close();
     context.reportProgress( 1.0, "Continuum removal complete" );
 

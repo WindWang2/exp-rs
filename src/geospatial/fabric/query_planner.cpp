@@ -467,8 +467,9 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
         // plan failure.
         try
         {
-            const AssetIdentity identity =
-              fabricAssetIdentity( record.path, AssetIdentityOptions{} );
+            AssetIdentityOptions identityOptions;
+            identityOptions.blockPrivateNetworks = options.blockPrivateNetworks;
+            const AssetIdentity identity = fabricAssetIdentity( record.path, identityOptions );
             if ( identity.provable() )
                 ++plan.mCost.cacheableAssets;
             else

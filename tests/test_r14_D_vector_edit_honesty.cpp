@@ -36,6 +36,10 @@
 #include "vector_test_fixtures.h"
 
 #include "main_window.h"
+#include "app/project_context.h"
+#include "app/workbench/selection_context.h"
+#include "app/workbench/command_registry.h"
+#include "app/workbench/workbench_state.h"
 #include "qgis_app_facade.h"
 #include "qgsclipboard.h"
 #include "shell/rs_job_panel.h"
@@ -351,6 +355,88 @@ TEST_CASE( "Facade saveEdits: commit failure reaches the message bar and returns
   layer->setAllowCommit( true );
   layer->rollBack();
   QgsProject::instance()->removeMapLayer( layer->id() );
+}
+
+// ── APP-10 ─────────────────────────────────────────────────────────────────
+
+TEST_CASE( "Failed startEditing never reports Stopped editing and leaves no lease (R18-D)",
+           "[app][vector_edit][r18d][app10]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  SECTION( "read-only layer: the refusal is surfaced, never claimed as Stopped" )
+  {
+    QgsVectorLayer *layer =
+      makeMemoryLayer( QString(), QStringLiteral( "readonly_layer" ), 2 );
+    REQUIRE( layer->isValid() );
+    layer->setReadOnly( true );
+    adoptInShell( fx.window, layer );
+
+    fx.window.toggleEditing();
+    QTest::qWait( 30 );
+
+    CHECK_FALSE( layer->isEditable() );
+    const QString status = fx.window.statusBar()->currentMessage();
+    CHECK_FALSE( status.contains( QStringLiteral( "Stopped editing" ) ) );
+    CHECK( status.contains( QStringLiteral( "Failed to start editing" ) ) );
+  }
+
+  SECTION( "asset-backed layer: a refused session must not leak the Edit Lease" )
+  {
+    REQUIRE( fx.window.projectContext() != nullptr );
+    sicnu::data::DataManager &dataManager = fx.window.projectContext()->dataManager();
+
+    sicnu::data::SourceDescriptor source;
+    source.providerKey = QStringLiteral( "ogr" );
+    source.canonicalSource = vector_test_fixtures::syntheticGeoJsonPath();
+    const auto registered = dataManager.registerSource(
+      sicnu::data::RegisterRequest{ source } );
+    REQUIRE_FALSE( registered.assetId.isNull() );
+    const sicnu::data::AssetId assetId = registered.assetId;
+    QTest::qWait( 100 );
+
+    QgsVectorLayer *assetLayer = nullptr;
+    for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+    {
+      auto *v = qobject_cast<QgsVectorLayer *>( l );
+      if ( v && sicnu::data::AssetId::fromString(
+                    v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) &&
+           *sicnu::data::AssetId::fromString(
+              v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() ) == assetId )
+      {
+        assetLayer = v;
+        break;
+      }
+    }
+    REQUIRE( assetLayer != nullptr );
+    // Refuse the session at the layer level while the lease path stays live:
+    // acquireEditLease() consults only the asset id, so the lease IS taken
+    // and then startEditing() must fail on the read-only flag.
+    assetLayer->setReadOnly( true );
+    fx.window.mapCanvas()->setCurrentLayer( assetLayer );
+    QTest::qWait( 20 );
+    CHECK_FALSE( dataManager.hasActiveEditLease( assetId ) );
+
+    // Snapshot identity: releasing the lease retries deferred relocations,
+    // which may relocate (destroy) the layer synchronously.
+    const QString assetLayerId = assetLayer->id();
+    fx.window.toggleEditing();
+    QTest::qWait( 30 );
+
+    if ( QgsMapLayer *resolved = QgsProject::instance()->mapLayer( assetLayerId ) )
+      if ( auto *v = qobject_cast<QgsVectorLayer *>( resolved ) )
+        CHECK_FALSE( v->isEditable() );
+    CHECK_FALSE( dataManager.hasActiveEditLease( assetId ) );
+    CHECK_FALSE( fx.window.statusBar()->currentMessage()
+                     .contains( QStringLiteral( "Stopped editing" ) ) );
+
+    for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+      if ( auto *v = qobject_cast<QgsVectorLayer *>( l ) )
+        v->rollBack();
+    purgeProjectLayers();
+  }
 }
 
 // ── APP-5 ──────────────────────────────────────────────────────────────────
@@ -880,6 +966,227 @@ TEST_CASE( "Digitizing tools gate on geometry type and expose reasons (R16-D T07
     CHECK_FALSE( reasonOf( rev ).isEmpty() );
     layer->rollBack();
   }
+
+  purgeProjectLayers();
+}
+
+// ── R18-D: menu-registered digitizing actions follow the same gate ─────────
+
+TEST_CASE( "Digitizing menu actions follow the editing availability gate (R18-D)",
+           "[app][vector_edit][r18d][menu_gate]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  const auto reasonOf = []( QAction *a ) {
+    return a->property( "sicnu/unavailableReason" ).toString();
+  };
+
+  // The digitizing MENU actions used to bypass the gate entirely
+  // (enabled-but-will-fail). Review R18-D R1 P2-1 extended the gate from the
+  // first 7 to every menu command whose toolbar twin is gated (Add Feature,
+  // Node, Move, Rotate, Scale, Offset, Reverse, Reshape, Split Features,
+  // Split Part, Simplify, Add/Fill/Delete Ring, Add/Delete Part, Trim/Extend,
+  // Chamfer/Fillet, Feature Array).
+  const std::vector<const char *> menuGated = {
+    "mActionCapturePoint",   "mActionVertexTool",    "mActionMoveFeature",
+    "mActionRotateFeature",  "mActionScaleFeature",  "mActionOffsetCurve",
+    "mActionReverseLine",    "mActionReshape",       "mActionSplitFeatures",
+    "mActionSplitParts",     "mActionSimplify",      "mActionAddRing",
+    "mActionAddPart",        "mActionFillRing",      "mActionDeletePart",
+    "mActionDeleteRing",     "mActionTrimExtendFeature",
+    "mActionChamferFillet",  "mActionFeatureArray",
+  };
+
+  SECTION( "no editable layer: menu digitizing actions are disabled with a reason" )
+  {
+    // Drive updateEditingUI the way a user does: current layer is a raster.
+    auto *raster = new QgsRasterLayer(
+      QStringLiteral( "wms:?crs=EPSG:4326" ), QStringLiteral( "menu_gate_none" ),
+      QStringLiteral( "wms" ) );
+    QgsProject::instance()->addMapLayer( raster );
+    fx.window.mapCanvas()->setCurrentLayer( raster );
+    QTest::qWait( 20 );
+
+    for ( const char *name : menuGated )
+    {
+      INFO( name );
+      QAction *a = fx.window.editingAction( QLatin1String( name ) );
+      REQUIRE( a != nullptr );
+      CHECK_FALSE( a->isEnabled() );
+      CHECK_FALSE( reasonOf( a ).isEmpty() );
+      CHECK( a->toolTip().contains( reasonOf( a ) ) );
+    }
+
+    // Pin the MENU twins themselves (R2 P3-2): editingAction() prefers the
+    // toolbar action for the 12 duplicated objectNames, so a menu-side
+    // regression would otherwise stay invisible to the loop above.
+    const QList<QAction *> menuTwins = fx.window.menuDigitizingActions();
+    REQUIRE( menuTwins.size() == static_cast<int>( menuGated.size() ) );
+    for ( QAction *a : menuTwins )
+    {
+      INFO( a->objectName().toStdString() );
+      CHECK_FALSE( a->isEnabled() );
+      CHECK_FALSE( reasonOf( a ).isEmpty() );
+    }
+  }
+
+  SECTION( "polygon edit session unlocks matching tools, geometry still gates" )
+  {
+    auto *poly = new QgsVectorLayer( QStringLiteral( "Polygon?crs=EPSG:4326" ),
+                                     QStringLiteral( "menu_gate_poly" ),
+                                     QStringLiteral( "memory" ) );
+    REQUIRE( poly->isValid() );
+    QgsProject::instance()->addMapLayer( poly );
+    fx.window.mapCanvas()->setCurrentLayer( poly );
+    QTest::qWait( 20 );
+    fx.window.toggleEditing();
+    REQUIRE( poly->isEditable() );
+
+    // Polygon-capable and geometry-agnostic menu tools unlock…
+    for ( const char *name :
+          { "mActionCapturePoint", "mActionVertexTool", "mActionMoveFeature",
+            "mActionScaleFeature", "mActionDeleteRing", "mActionFeatureArray",
+            "mActionSplitParts", "mActionAddPart", "mActionChamferFillet",
+            "mActionTrimExtendFeature", "mActionOffsetCurve",
+            "mActionSplitFeatures", "mActionReshape", "mActionSimplify",
+            "mActionAddRing", "mActionFillRing", "mActionDeletePart" } )
+    {
+      INFO( name );
+      QAction *a = fx.window.editingAction( QLatin1String( name ) );
+      REQUIRE( a != nullptr );
+      CHECK( a->isEnabled() );
+    }
+    // …and trim/extend squares polygon boundaries too (FeatureFilter accepts
+    // any edge match — review R18-D R1 P1: the tool is NOT line-only).
+    QAction *trim =
+      fx.window.editingAction( QStringLiteral( "mActionTrimExtendFeature" ) );
+    REQUIRE( trim != nullptr );
+    CHECK( trim->isEnabled() );
+    CHECK( reasonOf( trim ).isEmpty() );
+
+    // The line-only reverse stays honestly disabled on a polygon layer.
+    QAction *reverse =
+      fx.window.editingAction( QStringLiteral( "mActionReverseLine" ) );
+    REQUIRE( reverse != nullptr );
+    CHECK_FALSE( reverse->isEnabled() );
+    CHECK( reasonOf( reverse ).contains( QStringLiteral( "line" ) ) );
+
+    poly->rollBack();
+  }
+
+  purgeProjectLayers();
+}
+
+// ── R18-D: the editing projection tracks the canvas, not the tree ──────────
+
+TEST_CASE( "Editing projection tracks the canvas current layer, not the tree selection (R18-D)",
+           "[app][vector_edit][r18d][active_editing]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  QgsVectorLayer *layer =
+    makeMemoryLayer( QString(), QStringLiteral( "active_ed" ), 1 );
+  REQUIRE( layer->isValid() );
+  // adoptInShell sets the canvas current layer WITHOUT selecting it in the
+  // layer tree — the exact shape of programmatic current-layer switches
+  // (classification windows, session workspaces). The selection context
+  // used to derive activeEditable only from the tree∩canvas intersection,
+  // reporting "no edit session" while one was running: the shell's toggle
+  // action read unchecked and a re-click offered to discard the live
+  // session.
+  adoptInShell( fx.window, layer );
+  fx.window.toggleEditing();
+  REQUIRE( layer->isEditable() );
+
+  fx.window.selectionContext()->refreshNow();
+  const sicnu::app::SelectionContextSnapshot snap =
+    fx.window.selectionContext()->snapshot();
+  CHECK( snap.activeEditable );
+  CHECK_FALSE( snap.activeModified );
+
+  QTest::qWait( 30 ); // let the changed() projection reach the registry
+  CHECK( fx.window.commandRegistry()
+             ->unavailabilityReason( QStringLiteral( "layer.saveEdits" ) )
+             .isEmpty() );
+
+  layer->rollBack();
+  purgeProjectLayers();
+}
+
+// ── R18-D: task lifecycle events refresh the in-flight facts ───────────────
+
+TEST_CASE( "Task lifecycle events refresh the in-flight facts (R18-D)",
+           "[app][task_center][r18d][inflight]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  fx.window.selectionContext()->refreshNow();
+  CHECK_FALSE( fx.window.selectionContext()->snapshot().hasInFlightTask );
+  CHECK_FALSE( fx.window.workbenchState()->facts().taskInFlight );
+
+  // A task enters the running state WITHOUT any canvas/selection event: the
+  // predicate was injected once at assembly and nothing re-triggered the
+  // projection, so the snapshot used to stay idle-stale until the user
+  // happened to touch a layer.
+  const long task = sicnu::TaskCenter::instance().enqueueTask(
+    QStringLiteral( "test:r18d_inflight" ), QVariantMap{}, /*autoLoad=*/false );
+  REQUIRE( task > 0 );
+  sicnu::TaskCenter::instance().markTaskRunning( task );
+  QTest::qWait( 250 ); // debounce; no canvas/selection event is touched
+
+  CHECK( fx.window.selectionContext()->snapshot().hasInFlightTask );
+  CHECK( fx.window.workbenchState()->facts().taskInFlight );
+
+  sicnu::TaskCenter::instance().markTaskCompleted( task );
+  QTest::qWait( 250 );
+  CHECK_FALSE( fx.window.selectionContext()->snapshot().hasInFlightTask );
+  CHECK_FALSE( fx.window.workbenchState()->facts().taskInFlight );
+}
+
+// ── R18-D: editing started outside the shell still refreshes the UI ────────
+
+TEST_CASE( "Editing started outside the shell still refreshes the editing UI (R18-D)",
+           "[app][vector_edit][r18d][external_edit]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  QgsVectorLayer *layer =
+    makeMemoryLayer( QString(), QStringLiteral( "ext_edit" ), 1 );
+  REQUIRE( layer->isValid() );
+  adoptInShell( fx.window, layer );
+
+  // The attribute table / facade path starts editing directly on the layer
+  // (QgisApp::toggleEditing): no currentLayerChanged fires, and the shell
+  // used to leave the toolbar gating on the stale no-session state —
+  // dead clicks on digitizing tools that cannot work, and a toggle action
+  // that reads unchecked while a session runs.
+  REQUIRE( layer->startEditing() );
+  QTest::qWait( 200 );
+
+  QAction *node = fx.window.editingAction( QStringLiteral( "mActionVertexTool" ) );
+  REQUIRE( node != nullptr );
+  CHECK( node->isEnabled() );
+  // Command registry actions carry the cmd_<id> objectName.
+  QAction *toggle =
+    fx.window.findChild<QAction *>( QStringLiteral( "cmd_layer.toggleEditing" ) );
+  REQUIRE( toggle != nullptr );
+  CHECK( toggle->isChecked() );
+
+  fx.window.selectionContext()->refreshNow();
+  CHECK( fx.window.selectionContext()->snapshot().activeEditable );
+
+  // And the stop side re-locks the tools when the session ends the same way.
+  layer->rollBack(); // emits editingStopped
+  QTest::qWait( 200 );
+  CHECK_FALSE( node->isEnabled() );
 
   purgeProjectLayers();
 }

@@ -4,7 +4,7 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 
 ## Quick Commands
 
-*   **Configure:** `cmake --preset build-dev` (presets in `CMakePresets.json`; build dir `build-dev/`)
+*   **Configure:** `cmake --preset dev-default` (presets in `CMakePresets.json`; build dir `build-dev/`; presets require CMake ≥ 3.21 — schema v3 — while the project itself declares 3.20, so on CMake 3.20 configure without presets via `cmake -S . -B build-dev`)
 *   **Build:** `cmake --build build-dev -j2` — parallelism cap 2 (`CMAKE_BUILD_PARALLEL_LEVEL=2`); `-j$(nproc)` is forbidden (shared 16-core / 62 GB host, parallel epics; drop to `-j1` when RSS > 70% or load > 1.5× cores)
 *   **Launch:** `./build-dev/sicnu_geo_rs`
 *   **Test (targeted first):** `ctest -R <family> -j1` with `QT_QPA_PLATFORM=offscreen`, run inside the build dir

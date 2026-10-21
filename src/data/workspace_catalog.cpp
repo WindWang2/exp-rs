@@ -1,4 +1,5 @@
 // workspace_catalog.cpp — see workspace_catalog.h for the contract.
+#include <QReadWriteLock>
 #include "workspace_catalog.h"
 
 #include "runtime/observability/fault_point.h"
@@ -185,6 +186,7 @@ WorkspaceCatalog::~WorkspaceCatalog()
 
 bool WorkspaceCatalog::open( const QString &dbPath, QString *errorOut )
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     close();
     m_impl = new Impl;
     if ( sqlite3_open_v2( dbPath.toUtf8().constData(), &m_impl->db,
@@ -232,6 +234,7 @@ bool WorkspaceCatalog::open( const QString &dbPath, QString *errorOut )
 
 void WorkspaceCatalog::close()
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return;
     {
@@ -245,11 +248,13 @@ void WorkspaceCatalog::close()
 
 Result<void> WorkspaceCatalog::upsertAsset( const CatalogAsset &asset )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     return upsertAssets( { asset } );
 }
 
 Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.closed" ),
                                                    QStringLiteral( "catalog not open" ) ) );
@@ -398,6 +403,7 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
 
 Result<void> WorkspaceCatalog::removeAsset( const QString &assetId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.closed" ),
                                                    QStringLiteral( "catalog not open" ) ) );
@@ -449,6 +455,7 @@ Result<void> WorkspaceCatalog::removeAsset( const QString &assetId )
 
 std::optional<CatalogAsset> WorkspaceCatalog::byId( const QString &assetId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || assetId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -471,6 +478,7 @@ std::optional<CatalogAsset> WorkspaceCatalog::byId( const QString &assetId ) con
 
 std::optional<CatalogAsset> WorkspaceCatalog::byPath( const QString &path ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl || path.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -497,6 +505,7 @@ std::optional<CatalogAsset> WorkspaceCatalog::byPath( const QString &path ) cons
 
 CatalogPage WorkspaceCatalog::page( const CatalogQuery &query, qint64 offset, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     CatalogPage out;
     if ( !m_impl )
         return out;
@@ -572,6 +581,7 @@ CatalogPage WorkspaceCatalog::page( const CatalogQuery &query, qint64 offset, qi
 
 qint64 WorkspaceCatalog::count() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return 0;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
@@ -587,6 +597,7 @@ qint64 WorkspaceCatalog::count() const
 
 QString WorkspaceCatalog::schemaVersion() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     return m_impl ? m_impl->schemaVersion : QString();
 }
 

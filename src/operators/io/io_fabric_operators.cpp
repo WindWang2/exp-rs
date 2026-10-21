@@ -20,6 +20,10 @@
 namespace sicnu::operators::io
 {
 
+// The io:* family's GeoError translation, defined once in io_operators.cpp
+// (this file used to mirror the mapping and the guard verbatim — #1642).
+Json::Value guarded( const std::function<Json::Value()> &body );
+
 namespace
 {
 
@@ -29,52 +33,6 @@ using sicnu::geo::CubeChunkShape;
 using sicnu::geo::CubeSlice;
 using sicnu::geo::FabricIntent;
 using sicnu::geo::VirtualCubeGrid;
-
-/// Foundation GeoError → operator ErrorCode (same mapping as the io:*
-/// family's mapGeoCode — mirrored because that one is file-local).
-ErrorCode mapFabricCode( sicnu::geo::ErrorCode code )
-{
-  using G = sicnu::geo::ErrorCode;
-  switch ( code )
-  {
-    case G::InvalidArgument: return ErrorCode::InvalidParameter;
-    case G::OpenFailed: return ErrorCode::FileNotReadable;
-    case G::DriverMissing: return ErrorCode::GdalError;
-    case G::MissingCrs: return ErrorCode::InvalidParameter;
-    case G::InvalidCrs: return ErrorCode::InvalidParameter;
-    case G::TransformFailed: return ErrorCode::GdalError;
-    case G::WriteFailed: return ErrorCode::FileNotWritable;
-    case G::FidelityLoss: return ErrorCode::InvalidInputData;
-    case G::Unsupported: return ErrorCode::GdalError;
-    case G::Cancelled: return ErrorCode::Cancelled;
-    case G::IoError: return ErrorCode::FileNotWritable;
-    case G::NotFound: return ErrorCode::FileNotFound;
-    case G::PermissionDenied: return ErrorCode::FileNotReadable;
-    case G::UnsupportedFormat: return ErrorCode::InvalidInputData;
-    case G::UnsupportedProduct: return ErrorCode::InvalidInputData;
-    case G::InvalidMetadata: return ErrorCode::InvalidInputData;
-    case G::CorruptData: return ErrorCode::InvalidInputData;
-    case G::NetworkError: return ErrorCode::GdalError;
-    case G::Timeout: return ErrorCode::ExternalProcessTimeout;
-    case G::ResourceExhausted: return ErrorCode::OutOfRange;
-    case G::Incompatible: return ErrorCode::InvalidInputData;
-  }
-  return ErrorCode::Unknown;
-}
-
-/// Runs `body`, translating foundation GeoError into RSOperatorError (the
-/// io:* family's guard, mirrored here so this file stays self-contained).
-Json::Value fabricGuarded( const std::function<Json::Value()> &body )
-{
-  try
-  {
-    return body();
-  }
-  catch ( const sicnu::geo::GeoError &error )
-  {
-    throw RSOperatorError( mapFabricCode( error.code() ), error.what(), error.details() );
-  }
-}
 
 FabricIntent intentFrom( const Json::Value &params )
 {
@@ -124,7 +82,19 @@ Json::Value IoCatalogSearchOperator::schema() const
   using namespace sicnu::operators::schema;
   Json::Value params;
   params["catalog"] = makeStringParam( "catalog", "Catalog root (local STAC tree or STAC API URL)" );
-  params["bounds"] = makeStringParam( "bounds", "Spatial filter [minX,minY,maxX,maxY] (JSON array)" );
+  // The spatial filter is a number array at run time (fabricIntentFromJson
+  // reads bounds as [minX,minY,maxX,maxY], 2-D or 3-D); declaring it "string"
+  // made schema-validating agents and UIs reject legal input (#1642).
+  Json::Value bounds( Json::objectValue );
+  bounds["name"] = "bounds";
+  bounds["type"] = "array";
+  bounds["description"] = "Spatial filter [minX,minY,maxX,maxY] (JSON array)";
+  bounds["minItems"] = 4;
+  bounds["maxItems"] = 6;
+  Json::Value boundItem( Json::objectValue );
+  boundItem["type"] = "number";
+  bounds["items"] = boundItem;
+  params["bounds"] = bounds;
   params["temporalStartUtc"] = makeStringParam( "temporalStartUtc", "Inclusive UTC instant bound", "" );
   params["temporalEndUtc"] = makeStringParam( "temporalEndUtc", "Exclusive UTC instant bound", "" );
   params["cloudCoverMax"] = makeNumberParam( "cloudCoverMax", "Cloud cover ceiling (percent)" );
@@ -152,7 +122,7 @@ Json::Value IoCatalogSearchOperator::metadata() const
 
 Json::Value IoCatalogSearchOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  return fabricGuarded( [ & ] {
+  return guarded( [ & ] {
     context.reportProgress( 0.05, "opening catalog service" );
     sicnu::geo::CatalogServiceOptions options;
     const sicnu::geo::CatalogService service =
@@ -211,7 +181,7 @@ Json::Value IoCubePlanOperator::metadata() const
 
 Json::Value IoCubePlanOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  return fabricGuarded( [ & ] {
+  return guarded( [ & ] {
     context.reportProgress( 0.1, "parsing intent" );
     const sicnu::geo::FabricIntent intent = intentFrom( params );
     const sicnu::geo::CancelToken cancel = contextCancelToken( context );
@@ -266,7 +236,7 @@ Json::Value IoCubeWindowOperator::metadata() const
 
 Json::Value IoCubeWindowOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  return fabricGuarded( [ & ] {
+  return guarded( [ & ] {
     using namespace sicnu::operators::params;
     context.reportProgress( 0.05, "parsing cube window intent" );
     sicnu::geo::FabricIntent intent = intentFrom( params );
@@ -360,7 +330,7 @@ Json::Value IoCachePrefetchOperator::metadata() const
 
 Json::Value IoCachePrefetchOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  return fabricGuarded( [ & ] {
+  return guarded( [ & ] {
     using namespace sicnu::operators::params;
     context.reportProgress( 0.1, "planning chunks for prefetch" );
     const sicnu::geo::FabricIntent intent = intentFrom( params );

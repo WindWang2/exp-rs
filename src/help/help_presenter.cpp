@@ -18,7 +18,10 @@ QString elide( const QString &text, int maxLength )
 {
     if ( maxLength <= 0 || text.size() <= maxLength )
         return text;
-    return text.left( qMax( 1, maxLength - 1 ) ) + QStringLiteral( "…" );
+    // truncateSummary() owns the surrogate-pair boundary rule (#1522): reuse
+    // it instead of left() so the tooltip / status-tip / compact-summary
+    // producers cannot drift apart from the summary bound again.
+    return truncateSummary( text, qMax( 1, maxLength - 1 ) ) + QStringLiteral( "…" );
 }
 
 } // namespace
@@ -147,7 +150,7 @@ QString HelpCompact::toJsonText( const HelpDescriptor &descriptor, int budgetCha
     const int allowed = qMax( 0, budgetChars - overhead );
     QString summary = descriptor.summary;
     if ( summary.size() > allowed )
-        summary = summary.left( allowed ) + QStringLiteral( "…" );
+        summary = truncateSummary( summary, allowed ) + QStringLiteral( "…" );
     const QString trimmed = withSummary( base, summary );
     if ( trimmed.size() <= budgetChars )
         return trimmed;
@@ -155,7 +158,24 @@ QString HelpCompact::toJsonText( const HelpDescriptor &descriptor, int budgetCha
     const QString idOnly = makeJson( base );
     if ( idOnly.size() <= budgetChars )
         return idOnly;
-    return idOnly.left( qMax( 2, budgetChars ) );
+
+    // The {"id","title"} shell itself overflows the budget. Degrade inside the
+    // object — never by slicing the serialized text, which would emit a
+    // fragment and break the contract above: drop the title first, then elide
+    // the id until it fits, and finally fall back to the shortest valid JSON
+    // object so every budget still yields parseable output.
+    QJsonObject degraded;
+    degraded.insert( QStringLiteral( "id" ), descriptor.id );
+    if ( const QString withoutTitle = makeJson( degraded ); withoutTitle.size() <= budgetChars )
+        return withoutTitle;
+
+    constexpr int idShellChars = 9; // {"id":""}
+    for ( int idChars = qMax( 0, budgetChars - idShellChars ); idChars > 0; --idChars ) {
+        degraded.insert( QStringLiteral( "id" ), truncateSummary( descriptor.id, idChars ) );
+        if ( const QString elided = makeJson( degraded ); elided.size() <= budgetChars )
+            return elided;
+    }
+    return QStringLiteral( "{}" );
 }
 
 } // namespace sicnu::help

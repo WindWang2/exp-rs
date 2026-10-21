@@ -157,7 +157,13 @@ bool RsFeatureScaler::fromJson( const QJsonObject &obj )
   const QJsonArray minArr = obj.value( QStringLiteral( "min" ) ).toArray();
   const QJsonArray maxArr = obj.value( QStringLiteral( "max" ) ).toArray();
 
-  if ( meanArr.isEmpty() || meanArr.size() != stdArr.size() )
+  // min/max must match mean's length: toJson() always emits four equal
+  // arrays, so a short one means a truncated or foreign sidecar. Silently
+  // defaulting to 0.0/1.0 would rescale every band with range=1, offset=0
+  // under MinMax — a silent drift from the training-time statistics. Fail
+  // closed, same discipline as fit's non-finite rejection.
+  if ( meanArr.isEmpty() || meanArr.size() != stdArr.size()
+       || minArr.size() != meanArr.size() || maxArr.size() != meanArr.size() )
     return false;
 
   const int size = meanArr.size();
@@ -171,8 +177,8 @@ bool RsFeatureScaler::fromJson( const QJsonObject &obj )
     mMean[i] = meanArr[i].toDouble();
     const double s = stdArr[i].toDouble();
     mStd[i] = ( s < kMinStd ) ? 1.0 : s;
-    mMin[i] = ( i < minArr.size() ) ? minArr[i].toDouble() : 0.0;
-    mMax[i] = ( i < maxArr.size() ) ? maxArr[i].toDouble() : 1.0;
+    mMin[i] = minArr[i].toDouble();
+    mMax[i] = maxArr[i].toDouble();
   }
   mFitted = true;
   return true;

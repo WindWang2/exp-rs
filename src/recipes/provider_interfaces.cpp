@@ -4,6 +4,8 @@
 #include <json/json.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -14,6 +16,11 @@ namespace sicnu::recipes {
 namespace fs = std::filesystem;
 
 namespace {
+
+/// Bounded read (R14-E audit F5): the sidecar directories are a scan surface;
+/// an oversize file is skipped like an unreadable one, never slurped whole
+/// into memory.
+constexpr std::uintmax_t kMaxSidecarBytes = 16ull * 1024ull * 1024ull;
 
 /// Collect operator ids from one JSON document: object-with-"id" or
 /// array-of-objects-with-"id". `family:*` ids are family defaults, not
@@ -51,6 +58,12 @@ void collectIds( const fs::path &dir, std::vector<std::string> &ids )
       return;
     if ( !entry.is_regular_file() || entry.path().extension() != ".json" )
       continue;
+    // Stat-before-read (R14-E audit F5): refuse before any allocation
+    // proportional to the file size.
+    std::error_code sizeEc;
+    const std::uintmax_t size = std::filesystem::file_size( entry.path(), sizeEc );
+    if ( !sizeEc && size > kMaxSidecarBytes )
+      continue;
     std::ifstream in( entry.path() );
     if ( !in )
       continue;
@@ -61,10 +74,21 @@ void collectIds( const fs::path &dir, std::vector<std::string> &ids )
     Json::Value doc;
     Json::CharReaderBuilder builder;
     builder["collectComments"] = false;
+    // Pinned + caught (scientific_recipe.cpp discipline): jsoncpp THROWS on a
+    // stackLimit violation, and sidecar directories are untrusted scan input
+    // — an over-deep document is skipped like an unparseable one (#1607).
+    builder["stackLimit"] = 256;
     std::string errors;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &errors ) )
+    try
+    {
+      if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &errors ) )
+        continue;
+    }
+    catch ( const std::exception & )
+    {
       continue;
+    }
     collectDocIds( doc, ids );
   }
 }

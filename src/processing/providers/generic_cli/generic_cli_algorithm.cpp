@@ -464,20 +464,11 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
         if ( outPath.isEmpty() )
             continue;
 
-        QString actualPath = outPath;
-        if ( !QFileInfo::exists( actualPath ) )
-        {
-            for ( const QString &ext : { QStringLiteral( ".tif" ), QStringLiteral( ".shp" ), QStringLiteral( ".xml" ), QStringLiteral( ".txt" ) } )
-            {
-                if ( QFileInfo::exists( outPath + ext ) )
-                {
-                    actualPath = outPath + ext;
-                    break;
-                }
-            }
-        }
-
-        if ( !QFileInfo::exists( actualPath ) )
+        // Only the declared path counts as the output: a sidecar such as an
+        // OGR out.shp.xml (or any other declared-path + extension file) must
+        // not be mistaken for the output itself when the main output is
+        // missing (#1568).
+        if ( !QFileInfo::exists( outPath ) )
         {
             const QString err = QObject::tr(
                                   "Tool reported success but output file is missing: %1" )
@@ -488,7 +479,7 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
             throw QgsProcessingException(err);
         }
 
-        results[name] = actualPath;
+        results[name] = outPath;
     }
 
     return results;

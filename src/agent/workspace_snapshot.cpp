@@ -88,10 +88,11 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
 
   // Real Data Range: deliberately NOT sampled via bandStatistics() on the
   // GUI thread — that GDAL scan blocks the event loop on large rasters.
-  // dataMin/dataMax therefore stay unset on this capture path; the prompt's
-  // "Real Data Range" line (resolvePromptHeader) is emitted only when
-  // another (off-thread) producer fills the fields. (#634: tracker owned
-  // by the off-thread refresh - no action here)
+  // dataMin/dataMax therefore stay unset on this capture path. No producer
+  // fills them anywhere in the tree (the only capture consumer,
+  // agent_copilot_dock_widget.cpp, consumes the header immediately), so the
+  // prompt's "Real Data Range" line is currently unreachable — it fires only
+  // if/when an off-thread producer is wired to fill the fields (#634).
   Q_UNUSED( raster );
 
   // Stretch algorithm + display window from the renderer's contrast enhancement
@@ -314,9 +315,10 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
         if ( !channels.isEmpty() )
           prompt += QString( "  - Bands: %1\n" ).arg( channels.join( QStringLiteral( " " ) ) );
       }
-      // Emitted only when dataMin/dataMax are populated: the GUI-thread
-      // capture path leaves them unset (see captureActiveRaster), so this
-      // line appears only for snapshots filled by an off-thread producer.
+      // Emitted only when dataMin/dataMax are populated: nothing on the
+      // capture path fills them (see captureActiveRaster) and no off-thread
+      // producer exists yet, so this line is unreachable today — it stays
+      // wired for the producer #634 tracks.
       if ( mapView.activeRaster.dataMin && mapView.activeRaster.dataMax )
         prompt += QString( "  - Real Data Range: [%1, %2]\n" )
                     .arg( *mapView.activeRaster.dataMin )

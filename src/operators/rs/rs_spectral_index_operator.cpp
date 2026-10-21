@@ -514,18 +514,15 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         : (allowIndexOverride ? "rs:spectral_index" : ("rs:" + QString::fromStdString(defaultIndex).toLower().toStdString()));
 
     sicnu::operators::ChunkedRunOptions runOpts = options;
-    if (params.isMember("executionMode") && params["executionMode"].isString()) {
-        const std::string m = params["executionMode"].asString();
-        if (m == "pipeline")
-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
-        else if (m == "resumable")
-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
-    } else if (params.isMember("chunkedMode") && params["chunkedMode"].isString()) {
-        const std::string m = params["chunkedMode"].asString();
-        if (m == "pipeline")
-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Pipeline;
-        else if (m == "resumable")
-            runOpts.mode = sicnu::operators::ChunkedRunOptions::Mode::Resumable;
+    // R10-A/PR-5: mode switches refuse non-enum shapes typed (bools
+    // normalize explicitly) — never a silent fallback to the default mode.
+    // executionMode takes precedence over the legacy chunkedMode spelling.
+    if (params.isMember("executionMode")) {
+        sicnu::operators::parseChunkedModeValue(params["executionMode"], "executionMode",
+                                                &runOpts.mode);
+    } else if (params.isMember("chunkedMode")) {
+        sicnu::operators::parseChunkedModeValue(params["chunkedMode"], "chunkedMode",
+                                                &runOpts.mode);
     }
     if (params.isMember("ramBudgetBytes") && params["ramBudgetBytes"].isUInt64()) {
         runOpts.ramBudgetBytes = params["ramBudgetBytes"].asUInt64();
@@ -556,8 +553,11 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     } else if (params.isMember("after") && params["after"].isString()) {
         canonicalParams["postfire"] = params["after"].asString();
     }
-    if (params.isMember("postNir") && params["postNir"].isInt()) canonicalParams["postNir"] = params["postNir"].asInt();
-    if (params.isMember("postSwir2") && params["postSwir2"].isInt()) canonicalParams["postSwir2"] = params["postSwir2"].asInt();
+    // Tolerant typed reads (R10-A/PR-8): schema_validator accepts numeric
+    // strings for Integer ports — a bare asInt() on those throws jsoncpp
+    // LogicError through the parameter contract (#1447 pattern).
+    if (params.isMember("postNir")) canonicalParams["postNir"] = getInt(params, "postNir", 0);
+    if (params.isMember("postSwir2")) canonicalParams["postSwir2"] = getInt(params, "postSwir2", 0);
 
     sicnu::runtime::chunk::TileRunPartition partition;
     partition.rasterWidth = width;

@@ -8,6 +8,7 @@
 
 #include <cmath>
 
+#include "experiment_ids.h"
 #include "experiment_types.h"
 
 #include <QDir>
@@ -15,6 +16,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
 #include <QUuid>
 
 namespace sicnu::experiment
@@ -335,7 +337,26 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     run.setStatus( RunStatus::Created ); // evidence import, never a fake lifecycle
     if ( options.keepOriginalRunId && !report.originalRunId.isEmpty() )
     {
-        run.setRunId( report.originalRunId );
+        // The manifest is bundle-supplied, and a self-consistent
+        // checksums.txt only proves the bundle matches ITSELF — never that
+        // the recorded run id is well-formed. RunId::fromString is the
+        // boundary contract (experiment_ids.h: "invalid run ids are
+        // refused, never sanitized"): an unchecked id here becomes a store
+        // identity, and store identities name capsule/checkpoint
+        // directories downstream, so a path separator, a leading dot or a
+        // 65-char blob must never reach the store. Refuse, never sanitize.
+        const auto requestedRunId = RunId::fromString( report.originalRunId );
+        if ( !requestedRunId )
+        {
+            report.warnings.append(
+                QStringLiteral( "manifest run_id %1 is not a valid run id"
+                                " (filename-safe, at most 64 chars,"
+                                " [A-Za-z0-9._-], no leading dot) — import"
+                                " refused rather than sanitized" )
+                    .arg( report.originalRunId ) );
+            return report;
+        }
+        run.setRunId( requestedRunId->toString() );
         // A DIFFERENT recorded run already owns the requested id: refuse.
         // (Created-status runs may legally change identity pins on upsert,
         // so an unchecked overwrite would silently destroy that run.)
@@ -348,7 +369,9 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         }
     }
     else
-        run.setRunId( QUuid::createUuid().toString( QUuid::WithoutBraces ) );
+        // Fresh id through the RunId authority, so an imported run carries
+        // the same id shape RunId::generate() produces everywhere else.
+        run.setRunId( RunId::generate().toString() );
 
     // 6b. Metrics evidence — installed BEFORE the run so a refusal here
     // leaves zero partial state (no half-installed run without its numbers) (protocol + recorded numbers).
@@ -421,7 +444,49 @@ const auto installed = m_experimentStore->upsertRun( run );
         return report;
     }
 
-    // 7. Portable payload relocation (best-effort; the bundle stays
+    // 7. Lineage slice (provenance.json). The exporter ALWAYS writes it
+    // (reproduction_bundle.cpp:409-426) and it is checksum-covered, so a
+    // bundle that carries it is trustworthy about what it says — but the
+    // slice keeps only the FAR endpoint of each edge
+    // ({"edge","other_kind","other_id"}), so the run-relative direction is
+    // dropped at export, and the importer holds no DatasetStore, so
+    // dataset-side edges have no table to land in. Re-attaching them would
+    // either guess a direction or assert provenance the target store never
+    // observed. The gap is therefore NAMED, never silent: the imported run
+    // stays an island in the lineage graph until it is re-linked by hand.
+    {
+        QStringList sliceWarnings;
+        const auto provenance =
+            loadJson( dir, QStringLiteral( "provenance.json" ), &sliceWarnings );
+        if ( !provenance )
+        {
+            report.warnings.append( sliceWarnings );
+        }
+        else
+        {
+            const QJsonValue edgesValue =
+                provenance->value( QStringLiteral( "run_edges" ) );
+            if ( !edgesValue.isArray() )
+            {
+                report.warnings.append( QStringLiteral(
+                    "provenance.json does not record a run_edges array" ) );
+            }
+            else if ( const QJsonArray edges = edgesValue.toArray();
+                      !edges.isEmpty() )
+            {
+                report.warnings.append(
+                    QStringLiteral( "provenance.json records %1 lineage edge(s) around"
+                                    " the recorded run that import cannot re-attach"
+                                    " (the bundle keeps only each edge's far endpoint,"
+                                    " so the run-relative direction is lost); the"
+                                    " imported run stays an island in the lineage"
+                                    " graph until it is re-linked by hand" )
+                        .arg( edges.size() ) );
+            }
+        }
+    }
+
+    // 8. Portable payload relocation (best-effort; the bundle stays
     // authoritative if the target is unusable).
     const QDir dataDir( dir.filePath( QStringLiteral( "data" ) ) );
     if ( dataDir.exists() )
@@ -433,11 +498,56 @@ const auto installed = m_experimentStore->upsertRun( run );
         }
         else
         {
+            // R15-B (B12): only payloads the integrity gate actually
+            // verified may leave the bundle. verifyBundleChecksums hashes
+            // every LISTED member but its coverage sweep is top-level only,
+            // so data/ entries are trusted solely when checksums.txt lists
+            // "data/<name>". A symlink (or anything resolving outside data/)
+            // would make the copy read an arbitrary host file into the
+            // relocation target — refused, never followed.
+            QSet<QString> verifiedMembers;
+            {
+                QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
+                if ( checksumFile.open( QIODevice::ReadOnly ) )
+                {
+                    const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
+                                                  .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+                    for ( QString line : lines )
+                    {
+                        // R15-B (item 7): same CRLF tolerance as
+                        // verifyBundleChecksums, so a CRLF table that passed
+                        // the gate does not silently refuse every relocation.
+                        if ( line.endsWith( QLatin1Char( '\r' ) ) )
+                            line.chop( 1 );
+                        if ( line.size() > 66 && line.indexOf( QStringLiteral( "  " ) ) == 64 )
+                            verifiedMembers.insert( line.mid( 66 ) );
+                    }
+                }
+            }
+            const QString canonicalDataDir = QFileInfo( dataDir.absolutePath() ).canonicalFilePath();
             const QDir target( options.relocateDataDir );
             target.mkpath( QStringLiteral( "." ) );
             for ( const QFileInfo &entry :
-                  dataDir.entryInfoList( QDir::Files ) )
+                  dataDir.entryInfoList( QDir::Files | QDir::System | QDir::Hidden ) )
             {
+                const QString memberName = QStringLiteral( "data/" ) + entry.fileName();
+                const QString canonicalEntry = entry.canonicalFilePath();
+                QString refusal;
+                if ( entry.isSymLink() )
+                    refusal = QStringLiteral( "is a symbolic link" );
+                else if ( !entry.isFile() )
+                    refusal = QStringLiteral( "is not a regular file" );
+                else if ( canonicalDataDir.isEmpty() || canonicalEntry.isEmpty() ||
+                          QFileInfo( canonicalEntry ).absolutePath() != canonicalDataDir )
+                    refusal = QStringLiteral( "resolves outside the bundle data/ directory" );
+                else if ( !verifiedMembers.contains( memberName ) )
+                    refusal = QStringLiteral( "is not covered by checksums.txt" );
+                if ( !refusal.isEmpty() )
+                {
+                    report.warnings.append( QStringLiteral( "refused to relocate %1: %2" )
+                                                .arg( entry.fileName(), refusal ) );
+                    continue;
+                }
                 const QString destination = target.filePath( entry.fileName() );
                 QFile::remove( destination ); // relocation is last-writer-wins
                 if ( QFile::copy( entry.absoluteFilePath(), destination ) )
@@ -449,7 +559,7 @@ const auto installed = m_experimentStore->upsertRun( run );
         }
     }
 
-    // 8. Best-effort availability notes (never verdicts, never blockers).
+    // 9. Best-effort availability notes (never verdicts, never blockers).
     if ( !run.modelId().isEmpty() && hooks.modelAvailable &&
          !hooks.modelAvailable( run.modelId(), run.modelDigest() ) )
         report.warnings.append(

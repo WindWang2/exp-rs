@@ -1916,8 +1916,24 @@ endif()
 #############################################################
 # qgis_gui library
 
+# ANTIGRAVITY: fail-fast variant of list(REMOVE_ITEM) for the QGIS baseline lists
+# below. CMake's list(REMOVE_ITEM) silently no-ops on items that are not in the
+# list, so a QGIS baseline upgrade that renames/splits/moves a stripped file
+# would silently recompile the real QWT/Qsci-dependent TU next to the ANTIGRAVITY
+# stub (duplicate definitions or build failure). Assert every stripped item is
+# still part of the baseline list before removing it.
+function(antigravity_remove_checked _list)
+  foreach(_item ${ARGN})
+    if(NOT _item IN_LIST ${_list})
+      message(FATAL_ERROR "ANTIGRAVITY: ${_item} is no longer part of ${_list} — the QGIS baseline drifted; update the stub removal list in ${CMAKE_CURRENT_LIST_FILE}")
+    endif()
+  endforeach()
+  list(REMOVE_ITEM ${_list} ${ARGN})
+  set(${_list} ${${_list}} PARENT_SCOPE)
+endfunction()
+
 # ANTIGRAVITY: remove QWT-dependent sources (QWT not installed; stub headers provided)
-list(REMOVE_ITEM QGIS_GUI_SRCS
+antigravity_remove_checked(QGIS_GUI_SRCS
   symbology/qgsgraduatedhistogramwidget.cpp
   qgshistogramwidget.cpp
   qgscurveeditorwidget.cpp
@@ -1926,13 +1942,13 @@ list(REMOVE_ITEM QGIS_GUI_SRCS
 )
 # ANTIGRAVITY: remove QScintilla (codeeditor) sources — stub headers only
 # Also remove files that use raw Scintilla SCI_* messages or SendScintilla
-list(REMOVE_ITEM QGIS_GUI_SRCS
+antigravity_remove_checked(QGIS_GUI_SRCS
   editorwidgets/qgsjsoneditwidget.cpp
   qgsexpressionbuilderwidget.cpp
   qgsqueryresultwidget.cpp
   qgssqlcomposerdialog.cpp
 )
-list(REMOVE_ITEM QGIS_GUI_SRCS
+antigravity_remove_checked(QGIS_GUI_SRCS
   codeeditors/qgscodeeditor.cpp
   codeeditors/qgscodeeditorcolorscheme.cpp
   codeeditors/qgscodeeditorcolorschemeregistry.cpp
@@ -1950,7 +1966,7 @@ list(REMOVE_ITEM QGIS_GUI_SRCS
   codeeditors/qgscodeeditorwidget.cpp
 )
 # ANTIGRAVITY: remove non-codeeditor files that include codeeditor/Qsci headers at runtime
-list(REMOVE_ITEM QGIS_GUI_SRCS
+antigravity_remove_checked(QGIS_GUI_SRCS
   qgsexpressionfinder.cpp
   qgsexpressionlineedit.cpp
   qgsrichtexteditor.cpp
@@ -1967,7 +1983,7 @@ list(REMOVE_ITEM QGIS_GUI_SRCS
 list(APPEND QGIS_GUI_SRCS antigravity_settingsregistrygui.cpp)
 # ANTIGRAVITY: remove codeeditor headers from target — prevents AUTOMOC from generating
 # moc files that reference QsciScintilla/staticMetaObject etc.
-list(REMOVE_ITEM QGIS_GUI_HDRS
+antigravity_remove_checked(QGIS_GUI_HDRS
   codeeditors/qgscodeeditor.h
   codeeditors/qgscodeeditorcolorscheme.h
   codeeditors/qgscodeeditorcolorschemeregistry.h

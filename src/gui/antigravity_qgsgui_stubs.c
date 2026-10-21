@@ -587,8 +587,11 @@ void _ZN26QgsGradientColorRampDialogD1Ev(void) __attribute__((weak, visibility("
 void _ZN26QgsGradientColorRampDialogD1Ev(void) {}
 
 // QgsGradientPlotEventFilter::eventFilter(QObject*, QEvent*)
-void _ZN26QgsGradientPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));
-void _ZN26QgsGradientPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) {}
+// ANTIGRAVITY: upstream returns bool; the void stub left the return register
+// undefined, so the caller could read garbage and swallow Qt events.
+// Return false (not filtered) so events keep their normal processing.
+_Bool _ZN26QgsGradientPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));
+_Bool _ZN26QgsGradientPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) { return 0; }
 
 // QgsGraduatedHistogramEventFilter::eventFilter(QObject*, QEvent*)
 void _ZN32QgsGraduatedHistogramEventFilter11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));

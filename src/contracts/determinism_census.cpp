@@ -14,6 +14,7 @@
  ***************************************************************************/
 #include "determinism_census.h"
 #include "scientific_contract.h"
+#include "text_scan.h"
 
 #include <algorithm>
 #include <cctype>
@@ -47,6 +48,16 @@ bool readJsonFile( const std::string &path, Json::Value &out )
     std::string errs;
     std::istringstream is( text );
     return Json::parseFromStream( b, is, &out, &errs );
+}
+
+/// text_scan discipline (text_scan.h): a regex match whose START sits inside
+/// a comment or string literal is quoted documentation, never a real
+/// construct. Every census pattern must reject such a match before it can
+/// record a fact into the byte-gated snapshot — the same literal/comment
+/// filter the contract-9 scanners apply through findMatches/findMatchesWithPos.
+bool matchIsQuoted( const std::string &src, size_t pos )
+{
+    return insideLiteralOrComment( src, pos );
 }
 
 /// Relative-to-src path of every *.h/*.cpp under sourceRoot/src whose text
@@ -95,9 +106,6 @@ struct RegistrationSite
 /// Registration sites across the two shapes this tree uses:
 ///   REGISTER_RS_OPERATOR( ClassName, "prefix:id" )
 ///   add( "prefix:id", [] { return std::make_unique<ClassName>(); } );
-/// Registration sites across the two shapes this tree uses:
-///   REGISTER_RS_OPERATOR( ClassName, "prefix:id" )
-///   add( "prefix:id", [] { return std::make_unique<ClassName>(); } );
 /// Only first-party family prefixes count — documentation comments quote the
 /// macro with placeholder ids ("my:operator"), which must never enter the
 /// census.
@@ -131,6 +139,8 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
         {
             if ( !firstPartyId( ( *it )[2].str() ) )
                 continue;
+            if ( matchIsQuoted( text, static_cast<size_t>( it->position() ) ) )
+                continue;
             RegistrationSite s;
             s.className = ( *it )[1].str();
             s.operatorId = ( *it )[2].str();
@@ -141,6 +151,8 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
               it != std::sregex_iterator(); ++it )
         {
             if ( !firstPartyId( ( *it )[1].str() ) )
+                continue;
+            if ( matchIsQuoted( text, static_cast<size_t>( it->position() ) ) )
                 continue;
             RegistrationSite s;
             s.operatorId = ( *it )[1].str();
@@ -249,6 +261,8 @@ std::map<std::string, std::vector<ClassSlice>> scanClassSlices(
             }
             if ( !classNames.count( name ) )
                 continue;
+            if ( matchIsQuoted( text, static_cast<size_t>( mit->position() ) ) )
+                continue;
             ClassSlice slice;
             slice.file = rel;
             slice.isHeader = ( ext != ".cpp" );
@@ -305,16 +319,26 @@ OverrideFacts factsInBody( const std::string &body )
         R"re(determinismGrade\(\)\s*const\s*override\s*\{[^}]*return\s+"([^"]+)")re" );
     static const std::regex runtimeRe(
         R"re(RSOperatorDeterminism\s+determinism\(\)\s*const\s*override\s*\{[^}]*RSOperatorDeterminism::(\w+))re" );
-    std::smatch m;
-    if ( std::regex_search( body, m, gradeRe ) )
+    // Iterate every match and keep the first one in real code: a declaration
+    // quoted in a comment must never shadow (or stand in for) the real
+    // override body.
+    for ( auto it = std::sregex_iterator( body.begin(), body.end(), gradeRe );
+          it != std::sregex_iterator(); ++it )
     {
+        if ( matchIsQuoted( body, static_cast<size_t>( it->position() ) ) )
+            continue;
         f.gradeOverride = true;
-        f.gradeLiteral = m[1].str();
+        f.gradeLiteral = ( *it )[1].str();
+        break;
     }
-    if ( std::regex_search( body, m, runtimeRe ) )
+    for ( auto it = std::sregex_iterator( body.begin(), body.end(), runtimeRe );
+          it != std::sregex_iterator(); ++it )
     {
+        if ( matchIsQuoted( body, static_cast<size_t>( it->position() ) ) )
+            continue;
         f.runtimeOverride = true;
-        f.runtimeLiteral = m[1].str();
+        f.runtimeLiteral = ( *it )[1].str();
+        break;
     }
     f.found = f.gradeOverride || f.runtimeOverride;
     return f;
@@ -410,11 +434,17 @@ std::map<std::string, std::string> scanDirectSchemaStamps( const std::string &so
         std::vector<std::pair<size_t, std::string>> schemaFns;
         for ( auto it = std::sregex_iterator( text.begin(), text.end(), schemaFnRe );
               it != std::sregex_iterator(); ++it )
+        {
+            if ( matchIsQuoted( text, static_cast<size_t>( it->position() ) ) )
+                continue;
             schemaFns.emplace_back( static_cast<size_t>( ( *it ).position() ),
                                     ( *it )[1].str() );
+        }
         for ( auto it = std::sregex_iterator( text.begin(), text.end(), stampRe );
               it != std::sregex_iterator(); ++it )
         {
+            if ( matchIsQuoted( text, static_cast<size_t>( it->position() ) ) )
+                continue;
             const size_t pos = static_cast<size_t>( ( *it ).position() );
             const std::string *owner = nullptr;
             for ( const auto &[fnPos, fnClass] : schemaFns )
@@ -466,11 +496,14 @@ std::map<std::string, ClassSlice> scanMacroClassBodies( const std::string &sourc
         if ( text.empty() )
             continue;
         std::smatch m;
-        if ( std::regex_search( text, m, defRe ) )
+        if ( std::regex_search( text, m, defRe )
+             && !matchIsQuoted( text, static_cast<size_t>( m.position( 0 ) ) ) )
             macroBodies.emplace( m[1].str(), m[2].str() );
         for ( auto uit = std::sregex_iterator( text.begin(), text.end(), useRe );
               uit != std::sregex_iterator(); ++uit )
         {
+            if ( matchIsQuoted( text, static_cast<size_t>( uit->position() ) ) )
+                continue;
             const std::string macro = "SICNU_DECLARE_" + ( *uit )[1].str() + "_OP";
             const auto body = macroBodies.find( macro );
             if ( body == macroBodies.end() )

@@ -147,10 +147,15 @@ Json::Value FeatureCubeContract::toJson() const
 bool FeatureCubeContract::fromJson( const Json::Value &v, FeatureCubeContract *out,
                                     QString *error )
 {
-  if ( !v.isObject() || !v.isMember( "version" ) || v["version"].asInt() != 1 )
+  // R10-A/PR-10: asInt() on a string throws Json::LogicError and on a real
+  // silently truncates (1.9 → v1). Require an integer version through the
+  // error channel — never an exception, never a truncated accept.
+  if ( !v.isObject() || !v.isMember( "version" ) || !v["version"].isInt()
+       || v["version"].asInt() != 1 )
   {
     if ( error )
-      *error = QStringLiteral( "unsupported feature cube contract version" );
+      *error = QStringLiteral( "unsupported feature cube contract version "
+                               "(must be the integer 1)" );
     return false;
   }
   out->bands.clear();

@@ -12,6 +12,7 @@
 // append-only audit history keyed by content digest; identical content
 // re-runs are idempotent. Split manifests may attach to any version status
 // (they are derived evidence ABOUT a version, not mutations of it).
+#include <QReadWriteLock>
 #include "dataset_store_impl.h"
 #include <QJsonArray>
 #include <QDebug>
@@ -42,6 +43,7 @@ QString contentDigest( const QString &canonicalJson )
 
 sicnu::data::Result<void> DatasetStore::saveSplitManifest( const SplitManifest &manifest )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -143,6 +145,7 @@ sicnu::data::Result<void> DatasetStore::saveSplitManifest( const SplitManifest &
 
 std::optional<SplitManifest> DatasetStore::splitManifestById( const QString &manifestId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -169,6 +172,7 @@ std::optional<SplitManifest> DatasetStore::splitManifestById( const QString &man
 QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
     const DatasetVersionId &versionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<SplitManifest> manifests;
     if ( !m_impl )
         return manifests;
@@ -227,6 +231,7 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
 
 sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &report )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -239,16 +244,34 @@ sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &
         return Result::failure( storeDiag( QStringLiteral( "dataset.leakage_report_invalid" ),
                                            QStringLiteral( "report carries no split manifest id" ) ) );
 
-    StoreStmt split( m_impl->db, QStringLiteral(
-        "SELECT 1 FROM split_manifests WHERE manifest_id=?" ) );
-    if ( !split )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           split.error( m_impl->db ) ) );
-    split.bind( 1, report.splitManifestId() );
-    if ( !split.stepRow() )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.split_not_found" ),
-                                           QStringLiteral( "split manifest %1 is not stored" )
-                                               .arg( report.splitManifestId() ) ) );
+    // Existence check + append ride ONE transaction (BEGIN IMMEDIATE, same
+    // shape as saveQaReport below) so a report can never attach to a split
+    // manifest deleted between the check and the insert: a draft version can
+    // carry a split manifest, and deleteDataset cascades to split_manifests
+    // while this table keeps no FK — the previous check-then-insert raced
+    // across connections and left the inserted row an orphan that nothing can
+    // ever cascade away.
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
+    {
+        StoreStmt split( m_impl->db, QStringLiteral(
+            "SELECT 1 FROM split_manifests WHERE manifest_id=?" ) );
+        if ( !split )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               split.error( m_impl->db ) ) );
+        }
+        split.bind( 1, report.splitManifestId() );
+        if ( !split.stepRow() )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.split_not_found" ),
+                                               QStringLiteral( "split manifest %1 is not stored" )
+                                                   .arg( report.splitManifestId() ) ) );
+        }
+    }
 
     // The stored row keeps the Compact text (stored text may stay Compact);
     // the DIGEST input is the ONE canonical form (#1387) — the same bytes
@@ -262,25 +285,40 @@ sicnu::data::Result<void> DatasetStore::saveLeakageReport( const LeakageReport &
     const QString digest = contentDigest(
         QString::fromUtf8( sicnu::data::canonicalizeJsonRfc8785( report.toJson() ) ) );
 
-    StoreStmt insert( m_impl->db, QStringLiteral(
-        "INSERT OR IGNORE INTO leakage_reports(split_manifest_id, report_digest,"
-        " json, created_ms) VALUES(?,?,?,?)" ) );
-    if ( !insert )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           insert.error( m_impl->db ) ) );
-    insert.bind( 1, report.splitManifestId() );
-    insert.bind( 2, digest );
-    insert.bind( 3, json );
-    insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
-    if ( !insert.step() )
+    {
+        StoreStmt insert( m_impl->db, QStringLiteral(
+            "INSERT OR IGNORE INTO leakage_reports(split_manifest_id, report_digest,"
+            " json, created_ms) VALUES(?,?,?,?)" ) );
+        if ( !insert )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               insert.error( m_impl->db ) ) );
+        }
+        insert.bind( 1, report.splitManifestId() );
+        insert.bind( 2, digest );
+        insert.bind( 3, json );
+        insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
+        if ( !insert.step() )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               insert.error( m_impl->db ) ) );
+        }
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           QStringLiteral( "commit transaction failed" ) ) );
+    }
     return Result::success();
 }
 
 std::optional<LeakageReport> DatasetStore::latestLeakageReport(
     const QString &splitManifestId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -301,6 +339,7 @@ std::optional<LeakageReport> DatasetStore::latestLeakageReport(
 QVector<LeakageReport> DatasetStore::leakageReportsForSplit( const QString &splitManifestId,
                                                              qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<LeakageReport> reports;
     if ( !m_impl )
         return reports;
@@ -332,6 +371,7 @@ QVector<LeakageReport> DatasetStore::leakageReportsForSplit( const QString &spli
 
 sicnu::data::Result<void> DatasetStore::saveQaReport( const DatasetQaReport &report )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -403,6 +443,7 @@ sicnu::data::Result<void> DatasetStore::saveQaReport( const DatasetQaReport &rep
 sicnu::data::Result<QVector<DatasetStore::QaReportRecord>> DatasetStore::qaReportsForVersion(
     const DatasetVersionId &versionId, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<QVector<QaReportRecord>>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -445,6 +486,7 @@ sicnu::data::Result<QVector<DatasetStore::QaReportRecord>> DatasetStore::qaRepor
 sicnu::data::Result<std::optional<DatasetStore::QaReportRecord>> DatasetStore::latestQaReport(
     const DatasetVersionId &versionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<std::optional<QaReportRecord>>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),

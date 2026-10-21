@@ -51,6 +51,10 @@ struct CommonOptions
     QString mode;
     qint64 limit = 0;
     qint64 cursor = 0;
+    // Track 14 (WP-E): tokens this parser does not recognize. They used to be
+    // skipped together with any value they carried, so a misspelled optional
+    // flag changed the result while the command still exited 0.
+    QStringList leftover;
 };
 
 CommonOptions parseOptions( QStringList args )
@@ -69,13 +73,25 @@ CommonOptions parseOptions( QStringList args )
         QStringLiteral( "--mode" ),       QStringLiteral( "--limit" ),
         QStringLiteral( "--cursor" ),
     };
+    // Global envelope flags: main() reads them off argv and leaves them in
+    // place (cli_commands.h "Global output flags"), so the parser tolerates
+    // them in any position — they never carry a value of their own.
+    static const QStringList kGlobalFlags = {
+        QStringLiteral( "--json" ),      QStringLiteral( "--json-lines" ),
+        QStringLiteral( "--quiet" ),     QStringLiteral( "--progress-json" ),
+    };
     while ( !args.isEmpty() )
     {
         const QString flag = args.takeFirst();
-        // Only known flags consume a value; global flags (--json, --quiet…)
-        // and unknown tokens are skipped so flag order never matters.
+        // Only known flags consume a value. Global flags are skipped as
+        // before; every other unrecognized token is recorded as leftover so
+        // the caller refuses the invocation instead of guessing its meaning.
         if ( !kValueFlags.contains( flag ) )
+        {
+            if ( !kGlobalFlags.contains( flag ) )
+                options.leftover.append( flag );
             continue;
+        }
         if ( args.isEmpty() )
             break;
         const QString value = args.takeFirst();
@@ -179,6 +195,15 @@ constexpr const char *kReproduceSubcommands = "export|validate|inspect";
 constexpr const char *kDatasetStoreHint =
     "create a store first: dataset create --dataset-db <path> --name <name>";
 
+// Track 14 (WP-E): every flag the shared parser recognizes — the value flags
+// plus the global envelope flags. A token outside this set is refused instead
+// of being silently skipped (and its value with it).
+constexpr const char *kAcceptedFlags =
+    "--json|--json-lines|--quiet|--progress-json|--dataset-db|--experiment-db|"
+    "--name|--description|--objective|--dataset|--version|--from|--to|"
+    "--experiment|--a|--b|--run|--out|--bundle|--schema|--schema-version|"
+    "--split|--mode|--limit|--cursor";
+
 } // namespace
 
 int fail( const CliIO &io, const std::string &command, const std::string &message,
@@ -189,6 +214,24 @@ int fail( const CliIO &io, const std::string &command, const std::string &messag
     classified.exitCode = exitCode;
     return io.finish( false, command, {}, exitCode, diagnosticsToJson( diagnostics ), message,
                       &classified );
+}
+
+// Track 14 (WP-E): parseOptions used to swallow every token it did not know,
+// so `--datasset x` (a typo for an optional flag) ran the command anyway and
+// exited 0 with a different result. Returns the exit code of the refusal, or
+// 0 when the invocation carried nothing unrecognized. Called before any store
+// opens so a rejected invocation leaves no artifact behind.
+int rejectUnknownArgs( const CommonOptions &options, const std::string &command,
+                       const CliIO &io )
+{
+    if ( options.leftover.isEmpty() )
+        return 0;
+    const QString token = options.leftover.first();
+    const std::string reason = token.startsWith( QStringLiteral( "--" ) )
+                                   ? std::string( "unknown flag: " )
+                                   : std::string( "unknown argument: " );
+    return fail( io, command, reason + token.toStdString(), kInvalidInput,
+                 { .expected = kAcceptedFlags, .actual = token.toStdString() } );
 }
 
 std::string versionIdStdString( const QString &text )
@@ -212,6 +255,10 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         return fail( io, "dataset", "unknown dataset subcommand: " + sub.toStdString(),
                      kInvalidInput,
                      { .expected = kDatasetSubcommands, .actual = sub.toStdString() } );
+    // Track 14 (WP-E): refuse what the parser could not recognize — still
+    // before the store opens, so a rejected invocation leaves no artifact.
+    if ( const int unknown = rejectUnknownArgs( options, "dataset", io ) )
+        return unknown;
     if ( options.datasetDb.isEmpty() )
         return fail( io, "dataset", "--dataset-db <path> is required", kInvalidInput,
                      { .expected = "--dataset-db <path>",
@@ -596,6 +643,10 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
         return fail( io, "experiment", "unknown experiment subcommand: " + sub.toStdString(),
                      kInvalidInput,
                      { .expected = kExperimentSubcommands, .actual = sub.toStdString() } );
+    // Track 14 (WP-E): refuse what the parser could not recognize — still
+    // before the store opens, so a rejected invocation leaves no artifact.
+    if ( const int unknown = rejectUnknownArgs( options, "experiment", io ) )
+        return unknown;
     if ( options.experimentDb.isEmpty() )
         return fail( io, "experiment", "--experiment-db <path> is required", kInvalidInput,
                      { .expected = "--experiment-db <path>",
@@ -741,6 +792,10 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
         return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString(),
                      kInvalidInput,
                      { .expected = kReproduceSubcommands, .actual = sub.toStdString() } );
+    // Track 14 (WP-E): refuse what the parser could not recognize — still
+    // before either store opens, so a rejected invocation leaves no artifact.
+    if ( const int unknown = rejectUnknownArgs( options, "reproduce", io ) )
+        return unknown;
     if ( options.experimentDb.isEmpty() || options.datasetDb.isEmpty() )
         return fail( io, "reproduce", "--experiment-db and --dataset-db are required",
                      kInvalidInput,

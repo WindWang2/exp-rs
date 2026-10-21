@@ -207,6 +207,17 @@ void TerrainDialog::setupUi()
     mLayerCombo->setCurrentIndex( 0 );
 }
 
+QString TerrainDialog::defaultOutputPath( const QgsRasterLayer *layer ) const
+{
+  if ( !layer )
+    return QString();
+  const QString inputPath = layer->source();
+  const QString analysisType = mAnalysisCombo ? mAnalysisCombo->currentData().toString() : QStringLiteral( "slope" );
+  return QFileInfo( inputPath ).path() + QLatin1Char( '/' )
+         + QFileInfo( inputPath ).completeBaseName()
+         + QLatin1Char( '_' ) + analysisType + QStringLiteral( ".tif" );
+}
+
 bool TerrainDialog::validateInputs()
 {
   auto *rl = mLayerCombo ? mLayerCombo->currentData().value<QgsRasterLayer *>() : nullptr;
@@ -218,17 +229,8 @@ bool TerrainDialog::validateInputs()
 
   setRasterLayer( rl );
 
-  QString outPath = outputPath();
-  if ( outPath.isEmpty() )
-  {
-    const QString inputPath = rl->source();
-    const QString analysisType = mAnalysisCombo ? mAnalysisCombo->currentData().toString() : QStringLiteral( "slope" );
-    outPath = QFileInfo( inputPath ).path() + QLatin1Char( '/' )
-              + QFileInfo( inputPath ).completeBaseName()
-              + QLatin1Char( '_' ) + analysisType + QStringLiteral( ".tif" );
-    if ( m_outputEdit )
-      m_outputEdit->setText( outPath );
-  }
+  if ( outputPath().isEmpty() && m_outputEdit )
+    m_outputEdit->setText( defaultOutputPath( rl ) );
 
   return true;
 }
@@ -246,11 +248,9 @@ void TerrainDialog::onRun()
   QString outPath = outputPath();
   if ( outPath.isEmpty() )
   {
-    const QString inputPath = rl->source();
-    outPath = QFileInfo( inputPath ).path() + QLatin1Char( '/' )
-              + QFileInfo( inputPath ).baseName()
-              + QLatin1Char( '_' ) + product + QStringLiteral( ".tif" );
-    m_outputEdit->setText( outPath );
+    outPath = defaultOutputPath( rl );
+    if ( m_outputEdit )
+      m_outputEdit->setText( outPath );
   }
 
   if ( mStatusLabel )
@@ -289,10 +289,4 @@ void TerrainDialog::onRun()
   // No hardcoded nodata: the operator resolves the DEM's declared NoData and
   // only falls back to -9999 when neither param nor metadata provides one (#445).
   runOperatorTask( operatorForProduct( product ), params );
-}
-
-void TerrainDialog::onAnalysisFinished()
-{
-  if ( mStatusLabel )
-    mStatusLabel->setText( tr( "Ready" ) );
 }

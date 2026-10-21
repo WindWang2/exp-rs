@@ -3,6 +3,8 @@
 
 #include "data_project_serializer.h"
 #include "workbench/mission_context_store.h"
+#include "workbench/selection_context.h"
+#include "workbench/workbench_state.h"
 #include "workbench/mission_run_authority.h"
 #include "workbench/mission_run_resolver.h"
 #include "workbench/mission_runtime_store.h"
@@ -105,10 +107,23 @@ void QgisDesktopWindow::setupConnections()
              } );
 
     // Task Center → Ready line (product job queue)
+    // R18-D: task lifecycle events also flip the injected in-flight fact
+    // (hasInFlightTask / taskInFlight). The predicate was bound once at
+    // assembly and nothing re-triggered the projections, so the fact stayed
+    // idle-stale until an unrelated canvas/selection event — suggested next
+    // actions and the agent's workbench:context payload read "idle" while a
+    // task was running.
+    const auto onTaskCenterEvent = [this]( const sicnu::AlgorithmTaskInfo & ) {
+        refreshStatusTaskSummary();
+        if ( m_selectionContext )
+            m_selectionContext->scheduleRefresh();
+        if ( m_workbenchState )
+            m_workbenchState->refresh();
+    };
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskAdded,
-             this, [this]( const sicnu::AlgorithmTaskInfo & ) { refreshStatusTaskSummary(); } );
+             this, onTaskCenterEvent );
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
-             this, [this]( const sicnu::AlgorithmTaskInfo & ) { refreshStatusTaskSummary(); } );
+             this, onTaskCenterEvent );
 
     // Identify tool results
     connect(m_identifyTool, &CustomIdentifyTool::identifyCompleted,
@@ -145,6 +160,34 @@ void QgisDesktopWindow::setupConnections()
     if ( QgsProject::instance() )
         for ( QgsMapLayer *layer : QgsProject::instance()->mapLayers() )
             watchLayerName( layer );
+
+    // R18-D: editing can start/stop OUTSIDE the shell's own slots (the
+    // attribute table and the QgisApp facade call layer->startEditing()
+    // directly). Those paths fire no currentLayerChanged, so the toolbar
+    // gating, the toggle action's checked state and the palette availability
+    // used to keep the stale no-session projection — dead clicks on
+    // digitizing tools, and a toggle that read unchecked while a session
+    // ran. editingStarted/editingStopped on the layer is the authoritative
+    // signal both paths share.
+    const auto watchLayerEditing = [this]( QgsMapLayer *layer ) {
+        auto *vector = qobject_cast<QgsVectorLayer *>( layer );
+        if ( !vector )
+            return;
+        connect( vector, &QgsVectorLayer::editingStarted, this, [this]() {
+            updateEditingUI( currentVectorLayer() );
+            if ( m_selectionContext )
+                m_selectionContext->scheduleRefresh();
+        } );
+        connect( vector, &QgsVectorLayer::editingStopped, this, [this]() {
+            updateEditingUI( currentVectorLayer() );
+            if ( m_selectionContext )
+                m_selectionContext->scheduleRefresh();
+        } );
+    };
+    connect( QgsProject::instance(), &QgsProject::layerWasAdded, this, watchLayerEditing );
+    if ( QgsProject::instance() )
+        for ( QgsMapLayer *layer : QgsProject::instance()->mapLayers() )
+            watchLayerEditing( layer );
 
     // Project signals
     connect(QgsProject::instance(), &QgsProject::readProject,

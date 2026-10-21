@@ -12,6 +12,14 @@ include(ExternalProject)
 set(SICNU_VENDOR_PREFIX "${CMAKE_BINARY_DIR}/vendor_prefix")
 file(MAKE_DIRECTORY ${SICNU_VENDOR_PREFIX})
 
+# ANTIGRAVITY: vendored ExternalProject builds are capped at 2 jobs — the repo-wide
+# parallel cap (CLAUDE.md:8 'parallelism cap 2'; scripts/check_presets.py:20
+# JOBS_CAP=2, ADR 0147 / D7 resource discipline). A bare `--parallel` in the
+# BUILD_COMMANDs below lets each sub-build use every core of the shared 16-core
+# host. Kept as a plain (non-cache) variable so the cap cannot be raised from
+# outside this file.
+set(SICNU_VENDOR_BUILD_JOBS 2)
+
 # Common CMake args passed to all ExternalProject builds
 set(_VENDOR_COMMON_ARGS
   -DCMAKE_INSTALL_PREFIX=${SICNU_VENDOR_PREFIX}
@@ -32,7 +40,7 @@ ExternalProject_Add(vendor_geos
   CMAKE_ARGS
     ${_VENDOR_COMMON_ARGS}
     -DGEOS_ENABLE_TESTS=OFF
-  BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
+  BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel ${SICNU_VENDOR_BUILD_JOBS}
   INSTALL_COMMAND ${CMAKE_COMMAND} --install .
 )
 
@@ -48,7 +56,7 @@ ExternalProject_Add(vendor_proj
     -DENABLE_CURL=OFF
     -DENABLE_TIFF=OFF
     -DBUILD_APPS=OFF
-  BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
+  BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel ${SICNU_VENDOR_BUILD_JOBS}
   INSTALL_COMMAND ${CMAKE_COMMAND} --install .
 )
 
@@ -150,7 +158,7 @@ ExternalProject_Add(vendor_gdal
     -DGDAL_USE_TEIGHA=OFF
     -DGDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE=ON
   DEPENDS vendor_proj vendor_geos
-  BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
+  BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel ${SICNU_VENDOR_BUILD_JOBS}
   INSTALL_COMMAND ${CMAKE_COMMAND} --install .
 )
 

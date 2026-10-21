@@ -16,6 +16,32 @@ loaded_plugins = {}
 algo_executors = {}
 
 
+def _json_safe(value):
+    """Coerce a plugin return value into JSON-encodable Python types.
+
+    Plugin executors routinely hand back numpy values (np.int64 counters,
+    ndarrays from raster ops); ``json.dumps`` rejects them with TypeError,
+    which the dispatch loop's outer handler would report as a JSON-RPC
+    -32700 "parse error" instead of a typed algorithm failure (#1608).
+    ``np.generic`` unwraps via ``.item()``, ``ndarray`` via ``.tolist()``,
+    containers are recursed (dict keys included — numpy keys hit the same
+    wall). Anything else is passed through untouched so ``json.dumps``
+    still decides, and the caller reports a typed failure for it.
+    """
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {
+            (k if isinstance(k, str) else _json_safe(k)): _json_safe(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def _proxy_recv_timeout_s():
     # Bounded wait for host-UI proxy answers (#1462): an unanswered request
     # (e.g. a version-skewed method the host bridge no longer knows, before
@@ -179,10 +205,18 @@ class SicnuPythonIface:
         # Algorithm ids this plugin registered via registerProcessingAlgorithm
         # (issue #755: popped from algo_executors on unload_plugin).
         self.registered_algo_ids = []
+        # callback ids this plugin registered via addPluginToMenu (issue
+        # #1609: popped from callbacks on unload_plugin — that dict is the
+        # only strong reference to the action objects, so leaving entries
+        # behind keeps an unloaded plugin's module alive for the worker's
+        # whole lifetime and still routable via ui.on_action_triggered).
+        self.registered_callback_ids = []
 
     def addPluginToMenu(self, title, action):
         cb_id = f"cb_{id(action)}"
         callbacks[cb_id] = action
+        if cb_id not in self.registered_callback_ids:
+            self.registered_callback_ids.append(cb_id)
         action_text = action.text() if hasattr(action, "text") and callable(action.text) else str(action)
         req_msg = {
             "jsonrpc": "2.0",
@@ -390,6 +424,10 @@ def main():
                     continue
 
                 msg_id = None
+                # Pre-encoded reply payload, set by the branches that must
+                # report their own serialization failure (see #1608); None
+                # means "encode resp below".
+                encoded = None
                 try:
                     msg = json.loads(line)
                     msg_id = msg.get("id")
@@ -443,6 +481,16 @@ def main():
                                 iface_obj = getattr(plugin_obj, "_exprs_iface", None)
                                 for algo_id in getattr(iface_obj, "registered_algo_ids", []):
                                     algo_executors.pop(algo_id, None)
+                                # #1609 backstop: drop this plugin's menu
+                                # callbacks too. `callbacks` is the only strong
+                                # reference to the action objects, so leaving
+                                # them behind pins the unloaded plugin's module
+                                # (and its closures) for the worker's whole
+                                # lifetime and still routes ui.on_action_triggered
+                                # into it. Best-effort: unload() may already have
+                                # torn the menu down on the host side.
+                                for cb_id in getattr(iface_obj, "registered_callback_ids", []):
+                                    callbacks.pop(cb_id, None)
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
@@ -573,7 +621,12 @@ def main():
                                         exec_params = None
                                 if exec_params is not None:
                                     try:
-                                        exec_result = algo_executors[algo_id](exec_params)
+                                        # #1608: coerce numpy returns (ndarray,
+                                        # np.int64, ...) here so json.dumps does
+                                        # not choke on them downstream.
+                                        exec_result = _json_safe(
+                                            algo_executors[algo_id](exec_params)
+                                        )
                                     finally:
                                         for shm_handle in shm_handles:
                                             shm_handle.close()
@@ -586,6 +639,28 @@ def main():
                                         "id": req_id,
                                         "result": {"status": "ok", "result": exec_result}
                                     }
+                                    # #1608: encode the reply now so a return
+                                    # value json still cannot encode (a custom
+                                    # object, an open handle, ...) surfaces as
+                                    # this algorithm's typed failure (-32000)
+                                    # instead of the dispatch loop's -32700
+                                    # "parse error". The pre-encoded payload is
+                                    # reused by the shared send below — no
+                                    # second serialization pass.
+                                    try:
+                                        encoded = json.dumps(resp)
+                                    except (TypeError, ValueError) as ex:
+                                        resp = {
+                                            "jsonrpc": "2.0",
+                                            "id": req_id,
+                                            "error": {
+                                                "code": -32000,
+                                                "message": (
+                                                    f"Algorithm {algo_id} returned a "
+                                                    f"non-JSON-serializable result: {ex}"
+                                                )
+                                            }
+                                        }
                             except Exception as ex:
                                 resp = {
                                     "jsonrpc": "2.0",
@@ -705,7 +780,12 @@ def main():
                                 "message": f"Method not found: {method}"
                             }
                         }
-                    payload = (json.dumps(resp) + "\n").encode("utf-8")
+                    # #1608: `encoded` is set when a branch already serialized
+                    # its reply (and possibly replaced it with a typed error);
+                    # otherwise encode resp here as before.
+                    if encoded is None:
+                        encoded = json.dumps(resp)
+                    payload = (encoded + "\n").encode("utf-8")
                     s.sendall(payload)
                 except Exception as ex:
                     sys.stderr.write(f"WorkerDaemon processing error: {ex}\n")

@@ -56,10 +56,12 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
     QVector<int> quantized = quantize( smoothed.data(), n, bins, nodata );
     report( 0.5f );
 
-    // Mask nodata pixels explicitly from original raw data
+    // Mask nodata pixels explicitly from original raw data (non-finite
+    // included — the raw Inf may have been smoothed away above but the pixel
+    // itself remains invalid).
     for ( size_t i = 0; i < n; ++i )
     {
-        if ( data[i] == nodata || std::isnan( data[i] ) )
+        if ( data[i] == nodata || !std::isfinite( data[i] ) )
             quantized[i] = 0;
     }
 
@@ -147,7 +149,7 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
         {
             for ( size_t i = 0; i < n; ++i )
             {
-                if ( bandData[0][i] == nodata || std::isnan( bandData[0][i] ) || curQuant[i] == 0 )
+                if ( bandData[0][i] == nodata || !std::isfinite( bandData[0][i] ) || curQuant[i] == 0 )
                 {
                     compositeQuantized[i] = 0; // nodata bin
                 }
@@ -161,7 +163,7 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
         {
             for ( size_t i = 0; i < n; ++i )
             {
-                if ( compositeQuantized[i] == 0 || bandData[b][i] == nodata || std::isnan( bandData[b][i] ) || curQuant[i] == 0 )
+                if ( compositeQuantized[i] == 0 || bandData[b][i] == nodata || !std::isfinite( bandData[b][i] ) || curQuant[i] == 0 )
                 {
                     compositeQuantized[i] = 0; // nodata in any band
                 }
@@ -237,8 +239,12 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
     for ( float &k : kernel )
         k /= sum;
 
+    // Non-finite voiding (rs_multires_segmenter discipline): a single ±Inf
+    // sample participating in the convolution poisons every neighbour it
+    // touches, and an Inf surviving to quantize() collapses the whole scene
+    // (vmax=Inf → scale=0 → one segment, or static_cast<int>(NaN) UB).
     auto isNoData = [nodata]( float v ) {
-        return v == nodata || std::isnan( v );
+        return v == nodata || !std::isfinite( v );
     };
 
     // Line-buffered separable convolution:
@@ -307,13 +313,18 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
 
 QVector<int> RsSimpleSegmenter::quantize( const float *data, size_t n, int bins, float nodata )
 {
-    // Find min/max excluding nodata and NaN
+    // Exclude nodata and every non-finite sample (see gaussianSmooth): an Inf
+    // in the min/max scan collapses the dynamic range (scale=0) or UB-casts a
+    // NaN through static_cast<int>.
+    auto isVoid = [nodata]( float v ) {
+        return v == nodata || !std::isfinite( v );
+    };
     float vmin = std::numeric_limits<float>::infinity();
     float vmax = -std::numeric_limits<float>::infinity();
     for ( size_t i = 0; i < n; ++i )
     {
         float v = data[i];
-        if ( v != nodata && !std::isnan( v ) )
+        if ( !isVoid( v ) )
         {
             if ( v < vmin )
                 vmin = v;
@@ -327,7 +338,7 @@ QVector<int> RsSimpleSegmenter::quantize( const float *data, size_t n, int bins,
         // All same value
         QVector<int> result( n, 0 );
         for ( size_t i = 0; i < n; ++i )
-            result[i] = ( data[i] == nodata || std::isnan( data[i] ) ) ? 0 : 1;
+            result[i] = isVoid( data[i] ) ? 0 : 1;
         return result;
     }
 
@@ -335,8 +346,8 @@ QVector<int> RsSimpleSegmenter::quantize( const float *data, size_t n, int bins,
     const float scale = ( bins - 1 ) / ( vmax - vmin );
     for ( size_t i = 0; i < n; ++i )
     {
-        if ( data[i] == nodata || std::isnan( data[i] ) )
-            result[i] = 0; // nodata bin
+        if ( isVoid( data[i] ) )
+            result[i] = 0; // nodata / non-finite bin
         else
             result[i] = 1 + static_cast<int>( ( data[i] - vmin ) * scale );
     }
@@ -466,9 +477,12 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
         SICNU_LOG_DEBUG( SicnuLogTags::Segmentation, QString( "Merging %1 small regions (minSize=%2)" )
             .arg( smallCount ).arg( minSize ) );
 
-        // 4-connected boundary offsets
-        const int dr4[] = { -1, 1, 0, 0 };
-        const int dc4[] = { 0, 0, -1, 1 };
+        // 8-connected boundary offsets — the CC phase above is 8-connected,
+        // so adjacency here must match it or a region whose only neighbours
+        // touch diagonally can never merge and stays below minRegionSize
+        // (while the fixpoint loop re-scans the full image for nothing).
+        const int dr8[] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+        const int dc8[] = { 0, 0, -1, 1, -1, 1, -1, 1 };
 
         // Pass 1: For each small region pixel, count its non-small / different neighbors.
         // Each small region (< minSize pixels) touches few distinct neighbors. A compact
@@ -489,10 +503,10 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
                 continue;
             int r = static_cast<int>( i / static_cast<size_t>(w) );
             int c = static_cast<int>( i % static_cast<size_t>(w) );
-            for ( int d = 0; d < 4; ++d )
+            for ( int d = 0; d < 8; ++d )
             {
-                int nr = r + dr4[d];
-                int nc = c + dc4[d];
+                int nr = r + dr8[d];
+                int nc = c + dc8[d];
                 if ( nr < 0 || nr >= h || nc < 0 || nc >= w )
                     continue;
                 quint32 neighbor = labels[static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc)];

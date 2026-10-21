@@ -38,6 +38,37 @@ QHash<int, cv::Mat> splitByClass( const cv::Mat &X, const cv::Mat &y )
   return buckets;
 }
 
+/// Log-determinant of a symmetric positive-definite covariance, summed over
+/// log singular values (det = product of eigenvalues = product of singular
+/// values). The determinant itself overflows long before the bands run out:
+/// 100 bands with per-band variances of 1e4 give det = 1e400, i.e. double
+/// infinity, while the sum of logs stays finite (~921 nat). Returns false
+/// when the matrix is not full rank or the sum is not finite — the caller
+/// then reports the pair as non-computable rather than guessing a value.
+bool logDeterminant( const cv::Mat &cov, double &logDet )
+{
+  if ( cov.empty() || cov.rows != cov.cols )
+    return false;
+
+  cv::Mat w;
+  cv::SVD::compute( cov, w, cv::SVD::NO_UV );
+  if ( w.empty() || w.total() != static_cast<size_t>( cov.rows ) )
+    return false;
+
+  // reshape( 1, 1 ) forces a 1 x d row so the loop below indexes in bounds
+  // whichever layout SVD picked for w (a d x 1 column on this OpenCV).
+  const cv::Mat singular = w.reshape( 1, 1 );
+  logDet = 0.0;
+  for ( int i = 0; i < cov.rows; ++i )
+  {
+    const double s = singular.at<double>( 0, i );
+    if ( !( s > 0.0 ) || !std::isfinite( s ) )
+      return false;
+    logDet += std::log( s );
+  }
+  return std::isfinite( logDet );
+}
+
 } // namespace
 
 QHash<QPair<int, int>, double> RsJmSeparability::computeAll( const cv::Mat &X,
@@ -115,13 +146,41 @@ double RsJmSeparability::pairJm( const cv::Mat &xA, const cv::Mat &xB )
   cv::Mat term1m = diff.t() * covBarInv * diff;
   double term1 = term1m.at<double>( 0, 0 ) / 8.0;
 
-  const double detBar = std::max( cv::determinant( covBar ), 1e-300 );
-  const double detA = std::max( cv::determinant( covA ), 1e-300 );
-  const double detB = std::max( cv::determinant( covB ), 1e-300 );
-  double term2 = 0.5 * std::log( detBar / std::sqrt( detA * detB ) );
+  // #1550 - term2 must be evaluated in the log domain. The determinant form
+  // overflows for wide-band inputs: with d = 100 bands and per-band variances
+  // of 1e4 / 1e8, det(covA) and det(covB) are both double infinity, so
+  // detBar / sqrt(detA * detB) is inf / inf = NaN, log(NaN) is NaN, and the
+  // !isfinite guard below clamped B to 0.0 — reporting perfectly separable
+  // classes as JM = 0.0, the worst-case red cell in the JM matrix. The
+  // log-domain truth for that case is term2 ~ 195.6 nat, i.e. JM ~ 2.0.
+  // Same log-determinant technique as classifier_engine.cpp's
+  // choleskyInvert().
+  double logDetA = 0.0;
+  double logDetB = 0.0;
+  double logDetBar = 0.0;
+  if ( !logDeterminant( covA, logDetA ) || !logDeterminant( covB, logDetB )
+       || !logDeterminant( covBar, logDetBar ) )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QString( "JM separability skipped: covariance is not "
+                             "positive definite for band count %1" )
+                      .arg( d ) );
+    return -1.0;
+  }
+  const double term2 = 0.5 * ( logDetBar - 0.5 * ( logDetA + logDetB ) );
 
   double B = term1 + term2;
-  if ( !std::isfinite( B ) || B < 0.0 )
-    B = 0.0;
+  if ( std::isnan( B ) )
+  {
+    // Not computable — report "n/a" (-1.0) rather than clamping to 0.0, which
+    // the JM matrix paints as worst-case inseparable (#1550).
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QString( "JM separability skipped: Bhattacharyya distance "
+                             "is not finite for band count %1" )
+                      .arg( d ) );
+    return -1.0;
+  }
+  if ( B < 0.0 )
+    B = 0.0; // rounding can push an identical pair a hair below zero
   return 2.0 * ( 1.0 - std::exp( -B ) );
 }

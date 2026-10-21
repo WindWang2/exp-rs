@@ -1480,6 +1480,31 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
   const double pageH = spec["page"]["height_mm"].asDouble();
   const std::string mapRef = mainMapRef( spec );
 
+  // R18-D: the rect/margin RULES judge each item against its own sheet
+  // (itemPageSize, R16-D T08 WP-6), but the mechanical repairs below judged
+  // against the page-0 envelope. On a smaller physical page the clamp was a
+  // no-op that still counted "applied", so the produce repair loop burned
+  // its iteration cap re-reporting the item — non-convergent. Every repair
+  // that clamps or places an item rect must use the item's own sheet.
+  const auto itemSheet = [ &spec, pageW, pageH ]( const Json::Value &it ) {
+    double w = pageW;
+    double h = pageH;
+    const int page = itemPage( it );
+    if ( page >= 1 && spec.isMember( "pages" ) && spec["pages"].isArray() &&
+         page <= static_cast<int>( spec["pages"].size() ) )
+    {
+      const Json::Value &sheet = spec["pages"][page - 1];
+      if ( sheet.isObject() )
+      {
+        if ( sheet.isMember( "width_mm" ) && sheet["width_mm"].isNumeric() )
+          w = sheet["width_mm"].asDouble();
+        if ( sheet.isMember( "height_mm" ) && sheet["height_mm"].isNumeric() )
+          h = sheet["height_mm"].asDouble();
+      }
+    }
+    return std::make_pair( w, h );
+  };
+
   for ( const auto &item : report["issues"] )
   {
     if ( !item.isObject() || !item.get( "repairable", false ).asBool() )
@@ -1607,14 +1632,15 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       if ( !found.item->isMember( "rect_mm" ) || ( *found.item )["rect_mm"].size() != 4 )
         continue;
       Json::Value &foundItem = *found.item;
+      const auto [ sheetW, sheetH ] = itemSheet( foundItem );
       double x = foundItem["rect_mm"][0].asDouble();
       double y = foundItem["rect_mm"][1].asDouble();
       double w = foundItem["rect_mm"][2].asDouble();
       double h = foundItem["rect_mm"][3].asDouble();
-      w = std::clamp( w, 1.0, pageW );
-      h = std::clamp( h, 1.0, pageH );
-      x = std::clamp( x, 0.0, std::max( 0.0, pageW - w ) );
-      y = std::clamp( y, 0.0, std::max( 0.0, pageH - h ) );
+      w = std::clamp( w, 1.0, sheetW );
+      h = std::clamp( h, 1.0, sheetH );
+      x = std::clamp( x, 0.0, std::max( 0.0, sheetW - w ) );
+      y = std::clamp( y, 0.0, std::max( 0.0, sheetH - h ) );
       foundItem["rect_mm"] = rect( x, y, w, h );
       ++applied;
     }
@@ -1753,9 +1779,10 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
            ( *found.item )["rect_mm"].size() != 4 )
         continue;
       Json::Value &foundItem = *found.item;
+      const auto [ sheetW, sheetH ] = itemSheet( foundItem );
       const double m = declaredMargin( spec ) > 0 ? declaredMargin( spec ) : 12.0;
-      const double boxW = pageW - 2 * m;
-      const double boxH = pageH - 2 * m;
+      const double boxW = sheetW - 2 * m;
+      const double boxH = sheetH - 2 * m;
       if ( boxW <= 0 || boxH <= 0 )
         continue; // degenerate margin box: leave the item, rule stays reported
       double x = foundItem["rect_mm"][0].asDouble();
@@ -1764,8 +1791,8 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       double h = foundItem["rect_mm"][3].asDouble();
       w = std::min( w, boxW );
       h = std::min( h, boxH );
-      x = std::clamp( x, m, std::max( m, pageW - m - w ) );
-      y = std::clamp( y, m, std::max( m, pageH - m - h ) );
+      x = std::clamp( x, m, std::max( m, sheetW - m - w ) );
+      y = std::clamp( y, m, std::max( m, sheetH - m - h ) );
       foundItem["rect_mm"] = rect( x, y, w, h );
       ++applied;
     }
@@ -1788,7 +1815,8 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       // never fight the margin repair on the next pass.
       const double margin = declaredMargin( spec ) > 0 ? declaredMargin( spec ) : 12.0;
       const double y = foundItem["rect_mm"][1].asDouble();
-      if ( y + requiredH <= pageH - margin )
+      const auto [ densitySheetW, densitySheetH ] = itemSheet( foundItem );
+      if ( y + requiredH <= densitySheetH - margin )
       {
         foundItem["rect_mm"][3] = requiredH; // grow downward inside the margin
         ++applied;
@@ -1862,8 +1890,9 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       double y = frameY + frameH - insetH - 4.0;
       // An inset larger than its frame still lands on the page (the frame
       // itself stays the next pass's problem — never both at once).
-      x = std::clamp( x, 0.0, std::max( 0.0, pageW - insetW ) );
-      y = std::clamp( y, 0.0, std::max( 0.0, pageH - insetH ) );
+      const auto [ sheetW, sheetH ] = itemSheet( inset );
+      x = std::clamp( x, 0.0, std::max( 0.0, sheetW - insetW ) );
+      y = std::clamp( y, 0.0, std::max( 0.0, sheetH - insetH ) );
       inset["rect_mm"] = rect( x, y, insetW, insetH );
       ++applied;
     }
@@ -1891,7 +1920,8 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       const double requiredH = 12.0 + rows * fontPt * 0.352778 * 1.5;
       const double margin = declaredMargin( spec ) > 0 ? declaredMargin( spec ) : 12.0;
       const double y = foundItem["rect_mm"][1].asDouble();
-      const double maxH = pageH - margin - y;
+      const auto [ densitySheetW, densitySheetH ] = itemSheet( foundItem );
+      const double maxH = densitySheetH - margin - y;
       if ( maxH > foundItem["rect_mm"][3].asDouble() )
       {
         foundItem["rect_mm"][3] = std::min( requiredH, maxH );
@@ -2034,12 +2064,13 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       // with any other item. Convergence > cleverness for agent repair.
       const double w = foundItem["rect_mm"][2].asDouble();
       const double h = foundItem["rect_mm"][3].asDouble();
+      const auto [ sheetW, sheetH ] = itemSheet( foundItem );
       const double m = 6.0;
       struct Slot { double x; double y; };
       const Slot candidates[] = {
-        { pageW - m - w, m },   { m, m },               { m, pageH - m - h },
-        { pageW - m - w, pageH - m - h }, { m, ( pageH - h ) / 2.0 },
-        { pageW - m - w, ( pageH - h ) / 2.0 }, { ( pageW - w ) / 2.0, pageH - m - h },
+        { sheetW - m - w, m },   { m, m },               { m, sheetH - m - h },
+        { sheetW - m - w, sheetH - m - h }, { m, ( sheetH - h ) / 2.0 },
+        { sheetW - m - w, ( sheetH - h ) / 2.0 }, { ( sheetW - w ) / 2.0, sheetH - m - h },
       };
       // Collect every other furniture rect — the same collections the
       // overlap detector scans, so a relocated item never re-triggers
@@ -2063,8 +2094,8 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       }
       for ( const auto &candidate : candidates )
       {
-        if ( candidate.x < 0 || candidate.y < 0 || candidate.x + w > pageW ||
-             candidate.y + h > pageH )
+        if ( candidate.x < 0 || candidate.y < 0 || candidate.x + w > sheetW ||
+             candidate.y + h > sheetH )
           continue;
         bool free = true;
         for ( const auto &other : others )

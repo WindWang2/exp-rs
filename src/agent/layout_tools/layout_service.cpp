@@ -1354,7 +1354,10 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
       *error = QStringLiteral( "Layout has no pages" );
     return false;
   }
-  if ( dpi <= 0 || dpi > 1200 )
+  // R18-D: NaN-safe form (the negated range, mirroring export.cpp/produce).
+  // `dpi <= 0 || dpi > 1200` waved NaN through both comparisons into
+  // NaN-sized raster math downstream.
+  if ( !( dpi >= 1.0 && dpi <= 1200.0 ) )
   {
     if ( error )
       *error = QStringLiteral( "DPI must be between 1 and 1200" );

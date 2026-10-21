@@ -95,6 +95,65 @@ PlaceholderRef parseSingleBracedRef( const std::string &raw, const std::string &
   return ref;
 }
 
+// Matches the placeholder token starting at @p start (which must be '$').
+// On a match, @p consumed receives the token length and the returned ref
+// carries rawRef plus the parsed fields; an invalid ref (e.g. "${}") still
+// consumes its token so it is never re-scanned as a nested placeholder.
+// Returns an invalid ref with @p consumed == 0 when no token starts here.
+PlaceholderRef matchPlaceholderAt( const std::string &text, size_t start, size_t &consumed )
+{
+  consumed = 0;
+  const size_t len = text.size();
+  if ( start >= len || text[start] != '$' )
+    return PlaceholderRef();
+
+  if ( start + 1 < len && text[start + 1] == '{' )
+  {
+    size_t closePos = text.find( '}', start + 2 );
+    if ( closePos != std::string::npos )
+    {
+      std::string raw = text.substr( start, closePos - start + 1 );
+      std::string content = text.substr( start + 2, closePos - ( start + 2 ) );
+      consumed = closePos - start + 1;
+      return parseSingleBracedRef( raw, content );
+    }
+  }
+
+  // Unbraced form: $stepId.portName or $stepId
+  size_t j = start + 1;
+  while ( j < len && isIdChar( text[j] ) )
+  {
+    ++j;
+  }
+  if ( j > start + 1 )
+  {
+    std::string stepId = text.substr( start + 1, j - start - 1 );
+    std::string portName = "output";
+    size_t endPos = j;
+    if ( j < len && text[j] == '.' )
+    {
+      size_t k = j + 1;
+      while ( k < len && isIdChar( text[k] ) )
+      {
+        ++k;
+      }
+      if ( k > j + 1 )
+      {
+        portName = text.substr( j + 1, k - j - 1 );
+        endPos = k;
+      }
+    }
+    consumed = endPos - start;
+    PlaceholderRef ref;
+    ref.rawRef = text.substr( start, consumed );
+    ref.stepId = stepId;
+    ref.portName = portName;
+    return ref;
+  }
+
+  return PlaceholderRef();
+}
+
 } // namespace
 
 std::vector<PlaceholderRef> parsePlaceholders( const std::string &text )
@@ -114,57 +173,15 @@ std::vector<PlaceholderRef> parsePlaceholders( const std::string &text )
       continue;
     }
 
-    size_t startPos = i;
-    if ( i + 1 < len && text[i + 1] == '{' )
+    size_t consumed = 0;
+    const PlaceholderRef ref = matchPlaceholderAt( text, i, consumed );
+    if ( consumed > 0 )
     {
-      size_t closePos = text.find( '}', i + 2 );
-      if ( closePos != std::string::npos )
-      {
-        std::string raw = text.substr( startPos, closePos - startPos + 1 );
-        std::string content = text.substr( i + 2, closePos - ( i + 2 ) );
-        PlaceholderRef ref = parseSingleBracedRef( raw, content );
-        if ( ref.isValid() )
-        {
-          results.push_back( ref );
-        }
-        i = closePos + 1;
-        continue;
-      }
-    }
-
-    // Unbraced form: $stepId.portName or $stepId
-    size_t j = i + 1;
-    while ( j < len && isIdChar( text[j] ) )
-    {
-      ++j;
-    }
-    if ( j > i + 1 )
-    {
-      std::string stepId = text.substr( i + 1, j - i - 1 );
-      std::string portName = "output";
-      size_t endPos = j;
-      if ( j < len && text[j] == '.' )
-      {
-        size_t k = j + 1;
-        while ( k < len && isIdChar( text[k] ) )
-        {
-          ++k;
-        }
-        if ( k > j + 1 )
-        {
-          portName = text.substr( j + 1, k - j - 1 );
-          endPos = k;
-        }
-      }
-      PlaceholderRef ref;
-      ref.rawRef = text.substr( startPos, endPos - startPos );
-      ref.stepId = stepId;
-      ref.portName = portName;
       if ( ref.isValid() )
       {
         results.push_back( ref );
       }
-      i = endPos;
+      i += consumed;
       continue;
     }
 
@@ -221,17 +238,37 @@ std::string substitutePlaceholders( const std::string &text,
   if ( !resolver || text.empty() )
     return text;
 
-  auto refs = parsePlaceholders( text );
-  if ( refs.empty() )
-    return text;
+  // Single left-to-right pass over the ORIGINAL text: every resolved value is
+  // appended to the output and never re-scanned. Re-scanning already-substituted
+  // text let a resolved value that itself contains another ref's rawRef (e.g. a
+  // user-selected input path holding a literal '$') be silently rewritten by a
+  // later ref (#1594).
+  std::string result;
+  result.reserve( text.size() );
 
-  std::sort( refs.begin(), refs.end(), []( const PlaceholderRef &a, const PlaceholderRef &b ) {
-    return a.rawRef.length() > b.rawRef.length();
-  } );
-
-  std::string result = text;
-  for ( const auto &ref : refs )
+  size_t i = 0;
+  const size_t len = text.size();
+  while ( i < len )
   {
+    if ( text[i] != '$' )
+    {
+      result.push_back( text[i] );
+      ++i;
+      continue;
+    }
+
+    size_t consumed = 0;
+    const PlaceholderRef ref = matchPlaceholderAt( text, i, consumed );
+    if ( consumed == 0 || !ref.isValid() )
+    {
+      // Not a valid placeholder: copy the token verbatim so a malformed token
+      // is never re-scanned as a nested one; a bare '$' just passes through.
+      const size_t copyLen = ( consumed > 0 ) ? consumed : 1;
+      result.append( text, i, copyLen );
+      i += copyLen;
+      continue;
+    }
+
     std::string replacement = resolver( ref );
     if ( ( replacement.empty() || replacement == ref.rawRef ) && ref.isEnvVar )
     {
@@ -242,14 +279,10 @@ std::string substitutePlaceholders( const std::string &text,
       }
     }
     if ( !replacement.empty() && replacement != ref.rawRef )
-    {
-      size_t pos = 0;
-      while ( ( pos = result.find( ref.rawRef, pos ) ) != std::string::npos )
-      {
-        result.replace( pos, ref.rawRef.length(), replacement );
-        pos += replacement.length();
-      }
-    }
+      result += replacement;
+    else
+      result += ref.rawRef;
+    i += consumed;
   }
   return result;
 }

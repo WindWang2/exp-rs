@@ -199,7 +199,14 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
     if ( !m_dataManager )
         return 0;
     const QVector<AssetSnapshot> snapshots = m_dataManager->assets();
+    // `mirrored` counts rows the store actually COMMITTED: a staged batch is
+    // credited only after its write succeeds (issue #1587 — callers publish
+    // this number as "assets indexed" in diagnostics and audit, so a rejected
+    // governance write must never inflate it). `prepared` remembers how many
+    // rows were staged at all, for the failure evidence below.
     qint64 mirrored = 0;
+    qint64 prepared = 0;
+    qint64 failedAssetBatches = 0, failedEdgeBatches = 0, failedRuns = 0, failedRunOutputBatches = 0;
     // Review-3 (N+1): batch store writes — one transaction per 256-row chunk
     // keeps bulk mirroring of large catalogs fast and memory bounded.
     constexpr int kBatchSize = 256;
@@ -211,20 +218,30 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
     auto flush = [ & ]() {
         if ( !batch.isEmpty() )
         {
-            ( void ) m_store.upsertAssets( batch );
+            const qint64 staged = batch.size();
+            const Result<void> written = m_store.upsertAssets( batch );
             batch.clear();
+            if ( written )
+                mirrored += staged;
+            else
+                ++failedAssetBatches;
         }
         if ( !edgeBatch.isEmpty() )
         {
-            ( void ) m_store.addLineageEdges( edgeBatch, /*replaceOutgoing=*/true );
+            if ( !m_store.addLineageEdges( edgeBatch, /*replaceOutgoing=*/true ) )
+                ++failedEdgeBatches;
             edgeBatch.clear();
         }
         for ( auto it = runBatch.constBegin(); it != runBatch.constEnd(); ++it )
-            ( void ) m_store.upsertRun( it.value() );  // runs are few; deduped per mirror
+        {
+            if ( !m_store.upsertRun( it.value() ) )  // runs are few; deduped per mirror
+                ++failedRuns;
+        }
         runBatch.clear();
         if ( !runOutputBatch.isEmpty() )
         {
-            ( void ) m_store.addRunOutputs( runOutputBatch );
+            if ( !m_store.addRunOutputs( runOutputBatch ) )
+                ++failedRunOutputBatches;
             runOutputBatch.clear();
         }
     };
@@ -233,7 +250,7 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
         const std::optional<GovernedAsset> row = governedRowForSnapshot( snapshot );
         if ( row )
         {
-            ++mirrored;
+            ++prepared;
             batch.append( *row );
         }
         // Run anchors collected into the same batch (review P1-13: per-asset
@@ -301,6 +318,30 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
                 ( void ) m_store.removeAsset( storedId,
                                               GovernanceStore::RemoveAssetPolicy::Cascade );
         }
+    }
+    // Failure channel (issue #1587): a mirror the store rejected must leave
+    // durable evidence — silently dropping it is the exact defect class the
+    // checked-writer hardening (issue #758-1) removed from the store, and the
+    // truthful `mirrored` count alone would under-report why.
+    if ( failedAssetBatches || failedEdgeBatches || failedRuns || failedRunOutputBatches )
+    {
+        qWarning( "WorkspaceService: mirrorAllAssets store writes failed "
+                  "(assetBatches=%lld edgeBatches=%lld runs=%lld runOutputBatches=%lld; "
+                  "%lld of %lld asset rows indexed)",
+                  static_cast<long long>( failedAssetBatches ),
+                  static_cast<long long>( failedEdgeBatches ),
+                  static_cast<long long>( failedRuns ),
+                  static_cast<long long>( failedRunOutputBatches ),
+                  static_cast<long long>( mirrored ),
+                  static_cast<long long>( prepared ) );
+        audit( QStringLiteral( "system" ), QStringLiteral( "workspace.mirror_failed" ),
+               QStringLiteral( "workspace" ), QString(),
+               QJsonObject{ { QLatin1String( "failedAssetBatches" ), failedAssetBatches },
+                            { QLatin1String( "failedEdgeBatches" ), failedEdgeBatches },
+                            { QLatin1String( "failedRuns" ), failedRuns },
+                            { QLatin1String( "failedRunOutputBatches" ), failedRunOutputBatches },
+                            { QLatin1String( "mirrored" ), mirrored },
+                            { QLatin1String( "prepared" ), prepared } } );
     }
     return mirrored;
 }

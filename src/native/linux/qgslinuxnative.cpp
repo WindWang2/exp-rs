@@ -22,6 +22,7 @@
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMetaType>
+#include <QDBusPendingCallWatcher>
 #include <QFile>
 #include <QImage>
 #include <QProcess>
@@ -54,11 +55,16 @@ void QgsLinuxNative::openFileExplorerAndSelectFile( const QString &path )
 
   QDBusInterface iface( u"org.freedesktop.FileManager1"_s, u"/org/freedesktop/FileManager1"_s, u"org.freedesktop.FileManager1"_s, QDBusConnection::sessionBus() );
 
-  iface.call( QDBus::NoBlock, u"ShowItems"_s, QStringList( QUrl::fromLocalFile( path ).toString() ), u"QGIS"_s );
-  if ( iface.lastError().type() != QDBusError::NoError )
-  {
-    QgsNative::openFileExplorerAndSelectFile( path );
-  }
+  // A NoBlock call discards the reply, so lastError() cannot be used to detect a
+  // failure. Watch the asynchronous reply instead and fall back to the generic
+  // implementation when the file manager is not available on this session bus.
+  const QDBusPendingCall call = iface.asyncCall( u"ShowItems"_s, QStringList( QUrl::fromLocalFile( path ).toString() ), u"QGIS"_s );
+  QDBusPendingCallWatcher *watcher = new QDBusPendingCallWatcher( call, this );
+  connect( watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, path] {
+    if ( watcher->isError() )
+      QgsNative::openFileExplorerAndSelectFile( path );
+    watcher->deleteLater();
+  } );
 }
 
 void QgsLinuxNative::showFileProperties( const QString &path )
@@ -71,11 +77,15 @@ void QgsLinuxNative::showFileProperties( const QString &path )
 
   QDBusInterface iface( u"org.freedesktop.FileManager1"_s, u"/org/freedesktop/FileManager1"_s, u"org.freedesktop.FileManager1"_s, QDBusConnection::sessionBus() );
 
-  iface.call( QDBus::NoBlock, u"ShowItemProperties"_s, QStringList( QUrl::fromLocalFile( path ).toString() ), u"QGIS"_s );
-  if ( iface.lastError().type() != QDBusError::NoError )
-  {
-    QgsNative::showFileProperties( path );
-  }
+  // See openFileExplorerAndSelectFile(): the reply of a NoBlock call is discarded,
+  // so the error can only be observed asynchronously.
+  const QDBusPendingCall call = iface.asyncCall( u"ShowItemProperties"_s, QStringList( QUrl::fromLocalFile( path ).toString() ), u"QGIS"_s );
+  QDBusPendingCallWatcher *watcher = new QDBusPendingCallWatcher( call, this );
+  connect( watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, path] {
+    if ( watcher->isError() )
+      QgsNative::showFileProperties( path );
+    watcher->deleteLater();
+  } );
 }
 
 void QgsLinuxNative::showUndefinedApplicationProgress()
@@ -139,9 +149,10 @@ bool QgsLinuxNative::openTerminalAtPath( const QString &path )
     term = u"konsole"_s;
   }
 
-  QStringList arguments;
-  arguments << u"--working-directory"_s << path;
-  return QProcess::startDetached( term, arguments, path );
+  // Not every terminal understands a "--working-directory" argument (konsole uses
+  // "--workdir", xterm has no such option at all), so pass the working directory
+  // to startDetached instead: it becomes the process working directory for all of them.
+  return QProcess::startDetached( term, QStringList(), path );
 }
 
 /**

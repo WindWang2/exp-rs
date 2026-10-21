@@ -138,7 +138,11 @@ void measureExtras( const FaultGrid &grid, ObservableSet &out )
     if ( extras.isMember( "index_pair" ) && extras["index_pair"].isObject() )
     {
         const auto &pair = extras["index_pair"];
-        if ( pair.isMember( "numerator" ) && pair.isMember( "denominator" ) )
+        // isString() gates before the asString() reads: jsoncpp's asString()
+        // throws on array/object values, and this measurement is documented
+        // as never throwing (same rule as the samples block below, #1447).
+        if ( pair.isMember( "numerator" ) && pair["numerator"].isString() &&
+             pair.isMember( "denominator" ) && pair["denominator"].isString() )
         {
             const int numerator = grid.bandIndexByRole( pair["numerator"].asString() );
             const int denominator = grid.bandIndexByRole( pair["denominator"].asString() );
@@ -270,18 +274,27 @@ void measureExtras( const FaultGrid &grid, ObservableSet &out )
 
         if ( extras.isMember( "truth" ) && extras["truth"].isArray() )
         {
+            // Pair score and truth by their original index: a non-numeric
+            // entry on either side drops that pair. Reading the filtered
+            // score vector against the unfiltered truth array here would
+            // silently re-pair the survivors into a wrong kappa.
             std::vector<double> truth;
             std::vector<double> prediction;
+            const auto &scoreJson = extras["score"];
             const auto &truthJson = extras["truth"];
-            const std::size_t samples = std::min( score.size(), std::size_t( truthJson.size() ) );
+            const std::size_t samples =
+                std::min( std::size_t( scoreJson.size() ), std::size_t( truthJson.size() ) );
             for ( std::size_t i = 0; i < samples; ++i )
             {
-                if ( !truthJson[Json::ArrayIndex( i )].isNumeric() )
+                if ( !scoreJson[Json::ArrayIndex( i )].isNumeric() ||
+                     !truthJson[Json::ArrayIndex( i )].isNumeric() )
                 {
                     continue;
                 }
                 truth.push_back( truthJson[Json::ArrayIndex( i )].asDouble() );
-                prediction.push_back( score[i] > threshold ? 1.0 : 0.0 );
+                prediction.push_back( scoreJson[Json::ArrayIndex( i )].asDouble() > threshold
+                                          ? 1.0
+                                          : 0.0 );
             }
             out.insert( { "kappa", numberObservable( "kappa", cohenKappa( prediction, truth ) ) } );
         }

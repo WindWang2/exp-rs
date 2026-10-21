@@ -87,9 +87,25 @@ bool writeFileBytes( const QString &path, const QByteArray &bytes )
   return f.write( bytes ) == bytes.size() && f.flush();
 }
 
-QStringList leakedTmpFiles( const QString &dirPath )
+// Qt never names a publish temporary "*.tmp": QSaveFile writes through
+// QTemporaryFileEngine with the TARGET path as the name template, so a named
+// temporary left behind is "<target>.<6 random chars>" — QTemporaryFileName
+// appends Qt's ".XXXXXX" mask (Linux first tries an unnamed O_TMPFILE), and no
+// ".tmp" literal exists anywhere in libQt6Core (verified against the installed
+// Qt 6.12). A "*.tmp" wildcard can therefore never match a leak, which would
+// make the (h) assertion vacuous. Assert the guarantee pattern-agnostically
+// instead: the only files left in dirPath are @p expectedFiles, so any leftover
+// name — temp or otherwise — is caught.
+QStringList leakedTmpFiles( const QString &dirPath, const QStringList &expectedFiles = QStringList() )
 {
-  return QDir( dirPath ).entryList( QStringList() << QStringLiteral( "*.tmp" ), QDir::Files );
+  const QStringList files = QDir( dirPath ).entryList( QDir::Files | QDir::Hidden );
+  QStringList leaked;
+  for ( const QString &file : files )
+  {
+    if ( !expectedFiles.contains( file ) )
+      leaked.append( file );
+  }
+  return leaked;
 }
 
 int fake_argc = 1;
@@ -365,7 +381,8 @@ TEST_CASE( "rsSaveGcpPointsFile publishes durably and reports failure (APP-4)",
     CHECK( reloaded.size() == 3 );
 
     // No temp litter beside the .points file.
-    CHECK( leakedTmpFiles( tempDir.path() ).isEmpty() );
+    const QStringList expectedFiles = QStringList() << QStringLiteral( "gcps.points" );
+    CHECK( leakedTmpFiles( tempDir.path(), expectedFiles ).isEmpty() );
   }
 
   SECTION( "destination permissions survive a .points save (T-d at the call site)" )
@@ -514,7 +531,7 @@ TEST_CASE( "PipelineEditorDock write: permission preservation, symlink following
     CHECK_FALSE( PipelineEditorDock::writePipelineDefinitionFile( QString(), root, &error ) );
     CHECK_FALSE( error.isEmpty() );
 
-    // No *.tmp litter anywhere in the fixture tree (mirrors the leak check).
+    // No temp litter anywhere in the fixture tree (mirrors the leak check).
     CHECK( leakedTmpFiles( tempDir.path() ).isEmpty() );
   }
 }

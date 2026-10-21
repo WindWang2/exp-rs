@@ -501,3 +501,155 @@ TEST_CASE( "preflight survives a descriptor with zero tile dimensions (F-A-3)",
     REQUIRE( plan.isObject() );
     CHECK( plan["expectedTileCount"].asUInt64() == 4096u );
 }
+
+// R10-A/PR-4: the same-grid compatibility check compared raw WKT strings
+// (dialect differences → false crs_mismatch while the runtime OSRIsSame
+// gate accepts them) and only looked at width/height (resolution/origin
+// drift invisible to the agent). Preflight must compare CRS semantically
+// and surface pixel-size/origin drift with the runtime's tolerance.
+namespace {
+
+void writeRasterVariant( const QString &path, int width, int height, float value,
+                         const char *projection, const std::array<double, 6> &gt )
+{
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), width, height, 1,
+                                  GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    // Non-const buffer: older GDAL signatures take double*.
+    double gtBuf[6] = { gt[0], gt[1], gt[2], gt[3], gt[4], gt[5] };
+    REQUIRE( GDALSetGeoTransform( ds, gtBuf ) == CE_None );
+    REQUIRE( GDALSetProjection( ds, projection ) == CE_None );
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    REQUIRE( band != nullptr );
+    std::vector<float> line( width, value );
+    for ( int row = 0; row < height; ++row )
+        REQUIRE( GDALRasterIO( band, GF_Write, 0, row, width, 1, line.data(), width, 1,
+                               GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( ds );
+}
+
+char *esriWktForEpsg32648()
+{
+    OGRSpatialReference srs;
+    REQUIRE( srs.importFromEPSG( 32648 ) == OGRERR_NONE );
+    REQUIRE( srs.morphToESRI() == OGRERR_NONE );
+    char *wkt = nullptr;
+    REQUIRE( srs.exportToWkt( &wkt ) == OGRERR_NONE );
+    return wkt;
+}
+
+char *ogcWktForEpsg32648()
+{
+    OGRSpatialReference srs;
+    REQUIRE( srs.importFromEPSG( 32648 ) == OGRERR_NONE );
+    char *wkt = nullptr;
+    REQUIRE( srs.exportToWkt( &wkt ) == OGRERR_NONE );
+    return wkt;
+}
+
+bool compatHasIssue( const Json::Value &preflight, const char *code )
+{
+    const Json::Value &issues = preflight["compatibility"]["issues"];
+    for ( const auto &issue : issues )
+        if ( issue["code"].asString() == code )
+            return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE( "preflight same-grid check compares CRS semantically and surfaces grid drift (R10-A/PR-4)",
+           "[processing][preflight][r10a]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    const std::array<double, 6> gtDefault = { 500000, 30, 0, 4500000, 0, -30 };
+    const std::array<double, 6> gtCoarser = { 500000, 60, 0, 4500000, 0, -60 };
+    const std::array<double, 6> gtShifted = { 500015, 30, 0, 4500000, 0, -30 }; // half-pixel offset
+
+    char *ogcWkt = ogcWktForEpsg32648();
+
+    AlgorithmDescriptor desc;
+    desc.id = "stub:samegrid-r10a";
+    for ( const char *portName : { "a", "b" } )
+    {
+        PortDescriptor port;
+        port.name = portName;
+        port.type = DataType::Raster;
+        port.required = true;
+        port.rsContract["dataKind"] = "raster";
+        port.rsContract["gridRelation"] = "same-grid";
+        desc.inputs.push_back( port );
+    }
+    ContractStubAdapter adapter( "stub:samegrid-r10a", desc );
+
+    const auto preflightPair = [&adapter]( const QString &pathA, const QString &pathB ) {
+        Json::Value params( Json::objectValue );
+        params["a"] = pathA.toStdString();
+        params["b"] = pathB.toStdString();
+        return preflightAdapter( adapter, params );
+    };
+
+    // Genuinely different CRS → crs_mismatch MUST still fire (regression
+    // guard for switching the compare to semantic OSRIsSame: the fix must
+    // relax dialect differences, not real ones). The dialect-encoding
+    // variant of this scenario is not realizable through files — this GDAL
+    // re-normalizes ESRI WKT to OGC on write/read, so two dialects converge
+    // before preflight ever sees them (verified during R10-A GREEN).
+    {
+        OGRSpatialReference srs;
+        REQUIRE( srs.importFromEPSG( 32649 ) == OGRERR_NONE );
+        char *wkt32649 = nullptr;
+        REQUIRE( srs.exportToWkt( &wkt32649 ) == OGRERR_NONE );
+        const QString a = tmp.path() + "/crs_a.tif";
+        const QString b = tmp.path() + "/crs_b.tif";
+        writeRasterVariant( a, 16, 16, 1.0f, ogcWkt, gtDefault );
+        writeRasterVariant( b, 16, 16, 2.0f, wkt32649, gtDefault );
+        CPLFree( wkt32649 );
+        const Json::Value preflight = preflightPair( a, b );
+        INFO( "EPSG:32648 vs EPSG:32649 must stay a crs_mismatch" );
+        REQUIRE( preflight["valid"].asBool() == false );
+        REQUIRE( compatHasIssue( preflight, "crs_mismatch" ) );
+    }
+
+    // Genuinely different pixel sizes → pixel_size_mismatch (RED on master:
+    // invisible — only width/height were compared).
+    {
+        const QString a = tmp.path() + "/res_a.tif";
+        const QString b = tmp.path() + "/res_b.tif";
+        writeRasterVariant( a, 16, 16, 1.0f, ogcWkt, gtDefault );
+        writeRasterVariant( b, 16, 16, 2.0f, ogcWkt, gtCoarser );
+        const Json::Value preflight = preflightPair( a, b );
+        INFO( "30 m vs 60 m pixels on equal dimensions must be surfaced" );
+        REQUIRE( preflight["valid"].asBool() == false );
+        REQUIRE( compatHasIssue( preflight, "pixel_size_mismatch" ) );
+    }
+
+    // Same pixel size, half-pixel origin offset → origin_misalignment (RED
+    // on master: invisible).
+    {
+        const QString a = tmp.path() + "/org_a.tif";
+        const QString b = tmp.path() + "/org_b.tif";
+        writeRasterVariant( a, 16, 16, 1.0f, ogcWkt, gtDefault );
+        writeRasterVariant( b, 16, 16, 2.0f, ogcWkt, gtShifted );
+        const Json::Value preflight = preflightPair( a, b );
+        INFO( "sub-pixel origin offset must be surfaced" );
+        REQUIRE( preflight["valid"].asBool() == false );
+        REQUIRE( compatHasIssue( preflight, "origin_misalignment" ) );
+    }
+
+    // Pin: identical grid/CRS (writer defaults) still preflights valid.
+    {
+        const QString a = tmp.path() + "/same_a.tif";
+        const QString b = tmp.path() + "/same_b.tif";
+        writeRaster( a, 16, 16, 1.0f );
+        writeRaster( b, 16, 16, 2.0f );
+        REQUIRE( preflightPair( a, b )["valid"].asBool() == true );
+    }
+
+    CPLFree( ogcWkt );
+}

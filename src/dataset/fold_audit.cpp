@@ -75,9 +75,31 @@ sicnu::data::Result<FoldComparabilitySummary> FoldAuditor::auditFolds(
     }
 
     FoldComparabilitySummary summary;
-    summary.foldCount = manifest.config().foldCount;
 
-    const int foldTotal = int( manifest.config().foldCount );
+    // The fold base is a property of the ASSIGNMENTS, not of foldCount: the
+    // k-fold family numbers folds 0..foldCount-1, while
+    // leave-one-{region,scene,year}-out numbers one fold per distinct
+    // grouping key (split.cpp), so foldCount says nothing about how many
+    // holdouts those methods produced — iterating it skipped every holdout
+    // past it, and its int() narrowing could round the base down to 0 and
+    // audit nothing at all without a word. Derive the base from the
+    // assignments; gaps inside it still surface as "could not be
+    // materialized" notes.
+    int foldTotal = 0;
+    for ( const SplitAssignment &assignment : manifest.assignments() )
+    {
+        if ( assignment.fold < 0 )
+            continue;
+        if ( assignment.fold + 1 > foldTotal )
+            foldTotal = assignment.fold + 1;
+    }
+    summary.foldCount = foldTotal;
+    if ( foldTotal <= 0 )
+    {
+        summary.notes.append( QStringLiteral(
+            "manifest carries no fold assignments; no fold could be audited" ) );
+    }
+
     for ( int fold = 0; fold < foldTotal; ++fold )
     {
         const auto materialized = manifest.materializeFold( fold );

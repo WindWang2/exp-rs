@@ -28,6 +28,7 @@
 #include "dataset_version.h"
 
 #include <QPair>
+#include <QReadWriteLock>
 #include <QString>
 #include <QVariantMap>
 #include <QVector>
@@ -58,10 +59,18 @@ class DatasetStore
     /// `dataset.store_read_only`).
     bool open( const QString &dbPath, QString *errorOut = nullptr );
     void close();
-    bool isOpen() const { return m_impl != nullptr; }
+    bool isOpen() const
+    {
+        QReadLocker lifecycleGuard( &m_lifecycle );
+        return m_impl != nullptr;
+    }
     bool isReadOnly() const;
     QString schemaVersion() const;
-    QString storePath() const { return m_storePath; }
+    QString storePath() const
+    {
+        QReadLocker lifecycleGuard( &m_lifecycle );
+        return m_storePath;
+    }
     /// Folds the WAL into the main DB file so the file alone is safe to copy.
     bool checkpointForBackup();
 
@@ -75,7 +84,7 @@ class DatasetStore
     /// Paged listing ordered by name. `total` is the full row count.
     sicnu::data::Result<QPair<qint64, QVector<QVariantMap>>> listDatasets(
         qint64 offset = 0, qint64 limit = kMaxPageSize ) const;
-    qint64 datasetCount() const;
+    qint64 datasetCount( QString *scanError = nullptr ) const;
     sicnu::data::Result<void> deleteDataset( const DatasetId &datasetId );
 
     // --- versions -----------------------------------------------------------
@@ -101,12 +110,13 @@ class DatasetStore
 
     std::optional<DatasetVersionRecord> versionById( const DatasetVersionId &versionId ) const;
     /// Versions of one dataset, oldest first (parent before child).
-    QVector<DatasetVersionRecord> versionsOfDataset( const DatasetId &datasetId ) const;
+    QVector<DatasetVersionRecord> versionsOfDataset( const DatasetId &datasetId,
+        QString *scanError = nullptr ) const;
     std::optional<DatasetVersionRecord> latestCommittedVersion( const DatasetId &datasetId ) const;
     /// Drafts that were staged but never committed (interrupted processes).
     /// Recovery decision (resume/cleanup) belongs to the caller; the store
     /// only reports the truth.
-    QVector<DatasetVersionRecord> staleStagedDrafts() const;
+    QVector<DatasetVersionRecord> staleStagedDrafts( QString *scanError = nullptr ) const;
 
     // --- version lineage DAG (9.0 M1) ------------------------------------------
     /// Depth bound of lineage walks: deeper chains (or loops) are refused as
@@ -116,7 +126,8 @@ class DatasetStore
     /// Children of @p versionId (parent-link inversion; ascending creation
     /// order, bounded by @p limit).
     QVector<DatasetVersionRecord> versionChildren( const DatasetVersionId &versionId,
-                                                   qint64 limit = 1000 ) const;
+                                                   qint64 limit = 1000,
+        QString *scanError = nullptr ) const;
     /// Ancestor walk child → root: @p versionId first, then its parent, and
     /// so on. Every link must resolve inside the store — a dangling parent
     /// (possible in stores written before parent validation existed) is a
@@ -164,7 +175,8 @@ class DatasetStore
     std::optional<DatasetVersionId> versionByTag( const DatasetId &datasetId,
                                                   const QString &tag ) const;
     /// All tags of one dataset, tag-ascending (bounded by @p limit).
-    QVector<VersionTag> versionTags( const DatasetId &datasetId, qint64 limit = 1000 ) const;
+    QVector<VersionTag> versionTags( const DatasetId &datasetId, qint64 limit = 1000,
+        QString *scanError = nullptr ) const;
 
     // --- lineage edges (dataset-side; goal §28) ------------------------------
     /// Adds a directed edge `from → to`. Both endpoints are (kind, id) pairs
@@ -184,16 +196,25 @@ class DatasetStore
     };
     /// Outgoing edges of one node (bounded by @p limit).
     QVector<LineageEdge> outgoingEdges( const QString &kind, const QString &id,
-                                        qint64 limit = 1000 ) const;
+                                        qint64 limit = 1000,
+                                        QString *scanError = nullptr ) const;
     /// Incoming edges of one node (bounded by @p limit).
     QVector<LineageEdge> incomingEdges( const QString &kind, const QString &id,
-                                        qint64 limit = 1000 ) const;
+                                        qint64 limit = 1000,
+                                        QString *scanError = nullptr ) const;
     /// Whole-table edge scan (graph assembly input; bounded by @p limit).
-    QVector<LineageEdge> allLineageEdges( qint64 limit = 100000 ) const;
+    QVector<LineageEdge> allLineageEdges( qint64 limit = 100000,
+        QString *scanError = nullptr ) const;
 
+    // R15-B (B07 tail, #1448/#1457): every bare-container reader above and
+    // below takes an optional trailing `scanError`. A mid-scan SQLite ERROR
+    // (CORRUPT/IOERR/BUSY) now returns an EMPTY container — never a silently
+    // partial one — and, when @p scanError is non-null, stores the reason
+    // (an empty string on success is left untouched by the reader: callers
+    // pass a fresh QString). Existing callers compile unchanged.
     // --- maintenance ----------------------------------------------------------
-    qint64 versionCount() const;
-    qint64 lineageEdgeCount() const;
+    qint64 versionCount( QString *scanError = nullptr ) const;
+    qint64 lineageEdgeCount( QString *scanError = nullptr ) const;
 
     // --- label schemas (document rows; ADR 0135) ------------------------------
     /// Saves a validated schema document. Re-saving the same (id, version)
@@ -202,7 +223,8 @@ class DatasetStore
     sicnu::data::Result<void> saveLabelSchema( const LabelSchema &schema );
     std::optional<LabelSchema> labelSchema( const QString &schemaId, quint64 version ) const;
     /// (version, fingerprint-hex) pairs for one schema id, ascending.
-    QVector<QPair<quint64, QString>> labelSchemaVersions( const QString &schemaId ) const;
+    QVector<QPair<quint64, QString>> labelSchemaVersions( const QString &schemaId,
+        QString *scanError = nullptr ) const;
 
     // --- samples (ADR 0135) ---------------------------------------------------
     /// Batch-inserts samples into a DRAFT version (one transaction). The
@@ -231,10 +253,12 @@ class DatasetStore
     sicnu::data::Result<SampleCursorPage> samplesPageCursor(
         const DatasetVersionId &versionId, const QString &cursor = QString(),
         qint64 limit = kMaxPageSize ) const;
-    qint64 sampleCount( const DatasetVersionId &versionId ) const;
+    qint64 sampleCount( const DatasetVersionId &versionId,
+                        QString *scanError = nullptr ) const;
     /// Distinct group ids of one version (bounded by @p limit; ordered).
     QVector<QString> sampleGroupIds( const DatasetVersionId &versionId,
-                                     qint64 limit = 10000 ) const;
+                                     qint64 limit = 10000,
+        QString *scanError = nullptr ) const;
     /// Draft-only removal (typo fix before commit; committed versions are
     /// frozen).
     sicnu::data::Result<void> removeSample( const DatasetVersionId &versionId,
@@ -247,10 +271,12 @@ class DatasetStore
     sicnu::data::Result<void> addAnnotation( const AnnotationRecord &annotation );
     std::optional<AnnotationRecord> annotationTip( const QString &annotationId ) const;
     /// Full revision history, revision 1 first.
-    QVector<AnnotationRecord> annotationHistory( const QString &annotationId ) const;
+    QVector<AnnotationRecord> annotationHistory( const QString &annotationId,
+        QString *scanError = nullptr ) const;
     /// Current (tip) annotations targeting one sample, revision-ascending.
     QVector<AnnotationRecord> annotationsOfSample( const QString &sampleId,
-                                                   qint64 limit = 1000 ) const;
+                                                   qint64 limit = 1000,
+        QString *scanError = nullptr ) const;
 
     // --- split manifests & leakage reports (goal §18/§19) -----------------------
     /// Persists a split manifest as platform content. split.h's contract —
@@ -367,6 +393,13 @@ class DatasetStore
         const DatasetVersionId &versionId );
 
     struct Impl;
+    // R15-B (#1449): lifecycle lock OUTSIDE the Impl. Every member call holds
+    // it shared for its whole duration; open()/close() hold it exclusive, so
+    // close() waits for in-flight calls and no call can observe a deleted
+    // Impl (its mutex included) or a half-closed connection. Recursive: a
+    // member may call another member on the same thread. Calling close() or
+    // open() from INSIDE a member call on the same thread is not supported.
+    mutable QReadWriteLock m_lifecycle{ QReadWriteLock::Recursive };
     Impl *m_impl = nullptr;
     QString m_storePath;
 };

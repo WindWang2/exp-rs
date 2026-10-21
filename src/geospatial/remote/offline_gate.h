@@ -88,6 +88,19 @@ HostPinStatus resolveForPinning( const std::string &host, int port,
 /// is not synchronized).
 void applyGdalNetworkDeny();
 
+/// R15-B (R4-03): process-wide private-network policy. When engaged, every
+/// httpFetch* without its own redirect guard gets the private-network guard
+/// (host check + per-hop guard + DNS pinning), and the range cache treats
+/// blockPrivateNetworks as on. Library default: OFF (callers and tests that
+/// never engage it see no change). Entry points (the CLI) engage it through
+/// network_policy::engageProcessPrivateNetworkBlocking(), which also
+/// installs the GDAL-level hooks. Atomic; safe to read from any thread.
+void setBlockPrivateNetworks( bool block );
+bool blockPrivateNetworks();
+/// SICNU_BLOCK_PRIVATE_NETWORKS with the env-flag semantics of
+/// enabledFromEnv() — how a parent CLI hands the policy to its workers.
+bool blockPrivateNetworksFromEnv();
+
 /// Inverse of applyGdalNetworkDeny (tests re-enabling networking).
 void clearGdalNetworkDeny();
 

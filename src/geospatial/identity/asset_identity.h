@@ -81,6 +81,7 @@ struct AssetIdentityOptions
     int connectTimeoutSeconds = 5;
     int maxRetries = 1;
     std::uintmax_t probeBytes = 1024; ///< bounded remote metadata probe
+    bool blockPrivateNetworks = false; ///< R15-B T11: refuse private-network origins (token "")
 };
 
 struct AssetIdentity

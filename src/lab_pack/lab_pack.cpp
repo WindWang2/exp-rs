@@ -240,11 +240,27 @@ PackLoadResult PackVerifier::loadFromBytes( const std::string &bytes,
 {
   Json::Value root;
   Json::CharReaderBuilder builder;
+  // Pinned, not inherited: the jsoncpp default stackLimit is version-dependent
+  // (1000 on 1.9.5/1.9.6), and the reader THROWS (not returns false) once the
+  // limit is exceeded. A pack document is untrusted file content that reaches
+  // here from lab_self_check/teaching_admin inventory loops, so the recursion
+  // bound is explicit and the parse is guarded — the same safe-reader
+  // discipline as verify_pack/grader_json.
+  builder[ "stackLimit" ] = 128;
   std::string parseErrors;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-  if ( !reader->parse( bytes.data(), bytes.data() + bytes.size(), &root, &parseErrors ) )
-    return PackLoadResult::failure( "lab.pack_schema",
-                                    contextError( errorContext, parseErrors ) );
+  try
+  {
+    if ( !reader->parse( bytes.data(), bytes.data() + bytes.size(), &root, &parseErrors ) )
+      return PackLoadResult::failure( "lab.pack_schema",
+                                      contextError( errorContext, parseErrors ) );
+  }
+  catch ( const Json::Exception &exception )
+  {
+    return PackLoadResult::failure(
+      "lab.pack_schema",
+      contextError( errorContext, std::string( "invalid JSON: " ) + exception.what() ) );
+  }
 
   if ( !root.isObject() || !root["schema_version"].isString()
        || root["schema_version"].asString() != kSchemaId )

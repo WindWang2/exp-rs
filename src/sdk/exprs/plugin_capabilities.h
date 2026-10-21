@@ -80,6 +80,18 @@ bool expandCapabilityPath( const std::string &declared, const std::string &plugi
                            const std::string &workspaceRoot, const std::string &tempDir,
                            std::string &resolved, std::string &error );
 
+/// Worker-side workDir write-gate activation. FAIL CLOSED: the gate is ON
+/// whenever write roots were declared OR the access parse reported any
+/// error — a manifest that declares roots the worker cannot expand (e.g.
+/// ${workspace} with no workspace configured) must not drop the gate and
+/// grant unscoped writes. Only an error-free parse with no declared write
+/// roots leaves the gate off (access-less manifests keep pre-9.0 behavior);
+/// with no resolved roots every non-temp workDir is then refused.
+inline bool writeRootGateActive( const PluginCapabilityParseResult &access )
+{
+    return !access.ok() || !access.capabilities.fsWriteRoots.empty();
+}
+
 /// True when @p candidate resolves (canonicalized; a not-yet-existing tail
 /// is anchored at its deepest existing ancestor, exactly like declared
 /// roots) INSIDE @p root. Empty roots contain nothing. Used by the worker

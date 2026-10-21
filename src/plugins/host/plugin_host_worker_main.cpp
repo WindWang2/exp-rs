@@ -461,6 +461,22 @@ private:
     std::map<long long, State> mStates;
 };
 
+/// Reads a peer-controlled string field out of a request. jsoncpp's
+/// get(key, default) substitutes the default ONLY when the key is absent —
+/// a present but wrongly typed value (object/array) is returned as-is and
+/// asString() throws Json::LogicError on it. On a pool thread that throw is
+/// swallowed by ExecutionPool::workerLoop and the request is never answered:
+/// the host can only time out (E6004) and burn a restart. Type-check first
+/// so the caller can refuse typed, exactly like the provider uri gate.
+bool peerString( const Json::Value &params, const char *key, std::string &out )
+{
+    const Json::Value &value = params.get( key, Json::Value() );
+    if ( !value.isNull() && !value.isString() )
+        return false;
+    out = value.asString();
+    return true;
+}
+
 /// Loaded model runtimes live in the worker for the process lifetime (one
 /// plugin per process); the launcher only holds descriptors.
 class ModelRuntimeCache
@@ -484,11 +500,39 @@ public:
             result["deviceName"] = mRuntimes[ framework ]->deviceName();
             return true; // idempotent re-load for the same framework
         }
+        // Peer-controlled request fields: type-check BEFORE any cast. The
+        // kLoadModel caller has no try/catch, so a Json::LogicError thrown
+        // by asString()/asBool() would escape to ExecutionPool::workerLoop,
+        // be swallowed there, and leave the request unanswered (the host can
+        // only time out and restart the worker). Refuse typed instead.
+        if ( !requestJson.isNull() && !requestJson.isObject() )
+        {
+            error.code = "E6002";
+            error.message = "model request must be an object";
+            return false;
+        }
         PluginModelRequestV1 modelRequest;
-        modelRequest.modelName = requestJson.get( "modelName", "" ).asString();
-        modelRequest.artifactPath = requestJson.get( "artifactPath", "" ).asString();
+        if ( !peerString( requestJson, "modelName", modelRequest.modelName ) )
+        {
+            error.code = "E6002";
+            error.message = "model request modelName must be a string";
+            return false;
+        }
+        if ( !peerString( requestJson, "artifactPath", modelRequest.artifactPath ) )
+        {
+            error.code = "E6002";
+            error.message = "model request artifactPath must be a string";
+            return false;
+        }
         modelRequest.manifest = requestJson["manifest"];
-        modelRequest.gpuRequested = requestJson.get( "gpuRequested", false ).asBool();
+        const Json::Value &gpuValue = requestJson.get( "gpuRequested", Json::Value() );
+        if ( !gpuValue.isNull() && !gpuValue.isBool() )
+        {
+            error.code = "E6002";
+            error.message = "model request gpuRequested must be a boolean";
+            return false;
+        }
+        modelRequest.gpuRequested = gpuValue.asBool();
         std::string loadError;
         auto runtime = factory( modelRequest, loadError );
         if ( !runtime )
@@ -587,7 +631,15 @@ void executeOperator( IpcChannel &channel, long long requestId, WorkerSink &sink
                       const std::string &pluginId, ProgressThrottle &throttle,
                       const WorkerPolicy &policy )
 {
-    const std::string operatorId = params.get( "operatorId", "" ).asString();
+    std::string operatorId;
+    if ( !peerString( params, "operatorId", operatorId ) )
+    {
+        // Type-check BEFORE any cast: a hostile peer must not be able to
+        // throw out of a pool thread (Json::LogicError would leave the
+        // request unanswered and the host would time out instead).
+        channel.sendError( requestId, { "E6002", "operatorId must be a string" } );
+        return;
+    }
     auto factoryIterator = sink.mOperatorFactories.find( operatorId );
     if ( factoryIterator == sink.mOperatorFactories.end() )
     {
@@ -614,7 +666,12 @@ void executeOperator( IpcChannel &channel, long long requestId, WorkerSink &sink
         return;
     }
 
-    const std::string workDir = params.get( "workDir", "" ).asString();
+    std::string workDir;
+    if ( !peerString( params, "workDir", workDir ) )
+    {
+        channel.sendError( requestId, { "E6002", "workDir must be a string" } );
+        return;
+    }
     std::string resolvedWorkDir;
     if ( !workDir.empty() && policy.active && !policy.allowsWorkDir( workDir, resolvedWorkDir ) )
     {
@@ -685,7 +742,12 @@ void executeDataProvider( IpcChannel &channel, long long requestId, WorkerSink &
                           const Ipc::Envelope &request )
 {
     const Json::Value &params = request.params;
-    const std::string providerId = params.get( "providerId", "" ).asString();
+    std::string providerId;
+    if ( !peerString( params, "providerId", providerId ) )
+    {
+        channel.sendError( requestId, { "E6002", "providerId must be a string" } );
+        return;
+    }
     auto providerIterator = sink.mDataProviders.find( providerId );
     if ( providerIterator == sink.mDataProviders.end() )
     {
@@ -811,7 +873,12 @@ void executeModelRuntime( IpcChannel &channel, long long requestId, WorkerSink &
                           const Ipc::Envelope &request )
 {
     const Json::Value &params = request.params;
-    const std::string framework = params.get( "framework", "" ).asString();
+    std::string framework;
+    if ( !peerString( params, "framework", framework ) )
+    {
+        channel.sendError( requestId, { "E6002", "framework must be a string" } );
+        return;
+    }
     auto factoryIterator = sink.mModelRuntimeFactories.find( framework );
     if ( factoryIterator == sink.mModelRuntimeFactories.end() )
     {
@@ -1017,16 +1084,61 @@ int main( int argc, char **argv )
             }
 
             const Json::Value &serviceValues = params["services"];
-            services = std::make_unique<WorkerHostServices>(
-                serviceValues.get( "tempDirectory", "" ).asString(),
-                serviceValues.get( "workspaceRoot", "" ).asString(),
-                serviceValues.get( "dataDirectory", "" ).asString(),
-                serviceValues.get( "pluginDirectory", "" ).asString() );
+            if ( !serviceValues.isNull() && !serviceValues.isObject() )
+            {
+                // Type-check BEFORE the get()/asString() chain below: a
+                // hostile peer sending a non-object would make jsoncpp's
+                // find() throw Json::LogicError, and nothing between this
+                // load handler and main() catches — the worker would die
+                // with std::terminate instead of answering typed (same
+                // guard shape as "limits" above).
+                channel.sendError( request.id,
+                                   { "E1002", "plugin.load services must be an object" } );
+                continue;
+            }
+            // Each services MEMBER is peer-controlled too: a present
+            // non-string would make asString() throw Json::LogicError out of
+            // the load handler (main() catches nothing → std::terminate), so
+            // all four are validated once, here, before any get()/asString()
+            // chain reads them. Missing/null keeps the default "" exactly
+            // like the top-level gate above. The same values then feed the
+            // capability re-derivation further down, which is why they are
+            // kept in locals instead of being re-read from serviceValues.
+            std::string servicesTempDirectory;
+            std::string servicesWorkspaceRoot;
+            std::string servicesDataDirectory;
+            std::string servicesPluginDirectory;
+            if ( !peerString( serviceValues, "tempDirectory", servicesTempDirectory )
+                 || !peerString( serviceValues, "workspaceRoot", servicesWorkspaceRoot )
+                 || !peerString( serviceValues, "dataDirectory", servicesDataDirectory )
+                 || !peerString( serviceValues, "pluginDirectory",
+                                 servicesPluginDirectory ) )
+            {
+                channel.sendError( request.id,
+                                   { "E1002",
+                                     "plugin.load services members must be strings" } );
+                continue;
+            }
+            services = std::make_unique<WorkerHostServices>( servicesTempDirectory,
+                                                             servicesWorkspaceRoot,
+                                                             servicesDataDirectory,
+                                                             servicesPluginDirectory );
             services->attachChannel( &channel );
 
             PluginRecord record;
             record.manifest = manifest;
-            record.directory = params.get( "pluginDirectory", "" ).asString();
+            std::string pluginDirectory;
+            if ( !peerString( params, "pluginDirectory", pluginDirectory ) )
+            {
+                // Same typed refusal as the manifest/services gates: an
+                // untyped Json::LogicError here escapes the load handler and
+                // terminates the worker (main() catches nothing).
+                channel.sendError( request.id,
+                                   { "E1002",
+                                     "plugin.load pluginDirectory must be a string" } );
+                continue;
+            }
+            record.directory = pluginDirectory;
 
             // Capability policy for the worker-side workDir gate: re-derived
             // HERE from the manifest the worker parsed itself plus its own
@@ -1034,16 +1146,18 @@ int main( int argc, char **argv )
             {
                 PluginCapabilityParseResult access = parsePluginAccess(
                     manifest.access, record.directory,
-                    serviceValues.get( "workspaceRoot", "" ).asString(),
-                    serviceValues.get( "tempDirectory", "" ).asString() );
+                    servicesWorkspaceRoot, servicesTempDirectory );
                 policy.writeRoots = access.capabilities.fsWriteRoots;
-                policy.tempDirectory = serviceValues.get( "tempDirectory", "" ).asString();
+                policy.tempDirectory = servicesTempDirectory;
                 // Opt-in containment: only plugins that DECLARE write roots
                 // get the workDir gate. Without declarations the
                 // host-provided default workDir (the executor's run
                 // directory) is legitimate and is not gated — identical to
                 // v1 behavior for manifests that make no capability claims.
-                policy.active = access.ok() && !policy.writeRoots.empty();
+                // Fail closed: ANY parse error (e.g. a declared root that
+                // cannot expand under the worker's context) still turns the
+                // gate ON — an unexpanded declaration is not a grant.
+                policy.active = writeRootGateActive( access );
             }
 
             PluginLoader loader;
@@ -1271,28 +1385,36 @@ int main( int argc, char **argv )
                                      manifest.id, throttle, policy );
                 else if ( request.method == kExecuteAgentTool )
                 {
-                    const std::string toolId = request.params.get( "toolId", "" ).asString();
-                    auto toolIterator = sink.mAgentTools.find( toolId );
-                    if ( toolIterator == sink.mAgentTools.end() )
+                    std::string toolId;
+                    if ( !peerString( request.params, "toolId", toolId ) )
                     {
                         this_->sendError( request.id,
-                                          { "E6008", "agent tool not registered: " + toolId } );
+                                          { "E6002", "toolId must be a string" } );
                     }
                     else
                     {
-                        try
-                        {
-                            Json::Value envelope =
-                                toolIterator->second->execute( request.params["params"] );
-                            std::string sendError;
-                            this_->sendResponse( request.id, envelope, sendError );
-                        }
-                        catch ( const std::exception &exception )
+                        auto toolIterator = sink.mAgentTools.find( toolId );
+                        if ( toolIterator == sink.mAgentTools.end() )
                         {
                             this_->sendError( request.id,
-                                              { "E4003",
-                                                std::string( "agent tool execute() threw: " )
-                                                    + exception.what() } );
+                                              { "E6008", "agent tool not registered: " + toolId } );
+                        }
+                        else
+                        {
+                            try
+                            {
+                                Json::Value envelope =
+                                    toolIterator->second->execute( request.params["params"] );
+                                std::string sendError;
+                                this_->sendResponse( request.id, envelope, sendError );
+                            }
+                            catch ( const std::exception &exception )
+                            {
+                                this_->sendError( request.id,
+                                                  { "E4003",
+                                                    std::string( "agent tool execute() threw: " )
+                                                        + exception.what() } );
+                            }
                         }
                     }
                 }

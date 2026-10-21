@@ -283,10 +283,18 @@ quint32 editingToolGeometryMask( const QString &actionName )
 {
     // Rings are holes inside polygons — polygon geometry only.
     if ( actionName == QLatin1String( "mActionAddRing" ) ||
-         actionName == QLatin1String( "mActionFillRing" ) )
+         actionName == QLatin1String( "mActionFillRing" ) ||
+         actionName == QLatin1String( "mActionDeleteRing" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
     if ( actionName == QLatin1String( "mActionReverseLine" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) );
+    // Trim/extend squares line ends AND polygon boundaries (the tool's
+    // FeatureFilter accepts any edge match — polygon rings included; review
+    // R18-D R1 P1); chamfer/fillet squares corners of both.
+    if ( actionName == QLatin1String( "mActionTrimExtendFeature" ) ||
+         actionName == QLatin1String( "mActionChamferFillet" ) )
+        return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) ) |
+               ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
     // Offset curve offsets lines AND polygon boundaries (the tool carries a
     // polygon mode); split/reshape/simplify operate on line/polygon geometry.
     if ( actionName == QLatin1String( "mActionOffsetCurve" ) ||
@@ -295,7 +303,9 @@ quint32 editingToolGeometryMask( const QString &actionName )
          actionName == QLatin1String( "mActionSimplify" ) )
         return ( 1u << static_cast<int>( Qgis::GeometryType::Line ) ) |
                ( 1u << static_cast<int>( Qgis::GeometryType::Polygon ) );
-    return 0u; // geometry-agnostic (select/capture/node/move/rotate/delete-part)
+    // Geometry-agnostic (select/capture/node/move/rotate/delete-part/scale/
+    // split-part/add-part/feature-array).
+    return 0u;
 }
 
 /// Publish why an editing action is unavailable (R16-D T07 WP-2): the
@@ -339,7 +349,10 @@ void QgisDesktopWindow::updateEditingUI(QgsVectorLayer *vlayer)
     quint32 layerGeometryMask = 0u;
     if ( editing && vlayer )
         layerGeometryMask = 1u << static_cast<int>( vlayer->geometryType() );
-    for (QAction *a : m_editingToolActions)
+    // R18-D: the Digitizing MENU twins (m_menuDigitizingActions) ride the
+    // exact same gate as the toolbar actions — one contract, both entries.
+    const QList<QAction *> gatedActions = m_editingToolActions + m_menuDigitizingActions;
+    for (QAction *a : gatedActions)
     {
         QString reason;
         if ( !editing )
@@ -369,6 +382,12 @@ void QgisDesktopWindow::updateEditingUI(QgsVectorLayer *vlayer)
 QAction *QgisDesktopWindow::editingAction( const QString &name ) const
 {
     for ( QAction *a : m_editingToolActions )
+    {
+        if ( a && a->objectName() == name )
+            return a;
+    }
+    // R18-D: the Digitizing menu twins share the gate (and the test surface).
+    for ( QAction *a : m_menuDigitizingActions )
     {
         if ( a && a->objectName() == name )
             return a;
@@ -530,7 +549,26 @@ void QgisDesktopWindow::toggleEditing()
         // layers without an Asset ID (external/standard) keep QGIS behavior.
         if (!acquireEditLease(vlayer))
             return;
-        vlayer->startEditing();
+        if (!vlayer->startEditing())
+        {
+            // APP-10 (R18-D): a refused start must not keep the lease (the
+            // asset would stay locked against every other view, including
+            // this one) nor report "Stopped editing" — nothing was stopped.
+            // rollbackEditLease retries deferred relocations, which may
+            // relocate (destroy) this layer synchronously: snapshot identity
+            // and re-resolve (same hazard the discard path handles above).
+            const QString refusedId = vlayer->id();
+            const QString refusedName = vlayer->name();
+            rollbackEditLease(vlayer);
+            vlayer = qobject_cast<QgsVectorLayer *>(
+                QgsProject::instance()->mapLayer(refusedId));
+            updateEditingUI(vlayer);
+            statusBar()->showMessage(
+                tr("Failed to start editing %1 — the layer is read-only or the "
+                   "provider refused (no edit session was started)")
+                    .arg(refusedName), 5000);
+            return;
+        }
     }
 
     updateEditingUI(vlayer);

@@ -20,10 +20,8 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <mutex>
-#include <sstream>
 #include "platform/portable.h"
 
 namespace sicnu::geo
@@ -105,17 +103,6 @@ std::string trimText( const std::string &text )
   while ( end > begin && std::isspace( static_cast<unsigned char>( text[end - 1] ) ) )
     --end;
   return text.substr( begin, end - begin );
-}
-
-bool readFileInto( const std::string &path, std::string &out )
-{
-  std::ifstream in( path, std::ios::binary );
-  if ( !in.is_open() )
-    return false;
-  std::ostringstream buffer;
-  buffer << in.rdbuf();
-  out = buffer.str();
-  return true;
 }
 
 /// Sentinel-2 band id from an image file name. L2A names carry a trailing

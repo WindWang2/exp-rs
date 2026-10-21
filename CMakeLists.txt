@@ -51,6 +51,10 @@ endif()
 # clangd editors consume it. Silently ignored by IDE/VS generators.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Packaging version — declared ONCE here: COMPLETE_VERSION (next line) feeds
+# the library SOVERSIONs (src/core, src/gui, src/native) and qgsversion, so a
+# second declaration elsewhere is silently ignored by CMake and only drifts
+# (review #1626 removed the verbatim duplicate in the qgsconfig.h block below).
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 0)
 set(CPACK_PACKAGE_VERSION_PATCH 0)
@@ -228,9 +232,6 @@ endif()
 # --- qgsconfig.h: all optional features OFF for P0 ---
 # SICNU_GEO_RS: P3 — enable HAVE_GUI so core exposes authMethodEditWidget etc.
 set(HAVE_GUI TRUE)
-set(CPACK_PACKAGE_VERSION_MAJOR 1)
-set(CPACK_PACKAGE_VERSION_MINOR 0)
-set(CPACK_PACKAGE_VERSION_PATCH 0)
 set(RELEASE_NAME "SICNU GEO RS")
 set(QGIS_VERSION_INT 10000)
 set(QGIS_PLUGIN_SUBDIR "plugins")
@@ -268,6 +269,8 @@ option(WITH_HANA "" OFF)
 option(WITH_MESH_EXTRAS "" OFF)
 option(WITH_OPENCL "" OFF)
 option(WITH_3D "" OFF)
+# Declared once here; the P3 GUI-options block below must not repeat it —
+# CMake ignores a second option() and the duplicate only drifts (#1626).
 option(WITH_QTWEBENGINE "" OFF)
 option(WITH_GRASS "" OFF)
 option(WITH_SERVER "" OFF)
@@ -773,7 +776,9 @@ add_subdirectory(src/teaching_admin)
 add_subdirectory(src/experiment/debugger)
 # Unified Scientific Verifier Slice A (#1191, ADR 0172): the one verification
 # truth — status lattice, versioned spec/report serde, sha256. Qt-free leaf;
-# consumers are opt-in (tests first).
+# the verifier authority: the ADR 0172 provider adapters in src/verify_adapters
+# (below) compile against these headers, while the parallel core in
+# src/verification is included by no production TU (split notice there).
 add_subdirectory(src/verify)
 # RS14-03 Scientific Repair Planner (ADR 0174): explicit, auditable,
 # rejectable repair candidate plans over preflight findings. Qt-free leaf.
@@ -829,7 +834,6 @@ add_subdirectory(src/app/obia)
 # SICNU_GEO_RS: P3 GUI options — disable optional deps not installed on this system
 option(WITH_QWTPOLAR      "" OFF)
 option(WITH_QSCINTILLA    "" OFF)
-option(WITH_QTWEBENGINE   "" OFF)
 option(WITH_QTGAMEPAD     "" OFF)
 option(WITH_QUICK         "" OFF)
 add_subdirectory(src/ui)
@@ -886,10 +890,15 @@ add_subdirectory(src/science_context)
 add_subdirectory(src/agentbench)
 # Agent Operations & Recovery Control Center (compose authorities only).
 add_subdirectory(src/agent_ops)
-# Unified Scientific Verifier (RS14-10, ADR 0172): three-valued verification of
-# declared expectations. Qt-free and QGIS-free by design, so it stays usable
-# headless; must follow src/contracts (packs_builtin reads the registry) and
-# src/geospatial (the module compiles in the repo's single sha256 TU).
+# RS14-10 parallel verifier core (#1601): ADR 0172's decision text names this
+# directory, but the verifier authority is src/verify above — the hardening
+# recon records src/verify as the master authority and this as the old
+# parallel implementation. Three-valued verification of declared expectations.
+# Qt-free and QGIS-free by design, so it stays usable headless; must follow
+# src/contracts (packs_builtin reads the registry) and src/geospatial (the
+# module compiles in the repo's single sha256 TU). No production includer —
+# the only linkers are the test_verifier_* lanes in tests/CMakeLists.txt — so
+# it is wired for that suite alone.
 add_subdirectory(src/verification)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
@@ -979,6 +988,15 @@ add_custom_target(update_translations DEPENDS sicnu_i18n_update)
 if(TARGET sicnu_geo_rs)
   add_dependencies(sicnu_geo_rs sicnu_i18n)
 endif()
+# Install the compiled .qm beside the installed executable: the app target
+# installs to bin/ (src/app/CMakeLists.txt) and main.cpp's translation
+# candidates include <appdir>/resources/translations, so without this rule the
+# installed tree and the AppImage ship no .qm and a zh locale silently falls
+# back to English (main.cpp degrades, never errors). Deliberately not
+# OPTIONAL — a missing .qm must fail the install loudly, which matches
+# sicnu_geo_rs's build-time dependency on sicnu_i18n above.
+install(FILES "${SICNU_ZH_CN_QM}"
+        DESTINATION bin/resources/translations)
 
 # =============================================================================
 # End-of-configure dependency report (dependency doctor, ds41-build-portability):

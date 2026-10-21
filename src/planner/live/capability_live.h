@@ -70,6 +70,13 @@ class LiveCapabilityProvider final : public CapabilityProvider
     /// into provider facts. Fails (false + typed @p error) when the mirror
     /// is unconfigured or unhealthy: the planner must never plan over a
     /// degraded authority that looks live.
+    ///
+    /// RAM honesty: the mirror declares cost classes but NO memory
+    /// estimates, so every projected fact carries estimatedRamMb = 0
+    /// (undeclared). A caller setting max_estimated_ram_mb therefore gets
+    /// a plan whose RAM budget is VACUOUS under this provider — the
+    /// cost-class budget stays enforced, the RAM one cannot trip until the
+    /// authority declares RAM.
     static bool create( const sicnu::preflight::CapabilityMirrorProjection &mirror,
                         LiveCapabilityProvider &out, std::string &error );
 
@@ -110,13 +117,6 @@ class LiveCapabilityProvider final : public CapabilityProvider
 /// The mirror cost-class vocabulary projected onto the planner cost
 /// vocabulary. Returns "" for anything the mirror does not declare —
 /// the caller then skips the entry (never maps unknown → "low").
-std::string plannerCostClassForMirrorCostClass( const std::string &mirrorCostClass );
-
-/// RAM honesty: the mirror declares cost classes but NO memory estimates,
-/// so every projected fact carries estimatedRamMb = 0 (undeclared). A
-/// caller setting max_estimated_ram_mb therefore gets a plan whose RAM
-/// budget is VACUOUS under this provider — the cost-class budget stays
-/// enforced, the RAM one cannot trip until the authority declares RAM.
 std::string plannerCostClassForMirrorCostClass( const std::string &mirrorCostClass );
 
 } // namespace sicnu::planner

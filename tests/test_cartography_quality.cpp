@@ -247,6 +247,90 @@ TEST_CASE( "Off-page and margin rules use the item's own page geometry (R16-D T0
   CHECK_FALSE( hasCode( preflightMapSpec( spec ), "MAP_OFF_PAGE" ) );
 }
 
+TEST_CASE( "Off-page and margin repairs clamp against the item's own sheet (R18-D)",
+           "[cartography][quality][pages][r18d]" )
+{
+  // Same heterogeneous document as R16-D T08 WP-6 above, but the off-page
+  // item is REPAIRED (not hand-moved first): body 297x210, physical page 1 =
+  // pages[0] = 210x148. A page-0-geometry clamp no-ops on this shape
+  // (250+40=290 fits 297 but not 210), the repair counted "applied"
+  // without moving the rect, and the next preflight re-reported the item —
+  // a non-convergent loop that the produce path burns to its iteration cap.
+  const auto makeSpec = []( const std::string &name ) -> Json::Value {
+    Json::Value spec = fullSpec( name );
+    Json::Value pages( Json::arrayValue );
+    Json::Value page1( Json::objectValue );
+    page1["width_mm"] = 210.0;
+    page1["height_mm"] = 148.0;
+    pages.append( page1 );
+    spec["pages"] = pages;
+    return spec;
+  };
+
+  SECTION( "MAP_OFF_PAGE on a page-1 item is actually moved onto its sheet" )
+  {
+    Json::Value spec = makeSpec( "per-page-repair-off" );
+    Json::Value label( Json::objectValue );
+    label["id"] = "label-p1-over";
+    label["text"] = "x";
+    Json::Value labelRect( Json::arrayValue );
+    labelRect.append( 250 );
+    labelRect.append( 10 );
+    labelRect.append( 40 );
+    labelRect.append( 10 );
+    label["rect_mm"] = labelRect;
+    label["page"] = 1;
+    spec["labels"].append( label );
+
+    const Json::Value report = preflightMapSpec( spec );
+    REQUIRE( hasCode( report, "MAP_OFF_PAGE", "label-p1-over" ) );
+
+    Json::Value ledger;
+    repairMapSpecWithLedger( spec, report, &ledger );
+    const Json::Value &repaired = spec["labels"][spec["labels"].size() - 1];
+    CHECK( repaired["rect_mm"][0].asDouble() + repaired["rect_mm"][2].asDouble() <=
+           210.0 + 0.5 );
+    CHECK_FALSE( hasCode( preflightMapSpec( spec ), "MAP_OFF_PAGE", "label-p1-over" ) );
+    REQUIRE( ledger.isArray() );
+    bool sawLedgerEntry = false;
+    for ( const auto &record : ledger )
+      if ( record.get( "item_id", "" ).asString() == "label-p1-over" )
+      {
+        sawLedgerEntry = true;
+        CHECK( record["outcome"].asString() == "applied" );
+      }
+    CHECK( sawLedgerEntry );
+  }
+
+  SECTION( "MAP_MARGIN_VIOLATION on a page-1 item converges on its sheet" )
+  {
+    Json::Value spec = makeSpec( "per-page-repair-margin" );
+    spec["page"]["margin_mm"] = 12;
+    Json::Value label( Json::objectValue );
+    label["id"] = "label-p1-margin";
+    label["text"] = "x";
+    Json::Value labelRect( Json::arrayValue );
+    // On the small sheet (210 wide) but inside the 12 mm margin band.
+    labelRect.append( 5 );
+    labelRect.append( 100 );
+    labelRect.append( 40 );
+    labelRect.append( 10 );
+    label["rect_mm"] = labelRect;
+    label["page"] = 1;
+    spec["labels"].append( label );
+
+    const Json::Value report = preflightMapSpec( spec );
+    REQUIRE( hasCode( report, "MAP_MARGIN_VIOLATION", "label-p1-margin" ) );
+
+    repairMapSpec( spec, report );
+    const Json::Value &repaired = spec["labels"][spec["labels"].size() - 1];
+    // The margin clamp on the BODY page (297 wide) is a no-op at x=5 — a
+    // page-0-geometry repair left the violation standing.
+    CHECK( repaired["rect_mm"][0].asDouble() >= 12.0 - 0.5 );
+    CHECK_FALSE( hasCode( preflightMapSpec( spec ), "MAP_MARGIN_VIOLATION", "label-p1-margin" ) );
+  }
+}
+
 TEST_CASE( "Legend density grows the legend or adds columns",
            "[cartography][quality][density]" )
 {

@@ -226,6 +226,16 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
   if ( !sessionPtr )
     throw std::runtime_error( "Session not found: " + sessionId );
 
+  // Consume any stale cancellation request before this step starts: the flag is
+  // scoped to the session's CURRENT operator step (header contract), so a new
+  // runStep must begin uncancelled — otherwise a requestCancel() aimed at an
+  // earlier step (or at no step at all) would poison every later step in the
+  // session (#1654). A cancel that lands after this point still reaches the
+  // in-flight step: both run paths poll the same flag object captured below.
+  const auto staleFlag = cancelFlag( sessionId );
+  if ( staleFlag )
+    staleFlag->store( false, std::memory_order_release );
+
   const StepDef *step = sessionPtr->stepById( stepId );
   if ( !step )
     throw std::runtime_error( "Step not found: " + stepId );

@@ -2,6 +2,7 @@
 
 #include "platform/durable_sidecar.h"
 
+#include <exception>
 #include <sstream>
 
 namespace sicnu::teaching {
@@ -188,11 +189,26 @@ LabSessionState LabSessionState::deserialize( const std::string &bytes )
   Json::Value root;
   Json::CharReaderBuilder b;
   b["collectComments"] = false;
+  // Pinned stackLimit + typed catch (grader_json.cpp discipline): jsoncpp
+  // THROWS out of the reader on a stackLimit violation, and a session file
+  // is hand-editable input in this stack's threat model (lab/session_state.cpp
+  // defends tampering on these documents) — a nesting bomb must fail closed
+  // as a parse issue, never escape as an unhandled Json::RuntimeError.
+  b["stackLimit"] = 256;
   std::string errs;
   std::istringstream stream( bytes );
-  if ( !Json::parseFromStream( b, stream, &root, &errs ) ) {
+  try
+  {
+    if ( !Json::parseFromStream( b, stream, &root, &errs ) ) {
+      LabSessionState s;
+      s.issuesZh.push_back( "JSON 解析失败: " + errs );
+      return s;
+    }
+  }
+  catch ( const std::exception &e )
+  {
     LabSessionState s;
-    s.issuesZh.push_back( "JSON 解析失败: " + errs );
+    s.issuesZh.push_back( "JSON 解析失败: " + std::string( e.what() ) );
     return s;
   }
   return fromJson( root );

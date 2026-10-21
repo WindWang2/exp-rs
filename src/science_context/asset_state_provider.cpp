@@ -196,41 +196,60 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
     }
 
     PassportResolver resolver;
+    sicnu::state::RemoteSensingAssetState state;
+    bool cached = false;
     {
         std::lock_guard<std::mutex> lock( mMutex );
         auto it = mCache.find( request.assetKey );
         if ( it != mCache.end() )
         {
-            result.ok = true;
-            result.state = it->second;
-            result.summary = summarize( result.state );
+            state = it->second;
+            cached = true;
+        }
+        else
+        {
+            resolver = mResolver;
+        }
+    }
+
+    if ( !cached )
+    {
+        if ( !resolver )
+        {
+            result.error = "resolver_unavailable";
             return result;
         }
-        resolver = mResolver;
+
+        const PassportResolution resolved = resolver( request.assetKey );
+        if ( !resolved )
+        {
+            // Typed failure: keep the resolver's reason (gdal_open_failed vs
+            // asset_not_found vs ...). Failures are never cached — the next
+            // resolve re-consults the authority.
+            result.error = resolved.errorCode.empty() ? "asset_not_found" : resolved.errorCode;
+            result.errorDetail = resolved.errorDetail;
+            return result;
+        }
+
+        state = *resolved.state;
+        // The cache stores the FULL resolution: it is keyed by assetKey only
+        // (there is no allowAssumed dimension), so the caller's strictness is
+        // a projection applied on the way OUT, never baked into the entry.
+        // Baking it in let whichever caller resolved FIRST define the facts
+        // every later caller saw — a strict preflight:check inheriting a
+        // lenient entry's assumed claims (or the reverse).
+        {
+            std::lock_guard<std::mutex> lock( mMutex );
+            mCache[request.assetKey] = state;
+        }
     }
 
-    if ( !resolver )
-    {
-        result.error = "resolver_unavailable";
-        return result;
-    }
-
-    const PassportResolution resolved = resolver( request.assetKey );
-    if ( !resolved )
-    {
-        // Typed failure: keep the resolver's reason (gdal_open_failed vs
-        // asset_not_found vs ...). Failures are never cached — the next
-        // resolve re-consults the authority.
-        result.error = resolved.errorCode.empty() ? "asset_not_found" : resolved.errorCode;
-        result.errorDetail = resolved.errorDetail;
-        return result;
-    }
-
-    sicnu::state::RemoteSensingAssetState resolvedState = *resolved.state;
-    // Strip assumed claims when caller disallows them.
+    // Strip assumed claims when the caller disallows them. Applied to the
+    // RETURNED projection only (cache hit and miss alike) so strict and
+    // lenient callers can never pollute each other through the shared cache.
     if ( !request.allowAssumed )
     {
-        auto &claims = resolvedState.claims;
+        auto &claims = state.claims;
         claims.erase( std::remove_if( claims.begin(), claims.end(),
                                       []( const sicnu::state::ClaimRecord &c ) {
                                           return c.kind == ClaimKind::Assumed;
@@ -238,12 +257,8 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
                       claims.end() );
     }
 
-    {
-        std::lock_guard<std::mutex> lock( mMutex );
-        mCache[request.assetKey] = resolvedState;
-    }
     result.ok = true;
-    result.state = resolvedState;
+    result.state = std::move( state );
     result.summary = summarize( result.state );
     return result;
 }

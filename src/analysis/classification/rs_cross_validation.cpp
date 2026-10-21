@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <utility>
 
 RsCrossValidation::Result RsCrossValidation::kFold(
   const cv::Mat &X,
@@ -54,7 +55,17 @@ RsCrossValidation::Result RsCrossValidation::kFold(
   std::mt19937 rng( seed );
   for ( auto it = byClass.begin(); it != byClass.end(); ++it )
   {
-    std::shuffle( it.value().begin(), it.value().end(), rng );
+    QVector<int> &bucket = it.value();
+    // Hand-rolled Fisher-Yates: std::shuffle's permutation is
+    // implementation-defined, so the fold assignment would not replay
+    // across standard libraries — same discipline as
+    // RsSpatialCrossValidation::randomFolds, which shares this
+    // "reproducible from seed" contract.
+    for ( int i = static_cast<int>( bucket.size() ) - 1; i > 0; --i )
+    {
+      const int j = static_cast<int>( rng() % static_cast<unsigned int>( i + 1 ) );
+      std::swap( bucket[i], bucket[j] );
+    }
   }
 
   // Round-robin assign indices to folds (stratified).

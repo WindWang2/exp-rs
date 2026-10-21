@@ -24,6 +24,28 @@ QString fmt3( double v )
 {
   return QString::number( v, 'f', 3 );
 }
+
+// #1563: class names are free-form user input (rs_class_table_widget.cpp
+// writes them straight from the table cell into RsClassDef), so a CSV field
+// built from one can carry a comma, a double quote or a newline and silently
+// shift the report's columns. Quote per RFC 4180 (doubling embedded quotes);
+// a leading spreadsheet-formula trigger (=, +, -, @) is prefixed with an
+// apostrophe so a name like "=cmd|' /C calc'!A0" is not evaluated on open.
+QString csvField( const QString &value )
+{
+  QString text = value;
+  if ( text.startsWith( QLatin1Char( '=' ) ) || text.startsWith( QLatin1Char( '+' ) )
+       || text.startsWith( QLatin1Char( '-' ) ) || text.startsWith( QLatin1Char( '@' ) ) )
+    text.prepend( QLatin1Char( '\'' ) );
+  if ( text.contains( QLatin1Char( ',' ) ) || text.contains( QLatin1Char( '"' ) )
+       || text.contains( QLatin1Char( '\n' ) ) || text.contains( QLatin1Char( '\r' ) ) )
+  {
+    text.replace( QLatin1String( "\"" ), QLatin1String( "\"\"" ) );
+    text.prepend( QLatin1Char( '"' ) );
+    text.append( QLatin1Char( '"' ) );
+  }
+  return text;
+}
 } // namespace
 
 RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
@@ -262,11 +284,11 @@ bool RsAccuracyPanel::exportCsv()
   out << "Confusion Matrix\n";
   out << ",";
   for ( int id : mResult.classIds )
-    out << "Pred " << classLabel( id ) << ",";
+    out << csvField( QStringLiteral( "Pred %1" ).arg( classLabel( id ) ) ) << ",";
   out << "\n";
   for ( int rIdx = 0; rIdx < mResult.classIds.size(); ++rIdx )
   {
-    out << "True " << classLabel( mResult.classIds[rIdx] ) << ",";
+    out << csvField( QStringLiteral( "True %1" ).arg( classLabel( mResult.classIds[rIdx] ) ) ) << ",";
     for ( int cIdx = 0; cIdx < mResult.classIds.size(); ++cIdx )
     {
       const int v = ( !mResult.confusion.empty()
@@ -282,7 +304,7 @@ bool RsAccuracyPanel::exportCsv()
   out << "Class,ProducerAcc,UserAcc,F1\n";
   for ( int id : mResult.classIds )
   {
-    out << classLabel( id ) << ","
+    out << csvField( classLabel( id ) ) << ","
         << mResult.producerAcc.value( id ) << ","
         << mResult.userAcc.value( id ) << ","
         << mResult.f1.value( id ) << "\n";

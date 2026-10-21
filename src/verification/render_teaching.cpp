@@ -8,6 +8,7 @@
 #include "verification/failure_codes.h"
 
 #include <algorithm>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -230,6 +231,30 @@ std::string headlineFor( CheckStatus status, std::size_t violated, std::size_t u
            " of the declared expectations could not be concluded from the evidence available.";
 }
 
+/// The check ids the node structure claims. A result whose id is NOT in this
+/// set is a coverage gap: buildReport folds those results into the task outcome
+/// (report.cpp), so a renderer that folds only the nodes would render a verdict
+/// the report it is rendering contradicts.
+std::set<std::string> claimedCheckIds( const std::vector<NodeOutcome> &nodes )
+{
+    std::set<std::string> claimed;
+    for ( const NodeOutcome &node : nodes )
+    {
+        claimed.insert( node.checkIds.begin(), node.checkIds.end() );
+    }
+    return claimed;
+}
+
+/// The status a result contributes to a roll-up. The report's own record of a
+/// strict-policy promotion is honoured: buildReport folds a promoted result as
+/// Fail, so reading its raw Indeterminate here would render "undecided" over a
+/// report that says Fail — the promotion applied or not depending only on which
+/// surface asked.
+CheckStatus contributingStatus( const CheckResult &result )
+{
+    return result.promoted ? CheckStatus::Fail : result.status;
+}
+
 } // namespace
 
 CheckStatus derivedStatus( const VerificationReport &report )
@@ -241,20 +266,35 @@ CheckStatus derivedStatus( const VerificationReport &report )
     // level is the fallback for a report with no node structure at all.
     if ( !report.nodes.empty() )
     {
-        std::vector<CheckStatus> nodeStatuses;
-        nodeStatuses.reserve( report.nodes.size() );
+        const std::set<std::string> claimed = claimedCheckIds( report.nodes );
+        std::vector<CheckStatus> statuses;
+        statuses.reserve( report.nodes.size() + report.results.size() );
         for ( const NodeOutcome &node : report.nodes )
         {
-            nodeStatuses.push_back( node.status );
+            statuses.push_back( node.status );
         }
-        return combineAll( nodeStatuses );
+        // A result no node claims is not evidence the node structure carries,
+        // and dropping it from the fold is the fail-open this closes:
+        // buildReport folds exactly those results into the task outcome, so a
+        // report whose own status is Fail over a coverage gap would otherwise
+        // render as "pass" — the disagreement the roll-up was written to
+        // prevent, relocated into the surfaces that show it to a reader.
+        for ( const CheckResult &result : report.results )
+        {
+            if ( claimed.count( result.checkId ) != 0 )
+            {
+                continue;
+            }
+            statuses.push_back( contributingStatus( result ) );
+        }
+        return combineAll( statuses );
     }
 
     std::vector<CheckStatus> resultStatuses;
     resultStatuses.reserve( report.results.size() );
     for ( const CheckResult &result : report.results )
     {
-        resultStatuses.push_back( result.status );
+        resultStatuses.push_back( contributingStatus( result ) );
     }
     // Empty input is Indeterminate: zero evidence is never a pass.
     return combineAll( resultStatuses );
@@ -336,11 +376,14 @@ TeachingView renderTeaching( const VerificationReport &report )
     std::size_t undecided = 0;
     for ( const CheckResult &result : report.results )
     {
-        if ( result.status == CheckStatus::Fail )
+        // The same status the roll-up folds, so the counts cannot disagree with
+        // the verdict they are quoted in.
+        const CheckStatus contributed = contributingStatus( result );
+        if ( contributed == CheckStatus::Fail )
         {
             ++violated;
         }
-        else if ( result.status == CheckStatus::Indeterminate )
+        else if ( contributed == CheckStatus::Indeterminate )
         {
             ++undecided;
         }
@@ -370,6 +413,40 @@ TeachingView renderTeaching( const VerificationReport &report )
             view.reasons.push_back( "Node '" + node.nodeId +
                                     "' could not be judged, so the result stays undecided" +
                                     explainCodes( node.failureCodes ) );
+        }
+    }
+    // A result no node claimed still has a verdict, and the reason list has to
+    // carry it. The node loop above is silent about the gap, so without this a
+    // verdict decided by an uncovered check would arrive with no reason at all
+    // — or with the "every expectation was met" fallback, which is the opposite
+    // of what happened.
+    if ( !report.nodes.empty() )
+    {
+        const std::set<std::string> claimed = claimedCheckIds( report.nodes );
+        for ( const CheckResult &result : report.results )
+        {
+            const CheckStatus contributed = contributingStatus( result );
+            if ( contributed == CheckStatus::Pass || claimed.count( result.checkId ) != 0 )
+            {
+                continue;
+            }
+            const std::vector<std::string> codes =
+                result.failureCode.empty() ? std::vector<std::string>{}
+                                           : std::vector<std::string>{ result.failureCode };
+            if ( contributed == CheckStatus::Fail )
+            {
+                view.reasons.push_back( "Check '" + result.checkId +
+                                        "' did not meet what was declared for it, and no node "
+                                        "claimed it" +
+                                        explainCodes( codes ) );
+            }
+            else
+            {
+                view.reasons.push_back( "Check '" + result.checkId +
+                                        "' could not be judged, so the result stays undecided, "
+                                        "and no node claimed it" +
+                                        explainCodes( codes ) );
+            }
         }
     }
     if ( report.nodes.empty() )

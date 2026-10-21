@@ -275,6 +275,7 @@ AssetIdentity assetIdentityToken( const std::string &resource, const AssetIdenti
       remote.connectTimeoutSeconds = options.connectTimeoutSeconds;
       remote.maxRetries = options.maxRetries;
       remote.probeBytes = options.probeBytes;
+      remote.blockPrivateNetworks = options.blockPrivateNetworks;
       const std::string url = uri.kind == ResourceKind::VsiRemote ? uri.remoteUrl() : resource;
       return fromRemoteToken( remoteIdentityToken( url, remote ), resourceKindName( uri.kind ) );
     }
@@ -295,6 +296,7 @@ AssetIdentity assetIdentityToken( const std::string &resource, const AssetIdenti
           remote.connectTimeoutSeconds = options.connectTimeoutSeconds;
           remote.maxRetries = options.maxRetries;
           remote.probeBytes = options.probeBytes;
+      remote.blockPrivateNetworks = options.blockPrivateNetworks;
           container = fromRemoteToken(
             remoteIdentityToken( payload.kind == ResourceKind::VsiRemote ? payload.remoteUrl() : payload.raw,
                                  remote ),

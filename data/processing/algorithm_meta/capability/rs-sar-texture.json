@@ -100,6 +100,8 @@
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "measures",
           "required" : false,
           "type" : "string"

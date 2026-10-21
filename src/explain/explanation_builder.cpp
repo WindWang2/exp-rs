@@ -1,7 +1,9 @@
 #include "explain/explanation_builder.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <limits>
 
 namespace sicnu::explain
 {
@@ -35,7 +37,14 @@ EvidenceLink guidanceLink( const std::string &operatorId )
 std::string numberToString( double value )
 {
   // Stable text form for port numbers (resolutions, band counts).
-  if ( value == static_cast<double>( static_cast<long long>( value ) ) )
+  // The integral round-trip below is only defined for finite values inside
+  // the long long range: port numbers arrive from unvalidated JSON, and
+  // casting NaN/inf/out-of-range doubles to long long is undefined behaviour.
+  const bool integralRepresentable =
+    std::isfinite( value ) &&
+    value >= static_cast<double>( std::numeric_limits<long long>::min() ) &&
+    value < static_cast<double>( std::numeric_limits<long long>::max() );
+  if ( integralRepresentable && value == static_cast<double>( static_cast<long long>( value ) ) )
   {
     return std::to_string( static_cast<long long>( value ) );
   }

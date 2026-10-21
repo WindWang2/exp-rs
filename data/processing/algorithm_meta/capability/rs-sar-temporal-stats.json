@@ -63,6 +63,8 @@
           "type" : "numeric"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "dates",
           "required" : false,
           "type" : "string"
@@ -80,6 +82,8 @@
           "type" : "enum"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "inputs",
           "required" : true,
           "type" : "string"

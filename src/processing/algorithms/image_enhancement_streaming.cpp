@@ -762,7 +762,9 @@ void histogramEqualizeApplyTile( const float *in, float *out, size_t n,
 {
     for ( size_t i = 0; i < n; i++ )
     {
-        if ( in[i] == nodata || std::isnan( in[i] ) )
+        // Mask invalid / NoData pixels (#1538): non-finite inputs would be UB
+        // in equalizeBinOf's float->int cast, not a valid bin.
+        if ( !std::isfinite( in[i] ) || in[i] == nodata )
         {
             out[i] = nodata;
             continue;
@@ -977,7 +979,11 @@ bool streamBandStretch( const GdalDatasetWrapper &src, int bandNum, float nodata
                 for ( size_t i = 0; i < n; ++i )
                 {
                     const float v = px[i];
-                    if ( v == nodata || std::isnan( v ) )
+                    // Mask non-finite samples before binning (#1538): ±Inf
+                    // would be UB in equalizeBinOf's float->int cast and clamp
+                    // into bin 0, shifting the whole CDF. Same criterion as the
+                    // StdDev/PercentClip passes and StreamingBandStats.
+                    if ( !std::isfinite( v ) || v == nodata )
                         continue;
                     ++hist[static_cast<size_t>( equalizeBinOf( v, eqMin, eqBinWidth, kEqualizeBins ) )];
                 }

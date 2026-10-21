@@ -214,67 +214,81 @@ void QgisDesktopWindow::setupMenu()
     // Digitize tools nested under Edit (grouped)
     QMenu *digitizeMenu = makeMenu( editMenu->addMenu( tr( "Digitizing" ) ) );
     setMenuIcon( digitizeMenu, ic( "mActionCapturePoint" ) );
-    tip( digitizeMenu->addAction( ic( "mActionCapturePoint" ), tr( "Add Feature" ),
-                                  QKeySequence( "Ctrl+." ), this, &QgisDesktopWindow::addFeature ),
-         tr( "Digitize to add a new feature." ) );
-    tip( digitizeMenu->addAction( ic( "mActionVertexTool" ), tr( "Node Tool" ),
-                                  QKeySequence( "Ctrl+Shift+V" ), this, &QgisDesktopWindow::vertexTool ),
-         tr( "Edit nodes." ) );
+    // R18-D: the digitizing MENU commands the toolbar twins gate (the
+    // enablement contract: "Tools operate at use time only in QGIS — the
+    // enablement contract must match or the action is
+    // enabled-but-will-fail"). Registered disabled; updateEditingUI owns
+    // enablement from here on, exactly like m_editingToolActions.
+    const auto addGatedDigitizeAct =
+      [ this, &digitizeMenu ]( const char *objectName, const char *icon,
+                               const QString &text, void ( QgisDesktopWindow::*slot )(),
+                               const QString &tipText,
+                               const QKeySequence &shortcut = QKeySequence() ) {
+          QAction *a = digitizeMenu->addAction( ic( icon ), text, shortcut, this, slot );
+          a->setObjectName( QString::fromLatin1( objectName ) );
+          tip( a, tipText );
+          a->setEnabled( false );
+          m_menuDigitizingActions.append( a );
+      };
+    addGatedDigitizeAct( "mActionCapturePoint", "mActionCapturePoint",
+                         tr( "Add Feature" ), &QgisDesktopWindow::addFeature,
+                         tr( "Digitize to add a new feature." ),
+                         QKeySequence( QStringLiteral( "Ctrl+." ) ) );
+    addGatedDigitizeAct( "mActionVertexTool", "mActionVertexTool", tr( "Node Tool" ),
+                         &QgisDesktopWindow::vertexTool, tr( "Edit nodes." ),
+                         QKeySequence( QStringLiteral( "Ctrl+Shift+V" ) ) );
     digitizeMenu->addSeparator();
-    tip( digitizeMenu->addAction( ic( "mActionMoveFeature" ), tr( "Move Features" ),
-                                  this, &QgisDesktopWindow::moveFeature ),
-         tr( "Moves the selected features." ) );
-    tip( digitizeMenu->addAction( ic( "mActionRotateFeature" ), tr( "Rotate Features" ),
-                                  this, &QgisDesktopWindow::rotateFeature ),
-         tr( "Rotates the selected features." ) );
-    tip( digitizeMenu->addAction( ic( "mActionScaleFeature" ), tr( "Scale Features" ),
-                                  this, &QgisDesktopWindow::scaleFeature ),
-         tr( "Scales the selected features." ) );
-    tip( digitizeMenu->addAction( ic( "mActionOffsetCurve" ), tr( "Offset Line" ),
-                                  this, &QgisDesktopWindow::offsetCurve ),
-         tr( "Offsets line features." ) );
-    tip( digitizeMenu->addAction( ic( "mActionReverseLine" ), tr( "Reverse Line Direction" ),
-                                  this, &QgisDesktopWindow::reverseLine ),
-         tr( "Reverses the direction of line features." ) );
+    addGatedDigitizeAct( "mActionMoveFeature", "mActionMoveFeature",
+                         tr( "Move Features" ), &QgisDesktopWindow::moveFeature,
+                         tr( "Moves the selected features." ) );
+    addGatedDigitizeAct( "mActionRotateFeature", "mActionRotateFeature",
+                         tr( "Rotate Features" ), &QgisDesktopWindow::rotateFeature,
+                         tr( "Rotates the selected features." ) );
+    addGatedDigitizeAct( "mActionScaleFeature", "mActionScaleFeature",
+                         tr( "Scale Features" ), &QgisDesktopWindow::scaleFeature,
+                         tr( "Scales the selected features." ) );
+    addGatedDigitizeAct( "mActionOffsetCurve", "mActionOffsetCurve",
+                         tr( "Offset Line" ), &QgisDesktopWindow::offsetCurve,
+                         tr( "Offsets line features." ) );
+    addGatedDigitizeAct( "mActionReverseLine", "mActionReverseLine",
+                         tr( "Reverse Line Direction" ),
+                         &QgisDesktopWindow::reverseLine,
+                         tr( "Reverses the direction of line features." ) );
     digitizeMenu->addSeparator();
-    tip( digitizeMenu->addAction( ic( "mActionReshape" ), tr( "Reshape Geometry" ),
-                                  this, &QgisDesktopWindow::reshapeGeometry ),
-         tr( "Reshapes feature geometry." ) );
-    tip( digitizeMenu->addAction( ic( "mActionSplitFeatures" ), tr( "Split Features" ),
-                                  this, &QgisDesktopWindow::splitFeatures ),
-         tr( "Splits features." ) );
-    tip( digitizeMenu->addAction( ic( "s_lit" ), tr( "Split Part" ),
-                                  this, &QgisDesktopWindow::splitParts ),
-         tr( "Split multipart geometry." ) );
-    tip( digitizeMenu->addAction( ic( "mActionSimplify" ), tr( "Simplify" ),
-                                  this, &QgisDesktopWindow::simplifyFeature ),
-         tr( "Simplifies geometry." ) );
+    addGatedDigitizeAct( "mActionReshape", "mActionReshape",
+                         tr( "Reshape Geometry" ),
+                         &QgisDesktopWindow::reshapeGeometry,
+                         tr( "Reshapes feature geometry." ) );
+    addGatedDigitizeAct( "mActionSplitFeatures", "mActionSplitFeatures",
+                         tr( "Split Features" ), &QgisDesktopWindow::splitFeatures,
+                         tr( "Splits features." ) );
+    addGatedDigitizeAct( "mActionSplitParts", "s_lit", tr( "Split Part" ),
+                         &QgisDesktopWindow::splitParts,
+                         tr( "Split multipart geometry." ) );
+    addGatedDigitizeAct( "mActionSimplify", "mActionSimplify", tr( "Simplify" ),
+                         &QgisDesktopWindow::simplifyFeature,
+                         tr( "Simplifies geometry." ) );
     digitizeMenu->addSeparator();
-    tip( digitizeMenu->addAction( ic( "mActionAddRing" ), tr( "Add Ring" ),
-                                  this, &QgisDesktopWindow::addRing ),
-         tr( "Add an interior ring." ) );
-    tip( digitizeMenu->addAction( ic( "mActionAddPart" ), tr( "Add Part" ),
-                                  this, &QgisDesktopWindow::addPart ),
-         tr( "Adds a part." ) );
-    tip( digitizeMenu->addAction( ic( "mActionFillRing" ), tr( "Fill Ring" ),
-                                  this, &QgisDesktopWindow::fillRing ),
-         tr( "Filling the ring creates a new feature." ) );
-    tip( digitizeMenu->addAction( ic( "mActionDeletePart" ), tr( "Delete Part" ),
-                                  this, &QgisDesktopWindow::deletePart ),
-         tr( "Deletes the part." ) );
-    tip( digitizeMenu->addAction( ic( "mActionDeleteRing" ), tr( "Delete Ring" ),
-                                  this, &QgisDesktopWindow::deleteRing ),
-         tr( "Delete an interior ring." ) );
+    addGatedDigitizeAct( "mActionAddRing", "mActionAddRing", tr( "Add Ring" ),
+                         &QgisDesktopWindow::addRing,
+                         tr( "Add an interior ring." ) );
+    addGatedDigitizeAct( "mActionAddPart", "mActionAddPart", tr( "Add Part" ),
+                         &QgisDesktopWindow::addPart, tr( "Adds a part." ) );
+    addGatedDigitizeAct( "mActionFillRing", "mActionFillRing", tr( "Fill Ring" ),
+                         &QgisDesktopWindow::fillRing,
+                         tr( "Filling the ring creates a new feature." ) );
+    addGatedDigitizeAct( "mActionDeletePart", "mActionDeletePart",
+                         tr( "Delete Part" ), &QgisDesktopWindow::deletePart,
+                         tr( "Deletes the part." ) );
+    addGatedDigitizeAct( "mActionDeleteRing", "mActionDeleteRing", tr( "Delete Ring" ),
+                         &QgisDesktopWindow::deleteRing, tr( "Delete an interior ring." ) );
     digitizeMenu->addSeparator();
-    tip( digitizeMenu->addAction( ic( "mActionTrimExtendFeature" ), tr( "Trim/Extend" ),
-                                  this, &QgisDesktopWindow::trimExtendFeature ),
-         tr( "Trim or extend features." ) );
-    tip( digitizeMenu->addAction( ic( "mActionChamferFillet" ), tr( "Chamfer/Fillet" ),
-                                  this, &QgisDesktopWindow::chamferFillet ),
-         tr( "Chamfer or fillet." ) );
-    tip( digitizeMenu->addAction( ic( "mActionFeatureArray" ), tr( "Feature Array" ),
-                                  this, &QgisDesktopWindow::featureArray ),
-         tr( "Duplicates features in an array." ) );
+    addGatedDigitizeAct( "mActionTrimExtendFeature", "mActionTrimExtendFeature", tr( "Trim/Extend" ),
+                         &QgisDesktopWindow::trimExtendFeature, tr( "Trim or extend features." ) );
+    addGatedDigitizeAct( "mActionChamferFillet", "mActionChamferFillet", tr( "Chamfer/Fillet" ),
+                         &QgisDesktopWindow::chamferFillet, tr( "Chamfer or fillet." ) );
+    addGatedDigitizeAct( "mActionFeatureArray", "mActionFeatureArray", tr( "Feature Array" ),
+                         &QgisDesktopWindow::featureArray, tr( "Duplicates features in an array." ) );
 
     // ------------------------------------------------------------------
     // 视图 View — navigation, measure, compare

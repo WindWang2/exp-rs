@@ -79,6 +79,15 @@ QString createSyntheticRaster( const QString &path, int width, int height, int n
   return path;
 }
 
+// #1657: layers registered with the QgsProject singleton must not outlive the
+// test case that added them — sibling cases would otherwise see each other's
+// rasters (and keep their GDAL datasets open) for the whole binary run.
+class ProjectLayerCleanup
+{
+public:
+  ~ProjectLayerCleanup() { QgsProject::instance()->removeAllMapLayers(); }
+};
+
 class TestableMosaicDialog : public MosaicDialog
 {
 public:
@@ -104,6 +113,7 @@ TEST_CASE( "Batch B: OrthorectificationDialog buildParams contract and dynamic o
   ensureQgisApplication();
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString raster = dir.filePath( QStringLiteral( "ortho_in.tif" ) );
   REQUIRE( !createSyntheticRaster( raster, 4, 4, 1, 100.0f ).isEmpty() );
@@ -198,6 +208,7 @@ TEST_CASE( "Batch B: FusionDialog layer combos and method selection", "[batch_b]
   ensureQgisApplication();
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString panPath = dir.filePath( QStringLiteral( "pan.tif" ) );
   const QString msPath = dir.filePath( QStringLiteral( "ms.tif" ) );
@@ -228,6 +239,7 @@ TEST_CASE( "Batch B: ChangeDetectionDialog buildParams contract and mask strateg
   ensureQgisApplication();
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString before = dir.filePath( QStringLiteral( "before.tif" ) );
   const QString after = dir.filePath( QStringLiteral( "after.tif" ) );
@@ -324,6 +336,7 @@ TEST_CASE( "Batch B: PostClassificationDialog buildParams contract", "[batch_b][
   ensureQgisApplication();
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString before = dir.filePath( QStringLiteral( "class_before.tif" ) );
   const QString after = dir.filePath( QStringLiteral( "class_after.tif" ) );
@@ -364,6 +377,7 @@ TEST_CASE( "Batch B: TerrainDialog analysis products and solar controls", "[batc
   ensureQgisApplication();
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString demPath = dir.filePath( QStringLiteral( "dem.tif" ) );
   REQUIRE( !createSyntheticRaster( demPath, 4, 4, 1, 500.0f ).isEmpty() );
@@ -400,6 +414,7 @@ TEST_CASE( "Batch B: ApplyMaskDialog buildParams contract and NoData override", 
   ensureQgisApplication();
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString prodPath = dir.filePath( QStringLiteral( "product.tif" ) );
   const QString maskPath = dir.filePath( QStringLiteral( "mask.tif" ) );

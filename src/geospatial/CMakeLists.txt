@@ -29,6 +29,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     remote/remote_identity_resolver.cpp
     remote/range_cache_disk.cpp
     remote/range_cache.cpp
+    remote/process_network_policy.cpp
     remote/vsi_object_identity.cpp
     remote/vsi_object_identity.h
     formats/format_profiles.cpp
@@ -86,6 +87,16 @@ if(TARGET CURL::libcurl)
 else()
     target_include_directories(sicnu_geospatial SYSTEM PUBLIC ${CURL_INCLUDE_DIRS})
     target_link_libraries(sicnu_geospatial PUBLIC ${CURL_LIBRARIES})
+endif()
+
+# offline_gate.cpp calls getaddrinfo / getnameinfo / freeaddrinfo / ntohl
+# directly (private-network predicate and the DNS pinning entry point). Those
+# live in ws2_32 on Windows, so the dependency is PUBLIC: every consumer of
+# sicnu_geospatial has to see it, not just the tests that happen to link it by
+# hand (that hand-linking is how test_r15_B_post1505 ended up with an
+# unresolved __imp_getaddrinfo).
+if(WIN32)
+    target_link_libraries(sicnu_geospatial PUBLIC ws2_32)
 endif()
 
 # Product adapters parse Sentinel/Landsat XML with expat (already a global

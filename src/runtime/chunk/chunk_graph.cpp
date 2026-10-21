@@ -43,12 +43,20 @@ ChunkGraph::NodeId ChunkGraph::addSource( SourceFn fn )
 
 void ChunkGraph::requireFreeConsumerLocked( NodeId input ) const
 {
+    const auto rejectFanOut = [] {
+        throw std::logic_error( "chunk graph: node has more than one consumer (fan-out "
+                                "would silently split tiles); use an explicit copy stage" );
+    };
     for ( const auto &node : m_nodes )
         for ( const NodeId id : node.inputs )
             if ( id == input )
-                throw std::logic_error(
-                    "chunk graph: node has more than one consumer (fan-out "
-                    "would silently split tiles); use an explicit copy stage" );
+                rejectFanOut();
+    // The sink node is materialized only in run(), so its pending input
+    // occupies the single-consumer slot from addSink onward: without this
+    // check addSink(x) followed by addStage(x)/addJoin({x}) would still fan
+    // the queue out to two poppers (F-A-10).
+    if ( input == m_sinkInput )
+        rejectFanOut();
 }
 
 ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
@@ -84,6 +92,13 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
 void ChunkGraph::addSink( NodeId input, SinkFn fn )
 {
     assert( input >= 0 && input < static_cast<NodeId>( m_nodes.size() ) );
+    // Same single-consumer guard as addStage/addJoin (F-A-10): the sink edge
+    // counts as a consumer from build time, in either build order. Replacing
+    // the sink with the SAME input is legal (header contract: "calling twice
+    // replaces the sink") — the old edge is dropped, not doubled, so only a
+    // different input needs the check.
+    if ( input != m_sinkInput )
+        requireFreeConsumerLocked( input );
     m_sinkInput = input;
     m_sink = std::move( fn );
 }
@@ -140,14 +155,22 @@ void ChunkGraph::runSource( Node &node )
             // contract breach — a typed error, never a null dereference.
             const size_t expected = payload.spec.bufferElementCount();
             const size_t actual = payload.pixels ? payload.pixels->size() : 0;
-            if ( actual != expected )
-                throw std::logic_error( "chunk graph source: tile buffer size " +
-                                        std::to_string( actual ) + " != spec size " +
-                                        std::to_string( expected ) );
+            // R18-B: a fully-default payload (null pixels, empty spec) used to
+            // pass 0 == 0 — the very producer breach this gate exists for.
+            if ( !payload.pixels || actual != expected )
+                throw std::logic_error( "chunk graph source: producer returned a tile without "
+                                        "a pixel buffer ("
+                                        + std::to_string( actual ) + " of "
+                                        + std::to_string( expected ) + " elements)" );
             if ( !node.out->push( std::move( payload ) ) )
                 return; // graph unwinding downstream — drop the tile
             payload = TilePayload{};
             m_sourceTileCount.fetch_add( 1, std::memory_order_relaxed );
+            // R15-C C12 (F7): per-source count feeds the join progress
+            // denominator (see runSink).
+            if ( node.sourceIndex >= 0 && m_perSourceTiles )
+                m_perSourceTiles[static_cast<size_t>( node.sourceIndex )].fetch_add(
+                    1, std::memory_order_relaxed );
         }
         // Close on BOTH exits (EOF and cancel): downstream pop() must wake.
         node.out->close();
@@ -272,7 +295,21 @@ void ChunkGraph::runSink( Node &node )
             m_completedTiles.fetch_add( 1, std::memory_order_relaxed );
             if ( m_progress && !isCancelling() )
             {
-                const int emitted = m_sourceTileCount.load( std::memory_order_relaxed );
+                // R15-C C12 (F7): the denominator is ONE aligned source's
+                // emission when the graph joins (min over sources — the join
+                // cannot complete more tiles than its slowest input), and the
+                // single source's count otherwise. The old sum-over-sources
+                // denominator counted every join tile once per input, capping
+                // progress at 1/inputs forever.
+                int emitted = m_sourceTileCount.load( std::memory_order_relaxed );
+                if ( m_perSourceCount > 1 && m_perSourceTiles )
+                {
+                    emitted = m_perSourceTiles[0].load( std::memory_order_relaxed );
+                    for ( int s = 1; s < m_perSourceCount; ++s )
+                        emitted = std::min(
+                            emitted, m_perSourceTiles[static_cast<size_t>( s )].load(
+                                         std::memory_order_relaxed ) );
+                }
                 if ( emitted > 0 )
                 {
                     // Monotonic clamp (F-A-9): the denominator is a moving
@@ -324,12 +361,24 @@ void ChunkGraph::run()
     sinkNode.inputs = { m_sinkInput };
     m_nodes.push_back( std::move( sinkNode ) );
 
+    // Per-source emission counters (R15-C C12 / F7): sized before any source
+    // thread starts, indexed by the source's position among the Source nodes.
+    int sourceCount = 0;
+    for ( const auto &node : m_nodes )
+        if ( node.kind == Node::Kind::Source )
+            ++sourceCount;
+    m_perSourceCount = sourceCount;
+    m_perSourceTiles.reset( sourceCount > 0 ? new std::atomic<int>[static_cast<size_t>( sourceCount )]()
+                                            : nullptr );
+
+    int nextSourceIndex = 0;
     for ( size_t i = 0; i < m_nodes.size(); ++i )
     {
         Node &node = m_nodes[i];
         switch ( node.kind )
         {
         case Node::Kind::Source:
+            node.sourceIndex = nextSourceIndex++;
             m_threads.emplace_back( [this, &node] { runSource( node ); } );
             break;
         case Node::Kind::Stage:

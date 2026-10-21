@@ -1,4 +1,5 @@
 // experiment_store.cpp — SQLite implementation (mirrors dataset_store).
+#include <QReadWriteLock>
 #include "experiment_store.h"
 
 #include "../data/query_cursor.h"
@@ -135,6 +136,7 @@ ExperimentStore::~ExperimentStore()
 
 bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     close();
     sqlite3 *db = nullptr;
     if ( sqlite3_open_v2( dbPath.toUtf8().constData(), &db,
@@ -303,6 +305,7 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
 
 void ExperimentStore::close()
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return;
     // Take the same mutex every query holds: closing the sqlite handle under
@@ -319,11 +322,13 @@ void ExperimentStore::close()
 
 bool ExperimentStore::isReadOnly() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     return !m_impl || m_impl->readOnly;
 }
 
 QString ExperimentStore::schemaVersion() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return QString();
     QMutexLocker lock( &m_impl->mutex );
@@ -335,6 +340,7 @@ QString ExperimentStore::schemaVersion() const
 
 bool ExperimentStore::checkpointForBackup()
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return false;
     QMutexLocker lock( &m_impl->mutex );
@@ -346,6 +352,7 @@ bool ExperimentStore::checkpointForBackup()
 
 sicnu::data::Result<void> ExperimentStore::upsertExperiment( const Experiment &experiment )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -413,6 +420,7 @@ sicnu::data::Result<void> ExperimentStore::upsertExperiment( const Experiment &e
 
 std::optional<Experiment> ExperimentStore::experimentById( const QString &experimentId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -429,6 +437,7 @@ std::optional<Experiment> ExperimentStore::experimentById( const QString &experi
 sicnu::data::Result<QPair<qint64, QVector<Experiment>>> ExperimentStore::listExperiments(
     qint64 offset, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QPair<qint64, QVector<Experiment>>>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -447,6 +456,9 @@ sicnu::data::Result<QPair<qint64, QVector<Experiment>>> ExperimentStore::listExp
                                                 count.error( m_impl->db ) ) );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM experiments ORDER BY created_ms, id LIMIT ? OFFSET ?" ) );
@@ -464,11 +476,17 @@ sicnu::data::Result<QPair<qint64, QVector<Experiment>>> ExperimentStore::listExp
                                                 parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
 sicnu::data::Result<void> ExperimentStore::deleteExperiment( const QString &experimentId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -854,6 +872,7 @@ sicnu::data::Result<void> writeRunInTxnLocked( sqlite3 *db, const ExperimentRun 
 
 sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     // Unified-trace adapter (Verification Platform 8.0): the Experiment link
     // of the chain — one record per persisted run transition (the recorder's
     // Created → Running → terminal lifecycle lands here). Disabled path =
@@ -878,6 +897,7 @@ sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
 
 sicnu::data::Result<void> ExperimentStore::upsertRunImpl( const ExperimentRun &run )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -968,6 +988,7 @@ class BatchTraceEvent
 sicnu::data::Result<void> ExperimentStore::upsertRunsBatch(
     const QVector<ExperimentRun> &runs )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1017,6 +1038,7 @@ sicnu::data::Result<void> ExperimentStore::upsertRunsBatch(
 
 std::optional<ExperimentRun> ExperimentStore::runById( const QString &runId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -1025,6 +1047,7 @@ std::optional<ExperimentRun> ExperimentStore::runById( const QString &runId ) co
 
 sicnu::data::Result<ExperimentRun> ExperimentStore::runRecordById( const QString &runId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<ExperimentRun>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1037,6 +1060,7 @@ sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::list
     const QString &experimentId, const QString &datasetVersionId, const QString &status,
     qint64 offset, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1071,6 +1095,9 @@ sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::list
             count.bind( bindIndex++, status );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM experiment_runs%1 ORDER BY created_ms, run_id LIMIT ? OFFSET ?" )
@@ -1096,6 +1123,11 @@ sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::list
                                                 parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
@@ -1103,6 +1135,7 @@ sicnu::data::Result<ExperimentStore::RunCursorPage> ExperimentStore::listRunsByC
     const QString &experimentId, const QString &datasetVersionId, const QString &status,
     const QString &cursor, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<RunCursorPage>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1220,6 +1253,7 @@ sicnu::data::Result<ExperimentStore::RunCursorPage> ExperimentStore::listRunsByC
 
 qint64 ExperimentStore::runCount() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return -1; // closed store: fail closed (was 0, which looked empty)
     QMutexLocker lock( &m_impl->mutex );
@@ -1232,6 +1266,7 @@ qint64 ExperimentStore::runCount() const
 sicnu::data::Result<QStringList> ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
                                                                          qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QStringList>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1318,6 +1353,7 @@ sicnu::data::Result<QStringList> ExperimentStore::runIdsByExecutionRef( const QS
 sicnu::data::Result<QStringList> ExperimentStore::runIdsByExecutionFingerprint( const QString &fingerprint,
                                                                    qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QStringList>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1455,6 +1491,7 @@ QJsonObject ExperimentStore::RunPrunePlan::toJson() const
 sicnu::data::Result<ExperimentStore::RunPrunePlan> ExperimentStore::planRunPrune(
     const RunPrunePolicy &policy ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<RunPrunePlan>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1482,6 +1519,11 @@ sicnu::data::Result<ExperimentStore::RunPrunePlan> ExperimentStore::planRunPrune
                                          stmt.i64( 2 ), policy ) )
                 plan.runIds.append( stmt.text( 0 ) );
         }
+        // R15-B (B07): a partial scan would yield an incomplete prune plan
+        // presented as the whole store.
+        if ( stmt.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                stmt.error( m_impl->db ) ) );
         if ( rows < int( kPage ) )
             break;
         offset += kPage;
@@ -1493,6 +1535,7 @@ sicnu::data::Result<ExperimentStore::RunPrunePlan> ExperimentStore::planRunPrune
 
 sicnu::data::Result<qint64> ExperimentStore::executeRunPrune( const RunPrunePlan &plan )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<qint64>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1688,6 +1731,7 @@ sicnu::data::Result<qint64> ExperimentStore::executeRunPrune( const RunPrunePlan
 
 sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord &record )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1779,6 +1823,7 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord 
 sicnu::data::Result<void> ExperimentStore::saveMetricRecordsBatch(
     const QVector<MetricRecord> &records )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1877,6 +1922,7 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecordsBatch(
 
 std::optional<MetricRecord> ExperimentStore::metricRecordForRun( const QString &runId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -1893,6 +1939,7 @@ std::optional<MetricRecord> ExperimentStore::metricRecordForRun( const QString &
 sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> ExperimentStore::listMetricRecords(
     const QString &datasetVersionId, qint64 offset, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1913,6 +1960,9 @@ sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> ExperimentStore::listM
             count.bind( 1, datasetVersionId );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM run_metrics%1 ORDER BY created_ms, run_id LIMIT ? OFFSET ?" )
@@ -1934,6 +1984,11 @@ sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> ExperimentStore::listM
                                                 parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
@@ -1945,6 +2000,7 @@ sicnu::data::Result<void> ExperimentStore::addLineageEdge( const QString &fromKi
                                                            const QString &toKind,
                                                            const QString &toId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -1990,7 +2046,8 @@ QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QStri
                                                         const QString &kind,
                                                         const QString &id, qint64 limit,
                                                         const QString &edgeKind = QString(),
-                                                        const QString &toKind = QString() )
+                                                        const QString &toKind = QString(),
+                                                        QString *scanError = nullptr )
 {
     // Optional edge-kind/to-kind filters bind INSIDE the query, before the
     // page limit: a caller paging over one edge kind must not have its page
@@ -2005,7 +2062,11 @@ QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QStri
     QVector<ExperimentStore::LineageEdge> edges;
     Stmt stmt( db, sql );
     if ( !stmt )
+    {
+        if ( scanError )
+            *scanError = stmt.error( db );
         return edges;
+    }
     int bindIndex = 1;
     stmt.bind( bindIndex++, kind );
     stmt.bind( bindIndex++, id );
@@ -2024,6 +2085,15 @@ QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QStri
         edge.toId = stmt.text( 4 );
         edges.append( edge );
     }
+    // R15-B (B07 tail, R1-08): a mid-scan ERROR is not "no more edges" —
+    // refuse the partial set (callers such as runsForCell would otherwise
+    // under-report silently).
+    if ( stmt.stepFailed() )
+    {
+        if ( scanError )
+            *scanError = stmt.error( db );
+        return {};
+    }
     return edges;
 }
 
@@ -2031,6 +2101,7 @@ QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QStri
 
 ExperimentStore::LineageEdgePage ExperimentStore::lineageEdgePage( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     LineageEdgePage page;
     if ( !m_impl )
         return page;
@@ -2041,7 +2112,10 @@ ExperimentStore::LineageEdgePage ExperimentStore::lineageEdgePage( qint64 limit 
         if ( count.stepRow() )
             page.total = count.i64( 0 );
         else
+        {
             page.truncated = true; // count unreadable: report conservatively (P3-1)
+            page.scanFailed = true;
+        }
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
@@ -2059,12 +2133,21 @@ ExperimentStore::LineageEdgePage ExperimentStore::lineageEdgePage( qint64 limit 
         edge.toId = stmt.text( 4 );
         page.edges.append( edge );
     }
-    page.truncated = page.edges.size() < page.total;
+    // R15-B (B07 tail, R1-08): a scan that stopped on an ERROR is a prefix,
+    // whatever the count said — disclose it instead of reading as complete.
+    if ( stmt.stepFailed() )
+    {
+        page.scanFailed = true;
+        page.truncated = true;
+        return page;
+    }
+    page.truncated = page.scanFailed || page.edges.size() < page.total;
     return page;
 }
 
 QVector<ExperimentStore::LineageEdge> ExperimentStore::allLineageEdges( qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     return lineageEdgePage( limit ).edges;
 }
 
@@ -2072,35 +2155,49 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::outgoingEdges( const QStr
                                                                       const QString &id,
                                                                       qint64 limit,
                                                                       const QString &edgeKind,
-                                                                      const QString &toKind ) const
+                                                                      const QString &toKind,
+                                                                      QString *scanError ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
+    {
+        if ( scanError )
+            *scanError = QStringLiteral( "store is not open" );
         return {};
+    }
     QMutexLocker lock( &m_impl->mutex );
     return queryEdgesLocked( m_impl->db,
                              QStringLiteral(
                                  "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
                                  " FROM experiment_lineage WHERE from_kind=? AND from_id=?" ),
                              kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ),
-                             edgeKind, toKind );
+                             edgeKind, toKind, scanError );
 }
 
 QVector<ExperimentStore::LineageEdge> ExperimentStore::incomingEdges( const QString &kind,
                                                                       const QString &id,
-                                                                      qint64 limit ) const
+                                                                      qint64 limit,
+                                                                      QString *scanError ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
+    {
+        if ( scanError )
+            *scanError = QStringLiteral( "store is not open" );
         return {};
+    }
     QMutexLocker lock( &m_impl->mutex );
     return queryEdgesLocked( m_impl->db,
                              QStringLiteral(
                                  "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
                                  " FROM experiment_lineage WHERE to_kind=? AND to_id=?" ),
-                             kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+                             kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ),
+                             QString(), QString(), scanError );
 }
 
 sicnu::data::Result<void> ExperimentStore::savePromotionRecord( const PromotionRecord &record )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -2195,6 +2292,7 @@ sicnu::data::Result<void> ExperimentStore::savePromotionRecord( const PromotionR
 
 std::optional<PromotionRecord> ExperimentStore::promotionById( const QString &promotionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     const auto record = promotionRecordById( promotionId );
     return record ? std::optional<PromotionRecord>( record.value() ) : std::nullopt;
 }
@@ -2202,6 +2300,7 @@ std::optional<PromotionRecord> ExperimentStore::promotionById( const QString &pr
 sicnu::data::Result<PromotionRecord> ExperimentStore::promotionRecordById(
     const QString &promotionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<PromotionRecord>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -2230,6 +2329,7 @@ sicnu::data::Result<PromotionRecord> ExperimentStore::promotionRecordById(
 sicnu::data::Result<QVector<PromotionRecord>> ExperimentStore::promotionsForModel(
     const QString &modelId, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QVector<PromotionRecord>>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -2275,6 +2375,7 @@ sicnu::data::Result<QVector<PromotionRecord>> ExperimentStore::promotionsForMode
 sicnu::data::Result<void> ExperimentStore::saveBenchmarkDefinition(
     const BenchmarkDefinition &definition )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -2353,6 +2454,7 @@ sicnu::data::Result<void> ExperimentStore::saveBenchmarkDefinition(
 std::optional<BenchmarkDefinition> ExperimentStore::benchmarkDefinition(
     const QString &benchmarkId, quint64 version ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -2372,6 +2474,7 @@ std::optional<BenchmarkDefinition> ExperimentStore::benchmarkDefinition(
 sicnu::data::Result<QPair<qint64, QVector<BenchmarkDefinition>>>
 ExperimentStore::listBenchmarkDefinitions( qint64 offset, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QPair<qint64, QVector<BenchmarkDefinition>>>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -2387,6 +2490,9 @@ ExperimentStore::listBenchmarkDefinitions( qint64 offset, qint64 limit ) const
                                                 count.error( m_impl->db ) ) );
         if ( count.stepRow() )
             total = count.i64( 0 );
+        else if ( count.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                                count.error( m_impl->db ) ) );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM benchmark_definitions"
@@ -2409,11 +2515,17 @@ ExperimentStore::listBenchmarkDefinitions( qint64 offset, qint64 limit ) const
                 QStringLiteral( "stored benchmark definition does not parse" ) ) );
         rows.append( parsed.value() );
     }
+    // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
+    // is not "no more rows" — a short page must never read as complete.
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_scan_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     return ResultT::success( qMakePair( total, rows ) );
 }
 
 sicnu::data::Result<void> ExperimentStore::saveBenchmarkResult( const BenchmarkResult &result )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -2498,6 +2610,7 @@ sicnu::data::Result<void> ExperimentStore::saveBenchmarkResult( const BenchmarkR
 
 std::optional<BenchmarkResult> ExperimentStore::benchmarkResultById( const QString &resultId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -2514,6 +2627,7 @@ std::optional<BenchmarkResult> ExperimentStore::benchmarkResultById( const QStri
 sicnu::data::Result<QVector<BenchmarkResult>> ExperimentStore::benchmarkResultsFor(
     const QString &benchmarkId, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using ResultT = sicnu::data::Result<QVector<BenchmarkResult>>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),

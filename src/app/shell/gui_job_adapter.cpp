@@ -3,6 +3,62 @@
 
 namespace sicnu::app {
 
+namespace
+{
+
+/// Shared submission tail for every submit entry point (#1632): records the
+/// submitted id, fails a refused submission (or clears the callbacks when the
+/// caller installed none), and catches up an already-terminal record. The
+/// entry points differ ONLY in the single TaskCenter call inside @p submit,
+/// so any change to the submission semantics belongs here rather than in
+/// three verbatim copies. @p onSuccess / @p onFailure / @p onProgress /
+/// @p taskId are the handle's callback slots and task id, passed by
+/// reference so this helper can install and clear them.
+long submitWithCallbacks( GuiJobHandle::SuccessCallback &onSuccess,
+                          GuiJobHandle::FailureCallback &onFailure,
+                          GuiJobHandle::ProgressCallback &onProgress,
+                          long &taskId,
+                          const std::function<long()> &submit,
+                          const std::function<sicnu::AlgorithmTaskInfo( long )> &taskInfo,
+                          const std::function<void( const sicnu::AlgorithmTaskInfo & )> &catchUp )
+{
+  const long submittedId = submit();
+  taskId = submittedId;
+  if ( taskId < 0 )
+  {
+    if ( onFailure )
+    {
+      auto fail = std::move( onFailure );
+      onSuccess = nullptr;
+      onFailure = nullptr;
+      onProgress = nullptr;
+      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ),
+            /*wasCanceled=*/false );
+    }
+    else
+    {
+      onSuccess = nullptr;
+      onFailure = nullptr;
+      onProgress = nullptr;
+    }
+  }
+  else
+  {
+    const auto info = taskInfo( taskId );
+    if ( info.status == sicnu::TaskStatus::Completed
+         || info.status == sicnu::TaskStatus::Failed
+         || info.status == sicnu::TaskStatus::Canceled )
+    {
+      // Catch-up may already have fired the callbacks and reset m_taskId;
+      // the caller still needs the id of the submission that succeeded (#453).
+      catchUp( info );
+    }
+  }
+  return submittedId;
+}
+
+} // namespace
+
 GuiJobHandle::GuiJobHandle( QObject *parent, sicnu::TaskCenter *taskCenter )
   : QObject( parent )
   , m_taskCenter( taskCenter ? taskCenter : &sicnu::TaskCenter::instance() )
@@ -36,39 +92,11 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  const long submittedId = m_taskCenter->submitJob( req );
-  m_taskId = submittedId;
-  if ( m_taskId < 0 )
-  {
-    if ( m_onFailure )
-    {
-      auto fail = std::move( m_onFailure );
-      m_onSuccess = nullptr;
-      m_onFailure = nullptr;
-      m_onProgress = nullptr;
-      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ),
-            /*wasCanceled=*/false );
-    }
-    else
-    {
-      m_onSuccess = nullptr;
-      m_onFailure = nullptr;
-      m_onProgress = nullptr;
-    }
-  }
-  else
-  {
-    const auto info = m_taskCenter->getTaskInfo( m_taskId );
-    if ( info.status == sicnu::TaskStatus::Completed
-         || info.status == sicnu::TaskStatus::Failed
-         || info.status == sicnu::TaskStatus::Canceled )
-    {
-      // Catch-up may already have fired the callbacks and reset m_taskId;
-      // the caller still needs the id of the submission that succeeded (#453).
-      onTaskUpdated( info );
-    }
-  }
-  return submittedId;
+  return submitWithCallbacks(
+      m_onSuccess, m_onFailure, m_onProgress, m_taskId,
+      [this, &req] { return m_taskCenter->submitJob( req ); },
+      [this]( long id ) { return m_taskCenter->getTaskInfo( id ); },
+      [this]( const sicnu::AlgorithmTaskInfo &info ) { onTaskUpdated( info ); } );
 }
 
 long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
@@ -86,39 +114,15 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  const long submittedId = m_taskCenter->submitJob( req, std::move( executor ), std::move( cancelCallback ), autoLoad );
-  m_taskId = submittedId;
-  if ( m_taskId < 0 )
-  {
-    if ( m_onFailure )
-    {
-      auto fail = std::move( m_onFailure );
-      m_onSuccess = nullptr;
-      m_onFailure = nullptr;
-      m_onProgress = nullptr;
-      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ),
-            /*wasCanceled=*/false );
-    }
-    else
-    {
-      m_onSuccess = nullptr;
-      m_onFailure = nullptr;
-      m_onProgress = nullptr;
-    }
-  }
-  else
-  {
-    const auto info = m_taskCenter->getTaskInfo( m_taskId );
-    if ( info.status == sicnu::TaskStatus::Completed
-         || info.status == sicnu::TaskStatus::Failed
-         || info.status == sicnu::TaskStatus::Canceled )
-    {
-      // Catch-up may already have fired the callbacks and reset m_taskId;
-      // the caller still needs the id of the submission that succeeded (#453).
-      onTaskUpdated( info );
-    }
-  }
-  return submittedId;
+  return submitWithCallbacks(
+      m_onSuccess, m_onFailure, m_onProgress, m_taskId,
+      [this, &req, executor = std::move( executor ), cancelCallback = std::move( cancelCallback ),
+       autoLoad]() mutable {
+        return m_taskCenter->submitJob( req, std::move( executor ), std::move( cancelCallback ),
+                                        autoLoad );
+      },
+      [this]( long id ) { return m_taskCenter->getTaskInfo( id ); },
+      [this]( const sicnu::AlgorithmTaskInfo &info ) { onTaskUpdated( info ); } );
 }
 
 long GuiJobHandle::submitTask( const QString &algorithmId,
@@ -135,39 +139,13 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  const long submittedId = m_taskCenter->enqueueTask( algorithmId, params, autoLoad );
-  m_taskId = submittedId;
-  if ( m_taskId < 0 )
-  {
-    if ( m_onFailure )
-    {
-      auto fail = std::move( m_onFailure );
-      m_onSuccess = nullptr;
-      m_onFailure = nullptr;
-      m_onProgress = nullptr;
-      fail( QStringLiteral( "Task submission refused by scheduler (queue full or shutting down)" ),
-            /*wasCanceled=*/false );
-    }
-    else
-    {
-      m_onSuccess = nullptr;
-      m_onFailure = nullptr;
-      m_onProgress = nullptr;
-    }
-  }
-  else
-  {
-    const auto info = m_taskCenter->getTaskInfo( m_taskId );
-    if ( info.status == sicnu::TaskStatus::Completed
-         || info.status == sicnu::TaskStatus::Failed
-         || info.status == sicnu::TaskStatus::Canceled )
-    {
-      // Catch-up may already have fired the callbacks and reset m_taskId;
-      // the caller still needs the id of the submission that succeeded (#453).
-      onTaskUpdated( info );
-    }
-  }
-  return submittedId;
+  return submitWithCallbacks(
+      m_onSuccess, m_onFailure, m_onProgress, m_taskId,
+      [this, &algorithmId, &params, autoLoad] {
+        return m_taskCenter->enqueueTask( algorithmId, params, autoLoad );
+      },
+      [this]( long id ) { return m_taskCenter->getTaskInfo( id ); },
+      [this]( const sicnu::AlgorithmTaskInfo &info ) { onTaskUpdated( info ); } );
 }
 
 void GuiJobHandle::cancel()

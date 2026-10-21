@@ -1,6 +1,7 @@
 // src/processing/algorithms/spectral_local_rx.cpp — dual-window RX detector
 #include "spectral_local_rx.h"
 
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/primitives/dense_linalg.h"
 
 #include <algorithm>
@@ -15,16 +16,18 @@ namespace
 {
     /// Same valid-pixel predicate as SpectralAnomaly's accumulators: a band
     /// value is invalid when non-finite or — when that band declares NoData —
-    /// equal to the declared value. A pixel is valid when every band is valid.
+    /// exactly equal to the declared value. Resolves through the module-wide
+    /// predicate owner (nodata_utils.h, #A1) so the two RX kernels and the rest
+    /// of the module cannot drift apart. A pixel is valid when every band is
+    /// valid.
     bool pixelValid( const float *pixel, int bands,
                      const float *noDataBands, const uint8_t *hasNoDataBands )
     {
         for ( int b = 0; b < bands; ++b )
         {
             const float v = pixel[b];
-            if ( !std::isfinite( v ) )
-                return false;
-            if ( noDataBands && ( !hasNoDataBands || hasNoDataBands[b] ) && v == noDataBands[b] )
+            const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
+            if ( checkNd ? sicnu::rs::isNoDataValue( v, noDataBands[b] ) : !std::isfinite( v ) )
                 return false;
         }
         return true;

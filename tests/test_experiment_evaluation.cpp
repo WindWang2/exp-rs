@@ -1902,6 +1902,242 @@ TEST_CASE( "bundle import refuses corrupted member documents instead of half-ins
     }
 }
 
+TEST_CASE( "bundle import refuses a manifest run_id that is not a valid RunId",
+           "[experiment][repro][import][identity]" )
+{
+    // The manifest is attacker-supplied: a self-consistent checksums.txt
+    // proves the bundle matches ITSELF, never that run_id is well-formed.
+    // experiment_ids.h promises invalid run ids are REFUSED, never
+    // sanitized — and the store-side id names capsule directories
+    // downstream (the studio dock builds "capsule-<runId>.json" straight
+    // from it), so a leading dot, a path separator or an over-long blob
+    // must never reach the store through keepOriginalRunId.
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-src" ) );
+    experiment.setName( QStringLiteral( "source" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run = makeRun( QStringLiteral( "run-src" ), QStringLiteral( "exp-src" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-src" ), exportOptions );
+    REQUIRE( exportReport.ok );
+
+    // Rewrites manifest.json's run_id and re-signs checksums.txt for it —
+    // the tamper shape an attacker holding the bundle directory can always
+    // produce. The schema version stays intact so a refusal can only come
+    // from the RunId gate, never from the schema gate.
+    const QString bundlePath = exportReport.bundlePath;
+    const auto writeManifestRunIdAndResign = [&]( const QString &runIdValue ) {
+        const QString manifestPath =
+            QDir( bundlePath ).filePath( QStringLiteral( "manifest.json" ) );
+        QFile in( manifestPath );
+        REQUIRE( in.open( QIODevice::ReadOnly ) );
+        QJsonObject manifestJson = QJsonDocument::fromJson( in.readAll() ).object();
+        in.close();
+        REQUIRE( manifestJson.value( QStringLiteral( "schema_version" ) ).toString()
+                 == QLatin1String( kReproductionBundleSchemaVersion ) );
+        manifestJson.insert( QStringLiteral( "run_id" ), runIdValue );
+        const QByteArray content =
+            QJsonDocument( manifestJson ).toJson( QJsonDocument::Indented );
+        QFile out( manifestPath );
+        REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        REQUIRE( out.write( content ) == content.size() );
+        out.close();
+        const QString checksumsPath =
+            QDir( bundlePath ).filePath( QStringLiteral( "checksums.txt" ) );
+        QFile checksumsFile( checksumsPath );
+        REQUIRE( checksumsFile.open( QIODevice::ReadOnly ) );
+        QStringList lines = QString::fromUtf8( checksumsFile.readAll() )
+                                .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+        checksumsFile.close();
+        const QString digest = QString::fromLatin1(
+            QCryptographicHash::hash( content, QCryptographicHash::Sha256 ).toHex() );
+        for ( QString &line : lines )
+            if ( line.endsWith( QStringLiteral( "  manifest.json" ) ) )
+                line = digest + QStringLiteral( "  manifest.json" );
+        const QByteArray rewritten = lines.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
+        REQUIRE( QFile::remove( checksumsPath ) );
+        QFile rewrittenFile( checksumsPath );
+        REQUIRE( rewrittenFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        REQUIRE( rewrittenFile.write( rewritten ) == rewritten.size() );
+    };
+
+    // Every leg imports into a FRESH store with keepOriginalRunId — the
+    // manifest id is the only thing that could reach the store.
+    const auto importRefusesWithManifestRunId = [&]( const QString &storeName,
+                                                     const QString &runIdValue ) {
+        writeManifestRunIdAndResign( runIdValue );
+        ExperimentStore target;
+        REQUIRE( target.open( dir.filePath( storeName ) ) );
+        Experiment home;
+        home.setExperimentId( QStringLiteral( "exp-dst" ) );
+        home.setName( QStringLiteral( "destination" ) );
+        REQUIRE( target.upsertExperiment( home ).has_value() );
+        ReproductionBundleImporter importer( target );
+        ReproductionBundleImportOptions options;
+        options.bundleDir = bundlePath;
+        options.targetExperimentId = QStringLiteral( "exp-dst" );
+        options.keepOriginalRunId = true;
+        const auto report = importer.importRun( options );
+        CHECK_FALSE( report.ok );
+        // Named, never sanitized: the offending value plus the contract.
+        const QString named = report.warnings.join( QLatin1Char( ';' ) );
+        CHECK( named.contains( QStringLiteral( "not a valid run id" ) ) );
+        CHECK( named.contains( runIdValue ) );
+        // Zero partial state: no run row reached the store.
+        CHECK( target.runCount() == 0 );
+    };
+
+    // A leading dot: names nothing a shell would follow.
+    importRefusesWithManifestRunId( QStringLiteral( "dot.db" ), QStringLiteral( ".hidden" ) );
+    // A path separator: turns the store id into a directory escape.
+    importRefusesWithManifestRunId( QStringLiteral( "slash.db" ),
+                                    QStringLiteral( "../../evil" ) );
+    // 65 chars: one past RunId's filename-safe ceiling.
+    importRefusesWithManifestRunId( QStringLiteral( "long.db" ),
+                                    QString( 65, QLatin1Char( 'a' ) ) );
+
+    // Control: the same re-signed bundle carrying a VALID id imports and
+    // keeps it — so the legs above really exercised the RunId gate and not
+    // a broken bundle.
+    writeManifestRunIdAndResign( QStringLiteral( "run-src" ) );
+    {
+        ExperimentStore target;
+        REQUIRE( target.open( dir.filePath( QStringLiteral( "control.db" ) ) ) );
+        Experiment home;
+        home.setExperimentId( QStringLiteral( "exp-dst" ) );
+        home.setName( QStringLiteral( "destination" ) );
+        REQUIRE( target.upsertExperiment( home ).has_value() );
+        ReproductionBundleImporter importer( target );
+        ReproductionBundleImportOptions options;
+        options.bundleDir = bundlePath;
+        options.targetExperimentId = QStringLiteral( "exp-dst" );
+        options.keepOriginalRunId = true;
+        const auto report = importer.importRun( options );
+        REQUIRE( report.ok );
+        CHECK( report.runId == QStringLiteral( "run-src" ) );
+        CHECK( target.runById( QStringLiteral( "run-src" ) ).has_value() );
+    }
+}
+
+TEST_CASE( "bundle import names the lineage slice it cannot re-attach",
+           "[experiment][repro][import][lineage]" )
+{
+    // The exporter ALWAYS writes provenance.json — the lineage slice
+    // around the run — and the import used to drop it without a word,
+    // leaving the imported run an island in the lineage graph. The slice
+    // cannot be re-attached faithfully: the bundle keeps only each edge's
+    // FAR endpoint ({"edge","other_kind","other_id"}), so the run-relative
+    // direction is lost at export, and the importer holds no DatasetStore
+    // for dataset-side edges. The contract is therefore the repo's
+    // "named, never silent" convention — the report says what was NOT
+    // reconstructed, and nothing is fabricated into the store.
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-src" ) );
+    experiment.setName( QStringLiteral( "source" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run = makeRun( QStringLiteral( "run-src" ), QStringLiteral( "exp-src" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    // One lineage edge around the run, so the exported provenance.json
+    // really carries a slice instead of an empty array.
+    REQUIRE( experiments
+                 .addLineageEdge( QStringLiteral( "run" ), QStringLiteral( "run-src" ),
+                                  QStringLiteral( "produced" ), QStringLiteral( "artifact" ),
+                                  QStringLiteral( "ndvi.tif" ) )
+                 .has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-src" ), exportOptions );
+    REQUIRE( exportReport.ok );
+
+    // Guard against a vacuous test: the bundle really recorded the edge.
+    {
+        QFile provenance( QDir( exportReport.bundlePath )
+                              .filePath( QStringLiteral( "provenance.json" ) ) );
+        REQUIRE( provenance.open( QIODevice::ReadOnly ) );
+        const QJsonObject document =
+            QJsonDocument::fromJson( provenance.readAll() ).object();
+        REQUIRE( document.value( QStringLiteral( "run_edges" ) ).toArray().size() == 1 );
+    }
+
+    ExperimentStore target;
+    REQUIRE( target.open( dir.filePath( QStringLiteral( "target.db" ) ) ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions options;
+    options.bundleDir = exportReport.bundlePath;
+    options.targetExperimentId = QStringLiteral( "exp-dst" );
+    const auto report = importer.importRun( options );
+
+    // The gap is named, not fatal: the run still imports as evidence.
+    REQUIRE( report.ok );
+    CHECK( target.runById( report.runId ).has_value() );
+    const QString named = report.warnings.join( QLatin1Char( ';' ) );
+    CHECK( named.contains( QStringLiteral( "cannot re-attach" ) ) );
+    CHECK( named.contains( QStringLiteral( "island in the lineage" ) ) );
+    CHECK( named.contains( QStringLiteral( "1 lineage edge" ) ) );
+    // And nothing was fabricated: the target store holds no lineage edge
+    // invented for the imported run.
+    CHECK( target.outgoingEdges( QStringLiteral( "run" ), report.runId ).isEmpty() );
+    CHECK( target.incomingEdges( QStringLiteral( "run" ), report.runId ).isEmpty() );
+}
+
 TEST_CASE( "metric records survive the bundle round trip byte-identically, "
            "secret-shaped keys included",
            "[experiment][repro][metrics][hash]" )

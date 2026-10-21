@@ -12,8 +12,42 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QDateTime>
+#include <QHash>
 #include <QScrollBar>
 #include <QAction>
+
+namespace
+{
+// One message exactly as it arrived. The text area only holds what passed the
+// filter at the time, so the panel retains the raw records to re-evaluate them
+// whenever a filter control changes.
+struct LogRecord
+{
+    QString message;
+    QString tag;
+    Qgis::MessageLevel level = Qgis::MessageLevel::NoLevel;
+    QString html; // pre-rendered, so replaying keeps the original timestamp
+};
+
+// Everything retained for one panel.
+struct RetainedLog
+{
+    QVector<LogRecord> records;
+    int visible = 0; // records passing the current filters — what the label reports
+};
+
+// Mirrors mTextEdit->document()->setMaximumBlockCount(): retained history must
+// not outgrow what the text area is allowed to display.
+constexpr int kMaxRetainedMessages = 50000;
+
+// logMessage() only ever runs on the GUI thread (QgsMessageLog delivers through
+// a queued connection to this widget), so a plain per-panel map is enough.
+QHash<const LogPanel *, RetainedLog> &retainedMessages()
+{
+    static QHash<const LogPanel *, RetainedLog> messages;
+    return messages;
+}
+} // namespace
 
 LogPanel::LogPanel(QWidget *parent)
     : QgsDockWidget(tr("System Log"), parent)
@@ -109,9 +143,56 @@ void LogPanel::setupUi()
 
     // Connections
     connect(m_clearButton, &QPushButton::clicked, this, &LogPanel::clearMessages);
-    connect(m_levelFilter, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        // Re-filter would require storing all messages; for now just inform
+
+    // Retained history is keyed by panel; drop it once the panel is destroyed.
+    connect(this, &QObject::destroyed, [](QObject *obj) {
+        retainedMessages().remove(static_cast<const LogPanel *>(obj));
     });
+
+    // Re-apply the current filters to everything already logged. The controls
+    // used to be wired to nothing, so they only affected messages that arrived
+    // afterwards; replaying the retained records makes them behave as labelled.
+    const auto refilter = [this]() {
+        RetainedLog &retained = retainedMessages()[this];
+
+        mTextEdit->clear();
+        m_pendingHtml.clear();
+
+        int visible = 0;
+        for (const LogRecord &record : retained.records)
+        {
+            if (!shouldShowMessage(record.message, record.tag, record.level))
+                continue;
+
+            ++visible;
+            if (isVisible())
+            {
+                mTextEdit->append(record.html);
+            }
+            else
+            {
+                if (m_pendingHtml.size() >= 1000)
+                    m_pendingHtml.removeFirst();
+                m_pendingHtml.append(record.html);
+            }
+        }
+
+        retained.visible = visible;
+        m_countLabel->setText(tr("%1 messages").arg(visible));
+        if (m_textStack)
+            m_textStack->setCurrentIndex(visible > 0 ? 0 : 1);
+
+        if (mAutoScroll)
+        {
+            QScrollBar *scrollBar = mTextEdit->verticalScrollBar();
+            scrollBar->setValue(scrollBar->maximum());
+        }
+    };
+
+    connect(m_levelFilter, QOverload<int>::of(&QComboBox::currentIndexChanged), this, refilter);
+    connect(m_tagFilter, QOverload<const QString &>::of(&QComboBox::currentTextChanged), this, refilter);
+    connect(m_searchEdit, &QLineEdit::textChanged, this, refilter);
+
     connect(m_autoScrollCheck, &QCheckBox::toggled, this, [this](bool checked) {
         mAutoScroll = checked;
     });
@@ -152,6 +233,10 @@ QString LogPanel::lastMessage() const
 
 void LogPanel::clearMessages()
 {
+    RetainedLog &retained = retainedMessages()[this];
+    retained.records.clear();
+    retained.visible = 0;
+
     mTextEdit->clear();
     mMessageCount = 0;
     mLastMessage.clear();
@@ -162,20 +247,32 @@ void LogPanel::clearMessages()
 
 void LogPanel::logMessage(const QString &message, const QString &tag, Qgis::MessageLevel level)
 {
-    int count = ++mMessageCount;
+    ++mMessageCount;
     mLastMessage = message;
-    m_countLabel->setText(tr("%1 messages").arg(count));
 
     // Add tag to filter dropdown if not already present
     if (m_tagFilter->findText(tag) == -1) {
         m_tagFilter->addItem(tag, tag);
     }
 
-    if (!shouldShowMessage(message, tag, level))
-        return;
+    // Retain the message before filtering it: a message the current filters drop
+    // still has to be replayed when the user relaxes them.
+    RetainedLog &retained = retainedMessages()[this];
+    if (retained.records.size() >= kMaxRetainedMessages)
+    {
+        // Retire the oldest record, keeping the visible tally in step with what
+        // the text area is still allowed to show.
+        const LogRecord &dropped = retained.records.constFirst();
+        const bool wasVisible = shouldShowMessage(dropped.message, dropped.tag, dropped.level);
+        retained.records.removeFirst();
+        if (wasVisible)
+            --retained.visible;
+    }
 
-    if (m_textStack)
-        m_textStack->setCurrentIndex(0);
+    LogRecord record;
+    record.message = message;
+    record.tag = tag;
+    record.level = level;
 
     QString prefix;
     QColor color;
@@ -203,20 +300,33 @@ void LogPanel::logMessage(const QString &message, const QString &tag, Qgis::Mess
     }
 
     QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("hh:mm:ss"));
-    QString html = QStringLiteral("<span style='color:#888'>[%1]</span> "
-                                  "<span style='color:%2;font-weight:bold'>%3</span> "
-                                  "<span style='color:#aaa'>%4:</span> "
-                                  "<span style='color:%5'>%6</span>")
-                       .arg(timestamp, color.name(), prefix, tag, color.name(), message.toHtmlEscaped());
+    record.html = QStringLiteral("<span style='color:#888'>[%1]</span> "
+                                 "<span style='color:%2;font-weight:bold'>%3</span> "
+                                 "<span style='color:#aaa'>%4:</span> "
+                                 "<span style='color:%5'>%6</span>")
+                      .arg(timestamp, color.name(), prefix, tag, color.name(), message.toHtmlEscaped());
+
+    retained.records.append(record);
+
+    if (!shouldShowMessage(message, tag, level))
+        return;
+
+    if (m_textStack)
+        m_textStack->setCurrentIndex(0);
+
+    // The label reports what the filters show, so it cannot drift away from the
+    // text area while part of the history is filtered out.
+    ++retained.visible;
+    m_countLabel->setText(tr("%1 messages").arg(retained.visible));
 
     if (!isVisible()) {
         if (m_pendingHtml.size() >= 1000)
             m_pendingHtml.removeFirst();
-        m_pendingHtml.append(html);
+        m_pendingHtml.append(record.html);
         return;
     }
 
-    mTextEdit->append(html);
+    mTextEdit->append(record.html);
 
     if (mAutoScroll) {
         QScrollBar *scrollBar = mTextEdit->verticalScrollBar();

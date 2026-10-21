@@ -7,6 +7,7 @@
 #include "analysis/segmentation/rs_simple_segmenter.h"
 
 #include <cmath>
+#include <limits>
 
 using Catch::Approx;
 
@@ -249,4 +250,64 @@ TEST_CASE( "SimpleSegmenter: multi-band progress is scaled to the whole call", "
     REQUIRE( !segMap.isEmpty() );
     REQUIRE( first == Approx( 0.0f ) );
     REQUIRE( last == Approx( 1.0f ) );
+}
+
+TEST_CASE( "SimpleSegmenter: a single +/-Inf pixel must not collapse the scene (Inf governance, R10-A/AN-5)", "[segmentation][simple][r10a]" )
+{
+    // Four 8-column staircases with one poisoned pixel: the +/-Inf sample must
+    // be voided exactly like NaN (rs_multires_segmenter discipline). Today a
+    // single +Inf folds into vmax, scale becomes 0, and the whole image
+    // collapses into one segment — a silent, "valid-looking" output.
+    const int w = 32, h = 32;
+    QVector<float> data( w * h );
+    for ( int r = 0; r < h; ++r )
+        for ( int c = 0; c < w; ++c )
+            data[r * w + c] = static_cast<float>( 10 + ( c / 8 ) * 40 );
+    data[7 * w + 7] = std::numeric_limits<float>::infinity();
+
+    RsSimpleSegmenter::Params params;
+    params.smoothKernel = 3;
+    params.quantizeBins = 8;
+    params.minRegionSize = 10;
+
+    auto segMap = RsSimpleSegmenter::segment( data.data(), w, h, -9999.0f, params );
+
+    REQUIRE( !segMap.isEmpty() );
+    REQUIRE( segMap.segmentCount() >= 4 );
+    REQUIRE( segMap.labelAt( 7, 7 ) == 0 );
+}
+
+TEST_CASE( "SimpleSegmenter: minRegionSize honors 8-connectivity for diagonal-only contact (R10-A/AN-6)", "[segmentation][simple][r10a]" )
+{
+    // Two 25-px blocks touching only diagonally; every orthogonal neighbour
+    // is nodata. The CC phase is 8-connected, so the merge phase must be too,
+    // or both regions survive below the promised minRegionSize and the
+    // fixpoint loop burns 32 full-image passes for nothing. No smoothing
+    // (kernel < 3 skips the filter): a smoothed corner blurs a grey bridge
+    // between the blocks and merges them for the wrong reason.
+    const int w = 12, h = 12;
+    QVector<float> data( w * h, -9999.0f );
+    for ( int r = 1; r <= 5; ++r )
+        for ( int c = 1; c <= 5; ++c )
+            data[r * w + c] = 10.0f;
+    for ( int r = 6; r <= 10; ++r )
+        for ( int c = 6; c <= 10; ++c )
+            data[r * w + c] = 200.0f;
+
+    RsSimpleSegmenter::Params params;
+    params.smoothKernel = 0;
+    params.quantizeBins = 2;
+    params.minRegionSize = 26;
+
+    auto segMap = RsSimpleSegmenter::segment( data.data(), w, h, -9999.0f, params );
+
+    REQUIRE( !segMap.isEmpty() );
+    for ( int r = 0; r < h; ++r )
+        for ( int c = 0; c < w; ++c )
+            if ( data[r * w + c] != -9999.0f )
+            {
+                const quint32 label = segMap.labelAt( r, c );
+                CAPTURE( r, c, label );
+                REQUIRE( segMap.pixelCount( label ) >= 26 );
+            }
 }

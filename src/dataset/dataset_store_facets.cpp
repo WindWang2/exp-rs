@@ -6,6 +6,7 @@
 // RESULT is bounded (maxValues/maxCells); the store never walks sample rows
 // into C++ memory to count buckets. Facet writes attach to DRAFT versions
 // only — facets describe content and committed versions are frozen.
+#include <QReadWriteLock>
 #include "dataset_store_impl.h"
 #include <QDebug>
 #include <QJsonArray>
@@ -37,6 +38,7 @@ sicnu::data::Result<void> DatasetStore::setSampleFacets( const DatasetVersionId 
                                                          const SampleId &sampleId,
                                                          const QVector<FacetEntry> &entries )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_closed" ),
@@ -150,6 +152,7 @@ sicnu::data::Result<void> DatasetStore::setSampleFacets( const DatasetVersionId 
 sicnu::data::Result<DatasetStore::FacetDistribution> DatasetStore::facetDistribution(
     const DatasetVersionId &versionId, const QString &facet, int maxValues ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<FacetDistribution>;
     if ( !m_impl )
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_closed" ),
@@ -205,6 +208,7 @@ sicnu::data::Result<QVector<QPair<QPair<QString, QString>, qint64>>> DatasetStor
     const DatasetVersionId &versionId, const QString &facetA, const QString &facetB,
     int maxCells ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<QVector<QPair<QPair<QString, QString>, qint64>>>;
     if ( !m_impl )
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_closed" ),
@@ -239,6 +243,7 @@ sicnu::data::Result<QVector<QPair<QPair<QString, QString>, qint64>>> DatasetStor
 
 QVector<QString> DatasetStore::facetNames( const DatasetVersionId &versionId, qint64 limit ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QVector<QString> names;
     if ( !m_impl )
         return names;
@@ -269,6 +274,7 @@ sicnu::data::Result<void> DatasetStore::saveQualitySummary( const DatasetVersion
                                                             qint64 sampleCount, qint64 maxRoword,
                                                             const QJsonObject &summary )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     using Result = sicnu::data::Result<void>;
     if ( !m_impl )
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_closed" ),
@@ -311,6 +317,7 @@ sicnu::data::Result<void> DatasetStore::saveQualitySummary( const DatasetVersion
 std::optional<DatasetStore::QualitySummaryRecord> DatasetStore::qualitySummary(
     const DatasetVersionId &versionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     if ( !m_impl )
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
@@ -332,6 +339,7 @@ std::optional<DatasetStore::QualitySummaryRecord> DatasetStore::qualitySummary(
 
 QPair<qint64, qint64> DatasetStore::sampleContentStamp( const DatasetVersionId &versionId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
     QPair<qint64, qint64> stamp{ 0, 0 };
     if ( !m_impl )
         return stamp;

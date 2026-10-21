@@ -109,30 +109,80 @@ SlotFactsResult TemporalFactsProvider::slotFacts( const std::string &assetRef ) 
     if ( facts.temporalCollectionRefs.empty() || !lookup_ )
         return result;
 
-    // First resolvable declared reference (refs are stored sorted); the
-    // others are never merged in implicitly.
-    for ( const auto &collectionId : facts.temporalCollectionRefs )
+    // Declared references, deduplicated: the passport reader sorts them but
+    // never uniques them (asset_state_json.cpp), so a collection named twice
+    // would otherwise be counted twice and inflate the evidence the rules
+    // report. Sorting the copy keeps the walk deterministic whatever order
+    // the inner provider handed the refs in.
+    std::vector<std::string> collectionRefs( facts.temporalCollectionRefs );
+    std::sort( collectionRefs.begin(), collectionRefs.end() );
+    collectionRefs.erase( std::unique( collectionRefs.begin(), collectionRefs.end() ),
+                          collectionRefs.end() );
+
+    // Resolve every distinct declared reference once; the FIRST resolvable one
+    // supplies the series facts — several collections on one asset are never
+    // merged implicitly.
+    std::vector<TemporalCollectionFacts> resolved;
+    resolved.reserve( collectionRefs.size() );
+    for ( const auto &collectionId : collectionRefs )
+        resolved.push_back( lookup_( collectionId ) );
+
+    std::size_t selected = resolved.size();
+    for ( std::size_t i = 0; i < resolved.size(); ++i )
     {
-        const TemporalCollectionFacts collection = lookup_( collectionId );
-        if ( collection.status != FactStatus::Available )
-            continue;
-        facts.temporalSceneCount = collection.sceneCount;
-        facts.temporalInvalidTimeCount = collection.invalidTimeScenes;
-        facts.temporalTruncated = collection.truncated;
-        facts.temporalDates.clear();
-        for ( const auto &date : collection.datesIso )
+        if ( resolved[i].status == FactStatus::Available )
         {
-            if ( static_cast<int>( facts.temporalDates.size() ) >= cap_ )
-            {
-                facts.temporalTruncated = true;
-                break;
-            }
-            facts.temporalDates.push_back( date );
+            selected = i;
+            break;
         }
-        return result;
     }
     // No declared collection resolved: keep the typed temporal unknowns the
     // rules report (never fabricate counts from nothing).
+    if ( selected == resolved.size() )
+        return result;
+
+    const TemporalCollectionFacts &collection = resolved[selected];
+    facts.temporalSceneCount = collection.sceneCount;
+    facts.temporalInvalidTimeCount = collection.invalidTimeScenes;
+    // The inner projection may already carry the passport's own ref-list
+    // truncation ("a narrowed ref list must never read as complete"); a
+    // resolved collection never clears it.
+    facts.temporalTruncated = facts.temporalTruncated || collection.truncated;
+    facts.temporalDates.clear();
+    for ( const auto &date : collection.datesIso )
+    {
+        if ( static_cast<int>( facts.temporalDates.size() ) >= cap_ )
+        {
+            facts.temporalTruncated = true;
+            break;
+        }
+        facts.temporalDates.push_back( date );
+    }
+
+    // The remaining declared references stay unmerged, and that partiality is
+    // never silent: the declared scene count keeps every scene the provider
+    // resolved, scenes dropped from temporalDates because their collection
+    // was not merged are counted alongside the untimeable ones (facts.h:
+    // narrowing the series would fake confidence), and the bundle is flagged
+    // truncated so the rules report SPF_TEMPORAL_DATES_TRUNCATED and skip the
+    // order/gap judgment a narrowed series could never support. The count
+    // therefore covers two kinds of dropped scene — untimeable ones and ones
+    // whose collection was not merged.
+    for ( std::size_t i = 0; i < resolved.size(); ++i )
+    {
+        if ( i == selected )
+            continue;
+        if ( resolved[i].status != FactStatus::Available )
+        {
+            // Declared but unresolvable: the series is incomplete against the
+            // declaration even though its scene count stays unknown.
+            facts.temporalTruncated = true;
+            continue;
+        }
+        facts.temporalSceneCount += resolved[i].sceneCount;
+        facts.temporalInvalidTimeCount += resolved[i].sceneCount;
+        facts.temporalTruncated = true;
+    }
     return result;
 }
 

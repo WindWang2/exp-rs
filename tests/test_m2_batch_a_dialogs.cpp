@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -67,6 +68,15 @@ QString createSyntheticRaster( const QString &path, int width, int height, int n
   return path;
 }
 
+// #1657: layers registered with the QgsProject singleton must not outlive the
+// test case that added them — sibling cases would otherwise see each other's
+// rasters (and keep their GDAL datasets open) for the whole binary run.
+class ProjectLayerCleanup
+{
+public:
+  ~ProjectLayerCleanup() { QgsProject::instance()->removeAllMapLayers(); }
+};
+
 class TestableExtractBandDialog : public ExtractBandDialog
 {
 public:
@@ -86,6 +96,7 @@ TEST_CASE( "Batch A: AtmosphericDialog layout, layer switching, and method contr
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString raster1Path = tempDir.filePath( QStringLiteral( "single_band.tif" ) );
   const QString raster4Path = tempDir.filePath( QStringLiteral( "four_bands.tif" ) );
@@ -125,8 +136,11 @@ TEST_CASE( "Batch A: AtmosphericDialog layout, layer switching, and method contr
 
   SECTION( "Null layer safety" )
   {
+    dialog.setRasterLayer( layer1 );
+    QSignalSpy comboSpy( layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ) );
     dialog.setRasterLayer( nullptr );
-    CHECK( true );
+    CHECK( comboSpy.isEmpty() ); // null must not fire a bogus selection change
+    CHECK( layerCombo->currentRasterLayer() == layer1 ); // picker keeps its layer
   }
 }
 
@@ -135,6 +149,7 @@ TEST_CASE( "Batch A: RadiometricCalibrationDialog unit, band combo, and all-band
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "rad_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 3, 200.0f ).isEmpty() );
@@ -152,8 +167,10 @@ TEST_CASE( "Batch A: RadiometricCalibrationDialog unit, band combo, and all-band
 
   SECTION( "Null layer safety on radiometric calibration" )
   {
+    QSignalSpy comboSpy( layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ) );
     dialog.setRasterLayer( nullptr );
-    CHECK( true );
+    CHECK( comboSpy.isEmpty() ); // null must not fire a bogus selection change
+    CHECK( layerCombo->currentRasterLayer() == layer ); // picker keeps its layer
   }
 }
 
@@ -162,6 +179,7 @@ TEST_CASE( "Batch A: ContrastStretchDialog histogram widget and presets", "[batc
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "stretch_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 3, 100.0f ).isEmpty() );
@@ -179,8 +197,10 @@ TEST_CASE( "Batch A: ContrastStretchDialog histogram widget and presets", "[batc
 
   SECTION( "Layer switching to null and back" )
   {
+    QSignalSpy comboSpy( layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ) );
     dialog.setRasterLayer( nullptr );
-    CHECK( true );
+    CHECK( comboSpy.isEmpty() ); // null must not fire a bogus selection change
+    CHECK( layerCombo->currentRasterLayer() == layer ); // picker keeps its layer
     dialog.setRasterLayer( layer );
     CHECK( layerCombo->currentRasterLayer() == layer );
   }
@@ -191,6 +211,7 @@ TEST_CASE( "Batch A: SpatialFilterDialog filter types and sigma controls", "[bat
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "spatial_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 1, 100.0f ).isEmpty() );
@@ -212,6 +233,7 @@ TEST_CASE( "Batch A: SpeckleFilterDialog filter options and damping controls", "
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "speckle_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 1, 100.0f ).isEmpty() );
@@ -233,6 +255,7 @@ TEST_CASE( "Batch A: SpectralIndexDialog BandRoleCombos and index switching", "[
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString raster4Path = tempDir.filePath( QStringLiteral( "index_4b.tif" ) );
   const QString raster8Path = tempDir.filePath( QStringLiteral( "index_8b.tif" ) );
@@ -301,6 +324,7 @@ TEST_CASE( "Batch A: BandRatioDialog mode switching and band role combos", "[bat
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "ratio_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 4, 100.0f ).isEmpty() );
@@ -322,6 +346,7 @@ TEST_CASE( "Batch A: BandMathDialog expression validation and info label", "[bat
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "math_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 3, 100.0f ).isEmpty() );
@@ -351,6 +376,7 @@ TEST_CASE( "Batch A: ExtractBandDialog band selection and output validation", "[
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "extract_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 4, 100.0f ).isEmpty() );
@@ -378,6 +404,7 @@ TEST_CASE( "Batch A: QaMaskDialog auto-accept disabled and source combo", "[batc
   ensureQgisApplication();
   QTemporaryDir tempDir;
   REQUIRE( tempDir.isValid() );
+  const ProjectLayerCleanup projectLayers;
 
   const QString rasterPath = tempDir.filePath( QStringLiteral( "qa_test.tif" ) );
   REQUIRE( !createSyntheticRaster( rasterPath, 4, 4, 2, 100.0f ).isEmpty() );

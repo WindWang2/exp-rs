@@ -27,7 +27,8 @@ struct ContractNode
 {
     std::string id;
     std::string kind; // operator | command | help_topic | diagnostic |
-                      // error_code | capability_entry
+                      // error_code | capability_entry |
+                      // scientific_contract | preflight_action
     std::string origin; // evidence file (source or data path)
     // Optional attributes (e.g. declared params of an operator).
     std::vector<std::string> attributes;
@@ -37,7 +38,7 @@ struct ContractEdge
 {
     std::string kind; // command_help | surface_lookup | empty_state_cta |
                       // preflight_action | diagnostic_for |
-                      // capability_for | tool_for
+                      // capability_for | scientific_contract_for | tool_for
     std::string from;
     std::string to;
     std::string origin;

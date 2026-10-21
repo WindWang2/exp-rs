@@ -985,6 +985,89 @@ TEST_CASE( "Chart/colorbar string-typed fields are validated, not thrown (R16-D 
   }
 }
 
+TEST_CASE( "Text furniture string-typed text is validated, not silently replaced (R18-D)",
+           "[mapspec][validation][r18d]" )
+{
+  SECTION( "numeric title text is refused typed, not rendered as the placeholder" )
+  {
+    Json::Value spec = minimalSpec( "numeric-title-text" );
+    Json::Value title( Json::objectValue );
+    title["id"] = "title-1";
+    title["rect_mm"] = rectOf( 12, 12, 180, 12 );
+    title["text"] = 2024; // numeric — the natural way to write a year
+    spec["titles"].append( title );
+
+    const auto problems = validateMapSpec( spec );
+    REQUIRE_FALSE( problems.empty() );
+    CHECK( anyProblemMentions( problems, "text" ) );
+
+    // The compiler refuses the document before any render: the label setter
+    // for a numeric text throws Json::LogicError inside LayoutService, which
+    // used to be swallowed as an ignored property — leaving the placeholder
+    // "Map title" on the sheet and skipping every property declared after
+    // text.
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout == nullptr );
+    CHECK( compileError.contains( QStringLiteral( "text" ) ) );
+  }
+
+  SECTION( "labels / source_notes / annotations text: same contract" )
+  {
+    for ( const char *collection : { "labels", "source_notes", "annotations" } )
+    {
+      Json::Value spec = minimalSpec( std::string( "typed-text-" ) + collection );
+      Json::Value item( Json::objectValue );
+      item["id"] = "item-1";
+      item["rect_mm"] = rectOf( 12, 40, 100, 10 );
+      item["text"] = 7;
+      spec[collection].append( item );
+      const auto problems = validateMapSpec( spec );
+      CHECK_FALSE( problems.empty() );
+    }
+  }
+}
+
+TEST_CASE( "Numeric legend title is refused typed instead of silently mislinking the legend (R18-D)",
+           "[mapspec][validation][r18d]" )
+{
+  // Two map frames; the legend declares map_ref to the second and a numeric
+  // title. The title property applies before linked_map in LayoutService,
+  // so a throwing title setter used to skip linked_map — the legend silently
+  // bound to the reference map (frame 1) and mirrored the wrong layer set.
+  Json::Value spec = minimalSpec( "legend-title-typed" );
+  const std::string secondFrameId = appendMapSpecItem( spec, "map_frames", Json::Value() );
+  REQUIRE( secondFrameId != spec["map_frames"][0].get( "id", "" ).asString() );
+  Json::Value &frame2 = spec["map_frames"][1];
+  frame2["rect_mm"] = rectOf( 110, 60, 60, 60 );
+  Json::Value extent( Json::arrayValue );
+  extent.append( 116.0 );
+  extent.append( 39.0 );
+  extent.append( 116.5 );
+  extent.append( 39.5 );
+  frame2["extent"] = extent;
+
+  Json::Value legend( Json::objectValue );
+  legend["id"] = "legend-1";
+  legend["rect_mm"] = rectOf( 210, 30, 60, 70 );
+  legend["map_ref"] = secondFrameId;
+  legend["title"] = 42; // numeric title — the natural typo for a year/code
+  spec["legends"].append( legend );
+
+  const auto problems = validateMapSpec( spec );
+  REQUIRE_FALSE( problems.empty() );
+  CHECK( anyProblemMentions( problems, "title" ) );
+
+  // The compiler refuses the document instead of delivering a legend that
+  // mirrors the wrong map.
+  QString error;
+  QgsPrintLayout *layout = nullptr;
+  REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &error ) );
+  CHECK( layout == nullptr );
+  CHECK( error.contains( QStringLiteral( "title" ) ) );
+}
+
 TEST_CASE( "MapSpec validation rejects non-finite font sizes and bad grid declarations (CARTO-7/CARTO-11)",
            "[mapspec][validation][r14d]" )
 {

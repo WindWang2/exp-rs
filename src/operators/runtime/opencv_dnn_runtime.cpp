@@ -96,6 +96,13 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
       throw std::runtime_error( "inference canceled before the forward pass" );
     m_net.setInput( nchwBlob );
     output = outputName.empty() ? m_net.forward() : m_net.forward( outputName );
+    // forward() returns a header onto the net's internal output blob: the next
+    // forward() overwrites it. Detach WHILE THE LOCK IS STILL HELD — cloning
+    // after the try block let the next worker's forward on this shared cached
+    // session tear the buffer under the clone (inferMulti detaches under the
+    // lock for the same reason; one tile-sized copy, negligible next to the
+    // forward pass itself).
+    output = output.clone();
   }
   catch ( const cv::Exception &e )
   {
@@ -123,11 +130,7 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
     m_lastError.clear();
   }
   m_forwards.fetch_add( 1, std::memory_order_relaxed );
-  // forward() returns a header onto the net's internal output blob: the next
-  // forward() overwrites it. TTA averaging and multi-head stacking hold the
-  // result across further forwards, so detach (one tile-sized copy,
-  // negligible next to the forward pass itself).
-  return output.clone();
+  return output;
 }
 
 std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> &namedBlobs )
@@ -212,7 +215,7 @@ std::vector<std::string> OpenCvDnnRuntime::outputTensorNames() const
 {
   // cv::dnn::Net is not thread-safe: serialize against concurrent forward
   // passes on the shared cached session.
-  std::lock_guard<std::mutex> lock( *const_cast<std::mutex *>( &m_inferMutex ) );
+  std::lock_guard<std::mutex> lock( m_inferMutex );
   std::vector<std::string> names;
   if ( !m_loaded.load( std::memory_order_acquire ) )
     return names;

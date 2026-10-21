@@ -6,7 +6,9 @@
 #include <json/json.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -36,8 +38,18 @@ std::string fnv1a64Hex( const std::string &text )
 
 namespace {
 
+/// Bounded read (R14-E audit F5): the lab directory is a scan surface; an
+/// oversize file reads as absent (the same typed degradation as unreadable),
+/// never as an unbounded rdbuf slurp into memory.
+constexpr std::uintmax_t kMaxRegistryBytes = 16ull * 1024ull * 1024ull;
+
 std::string readFile( const fs::path &path )
 {
+  // Stat-before-read: refuse before any allocation proportional to the file.
+  std::error_code ec;
+  const std::uintmax_t size = fs::file_size( path, ec );
+  if ( !ec && size > kMaxRegistryBytes )
+    return {};
   std::ifstream in( path, std::ios::binary );
   if ( !in )
     return {};
@@ -101,11 +113,24 @@ RegistryView loadRegistry( const fs::path &registryPath )
     return view;
   Json::Value root;
   Json::CharReaderBuilder builder;
+  // Pinned + caught (scientific_recipe.cpp discipline; same shape as the
+  // other registry-scan parsers hardened under #1607): jsoncpp THROWS out of
+  // parse() on a stackLimit violation, and lab-registry.json is untrusted
+  // scan input — an over-deep document degrades to "registry absent", never
+  // a crash.
+  builder["stackLimit"] = 256;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   std::string errors;
-  if ( !reader->parse( text.data(), text.data() + text.size(), &root, &errors ) ||
-       !root.isObject() || !root["canonical"].isObject() )
+  try
+  {
+    if ( !reader->parse( text.data(), text.data() + text.size(), &root, &errors ) ||
+         !root.isObject() || !root["canonical"].isObject() )
+      return view;
+  }
+  catch ( const std::exception & )
+  {
     return view;
+  }
 
   for ( const std::string &canonicalId : root["canonical"].getMemberNames() )
   {

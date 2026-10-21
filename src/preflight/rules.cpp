@@ -214,6 +214,17 @@ bool entryReadable( const CapabilityEntryResult &capability, std::string &detail
 
 // ---- ISO date handling (deterministic, locale-free) --------------------------
 
+/// Days in the given month under the proleptic Gregorian calendar; a phantom
+/// day (2024-02-31) must never reach the day-number arithmetic below.
+int daysInMonth( long long year, long long month )
+{
+    static const int lengths[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    const bool leap = ( year % 4 == 0 && year % 100 != 0 ) || year % 400 == 0;
+    if ( month == 2 && leap )
+        return 29;
+    return lengths[month - 1];
+}
+
 /// Days since 1970-01-01 for "YYYY-MM-DD..." text; false when unparseable.
 bool isoDayNumber( const std::string &iso, long long &days )
 {
@@ -235,7 +246,7 @@ bool isoDayNumber( const std::string &iso, long long &days )
     const long long y = std::stoll( iso.substr( 0, 4 ) );
     const long long m = std::stoll( iso.substr( 5, 2 ) );
     const long long d = std::stoll( iso.substr( 8, 2 ) );
-    if ( m < 1 || m > 12 || d < 1 || d > 31 )
+    if ( m < 1 || m > 12 || d < 1 || d > daysInMonth( y, m ) )
         return false;
     // Days-from-civil (proleptic Gregorian).
     const long long yy = m <= 2 ? y - 1 : y;

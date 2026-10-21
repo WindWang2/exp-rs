@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <sstream>
 
 namespace sicnu::operators::io
 {
@@ -64,7 +65,12 @@ ErrorCode mapGeoCode( sicnu::geo::ErrorCode code )
   return ErrorCode::Unknown;
 }
 
+} // namespace
+
 /// Runs `body`, translating foundation GeoError into RSOperatorError.
+/// Single mapping authority for the whole io family: the fabric adapters
+/// (io_fabric_operators.cpp) call THIS one instead of keeping a mirrored copy,
+/// so a new geo::ErrorCode value has to be mapped exactly once (#1642).
 Json::Value guarded( const std::function<Json::Value()> &body )
 {
   try
@@ -75,6 +81,118 @@ Json::Value guarded( const std::function<Json::Value()> &body )
   {
     throw RSOperatorError( mapGeoCode( error.code() ), error.what(), error.details() );
   }
+}
+
+namespace
+{
+
+/// JSON-Schema item description for one scalar element type.
+Json::Value scalarItem( const std::string &type )
+{
+  Json::Value item( Json::objectValue );
+  item["type"] = type;
+  return item;
+}
+
+/// Array-typed parameter: rs_schema.h ships no array helper, and every one of
+/// these members is read back as a JSON array at run time — declaring them
+/// "string" made schema-validating agents and UIs reject legal input (#1642).
+/// `items` is the JSON-Schema item description (scalarItem() for scalars);
+/// minItems/maxItems are omitted when non-positive.
+Json::Value arrayParam( const std::string &name, const std::string &description,
+                        const Json::Value &items, int minItems = 0, int maxItems = 0 )
+{
+  Json::Value param( Json::objectValue );
+  param["name"] = name;
+  param["type"] = "array";
+  param["description"] = description;
+  param["items"] = items;
+  if ( minItems > 0 )
+    param["minItems"] = minItems;
+  if ( maxItems > 0 )
+    param["maxItems"] = maxItems;
+  return param;
+}
+/// Parses a 4-number bounds/extent parameter (R10-A/PR-1 + PR-8).
+///
+/// Accepted shapes: a 4-item array (canonical), the schema-documented string
+/// form "[minX,minY,maxX,maxY]" (comma- or space-separated), or a string of
+/// the same produced by a GUI/agent. Numeric-string ITEMS are accepted
+/// because schema_validator accepts them for Number ports — refusing them
+/// here would let jsoncpp throw LogicError through the parameter contract.
+/// Every other shape/type fails typed; an empty result never silently means
+/// "no bounds" (callers decide absence via isMember).
+std::vector<double> parseBounds( const Json::Value &v, const char *paramName )
+{
+  std::vector<double> out;
+  auto pushItem = [&]( const Json::Value &item ) -> bool {
+    if ( item.isNumeric() )
+    {
+      out.push_back( item.asDouble() );
+      return true;
+    }
+    if ( item.isString() && !item.asString().empty() )
+    {
+      try
+      {
+        out.push_back( std::stod( item.asString() ) );
+        return true;
+      }
+      catch ( const std::exception & )
+      {
+        return false;
+      }
+    }
+    return false;
+  };
+
+  if ( v.isArray() )
+  {
+    if ( v.size() != 4 )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             std::string( paramName ) + " must be [minX,minY,maxX,maxY]" );
+    for ( const Json::Value &item : v )
+    {
+      if ( !pushItem( item ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               std::string( paramName ) + " entries must be numbers" );
+    }
+    return out;
+  }
+  if ( v.isString() )
+  {
+    std::string text = v.asString();
+    // Comma- or whitespace-separated (optionally mixed, trailing commas ok).
+    for ( char &ch : text )
+      if ( ch == ',' )
+        ch = ' ';
+    std::vector<std::string> parts;
+    std::istringstream ss( text );
+    std::string tok;
+    while ( ss >> tok )
+      parts.push_back( tok );
+    if ( parts.size() != 4 )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             std::string( paramName ) +
+                               " string form must be \"minX,minY,maxX,maxY\"" );
+    for ( const std::string &part : parts )
+    {
+      try
+      {
+        out.push_back( std::stod( part ) );
+      }
+      catch ( const std::exception & )
+      {
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               std::string( paramName ) +
+                                 " string entries must be numbers (got \"" + part + "\")" );
+      }
+    }
+    return out;
+  }
+  throw RSOperatorError( ErrorCode::InvalidParameter,
+                         std::string( paramName ) + " must be [minX,minY,maxX,maxY] "
+                         "(array or \"minX,minY,maxX,maxY\" string)" );
 }
 
 std::vector<std::string> creationOptionsFrom( const Json::Value &params )
@@ -143,8 +261,9 @@ Json::Value IoTranslateOperator::schema() const
   params["input"] = makeRasterParam( "input", "Input raster path" );
   params["output"] = makeOutputParam( "output", "Output raster path" );
   params["driver"] = makeStringParam( "driver", "Output GDAL driver short name", "GTiff" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options (NAME=VALUE array)" );
-  params["bands"] = makeStringParam( "bands", "1-based band indices to keep" );
+  params["creationOptions"] =
+    arrayParam( "creationOptions", "Driver creation options (NAME=VALUE array)", scalarItem( "string" ) );
+  params["bands"] = arrayParam( "bands", "1-based band indices to keep", scalarItem( "string" ) );
   params["width"] = makeIntegerParam( "width", "Target width (with height)" );
   params["height"] = makeIntegerParam( "height", "Target height (with width)" );
   params["targetCrs"] = makeStringParam( "targetCrs", "Assign/override CRS explicitly (EPSG:xxxx or WKT)" );
@@ -221,9 +340,10 @@ Json::Value IoWarpOperator::schema() const
                                         { "near", "bilinear", "cubic", "cubicspline", "lanczos", "average", "mode" },
                                         "near" );
   params["resolution"] = makeNumberParam( "resolution", "Target pixel size in target CRS units" );
-  params["bounds"] = makeStringParam( "bounds", "Target extent [minX,minY,maxX,maxY] in target CRS" );
+  params["bounds"] =
+    arrayParam( "bounds", "Target extent [minX,minY,maxX,maxY] in target CRS", scalarItem( "number" ), 4, 4 );
   params["targetAlignedPixels"] = makeBooleanParam( "targetAlignedPixels", "Align target grid (-tap)", false );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Driver creation options", scalarItem( "string" ) );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Warped raster", "tif" );
   Json::Value root = makeRootSchema( "Warp Raster", description(), params, outputs );
@@ -255,11 +375,8 @@ Json::Value IoWarpOperator::run( const Json::Value &params, RSOperatorContext &c
       options.targetResolutionX = params::getDouble( params, "resolution", 0.0 );
       options.targetResolutionY = options.targetResolutionX;
     }
-    if ( params.isMember( "bounds" ) && params["bounds"].isArray() && params["bounds"].size() == 4 )
-    {
-      for ( const Json::Value &bound : params["bounds"] )
-        options.targetBounds.push_back( bound.asDouble() );
-    }
+    if ( params.isMember( "bounds" ) )
+      options.targetBounds = parseBounds( params["bounds"], "bounds" );
     options.targetAlignedPixels = params::getBool( params, "targetAlignedPixels", false ) ? "YES" : "NO";
     options.creationOptions = creationOptionsFrom( params );
     options.creationOptions.emplace_back( "COMPRESS=LZW" );
@@ -361,9 +478,10 @@ Json::Value IoClipOperator::schema() const
   Json::Value params;
   params["input"] = makeRasterParam( "input", "Input raster path" );
   params["output"] = makeOutputParam( "output", "Output raster path" );
-  params["bounds"] = makeStringParam( "bounds", "Clip extent [minX,minY,maxX,maxY] — mandatory" );
+  params["bounds"] =
+    arrayParam( "bounds", "Clip extent [minX,minY,maxX,maxY] — mandatory", scalarItem( "number" ), 4, 4 );
   params["srcCrsOverride"] = makeStringParam( "srcCrsOverride", "Declare the source CRS when the file carries none" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Driver creation options", scalarItem( "string" ) );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Clipped raster", "tif" );
   Json::Value root = makeRootSchema( "Clip Raster", description(), params, outputs );
@@ -397,11 +515,8 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
                              "input raster carries no CRS; declare srcCrsOverride to clip anyway", details );
     }
     std::vector<double> bounds;
-    if ( params.isMember( "bounds" ) && params["bounds"].isArray() && params["bounds"].size() == 4 )
-    {
-      for ( const Json::Value &bound : params["bounds"] )
-        bounds.push_back( bound.asDouble() );
-    }
+    if ( params.isMember( "bounds" ) )
+      bounds = parseBounds( params["bounds"], "bounds" );
     if ( bounds.size() != 4 )
       throw RSOperatorError( ErrorCode::MissingRequiredParameter,
                              "bounds must be [minX,minY,maxX,maxY]" );
@@ -461,7 +576,7 @@ Json::Value IoConvertFormatOperator::schema() const
   params["input"] = makeRasterParam( "input", "Input dataset (raster or vector)" );
   params["output"] = makeOutputParam( "output", "Output dataset path" );
   params["driver"] = makeStringParam( "driver", "Output GDAL driver short name (GTiff/GPKG/GeoJSON/...)", "GTiff" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Driver creation options", scalarItem( "string" ) );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Converted dataset", "" );
   Json::Value root = makeRootSchema( "Convert Format", description(), params, outputs );
@@ -543,7 +658,8 @@ Json::Value IoBuildOverviewsOperator::schema() const
   using namespace sicnu::operators::schema;
   Json::Value params;
   params["input"] = makeRasterParam( "input", "Raster path (modified in place)" );
-  params["levels"] = makeStringParam( "levels", "Overview levels (powers of two, e.g. [2,4,8,16])" );
+  params["levels"] =
+    arrayParam( "levels", "Overview levels (powers of two, e.g. [2,4,8,16])", scalarItem( "integer" ) );
   params["resampling"] = makeEnumParam( "resampling", "Overview resampling",
                                         { "NEAREST", "AVERAGE", "GAUSS", "CUBIC", "MODE" }, "GAUSS" );
   Json::Value root = makeRootSchema( "Build Overviews", description(), params, Json::Value() );
@@ -570,7 +686,28 @@ Json::Value IoBuildOverviewsOperator::run( const Json::Value &params, RSOperator
     if ( params.isMember( "levels" ) && params["levels"].isArray() )
     {
       for ( const Json::Value &level : params["levels"] )
-        levels.push_back( level.asInt() );
+      {
+        // Numeric strings pass schema validation for Integer ports — accept
+        // them here instead of letting jsoncpp throw LogicError (#1447
+        // pattern); anything else fails typed.
+        if ( level.isInt() )
+          levels.push_back( level.asInt() );
+        else if ( level.isString() )
+        {
+          try
+          {
+            levels.push_back( std::stoi( level.asString() ) );
+          }
+          catch ( const std::exception & )
+          {
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "levels entries must be integers" );
+          }
+        }
+        else
+          throw RSOperatorError( ErrorCode::InvalidParameter,
+                                 "levels entries must be integers" );
+      }
     }
     if ( levels.empty() )
     {
@@ -607,7 +744,7 @@ Json::Value IoMakeCogOperator::schema() const
                                     { "lossless_scientific", "visualization", "categorical",
                                       "continuous_float", "sar" },
                                     "lossless_scientific" );
-  params["creationOptions"] = makeStringParam( "creationOptions", "Extra COG creation options" );
+  params["creationOptions"] = arrayParam( "creationOptions", "Extra COG creation options", scalarItem( "string" ) );
   params["blocksize"] = makeIntegerParam( "blocksize", "Tile blocksize override (power of two, 128..4096)" );
   params["overviews"] = makeBooleanParam( "overviews", "Build overviews inside the COG (default true)" );
   params["deterministic"] = makeBooleanParam(
@@ -704,7 +841,8 @@ Json::Value IoVectorConvertOperator::schema() const
   params["layer"] = makeStringParam( "layer", "Layer name (default first)" );
   params["targetCrs"] = makeStringParam( "targetCrs", "Reproject features to this declared CRS" );
   params["where"] = makeStringParam( "where", "Attribute filter (OGR SQL WHERE)" );
-  params["clipBounds"] = makeStringParam( "clipBounds", "Clip box [minX,minY,maxX,maxY] in layer CRS" );
+  params["clipBounds"] =
+    arrayParam( "clipBounds", "Clip box [minX,minY,maxX,maxY] in layer CRS", scalarItem( "number" ), 4, 4 );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Converted vector", "" );
   Json::Value root = makeRootSchema( "Convert Vector", description(), params, outputs );
@@ -729,11 +867,8 @@ Json::Value IoVectorConvertOperator::run( const Json::Value &params, RSOperatorC
 {
   return guarded( [ & ] {
     std::vector<double> clipBounds;
-    if ( params.isMember( "clipBounds" ) && params["clipBounds"].isArray() && params["clipBounds"].size() == 4 )
-    {
-      for ( const Json::Value &bound : params["clipBounds"] )
-        clipBounds.push_back( bound.asDouble() );
-    }
+    if ( params.isMember( "clipBounds" ) )
+      clipBounds = parseBounds( params["clipBounds"], "clipBounds" );
     ContextProgress progress( context );
     const sicnu::geo::io::CheckedPath target =
       sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
@@ -915,7 +1050,11 @@ Json::Value IoMetadataPatchOperator::schema() const
   using namespace sicnu::operators::schema;
   Json::Value params;
   params["input"] = makeRasterParam( "input", "Target dataset (update-capable driver required)" );
-  params["patches"] = makeStringParam( "patches", "Array of {band, field, value} (band 0 = dataset stamp)" );
+  // One patch is {band?, field, value} — the exact shape run() enforces.
+  Json::Value patchItem( Json::objectValue );
+  patchItem["type"] = "object";
+  params["patches"] =
+    arrayParam( "patches", "Array of {band, field, value} (band 0 = dataset stamp)", patchItem );
   Json::Value outputs;
   outputs["report"] = makeOutputParam( "report", "Applied fields and manifest status", "" );
   Json::Value root = makeRootSchema( "Patch Metadata", description(), params, outputs );

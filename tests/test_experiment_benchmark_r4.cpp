@@ -129,3 +129,113 @@ TEST_CASE( "distinct rows still evaluate to the exact known answer (r4 control)"
     }
     CHECK( sawOa );
 }
+
+TEST_CASE( "benchmark coverage record exposes a low match rate instead of"
+           " silently completing (#1582)",
+           "[experiment][benchmark][r4]" )
+{
+    // #1582 - the classification path used to drop unmatched rows with bare
+    // `continue`s and the stored record carried neither the input scale nor
+    // any skip count, so a run that matched 5 of 10000 samples looked exactly
+    // like a full evaluation once persisted. The coverage block in
+    // raw_metrics now names the gap.
+    BenchmarkRunRequest request;
+    request.definition = makeDefinition();
+    request.modelId = QStringLiteral( "model-a" );
+    constexpr int kSamples = 10000;
+    for ( int i = 0; i < kSamples; ++i )
+    {
+        request.truths.append(
+            truthRow( QStringLiteral( "s%1" ).arg( i ),
+                      i % 2 == 0 ? QStringLiteral( "water" ) : QStringLiteral( "land" ) ) );
+    }
+    // Only the first five predictions share a sample id with the truth set.
+    for ( int i = 0; i < kSamples; ++i )
+    {
+        const QString id =
+            i < 5 ? QStringLiteral( "s%1" ).arg( i ) : QStringLiteral( "p%1" ).arg( i );
+        request.predictions.append( predictionRow( id, QStringLiteral( "water" ) ) );
+    }
+
+    const auto result = BenchmarkRunner::run( request );
+    REQUIRE( result.has_value() );
+    CHECK( result->status() == BenchmarkRunStatus::Completed );
+
+    const QJsonObject coverage =
+        result->rawMetrics().value( QStringLiteral( "coverage" ) ).toObject();
+    REQUIRE_FALSE( coverage.isEmpty() );
+    CHECK( coverage.value( QStringLiteral( "truth_rows" ) ).toInteger() == kSamples );
+    CHECK( coverage.value( QStringLiteral( "prediction_rows" ) ).toInteger() == kSamples );
+    CHECK( coverage.value( QStringLiteral( "matched_samples" ) ).toInteger() == 5 );
+    CHECK( coverage.value( QStringLiteral( "unmatched_prediction_rows" ) ).toInteger() ==
+           kSamples - 5 );
+    CHECK( coverage.value( QStringLiteral( "unmatched_truth_rows" ) ).toInteger() ==
+           kSamples - 5 );
+    CHECK( coverage.value( QStringLiteral( "predictions_without_truth_row" ) ).toInteger() ==
+           kSamples - 5 );
+}
+
+TEST_CASE( "benchmark coverage record names every skip reason and sums to"
+           " unmatched_prediction_rows (#1582)",
+           "[experiment][benchmark][r4]" )
+{
+    // #1582 - each former bare `continue` now has its own counter, and the
+    // per-reason counts must partition the unmatched prediction rows exactly:
+    // a future edit that renames a key, drops a counter, or double-counts a
+    // row fails here instead of silently shrinking the record.
+    BenchmarkRunRequest request;
+    request.definition = makeDefinition();
+    request.definition.protocol().ignoreLabels().append( QStringLiteral( "water" ) );
+    request.modelId = QStringLiteral( "model-a" );
+    request.truths.append( truthRow( QStringLiteral( "m1" ), QStringLiteral( "land" ) ) );
+    request.truths.append( truthRow( QStringLiteral( "m2" ), QStringLiteral( "land" ) ) );
+    // Truth row with no class: never enters the label index.
+    request.truths.append( truthRow( QStringLiteral( "u1" ), QString() ) );
+    // Truth class on the protocol ignore list.
+    request.truths.append( truthRow( QStringLiteral( "ig1" ), QStringLiteral( "water" ) ) );
+    request.predictions.append(
+        predictionRow( QStringLiteral( "m1" ), QStringLiteral( "land" ) ) );
+    // Prediction with no truth row at all.
+    request.predictions.append(
+        predictionRow( QStringLiteral( "zz" ), QStringLiteral( "land" ) ) );
+    // Prediction whose truth row carries no class → unknown truth label.
+    request.predictions.append(
+        predictionRow( QStringLiteral( "u1" ), QStringLiteral( "land" ) ) );
+    // Prediction with no class of its own → unknown predicted label.
+    request.predictions.append( predictionRow( QStringLiteral( "m2" ), QString() ) );
+    // Truth class on the protocol ignore list → skipped by ignore labels.
+    request.predictions.append(
+        predictionRow( QStringLiteral( "ig1" ), QStringLiteral( "land" ) ) );
+
+    const auto result = BenchmarkRunner::run( request );
+    REQUIRE( result.has_value() );
+    CHECK( result->status() == BenchmarkRunStatus::Completed );
+
+    const QJsonObject coverage =
+        result->rawMetrics().value( QStringLiteral( "coverage" ) ).toObject();
+    REQUIRE_FALSE( coverage.isEmpty() );
+    CHECK( coverage.value( QStringLiteral( "truth_rows" ) ).toInteger() == 4 );
+    CHECK( coverage.value( QStringLiteral( "prediction_rows" ) ).toInteger() == 5 );
+    CHECK( coverage.value( QStringLiteral( "matched_samples" ) ).toInteger() == 1 );
+    CHECK( coverage.value( QStringLiteral( "predictions_without_truth_row" ) ).toInteger() ==
+           1 );
+    CHECK( coverage.value( QStringLiteral( "predictions_with_unknown_truth_label" ) )
+               .toInteger() == 1 );
+    CHECK( coverage.value( QStringLiteral( "predictions_with_unknown_predicted_label" ) )
+               .toInteger() == 1 );
+    CHECK( coverage.value( QStringLiteral( "predictions_skipped_by_ignore_labels" ) )
+               .toInteger() == 1 );
+    CHECK( coverage.value( QStringLiteral( "unmatched_truth_rows" ) ).toInteger() == 3 );
+
+    // Invariant: the four named reasons partition the unmatched predictions.
+    const qint64 namedSkips =
+        coverage.value( QStringLiteral( "predictions_without_truth_row" ) ).toInteger() +
+        coverage.value( QStringLiteral( "predictions_with_unknown_truth_label" ) )
+            .toInteger() +
+        coverage.value( QStringLiteral( "predictions_with_unknown_predicted_label" ) )
+            .toInteger() +
+        coverage.value( QStringLiteral( "predictions_skipped_by_ignore_labels" ) )
+            .toInteger();
+    CHECK( namedSkips ==
+           coverage.value( QStringLiteral( "unmatched_prediction_rows" ) ).toInteger() );
+}

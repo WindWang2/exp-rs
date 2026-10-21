@@ -2,8 +2,10 @@
 //
 // Framework token "openvino": the artifact is an IR (.xml, with .bin beside
 // it) or a directly readable ONNX model. Execution: ov::Core::read_model →
-// compile (device from the platform's device planner: "CPU" fallback, "GPU"
-// when the manifest asked for it) → one infer request per forward. CPU
+// compile (device follows the registry's resolution verdict — the single
+// repair that verdict cannot make is supplied here: a GPU-wanting manifest
+// demoted to cpu only because the host has no CUDA is served by OpenVINO's
+// own GPU plugin when one is exposed) → one infer request per forward. CPU
 // inference is deterministic per build; the provider details record the
 // OpenVINO version honestly.
 #include "operators/runtime/openvino_provider.h"
@@ -16,10 +18,17 @@
 
 #include <opencv2/core.hpp>
 
+#include <QFileInfo>
+#include <QString>
+
+#include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <algorithm>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace sicnu::operators::runtime {
@@ -29,12 +38,16 @@ namespace {
 class OpenVinoRuntime final : public IModelRuntime
 {
   public:
-    bool load( const ModelInfo &model, std::string *error )
+    bool load( const ModelInfo &model, const ModelHardwareCapabilities &hw, std::string *error )
     {
       try
       {
         mCore = std::make_unique<ov::Core>();
         const std::string &path = model.resolvedArtifactPath;
+        // The IModelRuntime artifactPath() contract: the session reports the
+        // file it was actually loaded from (cache keys / payloads /
+        // provenance), never a hardcoded label.
+        m_artifactPath = path;
         // read_model handles both IR (.xml, with .bin beside it) and ONNX
         // directly; no format branch is needed.
         mModel = mCore->read_model( path );
@@ -44,10 +57,18 @@ class OpenVinoRuntime final : public IModelRuntime
             *error = "OpenVINO read_model failed for: " + path;
           return false;
         }
-        const std::string device = model.runtime.gpu ? "GPU" : "CPU";
+        const std::string device = selectDevice( model, hw, error );
+        if ( device.empty() )
+          return false; // typed refusal — selectDevice filled *error
         mCompiled = mCore->compile_model( mModel, device );
         mInfer = mCompiled.create_infer_request();
         mDevice = device;
+        mResolvedCudaIndex = model.runtime.resolvedCudaIndex;
+        // R15-C C05 (B8): the REAL artifact path — the placeholder
+        // "openvino-model" fabricated an identity for every payload/provenance
+        // consumer (every other provider reports the path it loaded).
+        mArtifact = path;
+        mLoaded = true;
         // Remember the input/output names for the blob bridge.
         mInputName = mModel->input().get_any_name();
         mInputShape = mModel->input().get_shape();
@@ -64,7 +85,25 @@ class OpenVinoRuntime final : public IModelRuntime
 
     std::string framework() const override { return "openvino"; }
     std::string backendName() const override { return "openvino"; }
-    std::string deviceName() const override { return mDevice; }
+    std::string deviceName() const override
+    {
+      // R15-C C05 (B7): payloads and the provenance sidecar speak the
+      // platform device vocabulary ("cpu" | "cuda:N", model_runtime.h).
+      // OpenVINO's own tokens ("CPU"/"GPU") broke every consumer matching on
+      // that vocabulary — and OV's GPU plugin is not necessarily a CUDA
+      // device, so a bare "GPU" claim was as wrong as dropping the resolved
+      // index. Report the platform token for the CPU plugin and, for the GPU
+      // plugin, the device index the registry's resolver actually picked
+      // (runtime.resolvedCudaIndex) in the platform spelling. Device 0 is
+      // the DEFAULT/first GPU (resolvedCudaIndex is 0 both for it and for an
+      // unresolved CPU pick), so the guard is >= 0 — "cuda:0" is the honest
+      // platform spelling of "the GPU plugin ran on the first device".
+      if ( mDevice == "CPU" )
+        return std::string( "cpu" );
+      if ( mResolvedCudaIndex >= 0 )
+        return "cuda:" + std::to_string( mResolvedCudaIndex );
+      return mDevice;
+    }
     std::string artifactPath() const override { return mArtifact; }
 
     ProviderRuntimeDetails providerDetails() const override
@@ -73,6 +112,42 @@ class OpenVinoRuntime final : public IModelRuntime
       details.executionProvider = "openvino";
       details.runtimeVersion = ov::get_openvino_version().buildNumber;
       return details;
+    }
+
+    // R15-C C05 (B9): the base class defaults reported every healthy
+    // OpenVINO session as UNHEALTHY (ok=false) with unknown weights (0 MiB)
+    // — the other four providers report honestly, so a health probe or a
+    // memory report classified by provider gave contradictory answers for
+    // the same model.
+    SessionHealth health() const override
+    {
+      SessionHealth health;
+      health.ok = mLoaded && !m_cancelRequested.load( std::memory_order_relaxed );
+      health.forwardsCompleted = m_forwards.load( std::memory_order_relaxed );
+      health.failures = m_failures.load( std::memory_order_relaxed );
+      std::lock_guard<std::mutex> healthLock( m_healthMutex );
+      health.lastError = m_lastError;
+      return health;
+    }
+
+    SessionMemoryEstimate memoryEstimate() const override
+    {
+      // Honest estimate: the serialized weights are known (the IR .xml plus
+      // its sibling .bin when present); the engine's peak working set is not
+      // discoverable through this API — 0 = unknown, never invented.
+      SessionMemoryEstimate estimate;
+      const QFileInfo info( QString::fromStdString( mArtifact ) );
+      if ( info.exists() && info.isFile() )
+        estimate.weightsMb = static_cast<int>( ( info.size() + ( 1 << 20 ) - 1 ) >> 20 );
+      if ( mArtifact.size() > 4
+           && mArtifact.compare( mArtifact.size() - 4, 4, ".xml" ) == 0 )
+      {
+        const QFileInfo bin( QString::fromStdString( mArtifact.substr( 0, mArtifact.size() - 4 )
+                                                     + ".bin" ) );
+        if ( bin.exists() && bin.isFile() )
+          estimate.weightsMb += static_cast<int>( ( bin.size() + ( 1 << 20 ) - 1 ) >> 20 );
+      }
+      return estimate;
     }
 
     cv::Mat infer( const cv::Mat &nchwBlob ) override
@@ -113,6 +188,7 @@ class OpenVinoRuntime final : public IModelRuntime
         cv::Mat out( static_cast<int>( dims.size() ), dims.data(), CV_32F );
         const std::size_t outElems = static_cast<std::size_t>( out.total() ) * out.channels();
         std::memcpy( out.ptr<float>(), output.data<const float>(), outElems * sizeof( float ) );
+        m_forwards.fetch_add( 1, std::memory_order_relaxed );
         return out;
       }
       catch ( const RSOperatorError & )
@@ -122,18 +198,33 @@ class OpenVinoRuntime final : public IModelRuntime
       }
       catch ( const std::exception &e )
       {
+        m_failures.fetch_add( 1, std::memory_order_relaxed );
+        {
+          std::lock_guard<std::mutex> healthLock( m_healthMutex );
+          m_lastError = e.what();
+        }
         throw RSOperatorError( ErrorCode::RuntimeProviderFailed,
                                std::string( "OpenVINO inference failed: " ) + e.what() );
       }
     }
 
+    void requestCancel() override { m_cancelRequested.store( true, std::memory_order_relaxed ); }
+    void clearCancel() override { m_cancelRequested.store( false, std::memory_order_relaxed ); }
+
   private:
-    std::string mArtifact = "openvino-model";
+    std::string mArtifact;
     std::string mDevice = "CPU";
+    int mResolvedCudaIndex = 0; ///< registry-resolved CUDA index (R15-C C05/B7)
     std::string mInputName;
     std::string mOutputName;
     ov::Shape mInputShape;
     std::mutex m_inferMutex;
+    std::atomic<bool> mLoaded{ false };
+    std::atomic<bool> m_cancelRequested{ false };
+    std::atomic<std::uint64_t> m_forwards{ 0 };
+    std::atomic<std::uint64_t> m_failures{ 0 };
+    std::mutex m_healthMutex;
+    std::string m_lastError;
     std::unique_ptr<ov::Core> mCore;
     std::shared_ptr<ov::Model> mModel;
     ov::CompiledModel mCompiled;
@@ -151,9 +242,8 @@ ModelRuntimePtr makeOpenVinoRuntime( const ModelInfo &model,
     return nullptr;
   }
   auto session = std::make_shared<OpenVinoRuntime>();
-  if ( !session->load( model, errorMessage ) )
+  if ( !session->load( model, hw, errorMessage ) )
     return nullptr;
-  ( void )hw;
   return session;
 }
 
@@ -166,6 +256,18 @@ bool openVinoProviderAvailable()
 
 void registerOpenVinoProvider( ModelRuntimeRegistry &registry )
 {
+  // ProviderTraits{} (maxAddressableCudaIndex 0): OpenVINO addresses NO
+  // CUDA device — its "GPU" token is the Intel plugin, reached through
+  // OpenVINO's own device registry, not a CUDA index. Declaring a
+  // multi-device index here would make the registry promote cudaAvailable
+  // for this framework and let a manifest book NVIDIA VRAM (cuda:N) this
+  // backend can never touch, while the CUDA-centric resolution still
+  // cannot SEE an Intel GPU. The registry's verdict therefore stays
+  // authoritative; the provider only supplies the one repair that
+  // resolution cannot make (selectDevice above): on a host without CUDA
+  // an auto request from a GPU-wanting manifest is demoted to cpu there,
+  // and OpenVINO's own device list decides whether the Intel plugin can
+  // take it.
   registry.registerProvider( "openvino", makeOpenVinoRuntime, ProviderTraits{} );
 }
 

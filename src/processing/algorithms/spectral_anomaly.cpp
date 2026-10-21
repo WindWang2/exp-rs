@@ -1,5 +1,6 @@
 // src/processing/algorithms/spectral_anomaly.cpp — RX anomaly detector
 #include "spectral_anomaly.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/primitives/dense_linalg.h"
 
 #include <algorithm>
@@ -8,6 +9,30 @@
 
 namespace SpectralAnomaly
 {
+
+namespace
+{
+
+/// True when every band of @a pixel is valid. A band value is invalid when it
+/// is non-finite (NaN/Inf) or — when that band declares NoData (@a noDataBands
+/// with @a hasNoDataBands[b]) — exactly equal to the declared value. The
+/// predicate resolves through the module-wide owner (nodata_utils.h, #A1):
+/// exact float equality, never an epsilon, so this kernel cannot drift from
+/// the rest of the module. A pixel is valid when every band is valid.
+bool pixelValid( const float *pixel, int bands, const float *noDataBands,
+                 const uint8_t *hasNoDataBands )
+{
+    for ( int b = 0; b < bands; ++b )
+    {
+        const float v = pixel[b];
+        const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
+        if ( checkNd ? sicnu::rs::isNoDataValue( v, noDataBands[b] ) : !std::isfinite( v ) )
+            return false;
+    }
+    return true;
+}
+
+} // namespace
 
 // The background-covariance inversion lives in the shared primitive
 // primitives/dense_linalg.h (single owner; this file used to carry its own
@@ -30,25 +55,10 @@ void accumulateMean( const float *pixels, size_t count, int bands,
     // for this accumulator; values match within FP rounding).
     for ( size_t p = 0; p < count; ++p )
     {
-        if ( skipNonFinite )
-        {
-            bool valid = true;
-            for ( int b = 0; b < bands; ++b )
-            {
-                const float v = pixels[p * static_cast<size_t>( bands ) + b];
-                // Invalid: non-finite, or equal (within tolerance) to the band's
-                // declared NoData value (@a noDataBands, when provided and hasNoData is true).
-                const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
-                if ( !std::isfinite( v )
-                     || ( checkNd && ( v == noDataBands[b] || std::isnan( v ) ) ) )
-                {
-                    valid = false;
-                    break;
-                }
-            }
-            if ( !valid )
-                continue;
-        }
+        if ( skipNonFinite
+             && !pixelValid( pixels + p * static_cast<size_t>( bands ), bands,
+                             noDataBands, hasNoDataBands ) )
+            continue;
         for ( int b = 0; b < bands; ++b )
             stats->mean[b] += pixels[p * static_cast<size_t>( bands ) + b];
         ++stats->count;
@@ -80,25 +90,10 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
     std::vector<double> d( bands );
     for ( size_t p = 0; p < count; ++p )
     {
-        if ( skipNonFinite )
-        {
-            bool valid = true;
-            for ( int b = 0; b < bands; ++b )
-            {
-                const float v = pixels[p * static_cast<size_t>( bands ) + b];
-                // Invalid: non-finite, or equal (within tolerance) to the band's
-                // declared NoData value (@a noDataBands, when provided and hasNoData is true).
-                const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
-                if ( !std::isfinite( v )
-                     || ( checkNd && ( v == noDataBands[b] || std::isnan( v ) ) ) )
-                {
-                    valid = false;
-                    break;
-                }
-            }
-            if ( !valid )
-                continue;
-        }
+        if ( skipNonFinite
+             && !pixelValid( pixels + p * static_cast<size_t>( bands ), bands,
+                             noDataBands, hasNoDataBands ) )
+            continue;
         for ( int b = 0; b < bands; ++b )
             d[b] = pixels[p * static_cast<size_t>( bands ) + b] - stats->mean[b];
         for ( int i = 0; i < bands; ++i )
@@ -277,17 +272,7 @@ bool rxDetector( const float *pixels, size_t count, int bands,
     for ( size_t p = 0; p < count; ++p )
     {
         const float *spec = pixels + p * static_cast<size_t>( bands );
-        bool valid = true;
-        for ( int b = 0; b < bands; ++b )
-        {
-            const float v = spec[b];
-            const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
-            if ( !std::isfinite( v ) || ( checkNd && ( v == noDataBands[b] || std::isnan( v ) ) ) )
-            {
-                valid = false;
-                break;
-            }
-        }
+        const bool valid = pixelValid( spec, bands, noDataBands, hasNoDataBands );
         ( *rxValues )[p] = valid ? rxScore( spec, stats.mean, invCov, bands, &scratch )
                                  : std::numeric_limits<float>::quiet_NaN();
     }

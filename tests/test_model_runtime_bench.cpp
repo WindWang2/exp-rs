@@ -217,6 +217,9 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
         std::string deviceName() const override { return "cpu"; }
         std::string artifactPath() const override { return "fake://bench7"; }
         cv::Mat infer( const cv::Mat &blob ) override { return blob.clone(); }
+        // Feeds several named inputs in one forward pass through inferNamed;
+        // declares it for the engine's capability preflight (R15-C C05/B3).
+        bool supportsMultiInput() const override { return true; }
         std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
                                              const std::vector<std::string> & ) override
         {

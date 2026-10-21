@@ -744,8 +744,26 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
                                       m_activeViewHost->mapCanvas() );
         // Workspace Governance 3.0 seam: governance tools read the
         // project-scoped WorkspaceService through AgentServices.
+        sicnu::workspace::WorkspaceService *const scopedWorkspaceService =
+            &m_projectContext->workspaceService();
         sicnu::agent::AgentServices::instance().setWorkspaceService(
-            &m_projectContext->workspaceService() );
+            scopedWorkspaceService );
+        // #1559: AgentServices is a process singleton that outlives this
+        // window, so the seam must be released when the window dies —
+        // governance tools would otherwise dereference a destroyed
+        // WorkspaceService from their JobEngine worker threads (the same
+        // dangling-pointer hazard as the TaskCenter/temporal catalog seams
+        // cleared in ~QgisDesktopWindow, #1454). Release only while the seam
+        // still names THIS window's service, so a window opened later keeps
+        // the service it wired.
+        connect( this, &QObject::destroyed, [scopedWorkspaceService]() {
+            if ( sicnu::agent::AgentServices::instance().workspaceService()
+                 == scopedWorkspaceService )
+            {
+                sicnu::agent::AgentServices::instance().setWorkspaceService(
+                    nullptr );
+            }
+        } );
     }
     agentCopilotDock->hide();
     // First-class surface: the copilot must be discoverable from the 窗口

@@ -112,6 +112,10 @@ class ChunkPipeline
     /// (rethrows std::exception_ptr rethrowably), ChunkCancelled on cancel,
     /// ChunkConsumerAborted when the consumer returns false, or returns
     /// normally when the consumer finished the stream.
+    /// One-run contract (R15-C C12 / F9): a second run() on the same object
+    /// throws std::logic_error instead of silently rethrowing the FIRST run's
+    /// stale error (m_firstError / m_completedTiles were never reset) — the
+    /// same guard ChunkGraph has always had.
     void run();
 
     /// Tiles that left the final queue (for tests / diagnostics).
@@ -131,6 +135,7 @@ class ChunkPipeline
     std::atomic<size_t> m_completedTiles{ 0 };
     std::exception_ptr m_firstError;
     std::mutex m_errorMutex;
+    bool m_ran = false; ///< one-run guard (R15-C C12 / F9)
 };
 
 } // namespace sicnu::runtime::chunk

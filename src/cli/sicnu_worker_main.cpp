@@ -14,6 +14,7 @@
 // Built-in test hooks (used by the fault-injection suite):
 //   "__hang__"  — loops until cancelled (simulates an unresponsive operator)
 #include "geospatial/remote/offline_gate.h"
+#include "geospatial/remote/process_network_policy.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -225,6 +226,10 @@ int main( int argc, char **argv )
         sicnu::geo::offline::setEnabled( true );
         sicnu::geo::offline::applyGdalNetworkDeny();
     }
+    // R15-B (R4-03): the private-network policy crosses the process boundary
+    // the same way (the host CLI exports SICNU_BLOCK_PRIVATE_NETWORKS=1).
+    if ( sicnu::geo::offline::blockPrivateNetworksFromEnv() )
+        sicnu::geo::network_policy::engageProcessPrivateNetworkBlocking();
 
     int protocolArg = 0; // position of "--protocol" if present
     for ( int i = 1; i < argc - 1; ++i )
