@@ -8,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 #include <numeric>
+#include <limits>
 
 // --- DN to Radiance ---
 
@@ -739,4 +740,76 @@ TEST_CASE("processFileMultiBand QUAC declares NaN NoData on every output band (#
         REQUIRE(std::isfinite(band1[i]));
         REQUIRE(std::isfinite(band2[i]));
     }
+}
+
+// --- R18-A WP3: in-memory DOS kernels must not let one -Inf sample poison ---
+// the whole band. findMin skipped NaN only, so a single -Inf pixel became the
+// dark object: surface = radiance - (-Inf) = +Inf everywhere. The streaming
+// paths and dos1Histogram/QUAC already filter !isfinite (#634 wash); the
+// in-memory kernels must match that family contract.
+
+TEST_CASE("dos1 treats a -Inf sample as invalid instead of the dark object [r18a][wp3]",
+          "[atm][dos]")
+{
+    std::vector<float> dn = {5.0f, -std::numeric_limits<float>::infinity(), 7.0f};
+    std::vector<float> out(3, 0.0f);
+
+    REQUIRE(AtmosphericCorrection::dos1(dn.data(), out.data(), 3, 1.0f, 0.0f));
+    // Dark object over finite radiance only: min = 5.
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isnan(out[1])); // -Inf input stays an invalid sample
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(2.0f, 1e-6f));
+}
+
+TEST_CASE("dos2 treats a -Inf sample as invalid instead of the path radiance [r18a][wp3]",
+          "[atm][dos]")
+{
+    std::vector<float> dn = {5.0f, -std::numeric_limits<float>::infinity(), 7.0f};
+    std::vector<float> out(3, 0.0f);
+
+    REQUIRE(AtmosphericCorrection::dos2(dn.data(), out.data(), 3, 1.0f, 0.0f, 0.5f));
+    // Path radiance over finite radiance only: min = 5 -> (L - 5)/0.5.
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isnan(out[1]));
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(4.0f, 1e-6f));
+}
+
+TEST_CASE("dos1 treats a +Inf sample as invalid too [r18a][wp3]", "[atm][dos]")
+{
+    std::vector<float> dn = {5.0f, std::numeric_limits<float>::infinity(), 7.0f};
+    std::vector<float> out(3, 0.0f);
+
+    REQUIRE(AtmosphericCorrection::dos1(dn.data(), out.data(), 3, 1.0f, 0.0f));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isnan(out[1])); // +Inf never participates as data
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(2.0f, 1e-6f));
+}
+
+// --- R18-A review-R1 P2: output predicates on the remaining in-memory routes ---
+TEST_CASE("dos1Histogram maps a ±Inf sample to NaN instead of passing it through [r18a][r1]",
+          "[atm][dos]")
+{
+    std::vector<float> dn = { 5.0f, -std::numeric_limits<float>::infinity(), 9.0f };
+    std::vector<float> out(3, 0.0f);
+    REQUIRE(AtmosphericCorrection::dos1Histogram(dn.data(), out.data(), 3, 1.0f, 0.0f));
+    REQUIRE(std::isnan(out[1])); // ±Inf in, NaN out — never ±Inf data
+    REQUIRE(std::isfinite(out[0]));
+    REQUIRE(std::isfinite(out[2]));
+}
+
+TEST_CASE("quac maps a ±Inf sample to NaN on the output band [r18a][r1]",
+          "[atm][quac]")
+{
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> b1 = { 0.10f, inf, 0.50f, 0.30f, 0.20f, 0.40f };
+    std::vector<float> b2 = { 0.20f, 0.30f, 0.10f, 0.50f, 0.30f, 0.10f };
+    std::vector<float> o1(6, -12345.0f), o2(6, -12345.0f);
+    const float *in[2] = { b1.data(), b2.data() };
+    float *out[2] = { o1.data(), o2.data() };
+    QString err;
+    REQUIRE(AtmosphericCorrection::quac(in, out, 2, 6, &err));
+    CHECK(err.isEmpty());
+    REQUIRE(std::isnan(o1[1])); // Inf input never becomes ±Inf output data
+    REQUIRE(std::isfinite(o1[0]));
+    REQUIRE(std::isfinite(o1[5]));
 }

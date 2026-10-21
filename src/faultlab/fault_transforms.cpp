@@ -246,6 +246,14 @@ FaultOutcome applyGridShift( FaultGrid &grid, const Json::Value &params,
     }
     const double dx = params["dx"].asDouble();
     const double dy = params["dy"].asDouble();
+    // A (0,0) shift is a no-op: reporting it as faultApplied with
+    // mutations=1 claimed a fault was injected when nothing moved — every
+    // other family refuses identity parameters (R18-E V10).
+    if ( dx == 0.0 && dy == 0.0 )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "grid_shift requires a non-zero shift (dx/dy not both 0)" );
+    }
     grid.geoTransform[0] += dx * grid.geoTransform[1];
     grid.geoTransform[3] += dy * grid.geoTransform[5];
     return okOutcome( 1 );

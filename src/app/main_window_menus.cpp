@@ -187,15 +187,29 @@ void QgisDesktopWindow::setupMenu()
                               QKeySequence::Redo, this, &QgisDesktopWindow::redo ),
          tr( "Redoes the undone edit." ) );
     editMenu->addSeparator();
-    tip( editMenu->addAction( ic( "cut_fill" ), tr( "Cut Features" ),
-                              QKeySequence::Cut, this, &QgisDesktopWindow::cutFeatures ),
-         tr( "Cuts the selected features." ) );
+    // R19-03: Cut/Paste/Delete Selected modify the edit buffer, so they ride
+    // the updateEditingUI session gate (registered disabled, exactly like
+    // the digitizing menu twins). Copy stays ungated: copying a selection
+    // from a read-only layer is legitimate.
+    const auto addSessionGatedEditAct =
+      [ this, editMenu ]( const char *objectName, const char *icon,
+                          const QString &text, void ( QgisDesktopWindow::*slot )(),
+                          const QString &tipText, const QKeySequence &shortcut ) {
+          QAction *a = editMenu->addAction( ic( icon ), text, shortcut, this, slot );
+          a->setObjectName( QString::fromLatin1( objectName ) );
+          tip( a, tipText );
+          a->setEnabled( false );
+          m_editingSessionMenuActions.append( a );
+      };
+    addSessionGatedEditAct( "mActionCutFeatures", "cut_fill", tr( "Cut Features" ),
+                            &QgisDesktopWindow::cutFeatures,
+                            tr( "Cuts the selected features." ), QKeySequence::Cut );
     tip( editMenu->addAction( ic( "copy" ), tr( "Copy Features" ),
                               QKeySequence::Copy, this, &QgisDesktopWindow::copyFeatures ),
          tr( "Copies the selected features." ) );
-    tip( editMenu->addAction( ic( "paste" ), tr( "Paste Features" ),
-                              QKeySequence::Paste, this, &QgisDesktopWindow::pasteFeatures ),
-         tr( "Pastes features." ) );
+    addSessionGatedEditAct( "mActionPasteFeatures", "paste", tr( "Paste Features" ),
+                            &QgisDesktopWindow::pasteFeatures,
+                            tr( "Pastes features." ), QKeySequence::Paste );
     editMenu->addSeparator();
     tip( editMenu->addAction( ic( "select" ), tr( "Select All" ),
                               QKeySequence( "Ctrl+A" ), this, &QgisDesktopWindow::selectAll ),
@@ -203,9 +217,11 @@ void QgisDesktopWindow::setupMenu()
     tip( editMenu->addAction( ic( "mActionSelectRectangle" ), tr( "Select Features" ),
                              this, &QgisDesktopWindow::selectFeatures ),
          tr( "Selects features with a rectangle." ) );
-    tip( editMenu->addAction( ic( "mActionDeleteSelectedFeatures" ), tr( "Delete Selected" ),
-                             QKeySequence::Delete, this, &QgisDesktopWindow::deleteSelectedFeatures ),
-         tr( "Deletes the selected features." ) );
+    addSessionGatedEditAct( "mActionDeleteSelectedFeatures", "mActionDeleteSelectedFeatures",
+                            tr( "Delete Selected" ),
+                            &QgisDesktopWindow::deleteSelectedFeatures,
+                            tr( "Deletes the selected features." ),
+                            QKeySequence::Delete );
     editMenu->addSeparator();
     tip( editMenu->addAction( ic( "t_ble" ), tr( "Open Attribute Table..." ),
                               this, &QgisDesktopWindow::openAttributeTable ),

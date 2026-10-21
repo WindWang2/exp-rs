@@ -304,6 +304,23 @@ CheckResult runRelationalCheck( const VerificationCheck &check, const Verificati
         }
     }
 
+    // Tautology refusal (R18-E V7): two metric operands that both omit
+    // "name" default to the check's own subject, so an `equals` over them
+    // compares a metric to itself and can never fail — an unconditional
+    // Pass wearing a check's clothes. Identical operands are refused as a
+    // spec defect instead.
+    if ( leftOperand.isArtifact == rightOperand.isArtifact
+         && leftOperand.reference == rightOperand.reference
+         && leftOperand.factPath == rightOperand.factPath )
+    {
+        const std::string problem =
+            "operands are tautologically identical: the relation compares a value to itself";
+        result.evidence.details["spec_problem"] = problem;
+        finishResult( result, CheckStatus::Indeterminate, failure_codes::kSpecInvalid,
+                      titleScopedMessage( check, problem ) );
+        return result;
+    }
+
     Json::Value expect{ Json::objectValue };
     const Json::Value *expectMember = check.params.isMember( "expect" ) ? &check.params["expect"]
                                                                         : nullptr;

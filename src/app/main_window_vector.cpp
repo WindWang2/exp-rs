@@ -351,7 +351,11 @@ void QgisDesktopWindow::updateEditingUI(QgsVectorLayer *vlayer)
         layerGeometryMask = 1u << static_cast<int>( vlayer->geometryType() );
     // R18-D: the Digitizing MENU twins (m_menuDigitizingActions) ride the
     // exact same gate as the toolbar actions — one contract, both entries.
-    const QList<QAction *> gatedActions = m_editingToolActions + m_menuDigitizingActions;
+    // R19-03: the Edit menu's session commands (Cut/Paste/Delete Selected)
+    // join the same contract; they are geometry-agnostic, so their mask is
+    // 0 and only the session/read-only clauses apply.
+    const QList<QAction *> gatedActions =
+      m_editingToolActions + m_menuDigitizingActions + m_editingSessionMenuActions;
     for (QAction *a : gatedActions)
     {
         QString reason;
@@ -388,6 +392,12 @@ QAction *QgisDesktopWindow::editingAction( const QString &name ) const
     }
     // R18-D: the Digitizing menu twins share the gate (and the test surface).
     for ( QAction *a : m_menuDigitizingActions )
+    {
+        if ( a && a->objectName() == name )
+            return a;
+    }
+    // R19-03: the Edit menu's session commands (no toolbar twins).
+    for ( QAction *a : m_editingSessionMenuActions )
     {
         if ( a && a->objectName() == name )
             return a;

@@ -660,6 +660,11 @@ private:
     // same updateEditingUI contract as the toolbar twins. They used to sit
     // outside the gate entirely (enabled-but-will-fail).
     QList<QAction *> m_menuDigitizingActions;
+    // R19-03: the Edit menu's own session commands (Cut/Paste/Delete
+    // Selected) — same updateEditingUI contract as the digitizing twins.
+    // They modify the edit buffer, so without a session they are
+    // enabled-but-will-fail; they carry no geometry mask.
+    QList<QAction *> m_editingSessionMenuActions;
 
     // Dock widgets
     QgsDockWidget *m_layersDock = nullptr;

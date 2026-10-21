@@ -853,11 +853,19 @@ QWidget *RibbonController::createRibbonBar()
 
     addGroupSeparator( pl );
     auto clip = addGroup( pl, tr( "Clipboard" ) );
-    if ( auto *btn = addToolButton( clip, tr( "Cut" ), "cut_fill", tr( "Cut Selected Features" ) ) )
+    // R19-03: Cut/Paste ride the editingAction() session gate like the
+    // digitizing buttons below (plain-button fallback only when the menu
+    // action does not exist yet). Copy stays ungated: copying a selection
+    // from a read-only layer is legitimate.
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionCutFeatures" ) ) : nullptr )
+      addActionButton( clip, a );
+    else if ( auto *btn = addToolButton( clip, tr( "Cut" ), "cut_fill", tr( "Cut Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::cutFeatures );
     if ( auto *btn = addToolButton( clip, tr( "Copy" ), "copy", tr( "Copy Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::copyFeatures );
-    if ( auto *btn = addToolButton( clip, tr( "Paste" ), "paste", tr( "Paste Features" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionPasteFeatures" ) ) : nullptr )
+      addActionButton( clip, a );
+    else if ( auto *btn = addToolButton( clip, tr( "Paste" ), "paste", tr( "Paste Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::pasteFeatures );
 
     addGroupSeparator( pl );
@@ -867,8 +875,10 @@ QWidget *RibbonController::createRibbonBar()
     if ( auto *btn = addToolButton( sel, tr( "Select" ), "mActionSelectRectangle",
                                     tr( "Select Features by Rectangle" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::selectFeatures );
-    if ( auto *btn = addToolButton( sel, tr( "Delete" ), "mActionDeleteSelectedFeatures",
-                                    tr( "Delete Selected Features" ) ) )
+    if ( auto *a = m_window ? m_window->editingAction( QStringLiteral( "mActionDeleteSelectedFeatures" ) ) : nullptr )
+      addActionButton( sel, a );
+    else if ( auto *btn = addToolButton( sel, tr( "Delete" ), "mActionDeleteSelectedFeatures",
+                                         tr( "Delete Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::deleteSelectedFeatures );
     if ( auto *btn = addToolButton( sel, tr( "Attribute Table" ), "t_ble", tr( "Open Attribute Table" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openAttributeTable );

@@ -62,7 +62,9 @@ inline double calculateFusionCost(
     double wShape,
     double wComp,
     const std::vector<double> &normBandWeights,
-    int bandCount )
+    int bandCount,
+    const double *sums,
+    const double *sumSqs )
 {
     const double n1 = static_cast<double>( r1.area );
     const double n2 = static_cast<double>( r2.area );
@@ -72,12 +74,16 @@ inline double calculateFusionCost(
     double deltaHColor = 0.0;
     if ( wShape < 1.0 )
     {
+        const double *s1Base = sums + static_cast<size_t>( r1.id ) * bandCount;
+        const double *ss1Base = sumSqs + static_cast<size_t>( r1.id ) * bandCount;
+        const double *s2Base = sums + static_cast<size_t>( r2.id ) * bandCount;
+        const double *ss2Base = sumSqs + static_cast<size_t>( r2.id ) * bandCount;
         for ( int b = 0; b < bandCount; ++b )
         {
-            const double s1 = r1.sumB[b];
-            const double ss1 = r1.sumSqB[b];
-            const double s2 = r2.sumB[b];
-            const double ss2 = r2.sumSqB[b];
+            const double s1 = s1Base[b];
+            const double ss1 = ss1Base[b];
+            const double s2 = s2Base[b];
+            const double ss2 = ss2Base[b];
 
             const double sMerge = s1 + s2;
             const double ssMerge = ss1 + ss2;
@@ -132,7 +138,9 @@ void mergeRegions(
     uint32_t r2Id,
     std::vector<RsMultiresSegmenter::SegmentNode> &nodes,
     DisjointSet &dsu,
-    int bandCount )
+    int bandCount,
+    double *sums,
+    double *sumSqs )
 {
     RsMultiresSegmenter::SegmentNode &r1 = nodes[r1Id];
     RsMultiresSegmenter::SegmentNode &r2 = nodes[r2Id];
@@ -156,10 +164,16 @@ void mergeRegions(
     r1.minY = std::min( r1.minY, r2.minY );
     r1.maxY = std::max( r1.maxY, r2.maxY );
 
-    for ( int b = 0; b < bandCount; ++b )
     {
-        r1.sumB[b] += r2.sumB[b];
-        r1.sumSqB[b] += r2.sumSqB[b];
+        double *s1Base = sums + static_cast<size_t>( r1Id ) * bandCount;
+        double *ss1Base = sumSqs + static_cast<size_t>( r1Id ) * bandCount;
+        const double *s2Base = sums + static_cast<size_t>( r2Id ) * bandCount;
+        const double *ss2Base = sumSqs + static_cast<size_t>( r2Id ) * bandCount;
+        for ( int b = 0; b < bandCount; ++b )
+        {
+            s1Base[b] += s2Base[b];
+            ss1Base[b] += ss2Base[b];
+        }
     }
 
     // 2. Update DSU
@@ -229,6 +243,8 @@ uint32_t findBestNeighbor(
     double wComp,
     const std::vector<double> &normBandWeights,
     int bandCount,
+    const double *sums,
+    const double *sumSqs,
     double &outBestCost )
 {
     const auto &r1 = nodes[u];
@@ -241,7 +257,7 @@ uint32_t findBestNeighbor(
         if ( v == u || !nodes[v].active )
             continue;
 
-        double cost = calculateFusionCost( r1, nodes[v], nb.second, wShape, wComp, normBandWeights, bandCount );
+        double cost = calculateFusionCost( r1, nodes[v], nb.second, wShape, wComp, normBandWeights, bandCount, sums, sumSqs );
         if ( cost < bestCost )
         {
             bestCost = cost;
@@ -338,12 +354,16 @@ RsSegmentMap RsMultiresSegmenter::segment(
     const double wComp = params.effectiveCompactnessWeight();
     const double scaleThreshold = params.scale * params.scale;
 
-    // 2. Identify valid pixels and allocate RAG nodes
+    // 2. Identify valid pixels and allocate RAG nodes.
+    // Spectral moments live in two flat arrays sized validPixels*bandCount
+    // (SoA, R18-A): the former per-node std::vector pair cost two heap
+    // allocations per pixel and dominated large-scene memory. The fill pass
+    // performs the identical per-band arithmetic in the identical order, so
+    // results are bit-identical to the per-node layout.
     const size_t totalPixels = static_cast<size_t>( width ) * static_cast<size_t>( height );
     std::vector<uint32_t> pixelToNode( totalPixels, std::numeric_limits<uint32_t>::max() );
-    std::vector<SegmentNode> nodes;
-    nodes.reserve( totalPixels );
 
+    size_t validPixels = 0;
     for ( int64_t y = 0; y < height; ++y )
     {
         for ( int64_t x = 0; x < width; ++x )
@@ -354,7 +374,11 @@ RsSegmentMap RsMultiresSegmenter::segment(
             for ( int b = 0; b < bandCount; ++b )
             {
                 float val = bands[b][idx];
-                if ( !std::isfinite( val ) || ( !std::isnan( nodata ) && std::abs( val - nodata ) < 1e-6f ) )
+                // A09: exact float-cast equality via the shared contract —
+                // an epsilon match silently voids legitimate values near the
+                // sentinel (a 5e-7 reflectance next to a 0.0 nodata raster)
+                // while the contract's exact compare keeps them valid.
+                if ( sicnu::rs::isNoDataValue( val, nodata ) )
                 {
                     isPixelNodata = true;
                     break;
@@ -363,34 +387,53 @@ RsSegmentMap RsMultiresSegmenter::segment(
 
             if ( isPixelNodata )
                 continue;
-
-            uint32_t nodeId = static_cast<uint32_t>( nodes.size() );
-            pixelToNode[idx] = nodeId;
-
-            SegmentNode node;
-            node.id = nodeId;
-            node.area = 1;
-            node.perimeter = 4;
-            node.minX = static_cast<uint32_t>( x );
-            node.maxX = static_cast<uint32_t>( x );
-            node.minY = static_cast<uint32_t>( y );
-            node.maxY = static_cast<uint32_t>( y );
-            node.sumB.resize( bandCount );
-            node.sumSqB.resize( bandCount );
-            for ( int b = 0; b < bandCount; ++b )
-            {
-                double val = static_cast<double>( bands[b][idx] );
-                node.sumB[b] = val;
-                node.sumSqB[b] = val * val;
-            }
-            node.active = true;
-            nodes.push_back( std::move( node ) );
+            pixelToNode[idx] = 0; // valid marker; real node ids assigned below
+            ++validPixels;
         }
     }
 
-    if ( nodes.empty() )
-    {
+    if ( validPixels == 0 )
         return RsSegmentMap();
+
+    std::vector<double> sumStore( validPixels * static_cast<size_t>( bandCount ) );
+    std::vector<double> sumSqStore( validPixels * static_cast<size_t>( bandCount ) );
+    std::vector<SegmentNode> nodes;
+    nodes.reserve( validPixels );
+
+    {
+        uint32_t nodeId = 0;
+        for ( int64_t y = 0; y < height; ++y )
+        {
+            for ( int64_t x = 0; x < width; ++x )
+            {
+                size_t idx = static_cast<size_t>( y * width + x );
+                if ( pixelToNode[idx] == std::numeric_limits<uint32_t>::max() )
+                    continue;
+
+                pixelToNode[idx] = nodeId;
+
+                SegmentNode node;
+                node.id = nodeId;
+                node.area = 1;
+                node.perimeter = 4;
+                node.minX = static_cast<uint32_t>( x );
+                node.maxX = static_cast<uint32_t>( x );
+                node.minY = static_cast<uint32_t>( y );
+                node.maxY = static_cast<uint32_t>( y );
+                node.active = true;
+                nodes.push_back( std::move( node ) );
+
+                double *sBase = sumStore.data() + static_cast<size_t>( nodeId ) * bandCount;
+                double *ssBase = sumSqStore.data() + static_cast<size_t>( nodeId ) * bandCount;
+                for ( int b = 0; b < bandCount; ++b )
+                {
+                    double val = static_cast<double>( bands[b][idx] );
+                    sBase[b] = val;
+                    ssBase[b] = val * val;
+                }
+                ++nodeId;
+            }
+        }
     }
 
     // 3. Build initial 4-connected adjacency edges
@@ -476,7 +519,7 @@ RsSegmentMap RsMultiresSegmenter::segment(
                     break;
 
                 double minCost = 0.0;
-                uint32_t bestNb = findBestNeighbor( curr, nodes, wShape, wComp, normBandWeights, bandCount, minCost );
+                uint32_t bestNb = findBestNeighbor( curr, nodes, wShape, wComp, normBandWeights, bandCount, sumStore.data(), sumSqStore.data(), minCost );
 
                 if ( bestNb == std::numeric_limits<uint32_t>::max() || minCost > scaleThreshold )
                 {
@@ -489,7 +532,7 @@ RsSegmentMap RsMultiresSegmenter::segment(
                     // Local Mutual Best Fit found!
                     uint32_t r1 = chain[chain.size() - 2];
                     uint32_t r2 = curr;
-                    mergeRegions( r1, r2, nodes, dsu, bandCount );
+                    mergeRegions( r1, r2, nodes, dsu, bandCount, sumStore.data(), sumSqStore.data() );
                     mergesInPass++;
                     break;
                 }
@@ -539,10 +582,10 @@ RsSegmentMap RsMultiresSegmenter::segment(
                     continue;
 
                 double minCost = 0.0;
-                uint32_t bestNb = findBestNeighbor( static_cast<uint32_t>( i ), nodes, wShape, wComp, normBandWeights, bandCount, minCost );
+                uint32_t bestNb = findBestNeighbor( static_cast<uint32_t>( i ), nodes, wShape, wComp, normBandWeights, bandCount, sumStore.data(), sumSqStore.data(), minCost );
                 if ( bestNb != std::numeric_limits<uint32_t>::max() )
                 {
-                    mergeRegions( bestNb, static_cast<uint32_t>( i ), nodes, dsu, bandCount );
+                    mergeRegions( bestNb, static_cast<uint32_t>( i ), nodes, dsu, bandCount, sumStore.data(), sumSqStore.data() );
                     mergesInCleanup++;
                 }
             }
