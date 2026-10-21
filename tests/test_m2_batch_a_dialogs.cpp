@@ -293,10 +293,24 @@ TEST_CASE( "Batch A: SpectralIndexDialog BandRoleCombos and index switching", "[
 
   SECTION( "DataManager toggle" )
   {
+    // The input mode must actually switch: with a Data Manager the asset
+    // picker is the visible input, without it the layer combo is (#1621 —
+    // the old CHECK(true) could not see a broken toggle).
+    auto *assetCombo = dialog.findChild<QComboBox *>(
+      QStringLiteral( "spectralIndexAssetCombo" ) );
+    auto *layerCombo = dialog.findChild<QComboBox *>(
+      QStringLiteral( "spectralIndexInputLayerCombo" ) );
+    REQUIRE( assetCombo != nullptr );
+    REQUIRE( layerCombo != nullptr );
+
     sicnu::data::DataManager dm;
     dialog.setDataManager( &dm );
+    CHECK( assetCombo->isVisibleTo( &dialog ) );
+    CHECK_FALSE( layerCombo->isVisibleTo( &dialog ) );
+
     dialog.setDataManager( nullptr );
-    CHECK( true );
+    CHECK_FALSE( assetCombo->isVisibleTo( &dialog ) );
+    CHECK( layerCombo->isVisibleTo( &dialog ) );
   }
 }
 
@@ -312,10 +326,22 @@ TEST_CASE( "Batch A: SpectralLibraryDialog matching and summary updates", "[batc
 
   SECTION( "Set spectral curve profile" )
   {
+    // #1621: the profile must land visibly — summary names the band count
+    // and the match action unlocks. The old CHECK(true) saw neither.
+    auto *matchBtn = dialog.findChild<QPushButton *>(
+      QStringLiteral( "spectralMatchBtn" ) );
+    REQUIRE( matchBtn != nullptr );
+    auto *summary =
+      dialog.findChild<QLabel *>( QStringLiteral( "spectralSummaryLabel" ) );
+    REQUIRE( summary != nullptr );
+    CHECK( summary->text().contains( QStringLiteral( "no spectrum" ) ) );
+    CHECK_FALSE( matchBtn->isEnabledTo( &dialog ) );
+
     QVector<double> wavelengths = { 450.0, 550.0, 650.0, 850.0 };
     QVector<double> values = { 0.05, 0.08, 0.04, 0.45 };
-    dialog.setSpectrum( wavelengths, values );
-    CHECK( true );
+    dialog.setSpectrum( values, wavelengths );
+    CHECK( summary->text().contains( QStringLiteral( "4" ) ) );
+    CHECK( matchBtn->isEnabledTo( &dialog ) );
   }
 }
 

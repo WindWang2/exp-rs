@@ -225,7 +225,9 @@ void TerminologyProvider::appendDescriptors( const QVector<TermEntry> &terms,
         d.id = assignedIds[ i ];
         d.kind = HelpKind::Concept;
         d.title = QStringLiteral( "%1（%2）" ).arg( term.zh, term.en );
-        d.summary = term.definitionZh;
+        // #1639: summary shares the ≤kHelpSummaryMaxChars bound with every
+        // other summary producer, and the cut must not strand a surrogate.
+        d.summary = truncateSummary( term.definitionZh );
         d.category = QStringLiteral( "术语表" );
         d.keywords << term.en << term.zh << term.aliases;
         for ( const QString &rel : term.related )
