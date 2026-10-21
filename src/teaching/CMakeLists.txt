@@ -19,6 +19,10 @@ add_library(sicnu_teaching STATIC
   lab_feedback_projection.h
   lab_session_state.cpp
   lab_session_state.h
+  verdict_stamp.cpp
+  verdict_stamp.h
+  lab_completion_ledger.cpp
+  lab_completion_ledger.h
 )
 
 add_library(Sicnu::teaching ALIAS sicnu_teaching)
@@ -31,6 +35,9 @@ target_include_directories(sicnu_teaching
 target_link_libraries(sicnu_teaching
   PUBLIC
     Sicnu::autonomy
+    # R18-E: verdict_stamp digests artifact bytes via the Qt-free lab sha256
+    # leaf (identity/drift evidence, same discipline as lab/session_store).
+    sicnu_lab_runtime
     # R6/R8: session-file writes route through the platform durable-sidecar
     # authority (lab_session_state save/load), like the batch side already
     # does. std-only header — keeps this target Qt-free (#1466).

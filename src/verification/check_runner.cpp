@@ -13,6 +13,7 @@
 #include "verification/failure_codes.h"
 
 #include <algorithm>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -206,6 +207,39 @@ VerificationReport runSpec( const VerificationSpec &spec, const VerificationInpu
             buildReport( spec, results, nodeChecks, spec.indeterminatePolicy, usage );
         addUniqueSorted( report.outcome.failureCodes, failure_codes::kEvidenceUnavailable );
         return report;
+    }
+
+    // Duplicate check ids are an ambiguous spec (R18-E V2): the roll-up
+    // used to take the FIRST result for an id, so [x(Pass), x(Fail)] rolled
+    // up as Pass while counters.by_status accused the fail. Pack composition
+    // already refuses to emit duplicates (pack.cpp); the runner must hold
+    // the same line for hand-assembled specs — every result is published
+    // (nothing vanishes), but none is trusted as a verdict.
+    {
+        std::set<std::string> seenIds;
+        bool duplicates = false;
+        for ( const VerificationCheck &check : spec.checks )
+        {
+            if ( !seenIds.insert( check.id ).second )
+                duplicates = true;
+        }
+        if ( duplicates )
+        {
+            for ( const VerificationCheck &check : spec.checks )
+            {
+                results.push_back( indeterminateResult(
+                    check, failure_codes::kSpecInvalid,
+                    "duplicate check id '" + check.id +
+                        "': the spec is ambiguous, so no result for it can be trusted",
+                    inputs.sourceId ) );
+                ++usage.checksUnevaluated;
+            }
+            usage.reasons.emplace_back( "duplicate_check_id" );
+            VerificationReport report =
+                buildReport( spec, results, nodeChecks, spec.indeterminatePolicy, usage );
+            addUniqueSorted( report.outcome.failureCodes, failure_codes::kSpecInvalid );
+            return report;
+        }
     }
 
     for ( const VerificationCheck &check : spec.checks )

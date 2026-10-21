@@ -55,24 +55,25 @@ std::string diagnoseTransition( const ObservableSet &clean, const ObservableSet 
     // all_negative_index: the lab brain fires when the index maximum is
     // negative; a role swap flips every per-pixel value, so the faulted
     // maximum is the exact negation of the clean minimum.
+    // Baseline-present gates (R18-E V10, round-1 review): these rules
+    // compare the faulted observable against the CLEAN one — with the
+    // clean observable absent they used to fire on the faulted value alone,
+    // fabricating the matching signature from missing evidence (the same
+    // vacuous class the expectation engine closed for delta relations).
     double faultedMax = 0.0;
     double cleanMax = 0.0;
-    if ( numberIs( faulted, "index_max", faultedMax ) && faultedMax < 0.0 )
+    if ( numberIs( faulted, "index_max", faultedMax ) && faultedMax < 0.0
+         && numberIs( clean, "index_max", cleanMax ) && cleanMax >= 0.0 )
     {
-        if ( !numberIs( clean, "index_max", cleanMax ) || cleanMax >= 0.0 )
-        {
-            return "all_negative_index";
-        }
+        return "all_negative_index";
     }
 
     double faultedFinite = 0.0;
     double cleanFinite = 0.0;
-    if ( numberIs( faulted, "finite_fraction", faultedFinite ) && faultedFinite <= 0.0 )
+    if ( numberIs( faulted, "finite_fraction", faultedFinite ) && faultedFinite <= 0.0
+         && numberIs( clean, "finite_fraction", cleanFinite ) && cleanFinite > 0.0 )
     {
-        if ( !numberIs( clean, "finite_fraction", cleanFinite ) || cleanFinite > 0.0 )
-        {
-            return "all_nodata";
-        }
+        return "all_nodata";
     }
 
     double faultedKappa = 0.0;

@@ -33,14 +33,22 @@ void addUniqueSorted( std::vector<std::string> &target, const std::string &value
 CheckStatus statusOf( const std::vector<CheckResult> &results, const std::string &checkId,
                       CheckStatus fallback )
 {
+    // Worst-wins across EVERY result carrying the id (R18-E V2): a
+    // first-match scan let a duplicate [x(Pass), x(Fail)] roll up as Pass
+    // while the counters accused the fail. The runner now refuses duplicate
+    // ids outright; this is the defensive layer for hand-assembled result
+    // sets that bypass it.
+    bool found = false;
+    CheckStatus combined = CheckStatus::Pass;
     for ( const CheckResult &result : results )
     {
         if ( result.checkId == checkId )
         {
-            return result.status;
+            combined = found ? combineStatus( combined, result.status ) : result.status;
+            found = true;
         }
     }
-    return fallback;
+    return found ? combined : fallback;
 }
 
 std::vector<ReplanClass> replanClassesFor( const std::vector<std::string> &codes )

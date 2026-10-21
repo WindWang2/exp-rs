@@ -631,3 +631,4 @@ r6_dev.cmd
 # does not cross '/', so subdirectory negation needs its own pair).
 !.planning/r18-b-model/references/
 !.planning/r18-b-model/references/*.md
+*.agent-build.lock

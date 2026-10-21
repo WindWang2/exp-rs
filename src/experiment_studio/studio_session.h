@@ -13,6 +13,9 @@ namespace sicnu::experiment_studio
 struct StudioSessionState
 {
     QString schema = QString::fromUtf8( kStudioSessionSchema );
+    /// True only when fromJson accepted the document's schema marker; a
+    /// refused document imports nothing (R18-E T202).
+    bool ok = false;
     QString studyId;
     QString experimentId;
     QString algorithmId;

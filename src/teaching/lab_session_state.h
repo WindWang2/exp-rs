@@ -28,6 +28,10 @@ struct LabSessionState {
   std::string artifactPath;      // student artifact under validation (nav ref)
   std::string autonomyPolicyRef; // path or id pointer
   Json::Value lastValidationSummary; // projected feedback summary (no goldens)
+  /// Content binding of lastValidationSummary to the artifact bytes it
+  /// graded (see verdict_stamp.h). Written by saveToFile when a verdict is
+  /// on record; verified by loadFromFile. Empty for legacy sessions.
+  std::string verdictArtifactStamp;
   std::string capsuleExportRef;
   ExperienceMode mode = ExperienceMode::Beginner;
   LabUiStatus labStatus = LabUiStatus::NotStarted;
