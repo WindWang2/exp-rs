@@ -12,7 +12,10 @@ namespace Mosaic
 
 static bool isValid(float value, float nodata)
 {
-    if (std::isnan(value))
+    // Non-finite samples are voids, not data (R18-A): ±Inf used to be painted
+    // into the canvas like a valid measurement — every other kernel in the
+    // operator family treats !isfinite as NoData.
+    if (!std::isfinite(value))
         return false;
     if (std::isnan(nodata))
         return true;

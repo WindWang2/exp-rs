@@ -48,6 +48,13 @@ void ChunkedProcessor::buildChunks(int chunkHeight)
 bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedback,
                                int maxThreads)
 {
+    // Zero chunks means a degenerate raster (width/height <= 0 — GDAL rasters
+    // are always >= 1x1), not "nothing to do": refuse it so callers can tell
+    // bad input from success (R18-A). A callback on an empty chunk set never
+    // runs either way.
+    if (m_width <= 0 || m_height <= 0)
+        return false;
+
     if (m_chunks.empty())
         return true;
 
