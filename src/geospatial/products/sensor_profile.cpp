@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -56,6 +57,11 @@ bool isDirectoryLocal( const std::string &path )
   return fs::is_directory( sicnu::portable::pathFromUtf8( path ), ec );
 }
 
+/// Sensor profiles are committed repo JSON (KB-scale); past this bound the
+/// file is misidentified or hostile and must be refused typed before the
+/// whole thing is held in memory (#1637-3 — same bound as the CN reader).
+constexpr std::uintmax_t kMaxProfileBytes = 4ull * 1024 * 1024;
+
 bool readFileText( const std::string &path, std::string &out )
 {
   // Open via the UTF-8 path boundary so Windows uses the wide API (#1178) —
@@ -63,8 +69,25 @@ bool readFileText( const std::string &path, std::string &out )
   std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in.is_open() )
     return false;
+  // Genuinely bounded read (chunked, refuse when the total exceeds the
+  // bound): a stat-then-slurp would leave FIFO/growing-file bypasses.
   std::ostringstream buffer;
-  buffer << in.rdbuf();
+  char chunk[65536];
+  std::uintmax_t total = 0;
+  while ( in.read( chunk, sizeof chunk ) || in.gcount() > 0 )
+  {
+    const std::streamsize got = in.gcount();
+    if ( got > 0 )
+    {
+      total += static_cast<std::uintmax_t>( got );
+      if ( total > kMaxProfileBytes )
+        throw GeoError( ErrorCode::InvalidMetadata,
+                        "sensor profile exceeds the 4 MiB bound, refused while reading: " + path );
+      buffer.write( chunk, got );
+    }
+    if ( in.eof() )
+      break;
+  }
   out = buffer.str();
   return true;
 }

@@ -4,6 +4,7 @@
   generic GeoTIFF fixtures, generated at runtime.
  ***************************************************************************/
 
+#include "geospatial/products/cn_product_metadata.h"
 #include "geospatial/products/product_adapters.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -151,4 +152,68 @@ TEST_CASE( "generic rasters take only declared metadata; unknown adapters fail s
   fs::create_directories( safe );
   writeText( ( safe / "manifest.safe" ).string(), "<unclosed>" );
   CHECK_THROWS_AS( sicnu::geo::readProductMetadataAuto( safe.string() ), sicnu::geo::GeoError );
+}
+
+TEST_CASE( "an oversized Sentinel-1 manifest is refused typed, never slurped (#1637-3)",
+           "[io][products][bounds]" )
+{
+  // The generic product adapters stream manifest.safe with the same
+  // unbounded `buffer << in.rdbuf()` the CN reader had — the bound must
+  // hold on this path too (R2-P3 twin closure).
+  const std::string dir = scratch( "s1_oversized" );
+  const fs::path safe = fs::path( dir ) / "S1A_IW_GRDH_1SDV_HUGE.SAFE";
+  fs::create_directories( safe );
+  const std::string pad( 5 * 1024 * 1024, 'x' );
+  writeText( ( safe / "manifest.safe" ).string(),
+             "<?xml version=\"1.0\"?>\n<safe: oasis=" + pad + "/>" );
+  try
+  {
+    ( void )sicnu::geo::readProductMetadataAuto( safe.string() );
+    FAIL( "a >4 MiB manifest.safe must be refused, not parsed" );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    CHECK( error.code() == sicnu::geo::ErrorCode::InvalidMetadata );
+  }
+}
+
+TEST_CASE( "an oversized CN metadata sidecar is refused typed, never slurped (#1637-3)",
+           "[io][products][cn][bounds]" )
+{
+  // The CN metadata reader used to stream the WHOLE sidecar into memory via
+  // `buffer << in.rdbuf()` with no byte bound — a misidentified or hostile
+  // multi-MiB "MTD_*.xml" became an unbounded allocation before the parser
+  // could refuse it. Real CRESDA/PMI sidecars are a few KB; anything past
+  // the bound must fail as InvalidMetadata BEFORE the read.
+  const std::string dir = scratch( "cn_oversized" );
+  const std::string base = ( fs::path( dir ) / "GF3_QPS_E113.9_N22.2_20221121_L1A00000432156-HH.tiff" ).string();
+  // Presence placeholder for the image half; the metadata path never opens it.
+  writeText( base, "x" );
+  // Valid legacy <MetaInfo> sidecar padded past 4 MiB with a well-formed
+  // XML comment, so the refusal is about SIZE, not parseability.
+  const std::string pad( 5 * 1024 * 1024, 'x' );
+  writeText( ( fs::path( dir ) / "GF3_QPS_E113.9_N22.2_20221121_L1A00000432156-HH.xml" ).string(),
+             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<MetaInfo>\n"
+             "  <ProductID>31890</ProductID>\n  <SatelliteID>GF3</SatelliteID>\n"
+             "  <SensorID>SAR</SensorID>\n  <ModeID>QPS</ModeID>\n"
+             "  <ProductLevel>L1A</ProductLevel>\n"
+             "  <ReceiveDate>2022-11-21</ReceiveDate>\n"
+             "  <ReceiveTime>10:23:45</ReceiveTime>\n"
+             "  <OrbitID>08871</OrbitID>\n"
+             "<!--" + pad + "-->\n</MetaInfo>\n" );
+
+  const sicnu::geo::CnProductIdentity identity =
+    sicnu::geo::cnIdentifyProduct( base );
+  REQUIRE( identity.recognized );
+  REQUIRE( identity.supported );
+  try
+  {
+    ( void )sicnu::geo::readCnProductMetadata( base, identity );
+    FAIL( "a >4 MiB CN metadata sidecar must be refused, not parsed" );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    CHECK( error.code() == sicnu::geo::ErrorCode::InvalidMetadata );
+    CHECK( std::string( error.what() ).find( "metadata" ) != std::string::npos );
+  }
 }

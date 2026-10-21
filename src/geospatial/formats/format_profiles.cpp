@@ -589,16 +589,29 @@ const FormatProfile *FormatRegistry::profileForPath( const std::string &path ) c
   percentDecode( path, decoded );
   const std::size_t queryOrFrag = decoded.find_first_of( "?#" );
   const std::string cleanPath = queryOrFrag == std::string::npos ? decoded : decoded.substr( 0, queryOrFrag );
-  const std::size_t dot = cleanPath.rfind( '.' );
-  if ( dot == std::string::npos )
-    return nullptr;
-  const std::string extension = lowerAscii( cleanPath.substr( dot + 1 ) );
+  // Longest DECLARED extension wins, dot-anchored at its start; equal-length
+  // ties keep the first-registered profile (GeoJSON vs STAC on "json",
+  // GeoTIFF vs COG on "tif"). The previous last-dot single-segment match
+  // made multi-segment declarations unreachable (#1637-2): the extension
+  // after the LAST dot of "store.zarr.json" is plain "json", so every Zarr
+  // v3 store document resolved as GeoJSON.
+  const std::string lowered = lowerAscii( cleanPath );
+  const FormatProfile *best = nullptr;
+  std::size_t bestLen = 0;
   for ( const FormatProfile &profile : mProfiles )
   {
-    if ( std::find( profile.extensions.begin(), profile.extensions.end(), extension ) != profile.extensions.end() )
-      return &profile;
+    for ( const std::string &extension : profile.extensions )
+    {
+      if ( extension.size() <= bestLen || extension.size() + 1 > lowered.size() )
+        continue;
+      const std::size_t at = lowered.size() - extension.size();
+      if ( lowered[at - 1] != '.' || lowered.compare( at, extension.size(), extension ) != 0 )
+        continue;
+      best = &profile;
+      bestLen = extension.size();
+    }
   }
-  return nullptr;
+  return best;
 }
 
 bool FormatRegistry::driverAvailable( const FormatProfile &profile ) const

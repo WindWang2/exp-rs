@@ -6,6 +6,7 @@
 
 namespace sicnu::operators {
 
+
 std::string RSOperator::displayName() const {
     return name();
 }
@@ -51,6 +52,15 @@ Json::Value RSOperator::estimateExecution(const Json::Value& /*params*/) const {
     return executionEstimate();
 }
 
+// #1578: setRange declarations used to be display-only metadata — 72
+// declarations across the operator families were never checked at runtime,
+// so an out-of-range knob reached the algorithm (or an otbcli subprocess)
+// as an unbounded value instead of a typed InvalidParameter refusal. The
+// check itself lives in the sicnu_operators_core leaf
+// (rs_param_validation) and RSOperator::validateParams (rs_operator.h,
+// inline) delegates to it, so run()-calling funnels that link only the
+// leaf share the exact same gate.
+
 Json::Value RSOperator::execute(const Json::Value& params, RSOperatorContext& context) {
     auto& logger = RSOperationLogger::instance();
     const size_t handle = logger.beginRun(name(), params);
@@ -58,6 +68,7 @@ Json::Value RSOperator::execute(const Json::Value& params, RSOperatorContext& co
     const auto start = std::chrono::steady_clock::now();
 
     try {
+        validateParams(params);
         Json::Value result = run(params, context);
         const auto end = std::chrono::steady_clock::now();
         const double durationMs =

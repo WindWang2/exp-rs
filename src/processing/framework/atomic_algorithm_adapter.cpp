@@ -359,6 +359,13 @@ Json::Value RsOperatorAdapter::execute( const Json::Value &params, ProgressCallb
                                       "Cancelled before run: " + mOp->name() );
   }
 
+  // The adapter is the production funnel for operator execution (main,
+  // job adapter, dispatcher) and calls run() directly — apply the schema
+  // range gate here too (#1578), same as RSOperator::execute() does.
+  // validateParams is an inline header delegation to the core leaf, so
+  // it stays resolvable from this lib (which links the leaf, not the
+  // operators .so).
+  mOp->validateParams( params );
   return mOp->run( params, ctx );
 }
 

@@ -247,7 +247,10 @@ TEST_CASE( "Tier 1: R1-F1 - Dynamic Governor Static & Dynamic Admission Ladder",
         advCfg.ramBytes = 0; // Unbounded advisory
         ExecutionGovernor advGov( advCfg );
         const TileMemoryPlan plan = advGov.advise( req );
-        REQUIRE( plan.action == TileMemoryPlan::Action::Admit );
+        // budgetBytes == 0 plans as Action::Advisory (memory_planner.h:
+        // "estimate reported, never gates") — not Admit, which is the
+        // gated-budget verdict. The old Admit pin predates that action.
+        REQUIRE( plan.action == TileMemoryPlan::Action::Advisory );
     }
 }
 
@@ -1464,9 +1467,15 @@ TEST_CASE( "Tier 4: Scenario 5 - Memory-Governed TB-Scale Streaming Workflow",
     const auto dir = createIsolatedTempDir( "tb_scale_governed_workflow" );
     RSOperatorContext ctx( dir.generic_string() );
 
-    // ExecutionGovernor with active budgets
+    // ExecutionGovernor with active budgets. 16 MiB keeps the full-capacity
+    // admission under the F-A-13 in-hand accounting: peak = queue
+    // ((stages+1)·cap·inputs = 3×2×1 = 6) + in-hand(2·stages+2 = 6) +
+    // drain(1) = 13 tiles × 1 MiB. The old 10 MiB budget assumed the
+    // pre-F-A-13 7-tile peak and degraded to ReduceConcurrency (minimal
+    // peak 10 MiB is not < 10 MiB), contradicting this scenario's
+    // Admitted-workflow intent.
     ExecutionGovernor::Config govCfg;
-    govCfg.ramBytes = 10 * 1024 * 1024; // 10 MiB RAM cap
+    govCfg.ramBytes = 16 * 1024 * 1024; // 16 MiB RAM cap
     govCfg.scratchBytes = 100 * 1024 * 1024; // 100 MiB Scratch cap
     govCfg.writeInFlightBytes = 2 * 1024 * 1024; // 2 MiB Write cap
     govCfg.scratchRoot = ( dir / "scratch" ).generic_string();

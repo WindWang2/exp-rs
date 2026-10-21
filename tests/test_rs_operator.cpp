@@ -394,3 +394,117 @@ TEST_CASE( "Every registered operator declares a determinism grade", "[operators
          == RSOperatorDeterminism::BitExact );
 }
 
+// ---------------------------------------------------------------------------
+// Schema-declared numeric ranges (#1578)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// setRange declarations used to be display-only metadata: 72 declarations
+/// across the operator families were never checked at runtime, so an
+/// out-of-range knob reached the algorithm (or an otbcli subprocess) as an
+/// unbounded value instead of a typed InvalidParameter refusal.
+class RangedStubOperator : public RSOperator {
+  public:
+    std::string name() const override { return "test:ranged_stub"; }
+    std::string displayName() const override { return "Ranged Stub"; }
+    std::string group() const override { return "math"; }
+    std::string description() const override { return "Declares ranged params."; }
+
+    Json::Value schema() const override {
+        Json::Value params( Json::objectValue );
+        Json::Value radius = makeIntegerParam( "radius", "Kernel radius", 5 );
+        setRange( radius, 1, 1000 );
+        params["radius"] = radius;
+        Json::Value threshold = makeNumberParam( "threshold", "Confidence threshold", 0.5 );
+        setRange( threshold, 0.0, 1.0 );
+        params["threshold"] = threshold;
+        params["gain"] = makeNumberParam( "gain", "No range declared", 1.0 );
+        Json::Value badBound = makeNumberParam( "badBound", "String bounds", 1.0 );
+        badBound["minimum"] = "not-a-number";
+        badBound["maximum"] = "also-not-a-number";
+        params["badBound"] = badBound;
+
+        Json::Value outputs( Json::objectValue );
+        outputs["result"] = makeNumberParam( "result", "Echo" );
+        return makeRootSchema( displayName(), description(), params, outputs );
+    }
+
+    Json::Value run( const Json::Value &params, RSOperatorContext & ) override {
+        Json::Value result( Json::objectValue );
+        result["echo"] = params.get( "radius", 5 ).asInt();
+        return result;
+    }
+};
+
+} // namespace
+
+TEST_CASE( "execute enforces schema-declared numeric ranges with typed refusals (#1578)",
+           "[operators][framework][ranges]" )
+{
+  ensureQtApp();
+  RangedStubOperator op;
+  RSOperatorContext context;
+
+  // In-range values (boundaries inclusive) pass through to run().
+  {
+    Json::Value params( Json::objectValue );
+    params["radius"] = 1;
+    params["threshold"] = 1.0;
+    Json::Value result = op.execute( params, context );
+    CHECK( result["echo"].asInt() == 1 );
+  }
+
+  // Below the declared minimum: typed refusal before run() executes.
+  {
+    Json::Value params( Json::objectValue );
+    params["radius"] = 0;
+    try {
+      op.execute( params, context );
+      FAIL( "radius=0 is outside the declared [1,1000] range" );
+    } catch ( const RSOperatorError &e ) {
+      CHECK( e.code() == ErrorCode::InvalidParameter );
+      CHECK( e.message().find( "radius" ) != std::string::npos );
+    }
+  }
+
+  // Above the declared maximum.
+  {
+    Json::Value params( Json::objectValue );
+    params["threshold"] = 1.5;
+    try {
+      op.execute( params, context );
+      FAIL( "threshold=1.5 is outside the declared [0,1] range" );
+    } catch ( const RSOperatorError &e ) {
+      CHECK( e.code() == ErrorCode::InvalidParameter );
+    }
+  }
+
+  // A param without a declared range keeps the legacy behavior: any
+  // numeric value reaches run() (enforcement is opt-in per declaration).
+  {
+    Json::Value params( Json::objectValue );
+    params["gain"] = -42.0;
+    Json::Value result = op.execute( params, context );
+    CHECK( result["echo"].asInt() == 5 );
+  }
+
+  // Absent params keep defaulting inside run() — the range only guards
+  // values actually supplied.
+  {
+    Json::Value params( Json::objectValue );
+    Json::Value result = op.execute( params, context );
+    CHECK( result["echo"].asInt() == 5 );
+  }
+
+  // A hand-written non-numeric bound is a schema defect, not a value
+  // refusal: the gate skips it instead of letting Json::LogicError escape
+  // from execute() (R1-P3 hardening, pinned here).
+  {
+    Json::Value params( Json::objectValue );
+    params["badBound"] = 5;
+    Json::Value result = op.execute( params, context );
+    CHECK( result["echo"].asInt() == 5 );
+  }
+}
+

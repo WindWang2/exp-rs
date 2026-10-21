@@ -4,10 +4,12 @@
 # sicnu_operators and sicnu_processing used to compile these TUs (two SHARED
 # libs exporting the same classes = ODR/RTTI hazard, the #573 class). A leaf
 # STATIC lib linked by both keeps exactly one copy. The TUs and their headers
-# are dependency-free (std-only), so no Qt/GDAL linkage is needed here.
+# are dependency-free (std + jsoncpp only — rs_param_validation reads schema
+# JSON), so no Qt/GDAL linkage is needed here.
 add_library(sicnu_operators_core STATIC
     framework/rs_operator_context.cpp
     framework/rs_operator_error.cpp
+    framework/rs_param_validation.cpp
 )
 # BUILD_INTERFACE keeps in-tree consumption unchanged; INSTALL_INTERFACE makes
 # the leaf exportable as part of the ExpRS SDK package (src/sdk/CMakeLists.txt).

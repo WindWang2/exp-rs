@@ -1096,7 +1096,12 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     if ( executor )
       result = executor( request, ctx );
     else
+    {
+      // Direct run() funnel: apply the schema range gate (#1578) — the
+      // typed RSOperatorError propagates through finishError below.
+      op->validateParams( request.params );
       result = op->run( request.params, ctx );
+    }
     finishSuccess( std::move( result ) );
   }
   catch ( const sicnu::operators::RSOperatorError &e )

@@ -83,7 +83,12 @@ class FormatRegistry
     /// Profile lookup by canonical id; nullptr when unknown.
     const FormatProfile *find( const std::string &id ) const;
 
-    /// Profile guess by file extension (first match); nullptr when unknown.
+    /// Profile guess by file extension: the longest dot-anchored DECLARED
+    /// extension that the (percent-decoded, query-stripped, case-folded)
+    /// path ends with wins; equal-length ties keep the first-registered
+    /// profile (GeoJSON over STAC on "json", GeoTIFF over COG on "tif").
+    /// Multi-segment declarations participate — "*.zarr.json" is Zarr
+    /// (#1637-2). nullptr when nothing matches.
     const FormatProfile *profileForPath( const std::string &path ) const;
 
     /// True when at least one backing driver of the profile is loaded.

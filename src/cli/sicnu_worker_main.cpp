@@ -441,6 +441,12 @@ int main( int argc, char **argv )
                     emitFrame( "progress", jobId, extra );
                 } );
                 context.setLogCallback( []( const std::string &, const std::string & ) {} );
+                // Isolated-worker route: run() is invoked here directly,
+                // bypassing the JobEngine gate — apply the schema range
+                // gate (#1578) before the payload reaches the operator
+                // (an unbounded value reaching an otbcli subprocess is
+                // exactly the threat this worker isolates).
+                operatorPtr->validateParams( params );
                 const Json::Value payload = operatorPtr->run( params, context );
                 // Result + optional output identity manifest in ONE frame
                 // (7.0): a legacy host reads "payload" and ignores "outputs".

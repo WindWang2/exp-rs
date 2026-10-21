@@ -112,6 +112,7 @@ set( EXPRS_OPERATOR_CONTRACT_HEADERS
   ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator.h
   ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_context.h
   ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_error.h
+  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_param_validation.h
   ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_schema.h
   ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_progress_callback.h
   ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_json_params.h

@@ -631,6 +631,12 @@ r6_dev.cmd
 # does not cross '/', so subdirectory negation needs its own pair).
 !.planning/r18-b-model/references/
 !.planning/r18-b-model/references/*.md
+
+# R19-01 track (data fabric / model runtime / persistence) planning artifacts
+# (markdown only; logs and build scripts stay local).
+!.planning/r19-01/
+.planning/r19-01/*
+!.planning/r19-01/*.md
 # R19-03 track (Qt/QGIS workbench + cartography UX) planning artifacts (markdown only).
 !.planning/r19-03/
 .planning/r19-03/*
