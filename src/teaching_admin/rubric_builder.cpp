@@ -106,9 +106,29 @@ ValidationResult validateLabRules( const QJsonObject &rules )
             r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
                         QStringLiteral( "weight must be a number" ) );
         const double weight = weightValue.toDouble( 0.0 );
-        if ( !std::isfinite( weight ) || weight < 0.0 )
+        // R18-E D5: align with the grading authority
+        // (OutputVerifier::loadLabRules): each weight in (0,100] — a zero
+        // weight passes an aggregate check here and fails the WHOLE class
+        // at batch time with exit 2 (every row error).
+        if ( !std::isfinite( weight ) || weight <= 0.0 || weight > 100.0 )
             r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
-                        QStringLiteral( "weight must be finite and non-negative" ) );
+                        QStringLiteral( "weight must lie in (0,100] — the grader refuses anything else at batch time" ) );
+        // severity, when PRESENT, is the grader's closed vocabulary — the
+        // authority (output_verifier) refuses an empty or unknown spelling
+        // at load time, so a present-but-invalid member must fail preflight
+        // too, not just a non-empty one (round-1 review P1-3: "" used to
+        // sail through here and fail the whole class at batch time).
+        if ( a.contains( QStringLiteral( "severity" ) ) )
+        {
+            const QJsonValue severityValue = a.value( QStringLiteral( "severity" ) );
+            const bool legal = severityValue.isString()
+                               && ( severityValue.toString() == QLatin1String( "normal" )
+                                    || severityValue.toString() == QLatin1String( "blocking" ) );
+            if ( !legal )
+                r.addError( QStringLiteral( "malformed_grading_rule" ),
+                            path + QStringLiteral( ".severity" ),
+                            QStringLiteral( "severity must be the string normal|blocking when present" ) );
+        }
         weightSum += weight;
         // Evidence / metric vocabulary soft checks
         if ( a.contains( QStringLiteral( "evidence" ) )
@@ -117,15 +137,28 @@ ValidationResult validateLabRules( const QJsonObject &rules )
                           QStringLiteral( "empty evidence ref" ) );
     }
 
-    // Lab rules historically use weights that sum to ~100 or ~1; flag mismatch vs 100 as warning if far.
-    // Non-finite sums (overflow to inf, or a NaN member) must be refused
-    // too: "sum > 0" alone holds for +inf and is silently false-compared
-    // for NaN.
-    if ( assertions.size() > 0 && ( !std::isfinite( weightSum ) || weightSum <= 0.0 ) )
+    // R18-E D5: the grader requires weights to sum to EXACTLY 100
+    // (output_verifier.cpp, ±1e-9) — "positive" here blessed rule files the
+    // batch run refuses wholesale. Preflight and the admin dock both call
+    // this validator, so this is where the mismatch has to die.
+    // Non-finite sums (overflow to inf, or a NaN member) are refused with
+    // the same error.
+    if ( assertions.size() > 0
+         && ( !std::isfinite( weightSum ) || std::fabs( weightSum - 100.0 ) > 1e-9 ) )
         r.addError( QStringLiteral( "weight_mismatch" ), QStringLiteral( "assertions" ),
-                    std::isfinite( weightSum )
-                      ? QStringLiteral( "assertion weights must sum to a positive total" )
-                      : QStringLiteral( "assertion weights must sum to a finite total" ) );
+                    QStringLiteral( "assertion weights must sum to exactly 100 (the grader's contract), got %1" )
+                        .arg( std::isfinite( weightSum ) ? weightSum : 0.0 ) );
+
+    // passing_score, when declared, is the grader's [0,100] band.
+    if ( rules.contains( QStringLiteral( "passing_score" ) ) )
+    {
+        const QJsonValue passing = rules.value( QStringLiteral( "passing_score" ) );
+        if ( !passing.isDouble()
+             || passing.toDouble() < 0.0 || passing.toDouble() > 100.0 )
+            r.addError( QStringLiteral( "malformed_grading_rule" ),
+                        QStringLiteral( "passing_score" ),
+                        QStringLiteral( "passing_score must be a number in [0,100]" ) );
+    }
 
     return r;
 }

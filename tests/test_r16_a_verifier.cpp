@@ -727,12 +727,28 @@ TEST_CASE( "r16a G: builtin packs cannot silently read as Pass under an omniscie
         spec.specId = "r16a.builtin." + pack.id;
         spec.checks = pack.checks;
         const VerificationReport report = runSpecFlat( spec, inputs );
-        REQUIRE( report.status == CheckStatus::Indeterminate );
+        // Since the full-review-sweep rewrite the builtin packs declare
+        // their expectations in the evaluators' REAL vocabulary, so an
+        // omniscient provider may legitimately conclude (e.g.
+        // provenance.inputs_resolved over a supplied "inputs" dimension).
+        // The fail-closed property this case exists for is not "never
+        // Pass" but "no Pass without a real expectation": a concluding
+        // check must carry the expectation it read (evidence.expected
+        // non-empty), and an unconcludable one stays Indeterminate —
+        // never a silent Pass. (R18-E cross-track fix: the sweep changed
+        // the packs but not this pin; the pin had gone red on master.)
         for ( const CheckResult &result : report.results )
         {
             UNSCOPED_INFO( "builtin check: " << result.checkId );
-            REQUIRE( result.status == CheckStatus::Indeterminate );
-            REQUIRE( result.status != CheckStatus::Pass );
+            if ( result.status == CheckStatus::Pass )
+            {
+                REQUIRE( result.evidence.expected.isObject() );
+                REQUIRE_FALSE( result.evidence.expected.empty() );
+            }
+            else
+            {
+                REQUIRE( result.status == CheckStatus::Indeterminate );
+            }
         }
     }
 

@@ -78,6 +78,13 @@ public:
 
     /**
      * @brief Node in Region Adjacency Graph (RAG) tracking geometric and spectral moments.
+     *
+     * The per-band spectral moments (sum / sum-of-squares) live in two flat
+     * side arrays owned by segment() — indexed node.id * bandCount + band —
+     * not in per-node vectors: one heap allocation per pixel per array (two
+     * per pixel total) dominated large-scene memory and allocator churn
+     * (R18-A). No code outside this translation unit ever touched the
+     * per-node vectors.
      */
     struct SegmentNode
     {
@@ -88,8 +95,6 @@ public:
         uint32_t minY = 0;
         uint32_t maxX = 0;
         uint32_t maxY = 0;
-        std::vector<double> sumB;
-        std::vector<double> sumSqB;
         std::vector<std::pair<uint32_t, uint32_t>> neighbors; // <neighbor_id, shared_border_len>
         bool active = true;
     };

@@ -33,6 +33,7 @@
 #include <gdal_priv.h>
 
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -364,4 +365,42 @@ TEST_CASE( "known-answer: apply_mask declares the explicit no_data on undeclared
     for ( int i = 0; i < 100; ++i )
         REQUIRE( nearRel( out[static_cast<size_t>( i )],
                           mask[static_cast<size_t>( i )] ? -7.0 : 3.0 ) );
+}
+
+// --- R18-A review-R1 P1: the production rs:mosaic operator route ----------------
+// The legacy in-memory Mosaic::merge kernel got the !isfinite void contract,
+// but the operator's own tiled loop used to paint ±Inf as data too. Same
+// synthetic shape as the case above: B is the later input with an Inf sample.
+
+TEST_CASE( "rs:mosaic operator skips an Inf sample instead of painting it [r18a][r1]",
+           "[mosaic][operator][r18a]" )
+{
+    using namespace r4fixtures;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    std::vector<float> a( 100 ), b( 100 );
+    for ( int i = 0; i < 100; ++i )
+    {
+        a[static_cast<size_t>( i )] = static_cast<float>( i );
+        b[static_cast<size_t>( i )] = static_cast<float>( 1000 + i );
+    }
+    b[0] = std::numeric_limits<float>::infinity();
+    const QString inA = writeFloatRaster( dir.filePath( "a2.tif" ), 10, 10, { a }, true,
+                                          kSentinel );
+    const QString inB = writeFloatRaster( dir.filePath( "b2.tif" ), 10, 10, { b }, true,
+                                          kSentinel );
+    Json::Value p;
+    Json::Value inputs( Json::arrayValue );
+    inputs.append( inA.toStdString() );
+    inputs.append( inB.toStdString() );
+    p["inputs"] = inputs;
+    p["output"] = dir.filePath( "mosaic_inf.tif" ).toStdString();
+    runOperator( "rs:mosaic", p, dir.path().toStdString() );
+
+    const auto out = readBand( dir.filePath( "mosaic_inf.tif" ), 1 );
+    REQUIRE( out.size() == 100 );
+    CHECK( !std::isinf( out[0] ) );
+    // The later source's Inf sample is a void: A's value shows through.
+    CHECK( out[0] == 0.0f );
+    CHECK( out[5] == 1005.0f );
 }

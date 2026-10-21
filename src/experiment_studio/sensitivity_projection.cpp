@@ -76,8 +76,12 @@ SensitivityViewModel projectSensitivity( const sicnu::study::StudyReport &report
     if ( !report.stoppedReason.isEmpty() )
         vm.issues.append( report.stoppedReason );
 
-    // Uncertainty requires seed replicates > 1; empty envelopes with seedReplicates==1
-    // or missing replicate metadata → flag for teaching UI.
+    // Uncertainty needs replicate EVIDENCE (R18-E H7): a produced band IS
+    // replicate evidence — the flag used to fire whenever the spec echo
+    // lacked budget.seed_replicates, telling students to re-declare what
+    // they already ran. No bands → flag; the wording then depends on
+    // whether the spec declared replicates (a declared-but-absent band is
+    // a stopped/partial study, not a missing declaration).
     bool anyBand = false;
     for ( const auto &e : report.envelopes )
     {
@@ -86,14 +90,30 @@ SensitivityViewModel projectSensitivity( const sicnu::study::StudyReport &report
     }
     const QJsonObject sampling = report.specJson.value( QStringLiteral( "budget" ) ).toObject();
     const int seedReplicates = sampling.value( QStringLiteral( "seed_replicates" ) ).toInt( 1 );
-    if ( seedReplicates <= 1 || !anyBand )
+    if ( !anyBand )
     {
         vm.uncertaintyMissingReplicate = true;
-        vm.issues.append(
-            QStringLiteral( "experiment_studio.uncertainty_missing_replicate:"
-                            " set budget.seed_replicates >= 2 to obtain bands" ) );
+        if ( seedReplicates >= 2 )
+        {
+            vm.issues.append(
+                QStringLiteral( "experiment_studio.uncertainty_missing_replicate:"
+                                " replicates were declared but no bands were produced"
+                                " (stopped or partial study?)" ) );
+        }
+        else
+        {
+            vm.issues.append(
+                QStringLiteral( "experiment_studio.uncertainty_missing_replicate:"
+                                " set budget.seed_replicates >= 2 to obtain bands" ) );
+        }
     }
 
+    // Spatial delta association (R18-E H6): the delta shown beside a
+    // selection must BELONG to that selection — the old first()-take let
+    // the teaching UI read another point's run-vs-baseline delta as the
+    // selected point's. With no selection, the first summary keeps the
+    // legacy preview behaviour.
+    QString selectedOutput;
     if ( !selectedPointId.isEmpty() )
     {
         for ( const auto &row : report.runTable )
@@ -101,12 +121,29 @@ SensitivityViewModel projectSensitivity( const sicnu::study::StudyReport &report
             if ( row.pointId == selectedPointId )
             {
                 vm.selectedPointDetail = row.toJson();
+                selectedOutput = row.outputAssetPath;
                 break;
             }
         }
     }
     if ( !report.spatialSummaries.isEmpty() )
-        vm.spatialDeltaSummary = report.spatialSummaries.first().toJson();
+    {
+        if ( selectedPointId.isEmpty() )
+        {
+            vm.spatialDeltaSummary = report.spatialSummaries.first().toJson();
+        }
+        else
+        {
+            for ( const auto &summary : report.spatialSummaries )
+            {
+                if ( summary.runPath == selectedOutput )
+                {
+                    vm.spatialDeltaSummary = summary.toJson();
+                    break;
+                }
+            }
+        }
+    }
     return vm;
 }
 

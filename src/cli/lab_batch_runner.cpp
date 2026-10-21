@@ -32,24 +32,50 @@ constexpr const char *kErrorVerdict = "error";
 
 /// One submission = one regular top-level file. Hidden files, directories and
 /// the CSV/summary targets never count (grade_all writes next to submissions).
-QStringList discoverSubmissions( const QDir &dir, const QStringList &excludedAbsolute )
+///
+/// R18-E T301: enumeration is UNFILTERED and classified here — the old
+/// QDir::Files listing follows symlinks (a linked file graded content from
+/// outside the submissions root) and silently drops dangling links. Links
+/// (live or dangling) and non-regular specials are typed refusals recorded
+/// in @p refused, never graded, never vanished — the same containment line
+/// the GUI batch (teaching_admin) already holds.
+QStringList discoverSubmissions( const QDir &dir, const QStringList &excludedAbsolute,
+                                 QVector<QPair<QString, QString>> *refused )
 {
-    QStringList names =
-      dir.entryList( QDir::Files | QDir::Readable | QDir::NoDotAndDotDot, QDir::Name );
-    names.erase(
-      std::remove_if(
-        names.begin(), names.end(),
-        [&dir, &excludedAbsolute]( const QString &name )
-        {
-            if ( name.startsWith( QLatin1Char( '.' ) ) )
-                return true;
-            QString absolute = dir.absoluteFilePath( name );
+    const QFileInfoList entries = dir.entryInfoList(
+      QDir::Dirs | QDir::Files | QDir::System | QDir::Hidden | QDir::NoDotAndDotDot,
+      QDir::Name );
+    QStringList names;
+    for ( const QFileInfo &info : entries )
+    {
+        const QString name = info.fileName();
+        if ( name.startsWith( QLatin1Char( '.' ) ) )
+            continue; // hidden entries keep their legacy invisibility
+        QString absolute = info.absoluteFilePath();
 #ifdef Q_OS_WIN
-            absolute = absolute.toLower();
+        absolute = absolute.toLower();
 #endif
-            return excludedAbsolute.contains( absolute );
-        } ),
-      names.end() );
+        if ( excludedAbsolute.contains( absolute ) )
+            continue;
+        if ( info.isSymLink() )
+        {
+            if ( refused )
+                refused->append( { name,
+                                   QStringLiteral( "symlinked submission refused "
+                                                   "(live or dangling): discovery never "
+                                                   "follows links out of the submissions "
+                                                   "root" ) } );
+            continue;
+        }
+        if ( !info.isFile() )
+        {
+            if ( refused && !info.isDir() )
+                refused->append(
+                  { name, QStringLiteral( "non-regular entry refused (device/fifo/socket)" ) } );
+            continue; // directories keep their legacy invisibility
+        }
+        names.append( name );
+    }
     return names;
 }
 
@@ -358,7 +384,7 @@ LabBatchSummary LabBatchRunner::run( const QString &submissionsDir, const QStrin
     lowered.reserve( excluded.size() );
 #endif
 
-    QStringList submissions = discoverSubmissions( dir, excluded );
+    QStringList submissions = discoverSubmissions( dir, excluded, &summary.refusedEntries );
     summary.total = submissions.size();
     if ( options.maxSubmissions >= 0 && submissions.size() > options.maxSubmissions )
     {
@@ -538,6 +564,19 @@ QJsonObject LabBatchRunner::summaryBodyJson( const QString &labId, const QString
     body.insert( QStringLiteral( "missing_roster" ), summary.missingRoster );
     body.insert( QStringLiteral( "capped_by_max_submissions" ), summary.cappedByMaxSubmissions );
     body.insert( QStringLiteral( "cancelled" ), summary.cancelled );
+
+    // R18-E T301: discovery refusals are part of the published outcome —
+    // a class report can be audited for silent omissions.
+    if ( !summary.refusedEntries.isEmpty() )
+    {
+        QJsonArray refused;
+        for ( const auto &entry : summary.refusedEntries )
+        {
+            refused.append( QJsonObject{ { QStringLiteral( "name" ), entry.first },
+                                          { QStringLiteral( "reason" ), entry.second } } );
+        }
+        body.insert( QStringLiteral( "refused_entries" ), refused );
+    }
 
     QJsonArray rows;
     // student_id order (deterministic regardless of filesystem discovery order)
