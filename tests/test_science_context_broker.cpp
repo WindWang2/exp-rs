@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 
@@ -747,6 +748,50 @@ TEST_CASE( "capability authority revision change invalidates cached bundles",
     CHECK( after.cacheHit == false );
     CHECK( after.bundle.sources.capabilities.revision == std::uint64_t{ 2 } );
     CHECK( broker.synthesize( req2 ).cacheHit == true );
+}
+
+TEST_CASE( "capability facts snapshot stays answerable across an authority reinstall",
+           "[science_context][r16b][lifetime]" )
+{
+    // #1505 review P1: capabilityFacts() used to hand out a pointer into the
+    // broker's optional storage. The agent tool (agent_adapter::
+    // scientificCapabilities) keeps that view past the broker lock, so a
+    // setCapabilityFacts reinstall move-assigned the stored lookup underneath
+    // it. Sequentially the stale view then silently answers for the NEW
+    // authority (the three CHECKs below); concurrently the same window is a
+    // torn read / std::bad_function_call on a mid-move callable (covered by
+    // the churn regression in test_science_context_concurrency.cpp). The
+    // broker hands the projection out, so it must own the handed-out
+    // lifetime.
+    ScienceContextBroker broker;
+    CapabilityFactsLookup first;
+    first.authority = "capability_knowledge.first";
+    first.entriesForIntent = []( const std::string & ) -> std::vector<Json::Value> {
+        Json::Value entry( Json::objectValue );
+        entry["id"] = "rs:ndvi";
+        return { entry };
+    };
+    first.revision = [] { return std::uint64_t{ 7 }; };
+    broker.setCapabilityFacts( first );
+    REQUIRE( broker.capabilityFacts() != nullptr );
+
+    const auto snapshot = broker.capabilityFacts();
+    CapabilityFactsLookup second;
+    second.authority = "capability_knowledge.second";
+    second.entriesForIntent = []( const std::string & ) -> std::vector<Json::Value> {
+        return {};
+    };
+    second.revision = [] { return std::uint64_t{ 9 }; };
+    broker.setCapabilityFacts( second );
+
+    REQUIRE( snapshot != nullptr );
+    CHECK( snapshot->authority == "capability_knowledge.first" );
+    REQUIRE_NOTHROW( snapshot->entriesForIntent( "ndvi" ) );
+    CHECK( snapshot->entriesForIntent( "ndvi" ).size() == 1 );
+    CHECK( snapshot->revision() == std::uint64_t{ 7 } );
+    // The broker itself serves the reinstalled authority afterwards.
+    CHECK( broker.capabilityFacts()->authority == "capability_knowledge.second" );
+    CHECK( broker.capabilityFacts()->revision() == std::uint64_t{ 9 } );
 }
 
 TEST_CASE( "GDAL open failure keeps its typed reason in the bundle",

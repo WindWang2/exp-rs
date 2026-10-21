@@ -41,10 +41,8 @@ void checkGroundedTexts( const std::vector<GroundedText> &entries, const std::st
 
 } // namespace
 
-ExplanationValidator::ExplanationValidator( const IOperatorKnowledge &operators,
-                                            const IAuthoredGuidance *guidance )
+ExplanationValidator::ExplanationValidator( const IOperatorKnowledge &operators )
   : operators_( operators )
-  , guidance_( guidance )
 {
 }
 

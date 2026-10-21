@@ -35,12 +35,10 @@ struct ValidationReport
 class ExplanationValidator
 {
 public:
-  explicit ExplanationValidator( const IOperatorKnowledge &operators,
-                                 const IAuthoredGuidance *guidance = nullptr );
+  explicit ExplanationValidator( const IOperatorKnowledge &operators );
 
   // Cross-checks a complete explanation. Operator steps are resolved against
-  // the live operator knowledge. Authored guidance (when provided) is stored
-  // for future/structural use; source references are verified structurally
+  // the live operator knowledge; source references are verified structurally
   // (known kind, non-empty title/locator) only — no content cross-check
   // against guidance is performed yet.
   ValidationReport validate( const StepExplanation &explanation ) const;
@@ -51,7 +49,6 @@ public:
 
 private:
   const IOperatorKnowledge &operators_;
-  const IAuthoredGuidance *guidance_;
 };
 
 } // namespace sicnu::explain

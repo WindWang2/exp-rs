@@ -16414,3 +16414,25 @@ sicnu_add_r18_e_test(test_r18_e_completion_ledger)
 # R18-E E10: the closed feedback loop (artifact → verdict → restart → ledger
 # → re-submission downgrade → re-validation) on the light closure.
 sicnu_add_r18_e_test(test_r18_e_golden_loop)
+# ── R19-02: Pi/MCP harness, workflow and plugin contract closure ──
+# Append-only registration block for this track's new suites (docs:
+# .planning/r19-02). One line per work package, added in RED→GREEN order.
+add_executable(test_r19_02_workflow_cancel_order test_r19_02_workflow_cancel_order.cpp)
+target_link_libraries(test_r19_02_workflow_cancel_order PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_workflow
+    sicnu_workflow_runtime
+    sicnu_operators
+    sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    Sicnu::data
+    Qt6::Core
+    qgis_core
+    GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r19_02_workflow_cancel_order PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r19_02_workflow_cancel_order PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_r19_02_workflow_cancel_order)

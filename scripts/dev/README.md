@@ -14,6 +14,7 @@ usable from any worktree of this repository; shared helpers live in
 | `review_pack.py` | Reproducible PR evidence pack + PR-body draft | refuses to write an incomplete pack; deterministic modulo the `Generated:` line |
 | `stale_branches.py` | Classifies remote branches (merged-equivalent / superseded / unmerged-increment / diverged-stale) with evidence | advisory only; deletes nothing, merges nothing |
 | `narrow_targets.py` | Maps changed paths to the minimal build/test targets the CMake wiring actually names (plus the `test_build_wiring_drift` oracle for wiring changes) | mapping is mechanical from the wiring text — paths no target covers are reported `unwired`, never guessed |
+| `merge_loss_audit.py` | Post-merge invariant check: names every merge whose resolution dropped one parent's EXCLUSIVE change (the 29596c913 silent-revert class; a path is lost when the merge result still equals the merge-base state) | advisory report; findings exit 1, clean 0, outside a repo 2; both-sides conflicts are skipped on purpose |
 
 Exit codes across the suite: `0` success (possibly degraded), `1` genuine
 failure, `2` refused (fail-closed precondition), `75` busy (lock held).
@@ -37,6 +38,8 @@ python scripts/dev/resource_guard.py --lock-dir <build-dir> [--wait 900] \
     [--parallel 2] [--status] [--json] -- <command...>
 python scripts/dev/review_pack.py [--base origin/master] [--head HEAD] \
     [--title "..."] [--out PR_PACK.md] [--json]
+python scripts/dev/merge_loss_audit.py [--since <rev>] [--first-parent] \
+    [--max-merges N] [--json]
 python scripts/dev/stale_branches.py [--branch <name>] [--behind-threshold 50] [--json]
 python scripts/dev/narrow_targets.py [paths...] [--base origin/master] [--json]
 ```
