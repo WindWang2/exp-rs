@@ -85,6 +85,11 @@ struct LabBatchSummary
 
     /// Roster-ordered student ids with no submission (sorted).
     QStringList missingRosterIds;
+
+    /// Discovery refusals (R18-E T301): (entry name, reason) for every
+    /// symlinked or non-regular entry — refused visibly, never graded,
+    /// never vanished. Empty on a clean directory.
+    QVector<QPair<QString, QString>> refusedEntries;
 };
 
 /// Optional roster: UTF-8 (BOM tolerated) CSV with header

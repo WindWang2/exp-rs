@@ -611,6 +611,11 @@ r6_dev.cmd
 .ccache/
 .configure_r15c.log
 .build_r15c_tests.log
+# R18-A track (remote sensing science algorithms: numerical correctness, quality
+# contracts and throughput): planning notes (markdown only; logs/builds stay local).
+!.planning/r18-a-science/
+.planning/r18-a-science/*
+!.planning/r18-a-science/*.md
 # R18-D track (Qt/QGIS workbench + MapSpec cartography) planning artifacts (markdown only).
 !.planning/r18-d-desktop/
 .planning/r18-d-desktop/*
@@ -632,3 +637,8 @@ r6_dev.cmd
 !.planning/r19-01/
 .planning/r19-01/*
 !.planning/r19-01/*.md
+# R19-03 track (Qt/QGIS workbench + cartography UX) planning artifacts (markdown only).
+!.planning/r19-03/
+.planning/r19-03/*
+!.planning/r19-03/*.md
+*.agent-build.lock

@@ -173,7 +173,32 @@ HelpDescriptor HelpContentStore::parseEntry( const Json::Value &entry, QStringLi
         }
         info.whatHappened = readString( entry, "whatHappened" );
         info.whyItMatters = readString( entry, "whyItMatters" );
-        info.severity = parseSeverity( readString( entry, "severity" ), sicnu::data::DiagnosticSeverity::Error );
+        // R18-E H1: severity is fail-closed like retry. An unknown spelling
+        // ("Warning", a typo) used to silently harden into Error with zero
+        // errors, bypassing the severity-drift gates; the entry is now
+        // refused outright. Absent keeps the Error fallback (undeclared =
+        // derived, backward compatible).
+        {
+            const QString severityText = readString( entry, "severity" );
+            if ( severityText.isEmpty() )
+            {
+                info.severity = sicnu::data::DiagnosticSeverity::Error;
+            }
+            else if ( severityText == QLatin1String( "info" )
+                      || severityText == QLatin1String( "warning" )
+                      || severityText == QLatin1String( "error" ) )
+            {
+                info.severity = parseSeverity( severityText,
+                                               sicnu::data::DiagnosticSeverity::Error );
+            }
+            else
+            {
+                errors << QStringLiteral( "%1: diagnostic entry %2 has unknown severity value '%3' (expected info|warning|error)" )
+                              .arg( context, d.id, severityText );
+                d.id.clear();
+                return d;
+            }
+        }
         // Absent or "derived" defers to the origin taxonomy at resolve time;
         // any other value is a content bug — fail closed instead of silently
         // degrading to Derived (a typo like "retryable" used to vanish here).

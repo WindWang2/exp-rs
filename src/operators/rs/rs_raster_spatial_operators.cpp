@@ -151,12 +151,33 @@ Json::Value finishResult( const std::string &opName, const std::string &outputPa
 
 // --- mask/label family ----------------------------------------------------
 
+/// Resolves the shared "band" parameter for the mask/label and window
+/// families. std::max(1, ...) used to rewrite band=0/-n to band 1 silently
+/// (a 0-based index typo processed the wrong band) and band>N fell through
+/// to a generic GdalError mid-stream. The index is a 1-based contract:
+/// validate it against the raster's band count up front (R18-A).
+int resolveBandParam( const Json::Value &params, const std::string &path )
+{
+    const int band = getInt( params, "band", 1 );
+    if ( band < 1 )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "band must be a 1-based index >= 1, got " + std::to_string( band ) );
+    GdalDatasetWrapper probe;
+    if ( !probe.open( QString::fromStdString( path ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open input raster: " + path );
+    if ( band > probe.bandCount() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "band " + std::to_string( band ) + " is out of range: raster has " +
+                                   std::to_string( probe.bandCount() ) + " band(s)" );
+    return band;
+}
+
 Json::Value runMaskOp( const std::string &opName, const Json::Value &params,
                        RSOperatorContext &context )
 {
     const std::string inputPath = requireString( params, "input" );
     const std::string outputPath = requireString( params, "output" );
-    const int band = std::max( 1, getInt( params, "band", 1 ) );
+    const int band = resolveBandParam( params, inputPath );
     const std::string connToken = getEnum( params, "connectivity", s_conn, "8" );
     const auto conn = parseConnectivity( connToken );
 
@@ -326,7 +347,7 @@ Json::Value runWindowOp( const std::string &opName, const Json::Value &params,
 {
     const std::string inputPath = requireString( params, "input" );
     const std::string outputPath = requireString( params, "output" );
-    const int band = std::max( 1, getInt( params, "band", 1 ) );
+    const int band = resolveBandParam( params, inputPath );
     const int window = std::clamp( getInt( params, "window", 3 ), 3, 101 );
     if ( window % 2 == 0 )
         throw RSOperatorError( ErrorCode::InvalidParameter, "window must be odd" );

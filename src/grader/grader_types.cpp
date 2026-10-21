@@ -170,7 +170,14 @@ bool parseStageExpectation( const Json::Value &doc, const std::string &path, Sta
             out.minDistinct = minDistinct;
         }
     } else {
-        out.expectedState = "Completed";
+        // R18-E V8: a stage criterion with no stage block used to grade
+        // silently against an invisible expectedState="Completed" — the
+        // only silent default left in this schema. Refused: the teacher
+        // declares the state or the rubric does not parse.
+        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                           "stage criterion must declare stage.expectedState (no silent default)",
+                           path + ".stage.expectedState" );
+        return false;
     }
     return true;
 }

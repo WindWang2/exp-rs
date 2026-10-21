@@ -12,8 +12,8 @@
 - 模态：optical
 - 输出：output（raster）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、baseline_end（string）、baseline_start（string）、collection（string）、duplicate_policy（enum）、method（enum）、min_observations（integer）、output（string）、scenes（string）、target_time（string）、tile_size（integer）
-- 前置条件：需要足够长的历史时序建立均值基线：基线期被污染（历史异常）会带入阈值并抬高/压低当期虚警。
-- 局限：z-score/差值阈值对全场景统一适用：趋势与季节性强的像元（物候循环）需先去季节项，否则常态循环会被误报为异常。
+- 前置条件：需足够长历史时序建基线：基线期污染（历史异常）会带入阈值、抬高压低当期虚警。
+- 局限：阈值对全场景统一：强趋势/季节（物候循环）像元需先去季节项，否则常态循环会被误报为异常。
 - 适用地物：植被、水体、农田
 - 适用场景：病虫害/旱情异常提示、水体异常扩张告警
 - 失败模式：
@@ -31,8 +31,8 @@
 - 模态：optical
 - 输出：bands（integer）、brokenPixelFraction（numeric）、maxBreaks（integer）、memory（json）、output（raster）、sceneCount（integer）、timeEnd（string）、timeStart（string）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、compute_ci（boolean）、duplicate_policy（enum）、maxBreaks（integer）、minImprovement（numeric）、minSegmentDays（numeric）、output（string）、outputBreakDates（boolean）、scenes（string）、tile_size（integer）
-- 前置条件：需要足够长的时序观测（分段线性拟合要求每段最少点数）：时相缺失或采样过稀会降低断点定位精度。
-- 局限：检出的是结构性趋势突变点，不区分突变原因（扰动/撂荒/洪泛等需业务判读）；定位精度受时序长度、采样密度与噪声影响。
+- 前置条件：需足够长时序（每段线性拟合有最少点数要求）：时相缺失或采样过稀会降低定位精度。
+- 局限：检出结构性趋势突变点，不区分原因（扰动/撂荒/洪泛需业务判读）；定位精度受时序长度、采样密度与噪声影响。
 - 适用地物：森林、农田、水体
 - 适用场景：森林扰动年份制图、土地利用转型检测
 - 失败模式：
@@ -43,14 +43,14 @@
 
 ## rs:temporal_composite
 
-时序合成：把多期影像按最优像元（质量分）/均值/中值合成一景，压制云与噪声。默认 quality_band=0 时各期得分相同，按目标日期就近选取；需要经典 MVC 时把指数波段显式设为 quality_band。
+时序合成：多期影像按最优像元（质量分）/均值/中值合成一景，压制云与噪声；quality_band 默认 0=各期等分、就近目标日期，经典 MVC 需显式指定指数波段。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：output（raster）、periodCount（integer）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、method（enum）、output（string）、period（enum）、period_days（integer）、quality_band（integer）、scenes（string）、target_date（string）、tile_size（integer）
 - 前置条件：所有期次影像须配准到同一网格并统一辐射量纲。
-- 局限：合成质量取决于质量分：quality_band=0（默认）表示各期等分、按目标日期就近选取；经典 MVC 需把指数波段显式设为 quality_band。；合成会压制云与噪声，但云掩膜不完整时污染期仍会进入合成；输出为重构值而非单一观测。
+- 局限：quality_band 的选像元语义见摘要行。；合成会压制云与噪声，但云掩膜不完整时污染期仍会进入合成；输出为重构值而非单一观测。
 - 适用地物：植被、水体、任意地物
 - 适用场景：月度/季度无云底图生产、NDVI 时序预处理
 - 失败模式：
@@ -68,8 +68,8 @@
 - 模态：optical
 - 输出：bands（integer）、components（string）、output（raster）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、components（string）、duplicate_policy（enum）、output（string）、scenes（string）、seasonal_window_days（integer）、tile_size（integer）、trend_lambda（numeric）
-- 前置条件：需要覆盖完整季节周期、等间隔或声明时间戳的时序：STL 思想的分解在观测不足时季节/趋势分离失真。
-- 局限：容差级算子（并行归约的浮点重排在容差内）：分量解释依赖周期与窗宽参数；残差分量包含未建模噪声，不宜单独当物理量使用。
+- 前置条件：需覆盖完整季节周期、等间隔或声明时间戳的时序：观测不足时季节/趋势分离失真。
+- 局限：容差级（并行归约浮点重排在容差内）；分量解释依赖周期/窗宽，残差含未建模噪声、不宜单独当物理量。
 - 适用地物：植被、水体、农田
 - 适用场景：长期趋势与季节动态分离、城郊扩张的时序证据分析
 - 失败模式：
@@ -87,7 +87,7 @@
 - 输出：emptyCells（integer）、medianEnabled（boolean）、output（table）、pointRegions（integer）、polygonRegions（integer）、regionCount（integer）、rowsWritten（integer）、sceneCount（integer）、timeEnd（string）、timeStart（string）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、max_regions（integer）、median_budget_mb（numeric）、output（string）、regions（string）、regions_file（string）、scenes（string）
 - 前置条件：多个点/面区域以参数列表给出：区域几何需与影像 CRS 一致。
-- 局限：输出区域×日期统计表：面区域统计为区域内像元聚合，大区域会平滑内部异质性；区域数量增长线性增加计算量。
+- 局限：区域×日期统计表：区域统计是像元聚合，大区域平滑内部异质性；区域数线性增加计算量。
 - 适用地物：耕地、林地、水体
 - 适用场景：多地块物候对比、时序监测
 - 失败模式：
@@ -123,7 +123,7 @@
 - 输出：bands（integer）、filledFraction（numeric）、memory（json）、output（raster）、provenanceOutput（string）、sceneCount（integer）、timeEnd（string）、timeStart（string）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、max_gap_days（numeric）、method（enum）、output（string）、provenance_output（string）、scenes（string）、tile_size（integer）
 - 前置条件：时序中的缺失（云/阴影）需以掩膜/NoData 标示：插值仅按时间维度进行（线性/最近邻）。
-- 局限：长缺口插值不可信：线性插值会抹平真实事件信号，最近邻跨大缺口产生阶跃；补洞结果应视为重构值并保留缺失位置信息。
+- 局限：长缺口插值不可信（线性抹平事件信号、最近邻跨缺口产生阶跃）；补洞结果应视为重构值并保留缺失位置。
 - 适用地物：植被、农田
 - 适用场景：去云后的 NDVI 时序修复、物候分析前的时间连续化
 - 失败模式：
@@ -161,7 +161,7 @@
 - 输出：bands（integer）、fittedPixelFraction（numeric）、harmonics（integer）、memory（json）、output（raster）、robust（boolean）、sceneCount（integer）、timeEnd（string）、timeStart（string）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、ci_level（numeric）、collection（string）、compute_ci（boolean）、duplicate_policy（enum）、harmonics（integer）、minObservations（integer）、output（string）、robust（boolean）、scenes（string）、tile_size（integer）、writeCoefficients（boolean）
 - 前置条件：需要至少覆盖一个年周期的时序并给定谐波阶数：采样过稀时高阶谐波不稳定。
-- 局限：拟合重构会平滑掉短时突变（收割/火灾等事件信号），同时插值与去云属模型化重构而非观测值；高阶谐波对噪声敏感。
+- 局限：拟合会平滑短时突变（收割/火灾信号）；插值与去云属模型化重构而非观测值，高阶谐波对噪声敏感。
 - 适用地物：农田、落叶林
 - 适用场景：双季作物识别、物候参数（峰值/相位）提取
 - 失败模式：
@@ -192,14 +192,14 @@
 
 ## rs:temporal_model_select
 
-逐像元有界模型选择：{谐波阶数} × {断点预算} 候选网格按 AICc/BIC/分块 CV 打分，平局取最小模型，退化像元如实拒绝。
+逐像元有界模型选择：{谐波阶数}×{断点预算} 候选网格按 AICc/BIC/分块 CV 打分，平局取最小，退化像元如实拒绝。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：memory（json）、output（raster）、pixelsByBreaks（json）、pixelsByHarmonics（json）、pixelsFitted（integer）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、cvFolds（integer）、duplicate_policy（enum）、maxBreaks（integer）、maxHarmonics（integer）、minImprovement（numeric）、minSegmentDays（numeric）、output（string）、penalty（enum）、robust（boolean）、scenes（string）、tile_size（integer）
 - 前置条件：>= 4 valid samples
-- 局限：模型选择只在候选网格（谐波阶数 × 断点预算）内进行：网格外的模型形态不可达；按 AICc/BIC/分块 CV 打分，平局取最小模型，退化像元如实拒绝而不强制输出。
+- 局限：模型选择只在候选网格内进行，网格外形态不可达；打分/平局/退化拒绝规则见摘要。
 - 适用地物：农田、草地、森林
 - 适用场景：物候建模前的模型复杂度选择、谐波阶数论证、分区拟合诊断
 - 失败模式：
@@ -237,7 +237,7 @@
 - 输出：bands（integer）、memory（json）、metrics（string）、output（raster）、sceneCount（integer）、timeEnd（string）、timeStart（string）、validPixelFraction（numeric）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、crossingFraction（numeric）、cycles（integer）、duplicate_policy（enum）、minValidPerSeason（integer）、output（string）、provenance（string）、scenes（string）、season2EndDoy（integer）、season2StartDoy（integer）、seasonEndDoy（integer）、seasonStartDoy（integer）、tile_size（integer）
 - 前置条件：建议先用 rs:temporal_smooth / rs:temporal_harmonic_fit 重构时序。
-- 局限：物候期提取依赖上游重构时序质量：云污染与假峰会导致生长季开始/结束误判；二季作区/干旱年的多峰情形需参数适配。
+- 局限：依赖上游重构时序质量：云污染与假峰会误判生长季起止；二季作/干旱年多峰需参数适配。
 - 适用地物：农田、草地、落叶林
 - 适用场景：作物生育期监测、物候对气候响应研究
 - 失败模式：
@@ -249,14 +249,14 @@
 
 ## rs:temporal_phenology_multi
 
-物候 2.0：自动多周期候选（峰值检测）、跨年窗口按收获年归属、逐窗口质量旗标；低覆盖窗口拒绝输出而非硬猜。
+物候 2.0：自动多周期候选（峰值检测）、跨年窗口按收获年归属、逐窗口质量旗标，低覆盖窗口拒绝输出。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：meanCyclesPerYear（numeric）、memory（json）、output（raster）、pixelsWithAnyCycle（integer）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、crossingFraction（numeric）、duplicate_policy（enum）、maxCyclesPerYear（integer）、maxGapFraction（numeric）、minCoverage（numeric）、minPeakFraction（numeric）、minValidPerSeason（integer）、output（string）、scenes（string）、tile_size（integer）
 - 前置条件：Common grid, acquisition times; >= ~2 full years for stable climatology; >= ~12 valid samples
-- 局限：低覆盖窗口拒绝输出而非硬猜（质量旗标逐窗口输出）；跨年窗口按收获年归属，物候年定义随窗口参数。
+- 局限：低覆盖窗口拒绝输出而非硬猜；跨年窗口按收获年归属，物候年定义随窗口参数。
 - 适用地物：农田、果园、草地
 - 适用场景：多熟制识别、跨年作物窗口、物候质量分级
 - 失败模式：
@@ -293,7 +293,7 @@
 - 输出：bands（integer）、cadenceDays（numeric）、calendarEnd（string）、calendarPoints（integer）、calendarStart（string）、filledFraction（numeric）、memory（json）、output（raster）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、cadence（string）、collection（string）、duplicate_policy（enum）、lambda（numeric）、max_gap_nodes（integer）、max_window_days（numeric）、method（enum）、output（string）、scenes（string）、tile_size（integer）
 - 前置条件：不规则时相输入需声明观测日期/时间戳，并给定目标规则日历（16 天/月等）。
-- 局限：规则化是按目标日历的采样/聚合：非观测期的值来自邻近期或插值——有效计数与填充计数溯源波段必须参与下游质检。
+- 局限：规则化按目标日历采样/聚合：非观测期值来自邻近期或插值——有效/填充计数溯源波段必须参与下游质检。
 - 适用地物：耕地、林地
 - 适用场景：规则时序构建、多源时相对齐
 - 失败模式：
@@ -313,7 +313,7 @@ Fuse co-registered optical and SAR temporal feature rasters into one stacked fea
 - 输出：bands（integer）、memory（json）、opticalBands（integer）、output（raster）、sarBands（integer）
 - 参数：grid_tolerance（numeric）、output（string）、tile_size（integer）
 - 前置条件：输入必须为已配准（同网格）的光学与 SAR 时序特征栅格。
-- 局限：融合是特征堆叠（stacked feature cube）：不消除光学/SAR 特征的辐射语义差异，各特征定义由上游算子决定。
+- 局限：融合是特征堆叠：不消除光学/SAR 特征的辐射语义差异，特征定义由上游算子决定。
 - 适用地物：光学/SAR 联合覆盖区
 - 适用场景：光学-SAR 时序特征融合、云污染区的时序补全
 - 适用性备注：输入为已配准的光学与 SAR 时序特征栅格。
@@ -326,14 +326,14 @@ Fuse co-registered optical and SAR temporal feature rasters into one stacked fea
 
 ## rs:temporal_seasonal_breaks
 
-季节分量突变检测与归因：联合谐波+趋势分段后，用嵌套模型 F 检验区分趋势突变与季节幅相突变，可选 bootstrap 置信区间。
+季节突变检测与归因：谐波+趋势分段后用嵌套 F 检验区分趋势与季节幅相突变，可选 bootstrap 置信区间。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：epochDate（string）、memory（json）、output（raster）、pixelsWithBreaks（integer）、pixelsWithSeasonalBreaks（integer）、sceneCount（integer）
 - 参数：alpha（numeric）、apply_qa_masking（boolean）、band（integer）、band_role（enum）、bootstrap_resamples（integer）、bootstrap_seed（integer）、ci_level（numeric）、collection（string）、compute_ci（boolean）、duplicate_policy（enum）、harmonics（integer）、maxBreaks（integer）、minImprovement（numeric）、minSegmentDays（numeric）、output（string）、robust（boolean）、scenes（string）、tile_size（integer）
 - 前置条件：Common grid, acquisition times, consistent radiometric state; >= ~2 years for stable harmonics
-- 局限：嵌套模型 F 检验区分趋势突变与季节幅相突变：归因结论受样本量与噪声影响；bootstrap 置信区间为可选输出，开启后计算量上升。
+- 局限：归因结论受样本量与噪声影响；bootstrap 置信区间为可选输出，开启后计算量上升。
 - 适用地物：森林、农田、灌草地
 - 适用场景：植被物候突变监测、作物制度转换识别、干扰与恢复制图
 - 失败模式：
@@ -345,7 +345,7 @@ Fuse co-registered optical and SAR temporal feature rasters into one stacked fea
 
 ## rs:temporal_sen_trend
 
-Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜率并做显著性检验，抗离群值优于普通最小二乘。
+Theil-Sen 稳健趋势 + Mann-Kendall 检验：稳健斜率与显著性检验，抗离群值优于 OLS。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
@@ -389,7 +389,7 @@ Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜
 - 输出：output（raster）、sceneCount（integer）、validFraction（numeric）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、include_median（boolean）、output（string）、scenes（string）、tile_size（integer）
 - 前置条件：输入为时序立方体（多期堆叠）：各期网格需一致。
-- 局限：概要统计是快速体检工具：最小/最大对单期噪声敏感，方差含季节信号——趋势与结构分析应接 trend/decompose 族。
+- 局限：快速体检工具：最小/最大对单期噪声敏感，方差含季节信号；趋势/结构分析用 trend/decompose 族。
 - 适用地物：任意地物
 - 适用场景：时序数据质量体检、变化检测前的概要统计
 - 失败模式：
@@ -400,14 +400,14 @@ Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜
 
 ## rs:temporal_trend
 
-逐像元时序趋势拟合：普通最小二乘估计斜率/截距并输出 R²/RMSE 佐证拟合质量；显著性检验请用 rs:temporal_sen_trend。
+逐像元 OLS 趋势拟合：输出斜率/截距与 R²/RMSE 拟合佐证；显著性检验请用 rs:temporal_sen_trend。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：output（raster）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、output（string）、provenance（string）、scenes（string）、tile_size（integer）
 - 前置条件：需要足够期数的时序做 OLS 拟合：建议先完成去云、插值与平滑。
-- 局限：OLS 对离群值（云污染期）敏感：显著性检验不在本算子范围（用 rs:temporal_sen_trend）；R²/RMSE 是拟合质量佐证，不是变化显著性结论。
+- 局限：OLS 对离群值（云污染期）敏感；R²/RMSE 只是拟合佐证，显著性检验用 rs:temporal_sen_trend。
 - 适用地物：植被、城市、水体
 - 适用场景：绿化/退化趋势制图、围填海等长期变化速率估计
 - 失败模式：

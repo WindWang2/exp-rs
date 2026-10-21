@@ -232,9 +232,18 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
   // earlier step (or at no step at all) would poison every later step in the
   // session (#1654). A cancel that lands after this point still reaches the
   // in-flight step: both run paths poll the same flag object captured below.
-  const auto staleFlag = cancelFlag( sessionId );
-  if ( staleFlag )
-    staleFlag->store( false, std::memory_order_release );
+  // The consume happens under m_mutex so it is TOTALLY ORDERED against
+  // requestCancel()'s flag store (which takes the same lock): a cancel that
+  // wins the lock first predates this step and is consumed; one that comes
+  // after leaves the flag set for the step's watcher/sync poll to honor.
+  // Without the shared lock the two stores raced unordered — the residual
+  // #1654 window (R19-02).
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    const auto staleFlag = cancelFlagLocked( sessionId );
+    if ( staleFlag )
+      staleFlag->store( false, std::memory_order_release );
+  }
 
   const StepDef *step = sessionPtr->stepById( stepId );
   if ( !step )
@@ -799,14 +808,19 @@ void WorkflowRuntime::setArtifact( const std::string &sessionId, const std::stri
 
 void WorkflowRuntime::requestCancel( const std::string &sessionId )
 {
-  auto flag = cancelFlag( sessionId );
-  if ( flag )
-    flag->store( true, std::memory_order_release );
-
   long taskId = -1;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
-    auto it = m_activeTaskIds.find( sessionId );
+    // The flag store runs UNDER m_mutex so it is totally ordered against
+    // runStep()'s stale-cancel consume (same lock): a cancel winning the
+    // lock before the consume predates the step and is correctly consumed;
+    // one arriving after leaves the flag set, and the step's cancel
+    // watcher / synchronous poll honors it. Storing outside the lock left
+    // the two writes racing unordered (#1654 residual window, R19-02).
+    const auto flag = cancelFlagLocked( sessionId );
+    if ( flag )
+      flag->store( true, std::memory_order_release );
+    const auto it = m_activeTaskIds.find( sessionId );
     if ( it != m_activeTaskIds.end() )
       taskId = it->second;
   }
@@ -849,6 +863,15 @@ bool WorkflowRuntime::useExecutionPlane() const
 std::shared_ptr<std::atomic<bool>> WorkflowRuntime::cancelFlag( const std::string &sessionId )
 {
   std::lock_guard<std::mutex> lock( m_mutex );
+  const auto it = m_cancelFlags.find( sessionId );
+  if ( it == m_cancelFlags.end() )
+    return nullptr;
+  return it->second;
+}
+
+std::shared_ptr<std::atomic<bool>> WorkflowRuntime::cancelFlagLocked( const std::string &sessionId )
+{
+  // Caller holds m_mutex (the consume/requestCancel ordering contract).
   const auto it = m_cancelFlags.find( sessionId );
   if ( it == m_cancelFlags.end() )
     return nullptr;

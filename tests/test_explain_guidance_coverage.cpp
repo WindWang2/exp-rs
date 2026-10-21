@@ -138,7 +138,7 @@ TEST_CASE( "every corpus operator id and parameter name exists in the live regis
     GuidanceStore::loadFromDirectory( SICNU_EXPLAIN_GUIDANCE_DIR, problems );
   REQUIRE( store != nullptr );
 
-  const ExplanationValidator validator( knowledge, store.get() );
+  const ExplanationValidator validator( knowledge );
 
   std::vector<std::string> failures;
   for ( const std::string &operatorId : entryOperatorIds( *store ) )
@@ -183,7 +183,7 @@ TEST_CASE( "builder output for every corpus entry passes the hallucination guard
   REQUIRE( store != nullptr );
 
   const StepExplanationBuilder builder( knowledge, *store, nullptr );
-  const ExplanationValidator validator( knowledge, store.get() );
+  const ExplanationValidator validator( knowledge );
 
   std::vector<std::string> failures;
   int built = 0;

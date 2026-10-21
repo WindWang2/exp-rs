@@ -464,10 +464,21 @@ std::pair<double, std::string> scoreMetricValue( const MetricExpectation &metric
         const double full = metric.value + metric.tolerance;
         if ( value <= full + kBandEps )
             return { 1.0, {} };
-        if ( metric.hasLinearWindow && value < metric.windowFrom ) {
-            const double span = metric.windowFrom - metric.windowTo;
+        // R18-E V1: the window is oriented exactly like AtLeast's
+        // ({from < to}, loader-enforced): from = where decay starts, to =
+        // where credit ends. The old branch required from > to — a shape
+        // the loader refuses — so every parseable AtMost window silently
+        // awarded zero instead of the declared partial credit.
+        // Exact AtLeast mirror (R18-E V1, round-2 review): the ramp branch
+        // is entered for every value below windowTo, and the fraction
+        // clamps — so the gap between the full band and windowFrom earns
+        // FULL credit (AtLeast awards its (windowTo, threshold) gap the
+        // same way via the same clamp), the ramp [from, to] descends to 0,
+        // and values at/beyond windowTo fall to above-band.
+        if ( metric.hasLinearWindow && value < metric.windowTo ) {
+            const double span = metric.windowTo - metric.windowFrom;
             if ( span > 0.0 ) {
-                const double fraction = ( metric.windowFrom - value ) / span;
+                const double fraction = ( metric.windowTo - value ) / span;
                 return { std::clamp( fraction, 0.0, 1.0 ), "grader:metric-partial-window" };
             }
         }

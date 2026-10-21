@@ -572,3 +572,74 @@ TEST_CASE( "summary truncation never splits a UTF-16 surrogate pair",
     const QString shortText = QStringLiteral( "short" );
     CHECK( truncateSummary( shortText ) == shortText );
 }
+
+TEST_CASE( "terminology descriptors respect the shared summary bound and surrogate rule",
+           "[help][terms][r19d]" )
+{
+    // #1639 item 2: HelpDescriptor::summary documents a ≤kHelpSummaryMaxChars
+    // bound shared by EVERY summary producer; terminology_provider used to
+    // assign definitionZh verbatim, the one producer outside the contract.
+    using sicnu::help::kHelpSummaryMaxChars;
+
+    TermEntry t;
+    t.en = QStringLiteral( "oversized definition term" );
+    t.zh = QStringLiteral( "超长定义术语" );
+    // 119 CJK chars (code units 0..118) + an astral char whose surrogate
+    // pair occupies code units 119-120: size 121 exceeds the 120 bound AND
+    // the naive left(120) cut lands exactly BETWEEN the pair's halves,
+    // stranding the high surrogate. truncateSummary must back off to 119.
+    t.definitionZh = QString( 119, QChar( 0x5B9A ) );
+    t.definitionZh += QString( QChar( 0xD842 ) ) + QChar( 0xDFB7 );
+    t.category = QStringLiteral( "spectral" );
+
+    QVector<TermEntry> terms;
+    terms << t;
+
+    HelpRegistry registry;
+    QStringList errors;
+    TerminologyProvider::appendDescriptors( terms, registry, &errors );
+    INFO( "append errors: " << errors.join( QStringLiteral( "; " ) ).toStdString() );
+    CHECK( errors.isEmpty() );
+
+    const HelpDescriptor *d =
+      registry.find( termDescriptorId( t.en ) );
+    REQUIRE( d != nullptr );
+
+    CHECK( d->summary.size() <= kHelpSummaryMaxChars );
+    // The boundary rule through appendDescriptors: the cut backs off the
+    // straddling pair, so the summary is exactly the 119 CJK prefix and
+    // contains no surrogate halves at all.
+    CHECK( d->summary == t.definitionZh.left( 119 ) );
+    // Belt-and-braces: no orphaned surrogate half anywhere in the summary.
+    // (A COMPLETE astral char inside the window is fine — only a high
+    // surrogate without its low partner, or a stray low, is an orphan.)
+    bool orphan = false;
+    for ( int i = 0; i < d->summary.size(); ++i )
+    {
+        const QChar c = d->summary.at( i );
+        if ( c.isHighSurrogate() )
+        {
+            orphan = orphan || !( i + 1 < d->summary.size() &&
+                                  d->summary.at( i + 1 ).isLowSurrogate() );
+            ++i; // consume the pair's low half
+        }
+        else if ( c.isLowSurrogate() )
+        {
+            orphan = true; // standalone low: the high half was cut away
+        }
+    }
+    CHECK_FALSE( orphan );
+    // Truncation is lossless for short definitions (the real glossary shape).
+    TermEntry shortTerm;
+    shortTerm.en = QStringLiteral( "short definition term" );
+    shortTerm.zh = QStringLiteral( "短定义术语" );
+    shortTerm.definitionZh = QStringLiteral( "地面采样距离。" );
+    shortTerm.category = QStringLiteral( "spatial" );
+    QVector<TermEntry> shorts;
+    shorts << shortTerm;
+    TerminologyProvider::appendDescriptors( shorts, registry, &errors );
+    const HelpDescriptor *sd =
+      registry.find( termDescriptorId( shortTerm.en ) );
+    REQUIRE( sd != nullptr );
+    CHECK( sd->summary == shortTerm.definitionZh );
+}

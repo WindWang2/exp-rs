@@ -368,7 +368,7 @@ public:
       return SpatialToolResult::failure( outcome.failureMessage, outcome.failureCode, "runtime" );
 
     const sicnu::explain::ValidationReport report =
-      sicnu::explain::ExplanationValidator( knowledge, store.get() ).validate( outcome.explanation );
+      sicnu::explain::ExplanationValidator( knowledge ).validate( outcome.explanation );
 
     return respond( outcome, report.issues, runScoped ? &evidenceProblems : nullptr );
   }

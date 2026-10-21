@@ -257,3 +257,127 @@ TEST_CASE( "rs:proximity refuses an all-background mask", "[spatial][proximity][
     RSOperatorContext context;
     REQUIRE_THROWS_AS( op->run( params, context ), RSOperatorError );
 }
+
+// --- R18-A WP4: band-index contract for the mask/label + window families ----
+// runMaskOp/runWindowOp used std::max(1, getInt("band", 1)): band=0/-n was
+// silently rewritten to band 1 (wrong-band result, no diagnostic) and band>N
+// surfaced as a generic GdalError instead of an InvalidParameter contract
+// refusal. The band index must be validated against the raster's band count
+// before any tile streaming starts.
+
+namespace
+{
+RSOperatorError runSpatialOpExpectError( const char *opId, Json::Value params )
+{
+    auto op = RSOperatorRegistry::instance().create( opId );
+    REQUIRE( op != nullptr );
+    RSOperatorContext context;
+    try
+    {
+        op->run( params, context );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        return e;
+    }
+    FAIL( "expected RSOperatorError from " << opId );
+    return RSOperatorError( ErrorCode::InvalidParameter, "unreachable" );
+}
+} // namespace
+
+TEST_CASE( "rs:focal_stats refuses band=0 as InvalidParameter instead of silently reading band 1 [r18a][wp4][contract]",
+           "[spatial][focal][contract]" )
+{
+    using namespace sicnu::testing;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    RsSyntheticRasterBuilder b( 3, 1, 2 );
+    b.withCrs( "EPSG:32650" );
+    b.withConstantValue( 1, 10.0f );
+    b.withConstantValue( 2, 90.0f );
+    const QString inPath = b.writeToDisk( dir.filePath( "in.tif" ) );
+    REQUIRE( !inPath.isEmpty() );
+
+    Json::Value params = baseParams( dir, "in.tif", "out.tif" );
+    params["stat"] = "mean";
+    params["band"] = 0; // 0-based index typo: must refuse, not read band 1 (=10)
+    const RSOperatorError err = runSpatialOpExpectError( "rs:focal_stats", params );
+    REQUIRE( err.code() == ErrorCode::InvalidParameter );
+}
+
+TEST_CASE( "rs:focal_stats refuses a negative band index [r18a][wp4][contract]",
+           "[spatial][focal][contract]" )
+{
+    using namespace sicnu::testing;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    RsSyntheticRasterBuilder b( 3, 1, 2 );
+    b.withCrs( "EPSG:32650" );
+    b.withConstantValue( 1, 10.0f );
+    b.withConstantValue( 2, 90.0f );
+    const QString inPath = b.writeToDisk( dir.filePath( "in.tif" ) );
+    REQUIRE( !inPath.isEmpty() );
+
+    Json::Value params = baseParams( dir, "in.tif", "out.tif" );
+    params["stat"] = "mean";
+    params["band"] = -3;
+    const RSOperatorError err = runSpatialOpExpectError( "rs:focal_stats", params );
+    REQUIRE( err.code() == ErrorCode::InvalidParameter );
+}
+
+TEST_CASE( "rs:focal_stats refuses band beyond bandCount as InvalidParameter not GdalError [r18a][wp4][contract]",
+           "[spatial][focal][contract]" )
+{
+    using namespace sicnu::testing;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    RsSyntheticRasterBuilder b( 3, 1, 2 );
+    b.withCrs( "EPSG:32650" );
+    b.withConstantValue( 1, 10.0f );
+    b.withConstantValue( 2, 90.0f );
+    const QString inPath = b.writeToDisk( dir.filePath( "in.tif" ) );
+    REQUIRE( !inPath.isEmpty() );
+
+    Json::Value params = baseParams( dir, "in.tif", "out.tif" );
+    params["stat"] = "mean";
+    params["band"] = 99; // raster has 2 bands
+    const RSOperatorError err = runSpatialOpExpectError( "rs:focal_stats", params );
+    REQUIRE( err.code() == ErrorCode::InvalidParameter );
+}
+
+TEST_CASE( "rs:connected_components refuses band=0 as InvalidParameter [r18a][wp4][contract]",
+           "[spatial][label][contract]" )
+{
+    using namespace sicnu::testing;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    RsSyntheticRasterBuilder b( 3, 3, 1 );
+    b.withCrs( "EPSG:32650" );
+    b.withConstantValue( 1, 0.0f );
+    const QString inPath = b.writeToDisk( dir.filePath( "in.tif" ) );
+    REQUIRE( !inPath.isEmpty() );
+
+    Json::Value params = baseParams( dir, "in.tif", "out.tif" );
+    params["band"] = 0;
+    const RSOperatorError err = runSpatialOpExpectError( "rs:connected_components", params );
+    REQUIRE( err.code() == ErrorCode::InvalidParameter );
+}
+
+TEST_CASE( "rs:morphology refuses band beyond bandCount as InvalidParameter [r18a][wp4][contract]",
+           "[spatial][morph][contract]" )
+{
+    using namespace sicnu::testing;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    RsSyntheticRasterBuilder b( 3, 3, 1 );
+    b.withCrs( "EPSG:32650" );
+    b.withConstantValue( 1, 0.0f );
+    const QString inPath = b.writeToDisk( dir.filePath( "in.tif" ) );
+    REQUIRE( !inPath.isEmpty() );
+
+    Json::Value params = baseParams( dir, "in.tif", "out.tif" );
+    params["op"] = "dilate";
+    params["band"] = 7; // raster has 1 band
+    const RSOperatorError err = runSpatialOpExpectError( "rs:morphology", params );
+    REQUIRE( err.code() == ErrorCode::InvalidParameter );
+}

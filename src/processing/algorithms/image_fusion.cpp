@@ -62,6 +62,19 @@ QVector<QVector<float>> ImageFusion::linearWeighted(
     QVector<QVector<float>> result;
     if ( nBands <= 0 || !panBand || width <= 0 || height <= 0 )
         return result;
+    // Guard the band list like every sibling kernel does (brovey checks each
+    // msBands[b] for null; pcaFusion and gramSchmidt check both null and list
+    // length): indexing msBands[b] past the list is QVector OOB (UB), not an
+    // empty result (R18-A).
+    if ( msBands.size() < nBands )
+        return result;
+    for (int b = 0; b < nBands; ++b)
+        if (!msBands[b])
+            return result;
+    // Clamp panWeight to [0,1] — the ms weights are clamped below, and the
+    // equal-weight default (1 - panWeight) assumes the same domain; an
+    // out-of-range panWeight used to flow into the fusion unclamped (R18-A).
+    panWeight = std::clamp(panWeight, 0.0f, 1.0f);
 
     // Build default weights if not provided (equal weight per band)
     QVector<float> weights = msWeights;
@@ -719,6 +732,27 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
         }
     }
 
+    // A03-6 (track finding; commit messages alias it "A14" — not the A14
+    // performance work package): exactly one side georeferenced is not
+    // co-registered.
+    // compareGrids returns no issues when EITHER side lacks a geotransform
+    // — its documented fallback covers BOTH-unreferenced synthetic rasters.
+    // The resample ratio below, however, is derived from the geotransforms:
+    // a GT-less raster reports GDAL's default identity transform, so an
+    // asymmetric pair silently routes through the same-resolution clamp
+    // path (readBandWindow clamps the pan-grid window to the smaller MS
+    // raster and pads the remainder with the declared sentinel) and voids
+    // most of the output with no error (the diag4 evidence). Refuse it.
+    if ( panDataset.hasGeoTransform() != msDataset.hasGeoTransform() )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Pan and multispectral rasters are not co-registered: %1" )
+                                .arg( panDataset.hasGeoTransform()
+                                          ? QStringLiteral( "the multispectral raster has no geotransform" )
+                                          : QStringLiteral( "the panchromatic raster has no geotransform" ) );
+        return false;
+    }
+
     const int w = panDataset.width();
     const int h = panDataset.height();
     const int msBands = msDataset.bandCount();
@@ -836,10 +870,15 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
     const bool resampleMs = ( std::abs( scaleX - 1.0 ) > 1e-9 || std::abs( scaleY - 1.0 ) > 1e-9 );
     if ( resampleMs )
     {
+        // QString::arg has no printf verbs — %.6g would print literally and
+        // warn ("Argument missing"). Format the numbers explicitly.
         SICNU_LOG_INFO( SicnuLogTags::Algorithms,
-                        QString( "Fusion: pan %.6g x %.6g vs MS %.6g x %.6g — MS tiles "
+                        QString( "Fusion: pan %1 x %2 vs MS %3 x %4 — MS tiles "
                                  "will be resampled to the pan grid" )
-                            .arg( panResX ).arg( panResY ).arg( msResX ).arg( msResY ) );
+                            .arg( panResX, 0, 'g', 6 )
+                            .arg( panResY, 0, 'g', 6 )
+                            .arg( msResX, 0, 'g', 6 )
+                            .arg( msResY, 0, 'g', 6 ) );
     }
 
     // readMsWindow: read MS @band (1-based) for the pan-grid tile at (xOff,
@@ -868,12 +907,21 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
             // NoData). Exact matches only: values GDAL resampling already
             // blended across a sentinel edge stay finite — a pre-existing
             // limitation of resample-then-mask, not altered here.
+            // ±Inf is washed too (R18-A): the operator family treats any
+            // non-finite sample as void (band_math, atmospheric streaming);
+            // an Inf pixel must never enter a fused product as ±Inf data.
             const float sentinel = msSentinels[static_cast<size_t>( band - 1 )];
+            const size_t n = static_cast<size_t>( tw ) * th;
             if ( std::isfinite( sentinel ) )
             {
-                const size_t n = static_cast<size_t>( tw ) * th;
                 for ( size_t i = 0; i < n; ++i )
-                    if ( buf[i] == sentinel )
+                    if ( buf[i] == sentinel || !std::isfinite( buf[i] ) )
+                        buf[i] = std::numeric_limits<float>::quiet_NaN();
+            }
+            else
+            {
+                for ( size_t i = 0; i < n; ++i )
+                    if ( !std::isfinite( buf[i] ) )
                         buf[i] = std::numeric_limits<float>::quiet_NaN();
             }
         }
@@ -881,15 +929,17 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
     };
 
     // Pan reads go through one washed boundary too: pan band 1's declared
-    // sentinel becomes NaN before any method consumes the buffer (R14-A).
+    // sentinel becomes NaN before any method consumes the buffer (R14-A);
+    // ±Inf is void here for the same R18-A reason as the MS wash above.
     auto readPanWindow = [&]( int xOff, int yOff, int tw, int th, float *buf ) -> bool {
         if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, buf ) )
             return false;
-        if ( std::isfinite( panSentinel ) )
         {
             const size_t n = static_cast<size_t>( tw ) * th;
             for ( size_t i = 0; i < n; ++i )
-                if ( buf[i] == panSentinel )
+                if ( !std::isfinite( buf[i] ) )
+                    buf[i] = std::numeric_limits<float>::quiet_NaN();
+                else if ( std::isfinite( panSentinel ) && buf[i] == panSentinel )
                     buf[i] = std::numeric_limits<float>::quiet_NaN();
         }
         return true;
@@ -897,11 +947,17 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
     if ( params.method == QStringLiteral( "linear" ) )
     {
+        // Clamp panWeight to [0,1] exactly like the in-memory kernel
+        // (linearWeighted): the ms weights are clamped below and the
+        // equal-weight default (1 - panWeight) assumes the same domain; an
+        // out-of-range value used to weight the pan unclamped on this
+        // streaming route (R18-A, review R1 P2).
+        const float panW = std::clamp( params.panWeight, 0.0f, 1.0f );
         QVector<float> weights = params.msWeights;
         if ( weights.isEmpty() )
         {
             weights.resize( nMsBands );
-            float defaultMsWeight = 1.0f - params.panWeight;
+            float defaultMsWeight = 1.0f - panW;
             for ( int b = 0; b < nMsBands; ++b )
                 weights[b] = defaultMsWeight;
         }
@@ -910,7 +966,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
             // A non-empty weight list shorter than the band count would read
             // weights[b] out of bounds below (#677). Pad with the same
             // equal-weight default the empty case uses and report it.
-            const float defaultMsWeight = 1.0f - params.panWeight;
+            const float defaultMsWeight = 1.0f - panW;
             QString paddedBands;
             for ( int b = weights.size(); b < nMsBands; ++b )
             {
@@ -959,7 +1015,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         }
                         else
                         {
-                            outData[i] = msW * msData[i] + params.panWeight * panBuf[i];
+                            outData[i] = msW * msData[i] + panW * panBuf[i];
                         }
                     }
                     if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outData ) )
@@ -1251,7 +1307,16 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
         }
 
         if ( validPixels == 0 )
+        {
+            // A refusal without a reason is indistinguishable from a silent
+            // failure (Oracle-D: recognizable states). The all-NoData scene
+            // is bad input for a statistics-driven method.
+            if ( errorMessage )
+                *errorMessage = QStringLiteral(
+                    "PCA fusion found no pixel valid in both the pan and MS rasters "
+                    "(NoData/NaN everywhere) — cannot estimate covariance" );
             return false;
+        }
 
         for ( int b = 0; b < nMsBands; ++b )
             msMean[b] /= static_cast<double>( validPixels );
@@ -1664,11 +1729,14 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 // The halo read bypasses readPanWindow (different window
                 // geometry) — wash the pan sentinel here too, or a declared
                 // void passes as a valid center/neighbor under the NaN
-                // working sentinel (review round-1 F1).
-                if ( std::isfinite( panSentinel ) )
+                // working sentinel (review round-1 F1). ±Inf joins the wash
+                // for the same R18-A reason: an Inf neighbour must not poison
+                // the box mean of surrounding pixels.
                 {
                     for ( size_t hi = 0; hi < halo.size(); ++hi )
-                        if ( halo[hi] == panSentinel )
+                        if ( !std::isfinite( halo[hi] ) )
+                            halo[hi] = std::numeric_limits<float>::quiet_NaN();
+                        else if ( std::isfinite( panSentinel ) && halo[hi] == panSentinel )
                             halo[hi] = std::numeric_limits<float>::quiet_NaN();
                 }
                 for ( int b = 0; b < nMsBands; ++b )

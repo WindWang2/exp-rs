@@ -16298,3 +16298,141 @@ sicnu_add_teaching_admin_test(test_teaching_admin_checkpoint_stamp_r16_c_t06)
 sicnu_add_teaching_admin_test(test_teaching_admin_grader_cli_budget_r16_c_t06)
 sicnu_add_teaching_admin_test(test_teaching_admin_rubric_weights_r16_c_t06)
 sicnu_add_teaching_admin_test(test_teaching_admin_student_id_authority_r16_c_t06)
+
+# ── R18-E: teaching/verification state truth & evidence feedback loop ──
+# Append-only registration block for the R18-E track's suites (docs:
+# .planning/r18-e-teaching). Added in RED→GREEN order per work package.
+function(sicnu_add_r18_e_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::teaching
+    sicnu_lab_runtime
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+  )
+  sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
+endfunction()
+sicnu_add_r18_e_test(test_r18_e_teaching_state)
+
+add_executable(test_r18_e_verifier_rules test_r18_e_verifier_rules.cpp)
+target_link_libraries(test_r18_e_verifier_rules PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verification
+)
+target_include_directories(test_r18_e_verifier_rules PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r18_e_verifier_rules PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_r18_e_verifier_rules TEST_PREFIX "test_r18_e_verifier_rules::")
+
+sicnu_add_r18_e_test(test_r18_e_recovery)
+
+sicnu_add_experiment_studio_test(test_r18_e_studio_session)
+
+# R18-E E03: CLI batch discovery parity + rubric/grader authority parity.
+add_executable(test_r18_e_batch_cli test_r18_e_batch_cli.cpp)
+target_link_libraries(test_r18_e_batch_cli PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_agent
+  sicnu_lab_batch
+)
+target_include_directories(test_r18_e_batch_cli PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r18_e_batch_cli PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_r18_e_batch_cli TEST_PREFIX "test_r18_e_batch_cli::")
+
+sicnu_add_teaching_admin_test(test_r18_e_rubric_parity)
+
+# R18-E E04/E06: grader AtMost window, faultlab baseline/verifier/identity.
+add_executable(test_r18_e_grader_faultlab test_r18_e_grader_faultlab.cpp)
+target_link_libraries(test_r18_e_grader_faultlab PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+  sicnu_faultlab
+)
+target_include_directories(test_r18_e_grader_faultlab PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r18_e_grader_faultlab PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_r18_e_grader_faultlab TEST_PREFIX "test_r18_e_grader_faultlab::")
+
+# R18-E E07: help severity fail-closed + presenter JSON/astral contracts.
+# Same helper/link shape as the r16-E help lane (Qt6::Core + Sicnu::help,
+# AUTOMOC ON, embedded help content) — the presenter and content store are
+# exercised exactly the way production loads them.
+add_executable(test_r18_e_help_contracts test_r18_e_help_contracts.cpp
+  ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
+)
+target_link_libraries(test_r18_e_help_contracts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::help
+)
+target_include_directories(test_r18_e_help_contracts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r18_e_help_contracts PROPERTIES
+  AUTOMOC ON
+)
+sicnu_discover_tests(test_r18_e_help_contracts TEST_PREFIX "test_r18_e_help_contracts::")
+
+# R18-E E05: sensitivity projection association + replicate-evidence flag.
+sicnu_add_experiment_studio_test(test_r18_e_studio_projections)
+
+# R18-E E03: checkpoint TOCTOU degradation + adopted-row visibility.
+sicnu_add_teaching_admin_test(test_r18_e_batch_checkpoint)
+
+# R18-E E01: teaching-side completion authority (D1 teaching half).
+sicnu_add_r18_e_test(test_r18_e_completion_ledger)
+
+# R18-E E10: the closed feedback loop (artifact → verdict → restart → ledger
+# → re-submission downgrade → re-validation) on the light closure.
+sicnu_add_r18_e_test(test_r18_e_golden_loop)
+# ── R19-02: Pi/MCP harness, workflow and plugin contract closure ──
+# Append-only registration block for this track's new suites (docs:
+# .planning/r19-02). One line per work package, added in RED→GREEN order.
+add_executable(test_r19_02_workflow_cancel_order test_r19_02_workflow_cancel_order.cpp)
+target_link_libraries(test_r19_02_workflow_cancel_order PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_workflow
+    sicnu_workflow_runtime
+    sicnu_operators
+    sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    Sicnu::data
+    Qt6::Core
+    qgis_core
+    GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r19_02_workflow_cancel_order PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r19_02_workflow_cancel_order PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_r19_02_workflow_cancel_order)

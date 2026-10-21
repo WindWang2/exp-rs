@@ -126,7 +126,7 @@
                 "enum": ["equals", "not_equals", "changed", "delta_ge", "delta_le", "in_range", "truth_is"]
               },
               "value": {
-                "description": "Operand for equals/not_equals/changed(implicit 0)/delta_ge/delta_le; boolean for truth_is."
+                "description": "Operand for equals/not_equals/delta_ge/delta_le (REQUIRED for these relations since R18-E: a value-less delta graded against the silent 0 default was a vacuous pass); optional (implicit 0) for changed; boolean for truth_is."
               },
               "range_lo": {
                 "type": "number"
