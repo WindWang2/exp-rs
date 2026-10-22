@@ -1551,6 +1551,18 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
         uncertaintyHeadIndex = static_cast<int>( h );
     }
     const int uncertaintyBandOffset = uncertaintyHeadIndex >= 0 ? totalBands : -1;
+    // R20-02: a declared output.uncertainty with no eligible head is a
+    // broken contract, not a silent downgrade — without this refusal the
+    // run published a product simply MISSING the declared band (#646
+    // declared-but-never-executed class). Refuse before any staging so no
+    // partial product appears at the output path.
+    if ( addUncertainty && uncertaintyHeadIndex < 0 )
+      throw RSOperatorError(
+        ErrorCode::InvalidParameter,
+        "output.uncertainty '" + uncertainty
+          + "' is declared but no model head has >= 2 channels — entropy/margin "
+            "need a per-class distribution; fix the manifest or drop the "
+            "uncertainty declaration" );
     if ( uncertaintyHeadIndex >= 0 )
       ++totalBands;
 
@@ -1979,6 +1991,25 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           // tile's planes — window-size planes under blending, so the band
           // blends exactly like every other output band.
           cv::Mat unc = headUncertainty( headPlanes, uncertainty );
+          // R20-02: NoData pixels fed all-NaN planes, and entropy/margin
+          // fold that to 0.0 = MAXIMUM confidence on the pixels the model
+          // knows the least about — the class bands get the sentinel
+          // restore below, the uncertainty band must get the identical
+          // restore or the two bands contradict each other.
+          {
+            const cv::Mat &tileMask = batchMasks[bi];
+            for ( int row = 0; row < bt.h; ++row )
+            {
+              const uchar *maskRow = tileMask.ptr<uchar>( row );
+              float *uncRow = unc.ptr<float>( row + ( blendThisHead ? halo : 0 ) );
+              for ( int col = 0; col < bt.w; ++col )
+              {
+                if ( maskRow[col] )
+                  uncRow[col + ( blendThisHead ? halo : 0 )] =
+                    std::numeric_limits<float>::quiet_NaN();
+              }
+            }
+          }
           if ( blendThisHead )
           {
             accumulator->add( uncertaintyBandOffset, unc, bt, halo, fedW, fedH );
@@ -2002,6 +2033,95 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     batchFedSize.clear();
     batchCores.clear();
     batchValidPixels.clear();
+  };
+
+  // R20-02: flush the pending accumulation buffers — the all-nodata
+  // deferral, the forward+stitch (with its OOM ladder) and the progress
+  // step, factored out of the size-full path so the edge-tile geometry
+  // break below can flush a homogeneous prefix through the IDENTICAL
+  // code path (per-tile semantics, ladder and accounting unchanged).
+  auto flushPendingBatch = [ & ]( int lastTileIndex )
+  {
+    // #705: a batch whose tiles hold ZERO valid pixels would run full forward
+    // passes only for every output pixel to be overwritten by the NoData
+    // restore — skip the forward and queue direct NoData writes instead
+    // (flushed as soon as the streaming writer exists).
+    if ( batchIsAllNoData( batchValidPixels ) )
+    {
+      skipped += static_cast<int>( batchCores.size() );
+      stats.tilesSkippedNoData += static_cast<int>( batchCores.size() );
+      deferredNoData.insert( deferredNoData.end(), batchCores.begin(), batchCores.end() );
+      batchMats.clear();
+      batchMasks.clear();
+      batchFedSize.clear();
+      batchCores.clear();
+      batchValidPixels.clear();
+      context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+                              "Tiled inference: " + std::to_string( done + skipped ) + "/"
+                                + std::to_string( totalTiles ) );
+      return;
+    }
+
+    // OOM ladder (Platform 4.0, goal §3): an over-budget batch is retried
+    // tile-by-tile — per-tile semantics never change, so the scientific
+    // contract holds (only the batching shrinks). At batch=1 an OOM is final
+    // and carries the diagnostic. The engine NEVER responds to OOM by
+    // shrinking tiles, changing resolution, or altering model semantics.
+    try
+    {
+      flushBatch( lastTileIndex );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      if ( classifyInferenceError( e.what() ) != InferenceFailureKind::OutOfMemory )
+        throw;
+      if ( batchMats.size() <= 1 )
+        throw RSOperatorError(
+          ErrorCode::ComputationError,
+          std::string( "inference ran out of memory even at batch=1 (tile " )
+            + std::to_string( tileSize )
+            + " px): free memory or use a smaller model - the engine never alters spatial "
+              "resolution or model semantics to fit memory. Original error: "
+            + e.what() );
+      ++stats.batchReductions;
+      // Serial retry: hold the pending batch, flush one tile per forward.
+      const std::vector<cv::Mat> pending = std::move( batchMats );
+      const std::vector<cv::Mat> pendingMasks = std::move( batchMasks );
+      const std::vector<std::pair<int, int>> pendingFed = std::move( batchFedSize );
+      const std::vector<CoreTile> pendingCores = std::move( batchCores );
+      const std::vector<int> pendingValid = std::move( batchValidPixels );
+      batchMats.clear();
+      batchMasks.clear();
+      batchFedSize.clear();
+      batchCores.clear();
+      batchValidPixels.clear();
+      for ( std::size_t i = 0; i < pending.size(); ++i )
+      {
+        batchMats.assign( 1, pending[i] );
+        batchMasks.assign( 1, pendingMasks[i] );
+        batchFedSize.assign( 1, pendingFed[i] );
+        batchCores.assign( 1, pendingCores[i] );
+        batchValidPixels.assign( 1, pendingValid[i] );
+        try
+        {
+          flushBatch( lastTileIndex );
+        }
+        catch ( const RSOperatorError &inner )
+        {
+          if ( classifyInferenceError( inner.what() ) == InferenceFailureKind::OutOfMemory )
+            throw RSOperatorError(
+              ErrorCode::ComputationError,
+              "inference ran out of memory even at batch=1 (tile " + std::to_string( tileSize )
+                + " px): free memory or use a smaller model — the engine never alters spatial "
+                  "resolution or model semantics to fit memory. Original error: "
+                + inner.what() );
+          throw;
+        }
+      }
+    }
+    context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+                            "Tiled inference: " + std::to_string( done + skipped ) + "/"
+                              + std::to_string( totalTiles ) );
   };
 
   try
@@ -2133,7 +2253,6 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     }
 
     cv::Mat tileMat = hwc.clone(); // detached from the reused window buffer
-    batchCores.push_back( t );
     if ( resizeToInput && ( winW != modelW || winH != modelH ) )
     {
       // cv::resize is limited to few channels; resample per band and merge.
@@ -2147,6 +2266,24 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       }
       cv::merge( channels, tileMat );
     }
+    // R20-02 (edge tiles): raster dims that are not a multiple of the
+    // tile size shrink the fed window of the last column/row tiles, so the
+    // batch would mix geometries and the forward refuses it ("mixed tile
+    // sizes") — the WHOLE run failed on rasters the engine should tile
+    // fine; every bundled segmentation manifest without resize:to_input
+    // hits it (batch_size >= 2). Flush the homogeneous prefix before
+    // admitting this tile (its core joins the vectors with the mat, AFTER
+    // the flush — flushPendingBatch clears all five batch vectors, so a
+    // core pushed here would be dropped and the arrays would desync).
+    // Correctness-first: a non-divisible edge splits batches at every
+    // geometry flip (row-major order: full/narrow alternate per row), so
+    // some batches shrink below batch_size; per-tile semantics, the OOM
+    // ladder and the output are untouched.
+    if ( !batchMats.empty()
+         && ( batchMats.front().cols != tileMat.cols
+              || batchMats.front().rows != tileMat.rows ) )
+      flushPendingBatch( tileIndex - 1 );
+    batchCores.push_back( t );
     batchMats.push_back( std::move( tileMat ) );
     batchMasks.push_back( invalidMask.clone() ); // detached from the per-tile scratch mask
     batchFedSize.emplace_back( resizeToInput ? modelW : winW, resizeToInput ? modelH : winH );
@@ -2156,86 +2293,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     if ( !batchFull )
       continue;
 
-    // #705: a batch whose tiles hold ZERO valid pixels would run full forward
-    // passes only for every output pixel to be overwritten by the NoData
-    // restore — skip the forward and queue direct NoData writes instead
-    // (flushed as soon as the streaming writer exists).
-    if ( batchIsAllNoData( batchValidPixels ) )
-    {
-      skipped += static_cast<int>( batchCores.size() );
-      stats.tilesSkippedNoData += static_cast<int>( batchCores.size() );
-      deferredNoData.insert( deferredNoData.end(), batchCores.begin(), batchCores.end() );
-      batchMats.clear();
-      batchMasks.clear();
-      batchFedSize.clear();
-      batchCores.clear();
-      batchValidPixels.clear();
-      context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
-                              "Tiled inference: " + std::to_string( done + skipped ) + "/"
-                                + std::to_string( totalTiles ) );
-      continue;
-    }
-
-    // OOM ladder (Platform 4.0, goal §3): an over-budget batch is retried
-    // tile-by-tile — per-tile semantics never change, so the scientific
-    // contract holds (only the batching shrinks). At batch=1 an OOM is final
-    // and carries the diagnostic. The engine NEVER responds to OOM by
-    // shrinking tiles, changing resolution, or altering model semantics.
-    try
-    {
-      flushBatch( tileIndex );
-    }
-    catch ( const RSOperatorError &e )
-    {
-      if ( classifyInferenceError( e.what() ) != InferenceFailureKind::OutOfMemory )
-        throw;
-      if ( batchMats.size() <= 1 )
-        throw RSOperatorError(
-          ErrorCode::ComputationError,
-          std::string( "inference ran out of memory even at batch=1 (tile " )
-            + std::to_string( tileSize )
-            + " px): free memory or use a smaller model - the engine never alters spatial "
-              "resolution or model semantics to fit memory. Original error: "
-            + e.what() );
-      ++stats.batchReductions;
-      // Serial retry: hold the pending batch, flush one tile per forward.
-      const std::vector<cv::Mat> pending = std::move( batchMats );
-      const std::vector<cv::Mat> pendingMasks = std::move( batchMasks );
-      const std::vector<std::pair<int, int>> pendingFed = std::move( batchFedSize );
-      const std::vector<CoreTile> pendingCores = std::move( batchCores );
-      const std::vector<int> pendingValid = std::move( batchValidPixels );
-      batchMats.clear();
-      batchMasks.clear();
-      batchFedSize.clear();
-      batchCores.clear();
-      batchValidPixels.clear();
-      for ( std::size_t i = 0; i < pending.size(); ++i )
-      {
-        batchMats.assign( 1, pending[i] );
-        batchMasks.assign( 1, pendingMasks[i] );
-        batchFedSize.assign( 1, pendingFed[i] );
-        batchCores.assign( 1, pendingCores[i] );
-        batchValidPixels.assign( 1, pendingValid[i] );
-        try
-        {
-          flushBatch( tileIndex );
-        }
-        catch ( const RSOperatorError &inner )
-        {
-          if ( classifyInferenceError( inner.what() ) == InferenceFailureKind::OutOfMemory )
-            throw RSOperatorError(
-              ErrorCode::ComputationError,
-              "inference ran out of memory even at batch=1 (tile " + std::to_string( tileSize )
-                + " px): free memory or use a smaller model — the engine never alters spatial "
-                  "resolution or model semantics to fit memory. Original error: "
-                + inner.what() );
-          throw;
-        }
-      }
-    }
-    context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
-                            "Tiled inference: " + std::to_string( done + skipped ) + "/"
-                              + std::to_string( totalTiles ) );
+    flushPendingBatch( tileIndex );
   }
 
   // Entire raster is NoData: no regular batch ever ran, so the writer (and
@@ -3620,6 +3678,16 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         uncertaintyHeadIndex = static_cast<int>( h );
     }
     const int uncertaintyBandOffset = uncertaintyHeadIndex >= 0 ? totalBands : -1;
+    // R20-02: same refusal as the single-input lane — a declared
+    // output.uncertainty with no >= 2-channel head must fail loudly, not
+    // publish without the declared band.
+    if ( addUncertainty && uncertaintyHeadIndex < 0 )
+      throw RSOperatorError(
+        ErrorCode::InvalidParameter,
+        "output.uncertainty '" + uncertainty
+          + "' is declared but no model head has >= 2 channels — entropy/margin "
+            "need a per-class distribution; fix the manifest or drop the "
+            "uncertainty declaration" );
     if ( uncertaintyHeadIndex >= 0 )
       ++totalBands;
 
@@ -3752,6 +3820,23 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         if ( isUncertaintyHead && uncertaintyBandOffset >= 0 )
         {
           cv::Mat unc = headUncertainty( headPlanes, uncertainty );
+          // R20-02: same NoData restore as the class planes (core-sized
+          // planes here, no halo offset) — entropy/margin fold all-NaN
+          // planes to 0.0 = MAXIMUM confidence otherwise, contradicting
+          // the NaN the class bands carry for those pixels.
+          {
+            const cv::Mat &tileMask = batchMasks[bi];
+            for ( int row = 0; row < bt.h; ++row )
+            {
+              const uchar *maskRow = tileMask.ptr<uchar>( row );
+              float *uncRow = unc.ptr<float>( row );
+              for ( int col = 0; col < bt.w; ++col )
+              {
+                if ( maskRow[col] )
+                  uncRow[col] = std::numeric_limits<float>::quiet_NaN();
+              }
+            }
+          }
           const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
                                                  currentTileIndex, totalTiles };
           if ( !writer->writeTile( uncertaintyBandOffset + 1, writeTile, unc.ptr<float>() ) )

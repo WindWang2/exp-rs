@@ -709,7 +709,9 @@ TEST_CASE( "Snapshot reports failure and cleans up when the governance DB copy f
     // RED on master: report.ok stays true and the "snapshot" holds nothing
     // but the project file — a restore would silently lose all governance.
     CHECK_FALSE( report.ok );
-    CHECK( report.error.contains( QStringLiteral( "governance" ) ) );
+    // "DB copy failed" pins the copy branch specifically (the checkpoint
+    // refusal path above carries a different message).
+    CHECK( report.error.contains( QStringLiteral( "DB copy failed" ) ) );
     CHECK( QDir( snapshotDir )
                .entryList( QStringList{ QStringLiteral( "snap-*.snapshot" ) }, QDir::Dirs )
                .isEmpty() );

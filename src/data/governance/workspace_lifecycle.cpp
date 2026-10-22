@@ -99,7 +99,18 @@ SnapshotReport SnapshotService::createSnapshot( const QString &projectFile, cons
                 QDir( destination ).removeRecursively();
                 return report;
             }
-            QFile::copy( dbPath, QDir( destination ).filePath( QFileInfo( dbPath ).fileName() ) );
+            // R20-02: the DB copy gets the same failure handling as the
+            // project-file copy above — an unchecked failure left ok=true
+            // with a snapshot that holds NO governance state, and a restore
+            // would silently lose every governed write.
+            if ( !QFile::copy( dbPath, QDir( destination ).filePath( QFileInfo( dbPath ).fileName() ) ) )
+            {
+                report.error = QStringLiteral(
+                    "cannot copy the governance store into the snapshot (DB copy failed "
+                    "for %1)" ).arg( dbPath );
+                QDir( destination ).removeRecursively();
+                return report;
+            }
             // After a successful TRUNCATE the log is folded into the main DB
             // file and reset — copying the DB file alone is the consistency
             // contract (issue #751). The -shm sidecar is never copied:
