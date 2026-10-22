@@ -166,24 +166,38 @@ TEST_CASE( "malformed grading rule and weight mismatch", "[teaching_admin][rubri
     auto r = validateLabRules( badRules );
     REQUIRE_FALSE( r.ok );
 
+    // #1652-1 (R20-05): validateProcessRubric delegates to the grader's own
+    // GradingRubric::fromJson, so the admin verdict and the engine verdict are
+    // ONE verdict. The rubric below is engine-shaped (dimensions[].criteria[]
+    // with maxPoints) but its dimension weight disagrees with the sum of its
+    // criteria maxPoints — the engine refuses it, so the admin console must
+    // refuse it too (this used to grade a flat dialect the engine rejects).
     QJsonObject process{
         { QStringLiteral( "schema" ), QStringLiteral( "sicnu.grader.rubric/1" ) },
-        { QStringLiteral( "criteria" ),
+        { QStringLiteral( "rubricId" ), QStringLiteral( "r-core-1" ) },
+        { QStringLiteral( "revision" ), 1 },
+        { QStringLiteral( "totalPoints" ), 10.0 },
+        { QStringLiteral( "dimensions" ),
           QJsonArray{
-              QJsonObject{ { QStringLiteral( "id" ), QStringLiteral( "c1" ) },
-                           { QStringLiteral( "kind" ), QStringLiteral( "stage" ) },
-                           { QStringLiteral( "weight" ), 0.4 } },
-              QJsonObject{ { QStringLiteral( "id" ), QStringLiteral( "c2" ) },
-                           { QStringLiteral( "kind" ), QStringLiteral( "metric" ) },
-                           { QStringLiteral( "weight" ), 0.4 },
-                           { QStringLiteral( "metricKey" ), QStringLiteral( "oa" ) } },
+              QJsonObject{ { QStringLiteral( "dimensionId" ), QStringLiteral( "d1" ) },
+                            { QStringLiteral( "weight" ), 7.0 },
+                            { QStringLiteral( "criteria" ),
+                              QJsonArray{ QJsonObject{
+                                  { QStringLiteral( "criterionId" ), QStringLiteral( "c1" ) },
+                                  { QStringLiteral( "maxPoints" ), 6.0 },
+                                  { QStringLiteral( "kind" ), QStringLiteral( "stage" ) },
+                                  { QStringLiteral( "evidenceKey" ), QStringLiteral( "process.stage" ) },
+                                  { QStringLiteral( "stage" ),
+                                    QJsonObject{ { QStringLiteral( "expectedState" ), QStringLiteral( "completed" ) },
+                                                  { QStringLiteral( "minDistinct" ), 1 } } } } } } },
           } },
     };
     r = validateProcessRubric( process );
     REQUIRE_FALSE( r.ok );
     bool weight = false;
     for ( const auto &i : r.issues )
-        if ( i.code == QLatin1String( "weight_mismatch" ) )
+        if ( i.code == QLatin1String( "malformed_grading_rule" )
+             && i.path.contains( QLatin1String( "weight" ) ) )
             weight = true;
     REQUIRE( weight );
 }

@@ -51,6 +51,10 @@ target_link_libraries(sicnu_teaching_admin
     # authority canonicalizeJsonRfc8785 (ONE serializer for every digest
     # path — curriculum/labSpec/rules/pack/release-report bytes included).
     sicnu_data
+    # #1652-1 (R20-05): validateProcessRubric delegates to the grader leaf's
+    # own GradingRubric::fromJson — ONE rubric truth, the same discipline as
+    # the lab-pack delegation above (a Qt-free leaf; no Qt/GDAL pulled in).
+    sicnu_grader
 )
 
 foreach(SICNU_TA_FORBIDDEN_LINK Qt6::Widgets qgis_gui Qt6::Network Sicnu::app)

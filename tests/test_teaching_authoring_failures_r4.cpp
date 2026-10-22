@@ -133,14 +133,27 @@ TEST_CASE( "authoring r4: duplicate ids in rules and curriculum are typed per po
 TEST_CASE( "authoring r4: process rubric requires a metric per metric-kind criterion",
            "[teaching_r4][authoring][rubric]" )
 {
+    // #1652-1 (R20-05): validateProcessRubric delegates to the grader's own
+    // parser, so the criterion dialect is the engine's dimensions[].criteria[].
+    // A metric-kind criterion without its metric expectation object is
+    // refused by the ENGINE ("metric criterion requires a metric object") —
+    // the admin console surfaces that refusal instead of its former flat
+    // "missing_metric" over a dialect the engine never read.
     const ValidationResult rubric = validateProcessRubric( qjson( R"JSON({
       "schema": "sicnu.grader.rubric/1",
-      "criteria": [
-        { "id": "c1", "kind": "metric", "weight": 1.0 }
+      "rubricId": "r-r4-metric",
+      "revision": 1,
+      "totalPoints": 10.0,
+      "dimensions": [
+        { "dimensionId": "d1", "weight": 10.0,
+          "criteria": [
+            { "criterionId": "c1", "maxPoints": 10.0, "kind": "metric",
+              "evidenceKey": "metric.oa" }
+          ] }
       ]
     })JSON" ) );
     CHECK_FALSE( rubric.ok );
-    CHECK( hasIssue( rubric, QStringLiteral( "missing_metric" ), QStringLiteral( "criteria[0]" ) ) );
+    CHECK( hasIssue( rubric, QStringLiteral( "malformed_grading_rule" ), QStringLiteral( "metric" ) ) );
 }
 
 TEST_CASE( "authoring r4: preflight report keeps ok=false with a stable canonical digest",
