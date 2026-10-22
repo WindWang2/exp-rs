@@ -234,3 +234,39 @@ TEST_CASE( "repeated identical workflow submissions serialize via the run lock",
     WorkflowRunLock next( lockPath );
     REQUIRE( next.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
 }
+
+// R20-02: put() must self-heal a torn object under a content address — a
+// crash between rename and durability, or external bit rot, otherwise
+// poisons that digest FOREVER (every re-put hits the mismatch branch and
+// returns nullopt, and nothing evicts an unreferenced object).
+TEST_CASE( "put() re-stages a corrupted object instead of permanently refusing the digest",
+           "[fault][cache_corruption][reput]" )
+{
+    PooledExecutionFixture fx;
+
+    auto first = fx.pool.put( fx.payload, true );
+    REQUIRE( first );
+
+    // Tear the stored bytes (simulates a crash between publish and
+    // durability, or external corruption).
+    {
+        QFile torn( first->poolPath );
+        REQUIRE( torn.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        torn.write( "TORN" );
+        torn.close();
+    }
+
+    // RED on master: the existing-object branch sees digest != expected and
+    // returns nullopt — the digest is poisoned until manual intervention.
+    auto second = fx.pool.put( fx.payload, true );
+    REQUIRE( second );
+    CHECK( second->digest == first->digest );
+    CHECK( second->poolPath == first->poolPath );
+    CHECK( second->size == QByteArray( "cacheable-bytes" ).size() );
+
+    // The healed object really carries the payload bytes again.
+    QFile healed( second->poolPath );
+    REQUIRE( healed.open( QIODevice::ReadOnly ) );
+    CHECK( healed.readAll() == QByteArray( "cacheable-bytes" ) );
+    healed.close();
+}

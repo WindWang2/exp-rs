@@ -642,3 +642,8 @@ r6_dev.cmd
 .planning/r19-03/*
 !.planning/r19-03/*.md
 *.agent-build.lock
+
+# R20-02 track (geospatial data / model runtime / persistence) planning artifacts (markdown only).
+!.planning/zcode-r20-02/
+.planning/zcode-r20-02/*
+!.planning/zcode-r20-02/*.md

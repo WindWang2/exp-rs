@@ -676,3 +676,45 @@ TEST_CASE( "Run mirror records truthful states and preserves run documents (#754
     REQUIRE( std::none_of( orphansAfter.cbegin(), orphansAfter.cend(),
                            [ & ]( const ResultRecord &r ) { return r.id == intentional.id; } ) );
 }
+
+// R20-02: a snapshot whose governance-DB copy fails must not report ok —
+// the restore side would see a project file with no governance state.
+TEST_CASE( "Snapshot reports failure and cleans up when the governance DB copy fails",
+           "[workspace][snapshot][dbcopy]" )
+{
+    Fixture fx;
+    QTemporaryDir dir;
+    const QString projectFile = dir.filePath( QStringLiteral( "snap.qgs" ) );
+    REQUIRE( QFile( projectFile ).open( QIODevice::WriteOnly ) );
+    const QString snapshotDir = dir.filePath( QStringLiteral( "snapshots" ) );
+
+    // Governed write so the store carries state worth snapshotting.
+    GovernedAsset tagged;
+    tagged.assetId = QStringLiteral( "snap-dbcopy-1" );
+    tagged.canonicalSource = QStringLiteral( "/data/snap-dbcopy-1.tif" );
+    tagged.kind = QStringLiteral( "raster" );
+    REQUIRE( fx.service.store().upsertAsset( tagged ).operator bool() );
+
+    // Make the DB file uncopyable for ANY user (root included): move the
+    // real file aside and put a directory on its path. The open SQLite
+    // handle keeps serving the moved inode, so the checkpoint succeeds and
+    // createSnapshot reaches the copy step — which cannot read a directory.
+    const QString dbPath = fx.service.store().storePath();
+    const QString dbMoved = dbPath + QStringLiteral( ".real" );
+    REQUIRE( QFile::rename( dbPath, dbMoved ) );
+    REQUIRE( QDir().mkdir( dbPath ) );
+
+    const SnapshotReport report = fx.snapshots.createSnapshot( projectFile, snapshotDir, 2 );
+
+    // RED on master: report.ok stays true and the "snapshot" holds nothing
+    // but the project file — a restore would silently lose all governance.
+    CHECK_FALSE( report.ok );
+    CHECK( report.error.contains( QStringLiteral( "governance" ) ) );
+    CHECK( QDir( snapshotDir )
+               .entryList( QStringList{ QStringLiteral( "snap-*.snapshot" ) }, QDir::Dirs )
+               .isEmpty() );
+
+    // Restore the store layout for fixture teardown.
+    REQUIRE( QDir().rmdir( dbPath ) );
+    REQUIRE( QFile::rename( dbMoved, dbPath ) );
+}
