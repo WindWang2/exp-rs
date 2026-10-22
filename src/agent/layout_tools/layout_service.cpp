@@ -1357,10 +1357,14 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
   // R18-D: NaN-safe form (the negated range, mirroring export.cpp/produce).
   // `dpi <= 0 || dpi > 1200` waved NaN through both comparisons into
   // NaN-sized raster math downstream.
-  if ( !( dpi >= 1.0 && dpi <= 1200.0 ) )
+  // R20-04: the lower bound matches the governed cartography export chain
+  // (export.cpp/produce.cpp pin [72, 1200]) — the same QGIS export engine
+  // must not accept a sub-delivery dpi on one agent seam and refuse it on
+  // the other.
+  if ( !( dpi >= 72.0 && dpi <= 1200.0 ) )
   {
     if ( error )
-      *error = QStringLiteral( "DPI must be between 1 and 1200" );
+      *error = QStringLiteral( "DPI must be between 72 and 1200" );
     return false;
   }
 
