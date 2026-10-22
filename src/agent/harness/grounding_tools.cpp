@@ -474,9 +474,11 @@ class DecisionRecordTool final : public SpatialTool
     {
       // Type-gated reads: a wrong-typed action/subject/... must come back
       // as the typed INVALID_PARAMETER refusal, never a Json::LogicError
-      // thrown past this tool into the MCP boundary's generic catch
-      // (which would degrade the tool's error contract). Absent optional
-      // fields keep their defaults.
+      // thrown past this tool (which would degrade the tool's error
+      // contract on the direct-dispatch paths). Absent optional fields
+      // keep their defaults; an EXPLICIT null now counts as absent too
+      // (pre-fix it coerced to ""), matching how every sibling tool
+      // treats nulls.
       const auto optionalString = [ &input ]( const char *key, const char *fallback,
                                               bool *wrongType ) -> std::string {
         const Json::Value &value = input.get( key, Json::Value() );

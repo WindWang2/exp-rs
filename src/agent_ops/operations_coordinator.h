@@ -37,9 +37,9 @@ struct OpsRunRequest {
     std::string domain = "research";
     std::string role;
     std::string journalDirectory; ///< empty = in-memory only
-/// Fallback when a diagnostic carries no per-proposal risk evidence. Empty
-    /// (the default) means UNKNOWN, and unknown resolves to the STRICTEST
-    /// class downstream — never shape_preserving.
+    /// Fallback when a diagnostic carries no per-proposal risk evidence.
+    /// Empty (the default) means UNKNOWN, and unknown resolves to the
+    /// STRICTEST class downstream — never shape_preserving.
     std::string leadingRepairRiskClass;
     /// Minted repair-approval token (optional). Verified against this
     /// coordinator, the last projected recovery plan and the launch clock;

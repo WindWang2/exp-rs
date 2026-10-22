@@ -410,6 +410,16 @@ TEST_CASE( "D8 validator: malformed sidecars are rejected with named problems",
     doc[ "schema_version" ] = Json::Value( Json::arrayValue );
     CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
 
+    // Out-of-int32-range integers pass isIntegral() but make asInt()
+    // itself throw — isInt() is the range-safe gate (R1 P1-1).
+    doc = base();
+    doc[ "schema_version" ] = 3000000000LL;
+    CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
+
+    doc = base();
+    doc[ "schema_version" ] = Json::Value( 4294967295.0 );
+    CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
+
     doc = base();
     doc[ "id" ] = Json::Value( Json::objectValue );
     CHECK( hasProblemContaining( problems( doc ), "id" ) );
@@ -471,6 +481,25 @@ TEST_CASE( "D8 loader: wrong-typed fields fail closed per file, never abort the 
     const std::string kRepoKnowledgeDir = std::string( kSourceDir ) +
       "/data/agent/capabilities";
 
+    // RAII restore: a failed REQUIRE inside a SECTION must not leave the
+    // process-wide singletons pointed at a destroyed QTemporaryDir —
+    // later TEST_CASEs that skip Bootstrap would fail spuriously (R1 P3-5).
+    struct RestoreDirs
+    {
+        std::string capabilityDir;
+        std::string relationsPath;
+        std::string knowledgeDir;
+        ~RestoreDirs()
+        {
+            CapabilityCatalog::instance().setDirectory( capabilityDir );
+            CapabilityCatalog::instance().reload();
+            CapabilityRelations::instance().setFilePath( relationsPath );
+            CapabilityRelations::instance().reload();
+            CapabilityKnowledge::instance().setDirectory( knowledgeDir );
+            CapabilityKnowledge::instance().reload();
+        }
+    } restore{ kRepoCapabilityDir, kRepoRelations, kRepoKnowledgeDir };
+
     SECTION( "catalog: string schema_version in one file costs only that file" )
     {
         CapabilityCatalog &catalog = CapabilityCatalog::instance();
@@ -516,6 +545,36 @@ TEST_CASE( "D8 loader: wrong-typed fields fail closed per file, never abort the 
             if ( problem.find( "id" ) != std::string::npos )
                 sawIdProblem = true;
         CHECK( sawIdProblem );
+
+        catalog.setDirectory( kRepoCapabilityDir );
+        catalog.reload();
+    }
+
+    SECTION( "catalog: a non-object sidecar file costs only that file" )
+    {
+        // validateEntry records "sidecar must be an object", but reload()
+        // then indexed parsed["id"] with the NON-CONST operator[] — on an
+        // array document that is resolveReference (assert/throw) and used
+        // to escape the per-file gate (R1 P1-2).
+        CapabilityCatalog &catalog = CapabilityCatalog::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        writeJson( dir.filePath( "good.json" ), baseSidecar() );
+        Json::Value array( Json::arrayValue );
+        array.append( "not" );
+        array.append( "an object" );
+        writeJson( dir.filePath( "array_file.json" ), array );
+
+        catalog.setDirectory( dir.path().toStdString() );
+        int loaded = 0;
+        REQUIRE_NOTHROW( loaded = catalog.reload() ); // RED pre-R1-fix: throws
+        CHECK( loaded == 1 );
+        bool sawShapeProblem = false;
+        for ( const std::string &problem : catalog.loadProblems() )
+            if ( problem.find( "must be an object" ) != std::string::npos )
+                sawShapeProblem = true;
+        CHECK( sawShapeProblem );
 
         catalog.setDirectory( kRepoCapabilityDir );
         catalog.reload();

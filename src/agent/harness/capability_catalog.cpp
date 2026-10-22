@@ -651,6 +651,13 @@ int CapabilityCatalog::reload()
     const std::string where = it.fileName().toStdString();
     for ( const std::string &problem : validateEntry( parsed ) )
       mLoadProblems.push_back( where + ": " + problem );
+    // A non-object document never reaches the id read: validateEntry has
+    // already recorded "sidecar must be an object", and the NON-const
+    // operator[] below on an array/scalar document is resolveReference
+    // (assert/throw) — the exact escape the per-file gate exists to stop
+    // (R1 P1-2).
+    if ( !parsed.isObject() )
+      continue;
     // Type-gated like validateEntry's own id read: asString() on an
     // object/array id throws past the problems gate and aborts the scan.
     const std::string id =
@@ -930,8 +937,10 @@ std::vector<std::string> CapabilityCatalog::validateEntry( const Json::Value &si
   // out of validateEntry: the loader's contract is "record problems, skip
   // the file" — a throw aborts the whole reload() scan and is a process
   // kill on non-MCP callers (GUI catalog panel / copilot dispatch).
+  // isInt(), not isIntegral(): int64/uint64/real values outside the int32
+  // range pass isIntegral() but make asInt() itself throw (R1 P1-1).
   const Json::Value &version = sidecar[ "schema_version" ];
-  if ( !version.isIntegral() || version.asInt() != 2 )
+  if ( !version.isInt() || version.asInt() != 2 )
     problems.push_back( "schema_version must be 2" );
 
   for ( const std::string &key : block.getMemberNames() )

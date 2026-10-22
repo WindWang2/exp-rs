@@ -1083,38 +1083,40 @@ TEST_CASE( "Eval: intent ambiguity resolves through typed candidates and decisio
 TEST_CASE( "decision_record refuses wrong-typed parameters with a typed error",
            "[harness][decision]" )
 {
-    // Pre-fix, a wrong-typed action/subject/decision_id threw
-    // Json::LogicError past the tool into the MCP boundary's generic catch
-    // (degrading the tool's error contract to an unspecified failure). The
-    // contract is a typed INVALID_PARAMETER naming the field.
+    // Pre-fix, a wrong-typed field threw Json::LogicError out of execute()
+    // on every direct-dispatch path (registry execute() callers such as
+    // workflow_planner/capability_graph, and tests); via MCP the
+    // schema-declared props were already stopped by the registry's
+    // validateAgainstRequired seam, but the undeclared `status` slipped
+    // through. Either way the throw degraded the tool's error contract.
+    // The contract is a typed INVALID_PARAMETER naming the field.
+    const auto typedRefusal = []( const SpatialToolResult &result, const char *field ) {
+        CHECK_FALSE( result.success );
+        CHECK( result.error.find( field ) != std::string::npos );
+        CHECK( result.errorCode == error_codes::kInvalidParameter );
+        CHECK( result.errorCategory == "validation" );
+    };
+
     Json::Value badActionDoc;
     badActionDoc["action"] = Json::Value( Json::arrayValue );
-    const SpatialToolResult badAction = callTool( "harness:decision_record", badActionDoc );
-    CHECK_FALSE( badAction.success );
-    CHECK( badAction.error.find( "action" ) != std::string::npos );
+    typedRefusal( callTool( "harness:decision_record", badActionDoc ), "action" );
 
     Json::Value badSubjectDoc;
     badSubjectDoc["action"] = "record";
     badSubjectDoc["subject"] = Json::Value( Json::objectValue );
-    const SpatialToolResult badSubject = callTool( "harness:decision_record", badSubjectDoc );
-    CHECK_FALSE( badSubject.success );
-    CHECK( badSubject.error.find( "subject" ) != std::string::npos );
+    typedRefusal( callTool( "harness:decision_record", badSubjectDoc ), "subject" );
 
     Json::Value badIdDoc;
     badIdDoc["action"] = "resolve";
     badIdDoc["decision_id"] = 7;
-    const SpatialToolResult badId = callTool( "harness:decision_record", badIdDoc );
-    CHECK_FALSE( badId.success );
-    CHECK( badId.error.find( "decision_id" ) != std::string::npos );
+    typedRefusal( callTool( "harness:decision_record", badIdDoc ), "decision_id" );
 
     // Wrong-typed optional fields are refused too, not silently defaulted.
     Json::Value badKindDoc;
     badKindDoc["action"] = "record";
     badKindDoc["subject"] = "s";
     badKindDoc["kind"] = Json::Value( Json::arrayValue );
-    const SpatialToolResult badKind = callTool( "harness:decision_record", badKindDoc );
-    CHECK_FALSE( badKind.success );
-    CHECK( badKind.error.find( "kind" ) != std::string::npos );
+    typedRefusal( callTool( "harness:decision_record", badKindDoc ), "kind" );
 }
 
 TEST_CASE( "Eval: understanding cache and plan binding persist typed context",

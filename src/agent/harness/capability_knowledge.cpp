@@ -536,6 +536,9 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
   if ( entry.isMember( "kind" ) && !kindValue.isString() )
     problems.push_back( "'kind' must be a string" );
   const bool isFamilyDefault = kindValue.isString() && kindValue.asString() == "family_default";
+  // extends deliberately keeps the wider null-tolerant vocabulary (null
+  // and absent both mean "no extension"); id/family/kind above reject an
+  // EXPLICIT null as wrong-typed. Do not harmonize these two behaviors.
   const Json::Value &extendsValue = entry.get( "extends", Json::Value() );
   if ( !extendsValue.isNull() && !extendsValue.isString() )
     problems.push_back( "'extends' must be a string" );
