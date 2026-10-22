@@ -91,6 +91,23 @@ TEST_CASE( "frame caps refuse oversize payloads on both sides", "[ipc][frame]" )
     REQUIRE( IpcFrame::read( *b, error.empty() ? error : error, tiny, 500, error )
              == IpcFrame::ReadStatus::TooLarge );
     REQUIRE( error.find( "E6003" ) != std::string::npos );
+
+    // The salvaged prefix rides out in `payload`: the channel's TooLarge
+    // hexdump ("stream head: ...") needs real bytes — pre-fix the buffer
+    // was cleared and the dump was always empty.
+    std::unique_ptr<IIpcStream> c;
+    std::unique_ptr<IIpcStream> d;
+    makeIpcMemoryPipePair( c, d );
+    const uint8_t prefix2[4] = { 0xAB, 0xCD, 0xEF, 0x7F };
+    REQUIRE( c->writeAll( reinterpret_cast<const char *>( prefix2 ), 4, error ) );
+    std::string salvaged;
+    REQUIRE( IpcFrame::read( *d, salvaged, tiny, 500, error )
+             == IpcFrame::ReadStatus::TooLarge );
+    REQUIRE( salvaged.size() == 4 );
+    CHECK( static_cast<unsigned char>( salvaged[0] ) == 0xAB );
+    CHECK( static_cast<unsigned char>( salvaged[1] ) == 0xCD );
+    CHECK( static_cast<unsigned char>( salvaged[2] ) == 0xEF );
+    CHECK( static_cast<unsigned char>( salvaged[3] ) == 0x7F );
 }
 
 TEST_CASE( "frame length prefix bytes 128-255 decode without sign extension", "[ipc][frame]" )
@@ -243,6 +260,63 @@ TEST_CASE( "envelope validation refuses malformed input", "[ipc][envelope]" )
     future["newFieldInV1_1"] = true;
     REQUIRE( Ipc::decodeEnvelope( future, decoded, error ) );
     REQUIRE( decoded.error.code == "E6004" );
+}
+
+TEST_CASE( "successful response envelope refuses a non-object result (E6002)", "[ipc][envelope]" )
+{
+    // Worker frames are untrusted input: the host's own contract declares
+    // the worker process untrusted (plugin_host_process_runtime.cpp), and
+    // host consumers index `outcome.result` with jsoncpp's NON-CONST
+    // operator[] (plugin_host_proxies.cpp HostProcessOperatorProxy::run,
+    // plugin_host_process_runtime.cpp loadPlugin/inspectUiSchema). On a
+    // non-object value that operator is resolveReference UB — a debug
+    // JSON_ASSERT abort or a wild-pointer read through the value union —
+    // which no try/catch on the consumer path can intercept. The only
+    // enforceable seam is decode time, mirroring the Request side's
+    // params-must-be-an-object gate.
+    std::string error;
+    Ipc::Envelope decoded;
+
+    Json::Value json( Json::objectValue );
+    json["v"] = 1;
+    json["type"] = "response";
+    json["id"] = 1;
+    json["ok"] = true;
+
+    json["result"] = "boom";
+    REQUIRE_FALSE( Ipc::decodeEnvelope( json, decoded, error ) );
+    REQUIRE( error.find( "E6002" ) != std::string::npos );
+    REQUIRE( error.find( "result" ) != std::string::npos );
+
+    json["result"] = Json::Value( Json::arrayValue );
+    REQUIRE_FALSE( Ipc::decodeEnvelope( json, decoded, error ) );
+
+    json["result"] = 42;
+    REQUIRE_FALSE( Ipc::decodeEnvelope( json, decoded, error ) );
+
+    json["result"] = true;
+    REQUIRE_FALSE( Ipc::decodeEnvelope( json, decoded, error ) );
+
+    // null stays legal: worker code paths default-construct
+    // `Json::Value result;` (nullValue) before filling it
+    // (plugin_host_worker_main.cpp model-runtime load), and a null result
+    // is safe to index — jsoncpp promotes null to an object on the first
+    // non-const access. Same object-or-null vocabulary as `params`.
+    json["result"] = Json::Value();
+    REQUIRE( Ipc::decodeEnvelope( json, decoded, error ) );
+
+    // Absent result defaults to an empty object.
+    json.removeMember( "result" );
+    REQUIRE( Ipc::decodeEnvelope( json, decoded, error ) );
+    REQUIRE( decoded.result.isObject() );
+    REQUIRE( decoded.result.empty() );
+
+    // Object results keep round-tripping.
+    Json::Value okResult( Json::objectValue );
+    okResult["done"] = true;
+    json["result"] = okResult;
+    REQUIRE( Ipc::decodeEnvelope( json, decoded, error ) );
+    REQUIRE( decoded.result["done"].asBool() );
 }
 
 TEST_CASE( "protocol compatibility gate", "[ipc][envelope]" )
