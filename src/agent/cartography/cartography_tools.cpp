@@ -567,6 +567,9 @@ class ListTokenSetsTool final : public SpatialTool
     {
       Json::Value schema( Json::objectValue );
       schema["type"] = "object";
+      // CT-6 (R19-02): canonical raw form carries an (empty) properties
+      // object so the registry leg matches the pinned surface snapshot.
+      schema["properties"] = Json::Value( Json::objectValue );
       return schema;
     }
     Json::Value outputSchema() const override
@@ -725,6 +728,9 @@ class RuleCatalogTool final : public SpatialTool
     {
       Json::Value schema( Json::objectValue );
       schema["type"] = "object";
+      // CT-6 (R19-02): canonical raw form carries an (empty) properties
+      // object so the registry leg matches the pinned surface snapshot.
+      schema["properties"] = Json::Value( Json::objectValue );
       return schema;
     }
     Json::Value outputSchema() const override
@@ -762,6 +768,9 @@ class CatalogIndexTool final : public SpatialTool
     {
       Json::Value schema( Json::objectValue );
       schema["type"] = "object";
+      // CT-6 (R19-02): canonical raw form carries an (empty) properties
+      // object so the registry leg matches the pinned surface snapshot.
+      schema["properties"] = Json::Value( Json::objectValue );
       return schema;
     }
     Json::Value outputSchema() const override
@@ -882,6 +891,9 @@ class ChartListTool final : public SpatialTool
     {
       Json::Value schema( Json::objectValue );
       schema["type"] = "object";
+      // CT-6 (R19-02): canonical raw form carries an (empty) properties
+      // object so the registry leg matches the pinned surface snapshot.
+      schema["properties"] = Json::Value( Json::objectValue );
       return schema;
     }
     Json::Value outputSchema() const override
@@ -1605,6 +1617,9 @@ class DiffTemplatesTool final : public SpatialTool
     Json::Value inputSchema() const override
     {
       Json::Value schema( Json::objectValue );
+      // CT-6 (R19-02): canonical raw form declares the object root type so
+      // the registry leg matches the pinned surface snapshot.
+      schema["type"] = "object";
       Json::Value props( Json::objectValue );
       props["before"]["type"] = "string";
       props["after"]["type"] = "string";
@@ -1666,6 +1681,9 @@ class ExportTool final : public SpatialTool
     Json::Value inputSchema() const override
     {
       Json::Value schema( Json::objectValue );
+      // CT-6 (R19-02): canonical raw form declares the object root type so
+      // the registry leg matches the pinned surface snapshot.
+      schema["type"] = "object";
       Json::Value props( Json::objectValue );
       props["layout"]["type"] = "string";
       props["format"]["type"] = "string";
@@ -1777,6 +1795,9 @@ class ExplainTool final : public SpatialTool
     Json::Value inputSchema() const override
     {
       Json::Value schema( Json::objectValue );
+      // CT-6 (R19-02): canonical raw form declares the object root type so
+      // the registry leg matches the pinned surface snapshot.
+      schema["type"] = "object";
       Json::Value props( Json::objectValue );
       props["mapspec"]["type"] = "object";
       props["item_id"]["type"] = "string";
