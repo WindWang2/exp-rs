@@ -911,4 +911,74 @@ QJsonObject regradeTraceability( const BatchAssessmentReport &report )
     };
 }
 
+bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report,
+                              QString &error, QString *warning )
+{
+    // Restored from the r15-E fix lost in merge c8f5e0805422: the console's
+    // class summary reads the PUBLISHED report, and a read failure used to
+    // render as "0 submissions / 0% completion" instead of as an error.
+    // Bounded read, same discipline as the checkpoint loader: a tampered
+    // multi-GB file beside the submissions degrades to a typed error rather
+    // than an OOM slurp.
+    constexpr qint64 kMaxReportBytes = 64 * 1024 * 1024;
+    const BoundedReadResult read = readBounded( path, kMaxReportBytes );
+    if ( read.oversize )
+    {
+        error = QStringLiteral( "batch report at %1 exceeds %2 bytes" )
+                  .arg( path ).arg( kMaxReportBytes );
+        return false;
+    }
+    if ( read.unreadable )
+    {
+        error = QStringLiteral( "cannot read batch report at %1" ).arg( path );
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson( read.bytes, &parseError );
+    if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+    {
+        error = QStringLiteral( "%1 is not valid JSON (offset %2: %3)" )
+                  .arg( path ).arg( parseError.offset ).arg( parseError.errorString() );
+        return false;
+    }
+    const QJsonObject o = doc.object();
+    if ( !o.value( QStringLiteral( "rows" ) ).isArray() )
+    {
+        error = QStringLiteral( "%1 is not a batch report (no rows array)" ).arg( path );
+        return false;
+    }
+
+    report = BatchAssessmentReport{};
+    report.labId = o.value( QStringLiteral( "lab_id" ) ).toString();
+    report.rubricVersion = o.value( QStringLiteral( "rubric_version" ) ).toString();
+    report.labVersion = o.value( QStringLiteral( "lab_version" ) ).toString();
+    report.softwareVersion = o.value( QStringLiteral( "software_version" ) ).toString();
+    const QJsonArray rows = o.value( QStringLiteral( "rows" ) ).toArray();
+    report.rows.reserve( rows.size() );
+    for ( const QJsonValue &rv : rows )
+    {
+        // A non-object row is a malformed report, not a row to skip: silently
+        // dropping it would understate the class just like the empty-summary
+        // bug this loader exists to prevent.
+        if ( !rv.isObject() )
+        {
+            error = QStringLiteral( "%1 has a non-object entry in rows[]" ).arg( path );
+            return false;
+        }
+        report.rows.push_back( BatchRowResult::fromJson( rv.toObject() ) );
+    }
+
+    const int declared = o.contains( QStringLiteral( "total" ) )
+                           ? o.value( QStringLiteral( "total" ) ).toInt( -1 )
+                           : -1;
+    report.total = declared >= 0 ? declared : report.rows.size();
+    if ( warning && declared >= 0 && declared != report.rows.size() )
+    {
+        *warning = QStringLiteral( "report declares total=%1 but carries %2 rows" )
+                     .arg( declared ).arg( report.rows.size() );
+    }
+    return true;
+}
+
 } // namespace sicnu::teaching_admin
