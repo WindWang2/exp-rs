@@ -607,7 +607,9 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
     const QString reportPath = m_batchOutEdit->text() + QStringLiteral( ".json" );
     if ( !sicnu::teaching_admin::loadBatchReportFromFile( reportPath, report, loadError, &loadWarning ) )
     {
-        appendLog( tr( "no batch report at %1: %2" ).arg( reportPath, loadError ) );
+        // loadError already carries the full path; prefixing it here would
+        // print the same path twice.
+        appendLog( tr( "no usable batch report: %1" ).arg( loadError ) );
         return;
     }
     if ( !loadWarning.isEmpty() )

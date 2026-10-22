@@ -32,16 +32,6 @@ QSet<QString> supportedLabRuleKinds()
     };
 }
 
-QSet<QString> supportedProcessCriterionKinds()
-{
-    return {
-        QStringLiteral( "stage" ),
-        QStringLiteral( "metric" ),
-        QStringLiteral( "fact" ),
-        QStringLiteral( "answer" ),
-    };
-}
-
 WeightSumCheck checkWeightSum( const QJsonArray &weightedItems, const QString &weightKey, double expected,
                                double eps )
 {

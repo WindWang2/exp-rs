@@ -2,18 +2,20 @@
   tests/test_r15_E_batch_refusal_accounting.cpp — R15-E / E08+E09 oracle.
 
   RESTORED by R20-05 (merge-loss recovery): this file was dropped wholesale by
-  merge c8f5e0805422 (r16-b merging PR #1517's r15-E side). The discovery
-  accounting half was independently re-delivered by the #1466 tail fix
-  (0a8f56a28d, R10-B B6) and stays green on master — kept as the protective
-  regression for that invariant. The fail-closed published-report loader half
-  (`loadBatchReportFromFile`) never came back: the function did not exist on
-  master 28e1891390 and the teacher console still re-read the report with
-  bare `doc.value("total").toInt()` calls (teaching_admin_dock.cpp:558/618),
-  so a truncated / half-synced / unrelated JSON file produced a structurally
-  valid "0 submissions / 0% completion" class summary. R20-05 restores the
-  loader and the two console call sites; the loader cases below are RED
-  against the pre-restoration tree at compile time (API absent) and pin the
-  fail-closed contract from here on.
+  merge c8f5e0805422 (r16-b merging PR #1517's r15-E side), together with
+  the production code both halves pin. NEITHER half ever came back on
+  master 28e1891390: the #1466 tail fix (0a8f56a28d) accounted reserved
+  OUTPUT names only, and a later commit (808f1c4c52) explicitly kept hidden
+  entries and nested directories invisible in discoverSubmissions — so the
+  four discovery cases below were RED on master (0 skips booked where >= 1
+  is required), and loadBatchReportFromFile did not exist at all while the
+  teacher console re-read the published report with bare
+  `doc.value("total").toInt()` calls: a truncated / half-synced / unrelated
+  JSON file produced a structurally valid "0 submissions / 0% completion"
+  class summary. R20-05 restores BOTH the discovery accounting (hidden
+  student directories, hidden files, nested lesson-grouped directories are
+  typed, attributable refusals) and the fail-closed loader + its two
+  console call sites.
 
   Original reproduction context (r15-E, master 46791bc65c):
 

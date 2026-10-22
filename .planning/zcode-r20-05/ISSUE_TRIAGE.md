@@ -20,7 +20,7 @@
 | `src/teaching_admin/batch_assessment.{h,cpp}` | `loadBatchReportFromFile` fail-closed 加载器(截断/无关 JSON 不再变成「0 份作业」) | **函数不存在**(grep 全仓无) | 语义恢复,适配 #1664 后结构 |
 | `src/app/teaching_admin/teaching_admin_dock.cpp:551-640` | finishBatchOnUiThread/onBuildFeedbackAndSummary 两处改用 fail-closed 加载器 | **==base(裸 toInt() 在 :558/:560/:618/:621)** | 语义恢复 |
 | `tests/test_r15_E_teaching_stats_honesty.cpp`(247 行,6 case) | 钉 WP-ML 前两项 | 文件被 merge 整体删除 | 恢复(适配现 schema) |
-| `tests/test_r15_E_batch_refusal_accounting.cpp`(360 行,9 case) | 钉 discoverSubmissions 记账 + fail-closed 加载器 | 文件被 merge 整体删除;hidden/nested 记账已由 #1466 tail(0a8f56a28d)独立修复,加载器断言应仍红 | 恢复(红/绿分开记账) |
+| `tests/test_r15_E_batch_refusal_accounting.cpp`(360 行,9 case) | 钉 discoverSubmissions 记账 + fail-closed 加载器 | 文件被 merge 整体删除;**两半都未回归**:0a8f56a28d 只记账保留输出名,808f1c4c52 显式维持 hidden/nested 不可见(R1 评审 P0 纠正了初版"discovery 半区已修"的误判;disc_driver 实证 base 0 skips) | 两半同时恢复(生产记账块 + 测试),驱动 base-RED/HEAD-GREEN 见 RUN_LOG |
 
 ## 已在 master 修复(本轨只做保护性验证/建议关闭,不重复修)
 

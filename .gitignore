@@ -643,7 +643,10 @@ r6_dev.cmd
 !.planning/r19-03/*.md
 *.agent-build.lock
 
-# R20-05 track (zcode teaching/verification) planning artifacts (markdown only).
+# R20-05 track (zcode teaching/verification) planning artifacts (markdown,
+# plus the standalone RED/GREEN driver sources + run log cited by ORACLES.md).
 !.planning/zcode-r20-05/
 .planning/zcode-r20-05/*
 !.planning/zcode-r20-05/*.md
+!.planning/zcode-r20-05/red-drivers/
+!.planning/zcode-r20-05/red-drivers/*

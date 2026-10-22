@@ -478,3 +478,27 @@ TEST_CASE( "Grid fractions over a fully tiled raster are a census, unmarked",
     CHECK_FALSE( report.checks[0].evidence->hasSampling );
     CHECK( report.checks[0].evidence->sampledPoints == 0 );
 }
+
+TEST_CASE( "An elongated raster with oversampled short axis is still marked sampled",
+           "[verify_adapters][grid][sampling][r20_05]" )
+{
+    // R1 review P2: 200x40 @ axis 32 reads 9 * 32 * 32 = 9216 samples over
+    // an 8000-pixel raster — MORE samples than pixels — while the long-axis
+    // windows leave columns 32..84 and 116..168 unread. A pixel-count
+    // comparison would claim a census over unread columns; the census claim
+    // must be per-axis contiguity (extent <= 3 * window), which fails here.
+    TempDir dir;
+    constexpr int kWide = 200;
+    constexpr int kTall = 40;
+    adapters::GdalGridProbe probe;
+    const std::string raster = dir.file( "elongated.tif" );
+    REQUIRE( writeGtiff( raster, kWide, kTall, "EPSG:4326", true,
+                         constantPixels( kWide, kTall, 1.0f ) ) );
+
+    const std::optional<GridInfo> info = probe.grid( raster );
+    REQUIRE( info.has_value() );
+    CHECK( info->fractionsFromSample );
+    CHECK( info->sampledPixels ==
+           static_cast<std::size_t>( 9 ) * adapters::GdalGridProbe::kDefaultSamplingAxis *
+               adapters::GdalGridProbe::kDefaultSamplingAxis );
+}
