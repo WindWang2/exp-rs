@@ -86,9 +86,14 @@ TEST_CASE( "frame caps refuse oversize payloads on both sides", "[ipc][frame]" )
     REQUIRE( error.find( "negotiated cap" ) != std::string::npos );
 
     // Reader side: a peer that announces an over-cap length is refused.
+    // Payload and error are DISTINCT strings here: on TooLarge the reader
+    // salvages the length prefix into payload and writes the E6003 message
+    // into error — aliasing one string into both slots (this call site's
+    // old `error.empty() ? error : error` habit) keeps only the message.
     const uint8_t prefix[4] = { 0xFF, 0xFF, 0xFF, 0x7F }; // ~2 GiB
+    std::string refusedPayload;
     REQUIRE( a->writeAll( reinterpret_cast<const char *>( prefix ), 4, error ) );
-    REQUIRE( IpcFrame::read( *b, error.empty() ? error : error, tiny, 500, error )
+    REQUIRE( IpcFrame::read( *b, refusedPayload, tiny, 500, error )
              == IpcFrame::ReadStatus::TooLarge );
     REQUIRE( error.find( "E6003" ) != std::string::npos );
 

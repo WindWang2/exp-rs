@@ -146,16 +146,20 @@ ReadStatus read( IIpcStream &stream, std::string &payload,
                       | ( lengthByte( pending[ 3 ] ) << 24 );
     if ( length > limits.maxFrameBytes )
     {
+        // Salvage the length prefix into `payload` for the caller's
+        // diagnostic FIRST: the frame body was never read (the cap check
+        // runs before phase 2), so the four prefix bytes are the only real
+        // stream-head evidence there is. Without this the channel's
+        // TooLarge hexdump dumped an always-empty buffer. The salvage
+        // precedes the error assignment on purpose: a caller that (against
+        // the separate-outputs contract) passes the SAME string as payload
+        // and error must still end up with the E6003 message, not with
+        // four raw prefix bytes where the message should be.
+        payload.assign( pending, 0, kPrefixBytes );
+        pending.clear();
         error = "peer announced a frame of " + std::to_string( length )
                 + " bytes, beyond the negotiated cap of "
                 + std::to_string( limits.maxFrameBytes ) + " bytes (E6003)";
-        // Salvage the length prefix into `payload` for the caller's
-        // diagnostic: the frame body was never read (the cap check runs
-        // before phase 2), so the four prefix bytes are the only real
-        // stream-head evidence there is. Without this the channel's
-        // TooLarge hexdump dumped an always-empty buffer.
-        payload.assign( pending, 0, kPrefixBytes );
-        pending.clear();
         return ReadStatus::TooLarge;
     }
 
