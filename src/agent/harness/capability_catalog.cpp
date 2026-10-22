@@ -664,9 +664,12 @@ int CapabilityCatalog::reload()
       parsed[ "id" ].isString() ? parsed[ "id" ].asString() : std::string();
     if ( id.empty() )
       continue;
+    // Exact 'where + ": "' prefix — same cross-match hazard as the
+    // knowledge loader (R2 P3).
+    const std::string ownPrefix = where + ": ";
     const bool problems = std::any_of(
       mLoadProblems.begin(), mLoadProblems.end(),
-      [ &where ]( const std::string &p ) { return p.rfind( where, 0 ) == 0; } );
+      [ &ownPrefix ]( const std::string &p ) { return p.rfind( ownPrefix, 0 ) == 0; } );
     if ( problems )
       continue;
     if ( mEntries.isMember( id ) )

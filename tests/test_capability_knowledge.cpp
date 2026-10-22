@@ -580,6 +580,73 @@ TEST_CASE( "D8 loader: wrong-typed fields fail closed per file, never abort the 
         catalog.reload();
     }
 
+    SECTION( "knowledge: array-typed variants.when.param costs only that file (R2 P1)" )
+    {
+        CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        Json::Value good( Json::objectValue );
+        good[ "id" ] = "rs:ndvi";
+        good[ "family" ] = "spectral";
+        writeJson( dir.filePath( "good.json" ), good );
+        Json::Value bad( Json::objectValue );
+        bad[ "id" ] = "rs:bad_variants";
+        bad[ "family" ] = "spectral";
+        Json::Value variant( Json::objectValue );
+        Json::Value when( Json::objectValue );
+        when[ "param" ] = Json::Value( Json::arrayValue );
+        when[ "values" ] = Json::Value( Json::arrayValue );
+        variant[ "when" ] = when;
+        Json::Value variants( Json::arrayValue );
+        variants.append( variant );
+        bad[ "variants" ] = variants;
+        writeJson( dir.filePath( "bad_variants.json" ), bad );
+
+        knowledge.setDirectory( dir.path().toStdString() );
+        REQUIRE_NOTHROW( knowledge.reload() ); // RED pre-R2-fix: throws past the gate
+        bool sawVariantProblem = false;
+        for ( const std::string &problem : knowledge.loadProblems() )
+            if ( problem.find( "variants" ) != std::string::npos )
+                sawVariantProblem = true;
+        CHECK( sawVariantProblem );
+        CHECK( knowledge.entryForOperator( "rs:ndvi" )["family"].asString() == "spectral" );
+    }
+
+    SECTION( "knowledge: query-time variant matching skips non-string supplied params (R2 P2)" )
+    {
+        CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        Json::Value entry( Json::objectValue );
+        entry[ "id" ] = "rs:ndvi";
+        entry[ "family" ] = "spectral";
+        Json::Value variant( Json::objectValue );
+        Json::Value when( Json::objectValue );
+        when[ "param" ] = "index";
+        Json::Value values( Json::arrayValue );
+        values.append( "ndvi" );
+        when[ "values" ] = values;
+        variant[ "when" ] = when;
+        variant[ "note" ] = "variant body";
+        Json::Value variants( Json::arrayValue );
+        variants.append( variant );
+        entry[ "variants" ] = variants;
+        writeJson( dir.filePath( "entry.json" ), entry );
+
+        knowledge.setDirectory( dir.path().toStdString() );
+        REQUIRE_NOTHROW( knowledge.reload() );
+
+        // An array at the colliding param must skip the variant match, not
+        // throw out of the query walk. RED pre-R2-fix: Json::LogicError.
+        Json::Value variantParams( Json::objectValue );
+        variantParams[ "index" ] = Json::Value( Json::arrayValue );
+        Json::Value merged;
+        REQUIRE_NOTHROW( merged = knowledge.entryForOperator( "rs:ndvi", variantParams ) );
+        CHECK( merged[ "family" ].asString() == "spectral" );
+    }
+
     SECTION( "relations: string schema_version is a named problem, not a throw" )
     {
         CapabilityRelations &relations = CapabilityRelations::instance();

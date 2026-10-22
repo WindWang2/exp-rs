@@ -194,9 +194,14 @@ int CapabilityKnowledge::reload()
       const std::string id = idValue.isString() ? idValue.asString() : std::string();
       if ( id.empty() )
         continue;
+      // Exact 'where + ": "' prefix: a bare `where` prefix would also
+      // cross-match a file literally named like another file's array
+      // position ("a.json[1]" vs "a.json[1].json") and skip a healthy
+      // entry for problems that are not its own (R2 P3).
+      const std::string ownPrefix = where + ": ";
       const bool problems =
         std::any_of( mLoadProblems.begin(), mLoadProblems.end(),
-                     [ &where ]( const std::string &p ) { return p.rfind( where, 0 ) == 0; } );
+                     [ &ownPrefix ]( const std::string &p ) { return p.rfind( ownPrefix, 0 ) == 0; } );
       if ( problems )
         continue;
       const Json::Value &kindValue = entry.get( "kind", Json::Value() );
@@ -334,7 +339,13 @@ Json::Value CapabilityKnowledge::mergedEntry( const Json::Value &raw,
       const std::string param = when.get( "param", "" ).asString();
       if ( param.empty() || !variantParams.isMember( param ) )
         continue;
-      const std::string actual = lowered( variantParams.get( param, "" ).asString() );
+      // The supplied value is CALLER input (node/tool params), not
+      // entry-controlled: an array/object there must skip the match, not
+      // throw asString() out of the query/extends walk (R2 P2).
+      const Json::Value &supplied = variantParams.get( param, Json::Value() );
+      if ( !supplied.isString() )
+        continue;
+      const std::string actual = lowered( supplied.asString() );
       bool matches = false;
       for ( const Json::Value &candidate : when.get( "values", Json::Value( Json::arrayValue ) ) )
       {
@@ -789,7 +800,13 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
           continue;
         }
         const Json::Value &when = variant.get( "when", Json::Value() );
-        if ( !when.isObject() || when.get( "param", "" ).asString().empty() ||
+        // Type-gate param before reading it: asString() on an array/object
+        // throws past this per-file gate and aborts the whole reload (the
+        // exact escape W2 exists to close; R2 P1). Numbers/bools are a
+        // wrong type too — the vocabulary is authored strings.
+        const Json::Value &paramValue = when.isObject() ? when.get( "param", Json::Value() )
+                                                        : when;
+        if ( !when.isObject() || !paramValue.isString() || paramValue.asString().empty() ||
              !when.get( "values", Json::Value() ).isArray() )
           problems.push_back( "variants[" + std::to_string( index ) +
                               "] needs when:{param, values[]}" );
