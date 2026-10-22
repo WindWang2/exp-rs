@@ -415,14 +415,20 @@ void TeachingAdminDock::onRunBatch()
     m_batchProgressLabel->setText( tr( "running 0 / %1" ).arg( total ) );
     if ( !discoverySkips.isEmpty() )
     {
-        // Preview honesty (#1466): reserved-name refusals are visible BEFORE
-        // the run, so a mis-named submission can be fixed while grading.
+        // Preview honesty (#1466): refusals are visible BEFORE the run, so
+        // a mis-named, hidden or misplaced submission can be fixed while
+        // grading. The refusal classes differ (reserved output names →
+        // rename; hidden entries → clear the attribute; nested directories
+        // → move the file up one level), so the preview names the entries
+        // and defers the per-entry remediation to the report's reasons.
         QStringList names;
         for ( const auto &skip : discoverySkips )
             names << QFileInfo( skip.path ).fileName();
-        appendLog( tr( "discovery refused %1 reserved-name file(s) (skipped, not graded): %2 — "
-                       "rename them if they are real submissions; see the report for reasons" )
+        appendLog( tr( "discovery refused %1 entr%2 (skipped, not graded): %3 — "
+                       "see the report for each refusal's reason and remedy" )
                      .arg( discoverySkips.size() )
+                     .arg( discoverySkips.size() == 1 ? QStringLiteral( "y" )
+                                                      : QStringLiteral( "ies" ) )
                      .arg( names.join( QStringLiteral( ", " ) ) ) );
     }
     m_batchCancelButton->setEnabled( true );

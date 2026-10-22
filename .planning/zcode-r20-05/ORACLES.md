@@ -22,8 +22,11 @@ BASE = master `28e1891390`;HEAD = 本分支(终码见 PR 正文)。
 ## 最终套件证据(待构建锁释放后回填)
 
 - [ ] test_r15_E_teaching_stats_honesty 全绿 ×2
-- [ ] test_r15_E_batch_refusal_accounting 全绿 ×2(discovery 半区在 master 已绿的保护性回归 + loader 新区)
-- [ ] test_teaching_admin_core / test_teaching_authoring_failures_r4 / test_teaching_admin_rubric_weights_r16_c_t06 全绿 ×2
-- [ ] test_verify_adapters_grid 全绿 ×2(含新 [sampling][r20_05] 2 case)
-- [ ] test_r18_e_completion_ledger 全绿 ×2(含新 nestbomb case)
-- [ ] 域回归 sweep(教学/评测族,见 BASELINE.md 68 目标清单,可执行子集)
+- [x] test_r15_E_batch_refusal_accounting 全绿(9 case / 62 断言)——R2 评审员独立构建+运行证实(disc_driver 另证 base 0 skips RED → head 4 skips GREEN);[待本轨锁内构建复跑 ×2]
+- [x] test_teaching_admin_rubric_weights_r16_c_t06 全绿(10 case / 19 断言)——R2 评审员独立运行证实;[待复跑 ×2;admin_core/authoring_failures_r4 待构建]
+- [x] test_r18_e_completion_ledger 全绿(4 case / 36 断言,含 300 层 nestbomb)——R2 评审员独立运行证实;[待复跑 ×2]
+- [x] test_r15_E_teaching_stats_honesty 全绿(6 case / 33 断言)——R2 评审员独立运行证实;[待复跑 ×2]
+- [ ] test_verify_adapters_grid(含新 [sampling][r20_05] 3 case)——sv/sv2 驱动证实盖章行为;[待构建运行 ×2]
+- [ ] 域回归 sweep(教学/评测族,见 BASELINE.md 68 目标清单,可执行子集)——[待本轨锁内构建]
+
+注:上表"discovery 半区 master 已绿"为初版误判(R1-P0 已推翻:master 0a8f56a28d 仅记账保留名,808f1c4c52 显式维持 hidden/nested 不可见;base 实测 0 skips)。本行更正即 R2-P3-2 处置。

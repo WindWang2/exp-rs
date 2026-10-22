@@ -14,6 +14,11 @@ BASE = origin/master = `28e1891390`。每次提交前执行
 | src/teaching_admin/batch_assessment.h | src/teaching_admin/** |
 | src/teaching_admin/batch_assessment.cpp | src/teaching_admin/** |
 | src/teaching_admin/rubric_builder.cpp | src/teaching_admin/** |
+| src/teaching_admin/rubric_builder.h | src/teaching_admin/**(删除委托后成死 API 的 supportedProcessCriterionKinds 声明) |
+| src/app/teaching/lab_operator_launch.cpp | src/app/teaching/**(#1607 同面三站点加固) |
+| src/app/teaching/lab_cockpit_dock.cpp | src/app/teaching/**(同上) |
+| .gitignore | 共享文件——仅追加本轨 planning allowlist 小段(r19 先例模式) |
+| .planning/zcode-r20-05/red-drivers/* | 本轨账本(RED/GREEN 驱动与运行日志) |
 | src/teaching_admin/CMakeLists.txt | src/teaching_admin/**(模块自身构建脚本;仅追加一条已存在同级模式的 sicnu_grader 链接) |
 | src/app/teaching_admin/teaching_admin_dock.cpp | src/app/teaching_admin/** |
 | src/verify/verify_context.h | src/verify/** |

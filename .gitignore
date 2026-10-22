@@ -649,4 +649,6 @@ r6_dev.cmd
 .planning/zcode-r20-05/*
 !.planning/zcode-r20-05/*.md
 !.planning/zcode-r20-05/red-drivers/
-!.planning/zcode-r20-05/red-drivers/*
+.planning/zcode-r20-05/red-drivers/*
+!.planning/zcode-r20-05/red-drivers/*.cpp
+!.planning/zcode-r20-05/red-drivers/*.md
