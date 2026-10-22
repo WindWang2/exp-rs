@@ -110,6 +110,19 @@ std::optional<sicnu::verify::GridInfo> GdalGridProbe::grid( const std::string &p
     info.nodataFraction = static_cast<double>( nodata ) / static_cast<double>( sampled );
     info.finiteFraction =
         static_cast<double>( sampled - nonFinite ) / static_cast<double>( sampled );
+    // #1600 (R20-05): stamp the estimate as an estimate. A lattice that read
+    // fewer native pixels than the raster holds produced fractions over a
+    // sample; the evidence that carries them must say so instead of spelling
+    // a bounded observation as a whole-raster measurement. When the windows
+    // covered every pixel (small rasters: one window == full extent) the
+    // fractions are a census and stay unmarked.
+    const std::uint64_t totalPixels =
+        static_cast<std::uint64_t>( metadata.width ) * static_cast<std::uint64_t>( metadata.height );
+    if ( static_cast<std::uint64_t>( sampled ) < totalPixels )
+    {
+        info.fractionsFromSample = true;
+        info.sampledPixels = sampled;
+    }
     return info;
 }
 

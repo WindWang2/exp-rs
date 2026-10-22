@@ -44,6 +44,14 @@ struct GridInfo
     std::string crs;
     double nodataFraction = 0.0;
     double finiteFraction = 0.0;
+    // #1600 (R20-05): the fractions above are computed over the probe's
+    // bounded window lattice, so when that lattice covered fewer pixels than
+    // the raster holds they are an ESTIMATE and must be stamped as one —
+    // evidence readers (and the humans behind them) must never mistake a
+    // bounded sample for a whole-raster fact. A lattice that covered every
+    // pixel is a census and carries no marker.
+    bool fractionsFromSample = false;
+    std::size_t sampledPixels = 0;  ///< pixels the fraction denominators actually counted
 };
 
 class IArtifactProbe
