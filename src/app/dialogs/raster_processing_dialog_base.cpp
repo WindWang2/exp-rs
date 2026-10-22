@@ -383,9 +383,19 @@ int RasterProcessingDialogBase::gdalCancelProgress( double, const char *, void *
   // GDALProgressFunc contract: return 0 (FALSE) to abort the running
   // operation with CE_Failure; nonzero (TRUE) to continue. The empty result
   // then flows into the executor's cancel branch below (#1560). A null or
-  // empty probe keeps GDAL running.
+  // empty probe keeps GDAL running. The probe must not throw across GDAL's
+  // C frames: a throwing probe keeps the operation running instead.
   const auto *probe = static_cast<const GdalTaskCancelProbe *>( pProgressArg );
-  return ( probe && *probe && ( *probe )() ) ? 0 : 1;
+  if ( !probe || !*probe )
+    return 1;
+  try
+  {
+    return ( *probe )() ? 0 : 1;
+  }
+  catch ( ... )
+  {
+    return 1;
+  }
 }
 
 void RasterProcessingDialogBase::runGdalTask(

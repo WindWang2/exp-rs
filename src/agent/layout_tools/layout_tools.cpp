@@ -783,6 +783,9 @@ class LayoutExportTool final : public SpatialTool
       props["format"]["enum"] = formats;
       props["dpi"] = Json::Value( Json::objectValue );
       props["dpi"]["type"] = "number";
+      // Note: adding a description here would drift the pinned surface
+      // snapshot (inputSchema is compared verbatim); the [72,1200] bound is
+      // enforced and reported by LayoutService::exportLayout at run time.
       schema["properties"] = props;
       Json::Value required( Json::arrayValue );
       required.append( "layout" );

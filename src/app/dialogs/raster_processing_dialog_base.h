@@ -101,8 +101,9 @@ public:
      * returns FALSE (aborting the GDAL operation with CE_Failure) as soon
      * as @p pProgressArg — a GdalTaskCancelProbe* — reports cancellation,
      * TRUE otherwise (including a null probe, which keeps GDAL running).
-     * Usage inside a task:
-     *   GDALSomeLongOp(..., gdalCancelProgress, &probe);
+     * Usage inside a task (GDAL takes a void*, so hand it a local copy):
+     *   GdalTaskCancelProbe local = probe;
+     *   GDALSomeLongOp(..., gdalCancelProgress, &local);
      */
     static int gdalCancelProgress(double dfComplete, const char *pszMessage, void *pProgressArg);
 

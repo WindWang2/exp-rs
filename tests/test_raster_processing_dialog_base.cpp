@@ -117,11 +117,29 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         // no success surface + UI recovery + a follow-up task still runs.
         constexpr int kTotalSteps = 300;
         std::atomic<int> steps{0};
+        // Non-auto-accept so resultReadyForDisplay is this section's real
+        // success surface (auto-accept would accept() instead and make the
+        // result-announced assertion below vacuous).
+        dialog.setShouldAutoAcceptOnSuccess(false);
         bool accepted = false;
         bool resultAnnounced = false;
         QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
         QObject::connect(&dialog, &RasterProcessingDialogBase::resultReadyForDisplay,
                          [&]([[maybe_unused]] const QString &path) { resultAnnounced = true; });
+
+        // Defense (same guard as the failure-path test below): if the cancel
+        // click ever raced the task to natural completion, the empty-result
+        // branch would raise a modal critical box inside processEvents and
+        // hang the drain loop — dismiss any modal box instead of hanging.
+        QTimer modalTimer;
+        QObject::connect(&modalTimer, &QTimer::timeout, []() {
+            const auto topWidgets = QApplication::topLevelWidgets();
+            for (QWidget *w : topWidgets) {
+                if (auto *box = qobject_cast<QMessageBox *>(w))
+                    box->accept();
+            }
+        });
+        modalTimer.start(10);
 
         dialog.runGdalTask([&](const RasterProcessingDialogBase::GdalTaskCancelProbe &probe) -> QString {
             // The seam hands the task the live cancel probe (#1560): a real
@@ -161,24 +179,24 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         REQUIRE(dialog.runButton()->isEnabled());
         REQUIRE_FALSE(accepted);
         REQUIRE_FALSE(resultAnnounced);
-        // Promptness: the task observed the cancel and stopped stepping
-        // well before the unabortable full run would have finished.
-        REQUIRE(steps.load() < kTotalSteps);
+        // Promptness: the cancel is armed within milliseconds of the click
+        // (steps ≈ 3..10 at that point); anything past half the run means
+        // the probe was not observed promptly.
+        REQUIRE(steps.load() < kTotalSteps / 2);
 
-        // Recovery: a follow-up task through the same seam still runs.
-        bool accepted2 = false;
-        QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted2 = true; });
+        // Recovery: a follow-up task through the same seam still runs and
+        // reaches its (non-auto-accept) success surface.
         dialog.runGdalTask([](const RasterProcessingDialogBase::GdalTaskCancelProbe &) -> QString {
             return QStringLiteral("/tmp/test_out_after_cancel.tif");
         });
-        for (int i = 0; i < 500 && (!accepted2 || dialog.isRunning()); ++i) {
+        for (int i = 0; i < 500 && (!resultAnnounced || dialog.isRunning()); ++i) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         for (int i = 0; i < 10; ++i) {
             QCoreApplication::processEvents();
         }
-        REQUIRE(accepted2);
+        REQUIRE(resultAnnounced);
         REQUIRE_FALSE(dialog.isRunning());
         REQUIRE(dialog.runButton()->isEnabled());
     }

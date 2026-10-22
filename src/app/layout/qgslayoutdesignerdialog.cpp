@@ -125,8 +125,10 @@ constexpr char kItemPlaceholderPanel[] = "LayoutItemPlaceholderPanel";
 double queryExportDpi( QgsLayout *layout, QWidget *parent, bool isRaster )
 {
     bool ok = false;
+    // R20-04: 72 floor matches the export engine's governed bound
+    // (LayoutService::exportLayout / cartography export chain).
     const double dpi = QInputDialog::getDouble( parent, QObject::tr( "Export Resolution" ),
-                                                QObject::tr( "Resolution (DPI):" ), 300.0, 36.0, 1200.0, 1, &ok );
+                                                QObject::tr( "Resolution (DPI):" ), 300.0, 72.0, 1200.0, 1, &ok );
     if ( !ok )
         return -1.0;
 
