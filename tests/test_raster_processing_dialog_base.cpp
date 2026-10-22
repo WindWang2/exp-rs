@@ -106,6 +106,76 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         REQUIRE(dialog.runButton()->isEnabled());
         REQUIRE_FALSE(dialog.isRunning());
     }
+
+    SECTION("cancel during a long GDAL task aborts it promptly and the dialog recovers (#1560)")
+    {
+        // Simulated long GDAL I/O: a stepped loop that observes cancellation
+        // as soon as the seam exposes it. On the unfixed seam the task lambda
+        // is opaque to the JobEngine cancel flag, so it runs every step and
+        // the cancel only lands after the fact — steps reaching kTotalSteps
+        // proves the abort was NOT prompt. Oracle (#1560): prompt abort +
+        // no success surface + UI recovery + a follow-up task still runs.
+        constexpr int kTotalSteps = 300;
+        std::atomic<int> steps{0};
+        bool accepted = false;
+        bool resultAnnounced = false;
+        QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
+        QObject::connect(&dialog, &RasterProcessingDialogBase::resultReadyForDisplay,
+                         [&]([[maybe_unused]] const QString &path) { resultAnnounced = true; });
+
+        dialog.runGdalTask([&]() -> QString {
+            for (int i = 0; i < kTotalSteps; ++i)
+            {
+                ++steps;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            return QString();
+        });
+
+        // Wait until the worker is inside the loop.
+        for (int i = 0; i < 400 && steps.load() < 3; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(steps.load() >= 3);
+        REQUIRE(dialog.isRunning());
+
+        dialog.cancelButton()->click();
+
+        // Drain to the terminal state (cancel path: no modal error box).
+        for (int i = 0; i < 600 && dialog.isRunning(); ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int i = 0; i < 10; ++i) {
+            QCoreApplication::processEvents();
+        }
+
+        REQUIRE_FALSE(dialog.isRunning());
+        REQUIRE(dialog.runButton()->isEnabled());
+        REQUIRE_FALSE(accepted);
+        REQUIRE_FALSE(resultAnnounced);
+        // Promptness: the task observed the cancel and stopped stepping
+        // well before the unabortable full run would have finished.
+        REQUIRE(steps.load() < kTotalSteps);
+
+        // Recovery: a follow-up task through the same seam still runs.
+        bool accepted2 = false;
+        QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted2 = true; });
+        dialog.runGdalTask([]() -> QString {
+            return QStringLiteral("/tmp/test_out_after_cancel.tif");
+        });
+        for (int i = 0; i < 500 && (!accepted2 || dialog.isRunning()); ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int i = 0; i < 10; ++i) {
+            QCoreApplication::processEvents();
+        }
+        REQUIRE(accepted2);
+        REQUIRE_FALSE(dialog.isRunning());
+        REQUIRE(dialog.runButton()->isEnabled());
+    }
 }
 
 namespace {
