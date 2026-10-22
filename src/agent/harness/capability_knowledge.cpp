@@ -188,7 +188,10 @@ int CapabilityKnowledge::reload()
         : it.fileName().toStdString();
       for ( const std::string &problem : validateEntry( entry ) )
         mLoadProblems.push_back( where + ": " + problem );
-      const std::string id = entry.get( "id", "" ).asString();
+      // Type-gated reads: asString() on an object/array id/kind throws
+      // past the problems gate and aborts the whole reload() scan.
+      const Json::Value &idValue = entry.get( "id", Json::Value() );
+      const std::string id = idValue.isString() ? idValue.asString() : std::string();
       if ( id.empty() )
         continue;
       const bool problems =
@@ -196,7 +199,8 @@ int CapabilityKnowledge::reload()
                      [ &where ]( const std::string &p ) { return p.rfind( where, 0 ) == 0; } );
       if ( problems )
         continue;
-      if ( entry.get( "kind", "" ).asString() == "family_default" )
+      const Json::Value &kindValue = entry.get( "kind", Json::Value() );
+      if ( kindValue.isString() && kindValue.asString() == "family_default" )
       {
         if ( mFamilyDefaults.isMember( id ) )
           mLoadProblems.push_back( where + ": duplicate family_default id " + id );
@@ -517,9 +521,24 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
       problems.push_back( "unknown key '" + key + "'" );
   }
 
-  const std::string id = entry.get( "id", "" ).asString();
-  const std::string family = entry.get( "family", "" ).asString();
-  const bool isFamilyDefault = entry.get( "kind", "" ).asString() == "family_default";
+  // Type-gated scalars: a wrong-typed id/family/kind/extends must be a
+  // named problem, never a Json::LogicError thrown past this gate (the
+  // loader and the query-time extends walk both consume these fields).
+  const Json::Value &idValue = entry.get( "id", Json::Value() );
+  if ( entry.isMember( "id" ) && !idValue.isString() )
+    problems.push_back( "'id' must be a string" );
+  const std::string id = idValue.isString() ? idValue.asString() : std::string();
+  const Json::Value &familyValue = entry.get( "family", Json::Value() );
+  if ( entry.isMember( "family" ) && !familyValue.isString() )
+    problems.push_back( "'family' must be a string" );
+  const std::string family = familyValue.isString() ? familyValue.asString() : std::string();
+  const Json::Value &kindValue = entry.get( "kind", Json::Value() );
+  if ( entry.isMember( "kind" ) && !kindValue.isString() )
+    problems.push_back( "'kind' must be a string" );
+  const bool isFamilyDefault = kindValue.isString() && kindValue.asString() == "family_default";
+  const Json::Value &extendsValue = entry.get( "extends", Json::Value() );
+  if ( !extendsValue.isNull() && !extendsValue.isString() )
+    problems.push_back( "'extends' must be a string" );
   if ( isFamilyDefault && id.rfind( "family:", 0 ) != 0 )
     problems.push_back( "family_default id must start with 'family:'" );
   if ( !isFamilyDefault && id.empty() )

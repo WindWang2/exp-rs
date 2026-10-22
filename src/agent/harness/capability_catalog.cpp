@@ -651,7 +651,10 @@ int CapabilityCatalog::reload()
     const std::string where = it.fileName().toStdString();
     for ( const std::string &problem : validateEntry( parsed ) )
       mLoadProblems.push_back( where + ": " + problem );
-    const std::string id = parsed[ "id" ].asString();
+    // Type-gated like validateEntry's own id read: asString() on an
+    // object/array id throws past the problems gate and aborts the scan.
+    const std::string id =
+      parsed[ "id" ].isString() ? parsed[ "id" ].asString() : std::string();
     if ( id.empty() )
       continue;
     const bool problems = std::any_of(
@@ -923,7 +926,12 @@ std::vector<std::string> CapabilityCatalog::validateEntry( const Json::Value &si
     problems.push_back( "missing 'capability' block" );
     return problems;
   }
-  if ( sidecar[ "schema_version" ].asInt() != 2 )
+  // Wrong-TYPED versions are a named problem, not a Json::LogicError thrown
+  // out of validateEntry: the loader's contract is "record problems, skip
+  // the file" — a throw aborts the whole reload() scan and is a process
+  // kill on non-MCP callers (GUI catalog panel / copilot dispatch).
+  const Json::Value &version = sidecar[ "schema_version" ];
+  if ( !version.isIntegral() || version.asInt() != 2 )
     problems.push_back( "schema_version must be 2" );
 
   for ( const std::string &key : block.getMemberNames() )
