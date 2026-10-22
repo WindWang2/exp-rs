@@ -16436,3 +16436,10 @@ if(TARGET jsoncpp)
 endif()
 target_include_directories(test_r19_02_workflow_cancel_order PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 sicnu_discover_tests(test_r19_02_workflow_cancel_order)
+
+# --- R20-05 (zcode-r20-05) restored merge-loss tests (merge c8f5e0805422) ---
+# Append-only registration; see tests/test_r15_E_teaching_stats_honesty.cpp
+# and tests/test_r15_E_batch_refusal_accounting.cpp headers for provenance.
+sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
+sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
+# --- end R20-05 restored registrations ---
