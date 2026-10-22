@@ -81,6 +81,9 @@ QJsonObject processRubric( double dimensionWeight, double totalPoints, const QJs
         { QStringLiteral( "rubricId" ), QStringLiteral( "r-t06" ) },
         { QStringLiteral( "revision" ), 1 },
         { QStringLiteral( "totalPoints" ), totalPoints },
+        // The engine defaults passingScore to 60 and validates it against
+        // totalPoints, so a small rubric must pin its own passing score.
+        { QStringLiteral( "passingScore" ), 6.0 },
         { QStringLiteral( "dimensions" ),
           QJsonArray{ QJsonObject{
               { QStringLiteral( "dimensionId" ), QStringLiteral( "d1" ) },

@@ -177,6 +177,7 @@ TEST_CASE( "malformed grading rule and weight mismatch", "[teaching_admin][rubri
         { QStringLiteral( "rubricId" ), QStringLiteral( "r-core-1" ) },
         { QStringLiteral( "revision" ), 1 },
         { QStringLiteral( "totalPoints" ), 10.0 },
+        { QStringLiteral( "passingScore" ), 6.0 },
         { QStringLiteral( "dimensions" ),
           QJsonArray{
               QJsonObject{ { QStringLiteral( "dimensionId" ), QStringLiteral( "d1" ) },

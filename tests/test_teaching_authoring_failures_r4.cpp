@@ -144,6 +144,7 @@ TEST_CASE( "authoring r4: process rubric requires a metric per metric-kind crite
       "rubricId": "r-r4-metric",
       "revision": 1,
       "totalPoints": 10.0,
+      "passingScore": 6.0,
       "dimensions": [
         { "dimensionId": "d1", "weight": 10.0,
           "criteria": [
