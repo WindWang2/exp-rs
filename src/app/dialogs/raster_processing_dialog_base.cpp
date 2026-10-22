@@ -378,7 +378,18 @@ void RasterProcessingDialogBase::finishRun()
   unsetCursor();
 }
 
-void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &task )
+int RasterProcessingDialogBase::gdalCancelProgress( double, const char *, void *pProgressArg )
+{
+  // GDALProgressFunc contract: return 0 (FALSE) to abort the running
+  // operation with CE_Failure; nonzero (TRUE) to continue. The empty result
+  // then flows into the executor's cancel branch below (#1560). A null or
+  // empty probe keeps GDAL running.
+  const auto *probe = static_cast<const GdalTaskCancelProbe *>( pProgressArg );
+  return ( probe && *probe && ( *probe )() ) ? 0 : 1;
+}
+
+void RasterProcessingDialogBase::runGdalTask(
+  const std::function<QString( const GdalTaskCancelProbe & )> &task )
 {
   if ( isRunning() )
     return;
@@ -399,10 +410,11 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
       ctx.throwIfCancelled();
       ctx.logInfo( "Running dialog GDAL task" );
       ctx.throwIfCancelled();
-      const QString result = task();
-      // Cooperative cancel: task may be long GDAL I/O; check flag after.
-      // For GDAL operations that support progress callbacks, wire
-      // GDALProgressFunc to ctx.isCancelled() so mid-operation cancel is prompt.
+      // #1560: the task polls this probe (ideally from its GDALProgressFunc
+      // via gdalCancelProgress) so a Cancel during long GDAL I/O aborts the
+      // operation mid-flight instead of after the call returns.
+      const GdalTaskCancelProbe cancelProbe( [&ctx]() { return ctx.isCancelled(); } );
+      const QString result = task( cancelProbe );
       ctx.throwIfCancelled();
       if ( result.isEmpty() )
       {
@@ -426,12 +438,10 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
       return out;
     },
     []() {
-      // No task-side cancel channel exists on this seam: the task lambda is
-      // opaque (std::function<QString()>), so nothing here can interrupt the
-      // GDAL I/O mid-flight. JobEngine arms the cooperative flag and the
-      // executor observes it at its next checkpoint (after task() returns);
-      // a prompt abort needs the task itself to poll ctx.isCancelled() from
-      // its GDAL progress callback (#1560).
+      // The task-side cancel channel is the probe handed to the task lambda
+      // (bound to the job's cooperative flag). JobEngine arms that flag (and
+      // runs this hook) on Cancel; long GDAL I/O observes it promptly from
+      // the task's GDALProgressFunc via gdalCancelProgress (#1560).
     },
     /*autoLoad=*/false,
     [this]( const QString &outPath, const Json::Value & ) {
