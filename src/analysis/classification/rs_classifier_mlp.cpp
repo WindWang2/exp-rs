@@ -291,12 +291,20 @@ bool RsMlpBackend::load( const QString &path )
 
 // F12 — RsClassOrder accessor: ascending training class ids captured at
 // fit() (one-hot column order). Empty when unfitted or for legacy loads
-// without the labels sidecar.
+// without the labels sidecar. The <2-distinct-labels fit() pad repeats
+// labels.front() to satisfy ANN_MLP's >= 2 outputs; the pad column is
+// never a real class ("never the argmax"), so it must not leak into the
+// order — RsClassOrder::isValid rejects duplicates and the sidecar
+// round-trip would otherwise reject the model it just saved.
 QVector<int> RsMlpBackend::classOrder() const
 {
   QVector<int> order;
   order.reserve( static_cast<int>( mClassLabels.total() ) );
   for ( int i = 0; i < mClassLabels.rows; ++i )
-    order.append( mClassLabels.at<int>( i, 0 ) );
+  {
+    const int id = mClassLabels.at<int>( i, 0 );
+    if ( order.isEmpty() || order.last() != id )
+      order.append( id );
+  }
   return order;
 }
