@@ -155,6 +155,15 @@ Json::Value RsSarBackscatterOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotFound,
                               "Incidence raster not found: " + incidenceRaster);
     }
+    // Physical domain (0, 90) degrees — same refusal the kernel applies
+    // per pixel. Without this seam check a constant theta of 90+ would
+    // stream a whole "successful" all-NaN product and still stamp the
+    // bogus angle into the output metadata (R1 review P3).
+    if (incidenceDeg >= 90.0) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "incidenceDeg must be in the open interval (0, 90) degrees; got " +
+                                  std::to_string(incidenceDeg));
+    }
 
     GdalDatasetWrapper src;
     if (!src.open(QString::fromStdString(inputPath))) {
