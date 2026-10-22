@@ -472,16 +472,51 @@ class DecisionRecordTool final : public SpatialTool
 
     SpatialToolResult execute( const Json::Value &input ) override
     {
-      const std::string action = input.get( "action", "" ).asString();
+      // Type-gated reads: a wrong-typed action/subject/... must come back
+      // as the typed INVALID_PARAMETER refusal, never a Json::LogicError
+      // thrown past this tool into the MCP boundary's generic catch
+      // (which would degrade the tool's error contract). Absent optional
+      // fields keep their defaults.
+      const auto optionalString = [ &input ]( const char *key, const char *fallback,
+                                              bool *wrongType ) -> std::string {
+        const Json::Value &value = input.get( key, Json::Value() );
+        if ( value.isNull() )
+          return std::string( fallback );
+        if ( !value.isString() )
+        {
+          *wrongType = true;
+          return std::string();
+        }
+        return value.asString();
+      };
+      bool wrongType = false;
+      const std::string action = optionalString( "action", "", &wrongType );
+      if ( wrongType )
+        return SpatialToolResult::failure( "parameter 'action' must be a string",
+                                           error_codes::kInvalidParameter, "validation" );
       if ( action == "record" )
       {
-        const std::string subject = input.get( "subject", "" ).asString();
+        const std::string subject = optionalString( "subject", "", &wrongType );
+        if ( wrongType )
+          return SpatialToolResult::failure( "parameter 'subject' must be a string",
+                                             error_codes::kInvalidParameter, "validation" );
         if ( subject.empty() )
           return SpatialToolResult::failure( "missing string parameter 'subject'",
                                              error_codes::kInvalidParameter, "validation" );
+        const std::string kind = optionalString( "kind", "alternative", &wrongType );
+        if ( wrongType )
+          return SpatialToolResult::failure( "parameter 'kind' must be a string",
+                                             error_codes::kInvalidParameter, "validation" );
+        const std::string status = optionalString( "status", "unresolved", &wrongType );
+        if ( wrongType )
+          return SpatialToolResult::failure( "parameter 'status' must be a string",
+                                             error_codes::kInvalidParameter, "validation" );
+        const std::string note = optionalString( "note", "", &wrongType );
+        if ( wrongType )
+          return SpatialToolResult::failure( "parameter 'note' must be a string",
+                                             error_codes::kInvalidParameter, "validation" );
         const std::string id = ContextLedger::instance().recordDecision(
-          input.get( "kind", "alternative" ).asString(), subject,
-          input.get( "status", "unresolved" ).asString(), input.get( "note", "" ).asString(),
+          kind, subject, status, note,
           input.isMember( "candidates" ) ? input["candidates"] : Json::Value() );
         Json::Value out( Json::objectValue );
         out["decision_id"] = id;
@@ -489,13 +524,19 @@ class DecisionRecordTool final : public SpatialTool
       }
       if ( action == "resolve" )
       {
-        const std::string decisionId = input.get( "decision_id", "" ).asString();
+        const std::string decisionId = optionalString( "decision_id", "", &wrongType );
+        if ( wrongType )
+          return SpatialToolResult::failure( "parameter 'decision_id' must be a string",
+                                             error_codes::kInvalidParameter, "validation" );
         if ( decisionId.empty() )
           return SpatialToolResult::failure( "missing string parameter 'decision_id'",
                                              error_codes::kInvalidParameter, "validation" );
+        const std::string chosen = optionalString( "chosen", "", &wrongType );
+        if ( wrongType )
+          return SpatialToolResult::failure( "parameter 'chosen' must be a string",
+                                             error_codes::kInvalidParameter, "validation" );
         Json::Value out( Json::objectValue );
-        out["resolved"] = ContextLedger::instance().resolveDecision(
-          decisionId, input.get( "chosen", "" ).asString() );
+        out["resolved"] = ContextLedger::instance().resolveDecision( decisionId, chosen );
         return SpatialToolResult::ok( std::move( out ) );
       }
       if ( action == "list" )
