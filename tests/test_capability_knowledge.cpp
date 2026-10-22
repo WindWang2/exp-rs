@@ -413,7 +413,7 @@ TEST_CASE( "D8 validator: malformed sidecars are rejected with named problems",
     // Out-of-int32-range integers pass isIntegral() but make asInt()
     // itself throw — isInt() is the range-safe gate (R1 P1-1).
     doc = base();
-    doc[ "schema_version" ] = 3000000000LL;
+    doc[ "schema_version" ] = Json::Value( Json::Int64( 3000000000LL ) );
     CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
 
     doc = base();
