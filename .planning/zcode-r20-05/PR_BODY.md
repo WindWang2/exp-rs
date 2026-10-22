@@ -3,7 +3,7 @@
 ## 基线与范围
 
 - BASE:`28e1891390`(fetch 实测 origin/master;无开放 PR,PR #1662–#1667 全部已合并)
-- HEAD:`<FILL>`(分支 `agent/r20-05-teaching-verification-20261022T190641Z`,独立 worktree)
+- HEAD:`b407a7b9e`(分支 `agent/r20-05-teaching-verification-20261022T190641Z`,独立 worktree)
 - 写区:src/teaching、src/teaching_admin、src/app/teaching{,_admin}、src/verify、src/verify_adapters、tests(教学/评测族 + append-only 注册)、.planning/zcode-r20-05;逐文件对照见 OWNERSHIP.md
 
 ## 交付(4 工作包 + 双轮评审处置)
@@ -36,7 +36,7 @@ lab_completion_ledger、verdict_stamp、lab_operator_launch×2、lab_cockpit_doc
 | jp(#1607) | **SIGABRT(134)** uncaught Json::RuntimeError | 类型化拒绝,EXIT=0 |
 | disc(记账) | skips=0 静默蒸发,EXIT=1 | skips=4 每路径恰一次,EXIT=0 |
 
-**套件运行**:R2 评审员独立构建+运行:test_r15_E_batch_refusal_accounting 9/62、test_r15_E_teaching_stats_honesty 6/33、test_r18_e_completion_ledger 4/36(含 nestbomb)、test_teaching_admin_rubric_weights_r16_c_t06 10/19 全绿。本轨锁内复跑与其他域套件:`<FILL:TEST_RESULTS 汇总>`
+**套件运行(本人环境,手工链接生产 TU 闭包,连续两轮全 exit 0)**:test_teaching_admin_core **3442 断言/37 case**(含 fake grader CLI 全流程)、test_verify_adapters_grid 146/5(含新采样 3 case)、test_r15_E_batch_refusal_accounting 62/9、test_r15_E_teaching_stats_honesty 33/6、test_r18_e_completion_ledger 36/4(含 nestbomb)、test_teaching_authoring_failures_r4 30/7、test_teaching_admin_rubric_weights_r16_c_t06 19/10 —— 合计 **3768 断言 ×2 轮零失败**。R2 评审员独立编译另跑绿其中 4 套件交叉印证。构建方式与边界(共享锁被四轨占用,故用 g++ 手链而非 CMake 全量;CMake 域 sweep 未执行)详见 TEST_RESULTS.md 披露。
 
 ## 独立评审
 - R1(fresh,REQUEST-CHANGES:P0×1/P2×1/P3×6)全处置于 7b1d6a2778:P0=discovery 记账块未恢复(恢复+纠正错误声明);P2=census 条件改逐轴连续性;P3=loader total 警告/文案去重/同面站点/死 API/gitignore。见 REVIEW_R1.md
@@ -49,5 +49,5 @@ lab_completion_ledger、verdict_stamp、lab_operator_launch×2、lab_cockpit_doc
 #1536→04 轨(widgets);#1601 双核→maintainer 决策;src/recipes 两处 #1607 同类;CT-1 剩余 app/shell/help 路径→03/04;grader passingScore 默认 60×小分制观察项。
 
 ## Known Fail / Not Executed
-- `<FILL>`
-- NOT_EXECUTED:Windows/macOS lane;线上 CI(#1491,按章程不等);TSan(未标)
+- KNOWN_BASELINE_FAIL:无(本轨改动闭包内零已知红)
+- NOT_EXECUTED:CMake 域 sweep 全量(68 目标;锁被兄弟轨占用,7 个直接受影响目标已手链双绿覆盖)、test_teaching_foundation_e2e、Windows/macOS lane、线上 CI(#1491,按章程不等)、TSan(未标)
