@@ -3,7 +3,7 @@
 ## 基线与范围
 
 - BASE:`28e1891390`(fetch 实测 origin/master;无开放 PR,PR #1662–#1667 全部已合并)
-- HEAD:`9603a4f35`(分支 `agent/r20-05-teaching-verification-20261022T190641Z`,独立 worktree)
+- HEAD:PR 创建时的分支头(GitHub 在 PR 页记录精确 SHA;分支 `agent/r20-05-teaching-verification-20261022T190641Z`,独立 worktree)
 - 写区:src/teaching、src/teaching_admin、src/app/teaching{,_admin}、src/verify、src/verify_adapters、tests(教学/评测族 + append-only 注册)、.planning/zcode-r20-05;逐文件对照见 OWNERSHIP.md
 
 ## 交付(4 工作包 + 双轮评审处置)
