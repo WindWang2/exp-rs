@@ -218,6 +218,20 @@ bool decodeEnvelope( const Json::Value &json, Envelope &envelope, std::string &e
         if ( envelope.ok )
         {
             envelope.result = json.get( "result", Json::Value( Json::objectValue ) );
+            // The result rides the same untrusted worker->host wire as
+            // params on requests: host consumers index it with jsoncpp's
+            // NON-CONST operator[] (plugin_host_proxies.cpp run(),
+            // plugin_host_process_runtime.cpp loadPlugin/inspectUiSchema),
+            // which on a non-object is resolveReference UB — an
+            // uncatchable assert abort or wild-pointer read. Refuse at
+            // decode time with the same object-or-null vocabulary the
+            // Request side's params gate uses (null is legal: worker
+            // paths default-construct a null result before filling it).
+            if ( !envelope.result.isObject() && !envelope.result.isNull() )
+            {
+                error = "response result must be an object (E6002)";
+                return false;
+            }
         }
         else
         {

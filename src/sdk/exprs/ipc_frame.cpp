@@ -149,6 +149,12 @@ ReadStatus read( IIpcStream &stream, std::string &payload,
         error = "peer announced a frame of " + std::to_string( length )
                 + " bytes, beyond the negotiated cap of "
                 + std::to_string( limits.maxFrameBytes ) + " bytes (E6003)";
+        // Salvage the length prefix into `payload` for the caller's
+        // diagnostic: the frame body was never read (the cap check runs
+        // before phase 2), so the four prefix bytes are the only real
+        // stream-head evidence there is. Without this the channel's
+        // TooLarge hexdump dumped an always-empty buffer.
+        payload.assign( pending, 0, kPrefixBytes );
         pending.clear();
         return ReadStatus::TooLarge;
     }
