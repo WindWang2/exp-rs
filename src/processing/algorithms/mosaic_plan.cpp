@@ -203,7 +203,15 @@ MosaicPlanner::build( const std::vector<SceneEntry> &scenes, const Options &opti
         const bool yDirMatch = ( gt[5] * refPxY > 0 ) || rotated; // rotated already flagged
         if ( !yDirMatch )
             plan.diagnostics.yDirectionMismatch.push_back( static_cast<int>( i ) );
-        e.gridEligible = !rotated && e.crsMatchesPlan && sizeMatch && yDirMatch;
+        // X-axis orientation must agree too: gt[1] < 0 means columns run
+        // east-to-west, and the grid sampler maps scene columns 1:1 onto
+        // plan columns — such a scene would enter the mosaic mirrored
+        // (silent geometric destruction, the exact failure the Y guard
+        // exists to prevent on the other axis).
+        const bool xDirMatch = ( gt[1] * refPxX > 0 ) || rotated;
+        if ( !xDirMatch )
+            plan.diagnostics.xDirectionMismatch.push_back( static_cast<int>( i ) );
+        e.gridEligible = !rotated && e.crsMatchesPlan && sizeMatch && yDirMatch && xDirMatch;
     }
 
     // Union extent over grid-eligible scenes; mixed-CRS scenes contribute a
@@ -325,6 +333,11 @@ MosaicPlanner::build( const std::vector<SceneEntry> &scenes, const Options &opti
         plan.diagnostics.warnings.push_back(
             "Y-axis orientation mismatch (mirrored/south-up raster) for input(s) [" +
             nameList( plan.diagnostics.yDirectionMismatch ) +
+            "]; flip/reproject to the reference orientation before mosaicking" );
+    if ( !plan.diagnostics.xDirectionMismatch.empty() )
+        plan.diagnostics.warnings.push_back(
+            "X-axis orientation mismatch (west-east mirrored columns) for input(s) [" +
+            nameList( plan.diagnostics.xDirectionMismatch ) +
             "]; flip/reproject to the reference orientation before mosaicking" );
     if ( !plan.diagnostics.subPixelOffset.empty() )
         plan.diagnostics.warnings.push_back(

@@ -66,6 +66,7 @@ struct PlanDiagnostics {
     std::vector<int> crsMismatch;
     std::vector<int> pixelSizeMismatch;
     std::vector<int> yDirectionMismatch; // mirrored / south-up vs north-up
+    std::vector<int> xDirectionMismatch; // west-east mirrored columns (gt[1] sign flip)
     std::vector<int> subPixelOffset;
     std::vector<std::string> warnings; // actionable, one per condition class
 };
