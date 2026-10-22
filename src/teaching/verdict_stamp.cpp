@@ -129,11 +129,23 @@ std::string verdictSummaryDigest( const std::string &summaryJson )
   // Digest the parsed document's compact serialization: whitespace-only
   // edits must not void a verdict that did not change.
   Json::CharReaderBuilder reader;
+  // #1607 residual (R20-05): pinned stackLimit + typed catch — a verdict
+  // summary is untrusted persisted text, and jsoncpp THROWS once the nesting
+  // limit is exceeded; the refusal stays an empty digest (the stamp then
+  // fails its own equality check), never a crash through the stamp path.
+  reader["stackLimit"] = 256;
   Json::Value doc;
   std::string errors;
   std::istringstream input( summaryJson );
-  if ( !Json::parseFromStream( reader, input, &doc, &errors ) )
+  try
+  {
+    if ( !Json::parseFromStream( reader, input, &doc, &errors ) )
+      return {};
+  }
+  catch ( const std::exception & )
+  {
     return {};
+  }
   Json::StreamWriterBuilder writer;
   writer["indentation"] = "";
   writer["commentStyle"] = "None";
