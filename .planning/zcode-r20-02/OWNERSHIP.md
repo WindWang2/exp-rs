@@ -16,7 +16,7 @@
 | tests/test_fault_injection.cpp | 本轨 | data/artifact pool 域测试（既有注册文件，追加） |
 | .planning/zcode-r20-02/** | 本轨 | 轨账本 |
 
-**零共享文件修改**：所有测试均追加进已注册的既有测试文件，不改 tests/CMakeLists.txt、根 CMakeLists、.gitignore。
+**共享文件最小变更**：所有测试均追加进已注册的既有测试文件；`tests/CMakeLists.txt`、根 `CMakeLists.txt` 零改动。`.gitignore` 有一个 append-only 的 5 行段（!.planning/zcode-r20-02/ 白名单，与 r19 各轨同模式，账本修正：R1 评审指出前文误写"不改 .gitignore"）。
 
 ## 只读域遵守
 - src/operators/rs/**（#1544 等发现 → CROSS_TRACK）、src/analysis、src/processing、src/app、src/cli、src/python 顶层（#1647-1）、src/teaching、pi/、src/gui、src/core 全程未动。
