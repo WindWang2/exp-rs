@@ -96,9 +96,13 @@ TEST_CASE( "SAR terrain geometry: closed forms", "[sar][geometry]" )
   const auto layover = terrainGeometry( 0.0, 1.7320508, 35.0, 0.0 );
   REQUIRE( layover.maskClass == TerrainMaskClass::Layover );
 
-  // Radiometric factor: flat ⇒ cos θi / cos θi = 1; grazing → NaN.
+  // Radiometric factor (#1146 alignment): flat terrain ⇒ sin θi / sin θ0 = 1;
+  // grazing local incidence → NaN. A fore-slope at θl = 15° against a 35°
+  // reference yields sin15/sin35 ≈ 0.4465 (the old cosθ0/cosθl form gave
+  // 0.8704 — the branded-biased optical ratio).
   REQUIRE( terrainRadiometricFactor( 35.0, 35.0 ) == Catch::Approx( 1.0 ).margin( 1e-12 ) );
   REQUIRE( std::isnan( terrainRadiometricFactor( 90.0, 35.0 ) ) );
+  REQUIRE( terrainRadiometricFactor( 15.0, 35.0 ) == Catch::Approx( 0.44647might ).margin( 1e-4 ) );
 
   // NaN gradients propagate as NaN incidence (caller masks).
   const auto degenerate = terrainGeometry( kNaN, 0.0, 35.0, 90.0 );

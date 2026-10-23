@@ -362,6 +362,14 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
     std::vector<std::complex<float>> residual( static_cast<size_t>( kTile ) * kTile );
     std::vector<float> topoFloat( static_cast<size_t>( kTile ) * kTile );
     std::vector<float> demBuf;
+    // SICNU_DEM_UNIT must reach topographicPhaseAtGround: heights read raw
+    // misplaced the reference shell on declared non-metre DEMs (3.28x for
+    // feet, 10x for decimeters).
+    QString appliedDemUnit;
+    const double demUnitScale = sicnu::sar::demUnitScaleToMetres( dem, &appliedDemUnit );
+    if ( demUnitScale != 1.0 )
+        context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
+                         + std::to_string( demUnitScale ) + ")" );
 
     long long topoValid = 0;
     long long topoNaN = 0;
@@ -449,6 +457,12 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
                                        "Failed to read the DEM window at tile (" +
                                            std::to_string( tx ) + ", "
                                            + std::to_string( ty ) + ")" );
+            }
+            if ( demUnitScale != 1.0 )
+            {
+                for ( float &v : demBuf )
+                    if ( std::isfinite( v ) )
+                        v = static_cast<float>( v * demUnitScale );
             }
 
             // Topographic phase per pixel (kernel authority; per-pixel

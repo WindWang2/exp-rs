@@ -86,7 +86,7 @@ Json::Value RsSarTerrainCorrectionOperator::metadata() const {
     meta["tags"].append("terrain");
     meta["tags"].append("radiometry");
     meta["purpose"] = "Full DEM terrain correction product: terrain-flattened gamma0 "
-                      "(sigma0·cosθ0/cosθi from a co-registered DEM in radar geometry) "
+                      "(sigma0·sinθi/sinθ0 from a co-registered DEM in radar geometry) "
                       "plus an optional layover/shadow validity mask and the local "
                       "incidence angle band.";
     meta["prerequisites"].append("sigma0 raster (linear power) and a DEM on the exact "
@@ -170,7 +170,7 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "input declares SICNU_SAR_DOMAIN=db; these filters operate on "
                                "linear power — convert with rs:sar_backscatter (or rs:sar_calibrate) first" );
-    // Declared-state preflight: the flattening factor sigma0·cosθ0/cosθi is
+    // Declared-state preflight: the flattening factor sigma0·sinθi/sinθ0 is
     // only lawful for sigma0 input. A declared gamma0/beta0 would be
     // double-corrected, a derived product carries no backscatter, and a
     // conflicting or unreadable declaration is never guessed. Legacy products

@@ -74,6 +74,15 @@ bool isSarDerivedState( const QString &state );
 /// Reads a dataset-level metadata item (default domain, empty when absent).
 QString datasetMeta( const GdalDatasetWrapper &ds, const char *key );
 
+/// Scale factor of the DEM's declared SICNU_DEM_UNIT to metres: "feet" →
+/// 0.3048, "decimeters" → 0.1, "meters"/undeclared → 1.0. An unknown unit
+/// resolves to 1.0 with @a appliedUnit set to "meters (assumed)" — callers
+/// should log it. Every DEM-consuming SAR operator must apply this before
+/// heights enter the geometry kernels: rs_sar_geocode / terrain_masks /
+/// remove_topographic_phase used to read raw values and misplaced
+/// geocoding/topographic phase by 3.28x/10x on declared non-metre DEMs.
+double demUnitScaleToMetres( const GdalDatasetWrapper &ds, QString *appliedUnit = nullptr );
+
 /// 10·log10(power). Callers must guarantee power > 0 (guard before calling).
 double linearToDb( double power );
 /// 10^(db/10).

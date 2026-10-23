@@ -255,6 +255,14 @@ Json::Value runOrbitIncidence( const Json::Value &params, RSOperatorContext &con
                                "Failed to create output raster: " + outputPath );
     out.setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
 
+// SICNU_DEM_UNIT must reach geolocateZeroDoppler: heights read raw
+    // misplaced the zero-Doppler shell on declared non-metre DEMs.
+    QString appliedDemUnit;
+    const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );
+    if ( demUnitScale != 1.0 )
+        context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
+                         + std::to_string( demUnitScale ) + ")" );
+
     std::vector<float> demScratch;
     std::vector<float> outF( static_cast<size_t>( kTileDim ) * kTileDim );
 
@@ -266,6 +274,12 @@ Json::Value runOrbitIncidence( const Json::Value &params, RSOperatorContext &con
         const int bw = tile.bufferWidth;
         const size_t bufN = static_cast<size_t>( bw ) * tile.bufferHeight;
         normalizeHalo( haloBuf, bufN, demHasSentinel, demSentinel, &demScratch );
+        if ( demUnitScale != 1.0 )
+        {
+            for ( float &v : demScratch )
+                if ( std::isfinite( v ) )
+                    v = static_cast<float>( v * demUnitScale );
+        }
         for ( int y = 0; y < tile.height; ++y )
         {
             const double azimuthTime = azimuthStart + static_cast<double>( tile.yOffset + y ) / prf;
@@ -422,6 +436,12 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
         const int bw = tile.bufferWidth;
         const size_t bufN = static_cast<size_t>( bw ) * tile.bufferHeight;
         normalizeHalo( haloBuf, bufN, demHasSentinel, demSentinel, &demScratch );
+        if ( demUnitScale != 1.0 )
+        {
+            for ( float &v : demScratch )
+                if ( std::isfinite( v ) )
+                    v = static_cast<float>( v * demUnitScale );
+        }
         for ( int y = 0; y < tile.height; ++y )
         {
             for ( int x = 0; x < tile.width; ++x )
