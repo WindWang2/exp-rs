@@ -3,7 +3,8 @@
 ## 分支与基线
 - Branch: `agent/r20-03-pi-mcp-workflow-20261022T160809Z`（独立 worktree `/home/kevin/projects/rs-studio/exp-rs-agent/r20-03-pi-mcp-workflow-20261022T160809Z`）
 - BASE `28e1891390` = live recon 时 origin/master（fetch 复核；推送前再次 fetch 确认）
-- 11 commits：4 修复 + 1 RED 网 + 3 评审修复轮 + 1 sidecar/页面再生 + 2 文档
+- 12 commits：4 修复 + 1 RED 网 + 3 评审修复轮 + 1 sidecar/页面再生 + 3 文档
+- **PR #1670**: https://github.com/WindWang2/exp-rs/pull/1670（OPEN 非草稿，head 06ed6f6df3 = 推送前 fetch 复核的 origin/master 28e1891390 之上；不等待 CI、不自动合并）
 
 ## 头条成果
 1. **W1 [P2]** IPC Response `result` 类型门：worker→host 不可信帧的非对象 result 此前直达宿主的非 const `operator[]` 消费点（resolveReference：异常构建抛穿无 catch 线程/无异常构建 abort）。decode 时镜像 params 门拒绝（E6002）；null/absent/object 词汇表与 params 一致。master-RED 实证（非对象 result 被接受）。

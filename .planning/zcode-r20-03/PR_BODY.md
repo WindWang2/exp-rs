@@ -1,7 +1,7 @@
 # hardening(r20-03): Pi/MCP harness — IPC result-type gate, capability-loader fail-closed closure, typed tool refusals
 
 **BASE** `28e1891390` (= origin/master at live recon; re-verified before push)
-**HEAD** `19fad36ec8`
+**HEAD** `06ed6f6df3` (PR #1670)
 
 ## Scope (track 03/05)
 All changes inside `src/sdk/exprs`, `src/agent/harness`, `src/agent_ops`, two derived data files (`data/processing/algorithm_meta/capability/rs-sam-classify.json`, `pi/knowledge/capability-classification.md`, both tool-regenerated) and three test files. No cartography/mapspec/layout_tools/symbology, no cli/app/geospatial (ownership proof: `.planning/zcode-r20-03/OWNERSHIP.md`).

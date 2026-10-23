@@ -54,4 +54,5 @@ Oracle: 任务书 §8（真实 RED/GREEN×2、快照三腿一致或如实 KNOWN_
 
 ## 轮 8 — 交付
 - 12 commits（10 代码/数据 + 2 文档）；推送前 fetch 复核 origin/master=28e1891390 不变；与 open PR #1668/#1669 零文件重叠。
-- PR 创建（URL 见 FINAL_REPORT 更新）。
+- PR 创建成功并复核：https://github.com/WindWang2/exp-rs/pull/1670（OPEN，非草稿，head 06ed6f6df393f5c638addfab334a5500bce4151b）。
+- 最后一条账本记录：任务以 PR 提交为交付边界，不自动合并、不等 CI。
