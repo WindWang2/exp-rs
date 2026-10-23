@@ -1786,3 +1786,91 @@ TEST_CASE( "Streaming linear fusion clamps an out-of-range panWeight [r18a][r1]"
     CHECK( out1[0] == Approx( 10.0f ).margin( 1e-4 ) );
     CHECK( out1[1] == Approx( 10.0f ).margin( 1e-4 ) );
 }
+
+
+// ===========================================================================
+// r21-A seam alignment — the in-memory kernels must agree with the
+// streaming production path's validity statistics and non-finite policy.
+// ===========================================================================
+
+TEST_CASE( "PCA Fusion: per-band NoData keeps the joint-valid statistics (AG2-D1)",
+           "[fusion][r21a]" )
+{
+    // Raster A: bands share the same NoData pixels -> joint set == per-band
+    //            set (the only case the old code handled correctly).
+    // Raster B: band 1 keeps pixel 2, band 2 keeps pixel 3 -> per-band means
+    //            used to drift off the joint set and rotate PC1.
+    // Metamorphic oracle: A and B hold IDENTICAL valid inputs on the joint
+    // set (pixels 0/1), so with joint statistics their fused outputs at
+    // those pixels must be identical.
+    const int W = 2, H = 2, N = W * H;
+    const float ND = NODATA;
+    std::vector<float> b1A = { 1.0f, 2.0f, ND, ND };
+    std::vector<float> b2A = { 1.0f, 2.0f, ND, ND };
+    std::vector<float> b1B = { 1.0f, 2.0f, 3.0f, ND };
+    std::vector<float> b2B = { 1.0f, 2.0f, ND, 4.0f };
+    std::vector<float> pan = { 1.5f, 1.5f, 9.0f, 9.0f };
+
+    QVector<const float *> bandsA = { b1A.data(), b2A.data() };
+    QVector<const float *> bandsB = { b1B.data(), b2B.data() };
+    const auto outA = ImageFusion::pcaFusion( bandsA, 2, pan.data(), W, H, ND );
+    const auto outB = ImageFusion::pcaFusion( bandsB, 2, pan.data(), W, H, ND );
+    REQUIRE( outA.size() == 2 );
+    REQUIRE( outB.size() == 2 );
+
+    // Joint-valid pixels carry identical fused values across A and B.
+    for ( int b = 0; b < 2; ++b )
+    {
+        INFO( "band " << b );
+        CHECK( outA[b][0] == Approx( outB[b][0] ).margin( 1e-4 ) );
+        CHECK( outA[b][1] == Approx( outB[b][1] ).margin( 1e-4 ) );
+    }
+    // Pixels valid in only one band stay NoData in B (joint validity).
+    for ( int b = 0; b < 2; ++b )
+    {
+        CHECK( outB[b][2] == NODATA );
+        CHECK( outB[b][3] == NODATA );
+    }
+}
+
+TEST_CASE( "Brovey: a non-finite band sample voids the whole pixel (AG2-D2)",
+           "[fusion][r21a]" )
+{
+    const int W = 1, H = 3, N = W * H;
+    const float inf = std::numeric_limits<float>::infinity();
+    // Pixel 0: +Inf in blue; pixel 1: NaN in pan; pixel 2: fully valid.
+    std::vector<float> r = { 50.0f, 50.0f, 50.0f };
+    std::vector<float> g = { 50.0f, 50.0f, 50.0f };
+    std::vector<float> b = { inf, 50.0f, 50.0f };
+    std::vector<float> pan = { 300.0f, std::numeric_limits<float>::quiet_NaN(), 300.0f };
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    const auto out = ImageFusion::brovey( msBands, 3, pan.data(), W, H, NODATA );
+    REQUIRE( out.size() == 3 );
+    // The streaming path washes ±Inf to NaN at read time, so the in-memory
+    // kernel must treat them identically: NoData, never invented 0.0 black
+    // bands (the old Inf/Inf=NaN path wrote 0 into the finite bands).
+    for ( int band = 0; band < 3; ++band )
+    {
+        CHECK( out[band][0] == NODATA );
+        CHECK( out[band][1] == NODATA );
+        CHECK( out[band][2] == Approx( 100.0f ).margin( 1e-3 ) );
+    }
+}
+
+TEST_CASE( "Linear weighted fusion: non-finite inputs become NoData (AG2-D2)",
+           "[fusion][r21a]" )
+{
+    const int W = 1, H = 2, N = W * H;
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> ms = { inf, 10.0f };
+    std::vector<float> pan = { 100.0f, 100.0f };
+
+    QVector<const float *> msBands = { ms.data() };
+    const QVector<float> weights = { 0.5f };
+    const auto out = ImageFusion::linearWeighted( msBands, 1, pan.data(), W, H,
+                                                  NODATA, weights, 0.5f );
+    REQUIRE( out.size() == 1 );
+    CHECK( out[0][0] == NODATA ); // 0.5*Inf + 0.5*100 used to publish +Inf
+    CHECK( out[0][1] == Approx( 55.0f ).margin( 1e-4 ) );
+}
