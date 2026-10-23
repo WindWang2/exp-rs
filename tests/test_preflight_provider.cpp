@@ -31,6 +31,9 @@
 #include <utility>
 #include <vector>
 
+#include <filesystem>
+
+
 using namespace sicnu::preflight;
 
 namespace {
@@ -280,6 +283,38 @@ TEST_CASE( "CapabilityMirrorProjection fails closed on corrupt input and missing
         REQUIRE( mirror.entryForOperator( "rs:spectral_index", {} ).status ==
                  FactStatus::Unknown );
     }
+}
+
+TEST_CASE( "mirror directory loading refuses planted oversized documents (D6)",
+           "[preflight][provider][bounds]" )
+{
+    // R20-03 D6: the directory loader slurped each mirror file whole
+    // (rdbuf >> stringstream) before parsing — a planted multi-megabyte
+    // "mirror" was buffered in full. The bounded reader refuses it by name
+    // instead (RED on master: the problem says "unparseable", not "exceeds").
+    // Fixed name + remove_all first: this suite runs single-process (ctest
+    // -j1 discipline), same as the TempDir helpers in the CLI lanes.
+    const auto dir = std::filesystem::temp_directory_path() / "preflight_mirror_bounds";
+    std::error_code ec;
+    std::filesystem::remove_all( dir, ec );
+    REQUIRE( std::filesystem::create_directories( dir, ec ) );
+    const auto planted = dir / "planted.json";
+    {
+        std::ofstream out( planted, std::ios::binary | std::ios::trunc );
+        const std::string head = "[{\"id\":\"rs:planted\",\"pad\":\"";
+        const std::string filler( 5 * 1024 * 1024, 'x' );
+        out << head << filler << "\"}]";
+    }
+
+    CapabilityMirrorProjection mirror;
+    const int loaded = mirror.loadDirectory( dir.string() );
+    REQUIRE( loaded == 0 );
+    REQUIRE_FALSE( mirror.healthy() );
+    REQUIRE( mirror.problems().size() == 1 );
+    REQUIRE( mirror.problems()[0].find( "exceeds" ) != std::string::npos );
+    REQUIRE( mirror.problems()[0].find( "planted.json" ) != std::string::npos );
+
+    std::filesystem::remove_all( dir, ec );
 }
 
 TEST_CASE( "integration: real passport + real mirror drive the full engine",

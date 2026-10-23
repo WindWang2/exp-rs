@@ -23,6 +23,7 @@
 #include <QStringList>
 
 #include <filesystem>
+#include <fstream>
 
 #include <iostream>
 #include <sstream>
@@ -207,6 +208,70 @@ TEST_CASE("cli session command: typed exit codes for typed failures",
         {"run", "--goal", "compute NDVI for the scene", "--intent", "ndvi"}, &driver);
     REQUIRE(relaunched.exitCode == 0);
     REQUIRE(relaunched.envelope["data"]["outcome"].asString() == "delivered");
+}
+
+TEST_CASE("cli session command: repair approval rides the token channel",
+          "[cli][ops_driver][approval]")
+{
+    // CT-B from R20-03: `--approve` mapped a bool nothing ever consumed, and
+    // the CLI had no way to carry the driver's repair_approval token, so the
+    // human approval gate was unreachable from the CLI. The channel is the
+    // token file: mint via `session approve-repair`, arm via
+    // `--repair-approval <token.json> [--approval-now-ms <ms>]` on run.
+    static OpsDriver seamless(OpsDriver::Options{});
+    const std::string dir =
+        (std::filesystem::temp_directory_path() / "cli_agent_ops_approval").string();
+    std::filesystem::create_directories(dir);
+    auto tokenFile = [&dir](const std::string &name, const std::string &content) {
+        const std::string path = (std::filesystem::path(dir) / name).string();
+        std::ofstream out(path, std::ios::trunc);
+        out << content;
+        return path;
+    };
+
+    // The bare-bool spellings are refused at parse time with a pointer to
+    // the token channel (RED: --approve used to be a silent no-op).
+    auto bare = runSession({"run", "--goal", "g", "--approve"}, &seamless);
+    REQUIRE(bare.exitCode == 6); // InvalidInput
+    REQUIRE(bare.envelope["error"].asString().find("--repair-approval") !=
+            std::string::npos);
+    auto legacy = runSession({"run", "--goal", "g", "--approve-pending-repair"}, &seamless);
+    REQUIRE(legacy.exitCode == 6);
+    REQUIRE(legacy.envelope["error"].asString().find("--repair-approval") !=
+            std::string::npos);
+
+    // A missing/unparseable/non-object token file is a typed refusal at
+    // parse time, never a silently dropped approval.
+    const std::string badJson = tokenFile("bad.json", "not json at all");
+    auto malformed = runSession({"run", "--goal", "g", "--repair-approval",
+                                 QString::fromStdString(badJson)},
+                                &seamless);
+    REQUIRE(malformed.exitCode == 6);
+    const std::string nonObject = tokenFile("array.json", "[1,2,3]");
+    auto notAnObject = runSession({"run", "--goal", "g", "--repair-approval",
+                                   QString::fromStdString(nonObject)},
+                                  &seamless);
+    REQUIRE(notAnObject.exitCode == 6);
+    auto missingFile = runSession(
+        {"run", "--goal", "g", "--repair-approval",
+         QString::fromStdString((std::filesystem::path(dir) / "nope.json").string())},
+        &seamless);
+    REQUIRE(missingFile.exitCode == 6);
+
+    // A well-formed token rides all the way to the driver: `resume` never
+    // consumes an approval, and the driver says so by name — proof the CLI
+    // carried the token instead of dropping it.
+    const std::string okToken = tokenFile(
+        "ok.json", R"({"findings_digest":"d","issued_at_ms":1,"expires_at_ms":2})");
+    auto carried = runSession({"resume", "--session-id", "s-x", "--repair-approval",
+                               QString::fromStdString(okToken), "--approval-now-ms", "123"},
+                              &seamless);
+    REQUIRE(carried.exitCode == 1); // GenericError refusal family
+    REQUIRE(carried.envelope["data"]["error"].asString() == "APPROVAL_TOKEN_REQUIRED");
+
+    // Non-numeric --approval-now-ms is a typed parse refusal.
+    auto badNow = runSession({"run", "--goal", "g", "--approval-now-ms", "abc"}, &seamless);
+    REQUIRE(badNow.exitCode == 6);
 }
 
 TEST_CASE("cli session command: journal reconcile over the wire",

@@ -388,6 +388,36 @@ TEST_CASE( "host-process plugin loads and executes over the worker", "[hostproce
     REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
 }
 
+TEST_CASE( "workerPid stays honest across the worker lifecycle (D5 snapshot)",
+           "[hostprocess][diagnostics]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Live worker: diagnostics name its pid (> 0).
+    Json::Value snapshot = stack.runtime->diagnosticsSnapshot();
+    const Json::Int64 livePid = snapshot["plugins"][ kPluginId ]["workerPid"].asInt64();
+    REQUIRE( livePid > 0 );
+
+    // Kill through the typed ladder (deadline), leaving the session dead
+    // but loaded — the post-mortem window diagnostics must still speak in.
+    Json::Value result = runOperator( stack, "test:iso-hang", Json::Value() );
+    REQUIRE( result["__operatorError"].asBool() );
+    REQUIRE( result["code"].asString() == "4100" );
+    snapshot = stack.runtime->diagnosticsSnapshot();
+    REQUIRE( snapshot["plugins"][ kPluginId ]["workerAlive"].asBool() == false );
+
+    // RED on master: the dead session collapsed to workerPid 0 (the close
+    // election had already cleared the plain handle member). The spawn-time
+    // snapshot keeps naming the worker that actually ran — the same honest
+    // post-mortem evidence retiredGroups already carries.
+    const Json::Int64 deadPid = snapshot["plugins"][ kPluginId ]["workerPid"].asInt64();
+    REQUIRE( deadPid > 0 );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
 TEST_CASE( "plugin crash leaves the host alive and recovery is bounded",
            "[hostprocess][crash]" )
 {
