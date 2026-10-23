@@ -44,6 +44,14 @@ Oracle: 任务书 §8（真实 RED/GREEN×2、快照三腿一致或如实 KNOWN_
 - 全部修复+RED SECTION 于 88a637df6b；语法预检通过。
 - R2 显式核验五项全过（isInt 矩阵、optionalString 矩阵、剩余未门控读清点、测试别名、W1 wire 形状）+W5 聚合初始化排查。
 
-## 轮 7 —（进行中）整合构建周期排队（PHASE1 补建 plugin 11 目标+cli+host；PHASE2 master-RED+跑 4 二进制；PHASE3 HEAD-GREEN+确认）→ 全 family ×2 → W8/CT-6 证据落账 → FINAL_REPORT → push+PR
+## 轮 7 — 整合周期执行 + 最终验证电池
+- 周期三阶段全成：PHASE1 plugin 11 目标+exprs_ipc 重链（sed 未生效漏掉 cli/host，后续单独补建）；PHASE2 master-RED（exprs_ipc 2 断言/capability 12 断言 3 例/harness 1 例/agent_ops 0=结构性）；PHASE3 HEAD-GREEN 确认。
+- capability 残留 2 败分诊：:206 drift=**r18-a #1663 漏再生 sidecar**（master 预存）→ gen-meta 157 sidecar 单文件 diff + gen-pages 页面再生 → 17 例/1637 断言全绿 ×2；:647=我 R2 测试条目用了非 knownKeys 的 "note" → 改 intents（c757c2492f）。
+- 最终电池：exprs_ipc/harness/agentops ×2 RC=0；parity 12/5506 ×2、e2e 4810+4674 ×2（cli 140MB+host 补建后）；r14C ×2 绿；pi 39/39；plugin 族 6 绿。
+- **master 对照周期**：host_process :1259 与 boundary/halffail/unload_order/loader 四测试 master==HEAD 失败集逐字节相同 → 全部预存红归档（KNOWN_BASELINE_FAIL）。
+- CT-6 证据：snapshot registry 腿 ×2 确定性失败，首工具 cartography:chart_list。
+- .gitignore 白名单 append（markdown-only 惯例）+ 12 账本文件入库。
 
-
+## 轮 8 — 交付
+- 12 commits（10 代码/数据 + 2 文档）；推送前 fetch 复核 origin/master=28e1891390 不变；与 open PR #1668/#1669 零文件重叠。
+- PR 创建（URL 见 FINAL_REPORT 更新）。
