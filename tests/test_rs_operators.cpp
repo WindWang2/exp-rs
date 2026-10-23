@@ -4360,3 +4360,90 @@ TEST_CASE("extract_bands carries NoData, band roles and provenance stamps", "[op
                                             "SICNU_NUMERIC_SCALE", nullptr))
           == QLatin1String("10000"));
 }
+
+#ifdef SICNU_HAS_OPENCV
+// ===========================================================================
+// r21-A / AG1-4 — rs:radiometric_calibration must refuse malformed bands
+// entries instead of silently dropping them (an emptied list meant "all
+// bands", widening the run's scope behind the caller's back).
+// ===========================================================================
+TEST_CASE("RS radiometric calibration refuses non-integral bands entries (AG1-4)", "[operators][rs][r21a]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString outputPath = tmp.path() + "/cal.tif";
+    const QString mtlPath = tmp.path() + "/LC08MTL.txt";
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(inputPath, 2, 2, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    std::vector<float> dn = {100.0f, 200.0f, 50.0f, 80.0f};
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(srcDs, 1), GF_Write, 0, 0, 2, 2,
+                         dn.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+    GDALSetDescription(GDALGetRasterBand(srcDs, 1), "B4");
+    GDALClose(srcDs);
+
+    {
+        QFile mtl(mtlPath);
+        REQUIRE(mtl.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream ts(&mtl);
+        ts << "SPACECRAFT_ID = \"LANDSAT_8\"\n"
+           << "SUN_ELEVATION = 45.0\n"
+           << "RADIANCE_MULT_BAND_4 = 0.01\n"
+           << "RADIANCE_ADD_BAND_4 = 0.0\n";
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:radiometric_calibration");
+    REQUIRE(op != nullptr);
+
+    SECTION("non-integral numeric entry is refused") {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["metadata_path"] = mtlPath.toStdString();
+        params["unit"] = "radiance";
+        params["bands"] = Json::Value(Json::arrayValue);
+        params["bands"].append(2.5);
+        RSOperatorContext ctx;
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError for non-integral bands entry");
+        } catch (const RSOperatorError &e) {
+            CHECK(e.code() == ErrorCode::InvalidParameter);
+        }
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("string entry is refused") {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["metadata_path"] = mtlPath.toStdString();
+        params["unit"] = "radiance";
+        params["bands"] = Json::Value(Json::arrayValue);
+        params["bands"].append("3");
+        RSOperatorContext ctx;
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError for string bands entry");
+        } catch (const RSOperatorError &e) {
+            CHECK(e.code() == ErrorCode::InvalidParameter);
+        }
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("integral selection still works") {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["metadata_path"] = mtlPath.toStdString();
+        params["unit"] = "radiance";
+        params["bands"] = Json::Value(Json::arrayValue);
+        params["bands"].append(1);
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        CHECK(result["bandCount"].asInt() == 1);
+        CHECK(QFile::exists(outputPath));
+    }
+}

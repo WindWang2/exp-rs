@@ -16,6 +16,8 @@
 #include <QString>
 #include <QMap>
 
+#include <cmath>
+
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -150,6 +152,16 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
     float gain = static_cast<float>(getDouble(params, "gain", 1.0));
     float bias = static_cast<float>(getDouble(params, "bias", 0.0));
     const float airmass = static_cast<float>(getDouble(params, "airmass", 1.0));
+    // DOS2 transmittance T = exp(-tau*airmass) needs a physically valid
+    // airmass. estimateTransmittance() maps a non-finite or non-positive
+    // value to T = 0, and dosReflectance() then turns EVERY valid pixel into
+    // NaN — the run used to return success and publish an all-NoData raster
+    // stamped as surface reflectance. Refuse the input instead.
+    if (!std::isfinite(airmass) || !(airmass > 0.0f)) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "airmass must be a positive finite number (got " +
+                                  std::to_string(airmass) + ")");
+    }
 
     int methodCode = AtmosphericCorrection::Dos1;
     if (method == "dn_to_radiance") methodCode = AtmosphericCorrection::DnToRadiance;

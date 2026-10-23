@@ -639,6 +639,17 @@ bool processFile(const QString &sourcePath, const QString &targetPath,
     constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
     const bool needsDarkLevel = (method == Method::Dos1 || method == Method::Dos2);
     const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
+    // Non-positive transmittance (non-finite or non-positive airmass) would
+    // void every valid pixel into NaN while the run still reports success —
+    // the in-memory dos2() kernel refuses exactly this case; mirror it here
+    // so no streaming caller can publish an all-NoData "surface reflectance".
+    if (method == Method::Dos2 && !(transmittance > 0.0f)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral(
+                "DOS2 transmittance is non-positive: airmass %1 is outside the physical domain")
+                .arg(airmass);
+        return false;
+    }
 
     // Pass 1 (+2): full-scene dark-object statistics for DOS1/DOS2.
     float darkLevel = 0.0f;
@@ -802,6 +813,17 @@ bool processFileDos(const QString &sourcePath, const QString &targetPath,
 
     constexpr int kTile = 256;
     const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
+    // Non-positive transmittance (non-finite or non-positive airmass) would
+    // void every valid pixel into NaN while the run still reports success —
+    // the in-memory dos2() kernel refuses exactly this case; mirror it here
+    // so no streaming caller can publish an all-NoData "surface reflectance".
+    if (method == Method::Dos2 && !(transmittance > 0.0f)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral(
+                "DOS2 transmittance is non-positive: airmass %1 is outside the physical domain")
+                .arg(airmass);
+        return false;
+    }
 
     // Passes 1+2: dark-object statistics in TOA-reflectance space (the same
     // streaming histogram estimator the radiance path uses). Declared

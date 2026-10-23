@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace RadiometricCalibration;
@@ -1055,5 +1056,19 @@ TEST_CASE("TOA Reflectance fails closed for unphysical sun geometry", "[radiomet
     REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
 
     p.sunElevationDeg = 0.0; // grazing: sin = 0 → division by zero guard
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
+}
+
+TEST_CASE("TOA Reflectance fails closed for NaN sun elevation (AG1-3)", "[radiometric][toa][r21a]")
+{
+    // NaN <= 0.0 is false, so the old horizon gate let a NaN elevation
+    // through: the run returned true and wrote an all-NaN band — the header
+    // documents this exact case as fail-closed.
+    exp_radiometric::SensorCalibrationParams p;
+    p.reflMult = 0.00002;
+    p.reflAdd = 0.0;
+    p.sunElevationDeg = std::numeric_limits<double>::quiet_NaN();
+    const float dn = 100.0f;
+    float toa = 123.0f;
     REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
 }
