@@ -263,3 +263,46 @@ TEST_CASE( "Plan: sameCrs handles string equality, WKT equivalence and differenc
     CHECK_FALSE( MosaicPlanner::sameCrs( "EPSG:4326", "EPSG:3857" ) );
     CHECK_FALSE( MosaicPlanner::sameCrs( "EPSG:4326", "" ) );
 }
+
+TEST_CASE( "Plan: X-flipped (west-to-east decreasing) raster is rejected like a Y mirror",
+           "[processing][mosaic][plan][x-flip]" )
+{
+    // A scene whose columns run east-to-decaying-west (gt[1] < 0 while the
+    // reference is north-up positive) describes the SAME ground mirrored.
+    // The planner guarded only the Y axis (yDirectionMismatch); an X flip
+    // passed every check, and the mosaic sampler then painted the scene's
+    // column 0 at the west edge — silently mirroring the imagery. The X
+    // axis must fail closed exactly like the Y axis.
+    std::vector<SceneEntry> scenes;
+    scenes.push_back( northUpScene( "ref.tif", 0.0, 0.0, 20, 20 ) ); // gt[1] = +1
+
+    SceneEntry flipped = northUpScene( "flip.tif", 20.0, 0.0, 20, 20 );
+    flipped.geoTransform[1] = -1.0; // columns decrease east->west mirror
+    scenes.push_back( flipped );
+
+    MosaicPlanner::Options opt;
+    const auto plan = MosaicPlanner::build( scenes, opt );
+    REQUIRE( plan.has_value() );
+
+    REQUIRE( plan->scenes.size() == 2 );
+    CHECK( plan->scenes[0].gridEligible );
+    REQUIRE_FALSE( plan->scenes[1].gridEligible );
+    REQUIRE( plan->diagnostics.xDirectionMismatch.size() == 1 );
+    CHECK( plan->diagnostics.xDirectionMismatch[0] == 1 );
+    // Placement must not be produced for the flipped scene.
+    CHECK_FALSE( plan->scenes[1].placement.valid );
+    bool warned = false;
+    for ( const std::string &w : plan->diagnostics.warnings )
+        if ( w.find( "X-axis orientation mismatch" ) != std::string::npos )
+            warned = true;
+    REQUIRE( warned );
+
+    // Control: a normal north-up scene stays eligible and unflagged.
+    std::vector<SceneEntry> ok;
+    ok.push_back( northUpScene( "ref.tif", 0.0, 0.0, 20, 20 ) );
+    ok.push_back( northUpScene( "ok.tif", 20.0, 0.0, 20, 20 ) );
+    const auto planOk = MosaicPlanner::build( ok, opt );
+    REQUIRE( planOk.has_value() );
+    CHECK( planOk->diagnostics.xDirectionMismatch.empty() );
+    CHECK( planOk->scenes[1].gridEligible );
+}

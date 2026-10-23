@@ -321,10 +321,20 @@ Json::Value LabCockpitDock::loadJsonFile( const QString &path ) const
   const QByteArray bytes = f.readAll();
   Json::Value root;
   Json::CharReaderBuilder b;
+  // #1607 discipline (R20-05): a hand-editable persisted document — pin the
+  // nesting bound and catch the reader's throw as an empty (refused) doc.
+  b["stackLimit"] = 256;
   std::string errs;
   std::unique_ptr<Json::CharReader> reader( b.newCharReader() );
-  if ( !reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &root, &errs ) )
+  try
+  {
+    if ( !reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &root, &errs ) )
+      return Json::Value();
+  }
+  catch ( const std::exception & )
+  {
     return Json::Value();
+  }
   return root;
 }
 

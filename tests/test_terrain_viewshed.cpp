@@ -200,3 +200,104 @@ TEST_CASE( "viewshed refuses observers outside the grid or on NoData",
     p.obsCol = 8;
     CHECK_FALSE( viewshedR3( gd.z.data(), 8, 8, kNo, 1.0, 1.0, p, &vis ) );
 }
+
+TEST_CASE( "viewshed marks DEM-NoData cells with the declared nodataByte",
+           "[terrain][viewshed][nodata]" )
+{
+    // Contract (terrain_viewshed.h): visible holds 1/0 and the caller's
+    // nodataByte for DEM-NoData cells. The raster pass used to leave the
+    // pre-assigned 0 there, so every consumer filtering on the sentinel
+    // (e.g. the agent terrain tool's 255) treated NoData as "not visible"
+    // and counted it into the analysed denominator.
+    const int w = 15;
+    const int h = 15;
+    Grid g = plane( w, h, 0.0, 0.0, 10.0 );
+    // NoData collar one cell thick.
+    for ( int x = 0; x < w; ++x )
+    {
+        g.z[static_cast<std::size_t>( x )] = kNo;
+        g.z[static_cast<std::size_t>( h - 1 ) * w + x] = kNo;
+    }
+    for ( int y = 0; y < h; ++y )
+    {
+        g.z[static_cast<std::size_t>( y ) * w] = kNo;
+        g.z[static_cast<std::size_t>( y ) * w + ( w - 1 )] = kNo;
+    }
+    // One interior NoData hole as well.
+    g.z[static_cast<std::size_t>( 4 ) * w + 4] = kNo;
+
+    ViewshedParams p;
+    p.obsCol = 7;
+    p.obsRow = 7;
+    p.observerHeight = 2.0;
+    p.radius = 0.0;
+    std::vector<std::uint8_t> vis;
+    constexpr std::uint8_t kSentinel = 255;
+    REQUIRE( viewshedR3( g.z.data(), w, h, kNo, 1.0, 1.0, p, &vis, kSentinel ) );
+    REQUIRE( vis.size() == static_cast<std::size_t>( w ) * h );
+
+    std::size_t sentinelCells = 0;
+    std::size_t nodataCells = 0;
+    for ( int y = 0; y < h; ++y )
+        for ( int x = 0; x < w; ++x )
+        {
+            const std::size_t i = static_cast<std::size_t>( y ) * w + x;
+            const bool isMissing = g.z[i] == kNo;
+            nodataCells += isMissing ? 1 : 0;
+            if ( isMissing )
+            {
+                INFO( "cell " << x << "," << y );
+                REQUIRE( vis[i] == kSentinel );
+                ++sentinelCells;
+            }
+            else
+            {
+                REQUIRE( vis[i] != kSentinel );
+            }
+        }
+    REQUIRE( nodataCells == sentinelCells );
+
+    // The analysed population for a visibleFraction must exclude the
+    // sentinel: 15*15 - 56 collar - 1 hole = 168 analysable cells.
+    std::size_t analysed = 0;
+    for ( std::uint8_t v : vis )
+        if ( v != kSentinel )
+            ++analysed;
+    REQUIRE( analysed == 168 );
+
+    // Sentinel 0 keeps the legacy 1/0 alphabet and the cumulative path is
+    // unchanged (its scratch uses nodataByte 0 and counts v != 0).
+    std::vector<std::uint8_t> vis0;
+    REQUIRE( viewshedR3( g.z.data(), w, h, kNo, 1.0, 1.0, p, &vis0, 0 ) );
+    std::size_t zeros = 0;
+    for ( int y = 0; y < h; ++y )
+        for ( int x = 0; x < w; ++x )
+        {
+            const std::size_t i = static_cast<std::size_t>( y ) * w + x;
+            if ( g.z[i] == kNo )
+            {
+                REQUIRE( vis0[i] == 0 );
+                ++zeros;
+            }
+        }
+    REQUIRE( zeros == nodataCells );
+    std::vector<std::uint16_t> counts;
+    REQUIRE( cumulativeViewshed( g.z.data(), w, h, kNo, 1.0, 1.0, { p }, &counts, 999 ) );
+    std::size_t nodataCount = 0;
+    for ( int y = 0; y < h; ++y )
+        for ( int x = 0; x < w; ++x )
+        {
+            const std::size_t i = static_cast<std::size_t>( y ) * w + x;
+            if ( g.z[i] == kNo )
+            {
+                REQUIRE( counts[i] == 999 );
+                ++nodataCount;
+            }
+            else
+            {
+                // Valid cells were re-zeroed by cumulativeViewshed itself.
+                REQUIRE( counts[i] <= 1 );
+            }
+        }
+    REQUIRE( nodataCount == nodataCells );
+}

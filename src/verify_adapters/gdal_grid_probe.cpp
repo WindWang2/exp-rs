@@ -110,6 +110,22 @@ std::optional<sicnu::verify::GridInfo> GdalGridProbe::grid( const std::string &p
     info.nodataFraction = static_cast<double>( nodata ) / static_cast<double>( sampled );
     info.finiteFraction =
         static_cast<double>( sampled - nonFinite ) / static_cast<double>( sampled );
+    // #1600 (R20-05): stamp the estimate as an estimate. The lattice is a
+    // CENSUS only when it covered every pixel, i.e. each axis is tiled
+    // contiguously (windowOrigins {0, (e-w)/2, e-w} leaves gaps unless
+    // extent <= 3*window — an elongated raster whose short axis is fully
+    // oversampled can read >= width*height pixels while long-axis columns
+    // in between are never read; comparing pixel counts would then claim a
+    // census over unread columns). Contiguous-but-overlapping lattices
+    // re-read some pixels; coverage, not weight uniformity, defines the
+    // census claim, and every such pixel was still read at least once.
+    const bool xAxisContiguous = metadata.width <= 3 * windowW;
+    const bool yAxisContiguous = metadata.height <= 3 * windowH;
+    if ( !( xAxisContiguous && yAxisContiguous ) )
+    {
+        info.fractionsFromSample = true;
+        info.sampledPixels = sampled;
+    }
     return info;
 }
 

@@ -221,7 +221,7 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 输出：bands（integer）、classes（integer）、output（raster）
 - 参数：angleOut（string）、bands（integer）、libraryMaterials（string）、libraryPath（string）、metric（enum）、output（string）、refs（string）、refsRef（string）
 - 前置条件：Reference spectra must use the same band order and units as the input raster.
-- 局限：SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair).
+- 局限：SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair).；Bands without a declared NoData are matched on non-finite values only (NaN-only policy): a -9999 sample in an undeclared band is treated as data, not a void. This deliberately differs from rs:spectral_similarity's family fallback (-9999 voids when no band declares a sentinel) — declare NoData explicitly to unify both paths.
 - 适用地物：矿物、植被、目标光谱
 - 适用场景：矿物填图、已知端元的目标识别
 - 失败模式：

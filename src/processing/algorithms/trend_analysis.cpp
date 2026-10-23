@@ -170,6 +170,14 @@ void TrendAnalyzer::computeRasterTrend( const float *inSeries, int width, int he
     for ( std::size_t i = 0; i < timeOrder.size(); ++i )
         ts[i] = tDays[timeOrder[i]];
 
+    // Per-pixel survivor timestamps: a dropped frame must drop BOTH the
+    // value and its t. Pairing the compacted values with ts's PREFIX
+    // misdates every observation after an interior gap (e.g. a cloud hole),
+    // corrupting the Theil-Sen denominators while leaving the rank-based
+    // S/z/p untouched — the single-series entry point keeps the pairing by
+    // construction; the batch must too.
+    std::vector<double> tsUsed( timeOrder.size() );
+
     for ( std::size_t px = 0; px < pixels; ++px )
     {
         std::size_t used = 0;
@@ -177,7 +185,11 @@ void TrendAnalyzer::computeRasterTrend( const float *inSeries, int width, int he
         {
             const float value = inSeries[timeOrder[k] * pixels + px];
             if ( std::isfinite( value ) )
-                ys[used++] = value;
+            {
+                ys[used] = value;
+                tsUsed[used] = ts[k];
+                ++used;
+            }
         }
         MannKendallResult r;
         if ( used >= 3 )
@@ -185,7 +197,7 @@ void TrendAnalyzer::computeRasterTrend( const float *inSeries, int width, int he
             if ( used == timeOrder.size() )
                 r = mannKendallImpl( ts, ys );
             else
-                r = mannKendallImpl( std::vector<double>( ts.begin(), ts.begin() + used ),
+                r = mannKendallImpl( std::vector<double>( tsUsed.begin(), tsUsed.begin() + used ),
                                      std::vector<float>( ys.begin(), ys.begin() + used ) );
         }
         outSlope[px] = r.valid ? static_cast<float>( r.senSlope ) : kNan;

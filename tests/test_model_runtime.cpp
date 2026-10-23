@@ -1070,3 +1070,232 @@ TEST_CASE( "rs:infer floors the model RAM term with the artifact size", "[models
     CHECK( est["estimatedRamBytes"].asUInt64() == expected );
   }
 }
+
+// ---------------------------------------------------------------------------
+// R20-02: edge-tile batching, uncertainty NoData semantics, uncertainty
+// head eligibility. All three pin CURRENT-broken behavior found by the
+// B09/B11 audit against master 28e1891390.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "tile engine completes a non-divisible raster with batched edge tiles",
+           "[models][runtime][engine][edge_tiles]" )
+{
+  REQUIRE( QFile::exists( identityModelPath() ) );
+
+  QTemporaryDir dir;
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  // 100x100 with tile 64: the core grid is (64x64, 36x64, 64x36, 36x36) in
+  // row-major order. With batch_size 4 the very first batch mixes a 64-wide
+  // and a 36-wide window — geometry every bundled segmentation manifest can
+  // hit on any raster whose dims are not a multiple of tile_size.
+  sicnu::testing::RsSyntheticRasterBuilder builder( 100, 100, 1 );
+  builder.withRampPattern( 1, 0.0f, 255.0f );
+  builder.writeToDisk( inputPath );
+
+  ModelInfo info;
+  info.name = "identity";
+  info.framework = "onnx";
+  info.readiness = ModelReadiness::Ready;
+  info.resolvedArtifactPath = identityModelPath().toStdString();
+  info.tiling.tileSize = 64;
+  info.tiling.batchSize = 4;
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+  const auto session = registry.acquire( info );
+  REQUIRE( session );
+
+  RSOperatorContext context;
+  TileInferenceEngine engine( info, session );
+  // RED on master: throws "mixed tile sizes in one inference batch" —
+  // the whole run fails instead of flushing the homogeneous prefix.
+  const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+  CHECK( stats.tilesProcessed == 4 );
+  CHECK( stats.outWidth == 100 );
+  CHECK( stats.outHeight == 100 );
+
+  // Identity seam check over the WHOLE extent, edge tiles included.
+  GdalDatasetWrapper out;
+  REQUIRE( out.open( outputPath ) );
+  REQUIRE( out.bandCount() == 1 );
+  std::vector<float> pixels( 100 * 100 );
+  REQUIRE( out.readBandData( 1, pixels.data(), 100, 100 ) );
+  const std::vector<float> &expectedBand = builder.band( 1 );
+  for ( std::size_t i = 0; i < pixels.size(); ++i )
+    CHECK( pixels[i] == Catch::Approx( expectedBand[i] ).margin( 1e-3 ) );
+}
+
+TEST_CASE( "uncertainty band reports NoData as NaN, never zero confidence",
+           "[models][runtime][engine][uncertainty][nodata]" )
+{
+  REQUIRE( QFile::exists( identityModelPath() ) );
+
+  QTemporaryDir dir;
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  // Two bands, identical checkerboard phase: quadrants where BOTH bands sit
+  // at the sentinel are NoData (every input band invalid); the other
+  // quadrants stay valid. The identity model needs >= 2 output channels for
+  // the uncertainty head, hence two input bands.
+  sicnu::testing::RsSyntheticRasterBuilder builder( 64, 64, 2 );
+  builder.withNoData( -9999.0 );
+  builder.withCheckerboard( 1, 32, 10.0f, -9999.0f );
+  builder.withCheckerboard( 2, 32, 10.0f, -9999.0f );
+  builder.writeToDisk( inputPath );
+
+  ModelInfo info;
+  info.name = "identity";
+  info.framework = "onnx";
+  info.readiness = ModelReadiness::Ready;
+  info.resolvedArtifactPath = identityModelPath().toStdString();
+  info.tiling.tileSize = 64; // single tile
+  info.output.uncertainty = "entropy";
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+  const auto session = registry.acquire( info );
+  REQUIRE( session );
+
+  RSOperatorContext context;
+  TileInferenceEngine engine( info, session );
+  const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+  CHECK( stats.outBands == 3 ); // 2 class bands + 1 uncertainty band
+
+  GdalDatasetWrapper out;
+  REQUIRE( out.open( outputPath ) );
+  REQUIRE( out.bandCount() == 3 );
+  std::vector<float> classBand( 64 * 64 ), uncBand( 64 * 64 );
+  REQUIRE( out.readBandData( 1, classBand.data(), 64, 64 ) );
+  REQUIRE( out.readBandData( 3, uncBand.data(), 64, 64 ) );
+
+  int nodataPixels = 0;
+  int validPixels = 0;
+  int mismatchedConfidence = 0;
+  for ( int row = 0; row < 64; ++row )
+  {
+    for ( int col = 0; col < 64; ++col )
+    {
+      const std::size_t i = static_cast<std::size_t>( row ) * 64 + col;
+      const bool classIsNodata = std::isnan( classBand[i] );
+      if ( classIsNodata )
+      {
+        ++nodataPixels;
+        // The class band is restored to NoData but the uncertainty band is
+        // computed from the raw all-NaN planes: entropy folds to 0 = MAXIMUM
+        // confidence on the pixels we know the least about. NoData must
+        // propagate to the uncertainty band exactly like the class band.
+        if ( !std::isnan( uncBand[i] ) )
+          ++mismatchedConfidence;
+      }
+      else
+      {
+        ++validPixels;
+      }
+    }
+  }
+  CHECK( nodataPixels == 2 * 32 * 32 ); // two all-invalid quadrants
+  CHECK( validPixels == 2 * 32 * 32 );
+  CHECK( mismatchedConfidence == 0 );
+}
+
+TEST_CASE( "declared output.uncertainty refuses when no head has two channels",
+           "[models][runtime][engine][uncertainty][contract]" )
+{
+  REQUIRE( QFile::exists( identityModelPath() ) );
+
+  QTemporaryDir dir;
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  sicnu::testing::RsSyntheticRasterBuilder builder( 64, 64, 1 );
+  builder.withConstantValue( 1, 10.0f );
+  builder.writeToDisk( inputPath );
+
+  ModelInfo info;
+  info.name = "identity";
+  info.framework = "onnx";
+  info.readiness = ModelReadiness::Ready;
+  info.resolvedArtifactPath = identityModelPath().toStdString();
+  info.tiling.tileSize = 64;
+  // A single-channel sigmoid head cannot carry entropy/margin semantics.
+  // On master this publishes a 1-band product with NO uncertainty band and
+  // NO diagnostic — a declared knob that silently never happens (#646 class).
+  info.output.uncertainty = "entropy";
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+  const auto session = registry.acquire( info );
+  REQUIRE( session );
+
+  RSOperatorContext context;
+  TileInferenceEngine engine( info, session );
+  REQUIRE_THROWS_AS( engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context ),
+                     RSOperatorError );
+  // Refused before staging: nothing partial is published.
+  CHECK_FALSE( QFileInfo::exists( outputPath ) );
+}
+
+// R20-02 R2-1: trailing all-NoData edge tiles on a non-divisible raster.
+// The valid prefix (tile0, 64-wide) never fills the batch and no geometry
+// flip flushes it (every later tile is deferred per-tile as all-NoData), so
+// the post-loop probe used to push a 36-wide probe tile into the still
+// pending 64-wide batch -> "mixed tile sizes" and the whole run failed.
+TEST_CASE( "tile engine completes trailing all-NoData edge tiles after a valid prefix",
+           "[models][runtime][engine][edge_tiles][nodata]" )
+{
+  REQUIRE( QFile::exists( identityModelPath() ) );
+
+  QTemporaryDir dir;
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  // Valid data ONLY in the top-left 64x64 core tile; the other three tiles
+  // (right column 36 wide, bottom row 36 tall) are pure NoData.
+  sicnu::testing::RsSyntheticRasterBuilder builder( 100, 100, 1 );
+  builder.withNoData( -9999.0 );
+  builder.withConstantValue( 1, -9999.0f );
+  builder.withRect( 1, 0, 0, 64, 64, 10.0f );
+  builder.writeToDisk( inputPath );
+
+  ModelInfo info;
+  info.name = "identity";
+  info.framework = "onnx";
+  info.readiness = ModelReadiness::Ready;
+  info.resolvedArtifactPath = identityModelPath().toStdString();
+  info.tiling.tileSize = 64;
+  info.tiling.batchSize = 4;
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+  const auto session = registry.acquire( info );
+  REQUIRE( session );
+
+  RSOperatorContext context;
+  TileInferenceEngine engine( info, session );
+  const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+  CHECK( stats.outWidth == 100 );
+  CHECK( stats.outHeight == 100 );
+
+  // Valid quadrant keeps its identity value; every NoData pixel is NaN.
+  GdalDatasetWrapper out;
+  REQUIRE( out.open( outputPath ) );
+  std::vector<float> pixels( 100 * 100 );
+  REQUIRE( out.readBandData( 1, pixels.data(), 100, 100 ) );
+  const auto at = [ & ]( int x, int y ) {
+    return pixels[static_cast<std::size_t>( y ) * 100 + x];
+  };
+  CHECK( at( 0, 0 ) == Catch::Approx( 10.0f ).margin( 1e-3 ) );
+  CHECK( at( 63, 63 ) == Catch::Approx( 10.0f ).margin( 1e-3 ) );
+  CHECK( std::isnan( at( 64, 0 ) ) );
+  CHECK( std::isnan( at( 99, 0 ) ) );
+  CHECK( std::isnan( at( 0, 64 ) ) );
+  CHECK( std::isnan( at( 99, 99 ) ) );
+  int nanCount = 0;
+  for ( float v : pixels )
+    if ( std::isnan( v ) )
+      ++nanCount;
+  CHECK( nanCount == 100 * 100 - 64 * 64 );
+}

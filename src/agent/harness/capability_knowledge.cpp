@@ -188,15 +188,24 @@ int CapabilityKnowledge::reload()
         : it.fileName().toStdString();
       for ( const std::string &problem : validateEntry( entry ) )
         mLoadProblems.push_back( where + ": " + problem );
-      const std::string id = entry.get( "id", "" ).asString();
+      // Type-gated reads: asString() on an object/array id/kind throws
+      // past the problems gate and aborts the whole reload() scan.
+      const Json::Value &idValue = entry.get( "id", Json::Value() );
+      const std::string id = idValue.isString() ? idValue.asString() : std::string();
       if ( id.empty() )
         continue;
+      // Exact 'where + ": "' prefix: a bare `where` prefix would also
+      // cross-match a file literally named like another file's array
+      // position ("a.json[1]" vs "a.json[1].json") and skip a healthy
+      // entry for problems that are not its own (R2 P3).
+      const std::string ownPrefix = where + ": ";
       const bool problems =
         std::any_of( mLoadProblems.begin(), mLoadProblems.end(),
-                     [ &where ]( const std::string &p ) { return p.rfind( where, 0 ) == 0; } );
+                     [ &ownPrefix ]( const std::string &p ) { return p.rfind( ownPrefix, 0 ) == 0; } );
       if ( problems )
         continue;
-      if ( entry.get( "kind", "" ).asString() == "family_default" )
+      const Json::Value &kindValue = entry.get( "kind", Json::Value() );
+      if ( kindValue.isString() && kindValue.asString() == "family_default" )
       {
         if ( mFamilyDefaults.isMember( id ) )
           mLoadProblems.push_back( where + ": duplicate family_default id " + id );
@@ -330,7 +339,13 @@ Json::Value CapabilityKnowledge::mergedEntry( const Json::Value &raw,
       const std::string param = when.get( "param", "" ).asString();
       if ( param.empty() || !variantParams.isMember( param ) )
         continue;
-      const std::string actual = lowered( variantParams.get( param, "" ).asString() );
+      // The supplied value is CALLER input (node/tool params), not
+      // entry-controlled: an array/object there must skip the match, not
+      // throw asString() out of the query/extends walk (R2 P2).
+      const Json::Value &supplied = variantParams.get( param, Json::Value() );
+      if ( !supplied.isString() )
+        continue;
+      const std::string actual = lowered( supplied.asString() );
       bool matches = false;
       for ( const Json::Value &candidate : when.get( "values", Json::Value( Json::arrayValue ) ) )
       {
@@ -517,9 +532,27 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
       problems.push_back( "unknown key '" + key + "'" );
   }
 
-  const std::string id = entry.get( "id", "" ).asString();
-  const std::string family = entry.get( "family", "" ).asString();
-  const bool isFamilyDefault = entry.get( "kind", "" ).asString() == "family_default";
+  // Type-gated scalars: a wrong-typed id/family/kind/extends must be a
+  // named problem, never a Json::LogicError thrown past this gate (the
+  // loader and the query-time extends walk both consume these fields).
+  const Json::Value &idValue = entry.get( "id", Json::Value() );
+  if ( entry.isMember( "id" ) && !idValue.isString() )
+    problems.push_back( "'id' must be a string" );
+  const std::string id = idValue.isString() ? idValue.asString() : std::string();
+  const Json::Value &familyValue = entry.get( "family", Json::Value() );
+  if ( entry.isMember( "family" ) && !familyValue.isString() )
+    problems.push_back( "'family' must be a string" );
+  const std::string family = familyValue.isString() ? familyValue.asString() : std::string();
+  const Json::Value &kindValue = entry.get( "kind", Json::Value() );
+  if ( entry.isMember( "kind" ) && !kindValue.isString() )
+    problems.push_back( "'kind' must be a string" );
+  const bool isFamilyDefault = kindValue.isString() && kindValue.asString() == "family_default";
+  // extends deliberately keeps the wider null-tolerant vocabulary (null
+  // and absent both mean "no extension"); id/family/kind above reject an
+  // EXPLICIT null as wrong-typed. Do not harmonize these two behaviors.
+  const Json::Value &extendsValue = entry.get( "extends", Json::Value() );
+  if ( !extendsValue.isNull() && !extendsValue.isString() )
+    problems.push_back( "'extends' must be a string" );
   if ( isFamilyDefault && id.rfind( "family:", 0 ) != 0 )
     problems.push_back( "family_default id must start with 'family:'" );
   if ( !isFamilyDefault && id.empty() )
@@ -767,7 +800,13 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
           continue;
         }
         const Json::Value &when = variant.get( "when", Json::Value() );
-        if ( !when.isObject() || when.get( "param", "" ).asString().empty() ||
+        // Type-gate param before reading it: asString() on an array/object
+        // throws past this per-file gate and aborts the whole reload (the
+        // exact escape W2 exists to close; R2 P1). Numbers/bools are a
+        // wrong type too — the vocabulary is authored strings.
+        const Json::Value &paramValue = when.isObject() ? when.get( "param", Json::Value() )
+                                                        : when;
+        if ( !when.isObject() || !paramValue.isString() || paramValue.asString().empty() ||
              !when.get( "values", Json::Value() ).isArray() )
           problems.push_back( "variants[" + std::to_string( index ) +
                               "] needs when:{param, values[]}" );

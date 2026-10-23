@@ -201,7 +201,12 @@ bool convertBackscatterRaster( const GdalDatasetWrapper &src, int band,
         double value = v;
         const double thetaDeg =
           useRasterIncidence ? incidenceTile[idx] : theta0;
-        if ( !std::isfinite( thetaDeg ) )
+        // Physical domain (0°, 90°), the same refusal sar_terrain_geometry
+        // applies to every incidence angle: cos(90°) underflows to ~6e-17
+        // (not a pole), so a vertical look direction produces a huge but
+        // FINITE positive gamma0 that sails through finishValue's v > 0
+        // gate into the product; sin(0°) does the same for beta0.
+        if ( !std::isfinite( thetaDeg ) || thetaDeg <= 0.0 || thetaDeg >= 90.0 )
         {
           out[idx] = kNan;
           continue;

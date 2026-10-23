@@ -167,6 +167,20 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
 /// Atomically publish JSON + CSV (temp + rename). Returns false on I/O failure.
 bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QString &outPrefix );
 
+/// Fail-closed loader for a PUBLISHED batch report document (`<prefix>.json`).
+///
+/// The teacher console used to re-read that file with bare
+/// `doc.value("total").toInt()` calls, so a truncated, half-synced or
+/// unrelated JSON file produced a structurally valid
+/// "0 submissions / 0% completion" class summary — a read failure rendered
+/// as "this class really has no homework". Returns false on unreadable /
+/// unparsable / not-a-batch-report input and fills @p error. When the
+/// document's declared `total` disagrees with its row count, the mismatch is
+/// reported through @p warning instead of being silently reconciled.
+/// (Restored from the r15-E fix lost in merge c8f5e0805422.)
+bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report,
+                              QString &error, QString *warning = nullptr );
+
 /// Deterministic regrade traceability block.
 QJsonObject regradeTraceability( const BatchAssessmentReport &report );
 
