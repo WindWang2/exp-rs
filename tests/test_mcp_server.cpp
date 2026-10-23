@@ -2913,3 +2913,57 @@ TEST_CASE( "StdinReader treats clean EOF as end-of-input, not an overlong line",
                                      QStringLiteral( "C" ) } );
     }
 }
+
+TEST_CASE( "dispatch refuses non-object parameters instead of silently running defaults",
+           "[agent][mcp][typed-args][r21c]" )
+{
+    // R21-C F2: tools/call used arguments.value("parameters").toMap() with
+    // no type gate, so a model sending parameters as a string/array got an
+    // EMPTY map — preflight_algorithm then validated defaults and answered
+    // ok (a lying preflight) and execute_algorithm ran with defaults. The
+    // schemas (meta_protocol_tools.cpp) all declare parameters type
+    // "object"; the dispatch layer must enforce the same contract it
+    // already enforces for run_workflow's pipeline argument.
+    TestMcpServer server;
+
+    auto callWithStringParams = [&server]( const QString &tool, const QString &idKey,
+                                           int requestId ) {
+        QVariantMap arguments;
+        arguments[idKey] = QStringLiteral( "rs:mcp_noop" );
+        arguments[QStringLiteral( "parameters" )] = QStringLiteral( "not-an-object" );
+        QVariantMap callReq;
+        callReq[QStringLiteral( "id" )] = requestId;
+        callReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+        QVariantMap callParams;
+        callParams[QStringLiteral( "name" )] = tool;
+        callParams[QStringLiteral( "arguments" )] = arguments;
+        callReq[QStringLiteral( "params" )] = callParams;
+        server.testHandleRequest( callReq );
+        return server.lastResponseResult;
+    };
+
+    SECTION( "preflight_algorithm" )
+    {
+        const QVariantMap result = callWithStringParams(
+            QStringLiteral( "preflight_algorithm" ), QStringLiteral( "algorithm_id" ), 910 );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PARAMETER" ) );
+    }
+    SECTION( "execute_algorithm" )
+    {
+        const QVariantMap result = callWithStringParams(
+            QStringLiteral( "execute_algorithm" ), QStringLiteral( "algorithm_id" ), 911 );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PARAMETER" ) );
+    }
+    SECTION( "execute_operator" )
+    {
+        const QVariantMap result = callWithStringParams(
+            QStringLiteral( "execute_operator" ), QStringLiteral( "operator_id" ), 912 );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( result.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "INVALID_PARAMETER" ) );
+    }
+}
