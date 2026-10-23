@@ -42,3 +42,7 @@ R2 独立评审 → push/PR。
 - R2（独立 reviewer #2）：APPROVE（0×P0/P1/P2，5×P3）→ 修 4（modalSeen oracle、精确 DPI 错误串、探针生命周期文档、OWNERSHIP 表）+ 声明 1（seam 生产态观察）；受影响两套件 ×2 复跑 120/1311 全绿。
 - .gitignore append-only 白名单（r19 同款 3 行模式）+ 全部账本随 PR 入库。
 - 终态：6 commits，RED×3（确定性）/GREEN×2×9 二进制，双轮独立评审通过，准备 push + PR。
+
+## Round 8 — 交付闭环（2026-10-23 09:1x）
+- push 前终检：master 未动（28e1891390）；4 个兄弟轨 open PR（#1668–#1671）changed-files 与本轨零源文件交集（仅 .gitignore 各自 append-only 块）；merge_loss_audit 223 条历史告警中 0 条涉及本轨文件；git diff --check CLEAN。
+- 推送 + PR：**https://github.com/WindWang2/exp-rs/pull/1672**（非草稿，base=master，head=129c37aaca）。不自动合并、不等 CI。

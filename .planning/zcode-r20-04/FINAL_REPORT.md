@@ -43,7 +43,7 @@ Track 04 — Qt/QGIS 工作台、交互状态、制图 MapSpec 与 UI 体验质�
 
 ## ⑥ 交付
 
-- PR：`<创建后回填 URL>`
+- PR：https://github.com/WindWang2/exp-rs/pull/1672（非草稿）
 - HEAD：`8d41eecd3c`（BASE 28e1891390）
 - Worktree：`exp-rs-agent/r20-04-qt-qgis-cartography-20261022T190613Z`
 - 账本最后记录：LOOP_LEDGER Round 7（本文件同批提交）。
