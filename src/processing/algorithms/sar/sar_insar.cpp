@@ -124,23 +124,6 @@ double evalPhaseRamp( const PhaseRampModel &m, int x, int y )
            + m.coef[4] * ( static_cast<double>( x ) * y ) + m.coef[5] * ( static_cast<double>( y ) * y );
 }
 
-namespace
-{
-// Generic design row: [1, x, y] or [1, x, y, x², xy, y²].
-void rampDesignRow( int x, int y, bool quadratic, double *row )
-{
-    row[0] = 1.0;
-    row[1] = x;
-    row[2] = y;
-    if ( quadratic )
-    {
-        row[3] = static_cast<double>( x ) * x;
-        row[4] = static_cast<double>( x ) * y;
-        row[5] = static_cast<double>( y ) * y;
-    }
-}
-} // anonymous namespace
-
 void PhaseRampFitter::addSample( int x, int y, double phase )
 {
     if ( !std::isfinite( phase ) )
