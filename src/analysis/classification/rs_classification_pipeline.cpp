@@ -1227,13 +1227,23 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
                 && backendOrder != appliedCalibration.classIds;
             if ( appliedCalibration.classIds.size() != probs.cols || idsMismatch )
             {
+              const auto joinIds = []( const QVector<int> &ids ) {
+                QString out;
+                for ( int i = 0; i < ids.size(); ++i )
+                {
+                  if ( i > 0 )
+                    out += QLatin1Char( ',' );
+                  out += QString::number( ids[i] );
+                }
+                return out;
+              };
               return failWithPartialOutput(
                 RsClassificationPipelineResult::Error::PredictionFailed,
                 QStringLiteral(
-                  "Calibration model class ids %1 do not match the backend "
-                  "label space %2 (probability columns) at tile (%3,%4)" )
-                  .arg( appliedCalibration.classIds.join( QStringLiteral( "," ) ),
-                        backendOrder.join( QStringLiteral( "," ) ) )
+                  "Calibration model class ids [%1] do not match the backend "
+                  "label space [%2] (probability columns) at tile (%3,%4)" )
+                  .arg( joinIds( appliedCalibration.classIds ),
+                        joinIds( backendOrder ) )
                   .arg( tx ).arg( ty ) );
             }
             std::vector<float> raw(
