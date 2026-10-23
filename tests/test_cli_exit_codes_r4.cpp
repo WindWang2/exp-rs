@@ -291,6 +291,13 @@ TEST_CASE( "cli unknown flags are refused, never silently ignored",
         requireErrorEnvelope( "data catalog search " + emptyRoot + " --platfrm xyz", "data",
                               kInvalidInput );
     }
+    SECTION( "data catalog search with a trailing unknown flag (no value)" )
+    {
+        // The old loop bound (i + 1 < size) never even VISITED a flag in
+        // last position — the loudest silent drop of the family.
+        requireErrorEnvelope( "data catalog search " + emptyRoot + " --platfrm", "data",
+                              kInvalidInput );
+    }
     SECTION( "data catalog search --max-items with a non-numeric value" )
     {
         // Issue #1595 residue: --cloud-max/--limit already parse-check;
