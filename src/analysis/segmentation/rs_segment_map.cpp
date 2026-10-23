@@ -32,6 +32,62 @@ RsSegmentMap::RsSegmentMap( QVector<quint32> labels, int width, int height )
 {
 }
 
+RsSegmentMap::RsSegmentMap( const RsSegmentMap &other )
+    : mLabels( other.mLabels )
+    , mWidth( other.mWidth )
+    , mHeight( other.mHeight )
+{
+}
+
+RsSegmentMap &RsSegmentMap::operator=( const RsSegmentMap &other )
+{
+    if ( this != &other )
+    {
+        QWriteLocker writer( &mCacheLock );
+        mLabels = other.mLabels;
+        mWidth = other.mWidth;
+        mHeight = other.mHeight;
+        mSizeCache.clear();
+        mSizeCacheBuilt = false;
+        mCoordsCache.clear();
+        mCoordsIndexBuilt = false;
+    }
+    return *this;
+}
+
+RsSegmentMap::RsSegmentMap( RsSegmentMap &&other ) noexcept
+{
+    QWriteLocker writer( &other.mCacheLock );
+    mLabels = std::move( other.mLabels );
+    mWidth = other.mWidth;
+    mHeight = other.mHeight;
+    other.mWidth = 0;
+    other.mHeight = 0;
+    other.mSizeCache.clear();
+    other.mSizeCacheBuilt = false;
+    other.mCoordsCache.clear();
+    other.mCoordsIndexBuilt = false;
+}
+
+RsSegmentMap &RsSegmentMap::operator=( RsSegmentMap &&other ) noexcept
+{
+    if ( this != &other )
+    {
+        QWriteLocker dstWriter( &mCacheLock );
+        QWriteLocker srcWriter( &other.mCacheLock );
+        mLabels = std::move( other.mLabels );
+        mWidth = other.mWidth;
+        mHeight = other.mHeight;
+        other.mWidth = 0;
+        other.mHeight = 0;
+        other.mSizeCache.clear();
+        other.mSizeCacheBuilt = false;
+        other.mCoordsCache.clear();
+        other.mCoordsIndexBuilt = false;
+    }
+    return *this;
+}
+
 RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
 {
     SICNU_LOG_INFO( SicnuLogTags::Segmentation, QString( "Loading segment map from: %1" ).arg( path ) );
@@ -254,15 +310,24 @@ int RsSegmentMap::segmentCount() const
 
 void RsSegmentMap::ensureSizeCache() const
 {
+    {
+        QReadLocker reader( &mCacheLock );
+        if ( mSizeCacheBuilt )
+            return;
+    }
+    QWriteLocker writer( &mCacheLock );
     if ( mSizeCacheBuilt )
         return;
 
-    mSizeCache.clear();
+    // Build into a local and publish with one move so no reader ever walks a
+    // half-populated map even if it won the read-lock race on the flag.
+    QMap<quint32, int64_t> sizes;
     for ( quint32 label : mLabels )
     {
         if ( label != 0 )
-            ++mSizeCache[label];
+            ++sizes[label];
     }
+    mSizeCache = std::move( sizes );
     mSizeCacheBuilt = true;
 }
 
@@ -293,20 +358,27 @@ QVector<QPoint> RsSegmentMap::buildCoordsForSegment( quint32 segmentId ) const
 
 void RsSegmentMap::ensureCoordsIndex() const
 {
+    {
+        QReadLocker reader( &mCacheLock );
+        if ( mCoordsIndexBuilt )
+            return;
+    }
+    // Must run before the write lock: ensureSizeCache takes mCacheLock itself
+    // and QReadWriteLock is non-recursive.
+    ensureSizeCache();
+    QWriteLocker writer( &mCacheLock );
     if ( mCoordsIndexBuilt )
         return;
-    if ( mLabels.isEmpty() )
-    {
-        mCoordsIndexBuilt = true;
-        return;
-    }
-    ensureSizeCache();
+
+    // Reading mSizeCache needs no lock: ensureSizeCache() has completed and a
+    // built size cache is immutable.
+    QMap<quint32, QVector<QPoint>> index;
     // Reserve per segment to avoid realloc churn
     for ( auto it = mSizeCache.constBegin(); it != mSizeCache.constEnd(); ++it )
     {
         QVector<QPoint> v;
-        v.reserve( it.value() );
-        mCoordsCache.insert( it.key(), v );
+        v.reserve( static_cast<int>( std::min<int64_t>( it.value(), 1 << 20 ) ) );
+        index.insert( it.key(), std::move( v ) );
     }
     for ( int r = 0; r < mHeight; ++r )
     {
@@ -315,11 +387,12 @@ void RsSegmentMap::ensureCoordsIndex() const
         {
             const quint32 sid = mLabels[static_cast<qsizetype>(rowBase + static_cast<size_t>(c))];
             if ( sid == 0 ) continue;
-            auto it = mCoordsCache.find( sid );
-            if ( it != mCoordsCache.end() )
+            auto it = index.find( sid );
+            if ( it != index.end() )
                 it.value().append( QPoint( c, r ) );
         }
     }
+    mCoordsCache = std::move( index );
     mCoordsIndexBuilt = true;
 }
 
@@ -328,26 +401,50 @@ QVector<QPoint> RsSegmentMap::pixelCoords( quint32 segmentId ) const
     if ( segmentId == 0 )
         return {};
 
-    auto it = mCoordsCache.constFind( segmentId );
-    if ( it != mCoordsCache.constEnd() )
-        return it.value();
+    // Unknown ids resolve through the (locked-immutable) size cache first:
+    // the answer is {} and the coords cache must not learn about them
+    // (buildCoordsForSegment would insert an empty vector per missing id).
+    ensureSizeCache();
+    if ( !mSizeCache.contains( segmentId ) )
+        return {};
 
-    if ( mCoordsCache.size() > 8 )
+    {
+        QReadLocker reader( &mCacheLock );
+        auto it = mCoordsCache.constFind( segmentId );
+        if ( it != mCoordsCache.constEnd() )
+            return it.value();
+        if ( mCoordsIndexBuilt )
+        {
+            // Full inverted index is published; the id is absent from it.
+            return {};
+        }
+    }
+
+    if ( mSizeCache.size() > 8 )
     {
         // Many segments -> build full inverted index once instead of scanning W*H per segment
         ensureCoordsIndex();
-        auto it2 = mCoordsCache.constFind( segmentId );
-        if ( it2 != mCoordsCache.constEnd() )
-            return it2.value();
-        return {};
+        QReadLocker reader( &mCacheLock );
+        auto it = mCoordsCache.constFind( segmentId );
+        return it != mCoordsCache.constEnd() ? it.value() : QVector<QPoint>{};
     }
 
     QVector<QPoint> coords = buildCoordsForSegment( segmentId );
+    QWriteLocker writer( &mCacheLock );
     mCoordsCache.insert( segmentId, coords );
     return coords;
 }
 
 int RsSegmentMap::pixelCount( quint32 segmentId ) const
+{
+    if ( segmentId == 0 )
+        return 0;
+
+    ensureSizeCache();
+    return static_cast<int>( mSizeCache.value( segmentId, 0 ) );
+}
+
+int64_t RsSegmentMap::pixelCount64( quint32 segmentId ) const
 {
     if ( segmentId == 0 )
         return 0;

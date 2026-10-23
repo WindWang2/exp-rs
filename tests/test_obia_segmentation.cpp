@@ -12,9 +12,11 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <numeric>
+#include <thread>
 #include <vector>
 
 static bool g_gdalInit = ( GDALAllRegister(), true );
@@ -685,4 +687,82 @@ TEST_CASE( "RsMultiresSegmenter: in-memory validity predicate matches the sentin
     CHECK( map.labelAt( 1, 0 ) != 0 );
     CHECK( map.labelAt( 0, 1 ) != 0 );
     CHECK( map.labelAt( 1, 1 ) == 0 );
+}
+
+// ===========================================================================
+// #1591 — RsSegmentMap lazily-built caches must tolerate concurrent const
+// access. RsObjectHierarchy::level() hands interior const references to
+// callers that QGIS may drive from render threads; before the QReadWriteLock
+// guard, ensureSizeCache()/ensureCoordsIndex()/pixelCoords() wrote mutable
+// members from const methods with no synchronization (data race, UB under
+// TSan). This hammer pins the post-fix contract: identical answers from N
+// threads racing across both cache paths (single-segment lazy + full
+// inverted index). The value oracle: ids 1..30, each a 10x300 row band.
+// ===========================================================================
+
+TEST_CASE( "RsSegmentMap: concurrent const access is race-free and consistent (#1591)", "[obia][segmentation][r21a][threads]" )
+{
+    constexpr int64_t W = 300;
+    constexpr int64_t H = 300;
+    QVector<quint32> labels( static_cast<qsizetype>( W * H ) );
+    for ( int64_t r = 0; r < H; ++r )
+        for ( int64_t c = 0; c < W; ++c )
+            labels[static_cast<qsizetype>( r * W + c )] = static_cast<quint32>( ( r / 10 ) + 1 ); // ids 1..30
+
+    const RsSegmentMap shared( labels, W, H );
+    CHECK( shared.segmentCount() == 30 );
+    CHECK( shared.pixelCount( 7 ) == 3000 );
+    CHECK( shared.pixelCount64( 7 ) == 3000 );
+
+    std::atomic<int> mismatches{ 0 };
+    std::atomic<bool> go{ false };
+    constexpr int kThreads = 4;
+    std::vector<std::thread> workers;
+    workers.reserve( kThreads );
+    for ( int t = 0; t < kThreads; ++t )
+    {
+        workers.emplace_back( [ &, t ] {
+            while ( !go.load( std::memory_order_acquire ) )
+            {
+            }
+            for ( int i = 0; i < 200; ++i )
+            {
+                const quint32 id = 1 + static_cast<quint32>( ( i * 7 + t ) % 30 );
+                if ( shared.pixelCount( id ) != 3000 )
+                    ++mismatches;
+                if ( shared.pixelCount64( id ) != 3000 )
+                    ++mismatches;
+                const QVector<QPoint> coords = shared.pixelCoords( id );
+                if ( coords.size() != 3000 )
+                    ++mismatches;
+                else if ( coords.front().y() != static_cast<int>( id - 1 ) * 10
+                          || coords.back().y() != static_cast<int>( id - 1 ) * 10 + 9 )
+                    ++mismatches;
+                if ( shared.segmentCount() != 30 )
+                    ++mismatches;
+                if ( shared.uniqueLabels().size() != 30 )
+                    ++mismatches;
+            }
+        } );
+    }
+    go.store( true, std::memory_order_release );
+    for ( auto &w : workers )
+        w.join();
+    CHECK( mismatches.load() == 0 );
+
+    // Copy semantics after caches are warm: the copy keeps the answers
+    // (caches rebuild on demand) and never aliases the source's caches.
+    RsSegmentMap copy = shared;
+    CHECK( copy.pixelCount( 7 ) == 3000 );
+    CHECK( copy.pixelCoords( 7 ).size() == 3000 );
+    CHECK( copy.segmentCount() == 30 );
+    RsSegmentMap moved = std::move( copy );
+    CHECK( moved.pixelCount( 7 ) == 3000 );
+    CHECK( moved.pixelCoords( 7 ).size() == 3000 );
+    CHECK( copy.isEmpty() );
+
+    // Unknown ids answer {} without polluting any cache path.
+    CHECK( shared.pixelCoords( 999 ).isEmpty() );
+    CHECK( shared.pixelCount( 999 ) == 0 );
+    CHECK( shared.pixelCount64( 999 ) == 0 );
 }
