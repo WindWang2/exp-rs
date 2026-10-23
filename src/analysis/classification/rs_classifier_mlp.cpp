@@ -1,5 +1,6 @@
 // rs_classifier_mlp.cpp — OBIA Artificial Neural Network (ANN_MLP) classifier backend.
 #include "rs_classifier_mlp.h"
+#include "sicnu_logging.h"
 #include "rs_classifier_labels_sidecar.h"
 #include <QDebug>
 #include <QFile>
@@ -21,6 +22,18 @@ bool RsMlpBackend::fit( const cv::Mat &X, const cv::Mat &y )
 {
   if ( X.empty() || y.empty() || X.rows != y.rows || !m_clf )
     return false;
+
+  // Validate y's type/shape before the label sweep below (same guard as
+  // RsClassifierKMeans::fit): at<int> on a non-CV_32S or multi-column
+  // matrix is a type-punning read — 1.0f's bit pattern reads as 1065353216
+  // and the one-hot mapping silently trains against garbage class ids.
+  if ( y.type() != CV_32S || y.cols != 1 )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                     QStringLiteral( "MLP::fit — label matrix must be single-column CV_32S: got %1x%2 (type %3)" )
+                       .arg( y.rows ).arg( y.cols ).arg( y.type() ) );
+    return false;
+  }
 
   // Capture the distinct training labels in ascending order so the network's
   // output columns map back onto true class ids deterministically (and

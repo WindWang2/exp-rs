@@ -165,3 +165,31 @@ TEST_CASE( "RsMlpBackend: single-class classOrder stays strictly ascending and r
   REQUIRE( RsClassOrder::fromJsonArray( arr, reloaded ) );
   REQUIRE( reloaded == order );
 }
+
+// fit() must validate y's type/shape before the label sweep (same guard
+// family as KMeans/ISODATA, R2-2): at<int> on CV_32F labels type-puns
+// 1.0f into 1065353216 and the one-hot mapping trains against garbage ids.
+TEST_CASE( "RsMlpBackend: fit fails closed on malformed label matrices",
+           "[obia][classifier][mlp][labels]" )
+{
+  auto backend = RsClassifierBackendFactory::create( "MLP" );
+  REQUIRE( backend != nullptr );
+
+  cv::Mat X( 8, 2, CV_32F );
+  cv::randu( X, cv::Scalar::all( 0.0 ), cv::Scalar::all( 1.0 ) );
+
+  {
+    cv::Mat yFloat( 8, 1, CV_32F );
+    cv::randu( yFloat, cv::Scalar::all( 1.0 ), cv::Scalar::all( 2.0 ) );
+    INFO( "CV_32F labels must be refused, not type-punned" );
+    REQUIRE_FALSE( backend->fit( X, yFloat ) );
+    REQUIRE_FALSE( backend->isFitted() );
+  }
+  {
+    cv::Mat yWide( 8, 2, CV_32S );
+    cv::randu( yWide, cv::Scalar::all( 1 ), cv::Scalar::all( 2 ) );
+    INFO( "multi-column labels must be refused" );
+    REQUIRE_FALSE( backend->fit( X, yWide ) );
+    REQUIRE_FALSE( backend->isFitted() );
+  }
+}
