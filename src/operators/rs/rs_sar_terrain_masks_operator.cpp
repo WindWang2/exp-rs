@@ -399,6 +399,14 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
     double csy = 0.0;
     cellSizesMetres( demDs, &csx, &csy );
 
+    // SICNU_DEM_UNIT parity with the flatten family (heights must reach
+    // geolocateZeroDoppler in metres; see the first product branch above).
+    QString appliedDemUnit;
+    const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );
+    if ( demUnitScale != 1.0 )
+        context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
+                         + std::to_string( demUnitScale ) + ")" );
+
     const bool byteMask = ( product == "layover_shadow_mask" );
 
     GdalBlockStream demStream( demDs, 1, kTileDim, kTileDim, kHalo );
