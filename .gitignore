@@ -641,4 +641,8 @@ r6_dev.cmd
 !.planning/r19-03/
 .planning/r19-03/*
 !.planning/r19-03/*.md
+# R20-03 track (Pi/MCP harness, tool contracts, workflow & plugin execution) planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r20-03/
+.planning/zcode-r20-03/*
+!.planning/zcode-r20-03/*.md
 *.agent-build.lock
