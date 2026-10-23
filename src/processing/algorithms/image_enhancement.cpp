@@ -26,7 +26,7 @@ void ImageEnhancement::linearStretch(const float *input, float *output, size_t c
     if (range == 0) range = 1.0f;
 
     for (size_t i = 0; i < count; i++) {
-        if (input[i] == nodata || std::isnan(input[i])) {
+        if (input[i] == nodata || !std::isfinite(input[i])) {
             output[i] = nodata;
             continue;
         }
@@ -46,7 +46,7 @@ void ImageEnhancement::percentClipStretch(const float *input, float *output, siz
     std::vector<float> valid;
     valid.reserve(count);
     for (size_t i = 0; i < count; i++) {
-        if (input[i] != nodata && !std::isnan(input[i]))
+        if (input[i] != nodata && std::isfinite(input[i]))
             valid.push_back(input[i]);
     }
 
@@ -103,7 +103,7 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
 
     if (min == max) {
         for (size_t i = 0; i < count; i++)
-            output[i] = (input[i] == nodata || std::isnan(input[i])) ? nodata : 128.0f;
+            output[i] = (input[i] == nodata || !std::isfinite(input[i])) ? nodata : 128.0f;
         return;
     }
 
@@ -112,7 +112,7 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     float binWidth = (max - min) / bins;
 
     for (size_t i = 0; i < count; i++) {
-        if (input[i] == nodata || std::isnan(input[i])) continue;
+        if (input[i] == nodata || !std::isfinite(input[i])) continue;
         int bin = static_cast<int>((input[i] - min) / binWidth);
         if (bin >= bins) bin = bins - 1;
         if (bin < 0) bin = 0;
@@ -140,7 +140,7 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     }
     const float denom = 1.0f - cdf_min;
     for (size_t i = 0; i < count; i++) {
-        if (input[i] == nodata || std::isnan(input[i])) {
+        if (input[i] == nodata || !std::isfinite(input[i])) {
             output[i] = nodata;
             continue;
         }
@@ -161,14 +161,14 @@ void ImageEnhancement::piecewiseLinearStretch(const float *input, float *output,
 {
     if (controlPoints.size() < 2) {
         for (size_t i = 0; i < count; i++) {
-            output[i] = (input[i] == nodata || std::isnan(input[i])) ? nodata : input[i];
+            output[i] = (input[i] == nodata || !std::isfinite(input[i])) ? nodata : input[i];
         }
         return;
     }
 
     for (size_t i = 0; i < count; i++) {
         float val = input[i];
-        if (val == nodata || std::isnan(val)) {
+        if (val == nodata || !std::isfinite(val)) {
             output[i] = nodata;
             continue;
         }
@@ -1213,7 +1213,7 @@ void ImageEnhancement::computeCovarianceMatrix(const std::vector<std::vector<flo
         bool pixelValid = true;
         for (int b = 0; b < bands; ++b) {
             const float v = centered[b][k];
-            if (std::isnan(v)) {
+            if (!std::isfinite(v)) {
                 pixelValid = false;
                 break;
             }
@@ -1374,19 +1374,28 @@ ImageEnhancement::PcaResult ImageEnhancement::pca(
     if (numComponents <= 0)
         numComponents = bands;
 
-    // Step 1: Compute mean per band and center data. NaN pixels are excluded
-    // from the mean so a single invalid pixel cannot corrupt the covariance.
+    // Step 1: mean-center over the joint-finite sample — the same pixel set
+    // computeCovarianceMatrix deletes listwise. Per-band means over each
+    // band's own valid set biased the centered products (and thus the
+    // rotation) whenever two bands carried disjoint NoData; the file path
+    // (processPcaFile) has always used the joint set.
     std::vector<float> means(bands, 0.0f);
-    for (int b = 0; b < bands; b++) {
-        double sum = 0.0;
+    {
+        std::vector<double> sum(bands, 0.0);
         size_t valid = 0;
         for (size_t k = 0; k < n; k++) {
-            if (std::isnan(input[b][k]))
+            bool ok = true;
+            for (int b = 0; b < bands && ok; ++b)
+                ok = std::isfinite(input[b][k]);
+            if (!ok)
                 continue;
-            sum += input[b][k];
             ++valid;
+            for (int b = 0; b < bands; ++b)
+                sum[b] += input[b][k];
         }
-        means[b] = valid > 0 ? static_cast<float>(sum / valid) : 0.0f;
+        if (valid > 0)
+            for (int b = 0; b < bands; ++b)
+                means[b] = static_cast<float>(sum[b] / valid);
     }
 
     std::vector<std::vector<float>> centered(bands, std::vector<float>(n));
@@ -1467,18 +1476,26 @@ ImageEnhancement::MnfResult ImageEnhancement::mnf(
     if (numComponents <= 0 || numComponents > bands)
         numComponents = bands;
 
-    // 1. Mean-center the data (skipping NaNs).
+    // 1. Mean-center over the joint-finite sample (processMnfFile parity;
+    // per-band means biased the centered products when bands carried
+    // disjoint NoData — see the PCA path above).
     std::vector<float> means(bands, 0.0f);
-    for (int b = 0; b < bands; b++) {
-        double sum = 0.0;
+    {
+        std::vector<double> sum(bands, 0.0);
         size_t validCount = 0;
         for (size_t k = 0; k < n; k++) {
-            if (!std::isnan(input[b][k])) {
-                sum += input[b][k];
-                validCount++;
-            }
+            bool ok = true;
+            for (int b = 0; b < bands && ok; ++b)
+                ok = std::isfinite(input[b][k]);
+            if (!ok)
+                continue;
+            ++validCount;
+            for (int b = 0; b < bands; ++b)
+                sum[b] += input[b][k];
         }
-        means[b] = (validCount > 0) ? static_cast<float>(sum / validCount) : 0.0f;
+        if (validCount > 0)
+            for (int b = 0; b < bands; ++b)
+                means[b] = static_cast<float>(sum[b] / validCount);
     }
     std::vector<std::vector<float>> centered(bands, std::vector<float>(n));
     for (int b = 0; b < bands; b++)
