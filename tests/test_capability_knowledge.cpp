@@ -629,7 +629,11 @@ TEST_CASE( "D8 loader: wrong-typed fields fail closed per file, never abort the 
         values.append( "ndvi" );
         when[ "values" ] = values;
         variant[ "when" ] = when;
-        variant[ "note" ] = "variant body";
+        // Variant override keys must be knownKeys members ("note" would be
+        // recorded as a problem and the per-file gate would skip the entry).
+        Json::Value variantIntents( Json::arrayValue );
+        variantIntents.append( "ndvi" );
+        variant[ "intents" ] = variantIntents;
         Json::Value variants( Json::arrayValue );
         variants.append( variant );
         entry[ "variants" ] = variants;
@@ -637,6 +641,7 @@ TEST_CASE( "D8 loader: wrong-typed fields fail closed per file, never abort the 
 
         knowledge.setDirectory( dir.path().toStdString() );
         REQUIRE_NOTHROW( knowledge.reload() );
+        REQUIRE( knowledge.loadProblems().empty() );
 
         // An array at the colliding param must skip the variant match, not
         // throw out of the query walk. RED pre-R2-fix: Json::LogicError.
@@ -645,6 +650,8 @@ TEST_CASE( "D8 loader: wrong-typed fields fail closed per file, never abort the 
         Json::Value merged;
         REQUIRE_NOTHROW( merged = knowledge.entryForOperator( "rs:ndvi", variantParams ) );
         CHECK( merged[ "family" ].asString() == "spectral" );
+        // The variant did NOT apply (its intents override is absent).
+        CHECK_FALSE( merged.isMember( "intents" ) );
     }
 
     SECTION( "relations: string schema_version is a named problem, not a throw" )
