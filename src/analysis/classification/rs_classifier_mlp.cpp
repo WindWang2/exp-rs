@@ -1,5 +1,6 @@
 // rs_classifier_mlp.cpp — OBIA Artificial Neural Network (ANN_MLP) classifier backend.
 #include "rs_classifier_mlp.h"
+#include "sicnu_logging.h"
 #include "rs_classifier_labels_sidecar.h"
 #include <QDebug>
 #include <QFile>
@@ -21,6 +22,18 @@ bool RsMlpBackend::fit( const cv::Mat &X, const cv::Mat &y )
 {
   if ( X.empty() || y.empty() || X.rows != y.rows || !m_clf )
     return false;
+
+  // Validate y's type/shape before the label sweep below (same guard as
+  // RsClassifierKMeans::fit): at<int> on a non-CV_32S or multi-column
+  // matrix is a type-punning read — 1.0f's bit pattern reads as 1065353216
+  // and the one-hot mapping silently trains against garbage class ids.
+  if ( y.type() != CV_32S || y.cols != 1 )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                     QStringLiteral( "MLP::fit — label matrix must be single-column CV_32S: got %1x%2 (type %3)" )
+                       .arg( y.rows ).arg( y.cols ).arg( y.type() ) );
+    return false;
+  }
 
   // Capture the distinct training labels in ascending order so the network's
   // output columns map back onto true class ids deterministically (and
@@ -291,12 +304,20 @@ bool RsMlpBackend::load( const QString &path )
 
 // F12 — RsClassOrder accessor: ascending training class ids captured at
 // fit() (one-hot column order). Empty when unfitted or for legacy loads
-// without the labels sidecar.
+// without the labels sidecar. The <2-distinct-labels fit() pad repeats
+// labels.front() to satisfy ANN_MLP's >= 2 outputs; the pad column is
+// never a real class ("never the argmax"), so it must not leak into the
+// order — RsClassOrder::isValid rejects duplicates and the sidecar
+// round-trip would otherwise reject the model it just saved.
 QVector<int> RsMlpBackend::classOrder() const
 {
   QVector<int> order;
   order.reserve( static_cast<int>( mClassLabels.total() ) );
   for ( int i = 0; i < mClassLabels.rows; ++i )
-    order.append( mClassLabels.at<int>( i, 0 ) );
+  {
+    const int id = mClassLabels.at<int>( i, 0 );
+    if ( order.isEmpty() || order.last() != id )
+      order.append( id );
+  }
   return order;
 }

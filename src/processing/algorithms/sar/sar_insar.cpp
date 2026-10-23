@@ -124,23 +124,6 @@ double evalPhaseRamp( const PhaseRampModel &m, int x, int y )
            + m.coef[4] * ( static_cast<double>( x ) * y ) + m.coef[5] * ( static_cast<double>( y ) * y );
 }
 
-namespace
-{
-// Generic design row: [1, x, y] or [1, x, y, x², xy, y²].
-void rampDesignRow( int x, int y, bool quadratic, double *row )
-{
-    row[0] = 1.0;
-    row[1] = x;
-    row[2] = y;
-    if ( quadratic )
-    {
-        row[3] = static_cast<double>( x ) * x;
-        row[4] = static_cast<double>( x ) * y;
-        row[5] = static_cast<double>( y ) * y;
-    }
-}
-} // anonymous namespace
-
 void PhaseRampFitter::addSample( int x, int y, double phase )
 {
     if ( !std::isfinite( phase ) )
@@ -158,6 +141,65 @@ bool PhaseRampFitter::fit( bool quadratic, int robustIterations, PhaseRampModel 
     if ( static_cast<long>( n ) < nCoef )
         return false;
 
+    // Fit in centered, unit-span coordinates: raw pixel coordinates on a
+    // large scene put x^4 ~ 1e17+ into the normal matrix against O(n)
+    // constant terms — beyond double's resolution, the coefficients
+    // dissolve into rounding noise (and the absolute 1e-12 pivot threshold
+    // misreads the matrix as singular). The center/scale is computed once
+    // from the unweighted reservoir (outlier clipping changes weights, not
+    // geometry); coefficients are converted back to raw pixel coordinates
+    // before leaving, so the PhaseRampModel contract is unchanged.
+    double mx = 0.0, my = 0.0;
+    for ( size_t k = 0; k < n; ++k )
+    {
+        mx += m_reservoir.xy[k].first;
+        my += m_reservoir.xy[k].second;
+    }
+    mx /= static_cast<double>( n );
+    my /= static_cast<double>( n );
+    double sx = 0.0, sy = 0.0;
+    for ( size_t k = 0; k < n; ++k )
+    {
+        sx = std::max( sx, std::abs( m_reservoir.xy[k].first - mx ) );
+        sy = std::max( sy, std::abs( m_reservoir.xy[k].second - my ) );
+    }
+    if ( !( sx > 0.0 ) )
+        sx = 1.0; // degenerate span: the solve below fails closed on rank
+    if ( !( sy > 0.0 ) )
+        sy = 1.0;
+    const double ax = 1.0 / sx, ay = 1.0 / sy;
+    const auto centeredRow = [&]( size_t k, bool quad, double *row ) {
+        const double u = ( m_reservoir.xy[k].first - mx ) * ax;
+        const double v = ( m_reservoir.xy[k].second - my ) * ay;
+        row[0] = 1.0;
+        row[1] = u;
+        row[2] = v;
+        if ( quad )
+        {
+            row[3] = u * u;
+            row[4] = u * v;
+            row[5] = v * v;
+        }
+    };
+    // Convert the centered-coefficient solve back to raw pixel axes:
+    // f = b0 + b1·u + b2·v + b3·u² + b4·uv + b5·v², u = ax(x−mx),
+    // v = ay(y−my), expanded and collected per power of x and y.
+    const auto backConvert = [&]( const double *b, double *c, bool quad ) {
+        c[0] = b[0] - b[1] * ax * mx - b[2] * ay * my;
+        c[1] = b[1] * ax;
+        c[2] = b[2] * ay;
+        if ( quad )
+        {
+            c[0] += b[3] * ax * ax * mx * mx + b[4] * ax * ay * mx * my
+                    + b[5] * ay * ay * my * my;
+            c[1] += -2.0 * b[3] * ax * ax * mx - b[4] * ax * ay * my;
+            c[2] += -2.0 * b[5] * ay * ay * my - b[4] * ax * ay * mx;
+            c[3] = b[3] * ax * ax;
+            c[4] = b[4] * ax * ay;
+            c[5] = b[5] * ay * ay;
+        }
+    };
+
     // Weights over the reservoir (IQR clip applied after each refit).
     std::vector<double> weight( n, 1.0 );
     double coef[6] = {};
@@ -172,7 +214,7 @@ bool PhaseRampFitter::fit( bool quadratic, int robustIterations, PhaseRampModel 
             if ( !( wt > 0.0 ) )
                 continue;
             double row[6];
-            rampDesignRow( m_reservoir.xy[k].first, m_reservoir.xy[k].second, quadratic, row );
+            centeredRow( k, quadratic, row );
             for ( int r = 0; r < nCoef; ++r )
             {
                 rhs[r] += wt * wt * row[r] * m_reservoir.phase[k];
@@ -194,12 +236,13 @@ bool PhaseRampFitter::fit( bool quadratic, int robustIterations, PhaseRampModel 
         if ( round == robustIterations || n < 4 )
             break;
 
-        // Re-clip weights from reservoir residuals.
+        // Re-clip weights from reservoir residuals — in the SAME centered
+        // coordinates as the solve above (coef are the centered fit).
         std::vector<double> residuals( n );
         for ( size_t k = 0; k < n; ++k )
         {
             double row[6];
-            rampDesignRow( m_reservoir.xy[k].first, m_reservoir.xy[k].second, quadratic, row );
+            centeredRow( k, quadratic, row );
             double model = 0.0;
             for ( int r = 0; r < nCoef; ++r )
                 model += coef[r] * row[r];
@@ -218,8 +261,7 @@ bool PhaseRampFitter::fit( bool quadratic, int robustIterations, PhaseRampModel 
 
     *out = PhaseRampModel{};
     out->quadratic = quadratic;
-    for ( int r = 0; r < nCoef; ++r )
-        out->coef[r] = coef[r];
+    backConvert( coef, out->coef, quadratic );
     return true;
 }
 

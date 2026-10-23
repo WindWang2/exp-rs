@@ -1357,3 +1357,63 @@ TEST_CASE( "rs:sar_calibrate multi-band resolves per-band NoData sentinel indepe
     CHECK( out2[1] == Approx( 4.0f ) );
     CHECK( !std::isnan( out2[2] ) );
 }
+
+TEST_CASE( "rs:sar_backscatter type-refuses constant incidence outside (0,90)",
+           "[sar][operator][incidence-domain]" )
+{
+    // The kernel enforces the physical open interval per pixel, but the
+    // operator seam must fail fast: without this check a theta0 of 90+
+    // streamed a whole "successful" all-NaN product and still stamped the
+    // bogus angle into the output metadata (R1/R2 review).
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = tmp.filePath( "sigma0.tif" );
+    REQUIRE( writeRaster( input, std::vector<float>( 4, 0.25f ), 2, 2 ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_backscatter" );
+    REQUIRE( op != nullptr );
+
+    for ( const double badTheta : { 90.0, 95.0, 700.0 } )
+    {
+        Json::Value params( Json::objectValue );
+        params["input"] = input.toStdString();
+        params["output"] = tmp.filePath( "out.tif" ).toStdString();
+        params["fromCalibration"] = "sigma0";
+        params["toCalibration"] = "gamma0";
+        params["incidenceDeg"] = badTheta;
+        RSOperatorContext ctx;
+        INFO( "theta0=" << badTheta );
+        REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+    }
+
+    // Same-state conversions carry no geometry: the default incidenceDeg=0
+    // must keep flowing (the domain check only bites at >= 90).
+    {
+        const QString outSame = tmp.filePath( "same.tif" );
+        Json::Value params( Json::objectValue );
+        params["input"] = input.toStdString();
+        params["output"] = outSame.toStdString();
+        params["fromCalibration"] = "sigma0";
+        params["toCalibration"] = "sigma0";
+        params["inputDomain"] = "linear_power";
+        params["outputDomain"] = "db";
+        RSOperatorContext ctx;
+        Json::Value result;
+        REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+        REQUIRE( result["calibration"].asString() == "sigma0" );
+    }
+
+    // sameState with an explicit non-physical angle is still refused: the
+    // angle would be stamped into the output metadata verbatim.
+    {
+        Json::Value params( Json::objectValue );
+        params["input"] = input.toStdString();
+        params["output"] = tmp.filePath( "out.tif" ).toStdString();
+        params["fromCalibration"] = "sigma0";
+        params["toCalibration"] = "sigma0";
+        params["incidenceDeg"] = 120.0;
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+    }
+}

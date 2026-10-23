@@ -115,3 +115,81 @@ TEST_CASE( "RsMlpBackend: arbitrary (0-based & sparse) class ids round-trip",
     REQUIRE( std::abs( sum - 1.0f ) < 1e-3f );
   }
 }
+
+// Single-class training pad regression: ANN_MLP needs >= 2 outputs, so fit()
+// pads the class list with a duplicate sentinel id. classOrder() must still
+// honour the RsClassifierBackend contract ("a non-empty result is always
+// strictly ascending") — the padded duplicate used to leak through, and the
+// pipeline's own sidecar writer/reader pair then rejected the model it had
+// just saved (RsClassOrder::isValid fails on [c, c], predict-only load died).
+#include "rs_class_order.h"
+
+TEST_CASE( "RsMlpBackend: single-class classOrder stays strictly ascending and round-trips",
+           "[obia][classifier][mlp][classorder]" )
+{
+  auto backend = RsClassifierBackendFactory::create( "MLP" );
+  REQUIRE( backend != nullptr );
+
+  cv::Mat trainX = ( cv::Mat_<float>( 6, 2 ) << 0.1, 0.1,
+                     0.2, 0.15,
+                     0.12, 0.05,
+                     0.3, 0.2,
+                     0.25, 0.25,
+                     0.18, 0.22 );
+  cv::Mat trainY = ( cv::Mat_<int>( 6, 1 ) << 7, 7, 7, 7, 7, 7 );
+
+  if ( !backend->fit( trainX, trainY ) )
+  {
+    // OpenCV 5.0.0 ANN_MLP NaN-model refusal: unfitted => empty order,
+    // which the sidecar writer skips — no corruption either way.
+    REQUIRE( backend->classOrder().isEmpty() );
+    SUCCEED( "fit() refused the single-class model (known OpenCV 5.0.0 ANN_MLP issue)" );
+    return;
+  }
+  REQUIRE( backend->isFitted() );
+
+  const QVector<int> order = backend->classOrder();
+  INFO( "classOrder:" );
+  for ( int v : order )
+    INFO( " " << v );
+  REQUIRE( !order.isEmpty() );
+  // The backend contract: strictly ascending, no duplicate sentinel.
+  REQUIRE( RsClassOrder::isValid( order ) );
+  // Exactly the distinct training labels — the pad column is not a class.
+  REQUIRE( order.size() == 1 );
+  REQUIRE( order.front() == 7 );
+
+  // Sidecar round-trip: what the pipeline writes must reload as written.
+  const QJsonArray arr = RsClassOrder::toJsonArray( order );
+  QVector<int> reloaded;
+  REQUIRE( RsClassOrder::fromJsonArray( arr, reloaded ) );
+  REQUIRE( reloaded == order );
+}
+
+// fit() must validate y's type/shape before the label sweep (same guard
+// family as KMeans/ISODATA, R2-2): at<int> on CV_32F labels type-puns
+// 1.0f into 1065353216 and the one-hot mapping trains against garbage ids.
+TEST_CASE( "RsMlpBackend: fit fails closed on malformed label matrices",
+           "[obia][classifier][mlp][labels]" )
+{
+  auto backend = RsClassifierBackendFactory::create( "MLP" );
+  REQUIRE( backend != nullptr );
+
+  cv::Mat X( 8, 2, CV_32F );
+  cv::randu( X, cv::Scalar::all( 0.0 ), cv::Scalar::all( 1.0 ) );
+
+  {
+    cv::Mat yFloat( 8, 1, CV_32F );
+    cv::randu( yFloat, cv::Scalar::all( 1.0 ), cv::Scalar::all( 2.0 ) );
+    INFO( "CV_32F labels must be refused, not type-punned" );
+    REQUIRE_FALSE( backend->fit( X, yFloat ) );
+    REQUIRE_FALSE( backend->isFitted() );
+  }
+  {
+    cv::Mat yWide( 8, 2, CV_32S );
+    cv::randu( yWide, cv::Scalar::all( 1 ), cv::Scalar::all( 2 ) );
+    INFO( "multi-column labels must be refused" );
+    REQUIRE_FALSE( backend->fit( X, yWide ) );
+    REQUIRE_FALSE( backend->isFitted() );
+  }
+}
