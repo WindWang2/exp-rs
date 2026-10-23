@@ -111,8 +111,32 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
         return std::nullopt;
     const QString objectPath = dir + QLatin1Char( '/' ) + digest;
 
-    if ( !QFile::exists( objectPath ) )
+    for ( ;; )
     {
+        if ( QFile::exists( objectPath ) )
+        {
+            // Content-addressed dedup: the existing object must genuinely
+            // carry its digest (corrupted-object hygiene at put time).
+            const QString existingDigest = artifactContentDigest( objectPath, &digestError );
+            if ( existingDigest == digest )
+                break;
+            // R20-02: a torn object under this content address (crash between
+            // publish and durability, external bit rot) poisoned the digest
+            // FOREVER before — every re-put landed here and returned nullopt,
+            // and eviction never collects an object no record references,
+            // contradicting the pool's "corruption self-heals" contract.
+            // Drop the bad bytes and re-stage from the still-healthy source
+            // (loop, so a concurrent re-tearer cannot grow the stack); if
+            // the removal fails the digest stays refused (fail-closed) and
+            // the on-disk bytes stay accounted (R2-2: subtract only after a
+            // successful remove — a failed one must not shrink the cache).
+            const qint64 tornBytes = QFileInfo( objectPath ).size();
+            if ( !QFile::remove( objectPath ) )
+                return std::nullopt;
+            if ( m_cachedTotalBytes >= 0 )
+                m_cachedTotalBytes -= tornBytes;
+            continue;
+        }
         // Stage-and-verify: copy to a pool-private temp, re-hash the STAGED
         // bytes, and only then rename into the content address. A partial
         // copy or a concurrent source rewrite can never become an object.
@@ -138,23 +162,30 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             QFile::remove( tmp );
             return std::nullopt;
         }
+        // R20-02: durability gate before the content address takes the bytes
+        // (the pool-side twin of the platform sidecar doctrine — temp +
+        // fsync + rename + directory sync): renaming unflushed bytes could
+        // commit the object's directory entry for data that never reached
+        // the disk, i.e. a torn object under a valid content address after
+        // a power loss.
+        if ( !sicnu::portable::syncFileUtf8( tmp.toStdString() ) )
+        {
+            QFile::remove( tmp );
+            return std::nullopt;
+        }
         if ( SICNU_FAULT_POINT( "artifact_pool.stage_publish" ) || !QFile::rename( tmp, objectPath ) )
         {
             QFile::remove( tmp );
             return std::nullopt;
         }
+        // Commit the rename's directory entry too (durable_sidecar.cpp
+        // doctrine: fsync → rename → best-effort directory sync).
+        sicnu::portable::syncDirectoryBestEffortUtf8( dir.toStdString() );
         // New object bytes landed: keep the incremental storage accounting
         // accurate without a full-tree re-walk (issue #758-5).
         if ( m_cachedTotalBytes >= 0 )
             m_cachedTotalBytes += QFileInfo( objectPath ).size();
-    }
-    else
-    {
-        // Content-addressed dedup: the existing object must genuinely carry
-        // its digest (corrupted-object hygiene at put time).
-        const QString existingDigest = artifactContentDigest( objectPath, &digestError );
-        if ( existingDigest != digest )
-            return std::nullopt;
+        break;
     }
 
     const QFileInfo objectInfo( objectPath );

@@ -395,6 +395,21 @@ TEST_CASE( "manifest fields that the runtime does not execute are rejected", "[m
       "name": "bad-threshold",
       "output": { "type": "mask", "threshold": 0.5 }
   })", QByteArray( "w" ) );
+  // R20-02 (#646 class): interpolation/resize are closed vocabularies — an
+  // unknown token (typo, casing, "bicubic") silently degraded to bilinear /
+  // no-resize on master instead of refusing the manifest.
+  writeManifest( dir, QStringLiteral( "bad-interpolation" ), R"({
+      "name": "bad-interpolation",
+      "preprocess": { "interpolation": "bicubic" }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-interpolation-case" ), R"({
+      "name": "bad-interpolation-case",
+      "preprocess": { "interpolation": "Nearest" }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-resize-token" ), R"({
+      "name": "bad-resize-token",
+      "preprocess": { "resize": "to-input" }
+  })", QByteArray( "w" ) );
   writeManifest( dir, QStringLiteral( "good-tiling" ), R"({
       "name": "good-tiling",
       "tiling": { "tile_size": 256, "halo": 64, "overlap": 32, "batch_size": 4 },
@@ -415,6 +430,9 @@ TEST_CASE( "manifest fields that the runtime does not execute are rejected", "[m
            Expectation{ "bad-halo-no-tile", "tile_size" },
            Expectation{ "bad-postprocess", "polygonize" },
            Expectation{ "bad-threshold", "output.threshold" },
+           Expectation{ "bad-interpolation", "interpolation" },
+           Expectation{ "bad-interpolation-case", "interpolation" },
+           Expectation{ "bad-resize-token", "resize" },
        } )
   {
     const auto model = catalog.find( e.name );

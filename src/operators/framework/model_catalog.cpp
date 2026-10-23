@@ -1068,6 +1068,23 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   if ( !info.preprocess.nodataPolicy.empty() && info.preprocess.nodataPolicy != "zero" )
     markInvalid( "unsupported preprocess.nodata_policy '" + info.preprocess.nodataPolicy
                  + "' (only 'zero' is executed)" );
+  // R20-02 (#646 class): interpolation/resize are closed vocabularies too —
+  // every consumer treats them as binary (anything != "nearest" resamples
+  // bilinear; anything != "to_input" never resizes), so a typo like
+  // "bicubic"/"Nearest"/"to-input" silently degraded the resampling instead
+  // of refusing the manifest.
+  if ( !info.preprocess.interpolation.empty()
+       && info.preprocess.interpolation != "bilinear"
+       && info.preprocess.interpolation != "nearest" )
+    markInvalid( "unsupported preprocess.interpolation '" + info.preprocess.interpolation
+                 + "' (supported: bilinear, nearest)" );
+  // "none" is the documented default spelling (model_catalog.h / manifest
+  // docs) and equals an absent key — the per-input gate below accepts it
+  // too, so the two sections stay one vocabulary.
+  if ( !info.preprocess.resize.empty() && info.preprocess.resize != "none"
+       && info.preprocess.resize != "to_input" )
+    markInvalid( "unsupported preprocess.resize '" + info.preprocess.resize
+                 + "' (supported: none, to_input)" );
   if ( info.tiling.tileSize > 0 )
   {
     if ( info.tiling.tileSize > 32768 )
@@ -1408,6 +1425,14 @@ std::string ModelInputContract::validate() const
                "grid-global) — declare it in the global preprocess section";
     if ( !preprocess.resize.empty() && preprocess.resize != "none" )
       return "inputs[].preprocess.resize '" + preprocess.resize
+               + "' is not executed per feed — declare it in the global preprocess section";
+    // R20-02 (R2-3, mirrors the resize/pad posture directly above): the
+    // multi-input stitch resamples with the GLOBAL preprocess
+    // interpolation only — a per-feed interpolation is never executed per
+    // feed, so a non-empty value here is the same declared-but-inert class
+    // the resize/pad refusals close. Point it at the global section.
+    if ( !preprocess.interpolation.empty() )
+      return "inputs[].preprocess.interpolation '" + preprocess.interpolation
                + "' is not executed per feed — declare it in the global preprocess section";
   }
   return {};
