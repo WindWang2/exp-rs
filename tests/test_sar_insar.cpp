@@ -394,3 +394,96 @@ TEST_CASE( "shiftComplexBilinear — exact for integer and linear fields", "[sar
                          == Approx( x - 0.5 ).margin( 1e-12 ) );
     }
 }
+
+TEST_CASE( "fitPhaseRamp — large-scene coordinates stay recoverable", "[sar][insar][ramp-scale]" )
+{
+    // The normal equations used raw pixel coordinates: on a 20k x 20k
+    // interferogram the quadratic design reaches x^2 ~ 4e8 and the normal
+    // matrix x^4 ~ 1.6e17, a ~1e17 condition number against double's 1e16
+    // resolution — the ramp coefficients dissolve into rounding noise (or
+    // the 1e-12 absolute pivot threshold misreads the matrix as singular).
+    // The fit must be invariant to where the scene sits on the pixel axis:
+    // same surface, same lattice, shifted far from the origin.
+    const double c[6] = { 0.5, 1e-4, -3e-5, 2e-9, 1e-9, 5e-10 };
+    const auto surface = [&]( double x, double y ) {
+        return c[0] + c[1] * x + c[2] * y + c[3] * x * x + c[4] * x * y + c[5] * y * y;
+    };
+
+    SECTION( "dense lattice spanning a 20k x 20k scene" )
+    {
+        PhaseRampFitter fitter;
+        const int steps = 100; // 10k samples, all kept by the reservoir
+        const double span = 20000.0;
+        for ( int j = 0; j < steps; ++j )
+            for ( int i = 0; i < steps; ++i )
+            {
+                const int xi = static_cast<int>( std::lround( span * i / ( steps - 1 ) ) );
+                const int yi = static_cast<int>( std::lround( span * j / ( steps - 1 ) ) );
+                // Phase evaluated AT the integer lattice the fitter sees —
+                // an unrounded evaluation point is not representable by the
+                // model and the LSQ residual would leak into coefficients.
+                fitter.addSample( xi, yi, surface( xi, yi ) );
+            }
+        PhaseRampModel m;
+        REQUIRE( fitter.fit( /*quadratic=*/true, /*robustIterations=*/0, &m ) );
+        REQUIRE( m.quadratic );
+        INFO( "coefs: " << m.coef[0] << ' ' << m.coef[1] << ' ' << m.coef[2] << ' '
+                        << m.coef[3] << ' ' << m.coef[4] << ' ' << m.coef[5] );
+        // Relative tolerances: the surface is O(1) rad over the scene, the
+        // quadratic coefficients are 1e-9-scale — recovery must hold to a
+        // fraction of a percent, not "same order of magnitude".
+        REQUIRE( m.coef[0] == Approx( c[0] ).epsilon( 1e-6 ) );
+        REQUIRE( m.coef[1] == Approx( c[1] ).epsilon( 1e-6 ) );
+        REQUIRE( m.coef[2] == Approx( c[2] ).epsilon( 1e-6 ) );
+        REQUIRE( m.coef[3] == Approx( c[3] ).epsilon( 1e-4 ) );
+        REQUIRE( m.coef[4] == Approx( c[4] ).epsilon( 1e-4 ) );
+        REQUIRE( m.coef[5] == Approx( c[5] ).epsilon( 1e-4 ) );
+    }
+
+    SECTION( "shift invariance: the same lattice offset by 100k" )
+    {
+        // A scene at pixel offset 100000 must fit the same surface as one
+        // at the origin: conditioning comes from the centered lattice, not
+        // from absolute coordinates.
+        const int steps = 40;
+        const double span = 8000.0;
+        const double off = 100000.0;
+        PhaseRampFitter fitter;
+        for ( int j = 0; j < steps; ++j )
+            for ( int i = 0; i < steps; ++i )
+            {
+                const int xi =
+                    static_cast<int>( std::lround( off + span * i / ( steps - 1 ) ) );
+                const int yi =
+                    static_cast<int>( std::lround( off + span * j / ( steps - 1 ) ) );
+                fitter.addSample( xi, yi, surface( xi, yi ) );
+            }
+        PhaseRampModel m;
+        REQUIRE( fitter.fit( true, 0, &m ) );
+        INFO( "coefs: " << m.coef[0] << ' ' << m.coef[1] << ' ' << m.coef[2] << ' '
+                        << m.coef[3] << ' ' << m.coef[4] << ' ' << m.coef[5] );
+        REQUIRE( m.coef[1] == Approx( c[1] ).epsilon( 1e-6 ) );
+        REQUIRE( m.coef[2] == Approx( c[2] ).epsilon( 1e-6 ) );
+        REQUIRE( m.coef[3] == Approx( c[3] ).epsilon( 1e-4 ) );
+        REQUIRE( m.coef[4] == Approx( c[4] ).epsilon( 1e-4 ) );
+        REQUIRE( m.coef[5] == Approx( c[5] ).epsilon( 1e-4 ) );
+
+        // Functional oracle: the fitted model must reproduce the surface at
+        // untried probe points inside the lattice.
+        const int probes[][2] = { { 101234, 104321 }, { 100007, 107999 }, { 106400, 100400 } };
+        for ( const auto &p : probes )
+            REQUIRE( evalPhaseRamp( m, p[0], p[1] )
+                     == Approx( surface( p[0], p[1] ) ).margin( 1e-9 ) );
+    }
+
+    SECTION( "degenerate span still refuses (no fabrication)" )
+    {
+        // All samples on one line: the quadratic system is rank-deficient
+        // regardless of coordinate conditioning — must still fail closed.
+        PhaseRampFitter fitter;
+        for ( int i = 0; i < 50; ++i )
+            fitter.addSample( i * 400, i * 400, surface( i * 400, i * 400 ) );
+        PhaseRampModel m;
+        REQUIRE_FALSE( fitter.fit( true, 0, &m ) );
+    }
+}

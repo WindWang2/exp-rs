@@ -389,3 +389,116 @@ TEST_CASE( "Grid facts drive the engine over a real dataset",
         CHECK( mismatch.checks[0].code == std::string( kCodeGridMismatch ) );
     }
 }
+
+// ---------------------------------------------------------------------------
+// #1600 (R20-05): sampled fractions must be stamped as estimates.
+// The lattice fractions are a bounded observation; evidence that carries
+// them without hasSampling/sampledPoints spells an estimate as a
+// whole-raster measurement (the exact failure mode src/verification/
+// evidence.h was written to prevent). A lattice that covered every pixel is
+// a census and stays unmarked.
+// ---------------------------------------------------------------------------
+TEST_CASE( "Grid fractions from a bounded sample are stamped as sampled",
+           "[verify_adapters][grid][sampling][r20_05]" )
+{
+    TempDir dir;
+    // 100x100 > the exact-tile 96x96: the 3x3 lattice of 32x32 windows reads
+    // 9 * 32 * 32 = 9216 of 10000 pixels — an estimate, not a census.
+    constexpr int kUntiled = 100;
+    constexpr std::size_t kExpectedSampled =
+        static_cast<std::size_t>( 9 ) * adapters::GdalGridProbe::kDefaultSamplingAxis *
+        adapters::GdalGridProbe::kDefaultSamplingAxis;
+
+    adapters::GdalGridProbe probe;
+    const std::string raster = dir.file( "sampled.tif" );
+    REQUIRE( writeGtiff( raster, kUntiled, kUntiled, "EPSG:4326", true,
+                         constantPixels( kUntiled, kUntiled, 1.0f ) ) );
+
+    const std::optional<GridInfo> info = probe.grid( raster );
+    REQUIRE( info.has_value() );
+    CHECK( info->fractionsFromSample );
+    CHECK( info->sampledPixels == kExpectedSampled );
+
+    SECTION( "the engine evidence carries the sampling stamp" )
+    {
+        adapters::FsArtifactProbe artifactProbe;
+        VerificationCheckSpec grid;
+        grid.checkId = "grid-sampled";
+        grid.kind = "artifact.grid";
+        grid.params["path"] = raster;
+        grid.params["maxNodataFraction"] = 0.5;
+        VerificationSpec spec;
+        spec.specId = "spec.grid.sampled";
+        spec.scope = "node";
+        spec.checks.push_back( grid );
+        const VerificationContext context{ &artifactProbe, &probe, nullptr, nullptr, nullptr };
+        const VerificationReport report = evaluate( spec, context );
+        CHECK( report.overall == VerificationStatus::Pass );
+        REQUIRE( report.checks[0].evidence.has_value() );
+        CHECK( report.checks[0].evidence->hasSampling );
+        CHECK( report.checks[0].evidence->sampledPoints == kExpectedSampled );
+        // The stamp must survive the canonical round-trip too (the sealed
+        // digest is computed over the serialized evidence).
+        const Json::Value canonical = report.checks[0].evidence->toCanonicalJson();
+        CHECK( canonical.isMember( "hasSampling" ) );
+        CHECK( canonical["hasSampling"].asBool() );
+        CHECK( canonical["sampledPoints"].asUInt64() == kExpectedSampled );
+    }
+}
+
+TEST_CASE( "Grid fractions over a fully tiled raster are a census, unmarked",
+           "[verify_adapters][grid][sampling][r20_05]" )
+{
+    TempDir dir;
+    // kEdge x kEdge tiles the default lattice exactly: every pixel is read,
+    // so the fractions are a census — no sampling stamp may appear.
+    adapters::GdalGridProbe probe;
+    const std::string raster = dir.file( "census.tif" );
+    REQUIRE( writeGtiff( raster, kEdge, kEdge, "EPSG:4326", true,
+                         quarterNodataPixels( kEdge, kEdge, 1.0f, 0.0f ) ) );
+
+    const std::optional<GridInfo> info = probe.grid( raster );
+    REQUIRE( info.has_value() );
+    CHECK_FALSE( info->fractionsFromSample );
+
+    adapters::FsArtifactProbe artifactProbe;
+    VerificationCheckSpec grid;
+    grid.checkId = "grid-census";
+    grid.kind = "artifact.grid";
+    grid.params["path"] = raster;
+    grid.params["maxNodataFraction"] = 0.5;
+    VerificationSpec spec;
+    spec.specId = "spec.grid.census";
+    spec.scope = "node";
+    spec.checks.push_back( grid );
+    const VerificationContext context{ &artifactProbe, &probe, nullptr, nullptr, nullptr };
+    const VerificationReport report = evaluate( spec, context );
+    CHECK( report.overall == VerificationStatus::Pass );
+    REQUIRE( report.checks[0].evidence.has_value() );
+    CHECK_FALSE( report.checks[0].evidence->hasSampling );
+    CHECK( report.checks[0].evidence->sampledPoints == 0 );
+}
+
+TEST_CASE( "An elongated raster with oversampled short axis is still marked sampled",
+           "[verify_adapters][grid][sampling][r20_05]" )
+{
+    // R1 review P2: 200x40 @ axis 32 reads 9 * 32 * 32 = 9216 samples over
+    // an 8000-pixel raster — MORE samples than pixels — while the long-axis
+    // windows leave columns 32..84 and 116..168 unread. A pixel-count
+    // comparison would claim a census over unread columns; the census claim
+    // must be per-axis contiguity (extent <= 3 * window), which fails here.
+    TempDir dir;
+    constexpr int kWide = 200;
+    constexpr int kTall = 40;
+    adapters::GdalGridProbe probe;
+    const std::string raster = dir.file( "elongated.tif" );
+    REQUIRE( writeGtiff( raster, kWide, kTall, "EPSG:4326", true,
+                         constantPixels( kWide, kTall, 1.0f ) ) );
+
+    const std::optional<GridInfo> info = probe.grid( raster );
+    REQUIRE( info.has_value() );
+    CHECK( info->fractionsFromSample );
+    CHECK( info->sampledPixels ==
+           static_cast<std::size_t>( 9 ) * adapters::GdalGridProbe::kDefaultSamplingAxis *
+               adapters::GdalGridProbe::kDefaultSamplingAxis );
+}

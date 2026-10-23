@@ -1,6 +1,11 @@
 #include "rubric_builder.h"
 
+#include "grader/grader_error.h"
+#include "grader/grader_json.h"
+#include "grader/grader_types.h"
+
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <cmath>
 
 namespace sicnu::teaching_admin {
@@ -24,16 +29,6 @@ QSet<QString> supportedLabRuleKinds()
         QStringLiteral( "spectral_signature" ),
         QStringLiteral( "file_check" ),
         QStringLiteral( "provenance" ),
-    };
-}
-
-QSet<QString> supportedProcessCriterionKinds()
-{
-    return {
-        QStringLiteral( "stage" ),
-        QStringLiteral( "metric" ),
-        QStringLiteral( "fact" ),
-        QStringLiteral( "answer" ),
     };
 }
 
@@ -165,75 +160,53 @@ ValidationResult validateLabRules( const QJsonObject &rules )
 
 ValidationResult validateProcessRubric( const QJsonObject &rubric )
 {
+    // #1652-1 (R20-05): this validator used to grade a FLAT criteria[]
+    // dialect (top-level criteria + weight sum 1.0 + metricKey/answerKey)
+    // that the grading engine never consumes — sicnu.grader.rubric/1 is
+    // dimensions[].criteria[] with maxPoints and weight==sum(maxPoints)
+    // (grader_types.cpp). A rubric the engine ACCEPTS was reported invalid
+    // here (and by release_preflight, which gates on this verdict), while a
+    // rubric this validator accepted was refused by the engine. The admin
+    // console now delegates to the engine's own parser — ONE rubric truth,
+    // the same discipline as the lab-pack validator (no second pack truth).
     ValidationResult r;
     if ( rubric.value( QStringLiteral( "schema" ) ).toString() != QLatin1String( "sicnu.grader.rubric/1" ) )
+    {
         r.addError( QStringLiteral( "schema_mismatch" ), QStringLiteral( "schema" ),
                     QStringLiteral( "must be sicnu.grader.rubric/1" ) );
-
-    const QJsonArray criteria = rubric.value( QStringLiteral( "criteria" ) ).toArray();
-    if ( criteria.isEmpty() )
-        r.addError( QStringLiteral( "missing_field" ), QStringLiteral( "criteria" ),
-                    QStringLiteral( "criteria required" ) );
-
-    const QSet<QString> kinds = supportedProcessCriterionKinds();
-    QSet<QString> ids;
-    double sum = 0.0;
-    for ( int i = 0; i < criteria.size(); ++i )
-    {
-        const QJsonObject c = criteria.at( i ).toObject();
-        const QString path = QStringLiteral( "criteria[%1]" ).arg( i );
-        const QString id = c.value( QStringLiteral( "id" ) ).toString();
-        if ( id.isEmpty() )
-            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".id" ),
-                        QStringLiteral( "criterion id required" ) );
-        if ( ids.contains( id ) )
-            r.addError( QStringLiteral( "duplicate_criterion_id" ), path + QStringLiteral( ".id" ),
-                        QStringLiteral( "duplicate criterion id" ) );
-        ids.insert( id );
-        const QString kind = c.value( QStringLiteral( "kind" ) ).toString().toLower();
-        if ( !kinds.contains( kind ) )
-            r.addError( QStringLiteral( "unsupported_criterion_kind" ), path + QStringLiteral( ".kind" ),
-                        QStringLiteral( "only stage|metric|fact|answer supported" ) );
-        // Weight arithmetic (R16-C/T06 WP3): same per-item rule as lab
-        // assertions — finite and non-negative; a NaN member made the
-        // aggregate |sum - 1.0| comparison silently false below. Type
-        // first (round-1 review): a non-numeric weight must be refused,
-        // not coerced to 0.0.
-        const QJsonValue weightValue = c.value( QStringLiteral( "weight" ) );
-        if ( !weightValue.isDouble() )
-            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
-                        QStringLiteral( "weight must be a number" ) );
-        const double weight = weightValue.toDouble( 0.0 );
-        if ( !std::isfinite( weight ) || weight < 0.0 )
-            r.addError( QStringLiteral( "malformed_grading_rule" ), path + QStringLiteral( ".weight" ),
-                        QStringLiteral( "weight must be finite and non-negative" ) );
-        sum += weight;
-
-        if ( kind == QLatin1String( "metric" )
-             && c.value( QStringLiteral( "metricKey" ) ).toString().isEmpty()
-             && c.value( QStringLiteral( "metric_key" ) ).toString().isEmpty() )
-            r.addError( QStringLiteral( "missing_metric" ), path,
-                        QStringLiteral( "metric criterion requires metricKey" ) );
+        return r;
     }
 
-    // !isfinite first: |NaN - 1.0| > eps is FALSE, so a NaN sum used to
-    // pass this aggregate check unseen.
-    if ( criteria.size() > 0 && ( !std::isfinite( sum ) || std::fabs( sum - 1.0 ) > 1e-6 ) )
-        r.addError( QStringLiteral( "weight_mismatch" ), QStringLiteral( "criteria" ),
-                    QStringLiteral( "criterion weights must sum to 1.0 (got " )
-                        + QString::number( sum ) + QStringLiteral( ")" ) );
+    // The engine reads the bytes, not the Qt value tree: serialize and hand
+    // the text to the grader's own strict reader, so what is validated here
+    // is exactly what `lab --grade` would parse.
+    const QByteArray bytes = QJsonDocument( rubric ).toJson( QJsonDocument::Compact );
+    const std::string text( bytes.constData(), static_cast<std::size_t>( bytes.size() ) );
 
-    // Unjudgeable: criteria with no matchable evidence kind / answer key
-    for ( int i = 0; i < criteria.size(); ++i )
+    sicnu::grader::GraderError error;
+    const auto doc = sicnu::grader::parseJsonStrict( text, error );
+    if ( !doc )
     {
-        const QJsonObject c = criteria.at( i ).toObject();
-        const QString kind = c.value( QStringLiteral( "kind" ) ).toString().toLower();
-        if ( kind == QLatin1String( "answer" )
-             && c.value( QStringLiteral( "answerKey" ) ).toString().isEmpty()
-             && c.value( QStringLiteral( "answer_key" ) ).toString().isEmpty() )
-            r.addWarning( QStringLiteral( "unjudgeable_rubric" ),
-                          QStringLiteral( "criteria[%1]" ).arg( i ),
-                          QStringLiteral( "answer criterion lacks answerKey" ) );
+        r.addError( QStringLiteral( "malformed_grading_rule" ),
+                    QString::fromStdString( error.path ),
+                    QString::fromUtf8( "invalid rubric JSON: %1" )
+                        .arg( QString::fromStdString( error.message ) ) );
+        return r;
+    }
+
+    const auto parsed = sicnu::grader::GradingRubric::fromJson( *doc, error );
+    if ( !parsed )
+    {
+        // The engine's document-level refusal vocabulary maps 1:1 onto the
+        // admin console's two error codes; the message keeps the engine's
+        // exact wording + path so the teacher can locate the offending member.
+        const QString code = error.code == sicnu::grader::GraderErrorCode::SchemaVersionUnsupported
+                                 ? QStringLiteral( "schema_mismatch" )
+                                 : QStringLiteral( "malformed_grading_rule" );
+        r.addError( code, QString::fromStdString( error.path ),
+                    QString::fromUtf8( "grader refused this rubric: %1" )
+                        .arg( QString::fromStdString( error.message ) ) );
+        return r;
     }
 
     return r;

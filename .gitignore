@@ -641,9 +641,23 @@ r6_dev.cmd
 !.planning/r19-03/
 .planning/r19-03/*
 !.planning/r19-03/*.md
+# R20-03 track (Pi/MCP harness, tool contracts, workflow & plugin execution) planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r20-03/
+.planning/zcode-r20-03/*
+!.planning/zcode-r20-03/*.md
 *.agent-build.lock
 
 # R20-02 track (geospatial data / model runtime / persistence) planning artifacts (markdown only).
 !.planning/zcode-r20-02/
 .planning/zcode-r20-02/*
 !.planning/zcode-r20-02/*.md
+
+# R20-05 track (zcode teaching/verification) planning artifacts (markdown,
+# plus the standalone RED/GREEN driver sources + run log cited by ORACLES.md).
+!.planning/zcode-r20-05/
+.planning/zcode-r20-05/*
+!.planning/zcode-r20-05/*.md
+!.planning/zcode-r20-05/red-drivers/
+.planning/zcode-r20-05/red-drivers/*
+!.planning/zcode-r20-05/red-drivers/*.cpp
+!.planning/zcode-r20-05/red-drivers/*.md

@@ -243,3 +243,59 @@ TEST_CASE( "ISODATA save/load round-trips the centres",
     const cv::Mat b = loaded.predict( twoClusters1D() );
     REQUIRE( cv::countNonZero( a != b ) == 0 );
 }
+
+// fit() must validate y before reading it (same contract as KMeans, ADR
+// 0061 remap discipline): at<int> on a non-CV_32S, multi-column or
+// row-mismatched label matrix is a type-punning read, and Mat::empty() is
+// total()==0 so a (rows>0, cols==0) matrix passes every empty() guard while
+// at<int>(i,0) lands on no data. Malformed labels fail closed; an empty
+// label matrix stays the documented unsupervised dummy.
+TEST_CASE( "ISODATA: fit fails closed on malformed label matrices",
+           "[obia][classifier][isodata][labels]" )
+{
+    cv::Mat X( 20, 2, CV_32F );
+    cv::randu( X, cv::Scalar::all( 0.0 ), cv::Scalar::all( 10.0 ) );
+
+    {
+        RsClassifierIsodata clf;
+        cv::Mat yFloat( 20, 1, CV_32F );
+        cv::randu( yFloat, cv::Scalar::all( 1.0 ), cv::Scalar::all( 3.0 ) );
+        INFO( "CV_32F labels must be refused, not type-punned" );
+        REQUIRE_FALSE( clf.fit( X, yFloat ) );
+        REQUIRE_FALSE( clf.isFitted() );
+    }
+    {
+        RsClassifierIsodata clf;
+        cv::Mat yWide( 20, 2, CV_32S );
+        cv::randu( yWide, cv::Scalar::all( 1 ), cv::Scalar::all( 3 ) );
+        INFO( "multi-column labels must be refused" );
+        REQUIRE_FALSE( clf.fit( X, yWide ) );
+        REQUIRE_FALSE( clf.isFitted() );
+    }
+    {
+        RsClassifierIsodata clf;
+        cv::Mat yShort( 10, 1, CV_32S, cv::Scalar( 1 ) );
+        INFO( "y.rows != X.rows must be refused" );
+        REQUIRE_FALSE( clf.fit( X, yShort ) );
+        REQUIRE_FALSE( clf.isFitted() );
+    }
+    {
+        // (rows>0, cols==0) has total()==0, so Mat::empty() folds it into
+        // the documented unsupervised dummy — the guard never reads it, so
+        // no type-pun or null-data dereference occurs (identical to the
+        // KMeans contract).
+        RsClassifierIsodata clf;
+        cv::Mat yDegenerate( 20, 0, CV_32S );
+        INFO( "(rows>0, cols==0) is empty() by OpenCV semantics — dummy path" );
+        REQUIRE( clf.fit( X, yDegenerate ) );
+        REQUIRE( clf.isFitted() );
+        REQUIRE_FALSE( clf.needsLabelRemap() );
+    }
+    {
+        RsClassifierIsodata clf;
+        INFO( "empty y stays the documented unsupervised dummy" );
+        REQUIRE( clf.fit( X, cv::Mat() ) );
+        REQUIRE( clf.isFitted() );
+        REQUIRE_FALSE( clf.needsLabelRemap() );
+    }
+}

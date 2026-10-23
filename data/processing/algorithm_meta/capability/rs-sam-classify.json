@@ -123,7 +123,8 @@
     },
     "limitations" : 
     [
-      "SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair)."
+      "SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair).",
+      "Bands without a declared NoData are matched on non-finite values only (NaN-only policy): a -9999 sample in an undeclared band is treated as data, not a void. This deliberately differs from rs:spectral_similarity's family fallback (-9999 voids when no band declares a sentinel) \u2014 declare NoData explicitly to unify both paths."
     ],
     "modality" : 
     [

@@ -56,20 +56,39 @@ QJsonObject assertion( const QString &id, double weight )
     };
 }
 
-QJsonObject processRubric( const QJsonArray &criteria )
+// #1652-1 (R20-05): validateProcessRubric delegates to the grader's own
+// GradingRubric::fromJson, so these helpers build the ENGINE dialect —
+// dimensions[].criteria[] with maxPoints (weight == sum of maxPoints,
+// dimension weights sum == totalPoints). The old flat criteria[] dialect was
+// this file's own vocabulary; the engine never read it.
+QJsonObject stageCriterion( const QString &id, double maxPoints )
 {
     return QJsonObject{
-        { QStringLiteral( "schema" ), QStringLiteral( "sicnu.grader.rubric/1" ) },
-        { QStringLiteral( "criteria" ), criteria },
+        { QStringLiteral( "criterionId" ), id },
+        { QStringLiteral( "maxPoints" ), maxPoints },
+        { QStringLiteral( "kind" ), QStringLiteral( "stage" ) },
+        { QStringLiteral( "evidenceKey" ), QStringLiteral( "process.stage" ) },
+        { QStringLiteral( "stage" ),
+          QJsonObject{ { QStringLiteral( "expectedState" ), QStringLiteral( "completed" ) },
+                        { QStringLiteral( "minDistinct" ), 1 } } },
     };
 }
 
-QJsonObject criterion( const QString &id, double weight )
+QJsonObject processRubric( double dimensionWeight, double totalPoints, const QJsonArray &criteria )
 {
     return QJsonObject{
-        { QStringLiteral( "id" ), id },
-        { QStringLiteral( "kind" ), QStringLiteral( "stage" ) },
-        { QStringLiteral( "weight" ), weight },
+        { QStringLiteral( "schema" ), QStringLiteral( "sicnu.grader.rubric/1" ) },
+        { QStringLiteral( "rubricId" ), QStringLiteral( "r-t06" ) },
+        { QStringLiteral( "revision" ), 1 },
+        { QStringLiteral( "totalPoints" ), totalPoints },
+        // The engine defaults passingScore to 60 and validates it against
+        // totalPoints, so a small rubric must pin its own passing score.
+        { QStringLiteral( "passingScore" ), 6.0 },
+        { QStringLiteral( "dimensions" ),
+          QJsonArray{ QJsonObject{
+              { QStringLiteral( "dimensionId" ), QStringLiteral( "d1" ) },
+              { QStringLiteral( "weight" ), dimensionWeight },
+              { QStringLiteral( "criteria" ), criteria } } } },
     };
 }
 
@@ -101,41 +120,57 @@ TEST_CASE( "lab rules reject a non-finite weight sum (overflow)",
     CHECK( hasIssue( r, QStringLiteral( "weight_mismatch" ) ) );
 }
 
-TEST_CASE( "process rubric rejects a negative weight that keeps the sum at 1.0",
+TEST_CASE( "process rubric rejects a negative maxPoints criterion",
            "[teaching_admin][rubric][r16_c_t06]" )
 {
-    const ValidationResult r = validateProcessRubric( processRubric( QJsonArray{
-        criterion( QStringLiteral( "c1" ), -0.5 ),
-        criterion( QStringLiteral( "c2" ), 1.5 ),
+    // The engine's weight model is maxPoints > 0 per criterion; a negative
+    // member is nonsense arithmetic the engine refuses at parse time.
+    const ValidationResult r = validateProcessRubric( processRubric( 10.0, 10.0, QJsonArray{
+        stageCriterion( QStringLiteral( "c1" ), -2.0 ),
+        stageCriterion( QStringLiteral( "c2" ), 12.0 ),
     } ) );
     REQUIRE_FALSE( r.ok );
     CHECK( hasIssue( r, QStringLiteral( "malformed_grading_rule" ) ) );
 }
 
-TEST_CASE( "process rubric rejects a NaN weight",
+TEST_CASE( "process rubric rejects a NaN maxPoints",
            "[teaching_admin][rubric][r16_c_t06]" )
 {
-    // sum becomes NaN and |NaN - 1.0| > 1e-6 is FALSE — the old aggregate
-    // check silently accepted it.
-    const ValidationResult r = validateProcessRubric( processRubric( QJsonArray{
-        criterion( QStringLiteral( "c1" ), std::numeric_limits<double>::quiet_NaN() ),
-        criterion( QStringLiteral( "c2" ), 1.0 ),
+    // A NaN double serializes to JSON null; the engine's finiteNumberMember
+    // refuses it — non-finite point arithmetic must never reach the grader.
+    const ValidationResult r = validateProcessRubric( processRubric( 10.0, 10.0, QJsonArray{
+        stageCriterion( QStringLiteral( "c1" ), std::numeric_limits<double>::quiet_NaN() ),
+        stageCriterion( QStringLiteral( "c2" ), 10.0 ),
     } ) );
     REQUIRE_FALSE( r.ok );
 }
 
-TEST_CASE( "process rubric rejects an infinite weight sum",
+TEST_CASE( "process rubric rejects a dimension weight that disagrees with its criteria",
            "[teaching_admin][rubric][r16_c_t06]" )
 {
-    const ValidationResult r = validateProcessRubric( processRubric( QJsonArray{
-        criterion( QStringLiteral( "c1" ), 1e308 ),
-        criterion( QStringLiteral( "c2" ), 1e308 ),
+    // The engine's own weight invariant: dimension.weight == sum of its
+    // criteria maxPoints (grader_types.cpp validate). 9 != 6 + 4.
+    const ValidationResult r = validateProcessRubric( processRubric( 9.0, 10.0, QJsonArray{
+        stageCriterion( QStringLiteral( "c1" ), 6.0 ),
+        stageCriterion( QStringLiteral( "c2" ), 4.0 ),
     } ) );
     REQUIRE_FALSE( r.ok );
-    CHECK( hasIssue( r, QStringLiteral( "weight_mismatch" ) ) );
+    CHECK( hasIssue( r, QStringLiteral( "malformed_grading_rule" ) ) );
 }
 
-TEST_CASE( "finite non-negative weights still validate (no over-rejection)",
+TEST_CASE( "process rubric rejects dimension weights that disagree with totalPoints",
+           "[teaching_admin][rubric][r16_c_t06]" )
+{
+    // sum of dimension weights (10) != totalPoints (12) — the engine refuses.
+    const ValidationResult r = validateProcessRubric( processRubric( 10.0, 12.0, QJsonArray{
+        stageCriterion( QStringLiteral( "c1" ), 6.0 ),
+        stageCriterion( QStringLiteral( "c2" ), 4.0 ),
+    } ) );
+    REQUIRE_FALSE( r.ok );
+    CHECK( hasIssue( r, QStringLiteral( "malformed_grading_rule" ) ) );
+}
+
+TEST_CASE( "finite positive weights still validate (no over-rejection)",
            "[teaching_admin][rubric][r16_c_t06]" )
 {
     // Guard against hardening into refusal: the ordinary shapes stay ok.
@@ -144,12 +179,25 @@ TEST_CASE( "finite non-negative weights still validate (no over-rejection)",
               assertion( QStringLiteral( "a2" ), 40.0 ),
           } ) )
              .ok );
-    // A zero weight is finite and non-negative — allowed (existing behavior).
-    CHECK( validateProcessRubric( processRubric( QJsonArray{
-              criterion( QStringLiteral( "c1" ), 0.0 ),
-              criterion( QStringLiteral( "c2" ), 1.0 ),
+    // Engine dialect: 6 + 4 == dimension weight 10 == totalPoints.
+    CHECK( validateProcessRubric( processRubric( 10.0, 10.0, QJsonArray{
+              stageCriterion( QStringLiteral( "c1" ), 6.0 ),
+              stageCriterion( QStringLiteral( "c2" ), 4.0 ),
           } ) )
              .ok );
+}
+
+TEST_CASE( "process rubric rejects a zero maxPoints criterion",
+           "[teaching_admin][rubric][r16_c_t06]" )
+{
+    // The ENGINE's contract (not the old flat dialect's): maxPoints must be
+    // strictly > 0 — a zero-point criterion carries no judgment and is
+    // refused by the grading authority itself.
+    const ValidationResult r = validateProcessRubric( processRubric( 10.0, 10.0, QJsonArray{
+        stageCriterion( QStringLiteral( "c1" ), 0.0 ),
+        stageCriterion( QStringLiteral( "c2" ), 10.0 ),
+    } ) );
+    REQUIRE_FALSE( r.ok );
 }
 
 TEST_CASE( "checkWeightSum stays fail-closed on a NaN member",
@@ -176,10 +224,11 @@ TEST_CASE( "a string-typed weight is refused, not silently coerced to 0.0",
     REQUIRE_FALSE( lab.ok );
     CHECK( hasIssue( lab, QStringLiteral( "malformed_grading_rule" ) ) );
 
-    QJsonObject stringProc = criterion( QStringLiteral( "c1" ), 0.5 );
-    stringProc.insert( QStringLiteral( "weight" ), QStringLiteral( "0.5" ) );
+    QJsonObject stringProc = stageCriterion( QStringLiteral( "c1" ), 5.0 );
+    stringProc.insert( QStringLiteral( "maxPoints" ), QStringLiteral( "5" ) );
     const ValidationResult proc = validateProcessRubric(
-        processRubric( QJsonArray{ stringProc, criterion( QStringLiteral( "c2" ), 0.5 ) } ) );
+        processRubric( 10.0, 10.0, QJsonArray{ stringProc,
+                                               stageCriterion( QStringLiteral( "c2" ), 5.0 ) } ) );
     REQUIRE_FALSE( proc.ok );
     CHECK( hasIssue( proc, QStringLiteral( "malformed_grading_rule" ) ) );
 }

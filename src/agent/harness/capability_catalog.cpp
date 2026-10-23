@@ -651,12 +651,25 @@ int CapabilityCatalog::reload()
     const std::string where = it.fileName().toStdString();
     for ( const std::string &problem : validateEntry( parsed ) )
       mLoadProblems.push_back( where + ": " + problem );
-    const std::string id = parsed[ "id" ].asString();
+    // A non-object document never reaches the id read: validateEntry has
+    // already recorded "sidecar must be an object", and the NON-const
+    // operator[] below on an array/scalar document is resolveReference
+    // (assert/throw) — the exact escape the per-file gate exists to stop
+    // (R1 P1-2).
+    if ( !parsed.isObject() )
+      continue;
+    // Type-gated like validateEntry's own id read: asString() on an
+    // object/array id throws past the problems gate and aborts the scan.
+    const std::string id =
+      parsed[ "id" ].isString() ? parsed[ "id" ].asString() : std::string();
     if ( id.empty() )
       continue;
+    // Exact 'where + ": "' prefix — same cross-match hazard as the
+    // knowledge loader (R2 P3).
+    const std::string ownPrefix = where + ": ";
     const bool problems = std::any_of(
       mLoadProblems.begin(), mLoadProblems.end(),
-      [ &where ]( const std::string &p ) { return p.rfind( where, 0 ) == 0; } );
+      [ &ownPrefix ]( const std::string &p ) { return p.rfind( ownPrefix, 0 ) == 0; } );
     if ( problems )
       continue;
     if ( mEntries.isMember( id ) )
@@ -923,7 +936,14 @@ std::vector<std::string> CapabilityCatalog::validateEntry( const Json::Value &si
     problems.push_back( "missing 'capability' block" );
     return problems;
   }
-  if ( sidecar[ "schema_version" ].asInt() != 2 )
+  // Wrong-TYPED versions are a named problem, not a Json::LogicError thrown
+  // out of validateEntry: the loader's contract is "record problems, skip
+  // the file" — a throw aborts the whole reload() scan and is a process
+  // kill on non-MCP callers (GUI catalog panel / copilot dispatch).
+  // isInt(), not isIntegral(): int64/uint64/real values outside the int32
+  // range pass isIntegral() but make asInt() itself throw (R1 P1-1).
+  const Json::Value &version = sidecar[ "schema_version" ];
+  if ( !version.isInt() || version.asInt() != 2 )
     problems.push_back( "schema_version must be 2" );
 
   for ( const std::string &key : block.getMemberNames() )

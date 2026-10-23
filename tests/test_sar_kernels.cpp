@@ -305,3 +305,140 @@ TEST_CASE( "Antenna look azimuth derives from flight heading + side, and"
     // heading = 180° directly) makes them identical and masks the error.
     CHECK( westSide.localIncidenceDeg != eastSide.localIncidenceDeg );
 }
+
+// Incidence-angle physical domain in the raster conversion kernel: the
+// per-pixel theta path used to only reject non-finite angles. cos(90°) is
+// ~6e-17 (not a pole), so a vertical look direction produced a huge but
+// FINITE positive gamma0 that sailed through finishValue's v>0 gate into
+// the product (test_sar_kernels pins the pure-function value class; the
+// raster kernel must fail closed on the (0°, 90°) physical domain, the
+// same refusal sar_terrain_geometry applies to every incidence angle).
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
+
+#include <QTemporaryDir>
+
+#include <array>
+#include <gdal_priv.h>
+
+namespace
+{
+
+std::vector<float> readFirstBand( const QString &path, int w, int h )
+{
+    GdalDatasetWrapper ds;
+    if ( !ds.open( path ) )
+        return {};
+    std::vector<float> out( static_cast<size_t>( w ) * h, 0.0f );
+    if ( !ds.readBandData( 1, out.data(), w, h ) )
+        return {};
+    return out;
+}
+
+} // namespace
+
+TEST_CASE( "Backscatter raster kernel rejects incidence angles outside (0,90)",
+           "[sar][calibration][incidence-domain]" )
+{
+    ensureApp();
+    ensureGdalInit();
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // 6x1 sigma0 strip of 1.0; per-pixel incidence rasters probing the
+    // domain edges. Grid/geotransform identical to the data raster.
+    const int w = 6, h = 1;
+    const std::vector<float> sigma0( w * h, 1.0f );
+    const std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+    const QString dataPath = tmp.filePath( QStringLiteral( "sigma0.tif" ) );
+    QString err;
+    std::vector<std::vector<float>> bandsData = { sigma0 };
+    REQUIRE( writeGdalOutput( dataPath, w, h, bandsData, gt, QString(),
+                                                 &err ) );
+
+    struct Edge
+    {
+        double theta;
+        bool valid;
+    };
+    const std::vector<Edge> edges = {
+        { 30.0, true },    // ordinary look angle
+        { 89.99, true },   // near-grazing but physical
+        { 90.0, false },   // vertical: cos ~ 6e-17 -> finite 1.6e16 poison
+        { 0.0, false },    // nadir: sin ~ 0 -> beta0 pole
+        { -5.0, false },   // below horizon
+        { 120.0, false },  // beyond vertical (upward look)
+    };
+    std::vector<float> incidence( w * h );
+    for ( int i = 0; i < w; ++i )
+        incidence[static_cast<size_t>( i )] = static_cast<float>( edges[static_cast<size_t>( i )].theta );
+
+    const QString incPath = tmp.filePath( QStringLiteral( "incidence.tif" ) );
+    std::vector<std::vector<float>> incBands = { incidence };
+    REQUIRE( writeGdalOutput( incPath, w, h, incBands, gt, QString(),
+                                                 &err ) );
+
+    GdalDatasetWrapper src;
+    REQUIRE( src.open( dataPath ) );
+
+    BackscatterConvertOptions opt;
+    opt.fromCalibration = QStringLiteral( "sigma0" );
+    opt.toCalibration = QStringLiteral( "gamma0" );
+    opt.outputDomain = SarDomain::LinearPower;
+    opt.incidenceRasterPath = incPath;
+
+    const QString outPath = tmp.filePath( QStringLiteral( "gamma0.tif" ) );
+    GdalStreamingOutput dst(
+        outPath, w, h, 1, GDT_Float32, src.geoTransform(), src.projection() );
+    REQUIRE( dst.isOpen() );
+    REQUIRE( convertBackscatterRaster( src, 1, opt, std::numeric_limits<float>::quiet_NaN(),
+                                              dst, 64 ) );
+    QString closeErr;
+    REQUIRE( dst.closeWithError( &closeErr ) );
+
+    const std::vector<float> out = readFirstBand( outPath, w, h );
+    REQUIRE( out.size() == static_cast<size_t>( w ) * h );
+    for ( int i = 0; i < w; ++i )
+    {
+        INFO( "theta=" << edges[static_cast<size_t>( i )].theta
+                       << " gamma0=" << out[static_cast<size_t>( i )] );
+        if ( edges[static_cast<size_t>( i )].valid )
+        {
+            // The incidence raster stores Float32: the kernel reads
+            // float(89.99) = 89.98999786..., so the oracle must use the
+            // quantized angle (a double-literal oracle is off by ~1.2 in
+            // gamma0 at near-grazing angles).
+            const double thetaQuantized =
+                static_cast<double>( static_cast<float>( edges[static_cast<size_t>( i )].theta ) );
+            const double expect = sigma0ToGamma0( 1.0, thetaQuantized );
+            REQUIRE( out[static_cast<size_t>( i )] == Approx( expect ).margin( 1e-3 ) );
+        }
+        else
+        {
+            REQUIRE( std::isnan( out[static_cast<size_t>( i )] ) );
+        }
+    }
+
+    // Constant-incidence path shares the same domain. 95° was already
+    // caught by the negative-value gate; 90.0° is the discriminative probe
+    // — cos(90°) ~ 6e-17 makes a FINITE ~1.6e16 gamma0 that the old
+    // finishValue v>0 gate let through into the product.
+    GdalStreamingOutput dst2(
+        tmp.filePath( QStringLiteral( "gamma0_c.tif" ) ), w, h, 1, GDT_Float32,
+        src.geoTransform(), src.projection() );
+    REQUIRE( dst2.isOpen() );
+    BackscatterConvertOptions optC;
+    optC.fromCalibration = QStringLiteral( "sigma0" );
+    optC.toCalibration = QStringLiteral( "gamma0" );
+    optC.outputDomain = SarDomain::LinearPower;
+    optC.constantIncidenceDeg = 90.0;
+    REQUIRE( convertBackscatterRaster(
+        src, 1, optC, std::numeric_limits<float>::quiet_NaN(), dst2, 64 ) );
+    QString closeErr2;
+    REQUIRE( dst2.closeWithError( &closeErr2 ) );
+    const std::vector<float> outC =
+        readFirstBand( tmp.filePath( QStringLiteral( "gamma0_c.tif" ) ), w, h );
+    REQUIRE( outC.size() == static_cast<size_t>( w ) * h );
+    for ( float v : outC )
+        REQUIRE( std::isnan( v ) );
+}

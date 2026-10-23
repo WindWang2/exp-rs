@@ -13,9 +13,6 @@ namespace sicnu::teaching_admin {
 /// Artifact assertion kinds from lab_rules.schema.json / kKnownKinds.
 QSet<QString> supportedLabRuleKinds();
 
-/// Process criterion kinds from sicnu.grader.rubric/1.
-QSet<QString> supportedProcessCriterionKinds();
-
 /// Validate lab artifact rules document (sicnu.lab.rules/1 shape).
 ValidationResult validateLabRules( const QJsonObject &rules );
 

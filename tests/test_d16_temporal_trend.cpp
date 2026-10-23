@@ -246,3 +246,63 @@ TEST_CASE( "Raster trend batch matches the single-series path pixel-wise",
                                        slope.data(), pval.data(), zsc.data() );
     SUCCEED( "degenerate raster arguments handled without crash" );
 }
+
+TEST_CASE( "Raster trend keeps value/time pairing for interior missing frames",
+           "[d16][trend][gaps]" )
+{
+    // A missing frame in the MIDDLE of a series must remove both the value
+    // AND its timestamp. The raster batch used to compact only the values
+    // and then pair the survivors with the FIRST used timestamps, so a
+    // mid-series cloud gap made every later Theil-Sen pair divide by the
+    // wrong day count. The single-series entry point never had the bug; the
+    // batch must agree with it.
+    const int w = 1, h = 1, steps = 4;
+    std::vector<double> t = { 0.0, 10.0, 20.0, 30.0 };
+    std::vector<float> stack( steps );
+    stack[0] = 1.0f;
+    stack[1] = kNan; // interior gap: the t=10 frame is missing
+    stack[2] = 2.0f;
+    stack[3] = 3.0f;
+
+    std::vector<float> slope( 1, 0.0f ), pval( 1, 0.0f ), zsc( 1, 0.0f );
+    TrendAnalyzer::computeRasterTrend( stack.data(), w, h, steps, t.data(),
+                                       slope.data(), pval.data(), zsc.data() );
+
+    // Analytic oracle: surviving (t, y) pairs are (0,1), (20,2), (30,3).
+    // Pairwise slopes: 1/20 = 0.05, 2/30, 1/10 = 0.1 -> median 2/30.
+    const double oracleSlope = 2.0 / 30.0;
+    const auto single = TrendAnalyzer::computeMannKendall( stack, t );
+    REQUIRE( single.valid );
+    REQUIRE( single.senSlope == Approx( oracleSlope ).margin( 1e-9 ) );
+    INFO( "raster slope=" << slope[0] << " single=" << single.senSlope
+                          << " oracle=" << oracleSlope );
+    REQUIRE( slope[0] == Approx( oracleSlope ).margin( 1e-6 ) );
+    REQUIRE( pval[0] == Approx( single.pValue ).margin( 1e-6 ) );
+    REQUIRE( zsc[0] == Approx( single.zScore ).margin( 1e-5 ) );
+
+    // Moving the missing frame's own timestamp must not move the slope:
+    // survivors are still (0,1), (20,2), (30,3) whatever t the gap carries.
+    t = { 0.0, 999.0, 20.0, 30.0 };
+    TrendAnalyzer::computeRasterTrend( stack.data(), w, h, steps, t.data(),
+                                       slope.data(), pval.data(), zsc.data() );
+    const auto single2 = TrendAnalyzer::computeMannKendall( stack, t );
+    REQUIRE( single2.valid );
+    REQUIRE( single2.senSlope == Approx( oracleSlope ).margin( 1e-9 ) );
+    INFO( "moved-gap raster slope=" << slope[0]
+                                     << " single=" << single2.senSlope );
+    REQUIRE( slope[0] == Approx( oracleSlope ).margin( 1e-6 ) );
+
+    // Unsorted axis with an interior gap: sorting is part of the contract,
+    // and the pairing must survive it. Survivors are (0,1), (20,2),
+    // (100,3): slopes 1/20, 2/100, 1/80 -> median 0.02.
+    const std::vector<double> t3 = { 100.0, 20.0, 0.0, 90.0 };
+    std::vector<float> s3 = { 3.0f, 2.0f, 1.0f, kNan };
+    TrendAnalyzer::computeRasterTrend( s3.data(), w, h, steps, t3.data(),
+                                       slope.data(), pval.data(), zsc.data() );
+    const auto single3 = TrendAnalyzer::computeMannKendall( s3, t3 );
+    REQUIRE( single3.valid );
+    REQUIRE( single3.senSlope == Approx( 0.02 ).margin( 1e-9 ) );
+    INFO( "unsorted-axis raster slope=" << slope[0]
+                                         << " single=" << single3.senSlope );
+    REQUIRE( slope[0] == Approx( single3.senSlope ).margin( 1e-6 ) );
+}

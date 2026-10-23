@@ -60,10 +60,25 @@ bool RsClassifierIsodata::fit( const cv::Mat &X, const cv::Mat &y )
 {
   // ADR 0061 — identical remap contract to K-Means: any non-zero true label
   // means the caller trained against real classes and the pipeline must
-  // Hungarian-remap the arbitrary cluster ids.
+  // Hungarian-remap the arbitrary cluster ids. Validate y before touching
+  // it (same guard as RsClassifierKMeans::fit): at<int> on a non-CV_32S,
+  // multi-column or row-mismatched matrix is a type-punning read, and
+  // Mat::empty() is total()==0 so a (rows>0, cols==0) matrix passes every
+  // empty() guard while at<int>(i,0) lands on no data. An empty label
+  // matrix stays the documented unsupervised dummy.
   m_remapNeeded = false;
-  for ( int i = 0; i < y.rows && !m_remapNeeded; ++i )
-    m_remapNeeded = ( y.at<int>( i, 0 ) != 0 );
+  if ( !y.empty() )
+  {
+    if ( y.type() != CV_32S || y.cols != 1 || y.rows != X.rows )
+    {
+      SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                       QStringLiteral( "ISODATA::fit — label matrix must be single-column CV_32S with one row per sample: got %1x%2 (type %3), X has %4 rows" )
+                         .arg( y.rows ).arg( y.cols ).arg( y.type() ).arg( X.rows ) );
+      return false;
+    }
+    for ( int i = 0; i < y.rows && !m_remapNeeded; ++i )
+      m_remapNeeded = ( y.at<int>( i, 0 ) != 0 );
+  }
 
   m_centers = cv::Mat();
   if ( X.empty() )

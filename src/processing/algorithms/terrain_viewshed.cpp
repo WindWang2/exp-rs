@@ -74,7 +74,14 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
         {
             const std::size_t i = static_cast<std::size_t>( y ) * width + x;
             if ( isMissing( dem[i], nodata ) )
+            {
+                // Contract: DEM-NoData cells carry the caller's sentinel
+                // (visible holds 1/0/nodataByte), so consumers can exclude
+                // them from the analysed population instead of counting
+                // them as "not visible".
+                ( *visible )[i] = nodataByte;
                 continue;
+            }
             const double dx = ( x - ox ) * cellSizeX;
             const double d = std::hypot( dx, dy );
             if ( radius > 0.0 && d > radius )
