@@ -13,6 +13,7 @@ BASE = `28e1891390bb812dc7ef2fe045ac90492c9525f1`（origin/master）
 | src/processing/algorithms/sar/sar_insar.cpp | 01 | 同上 |
 | src/processing/algorithms/terrain_viewshed.cpp | 01 | 同上 |
 | src/processing/algorithms/trend_analysis.cpp | 01 | 同上 |
+| src/operators/rs/rs_sar_backscatter_operator.cpp | 01 | 「与本轨算法直接绑定的 operators/rs 文件」——rs:sar_backscatter 是 sar_calibration 内核的唯一 operator 缝（R1-P3：(0,90) 参数校验） |
 | tests/test_classifier_isodata.cpp | 01 | 同名算法既有测试（`test_*classification*`/算法测试约定） |
 | tests/test_classifier_mlp.cpp | 01 | 同上 |
 | tests/test_d16_temporal_trend.cpp | 01 | `test_*temporal*` 既有测试 |

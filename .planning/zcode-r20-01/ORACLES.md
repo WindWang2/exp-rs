@@ -29,9 +29,9 @@
 
 ## F-06 SAR 入射角域（P2）
 
-- **oracle**：物理域 + 解析值。θ∈{30°,89.99°} → gamma0 解析值（sigma0/cosθ）；θ∈{90°,0°,-5°,120°} → NaN；常量 θ0=95° → 全 NaN。含真实 GTiff 流式 round-trip（writeGdalOutput→convertBackscatterRaster→readBandData）。
+- **oracle**：物理域 + 解析值。θ∈{30°,89.99°} → gamma0 解析值（sigma0/cosθ）；θ∈{90°,0°,-5°,120°} → NaN；常量 θ0=90.0°（R1-3 改定的判别探针）→ 全 NaN。含真实 GTiff 流式 round-trip（writeGdalOutput→convertBackscatterRaster→readBandData）。
 - **防恒真**：master 现码 θ=90 输出 ~1.6e16 有限值 → isnan 断言必红；θ=120（cos<0 → 负 → finishValue 拒）在 buggy 下也 NaN——该输入是行为不变项，非 RED 主体。
-- 纯函数 sigma0ToGamma0(2.0, 90.0) > 1e15 的既有断言**保持不变**（该测试钉的是纯数学函数行为，修复在栅格 kernel 的域检查）。
+- 纯函数 sigma0ToGamma0(2.0, 90.0) > 1e15 的既有断言**保持不变**；operator 缝 refusal 见 R2-1 测试（90/95/700/sameState 边界）（该测试钉的是纯数学函数行为，修复在栅格 kernel 的域检查）。
 
 ## F-07 InSAR 斜坡条件数（P2/P3）
 
