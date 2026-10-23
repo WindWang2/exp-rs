@@ -314,3 +314,47 @@ TEST_CASE( "F12 e2e: imbalanced classes still produce per-class metrics with "
   REQUIRE( class3Test > 50 );
   REQUIRE( static_cast<double>( class3Correct ) / class3Test > 0.9 );
 }
+
+
+// r21-A / AG5-2 — the calibration gate used to compare only the column
+// COUNT: a model fitted on {1,2,4} against a backend trained on {1,2,3}
+// passed the size check and silently calibrated class 3's column with
+// class 4's curve (wrong values in every probability/uncertainty band).
+TEST_CASE( "F12 e2e: calibration model class ids must match the backend label space (AG5-2)",
+           "[f12][e2e][calibration][r21a]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString src = tmp.path() + "/src.tif";
+  createThreeRegionRaster( src, 32, 32 );
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  const auto runWith = [&]( const QVector<int> &ids ) {
+    RsClassificationPipeline::Config cfg;
+    cfg.sourceRaster = src;
+    cfg.outputRaster = tmp.path() + "/labels.tif";
+    cfg.probabilityOutput = tmp.path() + "/prob.tif";
+    cfg.bandIndices = { 1, 2, 3 };
+    cfg.backend.reset( new RsClassifierNormalBayes() );
+    cfg.trainX = X;
+    cfg.trainY = y;
+    RsCalibrationModel m;
+    m.method = RsCalibrationModel::Method::Platt;
+    m.classIds = ids;
+    m.plattA = { 0.1, 0.1, 0.1 };
+    m.plattB = { 0.0, 0.0, 0.0 };
+    cfg.calibrationModel = m;
+    return RsClassificationPipeline::run( std::move( cfg ) );
+  };
+
+  // Mismatched identity, matched count: must fail closed.
+  const auto bad = runWith( QVector<int> { 1, 2, 4 } );
+  REQUIRE_FALSE( bad.ok );
+  REQUIRE( bad.errorMessage.contains( QStringLiteral( "Calibration model class ids" ) ) );
+
+  // Matching identity still runs.
+  const auto good = runWith( QVector<int> { 1, 2, 3 } );
+  INFO( "control failure: " << good.errorMessage.toStdString() );
+  REQUIRE( good.ok );
+}
