@@ -298,7 +298,15 @@ Json::Value RsTemporalMonitorOperator::run( const Json::Value &params, RSOperato
                 values[static_cast<size_t>( s )] = stack[idx];
                 if ( !okV || !enough )
                     continue;
-                const double z = sd > 0.0 ? ( stack[idx] - mean ) / sd : 0.0;
+                // temporal_monitoring.h: z must be finite — invalid
+                // observations are skipped and `used` reflects contributors.
+                // A zero-variance pixel has no defined standardized anomaly
+                // (0/0); feeding z = 0 used to fabricate CUSUM accumulation
+                // (S = -drift·n) on perfectly constant pixels whenever
+                // drift > 0.
+                if ( !( sd > 0.0 ) )
+                    continue;
+                const double z = ( stack[idx] - mean ) / sd;
                 temporal::monitoring::cusumStep( &cusum[i], z, drift, s );
                 temporal::monitoring::ewmaStep( &ewma[i], z, lambda, s );
             }

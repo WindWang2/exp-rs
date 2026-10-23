@@ -148,6 +148,24 @@ TEST_CASE( "sunPositionDeg matches tabulated solar geometry within ±1.5°",
     REQUIRE( sunPositionDeg( 355, 12.0, 80.0, &az, &elev ) );
     CHECK( elev < 0.0 );
 
+    // r21-A / AG4-3 — Dec 31 of a leap year is day 366 (QDate::dayOfYear
+    // forwards it verbatim); it used to be refused outright. It must now
+    // succeed and match day 365 of the Spencer series (elev at 40°N noon
+    // in late December is ≈ 26.6°, same as the solstice band).
+    double az366 = 0.0;
+    double elev366 = 0.0;
+    REQUIRE( sunPositionDeg( 366, 12.0, 40.0, &az366, &elev366 ) );
+    double az365 = 0.0;
+    double elev365 = 0.0;
+    REQUIRE( sunPositionDeg( 365, 12.0, 40.0, &az365, &elev365 ) );
+    CHECK( elev366 == Catch::Approx( elev365 ).margin( 1e-9 ) );
+    CHECK( az366 == Catch::Approx( az365 ).margin( 1e-9 ) );
+    CHECK( elev366 == Catch::Approx( 26.9 ).margin( 1.5 ) );
+
+    // Day 0 and 367 stay refused.
+    CHECK_FALSE( sunPositionDeg( 0, 12.0, 40.0, &az, &elev ) );
+    CHECK_FALSE( sunPositionDeg( 367, 12.0, 40.0, &az, &elev ) );
+
     // Input validation.
     double a2 = 0.0;
     double e2 = 0.0;
