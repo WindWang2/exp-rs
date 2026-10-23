@@ -33,7 +33,12 @@ namespace SpectralUnmixing
      * @param result      [out] abundances + per-pixel reconstruction error
      * @param errorMessage optional error sink
      * @return true on success; false for invalid arguments (count == 0,
-     *         bands <= 0, nEndmembers out of [1, bands], null pointers)
+     *         bands <= 0, nEndmembers out of [1, bands], null pointers).
+     *         Pixels with non-finite samples — and pixels whose LS solution
+     *         clips to all zeros (no non-negative component survives, so
+     *         unit-sum renormalization is impossible) — yield NaN
+     *         abundances and NaN reconstruction error instead of a
+     *         fabricated zero vector.
      */
     bool unmix( const float *pixels, size_t count, int bands,
                 const float *endmembers, int nEndmembers,
