@@ -1426,14 +1426,14 @@ std::string ModelInputContract::validate() const
     if ( !preprocess.resize.empty() && preprocess.resize != "none" )
       return "inputs[].preprocess.resize '" + preprocess.resize
                + "' is not executed per feed — declare it in the global preprocess section";
-    // R20-02 (#646 class, mirrors the global gate): interpolation is a
-    // closed vocabulary on both sections — a typo would otherwise silently
-    // resample bilinear per feed.
-    if ( !preprocess.interpolation.empty()
-         && preprocess.interpolation != "bilinear"
-         && preprocess.interpolation != "nearest" )
+    // R20-02 (R2-3, mirrors the resize/pad posture directly above): the
+    // multi-input stitch resamples with the GLOBAL preprocess
+    // interpolation only — a per-feed interpolation is never executed per
+    // feed, so a non-empty value here is the same declared-but-inert class
+    // the resize/pad refusals close. Point it at the global section.
+    if ( !preprocess.interpolation.empty() )
       return "inputs[].preprocess.interpolation '" + preprocess.interpolation
-               + "' is unsupported (supported: bilinear, nearest)";
+               + "' is not executed per feed — declare it in the global preprocess section";
   }
   return {};
 }

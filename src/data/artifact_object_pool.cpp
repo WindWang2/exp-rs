@@ -127,11 +127,14 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             // contradicting the pool's "corruption self-heals" contract.
             // Drop the bad bytes and re-stage from the still-healthy source
             // (loop, so a concurrent re-tearer cannot grow the stack); if
-            // the removal fails the digest stays refused (fail-closed).
-            if ( m_cachedTotalBytes >= 0 )
-                m_cachedTotalBytes -= QFileInfo( objectPath ).size();
+            // the removal fails the digest stays refused (fail-closed) and
+            // the on-disk bytes stay accounted (R2-2: subtract only after a
+            // successful remove — a failed one must not shrink the cache).
+            const qint64 tornBytes = QFileInfo( objectPath ).size();
             if ( !QFile::remove( objectPath ) )
                 return std::nullopt;
+            if ( m_cachedTotalBytes >= 0 )
+                m_cachedTotalBytes -= tornBytes;
             continue;
         }
         // Stage-and-verify: copy to a pool-private temp, re-hash the STAGED

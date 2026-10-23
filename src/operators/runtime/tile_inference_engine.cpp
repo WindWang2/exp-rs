@@ -2301,6 +2301,16 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // zero-tile probe forward establishes the output shape — its result is
   // NaN-restored like any other invalid tile. The probe tile is popped from
   // the deferred list and written by the normal flushBatch path.
+  // R20-02 (R2-1): a valid prefix can still sit UN-FLUSHED here — every
+  // later tile deferred per-tile as all-NoData means the batch never filled
+  // and no geometry flip flushed it. Pushing the probe (an edge-shaped
+  // tile, e.g. 36-wide) into that pending batch re-creates the exact
+  // "mixed tile sizes" refusal the geometry break above eliminates. Flush
+  // the pending prefix first; that creates the writer, the probe condition
+  // below short-circuits, and the remaining deferred tiles take the
+  // flushDeferredNoData path underneath.
+  if ( !deferredNoData.empty() && !writer && !batchMats.empty() )
+    flushPendingBatch( totalTiles - 1 );
   if ( !deferredNoData.empty() && !writer )
   {
     const CoreTile probeTile = deferredNoData.front();

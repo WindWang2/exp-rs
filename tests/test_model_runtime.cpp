@@ -1237,3 +1237,65 @@ TEST_CASE( "declared output.uncertainty refuses when no head has two channels",
   // Refused before staging: nothing partial is published.
   CHECK_FALSE( QFileInfo::exists( outputPath ) );
 }
+
+// R20-02 R2-1: trailing all-NoData edge tiles on a non-divisible raster.
+// The valid prefix (tile0, 64-wide) never fills the batch and no geometry
+// flip flushes it (every later tile is deferred per-tile as all-NoData), so
+// the post-loop probe used to push a 36-wide probe tile into the still
+// pending 64-wide batch -> "mixed tile sizes" and the whole run failed.
+TEST_CASE( "tile engine completes trailing all-NoData edge tiles after a valid prefix",
+           "[models][runtime][engine][edge_tiles][nodata]" )
+{
+  REQUIRE( QFile::exists( identityModelPath() ) );
+
+  QTemporaryDir dir;
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  // Valid data ONLY in the top-left 64x64 core tile; the other three tiles
+  // (right column 36 wide, bottom row 36 tall) are pure NoData.
+  sicnu::testing::RsSyntheticRasterBuilder builder( 100, 100, 1 );
+  builder.withNoData( -9999.0 );
+  builder.withConstantValue( 1, -9999.0f );
+  builder.withRect( 1, 0, 0, 64, 64, 10.0f );
+  builder.writeToDisk( inputPath );
+
+  ModelInfo info;
+  info.name = "identity";
+  info.framework = "onnx";
+  info.readiness = ModelReadiness::Ready;
+  info.resolvedArtifactPath = identityModelPath().toStdString();
+  info.tiling.tileSize = 64;
+  info.tiling.batchSize = 4;
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+  const auto session = registry.acquire( info );
+  REQUIRE( session );
+
+  RSOperatorContext context;
+  TileInferenceEngine engine( info, session );
+  const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+  CHECK( stats.outWidth == 100 );
+  CHECK( stats.outHeight == 100 );
+
+  // Valid quadrant keeps its identity value; every NoData pixel is NaN.
+  GdalDatasetWrapper out;
+  REQUIRE( out.open( outputPath ) );
+  std::vector<float> pixels( 100 * 100 );
+  REQUIRE( out.readBandData( 1, pixels.data(), 100, 100 ) );
+  const auto at = [ & ]( int x, int y ) {
+    return pixels[static_cast<std::size_t>( y ) * 100 + x];
+  };
+  CHECK( at( 0, 0 ) == Catch::Approx( 10.0f ).margin( 1e-3 ) );
+  CHECK( at( 63, 63 ) == Catch::Approx( 10.0f ).margin( 1e-3 ) );
+  CHECK( std::isnan( at( 64, 0 ) ) );
+  CHECK( std::isnan( at( 99, 0 ) ) );
+  CHECK( std::isnan( at( 0, 64 ) ) );
+  CHECK( std::isnan( at( 99, 99 ) ) );
+  int nanCount = 0;
+  for ( float v : pixels )
+    if ( std::isnan( v ) )
+      ++nanCount;
+  CHECK( nanCount == 100 * 100 - 64 * 64 );
+}
