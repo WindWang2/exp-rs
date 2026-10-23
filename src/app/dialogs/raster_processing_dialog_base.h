@@ -87,6 +87,28 @@ public:
     static QString gdalErrorMarker() { return QStringLiteral( "\x01SICNU_ERR\x01" ); }
 
     /**
+     * Cancel probe handed to GDAL task lambdas (runGdalTask): returns true
+     * once the JobEngine has armed the cooperative cancel flag for the job.
+     * Poll it from inside the task — ideally from the GDALProgressFunc of
+     * long I/O (see gdalCancelProgress) — so a mid-operation cancel aborts
+     * promptly instead of after the call returns (#1560). Cheap to copy;
+     * call only from the worker thread, and do not retain it past the
+     * task's return (it borrows the executor's stack-lived context).
+     */
+    using GdalTaskCancelProbe = std::function<bool()>;
+
+    /**
+     * GDALProgressFunc adapter for runGdalTask lambdas: forwards nothing,
+     * returns FALSE (aborting the GDAL operation with CE_Failure) as soon
+     * as @p pProgressArg — a GdalTaskCancelProbe* — reports cancellation,
+     * TRUE otherwise (including a null probe, which keeps GDAL running).
+     * Usage inside a task (GDAL takes a void*, so hand it a local copy):
+     *   GdalTaskCancelProbe local = probe;
+     *   GDALSomeLongOp(..., gdalCancelProgress, &local);
+     */
+    static int gdalCancelProgress(double dfComplete, const char *pszMessage, void *pProgressArg);
+
+    /**
      * Disable Run and mark dialog as busy. Called automatically by runGdalTask().
      */
     void startRun();
@@ -98,13 +120,17 @@ public:
 
     /**
      * Run a GDAL I/O lambda through Task Center (callable:gdal_task).
+     * The task receives a live cancel probe bound to the job's cooperative
+     * cancel flag: poll it (or wire gdalCancelProgress) so long GDAL I/O
+     * aborts promptly on Cancel (#1560).
      * Task return contract (legacy AsyncGdalRunner):
      *   - non-empty path → success
-     *   - empty → generic failure
+     *   - empty → generic failure (cancel-induced when the probe fired:
+     *     the executor reports Cancelled, not a failure)
      *   - "\x01SICNU_ERR\x01" + message → structured failure
      * Completes via onCompleted/onFailed on the GUI thread.
      */
-    void runGdalTask(const std::function<QString()> &task);
+    void runGdalTask(const std::function<QString(const GdalTaskCancelProbe &)> &task);
 
     /**
      * Run a QGIS Processing algorithm through Task Center (processing: prefix id).

@@ -85,7 +85,7 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
         const auto taskCountBefore = sicnu::TaskCenter::instance().allTasks().size();
 
-        dialog.runGdalTask([]() -> QString {
+        dialog.runGdalTask([](const RasterProcessingDialogBase::GdalTaskCancelProbe &) -> QString {
             return QStringLiteral("/tmp/test_out.tif");
         });
 
@@ -105,6 +105,153 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         REQUIRE(accepted);
         REQUIRE(dialog.runButton()->isEnabled());
         REQUIRE_FALSE(dialog.isRunning());
+    }
+
+    SECTION("cancel during a long GDAL task aborts it promptly and the dialog recovers (#1560)")
+    {
+        // Simulated long GDAL I/O: a stepped loop that observes cancellation
+        // as soon as the seam exposes it. On the unfixed seam the task lambda
+        // is opaque to the JobEngine cancel flag, so it runs every step and
+        // the cancel only lands after the fact — steps reaching kTotalSteps
+        // proves the abort was NOT prompt. Oracle (#1560): prompt abort +
+        // no success surface + UI recovery + a follow-up task still runs.
+        constexpr int kTotalSteps = 300;
+        std::atomic<int> steps{0};
+        // Non-auto-accept so resultReadyForDisplay is this section's real
+        // success surface (auto-accept would accept() instead and make the
+        // result-announced assertion below vacuous).
+        dialog.setShouldAutoAcceptOnSuccess(false);
+        bool accepted = false;
+        bool resultAnnounced = false;
+        QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
+        QObject::connect(&dialog, &RasterProcessingDialogBase::resultReadyForDisplay,
+                         [&]([[maybe_unused]] const QString &path) { resultAnnounced = true; });
+
+        // Defense + oracle (R2 #2): if the cancel click ever raced the task
+        // to natural completion, the empty-result branch would raise a modal
+        // critical box inside processEvents and hang the drain loop — the
+        // timer dismisses any modal box instead of hanging, and records that
+        // one appeared: the cancel path must take the isCanceled finishRun
+        // branch, never onFailed's modal, so modalSeen must stay false.
+        bool modalSeen = false;
+        QTimer modalTimer;
+        QObject::connect(&modalTimer, &QTimer::timeout, [&modalSeen]() {
+            const auto topWidgets = QApplication::topLevelWidgets();
+            for (QWidget *w : topWidgets) {
+                if (auto *box = qobject_cast<QMessageBox *>(w)) {
+                    modalSeen = true;
+                    box->accept();
+                }
+            }
+        });
+        modalTimer.start(10);
+
+        dialog.runGdalTask([&](const RasterProcessingDialogBase::GdalTaskCancelProbe &probe) -> QString {
+            // The seam hands the task the live cancel probe (#1560): a real
+            // GDAL task polls it from its GDALProgressFunc
+            // (gdalCancelProgress); this simulation polls per step. RED on
+            // the pre-fix seam ran the same loop with no probe to poll.
+            for (int i = 0; i < kTotalSteps; ++i)
+            {
+                if (probe && probe())
+                    return QString();   // prompt abort, mid-flight
+                ++steps;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            return QString();
+        });
+
+        // Wait until the worker is inside the loop.
+        for (int i = 0; i < 400 && steps.load() < 3; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(steps.load() >= 3);
+        REQUIRE(dialog.isRunning());
+
+        dialog.cancelButton()->click();
+
+        // Drain to the terminal state (cancel path: no modal error box).
+        for (int i = 0; i < 600 && dialog.isRunning(); ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int i = 0; i < 10; ++i) {
+            QCoreApplication::processEvents();
+        }
+
+        REQUIRE_FALSE(dialog.isRunning());
+        REQUIRE(dialog.runButton()->isEnabled());
+        REQUIRE_FALSE(accepted);
+        REQUIRE_FALSE(resultAnnounced);
+        // Cancel must land on the isCanceled finishRun branch, never onFailed
+        // (a misreported ComputationError would have raised the modal box the
+        // guard timer dismisses — R2 #2).
+        REQUIRE_FALSE(modalSeen);
+        // Promptness: the cancel is armed within milliseconds of the click
+        // (steps ≈ 3..10 at that point); anything past half the run means
+        // the probe was not observed promptly.
+        REQUIRE(steps.load() < kTotalSteps / 2);
+
+        // Recovery: a follow-up task through the same seam still runs and
+        // reaches its (non-auto-accept) success surface.
+        dialog.runGdalTask([](const RasterProcessingDialogBase::GdalTaskCancelProbe &) -> QString {
+            return QStringLiteral("/tmp/test_out_after_cancel.tif");
+        });
+        for (int i = 0; i < 500 && (!resultAnnounced || dialog.isRunning()); ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int i = 0; i < 10; ++i) {
+            QCoreApplication::processEvents();
+        }
+        REQUIRE(resultAnnounced);
+        REQUIRE_FALSE(dialog.isRunning());
+        REQUIRE(dialog.runButton()->isEnabled());
+    }
+
+    SECTION("runGdalTask hands the task a live, initially-clear cancel probe (#1560)")
+    {
+        bool probeReceived = false;
+        bool probeFalseAtStart = false;
+        bool accepted = false;
+        QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
+
+        dialog.runGdalTask([&](const RasterProcessingDialogBase::GdalTaskCancelProbe &probe) -> QString {
+            if (probe) {
+                probeReceived = true;
+                probeFalseAtStart = !probe();   // no cancel requested yet
+            }
+            return QStringLiteral("/tmp/test_probe.tif");
+        });
+
+        for (int i = 0; i < 500 && (!accepted || dialog.isRunning()); ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int i = 0; i < 10; ++i) {
+            QCoreApplication::processEvents();
+        }
+
+        REQUIRE(accepted);
+        REQUIRE(probeReceived);
+        REQUIRE(probeFalseAtStart);
+    }
+
+    SECTION("gdalCancelProgress aborts GDAL (returns 0) exactly when the probe fires (#1560)")
+    {
+        bool cancelled = false;
+        RasterProcessingDialogBase::GdalTaskCancelProbe probe = [&cancelled]() { return cancelled; };
+
+        // Continue while not cancelled, regardless of completion fraction.
+        REQUIRE(RasterProcessingDialogBase::gdalCancelProgress(0.0, "msg", &probe) != 0);
+        REQUIRE(RasterProcessingDialogBase::gdalCancelProgress(0.5, "msg", &probe) != 0);
+        REQUIRE(RasterProcessingDialogBase::gdalCancelProgress(1.0, nullptr, &probe) != 0);
+        // Abort (0) as soon as the probe reports cancellation.
+        cancelled = true;
+        REQUIRE(RasterProcessingDialogBase::gdalCancelProgress(0.5, "msg", &probe) == 0);
+        // Defensive: null/absent probe keeps GDAL running.
+        REQUIRE(RasterProcessingDialogBase::gdalCancelProgress(0.5, "msg", nullptr) != 0);
     }
 }
 
@@ -206,7 +353,7 @@ TEST_CASE("RasterProcessingDialogBase failure path re-enables button and keeps d
     bool accepted = false;
     QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
 
-    dialog.runGdalTask([]() -> QString {
+    dialog.runGdalTask([](const RasterProcessingDialogBase::GdalTaskCancelProbe &) -> QString {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         return RasterProcessingDialogBase::gdalErrorMarker() + QStringLiteral("Mock computation error");
     });
@@ -495,7 +642,7 @@ TEST_CASE("RasterProcessingDialogBase DPI scaling and layout expansion stress te
 TEST_CASE("RasterProcessingDialogBase destructor safety during active jobs", "[dialog][base][safety]")
 {
     auto *dialog = new TestRasterDialog();
-    dialog->runGdalTask([]() -> QString {
+    dialog->runGdalTask([](const RasterProcessingDialogBase::GdalTaskCancelProbe &) -> QString {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         return QStringLiteral("/tmp/destroyed_out.tif");
     });

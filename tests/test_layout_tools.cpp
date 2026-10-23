@@ -755,6 +755,36 @@ TEST_CASE( "LayoutService robustness: null layouts, non-finite properties and bo
 
     LayoutService::instance().deleteLayout( QStringLiteral( "NanDpiTest" ) );
   }
+
+  SECTION( "exportLayout refuses sub-delivery dpi below the governed 72 floor (R20-04 DPI unify)" )
+  {
+    REQUIRE( run( "layout:create", R"({"name":"LowDpiTest"})" ).success );
+    QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "LowDpiTest" ) );
+    REQUIRE( layout != nullptr );
+
+    // layout:export (this seam) and cartography:export (export.cpp, pinned
+    // at [72, 1200]) drive the same QGIS export engine; a 36-dpi export was
+    // waved through HERE while the governed chain refuses it — two bounds
+    // for one engine. The refusal must come from the DPI guard: its error
+    // names the 72 floor (a rendering failure would not).
+    error.clear();
+    const bool ok = LayoutService::instance().exportLayout(
+      layout, QStringLiteral( "/tmp/r2004-low-dpi.png" ), QStringLiteral( "png" ),
+      /*dpi=*/36.0, /*maxBytes=*/0, &error );
+    CHECK_FALSE( ok );
+    REQUIRE( !error.isEmpty() );
+    CHECK( error == QStringLiteral( "DPI must be between 72 and 1200" ) );
+
+    // The boundary itself stays inclusive: 72 exports exactly like the
+    // governed chain accepts it.
+    error.clear();
+    const bool ok72 = LayoutService::instance().exportLayout(
+      layout, QStringLiteral( "/tmp/r2004-72-dpi.png" ), QStringLiteral( "png" ),
+      /*dpi=*/72.0, /*maxBytes=*/0, &error );
+    CHECK( ok72 );
+
+    LayoutService::instance().deleteLayout( QStringLiteral( "LowDpiTest" ) );
+  }
 }
 
 // ---------------------------------------------------------------------------
