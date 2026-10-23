@@ -773,7 +773,7 @@ TEST_CASE( "LayoutService robustness: null layouts, non-finite properties and bo
       /*dpi=*/36.0, /*maxBytes=*/0, &error );
     CHECK_FALSE( ok );
     REQUIRE( !error.isEmpty() );
-    CHECK( error.contains( QStringLiteral( "72" ) ) );
+    CHECK( error == QStringLiteral( "DPI must be between 72 and 1200" ) );
 
     // The boundary itself stays inclusive: 72 exports exactly like the
     // governed chain accepts it.

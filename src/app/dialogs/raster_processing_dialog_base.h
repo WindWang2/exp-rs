@@ -92,7 +92,8 @@ public:
      * Poll it from inside the task — ideally from the GDALProgressFunc of
      * long I/O (see gdalCancelProgress) — so a mid-operation cancel aborts
      * promptly instead of after the call returns (#1560). Cheap to copy;
-     * safe to call from the worker thread only.
+     * call only from the worker thread, and do not retain it past the
+     * task's return (it borrows the executor's stack-lived context).
      */
     using GdalTaskCancelProbe = std::function<bool()>;
 

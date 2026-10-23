@@ -127,16 +127,21 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         QObject::connect(&dialog, &RasterProcessingDialogBase::resultReadyForDisplay,
                          [&]([[maybe_unused]] const QString &path) { resultAnnounced = true; });
 
-        // Defense (same guard as the failure-path test below): if the cancel
-        // click ever raced the task to natural completion, the empty-result
-        // branch would raise a modal critical box inside processEvents and
-        // hang the drain loop — dismiss any modal box instead of hanging.
+        // Defense + oracle (R2 #2): if the cancel click ever raced the task
+        // to natural completion, the empty-result branch would raise a modal
+        // critical box inside processEvents and hang the drain loop — the
+        // timer dismisses any modal box instead of hanging, and records that
+        // one appeared: the cancel path must take the isCanceled finishRun
+        // branch, never onFailed's modal, so modalSeen must stay false.
+        bool modalSeen = false;
         QTimer modalTimer;
-        QObject::connect(&modalTimer, &QTimer::timeout, []() {
+        QObject::connect(&modalTimer, &QTimer::timeout, [&modalSeen]() {
             const auto topWidgets = QApplication::topLevelWidgets();
             for (QWidget *w : topWidgets) {
-                if (auto *box = qobject_cast<QMessageBox *>(w))
+                if (auto *box = qobject_cast<QMessageBox *>(w)) {
+                    modalSeen = true;
                     box->accept();
+                }
             }
         });
         modalTimer.start(10);
@@ -179,6 +184,10 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         REQUIRE(dialog.runButton()->isEnabled());
         REQUIRE_FALSE(accepted);
         REQUIRE_FALSE(resultAnnounced);
+        // Cancel must land on the isCanceled finishRun branch, never onFailed
+        // (a misreported ComputationError would have raised the modal box the
+        // guard timer dismisses — R2 #2).
+        REQUIRE_FALSE(modalSeen);
         // Promptness: the cancel is armed within milliseconds of the click
         // (steps ≈ 3..10 at that point); anything past half the run means
         // the probe was not observed promptly.

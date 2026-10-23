@@ -642,3 +642,8 @@ r6_dev.cmd
 .planning/r19-03/*
 !.planning/r19-03/*.md
 *.agent-build.lock
+
+# R20-04 track (ZCode Qt/QGIS workbench + cartography) planning artifacts (markdown only).
+!.planning/zcode-r20-04/
+.planning/zcode-r20-04/*
+!.planning/zcode-r20-04/*.md
