@@ -100,7 +100,13 @@ std::vector<std::string> validateRelations( const Value &doc,
     problems.push_back( "relations document must be an object" );
     return problems;
   }
-  if ( doc[ "schema_version" ].asInt() != 1 )
+  // Wrong-TYPED versions are a named problem, not a Json::LogicError thrown
+  // out of validateRelations: reload()'s contract is "record problems, fail
+  // closed on the document" — a throw escapes before that gate can classify.
+  // isInt(), not isIntegral(): out-of-int32-range values pass isIntegral()
+  // but make asInt() itself throw (R1 P1-1).
+  const Value &version = doc[ "schema_version" ];
+  if ( !version.isInt() || version.asInt() != 1 )
     problems.push_back( "schema_version must be 1" );
 
   const auto checkOperator = [ & ]( const Value &id, const std::string &where ) {

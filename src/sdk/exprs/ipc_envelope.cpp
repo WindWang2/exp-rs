@@ -218,6 +218,24 @@ bool decodeEnvelope( const Json::Value &json, Envelope &envelope, std::string &e
         if ( envelope.ok )
         {
             envelope.result = json.get( "result", Json::Value( Json::objectValue ) );
+            // The result rides the same untrusted worker->host wire as
+            // params on requests. Host consumers index it with jsoncpp's
+            // NON-CONST operator[] (plugin_host_proxies.cpp run(),
+            // plugin_host_process_runtime.cpp loadPlugin/inspectUiSchema):
+            // on a non-object that is resolveReference, which throws
+            // Json::LogicError (aborting instead when jsoncpp is built
+            // without exceptions) — several of those consumer sites run
+            // on threads with no catch, so the throw is still a process
+            // kill, and the ones inside a catch degrade to an untyped
+            // failure. Refusing here, at decode time, keeps the boundary
+            // typed. null stays legal for vocabulary parity with the
+            // Request side's params gate (null results are not produced
+            // by this codebase's encoder, which omits them).
+            if ( !envelope.result.isObject() && !envelope.result.isNull() )
+            {
+                error = "response result must be an object (E6002)";
+                return false;
+            }
         }
         else
         {

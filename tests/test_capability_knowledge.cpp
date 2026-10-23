@@ -39,6 +39,7 @@
 #include <QDir>
 #include <QFile>
 #include <QString>
+#include <QTemporaryDir>
 
 #include <algorithm>
 #include <map>
@@ -395,6 +396,314 @@ TEST_CASE( "D8 validator: malformed sidecars are rejected with named problems",
     doc = base();
     doc[ "capability" ][ "summary" ] = 5;
     CHECK( hasProblemContaining( problems( doc ), "summary" ) );
+
+    // Wrong-TYPED scalars must surface as named problems, never as a
+    // Json::LogicError thrown out of validateEntry(): reload()'s contract
+    // is "record problems, skip the file" — a throw aborts the whole scan
+    // and is a process kill on non-MCP callers (GUI catalog panel /
+    // copilot dispatch).
+    doc = base();
+    doc[ "schema_version" ] = "2";
+    CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
+
+    doc = base();
+    doc[ "schema_version" ] = Json::Value( Json::arrayValue );
+    CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
+
+    // Out-of-int32-range integers pass isIntegral() but make asInt()
+    // itself throw — isInt() is the range-safe gate (R1 P1-1).
+    doc = base();
+    doc[ "schema_version" ] = Json::Value( Json::Int64( 3000000000LL ) );
+    CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
+
+    doc = base();
+    doc[ "schema_version" ] = Json::Value( 4294967295.0 );
+    CHECK( hasProblemContaining( problems( doc ), "schema_version" ) );
+
+    doc = base();
+    doc[ "id" ] = Json::Value( Json::objectValue );
+    CHECK( hasProblemContaining( problems( doc ), "id" ) );
+}
+
+TEST_CASE( "D8 loader: wrong-typed fields fail closed per file, never abort the reload",
+           "[capability][d8][validate]" )
+{
+    // End-to-end loader guard: one bad FILE in the directory must cost only
+    // that file. Pre-fix, a wrong-typed schema_version/id threw
+    // Json::LogicError out of reload() — defeating the per-file fail-closed
+    // gate in all three loaders (catalog, relations, knowledge).
+    auto baseSidecar = [] {
+        Json::Value doc( Json::objectValue );
+        doc[ "id" ] = "rs:ndvi";
+        doc[ "schema_version" ] = 2;
+        Json::Value block( Json::objectValue );
+        block[ "schema_version" ] = 2;
+        block[ "family" ] = "spectral";
+        block[ "operator_group" ] = "spectral";
+        Json::Value io( Json::objectValue );
+        io[ "inputs" ] = Json::Value( Json::arrayValue );
+        io[ "outputs" ] = Json::Value( Json::arrayValue );
+        io[ "parameters" ] = Json::Value( Json::arrayValue );
+        block[ "io" ] = io;
+        Json::Value modality( Json::arrayValue );
+        modality.append( "optical" );
+        block[ "modality" ] = modality;
+        block[ "band_roles" ] = Json::Value( Json::objectValue );
+        Json::Value crs( Json::objectValue );
+        crs[ "requires_projected" ] = false;
+        crs[ "requires_shared_grid" ] = false;
+        block[ "crs" ] = crs;
+        Json::Value determinism( Json::objectValue );
+        determinism[ "grade" ] = "bit_exact";
+        determinism[ "stochastic" ] = false;
+        block[ "determinism" ] = determinism;
+        block[ "prerequisites" ] = Json::Value( Json::arrayValue );
+        block[ "limitations" ] = Json::Value( Json::arrayValue );
+        block[ "summary" ] = "";
+        block[ "failure_modes" ] = Json::Value( Json::arrayValue );
+        block[ "applicability" ] = Json::Value( Json::objectValue );
+        block[ "teaching_use" ] = Json::Value( Json::objectValue );
+        doc[ "capability" ] = block;
+        return doc;
+    };
+    auto writeJson = []( const QString &path, const Json::Value &doc ) {
+        Json::StreamWriterBuilder builder;
+        const std::string body = Json::writeString( builder, doc );
+        QFile file( path );
+        REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        file.write( body.c_str(), static_cast<qint64>( body.size() ) );
+        file.close();
+    };
+    const std::string kRepoRelations = std::string( kSourceDir ) +
+      "/data/processing/algorithm_meta/capability/capability_relations.json";
+    const std::string kRepoCapabilityDir = std::string( kSourceDir ) +
+      "/data/processing/algorithm_meta/capability";
+    const std::string kRepoKnowledgeDir = std::string( kSourceDir ) +
+      "/data/agent/capabilities";
+
+    // RAII restore: a failed REQUIRE inside a SECTION must not leave the
+    // process-wide singletons pointed at a destroyed QTemporaryDir —
+    // later TEST_CASEs that skip Bootstrap would fail spuriously (R1 P3-5).
+    struct RestoreDirs
+    {
+        std::string capabilityDir;
+        std::string relationsPath;
+        std::string knowledgeDir;
+        ~RestoreDirs()
+        {
+            CapabilityCatalog::instance().setDirectory( capabilityDir );
+            CapabilityCatalog::instance().reload();
+            CapabilityRelations::instance().setFilePath( relationsPath );
+            CapabilityRelations::instance().reload();
+            CapabilityKnowledge::instance().setDirectory( knowledgeDir );
+            CapabilityKnowledge::instance().reload();
+        }
+    } restore{ kRepoCapabilityDir, kRepoRelations, kRepoKnowledgeDir };
+
+    SECTION( "catalog: string schema_version in one file costs only that file" )
+    {
+        CapabilityCatalog &catalog = CapabilityCatalog::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        writeJson( dir.filePath( "good.json" ), baseSidecar() );
+        Json::Value bad = baseSidecar();
+        bad[ "schema_version" ] = "2";
+        writeJson( dir.filePath( "bad_version.json" ), bad );
+
+        catalog.setDirectory( dir.path().toStdString() );
+        int loaded = 0;
+        REQUIRE_NOTHROW( loaded = catalog.reload() ); // RED pre-fix: throws
+        CHECK( loaded == 1 );
+        bool sawVersionProblem = false;
+        for ( const std::string &problem : catalog.loadProblems() )
+            if ( problem.find( "schema_version" ) != std::string::npos )
+                sawVersionProblem = true;
+        CHECK( sawVersionProblem );
+
+        catalog.setDirectory( kRepoCapabilityDir );
+        catalog.reload();
+    }
+
+    SECTION( "catalog: object id in one file costs only that file" )
+    {
+        CapabilityCatalog &catalog = CapabilityCatalog::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        writeJson( dir.filePath( "good.json" ), baseSidecar() );
+        Json::Value bad = baseSidecar();
+        bad[ "id" ] = Json::Value( Json::objectValue );
+        writeJson( dir.filePath( "bad_id.json" ), bad );
+
+        catalog.setDirectory( dir.path().toStdString() );
+        int loaded = 0;
+        REQUIRE_NOTHROW( loaded = catalog.reload() ); // RED pre-fix: throws
+        CHECK( loaded == 1 );
+        bool sawIdProblem = false;
+        for ( const std::string &problem : catalog.loadProblems() )
+            if ( problem.find( "id" ) != std::string::npos )
+                sawIdProblem = true;
+        CHECK( sawIdProblem );
+
+        catalog.setDirectory( kRepoCapabilityDir );
+        catalog.reload();
+    }
+
+    SECTION( "catalog: a non-object sidecar file costs only that file" )
+    {
+        // validateEntry records "sidecar must be an object", but reload()
+        // then indexed parsed["id"] with the NON-CONST operator[] — on an
+        // array document that is resolveReference (assert/throw) and used
+        // to escape the per-file gate (R1 P1-2).
+        CapabilityCatalog &catalog = CapabilityCatalog::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        writeJson( dir.filePath( "good.json" ), baseSidecar() );
+        Json::Value array( Json::arrayValue );
+        array.append( "not" );
+        array.append( "an object" );
+        writeJson( dir.filePath( "array_file.json" ), array );
+
+        catalog.setDirectory( dir.path().toStdString() );
+        int loaded = 0;
+        REQUIRE_NOTHROW( loaded = catalog.reload() ); // RED pre-R1-fix: throws
+        CHECK( loaded == 1 );
+        bool sawShapeProblem = false;
+        for ( const std::string &problem : catalog.loadProblems() )
+            if ( problem.find( "must be an object" ) != std::string::npos )
+                sawShapeProblem = true;
+        CHECK( sawShapeProblem );
+
+        catalog.setDirectory( kRepoCapabilityDir );
+        catalog.reload();
+    }
+
+    SECTION( "knowledge: array-typed variants.when.param costs only that file (R2 P1)" )
+    {
+        CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        Json::Value good( Json::objectValue );
+        good[ "id" ] = "rs:ndvi";
+        good[ "family" ] = "spectral";
+        writeJson( dir.filePath( "good.json" ), good );
+        Json::Value bad( Json::objectValue );
+        bad[ "id" ] = "rs:bad_variants";
+        bad[ "family" ] = "spectral";
+        Json::Value variant( Json::objectValue );
+        Json::Value when( Json::objectValue );
+        when[ "param" ] = Json::Value( Json::arrayValue );
+        when[ "values" ] = Json::Value( Json::arrayValue );
+        variant[ "when" ] = when;
+        Json::Value variants( Json::arrayValue );
+        variants.append( variant );
+        bad[ "variants" ] = variants;
+        writeJson( dir.filePath( "bad_variants.json" ), bad );
+
+        knowledge.setDirectory( dir.path().toStdString() );
+        REQUIRE_NOTHROW( knowledge.reload() ); // RED pre-R2-fix: throws past the gate
+        bool sawVariantProblem = false;
+        for ( const std::string &problem : knowledge.loadProblems() )
+            if ( problem.find( "variants" ) != std::string::npos )
+                sawVariantProblem = true;
+        CHECK( sawVariantProblem );
+        CHECK( knowledge.entryForOperator( "rs:ndvi" )["family"].asString() == "spectral" );
+    }
+
+    SECTION( "knowledge: query-time variant matching skips non-string supplied params (R2 P2)" )
+    {
+        CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        Json::Value entry( Json::objectValue );
+        entry[ "id" ] = "rs:ndvi";
+        entry[ "family" ] = "spectral";
+        Json::Value variant( Json::objectValue );
+        Json::Value when( Json::objectValue );
+        when[ "param" ] = "index";
+        Json::Value values( Json::arrayValue );
+        values.append( "ndvi" );
+        when[ "values" ] = values;
+        variant[ "when" ] = when;
+        // Variant override keys must be knownKeys members ("note" would be
+        // recorded as a problem and the per-file gate would skip the entry).
+        Json::Value variantIntents( Json::arrayValue );
+        variantIntents.append( "ndvi" );
+        variant[ "intents" ] = variantIntents;
+        Json::Value variants( Json::arrayValue );
+        variants.append( variant );
+        entry[ "variants" ] = variants;
+        writeJson( dir.filePath( "entry.json" ), entry );
+
+        knowledge.setDirectory( dir.path().toStdString() );
+        REQUIRE_NOTHROW( knowledge.reload() );
+        REQUIRE( knowledge.loadProblems().empty() );
+
+        // An array at the colliding param must skip the variant match, not
+        // throw out of the query walk. RED pre-R2-fix: Json::LogicError.
+        Json::Value variantParams( Json::objectValue );
+        variantParams[ "index" ] = Json::Value( Json::arrayValue );
+        Json::Value merged;
+        REQUIRE_NOTHROW( merged = knowledge.entryForOperator( "rs:ndvi", variantParams ) );
+        CHECK( merged[ "family" ].asString() == "spectral" );
+        // The variant did NOT apply (its intents override is absent).
+        CHECK_FALSE( merged.isMember( "intents" ) );
+    }
+
+    SECTION( "relations: string schema_version is a named problem, not a throw" )
+    {
+        CapabilityRelations &relations = CapabilityRelations::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        Json::Value doc( Json::objectValue );
+        doc[ "schema_version" ] = "1";
+        doc[ "chains" ] = Json::Value( Json::arrayValue );
+        doc[ "exclusive" ] = Json::Value( Json::arrayValue );
+        writeJson( dir.filePath( "capability_relations.json" ), doc );
+
+        relations.setFilePath( dir.filePath( "capability_relations.json" ).toStdString() );
+        REQUIRE_NOTHROW( relations.reload() ); // RED pre-fix: throws
+        bool sawVersionProblem = false;
+        for ( const std::string &problem : relations.loadProblems() )
+            if ( problem.find( "schema_version" ) != std::string::npos )
+                sawVersionProblem = true;
+        CHECK( sawVersionProblem );
+
+        relations.setFilePath( kRepoRelations );
+        relations.reload();
+    }
+
+    SECTION( "knowledge: object id in one entry costs only that entry" )
+    {
+        CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        Json::Value good( Json::objectValue );
+        good[ "id" ] = "rs:ndvi";
+        good[ "family" ] = "spectral";
+        writeJson( dir.filePath( "good.json" ), good );
+        Json::Value bad( Json::objectValue );
+        bad[ "id" ] = Json::Value( Json::objectValue );
+        bad[ "family" ] = "spectral";
+        writeJson( dir.filePath( "bad_id.json" ), bad );
+
+        knowledge.setDirectory( dir.path().toStdString() );
+        REQUIRE_NOTHROW( knowledge.reload() ); // RED pre-fix: throws
+        bool sawIdProblem = false;
+        for ( const std::string &problem : knowledge.loadProblems() )
+            if ( problem.find( "id" ) != std::string::npos )
+                sawIdProblem = true;
+        CHECK( sawIdProblem );
+
+        knowledge.setDirectory( kRepoKnowledgeDir );
+        knowledge.reload();
+    }
 }
 
 TEST_CASE( "D8 knowledge pages: no stale generated files", "[capability][d8][pages]" )

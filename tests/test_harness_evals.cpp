@@ -1080,6 +1080,45 @@ TEST_CASE( "Eval: intent ambiguity resolves through typed candidates and decisio
     CHECK( callTool( "harness:decision_record", resolve ).output["resolved"].asBool() );
 }
 
+TEST_CASE( "decision_record refuses wrong-typed parameters with a typed error",
+           "[harness][decision]" )
+{
+    // Pre-fix, a wrong-typed field threw Json::LogicError out of execute()
+    // on every direct-dispatch path (registry execute() callers such as
+    // workflow_planner/capability_graph, and tests); via MCP the
+    // schema-declared props were already stopped by the registry's
+    // validateAgainstRequired seam, but the undeclared `status` slipped
+    // through. Either way the throw degraded the tool's error contract.
+    // The contract is a typed INVALID_PARAMETER naming the field.
+    const auto typedRefusal = []( const SpatialToolResult &result, const char *field ) {
+        CHECK_FALSE( result.success );
+        CHECK( result.error.find( field ) != std::string::npos );
+        CHECK( result.errorCode == error_codes::kInvalidParameter );
+        CHECK( result.errorCategory == "validation" );
+    };
+
+    Json::Value badActionDoc;
+    badActionDoc["action"] = Json::Value( Json::arrayValue );
+    typedRefusal( callTool( "harness:decision_record", badActionDoc ), "action" );
+
+    Json::Value badSubjectDoc;
+    badSubjectDoc["action"] = "record";
+    badSubjectDoc["subject"] = Json::Value( Json::objectValue );
+    typedRefusal( callTool( "harness:decision_record", badSubjectDoc ), "subject" );
+
+    Json::Value badIdDoc;
+    badIdDoc["action"] = "resolve";
+    badIdDoc["decision_id"] = 7;
+    typedRefusal( callTool( "harness:decision_record", badIdDoc ), "decision_id" );
+
+    // Wrong-typed optional fields are refused too, not silently defaulted.
+    Json::Value badKindDoc;
+    badKindDoc["action"] = "record";
+    badKindDoc["subject"] = "s";
+    badKindDoc["kind"] = Json::Value( Json::arrayValue );
+    typedRefusal( callTool( "harness:decision_record", badKindDoc ), "kind" );
+}
+
 TEST_CASE( "Eval: understanding cache and plan binding persist typed context",
            "[harness][eval][continuity]" )
 {
