@@ -187,3 +187,27 @@ TEST_CASE("Continuum Removal depth threshold filters shallow ripples", "[hypersp
     REQUIRE(features.size() == 1);
     REQUIRE_THAT(features[0].absorptionDepth, WithinRel(0.05, 1e-3));
 }
+
+
+// r21-A / AG2-F4 — a trough truncated by the scan window (the wing never
+// climbs to half-depth inside the run) must report the run edge as the
+// half-depth point, never an extrapolated wavelength outside the spectrum
+// (the old crossings landed below the first / beyond the last band).
+TEST_CASE("Truncated trough half-depth crossings stay inside the run (AG2-F4)",
+          "[hyperspectral][continuum][r21a]")
+{
+    // normalized profile [0.2, 0.1, 0.15]: depth 0.9, half-level 0.55 is
+    // never reached on either wing.
+    const std::vector<float> wl = { 100.0f, 110.0f, 120.0f };
+    const std::vector<float> normalized = { 0.2f, 0.1f, 0.15f };
+    auto features = ContinuumRemoval::extractFeatures( wl.data(), normalized.data(), 3 );
+    REQUIRE( features.size() == 1 );
+    const SpectralAbsorptionFeature &f = features.front();
+    REQUIRE_THAT( f.absorptionDepth, WithinRel( 0.9, 1e-6 ) );
+    REQUIRE_THAT( f.centerWavelengthNm, WithinAbs( 110.0, 1e-9 ) );
+    // Crossings clamp to the run bounds (the old linear extrapolation put
+    // them at 65 nm and 200 nm — outside the spectrum entirely).
+    REQUIRE_THAT( f.leftHalfWavelengthNm, WithinAbs( 100.0, 1e-9 ) );
+    REQUIRE_THAT( f.rightHalfWavelengthNm, WithinAbs( 120.0, 1e-9 ) );
+    REQUIRE_THAT( f.fwhmNm, WithinAbs( 20.0, 1e-9 ) );
+}
