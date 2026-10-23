@@ -155,10 +155,27 @@ LabCompletionLedger LabCompletionLedger::loadVerified( const std::string &ledger
   }
   Json::Value doc;
   Json::CharReaderBuilder reader;
+  // #1607 residual (R20-05): pinned stackLimit + typed catch — the ledger is
+  // a hand-editable sidecar in this stack's threat model, and jsoncpp THROWS
+  // (never returns false) once the nesting limit is exceeded; the refusal
+  // must stay a typed parse issue, not a crash out of loadVerified. The
+  // std::exception catch matches LabSessionState::deserialize's spelling
+  // (Json::RuntimeError is-a std::exception; grader_json narrows to
+  // Json::Exception — both are fail-closed, this file follows the
+  // lab_session_state form it sits beside).
+  reader["stackLimit"] = 256;
   std::string errors;
   std::istringstream input( result.bytes );
-  if ( !Json::parseFromStream( reader, input, &doc, &errors ) ) {
-    ledger.issuesZh.push_back( "完成账本解析失败: " + errors );
+  try
+  {
+    if ( !Json::parseFromStream( reader, input, &doc, &errors ) ) {
+      ledger.issuesZh.push_back( "完成账本解析失败: " + errors );
+      return ledger;
+    }
+  }
+  catch ( const std::exception &e )
+  {
+    ledger.issuesZh.push_back( "完成账本解析失败: " + std::string( e.what() ) );
     return ledger;
   }
   ledger = fromJson( doc );

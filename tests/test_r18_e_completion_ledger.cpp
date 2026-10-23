@@ -16,6 +16,7 @@
 #include "teaching/lab_completion_ledger.h"
 #include "teaching/lab_feedback_projection.h"
 #include "teaching/lab_session_state.h"
+#include "teaching/verdict_stamp.h"
 
 #include <json/json.h>
 
@@ -190,6 +191,37 @@ TEST_CASE( "r18e T103c: a tampered ledger never survives as completion truth",
   const auto demoted = LabCompletionLedger::loadVerified( ledgerPath.string() );
   CHECK( demoted.completed.empty() );
   CHECK_FALSE( demoted.issuesZh.empty() );
+
+  std::filesystem::remove_all( dir );
+}
+
+// ---------------------------------------------------------------------------
+// #1607 residual (R20-05): a hand-edited ledger / verdict summary with
+// hostile nesting must be refused as a typed parse issue, never crash the
+// teaching plane with jsoncpp's stackLimit RuntimeError.
+// ---------------------------------------------------------------------------
+TEST_CASE( "r20-05: a nesting-bomb ledger is a typed refusal, not a crash",
+           "[teaching][ledger][r20_05]" )
+{
+  const auto dir = tempDir( "nestbomb" );
+  // 300 nested arrays > the pinned stackLimit of 256: the reader THROWS.
+  std::string bomb = "{ \"schema\": \"sicnu.teaching.completion-ledger/1\", \"deep\": ";
+  bomb += std::string( 300, '[' );
+  bomb += std::string( 300, ']' );
+  bomb += " }";
+  const auto ledgerPath = dir / "ledger.json";
+  writeBytes( ledgerPath, bomb );
+
+  const auto refused = LabCompletionLedger::loadVerified( ledgerPath.string() );
+  CHECK_FALSE( refused.ok );
+  CHECK_FALSE( refused.issuesZh.empty() );
+
+  // Same input shape through the verdict stamp digest: an unparseable
+  // summary digests to nothing (the stamp check then fails closed), it does
+  // not escape as an exception.
+  CHECK( verdictSummaryDigest( bomb ).empty() );
+  // A well-formed summary still digests (no over-rejection).
+  CHECK_FALSE( verdictSummaryDigest( R"({"schema":"sicnu.lab.feedback/1"})" ).empty() );
 
   std::filesystem::remove_all( dir );
 }

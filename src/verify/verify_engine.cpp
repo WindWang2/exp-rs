@@ -448,22 +448,37 @@ VerificationCheckResult evalArtifactGrid( const VerificationCheckSpec &check,
     for ( const char *field : { "width", "height", "bandCount", "crs", "maxNodataFraction", "minFiniteFraction" } )
         if ( check.params.isMember( field ) )
             expected[field] = check.params[field];
+    // #1600 (R20-05): the two fraction members above are, whenever the probe
+    // sampled, estimates over sampledPixels native pixels — the evidence
+    // carries the sampling stamp (VerificationEvidence::hasSampling /
+    // sampledPoints) so no reader mistakes a bounded sample for a
+    // whole-raster measurement. The bounds comparison below still uses the
+    // probe's declared bounded observation (its sampling contract).
+    const auto gridEvidence = [ & ]() {
+        VerificationEvidence evidence = makeEvidence( "grid:" + path, observed, expected );
+        if ( grid->fractionsFromSample )
+        {
+            evidence.hasSampling = true;
+            evidence.sampledPoints = grid->sampledPixels;
+        }
+        return evidence;
+    };
 
     const auto fail = [ & ]( const std::string &detail ) {
         return makeResult( check, VerificationStatus::Fail, kCodeGridMismatch,
                            "grid of '" + safeText( path ) + "': " + detail,
-                           makeEvidence( "grid:" + path, observed, expected ) );
+                           gridEvidence() );
     };
     // A non-finite observed fraction says nothing about the contract: the
     // grid NaN that silently passed review round 1 is now an Indeterminate.
     if ( check.params.isMember( "maxNodataFraction" ) && !std::isfinite( grid->nodataFraction ) )
         return makeResult( check, VerificationStatus::Indeterminate, kCodeMetricNotFinite,
                            "observed nodataFraction for '" + safeText( path ) + "' is not finite",
-                           makeEvidence( "grid:" + path, observed, expected ) );
+                           gridEvidence() );
     if ( check.params.isMember( "minFiniteFraction" ) && !std::isfinite( grid->finiteFraction ) )
         return makeResult( check, VerificationStatus::Indeterminate, kCodeMetricNotFinite,
                            "observed finiteFraction for '" + safeText( path ) + "' is not finite",
-                           makeEvidence( "grid:" + path, observed, expected ) );
+                           gridEvidence() );
 
     if ( check.params.isMember( "width" ) && grid->width != check.params["width"].asInt() )
         return fail( "width " + std::to_string( grid->width ) );
@@ -481,7 +496,7 @@ VerificationCheckResult evalArtifactGrid( const VerificationCheckSpec &check,
         return fail( "finiteFraction below the pinned minimum" );
 
     return makeResult( check, VerificationStatus::Pass, "", "grid satisfies every pinned constraint",
-                       makeEvidence( "grid:" + path, std::move( observed ), std::move( expected ) ) );
+                       gridEvidence() );
 }
 
 VerificationCheckResult evalArtifactSchema( const VerificationCheckSpec &check,

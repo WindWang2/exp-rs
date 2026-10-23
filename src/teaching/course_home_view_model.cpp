@@ -1,5 +1,7 @@
 #include "teaching/course_home_view_model.h"
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <set>
 
@@ -132,9 +134,21 @@ CourseHomeViewModel CourseHomeViewModel::fromDocuments( const Json::Value &manif
   vm.audienceZh = strOf( manifest, "audience_zh" );
 
   const auto done = completedSet( progressSummary );
+  // The upstream percentage is a HINT, never authority: a corrupt "105" used
+  // to be rendered verbatim, and a stale "0" was shown next to eight finished
+  // labs. It is clamped into [0,100] and kept only as a fallback; the value
+  // actually displayed is the ratio this projection can derive from the
+  // completed-lab set and the curriculum's own lab count.
+  // (Restored from the r15-E fix lost in merge c8f5e0805422 — see
+  // tests/test_r15_E_teaching_stats_honesty.cpp.)
+  bool reportedPercentUsable = false;
   if ( progressSummary.isObject() && progressSummary.isMember( "overall_percent" )
        && progressSummary["overall_percent"].isNumeric() ) {
-    vm.overallPercent = static_cast<int>( progressSummary["overall_percent"].asDouble() );
+    const double raw = progressSummary["overall_percent"].asDouble();
+    if ( std::isfinite( raw ) ) {
+      vm.overallPercent = std::max( 0, std::min( 100, static_cast<int>( raw ) ) );
+      reportedPercentUsable = true;
+    }
   }
   const auto availMap = indexAvailability( availability );
   const bool availMissing = !availability.isObject()
@@ -270,6 +284,29 @@ CourseHomeViewModel CourseHomeViewModel::fromDocuments( const Json::Value &manif
       break;
     }
     if ( !vm.continueLabId.empty() ) break;
+  }
+
+  // Derive the displayed percentage from projected facts. Deduplicated by
+  // lab id, matching how the upstream progress summary counts
+  // `completed_lab_ids` (see agent/harness/curriculum_progress.cpp) — a lab
+  // listed by two modules is ONE lab, not two, or the denominator would
+  // drift below the numerator's universe. The reported hint survives only
+  // when the projection has no lab at all to divide by.
+  // (Restored from the r15-E fix lost in merge c8f5e0805422.)
+  std::map<std::string, bool> labCompleted;
+  for ( const auto &mc : vm.modules ) {
+    for ( const auto &lc : mc.labs )
+      labCompleted.emplace( lc.labId, lc.status == LabUiStatus::Completed );
+  }
+  int labsDone = 0;
+  for ( const auto &entry : labCompleted ) {
+    if ( entry.second ) ++labsDone;
+  }
+  const int labsTotal = static_cast<int>( labCompleted.size() );
+  if ( labsTotal > 0 ) {
+    vm.overallPercent = ( labsDone * 100 ) / labsTotal;
+  } else if ( !reportedPercentUsable ) {
+    vm.overallPercent = 0;
   }
 
   vm.ok = vm.issuesZh.empty();

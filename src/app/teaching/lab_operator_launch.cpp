@@ -20,10 +20,22 @@ Json::Value parseParamsDocument( const QString &paramsJson, std::string &error )
   Json::Value root;
   if ( paramsJson.trimmed().isEmpty() ) return Json::Value( Json::objectValue );
   Json::CharReaderBuilder builder;
+  // #1607 discipline (R20-05): pinned stackLimit + typed catch — typed
+  // operator params are user input, and jsoncpp THROWS past the nesting
+  // limit; the refusal stays a parse error, never a crash.
+  builder["stackLimit"] = 256;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   const std::string bytes = paramsJson.toStdString();
-  if ( !reader->parse( bytes.data(), bytes.data() + bytes.size(), &root, &error ) )
+  try
+  {
+    if ( !reader->parse( bytes.data(), bytes.data() + bytes.size(), &root, &error ) )
+      return Json::Value();
+  }
+  catch ( const std::exception &e )
+  {
+    error = e.what();
     return Json::Value();
+  }
   return root;
 }
 
@@ -132,11 +144,20 @@ Json::Value parseLabPrefillParams( const QString &paramsJson, std::string *error
 {
   Json::Value root;
   Json::CharReaderBuilder builder;
+  // #1607 discipline (R20-05): same pin + typed catch as parseParamsDocument.
+  builder["stackLimit"] = 256;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   const std::string bytes = paramsJson.toStdString();
   std::string localError;
-  const bool parsed = reader->parse( bytes.data(), bytes.data() + bytes.size(),
-                                     &root, &localError );
+  bool parsed = false;
+  try
+  {
+    parsed = reader->parse( bytes.data(), bytes.data() + bytes.size(), &root, &localError );
+  }
+  catch ( const std::exception &e )
+  {
+    localError = e.what();
+  }
   if ( !parsed ) {
     if ( error ) *error = localError;
     return Json::Value();
