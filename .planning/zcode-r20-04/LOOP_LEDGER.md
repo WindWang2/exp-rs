@@ -37,3 +37,8 @@
 
 ## Round 7 — 待办
 R2 独立评审 → push/PR。
+
+## Round 7 — R2 评审 + 收尾（8d41eecd3c）
+- R2（独立 reviewer #2）：APPROVE（0×P0/P1/P2，5×P3）→ 修 4（modalSeen oracle、精确 DPI 错误串、探针生命周期文档、OWNERSHIP 表）+ 声明 1（seam 生产态观察）；受影响两套件 ×2 复跑 120/1311 全绿。
+- .gitignore append-only 白名单（r19 同款 3 行模式）+ 全部账本随 PR 入库。
+- 终态：6 commits，RED×3（确定性）/GREEN×2×9 二进制，双轮独立评审通过，准备 push + PR。
