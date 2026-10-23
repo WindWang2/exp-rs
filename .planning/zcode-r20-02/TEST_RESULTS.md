@@ -16,11 +16,30 @@
 
 结论：6/6 RED 全部命中预期根因；四个二进制合计 101,215 断言中仅 13 条失败且全部是本轨新种子 → **无预存红、无回归混杂**。
 
-## GREEN（修复后；待最终增量构建完成后回填 ×2 遍）
-（pending）
+## GREEN（修复 57b15509fd 状态；2026-10-23 07:0x-07:1x 实跑，QT_QPA_PLATFORM=offscreen 直跑）
+| 二进制 | pass1 | pass2 |
+|---|---|---|
+| test_model_runtime | **All tests passed (110,416 assertions in 24 cases)** | All tests passed (110,416) |
+| test_model_catalog_v2 | All tests passed (436 in 24) | All tests passed (436) |
+| test_workspace_services | All tests passed (212 in 17) | All tests passed (212) |
+| test_fault_injection | All tests passed (162 in 9) | All tests passed (162) |
 
-## 域回归 sweep
-（pending）
+（test_model_runtime 断言数从 RED 期 100,410 → 110,416：F1 修复后边缘 tile 用例真正跑完推理与逐点断言。）
 
-## 合并存续验证（运行时部分）
-（pending：io_paths/io_products/rs_operator/remote 家族/chunk 家族/model 8/9 家族复跑）
+## R2 驱动复验（R2-1 probe 路径；修复前 stash 取 RED → 恢复后重建）
+- **RED**（57b15509fd 引擎 + 新测试）：`InvalidInputData: mixed tile sizes in one inference batch (36x64 vs 64x64)` — probe 把 36 宽 deferred tile 压进未 flush 的 64 宽 pending 批，机制与 R2 推导一致（实跑输出留档）。
+- GREEN（R2 修复后）：待 build5 完成回填。
+
+## 宽回归 sweep（修复 57b15509fd 状态，38 个域族二进制串行 -j1）
+**PASS=38 / FAIL=0 / SKIP=0**：chunk_graph、d19_dataset_foundry、data_governance_consistency、dataset_{core,e2e_examples,fingerprint_determinism,quality_scale,version_migration}、experiment_{benchmark_r4,bridge_r4,capsule,consistency_r4,debugger,evaluation,parity_r4,txn_r4}、fault_injection、governance_store、gpu_plane、model_{ensemble,failure_matrix,library_manifests,manifest7,runtime,runtime_8,runtime_9,tasks,catalog_v2}、artifact_store、asset_catalog_index、workspace_{catalog,services,snapshot,state,stress}、store_fault_injection、runtime_pool_recovery_r5、r15_C_chunk_admission。
+另：test_rs_operator 832 断言、test_io_paths 67、test_io_products 46、test_io_remote_validator 232、test_io_uri 211、test_io_range_cache 314 全绿。
+
+## 合并存续验证（R19-01 修复的运行时回归）
+- zarr.json 两段扩展名（#1637-2）：test_io_paths 全绿（含 two-segment 用例）
+- 4MiB 有界读（#1637-3）：test_io_products 全绿
+- setRange 运行时强制（#1578）：test_rs_operator 832 断言全绿
+- SSRF 标志传播（#1545）：test_io_remote_validator 232 + test_io_range_cache 314 全绿
+- worker 路由设门（R19-01 R2）：model_runtime 家族全绿
+- chunk addSink 守卫（#1553）：test_chunk_graph 全绿
+- GPU 析构锁（#1554）：test_gpu_plane 全绿
+- dataset/experiment 全族（#1580-#1586 修复）：sweep 列表全绿

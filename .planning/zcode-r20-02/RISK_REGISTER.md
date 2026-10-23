@@ -16,3 +16,5 @@
 - 无 GPU/无 CUDA：GPU lane 测试未跑。
 - 无 macOS/Windows lane：#1456（Windows 注释红）等未执行。
 - TSan 未运行（宿主无 TSan 配方，R19-01 同声明）。
+
+| R2-4 | F2 feather-blend 变体与多输入 lane NoData 恢复的直接测试用例（当前为同构代码 + 纵深防御语义，R2 核实无缺陷） | tests/test_model_runtime*.cpp | 跟进轮补 2 个用例 |

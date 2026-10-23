@@ -48,3 +48,18 @@
 - 全局锁：$GIT_COMMON_DIR/exp-rs-zcode-global-build.lock；-j2；与 r20-01 实测互斥。
 - cmake 4.4.4 / Unix Makefiles / Debug / ENABLE_TESTS=ON；系统 GDAL/PROJ/GEOS。
 - QT_QPA_PLATFORM=offscreen；ctest 可用于 /usr/sbin/ctest。
+
+### 第 5 轮（R1 评审 → 修复 → GREEN×2 → 提交）
+- R1（fresh 子代理，含实跑复现权）REQUEST-CHANGES：P0（F1 断点 flush 位置错→batchCores 失步 SIGABRT）+ P2（resize 词表缺 none）+ P3×5。全部闭环（REVIEW_R1.md）。
+- 目标构建（持锁，12 目标）RC=0；GREEN×2：110,416/436/212/162 全绿；38 域族 sweep PASS=38 FAIL=0；io/rs_operator 家族全绿。
+- 修复 commit 57b15509fd + 账本 commit f74a27cddd。
+
+### 第 6 轮（R2 终审 → P2 闭环（真 RED）→ 终态 GREEN）
+- R2（fresh 只读子代理，APPROVE）：R2-1 P2（probe 路径混批残留）+ P3×3。
+- R2-1 以 stash 法取得真 RED：`mixed tile sizes (36x64 vs 64x64)`（机制与 R2 推导一致）；修复后新测试（象限/NaN 计数断言）随 GREEN。
+- 终态 GREEN：test_model_runtime 110,429/25 ×2、catalog 436、fault 162；受影响 11 二进制复验全绿（model_tasks 12,816、rs_operator 832 等）。
+- 排障记录：主仓根 0 字节游离 libsicnu_workflow.so（2026-10-01 已存在、gitignored、非本轨产物）+ LD_LIBRARY_PATH 尾冒号导致从 main 目录直跑测试时加载错库——以正确 cwd 运行即愈；不删非本轨文件。
+- R2 修复 commit 61b9b9af90。
+
+### 第 7 轮（PR）
+- 待：fetch 复核 → diff --check → push → gh pr create。
