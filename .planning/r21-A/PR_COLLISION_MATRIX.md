@@ -26,3 +26,11 @@
 - 原则：**只在确有必要时 append-only**；提交前 `git diff origin/master...HEAD --name-only` 逐一核对。
 - 若新测试需登记：优先复用 tests/CMakeLists.txt 既有同名测试目标的源文件清单（append 一行），不新增目标；确需新目标时用 `sicnu_add_*_test` 既有宏按本轨命名块追加。
 - 冲突处理：发现他轨已动同一区块 → 变基解决以他轨语义为准 + 本轨 append，不删除他人条目。
+
+## 提交前动态对账（2026-10-24 LIVE，fetch 后）
+
+- origin/master 仍为 911e0b17（未前进）。
+- 新出现 Open PR：#1673（r21-B）、#1674（r21-E）、#1675（r21-C）——逐一核对 files 列表，
+  **无一触碰本轨白名单**（src/analysis、src/processing/algorithms、src/operators/rs、本轨 tests）→ 零冲突。
+- Open Issues 仍 126（与 M0 一致）。
+- 结论：无需 rebase；分支与 master 无相同文件差异。
