@@ -73,11 +73,22 @@ RsSegmentMap &RsSegmentMap::operator=( RsSegmentMap &&other ) noexcept
 {
     if ( this != &other )
     {
-        QWriteLocker dstWriter( &mCacheLock );
-        QWriteLocker srcWriter( &other.mCacheLock );
+        // Lock order mirrors copy-assign (this only): the moved-from source
+        // is by convention an unspecified-state object, so resetting its
+        // caches needs no synchronization with this. Locking both would
+        // also create a theoretical dst→src vs src→dst deadlock for
+        // cross-thread a=std::move(b) / b=std::move(a).
+        QWriteLocker writer( &mCacheLock );
         mLabels = std::move( other.mLabels );
         mWidth = other.mWidth;
         mHeight = other.mHeight;
+        // The destination's caches describe the OLD labels: leaving them
+        // built would make every later pixelCount/pixelCoords answer from
+        // stale data (the built flags short-circuit the rebuild).
+        mSizeCache.clear();
+        mSizeCacheBuilt = false;
+        mCoordsCache.clear();
+        mCoordsIndexBuilt = false;
         other.mWidth = 0;
         other.mHeight = 0;
         other.mSizeCache.clear();

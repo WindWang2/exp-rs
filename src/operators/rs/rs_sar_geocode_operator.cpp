@@ -297,9 +297,13 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     // family always honored the declaration — this operator didn't).
     QString appliedDemUnit;
     const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );
-    if ( demUnitScale != 1.0 )
+    // Also log an UNKNOWN declared unit: demUnitScaleToMetres falls back to
+    // metres and says so in appliedDemUnit ("meters (assumed; declared '...')").
+    if ( demUnitScale != 1.0 || appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
         context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
                          + std::to_string( demUnitScale ) + ")" );
+    }
 
     std::vector<float> demScratch;
     // Per-tile working planes — one float/double per tile pixel each,

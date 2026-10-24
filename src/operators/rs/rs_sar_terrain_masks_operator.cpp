@@ -259,9 +259,13 @@ Json::Value runOrbitIncidence( const Json::Value &params, RSOperatorContext &con
     // misplaced the zero-Doppler shell on declared non-metre DEMs.
     QString appliedDemUnit;
     const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );
-    if ( demUnitScale != 1.0 )
+    // Also log an UNKNOWN declared unit: demUnitScaleToMetres falls back to
+    // metres and says so in appliedDemUnit ("meters (assumed; declared '...')").
+    if ( demUnitScale != 1.0 || appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
         context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
                          + std::to_string( demUnitScale ) + ")" );
+    }
 
     std::vector<float> demScratch;
     std::vector<float> outF( static_cast<size_t>( kTileDim ) * kTileDim );
@@ -403,9 +407,13 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
     // geolocateZeroDoppler in metres; see the first product branch above).
     QString appliedDemUnit;
     const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );
-    if ( demUnitScale != 1.0 )
+    // Also log an UNKNOWN declared unit: demUnitScaleToMetres falls back to
+    // metres and says so in appliedDemUnit ("meters (assumed; declared '...')").
+    if ( demUnitScale != 1.0 || appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
         context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
                          + std::to_string( demUnitScale ) + ")" );
+    }
 
     const bool byteMask = ( product == "layover_shadow_mask" );
 

@@ -360,8 +360,9 @@ TEST_CASE("OLS unmix keeps valid partial-negative pixels intact (AG2-F3 control)
 {
     // Control: clipping one mildly negative abundance still leaves a
     // positive sum, so the pixel keeps real (non-NaN) renormalized values.
-    // E1=(1,0), E2=(1,1); pixel (0.6,0.1) -> LS a=(-0.1, 0.8): the -0.1
-    // clips to 0, sum 0.8 renormalizes, nothing is voided.
+    // E1=(1,0), E2=(1,1); pixel (0.6,0.1) -> LS a=(0.5, 0.1): a mild
+    // negative would clip to 0 and renormalize without voiding; here both
+    // components already survive, so the pixel keeps real abundances.
     const std::vector<float> endmembers = {1.0f, 0.0f, 1.0f, 1.0f};
     const std::vector<float> pixel = {0.6f, 0.1f};
     SpectralUnmixing::UnmixResult result;

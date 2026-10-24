@@ -766,3 +766,38 @@ TEST_CASE( "RsSegmentMap: concurrent const access is race-free and consistent (#
     CHECK( shared.pixelCount( 999 ) == 0 );
     CHECK( shared.pixelCount64( 999 ) == 0 );
 }
+
+TEST_CASE( "RsSegmentMap: move-assignment drops the destination's stale caches (R1-1)",
+           "[obia][segmentation][r21a][threads]" )
+{
+    // Two disjoint label images: id 1 owns 1000 px in `a` and 100 px in `b`.
+    constexpr int64_t W = 100;
+    constexpr int64_t H = 10;
+    QVector<quint32> labelsA( static_cast<qsizetype>( W * H ), 1 );
+    QVector<quint32> labelsB( static_cast<qsizetype>( W * H ), 0 );
+    for ( int64_t r = 0; r < H; ++r )
+        for ( int64_t c = 0; c < W; ++c )
+            labelsB[static_cast<qsizetype>( r * W + c )] = ( r < 1 ) ? 1u : 0u; // 100 px of id 1
+
+    RsSegmentMap a( labelsA, W, H );
+    RsSegmentMap b( labelsB, W, H );
+
+    // Warm a's caches (built flags now true, values describe a's labels).
+    REQUIRE( a.pixelCount( 1 ) == 1000 );
+    REQUIRE( a.pixelCoords( 1 ).size() == 1000 );
+
+    // Move-assign b into a: a's labels become b's, so the counts must be
+    // rebuilt from the new image — not answered from the stale cache.
+    a = std::move( b );
+    CHECK( a.pixelCount( 1 ) == 100 );
+    CHECK( a.pixelCoords( 1 ).size() == 100 );
+    CHECK( a.segmentCount() == 1 );
+
+    // Copy-assignment parity: same drop for the copy path.
+    RsSegmentMap c( labelsA, W, H );
+    RsSegmentMap d( labelsB, W, H );
+    REQUIRE( c.pixelCount( 1 ) == 1000 );
+    c = d;
+    CHECK( c.pixelCount( 1 ) == 100 );
+    CHECK( c.pixelCoords( 1 ).size() == 100 );
+}

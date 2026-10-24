@@ -367,9 +367,13 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
     // feet, 10x for decimeters).
     QString appliedDemUnit;
     const double demUnitScale = sicnu::sar::demUnitScaleToMetres( dem, &appliedDemUnit );
-    if ( demUnitScale != 1.0 )
+    // Also log an UNKNOWN declared unit: demUnitScaleToMetres falls back to
+    // metres and says so in appliedDemUnit ("meters (assumed; declared '...')").
+    if ( demUnitScale != 1.0 || appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
         context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
                          + std::to_string( demUnitScale ) + ")" );
+    }
 
     long long topoValid = 0;
     long long topoNaN = 0;
