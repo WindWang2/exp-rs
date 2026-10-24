@@ -296,10 +296,25 @@ int CapabilityMirrorProjection::loadDirectory( const std::string &directory )
             problems_.push_back( file.filename().string() + ": unreadable" );
             continue;
         }
-        // Bounded read (D6): cap+1 bytes first, refuse past the cap — a
-        // planted huge file must never be slurped whole just to be refused
-        // by the parser a millisecond later.
-        std::string buffer( static_cast<std::size_t>( kMaxMirrorDocumentBytes ) + 1, '\0' );
+        // Bounded read (D6): size first, then cap+1 bytes — a planted huge
+        // file must never be slurped whole just to be refused by the parser
+        // a millisecond later, and a KB-scale sidecar must not pay a 4 MiB
+        // allocation (R1-P3-3).
+        std::error_code sizeEc;
+        const auto diskSize = std::filesystem::file_size( file, sizeEc );
+        if ( !sizeEc && diskSize > kMaxMirrorDocumentBytes )
+        {
+            problems_.push_back( file.filename().string() + ": exceeds the " +
+                                 std::to_string( kMaxMirrorDocumentBytes ) +
+                                 "-byte mirror document cap" );
+            continue;
+        }
+        const std::size_t readBudget =
+            static_cast<std::size_t>( sizeEc ? kMaxMirrorDocumentBytes
+                                             : std::min<std::uintmax_t>(
+                                                   diskSize, kMaxMirrorDocumentBytes ) )
+            + 1;
+        std::string buffer( readBudget, '\0' );
         in.read( buffer.data(), static_cast<std::streamsize>( buffer.size() ) );
         buffer.resize( static_cast<std::size_t>( in.gcount() ) );
         if ( buffer.size() > kMaxMirrorDocumentBytes )
