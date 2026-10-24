@@ -764,19 +764,29 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             validateBand(postSwir2Band, "SWIR2 (post)");
         }
         GdalDatasetWrapper &postRef = postDs.isValid() ? postDs : ds;
-        std::vector<float> nbrPre, nbrPost;
         ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, swir2Band),
                            makeSource(postRef, postNirBand), makeSource(postRef, postSwir2Band)},
                           [&](const float *const *in, float *outBlk, size_t n) {
-                              nbrPre.resize(n);
-                              nbrPost.resize(n);
-                              MathUtils::normalizedDifference(in[0], in[1], nbrPre.data(), n);
-                              MathUtils::normalizedDifference(in[2], in[3], nbrPost.data(), n);
+                              // dNBR = ND(NIR,SWIR)_pre - ND(NIR,SWIR)_post, fused
+                              // into one pass: the old form staged both normalized
+                              // differences into per-block heap vectors and re-read
+                              // them (two extra full-block round trips and two
+                              // allocations per block). Same values, same NaN mask.
                               const float nan = std::numeric_limits<float>::quiet_NaN();
+                              const float *preA = in[0];
+                              const float *preB = in[1];
+                              const float *postA = in[2];
+                              const float *postB = in[3];
                               for (size_t i = 0; i < n; ++i) {
-                                  outBlk[i] = (std::isfinite(nbrPre[i]) && std::isfinite(nbrPost[i]))
-                                                  ? (nbrPre[i] - nbrPost[i])
-                                                  : nan;
+                                  if (!MathUtils::bothNormalizable(preA[i], preB[i])
+                                      || !MathUtils::bothNormalizable(postA[i], postB[i])) {
+                                      outBlk[i] = nan;
+                                      continue;
+                                  }
+                                  const float pre = MathUtils::safeDiv(preA[i] - preB[i], preA[i] + preB[i]);
+                                  const float post = MathUtils::safeDiv(postA[i] - postB[i], postA[i] + postB[i]);
+                                  outBlk[i] = (std::isfinite(pre) && std::isfinite(post))
+                                                  ? (pre - post) : nan;
                               }
                               return true;
                           });
