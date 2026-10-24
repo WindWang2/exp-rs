@@ -121,4 +121,43 @@ bool cliIsInterrupted();
 /// code.
 int dispatchCliCommand( const QStringList &arguments, const CliIO &io );
 
+/// Global envelope flags (--json/--json-lines/--quiet/--progress-json).
+/// main() reads them off argv and leaves them in place, so every command
+/// family strips them from its own argument list before parsing.
+struct GlobalFlags
+{
+    bool json = false;
+    bool jsonLines = false;
+    bool quiet = false;
+    bool progressJson = false;
+};
+
+/// Removes @p name from @p args; true when it was present. Inline beside
+/// extractGlobalFlags so every command family (and the test hosts that
+/// link only one family's translation unit) shares one definition. Named
+/// for its one caller: the command files each carry their own takeFlag
+/// helper, and a shared name would make those calls ambiguous.
+inline bool takeGlobalFlag( QStringList &args, const QString &name )
+{
+    if ( !args.contains( name ) )
+        return false;
+    args.removeAll( name );
+    return true;
+}
+
+/// Removes the global envelope flags from @p args (in place) and reports
+/// which were present. Shared by every command family so a scripted flow
+/// (e.g. session approve-repair) can combine with --json.
+inline GlobalFlags extractGlobalFlags( QStringList &args )
+{
+    GlobalFlags flags;
+    flags.json = takeGlobalFlag( args, QStringLiteral( "--json" ) );
+    flags.jsonLines = takeGlobalFlag( args, QStringLiteral( "--json-lines" ) );
+    flags.quiet = takeGlobalFlag( args, QStringLiteral( "--quiet" ) );
+    flags.progressJson = takeGlobalFlag( args, QStringLiteral( "--progress-json" ) );
+    if ( flags.jsonLines )
+        flags.json = true;
+    return flags;
+}
+
 } // namespace sicnu::cli

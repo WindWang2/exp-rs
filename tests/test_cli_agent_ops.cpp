@@ -280,6 +280,30 @@ TEST_CASE("cli session command: repair approval rides the token channel",
     // Non-numeric --approval-now-ms is a typed parse refusal.
     auto badNow = runSession({"run", "--goal", "g", "--approval-now-ms", "abc"}, &seamless);
     REQUIRE(badNow.exitCode == 6);
+
+    // R1-P1-2: the mint half of the channel. The surface reads now_ms/ttl_ms;
+    // without CLI flags the mint always answered APPROVAL_MINTING_FAILED and
+    // the guidance this family prints was a dead end. The flags parse and
+    // ride the wire: with no projected plan the driver still refuses typed
+    // (NO_PENDING_REPAIR_PLAN) instead of "unknown flag" — proof the values
+    // reached the surface action.
+    FakeScenario mintScenario;
+    FakeSeams mintSeams( mintScenario );
+    OpsDriver mintDriver( wiredOptions( mintSeams ) );
+    auto minted = runSession({"approve-repair", "--now-ms", "1000", "--ttl-ms", "5000"},
+                             &mintDriver);
+    // No projected plan on a fresh coordinator: the refusal is TYPED and by
+    // name (the flags parsed and rode the wire — an unknown flag would have
+    // answered exit 6 instead). The refusal vocabulary maps this code to
+    // GenericError(1) in cliExitCodeForSessionRefusal.
+    REQUIRE(minted.exitCode == 1);
+    REQUIRE(minted.envelope["data"]["error"].asString() == "NO_PENDING_REPAIR_PLAN");
+
+    // R1-P2-2: the global envelope flags travel with the session family, so
+    // a scripted approval flow can ask for --json.
+    auto statusJson = runSession({"status", "--json"}, &mintDriver);
+    CHECK(statusJson.exitCode == 2); // NO_SESSION, parsed with --json accepted
+    CHECK(statusJson.envelope.isObject());
 }
 
 TEST_CASE("cli session command: journal reconcile over the wire",

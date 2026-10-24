@@ -122,6 +122,9 @@ int sessionError( const CliIO &io, const std::string &message, int exitCode,
 int commandAgentSession( QStringList arguments, const CliIO &io,
                          sicnu::agent_ops::OpsDriver *driver )
 {
+    // Global envelope flags travel with the session family too: a scripted
+    // approval flow needs --json (R1-P2-2). They never carry a value.
+    extractGlobalFlags( arguments );
     if ( arguments.isEmpty() )
         return sessionError( io, kSessionUsage,
                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -221,12 +224,28 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
                                      "--approval-now-ms <ms>", "--approval-now-ms" );
             args["approval_now_ms"] = Json::Int64( value );
         }
+        else if ( flag == QStringLiteral( "--now-ms" ) || flag == QStringLiteral( "--ttl-ms" ) )
+        {
+            // approve-repair minting inputs (R1-P1-2): the surface reads
+            // now_ms/ttl_ms, and without CLI flags the mint always answered
+            // APPROVAL_MINTING_FAILED — the guidance this family prints was
+            // a dead end. Same integer gate as the run-side clock flag.
+            bool parsed = false;
+            const qlonglong value = next( flag.toStdString().c_str() ).toLongLong( &parsed );
+            if ( !parsed )
+                return sessionError( io, flag.toStdString() + " needs an integer",
+                                     exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                     "--now-ms <ms>|--ttl-ms <ms>", flag.toStdString() );
+            args[flag == QStringLiteral( "--now-ms" ) ? "now_ms" : "ttl_ms"] =
+                Json::Int64( value );
+        }
         else
         {
             return sessionError( io, "unknown flag '" + flag.toStdString() + "'",
                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                  "--goal|--intent|--mode|--journal-dir|--session-id|"
-                                 "--domain|--role|--refs|--repair-approval|--approval-now-ms",
+                                 "--domain|--role|--refs|--repair-approval|--approval-now-ms|"
+                                 "--now-ms|--ttl-ms",
                                  flag.toStdString() );
         }
     }
