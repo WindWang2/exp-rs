@@ -90,6 +90,31 @@ int main(int argc, char *argv[])
     for ( int i = 0; i < argc; ++i )
         originalArguments << QString::fromLocal8Bit( argv[i] );
 
+    // R21-C (R1-P1-1): the same argv-collision class as the --name case
+    // above, but fatal. Qt's own parser consumes `-platform/--platform
+    // <value>` during QGuiApplication construction and ABORTS the process
+    // when the value is not a loadable platform plugin — `data catalog
+    // search --platform sentinel-2` died with exit 134 and no envelope at
+    // all, while `--platform offscreen` was silently swallowed (the value
+    // doubled as the catalog filter). The command layer routes from
+    // originalArguments, so the token is removed from the QT VIEW only:
+    // Qt falls back to its default platform (or QT_QPA_PLATFORM, which the
+    // headless harness sets) and the CLI still parses the flag.
+    for ( int i = 1; i < argc; ++i )
+    {
+        const QString token = QString::fromLocal8Bit( argv[i] );
+        const bool attachedForm = token.startsWith( QLatin1String( "-platform=" ) );
+        if ( !attachedForm && token != QLatin1String( "-platform" )
+             && token != QLatin1String( "--platform" ) )
+            continue;
+        const int removeCount = ( !attachedForm && i + 1 < argc ) ? 2 : 1;
+        for ( int j = i; j + removeCount < argc; ++j )
+            argv[j] = argv[j + removeCount];
+        argc -= removeCount;
+        argv[argc] = nullptr;
+        --i; // re-examine the token shifted into position i
+    }
+
     QgsApplication app(argc, argv, false);
     app.setApplicationName("sicnu_geo_rs_cli");
     QCoreApplication::setApplicationVersion("0.9.2-dev");
