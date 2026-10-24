@@ -203,7 +203,8 @@ struct HalfFailFixture
 
     bool sawCode( PluginDiagnosticCode code ) const
     {
-        for ( const PluginDiagnostic &item : registry.diagnostics().items() )
+        const exprs::PluginDiagnosticLog itemDiagSnapshot = registry.diagnostics();
+        for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
             if ( item.code == code )
                 return true;
         return false;
@@ -354,7 +355,8 @@ TEST_CASE( "entrypoint throwing is typed and leaves no residue",
     REQUIRE( after.recordState == PluginState::Failed );
     // Typed on THIS reason: the exception leg, not the nullptr leg.
     bool sawThrowMessage = false;
-    for ( const PluginDiagnostic &item : fixture.registry.diagnostics().items() )
+    const exprs::PluginDiagnosticLog itemDiagSnapshot = fixture.registry.diagnostics();
+    for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
     {
         if ( item.code == PluginDiagnosticCode::LibraryLoadFailed
              && item.message.find( "entrypoint threw" ) != std::string::npos )
@@ -427,7 +429,8 @@ TEST_CASE( "initialize() throwing is typed and leaves no residue",
     REQUIRE( after.factories == before.factories );
     REQUIRE( after.recordState == PluginState::Failed );
     bool sawThrowMessage = false;
-    for ( const PluginDiagnostic &item : fixture.registry.diagnostics().items() )
+    const exprs::PluginDiagnosticLog itemDiagSnapshot = fixture.registry.diagnostics();
+    for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
     {
         if ( item.code == PluginDiagnosticCode::InitializationFailed
              && item.message.find( "threw during initialize" ) != std::string::npos )

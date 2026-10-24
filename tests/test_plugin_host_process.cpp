@@ -291,7 +291,8 @@ bool loadOrExplain( const char *pluginId )
     const bool ok = PluginRegistry::instance().load( pluginId );
     if ( !ok )
     {
-        for ( const auto &d : PluginRegistry::instance().diagnostics().items() )
+        const exprs::PluginDiagnosticLog dDiagSnapshot = PluginRegistry::instance().diagnostics();
+        for ( const auto &d : dDiagSnapshot.items() )
             WARN( PluginDiagnostic::codeString( d.code ) << ": " << d.message );
     }
     return ok;
@@ -1280,7 +1281,8 @@ TEST_CASE( "model framework outside the declared access model fails the load typ
     auto &registry = PluginRegistry::instance();
     REQUIRE_FALSE( registry.load( kPluginId ) );
     bool sawTypedRefusal = false;
-    for ( const auto &item : registry.diagnostics().items() )
+    const exprs::PluginDiagnosticLog itemDiagSnapshot = registry.diagnostics();
+    for ( const auto &item : itemDiagSnapshot.items() )
     {
         if ( item.code == PluginDiagnosticCode::PermissionDenied
              && item.message.find( "E5005" ) != std::string::npos )
