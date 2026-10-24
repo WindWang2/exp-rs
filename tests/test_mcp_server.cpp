@@ -1,5 +1,7 @@
 // tests/test_mcp_server.cpp
 #include <catch2/catch_test_macros.hpp>
+
+#include <cstdio>
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QVariantMap>
@@ -2925,6 +2927,16 @@ TEST_CASE( "dispatch refuses non-object parameters instead of silently running d
     // "object"; the dispatch layer must enforce the same contract it
     // already enforces for run_workflow's pipeline argument.
     TestMcpServer server;
+    // Handshake first: tools/call before initialize is refused with -32002
+    // Server not initialized (#701.7) — the request never reaches dispatch.
+    {
+        QVariantMap initReq;
+        initReq[QStringLiteral( "jsonrpc" )] = QStringLiteral( "2.0" );
+        initReq[QStringLiteral( "id" )] = 1;
+        initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+        initReq[QStringLiteral( "params" )] = QVariantMap{};
+        server.testHandleRequest( initReq );
+    }
 
     auto callWithStringParams = [&server]( const QString &tool, const QString &idKey,
                                            int requestId ) {
