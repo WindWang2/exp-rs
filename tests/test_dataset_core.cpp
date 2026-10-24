@@ -25,6 +25,8 @@
 #include <sqlite3.h>
 
 #include <type_traits>
+#include <thread>
+#include <atomic>
 
 using namespace sicnu::dataset;
 
@@ -357,6 +359,108 @@ TEST_CASE( "store refuses writes on a newer schema (forward tolerance)",
     const auto refused = store.createDataset( DatasetId::generate(), QStringLiteral( "x" ) );
     CHECK( !refused.has_value() );
     CHECK( refused.diagnostics().first().code == QStringLiteral( "dataset.store_read_only" ) );
+}
+
+TEST_CASE( "concurrent createDataset/createDraftVersion races map to conflict, never write-failure",
+           "[dataset][store][concurrency]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "race.db" ) );
+
+    DatasetStore storeA;
+    REQUIRE( storeA.open( dbPath ) );
+    DatasetStore storeB;
+    REQUIRE( storeB.open( dbPath ) );
+
+    // Two connections, one file. Each round both stores pass the duplicate
+    // pre-check SELECT before either INSERT commits, so the losing INSERT
+    // surfaces as a PK constraint violation. The store must translate that
+    // into the SAME dataset.conflict diagnostic the sequential loser gets —
+    // an opaque store_write_failed here misleads callers into retry/report
+    // logic meant for real IO errors (risk A6).
+    constexpr int kRounds = 40;
+    int wrongCodes = 0;
+    int conflicts = 0;
+    for ( int round = 0; round < kRounds; ++round )
+    {
+        const DatasetId shared = DatasetId::generate();
+        std::atomic<int> arrived{ 0 };
+        std::atomic<bool> aOk{ false };
+        std::atomic<bool> bOk{ false };
+        QString aCode( QStringLiteral( "none" ) );
+        QString bCode( QStringLiteral( "none" ) );
+
+        auto racer = []( DatasetStore *store, const DatasetId &id, std::atomic<int> &gate,
+                         std::atomic<bool> *ok, QString *code )
+        {
+            ++gate;
+            while ( gate.load() < 2 )
+                std::this_thread::yield();
+            const auto result = store->createDataset( id, QStringLiteral( "racer" ) );
+            *ok = result.has_value();
+            if ( !result.has_value() )
+                *code = result.diagnostics().first().code;
+        };
+
+        std::thread ta( racer, &storeA, shared, std::ref( arrived ), &aOk, &aCode );
+        std::thread tb( racer, &storeB, shared, std::ref( arrived ), &bOk, &bCode );
+        ta.join();
+        tb.join();
+
+        // Exactly one insert may win.
+        REQUIRE( aOk.load() != bOk.load() );
+        const QString &loserCode = aOk.load() ? bCode : aCode;
+        if ( loserCode == QLatin1String( "dataset.conflict" ) )
+            ++conflicts;
+        else
+            ++wrongCodes;
+    }
+    CHECK( wrongCodes == 0 );
+    CHECK( conflicts == kRounds );
+
+    // Same contract on the version lane: concurrent drafts with one version
+    // id across two connections.
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( storeA.createDataset( datasetId, QStringLiteral( "drafts" ) ).has_value() );
+    int versionConflicts = 0;
+    int versionWrong = 0;
+    for ( int round = 0; round < kRounds; ++round )
+    {
+        const DatasetVersionId shared = DatasetVersionId::generate();
+        std::atomic<int> arrived{ 0 };
+        std::atomic<bool> aOk{ false };
+        std::atomic<bool> bOk{ false };
+        QString aCode( QStringLiteral( "none" ) );
+        QString bCode( QStringLiteral( "none" ) );
+
+        auto racer = [&shared, &datasetId]( DatasetStore *store, std::atomic<int> &gate,
+                                            std::atomic<bool> *ok, QString *code )
+        {
+            ++gate;
+            while ( gate.load() < 2 )
+                std::this_thread::yield();
+            const auto result = store->createDraftVersion(
+                makeManifest( datasetId.toString(), shared.toString() ),
+                QStringLiteral( "racer" ) );
+            *ok = result.has_value();
+            if ( !result.has_value() )
+                *code = result.diagnostics().first().code;
+        };
+
+        std::thread ta( racer, &storeA, std::ref( arrived ), &aOk, &aCode );
+        std::thread tb( racer, &storeB, std::ref( arrived ), &bOk, &bCode );
+        ta.join();
+        tb.join();
+
+        REQUIRE( aOk.load() != bOk.load() );
+        const QString &loserCode = aOk.load() ? bCode : aCode;
+        if ( loserCode == QLatin1String( "dataset.conflict" ) )
+            ++versionConflicts;
+        else
+            ++versionWrong;
+    }
+    CHECK( versionWrong == 0 );
+    CHECK( versionConflicts == kRounds );
 }
 
 TEST_CASE( "lineage edges are queryable in both directions", "[dataset][store][lineage]" )

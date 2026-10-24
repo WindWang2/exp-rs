@@ -1108,3 +1108,222 @@ TEST_CASE( "#r18B feather blending never inpaints an all-nodata run taller "
       CHECK( std::isnan( tailBlended[static_cast<std::size_t>( y ) * 32 + x] ) );
     }
 }
+
+// ---------------------------------------------------------------------------
+// R2-4 (R20-02 follow-up): direct tests for the feather-blend NoData restore
+// and the multi-input "every feed invalid" NoData rule.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Multi-input fake predicting a constant 7.0 at (B,1,H,W): the KNOWN
+/// answer separates "model output" from the NaN the engine restores where
+/// every feed's every band was invalid.
+class ConstantSevenMultiRuntime final : public IModelRuntime
+{
+  public:
+    std::string framework() const override { return "m9-fake"; }
+    std::string backendName() const override { return "m9seven"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return "fake://m9seven"; }
+
+    cv::Mat infer( const cv::Mat &blob ) override { return blob.clone(); }
+    bool supportsMultiInput() const override { return true; }
+
+    std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
+                                         const std::vector<std::string> &outputNames ) override
+    {
+      ( void )outputNames;
+      const TensorBlob &any = inputs.front().second;
+      const std::int64_t B = any.shape[0];
+      const std::int64_t H = any.rank() >= 4 ? any.shape[any.rank() - 2] : 1;
+      const std::int64_t W = any.rank() >= 4 ? any.shape[any.rank() - 1] : 1;
+      TensorBlob out;
+      out.shape = { B, 1, H, W };
+      out.dtype = TensorDType::Float32;
+      out.bytes.assign( static_cast<std::size_t>( B * H * W ) * sizeof( float ), 0 );
+      float *outData = reinterpret_cast<float *>( out.bytes.data() );
+      for ( std::int64_t i = 0; i < B * H * W; ++i )
+        outData[i] = 7.0f;
+      return { NamedTensor{ std::string(), std::move( out ) } };
+    }
+};
+
+} // namespace
+
+TEST_CASE( "R2-4: feather blending restores NoData exactly on invalid cores",
+           "[model9][blend][nodata]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  // Step raster with a NoData stripe at x in [18,20): inside tile B's core
+  // (16..32) and inside tile A's HALO, but away from either fed-window
+  // center (x=10 / x=22) so StepConstantRuntime's predictions stay 10/20.
+  // withRect is HALF-OPEN [x0,x1)x[y0,y1): the stripe is exactly
+  // x in [18,20), y in [0,16) = 2x16 = 32 pixels.
+  sicnu::testing::RsSyntheticRasterBuilder builder( 32, 16, 1, GDT_Float32 );
+  builder.withRect( 1, 0, 0, 18, 16, 10.0f );
+  builder.withRect( 1, 18, 0, 20, 16, -9999.0f );
+  builder.withRect( 1, 20, 0, 32, 16, 20.0f );
+  builder.withNoData( -9999.0 );
+  const QString raster = builder.writeToDisk( dir.filePath( QStringLiteral( "step-nodata.tif" ) ) );
+  REQUIRE_FALSE( raster.isEmpty() );
+
+  ModelInfo model;
+  model.name = "m9-blend-nodata";
+  model.framework = "m9-fake";
+  model.task = "segmentation";
+  model.tiling.tileSize = 16;
+  model.tiling.halo = 4;
+  model.output.classes = { "class" };
+
+  auto runtime = std::make_shared<StepConstantRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+
+  for ( const TileBlend blend : { TileBlend::None, TileBlend::Feather } )
+  {
+    TileInferenceRunOptions options;
+    options.blend = blend;
+    const QString path = dir.filePath( blend == TileBlend::Feather
+                                         ? QStringLiteral( "feather.tif" )
+                                         : QStringLiteral( "plain.tif" ) );
+    engine.run( raster.toStdString(), {}, path.toStdString(), context, options );
+
+    int w = 0;
+    int h = 0;
+    const std::vector<float> band = readBand( path, 1, w, h );
+    REQUIRE( w == 32 );
+    REQUIRE( h == 16 );
+
+    // The NoData stripe — and ONLY the stripe — is NaN, in both stitch
+    // modes: core-invalid pixels recover NoData even when the blended fed
+    // window carried halo predictions over them.
+    int nanCount = 0;
+    int stripeNan = 0;
+    int stripeOutOfRange = 0;
+    for ( int y = 0; y < 16; ++y )
+    {
+      for ( int x = 0; x < 32; ++x )
+      {
+        const float v = band[static_cast<std::size_t>( y ) * 32 + x];
+        const bool inStripe = ( x == 18 || x == 19 );
+        if ( std::isnan( v ) )
+        {
+          ++nanCount;
+          if ( inStripe )
+            ++stripeNan;
+        }
+        else if ( inStripe )
+        {
+          ++stripeOutOfRange;
+        }
+      }
+    }
+    CHECK( nanCount == 32 ); // exactly the 2x16 stripe
+    CHECK( stripeNan == 32 );
+    CHECK( stripeOutOfRange == 0 );
+    // Valid neighbors around the stripe are numbers (never poisoned).
+    CHECK_FALSE( std::isnan( band[static_cast<std::size_t>( 8 ) * 32 + 17] ) );
+    CHECK_FALSE( std::isnan( band[static_cast<std::size_t>( 8 ) * 32 + 20] ) );
+    // Pure cores away from seam and stripe keep the exact constants.
+    CHECK( band[static_cast<std::size_t>( 8 ) * 32 + 8] == 10.0f );
+    CHECK( band[static_cast<std::size_t>( 8 ) * 32 + 26] == 20.0f );
+  }
+}
+
+TEST_CASE( "R2-4: multi-input NoData restore requires every feed invalid",
+           "[model9][multimodal][nodata]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+
+  // withRect is HALF-OPEN [x0,x1)x[y0,y1): S1 = x in [4,8) x y in [0,32)
+  // = 4x32 = 128 pixels; S2 = x in [20,24) x y in [0,32) = 128 pixels.
+  // Feed "before": S1 and S2 NoData. Feed "after": S1 only. S1 is invalid
+  // in EVERY feed → NaN; S2 is invalid in one feed only → the model's
+  // prediction (7.0) survives.
+  auto before = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 1, GDT_Float32 )
+                  .withCrs( QStringLiteral( "EPSG:4326" ) )
+                  .withGeoTransform( 10.0, 1.0, 50.0, -1.0 )
+                  .withConstantValue( 1, 5.0f )
+                  .withRect( 1, 4, 0, 8, 32, -9999.0f )
+                  .withRect( 1, 20, 0, 24, 32, -9999.0f )
+                  .withNoData( -9999.0 )
+                  .writeToDisk( dir.filePath( QStringLiteral( "before.tif" ) ) );
+  auto after = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 1, GDT_Float32 )
+                 .withCrs( QStringLiteral( "EPSG:4326" ) )
+                 .withGeoTransform( 10.0, 1.0, 50.0, -1.0 )
+                 .withConstantValue( 1, 3.0f )
+                 .withRect( 1, 4, 0, 8, 32, -9999.0f )
+                 .withNoData( -9999.0 )
+                 .writeToDisk( dir.filePath( QStringLiteral( "after.tif" ) ) );
+  REQUIRE_FALSE( before.isEmpty() );
+  REQUIRE_FALSE( after.isEmpty() );
+
+  ModelInfo model;
+  model.name = "m9-seven";
+  model.framework = "m9-fake";
+  model.task = "change_detection";
+  model.tiling.tileSize = 32;
+  ModelInputContract feedBefore;
+  feedBefore.name = "before";
+  ModelInputContract feedAfter;
+  feedAfter.name = "after";
+  model.inputs = { feedBefore, feedAfter };
+  model.input = feedBefore;
+  model.output.classes = { "class" };
+
+  auto runtime = std::make_shared<ConstantSevenMultiRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+  const QString out = dir.filePath( QStringLiteral( "seven.tif" ) );
+  const TileInferenceStats stats = engine.runMultiInput(
+    { NamedRasterFeed{ "before", { before.toStdString() }, {} },
+      NamedRasterFeed{ "after", { after.toStdString() }, {} } },
+    out.toStdString(), context, {} );
+  REQUIRE( stats.outBands == 1 );
+
+  int w = 0;
+  int h = 0;
+  const std::vector<float> band = readBand( out, 1, w, h );
+  REQUIRE( w == 32 );
+  REQUIRE( h == 32 );
+
+  int s1Nan = 0;
+  int s1Total = 0;
+  int s2Seven = 0;
+  int s2Total = 0;
+  int elsewhereSeven = 0;
+  for ( int y = 0; y < 32; ++y )
+  {
+    for ( int x = 0; x < 32; ++x )
+    {
+      const float v = band[static_cast<std::size_t>( y ) * 32 + x];
+      if ( x >= 4 && x <= 7 )
+      {
+        ++s1Total;
+        if ( std::isnan( v ) )
+          ++s1Nan;
+      }
+      else if ( x >= 20 && x <= 23 )
+      {
+        ++s2Total;
+        if ( v == 7.0f )
+          ++s2Seven;
+      }
+      else if ( v == 7.0f )
+      {
+        ++elsewhereSeven;
+      }
+    }
+  }
+  // S1: invalid in EVERY feed → NoData restored (NaN), never a prediction.
+  CHECK( s1Nan == s1Total );
+  REQUIRE( s1Total == 128 );
+  // S2: invalid in ONE feed only → the prediction survives untouched.
+  CHECK( s2Seven == s2Total );
+  REQUIRE( s2Total == 128 );
+  // Everywhere else: the known-answer constant.
+  CHECK( elsewhereSeven == 32 * 32 - 128 - 128 );
+}

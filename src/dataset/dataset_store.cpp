@@ -377,8 +377,21 @@ sicnu::data::Result<QString> DatasetStore::createDataset( const DatasetId &datas
     insert.bind( 3, description );
     insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
     if ( !insert.step() )
+    {
+        // The pre-check SELECT above races a concurrent writer inserting the
+        // same id between the check and this INSERT: the PK violation must
+        // surface as dataset.conflict (the same diagnostic the losing
+        // sequential caller gets), never as an opaque store_write_failed
+        // (risk A6; same mapping template as tag_conflict below).
+        const int code = sqlite3_errcode( m_impl->db );
+        const QString message = insert.error( m_impl->db );
+        if ( code == SQLITE_CONSTRAINT )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.conflict" ),
+                QStringLiteral( "dataset %1 already exists" ).arg( id ) ) );
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           message ) );
+    }
     return Result::success( id );
 }
 
@@ -699,8 +712,19 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::createDraftVersion(
     insert.bind( 8, record.manifestJson() );
     insert.bind( 9, QString() );
     if ( !insert.step() )
+    {
+        // Concurrent draft with the same version id raced past the duplicate
+        // pre-check: map the PK violation to dataset.conflict like the
+        // sequential path (risk A6).
+        const int code = sqlite3_errcode( m_impl->db );
+        const QString message = insert.error( m_impl->db );
+        if ( code == SQLITE_CONSTRAINT )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.conflict" ),
+                QStringLiteral( "version %1 already exists" ).arg( versionId ) ) );
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           message ) );
+    }
     return Result::success( record );
 }
 

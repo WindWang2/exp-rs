@@ -204,3 +204,38 @@ TEST_CASE( "SicnuPythonApi routes layer addition through ActiveViewHost and Data
   CHECK(mainView->layerIds().size() == 1);
   CHECK(project->count() == 1);
 }
+
+// #1647-1: the _SicnuHelper shim advertised sicnu.project_path() while the
+// 288-line C++ SicnuPythonApi was never registered into the interpreter —
+// calling the advertised API raised AttributeError. The API is now a real
+// built-in backed by SicnuPythonApi::projectPath().
+TEST_CASE( "sicnu.project_path is a real registered API backed by the platform",
+           "[python][engine][sicnu_api]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+
+  QString result, error;
+
+  // No project open: the empty path is honestly reported (not a stub string
+  // and not an AttributeError).
+  bool ok = QgisPython::instance().evalString(
+      QStringLiteral( "repr(sicnu.project_path())" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "''" ) );
+
+  // With a project file set, the platform API answers through Python.
+  QgsProject::instance()->setFileName( QStringLiteral( "/tmp/r21b-proj.qgs" ) );
+  ok = QgisPython::instance().evalString(
+      QStringLiteral( "repr(sicnu.project_path())" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "'/tmp/r21b-proj.qgs'" ) );
+
+  // The built-in itself is visible in the globals (registered via the same
+  // table as sicnu_print).
+  ok = QgisPython::instance().evalString(
+      QStringLiteral( "callable(sicnu_project_path)" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "True" ) );
+
+  QgsProject::instance()->clear();
+}

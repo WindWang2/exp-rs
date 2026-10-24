@@ -1,5 +1,6 @@
 #include "ogr_vector_source_provider.h"
 
+#include <QDir>
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
@@ -35,8 +36,20 @@ QString normalizeVectorPath( const QString &rawPath )
     return rawPath;
 
   const QFileInfo info( rawPath );
-  return info.canonicalFilePath().isEmpty() ? info.absoluteFilePath()
-                                            : info.canonicalFilePath();
+  const QString canonical = info.canonicalFilePath();
+  if ( !canonical.isEmpty() )
+    return canonical;
+  // The file itself is missing (or unresolvable). Anchor the identity on the
+  // CANONICAL PARENT DIRECTORY instead of the raw absolute path: two
+  // spellings of the same not-yet-existing file (a symlinked or relatively
+  // dotted directory component) then collapse onto one SourceKey, and it is
+  // the same key the file's canonicalFilePath yields once it appears — the
+  // raw-absolute fallback kept the symlink spelling and later registered the
+  // materialized file a second time under a different AssetId (risk A1).
+  const QString parentCanonical = info.dir().canonicalPath();
+  if ( !parentCanonical.isEmpty() )
+    return parentCanonical + QLatin1Char( '/' ) + info.fileName();
+  return info.absoluteFilePath();
 }
 
 bool sourceSupportsEditing( const QString &path )
