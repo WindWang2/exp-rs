@@ -890,6 +890,53 @@ TEST_CASE( "layout:export reports every page of a multi-page layout (CARTO-15)",
   cleanupProject();
 }
 
+// R21-D: the tool used to build pages[] by re-walking the delivery
+// directory after the export, so a stale sibling from an earlier, larger
+// delivery (or a page the design now excludes) was reported as a page THIS
+// run delivered. The delivery set now comes from the export itself.
+TEST_CASE( "layout:export never re-manifests stale page siblings (R21-D)",
+           "[layout][mcp][export][r21d]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+
+  REQUIRE( run( "layout:create", R"({"name":"StaleSiblings"})" ).success );
+  QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "StaleSiblings" ) );
+  REQUIRE( layout != nullptr );
+  REQUIRE( run( "layout:add_item",
+                R"({"layout":"StaleSiblings","type":"label","properties":{"text":"body"}})" )
+              .success );
+
+  // A stale sibling from an earlier, larger delivery sitting in the target
+  // directory: the tool must not report it as a delivered page.
+  const QString png = dir.filePath( QStringLiteral( "single.png" ) );
+  const QString staleSibling = dir.filePath( QStringLiteral( "single_2.png" ) );
+  {
+    QFile stale( staleSibling );
+    REQUIRE( stale.open( QIODevice::WriteOnly ) );
+    stale.write( "stale" );
+    stale.close();
+  }
+  REQUIRE( QFile::exists( staleSibling ) );
+
+  const std::string input =
+      R"({"layout":"StaleSiblings","path":")" + png.toStdString() + R"(","format":"png","dpi":96})";
+  const auto exported = run( "layout:export", input );
+  REQUIRE( exported.success );
+  CHECK( exported.output["page_count"].asInt() == 1 );
+  REQUIRE( exported.output["pages"].isArray() );
+  CHECK( exported.output["pages"].size() == 1 );
+  CHECK( exported.output["pages"][0]["path"].asString() == png.toStdString() );
+  // The stale sibling is gone: this run's delivery is the complete set.
+  CHECK( !QFile::exists( staleSibling ) );
+
+  LayoutService::instance().deleteLayout( QStringLiteral( "StaleSiblings" ) );
+  cleanupProject();
+}
+
 TEST_CASE( "Non-finite font sizes and scale-bar segments are ignored, not applied (CARTO-7)",
            "[layout_service][robustness][r14d]" )
 {

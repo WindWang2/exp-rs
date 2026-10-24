@@ -1359,8 +1359,10 @@ QgsPrintLayout *LayoutService::loadTemplate( const QString &name, const QString 
 }
 
 bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const QString &format, double dpi,
-                                  qint64 maxBytes, QString *error )
+                                  qint64 maxBytes, QString *error, QStringList *deliveredFiles )
 {
+  if ( deliveredFiles )
+    deliveredFiles->clear();
   if ( !layout )
   {
     if ( error )
@@ -1432,6 +1434,29 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
     }
   }
 
+  // R21-D: drop stale deterministic page siblings BEFORE the export runs.
+  // QGIS raster exports write page N to <base>_<N+1>.<ext>; an earlier,
+  // larger delivery's siblings would otherwise survive as orphans that a
+  // post-export directory walk re-manifests as fresh pages (the delivery
+  // set must be exactly this run's writes). The scan covers a bounded
+  // window past the CURRENT page count: a layout that shrank must clean
+  // the siblings its larger version left, and the window stops a huge
+  // historical page count from turning this into a directory flood.
+  if ( isRaster )
+  {
+    const int pageCount = layout->pageCollection()->pageCount();
+    constexpr int kStaleSiblingSlack = 16;
+    const QFileInfo info( path );
+    for ( int page = 1; page < pageCount + kStaleSiblingSlack; ++page )
+    {
+      const QString stale = info.dir().filePath(
+        info.completeBaseName() + QStringLiteral( "_" ) + QString::number( page + 1 ) +
+        QStringLiteral( "." ) + info.suffix() );
+      if ( QFile::exists( stale ) )
+        QFile::remove( stale );
+    }
+  }
+
   QgsLayoutExporter exporter( layout );
   QgsLayoutExporter::ExportResult result = QgsLayoutExporter::Success;
   if ( isPdf )
@@ -1458,6 +1483,25 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
     if ( error )
       *error = QStringLiteral( "Export failed: %1" ).arg( exporter.errorMessage() );
     return false;
+  }
+  if ( deliveredFiles )
+  {
+    // R21-D: the delivery set THIS run produced — the primary path plus the
+    // raster page siblings the exporter just wrote (stale ones were removed
+    // before the export, so existence here means "written by this run").
+    const QFileInfo info( path );
+    deliveredFiles->append( path );
+    if ( isRaster )
+    {
+      for ( int page = 1; page < layout->pageCollection()->pageCount(); ++page )
+      {
+        const QString candidate = info.dir().filePath(
+          info.completeBaseName() + QStringLiteral( "_" ) + QString::number( page + 1 ) +
+          QStringLiteral( "." ) + info.suffix() );
+        if ( QFile::exists( candidate ) )
+          deliveredFiles->append( candidate );
+      }
+    }
   }
   return true;
 }
