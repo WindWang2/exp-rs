@@ -1175,14 +1175,19 @@ void McpServer::handleRequest(const QVariantMap &request)
                     m_cancelledRequestPipelines, rpcCancelMapKey(id),
                     resultData.value( QStringLiteral( "pipeline_id" ) ).toLongLong(), 1024 );
             }
-            // R21-C F1: the task map gets the SAME submitting-call gate the
-            // pipeline map has had since R14-C FIX-1. Every result carrying
-            // an execution_id used to arm it — including get_execution_status
-            // polls (they always echo it back), so an abort/timeout of the
-            // POLL itself cancelled the long-running execution the poll was
-            // merely reporting on. Only the two SUBMITTING tools arm it.
-            if ( ( toolName == QStringLiteral( "execute_algorithm" )
-                   || toolName == QStringLiteral( "execute_operator" ) )
+            // R21-C F1: every result carrying an execution_id used to arm
+            // the cancel map — including get_execution_status polls (they
+            // always echo it back), so an abort/timeout of the POLL itself
+            // cancelled the long-running execution the poll was merely
+            // reporting on. The gate is a POLLER blacklist, not a submitter
+            // whitelist: submitters also arrive through the direct-routed
+            // dispatchToolCall branches (view:/roi:/canvas:/layer:/raster:
+            // and every allowed tool id), and those must keep their cancel
+            // channel (R1-P2-1). Only the read-only status poll (and the
+            // cancel call itself — its id cancelling nothing is a no-op)
+            // are excluded.
+            if ( toolName != QStringLiteral( "get_execution_status" )
+                 && toolName != QStringLiteral( "cancel_execution" )
                  && resultData.contains( QStringLiteral( "execution_id" ) ) )
             {
                 const auto executionId = sicnu::processing::ExecutionId::fromWire(
