@@ -21,8 +21,8 @@
 | pi/test/r21_c_poll_interval_clamp | 1 败（SyntaxError） | F4（master mcp_bridge 无导出） |
 | test_exprs_plugin_loader / halffail_r4 / unload_order_r4 / boundary_r4 | 16/6/1/1 败 | **测试 UB**（见下 W8 归因） |
 
-## GREEN ×2（HEAD：全部修复 + 测试修正）
-两遍完整运行，47 个调用退出码逐一相同（diff 实证 identical）。汇总：
+## GREEN ×2（HEAD 终态：全部修复 + R1/R2 审查修复，21 commits）
+两遍完整运行（干净环境、无并发构建污染），47 个调用退出码逐一相同（diff 实证 identical）；42 个在跑内全绿，5 个 MISSING（位于 build 根目录）单独补跑全绿（下表 ★）。首轮复验曾因验证期间并发重建二进制而污染，已作废重跑——最终两遍为干净结果。
 
 | 二进制 | 结果 |
 |---|---|
@@ -58,6 +58,10 @@
 | test_preflight_authority_invalidation / check_tool / engine / rules | 294/20、37/4、70/17、481/18 ✓ |
 | test_cli_command_surface / commands_json / help_vocabulary_r4 / fail_fast_r4 / batch_manifest | 27/3、53/9、277/4、34/4、105/11 ✓ |
 | pi Node 套件（41 tests，含新增 F4 钳制） | 41/41 ✓（两轮之外另跑一次） |
+| ★ test_science_context_broker / live_authorities | 183/40、197/15 ✓ |
+| ★ test_plugin_capabilities | 129/14 ✓ |
+| ★ test_cli_command_surface / help_vocabulary_r4 / fail_fast_r4 / batch_manifest | 27/3、277/4、34/4、105/11 ✓ |
+| test_r18_c_rpc_cancel_id_namespace（含 R2 revert-guard） | 13/3 ✓ |
 
 ## W8-red 归因（R20-03 移交的 5 二进制"master 同构红"）
 R20-03 记录 5 个 plugin 二进制共 25 个失败断言为 master==HEAD 同构、疑属 fixture/环境。**本轮实证根因：测试代码 UB** —— `PluginRegistry::diagnostics()` 按值返回快照（#1449 有意设计），而 13 处 `for (item : registry.diagnostics().items())` 迭代的是 range-init 语句结束时即析构的临时内的 vector（编译器 -Wdangling 警告早已指出）。本机 toolchain 下 UB 静默产生垃圾读数，所有诊断断言假失败。修复（命名常量绑定快照）后 5 二进制全绿（上表）。**结论：非环境问题、非本轨引入；R20-03 的 master 同构判断方向正确（src 无关）但归因（fixture 行为）错误。**
