@@ -274,6 +274,24 @@ TEST_CASE( "cli unknown flags are refused, never silently ignored",
         requireErrorEnvelope( "workflow validate " + workflow + " --dry-runn",
                               "workflow", kInvalidInput );
     }
+    SECTION( "workflow resume with a typo'd flag" )
+    {
+        requireErrorEnvelope( "workflow resume no-such-run-r4 --dry-runn", "workflow",
+                              kInvalidInput );
+    }
+    SECTION( "workflow resume with a bare run id stays a typed runtime failure" )
+    {
+        // R1-P0-1 regression guard: the unknown-flag gate pulled the run id
+        // out of args while the runner ALSO consumed a token — resume then
+        // hit takeFirst() on an empty list (SIGABRT, exit 134) or resumed
+        // the wrong run. The bare form must reach the runner and answer
+        // typed (no such checkpoint -> ExecutionFailure).
+        const Json::Value envelope =
+            requireErrorEnvelope( "workflow resume no-such-run-r4", "workflow",
+                                  kExecutionFailure );
+        CHECK( envelope.get( "error", "" ).asString().find( "no-such-run-r4" )
+               != std::string::npos );
+    }
     SECTION( "workflow run with a typo'd flag" )
     {
         requireErrorEnvelope( "workflow run " + workflow + " --json-out", "workflow",

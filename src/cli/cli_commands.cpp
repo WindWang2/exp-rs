@@ -199,25 +199,7 @@ QString takeValue( QStringList &args, const QString &name, bool &present )
     return value;
 }
 
-struct GlobalFlags
-{
-    bool json = false;
-    bool jsonLines = false;
-    bool quiet = false;
-    bool progressJson = false;
-};
 
-GlobalFlags extractGlobalFlags( QStringList &args )
-{
-    GlobalFlags flags;
-    flags.json = takeFlag( args, "--json" );
-    flags.jsonLines = takeFlag( args, "--json-lines" );
-    flags.quiet = takeFlag( args, "--quiet" );
-    flags.progressJson = takeFlag( args, "--progress-json" );
-    if ( flags.jsonLines )
-        flags.json = true;
-    return flags;
-}
 
 // ---------------------------------------------------------------------------
 // algorithms
@@ -719,7 +701,7 @@ int commandWorkflow( QStringList args, const CliIO &io )
             io.reportLog( level, message );
         };
         RsPipelineRunner runner( progressCb, logCb );
-        const auto result = runner.resumeRun( args.takeFirst().toStdString() );
+        const auto result = runner.resumeRun( runId.toStdString() );
         if ( !result.success )
         {
             return io.finish( false, "workflow", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
@@ -2435,12 +2417,19 @@ int commandData( QStringList args, const CliIO &io )
                 }
                 if ( !takesValue )
                     continue;
-                if ( i + 1 >= args.size() )
+                if ( i + 1 >= args.size()
+                     || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
                 {
+                    // A value that is itself a flag is a MISSING value, not a
+                    // value: `--platform --limit 5` used to set the platform
+                    // filter to "--limit" (same rule as the session lane's
+                    // next() and algorithms search).
                     const CliErrorDetails details {
                         .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                         .expected = "a value after " + args[i].toStdString(),
-                        .actual = "(end of arguments)" };
+                        .actual = i + 1 >= args.size()
+                                      ? std::string( "(end of arguments)" )
+                                      : args[i + 1].toStdString() };
                     return io.finish( false, "data", {},
                                       exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                       {}, args[i].toStdString() + " needs a value", &details );
