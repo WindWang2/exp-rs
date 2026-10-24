@@ -715,6 +715,11 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
 
   // --- common properties: identical setters + undo ids as the GUI panel ---
   setProp( "name", [&]() {
+    // R1-P2-1: asString() on an array/object value throws Json::LogicError
+    // (the same half-applied failure shape the boolean keys had) — a
+    // wrong-typed key is ignored instead.
+    if ( !props["name"].isString() )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Change Item Id" ), QgsLayoutItem::UndoSetId );
     item->setId( QString::fromStdString( props["name"].asString() ) );
     undoStack->endCommand();
@@ -812,18 +817,24 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
     return true;
   } );
   setProp( "exclude_from_exports", [&]() {
+    if ( !props["exclude_from_exports"].isBool() )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Change Export Exclusion" ) );
     item->setExcludeFromExports( props["exclude_from_exports"].asBool() );
     undoStack->endCommand();
     return true;
   } );
   setProp( "frame_enabled", [&]() {
+    if ( !props["frame_enabled"].isBool() )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Toggle Frame" ) );
     item->setFrameEnabled( props["frame_enabled"].asBool() );
     undoStack->endCommand();
     return true;
   } );
   setProp( "frame_color", [&]() {
+    if ( !props["frame_color"].isString() )
+      return false;
     if ( !QColor::isValidColor( QString::fromStdString( props["frame_color"].asString() ) ) )
       return false;
     undoStack->beginCommand( item, QStringLiteral( "Change Frame Color" ), QgsLayoutItem::UndoStrokeColor );
@@ -840,12 +851,16 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
     return true;
   } );
   setProp( "background_enabled", [&]() {
+    if ( !props["background_enabled"].isBool() )
+      return false;
     undoStack->beginCommand( item, QStringLiteral( "Toggle Background" ) );
     item->setBackgroundEnabled( props["background_enabled"].asBool() );
     undoStack->endCommand();
     return true;
   } );
   setProp( "background_color", [&]() {
+    if ( !props["background_color"].isString() )
+      return false;
     if ( !QColor::isValidColor( QString::fromStdString( props["background_color"].asString() ) ) )
       return false;
     undoStack->beginCommand( item, QStringLiteral( "Change Background Color" ), QgsLayoutItem::UndoBackgroundColor );
@@ -859,6 +874,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
   if ( auto *label = qobject_cast<QgsLayoutItemLabel *>( item ) )
   {
     setProp( "text", [&]() {
+      if ( !props["text"].isString() )
+        return false;
       undoStack->beginCommand( item, QStringLiteral( "Change Label Text" ) );
       label->setText( QString::fromStdString( props["text"].asString() ) );
       undoStack->endCommand();
@@ -982,12 +999,16 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
   else if ( auto *legend = qobject_cast<QgsLayoutItemLegend *>( item ) )
   {
     setProp( "title", [&]() {
+      if ( !props["title"].isString() )
+        return false;
       undoStack->beginCommand( item, QStringLiteral( "Change Legend Title" ) );
       legend->setTitle( QString::fromStdString( props["title"].asString() ) );
       undoStack->endCommand();
       return true;
     } );
     setProp( "linked_map", [&]() {
+      if ( !props["linked_map"].isString() )
+        return false;
       const QString ref = QString::fromStdString( props["linked_map"].asString() );
       QgsLayoutItemMap *map = qobject_cast<QgsLayoutItemMap *>( findItem( layout, ref ) );
       if ( !map )
@@ -1005,6 +1026,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
   else if ( auto *scaleBar = qobject_cast<QgsLayoutItemScaleBar *>( item ) )
   {
     setProp( "style", [&]() {
+      if ( !props["style"].isString() )
+        return false;
       const QString style = QString::fromStdString( props["style"].asString() );
       const QStringList sorted = QgsApplication::scaleBarRendererRegistry()->sortedRendererList();
       QString matched;
@@ -1035,6 +1058,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "unit_label", [&]() {
+      if ( !props["unit_label"].isString() )
+        return false;
       undoStack->beginCommand( item, QStringLiteral( "Change Scale Bar Unit Label" ) );
       scaleBar->setUnitLabel( QString::fromStdString( props["unit_label"].asString() ) );
       scaleBar->update();
@@ -1046,6 +1071,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       // in. unit_label only relabels; without the unit a "km" bar shows
       // meter (or degree) values. Vocabulary kept in sync with
       // mapspec.cpp's isKnownScaleBarUnit and the compiler's mapping.
+      if ( !props["unit"].isString() )
+        return false;
       const QString unit = QString::fromStdString( props["unit"].asString() ).toLower();
       Qgis::DistanceUnit distanceUnit = Qgis::DistanceUnit::Unknown;
       bool valid = true;
@@ -1113,6 +1140,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
   else if ( auto *picture = qobject_cast<QgsLayoutItemPicture *>( item ) )
   {
     setProp( "path", [&]() {
+      if ( !props["path"].isString() )
+        return false;
       const QString path = QString::fromStdString( props["path"].asString() );
       if ( !path.startsWith( QLatin1String( ":/" ) ) && !QFile::exists( path ) )
       {
@@ -1126,6 +1155,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "north_mode", [&]() {
+      if ( !props["north_mode"].isString() )
+        return false;
       const QString mode = QString::fromStdString( props["north_mode"].asString() ).toLower();
       if ( mode != QStringLiteral( "grid" ) && mode != QStringLiteral( "true" ) &&
            mode != QStringLiteral( "default" ) )
@@ -1434,29 +1465,13 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
     }
   }
 
-  // R21-D: drop stale deterministic page siblings BEFORE the export runs.
-  // QGIS raster exports write page N to <base>_<N+1>.<ext>; an earlier,
-  // larger delivery's siblings would otherwise survive as orphans that a
-  // post-export directory walk re-manifests as fresh pages (the delivery
-  // set must be exactly this run's writes). The scan covers a bounded
-  // window past the CURRENT page count: a layout that shrank must clean
-  // the siblings its larger version left, and the window stops a huge
-  // historical page count from turning this into a directory flood.
-  if ( isRaster )
-  {
-    const int pageCount = layout->pageCollection()->pageCount();
-    constexpr int kStaleSiblingSlack = 16;
-    const QFileInfo info( path );
-    for ( int page = 1; page < pageCount + kStaleSiblingSlack; ++page )
-    {
-      const QString stale = info.dir().filePath(
-        info.completeBaseName() + QStringLiteral( "_" ) + QString::number( page + 1 ) +
-        QStringLiteral( "." ) + info.suffix() );
-      if ( QFile::exists( stale ) )
-        QFile::remove( stale );
-    }
-  }
-
+  // R1-P2-3: the stale-sibling cleanup moved AFTER a successful export.
+  // Doing it before destroyed the user's previous delivery whenever the
+  // exporter failed (pages 2..N deleted, nothing new written). Now the
+  // cleanup only runs when this run's delivery is confirmed, and it only
+  // removes siblings PAST the freshly written set — the pages this run
+  // produced are never touched, and a failure leaves the previous
+  // delivery intact.
   QgsLayoutExporter exporter( layout );
   QgsLayoutExporter::ExportResult result = QgsLayoutExporter::Success;
   if ( isPdf )
@@ -1487,19 +1502,35 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
   if ( deliveredFiles )
   {
     // R21-D: the delivery set THIS run produced — the primary path plus the
-    // raster page siblings the exporter just wrote (stale ones were removed
-    // before the export, so existence here means "written by this run").
+    // raster page siblings the exporter just wrote. Existence here means
+    // "written by this run" because stale siblings past the delivery are
+    // removed below, after the export is confirmed.
     const QFileInfo info( path );
     deliveredFiles->append( path );
     if ( isRaster )
     {
-      for ( int page = 1; page < layout->pageCollection()->pageCount(); ++page )
+      const int pageCount = layout->pageCollection()->pageCount();
+      for ( int page = 1; page < pageCount; ++page )
       {
         const QString candidate = info.dir().filePath(
           info.completeBaseName() + QStringLiteral( "_" ) + QString::number( page + 1 ) +
           QStringLiteral( "." ) + info.suffix() );
         if ( QFile::exists( candidate ) )
           deliveredFiles->append( candidate );
+      }
+      // R1-P2-3: clean the siblings PAST this delivery only now that the
+      // export succeeded — a layout that shrank must not leave the larger
+      // version's pages behind, and a failed export must not destroy the
+      // previous delivery. The bounded window stops a huge historical page
+      // count from turning this into a directory flood.
+      constexpr int kStaleSiblingSlack = 16;
+      for ( int page = pageCount; page < pageCount + kStaleSiblingSlack; ++page )
+      {
+        const QString stale = info.dir().filePath(
+          info.completeBaseName() + QStringLiteral( "_" ) + QString::number( page + 1 ) +
+          QStringLiteral( "." ) + info.suffix() );
+        if ( QFile::exists( stale ) )
+          QFile::remove( stale );
       }
     }
   }

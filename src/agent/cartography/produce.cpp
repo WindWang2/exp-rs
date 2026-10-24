@@ -414,15 +414,21 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     exportRequest.dpi = request.dpi;
     exportRequest.directory = request.directory;
     exportRequest.file_name = baseName.toStdString();
-    // R21-D: the reporter doubles as the cancel probe for the single/multi
-    // -page export (report(stage, progress, detail) == true means "keep
-    // going"), so a Stop during the write aborts at the next page boundary
-    // with the delivered pages rolled back — the same discipline the atlas
-    // delivery below already had.
+    // R21-D: the cancel probe for the single/multi-page export. NOTE: the
+    // probe must NOT route through report(): a report() call also emits a
+    // progress event, so every page-boundary poll would push a detail line
+    // ("exporting") that a non-cancelled export never asked for. The
+    // operator seam already passes a pure isCancelled() probe; here the
+    // reporter doubles as the cancel channel only through its return value,
+    // so the probe reports progress ONLY on the cancel branch.
+    bool exportCancelled = false;
     const MapExportResult exported =
         exportMapLayout( layout, exportRequest,
-                         [ &reporter ]() {
-                             return !report( reporter, "export", 0.6, "export cancelled" );
+                         [ &reporter, &exportCancelled ]() {
+                             if ( report( reporter, "export", 0.6, "export cancelled" ) )
+                                 return false; // keep going
+                             exportCancelled = true;
+                             return true;
                          } );
     result.font_diagnostics = exported.fontDiagnostics;
     result.exporterResult = exported.exporterResult;

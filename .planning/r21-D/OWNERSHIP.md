@@ -6,6 +6,7 @@
 - `src/gui/**`（vendored QGIS GUI 基线：修改须最小、可隔离、逐项记录）
 - `src/ui/**`
 - `src/agent/cartography/**`、`src/agent/layout_tools/**`（改动须配 R20 schema 三腿回归）
+- `src/agent/mapspec/**`（R1-P2-4 补入：MapSpec 编译链是 cartography/编图域的文档→布局编译器，本轨 P2-1/P1-1 修复所在；同样承担 R20 schema 三腿回归义务，与 C 轨经 registry 契约衔接）
 - `resources/**` 中 UI 图标/主题/QSS
 - `src/recipes/**` 仅制图模板 schema/消费端（与 C 轨同文件时先协调）
 - `docs/` 工作台/制图文档

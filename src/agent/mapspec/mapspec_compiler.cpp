@@ -34,6 +34,8 @@
 #include <qgssymbol.h>
 #include <qgsfillsymbol.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgscoordinatetransform.h>
+#include <qgscoordinatetransformcontext.h>
 #include <qgsvectorlayer.h>
 #include <qgsmaplayer.h>
 
@@ -585,6 +587,45 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
           LayoutService::instance().deleteLayout(
             QString::fromStdString( spec["layout_name"].asString() ) );
           return nullptr;
+        }
+        // R1-P1-1: MapSpec frame extents are NUMERIC in the PROJECT CRS's
+        // units (docs/cartography/migration-mapspec-v6.md: "frame extents
+        // stay numeric") — that is the documented unit contract, and the
+        // implicit fallback (project full extent) is in the same units.
+        // zoomToExtent() does no CRS transform and the renderer reads the
+        // extent in the item's CRS, so flipping the CRS under an
+        // untransformed extent reinterpreted the same rectangle in
+        // different units (project degrees read as 3857 metres),
+        // silently rendering the wrong region. Transform the extent into
+        // the declared CRS so the geometry is preserved; a spec that
+        // declares no extent gets the transformed project full extent.
+        //
+        // A project with NO CRS set falls back to EPSG:4326 — the same
+        // assumption the item's own crs() fallback makes (qgis
+        // layoutitemmap.cpp: an invalid item CRS reports the project CRS,
+        // and an unset project CRS defaults to WGS84 for map items).
+        QgsCoordinateReferenceSystem sourceCrs = QgsProject::instance()->crs();
+        if ( !sourceCrs.isValid() )
+          sourceCrs = QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) );
+        if ( sourceCrs.isValid() && declared.isValid() && sourceCrs != declared )
+        {
+          const QgsRectangle currentExt = compiledMap->extent();
+          if ( !currentExt.isNull() && currentExt.width() > 0.0 && currentExt.height() > 0.0 )
+          {
+            try
+            {
+              QgsCoordinateTransform transform( sourceCrs, declared, QgsProject::instance() );
+              transform.setBallparkTransformsAreAppropriate( true );
+              const QgsRectangle transformed = transform.transformBoundingBox( currentExt );
+              if ( !transformed.isNull() && transformed.width() > 0.0 && transformed.height() > 0.0 )
+                compiledMap->zoomToExtent( transformed );
+            }
+            catch ( const QgsCsException & )
+            {
+              // Untransformable extent: keep the item's extent as-is
+              // rather than blanking the map; the CRS is still applied.
+            }
+          }
         }
         compiledMap->setCrs( declared );
       }
