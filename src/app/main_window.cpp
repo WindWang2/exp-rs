@@ -423,6 +423,13 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // other's warm-up to null-catalog — a slowdown, not a crash.)
     sicnu::TaskCenter::instance().setCatalog( nullptr );
     sicnu::temporal::setWorkspaceCatalog( nullptr );
+    // Release the facade's edit-lease coordinator seam BEFORE this window
+    // (the coordinator) dies: the QgisApp singleton outlives windows, and a
+    // dangling coordinator would turn any later attribute-table editing
+    // into a use-after-free (same seam-lifetime contract as #1454/#1559).
+    // Guarded so a second window keeps the seam it wired.
+    if ( QgisApp::instance()->editLeaseCoordinator() == this )
+        QgisApp::instance()->setEditLeaseCoordinator( nullptr );
     m_projectContext.reset();
 }
 
@@ -533,6 +540,10 @@ void QgisDesktopWindow::setupMapCanvas()
     // Initialize QgisApp facade for ported tools (wire clipboard so cut/copy/paste work)
     auto *vectorLayerTools = new QgsGuiVectorLayerTools( this );
     QgisApp::initialize( m_mapCanvas, m_cadDock, vectorLayerTools, m_messageBar, this, m_clipboard );
+    // W1b: the facade (attribute table / ported tools) and QgsGuiVectorLayerTools
+    // bracket their edit sessions through this window's DataManager Edit
+    // Lease bookkeeping; register as the coordinator for those seams.
+    QgisApp::instance()->setEditLeaseCoordinator( this );
 
     // Map Tools Setup (Delegated to MapToolManager)
     m_toolManager = std::make_unique<MapToolManager>(this, m_mapCanvas, m_cadDock);

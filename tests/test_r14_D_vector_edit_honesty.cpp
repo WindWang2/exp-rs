@@ -1359,3 +1359,235 @@ TEST_CASE( "Edit menu session commands gate on the editing session (R19-03)",
     purgeProjectLayers();
   }
 }
+
+// ── R21-D W1b: every editing entry point keeps the DataManager Edit Lease
+// honest. The attribute table, the facade and the map-tool vector layer
+// tools used to commit/roll back directly on the provider, leaving the
+// lease acquired by the shell's toggleEditing() held forever (asset locked
+// against every other view) and the asset revision stale (siblings never
+// refresh). These cases drive those exact UI paths.
+
+#include <qgsvectorlayertools.h>
+
+namespace
+{
+/// Register the writable GeoJSON fixture as a Data Asset, surface its
+/// Display Layer (auto-display policy) and make it the canvas current
+/// layer — the same setup as the R16-D T07 WP-1 lease case.
+struct W1bAssetLayer
+{
+  sicnu::data::AssetId assetId;
+  QgsVectorLayer *layer = nullptr;
+  sicnu::data::DataManager *dataManager = nullptr;
+
+  bool setup( QgisDesktopWindow &window )
+  {
+    dataManager = &window.projectContext()->dataManager();
+    sicnu::data::SourceDescriptor source;
+    source.providerKey = QStringLiteral( "ogr" );
+    source.canonicalSource = vector_test_fixtures::syntheticGeoJsonPath();
+    const auto registered = dataManager->registerSource(
+      sicnu::data::RegisterRequest{ source } );
+    if ( registered.assetId.isNull() )
+      return false;
+    assetId = registered.assetId;
+    QTest::qWait( 100 ); // auto-display presents the asset on the main view
+    for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+    {
+      auto *v = qobject_cast<QgsVectorLayer *>( l );
+      const auto id = sicnu::data::AssetId::fromString(
+        v ? v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString()
+          : QString() );
+      if ( v && id && *id == assetId )
+      {
+        layer = v;
+        break;
+      }
+    }
+    if ( !layer )
+      return false;
+    window.mapCanvas()->setCurrentLayer( layer );
+    QTest::qWait( 20 );
+    return true;
+  }
+
+  /// Re-resolve the (possibly relocated — commitEditLease swaps Display
+  /// Layers synchronously) layer for the asset.
+  QgsVectorLayer *resolve()
+  {
+    for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+    {
+      auto *v = qobject_cast<QgsVectorLayer *>( l );
+      const auto id = sicnu::data::AssetId::fromString(
+        v ? v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString()
+          : QString() );
+      if ( v && id && *id == assetId )
+        return v;
+    }
+    return nullptr;
+  }
+
+  static bool makeModified( QgsVectorLayer *layer )
+  {
+    if ( !layer->isEditable() && !layer->startEditing() )
+      return false;
+    QgsFeature f( layer->fields() );
+    f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 3, 3 ) ) );
+    return layer->addFeature( f ) && layer->isModified();
+  }
+};
+
+void rollbackAllVectorLayers()
+{
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+    if ( auto *v = qobject_cast<QgsVectorLayer *>( l ) )
+      v->rollBack();
+}
+} // namespace
+
+TEST_CASE( "Facade toggleEditing stop releases the DataManager Edit Lease (W1b)",
+           "[app][vector_edit][w1b][lease]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  W1bAssetLayer fxAsset;
+  REQUIRE( fxAsset.setup( fx.window ) );
+  const auto revisionBefore =
+    fxAsset.dataManager->asset( fxAsset.assetId )->revision();
+
+  // Session starts through the shell menu (the lease owner).
+  fx.window.toggleEditing();
+  REQUIRE( fxAsset.layer->isEditable() );
+  REQUIRE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  REQUIRE( W1bAssetLayer::makeModified( fxAsset.layer ) );
+
+  // The attribute table's "Toggle Editing" routes through the facade
+  // (qgsattributetabledialog.cpp:930): commit + leave edit mode.
+  REQUIRE( QgisApp::instance()->toggleEditing( fxAsset.layer ) );
+
+  // The coordinated commit may relocate the Display Layer: re-resolve.
+  QgsVectorLayer *resolved = fxAsset.resolve();
+  REQUIRE( resolved != nullptr );
+  CHECK_FALSE( resolved->isEditable() );
+
+  // The session ended through a non-shell entry: the asset must not stay
+  // locked and the commit must have advanced the data-plane revision.
+  CHECK_FALSE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  CHECK( fxAsset.dataManager->asset( fxAsset.assetId )->revision().value() >
+         revisionBefore.value() );
+
+  rollbackAllVectorLayers();
+  purgeProjectLayers();
+}
+
+TEST_CASE( "Facade saveEdits with leaveEditable=false ends the lease (W1b)",
+           "[app][vector_edit][w1b][lease]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  W1bAssetLayer fxAsset;
+  REQUIRE( fxAsset.setup( fx.window ) );
+  const auto revisionBefore =
+    fxAsset.dataManager->asset( fxAsset.assetId )->revision();
+
+  fx.window.toggleEditing();
+  REQUIRE( fxAsset.layer->isEditable() );
+  REQUIRE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  REQUIRE( W1bAssetLayer::makeModified( fxAsset.layer ) );
+
+  // The attribute table's save cascade saves referencing layers with
+  // leaveEditable semantics; the explicit close
+  // (qgsattributetabledialog.cpp:706) ends the session.
+  REQUIRE( QgisApp::instance()->saveEdits( fxAsset.layer,
+                                           /*leaveEditable=*/false,
+                                           /*triggerRepaint=*/false ) );
+
+  QgsVectorLayer *resolved = fxAsset.resolve();
+  REQUIRE( resolved != nullptr );
+  CHECK_FALSE( resolved->isEditable() );
+  CHECK_FALSE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  CHECK( fxAsset.dataManager->asset( fxAsset.assetId )->revision().value() >
+         revisionBefore.value() );
+
+  rollbackAllVectorLayers();
+  purgeProjectLayers();
+}
+
+TEST_CASE( "Facade batch saveEdits keeps the session under a fresh lease (W1b)",
+           "[app][vector_edit][w1b][lease]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  W1bAssetLayer fxAsset;
+  REQUIRE( fxAsset.setup( fx.window ) );
+  const auto revisionBefore =
+    fxAsset.dataManager->asset( fxAsset.assetId )->revision();
+
+  fx.window.toggleEditing();
+  REQUIRE( fxAsset.layer->isEditable() );
+  REQUIRE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  REQUIRE( W1bAssetLayer::makeModified( fxAsset.layer ) );
+
+  // The attribute table's Save button fires the no-arg batch overload
+  // (qgsattributetabledialog.cpp:299): commit everything editable, then
+  // re-enter edit mode — which must happen under a re-acquired lease.
+  QgisApp::instance()->saveEdits();
+
+  QgsVectorLayer *resolved = fxAsset.resolve();
+  REQUIRE( resolved != nullptr );
+  CHECK( resolved->isEditable() );
+  CHECK( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  CHECK( fxAsset.dataManager->asset( fxAsset.assetId )->revision().value() >
+         revisionBefore.value() );
+
+  rollbackAllVectorLayers();
+  purgeProjectLayers();
+}
+
+TEST_CASE( "Map-tool vector layer tools bracket the Edit Lease (W1b)",
+           "[app][vector_edit][w1b][lease][tools]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  W1bAssetLayer fxAsset;
+  REQUIRE( fxAsset.setup( fx.window ) );
+  const auto revisionBefore =
+    fxAsset.dataManager->asset( fxAsset.assetId )->revision();
+
+  // Ported map tools start sessions through QgsGuiVectorLayerTools (the
+  // QgsVectorLayerTools installed at main_window.cpp:534) — that path must
+  // acquire the lease exactly like the shell's toggleEditing().
+  QgsVectorLayerTools *tools = QgisApp::instance()->vectorLayerTools();
+  REQUIRE( tools != nullptr );
+  REQUIRE( tools->startEditing( fxAsset.layer ) );
+  CHECK( fxAsset.layer->isEditable() );
+  CHECK( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+
+  REQUIRE( W1bAssetLayer::makeModified( fxAsset.layer ) );
+
+  // Stop-editing asks the user (modal): answer Save. The recorder runs the
+  // nested loop the same way the other modal cases in this file do.
+  QStringList modals;
+  armModalRecorder( &modals, QMessageBox::Save, 4 );
+  CHECK( tools->stopEditing( fxAsset.layer, /*allowCancel=*/false ) );
+  QTest::qWait( 50 );
+  REQUIRE( anyModalContains( modals, QStringLiteral( "save" ) ) );
+
+  QgsVectorLayer *resolved = fxAsset.resolve();
+  REQUIRE( resolved != nullptr );
+  CHECK_FALSE( resolved->isEditable() );
+  CHECK_FALSE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  CHECK( fxAsset.dataManager->asset( fxAsset.assetId )->revision().value() >
+         revisionBefore.value() );
+
+  rollbackAllVectorLayers();
+  purgeProjectLayers();
+}

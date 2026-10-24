@@ -26,6 +26,7 @@
 #include <qgsmapoverviewcanvas.h>
 
 #include "map_tools/measure_tool.h"
+#include "qgis_app_facade.h" // SicnuEditLeaseCoordinator (W1b facade seam)
 
 class QDomDocument;
 class QMenuBar;
@@ -175,7 +176,7 @@ class WorkbenchStateModel;
 
 class ExprsPluginShellUi;
 
-class QgisDesktopWindow : public QMainWindow
+class QgisDesktopWindow : public QMainWindow, public SicnuEditLeaseCoordinator
 {
     Q_OBJECT
 
@@ -553,12 +554,20 @@ private:
      * onSessionEmptied hook (whether the read then succeeds or fails).
      */
     void resetSessionStoryState();
-    /** Acquire the exclusive Edit Lease for an Asset-backed vector layer. */
-    bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning = true);
-    /** Commit the Edit Lease (advances Asset Revision, refreshes other layers). */
-    void commitEditLease(QgsVectorLayer *vlayer);
-    /** Release the Edit Lease without advancing the revision. */
-    void rollbackEditLease(QgsVectorLayer *vlayer);
+    /**
+     * Acquire the exclusive Edit Lease for an Asset-backed vector layer.
+     * The one-argument overload overrides SicnuEditLeaseCoordinator (W1b):
+     * the facade/attribute-table/map-tool editing paths call it through the
+     * QgisApp seam; it forwards here with the conflict dialog enabled.
+     */
+    bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning);
+    bool acquireEditLease(QgsVectorLayer *vlayer) override;
+    /** Commit the Edit Lease (advances Asset Revision, refreshes other layers).
+     *  Overrides SicnuEditLeaseCoordinator::commitEditLease (W1b). */
+    void commitEditLease(QgsVectorLayer *vlayer) override;
+    /** Release the Edit Lease without advancing the revision.
+     *  Overrides SicnuEditLeaseCoordinator::rollbackEditLease (W1b). */
+    void rollbackEditLease(QgsVectorLayer *vlayer) override;
     /** Drop a stored Edit Lease without touching the asset (layer removal). */
     void releaseEditLeaseForLayer(const QString &qgisLayerId);
     /** Set every Display Layer of an asset read-only except the edit owner. */

@@ -666,3 +666,9 @@ r6_dev.cmd
 .planning/zcode-r20-05/red-drivers/*
 !.planning/zcode-r20-05/red-drivers/*.cpp
 !.planning/zcode-r20-05/red-drivers/*.md
+
+# R21-D track (ZCode Qt/QGIS workbench, map interaction, cartography & UI
+# consistency) planning artifacts (markdown only, same pattern as r20-04).
+!.planning/r21-D/
+.planning/r21-D/*
+!.planning/r21-D/*.md
