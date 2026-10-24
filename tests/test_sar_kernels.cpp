@@ -442,3 +442,68 @@ TEST_CASE( "Backscatter raster kernel rejects incidence angles outside (0,90)",
     for ( float v : outC )
         REQUIRE( std::isnan( v ) );
 }
+
+
+// r21-A / AG3-1 — SICNU_DEM_UNIT resolution: feet and decimeter DEMs must
+// scale to metres before any SAR geometry kernel consumes the heights (the
+// geocode / terrain_mask / remove_topographic_phase operators used to read
+// raw values and displace geocoding by 3.28x/10x).
+TEST_CASE( "demUnitScaleToMetres resolves SICNU_DEM_UNIT declarations (AG3-1)",
+           "[sar][metadata][r21a]" )
+{
+    ensureApp();
+    ensureGdalInit();
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    const auto makeDem = [&]( const char *unit ) {
+        const QString path = tmp.filePath(
+            QStringLiteral( "dem_%1.tif" ).arg( unit ? unit : "none" ) );
+        GDALDriverH drv = GDALGetDriverByName( "GTiff" );
+        REQUIRE( drv );
+        GDALDatasetH ds = GDALCreate( drv, path.toUtf8().constData(), 2, 2, 1, GDT_Float32, nullptr );
+        REQUIRE( ds );
+        if ( unit )
+            GDALSetMetadataItem( ds, "SICNU_DEM_UNIT", unit, nullptr );
+        GDALClose( ds );
+        return path;
+    };
+
+    {
+        GdalDatasetWrapper ds;
+        REQUIRE( ds.open( makeDem( "feet" ) ) );
+        QString applied;
+        REQUIRE( demUnitScaleToMetres( ds, &applied ) == Catch::Approx( 0.3048 ).margin( 1e-12 ) );
+        CHECK( applied == QLatin1String( "feet" ) );
+    }
+    {
+        GdalDatasetWrapper ds;
+        REQUIRE( ds.open( makeDem( "decimeters" ) ) );
+        QString applied;
+        REQUIRE( demUnitScaleToMetres( ds, &applied ) == Catch::Approx( 0.1 ).margin( 1e-12 ) );
+        CHECK( applied == QLatin1String( "decimeters" ) );
+    }
+    {
+        GdalDatasetWrapper ds;
+        REQUIRE( ds.open( makeDem( "meters" ) ) );
+        QString applied;
+        REQUIRE( demUnitScaleToMetres( ds, &applied ) == Catch::Approx( 1.0 ).margin( 1e-12 ) );
+        CHECK( applied == QLatin1String( "meters" ) );
+    }
+    {
+        // Undeclared -> metres, unit name stays "meters".
+        GdalDatasetWrapper ds;
+        REQUIRE( ds.open( makeDem( nullptr ) ) );
+        QString applied;
+        REQUIRE( demUnitScaleToMetres( ds, &applied ) == Catch::Approx( 1.0 ).margin( 1e-12 ) );
+        CHECK( applied == QLatin1String( "meters" ) );
+    }
+    {
+        // Unknown unit -> assumed metres, name says so.
+        GdalDatasetWrapper ds;
+        REQUIRE( ds.open( makeDem( "cubits" ) ) );
+        QString applied;
+        REQUIRE( demUnitScaleToMetres( ds, &applied ) == Catch::Approx( 1.0 ).margin( 1e-12 ) );
+        CHECK( applied.contains( QLatin1String( "assumed" ) ) );
+    }
+}

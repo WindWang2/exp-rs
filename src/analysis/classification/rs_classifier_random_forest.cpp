@@ -110,6 +110,22 @@ cv::Mat RsRandomForestBackend::predictProbabilities( const cv::Mat &X ) const
                  << mClassLabels.total() << "trained vs" << nClasses << "votes columns";
       return probs;
     }
+    // The promised row-0 identity check: count alone would pass a model
+    // whose vote columns follow a different class order than the ids
+    // captured at fit() (a foreign OpenCV build or a hand-paired sidecar),
+    // silently mapping every column to the wrong class id.
+    for ( int c = 0; c < nClasses; ++c )
+    {
+      if ( votes.at<int>( 0, c ) != mClassLabels.at<int>( c, 0 ) )
+      {
+        qWarning() << "RsRandomForestBackend::predictProbabilities — votes header"
+                   << "class id" << votes.at<int>( 0, c ) << "at column" << c
+                   << "does not match trained label" << mClassLabels.at<int>( c, 0 )
+                   << "; refusing to map columns speculatively";
+        probs.release();
+        return probs;
+      }
+    }
 
     const int nSamples = votes.rows - 1;
     probs = cv::Mat::zeros( nSamples, nClasses, CV_32F );

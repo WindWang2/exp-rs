@@ -13,7 +13,9 @@
 //           = cos α · cos θ0 + sin α · sin θ0 · cos(β − φ)
 //     with α = local slope, β = downslope aspect, φ = look azimuth (heading).
 //
-//   terrain-flattened gamma0 = sigma0 · cos θ0 / cos θi
+//   terrain-flattened gamma0 = sigma0 · sin θi / sin θ0   (#1146: the
+//   cosθ0/cosθi form is the optical illumination correction and leaves a
+//   tanθ0/tanθi radiometry bias, up to ~4x on fore-slopes)
 //
 //   layover / shadow masking: cos θi ≤ cos θmax (θi ≥ θmax, default 85°) or
 //   the layover condition (downslope facing away steeper than the look) is
@@ -41,7 +43,7 @@ struct TerrainCorrectionOptions
                                 ///< heading; derive it with lookAzimuthFromHeading)
   double headingDeg = 0.0;      ///< platform flight heading (metadata stamp only)
   double flattenCosThetaMax = 0.0871557; ///< cos(85°): θi beyond this → invalid
-  bool applyFlattening = true;  ///< gamma0 = sigma0 · cosθ0/cosθi
+  bool applyFlattening = true;  ///< gamma0 = sigma0 · sinθi/sinθ0 (#1146)
   bool applyShadowMask = true;  ///< write the validity mask band
   bool writeIncidenceBand = false; ///< append the local incidence angle (deg)
   double demUnitScale = 1.0;    ///< DEM unit → meters (SICNU_DEM_UNIT aware)

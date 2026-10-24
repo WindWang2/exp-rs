@@ -813,3 +813,115 @@ TEST_CASE("quac maps a ±Inf sample to NaN on the output band [r18a][r1]",
     REQUIRE(std::isfinite(o1[0]));
     REQUIRE(std::isfinite(o1[5]));
 }
+
+// ===========================================================================
+// r21-A / AG1-1 — DOS2 with a non-physical airmass must refuse instead of
+// publishing an all-NaN raster as a successful surface-reflectance product
+// (the in-memory dos2() kernel always refused; the streaming paths didn't).
+// ===========================================================================
+
+TEST_CASE("processFileDos refuses DOS2 with non-physical airmass (AG1-1)", "[atm][gdal][r21a]")
+{
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const float badAirmasses[] = {0.0f, -1.0f,
+                                  std::numeric_limits<float>::quiet_NaN(),
+                                  std::numeric_limits<float>::infinity()};
+    for (const float bad : badAirmasses)
+    {
+        const QString src = dir.filePath(QStringLiteral("airmass_src.tif"));
+        const QString dst = dir.filePath(QStringLiteral("airmass_out.tif"));
+        GDALDriverH drv = GDALGetDriverByName("GTiff");
+        REQUIRE(drv);
+        GDALDatasetH ds = GDALCreate(drv, src.toUtf8().constData(), 3, 1, 1, GDT_Float32, nullptr);
+        REQUIRE(ds);
+        GDALRasterBandH b = GDALGetRasterBand(ds, 1);
+        std::vector<float> dn = {10000.0f, 3000.0f, 6000.0f};
+        REQUIRE(GDALRasterIO(b, GF_Write, 0, 0, 3, 1, dn.data(), 3, 1, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+
+        RadiometricCalibration::BandCoefficients c;
+        c.reflMult = 2e-5;
+        c.reflAdd = 0.0;
+        c.hasReflectance = true;
+        QString err;
+        REQUIRE_FALSE(AtmosphericCorrection::processFileDos(
+            src, dst, 1, AtmosphericCorrection::Dos2, c,
+            RadiometricCalibration::SensorType::Landsat, 30.0, bad, &err));
+        CHECK(!err.isEmpty());
+        // Refusal must not publish a product.
+        CHECK(!QFile::exists(dst));
+    }
+}
+
+TEST_CASE("processFileDos keeps a valid DOS2 airmass working (AG1-1 control)", "[atm][gdal][r21a]")
+{
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString src = dir.filePath(QStringLiteral("airmass_ok_src.tif"));
+    const QString dst = dir.filePath(QStringLiteral("airmass_ok_out.tif"));
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    REQUIRE(drv);
+    GDALDatasetH ds = GDALCreate(drv, src.toUtf8().constData(), 3, 1, 1, GDT_Float32, nullptr);
+    REQUIRE(ds);
+    GDALRasterBandH b = GDALGetRasterBand(ds, 1);
+    std::vector<float> dn = {10000.0f, 3000.0f, 6000.0f};
+    REQUIRE(GDALRasterIO(b, GF_Write, 0, 0, 3, 1, dn.data(), 3, 1, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    RadiometricCalibration::BandCoefficients c;
+    c.reflMult = 2e-5;
+    c.reflAdd = 0.0;
+    c.hasReflectance = true;
+    QString err;
+    REQUIRE(AtmosphericCorrection::processFileDos(
+        src, dst, 1, AtmosphericCorrection::Dos2, c,
+        RadiometricCalibration::SensorType::Landsat, 30.0, 2.0f, &err));
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(dst));
+    std::vector<float> result(3, -999.0f);
+    REQUIRE(out.readBandData(1, result.data(), 3, 1));
+    // T = exp(-0.1*2) = 0.8187; dark level 0.12; rho_surf = (rho-0.12+0.01)/T
+    REQUIRE_THAT(result[0], Catch::Matchers::WithinAbs((0.40f - 0.11f) / 0.8187f, 0.01f));
+}
+
+
+// r21-A / R1-3 control — the airmass refusal is scoped to DOS2 (the only
+// method that reads it); DOS1 must still run when a caller passes a
+// non-physical airmass value it ignores.
+TEST_CASE("processFileDos keeps DOS1 running with a non-physical airmass (R1-3 control)",
+          "[atm][gdal][r21a]")
+{
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString src = dir.filePath(QStringLiteral("dos1_src.tif"));
+    const QString dst = dir.filePath(QStringLiteral("dos1_out.tif"));
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    REQUIRE(drv);
+    GDALDatasetH ds = GDALCreate(drv, src.toUtf8().constData(), 3, 1, 1, GDT_Float32, nullptr);
+    REQUIRE(ds);
+    GDALRasterBandH b = GDALGetRasterBand(ds, 1);
+    std::vector<float> dn = {10000.0f, 3000.0f, 6000.0f};
+    REQUIRE(GDALRasterIO(b, GF_Write, 0, 0, 3, 1, dn.data(), 3, 1, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    RadiometricCalibration::BandCoefficients c;
+    c.reflMult = 2e-5;
+    c.reflAdd = 0.0;
+    c.hasReflectance = true;
+    QString err;
+    // Method Dos1 + airmass 0.0: must succeed (airmass is unused there).
+    REQUIRE(AtmosphericCorrection::processFileDos(
+        src, dst, 1, AtmosphericCorrection::Dos1, c,
+        RadiometricCalibration::SensorType::Landsat, 30.0, 0.0f, &err));
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(dst));
+    std::vector<float> result(3, -999.0f);
+    REQUIRE(out.readBandData(1, result.data(), 3, 1));
+    // Same arithmetic as the DOS1 reference case (dark level 0.12).
+    REQUIRE_THAT(result[0], Catch::Matchers::WithinAbs(0.29f, 0.005f));
+}

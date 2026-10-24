@@ -9,6 +9,7 @@
 
 #include <QMap>
 #include <QPoint>
+#include <QReadWriteLock>
 #include <QSet>
 #include <QString>
 #include <QVector>
@@ -30,6 +31,15 @@ class QGIS_ANALYSIS_EXPORT RsSegmentMap
     }
 
     RsSegmentMap( QVector<quint32> labels, int width, int height );
+
+    /// Copy/move carry the label image only; the lazily-built caches are
+    /// dropped and rebuilt on demand in the destination. The implicit
+    /// operations would also copy the guard lock and any half-built caches —
+    /// neither is meaningful in a fresh map.
+    RsSegmentMap( const RsSegmentMap &other );
+    RsSegmentMap &operator=( const RsSegmentMap &other );
+    RsSegmentMap( RsSegmentMap &&other ) noexcept;
+    RsSegmentMap &operator=( RsSegmentMap &&other ) noexcept;
 
     /// Load from a uint32 GeoTIFF label image written by OTB or similar.
     /// Returns an empty map on failure.
@@ -73,10 +83,7 @@ class QGIS_ANALYSIS_EXPORT RsSegmentMap
     int pixelCount( quint32 segmentId ) const;
 
     /// 64-bit safe pixel count
-    int64_t pixelCount64( quint32 segmentId ) const
-    {
-        return static_cast<int64_t>(pixelCount( segmentId ));
-    }
+    int64_t pixelCount64( quint32 segmentId ) const;
 
     /// Raw label buffer (read-only).
     const QVector<quint32> &labels() const { return mLabels; }
@@ -94,8 +101,17 @@ class QGIS_ANALYSIS_EXPORT RsSegmentMap
     int64_t mWidth = 0;
     int64_t mHeight = 0;
 
+    /// The lazily-built caches below are written from const accessors, and
+    /// RsObjectHierarchy::level() hands interior const references to callers
+    /// that QGIS may drive from render threads (#1591). All cache state is
+    /// therefore guarded by mCacheLock; once a cache flag is set under the
+    /// write lock its map is immutable, so post-build reads need no lock.
+    /// The label image itself is immutable after construction.
+    mutable QReadWriteLock mCacheLock;
     /// Size-only cache: segmentId → pixel count (cheap, built once).
-    mutable QMap<quint32, int> mSizeCache;
+    /// int64_t: the class advertises 64-bit pixel totals (#480/#497) — an
+    /// int counter overflows past 2^31 pixels in one segment.
+    mutable QMap<quint32, int64_t> mSizeCache;
     mutable bool mSizeCacheBuilt = false;
     /// Per-segment coords, filled lazily only when pixelCoords() is called.
     mutable QMap<quint32, QVector<QPoint>> mCoordsCache;

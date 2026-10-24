@@ -40,6 +40,38 @@ QString datasetMeta( const GdalDatasetWrapper &ds, const char *key )
   return value ? QString::fromUtf8( value ) : QString();
 }
 
+double demUnitScaleFromName( const QString &declaredUnit, QString *appliedUnit )
+{
+    // Trim: a declared " feet" (leading/trailing whitespace from a hand-edited
+    // or generated sidecar) must resolve like "feet", not fall through to the
+    // assumed-metres branch.
+    const QString unit = declaredUnit.trimmed().toLower();
+    double scale = 1.0;
+    QString resolved = QStringLiteral( "meters" );
+    if ( unit == QLatin1String( "feet" ) )
+    {
+        scale = 0.3048;
+        resolved = unit;
+    }
+    else if ( unit == QLatin1String( "decimeters" ) )
+    {
+        scale = 0.1;
+        resolved = unit;
+    }
+    else if ( !unit.isEmpty() && unit != QLatin1String( "meters" ) )
+    {
+        resolved = QStringLiteral( "meters (assumed; declared '" ) + unit + "')";
+    }
+    if ( appliedUnit )
+        *appliedUnit = resolved;
+    return scale;
+}
+
+double demUnitScaleToMetres( const GdalDatasetWrapper &ds, QString *appliedUnit )
+{
+    return demUnitScaleFromName( datasetMeta( ds, "SICNU_DEM_UNIT" ), appliedUnit );
+}
+
 double linearToDb( double power )
 {
   return 10.0 * std::log10( power );

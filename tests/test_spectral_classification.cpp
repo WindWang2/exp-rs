@@ -892,3 +892,37 @@ TEST_CASE( "rs:continuum_removal rejects duplicate WAVELENGTH values (#700)", "[
     RSOperatorContext ctx;
     REQUIRE_THROWS( op.run( params, ctx ) );
 }
+
+// ===========================================================================
+// r21-A / AG2-F2 — a degenerate (zero) continuum must surface as NoData,
+// never as a fabricated on-continuum 1.0.
+// ===========================================================================
+
+TEST_CASE( "ContinuumRemoval: zero spectrum does not fabricate 1.0 values (AG2-F2)", "[continuum][r21a]" )
+{
+    // All-zero (finite) reflectance: hull and tie-line are 0, so the ratio
+    // is 0/0 — undefined. The sibling analysis kernel
+    // (src/analysis/hyperspectral/continuum_removal.cpp) emits NaN here; the
+    // processing kernel used to emit 1.0 ("on continuum") per band, silently
+    // inventing data for dark/black targets (rs:continuum_removal operator).
+    std::vector<float> s = { 0.0f, 0.0f, 0.0f };
+    std::vector<float> out( 3, 123.0f );
+    bool ok = SpectralClassification::continuumRemoval( s.data(), out.data(), 3, NODATA );
+    REQUIRE( ok );
+    for ( int i = 0; i < 3; ++i )
+        REQUIRE( out[i] == NODATA );
+}
+
+TEST_CASE( "ContinuumRemoval: zero hull endpoint voids only the degenerate band (AG2-F2)", "[continuum][r21a]" )
+{
+    // Left endpoint 0, interior rising: at band 0 the continuum equals the
+    // sample (0), so the ratio is undefined there; every other band keeps a
+    // well-defined ratio against the hull.
+    std::vector<float> s = { 0.0f, 0.5f, 1.0f };
+    std::vector<float> out( 3, 123.0f );
+    bool ok = SpectralClassification::continuumRemoval( s.data(), out.data(), 3, NODATA );
+    REQUIRE( ok );
+    REQUIRE( out[0] == NODATA );
+    REQUIRE( out[1] == Approx( 1.0f ).margin( 1e-5 ) );
+    REQUIRE( out[2] == Approx( 1.0f ).margin( 1e-5 ) );
+}
