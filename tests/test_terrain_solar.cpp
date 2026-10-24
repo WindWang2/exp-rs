@@ -166,10 +166,12 @@ TEST_CASE( "sunPositionDeg matches tabulated solar geometry within ±1.5°",
     CHECK_FALSE( sunPositionDeg( 0, 12.0, 40.0, &az, &elev ) );
     CHECK_FALSE( sunPositionDeg( 367, 12.0, 40.0, &az, &elev ) );
 
-    // Input validation.
+    // Input validation: 366 is now a VALID day (leap-year Dec 31, clamped
+    // onto the Spencer series); only hour/latitude domains and day 0/367
+    // stay refused.
     double a2 = 0.0;
     double e2 = 0.0;
-    CHECK_FALSE( sunPositionDeg( 366, 12.0, 40.0, &a2, &e2 ) );
+    CHECK( sunPositionDeg( 366, 12.0, 40.0, &a2, &e2 ) );
     CHECK_FALSE( sunPositionDeg( 81, 25.0, 40.0, &a2, &e2 ) );
     CHECK_FALSE( sunPositionDeg( 81, 12.0, 91.0, &a2, &e2 ) );
 }

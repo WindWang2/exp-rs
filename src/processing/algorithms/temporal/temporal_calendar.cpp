@@ -335,8 +335,11 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
       // onto an observation exactly at t - radius, and the in-loop fabs
       // check filters anything actually outside.
       const double radius = options.maxWindowDays;
-      const int start = lowerBoundObs( tDays, nObs, t - radius ) - 1;
-      const int endExclusive = lowerBoundObs( tDays, nObs, t + radius );
+      // lowerBoundObs(x) is the last index at or before x. An observation
+      // exactly at t - radius is a window member (the in-loop |Δ| <= radius
+      // check keeps it), so the scan starts AT that index — not after it.
+      const int start = lowerBoundObs( tDays, nObs, t - radius );
+      const int endExclusive = lowerBoundObs( tDays, nObs, t + radius ) + 1;
       double sum = 0.0;
       int count = 0;
       bool exactHit = false;
