@@ -2,7 +2,7 @@
 
 **Base**: `911e0b17a3533ca0d79c1b68b000d6052c4c3c61`（执行时 origin/master，gh api compare 双确认 identical）
 **Head**: `02ce1622ee46448a819246fe3b81e53faa840a9f`（19 commits，独立 worktree `exp-rs-r21-C-20261023T185308Z`）
-**状态**：本地全部完成（RED/GREEN ×2、R1+R2 审查闭环）；**push/PR 被环境网络分区阻塞**（github.com:443 不可达，git fetch/push 超时；api.github.com 可达但 PR 需要远端分支）。阻塞详情与复现见文末。
+**PR**: https://github.com/WindWang2/exp-rs/pull/1675（OPEN，非草稿；不等待 CI、不自动合并）
 
 ## 读过的 PR / issues
 - PR：#1670（R20-03 全部修复，反回滚守卫逐点复核在位）、#1666/#1668/#1669/#1671/#1672（R20 兄弟轨，只读）。Open PR=0。

@@ -6,10 +6,10 @@
 - **21 commits**：3 RED 网 + 9 修复 + 1 UB 修复 + 5 R1 修复 + 1 R2 修复 + 2 文档
 - **Head**: `8480611326`
 
-## PR 状态（如实记录）
-- **push 被环境网络分区阻塞**：`github.com:443` 不可达（`git fetch/push` TLS 超时/挂起，`curl https://github.com` 超时；`api.github.com` 与 `gh api` 正常）。后台重试 8 次（每次 120s 超时）未见恢复。**未创建 PR**（PR 需远端分支存在）。
-- 恢复动作（网络恢复后一条命令）：`git push -u origin agent/r21-c-pi-mcp-harness-20261023T185308Z && gh pr create -R WindWang2/exp-rs --base master --head agent/r21-c-pi-mcp-harness-20261023T185308Z --title 'R21-C: Pi/MCP Harness、科学决策、Workflow 与插件工具契约 — fail-closed 加固' --body-file .planning/r21-C/PR_BODY.md`
-- PR 正文已定稿：`.planning/r21-C/PR_BODY.md`（base/head SHA、读过的 PR/issues、工作包、回归/基准、review 修复次数、剩余风险、白名单）。
+## PR 状态
+- **PR #1675: https://github.com/WindWang2/exp-rs/pull/1675**（OPEN，非草稿，22 commits，head=157c1fe079 → base=master 911e0b17a3；不等待 CI、不自动合并、不替用户合并）
+- 提交过程中 push 曾遇网络分区（github.com:443 不可达，git fetch/push TLS 挂起；api.github.com/gh api 正常），后台重试循环第 1 次即恢复并成功推送，随后 gh pr create 成功。
+- PR 正文：`.planning/r21-C/PR_BODY.md`（base/head SHA、读过的 PR/issues、工作包、回归/基准、review 修复次数、剩余风险、白名单）。
 
 ## 头条成果
 1. **W8-red 归因翻转（本轨最大发现）**：R20-03 记录为"master 同构、疑 fixture/环境"的 plugin 诊断码族 **25 个失败断言实为测试代码 UB**——`PluginRegistry::diagnostics()` 按值返回快照（#1449 有意设计），13 处 `for (item : registry.diagnostics().items())` 迭代 range-init 语句结束时即析构的临时内的 vector（编译器 -Wdangling 警告早已指出，无人处理）。修复后 **5 个二进制从 25 败到全绿**（exprs_plugin_loader 566/38、halffail 69/9、unload_order 34/4、boundary_r4 35/8、**host_process 371/34 含 R20-03 记录的 sawTypedRefusal**、channel_parity 10/3）。
