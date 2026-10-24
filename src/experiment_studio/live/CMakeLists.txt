@@ -30,6 +30,16 @@ target_link_libraries(sicnu_experiment_studio_live
     Sicnu::experiment          # ExperimentStore / MatrixLedger
     Sicnu::experiment_debugger # DirectoryEvidenceSource + divergence analyzer
     Sicnu::faultlab            # real sandbox scenario runner
+    # R21-E (#1613): the faultlab verifier hook runs the referenced lab rules
+    # over the materialized faulted artifact (OutputVerifier teaching seam).
+    # HONEST TRADE-OFF (R1b P2): sicnu_agent PUBLIC-links Qt6::Widgets /
+    # Qt6::Network / qgis_gui, so this composition layer transitively gains
+    # GUI + network code it did not have before. The grader lives inside
+    # sicnu_agent and moving it out is a maintainer-scale refactor; the
+    # alternative (duplicating the teaching grader) is a second truth. The
+    # direct-link guard below stays unchanged; the transitive arrival is
+    # deliberate and recorded here + .planning/r21-E/CROSS_TRACK_FINDINGS.md.
+    sicnu_agent
     Sicnu::experiment_capsule  # CapsuleBuilder / CapsuleIO / CapsuleReadiness
 )
 

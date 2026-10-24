@@ -21,13 +21,21 @@
 #include "faultlab/fault_types.h"
 #include "study/bridge/study_execution_plane.h"
 #include "study/study_spatial.h"
+// R21-E (#1613): the faultlab verifier hook lives HERE by design — the
+// jsoncpp-only faultlab leaf cannot link the grading stack, so this
+// composition layer materializes the faulted artifact and runs the
+// referenced lab rules through the OutputVerifier teaching seam.
+#include "agent/output_verifier.h"
+#include "geospatial/raster/raster_writer.h"
 
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QTemporaryDir>
 
 #include <json/json.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -42,6 +50,141 @@ using sicnu::study::GdalRasterDifferenceSummarizer;
 
 namespace
 {
+
+/// R21-E (#1613): the artifact-level verifier hook installed into
+/// FaultRunOptions. The faultlab leaf cannot link the grading stack, so THIS
+/// composition layer materializes the faulted grid to a staged GeoTIFF (the
+/// geospatial writer contract: temp → write → fsync → validate → publish)
+/// and runs the referenced lab rules through the OutputVerifier teaching
+/// seam. The scenario's must_fail_assertions must all fire on the faulted
+/// artifact — a fault the grader cannot catch must be visible, never passed.
+sicnu::faultlab::FaultVerifierOutcome labFaultVerifierHook(
+    const sicnu::faultlab::FaultGrid &grid, const sicnu::faultlab::FaultVerifierSpec &spec )
+{
+    sicnu::faultlab::FaultVerifierOutcome outcome;
+    if ( grid.width <= 0 || grid.height <= 0 || grid.bands.empty() )
+    {
+        outcome.note = QStringLiteral( "faulted grid is empty — nothing to grade" ).toStdString();
+        return outcome; // ran=false → the runner fails closed
+    }
+
+    QTemporaryDir dir;
+    if ( !dir.isValid() )
+    {
+        outcome.note = QStringLiteral( "cannot create a verifier temp dir" ).toStdString();
+        return outcome;
+    }
+    const QString target = dir.filePath( QStringLiteral( "faulted_artifact.tif" ) );
+
+    try
+    {
+        std::vector<sicnu::geo::RasterBandSpec> bandSpecs;
+        bandSpecs.reserve( grid.bands.size() );
+        bool scaleIdentity = true;
+        for ( const sicnu::faultlab::BandSpec &band : grid.bands )
+        {
+            sicnu::geo::RasterBandSpec bandSpec;
+            bandSpec.dtype = "Float64"; // fault samples are doubles — no
+                                        // precision slip between grid and grade
+            bandSpec.role = band.role;
+            bandSpec.hasNoData = grid.hasNoData;
+            bandSpec.noDataValue = grid.noDataValue;
+            // The fault grid's samples are PHYSICAL values; the writer's
+            // contract separates stored from physical (scale/offset). Carry
+            // the band's transform as metadata so a reader recovers the
+            // same physical values the grader must judge (R1b P3). A
+            // degenerate scale (0) would make the inverse unrecoverable —
+            // the caller cannot honor the declaration, so it fails closed.
+            if ( band.scale == 0.0 || !std::isfinite( band.scale ) ||
+                 !std::isfinite( band.offset ) )
+            {
+                outcome.note = "faulted band '" + band.role +
+                               "' carries a degenerate scale/offset transform";
+                return outcome;
+            }
+            if ( band.scale != 1.0 || band.offset != 0.0 )
+            {
+                bandSpec.hasScale = true;
+                bandSpec.scale = band.scale;
+                bandSpec.hasOffset = true;
+                bandSpec.offset = band.offset;
+                scaleIdentity = false;
+            }
+            bandSpecs.push_back( bandSpec );
+        }
+        sicnu::geo::RasterWriteOptions writeOptions;
+        writeOptions.overwrite = true; // temp dir is private; publish is ours
+        sicnu::geo::RasterWriter writer =
+            sicnu::geo::RasterWriter::create( target.toStdString(), grid.width, grid.height,
+                                              bandSpecs, writeOptions );
+        writer.setGeotransform( { grid.geoTransform[ 0 ], grid.geoTransform[ 1 ],
+                                  grid.geoTransform[ 2 ], grid.geoTransform[ 3 ],
+                                  grid.geoTransform[ 4 ], grid.geoTransform[ 5 ] } );
+        writer.setCrs( sicnu::geo::Crs::fromAuthid( grid.crsId ) );
+        const sicnu::geo::RasterWindow full{ 0, 0, grid.width, grid.height };
+        std::vector<double> stored;
+        for ( std::size_t band = 0; band < grid.bands.size(); ++band )
+        {
+            const std::vector<double> &samples = grid.bands[ band ].samples;
+            if ( samples.size() != grid.sampleCount() )
+            {
+                outcome.note = "faulted band '" + grid.bands[ band ].role +
+                               "' does not carry width*height samples";
+                return outcome;
+            }
+            const sicnu::faultlab::BandSpec &spec = grid.bands[ band ];
+            const double *values = samples.data();
+            if ( !scaleIdentity )
+            {
+                // stored = (physical - offset) / scale, so reading the band
+                // back (stored*scale + offset) yields the physical samples.
+                stored.resize( samples.size() );
+                for ( std::size_t i = 0; i < samples.size(); ++i )
+                    stored[ i ] = ( samples[ i ] - spec.offset ) / spec.scale;
+                values = stored.data();
+            }
+            writer.writeWindow( static_cast<int>( band ) + 1, full, values );
+        }
+        writer.finalize();
+    }
+    catch ( const sicnu::geo::GeoError &e )
+    {
+        outcome.note = std::string( "cannot materialize the faulted artifact: " ) + e.what();
+        return outcome;
+    }
+
+    const sicnu::agent::OutputVerifier verifier;
+    const sicnu::agent::OutputVerifier::LabGradeResult graded =
+        verifier.gradeForTeaching( QString::fromStdString( spec.rulesRef ), target );
+    if ( !graded.graded )
+    {
+        outcome.note = "grading did not produce a verdict: " + graded.error.toStdString();
+        return outcome; // ran=false → fail closed, never a guessed pass
+    }
+
+    outcome.ran = true;
+    for ( const auto &deduction : graded.deductions )
+        outcome.observedFailedAssertions.push_back( deduction.assertionId.toStdString() );
+    outcome.mustFailSatisfied = true;
+    std::string missing;
+    for ( const std::string &mustFail : spec.mustFailAssertions )
+    {
+        const bool observed = std::find( outcome.observedFailedAssertions.begin(),
+                                         outcome.observedFailedAssertions.end(),
+                                         mustFail ) !=
+                              outcome.observedFailedAssertions.end();
+        if ( !observed )
+        {
+            outcome.mustFailSatisfied = false;
+            if ( !missing.empty() )
+                missing += ", ";
+            missing += mustFail;
+        }
+    }
+    if ( !outcome.mustFailSatisfied )
+        outcome.note = "must-fail assertions the grader did not catch: " + missing;
+    return outcome;
+}
 
 /// Bounded QJson → jsoncpp conversion — the mirror of the bridge's
 /// jsonCppToQJson (same caps: ≤16 depth, ≤512 members/elements; overflow is
@@ -301,6 +444,10 @@ Result<FaultTeachingViewModel> runFaultScenarioTeaching( const QJsonObject &scen
 
     FaultRunOptions options;
     options.sandboxRoot = sandboxRoot.toStdString();
+    // R21-E (#1613): the production verifier hook — a scenario declaring
+    // expected.verifier gets its referenced rules really run over the
+    // faulted artifact (fail-closed through the whole chain).
+    options.verifierHook = &labFaultVerifierHook;
     const auto run = sicnu::faultlab::runFaultScenario( scenario.value, options );
     if ( !run.ok )
     {
