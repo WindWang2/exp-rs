@@ -25,9 +25,10 @@
 - 弱断言扫描（#1558 延伸）：70 个域内测试文件 CHECK(true)/真空断言/全宽 epsilon/空 catch **零命中**。
 - 兼容性：未声明 verifier 的 faultlab 报告 byte 形状不变（条件序列化）；usage 拒绝的 grade 报告无新字段；无存档 digest fixture（全部同跑比对）。
 
-## 评审
-- R1（fresh reviewer）：见 `.planning/r21-E/REVIEW_R1.md`，P0/P1/P2 全处置。
-- R2（fresh reviewer，含自编译自跑）：见 `.planning/r21-E/REVIEW_R2.md`，零未决 P0-P2。
+## 评审（两轮独立 fresh reviewer，全部处置并复测）
+- **R1**（fresh subagent ×2，只读）：见 `REVIEW_R1.md`。发现经处置：测试 rulesDir 约定、kernel-walk artifact 挂载、runner/loader declared 谓词对齐、vacuous 声明拒绝、死成员删除、早退可见性、scale/offset 物化。
+- **R2**（fresh subagent，78 调用，自行运行四个新二进制）：**READY-WITH-FIXES** → 见 `REVIEW_R2.md`。P0-1（批量记账不变式改为 runner 真实四分类，含 unverifiable 桶；不越权改 src/cli）、P1-1（studio 测试改诚实主张 + 控制组使折叠非空洞）、P1-2（PROJ 能力探针 skip）、P2-1..4（digest 预算 0 / 统一拒绝形状 / 路径耦合文档化 / usage 决策文档化）、P3-1..4（schema 收紧 / 复检范围文档化 / skipped_no_fault 覆盖）。
+- 复测：四 lane **GREEN×2**（22 / 66 / 31 / 11 断言）+ 28 目标回归 sweep **全绿** + e2e **ALL PASSED**。
 
 ## 残余与 NOT_EXECUTED（诚实归因）
 - Windows 实机 run_lab.cmd/grade_all.cmd：NOT_EXECUTED（宿主为 Linux；Linux 等价链路全绿不冒充 Windows）。
