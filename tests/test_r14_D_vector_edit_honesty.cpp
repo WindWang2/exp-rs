@@ -1437,6 +1437,19 @@ struct W1bAssetLayer
   }
 };
 
+/// Edit-kind leases only: leaseCount() also counts the View lease the
+/// Display Layer holds, so it is the wrong uniqueness probe for an edit
+/// session (R2: the W1b branch tests asserted against it and read 2).
+int editLeaseCount( const sicnu::data::DataManager &manager,
+                    const sicnu::data::AssetId &assetId )
+{
+  int edits = 0;
+  for ( const auto &lease : manager.leases( assetId ) )
+    if ( lease.kind == sicnu::data::LeaseKind::Edit )
+      ++edits;
+  return edits;
+}
+
 void rollbackAllVectorLayers()
 {
   for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
@@ -1590,4 +1603,171 @@ TEST_CASE( "Map-tool vector layer tools bracket the Edit Lease (W1b)",
 
   rollbackAllVectorLayers();
   purgeProjectLayers();
+}
+
+// R1-P3-6 closure: the lease-failure branches the facade/tools paths must
+// keep self-consistent. A failed commit keeps BOTH the buffer and the
+// lease (nothing to publish), and re-acquiring in that state would trip
+// the one-editor-per-asset rule with a bogus conflict against this very
+// session — so the re-acquire is gated on the publish having happened.
+TEST_CASE( "Facade saveEdits on a refused commit keeps the lease and the buffer (W1b)",
+           "[app][vector_edit][w1b][lease]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  W1bAssetLayer fxAsset;
+  REQUIRE( fxAsset.setup( fx.window ) );
+
+  fx.window.toggleEditing();
+  REQUIRE( fxAsset.layer->isEditable() );
+  REQUIRE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  REQUIRE( W1bAssetLayer::makeModified( fxAsset.layer ) );
+
+  // Genuine provider-level commit rejection.
+  fxAsset.layer->setAllowCommit( false );
+
+  // Message-bar spy: the failure must be surfaced (the attribute table
+  // reads it), not returned into silence.
+  QgsMessageBar *bar = QgisApp::instance()->messageBar();
+  REQUIRE( bar );
+  QStringList texts;
+  QObject::connect( bar, &QgsMessageBar::widgetAdded,
+                    &fx.window, [&texts]( QgsMessageBarItem *item ) {
+                      if ( item )
+                        texts << item->text();
+                    } );
+
+  const bool ok = QgisApp::instance()->saveEdits( fxAsset.layer,
+                                                 /*leaveEditable=*/true,
+                                                 /*triggerRepaint=*/false );
+  CHECK_FALSE( ok );
+  CHECK( texts.size() >= 1 );
+
+  QObject::disconnect( bar, &QgsMessageBar::widgetAdded, &fx.window, nullptr );
+
+  // The session survived the refusal: still editing, edits still buffered,
+  // and the lease is still held (exactly one, no bogus re-acquire).
+  CHECK( fxAsset.layer->isEditable() );
+  CHECK( fxAsset.layer->isModified() );
+  CHECK( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  CHECK( editLeaseCount( *fxAsset.dataManager, fxAsset.assetId ) == 1 );
+
+  // And the session can still end normally: unblock, stop through the
+  // facade, and the lease is released with the revision advanced.
+  fxAsset.layer->setAllowCommit( true );
+  REQUIRE( QgisApp::instance()->toggleEditing( fxAsset.layer ) );
+  CHECK_FALSE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+
+  rollbackAllVectorLayers();
+  purgeProjectLayers();
+}
+
+// R1-P3-6 closure: the lease-refusal branch. A session started through
+// the shell holds the asset; the map-tool path (QgsGuiVectorLayerTools)
+// must REFUSE to open a second unguarded session — and must not leave a
+// lease behind when it refuses.
+TEST_CASE( "Map-tool startEditing is refused while the shell holds the lease (W1b)",
+           "[app][vector_edit][w1b][lease]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  W1bAssetLayer fxAsset;
+  REQUIRE( fxAsset.setup( fx.window ) );
+
+  fx.window.toggleEditing();
+  REQUIRE( fxAsset.layer->isEditable() );
+  REQUIRE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+
+  // A second view's tools path: the asset is locked, so a session on a
+  // DISTINCT sibling Display Layer of the same asset is refused (it would
+  // need its own lease, which the held one blocks). A conflict dialog is
+  // armed (the coordinator shows it).
+  QStringList modals;
+  armModalRecorder( &modals, QMessageBox::Ok, 2 );
+  QgsVectorLayerTools *tools = QgisApp::instance()->vectorLayerTools();
+  REQUIRE( tools != nullptr );
+  QgsVectorLayer *sibling = nullptr;
+  for ( QgsMapLayer *l : QgsProject::instance()->mapLayers() )
+  {
+    auto *v = qobject_cast<QgsVectorLayer *>( l );
+    if ( v && v != fxAsset.layer )
+    {
+      const auto id = sicnu::data::AssetId::fromString(
+        v->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() );
+      if ( id && *id == fxAsset.assetId )
+      {
+        sibling = v;
+        break;
+      }
+    }
+  }
+  if ( sibling )
+  {
+    // Sibling exists (multi-display layout): starting edit on it is
+    // refused while the shell session holds the lease.
+    CHECK_FALSE( tools->startEditing( sibling ) );
+    CHECK_FALSE( sibling->isEditable() );
+    // The refusal left the asset with exactly the shell's one lease.
+    CHECK( editLeaseCount( *fxAsset.dataManager, fxAsset.assetId ) == 1 );
+    CHECK( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+  }
+  else
+  {
+    // No sibling in this layout: the same-layer start is a no-op that
+    // must not disturb the held lease.
+    CHECK( tools->startEditing( fxAsset.layer ) );
+    CHECK( editLeaseCount( *fxAsset.dataManager, fxAsset.assetId ) == 1 );
+  }
+
+  // End the shell session: the asset is unlocked.
+  REQUIRE( QgisApp::instance()->toggleEditing( fxAsset.layer ) );
+  CHECK_FALSE( fxAsset.dataManager->hasActiveEditLease( fxAsset.assetId ) );
+
+  rollbackAllVectorLayers();
+  purgeProjectLayers();
+}
+
+// R1-P3-6 closure: a layer with NO Data Asset (external / memory layer)
+// keeps native QGIS editing through every facade/tool entry — the lease
+// bracket is a no-op for it, and editing must simply work.
+TEST_CASE( "Facade editing of an asset-less layer keeps native QGIS behavior (W1b)",
+           "[app][vector_edit][w1b][lease]" )
+{
+  ensureApp();
+  purgeProjectLayers();
+  ShellFixture fx;
+
+  QgsVectorLayer *layer =
+    makeMemoryLayer( QStringLiteral( "field=kind:int" ), QStringLiteral( "plain_source" ), 0 );
+  REQUIRE( layer->isValid() );
+  adoptInShell( fx.window, layer );
+
+  // No sicnu/assetId property → acquireEditLease short-circuits true.
+  CHECK( layer->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString().isEmpty() );
+
+  REQUIRE( QgisApp::instance()->toggleEditing( layer ) );
+  CHECK( layer->isEditable() );
+
+  QgsFeature f( layer->fields() );
+  f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 4, 4 ) ) );
+  f.setAttribute( QStringLiteral( "kind" ), 1 );
+  REQUIRE( layer->addFeature( f ) );
+  REQUIRE( layer->isModified() );
+
+  // Batch save re-enters edit mode with no lease involved.
+  QgisApp::instance()->saveEdits();
+  CHECK( layer->isEditable() );
+  CHECK( layer->featureCount() == 1 );
+
+  // Stop through the facade: no DataManager lease was ever in play, and
+  // the commit landed on the provider.
+  REQUIRE( QgisApp::instance()->toggleEditing( layer ) );
+  CHECK_FALSE( layer->isEditable() );
+  CHECK( layer->featureCount() == 1 );
+
+  QgsProject::instance()->removeMapLayer( layer->id() );
 }

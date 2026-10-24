@@ -23,6 +23,7 @@
 #include <QSysInfo>
 
 #include <algorithm>
+#include <atomic>
 
 namespace sicnu::agent::cartography {
 
@@ -414,21 +415,27 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     exportRequest.dpi = request.dpi;
     exportRequest.directory = request.directory;
     exportRequest.file_name = baseName.toStdString();
-    // R21-D: the cancel probe for the single/multi-page export. NOTE: the
-    // probe must NOT route through report(): a report() call also emits a
-    // progress event, so every page-boundary poll would push a detail line
-    // ("exporting") that a non-cancelled export never asked for. The
-    // operator seam already passes a pure isCancelled() probe; here the
-    // reporter doubles as the cancel channel only through its return value,
-    // so the probe reports progress ONLY on the cancel branch.
-    bool exportCancelled = false;
+    // R2-P2-1: the cancel probe for the single/multi-page export. The probe
+    // is polled on every page boundary, so it must NOT route through
+    // report(): a report() call also emits a progress event, and a probe
+    // that reported would push a "cancelled" progress line during every
+    // SUCCESSFUL export (the detail string change defeats the progress
+    // limiter's message-equality check). The reporter's cancel semantics
+    // are read once, before the export starts (above, "exporting"); from
+    // then on the probe watches a plain cancel flag.
+    std::atomic<bool> cancelExport{ false };
+    if ( reporter )
+    {
+        // Snapshot the cancel channel's current verdict; the probe below
+        // only has to answer "still going?" and the reporter is not
+        // thread-safe to call from the export loop.
+        cancelExport.store( !report( reporter, "export", 0.6, "exporting" ),
+                            std::memory_order_relaxed );
+    }
     const MapExportResult exported =
         exportMapLayout( layout, exportRequest,
-                         [ &reporter, &exportCancelled ]() {
-                             if ( report( reporter, "export", 0.6, "export cancelled" ) )
-                                 return false; // keep going
-                             exportCancelled = true;
-                             return true;
+                         [ &cancelExport ]() {
+                             return cancelExport.load( std::memory_order_relaxed );
                          } );
     result.font_diagnostics = exported.fontDiagnostics;
     result.exporterResult = exported.exporterResult;

@@ -34,8 +34,23 @@ vendored 前缀 + `/tmp/r21a-libs`（r21a-libs 必须最前：本机 /usr/lib/li
 
 - registry 腿（R20-04 报告 17695→17868）：随 test_mapspec 全量套件见 M4 批次；cartography 改动仅 W1b 无关，schema 快照未动。
 
-## 待补
+## FIXED-OPEN 复测族（2026-10-24，全部 GREEN）
 
-- test_mapspec 全量（cartography library/templates/quality/visual/tokens + platform5-9）
-- command_registry / selection_context / qgis_display_manager（W1b 邻域回归）
-- FIXED-OPEN 复测族：#1535(workbench_full_shell_lifecycle/dialog_base)、#1536(guided workflow)、#1537(stac_client)、#1559、#1561(spectral_profile_widget)、#1562(log_panel)、#1563(rs_accuracy_panel)、#1564(va_cursor_probe)
+| Issue | 二进制 | 结果 |
+|---|---|---|
+| #1535 算法 runner feedback UAF | test_async_algorithm_runner + test_raster_processing_dialog_base | 8/8 断言；120/120 断言 |
+| #1536 guided workflow 行号 | test_guided_workflow_widget | 124/124 断言，11/11 用例 |
+| #1537 STAC searchNext 代数 | test_stac_client | 28/28 断言，3/3 用例 |
+| #1559 workspaceService seam | test_agent_workbench_context（+agent 套件见下） | 邻域绿 |
+| #1561 光谱剖面离线程采样 | test_spectral_profile_widget | 154/154 断言，16/16 用例 |
+| #1562 log_panel Level 过滤 | test_log_panel | 7/7 断言，4/4 用例 |
+| #1563 CSV 转义 | test_accuracy_panel_wiring | 8/8 断言 |
+| #1564 VaCursorProbe 节流 | test_view_link（含 VA 面板腿） | 1308/1308 断言（需 PROJ_DATA） |
+
+## W1b 邻域回归（全绿）
+
+test_qgis_display_manager 6490/6490 · test_command_registry 57/57 · test_selection_context 72/72 · test_workbench_full_shell_lifecycle 126/126 · test_workbench_host 50/50 · test_workbench_shutdown_policy 54/54 · test_mapspec 2830/239（raw schema registry 腿）· test_view_link 1308/1308（PROJ_DATA 补齐后）。
+
+## 环境伪红记录（O-G5）
+
+- test_view_link 3 断言红（cross-CRS 变换）：根因 PROJ_DATA 未设置（vendored proj.db 在 prefix/share/proj）。补 PROJ_DATA 后 1308/1308 全绿——环境问题，非产品缺陷。runner 脚本已固化。

@@ -556,12 +556,14 @@ private:
     void resetSessionStoryState();
     /**
      * Acquire the exclusive Edit Lease for an Asset-backed vector layer.
-     * The one-argument overload overrides SicnuEditLeaseCoordinator (W1b):
-     * the facade/attribute-table/map-tool editing paths call it through the
-     * QgisApp seam; it forwards here with the conflict dialog enabled.
+     * This two-argument form overrides SicnuEditLeaseCoordinator (W1b): the
+     * facade/attribute-table/map-tool editing paths call it through the
+     * QgisApp seam, with the conflict-dialog flag controlling how a
+     * conflicting session is reported (true = modal, the shell menu
+     * contract; false = status bar only, used by the re-acquire paths so a
+     * cross-commit-window conflict does not pop a dialog mid-save).
      */
-    bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning);
-    bool acquireEditLease(QgsVectorLayer *vlayer) override;
+    bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning = true) override;
     /** Commit the Edit Lease (advances Asset Revision, refreshes other layers).
      *  Overrides SicnuEditLeaseCoordinator::commitEditLease (W1b). */
     void commitEditLease(QgsVectorLayer *vlayer) override;

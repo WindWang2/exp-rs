@@ -50,8 +50,13 @@ class APP_EXPORT SicnuEditLeaseCoordinator
 
     /// Acquire the exclusive Edit Lease for the layer's asset before
     /// entering edit mode. Return false to refuse the session (another
-    /// view holds the lease); implementations surface the conflict.
-    virtual bool acquireEditLease( QgsVectorLayer *layer ) = 0;
+    /// view holds the lease). @p showConflictWarning controls the modal
+    /// conflict dialog: the shell's own menu path shows it (the user asked
+    /// to edit), while the re-acquire after a commit passes false and
+    /// reports through the status bar only (main_window_vector.cpp's
+    /// saveEdits() contract) — a modal popping up during an attribute-table
+    /// save is noise, not information.
+    virtual bool acquireEditLease( QgsVectorLayer *layer, bool showConflictWarning = true ) = 0;
 
     /// Publish a committed edit buffer to the data plane and release the
     /// lease. May relocate (destroy) @p layer synchronously — callers must

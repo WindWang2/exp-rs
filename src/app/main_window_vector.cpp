@@ -749,13 +749,11 @@ void QgisDesktopWindow::openAttributeTable()
 // shell menu path; the coordinator seam hands them the same lease-aware
 // bracket the menu slots implement, so no UI entry point can strand a
 // lease. commitEditLease()/rollbackEditLease() below ARE the overrides
-// (identical signatures); only acquireEditLease needs the one-argument
-// forwarding overload (the shell variant takes a conflict-dialog flag).
-
-bool QgisDesktopWindow::acquireEditLease( QgsVectorLayer *vlayer )
-{
-    return acquireEditLease( vlayer, /*showConflictWarning=*/true );
-}
+// (identical signatures); acquireEditLease below IS the override too —
+// the two-argument shell method with the conflict-dialog flag defaulted
+// for coordinator callers (R2-P3-4: the re-acquire paths pass false so a
+// cross-commit-window conflict reports through the status bar like the
+// shell's own saveEdits(), not a modal mid-save).
 
 void QgisDesktopWindow::setAssetLayersReadOnly( const sicnu::data::AssetId &assetId,
                                                 QgsVectorLayer *exceptLayer,

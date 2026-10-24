@@ -1,5 +1,27 @@
 # R21-D LOOP_LEDGER（goal-loop 每轮记账）
 
+## Round 4（2026-10-24 16:0x–19:xx CST）— 审计驱动编图/制图/布局修复波次
+
+- 子代理（fresh context）深度审计 src/agent/cartography + layout_tools + mapspec + app/cartography：交付 P1×1 / P2×2 / P3×5 + 非缺陷核验清单。
+- 修复并提交（每个 RED→GREEN×2）：
+  1. b29c751ea8 P1-1 atlas filter 解析失败静默丢弃（→编译拒绝 + 验证 filter armed）；P2-2 export 无取消 seam（page-boundary probe + 回滚 + operator/produce 映射 Cancelled/PRODUCE_CANCELLED）。
+  2. 851151b449 P2-1 frame-declared CRS 声明不编译（→编译进 QgsLayoutItemMap，无效 CRS 拒绝）。
+  3. 641dec9d4f P3-2 applyItemProperties 布尔键类型抛异常半应用（→ignored + undo 配对）；P3-3 重复页索引双清单双写（→typed refusal）；P3-4 repair 进度非单调（→[0.30,0.55]）。
+  4. d3d356f9f2 P3-1 layout:export 事后目录重扫陈旧 sibling（→exportLayout deliveredFiles 出参 + 导出前有界清理）。
+- 构建环境教训：本机 make 的 depend 检查在时钟偏移下漏编（对象时间旧于源但不重编）——强制删 .o 重编后才暴露真实编译错误（UndoInvisibility 不存在等）。所有 RED 证据均为重编后的真实运行结果。
+- 测试：R21-D 新用例 7 个（CP11 4 + layout 3），31+27+12+7 断言全绿；族回归 mapspec 2830/239、layout_tools 1338/16、CP11 29+3 已知环境红（SICNU_CP11_RENDER=0 时 0 失败）。
+- 下一轮：R1 独立评审（fresh reviewer 审 diff BASE...HEAD）。
+
+## Round 2（2026-10-24 14:0x–15:xx CST）— W1b 验证闭环 + 回归族 + 第二波启动
+
+- W1b RED 验证：stash 生产修复（保留测试）→ rebuild → 4/4 用例红、6 关键断言红（hasActiveEditLease=false、revision 未前进）→ pop → rebuild → GREEN×2（38/38）。
+- 全文件回归：test_r14_D_vector_edit_honesty 408/408（21 用例，既有 17 无回归）×2。
+- 邻域回归全绿：qgis_display_manager 6490/6490 · command_registry 57/57 · selection_context 72/72 · full_shell_lifecycle 126/126 · workbench_host 50/50 · shutdown_policy 54/54 · mapspec 2830/239 · layout_designer 48/48 · layout_designer_lifecycle 18/18 · editing_e2e 34/34 · active_view_host_{data_context 83, viewport 12} · theme_selector_parity 102/2 · i18n 401/6 · accuracy_panel_wiring 8/2 · guided_workflow_widget 124/11 · async_algorithm_runner 8/2 · stac_client 28/3 · spectral_profile_widget 154/16 · log_panel 7/4 · raster_processing_dialog_base 120/11（R20 cancel seam）· layout_tools 1311/14（R20 DPI seam）。
+- 环境伪红归因（O-G5）：test_view_link 3 断言红根因 PROJ_DATA 未设（vendored proj.db 在 prefix/share/proj）→ 补 PROJ_DATA 后 1308/1308 全绿。runner 脚本已固化该变量。
+- CP11（#1655）：默认 25/28 过，3 红 :811/:1160/:1296 与 R19-03/R20-04 记录逐点一致；SICNU_CP11_RENDER=0 时 23 passed+5 skipped、0 failed → 主机渲染路径差异（门注释记载的 legend paint 主机问题），非产品缺陷。
+- 提交 b83f31386c（W1b 波1：facade/window/vectorLayerTools/attributeTable 协调器 + 4 测试 + .planning 全套 + .gitignore R21-D 例外）。
+- 下一波：编图/导出纵深审计（子代理进行中）。
+
 ## Round 1（2026-10-24 07:0x–07:5x CST）— W1b 实现 + 构建修复
 
 - 问题：属性表/facade/vectorLayerTools 三条编辑入口绕过 DataManager Edit Lease（W1b，R19-03→R20-04 移交，live 复核仍在）。

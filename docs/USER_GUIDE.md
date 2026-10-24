@@ -1219,7 +1219,7 @@ exp-rs MCP 服务器（`--mcp`）暴露 14 个 `layout:*` 工具，Pi 可用自�
 | `layout:align_items` / `layout:distribute_items` | 对齐 / 分布 |
 | `layout:auto_arrange` | 生成经典专题版式（支持 dry-run） |
 | `layout:save_template` / `layout:apply_template` | `.qpt` 模板保存 / 应用 |
-| `layout:export` | 导出 png/jpg/pdf/svg（含内存预检） |
+| `layout:export` | 导出 png/jpg/pdf/svg（含内存预检）；`pages[]`/`page_count` 报告本次实际交付的文件集合（多页栅格为 `name.png` + `name_2.png`…；pdf/svg 为单个文件） |
 | `layout:save_project` / `layout:load_project` | 工程持久化（布局随工程保存） |
 
 > **同一属性层**：GUI 检查器与 MCP 工具都通过 QgsLayoutItem setter + QgsLayoutUndoStack 命令（相同命令 ID）修改对象，人工编辑与 Agent 编辑语义完全一致，布局对象本身是唯一事实来源。

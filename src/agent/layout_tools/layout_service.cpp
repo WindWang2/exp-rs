@@ -919,6 +919,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "color", [&]() {
+      if ( !props["color"].isString() )
+        return false;
       if ( !QColor::isValidColor( QString::fromStdString( props["color"].asString() ) ) )
         return false;
       undoStack->beginCommand( item, QStringLiteral( "Change Font Color" ) );
@@ -969,6 +971,14 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       const auto &store = QgsProject::instance()->layerStore();
       for ( const Json::Value &v : props["layers"] )
       {
+        // R2-P2-2: an array/object element would throw mid-apply (the same
+        // half-applied failure the scalar keys had) — skip it into the
+        // missing list so the whole set is reported, none silently.
+        if ( !v.isString() )
+        {
+          missing.append( QStringLiteral( "<non-string entry>" ) );
+          continue;
+        }
         const QString ref = QString::fromStdString( v.asString() );
         const QList<QgsMapLayer *> matches = store->mapLayersByName( ref );
         if ( !matches.isEmpty() )
@@ -1122,6 +1132,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "linked_map", [&]() {
+      if ( !props["linked_map"].isString() )
+        return false;
       const QString ref = QString::fromStdString( props["linked_map"].asString() );
       QgsLayoutItemMap *map = qobject_cast<QgsLayoutItemMap *>( findItem( layout, ref ) );
       if ( !map )
@@ -1180,6 +1192,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "linked_map", [&]() {
+      if ( !props["linked_map"].isString() )
+        return false;
       const QString ref = QString::fromStdString( props["linked_map"].asString() );
       QgsLayoutItemMap *map = qobject_cast<QgsLayoutItemMap *>( findItem( layout, ref ) );
       if ( !map )
@@ -1499,12 +1513,36 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
       *error = QStringLiteral( "Export failed: %1" ).arg( exporter.errorMessage() );
     return false;
   }
+
+  // R1-P2-3 / R2-P3-3: clean the deterministic page siblings PAST this
+  // delivery — a layout that shrank must not leave the larger version's
+  // pages behind, and a failed export must not destroy the previous
+  // delivery (this runs only after Success). Deliberately NOT coupled to
+  // whether the caller asked for the delivery list: the cleanup is a
+  // property of the write itself, so every caller gets the same directory
+  // hygiene. The bounded window stops a huge historical page count from
+  // turning this into a directory flood.
+  if ( isRaster )
+  {
+    const int pageCount = layout->pageCollection()->pageCount();
+    constexpr int kStaleSiblingSlack = 16;
+    const QFileInfo info( path );
+    for ( int page = pageCount; page < pageCount + kStaleSiblingSlack; ++page )
+    {
+      const QString stale = info.dir().filePath(
+        info.completeBaseName() + QStringLiteral( "_" ) + QString::number( page + 1 ) +
+        QStringLiteral( "." ) + info.suffix() );
+      if ( QFile::exists( stale ) )
+        QFile::remove( stale );
+    }
+  }
+
   if ( deliveredFiles )
   {
     // R21-D: the delivery set THIS run produced — the primary path plus the
     // raster page siblings the exporter just wrote. Existence here means
     // "written by this run" because stale siblings past the delivery are
-    // removed below, after the export is confirmed.
+    // removed above, after the export is confirmed.
     const QFileInfo info( path );
     deliveredFiles->append( path );
     if ( isRaster )
@@ -1517,20 +1555,6 @@ bool LayoutService::exportLayout( QgsLayout *layout, const QString &path, const 
           QStringLiteral( "." ) + info.suffix() );
         if ( QFile::exists( candidate ) )
           deliveredFiles->append( candidate );
-      }
-      // R1-P2-3: clean the siblings PAST this delivery only now that the
-      // export succeeded — a layout that shrank must not leave the larger
-      // version's pages behind, and a failed export must not destroy the
-      // previous delivery. The bounded window stops a huge historical page
-      // count from turning this into a directory flood.
-      constexpr int kStaleSiblingSlack = 16;
-      for ( int page = pageCount; page < pageCount + kStaleSiblingSlack; ++page )
-      {
-        const QString stale = info.dir().filePath(
-          info.completeBaseName() + QStringLiteral( "_" ) + QString::number( page + 1 ) +
-          QStringLiteral( "." ) + info.suffix() );
-        if ( QFile::exists( stale ) )
-          QFile::remove( stale );
       }
     }
   }

@@ -270,9 +270,12 @@ bool QgisApp::saveEdits( QgsVectorLayer *layer, bool leaveEditable, bool trigger
       // Saving stays in edit mode, and an edit session without the lease
       // would edit the asset unlocked — re-acquire first (the shell's
       // saveEdits() enforces the same order). A cross-commit-window
-      // acquisition failure must leave the layer NOT editable.
+      // acquisition failure must leave the layer NOT editable. The
+      // conflict dialog is suppressed (R2-P3-4): this is a save, not an
+      // explicit "start editing" request — the shell reports the same
+      // window through its status bar.
       if ( SicnuEditLeaseCoordinator *coordinator = editLeaseCoordinator() )
-        if ( !coordinator->acquireEditLease( layer ) )
+        if ( !coordinator->acquireEditLease( layer, /*showConflictWarning=*/false ) )
           return ok;
     }
     layer->startEditing();
@@ -326,6 +329,19 @@ bool QgisApp::toggleEditing( QgsVectorLayer *layer, bool allowCancel )
     {
       if ( !layer->commitChanges() )
       {
+        // R2-P3-5: the shell's toggleEditing() surfaces a refused commit
+        // (modal + status bar); the facade used to return false in
+        // silence, so an attribute-table user saw the toggle stay checked
+        // with no reason. Route the same details through the message bar
+        // the dialog shows. The session (and its lease) stays exactly as
+        // the shell leaves it: still editing, edits still buffered.
+        const QString details = layer->commitErrors().isEmpty()
+          ? tr( "The data source rejected the commit; the layer keeps the edits buffered." )
+          : layer->commitErrors().join( QLatin1Char( '\n' ) );
+        if ( mMessageBar )
+          mMessageBar->pushMessage( tr( "Save Edits" ),
+            tr( "Failed to save edits on layer '%1':\n%2" ).arg( layer->name(), details ),
+            Qgis::MessageLevel::Critical );
         return false;
       }
       // The session's buffered edits are now on the provider: publish the
@@ -404,7 +420,9 @@ void QgisApp::saveEdits()
       layer = resolveAfterLeaseStep( layerId, displayLayerId );
       if ( !layer )
         continue; // the swap ended this layer's session
-      if ( !coordinator->acquireEditLease( layer ) )
+      // R2-P3-4: re-acquire without the modal — the batch save reports a
+      // lost lease through the message bar path below, not a dialog.
+      if ( !coordinator->acquireEditLease( layer, /*showConflictWarning=*/false ) )
         // Another view took the lease across the commit window: leave the
         // layer out of edit mode rather than edit unlocked.
         continue;

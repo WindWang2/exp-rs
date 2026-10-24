@@ -145,7 +145,10 @@ bool QgsGuiVectorLayerTools::saveEdits( QgsVectorLayer *layer ) const
       if ( !resolved )
         return res; // the swap ended this layer's session
       layer = resolved;
-      if ( !coordinator->acquireEditLease( layer ) )
+      // R2-P3-4: re-acquire without the modal (a save, not an explicit
+      // start-editing request); another view's lease leaves the layer out
+      // of edit mode.
+      if ( !coordinator->acquireEditLease( layer, /*showConflictWarning=*/false ) )
         return res; // another view took the lease: stay out of edit mode
     }
     layer->startEditing();
