@@ -103,7 +103,8 @@ int main(int argc, char *argv[])
     for ( int i = 1; i < argc; ++i )
     {
         const QString token = QString::fromLocal8Bit( argv[i] );
-        const bool attachedForm = token.startsWith( QLatin1String( "-platform=" ) );
+        const bool attachedForm = token.startsWith( QLatin1String( "-platform=" ) )
+                                  || token.startsWith( QLatin1String( "--platform=" ) );
         if ( !attachedForm && token != QLatin1String( "-platform" )
              && token != QLatin1String( "--platform" ) )
             continue;
