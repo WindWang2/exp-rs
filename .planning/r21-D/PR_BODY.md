@@ -48,14 +48,17 @@
 
 ## Review 修复次数
 
-- R1（fresh reviewer）：见 `.planning/r21-D/REVIEW_R1.md`。
-- R2（不同 fresh reviewer）：见 `.planning/r21-D/REVIEW_R2.md`。
+- **R1**（fresh reviewer #1，独立 RED 重放）：**REJECT**（1×P1 + 3×P2）→ db93b2655e。P1 是 frame-CRS 修复新引入的静默错渲回归（项目 CRS 度数 extent 被按声明 CRS 单位解释），已修（extent 变换 + 4326 回落 + extent 断言）。记录：`.planning/r21-D/REVIEW_R1.md`。
+- **R2**（fresh reviewer #2，不同上下文，自行重构 RED 探针）：**APPROVE-WITH-FIXES**（4×P2）→ 8c3ff74bd6。包含 R1 一项虚假闭环的纠正（produce 取消探针照旧每轮询推进度事件）、4 处遗漏类型守卫、grid interval 单位分裂。记录：`.planning/r21-D/REVIEW_R2.md`。
 
-## 剩余风险与未执行项
+## 剩余风险与未执行项（已知限制，均附理由记录于 REVIEW_R2.md）
 
-- #1655 CP11 门：本机无法执行渲染用例（legend paint），已用 SICNU_CP11_RENDER=0 证明零失败；关闭建议留给维护者在带显示环境复核。
-- W1b 的 lease 协调器依赖 shell 生命周期：第二窗口场景（QgisApp 单例）由 guarded release 覆盖，但未构造双窗口集成测试（NOT_EXECUTED）。
-- D1/D3 的功能深化波次（命令面板/主题/i18n 冒烟）未展开——以审计驱动缺陷修复优先，记录于 FINAL_REPORT。
+- #1655 CP11 门：本机无法执行渲染用例（legend paint 主机差异），已用 SICNU_CP11_RENDER=0 证明零失败；关闭建议留给维护者在带显示环境复核。
+- 取消/清单失败的回滚只删"本次已发布页"，不恢复被本次覆盖的上一版同名文件（原子发布契约语义）。
+- kStaleSiblingSlack=16 有界清理对 >16 页的旧交付留孤儿（有界、下次导出自愈）。
+- page_count 跨表面语义：layout:export = 交付文件数；cartography:produce pdf = 布局页数（各自文档已说明）。
+- W1b 双窗口集成测试未构造（NOT_EXECUTED：QgisApp 单例协调器由 guarded release 代码级覆盖）。
+- O-D1/O-D4 的"新造"用户路径/视觉记录未展开：本会话以审计驱动缺陷修复与双评审闭环为优先，既有 offscreen 覆盖全绿。
 
 ## 同轨文件白名单
 
