@@ -45,6 +45,18 @@ Json::Value FaultRunReport::toJson() const
     doc["replay"]["digest"] = replayDigest;
     doc["replay"]["deterministic"] = replayDeterministic;
 
+    if ( verifierDeclared )
+    {
+        Json::Value failed( Json::arrayValue );
+        for ( const std::string &id : verifierObservedFailed )
+            failed.append( id );
+        doc["verifier"] = Json::Value( Json::objectValue );
+        doc["verifier"]["declared"] = true;
+        doc["verifier"]["checked"] = verifierChecked;
+        doc["verifier"]["must_fail_observed"] = verifierMustFailObserved;
+        doc["verifier"]["observed_failed"] = failed;
+    }
+
     Json::Value diagnostics( Json::arrayValue );
     for ( const auto &diagnostic : this->diagnostics )
     {

@@ -56,6 +56,12 @@ FaultResult<FaultRunReport> runFaultScenario( const FaultScenario &scenario,
                                               const FaultRunOptions &options )
 {
     FaultRunReport report;
+    // R21-E (#1613): the declaration is visible from the start, so a run that
+    // aborts before the fold still shows the verifier block (with
+    // checked=false) instead of masquerading as an undeclared scenario.
+    report.verifierDeclared = !scenario.verifier.isNull() &&
+                              !( scenario.verifier.isObject() &&
+                                 scenario.verifier.getMemberNames().empty() );
     report.scenarioId = scenario.scenarioId;
     report.title = scenario.title;
     report.faultFamily = scenario.fault.familyId;
@@ -153,11 +159,114 @@ FaultResult<FaultRunReport> runFaultScenario( const FaultScenario &scenario,
             replayed.ok == injected.ok && report.replayDigest == faultedDigest;
     }
 
+    // --- artifact-level verifier (#1613): fold the hook outcome in --------
+    // A declared verifier is part of the scenario's contract: the fault is
+    // only "passed" when the referenced grading rules actually catch it
+    // (every must_fail assertion observed failing). No hook installed is a
+    // fail-closed refusal, never a silent skip — the exact accepted-but-inert
+    // shape #1464/#1613 forbid.
+    bool verifierOk = true;
+    {
+        FaultVerifierSpec verifierSpec;
+        std::string verifierParseError;
+        // The loader refuses any non-object expected.verifier; the runner
+        // must judge the SAME shapes declared (a non-null non-object member
+        // is a malformed declaration, never "absent") so the last line of
+        // defense matches the door.
+        const bool declared =
+            !scenario.verifier.isNull() &&
+            !( scenario.verifier.isObject() && scenario.verifier.getMemberNames().empty() );
+        if ( declared &&
+             !parseFaultVerifierSpec( scenario.verifier, verifierSpec, verifierParseError ) )
+        {
+            // The loader validated this document; a parse failure here means
+            // a programmatically-constructed scenario bypassed it — refuse.
+            report.verifierDeclared = true;
+            report.diagnostics.push_back(
+              FaultDiagnostic{ "faultlab.verifier_spec_invalid",
+                               "scenario.verifier failed strict parse: " + verifierParseError,
+                               FaultSeverity::Error } );
+            verifierOk = false;
+        }
+        else if ( declared )
+        {
+            report.verifierDeclared = true;
+            if ( !options.verifierHook )
+            {
+                report.diagnostics.push_back(
+                  FaultDiagnostic{ "faultlab.verifier_missing",
+                                   "scenario declares expected.verifier but no verifier "
+                                   "hook is installed — refusing to pass an unchecked fault",
+                                   FaultSeverity::Error } );
+                verifierOk = false;
+            }
+            else if ( !injected.ok )
+            {
+                // The fault itself did not apply: there is no faulted
+                // artifact to grade, and the run already fails through
+                // faultApplied. Grading the untouched copy could only burn
+                // budget and muddy the report.
+                report.diagnostics.push_back(
+                  FaultDiagnostic{ "faultlab.verifier_skipped_no_fault",
+                                   "the fault did not apply, so no faulted artifact exists "
+                                   "for the verifier",
+                                   FaultSeverity::Warning } );
+            }
+            else
+            {
+                FaultVerifierOutcome outcome;
+                bool hookThrew = false;
+                try
+                {
+                    // The hook crosses into the composition layer's stack
+                    // (Qt/GDAL-backed grading): a stray exception must surface
+                    // as a typed did-not-run refusal, never escape the runner.
+                    outcome = options.verifierHook( faulted, verifierSpec );
+                }
+                catch ( const std::exception &e )
+                {
+                    hookThrew = true;
+                    outcome.note = std::string( "verifier hook threw: " ) + e.what();
+                }
+                catch ( ... )
+                {
+                    hookThrew = true;
+                    outcome.note = "verifier hook threw an unknown exception";
+                }
+                report.verifierChecked = outcome.ran;
+                report.verifierMustFailObserved = outcome.mustFailSatisfied;
+                report.verifierObservedFailed = outcome.observedFailedAssertions;
+                if ( hookThrew || !outcome.ran )
+                {
+                    report.diagnostics.push_back(
+                      FaultDiagnostic{ "faultlab.verifier_did_not_run",
+                                       "the installed verifier hook produced no verdict: " +
+                                           ( outcome.note.empty() ? std::string( "no detail" )
+                                                                  : outcome.note ),
+                                       FaultSeverity::Error } );
+                    verifierOk = false;
+                }
+                else if ( !outcome.mustFailSatisfied )
+                {
+                    report.diagnostics.push_back(
+                      FaultDiagnostic{ "faultlab.verifier_must_fail_not_observed",
+                                       "the grading rules did not fail on the faulted "
+                                       "artifact as the scenario requires: " +
+                                           ( outcome.note.empty() ? std::string( "no detail" )
+                                                                  : outcome.note ),
+                                       FaultSeverity::Error } );
+                    verifierOk = false;
+                }
+            }
+        }
+    }
+
     // --- cleanup + source immutability ---
     finishRun( sandbox.value, &source, report );
 
     report.passed = report.faultApplied && report.expectationsPassed && report.diagnosisMatched &&
-                    report.sandboxRemoved && report.sourceUnchanged && report.replayDeterministic;
+                    report.sandboxRemoved && report.sourceUnchanged && report.replayDeterministic &&
+                    verifierOk;
     return makeOk( std::move( report ) );
 }
 
