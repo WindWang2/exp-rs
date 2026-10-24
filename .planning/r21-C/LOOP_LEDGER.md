@@ -1,0 +1,26 @@
+# R21-C LOOP_LEDGER — goal-loop 账本
+
+| 轮 | 改动 | 验证 | 结果 | 下一步 |
+|---|---|---|---|---|
+| 1 | LIVE 盘点 + worktree 建立 + configure | git/gh api 双确认 master=911e0b17a3；configure exit 0 | 通过 | 种子分诊 |
+| 2 | 种子 issue 现码分诊（#1551/#1549/#1595/#1597/#1588 深读） | 源码逐行核对（见 ISSUE_TRIAGE A） | 通过（四修一半修） | 骨架文档 + 排队构建 |
+| 3 | .planning/r21-C 骨架（BASELINE/TRIAGE/OWNERSHIP/TASKS/ORACLES/碰撞矩阵）+ 45 目标构建排队（锁） | 文件落盘；构建日志 /tmp/r21c-build.log | 进行中 | 等构建→M1 回归 |
+| 4 | 抽查 #1594/#1572 现场 + R20-03 反回滚清单核对（W1-W4 全在位：E6002/capability skip/INVALID_PARAMETER 注释/stream head hexdump；#1572 m_streamGeneration 护栏 llm_streaming_client.cpp:217,452,501） | git log -S + 源码核对 | 通过 | 继续勘查 |
+| 5 | W-A/W-B RED 测试（test_cli_exit_codes_r4 新 TEST_CASE 6 section + test_cli_error_messages_r4 四元组 3 section）+ 修复（cli_commands.cpp：rejectUnknownCliFlag helper + pipeline/workflow×3/catalog-export/data-catalog-search 接线 + --max-items ok 门） | -fsyntax-only exit 0 | 通过（待构建 RED/GREEN 实证） | W-D9 |
+| 6 | W-D9 RED 测试（test_cli_agent_ops 新 TEST_CASE：--approve 拒绝/坏 token 文件拒绝/有效 token 到达 driver=APPROVAL_TOKEN_REQUIRED/坏 now-ms 拒绝）+ 修复（cli_agent_ops_commands.cpp：readApprovalTokenFile 有界读 1MiB + --repair-approval/--approval-now-ms 通道 + bare-bool 拒绝） | -fsyntax-only exit 0；apply 顺序核实（approval 拒绝先于 session 查找 :340-352） | 通过（待构建实证） | D5 |
+| 7 | D5 RED 测试（test_plugin_host_process 新 TEST_CASE：hang 杀死后 workerPid 仍>0）+ 修复（plugin_host_session：mLastKnownPid atomic write-once 快照；workerPid/killProcess败者/EOF probe 三读点转换） | -fsyntax-only exit 0 | 通过（待构建实证） | D6 |
+| 8 | D6 RED 测试（run_lock 种植 64KiB+ owner 文件→pid 不得被挖出、ownerInfoLine 有界；preflight_provider 种植 5MiB mirror→"exceeds" 拒绝）+ 修复（workflow_run_lock.cpp boundedOwnerRead 64KiB cap；capability_mirror.cpp 4MiB cap+1 读） | -fsyntax-only exit 0 | 通过（待构建实证） | 排队构建 |
+| 9 | 提交策略落地：commit d2684b3243=RED 网（6 测试文件 +249 行）；src 修复 stash（r21c-src-fixes）；48 目标 RED 构建已排队（锁内，R21-B 先持锁） | git log；构建日志 /tmp/r21c-build.log | 进行中（等锁） | 等构建→跑 RED→pop→fix commit→GREEN×2 |
+| 10 | 并行只读深扫（Explore 子代理，54 次工具调用）：F1 [P1] status 轮询 cancel 误杀任务（mcp_server.cpp:1154 无 tool 门，pipeline 版有 R14-C FIX-1）；F2 [P2] parameters 非 object 静默 toMap(){}（:942/:947/:961，schema 声明 object）；F3 [P3] 终态 session 二次 run 毒化 journal；F4 [P3] pi poll_interval_ms 0 忙轮询；F5 Pi category 漂移 | F1/F2 亲自读码复核属实；F3 亲读 refuse/abort+replay last-write-wins 属实；F5 经 surface_snapshot.test.mjs 复核判定**非缺陷**（有意决策矩阵）撤销 | 通过 | F1-F3 写 RED |
+| 11 | F1/F2/F3 RED 测试写入（r18_c 文件 append、test_mcp_server append、test_agent_loop_modes append），commits b8c8c20a4b + 7af8ae909b；构建目标补 test_r18_c_rpc_cancel_id_namespace/test_agent_loop_modes | git log -3；src 保持 master（修复在 stash/未写） | 通过 | F4 pi 侧 |
+| 12 | F4 修复+测试（mcp_bridge.ts clampPollIntervalMs 导出 + shell 引用 + 新测试）：**RED 实证**（master 无导出→SyntaxError fail 1）→ **GREEN 2/2 → 全套 pi 41/41**；commit 44002ab676；M4 裁剪：#1628-3/#1596 维持 DEBT（决策理由入 TASKS.md） | node --test 三轮输出 | 通过 | 等 RED 构建完成 |
+| 13 | 链接地狱攻坚（本轮主耗时）：expat/zlib/zstd 静态非 PIC → *_LIBRARY_RELEASE 覆盖；vendor libgdal wrapper2_* 26 符号全主机无提供者 → 复制 R21-B/R19-02 既有 link-shim 模式（build/link-shim + CMAKE_EXE_LINKER_FLAGS -L shim --allow-shlib-undefined）；运行期 DT_RUNPATH 不传递 → LD_LIBRARY_PATH=shim:vendor | canary test_capability_knowledge 链接 exit 0 + 运行 **1637 断言/17 例全绿**（与 R20-03 记录同构）；/tmp/r21c-configure5.log | 通过 | 全量 RED 构建（build4 已启动） |
+| 14 | 发现 R21-B 同样卡在 libgeos.so.3.14.1 运行期解析（其二进制 RUNPATH 相同）——本主机共享环境债，recipe 已文档化入 BASELINE | R21-B test_artifact_store 同错实证 | 通过（记录） | 等 build4 |
+| 15 | GREEN 实证（第 1 遍）：15/16 绿；5 个失败逐一归因为**测试自身缺陷**（F2 测试缺 initialize 握手触发 -32002；D6 测试种植先于 acquire 被覆写；W-D9 测试 resume 缺 goal/journal-dir 先撞 MISSING_ARGS；W-A 循环上界漏末位 flag；W-B 四元组缺失）。修测试 3 处 + 代码 2 处（循环上界+数值四元组） | 单体重跑全绿 | 通过 | 提交修复 |
+| 16 | 7 个修复 commit 落地（W-A/B 143b280086、W-D9 66d94e8418、D5 34feec4b9c、D6 ec06a79ff0、F1+F2 e107ae528f、F3 daf00a41a2；F4 44002ab676 在先） | git log | 通过 | W8-red |
+| 17 | W8-red 深挖：编译器 -Wdangling 警告指向 `registry.diagnostics()` 按值返回 + 13 处 range-for 迭代已析构临时 = UB，垃圾读数致 25 个诊断断言假失败（R20-03 归因 fixture/环境，实为测试 UB）。机械修复 13 处（命名快照）；过程中误删一块 E5006 断言已 git diff 精确恢复 | 5 二进制全绿：loader 566/38、halffail 69/9、unload_order 34/4、boundary_r4 35/8、**host_process 371/34（含 R20-03 记录的 sawTypedRefusal）**、channel_parity 10/3；commit 68e6740bf8 | 通过 | 终验 |
+| 18 | 终验 ×2：47 调用退出码两遍逐一相同（diff identical），40 跑内全绿 + 7 补建目标（science_context_broker/live_authorities、plugin_capabilities、cli_command_surface/help_vocabulary/fail_fast/batch_manifest）单独全绿；pi 41/41；E2E 5 条真实二进制链路实证（四元组呈现、token 被接纳）；TEST_RESULTS.md 落盘 | /tmp/r21c-final*.log、r21c-red-results.txt | 通过 | R1 审查 |
+| 19 | R1 审查（fresh 子代理，170 工具调用）：**P0-1 workflow resume 双重 takeFirst**（W-A 门取走 run id 后 runner 又消费一 token → SIGABRT/134 或续错 run；resume 族零测试覆盖致逃逸）+ P1×2（--platform Qt argv abort；W-D9 铸币半场死路）+ P2×2 + P3×3 全闭 | 5 个修复 commit（eef09d109e/dab9020782/d18b934291/855fe94580/e15bf98f4a）；resume 实证 exit 3 typed；--platform 实证 ok:true envelope | 通过 | 全量重建 |
+| 20 | 全量重建（3272 TU，0 错误）+ .gitignore append-only 条目 + 13 篇 planning 文档入库（commit 014c44fb7a） | git log 18→20 commits | 通过 | R2 |
+| 21 | R2 审查（第二 fresh 子代理，75 工具调用+对抗探针）：READY-WITH-FIXES，唯一 P2=F1 黑名单缺 revert-guard（白名单下全套仍绿但丢直连提交者取消通道）；P3×4 记录/修 | **R2-1 实证**：临时回退白名单 → 新 guard 测试 :308 失败；恢复黑名单 → 13/3 全绿（commit 02ce1622ee）；--platform= 附加形式拓宽；三形式 CLI 探针全正确（zsh 不词裂 $f 的实验假象已排除） | 通过 | 干净复验 |
+| 22 | 首轮复验被并发重建污染（验证期间我在重建/临时回退二进制）→ 作废重跑；干净 VERIFY×2 进行中 | — | 进行中 | PR |

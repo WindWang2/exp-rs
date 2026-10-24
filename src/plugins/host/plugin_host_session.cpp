@@ -316,6 +316,9 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     ::ResumeThread( processInfo.hThread );
     ::CloseHandle( processInfo.hThread );
     mProcessHandle = processInfo.hProcess;
+    // Write-once pid snapshot: workerPid()/probes never dereference the
+    // mutable handle (close-election discipline, #1644 / R20-03 D5).
+    mLastKnownPid = static_cast<long long>( ::GetProcessId( processInfo.hProcess ) );
     mProcessAlive = true;
 
     // The launcher's copies of the CHILD-side pipe ends MUST be closed now:
@@ -453,6 +456,9 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     mProcessHandle = reinterpret_cast<void *>( static_cast<intptr_t>( pid ) );
     mProcessGroupId = static_cast<long long>( pid );
     mLastKnownGroup = mProcessGroupId;
+    // Write-once pid snapshot: killProcess losers and the EOF probe read
+    // this, never the mutable handle member (close-election race, #1644).
+    mLastKnownPid = static_cast<long long>( pid );
     mProcessAlive = true;
     mChannel = std::make_unique<IpcChannel>(
         makeIpcHandleStream( reinterpret_cast<void *>( workerToHost[ 0 ] ),
@@ -622,15 +628,12 @@ int PluginHostProcessSession::peakInFlight() const
 
 long long PluginHostProcessSession::workerPid() const
 {
-#ifdef _WIN32
-    return mProcessHandle
-               ? static_cast<long long>( ::GetProcessId( static_cast<HANDLE>( mProcessHandle ) ) )
-               : 0;
-#else
-    return mProcessAlive ? static_cast<long long>(
-               reinterpret_cast<intptr_t>( mProcessHandle ) )
-                         : 0;
-#endif
+    // Snapshot read (R20-03 D5): the close election may clear/close the
+    // plain handle concurrently with this diagnostics poll. The spawn-time
+    // pid stays valid — and honest — after the worker died, so post-mortem
+    // diagnostics can still name the worker that ran instead of collapsing
+    // every dead session to an anonymous 0.
+    return mLastKnownPid.load();
 }
 
 std::string PluginHostProcessSession::processGroupState() const
@@ -698,7 +701,10 @@ void PluginHostProcessSession::killProcess( const char *reason )
     }
 #else
     const bool wasAlive = mProcessAlive.exchange( false );
-    const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
+    // Snapshot pid (never the mutable handle): a loser of the exchange can
+    // be inside this function while the winner clears mProcessHandle — the
+    // plain-member read was the #1644-class data race (R20-03 D5).
+    const pid_t pid = static_cast<pid_t>( mLastKnownPid.load() );
     // Read the group from mLastKnownGroup, never from mProcessGroupId: the
     // exchange winner clears mProcessGroupId while a loser of the same
     // exchange is still inside this function, and that member is a plain
@@ -752,7 +758,9 @@ bool PluginHostProcessSession::confirmProcessDeath()
     if ( mProcessHandle )
         dead = ::WaitForSingleObject( mProcessHandle, 0 ) == WAIT_OBJECT_0;
 #else
-    const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
+    // Snapshot pid for the same election-race reason as killProcess: the
+    // probe may run while a concurrent closer clears the plain member.
+    const pid_t pid = static_cast<pid_t>( mLastKnownPid.load() );
     if ( pid > 0 )
     {
         int status = 0;

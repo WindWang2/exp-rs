@@ -32,6 +32,7 @@ import { existsSync, statSync } from "node:fs";
 // the class, the constants, or the teardown hook reappear in this file.
 import {
   McpBridge,
+  clampPollIntervalMs,
   piToolName,
   toolCategory,
   truncateTail,
@@ -123,7 +124,10 @@ export default async function (pi: ExtensionAPI) {
       }),
       async execute(_toolCallId, params, signal) {
         const deadline = Date.now() + (params.timeout_seconds ?? 300) * 1000;
-        const interval = params.poll_interval_ms ?? 1000;
+        // Model-controlled interval: clamp (R21-C F4) — 0/negative values
+        // used to busy-loop the poll at event-loop speed for the whole
+        // timeout window (the deadline check cannot fire early either).
+        const interval = clampPollIntervalMs(params.poll_interval_ms);
         // Abort must also stop SERVER-side work: fire-and-forget a cancel so
         // an aborted 30-minute classification does not keep burning CPU
         // while Pi believes it stopped (#623).

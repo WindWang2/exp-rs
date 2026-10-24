@@ -939,12 +939,30 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("preflight_algorithm"))
             {
+                // R21-C F2: the schema declares parameters as an object; a
+                // non-object (string/array) used to be silently downgraded
+                // to an empty map — preflight then validated the algorithm's
+                // DEFAULTS and answered ok (a lying preflight), and execute
+                // ran with defaults instead of refusing. Same typed refusal
+                // run_workflow already gives its pipeline argument.
+                const QVariant parametersArg = arguments.value(QStringLiteral("parameters"));
+                if (parametersArg.isValid() && !parametersArg.isNull()
+                    && parametersArg.typeId() != QMetaType::QVariantMap)
+                    throw McpToolError(toolName + QStringLiteral(": parameters must be an object"),
+                                       QStringLiteral("INVALID_PARAMETER"),
+                                       QStringLiteral("validation"));
                 resultData = handlePreflightAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(),
-                                                      arguments.value(QStringLiteral("parameters")).toMap());
+                                                      parametersArg.toMap());
             }
             else if (toolName == QStringLiteral("execute_algorithm"))
             {
-                resultData = handleExecuteAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(), arguments.value(QStringLiteral("parameters")).toMap());
+                const QVariant parametersArg = arguments.value(QStringLiteral("parameters"));
+                if (parametersArg.isValid() && !parametersArg.isNull()
+                    && parametersArg.typeId() != QMetaType::QVariantMap)
+                    throw McpToolError(toolName + QStringLiteral(": parameters must be an object"),
+                                       QStringLiteral("INVALID_PARAMETER"),
+                                       QStringLiteral("validation"));
+                resultData = handleExecuteAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(), parametersArg.toMap());
             }
             else if (toolName == QStringLiteral("list_operators"))
             {
@@ -958,8 +976,14 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("execute_operator"))
             {
+                const QVariant parametersArg = arguments.value(QStringLiteral("parameters"));
+                if (parametersArg.isValid() && !parametersArg.isNull()
+                    && parametersArg.typeId() != QMetaType::QVariantMap)
+                    throw McpToolError(toolName + QStringLiteral(": parameters must be an object"),
+                                       QStringLiteral("INVALID_PARAMETER"),
+                                       QStringLiteral("validation"));
                 resultData = handleExecuteOperator(arguments.value(QStringLiteral("operator_id")).toString(),
-                                                   arguments.value(QStringLiteral("parameters")).toMap());
+                                                   parametersArg.toMap());
             }
             else if (toolName == QStringLiteral("get_execution_status"))
             {
@@ -1151,7 +1175,20 @@ void McpServer::handleRequest(const QVariantMap &request)
                     m_cancelledRequestPipelines, rpcCancelMapKey(id),
                     resultData.value( QStringLiteral( "pipeline_id" ) ).toLongLong(), 1024 );
             }
-            if ( resultData.contains( QStringLiteral( "execution_id" ) ) )
+            // R21-C F1: every result carrying an execution_id used to arm
+            // the cancel map — including get_execution_status polls (they
+            // always echo it back), so an abort/timeout of the POLL itself
+            // cancelled the long-running execution the poll was merely
+            // reporting on. The gate is a POLLER blacklist, not a submitter
+            // whitelist: submitters also arrive through the direct-routed
+            // dispatchToolCall branches (view:/roi:/canvas:/layer:/raster:
+            // and every allowed tool id), and those must keep their cancel
+            // channel (R1-P2-1). Only the read-only status poll (and the
+            // cancel call itself — its id cancelling nothing is a no-op)
+            // are excluded.
+            if ( toolName != QStringLiteral( "get_execution_status" )
+                 && toolName != QStringLiteral( "cancel_execution" )
+                 && resultData.contains( QStringLiteral( "execution_id" ) ) )
             {
                 const auto executionId = sicnu::processing::ExecutionId::fromWire(
                     resultData.value( QStringLiteral( "execution_id" ) ).toString() );

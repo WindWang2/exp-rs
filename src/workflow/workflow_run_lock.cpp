@@ -24,6 +24,12 @@ namespace sicnu::workflow {
 
 namespace {
 
+/// Cap for the owner-metadata sidecar read back for diagnostics. The writer
+/// emits ~100 bytes; anything past this bound is a planted or corrupt file
+/// and is refused rather than buffered whole (R20-03 D6 — the checkpoint
+/// kernel's cap discipline, applied to the lock's own trust-domain files).
+constexpr qint64 kMaxOwnerMetadataBytes = 64 * 1024;
+
 QString generateOwnerToken()
 {
   static std::random_device rd;
@@ -41,14 +47,28 @@ QString ownerMetadataJson( qint64 pid )
     .arg( QDateTime::currentDateTimeUtc().toString( Qt::ISODateWithMs ) );
 }
 
+/// Bounded read of the owner metadata: cap+1 bytes first, refuse past the
+/// cap — a file growing between a size() probe and readAll() can never
+/// bypass the bound this way (same shape as the checkpoint reader).
+QString boundedOwnerRead( QFile &file )
+{
+  const QByteArray raw = file.read( kMaxOwnerMetadataBytes + 1 );
+  if ( raw.size() > kMaxOwnerMetadataBytes )
+    return QString();
+  return QString::fromUtf8( raw );
+}
+
 /// Extracts "pid":N from the owner metadata (diagnostics only).
 qint64 pidFromOwnerFile( const QString &lockFilePath )
 {
   QFile f( lockFilePath );
   if ( !f.open( QIODevice::ReadOnly ) )
     return 0;
+  const QString text = boundedOwnerRead( f );
+  if ( text.isNull() )
+    return 0; // planted/corrupt: refused by the cap, never mined
   const QRegularExpression re( QStringLiteral( "\"pid\"\\s*:\\s*(\\d+)" ) );
-  const QRegularExpressionMatch m = re.match( QString::fromUtf8( f.readAll() ) );
+  const QRegularExpressionMatch m = re.match( text );
   return m.hasMatch() ? m.captured( 1 ).toLongLong() : 0;
 }
 
@@ -164,7 +184,10 @@ QString WorkflowRunLock::ownerInfoLine() const
   QFile f( m_path );
   if ( !f.open( QIODevice::ReadOnly ) )
     return QString();
-  return QString::fromUtf8( f.readAll() ).trimmed();
+  // Bounded (D6): a planted oversized file is refused empty rather than
+  // buffered whole into a diagnostics string.
+  const QString line = boundedOwnerRead( f );
+  return line.isNull() ? QString() : line.trimmed();
 }
 
 WorkflowRunLock::OwnerProbe WorkflowRunLock::probeOwner( const QString &lockFilePath )

@@ -325,7 +325,8 @@ TEST_CASE( "a symlinked entrypoint file escaping the root is refused at "
     REQUIRE( after != nullptr );
     REQUIRE( after->state == PluginState::Failed );
     bool sawEscape = false;
-    for ( const PluginDiagnostic &item : registry.diagnostics().items() )
+    const exprs::PluginDiagnosticLog itemDiagSnapshot = registry.diagnostics();
+    for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
         if ( item.code == PluginDiagnosticCode::EntrypointOutsideRoot )
             sawEscape = true;
     REQUIRE( sawEscape );
