@@ -79,13 +79,18 @@ RsClassRasterResult RsClassRaster::paint(
         return result;
     }
 
-    // Class ids must be ≥ 1; 0 is reserved as NoData / unclassified.
+    // Class ids must be >= 0; 0 is the documented NoData/unclassified value
+    // (header + RsClassRaster::paint's "Segments absent from segmentClasses
+    // paint as 0" caller contract, and the pixel pipeline writes
+    // ignoreOptions.unclassifiedValue the same way). Only negatives are
+    // refused: a negative id cannot be represented in the Byte/UInt16
+    // output dtype.
     for ( auto it = segmentClasses.constBegin(); it != segmentClasses.constEnd(); ++it )
     {
-        if ( it.value() <= 0 )
+        if ( it.value() < 0 )
         {
             result.errorMessage = QStringLiteral(
-                "paint: class ids must be >= 1 (got %1 for segment %2); 0 is NoData" )
+                "paint: class ids must be >= 0 (got %1 for segment %2); 0 is NoData" )
                                     .arg( it.value() )
                                     .arg( it.key() );
             return result;

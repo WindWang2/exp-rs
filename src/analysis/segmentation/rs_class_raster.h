@@ -22,7 +22,10 @@ class QGIS_ANALYSIS_EXPORT RsClassRaster
   public:
     /// Paint predicted class ids onto the segment map geometry.
     /// referenceRasterPath supplies geotransform/projection; output is Byte or UInt16.
-    /// Class ids must be ≥ 1; 0 is written as GDAL NoData (unclassified / background).
+    /// Class ids must be >= 0; 0 is written as GDAL NoData (unclassified /
+    /// background — KMeans clusters without a Hungarian class assignment,
+    /// or segments absent from segmentClasses, land here). Negatives are
+    /// refused (not representable in the Byte/UInt16 output dtype).
     /// Reference grid size must match the segment map when the reference opens.
     static RsClassRasterResult paint(
         const RsSegmentMap &segMap,
