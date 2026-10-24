@@ -81,10 +81,13 @@ double terrainRadiometricFactor( double localIncidenceDeg, double incidenceDeg )
     const double sinRef = std::sin( incidenceDeg * kDegToRad );
     if ( sinRef <= 1e-6 )
         return kNaN;
-    if ( localIncidenceDeg <= 0.0 || localIncidenceDeg >= 180.0 )
+    // Local incidence is a physical angle in (0, 90): 0 is a perfectly
+    // back-facing facet (undefined ratio), >= 90 is on/past the horizon
+    // (sin <= 0 -> the ratio would be negative or zero). Both are NaN.
+    if ( !( localIncidenceDeg > 0.0 ) || localIncidenceDeg >= 90.0 )
         return kNaN;
     const double sinLocal = std::sin( localIncidenceDeg * kDegToRad );
-    if ( sinLocal <= 1e-6 ) // grazing/overturned local geometry
+    if ( sinLocal <= 1e-6 ) // grazing local geometry
         return kNaN;
     return sinLocal / sinRef;
 }
