@@ -62,3 +62,14 @@
 - 构建：100%（Debug, tests ON, EXIT=0）
 - O-A1 七族：两遍全绿
 - 本轨新增/受影响 13 族 + 家族底网 ~156 族：两遍全绿
+
+## R2 后终验（HEAD=884a1e08）
+
+- O-A1 七族：两遍全绿（计数同首轮）。
+- R2 修复受影响 12 族：两遍全绿（test_object_hierarchy 271/36、test_rs_operators 9114/84、
+  test_image_fusion 1721/49、test_temporal_calendar 96/11、test_temporal_operators_10 472/10、
+  test_atmospheric 37548/48、test_obia_segmentation 871/16、test_sar_kernels 139/14、
+  test_sar_operators 910/29、test_obia_operators 170/18、test_classification_intelligence_e2e 6208/6、
+  test_spectral_formula_drift 145/4）。
+- sar + terrain 全家族（29 个二进制）：全绿。
+- 构建：Debug + tests ON，100%。

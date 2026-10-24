@@ -27,3 +27,22 @@
 | AG2-F4 | normalized=[0.2,0.1,0.15] → 半深交叉外推到 65/200nm（谱外） | 截断翼 clamp 到 run 边界 | test_continuum_removal 69/7 ×2 PASS | 测试 seam |
 | AG5-5 | 注释承诺的 getVotes row-0 id 校验从未实现 | 实现逐列 id 校验 | test_classifier_random_forest PASS | 潜在 guard |
 | AG5-4 | （主代理复核驳回：perBand 本就是累计映射，门已查累计） | 无代码变更 | — | 误报，已记录 |
+
+## R2 变异审计后的定向测试补充（RED→GREEN 证据类型）
+
+图例：T = 定向测试（变异该修复即使测试红）；F = 仅家族回归（变异不被抓住）；N/A = 不可测/无生产调用方。
+
+| 修复 | 证据类型 | 定向测试 |
+|---|---|---|
+| #1591 move-assign 缓存重置（R1-1） | T | test_obia_segmentation "move-assignment drops the destination's stale caches"（变异 M1 → 红） |
+| AG2-F2/F3/F4, AG5-2, AG4-1, AG4-3, AG1-1(内核), AG3-1(helper), AG3-2, AG2-D1, AG2-F1, AG2-F5, AG5-4(驳回), AG1-3, AG1-4 | T | 各自命名用例（R2 变异 M4/M5/M6/M7/M8/M10/M11/M12/M15/M18/M28/M29/M31/M32 均 → 红） |
+| WindowMean 下沿重复时间戳（R2 P3-1） | T | test_temporal_calendar 重复时间戳用例 |
+| paint 契约 33eda0e（R2-1） | T | test_object_hierarchy 新契约用例 |
+| AG5-1 kmeans scale | T（R2 补） | test_rs_operators "scale=false clusters on raw DN"（差分 oracle） |
+| AG4-2 monitor sd==0 | T（R2 补） | test_temporal_operators_10 "constant pixel's CUSUM at zero" |
+| AG2-F6 histogramMatch | T（R2 补） | test_image_fusion 小 tile 样本标准差 oracle |
+| dNBR 哨兵规则 | T（R2 补） | test_image_fusion bothNormalizable 谓词逐条 |
+| AG1-2 Rayleigh 1+3δ | F + N/A（无生产调用方；6S LUT 不变量测试间接覆盖） | — |
+| AG5-5 RF row-0 | F（stock OpenCV 不可达） | — |
+| #1591 锁（并发） | F（无 TSan；hammer 一致性断言） | — |
+| AG3-1 算子接线、AG5-3、AG2-D2 部分 | F（测试数据不触达该分支） | — |
