@@ -2,7 +2,9 @@
 
 ## 基线
 - **BASE**: origin/master `911e0b17a3533ca0d79c1b68b000d6052c4c3c61`（merge PR #1672；gh API LIVE 复核，本地 fetch 通道不可用见 RISK_REGISTER R1）
-- **HEAD**: `<本 PR head>` · 分支 `agent/r21-e-teaching-verification-20261023T215154Z`
+- **HEAD**: `19230f32bc5ac3c814067887677b4c7570e2c8b3`（API 发布；远端树与本地 HEAD 树逐字节一致）· 分支 `agent/r21-e-teaching-verification-20261023T215154Z`
+- **PR**: https://github.com/WindWang2/exp-rs/pull/1674（未自动合并、未启用 auto-merge、未等待线上 CI——按协议）
+- **发布方式说明**：本宿主 git 传输层（https 直连与 socks5h://127.0.0.1:7890）对 github.com 均不可达（SSL EOF / connect timeout），SSH 无密钥；分支与 9 个提交经 GitHub Git Database API 逐对象上传（blob→tree→commit→ref），本地提交全部保留、树哈希与远端一致（脚本 `.planning/r21-E/publish_via_api.sh`）。
 - 开放 PR 基线 = 0；提交前复查无同域新 PR。
 
 ## 读过的 PR / issues
