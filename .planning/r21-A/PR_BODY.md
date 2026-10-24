@@ -3,7 +3,7 @@
 ## Base / Head
 
 - base: `master` @ `911e0b17a3533ca0d79c1b68b000d6052c4c3c61`（执行时刻远程事实基线；Open PR=0，Open Issues=126 已全量再分诊）
-- head: `agent/r21-a-scientific-algorithms-20261023T184835Z` @ `<HEAD_SHA>`
+- head: `agent/r21-a-scientific-algorithms-20261023T184835Z` @ `51375e6fa5f531ac61a70eb5dc6bfcfe01738efe`
 - 读取的 PR/issues：#1671（本轨前作，七契约全部 merge-loss 复核在位）、#1663/#1534、#1550/#1538/#1590/#1591/#1631/#1646-6（R20 判"已修未关"，本轮逐条实读确认，不重复修）、#1467（跨轨）、#1541/#1544/#1573-1577/#1642/#1646 其余项/#1558（跨轨移交）
 
 ## 工作包（19 commits，全部 RED→GREEN×2）
