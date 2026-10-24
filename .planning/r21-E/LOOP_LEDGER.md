@@ -25,3 +25,4 @@
 | 21 | M6 | R1 修复落地+自证：vacuous 规则作用域 bug（写在 isMember 块内→删除成员永不触发）→移到块外；runner declared 谓词与 loader 对齐（非对象 fail-closed）；早退可见性；helper 期望方向修正（delta_ge→delta_le，canonical 对齐）；Qt6::Core 链入测试目标 | test_r21_e_faultlab_verifier: All tests passed (58 assertions / 9 cases) | ✅ | 等链 |
 | 22 | M6 | R2 评审（fresh subagent，78 调用，自行跑测试）：READY-WITH-FIXES；P0-1/P1-1/P1-2/P2-1..4/P3-1..4 全部处置 | 四 lane GREEN×2 + sweep 28 全绿 + e2e PASS | ✅ | 提交+PR |
 | 23 | M7 | 提交与 PR 准备 | — | ⏳ | — |
+| 24 | M7 | PR #1674 建成（11 提交/42 文件/+2534−24）；分支经 Git Database API 发布（git 传输层不可达），远端树与本地 HEAD 逐字节一致；不自动合并、不等 CI | gh pr view: OPEN | ✅ | 终报完成 |
