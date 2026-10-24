@@ -666,3 +666,6 @@ r6_dev.cmd
 .planning/zcode-r20-05/red-drivers/*
 !.planning/zcode-r20-05/red-drivers/*.cpp
 !.planning/zcode-r20-05/red-drivers/*.md
+# R21-B track (geospatial data / model runtime / reproducibility) planning artifacts (markdown only).
+!.planning/r21-B/*
+!.planning/r21-B/*.md

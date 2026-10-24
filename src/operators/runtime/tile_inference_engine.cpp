@@ -493,6 +493,33 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
   return prov;
 }
 
+/// mask_threshold binarizes CLASS-PROBABILITY planes only. The manifest's
+/// confidence-semantics contract is explicit: "Consumers must not threshold
+/// across semantics" — uncertainty, embedding, detection and auxiliary
+/// heads pass through untouched, whatever the postprocess block says
+/// (risk B5).
+///
+/// The role is looked up BY NAME against output.heads[], never by index:
+/// manifest validation only pins heads[0] to tensorNames[0], so a positional
+/// lookup can gate the wrong head's planes (review R1-F3). A head with no
+/// matching contract entry is UNDECLARED: thresholding it would assume
+/// probability semantics the manifest never states, so undeclared heads are
+/// NOT thresholdable (R1-F9) — except in the legacy flat shape, where heads
+/// is empty and the flat output block carries segmentation semantics.
+bool headRoleIsThresholdable( const std::vector<ModelHeadContract> &heads,
+                              const std::string &headName )
+{
+  if ( heads.empty() )
+    return true; // legacy flat head: segmentation semantics
+  for ( const ModelHeadContract &head : heads )
+  {
+    if ( head.name == headName )
+      return head.role.empty() || head.role == "segmentation"
+             || head.role == "classification";
+  }
+  return false; // undeclared head: no thresholding
+}
+
 } // namespace
 
 TileInferenceEngine::TileInferenceEngine( ModelInfo model, ModelRuntimePtr runtime )
@@ -1699,6 +1726,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       const int outH = output.size[2];
       const int outW = output.size[3];
       const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+      const bool thresholdableHead =
+        headRoleIsThresholdable( m_model.output.heads, headName );
       const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
                                                                outH * outW } );
       for ( std::size_t bi = 0; bi < batchMats.size(); ++bi )
@@ -1811,7 +1840,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           cv::Mat thresholded;
           if ( isUncertaintyHead )
             headPlanes.push_back( plane );
-          if ( mode == RasterOutputMode::Probability && m_model.postprocess.maskThreshold >= 0.0 )
+          if ( mode == RasterOutputMode::Probability && thresholdableHead
+               && m_model.postprocess.maskThreshold >= 0.0 )
           {
             const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
             cv::Mat mask = plane >= thr; // NaN ≥ thr is false → 0, restored below
@@ -3749,6 +3779,13 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       const int outH = output.size[2];
       const int outW = output.size[3];
       const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+      // resolvedHeadNames is sized to headOutputs (the runtime's ACTUAL
+      // outputs); headNames is the manifest's request and may be shorter
+      // (a manifest that declares no tensor_names asks for every graph
+      // output) — indexing it here read out of bounds (review R2-F02).
+      const std::string &resolvedHeadName = resolvedHeadNames[h];
+      const bool thresholdableHead =
+        headRoleIsThresholdable( m_model.output.heads, resolvedHeadName );
       const cv::Mat flat =
         output.reshape( 1, std::vector<int>{ B * outChannels, outH * outW } );
       for ( int bi = 0; bi < B; ++bi )
@@ -3802,7 +3839,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
             plane = plane( cv::Range( 0, bt.h ), cv::Range( 0, bt.w ) ).clone();
           if ( isUncertaintyHead )
             headPlanes.push_back( plane );
-          if ( m_model.postprocess.maskThreshold >= 0.0 )
+          if ( thresholdableHead && m_model.postprocess.maskThreshold >= 0.0 )
           {
             const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
             cv::Mat mask = plane >= thr;

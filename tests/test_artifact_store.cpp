@@ -394,3 +394,51 @@ TEST_CASE( "ArtifactStore survives concurrent store handles (WAL)", "[artifact_s
     REQUIRE( seen );
     REQUIRE( seen->logicalKey == QStringLiteral( "x" ) );
 }
+
+// risk A4: the schema stamp is write-once. A store that already records a
+// version (here '0', older than supported '1') must keep that stamp across
+// open() — the old blanket INSERT OR REPLACE silently "upgraded" the stamp
+// to the current version WITHOUT running any migration, so a future v2
+// build would skip migrations for every store it opened. The '99' newer
+// refusal above covers the other direction.
+TEST_CASE( "an existing schema stamp is never rewritten by open", "[artifact_store][migration]" )
+{
+    QTemporaryDir dir;
+    const QString db = dir.filePath( QStringLiteral( "older.sqlite" ) );
+    {
+        ArtifactStore store;
+        QString err;
+        REQUIRE( store.open( db, &err ) );
+    }
+    // Simulate a store written by an OLDER build (direct DB surgery).
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( db.toUtf8().constData(), &raw,
+                                  SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+        char *err = nullptr;
+        REQUIRE( sqlite3_exec( raw,
+                               "UPDATE store_meta SET value='0' WHERE key='schema_version'",
+                               nullptr, nullptr, &err ) == SQLITE_OK );
+        sqlite3_free( err );
+        sqlite3_close( raw );
+    }
+    ArtifactStore store;
+    QString err;
+    REQUIRE( store.open( db, &err ) );
+    // The recorded version survives: writing '1' over '0' here would claim
+    // a migration ran that never did.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( db.toUtf8().constData(), &raw,
+                                  SQLITE_OPEN_READONLY, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *stmt = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw, "SELECT value FROM store_meta WHERE key='schema_version'",
+                                     -1, &stmt, nullptr ) == SQLITE_OK );
+        REQUIRE( sqlite3_step( stmt ) == SQLITE_ROW );
+        const QString stamped = QString::fromUtf8(
+            reinterpret_cast<const char *>( sqlite3_column_text( stmt, 0 ) ) );
+        sqlite3_finalize( stmt );
+        sqlite3_close( raw );
+        CHECK( stamped == QLatin1String( "0" ) );
+    }
+}
