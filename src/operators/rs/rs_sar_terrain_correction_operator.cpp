@@ -209,16 +209,17 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     if (!declaredUnit.isEmpty()) {
         demUnit = declaredUnit.toStdString();
     }
-    double demUnitScale = 1.0;
-    if (demUnit == "feet") {
-        demUnitScale = 0.3048;
-    } else if (demUnit == "decimeters") {
-        demUnitScale = 0.1;
-    } else if (demUnit != "meters") {
-        context.logWarning("Unknown DEM unit '" + demUnit + "' (SICNU_DEM_UNIT); "
-                           "assuming meters");
+    // Unit-name -> scale resolution is the shared sar_metadata helper (single
+    // owner of the mapping). An unknown unit keeps scale 1.0 with a warning,
+    // so a future unit only has to be added in one place.
+    QString appliedDemUnit;
+    const double demUnitScale =
+        sicnu::sar::demUnitScaleFromName( QString::fromStdString( demUnit ), &appliedDemUnit );
+    if ( appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
+        context.logWarning( "Unknown DEM unit '" + demUnit + "' (SICNU_DEM_UNIT); "
+                            "assuming meters" );
         demUnit = "meters";
-        demUnitScale = 1.0;
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).

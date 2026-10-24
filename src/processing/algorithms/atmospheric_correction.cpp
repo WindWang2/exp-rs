@@ -643,6 +643,8 @@ bool processFile(const QString &sourcePath, const QString &targetPath,
     // void every valid pixel into NaN while the run still reports success —
     // the in-memory dos2() kernel refuses exactly this case; mirror it here
     // so no streaming caller can publish an all-NoData "surface reflectance".
+    // The staged output (if one was already created above) is removed by
+    // StagedRasterOutput's destructor on this early return.
     if (method == Method::Dos2 && !(transmittance > 0.0f)) {
         if (errorMessage)
             *errorMessage = QStringLiteral(
@@ -817,6 +819,8 @@ bool processFileDos(const QString &sourcePath, const QString &targetPath,
     // void every valid pixel into NaN while the run still reports success —
     // the in-memory dos2() kernel refuses exactly this case; mirror it here
     // so no streaming caller can publish an all-NoData "surface reflectance".
+    // The staged output (if one was already created above) is removed by
+    // StagedRasterOutput's destructor on this early return.
     if (method == Method::Dos2 && !(transmittance > 0.0f)) {
         if (errorMessage)
             *errorMessage = QStringLiteral(

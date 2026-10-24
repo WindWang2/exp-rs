@@ -255,7 +255,7 @@ Json::Value runOrbitIncidence( const Json::Value &params, RSOperatorContext &con
                                "Failed to create output raster: " + outputPath );
     out.setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
 
-// SICNU_DEM_UNIT must reach geolocateZeroDoppler: heights read raw
+    // SICNU_DEM_UNIT must reach geolocateZeroDoppler: heights read raw
     // misplaced the zero-Doppler shell on declared non-metre DEMs.
     QString appliedDemUnit;
     const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );

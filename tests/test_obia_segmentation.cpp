@@ -696,8 +696,11 @@ TEST_CASE( "RsMultiresSegmenter: in-memory validity predicate matches the sentin
 // guard, ensureSizeCache()/ensureCoordsIndex()/pixelCoords() wrote mutable
 // members from const methods with no synchronization (data race, UB under
 // TSan). This hammer pins the post-fix contract: identical answers from N
-// threads racing across both cache paths (single-segment lazy + full
-// inverted index). The value oracle: ids 1..30, each a 10x300 row band.
+// threads racing across the cache paths. With 30 segments every
+// pixelCoords() takes the >8 full-inverted-index path; the lazy
+// single-segment path is covered by the copy/move and unknown-id cases
+// below (safe by construction: build-into-local + insert under the write
+// lock). The value oracle: ids 1..30, each a 10x300 row band.
 // ===========================================================================
 
 TEST_CASE( "RsSegmentMap: concurrent const access is race-free and consistent (#1591)", "[obia][segmentation][r21a][threads]" )

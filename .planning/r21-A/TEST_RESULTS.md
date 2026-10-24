@@ -22,17 +22,17 @@
 
 | 测试族 | 断言数/用例 | 第一遍 | 第二遍 |
 |---|---|---|---|
-| test_obia_segmentation | 863 / 15 | PASS | PASS |
+| test_obia_segmentation | 871 / 16 | PASS | PASS |
 | test_spectral_classification | 205 / 32 | PASS | PASS |
 | test_spectral_unmixing | 72 / 11 | PASS | PASS |
 | test_classification_intelligence_e2e | 6208 / 6 | PASS | PASS |
-| test_atmospheric | 37540 / 47 | PASS | PASS |
+| test_atmospheric | 37548 / 48 | PASS | PASS |
 | test_fast_6s_atmospheric | 1215 / 9 | PASS | PASS |
 | test_radiometric_calibration | 195713 / 34 | PASS | PASS |
-| test_rs_operators | 9102 / 83 | PASS | PASS |
-| test_temporal_calendar | 92 / 11 | PASS* | PASS |
+| test_rs_operators | 9114 / 84 | PASS | PASS |
+| test_temporal_calendar | 96 / 11 | PASS* | PASS |
 | test_terrain_solar | 69 / 5 | PASS* | PASS |
-| test_image_fusion | 1710 / 47 | PASS | PASS |
+| test_image_fusion | 1721 / 49 | PASS | PASS |
 | test_pca | 287 / 8 | PASS | PASS |
 | test_continuum_removal | 69 / 7 | PASS | PASS |
 

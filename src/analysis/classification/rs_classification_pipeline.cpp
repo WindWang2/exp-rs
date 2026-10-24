@@ -1223,6 +1223,17 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
             // uncertainty band and meanConfidence. The backend's disclosed
             // label space is the ground truth to match.
             const QVector<int> backendOrder = config.backend->classOrder();
+            // A backend that discloses no label space (KMeans/ISODATA/KNN/
+            // statistical backends, or a legacy model loaded without a labels
+            // sidecar) cannot have its identity checked — say so instead of
+            // silently degrading to the count-only gate the caller believes
+            // was replaced.
+            if ( backendOrder.isEmpty() )
+            {
+              SICNU_LOG_WARN( SicnuLogTags::Classification,
+                                 QStringLiteral( "calibration applied but the backend discloses no "
+                                                 "class order; only the column count is checked" ) );
+            }
             const bool idsMismatch = !backendOrder.isEmpty()
                 && backendOrder != appliedCalibration.classIds;
             if ( appliedCalibration.classIds.size() != probs.cols || idsMismatch )

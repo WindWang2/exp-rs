@@ -234,8 +234,18 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
                                        + x + halo;
                     const double phi = sicnu::sar::interferogramPhase( mbuf[idx], sbuf[idx] );
                     fitter.addSample( tile.xOffset + x, tile.yOffset + y, phi );
-                    phasorSum += std::polar( 1.0, phi );
-                    ++phasorCount;
+                    // Same validity rule as the fitter: interferogramPhase
+                    // returns NaN for non-finite/zero samples, and one NaN in
+                    // the sum would poison the resultant length into NaN
+                    // (NaN >= 0.15 is false) — stamping "low" on essentially
+                    // every real pair, since coregistration voids and layover
+                    // zeros are ordinary. Counting invalid pixels would also
+                    // dilute R for all-finite scenes.
+                    if ( std::isfinite( phi ) )
+                    {
+                        phasorSum += std::polar( 1.0, phi );
+                        ++phasorCount;
+                    }
                 }
         }
         if ( !fitter.fit( rampMode == "quadratic", 2, &ramp ) )

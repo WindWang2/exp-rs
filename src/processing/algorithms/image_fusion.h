@@ -21,6 +21,14 @@ struct FusionQualityReport;
 class ImageFusion
 {
   public:
+    /// Histogram-match src to ref in place: match mean and SAMPLE stddev
+    /// (N-1, the same estimator the streaming IHS/PCA/GS paths accumulate
+    /// with — the population form mis-scales small tiles by sqrt((N-1)/N)).
+    /// Non-finite samples and the declared @p nodata sentinel are skipped by
+    /// both statistics.
+    static void histogramMatch( float *data, size_t n,
+                                const float *ref, size_t refN, float nodata );
+
     /// Linear weighted fusion: simplest fusion method
     ///   fused[i] = msWeight[i] * ms[i] + panWeight * pan
     /// msWeights: per-band mixing weight (default 0.5 for each)
@@ -96,10 +104,6 @@ class ImageFusion
                                     rs::fusion::FusionQualityReport *qualityReport = nullptr);
 
   private:
-    /// Histogram-match src to ref (match mean and stddev).
-    static void histogramMatch( float *data, size_t n,
-                                const float *ref, size_t refN, float nodata );
-
     /// Pre-F15 fusion path (kept verbatim); the public wrapper adds the
     /// optional quality-report pass on top.
     static bool processNativeFusionImpl(const QString &panPath, const QString &msPath,

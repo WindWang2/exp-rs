@@ -4446,3 +4446,61 @@ TEST_CASE("RS radiometric calibration refuses non-integral bands entries (AG1-4)
         CHECK(QFile::exists(outputPath));
     }
 }
+
+
+// ===========================================================================
+// r21-A / R2 mutation-gap closure — rs:kmeans must honor scale=false.
+// The regression test above uses two spectrally disjoint halves, where
+// z-scoring cannot change the partition; this oracle uses bands with very
+// different dynamic ranges so the scaled and raw partitions DIFFER.
+// ===========================================================================
+TEST_CASE("RS kmeans scale=false clusters on raw DN, scale=true on z-scores (AG5-1)",
+          "[operators][rs][r21a]") {
+    auto op = RSOperatorRegistry::instance().create("rs:kmeans_classification");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/scaled.tif";
+
+    // Band 1 spans [300,310] (range 10), band 2 spans [0,1] (range 1).
+    // Pixels: A=(302,0.25), B=(302,0.75) differ only in band 2;
+    //         C=(308,0.25) differs only in band 1.
+    constexpr int W = 3;
+    constexpr int H = 1;
+    std::vector<std::vector<float>> bands(2);
+    bands[0] = {302.0f, 302.0f, 308.0f};
+    bands[1] = {0.25f, 0.75f, 0.25f};
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    const auto run = [&](bool scale, const QString &out) {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = out.toStdString();
+        params["k"] = 2;
+        params["maxSamples"] = 0;
+        params["scale"] = scale;
+        RSOperatorContext ctx;
+        Json::Value r = op->run(params, ctx);
+        REQUIRE(r.isMember("output"));
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(out));
+        std::vector<float> px(3, 0.0f);
+        REQUIRE(ds.readBandData(1, px.data(), W, H));
+        return px;
+    };
+
+    const std::vector<float> raw = run(false, tmp.path() + "/raw.tif");
+    const std::vector<float> zs = run(true, tmp.path() + "/zs.tif");
+
+    // Raw DN: d(A,B)=0.5 << d(A,C)=6 -> A and B share a cluster, C is alone.
+    REQUIRE(raw[0] == raw[1]);
+    REQUIRE(raw[0] != raw[2]);
+
+    // Z-scored: band 1 spread ~2.9, band 2 spread ~0.29, so d'(A,B) ~= d'(A,C)
+    // — the partition must not be the raw one (A,B together) for BOTH runs.
+    // If scale were ignored (the bug), raw and zs would be identical.
+    const bool sameAsRaw = (zs[0] == zs[1]) && (zs[0] != zs[2]);
+    CHECK_FALSE(sameAsRaw);
+}
+

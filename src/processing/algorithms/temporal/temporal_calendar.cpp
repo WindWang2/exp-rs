@@ -338,7 +338,12 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
       // lowerBoundObs(x) is the last index at or before x. An observation
       // exactly at t - radius is a window member (the in-loop |Δ| <= radius
       // check keeps it), so the scan starts AT that index — not after it.
-      const int start = lowerBoundObs( tDays, nObs, t - radius );
+      // Duplicate timestamps at the lower edge must ALL participate (the
+      // upper edge includes every duplicate by construction); walk back over
+      // the equal-day run so both edges treat duplicates identically.
+      int start = lowerBoundObs( tDays, nObs, t - radius );
+      while ( start > 0 && tDays[start - 1] == tDays[start] )
+        --start;
       const int endExclusive = lowerBoundObs( tDays, nObs, t + radius ) + 1;
       double sum = 0.0;
       int count = 0;

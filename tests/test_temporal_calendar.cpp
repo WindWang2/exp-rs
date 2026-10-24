@@ -208,6 +208,27 @@ TEST_CASE( "regularizeSeries window_mean averages ALL observations inside the ra
   // 33 is 17 away -> excluded; window stays the five -> 2.6.
   REQUIRE( incl.points[0].value == Approx( 2.6f ).margin( 1e-6 ) );
   REQUIRE( incl.points[0].validObservations == 5 );
+
+  // Duplicate timestamps at the LOWER edge all participate (the upper edge
+  // includes every duplicate by construction; the lower edge used to keep
+  // only the last one — the same asymmetry AG4-1 fixed for distinct days).
+  // days {0,0,0,10} vals {1,2,3,50}, t=10, r=10: window = all four.
+  std::vector<float> dupSeries{ 1.0f, 2.0f, 3.0f, 50.0f };
+  std::vector<double> dupDays{ 0.0, 0.0, 0.0, 10.0 };
+  std::vector<CalendarPoint> dupCalendar{ { 10.0, "t10" } };
+  options.maxWindowDays = 10.0;
+  const RegularizedSeries dup = regularizeSeries( dupSeries, dupDays, dupCalendar, options );
+  REQUIRE( dup.points[0].value == Approx( 14.0f ).margin( 1e-6 ) );
+  REQUIRE( dup.points[0].validObservations == 4 );
+
+  // Duplicates exactly AT t with radius 0: mean of both, not just the last.
+  std::vector<float> dupAtSeries{ 2.0f, 4.0f };
+  std::vector<double> dupAtDays{ 5.0, 5.0 };
+  std::vector<CalendarPoint> dupAtCalendar{ { 5.0, "t5" } };
+  options.maxWindowDays = 0.0;
+  const RegularizedSeries dupAt = regularizeSeries( dupAtSeries, dupAtDays, dupAtCalendar, options );
+  REQUIRE( dupAt.points[0].value == Approx( 3.0f ).margin( 1e-6 ) );
+  REQUIRE( dupAt.points[0].validObservations == 2 );
 }
 
 TEST_CASE( "regularizeSeries whittaker: bridges small gaps, splits large ones", "[temporal][calendar]" )
