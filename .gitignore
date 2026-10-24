@@ -666,3 +666,8 @@ r6_dev.cmd
 .planning/zcode-r20-05/red-drivers/*
 !.planning/zcode-r20-05/red-drivers/*.cpp
 !.planning/zcode-r20-05/red-drivers/*.md
+# R21-C track (Pi/MCP harness, scientific decisions, workflow & plugin tool
+# contracts) planning artifacts (markdown only).
+!.planning/r21-C/
+.planning/r21-C/*
+!.planning/r21-C/*.md
