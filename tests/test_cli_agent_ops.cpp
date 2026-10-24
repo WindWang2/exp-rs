@@ -260,12 +260,20 @@ TEST_CASE("cli session command: repair approval rides the token channel",
 
     // A well-formed token rides all the way to the driver: `resume` never
     // consumes an approval, and the driver says so by name — proof the CLI
-    // carried the token instead of dropping it.
+    // carried the token instead of dropping it (the driver can only refuse
+    // APPROVAL_TOKEN_REQUIRED when the member actually arrived). Wired
+    // FakeSeams so the seam gate passes and the approval check is reached;
+    // it runs BEFORE the session lookup, so the id need not exist.
     const std::string okToken = tokenFile(
         "ok.json", R"({"findings_digest":"d","issued_at_ms":1,"expires_at_ms":2})");
-    auto carried = runSession({"resume", "--session-id", "s-x", "--repair-approval",
+    FakeScenario scenario;
+    FakeSeams wired(scenario);
+    OpsDriver wiredDriver(wiredOptions(wired));
+    auto carried = runSession({"resume", "--goal", "compute NDVI for the scene",
+                               "--journal-dir", QString::fromStdString(dir),
+                               "--session-id", "no-such-session", "--repair-approval",
                                QString::fromStdString(okToken), "--approval-now-ms", "123"},
-                              &seamless);
+                              &wiredDriver);
     REQUIRE(carried.exitCode == 1); // GenericError refusal family
     REQUIRE(carried.envelope["data"]["error"].asString() == "APPROVAL_TOKEN_REQUIRED");
 

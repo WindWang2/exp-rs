@@ -14,7 +14,10 @@
 
 #include <json/json.h>
 
+#include <QFile>
 #include <QString>
+
+#include <memory>
 
 namespace exprs_ns = exprs;
 
@@ -48,6 +51,44 @@ Json::Value parseRefs( const QString &raw, bool *ok )
     *ok = reader->parse( text.data(), text.data() + text.size(), &parsed, &error );
     delete reader;
     return parsed;
+}
+
+/// Reads the repair-approval token document. The token is a small JSON
+/// object minted by `session approve-repair`; anything missing, unparseable
+/// or non-object is a typed refusal — an approval must never be silently
+/// dropped on its way to the driver (CT-B, R20-03).
+bool readApprovalTokenFile( const QString &path, Json::Value &token, std::string &error )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+    {
+        error = "cannot read token file '" + qstr( path ) + "'";
+        return false;
+    }
+    // Bounded read: a token is a small sidecar; a planted huge file must not
+    // be buffered whole (same cap discipline as the workflow kernel).
+    const QByteArray raw = file.read( 1 * 1024 * 1024 + 1 );
+    if ( raw.size() > 1 * 1024 * 1024 )
+    {
+        error = "token file '" + qstr( path ) + "' exceeds the 1 MiB cap";
+        return false;
+    }
+    Json::CharReaderBuilder builder;
+    builder["collectComments"] = false;
+    std::string parseError;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &token,
+                         &parseError ) )
+    {
+        error = "token file '" + qstr( path ) + "' is not valid JSON: " + parseError;
+        return false;
+    }
+    if ( !token.isObject() )
+    {
+        error = "token file '" + qstr( path ) + "' must contain a JSON object";
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -146,17 +187,47 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
         else if ( flag == QStringLiteral( "--approve" ) ||
                   flag == QStringLiteral( "--approve-pending-repair" ) )
         {
-            const QString value = next( "approve" );
-            args["approve"] = value.isEmpty() || value == QStringLiteral( "true" );
-            if ( flag == QStringLiteral( "--approve-pending-repair" ) )
-                args["approve_pending_repair"] = args["approve"].asBool();
+            // CT-B (R20-03): the bare-bool spellings armed nothing —
+            // args["approve"] had zero consumers and the legacy
+            // approve_pending_repair is exactly what the driver refuses.
+            // Refuse at parse time and point at the token channel: mint via
+            // `session approve-repair`, arm via --repair-approval.
+            (void)next( "approve" );
+            return sessionError(
+                io, "a bare --approve arms nothing: mint the token with `session "
+                    "approve-repair`, then pass it with --repair-approval <token.json>",
+                exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                "--repair-approval <token.json> [--approval-now-ms <ms>]",
+                flag.toStdString() );
+        }
+        else if ( flag == QStringLiteral( "--repair-approval" ) )
+        {
+            const QString tokenPath = next( "repair-approval" );
+            Json::Value token( Json::objectValue );
+            std::string tokenError;
+            if ( !readApprovalTokenFile( tokenPath, token, tokenError ) )
+                return sessionError(
+                    io, tokenError, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                    "--repair-approval <token.json>", tokenPath.toStdString() );
+            args["repair_approval"] = token;
+        }
+        else if ( flag == QStringLiteral( "--approval-now-ms" ) )
+        {
+            bool parsed = false;
+            const qlonglong value = next( "approval-now-ms" ).toLongLong( &parsed );
+            if ( !parsed )
+                return sessionError( io, "--approval-now-ms needs an integer",
+                                     exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                     "--approval-now-ms <ms>", "--approval-now-ms" );
+            args["approval_now_ms"] = Json::Int64( value );
         }
         else
         {
             return sessionError( io, "unknown flag '" + flag.toStdString() + "'",
                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                  "--goal|--intent|--mode|--journal-dir|--session-id|"
-                                 "--domain|--role|--refs|--approve", flag.toStdString() );
+                                 "--domain|--role|--refs|--repair-approval|--approval-now-ms",
+                                 flag.toStdString() );
         }
     }
 
