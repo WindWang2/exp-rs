@@ -2,7 +2,7 @@
 
 **分支**: `agent/r21-b-data-model-runtime-20261023T185101Z` @ `de2dbd121b`（24 commits）
 **Base**: `911e0b17a3533ca0d79c1b68b000d6052c4c3c61`（执行时点 origin/master）
-**PR**: 见 PR_BODY.md
+**PR**: https://github.com/WindWang2/exp-rs/pull/1673（OPEN，未等 CI，未 auto-merge）
 
 ## 交付总览
 | 类别 | 数量 | 明细 |
