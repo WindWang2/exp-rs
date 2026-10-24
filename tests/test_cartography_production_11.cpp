@@ -1032,6 +1032,44 @@ TEST_CASE( "atlas filename_expression is compile-checked, never silently degrade
     CHECK( missingFieldError.contains( QStringLiteral( "filename_expression" ) ) );
 }
 
+TEST_CASE( "atlas filter expression parse failure refuses the compile (R21-D)",
+           "[cp11][atlas][r21d]" )
+{
+    // R21-D: the atlas filter used to be compiled permissively — a broken
+    // expression was dropped (filterError discarded, setFilterFeatures never
+    // called) and the export delivered EVERY coverage feature, silently
+    // reinterpreting the spec's declared subset. The same contract
+    // filename_expression already enforces (above) applies here.
+    addAtlasCoverageLayer( QStringLiteral( "atlas-cities-filter" ),
+                           { { qMakePair( QString::fromUtf8( "One" ), 1 ) },
+                             { qMakePair( QString::fromUtf8( "Two" ), 2 ) },
+                             { qMakePair( QString::fromUtf8( "Three" ), 3 ) } } );
+
+    Json::Value spec = atlasSpec( "atlas-filter-bad", QStringLiteral( "atlas-cities-filter" ) );
+    spec["page"]["atlas"]["filter"] = "rank > "; // parse error
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout == nullptr );
+    CHECK( compileError.contains( QStringLiteral( "filter" ) ) );
+
+    // Control: a valid filter still compiles, and the filter is actually
+    // armed on the compiled atlas (not just accepted).
+    Json::Value good = atlasSpec( "atlas-filter-good", QStringLiteral( "atlas-cities-filter" ) );
+    good["page"]["atlas"]["filter"] = "rank > 1";
+    QString goodError;
+    QgsPrintLayout *goodLayout = nullptr;
+    REQUIRE_NOTHROW( goodLayout = MapSpecCompiler::compile( good, &goodError ) );
+    REQUIRE( goodLayout != nullptr );
+    if ( QgsLayoutAtlas *atlas = goodLayout->atlas() )
+    {
+        CHECK( atlas->filterFeatures() );
+        CHECK( atlas->filterExpression() == QStringLiteral( "rank > 1" ) );
+    }
+    sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
+      QStringLiteral( "atlas-filter-good" ) );
+}
+
 TEST_CASE( "atlas count contract: updateFeatures refreshes, count does not",
            "[cp11][atlas]" )
 {
@@ -1778,4 +1816,68 @@ TEST_CASE( "series index label derives its rect from the template page size (R16
     CHECK( landscapeLabel["rect_mm"][2].asDouble() == Catch::Approx( 257.0 ) );
     CHECK( landscapeLabel["rect_mm"][3].asDouble() == Catch::Approx( 150.0 ) );
     CHECK( preflightMapSpec( landscapeSpec )["error_count"].asInt() == 0 );
+}
+
+TEST_CASE( "export cancel probe aborts mid-delivery and leaves no files (R21-D)",
+           "[cp11][export][r21d]" )
+{
+    // R21-D: the single/multi-page raster export had no cancel seam — a
+    // Stop during a long write left a task marked Canceled with the files
+    // already published. The probe now fires on every page boundary and
+    // every page THIS run delivered is rolled back.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    QgsPrintLayout layout( QgsProject::instance() );
+    auto *firstPage = new QgsLayoutItemPage( &layout );
+    firstPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( firstPage );
+    auto *extraPage = new QgsLayoutItemPage( &layout );
+    extraPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( extraPage );
+    std::unique_ptr<QgsLayoutItemLabel> page0Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page0Label->setText( QStringLiteral( "body page" ) );
+    page0Label->attemptSetSceneRect( QRectF( 10, 10, 80, 10 ) );
+    layout.addLayoutItem( page0Label.release() );
+    std::unique_ptr<QgsLayoutItemLabel> page1Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page1Label->setText( QStringLiteral( "second page" ) );
+    page1Label->attemptSetSceneRect( QRectF( 10, 220, 80, 10 ) );
+    layout.addLayoutItem( page1Label.release() );
+    REQUIRE( layout.pageCollection()->pageCount() == 2 );
+
+    sicnu::agent::cartography::MapExportRequest request;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.file_name = "cancel-mp";
+
+    // Control: no probe → full 2-page delivery.
+    const auto full = sicnu::agent::cartography::exportMapLayout( &layout, request );
+    REQUIRE( full.ok );
+    REQUIRE( full.pagePaths.size() == 2 );
+
+    // Cancel BEFORE the first page: nothing is written, result says cancelled.
+    const auto beforeFirst = sicnu::agent::cartography::exportMapLayout(
+        &layout, request, []() { return true; } );
+    CHECK( !beforeFirst.ok );
+    CHECK( beforeFirst.cancelled );
+
+    // Cancel AFTER the first page: page 0's file is rolled back — a stopped
+    // delivery must not leave its partial output behind.
+    QTemporaryDir dirCancel;
+    REQUIRE( dirCancel.isValid() );
+    sicnu::agent::cartography::MapExportRequest cancelRequest = request;
+    cancelRequest.directory = dirCancel.path().toStdString();
+    int calls = 0;
+    const auto midDelivery = sicnu::agent::cartography::exportMapLayout(
+        &layout, cancelRequest, [ &calls ]() { return ++calls >= 2; } );
+    CHECK( !midDelivery.ok );
+    CHECK( midDelivery.cancelled );
+    // The delivery directory holds NOTHING from this run (the control run's
+    // files live in a different directory).
+    CHECK( QDir( dirCancel.path() ).entryList( QDir::Files ).isEmpty() );
+    // Only the first page boundary was polled before the abort.
+    CHECK( calls == 2 );
 }

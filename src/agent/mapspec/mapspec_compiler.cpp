@@ -404,13 +404,27 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         }
       }
       // v3 atlas surface: filter, sort, per-feature margin fraction.
+      // R21-D: a filter that fails to parse used to be silently dropped
+      // (error string discarded, setFilterFeatures never armed), so the
+      // export delivered EVERY coverage feature — the spec's declared
+      // subset was silently reinterpreted. filename_expression above
+      // already refuses on this exact contract; the filter joins it.
       if ( atlasSpec.isMember( "filter" ) && atlasSpec["filter"].isString() &&
            !atlasSpec["filter"].asString().empty() )
       {
         QString filterError;
-        if ( atlas->setFilterExpression(
+        if ( !atlas->setFilterExpression(
                QString::fromStdString( atlasSpec["filter"].asString() ), filterError ) )
-          atlas->setFilterFeatures( true );
+        {
+          if ( error )
+            *error = QStringLiteral( "%1: invalid atlas filter: %2" )
+                       .arg( QString::fromStdString( spec["layout_name"].asString() ),
+                             filterError );
+          LayoutService::instance().deleteLayout(
+            QString::fromStdString( spec["layout_name"].asString() ) );
+          return nullptr;
+        }
+        atlas->setFilterFeatures( true );
       }
       std::string sortExpression;
       if ( atlasSpec.isMember( "sort_expression" ) && atlasSpec["sort_expression"].isString() )

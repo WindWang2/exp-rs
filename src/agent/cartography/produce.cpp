@@ -404,9 +404,22 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     exportRequest.dpi = request.dpi;
     exportRequest.directory = request.directory;
     exportRequest.file_name = baseName.toStdString();
-    const MapExportResult exported = exportMapLayout( layout, exportRequest );
+    // R21-D: the reporter doubles as the cancel probe for the single/multi
+    // -page export (report(stage, progress, detail) == true means "keep
+    // going"), so a Stop during the write aborts at the next page boundary
+    // with the delivered pages rolled back — the same discipline the atlas
+    // delivery below already had.
+    const MapExportResult exported =
+        exportMapLayout( layout, exportRequest,
+                         [ &reporter ]() {
+                             return !report( reporter, "export", 0.6, "export cancelled" );
+                         } );
     result.font_diagnostics = exported.fontDiagnostics;
     result.exporterResult = exported.exporterResult;
+    if ( exported.cancelled )
+        return refused( "PRODUCE_CANCELLED",
+                        exported.error.isEmpty() ? QStringLiteral( "cancelled during export" )
+                                                 : exported.error );
     if ( !exported.ok )
     {
         ProduceResult failed = refused( "EXPORT_FAILED", exported.error );

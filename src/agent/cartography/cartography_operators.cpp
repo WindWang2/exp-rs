@@ -406,7 +406,17 @@ class ExportOperator final : public sicnu::operators::RSOperator
                     request.pages.push_back( page.asInt() );
 
         context.reportProgress( 0.6, "exporting" );
-        const MapExportResult result = exportMapLayout( layout, request );
+        // R21-D: pass the cooperative cancel flag into the export so a Stop
+        // during a long write aborts at the next page boundary instead of
+        // delivering files for a task the engine already marked Cancelled.
+        const MapExportResult result =
+            exportMapLayout( layout, request,
+                             [ &context ]() { return context.isCancelled(); } );
+        if ( result.cancelled )
+            throw RSOperatorError( ErrorCode::Cancelled,
+                                   result.error.toStdString().empty()
+                                     ? std::string( "Export cancelled" )
+                                     : result.error.toStdString() );
         if ( !result.ok )
             throw RSOperatorError( ErrorCode::QgisProcessingError,
                                    result.error.toStdString() );

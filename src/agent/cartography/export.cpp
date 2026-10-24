@@ -185,9 +185,18 @@ std::vector<std::string> validateMapExportRequest( const QgsPrintLayout *layout,
   return problems;
 }
 
-MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest &request )
+MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest &request,
+                                 const std::function<bool()> &cancelProbe )
 {
   MapExportResult result;
+  // R21-D: the single/multi-page raster path had no cancel seam, so a user
+  // pressing Stop mid-export got a task marked Canceled while the files had
+  // already landed in the delivery directory. The atlas path polls on every
+  // page boundary; this path now does the same (probe invoked per page,
+  // before the page's bytes are published).
+  const auto cancelled = [ &cancelProbe ]() {
+    return cancelProbe && cancelProbe();
+  };
   const std::vector<std::string> problems = validateMapExportRequest( layout, request );
   if ( !problems.empty() )
   {
@@ -239,6 +248,18 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
       QStringList delivered;
       for ( const int page : pages )
       {
+        // R21-D: page-boundary cancel, same discipline as the atlas path —
+        // before this page's bytes are written, and the pages already
+        // delivered by THIS run are removed so a cancelled delivery leaves
+        // no trace.
+        if ( cancelled() )
+        {
+          result.error = QStringLiteral( "export cancelled" );
+          for ( const QString &published : delivered )
+            QFile::remove( published );
+          result.cancelled = true;
+          return result;
+        }
         QTemporaryFile temp( dir.filePath( baseName + ".XXXXXX." + suffix ) );
         temp.setAutoRemove( true );
         if ( !temp.open() )

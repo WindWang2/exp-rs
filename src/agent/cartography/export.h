@@ -57,6 +57,7 @@ struct MapExportRequest
 struct MapExportResult
 {
     bool ok = false;
+    bool cancelled = false;        ///< cancel probe fired on a page boundary
     QString error;                ///< human-readable refusal/failure cause
     std::string path;             ///< final file path (absolute) when ok
     std::string sha256;           ///< digest of the written bytes when ok
@@ -88,8 +89,13 @@ std::vector<std::string> validateMapExportRequest( const QgsPrintLayout *layout,
 QString sanitizeFileStem( const QString &raw, const QString &fallback );
 
 /// Executes an atomic governed export. Never throws; failures are reported
-/// in the result. `layout` must outlive the call only.
-MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest &request );
+/// in the result. `layout` must outlive the call only. An optional
+/// `cancelProbe` is polled on every page boundary (R21-D): when it fires
+/// mid-delivery, every page THIS run already published is removed and the
+/// result reports cancelled — a stopped export leaves no files behind,
+/// matching the atlas path's contract.
+MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest &request,
+                                 const std::function<bool()> &cancelProbe = {} );
 
 //
 // Atlas page delivery (Cartography Production 11.0).
