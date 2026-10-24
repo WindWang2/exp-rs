@@ -138,6 +138,24 @@ struct BandSpec
 /// geoTransform, per-band NoData. `extras` carries domain payloads that are
 /// not pixels (train/test sample points, model channel order + weights,
 /// provenance block) as JSON so scenarios stay declarative.
+/// Artifact-level verifier declaration (expected.verifier, #1613): the
+/// grading rules to run against the FAULTED artifact plus the assertion ids
+/// that must FAIL there — a fault the grader cannot catch must be visible.
+/// Parsed form of scenario.verifier (the loader validates before grading).
+struct FaultVerifierSpec
+{
+    std::string rulesRef;                  ///< lab id / rules path (sicnu.lab.rules/1)
+    std::vector<std::string> mustFailAssertions;
+};
+
+/// Strict parse of the scenario.verifier member. Closed shape: only
+/// rules_ref and must_fail_assertions are legal; rules_ref must be a
+/// non-empty string; must_fail_assertions an array of non-empty strings
+/// (both optional, but must_fail without rules_ref is refused — there is
+/// nothing to grade against). @returns false + @p error on any violation.
+bool parseFaultVerifierSpec( const Json::Value &verifier, FaultVerifierSpec &out,
+                             std::string &error );
+
 struct FaultGrid
 {
     int width = 0;

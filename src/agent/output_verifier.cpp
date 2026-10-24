@@ -8,6 +8,9 @@
 #include "geospatial/common.h"
 #include "geospatial/raster/raster_reader.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+// R21-E (#1601): the ADR 0172 authority reaches the production grade
+// report through the adapter-side composer — additive, sealed, three-valued.
+#include "verify_adapters/lab_verify_composer.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -923,6 +926,68 @@ QString resolveRulesPath( const QString &labIdOrRulesPath, const QString &rulesD
 }
 
 } // namespace lab_grading
+
+/// R21-E (#1601): grid pins the authority verifier re-checks independently.
+/// Derived from the rules' own crs_grid assertion, so the verifier attests
+/// the declared grid contract a second time through a different code path —
+/// a grader/probe disagreement surfaces as fail-closed evidence instead of
+/// a silent pass. First declared grid contract wins (rules are validated as
+/// a coherent set before grading starts).
+sicnu::verify_adapters::LabVerifyGridPins verifierGridPins( const lab_grading::LabRuleSet &rules )
+{
+  sicnu::verify_adapters::LabVerifyGridPins pins;
+  for ( const lab_grading::LabAssertion &a : rules.assertions )
+  {
+    if ( a.kind != QLatin1String( "crs_grid" ) )
+      continue;
+    const Json::Value &params = a.params;
+    if ( params.isObject() )
+    {
+      if ( params.isMember( "width" ) && params["width"].isIntegral() )
+        pins.width = params["width"].asInt();
+      if ( params.isMember( "height" ) && params["height"].isIntegral() )
+        pins.height = params["height"].asInt();
+      if ( params.isMember( "band_count" ) && params["band_count"].isIntegral() )
+        pins.bandCount = params["band_count"].asInt();
+      if ( params.isMember( "epsg" ) && params["epsg"].isIntegral() )
+        pins.crs = "EPSG:" + std::to_string( params["epsg"].asInt() );
+    }
+    break;
+  }
+  return pins;
+}
+
+/// Kind hint for the composer's artifact.type check — only kinds the
+/// authority's closed vocabulary knows; file-mode rules carry no kind pin
+/// (their artifacts are documents the fs probe cannot classify honestly).
+QString verifierKindHint( const lab_grading::LabRuleSet &rules )
+{
+  if ( rules.artifactKind == QLatin1String( "raster" ) ||
+       rules.artifactKind == QLatin1String( "vector" ) )
+    return rules.artifactKind;
+  return QString();
+}
+
+/// R21-E (#1601): attach the composed authority evidence. Called on every
+/// path that reached the artifact (artifact-class refusals included — an
+/// unreadable raster still gets honest exists/type/grid evidence); usage
+/// refusals return before this, so nothing is verified vacuously.
+/// DELIBERATE EXCEPTION (R2 P2-3): a missing artifact path stays a
+/// USAGE-class refusal (exit 2 — the student produced no file at all, which
+/// is an invocation-level failure the classroom scripts already report) and
+/// therefore carries no verifier block. Reclassifying it as artifact-class
+/// would change the CLI exit-code contract (2 -> 3) for the most common
+/// student failure; the authority's "artifact missing" fact adds nothing the
+/// usage error does not already say.
+void attachVerifierEvidence( OutputVerifier::LabGradeResult &result,
+                            const lab_grading::LabRuleSet &rules )
+{
+  const auto outcome = sicnu::verify_adapters::composeLabVerifyEvidence(
+    result.artifactPath.toStdString(), verifierKindHint( rules ).toStdString(),
+    verifierGridPins( rules ) );
+  if ( outcome.ran )
+    result.verifier = outcome.report;
+}
 
 // --- streaming evaluation machinery ----------------------------------------
 
@@ -2014,7 +2079,7 @@ bool runClassificationWalks( const RasterReader &reader, const LabRuleSet &rules
                              QString *usageError )
 {
     const RasterMetadata &meta = reader.metadata();
-    for ( const LabAssertion &a : rules.assertions )
+    for ( const lab_grading::LabAssertion &a : rules.assertions )
     {
         if ( a.kind != QLatin1String( "classification_kappa" )
              && a.kind != QLatin1String( "confusion_marginals" ) )
@@ -2234,6 +2299,7 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     {
         result.error = QStringLiteral( "Cannot open artifact as a raster: %1" ).arg( e.what() );
         result.errorClass = QStringLiteral( "artifact" );
+        attachVerifierEvidence( result, rules );
         return result;
     }
     if ( !fileMode )
@@ -2243,13 +2309,14 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
         {
             result.error = QStringLiteral( "Artifact has zero bands" );
             result.errorClass = QStringLiteral( "artifact" );
+            attachVerifierEvidence( result, rules );
             return result;
         }
     }
 
     // ---- per-assertion states ---------------------------------------------
     std::map<QString, AssertionState> states;
-    for ( const LabAssertion &a : rules.assertions )
+    for ( const lab_grading::LabAssertion &a : rules.assertions )
         states[a.id];
 
     GradeContext ctx;
@@ -2260,7 +2327,7 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     if ( fileMode )
     {
         std::vector<LabKernelSpec> fileSpecs;
-        for ( const LabAssertion &a : rules.assertions )
+        for ( const lab_grading::LabAssertion &a : rules.assertions )
             fileSpecs.push_back( LabKernelSpec{ a.id, a.kind, a.params } );
         QString usageError;
         if ( !runLabFileChecks( result.artifactPath, fileSpecs,
@@ -2283,6 +2350,7 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     {
         result.error = ctx.error;
         result.errorClass = QStringLiteral( "artifact" );
+        attachVerifierEvidence( result, rules );
         return result;
     }
 
@@ -2301,13 +2369,14 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
         {
             result.error = ctx.error;
             result.errorClass = QStringLiteral( "artifact" );
+            attachVerifierEvidence( result, rules );
         }
         return result;
     }
 
     // ---- grader 2.0 kernel walks (zone/position/temporal/spectral) ---------
     std::vector<LabKernelSpec> kernelSpecs;
-    for ( const LabAssertion &a : rules.assertions )
+    for ( const lab_grading::LabAssertion &a : rules.assertions )
         if ( isLabRasterKernelKind( a.kind ) )
             kernelSpecs.push_back( LabKernelSpec{ a.id, a.kind, a.params } );
     if ( !kernelSpecs.empty() )
@@ -2319,6 +2388,8 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
             result.error = ctx.error;
             result.errorClass = kernelUsage ? QStringLiteral( "usage" )
                                             : QStringLiteral( "artifact" );
+            if ( !kernelUsage )
+                attachVerifierEvidence( result, rules );
             return result;
         }
     }
@@ -2327,7 +2398,7 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     // ---- finalize: evidence, deductions, score ------------------------------
     double score = 100.0;
     bool capped = false;
-    for ( const LabAssertion &a : rules.assertions )
+    for ( const lab_grading::LabAssertion &a : rules.assertions )
     {
         const AssertionState &st = states[a.id];
         const auto forced = classificationForced.find( a.id );
@@ -2407,7 +2478,7 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     summary["tile_width"] = ctx.tileWidth;
     summary["tile_height"] = ctx.tileHeight;
     summary["tiles"] = static_cast<Json::Int64>( ctx.tiles );
-    for ( const LabAssertion &a : rules.assertions )
+    for ( const lab_grading::LabAssertion &a : rules.assertions )
     {
         if ( a.kind != QLatin1String( "nodata_ratio" ) )
             continue;
@@ -2423,6 +2494,8 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     }
     }
     result.summary = summary;
+
+    attachVerifierEvidence( result, rules );
 
     // digest over the canonical body (no timestamp inside — autonomy default 6)
     const std::string canonical = Json::writeString(
@@ -2484,6 +2557,8 @@ Json::Value OutputVerifier::LabGradeResult::toBodyJson() const
     evidenceJson.append( e.toJson() );
   body["evidence"] = evidenceJson;
   body["summary"] = summary;
+  if ( !verifier.isNull() )
+    body["verifier"] = verifier;
   if ( !graded )
     body["error"] = error.toStdString();
   return body;

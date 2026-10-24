@@ -253,4 +253,56 @@ Json::Value FaultScenario::toJson() const
     return doc;
 }
 
+bool parseFaultVerifierSpec( const Json::Value &verifier, FaultVerifierSpec &out,
+                             std::string &error )
+{
+    const auto fail = [ &error ]( const std::string &reason ) {
+        error = reason;
+        return false;
+    };
+    if ( !verifier.isObject() )
+        return fail( "expected.verifier must be an object" );
+    for ( const std::string &member : verifier.getMemberNames() )
+    {
+        if ( member != "rules_ref" && member != "must_fail_assertions" )
+            return fail( "expected.verifier: unknown member '" + member + "'" );
+    }
+    FaultVerifierSpec parsed;
+    if ( verifier.isMember( "rules_ref" ) )
+    {
+        if ( !verifier["rules_ref"].isString() || verifier["rules_ref"].asString().empty() )
+            return fail( "expected.verifier.rules_ref must be a non-empty string" );
+        parsed.rulesRef = verifier["rules_ref"].asString();
+    }
+    if ( verifier.isMember( "must_fail_assertions" ) )
+    {
+        if ( !verifier["must_fail_assertions"].isArray() )
+            return fail( "expected.verifier.must_fail_assertions must be an array" );
+        for ( const Json::Value &id : verifier["must_fail_assertions"] )
+        {
+            if ( !id.isString() || id.asString().empty() )
+                return fail(
+                  "expected.verifier.must_fail_assertions entries must be non-empty strings" );
+            parsed.mustFailAssertions.push_back( id.asString() );
+        }
+        // must-fail assertions without rules to grade against are inert by
+        // construction — refuse rather than accept a declaration that cannot
+        // be honored (#1464 discipline).
+        if ( !parsed.mustFailAssertions.empty() && parsed.rulesRef.empty() )
+            return fail( "expected.verifier.must_fail_assertions requires rules_ref" );
+    }
+    // The mirror inert shape, checked OUTSIDE the member block so it also
+    // catches a rules_ref with the must_fail member REMOVED: rules to grade
+    // against but no assertion that must fail. The declaration would
+    // observe nothing and fold in a vacuous "true" — the #1464
+    // accepted-but-inert shape one level down (R1b). A verifier declaration
+    // must name what the fault must break, or it means nothing.
+    if ( !parsed.rulesRef.empty() && parsed.mustFailAssertions.empty() )
+        return fail( "expected.verifier.rules_ref requires at least one "
+                     "must_fail_assertions entry" );
+    out = parsed;
+    error.clear();
+    return true;
+}
+
 } // namespace sicnu::faultlab
