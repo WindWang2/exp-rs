@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 #include "geospatial/util/atomic_fs.h"
 
@@ -181,6 +182,16 @@ std::vector<std::string> validateMapExportRequest( const QgsPrintLayout *layout,
         problems.push_back( "page index " + std::to_string( page ) +
                             " is out of range (layout has " + std::to_string( pageCount ) +
                             " page(s))" );
+    // R21-D: a repeated index used to be accepted, so the delivery wrote
+    // the same deterministic file name twice (second pass overwriting the
+    // first) while the result and the manifest claimed TWO pages — a
+    // manifest that cannot describe the files it delivered. Per-page
+    // delivery names are deterministic, so duplicates are a self-
+    // contradictory request: refuse typed instead.
+    std::set<int> unique( request.pages.cbegin(), request.pages.cend() );
+    if ( unique.size() != request.pages.size() )
+      problems.push_back( "page selection lists a repeated index; per-page delivery names "
+                          "are deterministic, so duplicates cannot describe distinct files" );
   }
   return problems;
 }

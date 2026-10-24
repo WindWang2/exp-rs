@@ -783,11 +783,24 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
     return true;
   } );
   setProp( "visible", [&]() {
+    // R21-D: asBool() on a non-boolean JSON value throws (jsoncpp is built
+    // with exceptions) mid-apply — the call returned ok=false with earlier
+    // keys already applied, a partially-mutated item. The contract is
+    // "unknown/invalid keys are reported through applied/ignored", so a
+    // wrong-typed key is IGNORED, never a half-applied failure.
+    if ( !props["visible"].isBool() )
+      return false;
+    undoStack->beginCommand( item, QStringLiteral( "Change Visibility" ) );
     item->setVisibility( props["visible"].asBool() );
+    undoStack->endCommand();
     return true;
   } );
   setProp( "locked", [&]() {
+    if ( !props["locked"].isBool() )
+      return false;
+    undoStack->beginCommand( item, QStringLiteral( "Change Locked" ) );
     item->setLocked( props["locked"].asBool() );
+    undoStack->endCommand();
     return true;
   } );
   setProp( "z", [&]() {
@@ -867,6 +880,10 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "bold", [&]() {
+      // Same wrong-type guard as visible/locked above (R21-D): a non-bool
+      // value is ignored, not a throwing half-apply.
+      if ( !props["bold"].isBool() )
+        return false;
       QFont font = label->font();
       font.setBold( props["bold"].asBool() );
       undoStack->beginCommand( item, QStringLiteral( "Change Font Weight" ) );
@@ -875,6 +892,8 @@ bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::
       return true;
     } );
     setProp( "italic", [&]() {
+      if ( !props["italic"].isBool() )
+        return false;
       QFont font = label->font();
       font.setItalic( props["italic"].asBool() );
       undoStack->beginCommand( item, QStringLiteral( "Change Font Style" ) );

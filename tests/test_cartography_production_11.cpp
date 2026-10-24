@@ -1924,3 +1924,53 @@ TEST_CASE( "frame-declared CRS compiles into the map item; bad CRS refuses (R21-
     sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
       QStringLiteral( "frame-crs-map" ) );
 }
+
+TEST_CASE( "Duplicate page indices are a typed export refusal (R21-D)",
+           "[cp11][export][r21d]" )
+{
+    // R21-D: pages:[0,0] used to be accepted — both passes published to
+    // the same deterministic name (second overwriting first) while the
+    // result and manifest claimed TWO pages. A manifest that cannot
+    // describe the files it delivered is worse than a refusal.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    QgsPrintLayout layout( QgsProject::instance() );
+    auto *firstPage = new QgsLayoutItemPage( &layout );
+    firstPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( firstPage );
+    auto *extraPage = new QgsLayoutItemPage( &layout );
+    extraPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( extraPage );
+    std::unique_ptr<QgsLayoutItemLabel> page0Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page0Label->setText( QStringLiteral( "body page" ) );
+    page0Label->attemptSetSceneRect( QRectF( 10, 10, 80, 10 ) );
+    layout.addLayoutItem( page0Label.release() );
+    std::unique_ptr<QgsLayoutItemLabel> page1Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page1Label->setText( QStringLiteral( "second page" ) );
+    page1Label->attemptSetSceneRect( QRectF( 10, 220, 80, 10 ) );
+    layout.addLayoutItem( page1Label.release() );
+    REQUIRE( layout.pageCollection()->pageCount() == 2 );
+
+    sicnu::agent::cartography::MapExportRequest request;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.file_name = "dup-pages";
+    request.pages = { 0, 0 };
+
+    const std::vector<std::string> problems =
+      sicnu::agent::cartography::validateMapExportRequest( &layout, request );
+    bool duplicateReported = false;
+    for ( const std::string &problem : problems )
+      if ( problem.find( "repeated" ) != std::string::npos )
+        duplicateReported = true;
+    CHECK( duplicateReported );
+
+    // And the export itself refuses typed, delivering nothing.
+    const auto result = sicnu::agent::cartography::exportMapLayout( &layout, request );
+    CHECK( !result.ok );
+    CHECK( QDir( dir.path() ).entryList( QDir::Files ).isEmpty() );
+}

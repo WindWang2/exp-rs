@@ -960,3 +960,68 @@ TEST_CASE( "Non-finite font sizes and scale-bar segments are ignored, not applie
   LayoutService::instance().deleteLayout( QStringLiteral( "FiniteGuards" ) );
   cleanupProject();
 }
+
+// R21-D: a wrong-TYPED boolean key used to throw Json::LogicError mid-apply
+// (asBool() on a string/number), so the batch returned ok=false with the
+// keys applied BEFORE it already mutated — a half-applied item and a
+// misleading error. The documented contract is "unknown/invalid keys are
+// reported through applied/ignored": wrong-typed keys are IGNORED.
+TEST_CASE( "Wrong-typed boolean item properties are ignored, not a half-applied failure (R21-D)",
+           "[layout][mcp][r21d]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  QgsPrintLayout *layout = LayoutService::instance().createLayout(
+    QStringLiteral( "BoolTypeGuards" ), QStringLiteral( "A4" ) );
+  REQUIRE( layout != nullptr );
+  QgsLayoutItem *item = nullptr;
+  {
+    // A plain shape: the generic item surface (visible/locked) applies.
+    Json::Value shapeProps( Json::objectValue );
+    shapeProps["name"] = "shape-1";
+    QString addError;
+    item = LayoutService::instance().addItem( layout, QStringLiteral( "shape" ), shapeProps,
+                                              &addError );
+    REQUIRE( item != nullptr );
+    item = LayoutService::instance().findItem( layout, QStringLiteral( "shape-1" ) );
+    REQUIRE( item != nullptr );
+  }
+
+  // A good key BEFORE the bad one must still be applied, and the bad key
+  // must land in ignored with the call reporting success.
+  Json::Value props( Json::objectValue );
+  props["x"] = 30.0;
+  props["visible"] = std::string( "yes" ); // wrong type: string, not bool
+  QStringList applied;
+  QStringList ignored;
+  QString error;
+  REQUIRE( LayoutService::instance().applyItemProperties( item, props, &applied, &ignored,
+                                                          &error ) );
+  CHECK( !ignored.filter( QStringLiteral( "visible" ) ).isEmpty() );
+  CHECK( fuzzyEquals( item->positionWithUnits().x(), 30.0 ) ); // x really applied
+
+  // locked: same shape of defect, same outcome.
+  Json::Value lockProps( Json::objectValue );
+  lockProps["locked"] = 7.0; // wrong type: number
+  applied.clear();
+  ignored.clear();
+  REQUIRE( LayoutService::instance().applyItemProperties( item, lockProps, &applied, &ignored,
+                                                          &error ) );
+  CHECK( !ignored.filter( QStringLiteral( "locked" ) ).isEmpty() );
+
+  // And the valid boolean still applies (guard did not break the key).
+  Json::Value goodProps( Json::objectValue );
+  goodProps["visible"] = false;
+  applied.clear();
+  ignored.clear();
+  REQUIRE( LayoutService::instance().applyItemProperties( item, goodProps, &applied, &ignored,
+                                                          &error ) );
+  CHECK( ignored.isEmpty() );
+  CHECK( !item->isVisible() );
+
+  LayoutService::instance().deleteLayout( QStringLiteral( "BoolTypeGuards" ) );
+  cleanupProject();
+}

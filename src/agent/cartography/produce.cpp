@@ -203,7 +203,17 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
         int iterations = 0;
         while ( iterations < maxRepairIterations && !quality["passed"].asBool() )
         {
-            if ( !report( reporter, "repair", 0.3 + 0.1 * iterations, "repair pass" ) )
+            // R21-D: the fraction used to be 0.3 + 0.1*iterations, which
+            // passed the export stage's fixed 0.6 from the 4th pass on —
+            // a progress bar that jumps 70%→100% and falls back to 60%.
+            // The repair stage now spans [0.30, 0.55]: the whole loop
+            // stays strictly below the export stage's floor and the bar
+            // remains monotone across every pass.
+            const double repairProgress =
+                maxRepairIterations > 1
+                  ? 0.30 + 0.25 * ( iterations / static_cast<double>( maxRepairIterations - 1 ) )
+                  : 0.30;
+            if ( !report( reporter, "repair", std::min( repairProgress, 0.55 ), "repair pass" ) )
                 return refused( "PRODUCE_CANCELLED", QStringLiteral( "cancelled during repair" ) );
             Json::Value passLedger;
             const int repairs = repairMapSpecWithLedger( working, quality, &passLedger );
