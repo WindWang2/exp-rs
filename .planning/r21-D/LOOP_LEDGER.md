@@ -53,3 +53,12 @@
 - 验证：<RED 证据 / 定向编译 / GREEN 轮次与 exit code>
 - 结论：继续/换假设/阻塞
 ```
+
+## Round 5（2026-10-24 深夜）— R2 闭环 + PR 交付
+
+- R2（第二个 fresh reviewer）APPROVE-WITH-FIXES：4×P2 + 6×P3 采纳 → 8c3ff74bd6。R2 以自行重构 RED 探针独立验证 R1 的 P1-1/P2-2/P2-3 真实修复，并纠正 R1 一项虚假闭环声明（produce 探针照旧每轮询推进度事件）。
+- R2 返工中发现并修正本轨测试缺陷：W1b 分支用例最初以 `leaseCount()`（含 View lease）断言 Edit lease 唯一性 → 读数为 2 → 补 editLeaseCount 辅助（按 LeaseRef::kind 过滤）。
+- 终态回归：r14_D 440/440（24 用例）、CP11 [r21d] 44/4、layout [r21d] 27/2、mapspec 2830/239、layout_tools 1338/16；CP11 默认 29+3 已知环境红（render-off 0 failed）。
+- 提交前核对：`git diff --check` 干净、工作树干净、merge-base = origin/master = 911e0b17a3（master 未前进，无需 rebase）、open PR 盘点（兄弟轨 #1673-#1676 在场；B 轨 PR 未触碰 data_manager.h，与 W1b 共享 API 无签名冲突）。
+- push：origin `agent/r21-d-qt-qgis-cartography-20261023T214750Z`；PR：https://github.com/WindWang2/exp-rs/pull/1677（未 auto-merge、未等 CI）。
+- 总 commits：11（911e0b17a3 → 628f2590d8）。
