@@ -196,7 +196,14 @@ bool ScientificAgentSession::refuse( const std::string &stopReason )
 {
     mStopReason = stopReason;
     const TransitionResult result = mMachine.terminate( terminal_states::kRefused, stopReason );
-    ( void )result; // legal from every running stage by construction
+    // R21-C F3: the machine is absorbing — an already-terminal session
+    // (second run() with a swapped goal) refuses, but terminate() answers
+    // kAlreadyTerminal. Appending the journal note anyway spliced a SECOND
+    // terminal event into the durable journal; replay() is last-write-wins,
+    // so a delivered session read back as refused. The typed refusal still
+    // reaches this caller; only the journal append is conditional now.
+    if ( !result.ok )
+        return false;
     note( "terminal", terminal_states::kRefused, Json::Value( stopReason ) );
     return false;
 }
@@ -205,7 +212,9 @@ bool ScientificAgentSession::abort( const std::string &stopReason )
 {
     mStopReason = stopReason;
     const TransitionResult result = mMachine.terminate( terminal_states::kAborted, stopReason );
-    ( void )result; // legal from every running stage by construction
+    // Same absorbing-machine discipline as refuse() (R21-C F3).
+    if ( !result.ok )
+        return false;
     note( "terminal", terminal_states::kAborted, Json::Value( stopReason ) );
     return false;
 }
