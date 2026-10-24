@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -12,6 +13,11 @@ namespace {
 
 constexpr int kMaxMergeDepth = 4; // authority parity (capability_knowledge bound)
 constexpr std::size_t kMaxEntries = 2048;
+/// Cap for one mirror document on disk. Real mirror files are KB-scale
+/// capability sidecars; a file past this bound is planted or corrupt and is
+/// refused by name instead of being buffered whole (R20-03 D6 — the
+/// checkpoint kernel's read-cap discipline).
+constexpr std::uintmax_t kMaxMirrorDocumentBytes = 4 * 1024 * 1024;
 
 Json::Value parseText( const std::string &text, std::string &errors )
 {
@@ -290,10 +296,21 @@ int CapabilityMirrorProjection::loadDirectory( const std::string &directory )
             problems_.push_back( file.filename().string() + ": unreadable" );
             continue;
         }
-        std::stringstream buffer;
-        buffer << in.rdbuf();
+        // Bounded read (D6): cap+1 bytes first, refuse past the cap — a
+        // planted huge file must never be slurped whole just to be refused
+        // by the parser a millisecond later.
+        std::string buffer( static_cast<std::size_t>( kMaxMirrorDocumentBytes ) + 1, '\0' );
+        in.read( buffer.data(), static_cast<std::streamsize>( buffer.size() ) );
+        buffer.resize( static_cast<std::size_t>( in.gcount() ) );
+        if ( buffer.size() > kMaxMirrorDocumentBytes )
+        {
+            problems_.push_back( file.filename().string() + ": exceeds the " +
+                                 std::to_string( kMaxMirrorDocumentBytes ) +
+                                 "-byte mirror document cap" );
+            continue;
+        }
         std::string parseErrors;
-        const Json::Value parsed = parseText( buffer.str(), parseErrors );
+        const Json::Value parsed = parseText( buffer, parseErrors );
         if ( parsed.isNull() && !parseErrors.empty() )
         {
             problems_.push_back( file.filename().string() + ": " + parseErrors );

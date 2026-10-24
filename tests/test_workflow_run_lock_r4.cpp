@@ -183,6 +183,12 @@ TEST_CASE( "planted oversized owner metadata is refused, never buffered whole (D
     // the bounded reader refuses the file instead (D6: same cap discipline
     // as the checkpoint kernel — planted or corrupt, never buffered whole).
     constexpr qint64 kCap = 64 * 1024;
+
+    WorkflowRunLock holder( lockPath );
+    REQUIRE( holder.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
+    // Plant the oversized file AFTER acquiring: tryAcquire writes its own
+    // owner metadata, so a pre-acquire plant would simply be overwritten
+    // (same ordering as the garbage-metadata test above).
     {
         QFile huge( lockPath );
         REQUIRE( huge.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
@@ -191,9 +197,6 @@ TEST_CASE( "planted oversized owner metadata is refused, never buffered whole (D
         huge.write( filler );
         huge.close();
     }
-
-    WorkflowRunLock holder( lockPath );
-    REQUIRE( holder.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
     {
         // flock still decides liveness — the verdict never depends on the
         // metadata bytes.
