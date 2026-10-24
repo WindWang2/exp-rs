@@ -4361,7 +4361,6 @@ TEST_CASE("extract_bands carries NoData, band roles and provenance stamps", "[op
           == QLatin1String("10000"));
 }
 
-#ifdef SICNU_HAS_OPENCV
 // ===========================================================================
 // r21-A / AG1-4 — rs:radiometric_calibration must refuse malformed bands
 // entries instead of silently dropping them (an emptied list meant "all
