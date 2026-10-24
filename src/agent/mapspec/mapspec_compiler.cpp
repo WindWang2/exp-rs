@@ -33,6 +33,7 @@
 #include <qgslayertree.h>
 #include <qgssymbol.h>
 #include <qgsfillsymbol.h>
+#include <qgscoordinatereferencesystem.h>
 #include <qgsvectorlayer.h>
 #include <qgsmaplayer.h>
 
@@ -561,6 +562,32 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         compiledMap->setAtlasDriven( true );
       if ( atlasMarginFraction >= 0.0 )
         compiledMap->setAtlasMargin( atlasMarginFraction );
+
+      // R21-D: a frame-declared CRS is shape-checked by mapspec.cpp and
+      // silences the preflight MAP_MISSING_CRS_NOTE, but the compiler used
+      // to drop it — the item silently fell back to the project CRS while
+      // a spec-extent in the DECLARED CRS units (3857 metres) was
+      // interpreted in the project's (degrees). A declared-but-uncompiled
+      // field is the worst failure shape: apply it, and refuse the compile
+      // when the CRS string is not a usable CRS (never silently keep a
+      // different one).
+      if ( frame.isMember( "crs" ) && frame["crs"].isString() &&
+           !frame["crs"].asString().empty() )
+      {
+        const QgsCoordinateReferenceSystem declared(
+          QString::fromStdString( frame["crs"].asString() ) );
+        if ( !declared.isValid() )
+        {
+          if ( error )
+            *error = QStringLiteral( "map frame '%1': invalid crs: %2" )
+                       .arg( QString::fromStdString( id ),
+                             QString::fromStdString( frame["crs"].asString() ) );
+          LayoutService::instance().deleteLayout(
+            QString::fromStdString( spec["layout_name"].asString() ) );
+          return nullptr;
+        }
+        compiledMap->setCrs( declared );
+      }
 
       const QgsRectangle currentExt = compiledMap->extent();
       if ( currentExt.isEmpty() || currentExt.width() <= 0.0 || currentExt.height() <= 0.0 ||

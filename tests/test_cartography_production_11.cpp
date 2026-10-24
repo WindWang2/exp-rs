@@ -34,6 +34,7 @@
 #include <qgspointxy.h>
 #include <qgslayoutatlas.h>
 #include <qgslayoutitemlabel.h>
+#include <qgslayoutitemmap.h>
 #include <qgslayoutitempage.h>
 #include <qgslayoutpagecollection.h>
 #include <qgsprintlayout.h>
@@ -1880,4 +1881,46 @@ TEST_CASE( "export cancel probe aborts mid-delivery and leaves no files (R21-D)"
     CHECK( QDir( dirCancel.path() ).entryList( QDir::Files ).isEmpty() );
     // Only the first page boundary was polled before the abort.
     CHECK( calls == 2 );
+}
+
+TEST_CASE( "frame-declared CRS compiles into the map item; bad CRS refuses (R21-D)",
+           "[cp11][mapspec][r21d]" )
+{
+    // R21-D: map_frames[].crs is shape-checked by mapspec.cpp and silences
+    // the preflight MAP_MISSING_CRS_NOTE, but the compiler used to drop it —
+    // the item fell back to the project CRS, so an extent declared in the
+    // spec CRS's units was interpreted in another CRS.
+    Json::Value spec = frameSpec( "frame-crs-map" );
+    spec["map_frames"][0]["crs"] = "EPSG:3857";
+    spec["map_frames"][0]["extent"] = Json::Value( Json::arrayValue );
+    spec["map_frames"][0]["extent"].append( 1290000.0 ); // metres in 3857
+    spec["map_frames"][0]["extent"].append( 4700000.0 );
+    spec["map_frames"][0]["extent"].append( 1300000.0 );
+    spec["map_frames"][0]["extent"].append( 4710000.0 );
+
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    REQUIRE( layout != nullptr );
+
+    QgsLayoutItem *frameItem =
+      sicnu::agent::layout_tools::LayoutService::instance().findItem(
+        layout, QStringLiteral( "map-1" ) );
+    REQUIRE( frameItem != nullptr );
+    auto *mapItem = qobject_cast<QgsLayoutItemMap *>( frameItem );
+    REQUIRE( mapItem != nullptr );
+    CHECK( mapItem->crs().authid() == QStringLiteral( "EPSG:3857" ) );
+
+    // An unusable CRS string is a typed compile refusal — never a silent
+    // fallback to the project CRS.
+    Json::Value bad = frameSpec( "frame-crs-bad" );
+    bad["map_frames"][0]["crs"] = "EPSG:999999";
+    QString badError;
+    QgsPrintLayout *badLayout = nullptr;
+    REQUIRE_NOTHROW( badLayout = MapSpecCompiler::compile( bad, &badError ) );
+    CHECK( badLayout == nullptr );
+    CHECK( badError.contains( QStringLiteral( "crs" ) ) );
+
+    sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
+      QStringLiteral( "frame-crs-map" ) );
 }
