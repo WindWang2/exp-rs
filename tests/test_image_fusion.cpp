@@ -1934,4 +1934,3 @@ TEST_CASE( "dNBR fusion keeps the negative-sentinel rule (R2 M3)", "[fusion][r21
     CHECK_FALSE( MathUtils::bothNormalizable(
         std::numeric_limits<float>::infinity(), 0.3f ) );
 }
-

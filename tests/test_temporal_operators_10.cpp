@@ -804,4 +804,3 @@ TEST_CASE( "temporal_monitor leaves a constant pixel's CUSUM at zero (AG4-2)",
     // The varying pixel still accumulates normally (control).
     REQUIRE( maxAbs[1] > 0.0 );
 }
-

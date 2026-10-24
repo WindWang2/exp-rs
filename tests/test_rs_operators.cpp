@@ -4503,4 +4503,3 @@ TEST_CASE("RS kmeans scale=false clusters on raw DN, scale=true on z-scores (AG5
     const bool sameAsRaw = (zs[0] == zs[1]) && (zs[0] != zs[2]);
     CHECK_FALSE(sameAsRaw);
 }
-
