@@ -16443,3 +16443,32 @@ sicnu_discover_tests(test_r19_02_workflow_cancel_order)
 sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
+
+# --- R21-E (zcode-r21-E): verifier evidence + faultlab verifier wiring ---
+# W1 (#1601): the ADR 0172 authority reaches the production grade report.
+sicnu_add_test(test_r21_e_verifier_evidence TIMEOUT 300)
+sicnu_link_jsoncpp(test_r21_e_verifier_evidence)
+target_link_libraries(test_r21_e_verifier_evidence PRIVATE sicnu_agent)
+
+# W2 (#1613): the schema-documented expected.verifier becomes a loadable,
+# enforced contract (loader acceptance + typed refusals; runner folding tests
+# join with the W2 runner change).
+add_executable(test_r21_e_faultlab_verifier test_r21_e_faultlab_verifier.cpp)
+target_link_libraries(test_r21_e_faultlab_verifier PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_faultlab
+  Qt6::Core # QTemporaryDir blocker fixture for the aborted-run case
+)
+sicnu_discover_tests(test_r21_e_faultlab_verifier)
+# --- end R21-E registrations ---
+
+# R21-E W5 (O-E2): course-scale batch invariants with time/RSS evidence.
+sicnu_add_test(test_r21_e_batch_stress TIMEOUT 600)
+sicnu_link_jsoncpp(test_r21_e_batch_stress)
+target_link_libraries(test_r21_e_batch_stress PRIVATE sicnu_lab_batch)
+
+# R21-E W2 (#1613): the PRODUCTION verifier hook end-to-end through the
+# studio composition layer (rules really run over the faulted artifact).
+sicnu_add_test(test_r21_e_studio_verifier_hook TIMEOUT 300)
+sicnu_link_jsoncpp(test_r21_e_studio_verifier_hook)
+target_link_libraries(test_r21_e_studio_verifier_hook PRIVATE Sicnu::experiment_studio_live)
