@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ master, main ]
 
+# #1683: least privilege for GITHUB_TOKEN — no job in this workflow publishes
+# anything, so the repo-default token permissions are pure attack surface.
+# Jobs keep the inherited read-only set.
+permissions:
+  contents: read
+
 concurrency:
   # #1490: GitHub keeps at most ONE pending run per concurrency group — a new
   # master push used to cancel the still-queued run for the previous push even
@@ -103,6 +109,15 @@ jobs:
         # numpy, so pin the system interpreter (python3-numpy via apt).
         run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
+      # #1681: this lane used to run between configure and build, so every
+      # ui_*.h / *.pb.h include (custom-command artifacts, 349 files by the
+      # #1681 audit) failed clang-tidy with "file not found" under
+      # --warnings-as-errors='*' before the build ever generated them. It now
+      # runs AFTER the build so compile_commands.json points at a tree where
+      # the generated headers exist.
+      - name: Compile Core & Test Targets
+        run: cmake --build build --parallel $(nproc)
+
       # #706/#1495: the repo's targeted .clang-tidy (12 checks for exactly the
       # #610-#658 bug classes) was dead config — first nothing ran it, then a
       # continue-on-error step that reported but never blocked (#1495). The
@@ -114,11 +129,12 @@ jobs:
       # has no C++ files — those states are printed, not silently passed.
       - name: Clang-Tidy Lint (changed files, blocking)
         run: |
-          git fetch --no-tags --depth=1 origin master
+          # #1683: fetch BOTH the base tip and the event commit with enough
+          # history for the lane's merge-base to resolve, so it lints exactly
+          # this branch's own changes (see scripts/run_clang_tidy_changed.sh;
+          # on truncated history the lane falls back to the tip diff loudly).
+          git fetch --no-tags --depth=500 origin master "${GITHUB_SHA}"
           ./scripts/run_clang_tidy_changed.sh origin/master build
-
-      - name: Compile Core & Test Targets
-        run: cmake --build build --parallel $(nproc)
 
       - name: Execute Fast CTest Suite
         env:
@@ -138,7 +154,17 @@ jobs:
       - name: Verify Installation Rule Execution
         run: |
           cmake --install build --prefix /tmp/sicnu_install_test
-          QT_QPA_PLATFORM=offscreen /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help
+          # #1698/#R1-2b: the install RPATH makes the prefix self-sufficient
+          # for the PROJECT's own lib/libsicnu_*.so (resolved via $ORIGIN/
+          # ..../lib — they exist only there, so this env var cannot shadow
+          # the relocatability proof). The aqt-installed Qt lives outside
+          # ldconfig, so it is supplied explicitly for the smoke.
+          LD_LIBRARY_PATH="${{ steps.qt.outputs.qt-path }}/lib" \
+            QT_QPA_PLATFORM=offscreen /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help
+          # #1698: the isolated-execution worker must ship with the install
+          # tree; the execution plane only falls back to PATH when it is not
+          # next to the application binary.
+          test -x /tmp/sicnu_install_test/bin/sicnu_worker
 
   # =========================================================================
   # Tier 2 — Full Linux Integration & Sanitizer Suite
@@ -366,8 +392,12 @@ jobs:
         shell: pwsh
         run: |
           choco install -y --no-progress pkgconfiglite winflexbison
+          # #1683: tags are mutable — clone by tag but fail closed unless HEAD
+          # is the pinned commit, so a moved/deleted tag cannot silently swap
+          # the source that gets compiled into the dependency closure.
           git clone --depth 1 --branch v2.3.10 https://github.com/KDE/qca.git C:\deps\qca-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          if ((git -C C:\deps\qca-src rev-parse HEAD) -ne "df5171e3c4baf346581f15af5a040e61b166a332") { throw "qca v2.3.10 pin mismatch" }
           cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\qca-build --config Release --parallel
@@ -376,6 +406,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           git clone --depth 1 --branch v0.14.0 https://github.com/frankosterfeld/qtkeychain.git C:\deps\kc-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          if ((git -C C:\deps\kc-src rev-parse HEAD) -ne "e63da2868465db18eb35a312b2635c26fdc46923") { throw "qtkeychain v0.14.0 pin mismatch" }
           cmake -S C:\deps\kc-src -B C:\deps\kc-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\kc-build --config Release --parallel
@@ -398,10 +429,39 @@ jobs:
             -DBISON_EXECUTABLE="$bisonDir\win_bison.exe" `
             -DFLEX_EXECUTABLE="$bisonDir\win_flex.exe" `
             -DENABLE_TESTS=OFF `
-            -DSICNU_VENDOR_GDAL=OFF
+            -DSICNU_VENDOR_GDAL=OFF `
+            -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON
 
       - name: Verify MSVC Compilation Guard & Headers
         run: cmake --build build-win --config Release --parallel
+
+      # #1697: the .cmd twin of the bundle guard, refused at parse time so
+      # no build dir or binaries are needed — proves the PowerShell
+      # validation actually rejects a traversal --version on real cmd.exe.
+      # The refusal is pinned exactly: exit code 2 (the guard's code; the
+      # build-dir paths use 1/2 differently) AND the refusal message — any
+      # other nonzero failure (e.g. a missing build dir) must NOT pass this
+      # smoke (R1-1).
+      - name: Offline Bundle Guard Smoke (#1697)
+        shell: pwsh
+        run: |
+          $out = cmd /c "scripts\build_offline_bundle.cmd --build-dir does-not-exist --version 1.0/../../x" 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 2) { throw "expected guard refusal (exit 2), got exit $LASTEXITCODE; output: $out" }
+          if ($out -notmatch 'refusing unsafe --version') { throw "exit 2 but no refusal message; output: $out" }
+          Write-Output "guard refused unsafe --version (exit 2)"
+
+      # #1698: the Windows tier stayed compile-only, so install-rule rot
+      # (missing INSTALL_RPATH targets, uninstalled worker) went unnoticed.
+      # Windows has no RPATH — CMake puts the DLL half of SHARED targets in
+      # bin/ next to the executables; the smoke proves the loader is happy.
+      - name: Install Tree Smoke (#1698)
+        shell: pwsh
+        run: |
+          cmake --install build-win --config Release --prefix C:\sicnu_install_test
+          & C:\sicnu_install_test\bin\sicnu_geo_rs_cli.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "installed CLI --help failed" }
+          if (-not (Test-Path C:\sicnu_install_test\bin\sicnu_worker.exe)) {
+            throw "sicnu_worker missing from install tree (#1698)" }
 
   tier3-platform-macos:
     name: Tier 3 - macOS Clang Configure & Build Seam
@@ -462,3 +522,24 @@ jobs:
         # peak RSS inside the budget; ccache absorbs the extra wall time.
         run: |
           cmake --build build-mac --parallel 2
+
+      # #1682/#1697: pure-shell guard suite (no compiled test binaries, so it
+      # fits the build-seam time budget) — pins the .sh bundle path against
+      # --version traversal on a real BSD userland.
+      - name: Offline Bundle Guard Test (#1697)
+        run: sh tests/test_r22_infra_bundle_guard.sh --repo-root .
+
+      # #1698: install + relocation smoke. The install tree relies on
+      # @loader_path RPATH on macOS; running the installed CLI with a clean
+      # environment proves the loader resolves lib/ without DYLD_* help for
+      # the PROJECT's libs. Homebrew kegs are outside dyld's default search
+      # list, so external deps are supplied through the FALLBACK path only —
+      # it is consulted after @loader_path, so the relocatability proof
+      # itself is untouched (R2-1 mitigation).
+      - name: Install Tree Smoke (#1698)
+        run: |
+          cmake --install build-mac --prefix /tmp/sicnu_install_test
+          env -i PATH=/usr/bin:/bin HOME="$HOME" QT_QPA_PLATFORM=offscreen \
+            DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix qt@6)/lib" \
+            /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help
+          test -x /tmp/sicnu_install_test/bin/sicnu_worker
