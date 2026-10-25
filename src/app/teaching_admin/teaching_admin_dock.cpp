@@ -402,20 +402,15 @@ void TeachingAdminDock::onRunBatch()
     cfg.outDir = QFileInfo( m_batchOutEdit->text() ).path();
     // #1694: version labels come from the actual authored documents (or a
     // short content fingerprint of the grading authority when no document
-    // carries an explicit version) — never a hardcoded constant. A rules
-    // edit changes the label AND the checkpoint digest below, so published
-    // grades stay traceable to the rules that produced them.
+    // carries an explicit version) — never a hardcoded constant. The
+    // documents are PARSED here on the GUI thread (widget reads); the
+    // file-hashing part of the identity (rules content, grader binary —
+    // potentially a ~100 MB stream) is computed inside the worker below,
+    // off the GUI thread (R2 finding 4).
     const QJsonObject rubricDoc =
       QJsonDocument::fromJson( m_rubricEdit->toPlainText().toUtf8() ).object();
     const QJsonObject labSpecDoc =
       QJsonDocument::fromJson( m_labSpecEdit->toPlainText().toUtf8() ).object();
-    cfg.gradingRulesFingerprint =
-      sicnu::teaching_admin::gradingRulesFingerprint( grader, repoRoot() );
-    cfg.graderIdentity = sicnu::teaching_admin::graderCliIdentity( grader.cliPath );
-    const auto versionLabels = sicnu::teaching_admin::gradingVersionLabels(
-      rubricDoc, labSpecDoc, cfg.labId, cfg.gradingRulesFingerprint );
-    cfg.rubricVersion = versionLabels.rubricVersion;
-    cfg.labVersion = versionLabels.labVersion;
     cfg.softwareVersion = m_softwareVersionEdit->text();
     // Durable partial results beside the published outputs: a re-run over
     // the same class resumes instead of re-grading completed submissions,
@@ -423,6 +418,7 @@ void TeachingAdminDock::onRunBatch()
     // covering rules content + grader identity means a resume only ever
     // adopts grades produced by the authority currently in force.
     cfg.checkpointPath = m_batchOutEdit->text() + QStringLiteral( ".checkpoint.json" );
+    const QString gradingSearchRoot = repoRoot();
     m_batchCancel.store( false );
 
     QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
@@ -456,11 +452,23 @@ void TeachingAdminDock::onRunBatch()
     // forever. The catch is non-const by std::thread's copy requirement.
     try
     {
-        m_batchThread = std::thread( [this, cfg, grader, outPrefix]() {
+        m_batchThread = std::thread( [this, cfg, grader, outPrefix, rubricDoc, labSpecDoc,
+                                      gradingSearchRoot]() {
             // Exception barrier: a throw leaving a std::thread function is
             // std::terminate — the GUI must survive a failed batch.
             try
             {
+                // #1694, off the GUI thread (R2 finding 4): the authority
+                // identity streams the rules file and the full grader
+                // binary — potentially ~100 MB — before any row is graded.
+                BatchAssessmentConfig runCfg = cfg;
+                runCfg.gradingRulesFingerprint =
+                  sicnu::teaching_admin::gradingRulesFingerprint( grader, gradingSearchRoot );
+                runCfg.graderIdentity = sicnu::teaching_admin::graderCliIdentity( grader.cliPath );
+                const auto versionLabels = sicnu::teaching_admin::gradingVersionLabels(
+                  rubricDoc, labSpecDoc, runCfg.labId, runCfg.gradingRulesFingerprint );
+                runCfg.rubricVersion = versionLabels.rubricVersion;
+                runCfg.labVersion = versionLabels.labVersion;
                 sicnu::teaching_admin::BatchProgressFn progress =
                   [this]( int done, int processedTotal ) {
                       QMetaObject::invokeMethod(
@@ -472,7 +480,7 @@ void TeachingAdminDock::onRunBatch()
                         Qt::QueuedConnection );
                   };
                 const auto report =
-                  runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
+                  runBatchAssessment( runCfg, cliGradeCallable( grader ), &m_batchCancel, progress );
                 // A publish failure must be a TYPED failure, never a silent
                 // fake success (#1453/WP02): routing it through the same catch
                 // makes the console fail visibly and re-arm.

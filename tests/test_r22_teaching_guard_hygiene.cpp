@@ -331,6 +331,21 @@ TEST_CASE( "#1689: leak guard detects numeric and Chinese-name foreign ids",
                                       QStringLiteral( "对比 student_bob 的结果" ) ) );
         const ValidationResult r = assertNoCrossStudentLeak( fb, QStringLiteral( "student_alice" ) );
         REQUIRE_FALSE( r.ok );
+        // R2 finding 1 pin: not-ok must come from the PREFIX SCAN (the
+        // cohort list is empty), not from a sentinel-regex artifact.
+        REQUIRE( r.issues.first().message.contains( QLatin1String( "student_bob" ) ) );
+    }
+    SECTION( "R2: empty cohort never fabricates a leak (2-arg overload stays clean)" )
+    {
+        // R2 finding 1 regression pin: a default-constructed sentinel regex
+        // is VALID with an empty pattern that matches the empty string —
+        // every roster-less check used to report a foreign-id error.
+        const QJsonObject fb =
+          buildFeedbackPack( packFor( QStringLiteral( "s01" ),
+                                      QStringLiteral( "一切正常，继续下一步" ) ) );
+        const ValidationResult r = assertNoCrossStudentLeak( fb, QStringLiteral( "s01" ) );
+        REQUIRE( r.ok );
+        REQUIRE( r.issues.isEmpty() );
     }
 }
 

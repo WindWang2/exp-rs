@@ -183,6 +183,22 @@ TEST_CASE( "#1694: swapping the grader binary invalidates the checkpoint",
 TEST_CASE( "#1694: gradingRulesFingerprint is content-sensitive and touch-stable",
            "[teaching_admin][batch][r22][issue-1694]" )
 {
+    // R2 finding 5b: hermetic — a developer/CI shell exporting
+    // SICNU_LAB_RULES_DIR would otherwise win over the search root below.
+    struct EnvGuard
+    {
+        const QByteArray original = qgetenv( "SICNU_LAB_RULES_DIR" );
+        ~EnvGuard()
+        {
+            if ( original.isEmpty() )
+                qputenv( "SICNU_LAB_RULES_DIR", "" );
+            else
+                qputenv( "SICNU_LAB_RULES_DIR", original );
+        }
+    } envGuard;
+    qputenv( "SICNU_LAB_RULES_DIR",
+             QDir( QDir::tempPath() ).filePath( QStringLiteral( "r22-no-such-rules-dir" ) ).toUtf8() );
+
     QTemporaryDir dir;
     const QString rules = QDir( dir.path() ).filePath( QStringLiteral( "lab.rules.json" ) );
     writeBytes( rules, QByteArrayLiteral( "{\"threshold\":0.5}" ) );
@@ -215,6 +231,22 @@ TEST_CASE( "#1694: gradingRulesFingerprint is content-sensitive and touch-stable
     // Empty authority: explicit none form.
     cfg.labIdOrRulesPath = QString();
     REQUIRE( gradingRulesFingerprint( cfg ) == QLatin1String( "none" ) );
+
+    // R2 finding 3: an existing file that is NOT a *.rules.json path is a
+    // LAB ID to the CLI (resolveRulesPath tests the suffix), never a direct
+    // authority — the fingerprint must not pin the decoy file's content.
+    const QString decoy = QDir( dir.path() ).filePath( QStringLiteral( "lab90_runtime_probe" ) );
+    writeBytes( decoy, QByteArrayLiteral( "decoy-bytes" ) );
+    GraderCliConfig decoyCfg;
+    decoyCfg.labIdOrRulesPath = decoy;
+    const QString decoyFp = gradingRulesFingerprint( decoyCfg );
+    REQUIRE_FALSE( decoyFp.startsWith( QLatin1String( "sha256:" ) ) );
+    REQUIRE( decoyFp.startsWith( QLatin1String( "labid:" ) ) );
+    // And a direct .rules.json path that does not exist is a typed missing
+    // marker, never a content hash.
+    GraderCliConfig missingCfg;
+    missingCfg.labIdOrRulesPath = QDir( dir.path() ).filePath( QStringLiteral( "nope.rules.json" ) );
+    REQUIRE( gradingRulesFingerprint( missingCfg ).startsWith( QLatin1String( "missing:" ) ) );
 }
 
 TEST_CASE( "#1694: graderCliIdentity fingerprints the authority binary",
@@ -285,6 +317,18 @@ TEST_CASE( "#1694: gradingVersionLabels derive real labels, never a constant",
 TEST_CASE( "#1694 R1: lab-id authority resolves its rules file (dock's primary path)",
            "[teaching_admin][batch][r22][issue-1694]" )
 {
+    // R2 finding 5b: hermetic against an inherited SICNU_LAB_RULES_DIR.
+    struct EnvGuard
+    {
+        const QByteArray original = qgetenv( "SICNU_LAB_RULES_DIR" );
+        ~EnvGuard()
+        {
+            qputenv( "SICNU_LAB_RULES_DIR", original );
+        }
+    } envGuard;
+    qputenv( "SICNU_LAB_RULES_DIR",
+             QDir( QDir::tempPath() ).filePath( QStringLiteral( "r22-no-such-rules-dir" ) ).toUtf8() );
+
     // R1 finding 1: with labIdOrRulesPath = a lab ID, the CLI reads
     // <searchRoot>/data/labs/grading/<id>.rules.json — the fingerprint must
     // track THAT file's content, or an in-place rules edit stays invisible

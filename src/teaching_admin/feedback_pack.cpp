@@ -72,7 +72,12 @@ QRegularExpression compileForeignIdRegex( const QStringList &cohortStudentIds )
 void addForeignIdErrorIfAny( ValidationResult &r, const QString &blob, const QString &studentId,
                              const QRegularExpression &allIdsRegex )
 {
-    if ( !allIdsRegex.isValid() )
+    // R2 finding 1: a default-constructed QRegularExpression is VALID with
+    // an EMPTY pattern — isValid() alone does not mean "nothing to scan",
+    // and an empty pattern matches the empty string at offset 0, which
+    // fabricated a foreign-id error for every roster-less check. Gate on
+    // the pattern being non-empty as well.
+    if ( allIdsRegex.pattern().isEmpty() || !allIdsRegex.isValid() )
         return;
     auto it = allIdsRegex.globalMatch( blob );
     while ( it.hasNext() )

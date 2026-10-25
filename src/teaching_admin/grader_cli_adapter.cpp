@@ -305,17 +305,29 @@ QString gradingRulesFingerprint( const GraderCliConfig &cfg, const QString &sear
 {
     if ( cfg.labIdOrRulesPath.isEmpty() )
         return QStringLiteral( "none" );
-    const QFileInfo info( cfg.labIdOrRulesPath );
-    if ( info.exists() && info.isFile() )
+    // Mirror the CLI's own shape test (resolveRulesPath): only a path ENDING
+    // in .rules.json is a direct file; anything else is a lab id even when
+    // a file of that name happens to exist (R2 finding 3 — fingerprinting
+    // an unrelated same-named file pinned the digest to a decoy while the
+    // CLI resolved the real rules elsewhere).
+    const bool isDirectRulesPath = cfg.labIdOrRulesPath.endsWith( QStringLiteral( ".rules.json" ) );
+    if ( isDirectRulesPath )
     {
-        const QString content = sha256OfFile( cfg.labIdOrRulesPath );
-        if ( !content.isEmpty() )
-            return QStringLiteral( "sha256:" ) + content;
-        // Exists but unreadable: a rules file we cannot read is not a
-        // stable authority. Size keeps the marker deterministic per file;
-        // two equal-size unreadable files are indistinguishable, but both
-        // are already un-gradeable (the CLI would fail, not mis-grade).
-        return QStringLiteral( "unreadable:" ) + QString::number( info.size() );
+        const QFileInfo info( cfg.labIdOrRulesPath );
+        if ( info.exists() && info.isFile() )
+        {
+            const QString content = sha256OfFile( cfg.labIdOrRulesPath );
+            if ( !content.isEmpty() )
+                return QStringLiteral( "sha256:" ) + content;
+            // Exists but unreadable: a rules file we cannot read is not a
+            // stable authority. Size keeps the marker deterministic per file;
+            // two equal-size unreadable files are indistinguishable, but both
+            // are already un-gradeable (the CLI would fail, not mis-grade).
+            return QStringLiteral( "unreadable:" ) + QString::number( info.size() );
+        }
+        // A .rules.json path that does not exist: the CLI fails with a typed
+        // usage error, so no grade can be adopted against this marker.
+        return QStringLiteral( "missing:" ) + cfg.labIdOrRulesPath;
     }
     // Lab id: mirror the CLI's own resolution (output_verifier's
     // resolveRulesPath order — env dir first, then the source tree's
@@ -323,6 +335,10 @@ QString gradingRulesFingerprint( const GraderCliConfig &cfg, const QString &sear
     // will actually read. R1 review: without this, editing
     // data/labs/grading/<id>.rules.json in place was invisible to the
     // checkpoint digest on the dock's primary configuration.
+    // R2 finding 2 (documented residual): the CLI's last search dir is its
+    // compile-time SICNU_SOURCE_DIR; when the console runs from a different
+    // tree than the grader was built in AND no env dir is set, the resolved
+    // file can diverge from what we hash — see CROSS_TRACK_FINDINGS.
     QStringList searchDirs;
     const QByteArray envDir = qgetenv( "SICNU_LAB_RULES_DIR" );
     if ( !envDir.isEmpty() )
