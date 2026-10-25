@@ -933,9 +933,54 @@ TEST_CASE( "corrupt disk blocks are refused and re-fetched, never served",
   CHECK( RemoteRangeCache::diskCacheStatsJson()["corrupt"].asUInt64() > corruptBefore );
 }
 
+TEST_CASE( "RangeDiskBlockStore keys blocks by geometry: a 128K read cannot hit a 64K block (#1700)",
+           "[io][remote][range_cache][fabric9][disk][issue1700]" )
+{
+  // Store-level oracle (R1-F1): the InstalledCache-based integration below
+  // has its disk layer wiped by uninstall() between passes, so the decisive
+  // #1700 evidence lives HERE — same URL + same strong ETag, two block
+  // geometries, one store directory. Pre-fix master derives ONE basis for
+  // both (no blockSize in the key) and the 128K read returns the 64K block's
+  // bytes; post-fix the bases differ and the read is a MISS.
+  const std::string dir = scratch( "disk_basis_split" );
+  const std::string diskDir = dir + "/blocks";
+  InstalledDiskStore store( diskDir, 16ull * 1024 * 1024 );
+
+  const std::string url = "https://example.com/scene.tif";
+  const std::string etag = "\"geometry-v1\"";
+  const std::string basis64 =
+    RangeDiskBlockStore::identityBasis( url, true, etag, true, 4096, "", 64ull * 1024 );
+  const std::string basis128 =
+    RangeDiskBlockStore::identityBasis( url, true, etag, true, 4096, "", 128ull * 1024 );
+  REQUIRE( basis64 != basis128 );
+
+  // Publish block index 1 under the 64 KiB geometry: bytes [64K,128K).
+  std::vector<unsigned char> bytes64K( 64ull * 1024 );
+  for ( std::size_t i = 0; i < bytes64K.size(); ++i )
+    bytes64K[i] = static_cast<unsigned char>( ( i * 7 ) % 251 );
+  RangeDiskBlockStore::putBlock( basis64, 1, bytes64K.data(), bytes64K.size() );
+
+  // Same basis reads back byte-for-byte (control: the store works).
+  std::vector<unsigned char> got64;
+  CHECK( RangeDiskBlockStore::readBlock( basis64, 1, got64 ) );
+  CHECK( got64 == bytes64K );
+
+  // The 128 KiB geometry's block 1 (bytes [128K,256K)) must NOT resolve to
+  // the 64 KiB layout's file — on pre-fix master this read SUCCEEDS and
+  // hands back the wrong run's bytes.
+  std::vector<unsigned char> got128;
+  CHECK_FALSE( RangeDiskBlockStore::readBlock( basis128, 1, got128 ) );
+}
+
 TEST_CASE( "a blockSize change never serves stale-geometry disk bytes (#1700)",
            "[io][remote][range_cache][fabric9][disk][issue1700]" )
 {
+  // Integration pass (R1-F1 note): InstalledCache's destructor uninstalls
+  // the cache, and uninstall() clears the disk store — so passes 2/3 below
+  // re-fetch from the fixture rather than reading pass-1 files. This case
+  // still pins the END-TO-END contract (a geometry change through install()
+  // must never serve misplaced bytes); the decisive key-separation oracle
+  // for #1700 is the RangeDiskBlockStore-level case above.
   CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
   const std::string dir = scratch( "disk_geometry_change" );
   const std::string diskDir = dir + "/blocks";

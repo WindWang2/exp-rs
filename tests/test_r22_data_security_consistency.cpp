@@ -36,6 +36,7 @@
 #include <sqlite3.h>
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -266,6 +267,12 @@ TEST_CASE( "a journal path that cannot be written fails the publish up front (#1
   writeFileBytes( staged, "NEW" );
 
   // A directory at the journal path makes the ofstream fail to open.
+  // R1-F5 scope note: this exercises the PRE-EXISTING open-failure check
+  // (a master behavior too); the NEW #1701 out.good() ENOSPC-mid-write path
+  // has no deterministic injection point without RLIMIT_FSIZE + SIGXFSZ
+  // handling, so its coverage is the code path itself plus the open-failure
+  // contract this case pins (journal unusable ⇒ publish refuses BEFORE
+  // touching targets).
   fs::create_directories( target + ".publish-journal" );
 
   bool refused = false;
@@ -360,14 +367,23 @@ TEST_CASE( "two pool instances racing one digest both converge (#1680)",
     QFile::copy( payload, srcB );
 
     std::atomic<int> successes{ 0 };
+    // R1-F6: a start gate makes the race deterministic — both threads
+    // reach the staging loop together instead of one finishing before the
+    // other's first byte (which let pre-fix code pass by serialization).
+    std::atomic<bool> go{ false };
     auto putter = [&]( sicnu::data::ArtifactObjectPool *pool, const QString &path )
     {
+      while ( !go.load( std::memory_order_acquire ) )
+        std::this_thread::yield();
       const auto object = pool->put( path, false );
       if ( object.has_value() && object->size == 4096 )
         successes.fetch_add( 1 );
     };
     std::thread ta( putter, &poolA, payload );
     std::thread tb( putter, &poolB, srcB );
+    // Give both threads a beat to park on the gate, then release together.
+    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+    go.store( true, std::memory_order_release );
     ta.join();
     tb.join();
 

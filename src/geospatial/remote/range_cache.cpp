@@ -878,12 +878,15 @@ class CacheStore
 
     void updateConfig( const RangeCacheConfig &newConfig )
     {
-      const bool geometryChanged = [ & ] {
-        std::lock_guard<std::mutex> lock( mMutex );
-        return newConfig.blockSize != config.blockSize;
-      }();
+      bool geometryChanged = false;
       {
+        // R1-F2: compare and apply under ONE lock hold — a split scope let
+        // two racing updateConfig calls both observe "unchanged" against
+        // the pre-swap value and skip the drop while the geometry still
+        // moved (latent today: install() serializes under
+        // g_storeLifecycleMutex, but this function must be safe alone).
         std::lock_guard<std::mutex> lock( mMutex );
+        geometryChanged = newConfig.blockSize != config.blockSize;
         config = newConfig;
         if ( geometryChanged )
           dropAllLocked(); // old-config blocks are unreadable under the new indexing
