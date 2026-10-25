@@ -73,4 +73,34 @@ GraderCliGrade gradeFromTranscript( int exitCode, const QJsonObject &transcript,
 /// typed unavailable rows; grader verdicts become graded rows verbatim.
 GradeCallable cliGradeCallable( const GraderCliConfig &cfg );
 
+/// #1694: fingerprint of the grading RULES the CLI will actually read.
+/// - labIdOrRulesPath points at an existing file -> "sha256:<hex>" over the
+///   file content (head+tail sampled past 4 MiB, so a rules edit always
+///   changes it while a mere touch does not).
+/// - otherwise (a lab id resolved inside the CLI) -> "labid:<id>" - stable,
+///   and explicitly distinct from every content fingerprint.
+/// - empty config -> "none".
+QString gradingRulesFingerprint( const GraderCliConfig &cfg );
+
+/// #1694: identity of the grading AUTHORITY binary: the resolved CLI path,
+/// its size and a content fingerprint (head+tail sampled). Swapping or
+/// rebuilding the grader changes it; a missing grader is "none" (distinct
+/// from every real grader, so unavailable-row checkpoints don't mix).
+QString graderCliIdentity( const QString &explicitCliPath = QString() );
+
+/// #1694: real, reproducible version labels for a batch run - replaces the
+/// hardcoded "ui-1". Prefers an explicit string "version" member in the
+/// authored rubric/lab documents; otherwise derives a short content
+/// fingerprint ("fp:<12 hex>") so every rule edit is visible in the
+/// published report/CSV. An absent rubric falls back to the rules-file
+/// fingerprint; an absent lab spec falls back to "labid:<id>" / "none".
+struct GradingVersionLabels
+{
+    QString rubricVersion;
+    QString labVersion;
+};
+GradingVersionLabels gradingVersionLabels( const QJsonObject &rubricOrRules,
+                                           const QJsonObject &labSpec, const QString &labId,
+                                           const QString &gradingRulesFingerprint );
+
 } // namespace sicnu::teaching_admin

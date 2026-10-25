@@ -1,14 +1,21 @@
 /***************************************************************************
   tests/test_r22_teaching_guard_hygiene.cpp
-  R22-06 round 1 — three production-safety gaps as runtime RED cases:
+  R22-06 round 1 — three production-safety gaps, RED→GREEN:
 
-  #1678 lab::recordAnswer accepts NaN/±Inf numeric answers; jsoncpp then
+  #1678 lab::recordAnswer accepted NaN/±Inf numeric answers; jsoncpp then
        serializes NaN as null and the session document no longer reloads.
-  #1689 the cross-student leak guard cannot see plain numeric student ids
-       (2023110101) or Chinese names — only "student_" prefixed tokens.
-  #1688 bundleBuilderRequest passes unvalidated arguments through
+       Fixed at BOTH boundaries: recordAnswer refuses non-finite values and
+       sessionFromJson rejects them with the same typed diagnostic.
+  #1689 the cross-student leak guard could not see plain numeric student
+       ids (2023110101) or Chinese names. The guard is now cohort-aware and
+       gated into the production emission path (buildGuardedFeedbackPacks).
+  #1688 bundleBuilderRequest passed unvalidated arguments through
        cmd.exe /c on Windows; metacharacters without spaces stay unquoted
        and become command separators ("--version 1.0&calc" runs calc).
+       Parameters are now validated fail-closed before any argv exists.
+
+  RED evidence (pre-fix, commit 1610c9b75): numeric-leak case returned ok,
+  NaN answer was accepted, and the injected argv carried program cmd.exe.
 
   The lab runtime fixture below is the canonical valid v3 document from
   tests/test_lab_runtime.cpp (kept verbatim so this suite stays hermetic).
@@ -146,6 +153,18 @@ sicnu::lab::SessionMeta probeMeta()
     return meta;
 }
 
+FeedbackPackInput packFor( const QString &studentId, const QString &message )
+{
+    FeedbackPackInput in;
+    in.row.studentId = studentId;
+    in.row.labId = QStringLiteral( "lab99" );
+    in.row.status = QStringLiteral( "pass" );
+    in.row.verdict = QStringLiteral( "pass" );
+    in.row.score = 1.0;
+    in.row.message = message;
+    return in;
+}
+
 } // namespace
 
 // ── #1678: non-finite numeric answers poison the session round-trip ─────────
@@ -163,8 +182,7 @@ TEST_CASE( "#1678: recordAnswer refuses NaN and ±Inf numeric answers",
                               -std::numeric_limits<double>::infinity() };
     for ( const double value : poison )
     {
-        const auto res =
-          sicnu::lab::recordAnswer( session, plan, "q_ndvi", "", value );
+        const auto res = sicnu::lab::recordAnswer( session, plan, "q_ndvi", "", value );
         REQUIRE_FALSE( res.ok );
         REQUIRE( res.diagnostics.front().code == "lab.session.field" );
     }
@@ -182,41 +200,110 @@ TEST_CASE( "#1678: recordAnswer refuses NaN and ±Inf numeric answers",
     REQUIRE( sicnu::lab::sessionFromJson( parseJson( bytes2 ) ).ok );
 }
 
+TEST_CASE( "#1678: sessionFromJson rejects non-finite numeric members",
+           "[lab_runtime][session][r22][issue-1678]" )
+{
+    // Belt and braces: even a hand-crafted document (jsoncpp parses huge
+    // exponents into infinities) is refused with the typed schema error
+    // instead of loading a session that cannot round-trip.
+    Json::Value doc = parseJson( [] {
+        const sicnu::lab::LabRuntimePlan plan = probePlan();
+        auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+        REQUIRE( started.ok );
+        REQUIRE( sicnu::lab::recordAnswer( started.value, plan, "q_ndvi", "", 0.35 ).ok );
+        return sicnu::lab::sessionToCanonicalBytes( started.value );
+    }() );
+    REQUIRE( doc[ "question_answers" ].isArray() );
+    REQUIRE( doc[ "question_answers" ].size() == 1 );
+    doc[ "question_answers" ][0][ "numeric" ] = std::numeric_limits<double>::infinity();
+
+    const auto res = sicnu::lab::sessionFromJson( doc );
+    REQUIRE_FALSE( res.ok );
+    REQUIRE( res.diagnostics.front().code == "lab.session.schema" );
+}
+
 // ── #1689: the leak guard must see real student ids ─────────────────────────
 
 TEST_CASE( "#1689: leak guard detects numeric and Chinese-name foreign ids",
            "[teaching_admin][feedback][r22][issue-1689]" )
 {
-    FeedbackPackInput in;
-    in.row.studentId = QStringLiteral( "2023001" );
-    in.row.labId = QStringLiteral( "lab99" );
-    in.row.status = QStringLiteral( "pass" );
-    in.row.verdict = QStringLiteral( "pass" );
-    in.row.score = 1.0;
-    in.row.message = QStringLiteral( "参考 2023002 的结果再检查裁剪范围" );
-    const QJsonObject fb = buildFeedbackPack( in );
-
-    // Master: the blob only contains plain numbers, the student_-prefix scan
-    // sees nothing, the guard returns ok — the leak ships.
-    const ValidationResult r = assertNoCrossStudentLeak( fb, QStringLiteral( "2023001" ) );
-    REQUIRE_FALSE( r.ok );
+    SECTION( "plain numeric student ids" )
+    {
+        const QJsonObject fb =
+          buildFeedbackPack( packFor( QStringLiteral( "2023001" ),
+                                      QStringLiteral( "参考 2023002 的结果再检查裁剪范围" ) ) );
+        const ValidationResult r = assertNoCrossStudentLeak(
+          fb, QStringLiteral( "2023001" ),
+          QStringList{ QStringLiteral( "2023001" ), QStringLiteral( "2023002" ) } );
+        REQUIRE_FALSE( r.ok );
+        REQUIRE( r.issues.first().code == QLatin1String( "cross_student_leak" ) );
+    }
+    SECTION( "Chinese-name ids" )
+    {
+        const QJsonObject fb =
+          buildFeedbackPack( packFor( QStringLiteral( "王五" ),
+                                      QStringLiteral( "张三 的处理范围更完整，建议对照" ) ) );
+        const ValidationResult r = assertNoCrossStudentLeak(
+          fb, QStringLiteral( "王五" ), QStringList{ QStringLiteral( "张三" ), QStringLiteral( "李四" ),
+                                                    QStringLiteral( "王五" ) } );
+        REQUIRE_FALSE( r.ok );
+    }
+    SECTION( "adjacent longer tokens do not trip the guard" )
+    {
+        // 20230021 is NOT the id 2023002 — a word-boundary match must not
+        // fire inside a longer number.
+        const QJsonObject fb =
+          buildFeedbackPack( packFor( QStringLiteral( "2023001" ),
+                                      QStringLiteral( "工单 20230021 已记录" ) ) );
+        const ValidationResult r = assertNoCrossStudentLeak(
+          fb, QStringLiteral( "2023001" ),
+          QStringList{ QStringLiteral( "2023001" ), QStringLiteral( "2023002" ) } );
+        REQUIRE( r.ok );
+    }
+    SECTION( "own token and unrelated prose stay clean" )
+    {
+        const QJsonObject fb =
+          buildFeedbackPack( packFor( QStringLiteral( "2023001" ),
+                                      QStringLiteral( "2023001: 裁剪正确，NDVI 注意范围" ) ) );
+        const ValidationResult r = assertNoCrossStudentLeak(
+          fb, QStringLiteral( "2023001" ),
+          QStringList{ QStringLiteral( "2023001" ), QStringLiteral( "2023002" ) } );
+        REQUIRE( r.ok );
+    }
+    SECTION( "legacy student_ prefix form still detected via the 2-arg overload" )
+    {
+        const QJsonObject fb =
+          buildFeedbackPack( packFor( QStringLiteral( "student_alice" ),
+                                      QStringLiteral( "对比 student_bob 的结果" ) ) );
+        const ValidationResult r = assertNoCrossStudentLeak( fb, QStringLiteral( "student_alice" ) );
+        REQUIRE_FALSE( r.ok );
+    }
 }
 
-TEST_CASE( "#1689: leak guard keeps passing own-token and unrelated content",
+TEST_CASE( "#1689: guarded emission withholds leaking packs on the production path",
            "[teaching_admin][feedback][r22][issue-1689]" )
 {
-    FeedbackPackInput in;
-    in.row.studentId = QStringLiteral( "2023001" );
-    in.row.labId = QStringLiteral( "lab99" );
-    in.row.status = QStringLiteral( "pass" );
-    in.row.verdict = QStringLiteral( "pass" );
-    in.row.score = 0.85;
-    in.row.message = QStringLiteral( "2023001: 裁剪正确，下一步注意 NDVI 的取值范围" );
-    const QJsonObject fb = buildFeedbackPack( in );
+    QVector<FeedbackPackInput> inputs;
+    inputs.append( packFor( QStringLiteral( "2023001" ),
+                            QStringLiteral( "裁剪正确，注意 NDVI 的取值范围" ) ) );
+    inputs.append( packFor( QStringLiteral( "2023002" ),
+                            QStringLiteral( "参考 2023001 的结果重做裁剪" ) ) );
+    const QStringList cohort{ QStringLiteral( "2023001" ), QStringLiteral( "2023002" ) };
 
-    // The student's own id and ordinary prose/numbers must not trip the guard.
-    const ValidationResult r = assertNoCrossStudentLeak( fb, QStringLiteral( "2023001" ) );
-    REQUIRE( r.ok );
+    const FeedbackPackEmission emission = buildGuardedFeedbackPacks( inputs, cohort );
+    // The clean pack ships; the leaking pack is withheld and accounted.
+    REQUIRE( emission.packs.size() == 1 );
+    REQUIRE( emission.packs.first().value( QStringLiteral( "student_id" ) ).toString()
+             == QLatin1String( "2023001" ) );
+    REQUIRE( emission.blockedStudents == QStringList{ QStringLiteral( "2023002" ) } );
+    REQUIRE( emission.refusals.size() == 1 );
+    REQUIRE( emission.refusals.first().contains( QLatin1String( "2023002" ) ) );
+    // The withheld pack's bytes are not in the emission at all.
+    QJsonArray emittedArr;
+    for ( const QJsonObject &p : emission.packs )
+        emittedArr.append( p );
+    const QByteArray emitted = QJsonDocument( emittedArr ).toJson( QJsonDocument::Compact );
+    REQUIRE_FALSE( emitted.contains( QByteArrayLiteral( "重做裁剪" ) ) );
 }
 
 // ── #1688: cmd.exe metacharacters must never reach the command line ─────────
@@ -224,22 +311,46 @@ TEST_CASE( "#1689: leak guard keeps passing own-token and unrelated content",
 TEST_CASE( "#1688: bundleBuilderRequest refuses injection-shaped arguments",
            "[teaching_admin][offline][r22][issue-1688]" )
 {
-    // "1.0&calc" contains no space: QProcess leaves it unquoted, cmd.exe
-    // splits at & and runs calc after the script. Master builds the request
-    // happily — this RED case demands a refusal (empty program).
-    const auto injected = bundleBuilderRequest( QStringLiteral( "C:/repo" ),
-                                                QStringLiteral( "C:/build" ),
-                                                QStringLiteral( "C:/out" ),
-                                                QStringLiteral( "1.0&calc" ), 250, true );
-    REQUIRE( injected.program.isEmpty() );
-
-    // A legal Windows path with & (C:\R&D\out) is equally refused — the
-    // argument cannot ride through cmd.exe /c safely.
-    const auto andedOut = bundleBuilderRequest( QStringLiteral( "C:/repo" ),
-                                                QStringLiteral( "C:/build" ),
-                                                QStringLiteral( "C:\\R&D\\out" ),
-                                                QStringLiteral( "v1" ), 250, true );
-    REQUIRE( andedOut.program.isEmpty() );
+    struct Case
+    {
+        const char *version;
+        const char *buildDir;
+        const char *outDir;
+    };
+    const Case cases[] = {
+        // cmd separators in a space-free argument ride through QProcess.
+        { "1.0&calc", "C:/build", "C:/out" },
+        { "1.0|whoami", "C:/build", "C:/out" },
+        { "1.0^whoami", "C:/build", "C:/out" },
+        // Environment expansion.
+        { "%TEMP%", "C:/build", "C:/out" },
+        { "v!PATH!", "C:/build", "C:/out" },
+        // Redirect metacharacters.
+        { "1.0>x", "C:/build", "C:/out" },
+        { "1.0<x", "C:/build", "C:/out" },
+        // Quotes break the argv join.
+        { "1\"0", "C:/build", "C:/out" },
+        // Legal Windows folder names that cmd would truncate at the &.
+        { "v1", "C:/build", "C:\\R&D\\out" },
+        { "v1", "C:\\R&D\\build", "C:/out" },
+    };
+    for ( const Case &c : cases )
+    {
+        CAPTURE( c.version, c.buildDir, c.outDir );
+        // Refused on BOTH platform twins: the refusal is an EMPTY request —
+        // no program, no argv, nothing a caller could execute.
+        const auto win = bundleBuilderRequest( QStringLiteral( "C:/repo" ),
+                                               QLatin1String( c.buildDir ),
+                                               QLatin1String( c.outDir ),
+                                               QLatin1String( c.version ), 250, true );
+        REQUIRE( win.program.isEmpty() );
+        REQUIRE( win.arguments.isEmpty() );
+        const auto posix = bundleBuilderRequest( QStringLiteral( "C:/repo" ),
+                                                 QLatin1String( c.buildDir ),
+                                                 QLatin1String( c.outDir ),
+                                                 QLatin1String( c.version ), 250, false );
+        REQUIRE( posix.program.isEmpty() );
+    }
 }
 
 TEST_CASE( "#1688: bundleBuilderRequest still builds legal requests",
@@ -251,4 +362,32 @@ TEST_CASE( "#1688: bundleBuilderRequest still builds legal requests",
                                              QStringLiteral( "v2026.09.1-beta_2" ), 250, true );
     REQUIRE( legal.program == QLatin1String( "cmd.exe" ) );
     REQUIRE( legal.arguments.contains( QStringLiteral( "v2026.09.1-beta_2" ) ) );
+    // A unicode path with spaces stays a single argument and is not refused.
+    const auto unicode =
+      bundleBuilderRequest( QStringLiteral( "C:/repo" ), QStringLiteral( "C:/build 2026" ),
+                            QStringLiteral( "C:/遥感课程/离线包" ), QString(), 250, true );
+    REQUIRE( unicode.program == QLatin1String( "cmd.exe" ) );
+    REQUIRE( unicode.arguments.contains( QStringLiteral( "C:/遥感课程/离线包" ) ) );
+}
+
+TEST_CASE( "#1688: validateBundleBuilderParams names the offending parameter",
+           "[teaching_admin][offline][r22][issue-1688]" )
+{
+    REQUIRE( validateBundleBuilderParams( QStringLiteral( "C:/build" ), QStringLiteral( "C:/out" ),
+                                          QStringLiteral( "v1" ) )
+               .isEmpty() );
+    const QStringList versionReject =
+      validateBundleBuilderParams( QStringLiteral( "C:/build" ), QStringLiteral( "C:/out" ),
+                                   QStringLiteral( "1.0&calc" ) );
+    REQUIRE( versionReject.size() == 1 );
+    REQUIRE( versionReject.first().startsWith( QLatin1String( "version:" ) ) );
+
+    const QStringList outReject =
+      validateBundleBuilderParams( QStringLiteral( "C:/build" ), QStringLiteral( "C:\\R&D\\out" ),
+                                   QString() );
+    REQUIRE( outReject.size() == 1 );
+    REQUIRE( outReject.first().startsWith( QLatin1String( "out_dir:" ) ) );
+
+    REQUIRE_FALSE( validateBundleBuilderParams( QString(), QStringLiteral( "C:/out" ), QString() )
+                     .isEmpty() );
 }

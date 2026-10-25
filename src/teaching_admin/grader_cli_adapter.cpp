@@ -291,4 +291,96 @@ GradeCallable cliGradeCallable( const GraderCliConfig &cfg )
     };
 }
 
+namespace
+{
+
+/// Head+tail content fingerprint (full content up to 4 MiB): deterministic,
+/// sensitive to any edit of a classroom-sized rules file, and bounded for
+/// arbitrarily large binaries. Mirrors batch_assessment's artifact stamp
+/// philosophy - a fingerprint, not a dedup.
+QString sampledContentSha256( const QString &path )
+{
+    QFile f( path );
+    if ( !f.open( QIODevice::ReadOnly ) )
+        return QString();
+    constexpr qint64 kFingerprintWindow = 4 * 1024 * 1024;
+    QByteArray bytes = f.read( kFingerprintWindow );
+    const qint64 size = f.size();
+    if ( size > 2 * kFingerprintWindow && f.seek( size - kFingerprintWindow ) )
+        bytes += f.read( kFingerprintWindow );
+    return sha256Hex( bytes );
+}
+
+QString shortFp( const QString &material )
+{
+    return QStringLiteral( "fp:" ) + sha256Hex( material.toUtf8() ).left( 12 );
+}
+
+} // namespace
+
+QString gradingRulesFingerprint( const GraderCliConfig &cfg )
+{
+    if ( cfg.labIdOrRulesPath.isEmpty() )
+        return QStringLiteral( "none" );
+    const QFileInfo info( cfg.labIdOrRulesPath );
+    if ( info.exists() && info.isFile() )
+    {
+        const QString content = sampledContentSha256( cfg.labIdOrRulesPath );
+        if ( !content.isEmpty() )
+            return QStringLiteral( "sha256:" ) + content;
+        // Exists but unreadable: an UNSTABLE-looking but distinct marker is
+        // still better than the labid form - a rules file we cannot read is
+        // not a stable authority either. Size+name keeps it deterministic.
+        return QStringLiteral( "unreadable:" ) + QString::number( info.size() );
+    }
+    return QStringLiteral( "labid:" ) + cfg.labIdOrRulesPath;
+}
+
+QString graderCliIdentity( const QString &explicitCliPath )
+{
+    const QString cli = resolveGraderCli( explicitCliPath );
+    if ( cli.isEmpty() )
+        return QStringLiteral( "none" );
+    const QFileInfo info( cli );
+    const QString content = sampledContentSha256( cli );
+    // No mtime on purpose: a touch of an identical binary keeps grades; a
+    // rebuild changes bytes and therefore the hash. Path is part of the
+    // identity so two different grader builds in different directories do
+    // not silently share checkpoints.
+    return QStringLiteral( "path:" ) + QDir::toNativeSeparators( info.absoluteFilePath() )
+           + QStringLiteral( ";size:" ) + QString::number( info.size() )
+           + ( content.isEmpty() ? QString() : QStringLiteral( ";sha256:" ) + content );
+}
+
+GradingVersionLabels gradingVersionLabels( const QJsonObject &rubricOrRules,
+                                           const QJsonObject &labSpec, const QString &labId,
+                                           const QString &rulesFingerprint )
+{
+    GradingVersionLabels labels;
+    // Rubric label: explicit authored version, else a short fingerprint of
+    // the authored content, else the rules-file fingerprint (the authority
+    // the grader actually reads), else an honest "none". Never a constant.
+    const QString rubricVersionMember =
+      rubricOrRules.value( QStringLiteral( "version" ) ).toString();
+    if ( !rubricVersionMember.isEmpty() )
+        labels.rubricVersion = rubricVersionMember;
+    else if ( !rubricOrRules.isEmpty() )
+        labels.rubricVersion = shortFp( QString::fromUtf8( canonicalJsonBytes( rubricOrRules ) ) );
+    else if ( !rulesFingerprint.isEmpty() )
+        labels.rubricVersion = shortFp( rulesFingerprint );
+    else
+        labels.rubricVersion = QStringLiteral( "none" );
+
+    const QString labVersionMember = labSpec.value( QStringLiteral( "version" ) ).toString();
+    if ( !labVersionMember.isEmpty() )
+        labels.labVersion = labVersionMember;
+    else if ( !labSpec.isEmpty() )
+        labels.labVersion = shortFp( QString::fromUtf8( canonicalJsonBytes( labSpec ) ) );
+    else if ( !labId.isEmpty() )
+        labels.labVersion = QStringLiteral( "labid:" ) + labId;
+    else
+        labels.labVersion = QStringLiteral( "none" );
+    return labels;
+}
+
 } // namespace sicnu::teaching_admin

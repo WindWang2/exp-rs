@@ -4,6 +4,8 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 
+#include <algorithm>
+
 namespace sicnu::teaching_admin {
 
 QJsonObject buildFeedbackPack( const FeedbackPackInput &in )
@@ -40,6 +42,12 @@ QJsonObject buildFeedbackPack( const FeedbackPackInput &in )
 
 ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QString &studentId )
 {
+    return assertNoCrossStudentLeak( feedback, studentId, QStringList{} );
+}
+
+ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QString &studentId,
+                                           const QStringList &cohortStudentIds )
+{
     ValidationResult r;
     const QString sid = feedback.value( QStringLiteral( "student_id" ) ).toString();
     if ( sid != studentId )
@@ -69,7 +77,60 @@ ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QS
             }
         }
     }
+
+    // #1689: roster-defined foreign ids. Real cohorts carry plain numeric
+    // student numbers and Chinese names — invisible to the prefix scan
+    // above. Every other id of the batch is matched with word boundaries so
+    // an id embedded in a longer token (2023002 inside 20230021) does not
+    // false-positive; the owner's own id is excluded by construction.
+    QStringList foreignPatterns;
+    for ( const QString &id : cohortStudentIds )
+    {
+        if ( id.isEmpty() || id == studentId )
+            continue;
+        foreignPatterns << QRegularExpression::escape( id );
+    }
+    if ( !foreignPatterns.isEmpty() )
+    {
+        foreignPatterns.removeDuplicates();
+        std::sort( foreignPatterns.begin(), foreignPatterns.end() ); // deterministic first hit
+        const QRegularExpression re( QStringLiteral( "(?<![A-Za-z0-9_\\-])(?:" )
+                                       + foreignPatterns.join( QLatin1Char( '|' ) )
+                                       + QStringLiteral( ")(?![A-Za-z0-9_\\-])" ) );
+        const auto m = re.match( blob );
+        if ( m.hasMatch() )
+            r.addError( QStringLiteral( "cross_student_leak" ), QStringLiteral( "body" ),
+                        QStringLiteral( "foreign student id: " ) + m.captured() );
+    }
     return r;
+}
+
+FeedbackPackEmission buildGuardedFeedbackPacks( const QVector<FeedbackPackInput> &inputs,
+                                                const QStringList &cohortStudentIds )
+{
+    FeedbackPackEmission emission;
+    for ( const FeedbackPackInput &in : inputs )
+    {
+        const QJsonObject pack = buildFeedbackPack( in );
+        const ValidationResult guard =
+          assertNoCrossStudentLeak( pack, in.row.studentId, cohortStudentIds );
+        if ( guard.ok )
+        {
+            emission.packs.append( pack );
+            continue;
+        }
+        // A suspected leak is WITHHELD and accounted — never emitted on the
+        // "best effort" theory that the guard might be wrong. The refusal
+        // names the student and the first issue so the teacher can inspect
+        // the source row.
+        emission.blockedStudents.append( in.row.studentId );
+        QString why;
+        if ( !guard.issues.isEmpty() )
+            why = guard.issues.first().message;
+        emission.refusals.append( in.row.studentId + QLatin1String( ": " ) + why );
+    }
+    emission.blockedStudents.removeDuplicates();
+    return emission;
 }
 
 } // namespace sicnu::teaching_admin

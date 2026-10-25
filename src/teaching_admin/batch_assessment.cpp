@@ -26,9 +26,13 @@ constexpr int kMaxBatchWorkers = 16;
 QJsonObject batchConfigDigestInput( const BatchAssessmentConfig &cfg )
 {
     // Semantic identity of a batch run: what was graded where, with which
-    // versions. Deliberately excludes maxConcurrency (a scheduling detail)
-    // and checkpointPath (a durability detail) — both may change between
-    // restarts without invalidating completed rows.
+    // versions AND which grading authority (#1694). The rules-content
+    // fingerprint and the grader CLI identity are part of the identity: a
+    // rules file edited in place or a swapped grader binary must change the
+    // digest, or a restart adopts grades computed by rules that are no
+    // longer in force. Deliberately excludes maxConcurrency (a scheduling
+    // detail) and checkpointPath (a durability detail) — both may change
+    // between restarts without invalidating completed rows.
     return sortKeys( QJsonObject{
         { QStringLiteral( "lab_id" ), cfg.labId },
         { QStringLiteral( "max_submissions" ), cfg.maxSubmissions },
@@ -36,6 +40,8 @@ QJsonObject batchConfigDigestInput( const BatchAssessmentConfig &cfg )
         { QStringLiteral( "lab_version" ), cfg.labVersion },
         { QStringLiteral( "software_version" ), cfg.softwareVersion },
         { QStringLiteral( "submissions_dir" ), cfg.submissionsDir },
+        { QStringLiteral( "grading_rules_fingerprint" ), cfg.gradingRulesFingerprint },
+        { QStringLiteral( "grader_identity" ), cfg.graderIdentity },
     } );
 }
 
@@ -148,9 +154,15 @@ bool writeBytesAtomically( const QString &path, const QByteArray &bytes )
 }
 /// Loads checkpoint rows whose config digest matches the current run. A
 /// missing/corrupt/foreign checkpoint degrades to "no adopted rows" (fresh
-/// start) — best-effort durability, never a wrong grade.
-QVector<DurableRow> loadCheckpointRows( const QString &path, const QString &configDigest )
+/// start) — best-effort durability, never a wrong grade. @p digestMismatch
+/// (optional) is set when the file was a well-formed checkpoint of a
+/// DIFFERENT run identity: the caller can distinguish "nothing to resume"
+/// from "the grading config changed, everything re-grades" (#1694).
+QVector<DurableRow> loadCheckpointRows( const QString &path, const QString &configDigest,
+                                        bool *digestMismatch = nullptr )
 {
+    if ( digestMismatch )
+        *digestMismatch = false;
     // Bounded read (R14-E audit F5): a tampered multi-GB checkpoint beside
     // the submissions must degrade to a fresh start, not an OOM slurp.
     constexpr qint64 kMaxCheckpointBytes = 64 * 1024 * 1024;
@@ -161,7 +173,11 @@ QVector<DurableRow> loadCheckpointRows( const QString &path, const QString &conf
     if ( doc.value( QStringLiteral( "schema" ) ).toString() != QLatin1String( kBatchCheckpointSchema ) )
         return {};
     if ( doc.value( QStringLiteral( "config_digest" ) ).toString() != configDigest )
+    {
+        if ( digestMismatch )
+            *digestMismatch = true;
         return {};
+    }
     QVector<DurableRow> rows;
     const QJsonArray arr = doc.value( QStringLiteral( "rows" ) ).toArray();
     rows.reserve( arr.size() );
@@ -267,6 +283,7 @@ QJsonObject BatchAssessmentReport::toJson() const
         { QStringLiteral( "cancelled_early" ), cancelledEarly },
         { QStringLiteral( "truncated" ), truncated },
         { QStringLiteral( "resumed" ), resumed },
+        { QStringLiteral( "checkpoint_invalidated" ), checkpointInvalidated },
         { QStringLiteral( "skipped" ), skippedFiles.size() },
         { QStringLiteral( "skipped_files" ), skipsArr },
         { QStringLiteral( "rubric_version" ), rubricVersion },
@@ -593,8 +610,10 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     // re-graded, never disguised as finished.
     if ( !cfg.checkpointPath.isEmpty() )
     {
+        bool digestMismatch = false;
         const QVector<DurableRow> durable =
-          loadCheckpointRows( cfg.checkpointPath, batchConfigDigest( cfg ) );
+          loadCheckpointRows( cfg.checkpointPath, batchConfigDigest( cfg ), &digestMismatch );
+        report.checkpointInvalidated = digestMismatch;
         QHash<QString, DurableRow> byKey;
         for ( const auto &entry : durable )
             byKey.insert( entry.row.studentId + QLatin1Char( '\n' ) + entry.row.artifactPath,

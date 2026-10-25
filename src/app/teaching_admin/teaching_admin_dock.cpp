@@ -387,19 +387,6 @@ void TeachingAdminDock::onRunBatch()
     m_batchRunButton->setEnabled( false );
     m_batchOutEdit->setEnabled( false );
 
-    BatchAssessmentConfig cfg;
-    cfg.labId = m_labIdEdit->text();
-    cfg.submissionsDir = m_submissionsDirEdit->text();
-    cfg.outDir = QFileInfo( m_batchOutEdit->text() ).path();
-    cfg.rubricVersion = QStringLiteral( "ui-1" );
-    cfg.labVersion = QStringLiteral( "ui-1" );
-    cfg.softwareVersion = m_softwareVersionEdit->text();
-    // Durable partial results beside the published outputs: a re-run over
-    // the same class resumes instead of re-grading completed submissions,
-    // and a cancelled run still publishes the completed rows.
-    cfg.checkpointPath = m_batchOutEdit->text() + QStringLiteral( ".checkpoint.json" );
-    m_batchCancel.store( false );
-
     // Real grading authority only: the lab CLI shell of
     // OutputVerifier::gradeArtifact. When the CLI is absent every row is
     // typed unavailable with a reason — the console never scores by itself.
@@ -408,6 +395,34 @@ void TeachingAdminDock::onRunBatch()
     grader.labIdOrRulesPath = m_labIdEdit->text();
     if ( grader.cliPath.isEmpty() )
         appendLog( tr( "grader CLI not found (set SICNU_GEO_RS_CLI); rows will be typed unavailable" ) );
+
+    BatchAssessmentConfig cfg;
+    cfg.labId = m_labIdEdit->text();
+    cfg.submissionsDir = m_submissionsDirEdit->text();
+    cfg.outDir = QFileInfo( m_batchOutEdit->text() ).path();
+    // #1694: version labels come from the actual authored documents (or a
+    // short content fingerprint of the grading authority when no document
+    // carries an explicit version) — never a hardcoded constant. A rules
+    // edit changes the label AND the checkpoint digest below, so published
+    // grades stay traceable to the rules that produced them.
+    const QJsonObject rubricDoc =
+      QJsonDocument::fromJson( m_rubricEdit->toPlainText().toUtf8() ).object();
+    const QJsonObject labSpecDoc =
+      QJsonDocument::fromJson( m_labSpecEdit->toPlainText().toUtf8() ).object();
+    cfg.gradingRulesFingerprint = sicnu::teaching_admin::gradingRulesFingerprint( grader );
+    cfg.graderIdentity = sicnu::teaching_admin::graderCliIdentity( grader.cliPath );
+    const auto versionLabels = sicnu::teaching_admin::gradingVersionLabels(
+      rubricDoc, labSpecDoc, cfg.labId, cfg.gradingRulesFingerprint );
+    cfg.rubricVersion = versionLabels.rubricVersion;
+    cfg.labVersion = versionLabels.labVersion;
+    cfg.softwareVersion = m_softwareVersionEdit->text();
+    // Durable partial results beside the published outputs: a re-run over
+    // the same class resumes instead of re-grading completed submissions,
+    // and a cancelled run still publishes the completed rows. The digest
+    // covering rules content + grader identity means a resume only ever
+    // adopts grades produced by the authority currently in force.
+    cfg.checkpointPath = m_batchOutEdit->text() + QStringLiteral( ".checkpoint.json" );
+    m_batchCancel.store( false );
 
     QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
     const int total =
@@ -552,6 +567,12 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QSt
     if ( skippedCount > 0 )
         summary += tr( " — %1 file(s) skipped (reserved names, see report)" ).arg( skippedCount );
     m_batchProgressLabel->setText( summary );
+    // #1694: a durable checkpoint existed but the grading authority changed
+    // (rules content, grader binary, versions) — say so instead of looking
+    // like a first run. The teacher must know every row was re-graded.
+    if ( reportJson.value( QStringLiteral( "checkpoint_invalidated" ) ).toBool() )
+        appendLog( tr( "grading rules or grader changed — checkpoint invalidated, "
+                       "all submissions re-graded under the current rules" ) );
     appendLog( QString::fromUtf8( QJsonDocument( reportJson ).toJson( QJsonDocument::Compact ) ) );
 
     // Class summary from the SAME published truth (the report on disk), not
@@ -621,13 +642,27 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
     if ( !loadWarning.isEmpty() )
         appendLog( tr( "batch report warning: %1" ).arg( loadWarning ) );
 
+    // #1689: packs are built AND guarded before anything reaches the log —
+    // the guard runs on the production path with the full cohort roster, so
+    // a numeric student number or a Chinese name in another student's pack
+    // is a visible refusal, not content that ships. The cohort is the batch
+    // report's own roster (the same truth the packs were graded from).
+    QVector<sicnu::teaching_admin::FeedbackPackInput> packInputs;
+    QStringList cohort;
+    cohort.reserve( report.rows.size() );
     for ( const sicnu::teaching_admin::BatchRowResult &row : report.rows )
     {
         sicnu::teaching_admin::FeedbackPackInput fin;
         fin.row = row;
-        const auto fb = sicnu::teaching_admin::buildFeedbackPack( fin );
-        appendLog( QString::fromUtf8( QJsonDocument( fb ).toJson( QJsonDocument::Compact ) ) );
+        packInputs.append( fin );
+        cohort.append( row.studentId );
     }
+    const sicnu::teaching_admin::FeedbackPackEmission emission =
+      sicnu::teaching_admin::buildGuardedFeedbackPacks( packInputs, cohort );
+    for ( const QString &refusal : emission.refusals )
+        appendLog( tr( "feedback pack BLOCKED (possible cross-student leak): %1" ).arg( refusal ) );
+    for ( const QJsonObject &fb : emission.packs )
+        appendLog( QString::fromUtf8( QJsonDocument( fb ).toJson( QJsonDocument::Compact ) ) );
     appendLog( QString::fromUtf8(
         QJsonDocument( sicnu::teaching_admin::buildClassSummary( report ) ).toJson( QJsonDocument::Indented ) ) );
 }

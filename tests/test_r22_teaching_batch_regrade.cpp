@@ -7,18 +7,20 @@
   place (same path, same lab id) used to be invisible to the digest, so a
   re-run silently published stale grades (resumed rows).
 
-  RED phase: the rules-edit test below compiles against the CURRENT config
-  API and fails on master — resumed == 2 with old-rule scores.
-  GREEN phase extends this file with the fingerprint helpers and the
-  grader-identity / version-label oracles.
+  RED evidence (pre-fix, commit 1610c9b75): the rules-edit case failed with
+  resumed == 2. GREEN: the config digest covers the rules-content
+  fingerprint and the grader identity; the report types the invalidation.
 ***************************************************************************/
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "teaching_admin/batch_assessment.h"
+#include "teaching_admin/grader_cli_adapter.h"
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 
 using namespace sicnu::teaching_admin;
@@ -79,19 +81,24 @@ struct ClassFixture
     }
 };
 
-BatchAssessmentConfig makeConfig( const ClassFixture &fx )
+BatchAssessmentConfig makeConfig( const ClassFixture &fx, const QString &graderIdentity )
 {
     BatchAssessmentConfig cfg;
     cfg.labId = QStringLiteral( "lab99" );
     cfg.submissionsDir = fx.submissionsDir;
     cfg.outDir = fx.dir.path();
     // Deliberately CONSTANT across both runs: the point of #1694 is that
-    // version STRINGS do not capture a rules-content edit.
+    // version STRINGS do not capture a rules-content edit — the digest
+    // additionally carries the rules fingerprint and grader identity.
     cfg.rubricVersion = QStringLiteral( "rubric-A" );
     cfg.labVersion = QStringLiteral( "lab-A" );
     cfg.softwareVersion = QStringLiteral( "sw-A" );
     cfg.maxConcurrency = 1;
     cfg.checkpointPath = fx.outPrefix + QStringLiteral( ".checkpoint.json" );
+    GraderCliConfig grader;
+    grader.labIdOrRulesPath = fx.rulesPath;
+    cfg.gradingRulesFingerprint = gradingRulesFingerprint( grader );
+    cfg.graderIdentity = graderIdentity;
     return cfg;
 }
 
@@ -101,12 +108,13 @@ TEST_CASE( "#1694: editing the rules file in place must invalidate the checkpoin
            "[teaching_admin][batch][r22][issue-1694]" )
 {
     ClassFixture fx;
-    const BatchAssessmentConfig cfg = makeConfig( fx );
+    const BatchAssessmentConfig cfg = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
 
     const auto report1 = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
     REQUIRE( report1.total == 2 );
     REQUIRE( report1.graded == 2 );
     REQUIRE( report1.resumed == 0 );
+    REQUIRE_FALSE( report1.checkpointInvalidated );
     REQUIRE( report1.rows.at( 0 ).score == 1.0 );
     REQUIRE( report1.rows.at( 1 ).score == 1.0 );
 
@@ -114,12 +122,19 @@ TEST_CASE( "#1694: editing the rules file in place must invalidate the checkpoin
     // same declared version strings, untouched submissions.
     writeBytes( fx.rulesPath, QByteArrayLiteral( "R2" ) );
 
-    const auto report2 = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
-    // Master adopts both stale rows and publishes R1 scores (the bug).
+    // The config is rebuilt the way the console builds it: the fingerprint
+    // helper reads the CURRENT rules content.
+    const BatchAssessmentConfig cfg2 = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
+    REQUIRE( cfg2.gradingRulesFingerprint != cfg.gradingRulesFingerprint );
+
+    const auto report2 = runBatchAssessment( cfg2, rulesReadingGrader( fx.rulesPath ) );
     REQUIRE( report2.resumed == 0 );
-    REQUIRE( report2.graded == 2 );
     REQUIRE( report2.rows.at( 0 ).score == 2.0 );
     REQUIRE( report2.rows.at( 1 ).score == 2.0 );
+    // The invalidation is published, not silent: the console says why the
+    // run started fresh.
+    REQUIRE( report2.checkpointInvalidated );
+    REQUIRE( report2.toJson().value( QStringLiteral( "checkpoint_invalidated" ) ).toBool() );
 }
 
 TEST_CASE( "#1694: an unchanged grading setup still resumes from the checkpoint",
@@ -129,16 +144,140 @@ TEST_CASE( "#1694: an unchanged grading setup still resumes from the checkpoint"
     // not on every re-run — durability (the point of the checkpoint) has to
     // survive an unchanged rules file.
     ClassFixture fx;
-    const BatchAssessmentConfig cfg = makeConfig( fx );
+    const BatchAssessmentConfig cfg = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
 
     const auto report1 = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
     REQUIRE( report1.graded == 2 );
 
-    const auto report2 = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
+    const BatchAssessmentConfig cfg2 = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
+    REQUIRE( cfg2.gradingRulesFingerprint == cfg.gradingRulesFingerprint );
+    const auto report2 = runBatchAssessment( cfg2, rulesReadingGrader( fx.rulesPath ) );
     REQUIRE( report2.resumed == 2 );
+    REQUIRE_FALSE( report2.checkpointInvalidated );
     // Published-row semantics: adopted rows keep status "pass", so `graded`
     // counts them (the counters describe the published rows) — the resume
     // oracle is the resumed counter plus the ADOPTED scores.
     REQUIRE( report2.rows.at( 0 ).score == 1.0 );
     REQUIRE( report2.rows.at( 1 ).score == 1.0 );
+}
+
+TEST_CASE( "#1694: swapping the grader binary invalidates the checkpoint",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    // Same rules content, same submissions — only the grader identity
+    // changes (rebuilt CLI, different binary). Old grades must not carry
+    // over: they were produced by a different authority.
+    ClassFixture fx;
+    const BatchAssessmentConfig cfg = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
+    const auto report1 = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE( report1.graded == 2 );
+
+    const BatchAssessmentConfig cfg2 = makeConfig( fx, QStringLiteral( "grader-test-2" ) );
+    const auto report2 = runBatchAssessment( cfg2, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE( report2.resumed == 0 );
+    REQUIRE( report2.checkpointInvalidated );
+    // Re-graded under the SAME rules: scores identical, provenance new.
+    REQUIRE( report2.rows.at( 0 ).score == 1.0 );
+}
+
+TEST_CASE( "#1694: gradingRulesFingerprint is content-sensitive and touch-stable",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    QTemporaryDir dir;
+    const QString rules = QDir( dir.path() ).filePath( QStringLiteral( "lab.rules.json" ) );
+    writeBytes( rules, QByteArrayLiteral( "{\"threshold\":0.5}" ) );
+
+    GraderCliConfig cfg;
+    cfg.labIdOrRulesPath = rules;
+    const QString fp1 = gradingRulesFingerprint( cfg );
+    REQUIRE( fp1.startsWith( QLatin1String( "sha256:" ) ) );
+
+    // Same bytes, new mtime: fingerprint unchanged (a touch is not an edit).
+    QFile f( rules );
+    REQUIRE( f.open( QIODevice::ReadWrite ) );
+    const QByteArray same = f.readAll();
+    f.seek( 0 );
+    f.write( same );
+    f.close();
+    REQUIRE( gradingRulesFingerprint( cfg ) == fp1 );
+
+    // Content edit under the same path: fingerprint changes.
+    writeBytes( rules, QByteArrayLiteral( "{\"threshold\":0.7}" ) );
+    REQUIRE( gradingRulesFingerprint( cfg ) != fp1 );
+
+    // Non-file (a lab id the CLI resolves internally): the stable labid
+    // form, distinct from every content fingerprint.
+    cfg.labIdOrRulesPath = QStringLiteral( "lab90_runtime_probe" );
+    const QString labidForm = gradingRulesFingerprint( cfg );
+    REQUIRE( labidForm == QLatin1String( "labid:lab90_runtime_probe" ) );
+    REQUIRE( labidForm != fp1 );
+
+    // Empty authority: explicit none form.
+    cfg.labIdOrRulesPath = QString();
+    REQUIRE( gradingRulesFingerprint( cfg ) == QLatin1String( "none" ) );
+}
+
+TEST_CASE( "#1694: graderCliIdentity fingerprints the authority binary",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    QTemporaryDir dir;
+    const QString cli = QDir( dir.path() ).filePath( QStringLiteral( "grader_cli.exe" ) );
+    writeBytes( cli, QByteArrayLiteral( "MZ-binary-bytes-v1" ) );
+
+    const QString id1 = graderCliIdentity( cli );
+    REQUIRE( id1.startsWith( QLatin1String( "path:" ) ) );
+    REQUIRE( id1.contains( QLatin1String( ";sha256:" ) ) );
+    REQUIRE( id1.contains( QLatin1String( ";size:" ) ) );
+    // Deterministic for identical bytes.
+    REQUIRE( graderCliIdentity( cli ) == id1 );
+
+    // Same SIZE, different content (a rebuild): identity changes.
+    writeBytes( cli, QByteArrayLiteral( "MZ-binary-bytes-v2" ) );
+    REQUIRE( graderCliIdentity( cli ) != id1 );
+
+    // Content growth (size change): identity changes.
+    writeBytes( cli, QByteArrayLiteral( "MZ-binary-bytes-v2-plus-more" ) );
+    REQUIRE( graderCliIdentity( cli ) != id1 );
+}
+
+TEST_CASE( "#1694: gradingVersionLabels derive real labels, never a constant",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    const QJsonObject withVersion = QJsonDocument::fromJson( R"( {"version":"2026.10"} )" ).object();
+    const QJsonObject withoutVersion =
+      QJsonDocument::fromJson( R"( {"schema":"sicnu.grader.rubric/1"} )" ).object();
+    const QJsonObject editedRules =
+      QJsonDocument::fromJson( R"( {"schema":"sicnu.grader.rubric/1","threshold":0.7} )" ).object();
+
+    // Explicit authored version wins.
+    const auto explicitLabels = gradingVersionLabels( withVersion, QJsonObject{}, QStringLiteral( "lab99" ), QString() );
+    REQUIRE( explicitLabels.rubricVersion == QLatin1String( "2026.10" ) );
+
+    // No version member: short content fingerprint, stable and
+    // edit-sensitive, and NEVER the hardcoded "ui-1".
+    const auto fp1 = gradingVersionLabels( withoutVersion, QJsonObject{}, QStringLiteral( "lab99" ), QString() );
+    REQUIRE( fp1.rubricVersion.startsWith( QLatin1String( "fp:" ) ) );
+    REQUIRE( fp1.rubricVersion.size() == 3 + 12 );
+    REQUIRE( fp1.rubricVersion != QLatin1String( "ui-1" ) );
+    REQUIRE( gradingVersionLabels( withoutVersion, QJsonObject{}, QStringLiteral( "lab99" ), QString() )
+               .rubricVersion == fp1.rubricVersion );
+    REQUIRE( gradingVersionLabels( editedRules, QJsonObject{}, QStringLiteral( "lab99" ), QString() )
+               .rubricVersion != fp1.rubricVersion );
+
+    // No authored rubric at all: fall back to the rules-file fingerprint.
+    const auto fromRules = gradingVersionLabels( QJsonObject{}, QJsonObject{}, QStringLiteral( "lab99" ),
+                                                 QStringLiteral( "sha256:deadbeef" ) );
+    REQUIRE( fromRules.rubricVersion.startsWith( QLatin1String( "fp:" ) ) );
+    // And with nothing at all: honest none.
+    const auto none = gradingVersionLabels( QJsonObject{}, QJsonObject{}, QString(), QString() );
+    REQUIRE( none.rubricVersion == QLatin1String( "none" ) );
+    REQUIRE( none.labVersion == QLatin1String( "none" ) );
+
+    // Lab side: explicit version, else content fp, else labid form.
+    REQUIRE( gradingVersionLabels( QJsonObject{}, withVersion, QStringLiteral( "lab99" ), QString() )
+               .labVersion == QLatin1String( "2026.10" ) );
+    REQUIRE( gradingVersionLabels( QJsonObject{}, withoutVersion, QStringLiteral( "lab99" ), QString() )
+               .labVersion.startsWith( QLatin1String( "fp:" ) ) );
+    REQUIRE( gradingVersionLabels( QJsonObject{}, QJsonObject{}, QStringLiteral( "lab99" ), QString() )
+               .labVersion == QLatin1String( "labid:lab99" ) );
 }

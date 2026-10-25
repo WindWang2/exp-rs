@@ -378,11 +378,68 @@ QJsonObject BundleManifestInfo::toJson() const
     };
 }
 
+QStringList validateBundleBuilderParams( const QString &buildDir, const QString &outDir,
+                                         const QString &version )
+{
+    // #1688. On Windows the constructed argv reaches cmd.exe /c, which
+    // re-parses the JOINED command line: & | ^ become command separators,
+    // %VAR% expands, ! expands under delayed expansion, and redirects eat
+    // < >. QProcess only quotes arguments containing spaces/quotes, so a
+    // metacharacter inside a space-free argument rides through verbatim
+    // ("--version 1.0&calc" runs calc; a legal C:\R&D\out is truncated at
+    // the &). Paths keep every legal character (colon, slash, unicode);
+    // only the interpreter-active set is refused. The same policy guards
+    // the bash twin for uniformity.
+    static const QString kMetacharacters = QStringLiteral( "&|<>^%!\"\n\r\t" );
+    QStringList rejections;
+    const auto checkPath = [&rejections]( const QString &value, const char *param ) {
+        if ( value.isEmpty() )
+        {
+            rejections << QStringLiteral( "%1: must not be empty" ).arg( QLatin1String( param ) );
+            return;
+        }
+        for ( const QChar &c : value )
+        {
+            if ( kMetacharacters.contains( c ) )
+            {
+                rejections << QStringLiteral( "%1: forbidden character '%2' (cmd.exe metacharacter)" )
+                                .arg( QLatin1String( param ), QString( c ) );
+                return;
+            }
+        }
+    };
+    checkPath( buildDir, "build_dir" );
+    checkPath( outDir, "out_dir" );
+    if ( !version.isEmpty() )
+    {
+        for ( const QChar &c : version )
+        {
+            const bool allowed = ( c.isLetterOrNumber() && c.toLatin1() != 0 )
+                                 || c == QLatin1Char( '.' ) || c == QLatin1Char( '_' )
+                                 || c == QLatin1Char( '-' );
+            if ( !allowed )
+            {
+                rejections << QStringLiteral(
+                                 "version: allowed characters are [0-9A-Za-z._-] (got '%1')" )
+                                 .arg( QString( c ) );
+                break;
+            }
+        }
+    }
+    return rejections;
+}
+
 ScriptRunRequest bundleBuilderRequest( const QString &repoRoot, const QString &buildDir,
                                        const QString &outDir, const QString &version, int maxMb,
                                        bool windows )
 {
     ScriptRunRequest req;
+    // #1688: fail closed — an injection-shaped parameter yields an EMPTY
+    // request (no program), which no caller can execute, instead of an
+    // argv that cmd.exe would re-parse into something else. Legal inputs
+    // build exactly the same request as before.
+    if ( !validateBundleBuilderParams( buildDir, outDir, version ).isEmpty() )
+        return req;
     if ( windows )
     {
         req.program = QStringLiteral( "cmd.exe" );
@@ -416,6 +473,17 @@ ScriptRunRequest bundleBuilderRequest( const QString &repoRoot, const QString &b
 ScriptRunResult buildOfflineBundle( const QString &repoRoot, const QString &buildDir, const QString &outDir,
                                     const QString &version, int maxMb )
 {
+    const QStringList rejections = validateBundleBuilderParams( buildDir, outDir, version );
+    if ( !rejections.isEmpty() )
+    {
+        // Typed refusal, never a process start: the caller sees the exact
+        // parameter classes that were rejected (#1688).
+        ScriptRunResult refused;
+        refused.started = false;
+        refused.error = QStringLiteral( "bundle builder parameters refused: " )
+                        + rejections.join( QStringLiteral( "; " ) );
+        return refused;
+    }
 #ifdef Q_OS_WIN
     const ScriptRunRequest req = bundleBuilderRequest( repoRoot, buildDir, outDir, version, maxMb, true );
 #else
