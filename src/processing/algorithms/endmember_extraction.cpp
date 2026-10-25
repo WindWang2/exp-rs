@@ -1,6 +1,8 @@
 // src/processing/algorithms/endmember_extraction.cpp — PPI endmember extraction
 #include "endmember_extraction.h"
 
+#include "processing/algorithms/portable_random.h"
+
 #include <algorithm>
 #include <cmath>
 #include <random>
@@ -52,9 +54,11 @@ bool pixelPurityIndex( const float *pixels, size_t count, int bands,
     for ( int b = 0; b < bands; ++b )
         mean[static_cast<size_t>( b )] /= static_cast<double>( validCount );
 
-    // Reproducible randomness: fixed seed.
+    // Reproducible randomness: fixed seed. normal01 is the portable
+    // Box-Muller draw (#1685) — std::normal_distribution's algorithm is
+    // implementation-defined, so the PPI projection vectors would differ
+    // across STLs for the same seed 42.
     std::mt19937 rng( 42 );
-    std::normal_distribution<double> normal( 0.0, 1.0 );
 
     std::vector<int> extremeCounts( count, 0 );
     for ( int proj = 0; proj < projections; ++proj )
@@ -64,7 +68,7 @@ bool pixelPurityIndex( const float *pixels, size_t count, int bands,
         double norm = 0.0;
         for ( int b = 0; b < bands; ++b )
         {
-            direction[static_cast<size_t>( b )] = normal( rng );
+            direction[static_cast<size_t>( b )] = rs::algorithms::portable::normal01( rng );
             norm += direction[static_cast<size_t>( b )] * direction[static_cast<size_t>( b )];
         }
         norm = std::sqrt( norm );

@@ -23,6 +23,11 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/nodata_utils.h"
+#include "processing/algorithms/portable_random.h"
+
+// Absolute-path alias: this TU lives in sicnu::operators::rs, where a
+// relative rs::algorithms lookup would resolve against the wrong namespace.
+namespace r22portable = ::rs::algorithms::portable;
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include "rs_classification_pipeline.h"
@@ -217,8 +222,11 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         std::vector<std::vector<float>> reservoir(static_cast<size_t>(nFeat),
                                                   std::vector<float>(k, 0.0f));
         sampleIdx.resize(k);
+        // Reservoir replace draws use the portable fixed-algorithm index
+        // (#1685): std::uniform_int_distribution's algorithm is
+        // implementation-defined, so the sampled pixel subset — and with it
+        // the k-means seeding — differed across STLs for seed 42.
         std::mt19937 rng(42);
-        std::uniform_int_distribution<size_t> dist(0, std::numeric_limits<size_t>::max());
 
         constexpr int kTile = 256;
         std::vector<float> tileBuf(static_cast<size_t>(kTile) * kTile * static_cast<size_t>(nFeat));
@@ -258,8 +266,7 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
                     else
                     {
                         // Reservoir replace: j = uniform(0, seen); if j < k replace.
-                        const size_t j = static_cast<size_t>(
-                            dist(rng) % (seen + 1));
+                        const size_t j = r22portable::uniformIndex( rng, seen + 1 );
                         if (j < k)
                         {
                             sampleIdx[j] = seen;

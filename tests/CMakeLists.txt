@@ -16443,3 +16443,44 @@ sicnu_discover_tests(test_r19_02_workflow_cancel_order)
 sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
+
+# --- R22-01 science track (r22-science): append-only registration ---
+# Numerical-correctness anchors for #1707 (distance transform) and #1684
+# (accumulator stats), portable-random golden sequences for #1685, and
+# resampler footprint semantics for #1686.
+qt_add_executable(test_r22_science_numerics test_r22_science_numerics.cpp)
+target_link_libraries(test_r22_science_numerics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r22_science_numerics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_science_numerics)
+
+qt_add_executable(test_r22_science_random test_r22_science_random.cpp)
+target_link_libraries(test_r22_science_random PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r22_science_random PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_science_random)
+
+qt_add_executable(test_r22_science_resampler test_r22_science_resampler.cpp)
+target_link_libraries(test_r22_science_resampler PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r22_science_resampler PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_science_resampler)
+# --- end R22-01 science track registrations ---
