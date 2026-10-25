@@ -933,20 +933,93 @@ TEST_CASE( "corrupt disk blocks are refused and re-fetched, never served",
   CHECK( RemoteRangeCache::diskCacheStatsJson()["corrupt"].asUInt64() > corruptBefore );
 }
 
+TEST_CASE( "a blockSize change never serves stale-geometry disk bytes (#1700)",
+           "[io][remote][range_cache][fabric9][disk][issue1700]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk_geometry_change" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"geometry-v1\"" ); // strong ETag: same identity across geometries
+
+  // Pass 1: 64 KiB geometry fills memory AND the disk layer.
+  RangeCacheConfig config64;
+  config64.blockSize = 64 * 1024;
+  config64.maxCacheBytes = 4ull * 1024 * 1024;
+  config64.stalePolicy = RangeCacheStalePolicy::TrustForever; // same identity, geometry is the variable
+  config64.diskDirectory = diskDir;
+  config64.diskMaxBytes = 16ull * 1024 * 1024;
+
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( expected.size() == 256ull * 256 );
+  }
+  {
+    InstalledCache guard( config64 );
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expected );
+    CHECK( RemoteRangeCache::diskCacheStatsJson()["puts"].asUInt64() > 0 );
+  }
+
+  // Pass 2: same process, same disk directory, 128 KiB geometry. Blocks on
+  // disk were laid out by the 64 KiB pass; under the bug the same ETag
+  // produced the SAME basis, so block index 1 of the 128 KiB read resolved
+  // to the old [64K,128K) file and the window came back byte-shifted.
+  RangeCacheConfig config128 = config64;
+  config128.blockSize = 128 * 1024;
+  {
+    InstalledCache guard( config128 ); // install() routes through updateConfig
+    {
+      RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+      const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+      REQUIRE( got.size() == expected.size() );
+      CHECK( got == expected ); // byte-for-byte: geometry change ⇒ fresh layout
+    }
+  }
+
+  // Pass 3: a COLD PROCESS shape — memory gone (updateConfig dropped it),
+  // only the (now 128 KiB-layout) disk files remain. Re-reads must still be
+  // byte-exact, proving the re-fetched blocks landed under the new basis.
+  RangeCacheConfig config128again = config64;
+  config128again.blockSize = 128 * 1024;
+  {
+    InstalledCache guard( config128again );
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( got.size() == expected.size() );
+    CHECK( got == expected );
+  }
+}
+
 TEST_CASE( "disk identityBasis requires a strong ETag (LM alone is refused)",
            "[io][remote][range_cache][fabric9][disk][issue1228]" )
 {
   // Same-second same-size rewrites make size+Last-Modified unsafe for disk.
+  // #1700: the basis also names the block geometry — a block INDEX only
+  // means a byte range under one blockSize, so the basis carries it.
   const std::string etagBasis = RangeDiskBlockStore::identityBasis(
-    "https://Example.COM:443/a.tif", true, "\"v1\"", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT" );
-  CHECK( etagBasis == "etag\nhttps://Example.COM:443/a.tif\n\"v1\"" );
+    "https://Example.COM:443/a.tif", true, "\"v1\"", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT",
+    64ull * 1024 );
+  CHECK( etagBasis == "etag\nhttps://Example.COM:443/a.tif\n\"v1\"\nbs=65536" );
+
+  // A geometry change must NOT reuse the old basis: the same URL+ETag under
+  // a different blockSize is a different key (old-layout files unreachable).
+  const std::string etagBasis128 = RangeDiskBlockStore::identityBasis(
+    "https://Example.COM:443/a.tif", true, "\"v1\"", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT",
+    128ull * 1024 );
+  CHECK( etagBasis128 == "etag\nhttps://Example.COM:443/a.tif\n\"v1\"\nbs=131072" );
+  CHECK( etagBasis != etagBasis128 );
 
   const std::string lmOnly = RangeDiskBlockStore::identityBasis(
-    "https://example.com/a.tif", false, "", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT" );
+    "https://example.com/a.tif", false, "", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT", 64ull * 1024 );
   CHECK( lmOnly.empty() );
 
   const std::string weak = RangeDiskBlockStore::identityBasis(
-    "https://example.com/a.tif", false, "W/\"v1\"", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT" );
+    "https://example.com/a.tif", false, "W/\"v1\"", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT",
+    64ull * 1024 );
   CHECK( weak.empty() );
 }
 

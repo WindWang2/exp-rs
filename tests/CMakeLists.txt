@@ -16443,3 +16443,16 @@ sicnu_discover_tests(test_r19_02_workflow_cancel_order)
 sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
+
+# ── R22-02 (r22-data): data-access security, remote COG cache identity,
+# atomic publish consistency and dataset provenance closure (#1679/#1700/
+# #1701/#1680/#1702/#1703). Append-only registration block for this track;
+# docs: .planning/r22-data. ──
+sicnu_add_test(test_r22_data_security_consistency TIMEOUT 300)
+target_link_libraries(test_r22_data_security_consistency PRIVATE
+    Sicnu::Geospatial
+    Sicnu::dataset
+    Sicnu::data
+    SQLite::SQLite3
+)
+# ── end R22-02 registrations ──
