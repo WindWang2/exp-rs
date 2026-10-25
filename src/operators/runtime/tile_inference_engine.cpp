@@ -693,6 +693,13 @@ float featherWeight( int distance, int halo )
  * Final pixel = Σ(w·v)/Σw over every tile that saw it (NaN predictions are
  * skipped — weight 0 — and a pixel no tile predicted stays NoData).
  *
+ * The blend is PER SLOT (#1706): each output band (class plane, uncertainty
+ * plane) carries its own weighted-sum AND its own weight ledger, so band s
+ * is normalized exactly by the tiles that contributed a finite value to
+ * band s. Slots never share buffers — cv::Mat copies alias, one prototype
+ * Mat assigned n times is one buffer — and a tile's weight is booked once
+ * per slot it feeds, never once for the whole stack.
+ *
  * Memory is bounded by a sliding row window of (tile + 2·halo) rows: rows are
  * final once every tile whose halo could reach them has been added, and tiles
  * arrive in row-major order, so rows leave the window monotonically. The
@@ -750,7 +757,14 @@ class FeatherAccumulator
       const int y1 = std::min( m_rasterH, core.y + core.h + halo );
       if ( x0 >= x1 || y0 >= y1 )
         return;
-      cv::Mat sum = m_sum[static_cast<std::size_t>( slot )];
+      cv::Mat &sum = m_sum[static_cast<std::size_t>( slot )];
+      // #1706: the weight ledger is PER SLOT. add() runs once per class slot
+      // per tile; the former single shared m_weight counted every tile's
+      // feather weight C times and scaled every band down by C. A per-slot
+      // denominator also keeps a band's blend honest when another band's
+      // prediction was non-finite at this pixel (that band alone drops the
+      // contribution).
+      cv::Mat &weight = m_weight[static_cast<std::size_t>( slot )];
       for ( int y = y0; y < y1; ++y )
       {
         const int wy = y - ( core.y - halo ); // window-plane row
@@ -763,7 +777,7 @@ class FeatherAccumulator
         CV_Assert( y >= m_top && y < m_top + m_span );
         const float *srcRow = windowPlane.ptr<float>( wy );
         float *sumRow = sum.ptr<float>( y - m_top );
-        float *weightRow = m_weight.ptr<float>( y - m_top );
+        float *weightRow = weight.ptr<float>( y - m_top );
         for ( int x = x0; x < x1; ++x )
         {
           const int wx = x - ( core.x - halo );
@@ -812,8 +826,10 @@ class FeatherAccumulator
         m( cv::Range( keep, m_span ), cv::Range::all() ) = 0.0f;
       };
       for ( int s = 0; s < m_slots; ++s )
+      {
         slideUp( m_sum[static_cast<std::size_t>( s )] );
-      slideUp( m_weight );
+        slideUp( m_weight[static_cast<std::size_t>( s )] );
+      }
       slideUp( m_invalid );
       m_top = last;
     }
@@ -825,9 +841,19 @@ class FeatherAccumulator
     void resetWindow( int top )
     {
       m_top = top;
-      m_sum.assign( static_cast<std::size_t>( m_slots ),
-                    cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 ) );
-      m_weight = cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 );
+      // #1706: every slot owns its OWN sum and weight ledgers. cv::Mat's copy
+      // constructor is a refcounted shallow alias, so the former
+      // `assign(n, cv::Mat::zeros(...))` pointed all n slots at ONE buffer —
+      // multi-class runs then published the class MEAN on every band and
+      // argmax = class 0 everywhere. Fresh zeros per slot, never a shared
+      // prototype Mat.
+      m_sum.assign( static_cast<std::size_t>( m_slots ), cv::Mat() );
+      m_weight.assign( static_cast<std::size_t>( m_slots ), cv::Mat() );
+      for ( int s = 0; s < m_slots; ++s )
+      {
+        m_sum[static_cast<std::size_t>( s )] = cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 );
+        m_weight[static_cast<std::size_t>( s )] = cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 );
+      }
       m_invalid = cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 );
     }
 
@@ -846,7 +872,7 @@ class FeatherAccumulator
           for ( int r = 0; r < rows; ++r )
           {
             const float *sumRow = m_sum[static_cast<std::size_t>( s )].ptr<float>( r );
-            const float *weightRow = m_weight.ptr<float>( r );
+            const float *weightRow = m_weight[static_cast<std::size_t>( s )].ptr<float>( r );
             const float *invalidRow = m_invalid.ptr<float>( r );
             float *outRow = out.ptr<float>( r );
             for ( int x = 0; x < m_rasterW; ++x )
@@ -866,12 +892,11 @@ class FeatherAccumulator
       cv::Mat derived( rows, m_rasterW, CV_32FC1 );
       for ( int r = 0; r < rows; ++r )
       {
-        const float *weightRow = m_weight.ptr<float>( r );
         const float *invalidRow = m_invalid.ptr<float>( r );
         float *outRow = derived.ptr<float>( r );
         for ( int x = 0; x < m_rasterW; ++x )
         {
-          if ( weightRow[x] <= 0.0f || invalidRow[x] > 0.0f )
+          if ( invalidRow[x] > 0.0f )
           {
             outRow[x] = m_writeNoData;
             continue;
@@ -881,8 +906,17 @@ class FeatherAccumulator
           bool invalid = false;
           for ( int c = 0; c < classes; ++c )
           {
-            const float v = m_sum[static_cast<std::size_t>( c )].ptr<float>( r )[x]
-                            / weightRow[x];
+            // #1706: each class band normalizes by ITS OWN denominator; a
+            // class whose ledger has no finite contribution at this pixel
+            // has no blend to argue with (fail-closed to NoData below —
+            // argmax over a partially-defined stack would be fabricated).
+            const float w = m_weight[static_cast<std::size_t>( c )].ptr<float>( r )[x];
+            if ( !( w > 0.0f ) )
+            {
+              invalid = true;
+              break;
+            }
+            const float v = m_sum[static_cast<std::size_t>( c )].ptr<float>( r )[x] / w;
             if ( !std::isfinite( v ) )
             {
               invalid = true;
@@ -941,7 +975,7 @@ class FeatherAccumulator
         for ( int r = 0; r < rows; ++r )
         {
           const float *sumRow = m_sum[static_cast<std::size_t>( classes )].ptr<float>( r );
-          const float *weightRow = m_weight.ptr<float>( r );
+          const float *weightRow = m_weight[static_cast<std::size_t>( classes )].ptr<float>( r );
           const float *invalidRow = m_invalid.ptr<float>( r );
           float *outRow = unc.ptr<float>( r );
           for ( int x = 0; x < m_rasterW; ++x )
@@ -962,7 +996,11 @@ class FeatherAccumulator
     int m_span;      // window height in rows (tile + 2·halo, clamped to raster)
     int m_top = 0;   // first raster row held by the window
     std::vector<cv::Mat> m_sum;
-    cv::Mat m_weight;
+    /// #1706: per-slot denominators. One shared weight matrix counted each
+    /// tile's feather weight once per class slot (C× overcount → every band
+    /// scaled by 1/C) and couples bands through shared non-finite drops.
+    /// Window-bounded like m_sum: slots × (tile + 2·halo) rows × rasterW.
+    std::vector<cv::Mat> m_weight;
     cv::Mat m_invalid; // core-invalid marks (Platform 9.0: NoData wins)
     RasterOutputMode m_mode;
     float m_maskThreshold = 0.5f;
