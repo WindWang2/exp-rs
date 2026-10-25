@@ -257,6 +257,31 @@ TEST_CASE( "a stale .bak never becomes the rollback source (#1701)",
   CHECK_FALSE( atomic_fs::fileExists( target + ".bak" ) );
 }
 
+TEST_CASE( "an orphaned .bak with no target is resurrected, never deleted (#1701)",
+           "[r22][data][atomic][issue1701]" )
+{
+  const std::string dir = scratchDir( "orphan_bak_resurrect" );
+  const std::string target = dir + "/target.shp";
+  const std::string staged = dir + "/staged-main.shp";
+
+  // The crash shape of the move-aside fallback (hardlink-less FS): a
+  // previous run parked the target's bytes at .bak and died before its
+  // publish rename, and its journal was destroyed unreadable — so
+  // recoverDatasetGroup() has nothing to act on. The .bak is the target's
+  // ONLY copy.
+  writeFileBytes( target + ".bak", "ONLY-COPY" );
+  writeFileBytes( staged, "NEW-MAIN" );
+
+  atomic_fs::publishStagedGroup( staged, target );
+
+  // The sweep resurrected the orphan as the pre-publish state; the publish
+  // then replaced it with the new bytes and no journal material survives.
+  CHECK( readFile( target ) == "NEW-MAIN" );
+  CHECK_FALSE( atomic_fs::fileExists( target + ".bak" ) );
+  CHECK_FALSE( atomic_fs::fileExists( target + ".publish-journal" ) );
+  CHECK_FALSE( atomic_fs::fileExists( target + ".publish-journal.committed" ) );
+}
+
 TEST_CASE( "a journal path that cannot be written fails the publish up front (#1701)",
            "[r22][data][atomic][issue1701]" )
 {
