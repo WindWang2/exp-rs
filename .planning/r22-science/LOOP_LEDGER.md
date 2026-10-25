@@ -13,3 +13,6 @@
 - R08 | GREEN 跑1+跑2：13 个测试二进制全绿（351,467 断言对拍零错） | 全部 | /tmp/r22s-run.sh | 通过 | 分包提交
 - R09 | 4 commits（#1707/#1684/#1685/#1686）+ .gitignore 白名单 | git | git log | 通过（3beab0a, eeb1711, e79455d, b113e41） | R1 评审
 - R10 | R1 独立对抗评审启动（subagent） | REVIEW_R1.md | - | 进行中 | 等待
+- R11 | R1 APPROVE（1 P2+8 P3）；全闭环：resampler.h 契约、boundedBelow 守卫、range-FY 黄金 pin（自检又揪出我模拟漏 +1，正是 pin 的价值）、注释/include/别名位置；重验双绿 | eb41870 | /tmp/r22s-run.sh | 通过 | R2
+- R12 | R2 APPROVE（0 P0/P1/P2+2 P3）：11.1 万 mask、127 万点扫描、独立 MT19937、gcc16-vs-clang23、33 二进制；G1/G2 文档精度闭环 | 1b95ec3 | 同上 | 通过 | 交付
+- R13 | 交付文档（TEST_RESULTS/PERF N-A/CROSS_TRACK/FINAL_REPORT/PR_BODY）；push 前二次冲突复检（master 未动，新增 4 PR 仅 append-only 交集；#1706 已被 #1709 实施） | .planning | gh api/pr view | 通过 | Push+PR

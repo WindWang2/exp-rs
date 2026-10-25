@@ -14,11 +14,9 @@ DN~1e4、σ<1、类内像元数 ~1e6 的教学数据，stddev 特征残余误差
 在范围外），改为文档化 + 范围内调用方 Kahan。后续轨如改，请同步更新
 `math_utils.h` 契约注释。
 
-## 3. #1706 FeatherAccumulator（P1，本轨未实施）
-`src/operators/rs/rs_cartographic_operators.cpp` 的多槽位共享 cv::Mat 缓冲 +
-权重重复累加问题在允许写范围内，但本轮容量用于 A1-A3 的四项 P1/P2 修复与
-双轮评审，未及实施。留给 science 下一里程碑（RED 思路：多类别羽化时断言各类
-缓冲互不串扰、权重只累加一次）。
+## 3. #1706 FeatherAccumulator（P1）——已由 r22-inference 轨实施（2026-10-26 复检）
+push 前复检发现 #1709（r22-inference）已实施 #1706 的 per-slot 缓冲与权重账本修复。
+本轨不再重复实施；ISSUE_TRIAGE 中"留待下一里程碑"的记录以此为准作废。
 
 ## 4. #1687（P3）部分处理说明
 - `bothNormalizable` 的 `-999` 魔数：#1676 已抽出函数但语义未变。改用波段声明

@@ -14,3 +14,16 @@
 ## Push 前复检义务
 - 重跑 `gh pr list` + `gh pr view <n> --json files` 对比新增文件交集；
 - `git fetch origin master` 成功后比对 SHA，若 master 前进则 rebase 语义核对。
+
+## 2026-10-26T05:0xZ Push 前复检（第二轮）
+- 远端 master 仍为 911e0b17（gh api 确认）——无 rebase 需要。
+- 新增 open PR：#1708(r22-infra)、#1709(r22-inference)、#1710(r22-data)、#1711(r22-teaching)。
+- 文件交集复核：
+  - `tests/CMakeLists.txt`：#1708/#1709/#1710/#1711 与本轨均为文末 append-only
+    注册块——若相邻行合并可能产生行级冲突，解决方式为保留双方追加块（语义零冲突）。
+  - `.gitignore`：各轨白名单 stanza 互不相交。
+  - 源文件：零交集。
+- #1709 已实施 #1706（FeatherAccumulator）——本轨 ISSUE_TRIAGE 中"#1706 留待
+  下一里程碑"的记录已被兄弟轨 supersede，以 #1709 为准，本轨不重复实施。
+- #1676（math_utils.cpp/rs_kmeans_operator.cpp 轻度交集）结论不变：不同函数区域，
+    git 可自动合并。
