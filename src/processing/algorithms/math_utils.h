@@ -27,10 +27,14 @@ struct Stats {
  *
  * Precision contract (#1684): the mean is kept in double through the
  * variance formula (sumSq/N - mean²), which is exact by the Sterbenz
- * lemma whenever mean² is within a factor of two of sumSq/N. The residual
- * error therefore comes from the CALLER's accumulation of sum/sumSq:
- * naive accumulation carries ~sqrt(N)·eps·sumSq, which dominates for
- * large-offset small-spread populations (mean/σ > ~1e6 at N=1e6).
+ * lemma whenever mean² is within a factor of two of sumSq/N. Two error
+ * floors remain, whichever dominates:
+ *   - the formula's own cancellation, ~eps·(mean²/σ²) — dominates only
+ *     above condition number mean²/σ² ~ 1/eps (≈4.5e15), i.e. far beyond
+ *     reflectance/DN magnitudes;
+ *   - the CALLER's accumulation of sum/sumSq: naive accumulation carries
+ *     ~sqrt(N)·eps·sumSq, which dominates for realistic large-offset
+ *     small-spread populations (mean/σ > ~1e6 at N=1e6).
  * Accumulators feeding this struct over many pixels should sum values
  * shifted by a representative offset or use Kahan compensation
  * (see rs_segment_features.cpp).
