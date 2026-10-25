@@ -65,6 +65,10 @@ std::vector<float> readBand( const QString &path, int band, int &width, int &hei
 class ThreeClassStepRuntime final : public IModelRuntime
 {
   public:
+    /// When true, channel 1 of the RIGHT profile predicts NaN — pins the
+    /// per-slot fail-closed semantics (that band alone drops its weight).
+    bool poisonMiddleOnRight = false;
+
     std::string framework() const override { return "m9-fake"; }
     std::string backendName() const override { return "r22step"; }
     std::string deviceName() const override { return "cpu"; }
@@ -91,7 +95,9 @@ class ThreeClassStepRuntime final : public IModelRuntime
       for ( int b = 0; b < B; ++b )
         for ( int c = 0; c < C; ++c )
         {
-          const float value = ( ( c == 0 && left ) || ( c == 2 && !left ) ) ? 0.8f : 0.1f;
+          float value = ( ( c == 0 && left ) || ( c == 2 && !left ) ) ? 0.8f : 0.1f;
+          if ( poisonMiddleOnRight && !left && c == 1 )
+            value = std::numeric_limits<float>::quiet_NaN();
           std::fill_n( base + ( static_cast<std::size_t>( b * C + c ) ) * plane, plane, value );
         }
       return out;
@@ -271,6 +277,128 @@ TEST_CASE( "#1706 feather labels argmax matches the unblended argmax",
     CHECK( at( blended, 8, y ) == 0.0f );
     CHECK( at( blended, 24, y ) == 2.0f );
   }
+
+  // Product-class remap under blending: the collapse argmaxes MODEL classes
+  // and then maps through postprocess.class_mapping — 0→5, 1→6, 2→7.
+  ModelInfo remapped = threeClassModel();
+  remapped.output.format = "labels";
+  remapped.postprocess.classMapping = { 5, 6, 7 };
+  const QString remapPath = dir.filePath( QStringLiteral( "remap-labels.tif" ) );
+  TileInferenceEngine remapEngine( remapped, std::make_shared<ThreeClassStepRuntime>() );
+  remapEngine.run( raster.toStdString(), {}, remapPath.toStdString(), context, feather );
+  const std::vector<float> remappedLabels = readBand( remapPath, 1, w, h );
+  auto rat = [ &remappedLabels ]( int x, int y ) {
+    return remappedLabels[static_cast<std::size_t>( y ) * 32 + x];
+  };
+  CHECK( rat( 8, 8 ) == 5.0f );
+  CHECK( rat( 24, 8 ) == 7.0f );
+  CHECK( rat( 18, 8 ) == 7.0f );
+}
+
+// ---------------------------------------------------------------------------
+// #1706 — mask mode: the binary product follows the blended argmax
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "#1706 feather mask collapses the blended argmax to {0,1}",
+           "[r22][blend][feather]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString raster = writeStepRaster( dir, QStringLiteral( "step.tif" ), 16 );
+
+  ModelInfo model = threeClassModel();
+  model.output.format = "mask"; // classes > 1: mask = (argmax != 0)
+
+  TileInferenceRunOptions feather;
+  feather.blend = TileBlend::Feather;
+  const QString blendedPath = dir.filePath( QStringLiteral( "blended-mask.tif" ) );
+  TileInferenceEngine engine( model, std::make_shared<ThreeClassStepRuntime>() );
+  RSOperatorContext context;
+  engine.run( raster.toStdString(), {}, blendedPath.toStdString(), context, feather );
+
+  int w = 0;
+  int h = 0;
+  const std::vector<float> blended = readBand( blendedPath, 1, w, h );
+  REQUIRE( w == 32 );
+  REQUIRE( h == 16 );
+  auto at = []( const std::vector<float> &img, int x, int y ) {
+    return img[static_cast<std::size_t>( y ) * 32 + x];
+  };
+
+  // Left pure core: argmax 0 → background 0; right pure core: argmax 2 → 1.
+  // The aliased accumulator made every slot the class mean, so the whole
+  // raster collapsed to argmax 0 / mask 0.
+  CHECK( at( blended, 8, 8 ) == 0.0f );
+  CHECK( at( blended, 24, 8 ) == 1.0f );
+  // Seam: x=14 argmax 0 → 0; x=18 argmax 2 → 1.
+  CHECK( at( blended, 14, 8 ) == 0.0f );
+  CHECK( at( blended, 18, 8 ) == 1.0f );
+  for ( int y = 0; y < 16; ++y )
+  {
+    INFO( "row " << y );
+    CHECK( at( blended, 8, y ) == 0.0f );
+    CHECK( at( blended, 24, y ) == 1.0f );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #1706 — one channel going non-finite fails THAT band closed, per slot
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "#1706 feather drops only the poisoned band; the stack stays honest",
+           "[r22][blend][feather]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString raster = writeStepRaster( dir, QStringLiteral( "step.tif" ), 16 );
+
+  auto runtime = std::make_shared<ThreeClassStepRuntime>();
+  runtime->poisonMiddleOnRight = true; // channel 1 predicts NaN on the right
+
+  ModelInfo model = threeClassModel();
+
+  TileInferenceRunOptions feather;
+  feather.blend = TileBlend::Feather;
+  const QString probPath = dir.filePath( QStringLiteral( "poison-prob.tif" ) );
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+  engine.run( raster.toStdString(), {}, probPath.toStdString(), context, feather );
+
+  int w = 0;
+  int h = 0;
+  const std::vector<float> band1 = readBand( probPath, 1, w, h );
+  const std::vector<float> band2 = readBand( probPath, 2, w, h );
+  const std::vector<float> band3 = readBand( probPath, 3, w, h );
+  REQUIRE( w == 32 );
+  REQUIRE( h == 16 );
+  auto at = []( const std::vector<float> &img, int x, int y ) {
+    return img[static_cast<std::size_t>( y ) * 32 + x];
+  };
+
+  // Left (no poison anywhere): all three bands blend normally.
+  CHECK( at( band1, 8, 8 ) == Catch::Approx( 0.8f ).margin( 1e-4 ) );
+  CHECK( at( band2, 8, 8 ) == Catch::Approx( 0.1f ).margin( 1e-4 ) );
+  CHECK( at( band3, 8, 8 ) == Catch::Approx( 0.1f ).margin( 1e-4 ) );
+  // Right pure core: band 2 has ZERO finite contributions (weight 0) →
+  // NoData, while bands 1/3 keep their constants — per-slot honesty, the
+  // healthy bands must not inherit the poisoned band's verdict.
+  CHECK( at( band1, 24, 8 ) == Catch::Approx( 0.1f ).margin( 1e-4 ) );
+  CHECK( std::isnan( at( band2, 24, 8 ) ) );
+  CHECK( at( band3, 24, 8 ) == Catch::Approx( 0.8f ).margin( 1e-4 ) );
+
+  // Derived collapse over a partially-defined stack fails CLOSED: the right
+  // core's class-1 ledger is empty, so argmax would be fabricated → NoData.
+  ModelInfo labelsModel = threeClassModel();
+  labelsModel.output.format = "labels";
+  const QString labelsPath = dir.filePath( QStringLiteral( "poison-labels.tif" ) );
+  TileInferenceEngine labelsEngine( labelsModel, runtime );
+  labelsEngine.run( raster.toStdString(), {}, labelsPath.toStdString(), context, feather );
+  const std::vector<float> labels = readBand( labelsPath, 1, w, h );
+  auto lat = [ &labels ]( int x, int y ) {
+    return labels[static_cast<std::size_t>( y ) * 32 + x];
+  };
+  CHECK( lat( 8, 8 ) == 0.0f );        // left stack fully defined → labels fine
+  CHECK( lat( 24, 8 ) == 255.0f );     // Byte product, NoData sentinel 255
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +445,9 @@ TEST_CASE( "#1706 feather slides the row window without cross-slot bleed",
 }
 
 // ---------------------------------------------------------------------------
-// #1706 — all-nodata run taller than the window: every band stays NoData
+// #1706 — all-nodata run taller than the window: NoData verdicts hold in
+// every band (the per-slot RED evidence is the VALID-row block below; the
+// NoData rows guard the deferred-mark path for multi-class stacks)
 // ---------------------------------------------------------------------------
 
 TEST_CASE( "#1706 feather keeps an all-nodata run NoData in every class band",
