@@ -45,3 +45,8 @@
 
 ## L8 交付轮
 - push 前：git fetch 复核 origin/master 与 open PR（含 #1673）无新交集 → push 分支 → gh pr create。
+
+## L8 交付轮（完成）
+- push：第 2 组重试第 1 次成功（TLS 间歇；commits 完整推上）。
+- PR：https://github.com/WindWang2/exp-rs/pull/1710（OPEN，head cc9103c931，8 commits，base master@911e0b17）。
+- 不自动合并、不等待 CI。worktree 保留供修订。
