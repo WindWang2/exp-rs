@@ -27,3 +27,21 @@
 
 ## 待续轮
 - L5 测试执行与修复闭环；L6 R1 独立 review；L7 R2 独立 review；L8 交付（文档+push+PR）。
+
+## L5 测试执行轮
+- 命令：`flock 双锁; cmake --build --target <族> -j4` + `PROJ_LIB/LD_LIBRARY_PATH/link-shim QT_QPA_PLATFORM=offscreen`。
+- 结果：15 族全绿；关键族双跑（/tmp/r22_pass2.log）；两处测试期望错误（recover 无事可做返回 false；fixture 缺 model_id）修正后 8/8。
+- 下一步：R1。
+
+## L6 R1 轮
+- 结果：APPROVE + 8 findings；F1（vacuous #1700 集成测试）以 store 层 oracle 重写 + RED_GREEN 纠错；F2 锁折叠；F5 注明；F6 start gate。双跑绿（327/39、87/8）。
+- 下一步：R2。
+
+## L7 R2 轮
+- 主动前置：等 R2 期间自证 B5 场景（move-aside fallback × 损坏 journal × 孤儿 .bak 唯一副本），发现 R1 轮清扫会删除唯一副本——先修（5fc544a6c6 复活语义）+ 用例。
+- R2 报告：APPROVE @ 5fc544a6c6；确认上述为 R1 轮真实引入的 P1（R2-1，已被 5fc544a6c6 关闭）；R2-2 测试强化（block journal + ONLY-COPY 断言）、R2-3 注释、R2-6 措辞——eb24ccb4dd 闭环。
+- 最终验证：双跑 pass A/B 全绿（94/9、327/39、232/27、79/14、425-427/18、283/19）。
+- 下一步：交付（PR_BODY + push + PR）。
+
+## L8 交付轮
+- push 前：git fetch 复核 origin/master 与 open PR（含 #1673）无新交集 → push 分支 → gh pr create。

@@ -29,3 +29,12 @@
 
 - 无符号级/同 hunk 冲突；`dataset_store.cpp` 与 `tests/CMakeLists.txt` 为可自动合并的相邻变更。
 - Push 前动作：`git fetch origin` + 重跑 `gh pr list`/`gh pr view <n> --json files` 复核；若 #1673 在此期间改了 `addSourceAssetsToDraft` 邻域，rebase 后语义合并（不以 ours/theirs 粗暴覆盖）。
+
+## Push 前复核（2026-10-26 交付时）
+
+- origin/master 仍 = `911e0b17`（gh api 双确认；git fetch 经代理仍间歇失败，不影响远端 SHA 判定）。
+- 新 open PR：**#1708（r22-infra）**、**#1709（r22-inference）**。
+  - #1708：src/cli、src/verification、.github、CMakeLists.txt、scripts、tests 若干（test_data_manager/test_data_source_providers/test_asset_catalog_index 等）——与本轨 src/ 文件**零交集**；tests/CMakeLists.txt 双方 append-only。
+  - #1709：src/operators/runtime（03 轨）、tests/CMakeLists.txt、新测试文件——本轨交集仍仅 tests/CMakeLists.txt（相邻追加，Git 可自动合并或 trivial resolve）。
+- R21 五轨（#1673–#1677）head 未动。
+- 结论：无语义冲突；唯一注意点为 tests/CMakeLists.txt 的 append 相邻性（合并顺序无关于正确性）。
