@@ -527,8 +527,8 @@ TEST_CASE( "#1706 feather blends the uncertainty slot independently",
     return img[static_cast<std::size_t>( y ) * 32 + x];
   };
 
-  // margin([0.8, 0.1, 0.1]) as logits: softmax ≈ (0.50175, 0.24913,
-  // 0.24913) → top1 − top2 ≈ 0.25262. A shared buffer published the mean
+  // margin([0.8, 0.1, 0.1]) as logits: softmax ≈ (0.501713, 0.249143,
+  // 0.249143) → top1 − top2 ≈ 0.252570. A shared buffer published the mean
   // over all four slots instead.
   const double e08 = std::exp( 0.8 );
   const double e01 = std::exp( 0.1 );
