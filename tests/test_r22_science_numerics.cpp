@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -83,8 +84,10 @@ TEST_CASE( "r22/#1707: randomized differential vs brute force (3000+ masks)",
            "[r22_science][distance][primitives]" )
 {
   using namespace sicnu::rs::primitives;
-  // Fixed seed: the point is regression pinning, not sampling theory. Note
-  // this std::mt19937 usage stays test-local (raw draws only — portable).
+  // Fixed seed: the point is regression pinning, not sampling theory. The
+  // distributions here are std:: (test-local); that is fine because the
+  // oracle is self-consistent — whatever masks this run generates are
+  // brute-force-compared within the same run.
   std::mt19937 rng( 20261025u );
   std::uniform_int_distribution<int> wgen( 1, 20 );
   std::uniform_int_distribution<int> hgen( 1, 20 );

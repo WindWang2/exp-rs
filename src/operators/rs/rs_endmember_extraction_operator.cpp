@@ -9,10 +9,6 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/endmember_extraction.h"
 #include "processing/algorithms/portable_random.h"
-
-// Absolute-path alias: this TU lives in sicnu::operators::rs, where a
-// relative rs::algorithms lookup would resolve against the wrong namespace.
-namespace r22portable = ::rs::algorithms::portable;
 #include "processing/algorithms/spectral_table.h"
 #include "processing/algorithms/spectral_wavelength.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -26,6 +22,10 @@ namespace r22portable = ::rs::algorithms::portable;
 #include <random>
 #include <unordered_set>
 #include <vector>
+
+// Absolute-path alias: this TU lives in sicnu::operators::rs, where a
+// relative rs::algorithms lookup would resolve against the wrong namespace.
+namespace r22portable = ::rs::algorithms::portable;
 
 namespace sicnu::operators::rs {
 

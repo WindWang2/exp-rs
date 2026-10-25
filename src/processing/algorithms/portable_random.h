@@ -15,8 +15,9 @@
 //
 //   - fisherYatesShuffle: descending Fisher-Yates, j = engine() % i
 //     (same convention as the existing cross-validation code);
-//   - boundedBelow / uniformIndex: single-draw modulo (documented bias
-//     < 2^-32 relative for the draw ranges used here);
+//   - boundedBelow: single-draw modulo (documented bias < 2^-32 relative
+//     for the draw ranges used here);
+//   - uniformIndex: two-draw u64 modulo (nextU64), for size_t bounds;
 //   - uniformUnit53 / nextU64: fixed 53-bit/64-bit composition of two draws;
 //   - normal01: Box-Muller cos form, exactly two unit53 draws per value.
 //
@@ -44,10 +45,13 @@ inline std::uint64_t nextU64( std::mt19937 &rng )
     return ( static_cast<std::uint64_t>( hi ) << 32 ) | lo;
 }
 
-/// Uniform index in [0, bound). Single draw; bound must be > 0 and, to keep
-/// the modulo bias under a relative 2^-32, bound <= 2^32.
+/// Uniform index in [0, bound). Single draw; to keep the modulo bias under
+/// a relative 2^-32, bound should be <= 2^32. bound <= 1 short-circuits to
+/// 0 without consuming a draw (rng() % 0 would be a division by zero).
 inline std::uint32_t boundedBelow( std::mt19937 &rng, std::uint32_t bound )
 {
+    if ( bound <= 1 )
+        return 0;
     return rng() % bound;
 }
 

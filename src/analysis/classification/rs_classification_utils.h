@@ -22,13 +22,13 @@ inline QColor rsSynthesizedClassColor( int classId )
   return QColor::fromHsv( ( classId * 47 ) % 360, 200, 230 );
 }
 
-/// Deterministic subsampling policy shared by training-data extraction
-/// (per-class cap) and the K-Means operator (global cap): shuffle with the
-/// caller's engine and keep the first \a maxKeep items. maxKeep == 0 keeps
-/// everything; sequences at or below the cap are left untouched (training
-/// extraction preserves sorted bucket order). The shuffle is the portable
-/// Fisher-Yates (#1685) — std::shuffle's permutation is
-/// implementation-defined, so the kept subset would differ across STLs.
+/// Deterministic subsampling policy (currently no in-repo callers; kept as
+/// the designated seam for per-class / global sample caps, ADR 0061):
+/// shuffle with the caller's engine and keep the first \a maxKeep items.
+/// maxKeep == 0 keeps everything; sequences at or below the cap are left
+/// untouched. The shuffle is the portable Fisher-Yates (#1685) —
+/// std::shuffle's permutation is implementation-defined, so the kept
+/// subset would differ across STLs.
 template <typename T>
 void rsShuffleAndKeep( std::mt19937 &rng, std::vector<T> &items, std::size_t maxKeep )
 {

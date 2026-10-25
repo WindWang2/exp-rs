@@ -87,6 +87,16 @@ TEST_CASE( "r22/#1685: golden Fisher-Yates permutations (seeds 42 and 7)",
   const int expected7[5] = { 2, 3, 1, 4, 0 };
   for ( size_t i = 0; i < 5; ++i )
     REQUIRE( w[i] == expected7[i] );
+
+  // The range overload (used by rs_classification_split) is draw-identical
+  // to the vector version — pinned independently so an off-by-one in the
+  // range handling cannot hide behind "still a permutation".
+  std::mt19937 rngR( 42 );
+  int arr[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+  fisherYatesShuffleRange( rngR, arr, arr + 8 );
+  const int expectedRange[8] = { 1, 0, 3, 7, 5, 4, 2, 6 };
+  for ( int i = 0; i < 8; ++i )
+    REQUIRE( arr[i] == expectedRange[i] );
 }
 
 TEST_CASE( "r22/#1685: same seed replays, different seeds diverge",
@@ -127,10 +137,18 @@ TEST_CASE( "r22/#1685: uniformIndex and fisherYatesShuffleRange contracts",
            "[r22_science][random]" )
 {
   std::mt19937 rng( 2026 );
-  // uniformIndex(0) and uniformIndex(1) are trivially 0 and consume no
-  // ambiguity about the bound.
+  // Degenerate bounds short-circuit to 0 without consuming a draw
+  // (rng() % 0 would be a division by zero); the engine state is untouched,
+  // so the next real draw still follows the golden sequence.
+  {
+    std::mt19937 probe( 42 );
+    REQUIRE( uniformIndex( probe, 0 ) == 0 );
+    REQUIRE( uniformIndex( probe, 1 ) == 0 );
+    REQUIRE( boundedBelow( probe, 0 ) == 0 );
+    REQUIRE( boundedBelow( probe, 1 ) == 0 );
+    REQUIRE( probe() == 1608637542u ); // first raw draw of mt19937(42)
+  }
   REQUIRE( uniformIndex( rng, 0 ) == 0 );
-  REQUIRE( uniformIndex( rng, 1 ) == 0 );
   for ( int i = 0; i < 1000; ++i )
   {
     const std::size_t bound = 1 + ( rng() % 1000 );
