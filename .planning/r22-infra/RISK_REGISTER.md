@@ -1,0 +1,14 @@
+# R22-07 Risk Register
+
+| # | Risk | Likelihood | Impact | Mitigation / status |
+|---|---|---|---|---|
+| 1 | Host GCC 16.2.1 Debug ICEs block local verification | Confirmed (multiple dwarf2out/front-end ICEs across TUs; survives 12-attempt stack-raise retries) | Local Debug/oracle runs impossible | Release configure for all local evidence (documented); CI remains authoritative for Debug/other compilers. NOT a product regression — reproduced on untouched master TUs. |
+| 2 | Local clang-tidy SIGSEGV (nondeterministic) + GCC-only flag errors | Confirmed (same file returns 1 and 139 across runs; `-mno-direct-extern-access` unknown to clang) | Local lint evidence partial | Lane logic verified locally (file-set selection, merge-base, filters); CI lane authoritative. Recorded NOT_EXECUTED-grade caveats. |
+| 3 | `tests/CMakeLists.txt` append conflict with #1673/#1674 | Medium (both append-only) | Trivial textual conflict at tail | Disjoint blocks; re-check before push; no shared lines. |
+| 4 | `test_data_source_providers.cpp` overlap with #1673 | Low-medium | Merge conflict in one file, regions disjoint (their new TEST_CASEs vs my line-503 comment/threshold) | Region-disjoint edit kept minimal; re-verify before push. |
+| 5 | `.cmd` guard unverifiable locally (no Windows host) | Certain | Undetected batch-syntax defect possible | Structure kept to standard batch idioms reviewed line-by-line; PowerShell regex identical to `.sh` whitelist; CI Windows smoke step added (not waited on). Honest NOT_EXECUTED label. |
+| 6 | RPATH change affects packaging lanes that assume no RPATH | Low | Unexpected RUNPATH in shipped artifacts | Desired behavior per #1698 (relocatable install); offline bundle ships its own runtime next to CLI (bundle layout unaffected — bundle copies binaries and deploys Qt via windeployqt/QGIS_BIN, not via install tree). Verified bundle script does not consume the install tree. |
+| 7 | Narrowed lint header-filter weakens the gate | Considered | Unchanged-header debt no longer blocks changed-TU diffs | Matches lane's documented contract ("lints ONLY files changed… backlog outside the diff cannot flood the gate"); main-file + changed-header diagnostics unaffected; cross-track debt recorded. |
+| 8 | Opt-in workflow YAML drift vs tier3 steps | Low | Opt-in lane fails on dispatch | Copied verbatim from tier3 macOS job (same brew set/flags); Windows lane intentionally omitted (needs reusable deps refactor — CROSS_TRACK #5). |
+| 9 | Renamed header breaks downstream includes outside repo grep scope | Low | Compile break | `git grep` full-repo for old name = 0 hits post-rename (src+tests); no docs reference it (checked `docs/` grep). |
+| 10 | `SICNU_TEST_TIME_SCALE` misuse to mask perf regressions | Low | False-green perf tests | Release default = 1.0 (no env, no sanitizer → base); documented in header; CI fast lane runs Release unscaled. |
