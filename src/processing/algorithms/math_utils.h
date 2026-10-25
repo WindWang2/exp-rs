@@ -24,6 +24,16 @@ struct Stats {
 /**
  * Statistics computed from pre-accumulated sums.
  * Useful for streaming/segment-based statistics where the full array is not available.
+ *
+ * Precision contract (#1684): the mean is kept in double through the
+ * variance formula (sumSq/N - mean²), which is exact by the Sterbenz
+ * lemma whenever mean² is within a factor of two of sumSq/N. The residual
+ * error therefore comes from the CALLER's accumulation of sum/sumSq:
+ * naive accumulation carries ~sqrt(N)·eps·sumSq, which dominates for
+ * large-offset small-spread populations (mean/σ > ~1e6 at N=1e6).
+ * Accumulators feeding this struct over many pixels should sum values
+ * shifted by a representative offset or use Kahan compensation
+ * (see rs_segment_features.cpp).
  */
 struct AccumulatorStats {
     size_t count = 0;
