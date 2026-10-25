@@ -40,6 +40,17 @@
   changes but not data-pack updates. A future CLI `--print-authority-fingerprint` flag would
   close this; recorded as follow-up, not blocking.
 
+## To CLI / verifier owners (r21-E #1674 successors)
+
+4. **Transcript should carry `rules_path`** (R2 finding 2 residual): the console's rules
+   fingerprint resolves `<id>.rules.json` through env `SICNU_LAB_RULES_DIR` + the repo root it
+   runs from; the CLI's final search dir is its compile-time `SICNU_SOURCE_DIR`. When the
+   console runs from a tree different from the grader's build tree and no env dir is set,
+   the fingerprint may hash a different file than the CLI reads (stale-adoption window,
+   installed layouts). Exposing the rules path actually read (e.g. in the
+   `sicnu.lab.grade/1` transcript, `LabGradeResult::rulesPath` already exists in
+   output_verifier.cpp:2207) and stamping it into the batch checkpoint closes this exactly.
+
 ## From #1558 triage (no action)
 
 #1558 fixed by 0847c5ec1 (2026-10-19); assertions in tests/test_e2e_open_issues.cpp are real.

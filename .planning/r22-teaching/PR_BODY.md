@@ -1,7 +1,7 @@
 # hardening(r22-teaching): 评分权威身份化 checkpoint + 跨学生泄露门禁 + NaN/Inf 会话防护 + Windows cmd 注入拒绝（#1694/#1689/#1678/#1688）
 
 - **base**: master `911e0b17a3533ca0d79c1b68b000d6052c4c3c61`
-- **head**: agent/r22-teaching-20261025T131928（RED `1610c9b75` + GREEN `70afbb6a8` + 评审修复提交）
+- **head**: agent/r22-teaching-20261025T131928（RED `1610c9b75` → 修复 `70afbb6a8` → R1 修复 `572068233` → R2 修复 `318b7d0c8`）
 - **track docs**: `.planning/r22-teaching/`（BASELINE / ISSUE_TRIAGE / PR_COLLISION_MATRIX / LOOP_LEDGER / TEST_RESULTS / CROSS_TRACK_FINDINGS / REVIEW_R1 / REVIEW_R2 / FINAL_REPORT）
 
 ## What & why（全部先 RED 后 GREEN，证据见 TEST_RESULTS.md）
@@ -29,18 +29,23 @@
 
 ## 验证（Windows/MSVC 主机，本地）
 - RED（master 行为）：`#1694 resumed==2`、`#1678 NaN accepted`、`#1689 numeric leak ok`、`#1688 cmd.exe argv` 四处真实运行失败记录于 LOOP_LEDGER R4
-- GREEN×2：`test_r22_teaching_batch_regrade` 98 断言、`test_r22_teaching_guard_hygiene` 76 断言全绿（两遍）
+- GREEN×2（最终提交后）：`test_r22_teaching_batch_regrade` 183 断言/10 例、`test_r22_teaching_guard_hygiene` 107 断言/8 例全绿（两遍）
 - 既有族：checkpoint_stamp(85)、grader_cli_budget(3)、r15_E_batch_refusal(62)、rubric_weights(19)、student_id_authority(23) 全绿
 - 预存环境红（stash 基线复核同断言失败，非本 PR 回归）：`test_teaching_admin_core` 2 例（MSVC abort()=exit3 非 signal 的 grader_crashed 模拟；python pin probe）、`test_lab_runtime` 1 例（Windows remove_all 句柄竞争）
-- dock 改动经 `teaching_admin_dock.cpp` TU 编译验证（sicnu_geo_rs_shell）+ 双评审
+- dock 改动经 `teaching_admin_dock.cpp` TU 编译验证（全链 1624 TUs + R2 后增量 1212 TUs，均 exit 0）+ 双评审
+- **评审闭环**：R1 REJECT（2×P1/2×P2/5×P3，含 lab-id 路径盲区与 CJK 前缀误报）→ `572068233` 全闭环；R2 REJECT（抓到 R1 修复引入的空 cohort 哨兵 P1 回归）→ `318b7d0c8` 闭环，core 回到 master 基线
 - **不等待 CI**（按轨道章程，本地可执行检查为准）
 
 ## 与 R21/兄弟轨差异核对
-- #1674 (r21-E)：未触碰其文件（output_verifier/faultlab/lab_verify_composer）；`checkpoint_invalidated` 为 additive 字段，`loadBatchReportFromFile` 忽略未知字段
-- tests/CMakeLists.txt 仅追加本轨注册块（与 #1674 的追加块互不重叠，rebase 安全）
+- #1674 (r21-E)：未触碰其文件（output_verifier/faultlab/lab_verify_composer/studio_live）；`checkpoint_invalidated` 为 additive 字段，`loadBatchReportFromFile` 忽略未知字段
+- #1673/#1675/#1676/#1677：无文件交集
+- **新 R22 兄弟轨（push 前复查）**：#1708 r22-infra 与本 PR 共享 `.gitignore`（双方 EOF 追加各自 planning 白名单）与 `src/lab/session_state.cpp`（其 #1696 `<algorithm>` 修复 vs 本轨 #1678 行为修复，不同 hunk）与 `tests/CMakeLists.txt`（追加）；#1709 r22-inference 共享 `tests/CMakeLists.txt` 追加；#1710 r22-data 无交集。全部为 append-only/异 hunk 易解冲突，谁后合谁 rebase 保留双方（详见 PR_COLLISION_MATRIX 更新节）
+- tests/CMakeLists.txt 仅追加本轨注册块（与 #1674 的追加块互不重叠，rebase 安全）；.gitignore 按仓库既有惯例追加本轨 planning 白名单
 - 共享构建机事件：vcpkg manifest ABI 风暴删除了共享树 opencv4+protobuf，本轨已修复重装（详见 LOOP_LEDGER R2/R3 与 CROSS_TRACK_FINDINGS #3）
 
-## 遗留风险 / 未执行项
-- lab-id 形式的 CLI 内部解析（lab pack 数据变化）对摘要不可见——需 CLI 侧 `--print-authority-fingerprint` 类接口（后续跟进，不阻塞）
+## 遗留风险 / 未执行项（详见 FINAL_REPORT）
+- 安装布局下 console 与 CLI 源树不一致时规则解析可能错位（R2-2 残余）：需 transcript 携带 `rules_path`（已记录 CROSS_TRACK_FINDINGS #4，跨轨请求）
+- lab-id 形式的 CLI 内部解析（lab pack 数据变化）对摘要不可见——同上接口可一并收口
+- 同名学生文本不可区分（守卫已文档化的固有限制）；A→B→A 规则还原 TOCTOU（自愈型残余）
 - 全仓测试扫描未跑（主机预算）；覆盖了全部触碰产品面的目标族
 - GUI 运行时行为（dock 按钮流）无仓内测试基建，以 TU 编译 + 评审覆盖

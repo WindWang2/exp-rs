@@ -16,3 +16,13 @@ No sibling PR touches any of these except tests/CMakeLists.txt (append-only, see
 
 Historical merge-loss references guarded: r15-E fail-closed loader (batch_assessment.cpp:170-182),
 r18-E D3/D4 stamps (batch_assessment.cpp:590-629, 660-667) — new digest work must not weaken these.
+
+## Update 2026-10-26 pre-push: new sibling R22 PRs appeared
+
+| New PR | Shared files | Nature | Rule |
+|--------|--------------|--------|------|
+| #1708 r22-infra | `.gitignore` (both append at EOF), `src/lab/session_state.cpp` (their #1696 `<algorithm>` fix vs our #1678 behavioral fix — different hunks in the same include/Numeric areas), `tests/CMakeLists.txt` (both append) | append-only / distinct hunks; textual conflict possible on second merge, semantically trivial (keep both) | no action now; rebase + keep both sides when either merges; infra owns #1696, we own #1678 |
+| #1709 r22-inference | `tests/CMakeLists.txt` (both append at EOF) | append-only | same |
+| #1710 r22-data | none | none | — |
+
+master still 911e0b17a at push time — no rebase needed yet.
