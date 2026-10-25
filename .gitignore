@@ -666,3 +666,8 @@ r6_dev.cmd
 .planning/zcode-r20-05/red-drivers/*
 !.planning/zcode-r20-05/red-drivers/*.cpp
 !.planning/zcode-r20-05/red-drivers/*.md
+
+# R22-01 science track (r22-science): planning notes (markdown only; logs/builds stay local).
+!.planning/r22-science/
+.planning/r22-science/*
+!.planning/r22-science/*.md
