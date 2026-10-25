@@ -26,9 +26,13 @@ $ ./red_fixed             # 本轨修复版，同一 main()
 
 ## #1700（P1 RangeDiskBlockStore blockSize 键）
 
-**RED（逐行矛盾）**：master `identityBasis`（range_cache_disk.cpp@911e0b17:298-315）返回 `"etag\n"+url+"\n"+etag`，不含 blockSize；`updateConfig`（range_cache.cpp:869-876）geometry 变化仅 `dropAllLocked()`。新用例 `a blockSize change never serves stale-geometry disk bytes (#1700)` 的第二段（128KiB 重读与可信源 byte-for-byte 相等）在 master 上必然失败：`loadBlocksFromDisk` 以同 basis 命中 64KiB 布局的 `<h>.1.blk`（内容 [64K,128K)），`tryServe` 按 `1*128K` 偏移返回 —— 错位字节 ≠ expected。basis 格式用例（`bs=65536` 精确串）同样在 master 上编译不通过旧签名/断言旧串失败。
+**RED（两层证据，R1 复核后修正）**：
+1. **basis 格式断言（决定性）**：master `identityBasis`（range_cache_disk.cpp@911e0b17:298-315）返回 `"etag\n"+url+"\n"+etag`，不含 blockSize；新用例断言 `bs=65536`/`bs=131072` 两键不同——master 上该断言直接失败（旧格式串无 `bs=` 段）。
+2. **store 层 oracle（R1-F1 新增）**：`RangeDiskBlockStore keys blocks by geometry…` 用例在同一目录、同一 URL+ETag 下以 64K basis `putBlock(index 1)`，随后以 128K basis `readBlock(index 1)`——master 上两 basis 相同 → 命中并返回 [64K,128K) 字节（`CHECK_FALSE` 失败）；修复后键分离 → MISS。
 
-**GREEN**：basis 含 `bs=<blockSize>`；geometry 变化同时 `RangeDiskBlockStore::clear()`；`loadBlocksFromDisk` 拒绝 `data.size() > blockSize` 的块。三段（64K 填充 / 128K 热切换 / 128K 冷进程形态）byte-for-byte 全绿。
+**修正声明（R1 指出）**：此前版本此处声称「集成测试第二段在 master 上必然失败（loadBlocksFromDisk 命中旧块）」——**不成立**：`InstalledCache` 析构触发 `uninstall()`，后者无条件清空磁盘层，集成测试的 pass 2/3 实际重新拉取 fixture、在 master 上也会通过（vacuous）。集成用例保留为端到端合同钉子（已加注释说明），决定性证据由上述 store 层 oracle 承担。
+
+**GREEN**：basis 含 `bs=<blockSize>`（两键不同 + store 层 MISS）；geometry 变化同时 `RangeDiskBlockStore::clear()`；`loadBlocksFromDisk` 拒绝 `data.size() > blockSize` 的块。R1-F2 后 updateConfig 的比较/应用合并到单个锁域。
 
 ## #1701（P2 atomic_fs 崩溃一致性）
 
@@ -38,7 +42,7 @@ $ ./red_fixed             # 本轨修复版，同一 main()
 
 ## #1680（P2 ArtifactObjectPool 并发发布）
 
-**RED（逐行矛盾）**：master artifact_object_pool.cpp@911e0b17:176-180 rename 失败分支直接 `return std::nullopt`，不复查 objectPath；tmp 名 `.<pid>.puttmp`（:143-145）同进程两实例同目标互踩。双实例×双线程×8 轮的 `successes==2` 在 master 上按构造会失败（败者 rename 撞赢者对象 → nullopt；或 tmp 被对方 remove → copy 后 rename 失败）。
+**RED（逐行矛盾；R2 措辞修正）**：master artifact_object_pool.cpp@911e0b17:176-180 rename 失败分支直接 `return std::nullopt`，不复查 objectPath；tmp 名 `.<pid>.puttmp`（:143-145）同进程两实例同目标互踩。双实例×双线程×8 轮（start gate 后）的 `successes==2` 在 master 上**大概率**失败（败者 rename 撞赢者对象 → nullopt；或 tmp 被对方 remove → copy 后 rename 失败）——并发时序使然，非确定性构造；修复后为确定性通过（R2 连续 10/10）。R2 并实证了本工具链上 Qt rename 对已存在目标返回 false 且不动目标（#1680 前提成立）。
 
 **GREEN**：tmp 名加进程内原子计数后缀；rename 失败且 objectPath 已存在 → `continue` 重走顶部 digest 验证。8/8 轮双成功。
 

@@ -893,11 +893,15 @@ class CacheStore
         configGeneration += 1;
       }
       // #1700: the disk layer outlives this process. A geometry change made
-      // every on-disk block's INDEX meaningless — even with blockSize now in
-      // the basis (old files unreachable, never served), keeping them is
-      // pure dead bytes against the disk cap. Drop them while NOT holding
-      // mMutex: clear() takes the store's own mutex, and mMutex→disk-mutex
-      // is the only ordering the two locks ever meet in.
+      // every on-disk OLD-geometry block's INDEX meaningless — even with
+      // blockSize now in the basis (old files unreachable, never served),
+      // keeping them is dead bytes against the disk cap. Drop them while
+      // NOT holding mMutex: clear() takes the store's own mutex, and
+      // mMutex→disk-mutex is the only ordering the two locks ever meet in.
+      // (R2-3 scope note: this also drops same-new-geometry blocks a prior
+      // process left in the directory — a cold-start refill, correctness
+      // unaffected. Keying the sweep per-basis would keep them; not done:
+      // a geometry change is a rare config act, not a hot path.)
       if ( geometryChanged )
         RangeDiskBlockStore::clear();
     }

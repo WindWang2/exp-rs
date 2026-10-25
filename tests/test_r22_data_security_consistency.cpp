@@ -272,10 +272,31 @@ TEST_CASE( "an orphaned .bak with no target is resurrected, never deleted (#1701
   writeFileBytes( target + ".bak", "ONLY-COPY" );
   writeFileBytes( staged, "NEW-MAIN" );
 
-  atomic_fs::publishStagedGroup( staged, target );
+  // R2-2: make the publish FAIL AFTER the sweep (journal path blocked by a
+  // directory) — the success path alone was vacuous (master's
+  // backupInPlace first line also removes the orphan). The decisive
+  // observable: the failed publish must leave the resurrected OLD bytes
+  // as the target, not destroy them.
+  fs::create_directories( target + ".publish-journal" );
+  bool refused = false;
+  try
+  {
+    atomic_fs::publishStagedGroup( staged, target );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    refused = true;
+  }
+  REQUIRE( refused );
+  // The sweep resurrected the orphan BEFORE the journal write failed, so
+  // the only surviving copy is now the target — nothing was lost.
+  CHECK( readFile( target ) == "ONLY-COPY" );
+  CHECK_FALSE( atomic_fs::fileExists( target + ".bak" ) );
 
-  // The sweep resurrected the orphan as the pre-publish state; the publish
-  // then replaced it with the new bytes and no journal material survives.
+  // Retrying with the journal path clear must now publish over the
+  // resurrected pre-state normally.
+  fs::remove_all( target + ".publish-journal" );
+  atomic_fs::publishStagedGroup( staged, target );
   CHECK( readFile( target ) == "NEW-MAIN" );
   CHECK_FALSE( atomic_fs::fileExists( target + ".bak" ) );
   CHECK_FALSE( atomic_fs::fileExists( target + ".publish-journal" ) );
