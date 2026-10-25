@@ -378,19 +378,34 @@ QJsonObject BundleManifestInfo::toJson() const
     };
 }
 
+namespace
+{
+
+/// Characters cmd.exe treats as ACTIVE when it re-parses the joined command
+/// line for a .cmd target: separators (& | ^), expansions (% !), redirects
+/// ( < > ), quoting ("), argument delimiters (, ; =) and control chars.
+const QString &cmdActiveCharacters()
+{
+    static const QString chars = QStringLiteral( "&|<>^%!\";,=\n\r\t" );
+    return chars;
+}
+
+} // namespace
+
 QStringList validateBundleBuilderParams( const QString &buildDir, const QString &outDir,
                                          const QString &version )
 {
     // #1688. On Windows the constructed argv reaches cmd.exe /c, which
     // re-parses the JOINED command line: & | ^ become command separators,
     // %VAR% expands, ! expands under delayed expansion, and redirects eat
-    // < >. QProcess only quotes arguments containing spaces/quotes, so a
-    // metacharacter inside a space-free argument rides through verbatim
-    // ("--version 1.0&calc" runs calc; a legal C:\R&D\out is truncated at
-    // the &). Paths keep every legal character (colon, slash, unicode);
-    // only the interpreter-active set is refused. The same policy guards
-    // the bash twin for uniformity.
-    static const QString kMetacharacters = QStringLiteral( "&|<>^%!\"\n\r\t" );
+    // < >. cmd.exe additionally re-tokenizes batch-file (.cmd) arguments on
+    // , ; = — a directory containing those is corrupted (not injected, but
+    // wrong) before the script sees it, so they are refused too. QProcess
+    // only quotes arguments containing spaces/quotes, so a metacharacter
+    // inside a space-free argument rides through verbatim ("--version
+    // 1.0&calc" runs calc; a legal C:\R&D\out is truncated at the &). Paths
+    // keep every other legal character (colon, slash, unicode); the same
+    // policy guards the bash twin for uniformity.
     QStringList rejections;
     const auto checkPath = [&rejections]( const QString &value, const char *param ) {
         if ( value.isEmpty() )
@@ -400,9 +415,9 @@ QStringList validateBundleBuilderParams( const QString &buildDir, const QString 
         }
         for ( const QChar &c : value )
         {
-            if ( kMetacharacters.contains( c ) )
+            if ( cmdActiveCharacters().contains( c ) )
             {
-                rejections << QStringLiteral( "%1: forbidden character '%2' (cmd.exe metacharacter)" )
+                rejections << QStringLiteral( "%1: forbidden character '%2' (cmd.exe active character)" )
                                 .arg( QLatin1String( param ), QString( c ) );
                 return;
             }
@@ -412,11 +427,14 @@ QStringList validateBundleBuilderParams( const QString &buildDir, const QString 
     checkPath( outDir, "out_dir" );
     if ( !version.isEmpty() )
     {
+        // R1 review: ASCII-only by explicit ranges — a toLatin1()-based
+        // letter check admitted Latin-1 letters (é/ü/ñ) while the rejection
+        // text promised [0-9A-Za-z._-].
         for ( const QChar &c : version )
         {
-            const bool allowed = ( c.isLetterOrNumber() && c.toLatin1() != 0 )
-                                 || c == QLatin1Char( '.' ) || c == QLatin1Char( '_' )
-                                 || c == QLatin1Char( '-' );
+            const char l = c.toLatin1();
+            const bool allowed = ( l >= 'a' && l <= 'z' ) || ( l >= 'A' && l <= 'Z' )
+                                 || ( l >= '0' && l <= '9' ) || l == '.' || l == '_' || l == '-';
             if ( !allowed )
             {
                 rejections << QStringLiteral(
@@ -436,8 +454,16 @@ ScriptRunRequest bundleBuilderRequest( const QString &repoRoot, const QString &b
     ScriptRunRequest req;
     // #1688: fail closed — an injection-shaped parameter yields an EMPTY
     // request (no program), which no caller can execute, instead of an
-    // argv that cmd.exe would re-parse into something else. Legal inputs
-    // build exactly the same request as before.
+    // argv that cmd.exe would re-parse into something else. repoRoot flows
+    // into the same cmd.exe argv, so it is held to the same standard (R1
+    // review). Legal inputs build exactly the same request as before.
+    if ( repoRoot.isEmpty() )
+        return req;
+    for ( const QChar &c : repoRoot )
+    {
+        if ( cmdActiveCharacters().contains( c ) )
+            return req;
+    }
     if ( !validateBundleBuilderParams( buildDir, outDir, version ).isEmpty() )
         return req;
     if ( windows )

@@ -958,14 +958,15 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
 QJsonObject regradeTraceability( const BatchAssessmentReport &report )
 {
     // Regrade identity covers the grading OUTCOME: rows plus the grading
-    // counters. Run-metadata fields (resumed / truncated / cancelled_early)
-    // describe HOW this run came to be, not what was graded — a resumed
-    // restart and a fresh uninterrupted run of the same class share the
-    // digest.
+    // counters. Run-metadata fields (resumed / truncated / cancelled_early /
+    // checkpoint_invalidated) describe HOW this run came to be, not what was
+    // graded — a resumed restart, a rules-change re-grade and a fresh
+    // uninterrupted run of the same class share the digest.
     QJsonObject outcome = report.toJson();
     outcome.remove( QStringLiteral( "resumed" ) );
     outcome.remove( QStringLiteral( "truncated" ) );
     outcome.remove( QStringLiteral( "cancelled_early" ) );
+    outcome.remove( QStringLiteral( "checkpoint_invalidated" ) );
     return QJsonObject{
         { QStringLiteral( "lab_id" ), report.labId },
         { QStringLiteral( "rubric_version" ), report.rubricVersion },

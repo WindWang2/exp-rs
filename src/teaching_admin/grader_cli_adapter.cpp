@@ -294,23 +294,6 @@ GradeCallable cliGradeCallable( const GraderCliConfig &cfg )
 namespace
 {
 
-/// Head+tail content fingerprint (full content up to 4 MiB): deterministic,
-/// sensitive to any edit of a classroom-sized rules file, and bounded for
-/// arbitrarily large binaries. Mirrors batch_assessment's artifact stamp
-/// philosophy - a fingerprint, not a dedup.
-QString sampledContentSha256( const QString &path )
-{
-    QFile f( path );
-    if ( !f.open( QIODevice::ReadOnly ) )
-        return QString();
-    constexpr qint64 kFingerprintWindow = 4 * 1024 * 1024;
-    QByteArray bytes = f.read( kFingerprintWindow );
-    const qint64 size = f.size();
-    if ( size > 2 * kFingerprintWindow && f.seek( size - kFingerprintWindow ) )
-        bytes += f.read( kFingerprintWindow );
-    return sha256Hex( bytes );
-}
-
 QString shortFp( const QString &material )
 {
     return QStringLiteral( "fp:" ) + sha256Hex( material.toUtf8() ).left( 12 );
@@ -318,21 +301,50 @@ QString shortFp( const QString &material )
 
 } // namespace
 
-QString gradingRulesFingerprint( const GraderCliConfig &cfg )
+QString gradingRulesFingerprint( const GraderCliConfig &cfg, const QString &searchRoot )
 {
     if ( cfg.labIdOrRulesPath.isEmpty() )
         return QStringLiteral( "none" );
     const QFileInfo info( cfg.labIdOrRulesPath );
     if ( info.exists() && info.isFile() )
     {
-        const QString content = sampledContentSha256( cfg.labIdOrRulesPath );
+        const QString content = sha256OfFile( cfg.labIdOrRulesPath );
         if ( !content.isEmpty() )
             return QStringLiteral( "sha256:" ) + content;
-        // Exists but unreadable: an UNSTABLE-looking but distinct marker is
-        // still better than the labid form - a rules file we cannot read is
-        // not a stable authority either. Size+name keeps it deterministic.
+        // Exists but unreadable: a rules file we cannot read is not a
+        // stable authority. Size keeps the marker deterministic per file;
+        // two equal-size unreadable files are indistinguishable, but both
+        // are already un-gradeable (the CLI would fail, not mis-grade).
         return QStringLiteral( "unreadable:" ) + QString::number( info.size() );
     }
+    // Lab id: mirror the CLI's own resolution (output_verifier's
+    // resolveRulesPath order — env dir first, then the source tree's
+    // data/labs/grading) so the fingerprint tracks the file the grader
+    // will actually read. R1 review: without this, editing
+    // data/labs/grading/<id>.rules.json in place was invisible to the
+    // checkpoint digest on the dock's primary configuration.
+    QStringList searchDirs;
+    const QByteArray envDir = qgetenv( "SICNU_LAB_RULES_DIR" );
+    if ( !envDir.isEmpty() )
+        searchDirs << QString::fromLocal8Bit( envDir );
+    if ( !searchRoot.isEmpty() )
+        searchDirs << QDir( searchRoot ).filePath( QStringLiteral( "data/labs/grading" ) );
+    for ( const QString &dir : std::as_const( searchDirs ) )
+    {
+        const QString candidate =
+          QDir( dir ).filePath( cfg.labIdOrRulesPath + QStringLiteral( ".rules.json" ) );
+        if ( !QFileInfo::exists( candidate ) )
+            continue;
+        const QString content = sha256OfFile( candidate );
+        if ( !content.isEmpty() )
+            return QStringLiteral( "labid:" ) + cfg.labIdOrRulesPath
+                   + QStringLiteral( ";sha256:" ) + content;
+        return QStringLiteral( "labid:" ) + cfg.labIdOrRulesPath
+               + QStringLiteral( ";unreadable:" )
+               + QString::number( QFileInfo( candidate ).size() );
+    }
+    // Nothing resolvable here: the CLI will fail with a typed usage error
+    // (unknown lab), so no grade can be adopted against this marker anyway.
     return QStringLiteral( "labid:" ) + cfg.labIdOrRulesPath;
 }
 
@@ -342,9 +354,12 @@ QString graderCliIdentity( const QString &explicitCliPath )
     if ( cli.isEmpty() )
         return QStringLiteral( "none" );
     const QFileInfo info( cli );
-    const QString content = sampledContentSha256( cli );
+    const QString content = sha256OfFile( cli );
     // No mtime on purpose: a touch of an identical binary keeps grades; a
-    // rebuild changes bytes and therefore the hash. Path is part of the
+    // rebuild changes bytes and therefore the hash. The hash is a STREAMED
+    // full-content hash (R1 review): head+tail sampling left the interior
+    // of a multi-MiB CLI binary unfingerprinted — a same-size interior
+    // rebuild would have kept stale grades adoptable. Path is part of the
     // identity so two different grader builds in different directories do
     // not silently share checkpoints.
     return QStringLiteral( "path:" ) + QDir::toNativeSeparators( info.absoluteFilePath() )

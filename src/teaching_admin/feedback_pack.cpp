@@ -40,13 +40,64 @@ QJsonObject buildFeedbackPack( const FeedbackPackInput &in )
     };
 }
 
+namespace
+{
+
+/// R1 review: the boundary classes must be UNICODE letter/digit aware. With
+/// ASCII-only classes, cohort {张三, 张三丰} made 张三's pattern match inside
+/// 张三丰's own student_id — the guard withheld a legitimate pack on the
+/// production path. \p{L}/\p{N} keep 数字 adjacency protection (2023002
+/// inside 20230021) AND extend it to CJK and every other script.
+QRegularExpression compileForeignIdRegex( const QStringList &cohortStudentIds )
+{
+    QStringList patterns;
+    for ( const QString &id : cohortStudentIds )
+    {
+        if ( id.isEmpty() )
+            continue;
+        patterns << QRegularExpression::escape( id );
+    }
+    patterns.removeDuplicates();
+    std::sort( patterns.begin(), patterns.end() ); // deterministic first hit
+    if ( patterns.isEmpty() )
+        return QRegularExpression();
+    return QRegularExpression( QStringLiteral( "(?<![\\p{L}\\p{N}_\\-])(?:" )
+                                 + patterns.join( QLatin1Char( '|' ) )
+                                 + QStringLiteral( ")(?![\\p{L}\\p{N}_\\-])" ) );
+}
+
+/// Scan with an ALL-cohort-ids regex (compiled once per batch) and skip the
+/// owner's own id at match time: one compiled pattern serves every pack —
+/// per-pack recompilation on the GUI thread was the R1 P3-8 finding.
+void addForeignIdErrorIfAny( ValidationResult &r, const QString &blob, const QString &studentId,
+                             const QRegularExpression &allIdsRegex )
+{
+    if ( !allIdsRegex.isValid() )
+        return;
+    auto it = allIdsRegex.globalMatch( blob );
+    while ( it.hasNext() )
+    {
+        const QString m = it.next().captured();
+        if ( m == studentId )
+            continue; // the owner's own id is legitimate in its own pack
+        r.addError( QStringLiteral( "cross_student_leak" ), QStringLiteral( "body" ),
+                    QStringLiteral( "foreign student id: " ) + m );
+        return;
+    }
+}
+
+} // namespace
+
 ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QString &studentId )
 {
     return assertNoCrossStudentLeak( feedback, studentId, QStringList{} );
 }
 
-ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QString &studentId,
-                                           const QStringList &cohortStudentIds )
+/// All three leak checks with a PRE-COMPILED all-cohort-ids regex (may be
+/// invalid = no ids to scan): owner match, legacy student_ prefix scan,
+/// roster-defined foreign ids with Unicode word boundaries.
+static ValidationResult leakGuardCore( const QJsonObject &feedback, const QString &studentId,
+                                       const QRegularExpression &allIdsRegex )
 {
     ValidationResult r;
     const QString sid = feedback.value( QStringLiteral( "student_id" ) ).toString();
@@ -70,50 +121,42 @@ ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QS
             if ( m == QLatin1String( "student_id" ) || m == studentId
                  || m == QStringLiteral( "student_" ) + studentId )
                 continue;
-            {
-                r.addError( QStringLiteral( "cross_student_leak" ), QStringLiteral( "body" ),
-                            QStringLiteral( "foreign student token: " ) + m );
-                break;
-            }
+            r.addError( QStringLiteral( "cross_student_leak" ), QStringLiteral( "body" ),
+                        QStringLiteral( "foreign student token: " ) + m );
+            break;
         }
     }
 
     // #1689: roster-defined foreign ids. Real cohorts carry plain numeric
     // student numbers and Chinese names — invisible to the prefix scan
-    // above. Every other id of the batch is matched with word boundaries so
-    // an id embedded in a longer token (2023002 inside 20230021) does not
-    // false-positive; the owner's own id is excluded by construction.
-    QStringList foreignPatterns;
-    for ( const QString &id : cohortStudentIds )
-    {
-        if ( id.isEmpty() || id == studentId )
-            continue;
-        foreignPatterns << QRegularExpression::escape( id );
-    }
-    if ( !foreignPatterns.isEmpty() )
-    {
-        foreignPatterns.removeDuplicates();
-        std::sort( foreignPatterns.begin(), foreignPatterns.end() ); // deterministic first hit
-        const QRegularExpression re( QStringLiteral( "(?<![A-Za-z0-9_\\-])(?:" )
-                                       + foreignPatterns.join( QLatin1Char( '|' ) )
-                                       + QStringLiteral( ")(?![A-Za-z0-9_\\-])" ) );
-        const auto m = re.match( blob );
-        if ( m.hasMatch() )
-            r.addError( QStringLiteral( "cross_student_leak" ), QStringLiteral( "body" ),
-                        QStringLiteral( "foreign student id: " ) + m.captured() );
-    }
+    // above. Unicode word boundaries keep an id embedded in a longer token
+    // (2023002 inside 20230021, 张三 inside 张三丰) from false-positiving.
+    // Identically-named students cannot be distinguished texturally at all —
+    // a documented limitation, not a guard promise.
+    addForeignIdErrorIfAny( r, blob, studentId, allIdsRegex );
     return r;
+}
+
+ValidationResult assertNoCrossStudentLeak( const QJsonObject &feedback, const QString &studentId,
+                                           const QStringList &cohortStudentIds )
+{
+    return leakGuardCore( feedback, studentId, compileForeignIdRegex( cohortStudentIds ) );
 }
 
 FeedbackPackEmission buildGuardedFeedbackPacks( const QVector<FeedbackPackInput> &inputs,
                                                 const QStringList &cohortStudentIds )
 {
+    // R1 P3-8: compile the cohort regex ONCE for the whole batch — the
+    // per-pack public overload would recompile an O(cohort) alternation for
+    // every student on the GUI thread. The guard itself (all three checks)
+    // is the shared leakGuardCore, so the production path and the public
+    // API cannot drift.
+    const QRegularExpression allIdsRegex = compileForeignIdRegex( cohortStudentIds );
     FeedbackPackEmission emission;
     for ( const FeedbackPackInput &in : inputs )
     {
         const QJsonObject pack = buildFeedbackPack( in );
-        const ValidationResult guard =
-          assertNoCrossStudentLeak( pack, in.row.studentId, cohortStudentIds );
+        const ValidationResult guard = leakGuardCore( pack, in.row.studentId, allIdsRegex );
         if ( guard.ok )
         {
             emission.packs.append( pack );

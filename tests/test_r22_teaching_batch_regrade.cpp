@@ -281,3 +281,131 @@ TEST_CASE( "#1694: gradingVersionLabels derive real labels, never a constant",
     REQUIRE( gradingVersionLabels( QJsonObject{}, QJsonObject{}, QStringLiteral( "lab99" ), QString() )
                .labVersion == QLatin1String( "labid:lab99" ) );
 }
+
+TEST_CASE( "#1694 R1: lab-id authority resolves its rules file (dock's primary path)",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    // R1 finding 1: with labIdOrRulesPath = a lab ID, the CLI reads
+    // <searchRoot>/data/labs/grading/<id>.rules.json — the fingerprint must
+    // track THAT file's content, or an in-place rules edit stays invisible
+    // to the checkpoint digest on the console's main configuration.
+    QTemporaryDir repo;
+    const QString gradingDir = QDir( repo.path() ).filePath( QStringLiteral( "data/labs/grading" ) );
+    REQUIRE( QDir().mkpath( gradingDir ) );
+    const QString rules = QDir( gradingDir ).filePath( QStringLiteral( "lab15.rules.json" ) );
+    writeBytes( rules, QByteArrayLiteral( "{\"threshold\":0.5}" ) );
+
+    GraderCliConfig cfg;
+    cfg.labIdOrRulesPath = QStringLiteral( "lab15" );
+    const QString fp1 = gradingRulesFingerprint( cfg, repo.path() );
+    REQUIRE( fp1.startsWith( QLatin1String( "labid:lab15;sha256:" ) ) );
+
+    // Edit the resolved rules file in place: fingerprint changes.
+    writeBytes( rules, QByteArrayLiteral( "{\"threshold\":0.7}" ) );
+    REQUIRE( gradingRulesFingerprint( cfg, repo.path() ) != fp1 );
+
+    // Unresolvable id (no file anywhere): stable plain labid marker.
+    GraderCliConfig unknown;
+    unknown.labIdOrRulesPath = QStringLiteral( "no_such_lab" );
+    REQUIRE( gradingRulesFingerprint( unknown, repo.path() )
+             == QLatin1String( "labid:no_such_lab" ) );
+
+    // End-to-end: a batch keyed by LAB ID adopts nothing when the resolved
+    // rules file changes between runs.
+    ClassFixture fx;
+    const QString labGradingDir =
+      QDir( fx.dir.path() ).filePath( QStringLiteral( "data/labs/grading" ) );
+    REQUIRE( QDir().mkpath( labGradingDir ) );
+    const QString labRules =
+      QDir( labGradingDir ).filePath( QStringLiteral( "lab99.rules.json" ) );
+    GraderCliConfig g;
+    g.labIdOrRulesPath = QStringLiteral( "lab99" );
+
+    writeBytes( labRules, QByteArrayLiteral( "R1" ) );
+    BatchAssessmentConfig c1 = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
+    c1.gradingRulesFingerprint = gradingRulesFingerprint( g, fx.dir.path() );
+    const auto run1 = runBatchAssessment( c1, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE( run1.graded == 2 );
+
+    writeBytes( labRules, QByteArrayLiteral( "R2" ) );
+    BatchAssessmentConfig c2 = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
+    c2.gradingRulesFingerprint = gradingRulesFingerprint( g, fx.dir.path() );
+    const auto run2 = runBatchAssessment( c2, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE( run2.resumed == 0 );
+    REQUIRE( run2.checkpointInvalidated );
+}
+
+TEST_CASE( "#1694 R1: graderCliIdentity has no interior blind spot",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    // R1 finding 4: head+tail sampling left >8 MiB interiors (and the tail
+    // of 4–8 MiB files) unfingerprinted. The hash is a streamed FULL-file
+    // hash now: same-size interior and late-tail rewrites must change it.
+    QTemporaryDir dir;
+    const QString cli = QDir( dir.path() ).filePath( QStringLiteral( "big_cli.exe" ) );
+    QByteArray big( 9 * 1024 * 1024, 'A' );
+    big[0] = 'M';
+    writeBytes( cli, big );
+    const QString id1 = graderCliIdentity( cli );
+    REQUIRE( graderCliIdentity( cli ) == id1 );
+
+    // Interior-only rewrite (middle of the file, far from both ends).
+    QByteArray mid = big;
+    mid[big.size() / 2] = 'X';
+    writeBytes( cli, mid );
+    REQUIRE( graderCliIdentity( cli ) != id1 );
+
+    // Late-tail rewrite (inside the old 4–8 MiB blind zone).
+    QByteArray tail = big;
+    tail[7 * 1024 * 1024] = 'Y';
+    writeBytes( cli, tail );
+    REQUIRE( graderCliIdentity( cli ) != id1 );
+}
+
+TEST_CASE( "#1694 R1: checkpoint_invalidated is false for absent/corrupt/foreign checkpoints",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    ClassFixture fx;
+    BatchAssessmentConfig cfg = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
+
+    // No checkpoint file at all → fresh run, NOT an invalidation.
+    const auto fresh = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE_FALSE( fresh.checkpointInvalidated );
+
+    // Corrupt checkpoint (garbage bytes) → degrade to fresh, not invalidation.
+    writeBytes( cfg.checkpointPath, QByteArrayLiteral( "not json at all" ) );
+    const auto corrupt = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE_FALSE( corrupt.checkpointInvalidated );
+
+    // Foreign-schema checkpoint → same: schema mismatch is not a rules change.
+    writeBytes( cfg.checkpointPath, QByteArrayLiteral( "{\"schema\":\"something.else/1\"}" ) );
+    const auto foreign = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE_FALSE( foreign.checkpointInvalidated );
+
+    // Well-formed checkpoint of a DIFFERENT identity → invalidation.
+    const auto warm = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE( warm.graded == 2 );
+    const BatchAssessmentConfig changed = makeConfig( fx, QStringLiteral( "grader-test-2" ) );
+    const auto invalidated = runBatchAssessment( changed, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE( invalidated.checkpointInvalidated );
+}
+
+TEST_CASE( "#1694 R1: regradeTraceability ignores run metadata (incl. checkpoint_invalidated)",
+           "[teaching_admin][batch][r22][issue-1694]" )
+{
+    // R1 finding 3: the outcome digest must not depend on HOW the run came
+    // to be — a rules-change re-grade and a clean identical-outcome run of
+    // the same rows share report_digest.
+    ClassFixture fx;
+    const BatchAssessmentConfig cfg = makeConfig( fx, QStringLiteral( "grader-test-1" ) );
+    auto report = runBatchAssessment( cfg, rulesReadingGrader( fx.rulesPath ) );
+    REQUIRE( report.graded == 2 );
+    const QString digest1 = regradeTraceability( report ).value( QStringLiteral( "report_digest" ) ).toString();
+
+    // Same rows/counter values, only run metadata flips.
+    report.checkpointInvalidated = true;
+    report.resumed = 1; // also covered by the pre-existing removal list
+    const QString digest2 = regradeTraceability( report ).value( QStringLiteral( "report_digest" ) ).toString();
+    REQUIRE( digest1 == digest2 );
+    REQUIRE( !digest1.isEmpty() );
+}

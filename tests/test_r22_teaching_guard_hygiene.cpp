@@ -220,6 +220,26 @@ TEST_CASE( "#1678: sessionFromJson rejects non-finite numeric members",
     const auto res = sicnu::lab::sessionFromJson( doc );
     REQUIRE_FALSE( res.ok );
     REQUIRE( res.diagnostics.front().code == "lab.session.schema" );
+
+    // R1 test-gap 4: the same poison as a LITERAL exponent in the raw text
+    // (jsoncpp's reader accepts 1e999 and yields a non-finite double).
+    std::string text = [] {
+        const sicnu::lab::LabRuntimePlan plan = probePlan();
+        auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+        REQUIRE( started.ok );
+        REQUIRE( sicnu::lab::recordAnswer( started.value, plan, "q_ndvi", "", 0.35 ).ok );
+        return sicnu::lab::sessionToCanonicalBytes( started.value );
+    }();
+    const auto keyPos = text.find( "\"numeric\"" );
+    REQUIRE( keyPos != std::string::npos );
+    const auto colonPos = text.find( ':', keyPos );
+    const auto valueEnd = text.find_first_of( ",}", colonPos );
+    REQUIRE( colonPos != std::string::npos );
+    REQUIRE( valueEnd != std::string::npos );
+    text.replace( colonPos + 1, valueEnd - colonPos - 1, "1e999" );
+    const Json::Value parsed = parseJson( text );
+    const auto res2 = sicnu::lab::sessionFromJson( parsed );
+    REQUIRE_FALSE( res2.ok );
 }
 
 // ── #1689: the leak guard must see real student ids ─────────────────────────
@@ -259,6 +279,40 @@ TEST_CASE( "#1689: leak guard detects numeric and Chinese-name foreign ids",
           fb, QStringLiteral( "2023001" ),
           QStringList{ QStringLiteral( "2023001" ), QStringLiteral( "2023002" ) } );
         REQUIRE( r.ok );
+    }
+    SECTION( "R1: Chinese-name PREFIX overlap does not trip the guard" )
+    {
+        // R1 finding 2: with ASCII-only boundary classes, 张三's pattern
+        // matched inside 张三丰's own student_id and the production gate
+        // withheld a legitimate pack. Unicode boundaries must hold.
+        const QJsonObject fb =
+          buildFeedbackPack( packFor( QStringLiteral( "张三丰" ),
+                                      QStringLiteral( "裁剪正确，注意 NDVI 范围" ) ) );
+        const ValidationResult r =
+          assertNoCrossStudentLeak( fb, QStringLiteral( "张三丰" ),
+                                    QStringList{ QStringLiteral( "张三" ),
+                                                 QStringLiteral( "李四" ),
+                                                 QStringLiteral( "张三丰" ) } );
+        REQUIRE( r.ok );
+        // And the reverse cohort member genuinely mentioning 张三 is caught.
+        const QJsonObject leaking =
+          buildFeedbackPack( packFor( QStringLiteral( "李四" ),
+                                      QStringLiteral( "张三 的结果更好" ) ) );
+        REQUIRE_FALSE( assertNoCrossStudentLeak(
+                         leaking, QStringLiteral( "李四" ),
+                         QStringList{ QStringLiteral( "张三" ), QStringLiteral( "李四" ),
+                                      QStringLiteral( "张三丰" ) } )
+                         .ok );
+        // The production gate itself must not withhold 张三丰's pack.
+        QVector<FeedbackPackInput> inputs;
+        inputs.append( packFor( QStringLiteral( "张三" ), QStringLiteral( "正常反馈" ) ) );
+        inputs.append( packFor( QStringLiteral( "张三丰" ), QStringLiteral( "正常反馈" ) ) );
+        const FeedbackPackEmission emission =
+          buildGuardedFeedbackPacks( inputs,
+                                     QStringList{ QStringLiteral( "张三" ),
+                                                  QStringLiteral( "张三丰" ) } );
+        REQUIRE( emission.packs.size() == 2 );
+        REQUIRE( emission.blockedStudents.isEmpty() );
     }
     SECTION( "own token and unrelated prose stay clean" )
     {
@@ -390,4 +444,47 @@ TEST_CASE( "#1688: validateBundleBuilderParams names the offending parameter",
 
     REQUIRE_FALSE( validateBundleBuilderParams( QString(), QStringLiteral( "C:/out" ), QString() )
                      .isEmpty() );
+
+    SECTION( "R1: Latin-1 letters are not in the ASCII whitelist" )
+    {
+        REQUIRE_FALSE( validateBundleBuilderParams( QStringLiteral( "C:/build" ),
+                                                    QStringLiteral( "C:/out" ),
+                                                    QStringLiteral( "café" ) )
+                         .isEmpty() );
+    }
+    SECTION( "R1: cmd .cmd re-tokenization delimiters are refused in paths" )
+    {
+        REQUIRE_FALSE( validateBundleBuilderParams( QStringLiteral( "C:/build" ),
+                                                    QStringLiteral( "C:\\a;b" ), QString() )
+                         .isEmpty() );
+        REQUIRE_FALSE( validateBundleBuilderParams( QStringLiteral( "C:/b,c" ),
+                                                    QStringLiteral( "C:/out" ), QString() )
+                         .isEmpty() );
+        REQUIRE_FALSE( validateBundleBuilderParams( QStringLiteral( "C:/a=b" ),
+                                                    QStringLiteral( "C:/out" ), QString() )
+                         .isEmpty() );
+    }
+}
+
+TEST_CASE( "#1688 R1: buildOfflineBundle refuses injection-shaped input without a process",
+           "[teaching_admin][offline][r22][issue-1688]" )
+{
+    // R1 test-gap 3: the production refusal path — typed failure, no start.
+    const ScriptRunResult refused =
+      buildOfflineBundle( QStringLiteral( "C:/repo" ), QStringLiteral( "C:/build" ),
+                          QStringLiteral( "C:/out" ), QStringLiteral( "1.0&calc" ), 250 );
+    REQUIRE_FALSE( refused.started );
+    REQUIRE( refused.error.contains( QLatin1String( "refused" ) ) );
+    REQUIRE( refused.error.contains( QLatin1String( "version" ) ) );
+
+    // R1 finding 7: repoRoot rides in the same cmd.exe argv — held to the
+    // same standard by bundleBuilderRequest.
+    const auto badRoot = bundleBuilderRequest( QStringLiteral( "C:\\R&D\\repo" ),
+                                               QStringLiteral( "C:/build" ),
+                                               QStringLiteral( "C:/out" ),
+                                               QStringLiteral( "v1" ), 250, true );
+    REQUIRE( badRoot.program.isEmpty() );
+    const auto emptyRoot = bundleBuilderRequest( QString(), QStringLiteral( "C:/build" ),
+                                                 QStringLiteral( "C:/out" ), QString(), 250, true );
+    REQUIRE( emptyRoot.program.isEmpty() );
 }

@@ -409,7 +409,8 @@ void TeachingAdminDock::onRunBatch()
       QJsonDocument::fromJson( m_rubricEdit->toPlainText().toUtf8() ).object();
     const QJsonObject labSpecDoc =
       QJsonDocument::fromJson( m_labSpecEdit->toPlainText().toUtf8() ).object();
-    cfg.gradingRulesFingerprint = sicnu::teaching_admin::gradingRulesFingerprint( grader );
+    cfg.gradingRulesFingerprint =
+      sicnu::teaching_admin::gradingRulesFingerprint( grader, repoRoot() );
     cfg.graderIdentity = sicnu::teaching_admin::graderCliIdentity( grader.cliPath );
     const auto versionLabels = sicnu::teaching_admin::gradingVersionLabels(
       rubricDoc, labSpecDoc, cfg.labId, cfg.gradingRulesFingerprint );
@@ -567,12 +568,13 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QSt
     if ( skippedCount > 0 )
         summary += tr( " — %1 file(s) skipped (reserved names, see report)" ).arg( skippedCount );
     m_batchProgressLabel->setText( summary );
-    // #1694: a durable checkpoint existed but the grading authority changed
-    // (rules content, grader binary, versions) — say so instead of looking
-    // like a first run. The teacher must know every row was re-graded.
+    // #1694: a durable checkpoint existed but was NOT adopted — the grading
+    // config changed (rules content, grader binary, versions) or the
+    // checkpoint predates this build's digest scheme. Either way every row
+    // was re-graded under the authority currently in force.
     if ( reportJson.value( QStringLiteral( "checkpoint_invalidated" ) ).toBool() )
-        appendLog( tr( "grading rules or grader changed — checkpoint invalidated, "
-                       "all submissions re-graded under the current rules" ) );
+        appendLog( tr( "checkpoint not adopted — grading rules/grader/config changed "
+                       "(or checkpoint from an older build); all submissions re-graded" ) );
     appendLog( QString::fromUtf8( QJsonDocument( reportJson ).toJson( QJsonDocument::Compact ) ) );
 
     // Class summary from the SAME published truth (the report on disk), not
