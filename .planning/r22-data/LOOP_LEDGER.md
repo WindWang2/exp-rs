@@ -1,0 +1,29 @@
+# R22-02 (r22-data) LOOP_LEDGER — 轮次账本
+
+格式：`轮次 | 假设 | 文件 | 测试命令 | 真实结果 | 下一步`
+
+## L1 盘点轮
+- 假设：任务快照（master=911e0b17、5 open PR、issue 状态）仍最新。
+- 动作：gh api 核 SHA、pr list、issue list、worktree list；建 `agent/r22-data-20261025T132358Z`。
+- 结果：master 一致；open PR=5（R21 轨）；6 个目标 issue 全部 OPEN_UNFIXED（源码逐行验真，BASELINE.md 表）。本地 master behind 59（祖先正常）。
+- 下一步：规划文档 + 修复。
+
+## L2 修复轮（6 issue → 生产代码）
+- 假设：每个 issue 的修复面 = BASELINE 表所列行。
+- 文件：offline_gate.{cpp,h}、range_cache{,_disk}.{cpp,h}、atomic_fs.cpp、artifact_object_pool.cpp、sample_promotion.cpp、dataset_store.{cpp,h}、raster_reader.{cpp,h}。
+- 结果：全部修改完成（含 #1703-③ 同型 4 处、#1679 DNS 分支统一 + pinning 纵深 + 头文件注释更新）。
+- 下一步：RED 证据 + 测试。
+
+## L3 RED 证据轮
+- 命令：`git show origin/master:src/geospatial/remote/offline_gate.cpp` → /tmp/r22red 独立编译（g++ -std=c++20，cpl_conv.h 打桩）。
+- 结果：master 版 9 形态中 7 判公网（漏判）；修复版 9/9 判私网。其余 issue 以「master 代码路径 × 新断言」逐行矛盾记录于 RED_GREEN.md。
+- 下一步：新测试文件 + 注册 + 构建。
+
+## L4 测试轮（进行中）
+- 文件：tests/test_r22_data_security_consistency.cpp（7 TEST_CASE）+ test_io_range_cache.cpp 追加 2 段（basis 格式更新 + 几何切换 e2e）+ tests/CMakeLists.txt append-only 注册。
+- 命令：`flock /tmp/exp-rs-r21-build.lock + /home/kevin/project/exp-rs-build.lock; cmake --build build-r22-data --target test_r22_data_security_consistency test_io_remote_validator test_io_range_cache -j4`。
+- 结果（实时）：configure ✅（164.7s）；编译中——发现缓存缺 qgis_core 对象（R21-B 只建过 io/模型轨目标），sicnu_add_test 链条需全量编 qgis_core；同时段兄弟轨 r22-inference 持锁串行中（锁机制按预期工作，load 16.6/40 核）。
+- 下一步：跑新测试（需 PROJ_LIB/LD_LIBRARY_PATH/link-shim 环境，沿 r22-inference 轨公开命令形态）→ 域族 sweep → 双跑。
+
+## 待续轮
+- L5 测试执行与修复闭环；L6 R1 独立 review；L7 R2 独立 review；L8 交付（文档+push+PR）。
