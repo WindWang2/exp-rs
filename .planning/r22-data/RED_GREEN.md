@@ -53,3 +53,12 @@ $ ./red_fixed             # 本轨修复版，同一 main()
 - ① **RED**：master raster_reader.cpp:214 `window.xOff + window.width`（int）在 {1, INT_MAX} 处回绕为负 → 校验通过；新用例 `CHECK_FALSE(validateWindow(...))` 在 master 失败。**GREEN**：int64 比较 + 边界/正常窗用例。
 - ② readMask：**证据修正**——issue 称「无调用者」，实测 tests/ 有 6 处调用（test_io_raster_contract ×5、test_io_fidelity ×1），语义被测试钉死。处置：头文件注明「不咨询 GDAL mask/alpha band」的范围限制，不改语义不删 API（详见 CROSS_TRACK_FINDINGS）。
 - ③ **RED**：master dataset_store.cpp:728 等 4 处 `stepRow()` 失败折进 `dataset.not_found`。**GREEN**：`stepFailed()`（既有原语，#1448/#1457 同契约）区分 `dataset.store_query_failed`。4 处同型全部修复（addSourceAssetsToDraft/stageVersion/commitVersionImpl/deprecateVersion）。
+
+## #1679 扩展对抗输入（修复版，2026-10-26 补充）
+
+对修复版额外跑了 16 个对抗形态（`/tmp/r22red/red_extra.cpp`）：IPv6+端口+query、zone-id、0.0.0.0/组播/尾点字面量、大写、空 authority、scheme-in-path、编码 `%40`、反斜杠。14/16 与「curl 实际连接目标」判定一致。两个非匹配经分析为**期望过严而非缺陷**：
+
+1. `http://127.0.0.1\@example.com/` → gate 判 example.com（公网）。curl 的 urlapi 仅以 `/?#` 终止 authority，`\` 不是终止符，userinfo=`127.0.0.1\`、host=`example.com` —— gate 与 curl 判定**一致**（WHATWG 浏览器语义把 `\` 当 `/`，但本 gate 只服务 libcurl/GDAL VSI）。无绕过。
+2. `http://10.0.0.1%40.example.com/` → 两侧 host 均为含编码字符的不可解析名，curl 同样无法连私网。无绕过。
+
+结论：修复后 gate 的 authority 语义与 libcurl 一致；判「公网」但 curl 连私网的分歧面已闭合。
