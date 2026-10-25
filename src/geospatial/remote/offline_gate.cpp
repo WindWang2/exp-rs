@@ -517,13 +517,23 @@ bool isPrivateHost( const std::string &hostOrUrl )
     const std::size_t schemePos = input.find( "://" );
     if ( schemePos != std::string::npos )
     {
+        // #1679: the authority ends at the FIRST '/', '?' or '#' (RFC 3986
+        // §3.2) — the bound the transport (libcurl, GDAL VSI) actually
+        // connects by. Only AFTER that cut does a LAST '@' separate
+        // userinfo from host. The old order (first '@' before the first
+        // '/') parsed http://127.0.0.1?@example.com/ as host example.com
+        // while the connector dialed 127.0.0.1 — the gate and the connector
+        // disagreeing IS the SSRF hole. Same rule as urlHostOf()
+        // (http_fetch.cpp); the two parsers of one authority must not
+        // diverge again.
         std::string afterScheme = input.substr( schemePos + 3 );
-        const std::size_t atPos = afterScheme.find( '@' );
-        const std::size_t firstSlash = afterScheme.find( '/' );
-        if ( atPos != std::string::npos && ( firstSlash == std::string::npos || atPos < firstSlash ) )
-            afterScheme = afterScheme.substr( atPos + 1 );
         const std::size_t term = afterScheme.find_first_of( "/?#" );
-        host = ( term == std::string::npos ) ? afterScheme : afterScheme.substr( 0, term );
+        std::string authority =
+            ( term == std::string::npos ) ? afterScheme : afterScheme.substr( 0, term );
+        const std::size_t atPos = authority.rfind( '@' );
+        if ( atPos != std::string::npos )
+            authority = authority.substr( atPos + 1 );
+        host = authority;
     }
     else
     {
@@ -602,38 +612,16 @@ bool isPrivateHost( const std::string &hostOrUrl )
             {
                 auto *sa6 = reinterpret_cast<struct sockaddr_in6 *>( p->ai_addr );
                 const unsigned char *bytes = reinterpret_cast<const unsigned char *>( &sa6->sin6_addr );
-
-                bool loopback = true;
-                for ( int i = 0; i < 15; ++i )
-                    loopback = loopback && ( bytes[i] == 0 );
-                loopback = loopback && ( bytes[15] == 1 );
-                if ( loopback )
+                // #1679 (附带): one rule, one place. This branch used to
+                // re-derive a SUBSET of the IPv6 private list by hand
+                // (loopback/link-local/ULA/IPv4-mapped only — no '::',
+                // multicast, NAT64 64:ff9b::/96, IPv4-compatible), while
+                // isPrivateIpv6()'s own comment warns that two subtly
+                // different copies are how an egress filter grows a hole.
+                if ( isPrivateIpv6( bytes ) )
                 {
                     privateFound = true;
                     break;
-                }
-
-                if ( ( bytes[0] == 0xFE && ( bytes[1] & 0xC0 ) == 0x80 ) ||
-                     ( ( bytes[0] & 0xFE ) == 0xFC ) )
-                {
-                    privateFound = true;
-                    break;
-                }
-
-                bool ipv4Mapped = ( bytes[10] == 0xFF && bytes[11] == 0xFF );
-                for ( int i = 0; i < 10 && ipv4Mapped; ++i )
-                    ipv4Mapped = ( bytes[i] == 0 );
-                if ( ipv4Mapped )
-                {
-                    const std::uint32_t emb = ( static_cast<std::uint32_t>( bytes[12] ) << 24 ) |
-                                              ( static_cast<std::uint32_t>( bytes[13] ) << 16 ) |
-                                              ( static_cast<std::uint32_t>( bytes[14] ) << 8 ) |
-                                              static_cast<std::uint32_t>( bytes[15] );
-                    if ( isPrivateIpv4( emb ) )
-                    {
-                        privateFound = true;
-                        break;
-                    }
                 }
             }
         }
@@ -665,13 +653,34 @@ HostPinStatus resolveForPinning( const std::string &host, int port,
         return HostPinStatus::PrivateAddress;
     }
 
-    // IP literals: isPrivateHost() already judges them verbatim, and there is
-    // nothing for libcurl to resolve — pinning would only add a second,
-    // redundant source of truth.
+    // IP literals: there is nothing for libcurl to resolve, but #1679
+    // defense-in-depth — under the process-wide private-network policy the
+    // pinning step judges the literal ITSELF instead of trusting that
+    // isPrivateHost() (a different parser, once divergently) already did.
+    // If the two parsers ever disagree again, this side now refuses
+    // fail-closed instead of waving the literal through. Outside the
+    // policy, a caller-supplied guard stays the caller's own decision
+    // (loopback fixture servers ride this path with the policy off).
     std::uint32_t v4 = 0;
     unsigned char v6[16] = {};
-    if ( parseIpv4( lowered, v4 ) || parseIpv6( lowered, v6 ) )
+    if ( parseIpv4( lowered, v4 ) )
+    {
+        if ( blockPrivateNetworks() && isPrivateIpv4( v4 ) )
+        {
+            errorMessage = "host '" + lowered + "' is a private/loopback IP literal";
+            return HostPinStatus::PrivateAddress;
+        }
         return HostPinStatus::NoResolutionNeeded;
+    }
+    if ( parseIpv6( lowered, v6 ) )
+    {
+        if ( blockPrivateNetworks() && isPrivateIpv6( v6 ) )
+        {
+            errorMessage = "host '" + lowered + "' is a private/loopback IPv6 literal";
+            return HostPinStatus::PrivateAddress;
+        }
+        return HostPinStatus::NoResolutionNeeded;
+    }
 
     // Names that are loopback/metadata by definition, before any resolution.
     if ( lowered == "localhost" ||

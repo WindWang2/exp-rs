@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -211,8 +212,13 @@ bool RasterReader::validateWindow( const RasterMetadata &metadata, const RasterW
       *error = "window has degenerate size";
     return false;
   }
-  if ( window.xOff < 0 || window.yOff < 0 || window.xOff + window.width > metadata.width
-       || window.yOff + window.height > metadata.height )
+  // #1703-1: the extent check is 64-bit — the int sum `xOff + width`
+  // overflows (UB, typically negative → check PASSES) for far-edge windows
+  // like {xOff = 2, width = INT_MAX}, and a passed validation feeds the
+  // overflow straight into GDAL raster IO.
+  const std::int64_t xEnd = static_cast<std::int64_t>( window.xOff ) + window.width;
+  const std::int64_t yEnd = static_cast<std::int64_t>( window.yOff ) + window.height;
+  if ( window.xOff < 0 || window.yOff < 0 || xEnd > metadata.width || yEnd > metadata.height )
   {
     if ( error )
       *error = "window exceeds raster extent";

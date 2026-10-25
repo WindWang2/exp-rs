@@ -395,6 +395,14 @@ void writeJournalFile( const std::string &journalPath, const std::string &mainTa
   out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
   out.flush();
   out.close();
+  // #1701: a journal that hit ENOSPC mid-write is a truncated JSON that
+  // recoverFromJournalFile() parses as invalid and DELETES — silently
+  // discarding the group's only rollback record. The write must be proven,
+  // not assumed: a failed stream is an error while the targets are still
+  // untouched, exactly like the open failure above.
+  if ( !out.good() )
+    throw GeoError( ErrorCode::IoError,
+                    "atomic fs journal write did not complete (stream error): " + journalPath );
 
   fsyncFile( journalPath );
 }
@@ -674,6 +682,18 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     }
   }
   journalMembers.push_back( { stagedMainPath, targetMainPath, mainBackup, hadMainTarget } );
+
+  // #1701: sweep STALE member backups BEFORE the journal names them. After
+  // recoverDatasetGroup() above no live journal exists, so any leftover
+  // <target>.bak is residue of an older interrupted run (a journal that
+  // failed to parse is deleted WITHOUT touching .baks). Left in place, a
+  // crash between writeJournalFile() and backupInPlace() would let the next
+  // recovery "restore" those ancient bytes over the current good target.
+  // From here on, any .bak that exists was written by THIS run's
+  // backupInPlace() — a provable pre-publish image.
+  for ( const JournalMember &member : journalMembers )
+    removeFileQuiet( member.backup );
+
   writeJournalFile( journalPath, targetMainPath, journalMembers );
 
   auto cleanup = [ & ]( const std::string &failedName ) {
@@ -764,7 +784,24 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   }
 
   // Atomically mark committed
-  renameReplaceQuiet( journalPath, commitMarkerPath );
+  // #1701: an unlanded marker means the NEXT recovery reads the journal as
+  // uncommitted and rolls the group back. That is only sound while the
+  // backups still exist — deleting them below regardless of the rename
+  // result turned a marker failure into "delete freshly published targets
+  // with had_target=false and keep new bytes elsewhere": half committed,
+  // half destroyed. Fail LOUDLY, keep journal + backups: recovery then
+  // restores the full pre-publish group (or a retry re-publishes).
+  if ( !renameReplaceQuiet( journalPath, commitMarkerPath ) )
+  {
+    Json::Value details;
+    details["journal"] = journalPath;
+    details["commit_marker"] = commitMarkerPath;
+    details["recovery"] = "atomic_fs::recoverDatasetGroup(<main target>) restores the pre-publish group";
+    throw GeoError( ErrorCode::IoError,
+                    "group publish completed but the commit marker could not be "
+                    "installed; journal and backups kept for recovery: " + targetMainPath,
+                    details );
+  }
 
   // Success: drop the backup set
   removeFileQuiet( mainBackup );
@@ -801,6 +838,11 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
     hadTarget[i] = fileExists( live[i].second );
     journalMembers.push_back( { live[i].first, live[i].second, live[i].second + ".bak", hadTarget[i] } );
   }
+  // #1701: same stale-backup sweep as publishStagedGroup — after the
+  // recover above no live journal exists, so leftover .baks are old-run
+  // residue that must not become this run's rollback source.
+  for ( const JournalMember &member : journalMembers )
+    removeFileQuiet( member.backup );
   writeJournalFile( journalPath, mainTarget, journalMembers );
 
   auto cleanup = [ & ]( const std::string &failedName ) {
@@ -876,8 +918,21 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
     published.push_back( live[i].second );
   }
 
-  // Atomically mark committed
-  renameReplaceQuiet( journalPath, commitMarkerPath );
+  // Atomically mark committed — checked, same #1701 contract as
+  // publishStagedGroup: an unlanded marker plus deleted backups is a
+  // half-destroyed group at the next recovery; keep journal + backups and
+  // fail loudly instead.
+  if ( !renameReplaceQuiet( journalPath, commitMarkerPath ) )
+  {
+    Json::Value details;
+    details["journal"] = journalPath;
+    details["commit_marker"] = commitMarkerPath;
+    details["recovery"] = "atomic_fs::recoverDatasetGroup(<main target>) restores the pre-publish group";
+    throw GeoError( ErrorCode::IoError,
+                    "member publish completed but the commit marker could not be "
+                    "installed; journal and backups kept for recovery: " + mainTarget,
+                    details );
+  }
 
   for ( const auto &m : live )
     removeFileQuiet( m.second + ".bak" );

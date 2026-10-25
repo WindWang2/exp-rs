@@ -152,6 +152,11 @@ class RasterReader
     /// bands without declared NoData... a NaN pixel is invalid only when the
     /// band declares NaN as NoData — undeclared NaNs are data). Bands with
     /// no NoData produce an all-valid mask. Multi-band masks AND-combine.
+    /// Scope (#1703-2, verified): derived ONLY from per-band NoData/NaN
+    /// sentinels — a GDAL mask band (alpha, MF_MASK) is NOT consulted, so
+    /// alpha-masked products report valid where alpha says otherwise. Not
+    /// dead API (pinned by test_io_raster_contract/test_io_fidelity);
+    /// widening to GDAL mask bands is a semantic change, not a cleanup.
     std::vector<std::uint8_t> readMask( const RasterWindow &window, const std::vector<int> &bands ) const;
 
     /// Physical values for a stored value: value * scale + offset (declared
