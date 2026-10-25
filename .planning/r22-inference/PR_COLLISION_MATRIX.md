@@ -2,6 +2,12 @@
 
 基线 911e0b17；每次远端变动后重评（push 前强制复查一次）。
 
+## Push 前复查（2026-10-26）
+
+- 远端 master 仍为 `911e0b17`（gh api 复测），无新 merge。
+- #1673 head `941af0d18` 自初查未变。
+- 新增 open PR **#1708**（r22-infra 轨，head bbdd034f9）：文件交集仅 `.gitignore`（双方均为尾部 append，语义不同的白名单段，git 可能文本冲突但语义无碰撞——合并者保留两段即可）与 `tests/CMakeLists.txt`（其注册块位置与本轨不重叠，可自动合并）。**无 src 文件交集。**
+
 ## 与 open PR 的文件交集
 
 | PR | 交集文件 | 冲突风险 | 处置 |
