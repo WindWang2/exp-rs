@@ -44,12 +44,19 @@ TEST_CASE("agent_ops UI dock: startWorker does not block on prior worker", "[age
     sicnu::app::agent_ops::AgentOpsControlCenterDock dock;
     std::atomic<int> runs{0};
 
-    // Start a first worker that sleeps briefly
+    // Start a first worker with a deterministic, generous runtime: 25 x 20ms
+    // cancel-checked quanta = up to 500ms. #1699: the old shape (5 x 10ms
+    // sleeps, 40ms ceiling) put the ceiling INSIDE the blocking range, so a
+    // loaded runner or ASan flaked it. The split below is structural:
+    // a startWorker that reaps asynchronously returns in ~thread-spawn time,
+    // while one that joins the prior worker without cancelling it first
+    // cannot return before the full 500ms runtime — 200ms separates both
+    // regimes with >=2.5x margin on each side, independent of machine load.
     dock.startWorker([&](const std::atomic<bool> &cancel) {
         ++runs;
-        for (int i = 0; i < 5 && !cancel.load(); ++i)
+        for (int i = 0; i < 25 && !cancel.load(); ++i)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
     });
 
@@ -60,8 +67,9 @@ TEST_CASE("agent_ops UI dock: startWorker does not block on prior worker", "[age
     });
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 
-    // startWorker must return near-instantly (< 40ms), not wait for the worker
-    CHECK(elapsed < 40);
+    // Async reap is ~0ms; a blocking join of the uncanceled worker is
+    // >=500ms. 200ms rejects the second regime with margin (see above).
+    CHECK(elapsed < 200);
     dock.joinWorker();
     CHECK(runs.load() >= 1);
 }
