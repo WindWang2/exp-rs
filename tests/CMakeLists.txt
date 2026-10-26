@@ -16779,3 +16779,29 @@ target_include_directories(test_r22_agent_ghost_algo PRIVATE
 )
 sicnu_discover_tests(test_r22_agent_ghost_algo RUN_SERIAL TRUE)
 # --- end R22-04 registration ---
+
+# ── R23-B (zcode r23-b): provider TU stub-compile gate (#1576/#1577) ──
+# Append-only registration block for this track (docs: .planning/zcode-r23-B).
+# The optional TensorRT/OpenVINO provider TUs compile nowhere by default
+# (both options default OFF in every lane), so union-merge code loss in them
+# ships silently — this happened in 9988aa15a9 (dangling selectDevice()
+# call, undeclared m_artifactPath, const method locking a non-mutable
+# mutex). Gate: -fsyntax-only both TUs against tests/fixtures/provider_stubs.
+if(UNIX AND OpenCV_FOUND)
+  get_target_property(_r23b_qt_core_incs Qt6::Core INTERFACE_INCLUDE_DIRECTORIES)
+  set(_r23b_stub_inc_args)
+  foreach(_r23b_dir IN ITEMS ${OpenCV_INCLUDE_DIRS} ${_r23b_qt_core_incs})
+    if(_r23b_dir AND NOT _r23b_dir MATCHES "\\$<" AND EXISTS "${_r23b_dir}")
+      list(APPEND _r23b_stub_inc_args -I "${_r23b_dir}")
+    endif()
+  endforeach()
+  add_test(NAME test_r23_b_provider_stub_compile
+    COMMAND sh "${CMAKE_SOURCE_DIR}/tests/test_r23_b_provider_stub_compile.sh"
+            --repo-root "${CMAKE_SOURCE_DIR}"
+            --cxx "${CMAKE_CXX_COMPILER}"
+            ${_r23b_stub_inc_args})
+  set_tests_properties(test_r23_b_provider_stub_compile PROPERTIES
+    TIMEOUT 120
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+# --- end R23-B provider stub-compile registration ---

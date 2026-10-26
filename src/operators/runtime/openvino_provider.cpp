@@ -44,10 +44,6 @@ class OpenVinoRuntime final : public IModelRuntime
       {
         mCore = std::make_unique<ov::Core>();
         const std::string &path = model.resolvedArtifactPath;
-        // The IModelRuntime artifactPath() contract: the session reports the
-        // file it was actually loaded from (cache keys / payloads /
-        // provenance), never a hardcoded label.
-        m_artifactPath = path;
         // read_model handles both IR (.xml, with .bin beside it) and ONNX
         // directly; no format branch is needed.
         mModel = mCore->read_model( path );
@@ -212,6 +208,62 @@ class OpenVinoRuntime final : public IModelRuntime
     void clearCancel() override { m_cancelRequested.store( false, std::memory_order_relaxed ); }
 
   private:
+    // Device selection for compile_model. The registry's resolution verdict
+    // is authoritative; the one repair it cannot make is supplied here: a
+    // GPU-wanting manifest demoted to cpu only because the host has no CUDA
+    // is served by OpenVINO's own GPU plugin when one is exposed (#1576).
+    // That demotion — and only that one — is repaired here: hw.cudaAvailable
+    // separates it from every other cpu verdict, because an explicit cpu
+    // request or a capacity demotion is only ever recorded where CUDA
+    // exists. The device itself still comes from OpenVINO's own plugin
+    // registry (its "GPU" token is the Intel plugin, never a CUDA index).
+    // Returns "" with *error set when the request cannot be honored.
+    std::string selectDevice( const ModelInfo &model,
+                              const ModelHardwareCapabilities &hw, std::string *error )
+    {
+      bool gpu = model.runtime.gpu; // the registry's verdict
+      if ( !gpu && !hw.cudaAvailable && model.gpu && !manifestPinsCpu( model ) )
+        gpu = true; // the repairable CUDA-absence demotion (#1576)
+      if ( !gpu )
+        return "CPU";
+      const std::vector<std::string> devices = mCore->get_available_devices();
+      if ( std::find( devices.begin(), devices.end(), "GPU" ) != devices.end() )
+        return "GPU";
+      if ( model.runtime.gpu )
+      {
+        // The verdict resolved (and booked) a GPU device; a build without
+        // the GPU plugin cannot execute it — refuse instead of silently
+        // dropping to CPU underneath a live GPU reservation.
+        if ( error )
+          *error = "device resolution selected a GPU device but this OpenVINO build "
+                   "exposes no GPU plugin (available devices: " + joinDevices( devices ) + ")";
+        return {};
+      }
+      // The repairable demotion has no Intel plugin to land on either:
+      // CPU is the only device this build can offer for it.
+      return "CPU";
+    }
+
+    // True when the manifest's runtime.device token explicitly asks for
+    // CPU. An operator-side --device override never reaches the factory
+    // (model_execution_service.cpp passes it as explicitDevice), so it is
+    // honored through the verdict, never re-derived here.
+    static bool manifestPinsCpu( const ModelInfo &model )
+    {
+      RequestedDevice request;
+      return !model.runtime.device.empty()
+             && RequestedDevice::parse( model.runtime.device, &request )
+             && request.kind == RequestedDevice::Kind::Cpu;
+    }
+
+    static std::string joinDevices( const std::vector<std::string> &devices )
+    {
+      std::string joined;
+      for ( const std::string &device : devices )
+        joined += ( joined.empty() ? "" : ", " ) + device;
+      return joined.empty() ? std::string( "none" ) : joined;
+    }
+
     std::string mArtifact;
     std::string mDevice = "CPU";
     int mResolvedCudaIndex = 0; ///< registry-resolved CUDA index (R15-C C05/B7)
@@ -223,7 +275,7 @@ class OpenVinoRuntime final : public IModelRuntime
     std::atomic<bool> m_cancelRequested{ false };
     std::atomic<std::uint64_t> m_forwards{ 0 };
     std::atomic<std::uint64_t> m_failures{ 0 };
-    std::mutex m_healthMutex;
+    mutable std::mutex m_healthMutex; ///< locked by the const health() probe
     std::string m_lastError;
     std::unique_ptr<ov::Core> mCore;
     std::shared_ptr<ov::Model> mModel;
