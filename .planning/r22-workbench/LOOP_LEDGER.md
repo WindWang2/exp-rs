@@ -12,3 +12,5 @@ R6 | GREEN×2 全绿：async 24/4、view_tree 70/2、temporal 30/1、log 24/1、
 R7 | 邻域回归 11 目标全绿：async_algorithm_runner 8/2、ui_task_center_contract 169/6、raster_processing_dialog_base 120/11、gui_job_adapter 29/3、active_view_host_viewport 12/2、log_panel 7/4、batch_processing_dialog 35/5、layout_designer 48/9、workspace_browser_wiring 39/4、data_manager_panel 101/16、m2_batch_b_dialogs 193/19 | 同上 | 输出在案 | 通过 | 分包提交
 R8 | R1 评审闭环：APPROVE-WITH-FIXES（P1 close逃逸在 WA_DeleteOnClose 下重开#339 UAF；P2 模态后节点守卫；P3×4）→ 修复 d8d99ee28d + 契约加强；全绿（含 m3_stress 5241/7） | 同 RED_GREEN | 输出在案 | 通过 | R2
 R9 | R2 评审闭环：APPROVE-WITH-FIXES（P2 workerStarted 数据竞争→atomic；P2 reject/Esc 绕过→共享 canCloseSafely 门；P3 void removeLayers；P3 契约加强；P4 注释）→ 修复；ui_contract 34/5 双绿 + 8 目标复跑全绿 | 同上 | 输出在案 | 通过 | 交付文档
+R10 | push 前复查：master 未移动(API 证实)；#1673-76 关闭未合并；#1677 仍 open；新 R22 PR #1708-1712 与本轨零文件交集；fetch 一次 SSL 瞬断已按 fallback 用 API 核实 | gh api/files | 记录在案 | 通过 | push
+R11 | 交付：push 成功 → gh pr create → **PR #1713** https://github.com/WindWang2/exp-rs/pull/1713（MERGEABLE，head 33f29f448b） | gh pr view 核实 | 通过 | 终报完成
