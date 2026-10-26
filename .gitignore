@@ -666,8 +666,15 @@ r6_dev.cmd
 .planning/zcode-r20-05/red-drivers/*
 !.planning/zcode-r20-05/red-drivers/*.cpp
 !.planning/zcode-r20-05/red-drivers/*.md
+<<<<<<< HEAD
 # R22-03 track (remote-sensing AI inference correctness / GPU-CPU stability /
 # chunked throughput): planning artifacts (markdown only; logs/builds stay local).
 !.planning/r22-inference/
 .planning/r22-inference/*
 !.planning/r22-inference/*.md
+=======
+# R22-07 (r22-infra) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/r22-infra/
+.planning/r22-infra/*
+!.planning/r22-infra/*.md
+>>>>>>> origin/master

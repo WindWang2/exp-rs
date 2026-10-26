@@ -16465,3 +16465,18 @@ sicnu_discover_tests(test_r19_02_workflow_cancel_order)
 sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
+
+# ── R22-07 (r22-infra): build/install/test-credibility hardening ──
+# Append-only registration block for this track's suites (docs:
+# .planning/r22-infra). #1697: pins build_offline_bundle.sh's --version
+# guard (traversal battery + legal/space/symlink/incremental legs). Pure
+# POSIX shell invoked through the interpreter (repo precedent for script
+# tests; no exec-bit dependency), POSIX-only hosts only — the Windows twin
+# (.cmd) is smoke-checked in the tier3 CI job instead.
+if(UNIX)
+  add_test(NAME test_r22_infra_bundle_guard
+    COMMAND sh "${CMAKE_SOURCE_DIR}/tests/test_r22_infra_bundle_guard.sh" --repo-root "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(test_r22_infra_bundle_guard PROPERTIES
+    TIMEOUT 120
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
