@@ -411,23 +411,23 @@ FaultResult<FaultScenario> loadFaultScenario( const Value &doc )
         {
             return fieldError( "expected.verifier must be an object" );
         }
-        // The schema publishes the slot (rules_ref / must_fail_assertions)
-        // but nothing consumes it: runFaultScenario never reads
-        // scenario.verifier, and report.passed is the six-way conjunction of
-        // faultApplied/expectations/diagnosis/sandbox/source/replay, so a
-        // scenario declaring verification rules still graded passed:true —
-        // the #1464 accepted-but-inert shape (the same refusal the fixture
-        // level already makes above, and cell_size made at the transform
-        // level in R8). Wiring an artifact-level verifier here would need a
-        // sicnu_verifier link this jsoncpp-only leaf deliberately refuses
-        // (util/canonical_json.cpp), so the door is the loader: refuse the
-        // declaration rather than echo it back through toJson as if it meant
-        // something. The empty object stays legal for schema symmetry.
+        // R21-E (#1613): the schema-documented verifier slot (rules_ref /
+        // must_fail_assertions) is REAL now — strict-parsed here, consumed by
+        // the runner through the injected verifier hook (FaultRunOptions).
+        // The jsoncpp-only leaf still refuses a direct grader link; the
+        // composition layer above (studio_live) installs the hook that runs
+        // the referenced lab rules over the faulted artifact. A declaration
+        // with no hook installed fails closed at run time (never passes
+        // unchecked), and must_fail without rules_ref is refused here. The
+        // empty object stays legal for schema symmetry.
         if ( !expected["verifier"].empty() )
         {
-            return fieldError( "expected.verifier must be empty: schema v1 has no "
-                               "verifier consumer, declared rules would be silently "
-                               "ignored" );
+            FaultVerifierSpec parsed;
+            std::string parseError;
+            if ( !parseFaultVerifierSpec( expected["verifier"], parsed, parseError ) )
+            {
+                return fieldError( parseError );
+            }
         }
         scenario.verifier = expected["verifier"];
     }

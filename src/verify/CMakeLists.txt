@@ -27,6 +27,11 @@ target_include_directories( sicnu_verifier PUBLIC ${CMAKE_SOURCE_DIR}/src )
 set_target_properties( sicnu_verifier PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # R21-E (#1601): the verifier leaf now links into SHARED consumers (the
+    # adapter-side composer reaches libsicnu_agent.so through
+    # sicnu_verify_adapters_gdal), so its objects must be PIC — the same
+    # property sicnu_grader and sicnu_faultlab already carry.
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Same jsoncpp resolution as sicnu_contracts: the canonical target when the

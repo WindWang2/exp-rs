@@ -330,6 +330,10 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         return report;
     }
 
+    // The empty target-experiment-id refusal lives at step 5 (before any
+    // store mutation). The A5 protection installed below is the COMPENSATION
+    // leg: the metrics record is written before the run by design, and a
+    // failed run install deletes it again — no orphan metric row survives.
     run.setExperimentId( options.targetExperimentId );
     run.setExecutionRef( report.originalRunId.isEmpty()
                              ? QString()
@@ -375,6 +379,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
 
     // 6b. Metrics evidence — installed BEFORE the run so a refusal here
     // leaves zero partial state (no half-installed run without its numbers) (protocol + recorded numbers).
+    bool metricsInstalled = false;
     if ( const auto metrics = loadJson( dir, QStringLiteral( "metrics.json" ), &warnings ) )
     {
         if ( !metrics->isEmpty() )
@@ -423,6 +428,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                                       : saved.diagnostics().first().message ) );
                     return report;
                 }
+                metricsInstalled = true;
             }
         }
     }
@@ -436,6 +442,19 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
 const auto installed = m_experimentStore->upsertRun( run );
     if ( !installed )
     {
+        // The metrics record above was installed before the run: without
+        // compensation a failed run install strands an orphan metric row
+        // keyed to a run id that does not exist (risk A5). Undo it now.
+        if ( metricsInstalled )
+        {
+            const auto undone = m_experimentStore->deleteMetricRecord( run.runId() );
+            if ( !undone )
+                report.warnings.append(
+                    QStringLiteral( "compensation failed: the metrics record for run %1"
+                                    " could not be removed after run install failure —"
+                                    " manual cleanup required" )
+                        .arg( run.runId() ) );
+        }
         report.warnings.append(
             QStringLiteral( "run install failed: %1" )
                 .arg( installed.diagnostics().isEmpty()

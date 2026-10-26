@@ -1,0 +1,21 @@
+Randomness seeded to: 2936034844
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+test_r22_agent_ipc is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+oversized IPC responses fail their pending request immediately (#1692)
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_ipc.cpp:59
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_ipc.cpp:109: FAILED:
+  REQUIRE( waitOn( bigAnswered ) )
+with expansion:
+  false
+
+===============================================================================
+test cases:  2 |  1 passed | 1 failed
+assertions: 11 | 10 passed | 1 failed
+

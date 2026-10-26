@@ -37,6 +37,8 @@ class Stmt
         if ( sqlite3_prepare_v2( db, sql, -1, &m_stmt, nullptr ) != SQLITE_OK )
             m_stmt = nullptr;
     }
+    Stmt( sqlite3 *db, const QString &sql )
+        : Stmt( db, sql.toUtf8().constData() ) {}
     ~Stmt() { if ( m_stmt ) sqlite3_finalize( m_stmt ); }
     explicit operator bool() const { return m_stmt != nullptr; }
     sqlite3_stmt *get() const { return m_stmt; }
@@ -133,10 +135,26 @@ struct WorkspaceCatalog::Impl
             "  tag TEXT NOT NULL,"
             "  PRIMARY KEY(asset_id, tag));"
             "CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);"
-            "INSERT OR REPLACE INTO catalog_meta(key,value)"
-            " VALUES('schema_version','" SICNU_CATALOG_SCHEMA_VERSION "');"
             "COMMIT;";
-        return exec( schema );
+        if ( !exec( schema ) )
+            return false;
+        // Risk A4 (same doctrine as ArtifactStore): the version stamp is
+        // write-once. INSERT OR REPLACE would rewrite an EXISTING stamp —
+        // harmless while "1" is the only version, migration-skipping the
+        // day a v2 exists. Stamp only catalogs that have no version row.
+        {
+            Stmt existing( db,
+                           QStringLiteral( "SELECT value FROM catalog_meta WHERE key='schema_version'" ) );
+            if ( existing && existing.stepRow() )
+                return true; // existing stamp is authoritative, never rewritten
+        }
+        // INSERT OR IGNORE: two concurrent first-opens can both observe "no
+        // stamp" and both reach this INSERT. The PK loser must NOT fail
+        // open() — the winner's stamp is on disk and valid, which is the
+        // state this call exists to establish (review R1-F5/R2-F04).
+        Stmt stamp( db, QStringLiteral(
+            "INSERT OR IGNORE INTO catalog_meta(key,value) VALUES('schema_version','" SICNU_CATALOG_SCHEMA_VERSION "')" ) );
+        return stamp && stamp.step();
     }
 
     CatalogAsset readAsset( const Stmt &s )
@@ -228,7 +246,13 @@ bool WorkspaceCatalog::open( const QString &dbPath, QString *errorOut )
         close();
         return false;
     }
-    m_impl->schemaVersion = QStringLiteral( "1" );
+    // Report the catalog's OWN stamp (write-once: an older stamp survives
+    // open and is reported honestly, never silently upgraded).
+    {
+        Stmt v( m_impl->db, "SELECT value FROM catalog_meta WHERE key='schema_version'" );
+        if ( v && v.stepRow() )
+            m_impl->schemaVersion = v.text( 0 );
+    }
     return true;
 }
 

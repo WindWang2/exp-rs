@@ -98,6 +98,12 @@ class SICNU_AGENT_EXPORT OutputVerifier
         std::vector<LabDeduction> deductions;
         std::vector<LabEvidence> evidence;
         Json::Value summary;    ///< grid info, valid/nodata counts, budget used
+        /// R21-E (#1601): composed scientific-verifier evidence from the ADR
+        /// 0172 authority (verify_adapters composer) — additive and sealed
+        /// ({schema,status,spec_digest,counts,checks}); "indeterminate" never
+        /// folds into @a verdict. Null for usage-class refusals (nothing was
+        /// verified, so nothing is claimed).
+        Json::Value verifier;
         QString digest;         ///< sha256 over the canonical body (no timestamp)
 
         /// Deterministic body object (the "report" member of the emitted

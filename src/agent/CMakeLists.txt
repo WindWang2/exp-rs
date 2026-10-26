@@ -274,6 +274,10 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_workflow
   Sicnu::help
   Sicnu::help_adapters
+  # R21-E (#1601): the ADR 0172 authority (via its adapter-side composer)
+  # reaches the teaching grade report — additive evidence, the verifier leaf
+  # itself gains no downstream link.
+  sicnu_verify_adapters_gdal
   # RS14-12: teaching autonomy policy leaf (Qt-free); hosts the L0..L5
   # decision engine the lab copilot and the plan executor gate on.
   Sicnu::autonomy

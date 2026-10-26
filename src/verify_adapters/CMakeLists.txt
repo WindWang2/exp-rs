@@ -26,6 +26,9 @@ target_include_directories( sicnu_verify_adapters PUBLIC ${CMAKE_SOURCE_DIR}/src
 set_target_properties( sicnu_verify_adapters PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # R21-E (#1601): the production composer (in the gdal variant) links into
+    # libsicnu_agent.so (SHARED) — PIC like the verifier leaf.
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # jsoncpp arrives transitively through sicnu_verifier's PUBLIC link; the
@@ -49,8 +52,12 @@ endforeach()
 
 # GDAL-backed grid probe: same seam, one more authority (the geospatial I/O
 # foundation — RasterReader, bandSentinelMatches, ensureGdalRegistered).
+# lab_verify_composer (R21-E #1601) is the production bridge that composes
+# the authority engine + both probes for one teaching artifact; it judges
+# nothing itself (the engine does) so the "no second verifier" line holds.
 add_library( sicnu_verify_adapters_gdal STATIC
     gdal_grid_probe.cpp
+    lab_verify_composer.cpp
 )
 
 target_include_directories( sicnu_verify_adapters_gdal PUBLIC ${CMAKE_SOURCE_DIR}/src )
@@ -58,6 +65,10 @@ target_include_directories( sicnu_verify_adapters_gdal PUBLIC ${CMAKE_SOURCE_DIR
 set_target_properties( sicnu_verify_adapters_gdal PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # R21-E (#1601): linked into libsicnu_agent.so (SHARED) by the production
+    # composer seam — the objects must be PIC like the verifier leaf they
+    # compose.
+    POSITION_INDEPENDENT_CODE ON
 )
 
 target_link_libraries( sicnu_verify_adapters_gdal PUBLIC

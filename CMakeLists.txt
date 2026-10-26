@@ -254,6 +254,21 @@ endif()
 set(QGISPOSTFIX "")
 set(LIBRARY_TYPE SHARED)
 
+# --- Install-tree RPATH (#1698) ---
+# CMake strips the build RPATH at install time and this project never set an
+# INSTALL_RPATH, so an installed bin/sicnu_geo_rs_cli could not locate the
+# project's own lib/libsicnu_*.so without LD_LIBRARY_PATH/DYLD_* help. Make
+# the install tree relocatable: executables in bin/ reach lib/ one level up,
+# libraries in lib/ resolve sibling libraries in place. Declared before any
+# add_subdirectory() so every target below inherits it. Windows has no RPATH
+# by design — CMake already installs the DLL half of each SHARED target into
+# bin/ next to the executables.
+if(APPLE)
+    set(CMAKE_INSTALL_RPATH "@loader_path/../lib;@loader_path")
+elseif(UNIX)
+    set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN")
+endif()
+
 # --- P0 options: disable optional features, use vendored deps ---
 option(ENABLE_UNITY_BUILDS "" OFF)
 option(WITH_INTERNAL_MESHOPTIMIZER "" ON)

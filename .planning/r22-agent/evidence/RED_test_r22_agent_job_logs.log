@@ -1,0 +1,34 @@
+Randomness seeded to: 2852186667
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+test_r22_agent_job_logs is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+chatty jobs keep bounded logLines with drop accounting (#1705)
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_job_logs.cpp:48
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_job_logs.cpp:78: FAILED:
+  REQUIRE( snap->logLines.size() <= 10'000 )
+with expansion:
+  25002 (0x61aa) <= 10000 (0x2710)
+
+-------------------------------------------------------------------------------
+oversized single log lines are truncated, not stored verbatim (#1705)
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_job_logs.cpp:152
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_job_logs.cpp:179: FAILED:
+  REQUIRE( fat.size() < 8 * 1024 )
+with expansion:
+  1048576 (0x100000) < 8192 (0x2000)
+with message:
+  fat line retained size: 1048576
+
+===============================================================================
+test cases:     4 |     2 passed | 2 failed
+assertions: 24015 | 24013 passed | 2 failed
+

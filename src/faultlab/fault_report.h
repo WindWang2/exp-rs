@@ -46,6 +46,14 @@ struct FaultRunReport
     std::string replayDigest;
     bool replayDeterministic = false;
 
+    // Artifact-level verifier (#1613): present only when the scenario
+    // declared expected.verifier; serialized conditionally so undeclared
+    // scenarios keep their byte-identical legacy report shape.
+    bool verifierDeclared = false;   // the scenario declared expected.verifier
+    bool verifierChecked = false;    // the hook ran and produced a verdict
+    bool verifierMustFailObserved = false; ///< every must-fail assertion failed
+    std::vector<std::string> verifierObservedFailed;
+
     std::vector<FaultDiagnostic> diagnostics;
 
     bool passed = false;

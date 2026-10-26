@@ -429,28 +429,16 @@ void StdinReader::run()
             // shutdown with a bogus "-32700 line too long" (id:null).
             if ( std::cin.eof() && std::cin.gcount() == 0 )
                 break;
-            // Exact-boundary line: the buffer filled at precisely
-            // kMaxMcpLine chars before the delimiter, so getline set
-            // failbit — but if the very next char IS the newline (or EOF)
-            // the line is exactly at the cap, not over it. Consume the
-            // delimiter and deliver it like any other frame. peek() needs a
-            // clear() first: on a failed stream it returns EOF blindly.
-            if ( std::cin.gcount() == kMaxMcpLine )
-            {
-                std::cin.clear();
-                const int next = std::cin.peek();
-                if ( next == '\n' || next == EOF )
-                {
-                    if ( next == '\n' )
-                        std::cin.get();
-                    const QString line = QString::fromUtf8( buffer.data() ).trimmed();
-                    if ( !line.isEmpty() )
-                        emit lineRead( line );
-                    if ( next == EOF )
-                        break;
-                    continue;
-                }
-            }
+            // #1693: an "exact-boundary line" rescue branch used to live
+            // here (fail() && gcount()==kMaxMcpLine → peek for '\n'). It
+            // was dead code: istream::getline checks the DELIMITER before
+            // the n-1 limit, so storing exactly kMaxMcpLine chars followed
+            // by '\n' extracts the delimiter WITHOUT setting failbit (the
+            // non-fail path below delivers it), and hitting EOF after
+            // kMaxMcpLine stored chars sets eofbit, not failbit. Reaching
+            // fail() with gcount()==kMaxMcpLine therefore means the next
+            // character is neither '\n' nor EOF — the line is genuinely
+            // over the cap and belongs to the sentinel path below.
             // Unrecoverable stream error (badbit): clear() cannot repair a
             // broken streambuf — without this the loop spins emitting
             // sentinels forever on a dead stdin.

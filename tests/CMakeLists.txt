@@ -3375,6 +3375,28 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_model_runtime_9)
 
+    # R22-03 inference track: #1706 multi-class feather accumulator
+    # regression — per-slot buffers, once-per-tile weights, argmax parity,
+    # window-slide isolation, NoData verdicts, uncertainty slot.
+    # Fake provider + synthetic rasters — runs in every OpenCV-enabled build.
+    add_executable(test_r22_inference_feather test_r22_inference_feather.cpp)
+    target_link_libraries(test_r22_inference_feather PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r22_inference_feather)
+    target_include_directories(test_r22_inference_feather PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r22_inference_feather)
+
     # Model Runtime 8.0 WP-A: the REAL ONNX Runtime lane. Built only when the
     # ORT provider is actually compiled in — hosts without the dependency skip
     # the target entirely (honest capability gate, never a fake pass).
@@ -16443,3 +16465,317 @@ sicnu_discover_tests(test_r19_02_workflow_cancel_order)
 sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
+
+# --- R21-E (zcode-r21-E): verifier evidence + faultlab verifier wiring ---
+# W1 (#1601): the ADR 0172 authority reaches the production grade report.
+sicnu_add_test(test_r21_e_verifier_evidence TIMEOUT 300)
+sicnu_link_jsoncpp(test_r21_e_verifier_evidence)
+target_link_libraries(test_r21_e_verifier_evidence PRIVATE sicnu_agent)
+
+# W2 (#1613): the schema-documented expected.verifier becomes a loadable,
+# enforced contract (loader acceptance + typed refusals; runner folding tests
+# join with the W2 runner change).
+add_executable(test_r21_e_faultlab_verifier test_r21_e_faultlab_verifier.cpp)
+target_link_libraries(test_r21_e_faultlab_verifier PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_faultlab
+  Qt6::Core # QTemporaryDir blocker fixture for the aborted-run case
+)
+sicnu_discover_tests(test_r21_e_faultlab_verifier)
+# --- end R21-E registrations ---
+
+# R21-E W5 (O-E2): course-scale batch invariants with time/RSS evidence.
+sicnu_add_test(test_r21_e_batch_stress TIMEOUT 600)
+sicnu_link_jsoncpp(test_r21_e_batch_stress)
+target_link_libraries(test_r21_e_batch_stress PRIVATE sicnu_lab_batch)
+
+# R21-E W2 (#1613): the PRODUCTION verifier hook end-to-end through the
+# studio composition layer (rules really run over the faulted artifact).
+sicnu_add_test(test_r21_e_studio_verifier_hook TIMEOUT 300)
+sicnu_link_jsoncpp(test_r21_e_studio_verifier_hook)
+target_link_libraries(test_r21_e_studio_verifier_hook PRIVATE Sicnu::experiment_studio_live)
+
+# --- R21-B track (append-only block) -----------------------------------------
+sicnu_add_test(test_r21_b_end_to_end TIMEOUT 300)
+target_link_libraries(test_r21_b_end_to_end PRIVATE
+    Sicnu::experiment Sicnu::dataset Sicnu::data SQLite::SQLite3)
+
+# --- R22-05 (r22-workbench) async runner lifecycle contract (#1695 item 1) ---
+# Append-only registration. The runner implementations are compiled directly
+# into the test (deprecated legacy types not built into any library), mirroring
+# test_async_algorithm_runner / test_ui_task_center_contract.
+add_executable(test_r22_workbench_async_runner
+  test_r22_workbench_async_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_gdal_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+)
+target_link_libraries(test_r22_workbench_async_runner PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_r22_workbench_async_runner PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_workbench_async_runner)
+# --- end R22-05 registration ---
+
+# --- R22-05 (r22-workbench) W2/W3/W4/W5 + source contracts -------------------
+# Append-only registrations. W3/W4 drive ActiveViewHost + LayerTreeMenuProvider
+# against a real QgisDisplayManager fixture (mirrors test_qgis_display_manager).
+qt_add_executable(test_r22_workbench_view_tree
+  test_r22_workbench_view_tree.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layer_tree_menu.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_r22_workbench_view_tree PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  GDAL::GDAL
+)
+target_include_directories(test_r22_workbench_view_tree PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_workbench_view_tree)
+
+# W2: temporal dialog parameter-page routing (Temporal Intelligence 11.0 gap).
+# NO_DEFAULT_MAIN: the test file carries its own QgsApplication-aware main.
+sicnu_add_dialog_test(test_r22_workbench_temporal_pages NO_DEFAULT_MAIN
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+  EXTRA_LIBS Sicnu::qgis_display GDAL::GDAL
+)
+
+# W5: log panel typed-tag filter (shares the QgsApplication-aware main).
+add_executable(test_r22_workbench_log_tagfilter
+  test_r22_workbench_log_tagfilter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/tests/test_log_panel_main.cpp
+)
+target_link_libraries(test_r22_workbench_log_tagfilter PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_r22_workbench_log_tagfilter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_workbench_log_tagfilter)
+
+# W4/W6/W7/W8/W9/extras: source-level UI contracts (readSource pattern).
+add_executable(test_r22_workbench_ui_contract
+  test_r22_workbench_ui_contract.cpp
+)
+target_link_libraries(test_r22_workbench_ui_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r22_workbench_ui_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r22_workbench_ui_contract PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r22_workbench_ui_contract)
+# --- end R22-05 registrations ---
+
+# --- R22-01 science track (r22-science): append-only registration ---
+# Numerical-correctness anchors for #1707 (distance transform) and #1684
+# (accumulator stats), portable-random golden sequences for #1685, and
+# resampler footprint semantics for #1686.
+qt_add_executable(test_r22_science_numerics test_r22_science_numerics.cpp)
+target_link_libraries(test_r22_science_numerics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r22_science_numerics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_science_numerics)
+
+qt_add_executable(test_r22_science_random test_r22_science_random.cpp)
+target_link_libraries(test_r22_science_random PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r22_science_random PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_science_random)
+
+qt_add_executable(test_r22_science_resampler test_r22_science_resampler.cpp)
+target_link_libraries(test_r22_science_resampler PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r22_science_resampler PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_science_resampler)
+# --- end R22-01 science track registrations ---
+
+# --- R22-06 teaching track (r22-teaching): batch regrade identity + guard ---
+# Append-only registration block; docs: .planning/r22-teaching.
+sicnu_add_teaching_admin_test(test_r22_teaching_batch_regrade)
+
+add_executable(test_r22_teaching_guard_hygiene test_r22_teaching_guard_hygiene.cpp)
+target_link_libraries(test_r22_teaching_guard_hygiene PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching_admin
+  sicnu_lab_runtime
+)
+target_include_directories(test_r22_teaching_guard_hygiene PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+set_target_properties(test_r22_teaching_guard_hygiene PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_r22_teaching_guard_hygiene)
+# --- end R22-06 registrations ---
+
+# ── R22-02 (r22-data): data-access security, remote COG cache identity,
+# atomic publish consistency and dataset provenance closure (#1679/#1700/
+# #1701/#1680/#1702/#1703). Append-only registration block for this track;
+# docs: .planning/r22-data. ──
+sicnu_add_test(test_r22_data_security_consistency TIMEOUT 300)
+target_link_libraries(test_r22_data_security_consistency PRIVATE
+    Sicnu::Geospatial
+    Sicnu::dataset
+    Sicnu::data
+    SQLite::SQLite3
+)
+# ── end R22-02 registrations ──
+
+# ── R22-07 (r22-infra): build/install/test-credibility hardening ──
+# Append-only registration block for this track's suites (docs:
+# .planning/r22-infra). #1697: pins build_offline_bundle.sh's --version
+# guard (traversal battery + legal/space/symlink/incremental legs). Pure
+# POSIX shell invoked through the interpreter (repo precedent for script
+# tests; no exec-bit dependency), POSIX-only hosts only — the Windows twin
+# (.cmd) is smoke-checked in the tier3 CI job instead.
+if(UNIX)
+  add_test(NAME test_r22_infra_bundle_guard
+    COMMAND sh "${CMAKE_SOURCE_DIR}/tests/test_r22_infra_bundle_guard.sh" --repo-root "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(test_r22_infra_bundle_guard PROPERTIES
+    TIMEOUT 120
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+
+# --- R22-04 (r22-agent, #1704): GDAL driver-prefix connection strings vs the
+# workspace sandbox. Light binary: the containment policy is header-only, so
+# Catch2 + Qt Core suffice (no qgis/GDAL chain) — mirrors the CLI pipeline
+# runner's use of the same header.
+qt_add_executable(test_r22_agent_containment test_r22_agent_containment.cpp)
+target_link_libraries(test_r22_agent_containment PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r22_agent_containment PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_agent_containment)
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1690): env-key splice validation + manifest-time
+# env-name charset gate. Light SDK binary (Catch2 + sicnu_sdk).
+sicnu_add_sdk_test(test_r22_agent_env_keys)
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1692): oversized IPC response lines must fail their
+# pending request immediately instead of hanging to the caller timeout.
+# Own main (QCoreApplication + Catch::Session), same link set as the python
+# channel tests (test_runtime_python_channel_r4).
+qt_add_executable(test_r22_agent_ipc test_r22_agent_ipc.cpp)
+target_link_libraries(test_r22_agent_ipc PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Network
+  sicnu_python_isolated
+  sicnu_jobs
+  sicnu_qgis_display
+  sicnu_processing
+  sicnu_operators
+  qgis_core
+)
+target_include_directories(test_r22_agent_ipc PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_agent_ipc)
+# R1-F6 note: test_r22_agent_ghost_algo spawns the REAL worker daemon
+# (subprocess python via PythonWorkerProcessPool) and needs a python with
+# numpy — set SICNU_PYTHON_EXECUTABLE when the system python lacks it.
+# test_r22_agent_ipc drives PythonIpcServer through an in-process fake
+# QLocalSocket worker (no daemon). Neither uses the embedded interpreter, so
+# both stay outside the if(SICNU_EMBED_PYTHON) gate; on a lane without any
+# numpy-capable python, expect ghost_algo to fail on daemon startup rather
+# than be skipped.
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1705): bounded JobEngine log retention. Same link
+# shape as test_job_engine (jobs + operators registry chain).
+add_executable(test_r22_agent_job_logs test_r22_agent_job_logs.cpp)
+target_link_libraries(test_r22_agent_job_logs PRIVATE Catch2::Catch2WithMain sicnu_jobs)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r22_agent_job_logs PRIVATE sicnu_operators)
+endif()
+target_include_directories(test_r22_agent_job_logs PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_r22_agent_job_logs)
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1691): timed-out plugin loads must revoke their
+# py: registrations. Spawns the real worker daemon (RUN_SERIAL, mirrors
+# test_python_plugin_host).
+qt_add_executable(test_r22_agent_ghost_algo test_r22_agent_ghost_algo.cpp)
+target_link_libraries(test_r22_agent_ghost_algo PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_python_isolated
+  Sicnu::qgis_display
+  sicnu_processing
+  sicnu_operators
+  Sicnu::data
+  qgis_core
+  GDAL::GDAL
+)
+target_include_directories(test_r22_agent_ghost_algo PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/python/isolated
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_agent_ghost_algo RUN_SERIAL TRUE)
+# --- end R22-04 registration ---

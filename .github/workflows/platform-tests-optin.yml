@@ -1,0 +1,91 @@
+# Opt-in macOS test lane (#1682).
+#
+# The macOS tier in ci.yml stays a compile-only BUILD SEAM on purpose:
+# building all ~100 Catch2 executables next to the product pushes the job
+# past GitHub's 360-minute cap (see the tier3 note there). This workflow is
+# the manual escape hatch for exactly that gap: dispatch it when a change
+# touches platform-sensitive code (path separators, native/mac, QProcess,
+# file locks, loader/@loader_path behavior) and you need real macOS test
+# coverage. It enables ENABLE_TESTS but builds ONLY the requested subset
+# before running it, keeping inside the job cap.
+#
+# Windows has no lane here on purpose: its dependency stack
+# (tier3-windows-deps + pinned vcpkg + qca/qtkeychain source builds) only
+# exists inside ci.yml and duplicating it here would drift immediately.
+# The Windows PR-lane smokes (bundle guard + install tree) live in ci.yml;
+# a compiled-test Windows lane needs that stack factored into a reusable
+# workflow first (tracked in .planning/r22-infra/CROSS_TRACK_FINDINGS.md).
+#
+# Deliberately NOT wired into push/PR/schedule: no automatic runner spend; a
+# human decides when platform coverage is worth the minutes.
+name: Platform Tests (opt-in)
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_regex:
+        description: 'ctest -R regex selecting the test subset to run'
+        required: false
+        default: 'test_cli_exit_codes_r4|test_workflow_run_lock_r4|test_plugin_host_process|test_agent_ops_ui_smoke'
+      targets:
+        description: 'Test targets to build (must match the regex above)'
+        required: false
+        default: 'test_cli_exit_codes_r4 test_workflow_run_lock_r4 test_plugin_host_process test_agent_ops_ui_smoke'
+
+# #1683: least privilege — nothing here publishes.
+permissions:
+  contents: read
+
+jobs:
+  macos-tests:
+    name: macOS - platform-sensitive test subset
+    runs-on: macos-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          # Same (clang, Release, brew deps) triple as the tier3 macOS build
+          # seam in ci.yml — reuse its warmed cache instead of forking a
+          # third macOS pool (R1-6); only the tail differs on test-object
+          # recompiles.
+          key: ccache-tier3-macos-clang-Release
+          restore-keys: ccache-tier3-macos-clang-Release-
+          max-size: 2G
+
+      - name: Install macOS Dependencies via Homebrew
+        run: |
+          brew update
+          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf jsoncpp opencv libtasn1
+
+      - name: Configure CMake for macOS (tests on)
+        run: |
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          export PATH="$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$PATH"
+          cmake -B build-mac -S . \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6);$(brew --prefix)" \
+            -DBISON_EXECUTABLE="$(brew --prefix bison)/bin/bison" \
+            -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_LTO=OFF \
+            -DENABLE_TESTS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build test subset
+        # -j2: see the tier3 note in ci.yml — 7GB runners OOM with more.
+        run: cmake --build build-mac --target ${{ inputs.targets }} --parallel 2
+
+      - name: Run test subset
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # tier1 env parity (R2-10): tests that fall back to the models
+          # directory need the same pointer the fast lane gets.
+          SICNU_MODELS_DIR: ${{ github.workspace }}/models
+        run: ctest --test-dir build-mac -R "${{ inputs.test_regex }}" --output-on-failure

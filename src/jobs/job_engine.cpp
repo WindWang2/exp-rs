@@ -752,11 +752,42 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
 
 void JobEngine::appendLog( JobRecord &rec, JobLogLevel level, const std::string &text )
 {
+  // #1705: logLines used to grow without bound for the lifetime of a
+  // running job (a chatty operator printed its way to OOM), and every
+  // snapshot/terminal notify copied the whole vector under m_mutex. The
+  // retained history is now bounded: single lines above kMaxJobLogLineBytes
+  // are truncated (no single print can dominate the budget), and once the
+  // line count crosses kMaxJobLogLines the OLDEST block is evicted down to
+  // kJobLogKeepLines (block eviction amortizes the front-erase cost; the
+  // count of dropped lines is preserved in rec.droppedLogLines). Callers
+  // must hold m_mutex — every existing call site does.
+  constexpr std::size_t kMaxJobLogLineBytes = 4 * 1024;
   JobLogLine line;
   line.unixMs = nowUnixMs();
   line.level = level;
   line.text = text;
+  if ( line.text.size() > kMaxJobLogLineBytes )
+  {
+    std::size_t cut = kMaxJobLogLineBytes;
+    // Do not split a UTF-8 sequence at the cut boundary.
+    while ( cut > 0 && ( static_cast<unsigned char>( line.text[cut] ) & 0xC0 ) == 0x80 )
+      --cut;
+    const std::size_t droppedBytes = line.text.size() - cut;
+    line.text.resize( cut );
+    line.text += " …[truncated " + std::to_string( droppedBytes ) + " bytes]";
+  }
   rec.logLines.push_back( std::move( line ) );
+  if ( rec.logLines.size() > kMaxJobLogLines )
+  {
+    const std::size_t evict = rec.logLines.size() - kJobLogKeepLines;
+    rec.logLines.erase( rec.logLines.begin(),
+                        rec.logLines.begin() + static_cast<std::ptrdiff_t>( evict ) );
+    rec.droppedLogLines += evict;
+    // No cursor adjustment: delta offsets reference the ABSOLUTE appended-
+    // line space (droppedLogLines + local index, see the log callback), which
+    // eviction does not renumber — consumers keep a monotonic exactly-once
+    // index even as old lines leave the retained window.
+  }
 }
 
 void JobEngine::notify( const JobRecord &rec )
@@ -930,26 +961,43 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     // cumulative record is still reachable via snapshot() and the terminal
     // notify. (The first cut of this delta omitted id and shipped a 1-line
     // slice, so TaskCenter silently dropped every streaming log line.)
+    //
+    // #1705: offsets reference the ABSOLUTE appended-line space
+    // (droppedLogLines + local index), so the bounded window's front-erase
+    // never renumbers what consumers have already indexed — TaskCenter's
+    // forwarded-count stays monotonic and exactly-once across evictions.
     JobRecord copy;
     {
       std::lock_guard<std::mutex> lock( m_mutex );
       auto it = m_jobs.find( jobId );
       if ( it == m_jobs.end() )
         return;
+      // #1693: a late log line from the operator's own lingering threads
+      // after the terminal transition used to appendLog into the FINISHED
+      // record and re-insert m_deltaLogCursor[jobId] (finishJobLocked had
+      // just erased it) — mutating a terminal record and leaking a cursor
+      // entry nothing ever cleans up. Terminal records are immutable.
+      if ( isTerminalState( it->second.state ) )
+        return;
       appendLog( it->second, logLevelFromString( level ), message );
       copy.id = it->second.id;
       copy.progress = it->second.progress;
       copy.state = it->second.state;
       const std::size_t total = it->second.logLines.size();
-      std::size_t &cursor = m_deltaLogCursor[jobId];
-      if ( total > cursor )
+      const std::size_t absTotal = total + it->second.droppedLogLines;
+      std::size_t &cursor = m_deltaLogCursor[jobId]; // absolute shipped index
+      if ( absTotal > cursor )
       {
-        // 1-based: logLinesOffset == 0 is reserved for cumulative records.
-        copy.logLinesOffset = cursor + 1;
-        copy.logLines.reserve( total - cursor );
-        for ( std::size_t i = cursor; i < total; ++i )
+        // Local start of the un-shipped tail; clamped to the retained
+        // window when the cursor predates evicted lines (the dropped lines
+        // were already shipped to the consumer — or nobody was listening).
+        const std::size_t localStart =
+            cursor > it->second.droppedLogLines ? cursor - it->second.droppedLogLines : 0;
+        copy.logLinesOffset = it->second.droppedLogLines + localStart + 1;
+        copy.logLines.reserve( total - localStart );
+        for ( std::size_t i = localStart; i < total; ++i )
           copy.logLines.push_back( it->second.logLines[i] );
-        cursor = total;
+        cursor = absTotal;
       }
     }
     notify( copy );
@@ -1046,8 +1094,35 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       if ( outcome.hasResult )
         rec.result = std::move( outcome.result );
       appendLog( rec, outcome.logLevel, outcome.logText );
-      finishJobLocked( rec, wasExclusive );
       copy = rec;
+      // #1705: once bounded eviction can shrink logLines below what a
+      // consumer has already indexed, a CUMULATIVE terminal record can no
+      // longer deliver its final line (TaskCenter only appends when
+      // size > forwarded). Ship the terminal line as the SAME monotonic
+      // delta stream the log callback uses whenever a cursor exists; the
+      // record's fields (state/result/error) ride along unchanged.
+      auto cursorIt = m_deltaLogCursor.find( jobId );
+      if ( cursorIt != m_deltaLogCursor.end() )
+      {
+        const std::size_t total = rec.logLines.size();
+        const std::size_t absTotal = total + rec.droppedLogLines;
+        std::size_t &cursor = cursorIt->second;
+        if ( absTotal > cursor )
+        {
+          const std::size_t localStart =
+              cursor > rec.droppedLogLines ? cursor - rec.droppedLogLines : 0;
+          copy.logLinesOffset = rec.droppedLogLines + localStart + 1;
+          copy.logLines.assign( rec.logLines.begin() + static_cast<std::ptrdiff_t>( localStart ),
+                                rec.logLines.end() );
+          cursor = absTotal;
+        }
+        else
+        {
+          copy.logLines.clear();
+          copy.logLinesOffset = 0; // nothing new: fields-only notify
+        }
+      }
+      finishJobLocked( rec, wasExclusive );
     }
     notify( copy );
   };

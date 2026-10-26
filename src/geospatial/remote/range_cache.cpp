@@ -730,15 +730,18 @@ class CacheStore
 
     /// 9.0 M3 — disk layer: the content-identity basis of a resource, or ""
     /// when the layer is disabled or the identity is unprovable (fail-closed:
-    /// unprovable identity is never disk-cached).
-    std::string diskBasis( const std::shared_ptr<ResourceEntry> &entry )
+    /// unprovable identity is never disk-cached). @p blockSize participates
+    /// in the basis (#1700): block indices name byte ranges only under one
+    /// geometry.
+    std::string diskBasis( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t blockSize )
     {
       if ( !RangeDiskBlockStore::enabled() )
         return std::string();
       const RemoteSourceIdentity identity = snapshotIdentity( entry );
       return RangeDiskBlockStore::identityBasis( entry->requestUrl, identity.validator.hasStrongEtag(),
                                                  identity.validator.etag, identity.hasSize,
-                                                 identity.sizeBytes, identity.validator.lastModified );
+                                                 identity.sizeBytes, identity.validator.lastModified,
+                                                 blockSize );
     }
 
     /// Fills missing blocks of [firstBlock,lastBlock] from the checksummed
@@ -750,7 +753,7 @@ class CacheStore
                              std::uint64_t blockSize, std::uint64_t fetchConfigGeneration,
                              std::uint64_t maxCacheBytes, std::uint64_t maxBytesPerResource )
     {
-      const std::string basis = diskBasis( entry );
+      const std::string basis = diskBasis( entry, blockSize );
       if ( basis.empty() )
         return false;
       std::vector<std::uint64_t> missing;
@@ -772,6 +775,13 @@ class CacheStore
       {
         std::vector<unsigned char> data;
         if ( !RangeDiskBlockStore::readBlock( basis, blockIndex, data ) )
+          continue;
+        // #1700 belt-and-braces: a block file can never legitimately carry
+        // MORE bytes than the current geometry's blockSize. The basis
+        // already separates geometries; this refuses a misfiled or
+        // hand-planted oversized block instead of inserting it (a short
+        // block IS legal — a range end or object EOF clamps the tail).
+        if ( data.empty() || data.size() > static_cast<std::size_t>( blockSize ) )
           continue;
         {
           std::lock_guard<std::mutex> lock( mMutex );
@@ -805,7 +815,7 @@ class CacheStore
         const RemoteSourceIdentity &identity = entry->identity;
         basis = RangeDiskBlockStore::identityBasis(
           entry->requestUrl, identity.validator.hasStrongEtag(), identity.validator.etag,
-          identity.hasSize, identity.sizeBytes, identity.validator.lastModified );
+          identity.hasSize, identity.sizeBytes, identity.validator.lastModified, blockSize );
       }
       if ( basis.empty() )
         return;
@@ -868,12 +878,32 @@ class CacheStore
 
     void updateConfig( const RangeCacheConfig &newConfig )
     {
-      std::lock_guard<std::mutex> lock( mMutex );
-      const bool geometryChanged = newConfig.blockSize != config.blockSize;
-      config = newConfig;
+      bool geometryChanged = false;
+      {
+        // R1-F2: compare and apply under ONE lock hold — a split scope let
+        // two racing updateConfig calls both observe "unchanged" against
+        // the pre-swap value and skip the drop while the geometry still
+        // moved (latent today: install() serializes under
+        // g_storeLifecycleMutex, but this function must be safe alone).
+        std::lock_guard<std::mutex> lock( mMutex );
+        geometryChanged = newConfig.blockSize != config.blockSize;
+        config = newConfig;
+        if ( geometryChanged )
+          dropAllLocked(); // old-config blocks are unreadable under the new indexing
+        configGeneration += 1;
+      }
+      // #1700: the disk layer outlives this process. A geometry change made
+      // every on-disk OLD-geometry block's INDEX meaningless — even with
+      // blockSize now in the basis (old files unreachable, never served),
+      // keeping them is dead bytes against the disk cap. Drop them while
+      // NOT holding mMutex: clear() takes the store's own mutex, and
+      // mMutex→disk-mutex is the only ordering the two locks ever meet in.
+      // (R2-3 scope note: this also drops same-new-geometry blocks a prior
+      // process left in the directory — a cold-start refill, correctness
+      // unaffected. Keying the sweep per-basis would keep them; not done:
+      // a geometry change is a rare config act, not a hot path.)
       if ( geometryChanged )
-        dropAllLocked(); // old-config blocks are unreadable under the new indexing
-      configGeneration += 1;
+        RangeDiskBlockStore::clear();
     }
 
     std::uint64_t cachedBytes()
