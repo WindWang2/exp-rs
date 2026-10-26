@@ -94,7 +94,40 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     if ( node->nodeType() == QgsLayerTreeNode::NodeGroup ) {
         menu->addAction( defActions->actionZoomToGroup( nullptr ) );
         menu->addAction( defActions->actionRenameGroupOrLayer() );
-        menu->addAction( defActions->actionRemoveGroupOrLayer() );
+        // Group removal must go through ActiveViewHost so every layer in the
+        // group is removed via QgisDisplayManager (Display Layer records and
+        // Asset leases are released). The stock default action deletes the
+        // tree nodes / project layers behind the manager's back, stranding
+        // both ("asset is leased / cannot unload").
+        if ( m_activeViewHost ) {
+            QAction *removeAction = menu->addAction( QObject::tr( "&Remove" ) );
+            removeAction->setToolTip(
+                QObject::tr( "Remove the group and its layers from the display" ) );
+            const QPointer<QgsLayerTreeNode> nodeGuard( node );
+            QObject::connect( removeAction, &QAction::triggered, menu,
+                              [hostPtr, nodeGuard]() {
+                if ( !hostPtr || !nodeGuard )
+                    return;
+                auto *group = static_cast<QgsLayerTreeGroup *>( nodeGuard.data() );
+                QList<QgsMapLayer *> layers;
+                const QList<QgsLayerTreeLayer *> layerNodes = group->findLayers();
+                for ( QgsLayerTreeLayer *layerNode : layerNodes ) {
+                    if ( QgsMapLayer *layer = layerNode->layer() )
+                        layers.append( layer );
+                }
+                const bool removedAny = hostPtr->removeLayers( layers );
+                // Remove the group node itself once its layers went through
+                // the manager (or when it never had any). Declining the
+                // confirmation removes nothing.
+                if ( layers.isEmpty() || removedAny ) {
+                    if ( QgsLayerTreeGroup *parent =
+                             qobject_cast<QgsLayerTreeGroup *>( nodeGuard->parent() ) )
+                        parent->removeChildNode( nodeGuard.data() );
+                }
+            } );
+        } else {
+            menu->addAction( defActions->actionRemoveGroupOrLayer() );
+        }
         menu->addSeparator();
         menu->addAction( defActions->actionAddGroup() );
         menu->addAction( defActions->actionMutuallyExclusiveGroup() );
