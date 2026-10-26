@@ -39,12 +39,21 @@ struct JobRecord {
   double progress = -1.0; // -1 = indeterminate
   std::string statusMessage;
   std::vector<JobLogLine> logLines;
+  /// Bounded-log accounting (#1705): lines evicted from the FRONT of
+  /// logLines once the per-job cap was reached. Kept alongside logLines so
+  /// consumers can tell "job printed N lines" from "N lines are still
+  /// retained" — the delta protocol delivers a contiguous recent window,
+  /// never the full history of a chatty job.
+  std::size_t droppedLogLines = 0;
   /// Transmission hint for notify() copies: 0 = logLines is the cumulative
-  /// vector; >0 = delta notify (#638) where logLines holds only the slice
-  /// beginning at engine-side index (logLinesOffset - 1). Consumers that
-  /// forward log lines must append the whole slice exactly once and treat
-  /// (logLinesOffset - 1) + size as the new engine total. The authoritative
-  /// record kept by the engine is always cumulative.
+  /// retained vector; >0 = delta notify (#638) where logLines holds only the
+  /// slice of ABSOLUTE appended-line index (logLinesOffset - 1) onward
+  /// (#1705: absolute = droppedLogLines + local index, so eviction never
+  /// renumbers what consumers already indexed). Consumers that forward log
+  /// lines must append every slice line whose absolute index they have not
+  /// yet seen and treat (logLinesOffset - 1) + size as the new total
+  /// appended count. The authoritative record kept by the engine is always
+  /// the bounded cumulative retained window.
   std::size_t logLinesOffset = 0;
   Json::Value result;
   std::string error;
