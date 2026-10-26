@@ -148,6 +148,15 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
       [this]( const sicnu::AlgorithmTaskInfo &info ) { onTaskUpdated( info ); } );
 }
 
+bool jobCancelInFlight( const GuiJobHandle &handle )
+{
+  const long taskId = handle.taskId();
+  if ( taskId < 0 )
+    return false;
+  const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  return info.taskId == taskId && info.status == sicnu::TaskStatus::Cancelling;
+}
+
 void GuiJobHandle::cancel()
 {
   if ( m_taskId < 0 )

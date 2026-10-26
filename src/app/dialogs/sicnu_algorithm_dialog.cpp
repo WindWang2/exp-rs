@@ -473,17 +473,21 @@ bool SicnuAlgorithmDialog::isFinalized()
 
 void SicnuAlgorithmDialog::closeEvent( QCloseEvent *event )
 {
-  if ( mJobHandle.isRunning() )
+  if ( mJobHandle.isRunning() && !sicnu::app::jobCancelInFlight( mJobHandle ) )
   {
-    // #339: prevent WA_DeleteOnClose from destroying mContext/feedback while
-    // the worker still dereferences them. Cancel and ignore the close;
-    // the user can close again after the job finishes/cancels.
+    // #339: the worker owns its context and reads the dialog feedback
+    // through a QPointer guard, so the task is safe to outlive this dialog.
+    // Cancel and ignore the close while the task is still running; the user
+    // can close again after the job finishes/cancels.
     mJobHandle.cancel();
     if ( mFeedback )
       mFeedback->pushInfo( tr( "Cancel requested — please wait for the task to finish." ) );
     event->ignore();
     return;
   }
+  // Once the cooperative cancel is armed (#1560, same escape hatch as the
+  // raster dialogs) accept the close instead of trapping the user in a
+  // dialog whose task already agreed to stop.
   QgsProcessingAlgorithmDialogBase::closeEvent( event );
 }
 

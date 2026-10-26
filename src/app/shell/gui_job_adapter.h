@@ -74,4 +74,10 @@ private:
   ProgressCallback m_onProgress;
 };
 
+/// True while the handle's task sits in the cooperative cancel-in-progress
+/// state (TaskStatus::Cancelling): a cancel was requested and the worker has
+/// not reported its terminal record yet. Lets dialogs tell "running" from
+/// "cancelling" without the handle exposing its status (#1560).
+bool jobCancelInFlight( const GuiJobHandle &handle );
+
 } // namespace sicnu::app
