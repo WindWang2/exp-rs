@@ -31,8 +31,22 @@ static PyObject *pythonPrint(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+// #1647-1: the platform's SicnuPythonApi was dead code — never registered
+// into the interpreter, while the pure-Python helper ADVERTISED
+// sicnu.project_path() (which did not exist). Register the real C++ API as
+// built-in functions so the advertised surface is backed by the platform.
+static PyObject *sicnuProjectPath(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    const QString path = SicnuPythonApi::instance().projectPath();
+    return PyUnicode_FromString(path.toUtf8().constData());
+}
+
 static PyMethodDef PrintMethods[] = {
     {"sicnu_print", pythonPrint, METH_VARARGS, "Print to SICNU console"},
+    {"sicnu_project_path", (PyCFunction)sicnuProjectPath, METH_NOARGS,
+     "Current SICNU project file path (empty when no project is open)"},
     {nullptr, nullptr, 0, nullptr}
 };
 
@@ -199,9 +213,13 @@ class _SicnuHelper:
         return np.stack(bands, axis=0) if len(bands) > 1 else bands[0]
 
     @staticmethod
+    def project_path():
+        """Current project file path (real platform API, #1647-1)."""
+        return sicnu_project_path()
+
     def project_info():
         """Get current project information."""
-        return "Use 'sicnu.project_path()' for project info"
+        return sicnu_project_path()
 
 sicnu = _SicnuHelper()
 sys.modules['sicnu'] = sicnu

@@ -1920,6 +1920,28 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecordsBatch(
     return ResultT::success();
 }
 
+sicnu::data::Result<void> ExperimentStore::deleteMetricRecord( const QString &runId )
+{
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
+    using ResultT = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_read_only" ),
+                                            QStringLiteral( "store is read-only" ) ) );
+    Stmt del( m_impl->db, QStringLiteral( "DELETE FROM run_metrics WHERE run_id=?" ) );
+    if ( !del )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            del.error( m_impl->db ) ) );
+    del.bind( 1, runId );
+    if ( !del.step() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            del.error( m_impl->db ) ) );
+    return ResultT::success();
+}
+
 std::optional<MetricRecord> ExperimentStore::metricRecordForRun( const QString &runId ) const
 {
     QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call

@@ -526,6 +526,15 @@ void TemporalAnalysisDialog::algorithmChanged()
     page = 4;
   else if ( id == QLatin1String( "rs:temporal_extract_series" ) )
     page = 5;
+  else if ( id == QLatin1String( "rs:temporal_seasonal_breaks" ) )
+    page = 6;
+  else if ( id == QLatin1String( "rs:temporal_model_select" ) )
+    page = 7;
+  else if ( id == QLatin1String( "rs:temporal_phenology_multi" ) )
+    page = 8;
+  // Page order mirrors kAlgorithms order (pages are appended per entry);
+  // every combo entry must map to its own page or the study silently runs
+  // with defaults the user cannot see or change.
   m_paramStack->setCurrentIndex( page );
 }
 

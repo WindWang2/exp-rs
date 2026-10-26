@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QWidget>
 #include <QApplication>
@@ -17,7 +18,10 @@ class AsyncRunnerBase : public QObject
 
 public:
     explicit AsyncRunnerBase(QWidget *parentWidget, QObject *parent = nullptr)
-        : QObject(parent), m_parentWidget(parentWidget) {}
+        : QObject(parent), m_parentWidget(parentWidget)
+        , m_hadParentWidget(parentWidget != nullptr) {}
+
+    ~AsyncRunnerBase() override;
 
     /**
      * Check if a task is currently running.
@@ -35,8 +39,10 @@ protected:
     void beginRun()
     {
         m_running = true;
-        if (m_parentWidget)
+        if (m_parentWidget) {
             QApplication::setOverrideCursor(Qt::WaitCursor);
+            m_cursorOverrideActive = true;
+        }
     }
 
     /**
@@ -45,10 +51,22 @@ protected:
     void endRun()
     {
         m_running = false;
-        if (m_parentWidget)
+        // Restore on the push flag, not on parent liveness: the override
+        // cursor stack is application-global, so a parent destroyed mid-run
+        // must not strand the WaitCursor this runner pushed (#1695).
+        if (m_cursorOverrideActive) {
             QApplication::restoreOverrideCursor();
+            m_cursorOverrideActive = false;
+        }
     }
 
-    QWidget *m_parentWidget = nullptr;
+    /** Guarded: dialogs die mid-task; a bare pointer dangles and the
+     * completion lambdas build a QPointer from it (#1695). */
+    QPointer<QWidget> m_parentWidget;
+    /// True when a parent widget was provided at construction. A null-parent
+    /// runner (no dialog to guard) still delivers results; only a parent
+    /// that died mid-task suppresses the completion.
+    bool m_hadParentWidget = false;
     bool m_running = false;
+    bool m_cursorOverrideActive = false;
 };

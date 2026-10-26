@@ -19,9 +19,14 @@ namespace
 constexpr double kUnreached = 1e30;
 
 /// 1D squared-distance lower-envelope pass (Felzenszwalb & Huttenlocher
-/// 2012, distance transform of a sampled function). In-place over @a f
-/// (@a n values); @a z needs @a n + 1 slots, @a v needs @a n slots.
-void squaredDistancePass( double *f, double *z, size_t *v, size_t n )
+/// 2012, distance transform of a sampled function). @a f holds the n input
+/// heights and is left untouched; results land in @a out (@a n values,
+/// must not alias @a f); @a z needs @a n + 1 slots, @a v needs @a n slots.
+/// Writing the envelope values back into f in place (#1707) corrupts the
+/// pass: at query q the envelope height f[v[j]] with v[j] < q may already
+/// have been overwritten by an earlier query's output, so distances come
+/// out systematically small.
+void squaredDistancePass( const double *f, double *out, double *z, size_t *v, size_t n )
 {
   if ( n == 0 )
     return;
@@ -52,7 +57,7 @@ void squaredDistancePass( double *f, double *z, size_t *v, size_t n )
     while ( z[j + 1] < static_cast<double>( q ) )
       ++j;
     const double d = static_cast<double>( q ) - static_cast<double>( v[j] );
-    f[q] = d * d + f[v[j]];
+    out[q] = d * d + f[v[j]];
   }
 }
 
@@ -76,12 +81,13 @@ bool distanceToForeground( const uint8_t *mask, int width, int height, float *ou
     std::vector<double> z( w + 1 );
     std::vector<size_t> v( w );
     std::vector<double> row( w );
+    std::vector<double> rowOut( w );
     for ( size_t y = 0; y < h; ++y )
     {
       std::copy( f.begin() + static_cast<std::ptrdiff_t>( y * w ),
                  f.begin() + static_cast<std::ptrdiff_t>( ( y + 1 ) * w ), row.begin() );
-      squaredDistancePass( row.data(), z.data(), v.data(), w );
-      std::copy( row.begin(), row.end(), f.begin() + static_cast<std::ptrdiff_t>( y * w ) );
+      squaredDistancePass( row.data(), rowOut.data(), z.data(), v.data(), w );
+      std::copy( rowOut.begin(), rowOut.end(), f.begin() + static_cast<std::ptrdiff_t>( y * w ) );
     }
   }
 
@@ -91,13 +97,14 @@ bool distanceToForeground( const uint8_t *mask, int width, int height, float *ou
   std::vector<double> z( h + 1 );
   std::vector<size_t> v( h );
   std::vector<double> col( h );
+  std::vector<double> colOut( h );
   for ( size_t x = 0; x < w; ++x )
   {
     for ( size_t y = 0; y < h; ++y )
       col[y] = f[y * w + x];
-    squaredDistancePass( col.data(), z.data(), v.data(), h );
+    squaredDistancePass( col.data(), colOut.data(), z.data(), v.data(), h );
     for ( size_t y = 0; y < h; ++y )
-      f[y * w + x] = col[y];
+      f[y * w + x] = colOut[y];
   }
 
   for ( size_t i = 0; i < n; ++i )

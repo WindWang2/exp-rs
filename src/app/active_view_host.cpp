@@ -30,17 +30,18 @@
 #include "data/source_descriptor.h"
 
 namespace {
-void setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
+void setCanvasExtentTransformed( QgsMapCanvas *canvas, const QgsRectangle &extentIn,
+                                 const QgsCoordinateReferenceSystem &srcCrs )
 {
-    if ( !canvas || !layer )
+    if ( !canvas )
         return;
-    QgsRectangle extent = layer->extent();
+    QgsRectangle extent = extentIn;
     const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
-    if ( layer->crs().isValid() && canvasCrs.isValid() && layer->crs() != canvasCrs )
+    if ( srcCrs.isValid() && canvasCrs.isValid() && srcCrs != canvasCrs )
     {
         try
         {
-            const QgsCoordinateTransform ct( layer->crs(), canvasCrs, QgsProject::instance() );
+            const QgsCoordinateTransform ct( srcCrs, canvasCrs, QgsProject::instance() );
             extent = ct.transformBoundingBox( extent );
         }
         catch ( const QgsCsException & )
@@ -49,12 +50,19 @@ void setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
             // canvas with another CRS is the silent wrong-spatial-product
             // class; leave the canvas extent alone instead.
             qWarning().noquote() << "canvas extent: CRS transform from"
-                                 << layer->crs().authid() << "to" << canvasCrs.authid()
+                                 << srcCrs.authid() << "to" << canvasCrs.authid()
                                  << "failed; canvas extent left unchanged";
             return;
         }
     }
     canvas->setExtent( extent );
+}
+
+void setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
+{
+    if ( !canvas || !layer )
+        return;
+    setCanvasExtentTransformed( canvas, layer->extent(), layer->crs() );
 }
 } // namespace
 
@@ -464,15 +472,11 @@ void ActiveViewHost::showLayerProperties( QgsMapLayer *layer )
     }
 }
 
-void ActiveViewHost::removeSelectedDisplayLayers()
+void ActiveViewHost::removeLayers( const QList<QgsMapLayer *> &layers )
 {
-    QList<QgsMapLayer *> selected = selectedLayers();
+    QList<QgsMapLayer *> selected = layers;
     if ( selected.isEmpty() )
-    {
-        if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
-            win->statusBar()->showMessage( QObject::tr( "No layer selected" ), 2000 );
         return;
-    }
 
     // Safety-first: confirm before removing (legacy QGIS layers are removed from project).
     QStringList names;
@@ -481,8 +485,11 @@ void ActiveViewHost::removeSelectedDisplayLayers()
         if ( layer )
             names.append( layer->name() );
     }
-    QString detail = QObject::tr( "Remove the selected %1 layers from the display?\n(The data assets stay in the project; only the display is removed;"
-                                  "External QGIS layers will be removed from the project.)" ).arg( selected.size() );
+    QString detail = selected.size() == 1
+                         ? QObject::tr( "Remove the selected layer from the display?\n(The data asset stays in the project; only the display is removed;"
+                                        "External QGIS layers will be removed from the project.)" )
+                         : QObject::tr( "Remove the selected %1 layers from the display?\n(The data assets stay in the project; only the display is removed;"
+                                        "External QGIS layers will be removed from the project.)" ).arg( selected.size() );
     if ( names.size() <= 5 )
         detail += QStringLiteral( "\n\n" ) + names.join( QStringLiteral( "\n" ) );
     else
@@ -523,6 +530,18 @@ void ActiveViewHost::removeSelectedDisplayLayers()
         win->statusBar()->showMessage( QObject::tr( "Removed from view (data kept)" ), 2000 );
 }
 
+void ActiveViewHost::removeSelectedDisplayLayers()
+{
+    QList<QgsMapLayer *> selected = selectedLayers();
+    if ( selected.isEmpty() )
+    {
+        if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
+            win->statusBar()->showMessage( QObject::tr( "No layer selected" ), 2000 );
+        return;
+    }
+    removeLayers( selected );
+}
+
 void ActiveViewHost::zoomToLayer( QgsMapLayer *layer )
 {
     if ( !m_mapCanvas )
@@ -552,6 +571,11 @@ void ActiveViewHost::zoomToNativeResolution( QgsMapLayer *layer )
         return;
     }
 
+    // The 1:1 window is computed in layer-CRS units; it must be transformed
+    // into the canvas destination CRS before it is applied, exactly like
+    // zoomToLayer. Writing layer-CRS units straight into setExtent() silently
+    // relocates and rescales the view whenever the two CRS differ (the same
+    // wrong-spatial-product class #1030 guards elsewhere).
     double xRes = rl->rasterUnitsPerPixelX();
     double yRes = rl->rasterUnitsPerPixelY();
     QgsRectangle ext = rl->extent();
@@ -559,7 +583,9 @@ void ActiveViewHost::zoomToNativeResolution( QgsMapLayer *layer )
     double cy = ( ext.yMinimum() + ext.yMaximum() ) / 2.0;
     double w = m_mapCanvas->width() * xRes;
     double h = m_mapCanvas->height() * yRes;
-    m_mapCanvas->setExtent( QgsRectangle( cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0 ) );
+    setCanvasExtentTransformed( m_mapCanvas,
+                                QgsRectangle( cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0 ),
+                                rl->crs() );
     m_mapCanvas->refresh();
 }
 

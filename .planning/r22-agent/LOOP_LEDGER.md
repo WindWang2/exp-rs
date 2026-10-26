@@ -1,0 +1,20 @@
+# R22-04 (r22-agent) LOOP_LEDGER
+
+格式：轮次 | 假设/改动 | 文件 | 测试命令 | 真实结果 | 下一步
+
+- R0 | 启动盘点+worktree+规划文档 | .planning/r22-agent/* | gh/git 命令实录 | origin/master=911e0b17a3 与任务书一致；5 个 R21 PR open；6 个 agent issue 全部 OPEN_UNFIXED | 开始 M1-D0a #1704
+- R1 | configure build-r22-agent（R21-C 配方） | build-r22-agent/ | cmake -S . -B build-r22-agent ... | 退出码 0（见 /tmp/r22a-configure.log） | 构建 RED 基线测试目标
+- R2 | #1704 修复：classifyReference 增 GDAL 驱动前缀识别（文件驱动提取内嵌路径递归 containment/网络驱动走 remote 默认拒/未知驱动危险 payload 拒绝），新增 DriverPath kind | src/agent/tool_catalog/workspace_containment.h | tests/test_r22_agent_containment.cpp（待构建运行） | 代码完成，RED/GREEN 待构建 | 构建 RED 基线
+- R3 | #1690 修复：dangerousEnvironmentKey 拒空/含'='/NUL key（E5007）+ PluginManifest 解析期 env key 字符集门 | src/sdk/exprs/external_process.cpp plugin_manifest.cpp | tests/test_r22_agent_env_keys.cpp | 代码完成，待构建 | 同上
+- R4 | #1691 修复：initialize 失败路径 unregisterRegisteredAlgorithms + ~AppInterfaceBridge 兜底 | src/python/isolated/python_plugin_adapter.cpp app_interface_bridge.* | tests/test_r22_agent_ghost_algo.cpp | 代码完成，待构建 | 同上
+- R5 | #1692 修复：oversized 行 256B 前缀提取 id 立即回错+dropInFlight；daemon 共享发送点 >1MiB 回 typed error(-32001) | src/python/isolated/python_ipc_server.cpp src/python/scripts/worker_daemon.py | tests/test_r22_agent_ipc.cpp + py_compile | 代码完成，待构建 | 同上
+- R6 | #1705 修复：appendLog 有界（4KiB/行截断 + 10k 行块驱逐 + droppedLogLines + delta cursor 补偿）；#1693-2 终态日志回调早退；#1693-1 StdinReader 死分支删除 | src/jobs/job_types.h job_engine.h job_engine.cpp src/agent/mcp_server.cpp | tests/test_r22_agent_job_logs.cpp | 代码完成，待构建 | 同上
+- R7 | configure 第二次（补 GDAL_INCLUDE_DIR/GDAL_LIBRARY）被共享构建锁阻塞（r22-science 先持有） | build-r22-agent | - | 等待锁 | 锁释放后 configure+build RED
+- R8 | 构建环境落地：GDAL/PROJ/GEOS/GSL/netCDF 覆盖 + SQLite→系统 .so（vendor .a 无 -fPIC）+ R21-C 同款 link-shim（wrapper2_* 等 26 符号） | build-r22-agent | cmake reconfigure ×5 | EXIT=0 | RED 构建
+- R9 | RED 全五项实锤（master src + RED 变体测试）：containment exit42(25断言红)/env_keys exit42(4红)/job_logs exit42(25002>10000, 1MiB行未截断)/ipc exit42(挂起)/ghost exit42(幽灵残留, 需 SICNU_PYTHON_EXECUTABLE=fusion venv numpy) | evidence/RED_*.log | 见 evidence | 全部 RED | 恢复修复进 GREEN
+- R10 | GREEN 第一轮修复三处：①env 空键返回标记串（原来返回空串被当干净）；②JobEngine delta 改绝对索引空间（dropped+local，驱逐不再重编号；终态通知也走 delta，防 TaskCenter 终行丢失）；③ipc 测试 takeInFlightRequests 语义修正（它 retire 全部 pending）。job_logs 断言两处笔误修正（1-based offset、7001） | src/sdk/exprs/external_process.cpp src/jobs/job_engine.cpp tests/* | 5 目标全绿 | exit0 | 双跑
+- R11 | GREEN×2 双跑：containment 64 断言 / env_keys 46 / job_logs 24031 / ipc 17 / ghost 7，两遍退出码与断言数完全一致（/tmp/r22a-green-p{1,2}-*.log） | 5 目标 | 双跑 exit0 一致 | 通过 | 回归族复跑
+- R12 | 回归族复跑：mcp_server 9686/31 ✅、job_engine 446/34 ✅、r14_C_env 23/2 ✅、exprs_external 83/13 ✅、task_center 533/34 ✅、runtime_python_channel_r4 126/12 ✅；exprs_plugin_loader 16 例失败经 A/B（回退 master plugin_manifest.cpp 同样 16 败）判定为 KNOWN_BASELINE_FAIL（本机信任链/签名环境）；test_python_plugin_host/manager/plugin_host 族被 if(SICNU_EMBED_PYTHON)（=OFF，R21-C 同车道）门控 → NOT_EXECUTED，替代覆盖=ghost_algo 真实 daemon 测试 | /tmp/r22a-reg-*.log | 见左 | 回归闭环 | 提交+R1
+- R13 | R1 独立审查（general-purpose subagent，与开发分离）：APPROVE + F1(P2 scheme:// payload 旁路) + F2-F7(P3)。已修 F1（任意 scheme:// 走递归 URL 策略，两处）、F2（嵌套驱动前缀递归分类）、F4（抢救正则锚定响应形状+溢出安全解析）、F7（文案）；F5 记 CROSS_TRACK（TaskCenter 计数器统一，processing 归属）；F6 CMake 注释说明 | REVIEW_R1.md | 5 目标双跑全绿（containment 增至 70 断言）+ mcp_server 9686/31×2 + channel_r4 126/12 | 闭环 | R2 审查
+- R14 | R2 独立审查（另一 subagent）：REJECT——F1(P1) 网络驱动表 "oracle" 应为短名 "OCI"（+EEDA/AmigoCloud/GeoRaster）；F2(P2) 嵌套驱动递归无深度上限（"KML:"×100000 PoC 实测 SIGSEGV）；P3 若干。已修：表名更正+tiledbspatial→tiledb+移除含空格死条目+kvKeys 补 path=/driver=；递归加 8 层深度上限 fail-closed；进度通知剥离 logLines（消除 TaskCenter 双索引写 hazard 高频源）；CMake 注释更正；INFO 次序；新增 8 个 R2 回归用例 | REVIEW_R2.md | 最终双跑全绿（containment 78）；task_center #1454 竞态用例三方证据（含纯 master 二进制同红）判 KNOWN_BASELINE_FLAKY | R2 闭环 | 交付
+- R15 | 交付：push 成功（网络分区 1 次重试内恢复）→ gh pr create → **PR #1714** https://github.com/WindWang2/exp-rs/pull/1714（gh pr view 复核 OPEN，head=20cc98e59f，base=master）；push 前远端 SHA 经 API 复核未前进（911e0b17a3），兄弟 R22 PR 仅 #1709 共享 tests/CMakeLists（append-only） | - | PR OPEN | 轨道闭环

@@ -16,6 +16,7 @@
 #include "processing/framework/execution_plane.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "synthetic_raster_builder.h"
+#include "support/onnx_fixture_builder.h"
 
 #include <opencv2/dnn.hpp>
 
@@ -25,6 +26,8 @@
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <filesystem>
+#include <set>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -32,11 +35,15 @@
 #include <string>
 #include <vector>
 
+namespace fs = std::filesystem;
+
 namespace {
 
 using sicnu::operators::ModelCatalog;
 using sicnu::operators::ModelInfo;
 using sicnu::operators::ModelReadiness;
+using sicnu::operators::runtime::RequestedDevice;
+
 using sicnu::operators::RSOperatorContext;
 using sicnu::operators::RSOperatorError;
 using sicnu::operators::runtime::IModelRuntime;
@@ -1298,4 +1305,106 @@ TEST_CASE( "tile engine completes trailing all-NoData edge tiles after a valid p
     if ( std::isnan( v ) )
       ++nanCount;
   CHECK( nanCount == 100 * 100 - 64 * 64 );
+}
+
+// risk B5: postprocess.mask_threshold binarizes CLASS-PROBABILITY planes.
+// A two-head model (segmentation + embedding) with mask_threshold must
+// threshold the segmentation head and leave the embedding head continuous:
+// the manifest's confidence contract says "Consumers must not threshold
+// across semantics" — binarizing an embedding destroys its metric space.
+// Fixture: seg = Identity(x), emb = 0.37·x on a 0..1 ramp, threshold 0.5.
+// Buggy behavior: emb planes also thresholded → all zeros (0.37 < 0.5).
+TEST_CASE( "mask_threshold leaves non-class heads continuous",
+           "[models][runtime][engine]" )
+{
+  using namespace onnxfixture;
+
+  QTemporaryDir dir;
+  const fs::path artifact =
+    fs::path( dir.path().toStdString() ) / "seg_emb.onnx";
+  writeModel( artifact,
+              buildModel(
+                { node( "Identity", { "x" }, { "seg" } ),
+                  node( "Mul", { "x", "scale" }, { "emb" } ) },
+                { rawTensor( "scale", Float, {}, floatRaw( { 0.37f } ) ) },
+                { valueInfo( "x", Float, { fixed( 1 ), fixed( 1 ), fixed( 64 ), fixed( 64 ) } ) },
+                { valueInfo( "seg", Float, { fixed( 1 ), fixed( 1 ), fixed( 64 ), fixed( 64 ) } ),
+                  valueInfo( "emb", Float, { fixed( 1 ), fixed( 1 ), fixed( 64 ), fixed( 64 ) } ) },
+                "seg_emb_fixture" ) );
+
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 64, 64, 1 );
+  builder.withCrs( QStringLiteral( "EPSG:32648" ) )
+      .withGeoTransform( 100.0, 0.5, 200.0, -0.5 )
+      .withRampPattern( 1, 0.0f, 1.0f );
+  builder.writeToDisk( inputPath );
+
+  ModelInfo info;
+  info.name = "seg-emb";
+  info.framework = "onnx";
+  info.readiness = ModelReadiness::Ready;
+  info.resolvedArtifactPath = artifact.string();
+  info.tiling.tileSize = 64;
+  info.tiling.overlap = 0;
+  info.output.tensorNames = { "seg", "emb" };
+  sicnu::operators::ModelHeadContract segHead;
+  segHead.name = "seg";
+  segHead.role = "segmentation";
+  segHead.confidence = "probability";
+  sicnu::operators::ModelHeadContract embHead;
+  embHead.name = "emb";
+  embHead.role = "embedding";
+  embHead.confidence = "distance";
+  info.output.heads = { segHead, embHead };
+  info.postprocess.maskThreshold = 0.5;
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+  std::string acquireError;
+  const auto session = registry.acquire( info, RequestedDevice::cpu(), &acquireError );
+  REQUIRE( session );
+
+  RSOperatorContext context;
+  TileInferenceEngine engine( info, session );
+  const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+
+  REQUIRE( stats.outBands == 2 );
+
+  GdalDatasetWrapper out;
+  REQUIRE( out.open( outputPath ) );
+  REQUIRE( out.bandCount() == 2 );
+  std::vector<float> seg( 64 * 64 );
+  std::vector<float> emb( 64 * 64 );
+  REQUIRE( out.readBandData( 1, seg.data(), 64, 64 ) );
+  REQUIRE( out.readBandData( 2, emb.data(), 64, 64 ) );
+
+  // Head 1 (segmentation): binarized to {0,1} with BOTH phases present —
+  // the ramp crosses the threshold, so a flat band would mean the gate
+  // stopped thresholding class heads too.
+  int segZeros = 0;
+  int segOnes = 0;
+  int segOther = 0;
+  for ( float v : seg )
+  {
+    if ( v == 0.0f )
+      ++segZeros;
+    else if ( v == 1.0f )
+      ++segOnes;
+    else
+      ++segOther;
+  }
+  CHECK( segOther == 0 );
+  CHECK( segZeros > 0 );
+  CHECK( segOnes > 0 );
+
+  // Head 2 (embedding): continuous 0.37·ramp — many distinct values, max
+  // near 0.37, and never binarized.
+  std::set<float> distinct( emb.begin(), emb.end() );
+  float embMax = 0.0f;
+  for ( float v : emb )
+    embMax = std::max( embMax, v );
+  CHECK( distinct.size() > 32 );
+  CHECK( embMax == Catch::Approx( 0.37f ).margin( 1e-3 ) );
+  registry.releaseAll();
 }

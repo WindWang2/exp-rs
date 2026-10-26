@@ -5,6 +5,7 @@
 
 #include "platform/portable.h"
 
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
@@ -162,8 +163,39 @@ bool ManifestExternalTool::fromJson( const Json::Value &json, ManifestExternalTo
         }
         out.argv.push_back( arg.asString() );
     }
-    if ( json.isMember( "environment" ) && json["environment"].isObject() )
-        out.environment = json["environment"];
+    if ( json.isMember( "environment" ) )
+    {
+        const Json::Value &envJson = json["environment"];
+        if ( !envJson.isObject() )
+        {
+            error = "'external.environment' must be an object";
+            return false;
+        }
+        // #1690: validate at INGESTION what the external-process gate used
+        // to catch only at spawn time — and then only by exact key match.
+        // A key like "LD_PRELOAD=/x.so " splices into a different child
+        // variable once the envp entry is assembled, so malformed names are
+        // a typed manifest error here, not a runtime surprise. The charset
+        // is the POSIX-portable env-name subset ([A-Za-z_][A-Za-z0-9_]*).
+        for ( const std::string &key : envJson.getMemberNames() )
+        {
+            bool valid = !key.empty() && ( isalpha( static_cast<unsigned char>( key[0] ) )
+                                           || key[0] == '_' );
+            for ( std::size_t i = 1; valid && i < key.size(); ++i )
+            {
+                const char c = key[i];
+                valid = isalnum( static_cast<unsigned char>( c ) ) || c == '_';
+            }
+            if ( !valid )
+            {
+                error = "'external.environment' key '" + key
+                        + "' is not a valid environment variable name "
+                          "([A-Za-z_][A-Za-z0-9_]*)";
+                return false;
+            }
+        }
+        out.environment = envJson;
+    }
     out.inheritEnvironment = json.get( "inherit_environment", false ).asBool();
     if ( json.isMember( "working_directory" ) && json["working_directory"].isString() )
         out.workingDirectoryParam = json["working_directory"].asString();

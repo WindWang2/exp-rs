@@ -37,7 +37,10 @@ class Resampler {
     [[nodiscard]] static double lanczos3Kernel(double x) noexcept;
 
     /// 2D sub-pixel sample at pixel coordinate (u, v). Coordinates outside
-    /// [0, width-1] x [0, height-1] yield noDataValue.
+    /// the raster-edge footprint [-0.5, width-0.5] x [-0.5, height-0.5]
+    /// yield noDataValue; inside it, taps are edge-clamped (#1686 — the
+    /// outer half-pixel ring between the first/last pixel centre and the
+    /// raster edge is valid coverage, GDAL semantics).
     static double interpolate(const float* buffer, int width, int height,
                               double u, double v,
                               ResampleMethod method,

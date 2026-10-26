@@ -276,6 +276,13 @@ class JobEngine
     /// one slot. Blocking waits remain forbidden on worker threads
     /// (waitUntilIdleForTests refuses there).
     static constexpr int kMaxTransientWorkers = 8;
+    /// Bounded per-job log retention (#1705): above kMaxJobLogLines the
+    /// oldest block is evicted down to kJobLogKeepLines (block eviction
+    /// amortizes the vector front-erase). ~10k x 4 KiB worst case keeps a
+    /// chatty job's retained history well under control while the delta
+    /// protocol keeps streaming the recent window.
+    static constexpr std::size_t kMaxJobLogLines = 10'000;
+    static constexpr std::size_t kJobLogKeepLines = 5'000;
     int m_transientAllowance = 0;
     std::unordered_set<std::string> m_transientBacked; // sub-jobs holding +1 capacity
 };

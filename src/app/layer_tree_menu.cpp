@@ -94,7 +94,46 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     if ( node->nodeType() == QgsLayerTreeNode::NodeGroup ) {
         menu->addAction( defActions->actionZoomToGroup( nullptr ) );
         menu->addAction( defActions->actionRenameGroupOrLayer() );
-        menu->addAction( defActions->actionRemoveGroupOrLayer() );
+        // Group removal must go through ActiveViewHost so every layer in the
+        // group is removed via QgisDisplayManager (Display Layer records and
+        // Asset leases are released). The stock default action deletes the
+        // tree nodes / project layers behind the manager's back, stranding
+        // both ("asset is leased / cannot unload").
+        if ( m_activeViewHost ) {
+            QAction *removeAction = menu->addAction( QObject::tr( "&Remove" ) );
+            removeAction->setToolTip(
+                QObject::tr( "Remove the group and its layers from the display" ) );
+            const QPointer<QgsLayerTreeNode> nodeGuard( node );
+            QObject::connect( removeAction, &QAction::triggered, menu,
+                              [hostPtr, nodeGuard]() {
+                if ( !hostPtr || !nodeGuard )
+                    return;
+                auto *group = static_cast<QgsLayerTreeGroup *>( nodeGuard.data() );
+                QList<QgsMapLayer *> layers;
+                const QList<QgsLayerTreeLayer *> layerNodes = group->findLayers();
+                for ( QgsLayerTreeLayer *layerNode : layerNodes ) {
+                    if ( QgsMapLayer *layer = layerNode->layer() )
+                        layers.append( layer );
+                }
+                hostPtr->removeLayers( layers );
+                // removeLayers() ran a modal confirmation: the node may have
+                // been destroyed from underneath meanwhile, so re-check the
+                // guard. The group node is removed only when it no longer
+                // holds layers (all removed, or it never had any) — a failed
+                // per-layer removal keeps the group with its surviving
+                // layers, and declining the confirmation removes nothing.
+                if ( nodeGuard ) {
+                    auto *survivingGroup = static_cast<QgsLayerTreeGroup *>( nodeGuard.data() );
+                    if ( survivingGroup->findLayers().isEmpty() ) {
+                        if ( QgsLayerTreeGroup *parent =
+                                 qobject_cast<QgsLayerTreeGroup *>( survivingGroup->parent() ) )
+                            parent->removeChildNode( survivingGroup );
+                    }
+                }
+            } );
+        } else {
+            menu->addAction( defActions->actionRemoveGroupOrLayer() );
+        }
         menu->addSeparator();
         menu->addAction( defActions->actionAddGroup() );
         menu->addAction( defActions->actionMutuallyExclusiveGroup() );

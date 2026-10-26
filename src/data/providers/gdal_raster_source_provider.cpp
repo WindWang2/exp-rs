@@ -197,8 +197,17 @@ QString normalizeRasterPath( const QString &rawPath )
 
   const QString enviResolved = resolveEnviDataPath( rawPath );
   const QFileInfo info( enviResolved );
-  return info.canonicalFilePath().isEmpty() ? info.absoluteFilePath()
-                                            : info.canonicalFilePath();
+  const QString canonical = info.canonicalFilePath();
+  if ( !canonical.isEmpty() )
+    return canonical;
+  // Missing file: anchor on the canonical parent directory so alternate
+  // spellings of the same not-yet-existing file share one SourceKey with the
+  // canonical path it will get once it appears (raw-absolute fallback would
+  // register the materialized file twice — risk A1).
+  const QString parentCanonical = info.dir().canonicalPath();
+  if ( !parentCanonical.isEmpty() )
+    return parentCanonical + QLatin1Char( '/' ) + info.fileName();
+  return info.absoluteFilePath();
 }
 
 } // namespace

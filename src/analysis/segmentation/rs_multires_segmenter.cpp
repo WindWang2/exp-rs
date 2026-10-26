@@ -2,6 +2,7 @@
 #include "rs_multires_segmenter.h"
 #include "sicnu_logging.h"
 #include "processing/algorithms/nodata_utils.h"
+#include "processing/algorithms/portable_random.h"
 
 #include <gdal.h>
 
@@ -498,7 +499,10 @@ RsSegmentMap RsMultiresSegmenter::segment(
             break;
 
         std::mt19937 rng( 42 + pass );
-        std::shuffle( activeList.begin(), activeList.end(), rng );
+        // Portable Fisher-Yates (#1685): std::shuffle's permutation is
+        // implementation-defined, so the merge visit order — and with it the
+        // resulting segmentation — would differ across STLs for seed 42.
+        rs::algorithms::portable::fisherYatesShuffle( rng, activeList );
 
         int mergesInPass = 0;
 
