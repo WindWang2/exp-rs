@@ -205,10 +205,15 @@ bool LogPanel::shouldShowMessage(const QString &message, const QString &tag, Qgi
     if (levelFilter != -1 && static_cast<int>(level) != levelFilter)
         return false;
 
-    // Tag filter
-    QString tagData = m_tagFilter->currentData().toString();
-    QString tagText = m_tagFilter->currentText();
-    if (!tagData.isEmpty() && tagText != tr("All") && tagText != tr("All") && !tag.contains(tagText, Qt::CaseInsensitive))
+    // Tag filter. The combo is editable: while the "All" item is current the
+    // user may still type a partial tag, and currentData() is empty in that
+    // state — key the filter off the visible text compared against the "All"
+    // item itself, or the typed filter is silently ignored.
+    const QString allText = m_tagFilter->itemText(0);
+    const bool tagFilterActive =
+        m_tagFilter->currentIndex() > 0 || m_tagFilter->currentText() != allText;
+    if (tagFilterActive
+        && !tag.contains(m_tagFilter->currentText(), Qt::CaseInsensitive))
         return false;
 
     // Search filter — match message body as well as tag
