@@ -666,6 +666,15 @@ r6_dev.cmd
 .planning/zcode-r20-05/red-drivers/*
 !.planning/zcode-r20-05/red-drivers/*.cpp
 !.planning/zcode-r20-05/red-drivers/*.md
+
+# R21-E track (zcode teaching/verification) planning artifacts (markdown,
+# plus the reproducible offline end-to-end + RED/GREEN chain scripts cited by
+# ORACLES.md — same precedent as zcode-r20-05/red-drivers).
+!.planning/r21-E/
+.planning/r21-E/*
+!.planning/r21-E/*.md
+!.planning/r21-E/*.sh
+
 # R21-B track (geospatial data / model runtime / reproducibility) planning artifacts (markdown only).
 !.planning/r21-B/*
 !.planning/r21-B/*.md

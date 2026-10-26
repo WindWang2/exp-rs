@@ -159,16 +159,30 @@
           "properties": {
             "rules_ref": {
               "type": "string",
+              "minLength": 1,
               "description": "Grading rules reference (sicnu.lab.rules/1 family) for artifact-level checks."
             },
             "must_fail_assertions": {
               "type": "array",
+              "minItems": 1,
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "description": "Assertion ids that must fail on the faulted artifact (existing OutputVerifier assertion kinds only; no new kinds)."
             }
-          }
+          },
+          "anyOf": [
+            {
+              "required": ["must_fail_assertions"]
+            },
+            {
+              "not": {
+                "required": ["rules_ref"]
+              }
+            }
+          ],
+          "description": "Artifact-level verifier declaration. A rules_ref without at least one must_fail assertion (and vice versa) is the accepted-but-inert shape #1464/#1613 refuse: the loader rejects both, and the schema now says so."
         }
       }
     },
