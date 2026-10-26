@@ -243,3 +243,67 @@ TEST_CASE( "numeric and string rpc ids keep disjoint cancel bookkeeping",
         waitForStatus( s, stringExec, { QStringLiteral( "canceled" ) }, 15000 );
     CHECK( stringStatusAfter == QStringLiteral( "canceled" ) );
 }
+
+TEST_CASE( "aborting a read-only status poll never cancels the task it reports",
+           "[agent][mcp][cancel][r21c]" )
+{
+    // R21-C F1: m_cancelledRequestTasks was armed by EVERY tools/call whose
+    // result carried an execution_id — including get_execution_status polls
+    // (they always echo it). A UI abort or bridge 10-minute timeout on the
+    // POLL itself then cancelled the long-running execution the poll was
+    // merely reporting on. The pipeline map got the submitting-call gate in
+    // R14-C FIX-1; the task map must mirror it (RED on master: the poll id
+    // 99 armed the map, so cancelling 99 kills the task).
+    RecordingServer &s = server();
+
+    const QVariantMap submitted = s.callTool(
+        QVariant( qlonglong( 9001 ) ), QStringLiteral( "execute_algorithm" ),
+        QVariantMap{ { QStringLiteral( "algorithm_id" ), QStringLiteral( "rs:r18_c_sleep" ) },
+                     { QStringLiteral( "parameters" ),
+                       QVariantMap{ { QStringLiteral( "slices" ), 120 } } } } );
+    const QString exec = executionIdOf( submitted );
+    REQUIRE_FALSE( exec.isEmpty() );
+    REQUIRE( waitForStatus( s, exec, { QStringLiteral( "running" ) }, 15000 )
+             == QStringLiteral( "running" ) );
+
+    // Cancel the READ-ONLY poll's rpc id (99 = the harness statusOf id).
+    s.cancelNotification( QVariant( qlonglong( 99 ) ) );
+    for ( int i = 0; i < 8; ++i )
+    {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+    }
+    CHECK( s.statusOf( exec ) == QStringLiteral( "running" ) );
+
+    // The SUBMITTING request's own id stays the real cancel channel.
+    s.cancelNotification( QVariant( qlonglong( 9001 ) ) );
+    const QString finalStatus =
+        waitForStatus( s, exec, { QStringLiteral( "canceled" ) }, 15000 );
+    CHECK( finalStatus == QStringLiteral( "canceled" ) );
+}
+
+TEST_CASE( "a direct-routed tool submission keeps its cancel channel (R1-5 guard)",
+           "[agent][mcp][cancel][r21c]" )
+{
+    // The F1 gate is a POLLER blacklist, not a submitter whitelist: tools
+    // routed straight through dispatchToolCall (isToolIdAllowed branch)
+    // also submit to the Task Center and return an execution_id, and their
+    // rpc-id cancel channel must survive. Under the intermediate whitelist
+    // (execute_algorithm/execute_operator only) this test FAILS — the map
+    // is never armed for this tool, so the abort cancels nothing — which is
+    // exactly the regression this pins.
+    RecordingServer &s = server();
+
+    const QVariantMap submitted = s.callTool(
+        QVariant( qlonglong( 9002 ) ), QStringLiteral( "rs:r18_c_sleep" ),
+        QVariantMap{ { QStringLiteral( "slices" ), 120 } } );
+    const QString exec = executionIdOf( submitted );
+    REQUIRE_FALSE( exec.isEmpty() );
+    REQUIRE( waitForStatus( s, exec, { QStringLiteral( "running" ) }, 15000 )
+             == QStringLiteral( "running" ) );
+
+    s.cancelNotification( QVariant( qlonglong( 9002 ) ) );
+    const QString finalStatus =
+        waitForStatus( s, exec, { QStringLiteral( "canceled" ) }, 15000 );
+    CHECK( finalStatus == QStringLiteral( "canceled" ) );
+}

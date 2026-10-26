@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -12,6 +13,11 @@ namespace {
 
 constexpr int kMaxMergeDepth = 4; // authority parity (capability_knowledge bound)
 constexpr std::size_t kMaxEntries = 2048;
+/// Cap for one mirror document on disk. Real mirror files are KB-scale
+/// capability sidecars; a file past this bound is planted or corrupt and is
+/// refused by name instead of being buffered whole (R20-03 D6 — the
+/// checkpoint kernel's read-cap discipline).
+constexpr std::uintmax_t kMaxMirrorDocumentBytes = 4 * 1024 * 1024;
 
 Json::Value parseText( const std::string &text, std::string &errors )
 {
@@ -290,10 +296,36 @@ int CapabilityMirrorProjection::loadDirectory( const std::string &directory )
             problems_.push_back( file.filename().string() + ": unreadable" );
             continue;
         }
-        std::stringstream buffer;
-        buffer << in.rdbuf();
+        // Bounded read (D6): size first, then cap+1 bytes — a planted huge
+        // file must never be slurped whole just to be refused by the parser
+        // a millisecond later, and a KB-scale sidecar must not pay a 4 MiB
+        // allocation (R1-P3-3).
+        std::error_code sizeEc;
+        const auto diskSize = std::filesystem::file_size( file, sizeEc );
+        if ( !sizeEc && diskSize > kMaxMirrorDocumentBytes )
+        {
+            problems_.push_back( file.filename().string() + ": exceeds the " +
+                                 std::to_string( kMaxMirrorDocumentBytes ) +
+                                 "-byte mirror document cap" );
+            continue;
+        }
+        const std::size_t readBudget =
+            static_cast<std::size_t>( sizeEc ? kMaxMirrorDocumentBytes
+                                             : std::min<std::uintmax_t>(
+                                                   diskSize, kMaxMirrorDocumentBytes ) )
+            + 1;
+        std::string buffer( readBudget, '\0' );
+        in.read( buffer.data(), static_cast<std::streamsize>( buffer.size() ) );
+        buffer.resize( static_cast<std::size_t>( in.gcount() ) );
+        if ( buffer.size() > kMaxMirrorDocumentBytes )
+        {
+            problems_.push_back( file.filename().string() + ": exceeds the " +
+                                 std::to_string( kMaxMirrorDocumentBytes ) +
+                                 "-byte mirror document cap" );
+            continue;
+        }
         std::string parseErrors;
-        const Json::Value parsed = parseText( buffer.str(), parseErrors );
+        const Json::Value parsed = parseText( buffer, parseErrors );
         if ( parsed.isNull() && !parseErrors.empty() )
         {
             problems_.push_back( file.filename().string() + ": " + parseErrors );

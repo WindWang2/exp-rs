@@ -262,6 +262,15 @@ private:
     long long mProcessGroupId = -1;   ///< POSIX: worker process group (-pid)
     long long mLastKnownGroup = -1;   ///< POSIX: group id retained after death
                                       ///< (orphan probe, M3)
+    /// Worker pid as a write-once snapshot taken at spawn. workerPid() and
+    /// the POSIX liveness probe read THIS, never mProcessHandle: the close
+    /// election clears the plain pointer (and on Windows closes the handle)
+    /// while diagnostics poll concurrently, so a plain read is a data race
+    /// and a post-close handle dereference could name a recycled process.
+    /// The snapshot stays valid after death — post-mortem diagnostics can
+    /// still name the worker that ran (same discipline as mLastKnownGroup,
+    /// #1644 / R20-03 D5).
+    std::atomic<long long> mLastKnownPid{ 0 };
 
     std::atomic<bool> mProcessAlive{ false };
     std::atomic<unsigned> mGeneration{ 1 };

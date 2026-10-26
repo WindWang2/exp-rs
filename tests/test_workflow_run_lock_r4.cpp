@@ -171,6 +171,46 @@ TEST_CASE( "WorkflowRunLock: garbage owner metadata never widens or narrows owne
     }
 }
 
+TEST_CASE( "planted oversized owner metadata is refused, never buffered whole (D6)",
+           "[workflow][r4][run_lock][bounds]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString lockPath = WorkflowRunLock::lockPathForRun( dir.path(), "r4_lock_huge" );
+
+    // A planted >cap file with a plausible pid near its head. The unbounded
+    // readAll() buffered all of it and even mined the pid out of the plant;
+    // the bounded reader refuses the file instead (D6: same cap discipline
+    // as the checkpoint kernel — planted or corrupt, never buffered whole).
+    constexpr qint64 kCap = 64 * 1024;
+
+    WorkflowRunLock holder( lockPath );
+    REQUIRE( holder.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
+    // Plant the oversized file AFTER acquiring: tryAcquire writes its own
+    // owner metadata, so a pre-acquire plant would simply be overwritten
+    // (same ordering as the garbage-metadata test above).
+    {
+        QFile huge( lockPath );
+        REQUIRE( huge.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        huge.write( QByteArray( R"({"pid":4242,"pad":")" ) );
+        const QByteArray filler( static_cast<int>( kCap ), 'x' );
+        huge.write( filler );
+        huge.close();
+    }
+    {
+        // flock still decides liveness — the verdict never depends on the
+        // metadata bytes.
+        const WorkflowRunLock::OwnerProbe probe = WorkflowRunLock::probeOwner( lockPath );
+        REQUIRE( probe.state == WorkflowRunLock::OwnerProbe::State::LiveOwner );
+        // RED on master: the planted pid 4242 was mined out of the oversized
+        // plant; the bounded reader refuses the file, so pid stays 0.
+        REQUIRE( probe.pid == 0 );
+        // RED on master: ownerInfoLine() returned the whole >64KiB plant.
+        REQUIRE( holder.ownerInfoLine().size() <= kCap );
+    }
+    holder.release();
+}
+
 TEST_CASE( "checkpoint publish faults leave the previous checkpoint intact with no tmp residue",
            "[workflow][r4][checkpoint][fault]" )
 {

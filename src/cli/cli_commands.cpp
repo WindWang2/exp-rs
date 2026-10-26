@@ -109,6 +109,32 @@ int usageError( const CliIO &io, const std::string &command, const std::string &
                       usage, &details );
 }
 
+/// Issue #1597 (second half): dataset/experiment/reproduce already refuse
+/// unknown flags (rejectUnknownArgs); the pipeline/workflow/catalog/data
+/// families still skipped them silently, so a typo'd optional flag ran a
+/// DIFFERENT command than typed and exited 0. Same rule as the algorithms
+/// lane: only `--`-prefixed leftovers are refused (positional tokens keep
+/// their per-subcommand meaning), and the four-tuple names the flag so the
+/// typo is obvious. Returns the refusal exit code, or 0 when every token
+/// was consumed.
+int rejectUnknownCliFlag( const QStringList &args, const CliIO &io, const char *command,
+                          const char *accepted )
+{
+    for ( const QString &token : args )
+    {
+        if ( !token.startsWith( QStringLiteral( "--" ) ) || token == QLatin1String( "--" ) )
+            continue;
+        const CliErrorDetails details {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+            .expected = accepted,
+            .actual = token.toStdString() };
+        return io.finish( false, command, {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "unknown flag: " + token.toStdString(), &details );
+    }
+    return 0;
+}
+
 } // namespace
 
 namespace {
@@ -173,25 +199,7 @@ QString takeValue( QStringList &args, const QString &name, bool &present )
     return value;
 }
 
-struct GlobalFlags
-{
-    bool json = false;
-    bool jsonLines = false;
-    bool quiet = false;
-    bool progressJson = false;
-};
 
-GlobalFlags extractGlobalFlags( QStringList &args )
-{
-    GlobalFlags flags;
-    flags.json = takeFlag( args, "--json" );
-    flags.jsonLines = takeFlag( args, "--json-lines" );
-    flags.quiet = takeFlag( args, "--quiet" );
-    flags.progressJson = takeFlag( args, "--progress-json" );
-    if ( flags.jsonLines )
-        flags.json = true;
-    return flags;
-}
 
 // ---------------------------------------------------------------------------
 // algorithms
@@ -567,6 +575,11 @@ int commandPipeline( QStringList args, const CliIO &io )
         return usageError( io, "pipeline", "usage: pipeline run <file.json>" );
     }
     const QString path = args.takeFirst();
+    // #1597: pipeline takes the document path and nothing else — anything
+    // `--`-shaped left over is a typo'd flag, never a silent modifier.
+    if ( const int refused = rejectUnknownCliFlag( args, io, "pipeline",
+                                                   "run|validate|resume <file.json|run_id>" ) )
+        return refused;
 
     auto progressCb = [&io]( int stepIndex, int totalSteps, double stepProgress,
                              const std::string &message ) {
@@ -647,6 +660,10 @@ int commandWorkflow( QStringList args, const CliIO &io )
 
     if ( sub == "list-runs" )
     {
+        // #1597: list-runs takes no flags at all; a `--`-shaped leftover is
+        // a typo'd filter the old parser silently dropped.
+        if ( const int refused = rejectUnknownCliFlag( args, io, "workflow", "list-runs" ) )
+            return refused;
         const QString dir = sicnu::workflow::WorkflowRunCoordinator::instance().checkpointDirectory();
         Json::Value runs( Json::arrayValue );
         const QStringList checkpoints = sicnu::workflow::WorkflowCheckpointManager().listCheckpoints( dir );
@@ -672,6 +689,10 @@ int commandWorkflow( QStringList args, const CliIO &io )
         {
             return usageError( io, "workflow", "usage: workflow resume <run_id>" );
         }
+        const QString runId = args.takeFirst();
+        // #1597: resume takes the run id and nothing else.
+        if ( const int refused = rejectUnknownCliFlag( args, io, "workflow", "resume <run_id>" ) )
+            return refused;
         auto progressCb = [&io]( int stepIndex, int totalSteps, double stepProgress,
                                  const std::string &message ) {
             io.reportProgress( stepIndex, totalSteps, stepProgress, message );
@@ -680,7 +701,7 @@ int commandWorkflow( QStringList args, const CliIO &io )
             io.reportLog( level, message );
         };
         RsPipelineRunner runner( progressCb, logCb );
-        const auto result = runner.resumeRun( args.takeFirst().toStdString() );
+        const auto result = runner.resumeRun( runId.toStdString() );
         if ( !result.success )
         {
             return io.finish( false, "workflow", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ),
@@ -699,6 +720,12 @@ int commandWorkflow( QStringList args, const CliIO &io )
                               {}, "usage: workflow " + sub.toStdString() + " <file.json>" );
         }
         const QString path = args.takeFirst();
+        // #1597: validate/run take the document path and nothing else —
+        // refuse a typo'd flag BEFORE the document is even read, so the
+        // refusal never depends on the document's own validity.
+        if ( const int refused = rejectUnknownCliFlag( args, io, "workflow",
+                                                       "validate|run <file.json>" ) )
+            return refused;
         std::string error;
         const Json::Value document = parseJsonFile( path.toStdString(), error );
         if ( !error.empty() )
@@ -2366,12 +2393,47 @@ int commandData( QStringList args, const CliIO &io )
                                   {}, "data catalog search needs a catalog root" );
             const std::string catalogRoot = args.takeFirst().toStdString();
             sicnu::geo::CatalogQuery query;
-            for ( int i = 0; i + 1 < args.size(); ++i )
+            // #1597: the loop must VISIT every token — the old `i + 1 < size`
+            // bound never looked at a flag in last position, the loudest
+            // silent drop of the family. A known value flag without its
+            // value is a typed refusal too, never an out-of-bounds read.
+            for ( int i = 0; i < args.size(); ++i )
             {
+                // #1597: every `--` token must be one of the four value
+                // flags below — anything else is a typo the old loop
+                // skipped together with its value, silently narrowing the
+                // query the user believed they had typed.
                 const bool takesValue = args[i] == "--cloud-max" || args[i] == "--limit" ||
                                         args[i] == "--max-items" || args[i] == "--platform";
+                if ( args[i].startsWith( QStringLiteral( "--" ) ) && !takesValue )
+                {
+                    const CliErrorDetails details {
+                        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                        .expected = "--cloud-max n|--limit n|--max-items n|--platform s",
+                        .actual = args[i].toStdString() };
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "unknown flag: " + args[i].toStdString(), &details );
+                }
                 if ( !takesValue )
                     continue;
+                if ( i + 1 >= args.size()
+                     || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
+                {
+                    // A value that is itself a flag is a MISSING value, not a
+                    // value: `--platform --limit 5` used to set the platform
+                    // filter to "--limit" (same rule as the session lane's
+                    // next() and algorithms search).
+                    const CliErrorDetails details {
+                        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                        .expected = "a value after " + args[i].toStdString(),
+                        .actual = i + 1 >= args.size()
+                                      ? std::string( "(end of arguments)" )
+                                      : args[i + 1].toStdString() };
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, args[i].toStdString() + " needs a value", &details );
+                }
                 if ( args[i] == "--cloud-max" )
                 {
                     // Parse-ok parity with --max-bytes/--bytes: a failed
@@ -2380,9 +2442,16 @@ int commandData( QStringList args, const CliIO &io )
                     bool parsed = false;
                     const double value = args[i + 1].toDouble( &parsed );
                     if ( !parsed )
+                    {
+                        const CliErrorDetails details {
+                            .exitCode =
+                                exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                            .expected = "a number in [0,100]",
+                            .actual = args[i + 1].toStdString() };
                         return io.finish( false, "data", {},
                                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                                          {}, "--cloud-max needs a number" );
+                                          {}, "--cloud-max needs a number", &details );
+                    }
                     query.hasCloudCoverMax = true;
                     query.cloudCoverMax = value;
                 }
@@ -2391,13 +2460,37 @@ int commandData( QStringList args, const CliIO &io )
                     bool parsed = false;
                     const int value = args[i + 1].toInt( &parsed );
                     if ( !parsed )
+                    {
+                        const CliErrorDetails details {
+                            .exitCode =
+                                exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                            .expected = "an integer",
+                            .actual = args[i + 1].toStdString() };
                         return io.finish( false, "data", {},
                                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                                          {}, "--limit needs an integer" );
+                                          {}, "--limit needs an integer", &details );
+                    }
                     query.limit = value;
                 }
                 else if ( args[i] == "--max-items" )
-                    query.maxItems = args[i + 1].toInt();
+                {
+                    // #1595 residue: same parse-ok gate as --limit — a bare
+                    // toInt() used to turn garbage into maxItems=0.
+                    bool parsed = false;
+                    const int value = args[i + 1].toInt( &parsed );
+                    if ( !parsed )
+                    {
+                        const CliErrorDetails details {
+                            .exitCode =
+                                exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                            .expected = "an integer",
+                            .actual = args[i + 1].toStdString() };
+                        return io.finish( false, "data", {},
+                                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                          {}, "--max-items needs an integer", &details );
+                    }
+                    query.maxItems = value;
+                }
                 else if ( args[i] == "--platform" )
                     query.platformEquals = args[i + 1].toStdString();
             }
@@ -2707,6 +2800,9 @@ int commandCatalogExport( QStringList args, const CliIO &io )
         return usageError( io, "catalog", "usage: catalog export <dir>" );
     }
     const QString outDir = args.takeFirst();
+    // #1597: export takes the output directory and nothing else.
+    if ( const int refused = rejectUnknownCliFlag( args, io, "catalog", "export <dir>" ) )
+        return refused;
     const auto descriptors = processing::AtomicAlgorithmRegistry::instance().listDescriptors();
     std::string error;
     const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(

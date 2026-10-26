@@ -193,6 +193,39 @@ TEST_CASE( "cli dataset argument errors carry the four-tuple", "[cli][errors][r4
     }
 }
 
+TEST_CASE( "cli unknown-flag refusals carry the four-tuple (#1597 second half)",
+           "[cli][errors][r4][unknown-flag]" )
+{
+    TempDir dir( "unknownflag" );
+    const std::string workflow = dir.file( "ok-workflow.json" );
+    writeFile( workflow,
+               R"({"schema_version":1,"steps":[{"id":"s1","operator":"rs:spectral_index"}]})" );
+
+    SECTION( "workflow validate names the typo'd flag" )
+    {
+        requireFourTuple( "workflow validate " + workflow + " --dry-runn", 6, "INVALID_INPUT",
+                          /*expected*/ true, /*actual*/ true, /*hint*/ false );
+    }
+    SECTION( "data catalog search names the unknown flag" )
+    {
+        const std::string emptyRoot = dir.file( "root" );
+        std::filesystem::create_directories( emptyRoot );
+        requireFourTuple( "data catalog search " + emptyRoot + " --platfrm xyz", 6,
+                          "INVALID_INPUT", true, true, false );
+    }
+    SECTION( "data catalog search --max-items non-numeric names the flag" )
+    {
+        const std::string emptyRoot = dir.file( "root2" );
+        std::filesystem::create_directories( emptyRoot );
+        const auto result =
+            runCli( "data catalog search " + emptyRoot + " --max-items abc", true );
+        REQUIRE( result.exitCode == 6 );
+        const std::string::size_type at = result.out.find( "[E-6:INVALID_INPUT]" );
+        REQUIRE( at != std::string::npos );
+        REQUIRE( result.out.find( "--max-items", at ) != std::string::npos );
+    }
+}
+
 TEST_CASE( "cli experiment and reproduce argument errors carry the four-tuple",
            "[cli][errors][r4]" )
 {
