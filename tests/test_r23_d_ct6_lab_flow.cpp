@@ -23,7 +23,9 @@
 
   Before R23-D the first oracle had no passing authority on the repo side
   (CT-6, .planning/r21-e/CROSS_TRACK_FINDINGS.md): the only repo rules were
-  fixture-calibrated, so the documented flow graded 45/100.
+  fixture-calibrated, so the documented flow graded 45/100. NOTE scope: this
+  suite delivers the repo-side authority + regression; the run_lab.cmd
+  --lab switch itself is an E-track one-liner (CROSS_TRACK CT-D1).
  ***************************************************************************/
 
 #include "agent/output_verifier.h"
@@ -158,6 +160,24 @@ TEST_CASE( "ct6: foundry lab-1 student flow grades PASS against the foundry-cali
     REQUIRE( again.graded );
     REQUIRE( again.digest == grade.digest );
     REQUIRE( again.score == grade.score );
+
+    // Cross-run determinism (R1 F4): an independent generate -> NDVI -> grade
+    // cycle over a fresh directory must land on the same verdict/score/summary.
+    // Digest equality is deliberately NOT asserted across directories — the
+    // canonical body embeds the artifact/rules PATHS, so two runs on different
+    // paths differ by construction; content-level equality is the claim.
+    QTemporaryDir second;
+    REQUIRE( second.isValid() );
+    const QString input2 = generateFoundryScene( second.path() );
+    const QString artifact2 = runLab1NdviStep(
+      input2, QDir( second.path() ).filePath( QStringLiteral( "lab1_ndvi.tif" ) ) );
+    const auto rerun = verifier.gradeArtifact( QStringLiteral( "ndvi_landsat" ), artifact2, {} );
+    REQUIRE( rerun.graded );
+    REQUIRE( rerun.verdict == grade.verdict );
+    REQUIRE( rerun.score == grade.score );
+    REQUIRE( rerun.deductions.empty() );
+    REQUIRE( rerun.summary["crs"].asString() == grade.summary["crs"].asString() );
+    REQUIRE( rerun.summary["width"].asInt() == grade.summary["width"].asInt() );
 }
 
 TEST_CASE( "ct6: wrong-CRS submission fails with a typed grid localization",

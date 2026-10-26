@@ -21,7 +21,7 @@
         "pixel_size_y": 30.0,
         "pixel_size_tolerance": 1e-06
       },
-      "derivation": "Foundry grid contract (docs/adr/0164): sicnu_generate_samples (tools/sample_foundry) emits the Lab profile as 256x256 at 30 m in EPSG:32648 (UTM 48N); a submission on another grid is not comparable to the known answer. Same pins as the offline-classroom bundle overlay (packaging/bundle/labs/grading-overlay/ndvi_basics.rules.json) — this file is the repo-side copy of that foundry-scene authority, closing R21-E CT-6 for the repo-documented run_lab.cmd flow. The fixture authority ndvi_basics.rules.json (128x128 EPSG:4326 committed scene, tests/fixtures/lab/ndvi_basics_reference.tif) stays untouched; two scenes, two authorities, no loosening."
+      "derivation": "Foundry grid contract (docs/adr/0164): sicnu_generate_samples (tools/sample_foundry) emits the Lab profile as 256x256 at 30 m in EPSG:32648 (UTM 48N); a submission on another grid is not comparable to the known answer. Same pins as the offline-classroom bundle overlay (packaging/bundle/labs/grading-overlay/ndvi_basics.rules.json) — this file is the repo-side copy of that foundry-scene authority — the piece R21-E CT-6 showed missing on the repo side. Switching scripts/windows/run_lab.cmd (and only that one line, --lab ndvi_basics -> --lab ndvi_landsat) is tracked for the E track (CROSS_TRACK CT-D1); until then the foundry flow passes against THIS file, not against the fixture authority. The fixture authority ndvi_basics.rules.json (128x128 EPSG:4326 committed scene, tests/fixtures/lab/ndvi_basics_reference.tif) stays untouched; two scenes, two authorities, no loosening."
     },
     {
       "id": "range.ndvi",

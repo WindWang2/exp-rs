@@ -141,10 +141,19 @@ std::string firstDiagCode( const sicnu::lab::LabResult<sicnu::lab::LabRuntimePla
 
 } // namespace
 
+/// RAII: removes the temp root even when a REQUIRE aborts the test case
+/// (R1 F5 — a skipped trailing remove_all leaked %TEMP%\r23d-bomb-* on red).
+struct TempRootGuard
+{
+  std::filesystem::path path;
+  ~TempRootGuard() { std::error_code ec; std::filesystem::remove_all( path, ec ); }
+};
+
 TEST_CASE( "session store: depth-bomb session file is a typed refusal, never an escaping jsoncpp exception",
            "[lab][r23_d][hardening]" )
 {
-  const std::filesystem::path root = makeTempRoot( "bomb" );
+  TempRootGuard guard{ makeTempRoot( "bomb" ) };
+  const std::filesystem::path root = guard.path;
 
   // 200 nested arrays — comfortably past the store's stackLimit of 64.
   std::string bomb( 200, '[' );
@@ -179,8 +188,6 @@ TEST_CASE( "session store: depth-bomb session file is a typed refusal, never an 
   const auto brokenResult = store.loadAny( "labx/studentx/2" );
   REQUIRE( !brokenResult.ok );
   REQUIRE( brokenResult.diagnostics.front().code == "lab.session.corrupt" );
-
-  std::filesystem::remove_all( root );
 }
 
 TEST_CASE( "spec runtime: expected_numeric bounds must be finite", "[lab][r23_d][spec]" )

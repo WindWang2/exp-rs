@@ -16804,7 +16804,7 @@ target_include_directories(test_r23_d_ct6_lab_flow PRIVATE
 target_compile_definitions(test_r23_d_ct6_lab_flow PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-sicnu_discover_tests(test_r23_d_ct6_lab_flow TIMEOUT 300)
+sicnu_discover_tests(test_r23_d_ct6_lab_flow TEST_PREFIX test_r23_d_ct6_lab_flow:: TIMEOUT 300)
 # --- end R23-D registration ---
 
 # --- R23-D (r23-d, hardening pair): src/lab fail-closed contracts —
@@ -16820,5 +16820,5 @@ target_include_directories(test_r23_d_lab_hardening PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r23_d_lab_hardening)
+sicnu_discover_tests(test_r23_d_lab_hardening TEST_PREFIX test_r23_d_lab_hardening::)
 # --- end R23-D hardening registration ---
