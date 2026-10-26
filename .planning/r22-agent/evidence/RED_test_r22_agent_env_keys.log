@@ -1,0 +1,60 @@
+Randomness seeded to: 3607171867
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+test_r22_agent_env_keys is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+environment keys carrying '=' splice-refuse before spawn (#1690)
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:22
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:44: FAILED:
+  REQUIRE_FALSE( result.started )
+with expansion:
+  !true
+with message:
+  key: LD_PRELOAD=/tmp/exp_rs_r22_nonexistent_evil.so 
+
+-------------------------------------------------------------------------------
+empty and NUL-bearing environment keys are refused (#1690)
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:50
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:65: FAILED:
+  REQUIRE_FALSE( result.started )
+with expansion:
+  !true
+with message:
+  key bytes: 0
+
+-------------------------------------------------------------------------------
+manifest env keys are validated at parse time (#1690)
+  malformed keys are a typed manifest error
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:99
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:108: FAILED:
+  REQUIRE_FALSE( parseEnv( env, error ) )
+with expansion:
+  !true
+
+-------------------------------------------------------------------------------
+manifest env keys are validated at parse time (#1690)
+  non-object environment is a typed error
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:122
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_env_keys.cpp:127: FAILED:
+  REQUIRE_FALSE( parseEnv( env, error ) )
+with expansion:
+  !true
+
+===============================================================================
+test cases: 4 | 1 passed | 3 failed
+assertions: 9 | 5 passed | 4 failed
+
