@@ -721,3 +721,9 @@ r6_dev.cmd
 !.planning/r22-infra/
 .planning/r22-infra/*
 !.planning/r22-infra/*.md
+
+# r23-C track (zcode r23-C: Pi/MCP harness, Qt/QGIS workbench & cartography
+# interaction loop): planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r23-C/
+.planning/zcode-r23-C/*
+!.planning/zcode-r23-C/*.md
