@@ -65,7 +65,14 @@ class AppInterfaceBridge : public QObject
                                  ActiveViewHost *activeViewHost = nullptr,
                                  QMenu *parentMenu = nullptr,
                                  QObject *parent = nullptr );
-    ~AppInterfaceBridge() override = default;
+    /// #1691: a discarded bridge must not leave its py: registrations in the
+    /// engine/registry — a destroyed bridge's algorithm executors can only
+    /// answer "IPC Server not available", so the catalog would carry ghost
+    /// entries. unload() and the adapter's load-failure path revoke
+    /// explicitly; this destructor is the last-resort net for any other
+    /// discard path (defined in the .cpp to keep the registry calls out of
+    /// every TU including this header).
+    ~AppInterfaceBridge() override;
 
     void setDataManager( sicnu::data::DataManager *dataManager );
     sicnu::data::DataManager *dataManager() const;
