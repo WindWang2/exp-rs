@@ -141,17 +141,20 @@ void MapToolManager::setupTools()
     m_featureArrayTool = new QgsMapToolFeatureArray(m_canvas);
     m_vertexTool = new QgsVertexTool(m_canvas, m_cadDock);
 
-    // Editing tools created: the ones in m_allTools after the navigation/
-    // view tools (pan, zoom in/out, identify, measure distance/area) plus
-    // the seven created after the list was frozen. Counted from the real
-    // inventory — a hardcoded literal drifts silently on the next tool.
+    // Editing tools created: the ones in m_allTools beyond the navigation/
+    // view tools, plus those created after the list was frozen. Counted from
+    // the real inventories — a hardcoded literal drifts silently on the next
+    // tool addition.
     const QList<QgsMapTool *> laterEditingTools = {
         m_fillRingTool, m_deletePartTool, m_deleteRingTool,
         m_trimExtendTool, m_chamferFilletTool, m_featureArrayTool, m_vertexTool
     };
-    constexpr int kNavigationToolCount = 6; // pan, zoom in/out, identify, measure distance/area
+    const QList<QgsMapTool *> navigationTools = {
+        m_panTool, m_zoomInTool, m_zoomOutTool, m_identifyTool,
+        m_measureDistanceTool, m_measureAreaTool
+    };
     const int editingToolCount =
-        m_allTools.size() - kNavigationToolCount + laterEditingTools.size();
+        m_allTools.size() - navigationTools.size() + laterEditingTools.size();
     SICNU_LOG_SUCCESS( SicnuLogTags::MapTools, QString( "Map tools initialized: pan, zoom, identify, measure, %1 editing tools" )
         .arg( editingToolCount ) );
 }

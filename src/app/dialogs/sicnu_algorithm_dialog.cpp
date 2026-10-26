@@ -473,21 +473,32 @@ bool SicnuAlgorithmDialog::isFinalized()
 
 void SicnuAlgorithmDialog::closeEvent( QCloseEvent *event )
 {
-  if ( mJobHandle.isRunning() && !sicnu::app::jobCancelInFlight( mJobHandle ) )
+  if ( mJobHandle.isRunning() )
   {
-    // #339: the worker owns its context and reads the dialog feedback
-    // through a QPointer guard, so the task is safe to outlive this dialog.
-    // Cancel and ignore the close while the task is still running; the user
-    // can close again after the job finishes/cancels.
-    mJobHandle.cancel();
-    if ( mFeedback )
-      mFeedback->pushInfo( tr( "Cancel requested — please wait for the task to finish." ) );
-    event->ignore();
-    return;
+    // #339: while the worker is executing, runPrepared() dereferences this
+    // dialog's mFeedback RAW — a WA_DeleteOnClose close would free it
+    // underneath the worker thread. Cancel and ignore the close; the user
+    // can close again once the terminal record lands.
+    if ( !sicnu::app::jobCancelInFlight( mJobHandle ) )
+    {
+      mJobHandle.cancel();
+      if ( mFeedback )
+        mFeedback->pushInfo( tr( "Cancel requested — please wait for the task to finish." ) );
+      event->ignore();
+      return;
+    }
+    // Cancel armed. If the worker already started, it is inside
+    // runPrepared() with the raw feedback pointer — still refuse (#339).
+    if ( mRunState && mRunState->workerStarted )
+    {
+      event->ignore();
+      return;
+    }
+    // Cancel armed and the worker never started: the task will observe the
+    // cancel before touching the feedback (the executor rejects a nulled
+    // feedback guard), so closing no longer dangles anything (#1560 escape
+    // hatch, same as the raster dialogs).
   }
-  // Once the cooperative cancel is armed (#1560, same escape hatch as the
-  // raster dialogs) accept the close instead of trapping the user in a
-  // dialog whose task already agreed to stop.
   QgsProcessingAlgorithmDialogBase::closeEvent( event );
 }
 
@@ -636,6 +647,14 @@ void SicnuAlgorithmDialog::runAlgorithm()
       ctx.throwIfCancelled();
 
       state->workerStarted = true;
+
+      // The feedback's owner (the dialog) may be gone if it closed after
+      // arming the cancel but before dispatch — running without it would
+      // hand runPrepared a dangling/null receiver. Treat as cancelled.
+      if ( !feedbackGuard )
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled,
+          "Dialog closed before execution started" );
 
       try
       {

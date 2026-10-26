@@ -115,14 +115,20 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
                     if ( QgsMapLayer *layer = layerNode->layer() )
                         layers.append( layer );
                 }
-                const bool removedAny = hostPtr->removeLayers( layers );
-                // Remove the group node itself once its layers went through
-                // the manager (or when it never had any). Declining the
-                // confirmation removes nothing.
-                if ( layers.isEmpty() || removedAny ) {
-                    if ( QgsLayerTreeGroup *parent =
-                             qobject_cast<QgsLayerTreeGroup *>( nodeGuard->parent() ) )
-                        parent->removeChildNode( nodeGuard.data() );
+                hostPtr->removeLayers( layers );
+                // removeLayers() ran a modal confirmation: the node may have
+                // been destroyed from underneath meanwhile, so re-check the
+                // guard. The group node is removed only when it no longer
+                // holds layers (all removed, or it never had any) — a failed
+                // per-layer removal keeps the group with its surviving
+                // layers, and declining the confirmation removes nothing.
+                if ( nodeGuard ) {
+                    auto *survivingGroup = static_cast<QgsLayerTreeGroup *>( nodeGuard.data() );
+                    if ( survivingGroup->findLayers().isEmpty() ) {
+                        if ( QgsLayerTreeGroup *parent =
+                                 qobject_cast<QgsLayerTreeGroup *>( survivingGroup->parent() ) )
+                            parent->removeChildNode( survivingGroup );
+                    }
                 }
             } );
         } else {

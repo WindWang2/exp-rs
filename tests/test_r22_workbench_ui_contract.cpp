@@ -108,8 +108,15 @@ TEST_CASE( "r22 W9-contract: toolbox dialog close accepted once cancel is armed"
   REQUIRE_FALSE( dialog.isEmpty() );
   const int fn = dialog.indexOf( QStringLiteral( "SicnuAlgorithmDialog::closeEvent" ) );
   REQUIRE( fn >= 0 );
-  const QString body = dialog.mid( fn, 1400 );
+  const QString body = dialog.mid( fn, 2000 );
   CHECK( body.contains( QStringLiteral( "jobCancelInFlight" ) ) );
+  // R1-1: once the worker STARTED, runPrepared dereferences mFeedback raw,
+  // so the close must still be refused even with the cancel armed.
+  CHECK( body.contains( QStringLiteral( "workerStarted" ) ) );
+  // R1-1 companion: the executor must refuse to run with a nulled feedback
+  // guard (dialog closed after arming, before dispatch).
+  const int exec = dialog.indexOf( QStringLiteral( "Dialog closed before execution started" ) );
+  CHECK( exec >= 0 );
 }
 
 // W-extra-contract (#map-tool-count): the structured "Map tools initialized"
