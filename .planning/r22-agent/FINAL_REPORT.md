@@ -31,7 +31,7 @@
 ## 评审
 
 - R1（独立 subagent）：APPROVE；F1(P2)+F2-F7(P3) 全部闭环（F1/F2/F4/F7 代码修复+回归用例；F5 转跨轨；F6 注释说明）
-- R2（另一独立 subagent）：见 REVIEW_R2.md（本报告随其结论更新）
+- R2（另一独立 subagent，不采信 R1）：初判 REJECT——R2-F1（P1：网络驱动表 "oracle" 应为连接串短名 "OCI"，EEDA/AmigoCloud/GeoRaster 同漏，OCI:usr/pwd@db 可绕远程默认拒）与 R2-F2（P2：嵌套驱动递归无深度上限，"KML:"×100000 PoC 实测 SIGSEGV）。两项已修（表名更正+8 层深度上限 fail-closed）并加 8 个回归用例；P3 项（进度通知剥离 logLines 消除 TaskCenter 双索引 hazard、CMake 注释、INFO 次序、TileDB 真名、kvKeys 补 path=/driver=）一并闭环。修复后最终双跑全绿（containment 78×2 / env 46×2 / job_logs 24031×2 / ipc 17×2 / ghost 7×2；job_engine 446/34、mcp_server 9686/31）。R2 还独立验证了 IPC 抢救正则对 daemon 全部 26 个 sendall 点的键序匹配、envp 双门、bridge 析构幂等、#1705 单线程 exactly-once 代数。→ 两轮独立评审全部闭环。
 
 ## 遗留与跨轨
 
