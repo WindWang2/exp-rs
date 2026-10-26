@@ -261,7 +261,22 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteClassification(
         assetRef.assetId = source.assetId;
         assetRef.revision = source.revision;
         assetRef.role = QStringLiteral( "label" );
-        m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
+        // #1702: a dropped failure here left the dataset manifest without
+        // its label source-asset reference while the promotion still
+        // reported success — provenance silently incomplete. The failure is
+        // reported TRUTHFULLY with the committed counts, same doctrine as
+        // the annotation loop below.
+        auto linked = m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
+        if ( !linked )
+        {
+            QVector<sicnu::data::Diagnostic> diags = linked.diagnostics();
+            diags.append( promotionDiag(
+                QStringLiteral( "dataset.promotion_partial" ),
+                QStringLiteral( "%1 samples committed, but the label source-asset link"
+                                " failed; the version's provenance is incomplete" )
+                    .arg( report.samplesWritten ) ) );
+            return failAs<PromotionReport>( diags );
+        }
     }
     for ( auto &annotation : annotations )
     {
@@ -364,7 +379,19 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteSegmentation(
         assetRef.assetId = source.assetId;
         assetRef.revision = source.revision;
         assetRef.role = QStringLiteral( "segmentation" );
-        m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
+        // #1702: same provenance-link check as promoteVector — a dropped
+        // failure silently stripped the manifest's source-asset reference.
+        auto linked = m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
+        if ( !linked )
+        {
+            QVector<sicnu::data::Diagnostic> diags = linked.diagnostics();
+            diags.append( promotionDiag(
+                QStringLiteral( "dataset.promotion_partial" ),
+                QStringLiteral( "%1 samples committed, but the segmentation source-asset"
+                                " link failed; the version's provenance is incomplete" )
+                    .arg( report.samplesWritten ) ) );
+            return failAs<PromotionReport>( diags );
+        }
     }
     for ( auto &annotation : annotations )
     {
@@ -497,7 +524,22 @@ sicnu::data::Result<QString> SamplePromoter::promotePair( const DatasetVersionId
     auto written = m_store->addSamples( QVector<SampleRecord>{ sample } );
     if ( !written )
         return failAs<QString>( written.diagnostics() );
-    m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
+    // #1702: the pair's provenance link is part of the promotion contract —
+    // report its failure instead of succeeding with a manifest that cannot
+    // trace the sample back to its source assets.
+    {
+        auto linked = m_store->addSourceAssetsToDraft( version, QVector<SourceAssetRef>{ assetRef } );
+        if ( !linked )
+        {
+            QVector<sicnu::data::Diagnostic> diags = linked.diagnostics();
+            diags.append( promotionDiag(
+                QStringLiteral( "dataset.promotion_partial" ),
+                QStringLiteral( "sample %1 committed, but its source-asset link failed;"
+                                " the version's provenance is incomplete" )
+                    .arg( sample.sampleId() ) ) );
+            return failAs<QString>( diags );
+        }
+    }
     return TypedResult::success( sample.sampleId() );
 }
 
@@ -586,7 +628,20 @@ sicnu::data::Result<QString> SamplePromoter::promoteTemporal(
     if ( !written )
         return failAs<QString>( written.diagnostics() );
     if ( !assets.isEmpty() )
-        m_store->addSourceAssetsToDraft( version, assets );
+    {
+        // #1702: same provenance-link check as promotePair.
+        auto linked = m_store->addSourceAssetsToDraft( version, assets );
+        if ( !linked )
+        {
+            QVector<sicnu::data::Diagnostic> diags = linked.diagnostics();
+            diags.append( promotionDiag(
+                QStringLiteral( "dataset.promotion_partial" ),
+                QStringLiteral( "sample %1 committed, but its observation source-asset"
+                                " links failed; the version's provenance is incomplete" )
+                    .arg( sample.sampleId() ) ) );
+            return failAs<QString>( diags );
+        }
+    }
     return TypedResult::success( sample.sampleId() );
 }
 
