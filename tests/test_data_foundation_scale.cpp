@@ -23,6 +23,7 @@
 #include <QJsonObject>
 #include <QSet>
 #include <QTemporaryDir>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 
 using namespace sicnu::dataset;
 using namespace sicnu::experiment;
@@ -143,7 +144,7 @@ TEST_CASE( "100k catalog + 10k runs: batch ingest, cursor paging, indexed "
                       static_cast<double>( lastCursorMs ) );
         report.insert( QStringLiteral( "deep_page_probe" ), entry );
     }
-    CHECK( lastCursorMs < 5000 ); // generous: keyset pages never regress to scans
+    CHECK( lastCursorMs < sicnu::testsupport::wallClockBudgetMs( 5000 ) ); // generous: keyset pages never regress to scans (#1699 scaled)
 
     // --- bounded DISTINCT query over the full catalog -----------------------
     timer.restart();
@@ -239,7 +240,7 @@ TEST_CASE( "100k catalog + 10k runs: batch ingest, cursor paging, indexed "
     const auto twinLookup = experimentStore.runIdsByExecutionFingerprint(
         runExecutionFingerprint( identity ), ExperimentStore::kMaxPageSize );
     REQUIRE( twinLookup.has_value() );
-    const QStringList twinIds = twinLookup.value();
+    const QStringList &twinIds = twinLookup.value();
     const qint64 fpLookupMs = timer.elapsed();
     CHECK( twinIds.size() == 500 ); // page-bound slice of the 10k identity twins
     {
@@ -248,7 +249,7 @@ TEST_CASE( "100k catalog + 10k runs: batch ingest, cursor paging, indexed "
         entry.insert( QStringLiteral( "matches" ), static_cast<double>( twinIds.size() ) );
         report.insert( QStringLiteral( "execution_fingerprint_lookup" ), entry );
     }
-    CHECK( fpLookupMs < 2000 ); // indexed lookup, generous ceiling
+    CHECK( fpLookupMs < sicnu::testsupport::wallClockBudgetMs( 2000 ) ); // indexed lookup, generous ceiling (#1699 scaled)
 
     // --- emit the structured evidence ---------------------------------------
     const QByteArray evidenceDir = qgetenv( "SICNU_PERF_EVIDENCE_DIR" );

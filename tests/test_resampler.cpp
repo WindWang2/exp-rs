@@ -100,9 +100,12 @@ TEST_CASE("test_resampler - Nearest neighbour picks the rounded cell", "[resampl
 TEST_CASE("test_resampler - Out-of-range sampling yields the NoData sentinel", "[resampler][d14]")
 {
     const auto grid = analyticPlaneGrid();
+    // Footprint is [-0.5, 9.5] (#1686): -0.75 / 10.5 are outside the raster
+    // edge; the half-pixel ring inside the edge is valid coverage (covered by
+    // test_r22_science_resampler.cpp).
     for (const auto method : {ResampleMethod::NearestNeighbor, ResampleMethod::Bilinear,
                               ResampleMethod::CubicConvolution, ResampleMethod::Lanczos}) {
-        REQUIRE(Resampler::interpolate(grid.data(), 10, 10, -0.25, 5.0, method, kNoData) == kNoData);
+        REQUIRE(Resampler::interpolate(grid.data(), 10, 10, -0.75, 5.0, method, kNoData) == kNoData);
         REQUIRE(Resampler::interpolate(grid.data(), 10, 10, 5.0, 10.5, method, kNoData) == kNoData);
     }
 }

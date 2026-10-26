@@ -751,6 +751,13 @@ sicnu::data::Result<void> DatasetStore::addSourceAssetsToDraft(
         stmt.bind( 1, versionId.toString() );
         if ( stmt.stepRow() )
             current = recordFromRow( stmt );
+        else if ( stmt.stepFailed() )
+            // #1703-3: an I/O error is not absence — reporting it as
+            // dataset.not_found sent callers hunting identity bugs that
+            // were really SQLite failures (same contract as #1448/#1457).
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               QStringLiteral( "reading version %1 failed: %2" )
+                                                   .arg( versionId.toString(), stmt.error( m_impl->db ) ) ) );
     }
     if ( !current )
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
@@ -831,6 +838,13 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::stageVersion(
         stmt.bind( 1, versionId.toString() );
         if ( stmt.stepRow() )
             current = recordFromRow( stmt );
+        else if ( stmt.stepFailed() )
+            // #1703-3: an I/O error is not absence — reporting it as
+            // dataset.not_found sent callers hunting identity bugs that
+            // were really SQLite failures (same contract as #1448/#1457).
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               QStringLiteral( "reading version %1 failed: %2" )
+                                                   .arg( versionId.toString(), stmt.error( m_impl->db ) ) ) );
     }
     if ( !current )
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
@@ -921,6 +935,13 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersionImpl(
         stmt.bind( 1, versionId.toString() );
         if ( stmt.stepRow() )
             current = recordFromRow( stmt );
+        else if ( stmt.stepFailed() )
+            // #1703-3: an I/O error is not absence — reporting it as
+            // dataset.not_found sent callers hunting identity bugs that
+            // were really SQLite failures (same contract as #1448/#1457).
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               QStringLiteral( "reading version %1 failed: %2" )
+                                                   .arg( versionId.toString(), stmt.error( m_impl->db ) ) ) );
     }
     if ( !current )
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
@@ -1043,6 +1064,13 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::deprecateVersion(
         stmt.bind( 1, versionId.toString() );
         if ( stmt.stepRow() )
             current = recordFromRow( stmt );
+        else if ( stmt.stepFailed() )
+            // #1703-3: an I/O error is not absence — reporting it as
+            // dataset.not_found sent callers hunting identity bugs that
+            // were really SQLite failures (same contract as #1448/#1457).
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               QStringLiteral( "reading version %1 failed: %2" )
+                                                   .arg( versionId.toString(), stmt.error( m_impl->db ) ) ) );
     }
     if ( !current )
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),

@@ -108,11 +108,28 @@ BundleManifestInfo inspectBundleManifest( const QString &bundleDir );
 /// Pure argv construction for the bundle builder (testable without
 /// executing): selects build_offline_bundle.sh (bash) vs .cmd (cmd.exe) per
 /// platform. @p windows mirrors Q_OS_WIN at the call site.
+///
+/// #1688: the request is REFUSED (empty program and arguments) when any
+/// parameter fails validateBundleBuilderParams() — on Windows the argv is
+/// re-parsed by cmd.exe, so metacharacters without spaces stay unquoted and
+/// become command separators. Legal inputs produce exactly the request the
+/// platform twin expects (unchanged shape).
 ScriptRunRequest bundleBuilderRequest( const QString &repoRoot, const QString &buildDir,
                                        const QString &outDir, const QString &version, int maxMb,
                                        bool windows );
 
-/// Adapter: build_offline_bundle.sh (POSIX) / .cmd (Windows).
+/// #1688: parameter validation shared by every bundle-builder entry point.
+/// Empty result = safe on both the bash and cmd.exe paths. Each rejection
+/// names the parameter and the offending character class:
+/// - version (when set) must match [0-9A-Za-z._-]+;
+/// - buildDir/outDir must be non-empty and free of cmd.exe metacharacters
+///   (& | < > ^ % ! ") and control characters (newline/CR/tab).
+QStringList validateBundleBuilderParams( const QString &buildDir, const QString &outDir,
+                                         const QString &version );
+
+/// Adapter: build_offline_bundle.sh (POSIX) / .cmd (Windows). Refuses to
+/// start a process when validateBundleBuilderParams() rejects — the typed
+/// failure carries the rejections verbatim (started=false).
 ScriptRunResult buildOfflineBundle( const QString &repoRoot, const QString &buildDir, const QString &outDir,
                                     const QString &version = QString(), int maxMb = 250 );
 

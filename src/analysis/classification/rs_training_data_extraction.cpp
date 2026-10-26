@@ -121,8 +121,10 @@ void buildMatrices( GDALDataset *ds,
       auto &vec = kv.second;
       std::sort( vec.begin(), vec.end(),
                  []( const auto &a, const auto &b ) { return a.first < b.first; } );
-      // Shuffle the pair vector, then truncate
-      std::shuffle( vec.begin(), vec.end(), rng );
+      // Shuffle the pair vector, then truncate. Portable Fisher-Yates
+      // (#1685): std::shuffle is implementation-defined, which would make
+      // the kept sample subset differ across STLs for the same seed.
+      rs::algorithms::portable::fisherYatesShuffle( rng, vec );
       if ( vec.size() > static_cast<size_t>( options.maxSamplesPerClass ) )
         vec.resize( static_cast<size_t>( options.maxSamplesPerClass ) );
       std::sort( vec.begin(), vec.end(),

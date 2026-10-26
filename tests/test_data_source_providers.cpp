@@ -553,7 +553,12 @@ TEST_CASE( "Remote raster resolve on the application thread does not GDALOpen th
   QElapsedTimer timer;
   timer.start();
   const auto resolved = provider.resolve( source );
-  CHECK( timer.elapsed() < 2000 );
+  // #1699: hang-guard, not a latency budget — the deferred-resolution
+  // behaviour is asserted structurally right below (Missing state, Remote
+  // storage kind, deferred diagnostics). A blocking resolve would sit in
+  // the kernel's SYN-retry window for the TEST-NET address (~20s+); a
+  // tight 2s ceiling only flaked under ASan or a loaded parallel ctest.
+  CHECK( timer.elapsed() < 10000 );
 
   REQUIRE( resolved );
   CHECK( resolved.value().state == AssetState::Missing );

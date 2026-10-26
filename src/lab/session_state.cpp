@@ -4,6 +4,8 @@
 
 #include "session_state.h"
 
+#include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace sicnu::lab
@@ -358,6 +360,14 @@ LabResult<> recordAnswer( LabSession &session, const LabRuntimePlan &plan,
         return LabResult<>::failure( { LabDiag{ "lab.session.field",
                                                 "numeric question '" + questionId +
                                                   "' requires a numeric answer" } } );
+      // #1678: a non-finite double serializes as null (NaN) or 1e+9999
+      // (Inf) under jsoncpp's defaults, and a reload then rejects the whole
+      // session document — one poisoned answer would take the session's
+      // evidence down with it. Refuse the value at the API boundary.
+      if ( !std::isfinite( *numeric ) )
+        return LabResult<>::failure( { LabDiag{ "lab.session.field",
+                                                "numeric answer for '" + questionId +
+                                                  "' must be finite (NaN/Inf are rejected)" } } );
       answer.hasNumeric = true;
       answer.numeric = *numeric;
       break;
@@ -667,8 +677,17 @@ LabResult<LabSession> sessionFromJson( const Json::Value &doc )
           diags.push_back( LabDiag{ "lab.session.schema", "answer numeric must be a number" } );
           continue;
         }
+        // #1678: jsoncpp parses huge exponents into infinities; a non-finite
+        // double round-trips as null/1e+9999 and poisons the whole session
+        // document. Reject at load time with the same typed diagnostic.
+        const double parsed = node[ "numeric" ].asDouble();
+        if ( !std::isfinite( parsed ) )
+        {
+          diags.push_back( LabDiag{ "lab.session.schema", "answer numeric must be finite" } );
+          continue;
+        }
         answer.hasNumeric = true;
-        answer.numeric = node[ "numeric" ].asDouble();
+        answer.numeric = parsed;
       }
       answer.seq = node[ "seq" ].asInt64();
       session.questionAnswers.push_back( std::move( answer ) );

@@ -540,8 +540,13 @@ void BatchProcessingDialog::onBatchTaskUpdated(const sicnu::AlgorithmTaskInfo &i
     if (info.status == sicnu::TaskStatus::Completed) {
         m_batchSuccess++;
     } else if (info.status == sicnu::TaskStatus::Canceled) {
-        // A user cancel of the in-flight item is a batch stop, not an item
-        // failure; submitNextBatchItem records the single cancellation note.
+        // A cancel of the in-flight item is a batch stop, not an item
+        // failure — including one issued from the Task Center panel rather
+        // than this dialog's Run/Stop button; otherwise the chain silently
+        // skips the file, keeps submitting, and reports undercounted totals
+        // with the progress bar at 100%.
+        m_canceled = true;
+        // submitNextBatchItem records the single cancellation note.
     } else {
         m_batchFail++;
         QString reason = info.errorMessage;

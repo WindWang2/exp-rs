@@ -24,7 +24,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "verification/availability.h"
+#include "verification/verification_availability.h"
 #include "verification/canonical_json.h"
 #include "verification/checks_cross_output.h"
 #include "verification/checks_provenance.h"

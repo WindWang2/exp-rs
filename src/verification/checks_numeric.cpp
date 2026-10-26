@@ -3,7 +3,7 @@
 
 #include "verification/checks_numeric.h"
 
-#include "verification/availability.h"
+#include "verification/verification_availability.h"
 #include "verification/canonical_json.h"
 #include "verification/failure_codes.h"
 
