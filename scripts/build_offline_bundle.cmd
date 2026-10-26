@@ -46,6 +46,18 @@ exit /b 2
 :parsed
 if not "%VERIFY_PATH%"=="" goto :verify
 
+rem #1697: an explicit --version is concatenated into BUNDLE, which the
+rem rmdir /S /Q below deletes recursively. Reject anything that is not one
+rem safe path component (alnum first char; then letters, digits, dot,
+rem underscore, hyphen only) right at parse time, before build-dir probing
+rem or anything else, so the dangerous input never gets further. The final
+rem value (git-describe fallback included) is validated again after the
+rem defaults resolve. See :check_version for why the match runs in PowerShell.
+if not "%VERSION%"=="" (
+  call :check_version
+  if errorlevel 1 exit /b 2
+)
+
 if "%BUILD_DIR%"=="" ( echo build_offline_bundle: --build-dir is required & exit /b 2 )
 if not exist "%BUILD_DIR%\" ( echo build_offline_bundle: build dir not found: %BUILD_DIR% & exit /b 1 )
 
@@ -62,6 +74,9 @@ if "!GEN_BIN!"=="" ( echo build_offline_bundle: sicnu_generate_samples.exe not f
 
 if "%VERSION%"=="" for /F "delims=" %%V in ('git -C "%REPO_ROOT%" describe --tags --always 2^>nul') do set "VERSION=%%V"
 if "%VERSION%"=="" set "VERSION=dev"
+call :check_version
+if errorlevel 1 exit /b 2
+
 if "%OUT_DIR%"=="" set "OUT_DIR=%REPO_ROOT%\dist"
 set "BUNDLE=%OUT_DIR%\sicnu-lab-%VERSION%"
 if exist "%BUNDLE%\" rmdir /S /Q "%BUNDLE%"
@@ -193,3 +208,18 @@ exit /b %errorlevel%
 if not exist "%VERIFY_PATH%\manifest.json" ( echo build_offline_bundle: no manifest.json under %VERIFY_PATH% & exit /b 1 )
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Verify "%VERIFY_PATH%"
 exit /b %errorlevel%
+
+:check_version
+rem #1697 subroutine: refuses an unsafe VERSION (see the :parsed comment).
+rem The regex match runs in PowerShell with the value passed through the
+rem environment (never percent-expanded into the command line), so quotes,
+rem ampersands, pipes and other special characters in the value cannot
+rem alter or bypass the check; the error path echoes through delayed
+rem expansion for the same reason.
+set "R22_VERSION_PROBE=%VERSION%"
+powershell -NoProfile -Command "exit ([int](-not ($env:R22_VERSION_PROBE -match '^[A-Za-z0-9][A-Za-z0-9._-]*$')))"
+if errorlevel 1 (
+  echo build_offline_bundle: refusing unsafe --version "!VERSION!" - must be one path component ^(letters, digits, . _ -^)
+  exit /b 2
+)
+goto :eof

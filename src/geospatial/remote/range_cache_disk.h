@@ -70,9 +70,16 @@ class RangeDiskBlockStore
     /// provable, else "" (not disk-cacheable). Size+Last-Modified is rejected
     /// (second-resolution race). Callers pass the captured identity fields;
     /// the store never probes.
+    ///
+    /// #1700: @p blockSize is part of the basis. Disk blocks are keyed by
+    /// basis hash + block INDEX, and an index only names a byte range under
+    /// ONE geometry — a 64 KiB-layout block 1 holds [64K,128K) while a
+    /// 128 KiB-layout block 1 holds [128K,256K). Without the geometry in
+    /// the key, a blockSize change served the old file's bytes at the new
+    /// offsets, silently, with a valid per-block checksum.
     static std::string identityBasis( const std::string &requestUrl, bool hasStrongEtag,
                                       const std::string &etag, bool hasSize, std::uint64_t sizeBytes,
-                                      const std::string &lastModified );
+                                      const std::string &lastModified, std::uint64_t blockSize );
 
     /// Reads one block. Returns false on any miss/corruption (corrupt files
     /// are unlinked). `expectedSize` tolerates an EOF-clamped final block.

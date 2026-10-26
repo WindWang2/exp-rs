@@ -362,12 +362,18 @@ TEST_CASE( "RSS watermark throttling blocks at high watermark and unblocks at lo
         REQUIRE_FALSE( gov.isWatermarkExceeded() );
         REQUIRE( gov.currentRssBytes() == 500 * 1024 * 1024 );
 
-        // Must complete immediately without blocking
+        // Must complete immediately without blocking. #1699: this is a
+        // hang-guard only — the correct path is ~0ms and even a path that
+        // slept the full 5ms throttle quantum would stay far below this
+        // ceiling, so a tight bound (the old <50ms) only bought ASan/loaded-
+        // runner flakes without catching anything extra. The behavioural
+        // oracle for "blocks when above watermark" is the structural
+        // entered/unblocked section below, not this clock.
         const auto t0 = std::chrono::steady_clock::now();
         gov.throttleWait( nullptr, std::chrono::milliseconds( 5 ) );
         const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0 ).count();
-        REQUIRE( elapsedMs < 50 );
+        REQUIRE( elapsedMs < 500 );
     }
 
     SECTION( "At or above high watermark: throttleWait blocks until RSS drops below low watermark" )
