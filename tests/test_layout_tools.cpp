@@ -890,6 +890,53 @@ TEST_CASE( "layout:export reports every page of a multi-page layout (CARTO-15)",
   cleanupProject();
 }
 
+// R21-D: the tool used to build pages[] by re-walking the delivery
+// directory after the export, so a stale sibling from an earlier, larger
+// delivery (or a page the design now excludes) was reported as a page THIS
+// run delivered. The delivery set now comes from the export itself.
+TEST_CASE( "layout:export never re-manifests stale page siblings (R21-D)",
+           "[layout][mcp][export][r21d]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+
+  REQUIRE( run( "layout:create", R"({"name":"StaleSiblings"})" ).success );
+  QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "StaleSiblings" ) );
+  REQUIRE( layout != nullptr );
+  REQUIRE( run( "layout:add_item",
+                R"({"layout":"StaleSiblings","type":"label","properties":{"text":"body"}})" )
+              .success );
+
+  // A stale sibling from an earlier, larger delivery sitting in the target
+  // directory: the tool must not report it as a delivered page.
+  const QString png = dir.filePath( QStringLiteral( "single.png" ) );
+  const QString staleSibling = dir.filePath( QStringLiteral( "single_2.png" ) );
+  {
+    QFile stale( staleSibling );
+    REQUIRE( stale.open( QIODevice::WriteOnly ) );
+    stale.write( "stale" );
+    stale.close();
+  }
+  REQUIRE( QFile::exists( staleSibling ) );
+
+  const std::string input =
+      R"({"layout":"StaleSiblings","path":")" + png.toStdString() + R"(","format":"png","dpi":96})";
+  const auto exported = run( "layout:export", input );
+  REQUIRE( exported.success );
+  CHECK( exported.output["page_count"].asInt() == 1 );
+  REQUIRE( exported.output["pages"].isArray() );
+  CHECK( exported.output["pages"].size() == 1 );
+  CHECK( exported.output["pages"][0]["path"].asString() == png.toStdString() );
+  // The stale sibling is gone: this run's delivery is the complete set.
+  CHECK( !QFile::exists( staleSibling ) );
+
+  LayoutService::instance().deleteLayout( QStringLiteral( "StaleSiblings" ) );
+  cleanupProject();
+}
+
 TEST_CASE( "Non-finite font sizes and scale-bar segments are ignored, not applied (CARTO-7)",
            "[layout_service][robustness][r14d]" )
 {
@@ -958,5 +1005,70 @@ TEST_CASE( "Non-finite font sizes and scale-bar segments are ignored, not applie
   CHECK( bar->units() == Qgis::DistanceUnit::Kilometers );
 
   LayoutService::instance().deleteLayout( QStringLiteral( "FiniteGuards" ) );
+  cleanupProject();
+}
+
+// R21-D: a wrong-TYPED boolean key used to throw Json::LogicError mid-apply
+// (asBool() on a string/number), so the batch returned ok=false with the
+// keys applied BEFORE it already mutated — a half-applied item and a
+// misleading error. The documented contract is "unknown/invalid keys are
+// reported through applied/ignored": wrong-typed keys are IGNORED.
+TEST_CASE( "Wrong-typed boolean item properties are ignored, not a half-applied failure (R21-D)",
+           "[layout][mcp][r21d]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  QgsPrintLayout *layout = LayoutService::instance().createLayout(
+    QStringLiteral( "BoolTypeGuards" ), QStringLiteral( "A4" ) );
+  REQUIRE( layout != nullptr );
+  QgsLayoutItem *item = nullptr;
+  {
+    // A plain shape: the generic item surface (visible/locked) applies.
+    Json::Value shapeProps( Json::objectValue );
+    shapeProps["name"] = "shape-1";
+    QString addError;
+    item = LayoutService::instance().addItem( layout, QStringLiteral( "shape" ), shapeProps,
+                                              &addError );
+    REQUIRE( item != nullptr );
+    item = LayoutService::instance().findItem( layout, QStringLiteral( "shape-1" ) );
+    REQUIRE( item != nullptr );
+  }
+
+  // A good key BEFORE the bad one must still be applied, and the bad key
+  // must land in ignored with the call reporting success.
+  Json::Value props( Json::objectValue );
+  props["x"] = 30.0;
+  props["visible"] = std::string( "yes" ); // wrong type: string, not bool
+  QStringList applied;
+  QStringList ignored;
+  QString error;
+  REQUIRE( LayoutService::instance().applyItemProperties( item, props, &applied, &ignored,
+                                                          &error ) );
+  CHECK( !ignored.filter( QStringLiteral( "visible" ) ).isEmpty() );
+  CHECK( fuzzyEquals( item->positionWithUnits().x(), 30.0 ) ); // x really applied
+
+  // locked: same shape of defect, same outcome.
+  Json::Value lockProps( Json::objectValue );
+  lockProps["locked"] = 7.0; // wrong type: number
+  applied.clear();
+  ignored.clear();
+  REQUIRE( LayoutService::instance().applyItemProperties( item, lockProps, &applied, &ignored,
+                                                          &error ) );
+  CHECK( !ignored.filter( QStringLiteral( "locked" ) ).isEmpty() );
+
+  // And the valid boolean still applies (guard did not break the key).
+  Json::Value goodProps( Json::objectValue );
+  goodProps["visible"] = false;
+  applied.clear();
+  ignored.clear();
+  REQUIRE( LayoutService::instance().applyItemProperties( item, goodProps, &applied, &ignored,
+                                                          &error ) );
+  CHECK( ignored.isEmpty() );
+  CHECK( !item->isVisible() );
+
+  LayoutService::instance().deleteLayout( QStringLiteral( "BoolTypeGuards" ) );
   cleanupProject();
 }

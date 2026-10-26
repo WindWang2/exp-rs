@@ -109,9 +109,13 @@ class LayoutService
     // --- Export -------------------------------------------------------------------
 
     /// Exports a layout to png/jpg/pdf/svg with a raster memory preflight
-    /// (rejects buffers above maxBytes or per-edge pixel limits).
+    /// (rejects buffers above maxBytes or per-edge pixel limits). On success
+    /// @p deliveredFiles (when non-null) receives the files THIS run wrote —
+    /// never a directory re-walk, so stale siblings from an earlier delivery
+    /// cannot be re-manifested as fresh pages (R21-D).
     bool exportLayout( QgsLayout *layout, const QString &path, const QString &format, double dpi,
-                       qint64 maxBytes, QString *error = nullptr );
+                       qint64 maxBytes, QString *error = nullptr,
+                       QStringList *deliveredFiles = nullptr );
 
     // --- Auto layout ----------------------------------------------------------
 

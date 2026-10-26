@@ -23,6 +23,7 @@
 #include <QSysInfo>
 
 #include <algorithm>
+#include <atomic>
 
 namespace sicnu::agent::cartography {
 
@@ -203,7 +204,17 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
         int iterations = 0;
         while ( iterations < maxRepairIterations && !quality["passed"].asBool() )
         {
-            if ( !report( reporter, "repair", 0.3 + 0.1 * iterations, "repair pass" ) )
+            // R21-D: the fraction used to be 0.3 + 0.1*iterations, which
+            // passed the export stage's fixed 0.6 from the 4th pass on —
+            // a progress bar that jumps 70%→100% and falls back to 60%.
+            // The repair stage now spans [0.30, 0.55]: the whole loop
+            // stays strictly below the export stage's floor and the bar
+            // remains monotone across every pass.
+            const double repairProgress =
+                maxRepairIterations > 1
+                  ? 0.30 + 0.25 * ( iterations / static_cast<double>( maxRepairIterations - 1 ) )
+                  : 0.30;
+            if ( !report( reporter, "repair", std::min( repairProgress, 0.55 ), "repair pass" ) )
                 return refused( "PRODUCE_CANCELLED", QStringLiteral( "cancelled during repair" ) );
             Json::Value passLedger;
             const int repairs = repairMapSpecWithLedger( working, quality, &passLedger );
@@ -404,9 +415,34 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     exportRequest.dpi = request.dpi;
     exportRequest.directory = request.directory;
     exportRequest.file_name = baseName.toStdString();
-    const MapExportResult exported = exportMapLayout( layout, exportRequest );
+    // R2-P2-1: the cancel probe for the single/multi-page export. The probe
+    // is polled on every page boundary, so it must NOT route through
+    // report(): a report() call also emits a progress event, and a probe
+    // that reported would push a "cancelled" progress line during every
+    // SUCCESSFUL export (the detail string change defeats the progress
+    // limiter's message-equality check). The reporter's cancel semantics
+    // are read once, before the export starts (above, "exporting"); from
+    // then on the probe watches a plain cancel flag.
+    std::atomic<bool> cancelExport{ false };
+    if ( reporter )
+    {
+        // Snapshot the cancel channel's current verdict; the probe below
+        // only has to answer "still going?" and the reporter is not
+        // thread-safe to call from the export loop.
+        cancelExport.store( !report( reporter, "export", 0.6, "exporting" ),
+                            std::memory_order_relaxed );
+    }
+    const MapExportResult exported =
+        exportMapLayout( layout, exportRequest,
+                         [ &cancelExport ]() {
+                             return cancelExport.load( std::memory_order_relaxed );
+                         } );
     result.font_diagnostics = exported.fontDiagnostics;
     result.exporterResult = exported.exporterResult;
+    if ( exported.cancelled )
+        return refused( "PRODUCE_CANCELLED",
+                        exported.error.isEmpty() ? QStringLiteral( "cancelled during export" )
+                                                 : exported.error );
     if ( !exported.ok )
     {
         ProduceResult failed = refused( "EXPORT_FAILED", exported.error );

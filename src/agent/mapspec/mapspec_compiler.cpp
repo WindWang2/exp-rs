@@ -33,6 +33,9 @@
 #include <qgslayertree.h>
 #include <qgssymbol.h>
 #include <qgsfillsymbol.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgscoordinatetransform.h>
+#include <qgscoordinatetransformcontext.h>
 #include <qgsvectorlayer.h>
 #include <qgsmaplayer.h>
 
@@ -404,13 +407,27 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         }
       }
       // v3 atlas surface: filter, sort, per-feature margin fraction.
+      // R21-D: a filter that fails to parse used to be silently dropped
+      // (error string discarded, setFilterFeatures never armed), so the
+      // export delivered EVERY coverage feature — the spec's declared
+      // subset was silently reinterpreted. filename_expression above
+      // already refuses on this exact contract; the filter joins it.
       if ( atlasSpec.isMember( "filter" ) && atlasSpec["filter"].isString() &&
            !atlasSpec["filter"].asString().empty() )
       {
         QString filterError;
-        if ( atlas->setFilterExpression(
+        if ( !atlas->setFilterExpression(
                QString::fromStdString( atlasSpec["filter"].asString() ), filterError ) )
-          atlas->setFilterFeatures( true );
+        {
+          if ( error )
+            *error = QStringLiteral( "%1: invalid atlas filter: %2" )
+                       .arg( QString::fromStdString( spec["layout_name"].asString() ),
+                             filterError );
+          LayoutService::instance().deleteLayout(
+            QString::fromStdString( spec["layout_name"].asString() ) );
+          return nullptr;
+        }
+        atlas->setFilterFeatures( true );
       }
       std::string sortExpression;
       if ( atlasSpec.isMember( "sort_expression" ) && atlasSpec["sort_expression"].isString() )
@@ -547,6 +564,92 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         compiledMap->setAtlasDriven( true );
       if ( atlasMarginFraction >= 0.0 )
         compiledMap->setAtlasMargin( atlasMarginFraction );
+
+      // R21-D: a frame-declared CRS is shape-checked by mapspec.cpp and
+      // silences the preflight MAP_MISSING_CRS_NOTE, but the compiler used
+      // to drop it — the item silently fell back to the project CRS while
+      // a spec-extent in the DECLARED CRS units (3857 metres) was
+      // interpreted in the project's (degrees). A declared-but-uncompiled
+      // field is the worst failure shape: apply it, and refuse the compile
+      // when the CRS string is not a usable CRS (never silently keep a
+      // different one).
+      if ( frame.isMember( "crs" ) && frame["crs"].isString() &&
+           !frame["crs"].asString().empty() )
+      {
+        const QgsCoordinateReferenceSystem declared(
+          QString::fromStdString( frame["crs"].asString() ) );
+        if ( !declared.isValid() )
+        {
+          if ( error )
+            *error = QStringLiteral( "map frame '%1': invalid crs: %2" )
+                       .arg( QString::fromStdString( id ),
+                             QString::fromStdString( frame["crs"].asString() ) );
+          LayoutService::instance().deleteLayout(
+            QString::fromStdString( spec["layout_name"].asString() ) );
+          return nullptr;
+        }
+        // R1-P1-1 / R2-P3-1: MapSpec frame extents are NUMBERS in the
+        // PROJECT CRS's units (migration-mapspec-v6: "frame extents stay
+        // numeric" — the field's shape, and the unit convention the
+        // compiler and the implicit project-full-extent fallback share;
+        // series_planner's coverage-layer bbox is the one documented
+        // exception and has no production caller). zoomToExtent() does no
+        // CRS transform and the renderer reads the extent in the item's
+        // CRS, so flipping the CRS under an untransformed extent
+        // reinterpreted the same rectangle in different units (project
+        // degrees read as 3857 metres), silently rendering the wrong
+        // region. Transform the extent into the declared CRS so the
+        // geometry is preserved; a spec that declares no extent gets the
+        // transformed project full extent.
+        //
+        // A project with NO CRS set falls back to EPSG:4326 — the same
+        // assumption the item's own crs() fallback makes (qgis
+        // layoutitemmap.cpp: an invalid item CRS reports the project CRS,
+        // and an unset project CRS defaults to WGS84 for map items).
+        //
+        // R2-P3-1: an UNTRANSFORMABLE extent is a typed compile refusal,
+        // not a silent fallback to a project-units rectangle under the
+        // declared CRS — that fallback is exactly the wrong-region render
+        // this whole block exists to prevent.
+        QgsCoordinateReferenceSystem sourceCrs = QgsProject::instance()->crs();
+        if ( !sourceCrs.isValid() )
+          sourceCrs = QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) );
+        if ( sourceCrs.isValid() && declared.isValid() && sourceCrs != declared )
+        {
+          const QgsRectangle currentExt = compiledMap->extent();
+          if ( !currentExt.isNull() && currentExt.width() > 0.0 && currentExt.height() > 0.0 )
+          {
+            bool transformedOk = false;
+            try
+            {
+              QgsCoordinateTransform transform( sourceCrs, declared, QgsProject::instance() );
+              transform.setBallparkTransformsAreAppropriate( true );
+              const QgsRectangle transformed = transform.transformBoundingBox( currentExt );
+              if ( !transformed.isNull() && transformed.width() > 0.0 && transformed.height() > 0.0 )
+              {
+                compiledMap->zoomToExtent( transformed );
+                transformedOk = true;
+              }
+            }
+            catch ( const QgsCsException & )
+            {
+              transformedOk = false;
+            }
+            if ( !transformedOk )
+            {
+              if ( error )
+                *error = QStringLiteral( "map frame '%1': extent cannot be transformed from "
+                                         "%2 to the declared crs %3" )
+                           .arg( QString::fromStdString( id ), sourceCrs.authid(),
+                                 declared.authid() );
+              LayoutService::instance().deleteLayout(
+                QString::fromStdString( spec["layout_name"].asString() ) );
+              return nullptr;
+            }
+          }
+        }
+        compiledMap->setCrs( declared );
+      }
 
       const QgsRectangle currentExt = compiledMap->extent();
       if ( currentExt.isEmpty() || currentExt.width() <= 0.0 || currentExt.height() <= 0.0 ||
@@ -875,8 +978,47 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     if ( grid.isMember( "interval" ) && grid["interval"].isNumeric() &&
          std::isfinite( grid["interval"].asDouble() ) && grid["interval"].asDouble() > 0 )
     {
-      map->grid()->setIntervalX( grid["interval"].asDouble() );
-      map->grid()->setIntervalY( grid["interval"].asDouble() );
+      // R2-P2-3: the interval is a MapSpec NUMBER — same unit contract as
+      // frame extents (project CRS units). The grid's interval, however, is
+      // read in the MAP ITEM's CRS units, so a frame that declared a
+      // different CRS would interpret a project-units interval in the
+      // declared CRS: 1 degree declared as 1 metre ≈ 90,000 grid lines.
+      // Scale the interval by the same transform the extent went through
+      // (project CRS → item CRS), so both stay in one consistent unit
+      // system. A transform failure keeps the declared interval (the
+      // extent fallback above keeps the item usable too).
+      double interval = grid["interval"].asDouble();
+      const QgsCoordinateReferenceSystem itemCrs = map->crs();
+      QgsCoordinateReferenceSystem sourceCrs = QgsProject::instance()->crs();
+      if ( !sourceCrs.isValid() )
+        sourceCrs = QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) );
+      if ( sourceCrs.isValid() && itemCrs.isValid() && sourceCrs != itemCrs )
+      {
+        try
+        {
+          QgsCoordinateTransform transform( sourceCrs, itemCrs, QgsProject::instance() );
+          transform.setBallparkTransformsAreAppropriate( true );
+          // Scale by the X axis of the transformed unit square anchored at
+          // the map centre — the grid interval is a length, and the local
+          // scale at the visible extent is what the renderer cares about.
+          const QgsRectangle ext = map->extent();
+          const QgsPointXY center( ( ext.xMinimum() + ext.xMaximum() ) / 2.0,
+                                   ( ext.yMinimum() + ext.yMaximum() ) / 2.0 );
+          const QgsPointXY scaled = transform.transform( center );
+          const QgsPointXY shifted = transform.transform(
+            QgsPointXY( center.x() + interval, center.y() ) );
+          const double scaledDx = std::abs( shifted.x() - scaled.x() );
+          if ( scaledDx > 0.0 && std::isfinite( scaledDx ) )
+            interval = scaledDx;
+        }
+        catch ( const QgsCsException & )
+        {
+          // Keep the declared interval: the extent fallback above keeps the
+          // item usable, and the grid is still drawn (in the declared CRS).
+        }
+      }
+      map->grid()->setIntervalX( interval );
+      map->grid()->setIntervalY( interval );
     }
     map->grid()->setEnabled( true );
   }

@@ -21,6 +21,7 @@
 #include "qgsmessagebar.h"
 #include "qgsmessagebaritem.h"
 #include "qgsmessageviewer.h"
+#include "qgsproject.h"
 #include "qgsvectorlayer.h"
 #include "qgsvectorlayertoolscontext.h"
 #include "qgsvectorlayerutils.h"
@@ -72,8 +73,6 @@ bool QgsGuiVectorLayerTools::startEditing( QgsVectorLayer *layer ) const
     return false;
   }
 
-  const bool res = true;
-
   if ( !layer->isEditable() && !layer->readOnly() )
   {
     if ( !layer->supportsEditing() )
@@ -82,10 +81,26 @@ bool QgsGuiVectorLayerTools::startEditing( QgsVectorLayer *layer ) const
       return false;
     }
 
-    layer->startEditing();
+    // W1b: an Asset-backed Display Layer may only enter an edit session
+    // under the exclusive DataManager Edit Lease — the same bracket the
+    // shell's toggleEditing() enforces. A failed acquisition (another view
+    // edits the asset) refuses the session here instead of opening an
+    // unguarded one.
+    SicnuEditLeaseCoordinator *coordinator = QgisApp::instance()->editLeaseCoordinator();
+    if ( coordinator && !coordinator->acquireEditLease( layer ) )
+      return false;
+
+    if ( !layer->startEditing() )
+    {
+      // A refused start must not keep the lease (APP-10/R18-D contract):
+      // the asset would stay locked against every other view.
+      if ( coordinator )
+        coordinator->rollbackEditLease( layer );
+      return false;
+    }
   }
 
-  return res;
+  return true;
 }
 
 bool QgsGuiVectorLayerTools::saveEdits( QgsVectorLayer *layer ) const
@@ -102,6 +117,40 @@ bool QgsGuiVectorLayerTools::saveEdits( QgsVectorLayer *layer ) const
       // and try the commit again later
       res = false;
     }
+    else if ( SicnuEditLeaseCoordinator *coordinator = QgisApp::instance()->editLeaseCoordinator() )
+    {
+      // W1b: publish the commit to the data plane and re-open the session
+      // under a re-acquired lease (saving keeps editing). The coordinated
+      // commit may relocate (destroy) this Display Layer synchronously —
+      // snapshot identity and re-resolve before the epilogue.
+      const QString layerId = layer->id();
+      const QString displayLayerId =
+        layer->customProperty( QStringLiteral( "sicnu/displayLayerId" ) ).toString();
+      coordinator->commitEditLease( layer );
+      QgsVectorLayer *resolved = qobject_cast<QgsVectorLayer *>(
+        QgsProject::instance()->mapLayer( layerId ) );
+      if ( !resolved && !displayLayerId.isEmpty() )
+      {
+        for ( QgsMapLayer *candidate : QgsProject::instance()->mapLayers() )
+        {
+          if ( candidate->customProperty(
+                 QStringLiteral( "sicnu/displayLayerId" ) ).toString() == displayLayerId )
+          {
+            resolved = qobject_cast<QgsVectorLayer *>( candidate );
+            if ( resolved )
+              break;
+          }
+        }
+      }
+      if ( !resolved )
+        return res; // the swap ended this layer's session
+      layer = resolved;
+      // R2-P3-4: re-acquire without the modal (a save, not an explicit
+      // start-editing request); another view's lease leaves the layer out
+      // of edit mode.
+      if ( !coordinator->acquireEditLease( layer, /*showConflictWarning=*/false ) )
+        return res; // another view took the lease: stay out of edit mode
+    }
     layer->startEditing();
   }
   else //layer not modified
@@ -114,6 +163,7 @@ bool QgsGuiVectorLayerTools::saveEdits( QgsVectorLayer *layer ) const
 bool QgsGuiVectorLayerTools::stopEditing( QgsVectorLayer *layer, bool allowCancel ) const
 {
   bool res = true;
+  SicnuEditLeaseCoordinator *coordinator = QgisApp::instance()->editLeaseCoordinator();
 
   if ( layer->isModified() )
   {
@@ -128,6 +178,7 @@ bool QgsGuiVectorLayerTools::stopEditing( QgsVectorLayer *layer, bool allowCance
         break;
 
       case QMessageBox::Save:
+      {
         if ( !layer->commitChanges() )
         {
           commitError( layer );
@@ -136,9 +187,23 @@ bool QgsGuiVectorLayerTools::stopEditing( QgsVectorLayer *layer, bool allowCance
           // and try the commit again later
           res = false;
         }
+        else if ( coordinator )
+        {
+          // W1b: publish the commit (revision bump + lease release). The
+          // coordinated commit may relocate (destroy) this Display Layer
+          // synchronously — snapshot identity and re-resolve for the
+          // repaint; a swapped-away layer has nothing left to repaint.
+          const QString layerId = layer->id();
+          coordinator->commitEditLease( layer );
+          layer = qobject_cast<QgsVectorLayer *>(
+            QgsProject::instance()->mapLayer( layerId ) );
+          if ( !layer )
+            break;
+        }
 
         layer->triggerRepaint();
         break;
+      }
 
       case QMessageBox::Discard:
         QgisApp::instance()->freezeCanvases();
@@ -148,6 +213,19 @@ bool QgsGuiVectorLayerTools::stopEditing( QgsVectorLayer *layer, bool allowCance
           res = false;
         }
         QgisApp::instance()->freezeCanvases( false );
+
+        if ( res && coordinator )
+        {
+          // W1b: the session ended without a change — release the lease the
+          // session acquired (rollbackEditLease handles the no-lease case
+          // for layers edited without coordination).
+          const QString layerId = layer->id();
+          coordinator->rollbackEditLease( layer );
+          layer = qobject_cast<QgsVectorLayer *>(
+            QgsProject::instance()->mapLayer( layerId ) );
+          if ( !layer )
+            break;
+        }
 
         layer->triggerRepaint();
         break;
@@ -162,6 +240,15 @@ bool QgsGuiVectorLayerTools::stopEditing( QgsVectorLayer *layer, bool allowCance
     layer->rollBack();
     QgisApp::instance()->freezeCanvases( false );
     res = true;
+    if ( coordinator )
+    {
+      const QString layerId = layer->id();
+      coordinator->rollbackEditLease( layer );
+      layer = qobject_cast<QgsVectorLayer *>(
+        QgsProject::instance()->mapLayer( layerId ) );
+      if ( !layer )
+        return res;
+    }
     layer->triggerRepaint();
   }
 

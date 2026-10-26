@@ -936,6 +936,12 @@ void QgsAttributeTableDialog::mActionToggleEditing_toggled( bool )
 
 void QgsAttributeTableDialog::editingToggled()
 {
+  // A coordinated commit/rollback (W1b) can relocate this Display Layer
+  // synchronously: the destroyed→close connection fires, but this slot may
+  // already be running from the toggle handler that triggered it. A null
+  // mLayer here means the dialog is closing — nothing left to project.
+  if ( !mLayer )
+    return;
   const bool isEditable = mLayer->isEditable();
   mActionToggleEditing->blockSignals( true );
   mActionToggleEditing->setChecked( isEditable );

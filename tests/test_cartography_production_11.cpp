@@ -34,6 +34,7 @@
 #include <qgspointxy.h>
 #include <qgslayoutatlas.h>
 #include <qgslayoutitemlabel.h>
+#include <qgslayoutitemmap.h>
 #include <qgslayoutitempage.h>
 #include <qgslayoutpagecollection.h>
 #include <qgsprintlayout.h>
@@ -1032,6 +1033,44 @@ TEST_CASE( "atlas filename_expression is compile-checked, never silently degrade
     CHECK( missingFieldError.contains( QStringLiteral( "filename_expression" ) ) );
 }
 
+TEST_CASE( "atlas filter expression parse failure refuses the compile (R21-D)",
+           "[cp11][atlas][r21d]" )
+{
+    // R21-D: the atlas filter used to be compiled permissively — a broken
+    // expression was dropped (filterError discarded, setFilterFeatures never
+    // called) and the export delivered EVERY coverage feature, silently
+    // reinterpreting the spec's declared subset. The same contract
+    // filename_expression already enforces (above) applies here.
+    addAtlasCoverageLayer( QStringLiteral( "atlas-cities-filter" ),
+                           { { qMakePair( QString::fromUtf8( "One" ), 1 ) },
+                             { qMakePair( QString::fromUtf8( "Two" ), 2 ) },
+                             { qMakePair( QString::fromUtf8( "Three" ), 3 ) } } );
+
+    Json::Value spec = atlasSpec( "atlas-filter-bad", QStringLiteral( "atlas-cities-filter" ) );
+    spec["page"]["atlas"]["filter"] = "rank > "; // parse error
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout == nullptr );
+    CHECK( compileError.contains( QStringLiteral( "filter" ) ) );
+
+    // Control: a valid filter still compiles, and the filter is actually
+    // armed on the compiled atlas (not just accepted).
+    Json::Value good = atlasSpec( "atlas-filter-good", QStringLiteral( "atlas-cities-filter" ) );
+    good["page"]["atlas"]["filter"] = "rank > 1";
+    QString goodError;
+    QgsPrintLayout *goodLayout = nullptr;
+    REQUIRE_NOTHROW( goodLayout = MapSpecCompiler::compile( good, &goodError ) );
+    REQUIRE( goodLayout != nullptr );
+    if ( QgsLayoutAtlas *atlas = goodLayout->atlas() )
+    {
+        CHECK( atlas->filterFeatures() );
+        CHECK( atlas->filterExpression() == QStringLiteral( "rank > 1" ) );
+    }
+    sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
+      QStringLiteral( "atlas-filter-good" ) );
+}
+
 TEST_CASE( "atlas count contract: updateFeatures refreshes, count does not",
            "[cp11][atlas]" )
 {
@@ -1778,4 +1817,214 @@ TEST_CASE( "series index label derives its rect from the template page size (R16
     CHECK( landscapeLabel["rect_mm"][2].asDouble() == Catch::Approx( 257.0 ) );
     CHECK( landscapeLabel["rect_mm"][3].asDouble() == Catch::Approx( 150.0 ) );
     CHECK( preflightMapSpec( landscapeSpec )["error_count"].asInt() == 0 );
+}
+
+TEST_CASE( "export cancel probe aborts mid-delivery and leaves no files (R21-D)",
+           "[cp11][export][r21d]" )
+{
+    // R21-D: the single/multi-page raster export had no cancel seam — a
+    // Stop during a long write left a task marked Canceled with the files
+    // already published. The probe now fires on every page boundary and
+    // every page THIS run delivered is rolled back.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    QgsPrintLayout layout( QgsProject::instance() );
+    auto *firstPage = new QgsLayoutItemPage( &layout );
+    firstPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( firstPage );
+    auto *extraPage = new QgsLayoutItemPage( &layout );
+    extraPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( extraPage );
+    std::unique_ptr<QgsLayoutItemLabel> page0Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page0Label->setText( QStringLiteral( "body page" ) );
+    page0Label->attemptSetSceneRect( QRectF( 10, 10, 80, 10 ) );
+    layout.addLayoutItem( page0Label.release() );
+    std::unique_ptr<QgsLayoutItemLabel> page1Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page1Label->setText( QStringLiteral( "second page" ) );
+    page1Label->attemptSetSceneRect( QRectF( 10, 220, 80, 10 ) );
+    layout.addLayoutItem( page1Label.release() );
+    REQUIRE( layout.pageCollection()->pageCount() == 2 );
+
+    sicnu::agent::cartography::MapExportRequest request;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.file_name = "cancel-mp";
+
+    // Control: no probe → full 2-page delivery.
+    const auto full = sicnu::agent::cartography::exportMapLayout( &layout, request );
+    REQUIRE( full.ok );
+    REQUIRE( full.pagePaths.size() == 2 );
+
+    // Cancel BEFORE the first page: nothing is written, result says cancelled.
+    const auto beforeFirst = sicnu::agent::cartography::exportMapLayout(
+        &layout, request, []() { return true; } );
+    CHECK( !beforeFirst.ok );
+    CHECK( beforeFirst.cancelled );
+
+    // Cancel AFTER the first page: page 0's file is rolled back — a stopped
+    // delivery must not leave its partial output behind.
+    QTemporaryDir dirCancel;
+    REQUIRE( dirCancel.isValid() );
+    sicnu::agent::cartography::MapExportRequest cancelRequest = request;
+    cancelRequest.directory = dirCancel.path().toStdString();
+    int calls = 0;
+    const auto midDelivery = sicnu::agent::cartography::exportMapLayout(
+        &layout, cancelRequest, [ &calls ]() { return ++calls >= 2; } );
+    CHECK( !midDelivery.ok );
+    CHECK( midDelivery.cancelled );
+    // The delivery directory holds NOTHING from this run (the control run's
+    // files live in a different directory).
+    CHECK( QDir( dirCancel.path() ).entryList( QDir::Files ).isEmpty() );
+    // Only the first page boundary was polled before the abort.
+    CHECK( calls == 2 );
+}
+
+TEST_CASE( "frame-declared CRS compiles into the map item; bad CRS refuses (R21-D)",
+           "[cp11][mapspec][r21d]" )
+{
+    // R21-D: map_frames[].crs is shape-checked by mapspec.cpp and silences
+    // the preflight MAP_MISSING_CRS_NOTE, but the compiler used to drop it —
+    // the item fell back to the project CRS, so an extent declared in the
+    // spec CRS's units was interpreted in another CRS.
+    Json::Value spec = frameSpec( "frame-crs-map" );
+    spec["map_frames"][0]["crs"] = "EPSG:3857";
+    // Frame extents are numeric in the PROJECT CRS's units (degrees here):
+    // the compiler transforms them into the declared CRS.
+    spec["map_frames"][0]["extent"] = Json::Value( Json::arrayValue );
+    spec["map_frames"][0]["extent"].append( 116.0 );
+    spec["map_frames"][0]["extent"].append( 39.0 );
+    spec["map_frames"][0]["extent"].append( 117.0 );
+    spec["map_frames"][0]["extent"].append( 40.0 );
+
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    REQUIRE( layout != nullptr );
+
+    QgsLayoutItem *frameItem =
+      sicnu::agent::layout_tools::LayoutService::instance().findItem(
+        layout, QStringLiteral( "map-1" ) );
+    REQUIRE( frameItem != nullptr );
+  auto *mapItem = qobject_cast<QgsLayoutItemMap *>( frameItem );
+  REQUIRE( mapItem != nullptr );
+  CHECK( mapItem->crs().authid() == QStringLiteral( "EPSG:3857" ) );
+  // MapSpec frame extents are NUMERIC in the PROJECT CRS's units
+  // (migration-mapspec-v6: "frame extents stay numeric") — the declared
+  // CRS does not change the extent's unit contract, so the extent is
+  // transformed into the declared CRS. The 116..117/39..40 degree
+  // rectangle around Beijing becomes the 3857-metre equivalent.
+  const QgsRectangle ext = mapItem->extent();
+  INFO( "declared extent: " << ext.toString().toStdString() );
+  CHECK( ext.xMinimum() > 1.0e7 );
+  CHECK( ext.xMaximum() < 1.5e7 );
+  CHECK( ext.yMinimum() > 4.5e6 );
+  CHECK( ext.yMaximum() < 5.5e6 );
+
+  // R1-P1-1 regression: a frame with NO spec extent falls back to the
+  // PROJECT extent (same unit contract). Before the fix, applying the CRS
+  // under that untransformed extent reinterpreted the project degrees as
+  // declared-CRS units — a degrees-valued extent read as 3857 metres
+  // rendered an empty map off West Africa. The transform must land in the
+  // 3857-metre magnitude range.
+  Json::Value implicit = makeMapSpec( "frame-crs-implicit", Json::Value() );
+  {
+    Json::Value rect( Json::arrayValue );
+    rect.append( 12 );
+    rect.append( 24 );
+    rect.append( 190 );
+    rect.append( 160 );
+    Json::Value frame( Json::objectValue );
+    frame["rect_mm"] = rect;
+    frame["crs"] = "EPSG:3857";
+    appendMapSpecItem( implicit, "map_frames", frame );
+  }
+  QString implicitError;
+  QgsPrintLayout *implicitLayout = nullptr;
+  REQUIRE_NOTHROW( implicitLayout = MapSpecCompiler::compile( implicit, &implicitError ) );
+  REQUIRE( implicitLayout != nullptr );
+  QgsLayoutItem *implicitItem =
+    sicnu::agent::layout_tools::LayoutService::instance().findItem(
+      implicitLayout, QStringLiteral( "map-1" ) );
+  REQUIRE( implicitItem != nullptr );
+  auto *implicitMap = qobject_cast<QgsLayoutItemMap *>( implicitItem );
+  REQUIRE( implicitMap != nullptr );
+  CHECK( implicitMap->crs().authid() == QStringLiteral( "EPSG:3857" ) );
+  // The fallback extent (project degrees around Beijing ~116..117/39..40)
+  // transformed into 3857 metres must land in the 10^7 magnitude range —
+  // a degrees-valued extent under a metres CRS would fail this.
+  const QgsRectangle implicitExt = implicitMap->extent();
+  INFO( "implicit extent: " << implicitExt.toString().toStdString() );
+  CHECK( implicitExt.xMinimum() > 1.0e7 );
+  CHECK( implicitExt.xMaximum() < 1.5e7 );
+  CHECK( implicitExt.yMinimum() > 4.5e6 );
+  CHECK( implicitExt.yMaximum() < 5.5e6 );
+  sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
+    QStringLiteral( "frame-crs-implicit" ) );
+
+  // An unusable CRS string is a typed compile refusal — never a silent
+  // fallback to the project CRS.
+  Json::Value bad = frameSpec( "frame-crs-bad" );
+  bad["map_frames"][0]["crs"] = "EPSG:999999";
+  QString badError;
+  QgsPrintLayout *badLayout = nullptr;
+  REQUIRE_NOTHROW( badLayout = MapSpecCompiler::compile( bad, &badError ) );
+  CHECK( badLayout == nullptr );
+  CHECK( badError.contains( QStringLiteral( "crs" ) ) );
+
+  sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
+    QStringLiteral( "frame-crs-map" ) );
+}
+
+TEST_CASE( "Duplicate page indices are a typed export refusal (R21-D)",
+           "[cp11][export][r21d]" )
+{
+    // R21-D: pages:[0,0] used to be accepted — both passes published to
+    // the same deterministic name (second overwriting first) while the
+    // result and manifest claimed TWO pages. A manifest that cannot
+    // describe the files it delivered is worse than a refusal.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    QgsPrintLayout layout( QgsProject::instance() );
+    auto *firstPage = new QgsLayoutItemPage( &layout );
+    firstPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( firstPage );
+    auto *extraPage = new QgsLayoutItemPage( &layout );
+    extraPage->setPageSize( QgsLayoutSize( 297.0, 210.0, Qgis::LayoutUnit::Millimeters ) );
+    layout.pageCollection()->addPage( extraPage );
+    std::unique_ptr<QgsLayoutItemLabel> page0Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page0Label->setText( QStringLiteral( "body page" ) );
+    page0Label->attemptSetSceneRect( QRectF( 10, 10, 80, 10 ) );
+    layout.addLayoutItem( page0Label.release() );
+    std::unique_ptr<QgsLayoutItemLabel> page1Label =
+      std::make_unique<QgsLayoutItemLabel>( &layout );
+    page1Label->setText( QStringLiteral( "second page" ) );
+    page1Label->attemptSetSceneRect( QRectF( 10, 220, 80, 10 ) );
+    layout.addLayoutItem( page1Label.release() );
+    REQUIRE( layout.pageCollection()->pageCount() == 2 );
+
+    sicnu::agent::cartography::MapExportRequest request;
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.file_name = "dup-pages";
+    request.pages = { 0, 0 };
+
+    const std::vector<std::string> problems =
+      sicnu::agent::cartography::validateMapExportRequest( &layout, request );
+    bool duplicateReported = false;
+    for ( const std::string &problem : problems )
+      if ( problem.find( "repeated" ) != std::string::npos )
+        duplicateReported = true;
+    CHECK( duplicateReported );
+
+    // And the export itself refuses typed, delivering nothing.
+    const auto result = sicnu::agent::cartography::exportMapLayout( &layout, request );
+    CHECK( !result.ok );
+    CHECK( QDir( dir.path() ).entryList( QDir::Files ).isEmpty() );
 }

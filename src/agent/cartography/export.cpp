@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 #include "geospatial/util/atomic_fs.h"
 
@@ -181,13 +182,32 @@ std::vector<std::string> validateMapExportRequest( const QgsPrintLayout *layout,
         problems.push_back( "page index " + std::to_string( page ) +
                             " is out of range (layout has " + std::to_string( pageCount ) +
                             " page(s))" );
+    // R21-D: a repeated index used to be accepted, so the delivery wrote
+    // the same deterministic file name twice (second pass overwriting the
+    // first) while the result and the manifest claimed TWO pages — a
+    // manifest that cannot describe the files it delivered. Per-page
+    // delivery names are deterministic, so duplicates are a self-
+    // contradictory request: refuse typed instead.
+    std::set<int> unique( request.pages.cbegin(), request.pages.cend() );
+    if ( unique.size() != request.pages.size() )
+      problems.push_back( "page selection lists a repeated index; per-page delivery names "
+                          "are deterministic, so duplicates cannot describe distinct files" );
   }
   return problems;
 }
 
-MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest &request )
+MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest &request,
+                                 const std::function<bool()> &cancelProbe )
 {
   MapExportResult result;
+  // R21-D: the single/multi-page raster path had no cancel seam, so a user
+  // pressing Stop mid-export got a task marked Canceled while the files had
+  // already landed in the delivery directory. The atlas path polls on every
+  // page boundary; this path now does the same (probe invoked per page,
+  // before the page's bytes are published).
+  const auto cancelled = [ &cancelProbe ]() {
+    return cancelProbe && cancelProbe();
+  };
   const std::vector<std::string> problems = validateMapExportRequest( layout, request );
   if ( !problems.empty() )
   {
@@ -239,6 +259,18 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
       QStringList delivered;
       for ( const int page : pages )
       {
+        // R21-D: page-boundary cancel, same discipline as the atlas path —
+        // before this page's bytes are written, and the pages already
+        // delivered by THIS run are removed so a cancelled delivery leaves
+        // no trace.
+        if ( cancelled() )
+        {
+          result.error = QStringLiteral( "export cancelled" );
+          for ( const QString &published : delivered )
+            QFile::remove( published );
+          result.cancelled = true;
+          return result;
+        }
         QTemporaryFile temp( dir.filePath( baseName + ".XXXXXX." + suffix ) );
         temp.setAutoRemove( true );
         if ( !temp.open() )
@@ -375,6 +407,20 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
   const QString tempPath = temp.fileName();
   temp.close(); // the exporter writes its own handle
 
+  // R1-P2-2: the single-file path (pdf, svg, and one-page png) had no cancel
+  // seam at all — the probe was only polled inside the multi-page raster
+  // loop, so a Stop during a long pdf write produced a task marked Canceled
+  // with the document already published. Poll before the (uninterruptible)
+  // exporter call and again before the staged bytes are published; the
+  // declared path is untouched by an abort, so a cancelled single-file
+  // delivery leaves exactly what it was before the call.
+  if ( cancelled() )
+  {
+    result.error = QStringLiteral( "export cancelled" );
+    result.cancelled = true;
+    return result;
+  }
+
   QgsLayoutExporter exporter( layout );
   if ( request.format == "png" )
   {
@@ -418,6 +464,15 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
   if ( result.bytes <= 0 || result.sha256.empty() )
   {
     result.error = QStringLiteral( "exported file is empty or unreadable" );
+    return result;
+  }
+  // R1-P2-2: last cancel window before the publish — a Stop that landed
+  // during the exporter call still aborts before the declared path is
+  // touched.
+  if ( cancelled() )
+  {
+    result.error = QStringLiteral( "export cancelled" );
+    result.cancelled = true;
     return result;
   }
   // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW). The verified

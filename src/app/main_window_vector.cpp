@@ -557,7 +557,7 @@ void QgisDesktopWindow::toggleEditing()
         // Acquire the exclusive Edit Lease before entering edit mode. A Display
         // Layer backed by a Data Asset may only be edited by one view at a time;
         // layers without an Asset ID (external/standard) keep QGIS behavior.
-        if (!acquireEditLease(vlayer))
+        if (!acquireEditLease(vlayer, /*showConflictWarning=*/true))
             return;
         if (!vlayer->startEditing())
         {
@@ -743,6 +743,17 @@ void QgisDesktopWindow::openAttributeTable()
 // The layer that acquires the Edit Lease is the edit owner and stays editable.
 // Every other Display Layer of the same asset is read-only for the duration of
 // the edit session, per the one-edit-lease-per-asset rule.
+
+// SicnuEditLeaseCoordinator override (W1b): the attribute table, the
+// QgisApp facade and the ported map tools end edit sessions outside the
+// shell menu path; the coordinator seam hands them the same lease-aware
+// bracket the menu slots implement, so no UI entry point can strand a
+// lease. commitEditLease()/rollbackEditLease() below ARE the overrides
+// (identical signatures); acquireEditLease below IS the override too —
+// the two-argument shell method with the conflict-dialog flag defaulted
+// for coordinator callers (R2-P3-4: the re-acquire paths pass false so a
+// cross-commit-window conflict reports through the status bar like the
+// shell's own saveEdits(), not a modal mid-save).
 
 void QgisDesktopWindow::setAssetLayersReadOnly( const sicnu::data::AssetId &assetId,
                                                 QgsVectorLayer *exceptLayer,

@@ -835,34 +835,28 @@ class LayoutExportTool final : public SpatialTool
       // Memory guard: hard cap identical to the GUI export preflight.
       constexpr qint64 kMaxExportBytes = 4LL * 1024 * 1024 * 1024;
       QString error;
-      if ( !LayoutService::instance().exportLayout( layout, path, format, dpi, kMaxExportBytes, &error ) )
+      // R21-D: the delivery set comes from the export itself. The old code
+      // re-walked the directory afterwards, so a stale sibling from an
+      // earlier, larger delivery (or a page skipped by excludeFromExports)
+      // was reported as a page THIS run delivered — page_count and pages[]
+      // could both lie. exportLayout now clears the stale siblings and
+      // reports exactly what it wrote.
+      QStringList delivered;
+      if ( !LayoutService::instance().exportLayout( layout, path, format, dpi, kMaxExportBytes, &error,
+                                                    &delivered ) )
         return SpatialToolResult::failure( error.toStdString(), "EXPORT_FAILED", "runtime", true );
 
-      // CARTO-15: report EVERY delivered page. Raster exports of multi-page
-      // layouts write page siblings (path_2.png, path_3.png, ... — QGIS
-      // generateFileName semantics); pdf/svg flatten into one file. path/
-      // bytes keep describing the page-0/primary file for backward
-      // compatibility; pages[] is the complete delivery list.
-      const int pageCount = std::max( 1, layout->pageCollection()->pageCount() );
-      const bool raster = format == QStringLiteral( "png" ) || format == QStringLiteral( "jpg" ) ||
-                          format == QStringLiteral( "jpeg" );
-      const QFileInfo info( path );
-      const auto pagePath = [&]( int page ) {
-        return page == 0 || !raster
-                 ? path
-                 : info.dir().filePath( info.completeBaseName() + QStringLiteral( "_" ) +
-                                        QString::number( page + 1 ) + QStringLiteral( "." ) +
-                                        info.suffix() );
-      };
+      // CARTO-15: report EVERY delivered page, from the delivery set itself.
+      // Raster exports of multi-page layouts write page siblings (path_2.png,
+      // path_3.png, ... — QGIS generateFileName semantics); pdf/svg flatten
+      // into one file. path/bytes keep describing the page-0/primary file
+      // for backward compatibility; pages[] is the complete delivery list.
       Json::Value pages( Json::arrayValue );
-      for ( int page = 0; page < pageCount; ++page )
+      for ( const QString &deliveredPath : delivered )
       {
-        const QString candidate = pagePath( page );
-        if ( !QFile::exists( candidate ) )
-          continue; // page excluded from export
         Json::Value entry( Json::objectValue );
-        entry["path"] = candidate.toStdString();
-        entry["bytes"] = static_cast<Json::Int64>( QFileInfo( candidate ).size() );
+        entry["path"] = deliveredPath.toStdString();
+        entry["bytes"] = static_cast<Json::Int64>( QFileInfo( deliveredPath ).size() );
         pages.append( entry );
       }
 
@@ -871,7 +865,7 @@ class LayoutExportTool final : public SpatialTool
       out["format"] = format.toStdString();
       out["dpi"] = dpi;
       out["bytes"] = static_cast<Json::Int64>( QFileInfo( path ).size() );
-      out["page_count"] = pageCount;
+      out["page_count"] = static_cast<int>( delivered.size() );
       out["pages"] = pages;
       return SpatialToolResult::ok( out );
     }

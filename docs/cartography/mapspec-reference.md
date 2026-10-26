@@ -83,6 +83,14 @@ constraints` — arrays of items with a unique string `id` (auto-assigned
 - `inset_maps` compile as secondary map frames; explicit `extent`, else
   inherited from `map_ref`/first frame (locator outline drawn by shared
   layers).
+- `map_frames` accept `crs` (string, a valid CRS such as `EPSG:3857`).
+  Frame `extent` and `grids.interval` are NUMBERS in the **project CRS's
+  units**; when the frame declares a `crs` the compiler transforms the
+  extent (and scales the grid interval) into the declared CRS, so both
+  keep one consistent unit system. An invalid `crs` string refuses the
+  compile. `inset_maps` do not support `crs` (they render in the project
+  CRS); `page.crs` / `pages[k].crs` remain provenance-only labels and are
+  not consumed by the compiler.
 
 ## Constraints (solver-enforced)
 
