@@ -59,6 +59,8 @@ class Stmt
             m_stmt = nullptr;
         }
     }
+    Stmt( sqlite3 *db, const QString &sql, QString *errorOut = nullptr )
+        : Stmt( db, sql.toUtf8().constData(), errorOut ) {}
     ~Stmt()
     {
         if ( m_stmt )
@@ -217,9 +219,47 @@ struct ArtifactStore::Impl
             "  created_at_ms INTEGER NOT NULL,"
             "  PRIMARY KEY(artifact_id, ref_kind, ref_id));"
             "CREATE INDEX IF NOT EXISTS idx_refs_ref ON artifact_refs(ref_kind, ref_id);"
-            "INSERT OR REPLACE INTO store_meta(key,value) VALUES('schema_version','" SICNU_ARTIFACT_STORE_SCHEMA_VERSION "');"
             "COMMIT;";
-        return exec( schema, errorOut );
+        if ( !exec( schema, errorOut ) )
+            return false;
+        // Risk A4: the schema stamp is write-once. The pre-check probe in
+        // open() can FAIL (locked pages, transient IO) on an existing store,
+        // and a blanket INSERT OR REPLACE then overwrote the recorded
+        // version — masking a newer-than-supported store (and, once
+        // migrations exist, skipping them). Stamp ONLY a store that has no
+        // version row yet, and re-check a newer existing stamp inside the
+        // same transaction that would write: fail-closed, never stamp over.
+        QString stamped;
+        {
+            Stmt existing( db,
+                           QStringLiteral( "SELECT value FROM store_meta WHERE key='schema_version'" ) );
+            if ( existing && existing.stepRow() )
+                stamped = existing.text( 0 );
+        }
+        if ( !stamped.isEmpty() )
+        {
+            if ( stamped.toInt() > QString( SICNU_ARTIFACT_STORE_SCHEMA_VERSION ).toInt() )
+            {
+                if ( errorOut )
+                    *errorOut = QStringLiteral( "artifact store schema %1 is newer than supported %2" )
+                                    .arg( stamped, QStringLiteral( SICNU_ARTIFACT_STORE_SCHEMA_VERSION ) );
+                return false;
+            }
+            return true; // existing stamp is authoritative, never rewritten
+        }
+        // INSERT OR IGNORE: two concurrent first-opens can both observe "no
+        // stamp" and both reach this INSERT. The PK loser must NOT fail
+        // open() — the winner's stamp is on disk and valid, which is the
+        // state this call exists to establish (review R1-F5).
+        Stmt stamp( db, QStringLiteral(
+            "INSERT OR IGNORE INTO store_meta(key,value) VALUES('schema_version','" SICNU_ARTIFACT_STORE_SCHEMA_VERSION "')" ) );
+        if ( !stamp )
+        {
+            if ( errorOut )
+                *errorOut = stamp.error();
+            return false;
+        }
+        return stamp.step();
     }
 
     ArtifactRecord readRecord( const Stmt &s ) const
@@ -274,13 +314,33 @@ bool ArtifactStore::open( const QString &dbPath, QString *errorOut )
             close();
             return false;
         }
+        // A failed schema probe must not fall through to createSchema():
+        // the version is UNKNOWN, and writing into a possibly-newer database
+        // corrupts it — fail closed instead (#1448/#1457 doctrine, same as
+        // WorkspaceCatalog).
+        if ( v && v.stepFailed() )
+        {
+            if ( errorOut )
+                *errorOut = QStringLiteral( "cannot read artifact store schema version (%1)" )
+                                .arg( v.error() );
+            close();
+            return false;
+        }
     }
     if ( !m_impl->createSchema( errorOut ) )
     {
         close();
         return false;
     }
-    m_impl->schemaVersion = QString( kCurrentSchemaVersion );
+    // Report the store's OWN stamp (an older stamp preserved by the
+    // write-once rule above), not blindly the current build's version.
+    {
+        Stmt v( m_impl->db, "SELECT value FROM store_meta WHERE key='schema_version'" );
+        if ( v && v.stepRow() )
+            m_impl->schemaVersion = v.text( 0 );
+        else
+            m_impl->schemaVersion = QString( kCurrentSchemaVersion );
+    }
     return true;
 }
 

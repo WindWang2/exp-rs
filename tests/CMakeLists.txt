@@ -16466,6 +16466,11 @@ sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
 
+# --- R21-B track (append-only block) -----------------------------------------
+sicnu_add_test(test_r21_b_end_to_end TIMEOUT 300)
+target_link_libraries(test_r21_b_end_to_end PRIVATE
+    Sicnu::experiment Sicnu::dataset Sicnu::data SQLite::SQLite3)
+
 # --- R22-05 (r22-workbench) async runner lifecycle contract (#1695 item 1) ---
 # Append-only registration. The runner implementations are compiled directly
 # into the test (deprecated legacy types not built into any library), mirroring

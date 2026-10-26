@@ -164,6 +164,10 @@ class ExperimentStore
     /// failure.
     sicnu::data::Result<void> saveMetricRecordsBatch(
         const QVector<MetricRecord> &records );
+    /// Removes one run's metric record — the compensation leg for callers
+    /// that install metrics before the owning run and see the run install
+    /// fail (bundle import). Deleting a missing record is a no-op success.
+    sicnu::data::Result<void> deleteMetricRecord( const QString &runId );
     std::optional<MetricRecord> metricRecordForRun( const QString &runId ) const;
     sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> listMetricRecords(
         const QString &datasetVersionId = QString(), qint64 offset = 0,
