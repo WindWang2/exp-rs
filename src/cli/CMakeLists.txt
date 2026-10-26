@@ -260,3 +260,11 @@ set_target_properties(sicnu_worker PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     OUTPUT_NAME "sicnu_worker"
 )
+
+# #1698: ship the worker with the install tree. The execution plane looks for
+# it next to the application binary (src/processing/framework/
+# worker_execution_route.cpp) before falling back to PATH; without an install
+# rule the isolated-execution lane is simply absent from an installed prefix.
+install(TARGETS sicnu_worker
+    RUNTIME DESTINATION bin
+)

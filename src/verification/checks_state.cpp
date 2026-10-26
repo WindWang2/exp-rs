@@ -2,7 +2,7 @@
 
 #include "verification/checks_state.h"
 
-#include "verification/availability.h"
+#include "verification/verification_availability.h"
 #include "verification/checks_numeric.h"
 #include "verification/failure_codes.h"
 

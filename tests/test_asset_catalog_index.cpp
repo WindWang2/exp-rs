@@ -24,6 +24,7 @@
 #include <gdal.h>
 #include <gdal_priv.h>
 #include <cstdio>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 
 namespace
 {
@@ -321,14 +322,14 @@ TEST_CASE( "Scale evidence: 200k logical records stay bounded and responsive",
     const qint64 filterMs = timer.elapsed();
     // scene_19990 matches by display name and by its source path fragment.
     REQUIRE( hits.size() >= 1 );
-    REQUIRE( filterMs < 2000 ); // generous ceiling; observed ~ms in Release
+    REQUIRE( filterMs < sicnu::testsupport::wallClockBudgetMs( 2000 ) ); // generous ceiling; observed ~ms in Release (#1699: scales under sanitizers / SICNU_TEST_TIME_SCALE)
 
     // Second pass variant: the empty-filter full scan over 200k.
     timer.restart();
     const QVector<int> all = index.filterIndices( QString() );
     const qint64 scanMs = timer.elapsed();
     REQUIRE( all.size() == kLogicalRecords );
-    REQUIRE( scanMs < 2000 );
+    REQUIRE( scanMs < sicnu::testsupport::wallClockBudgetMs( 2000 ) );
 
     // Update-in-place does not grow the index.
     AssetCatalogEntry updated;
