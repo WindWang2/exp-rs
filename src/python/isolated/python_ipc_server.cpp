@@ -3,6 +3,7 @@
 
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QRegularExpression>
 #include <algorithm>
 #include <QEventLoop>
 #include <QJsonArray>
@@ -175,7 +176,39 @@ void PythonIpcServer::onReadyRead()
 
     if ( newlineIdx > kMaxLineBytes )
     {
-      // Oversized message: discard it and keep parsing the following lines.
+      // #1692: an oversized line used to be discarded silently even when it
+      // carried the RESPONSE to a pending request — the callback never fired
+      // and the caller sat out its full timeout (300 s on the algorithm
+      // path) with an error that pointed nowhere near the real cause; above
+      // kMaxBufferBytes the whole worker was even treated as crashed and
+      // replayed. Salvage the request id from a bounded prefix of the line
+      // (the daemon serializes "id" as the second JSON key, well inside the
+      // first bytes) and fail that request IMMEDIATELY with a typed error.
+      // If the id does not map to a pending request (or the line was not a
+      // response), the discard simply stays silent as before.
+      const QByteArray prefix = m_buffer.left( qMin( newlineIdx, 256 ) );
+      static const QRegularExpression kIdToken( QStringLiteral( "\"id\"\\s*:\\s*(-?\\d+)" ) );
+      const auto idMatch = kIdToken.match( QString::fromLatin1( prefix ) );
+      if ( idMatch.hasMatch() )
+      {
+        const int salvagedId = idMatch.captured( 1 ).toInt();
+        auto it = m_callbacks.find( salvagedId );
+        if ( it != m_callbacks.end() )
+        {
+          QJsonObject err;
+          err[QStringLiteral( "code" )] = -32001;
+          err[QStringLiteral( "message" )] = QStringLiteral(
+                                                "response exceeds the %1-byte IPC line limit; "
+                                                "return large results via a file/shared-memory "
+                                                "reference" )
+                                              .arg( kMaxLineBytes );
+          // Erase BEFORE invoking (#624): the callback may re-enter.
+          auto callback = std::move( it->second );
+          m_callbacks.erase( it );
+          callback( err, true );
+        }
+        dropInFlight( salvagedId );
+      }
       m_buffer.remove( 0, newlineIdx + 1 );
       continue;
     }
