@@ -16803,3 +16803,17 @@ if(Python_EXECUTABLE)
   sicnu_set_test_env(r23_e_merge_registration_integrity)
 endif()
 # --- end R23-E WP3 registration ---
+
+# --- R23-E registration (r23-e-platform-plugin-release): typed-contract
+# regression guards for the #1662 sweep fixes (#1551/#1592) — hostile-typed
+# plugin.load/execution frames must be refused typed by the REAL
+# out-of-process worker, which must survive them (no std::terminate, no
+# unanswered-request timeout, no burned restart).
+sicnu_add_sdk_test(test_r23_e_plugin_typed_gates TEST_PREFIX "test_r23_e_plugin_typed_gates::")
+target_link_libraries(test_r23_e_plugin_typed_gates PRIVATE sicnu_plugins_hostprocess)
+target_compile_definitions(test_r23_e_plugin_typed_gates PRIVATE
+  SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
+  SICNU_TEST_PLUGIN_HOST_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
+)
+add_dependencies(test_r23_e_plugin_typed_gates isolation_plugin exprs_plugin_host_worker)
+# --- end R23-E registration ---
