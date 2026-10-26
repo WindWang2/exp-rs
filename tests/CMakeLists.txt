@@ -16779,3 +16779,15 @@ target_include_directories(test_r22_agent_ghost_algo PRIVATE
 )
 sicnu_discover_tests(test_r22_agent_ghost_algo RUN_SERIAL TRUE)
 # --- end R22-04 registration ---
+
+# --- R23-E WP2: optional Python worker compat-layer regression guards
+# (#1608/#1609 + daemon typed-error contracts). Pure-python unittest that
+# spawns the REAL worker daemon over a private unix socket; skips loudly on
+# hosts without numpy or AF_UNIX (the daemon is POSIX-only by design).
+if(Python_EXECUTABLE)
+  add_test(NAME r23_e_python_worker_typed
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_r23_e_python_worker_typed.py)
+  set_tests_properties(r23_e_python_worker_typed PROPERTIES TIMEOUT 180)
+  sicnu_set_test_env(r23_e_python_worker_typed)
+endif()
+# --- end R23-E WP2 registration ---
