@@ -721,3 +721,8 @@ r6_dev.cmd
 !.planning/r22-infra/
 .planning/r22-infra/*
 !.planning/r22-infra/*.md
+
+# R23-B (zcode r23-b) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r23-B/
+.planning/zcode-r23-B/*
+!.planning/zcode-r23-B/*.md
