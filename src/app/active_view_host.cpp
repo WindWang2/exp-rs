@@ -472,11 +472,11 @@ void ActiveViewHost::showLayerProperties( QgsMapLayer *layer )
     }
 }
 
-bool ActiveViewHost::removeLayers( const QList<QgsMapLayer *> &layers )
+void ActiveViewHost::removeLayers( const QList<QgsMapLayer *> &layers )
 {
     QList<QgsMapLayer *> selected = layers;
     if ( selected.isEmpty() )
-        return false;
+        return;
 
     // Safety-first: confirm before removing (legacy QGIS layers are removed from project).
     QStringList names;
@@ -496,7 +496,7 @@ bool ActiveViewHost::removeLayers( const QList<QgsMapLayer *> &layers )
         detail += QStringLiteral( "\n\n" ) + names.mid( 0, 5 ).join( QStringLiteral( "\n" ) )
                   + QObject::tr( "\n... and %1 more" ).arg( names.size() - 5 );
     if ( !m_confirmationFn( detail ) )
-        return false;
+        return;
 
     if ( m_mapCanvas )
         m_mapCanvas->stopRendering();
@@ -528,7 +528,6 @@ bool ActiveViewHost::removeLayers( const QList<QgsMapLayer *> &layers )
 
     if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
         win->statusBar()->showMessage( QObject::tr( "Removed from view (data kept)" ), 2000 );
-    return true;
 }
 
 void ActiveViewHost::removeSelectedDisplayLayers()

@@ -106,9 +106,10 @@ TEST_CASE( "r22 W9-contract: toolbox dialog close accepted once cancel is armed"
 
   const QString dialog = readSource( QStringLiteral( "src/app/dialogs/sicnu_algorithm_dialog.cpp" ) );
   REQUIRE_FALSE( dialog.isEmpty() );
-  const int fn = dialog.indexOf( QStringLiteral( "SicnuAlgorithmDialog::closeEvent" ) );
+  // R2 moved the gate into canCloseSafely(), shared by closeEvent+reject.
+  const int fn = dialog.indexOf( QStringLiteral( "SicnuAlgorithmDialog::canCloseSafely" ) );
   REQUIRE( fn >= 0 );
-  const QString body = dialog.mid( fn, 2000 );
+  const QString body = dialog.mid( fn, 2400 );
   CHECK( body.contains( QStringLiteral( "jobCancelInFlight" ) ) );
   // R1-1: once the worker STARTED, runPrepared dereferences mFeedback raw,
   // so the close must still be refused even with the cancel armed.
@@ -117,6 +118,13 @@ TEST_CASE( "r22 W9-contract: toolbox dialog close accepted once cancel is armed"
   // guard (dialog closed after arming, before dispatch).
   const int exec = dialog.indexOf( QStringLiteral( "Dialog closed before execution started" ) );
   CHECK( exec >= 0 );
+  // R2-2: Esc / button-box Close bypass closeEvent (QDialog::done() deletes
+  // a WA_DeleteOnClose dialog without a close event) — reject() must share
+  // the same gate.
+  const int rj = dialog.indexOf( QStringLiteral( "SicnuAlgorithmDialog::reject" ) );
+  REQUIRE( rj >= 0 );
+  const QString rejectBody = dialog.mid( rj, 800 );
+  CHECK( rejectBody.contains( QStringLiteral( "canCloseSafely" ) ) );
 }
 
 // W-extra-contract (#map-tool-count): the structured "Map tools initialized"

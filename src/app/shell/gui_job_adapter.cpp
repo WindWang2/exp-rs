@@ -148,6 +148,8 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
       [this]( const sicnu::AlgorithmTaskInfo &info ) { onTaskUpdated( info ); } );
 }
 
+// Deliberately TaskCenter::instance(), matching the raster dialogs' original
+// predicate: every current caller runs against the process center (R2-5).
 bool jobCancelInFlight( const GuiJobHandle &handle )
 {
   const long taskId = handle.taskId();

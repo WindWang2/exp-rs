@@ -471,35 +471,52 @@ bool SicnuAlgorithmDialog::isFinalized()
   return QgsProcessingAlgorithmDialogBase::isFinalized();
 }
 
+bool SicnuAlgorithmDialog::canCloseSafely()
+{
+  if ( !mJobHandle.isRunning() )
+    return true; // idle (or terminal already processed)
+  // #339: while the worker is executing, runPrepared() dereferences this
+  // dialog's mFeedback RAW — a WA_DeleteOnClose close would free it
+  // underneath the worker thread. Cancel and refuse; the user can retry
+  // once the terminal record lands.
+  if ( !sicnu::app::jobCancelInFlight( mJobHandle ) )
+  {
+    mJobHandle.cancel();
+    if ( mFeedback )
+      mFeedback->pushInfo( tr( "Cancel requested — please wait for the task to finish." ) );
+    return false;
+  }
+  // Cancel armed. If the worker already started, it is inside
+  // runPrepared() with the raw feedback pointer — still refuse (#339).
+  // workerStarted is atomic: a stale false read here would re-open the UAF
+  // window (R2-1).
+  if ( mRunState && mRunState->workerStarted )
+    return false;
+  // Cancel armed and the worker never started: the task will observe the
+  // cancel before touching the feedback (the executor rejects a nulled
+  // feedback guard), so closing no longer dangles anything (#1560 escape
+  // hatch, same as the raster dialogs).
+  return true;
+}
+
 void SicnuAlgorithmDialog::closeEvent( QCloseEvent *event )
 {
-  if ( mJobHandle.isRunning() )
+  if ( !canCloseSafely() )
   {
-    // #339: while the worker is executing, runPrepared() dereferences this
-    // dialog's mFeedback RAW — a WA_DeleteOnClose close would free it
-    // underneath the worker thread. Cancel and ignore the close; the user
-    // can close again once the terminal record lands.
-    if ( !sicnu::app::jobCancelInFlight( mJobHandle ) )
-    {
-      mJobHandle.cancel();
-      if ( mFeedback )
-        mFeedback->pushInfo( tr( "Cancel requested — please wait for the task to finish." ) );
-      event->ignore();
-      return;
-    }
-    // Cancel armed. If the worker already started, it is inside
-    // runPrepared() with the raw feedback pointer — still refuse (#339).
-    if ( mRunState && mRunState->workerStarted )
-    {
-      event->ignore();
-      return;
-    }
-    // Cancel armed and the worker never started: the task will observe the
-    // cancel before touching the feedback (the executor rejects a nulled
-    // feedback guard), so closing no longer dangles anything (#1560 escape
-    // hatch, same as the raster dialogs).
+    event->ignore();
+    return;
   }
   QgsProcessingAlgorithmDialogBase::closeEvent( event );
+}
+
+void SicnuAlgorithmDialog::reject()
+{
+  // Esc / button-box Close bypass closeEvent (QDialog::done() deletes a
+  // WA_DeleteOnClose dialog without a close event) — apply the same gate
+  // (#339/#1560) or the hardening is only half-installed (R2-2).
+  if ( !canCloseSafely() )
+    return;
+  QgsProcessingAlgorithmDialogBase::reject();
 }
 
 void SicnuAlgorithmDialog::runAlgorithm()

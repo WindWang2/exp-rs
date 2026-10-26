@@ -145,9 +145,10 @@ class ActiveViewHost : public QObject
     void removeSelectedDisplayLayers();
     /// Remove an explicit layer set (e.g. a tree group's contents) through
     /// the display manager — with the same confirmation and per-layer
-    /// routing as the selected-layers path. Returns true when at least one
-    /// layer removal actually ran (confirmation accepted).
-    bool removeLayers( const QList<QgsMapLayer *> &layers );
+    /// routing as the selected-layers path. Callers re-derive their own
+    /// post-state (the group menu removes the emptied group node only when
+    /// it actually holds no layers any more).
+    void removeLayers( const QList<QgsMapLayer *> &layers );
     void removeSelectedLayers() { removeSelectedDisplayLayers(); }
     void refreshCanvasLayers();
 
