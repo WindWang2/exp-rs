@@ -37,18 +37,6 @@ QString gdalErrorMarker()
   return QStringLiteral( "\x01SICNU_ERR\x01" );
 }
 
-// True while the handle's task sits in the cooperative cancel-in-progress
-// state (TaskStatus::Cancelling): a cancel was requested and the worker has
-// not reported its terminal record yet. Lets reject() tell "running" from
-// "cancelling" without the handle exposing the status (#1560).
-bool jobCancelInFlight( const sicnu::app::GuiJobHandle &handle )
-{
-  const long taskId = handle.taskId();
-  if ( taskId < 0 )
-    return false;
-  const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
-  return info.taskId == taskId && info.status == sicnu::TaskStatus::Cancelling;
-}
 } // namespace
 
 RasterProcessingDialogBase::RasterProcessingDialogBase( QWidget *parent )
@@ -88,7 +76,7 @@ void RasterProcessingDialogBase::reject()
   // remaining GDAL I/O. The handle keeps the task busy (isRunning() stays
   // true until the terminal record lands), so Run remains disabled and
   // closing here cannot restart a run against the same output path (#696).
-  if ( isRunning() && !jobCancelInFlight( m_jobHandle ) )
+  if ( isRunning() && !sicnu::app::jobCancelInFlight( m_jobHandle ) )
     return;
   QDialog::reject();
 }

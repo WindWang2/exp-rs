@@ -5,6 +5,8 @@
 // so toolbox algorithms appear in the unified task list with the rest of the queue.
 #pragma once
 
+#include <atomic>
+
 #include <gui/processing/qgsprocessingalgorithmdialogbase.h>
 #include <gui/processing/qgsprocessingwidgetwrapper.h>
 
@@ -43,7 +45,10 @@ struct SicnuProcessingRunState
       seeded from the dialog's context. */
   std::unique_ptr<QgsProcessingContext> context;
   /** True once the worker entered runPrepared (postProcess required). */
-  bool workerStarted = false;
+  /// Written on the worker thread, read on the GUI thread by the close
+  /// gate — atomic: a stale false read would free mFeedback underneath
+  /// runPrepared()'s raw deref (R2-1).
+  std::atomic<bool> workerStarted{ false };
 };
 
 class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
@@ -52,6 +57,9 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
   public:
     explicit SicnuAlgorithmDialog( QWidget *parent = nullptr );
     ~SicnuAlgorithmDialog() override;
+
+    /// Esc/button-box close shares the #339/#1560 close gate with closeEvent.
+    void reject() override;
 
     // QgsProcessingParametersGenerator interface
     QVariantMap createProcessingParameters( Flags flags = Flags() ) override;
@@ -77,6 +85,9 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     bool isFinalized() override;
 
     void closeEvent( QCloseEvent *event ) override;
+
+    /// Shared close/cancel gate: true when the dialog can be destroyed safely.
+    bool canCloseSafely();
 
   private:
     QgsProcessingContext mContext;

@@ -344,6 +344,9 @@ void WorkspaceBrowserPanel::setWorkspaceService( WorkspaceService *service )
     if ( m_importCenter )
     {
         disconnect( m_importCenter, &ImportCenter::finished, this, &WorkspaceBrowserPanel::refresh );
+        // Parented to this panel: release the old center instead of letting
+        // it (and its bound DataManager) pile up per workspace reopen.
+        m_importCenter->deleteLater();
         m_importCenter = nullptr;
     }
     if ( service )

@@ -16466,6 +16466,110 @@ sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
 
+# --- R22-05 (r22-workbench) async runner lifecycle contract (#1695 item 1) ---
+# Append-only registration. The runner implementations are compiled directly
+# into the test (deprecated legacy types not built into any library), mirroring
+# test_async_algorithm_runner / test_ui_task_center_contract.
+add_executable(test_r22_workbench_async_runner
+  test_r22_workbench_async_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_gdal_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+)
+target_link_libraries(test_r22_workbench_async_runner PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_r22_workbench_async_runner PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_workbench_async_runner)
+# --- end R22-05 registration ---
+
+# --- R22-05 (r22-workbench) W2/W3/W4/W5 + source contracts -------------------
+# Append-only registrations. W3/W4 drive ActiveViewHost + LayerTreeMenuProvider
+# against a real QgisDisplayManager fixture (mirrors test_qgis_display_manager).
+qt_add_executable(test_r22_workbench_view_tree
+  test_r22_workbench_view_tree.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layer_tree_menu.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_r22_workbench_view_tree PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  GDAL::GDAL
+)
+target_include_directories(test_r22_workbench_view_tree PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_workbench_view_tree)
+
+# W2: temporal dialog parameter-page routing (Temporal Intelligence 11.0 gap).
+# NO_DEFAULT_MAIN: the test file carries its own QgsApplication-aware main.
+sicnu_add_dialog_test(test_r22_workbench_temporal_pages NO_DEFAULT_MAIN
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+  EXTRA_LIBS Sicnu::qgis_display GDAL::GDAL
+)
+
+# W5: log panel typed-tag filter (shares the QgsApplication-aware main).
+add_executable(test_r22_workbench_log_tagfilter
+  test_r22_workbench_log_tagfilter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/tests/test_log_panel_main.cpp
+)
+target_link_libraries(test_r22_workbench_log_tagfilter PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_r22_workbench_log_tagfilter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_workbench_log_tagfilter)
+
+# W4/W6/W7/W8/W9/extras: source-level UI contracts (readSource pattern).
+add_executable(test_r22_workbench_ui_contract
+  test_r22_workbench_ui_contract.cpp
+)
+target_link_libraries(test_r22_workbench_ui_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r22_workbench_ui_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r22_workbench_ui_contract PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r22_workbench_ui_contract)
+# --- end R22-05 registrations ---
+
 # --- R22-01 science track (r22-science): append-only registration ---
 # Numerical-correctness anchors for #1707 (distance transform) and #1684
 # (accumulator stats), portable-random golden sequences for #1685, and
