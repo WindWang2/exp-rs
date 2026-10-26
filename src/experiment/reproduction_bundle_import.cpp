@@ -377,9 +377,13 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         // the same id shape RunId::generate() produces everywhere else.
         run.setRunId( RunId::generate().toString() );
 
-    // 6b. Metrics evidence — installed BEFORE the run so a refusal here
-    // leaves zero partial state (no half-installed run without its numbers) (protocol + recorded numbers).
-    bool metricsInstalled = false;
+    // 6b. Metrics evidence — VALIDATED here (before any store mutation) so
+    // a refusal leaves zero partial state; the record itself is installed in
+    // ONE transaction with the run below (risk A5 closure: the old
+    // saveMetricRecord → upsertRun sequence left a crash window where the
+    // process died between the two commits and stranded an orphan metric
+    // row keyed to a run id that was never installed).
+    std::optional<MetricRecord> metricToInstall;
     if ( const auto metrics = loadJson( dir, QStringLiteral( "metrics.json" ), &warnings ) )
     {
         if ( !metrics->isEmpty() )
@@ -411,25 +415,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                         .arg( secretKey ) );
                 return report;
             }
-            else
-            {
-                const auto saved = m_experimentStore->saveMetricRecord( record.value() );
-                if ( !saved )
-                {
-                    // Includes the metrics-hash mismatch gate: a bundle whose
-                    // embedded hash disagrees with its own content is tamper
-                    // evidence. Installing the run while dropping its only
-                    // recorded numbers would be evidence loss dressed as
-                    // success — refuse the import instead.
-                    report.warnings.append(
-                        QStringLiteral( "metric record install failed: %1" )
-                            .arg( saved.diagnostics().isEmpty()
-                                      ? QStringLiteral( "unknown error" )
-                                      : saved.diagnostics().first().message ) );
-                    return report;
-                }
-                metricsInstalled = true;
-            }
+            metricToInstall = record.value();
         }
     }
     else
@@ -439,22 +425,17 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     }
     warnings.clear();
 
-const auto installed = m_experimentStore->upsertRun( run );
+    const auto installed = metricToInstall.has_value()
+                             ? m_experimentStore->upsertRunWithMetric( run, *metricToInstall )
+                             : m_experimentStore->upsertRun( run );
     if ( !installed )
     {
-        // The metrics record above was installed before the run: without
-        // compensation a failed run install strands an orphan metric row
-        // keyed to a run id that does not exist (risk A5). Undo it now.
-        if ( metricsInstalled )
-        {
-            const auto undone = m_experimentStore->deleteMetricRecord( run.runId() );
-            if ( !undone )
-                report.warnings.append(
-                    QStringLiteral( "compensation failed: the metrics record for run %1"
-                                    " could not be removed after run install failure —"
-                                    " manual cleanup required" )
-                        .arg( run.runId() ) );
-        }
+        // Includes the metrics-hash mismatch gate: a bundle whose embedded
+        // hash disagrees with its own content is tamper evidence. Installing
+        // the run while dropping its only recorded numbers would be evidence
+        // loss dressed as success — refuse the import instead. The combined
+        // transaction already rolled both writes back; no compensation leg
+        // is needed.
         report.warnings.append(
             QStringLiteral( "run install failed: %1" )
                 .arg( installed.diagnostics().isEmpty()

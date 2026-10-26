@@ -59,6 +59,16 @@ class ExperimentStore
     /// identity immutability, corrupt-row guard); the FIRST failure rolls
     /// back the whole batch — no partial batch ever becomes visible.
     sicnu::data::Result<void> upsertRunsBatch( const QVector<ExperimentRun> &runs );
+    /// Installs a run AND its metric record in ONE transaction (risk A5
+    /// closure): the two-call sequence saveMetricRecord() → upsertRun()
+    /// left a crash window where a process death between the two commits
+    /// stranded an orphan metric row keyed to a run id that was never
+    /// installed. Here either both rows land or neither does. Validation
+    /// and conflict semantics are exactly upsertRun() + saveMetricRecord()
+    /// (same diagnostic codes); the bundle importer is the reference
+    /// caller.
+    sicnu::data::Result<void> upsertRunWithMetric( const ExperimentRun &run,
+                                                   const MetricRecord &record );
     std::optional<ExperimentRun> runById( const QString &runId ) const;
     /// Typed single-record reader (#1333 item 11): `experiment.run_not_found`
     /// vs `experiment.run_corrupt` are distinct failures. Decision paths
@@ -164,9 +174,10 @@ class ExperimentStore
     /// failure.
     sicnu::data::Result<void> saveMetricRecordsBatch(
         const QVector<MetricRecord> &records );
-    /// Removes one run's metric record — the compensation leg for callers
-    /// that install metrics before the owning run and see the run install
-    /// fail (bundle import). Deleting a missing record is a no-op success.
+    /// Removes one run's metric record — the manual-cleanup leg for callers
+    /// that still sequence metrics before their run (the bundle importer now
+    /// installs both through upsertRunWithMetric in one transaction).
+    /// Deleting a missing record is a no-op success.
     sicnu::data::Result<void> deleteMetricRecord( const QString &runId );
     std::optional<MetricRecord> metricRecordForRun( const QString &runId ) const;
     sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> listMetricRecords(
@@ -254,6 +265,10 @@ class ExperimentStore
     /// The real upsert path; `upsertRun()` wraps it with the unified-trace
     /// record (Verification Platform 8.0). No behavior change.
     sicnu::data::Result<void> upsertRunImpl( const ExperimentRun &run );
+    /// The real run+metric transaction; `upsertRunWithMetric()` wraps it
+    /// with the same unified-trace record as upsertRun.
+    sicnu::data::Result<void> upsertRunWithMetricImpl( const ExperimentRun &run,
+                                                       const MetricRecord &record );
 
     struct Impl;
     // R15-B (#1449): lifecycle lock OUTSIDE the Impl. Every member call holds
