@@ -550,6 +550,11 @@ void TaskCenter::shutdownForTests()
     flushPendingSignals();
 }
 
+void TaskCenter::deliverJobRecordForTests( const sicnu::jobs::JobRecord &record )
+{
+    onJobRecord( record );
+}
+
 TaskCenter::TaskCenter()
 {
     qRegisterMetaType<AlgorithmTaskInfo>("sicnu::AlgorithmTaskInfo");
