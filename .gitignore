@@ -666,6 +666,13 @@ r6_dev.cmd
 .planning/zcode-r20-05/red-drivers/*
 !.planning/zcode-r20-05/red-drivers/*.cpp
 !.planning/zcode-r20-05/red-drivers/*.md
+
+# R22-06 teaching track (zcode r22-teaching): planning artifacts (markdown
+# only; build/test logs stay local).
+!.planning/r22-teaching/
+.planning/r22-teaching/*
+!.planning/r22-teaching/*.md
+
 # R22-03 track (remote-sensing AI inference correctness / GPU-CPU stability /
 # chunked throughput): planning artifacts (markdown only; logs/builds stay local).
 !.planning/r22-inference/

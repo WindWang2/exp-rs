@@ -16466,6 +16466,25 @@ sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
 
+# --- R22-06 teaching track (r22-teaching): batch regrade identity + guard ---
+# Append-only registration block; docs: .planning/r22-teaching.
+sicnu_add_teaching_admin_test(test_r22_teaching_batch_regrade)
+
+add_executable(test_r22_teaching_guard_hygiene test_r22_teaching_guard_hygiene.cpp)
+target_link_libraries(test_r22_teaching_guard_hygiene PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching_admin
+  sicnu_lab_runtime
+)
+target_include_directories(test_r22_teaching_guard_hygiene PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+set_target_properties(test_r22_teaching_guard_hygiene PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_r22_teaching_guard_hygiene)
+# --- end R22-06 registrations ---
+
 # ── R22-02 (r22-data): data-access security, remote COG cache identity,
 # atomic publish consistency and dataset provenance closure (#1679/#1700/
 # #1701/#1680/#1702/#1703). Append-only registration block for this track;
