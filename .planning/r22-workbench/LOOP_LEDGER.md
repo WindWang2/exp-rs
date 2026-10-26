@@ -10,3 +10,5 @@ R4 | RED 全量实证（未打补丁）：async_runner 2 红断言+SIGSEGV(父�
 R5 | GREEN 实现迭代：W1 补 null-parent 完成送达(m_hadParentWidget)；W4 夹具改生产同款"先插新再删旧"+代理坐标系 currentIndex；W3 oracle 改中心精确+包含+有界放宽(画布纵横比 pad)；W4 生产补 qobject_cast 组父 | src/app+tests | 见 R6 | 通过 | 全量跑
 R6 | GREEN×2 全绿：async 24/4、view_tree 70/2、temporal 30/1、log 24/1、ui_contract 30/5（两遍一致，178 断言×2） | build-r22-workbench/tests | 输出在案 | 通过 | 邻域回归
 R7 | 邻域回归 11 目标全绿：async_algorithm_runner 8/2、ui_task_center_contract 169/6、raster_processing_dialog_base 120/11、gui_job_adapter 29/3、active_view_host_viewport 12/2、log_panel 7/4、batch_processing_dialog 35/5、layout_designer 48/9、workspace_browser_wiring 39/4、data_manager_panel 101/16、m2_batch_b_dialogs 193/19 | 同上 | 输出在案 | 通过 | 分包提交
+R8 | R1 评审闭环：APPROVE-WITH-FIXES（P1 close逃逸在 WA_DeleteOnClose 下重开#339 UAF；P2 模态后节点守卫；P3×4）→ 修复 d8d99ee28d + 契约加强；全绿（含 m3_stress 5241/7） | 同 RED_GREEN | 输出在案 | 通过 | R2
+R9 | R2 评审闭环：APPROVE-WITH-FIXES（P2 workerStarted 数据竞争→atomic；P2 reject/Esc 绕过→共享 canCloseSafely 门；P3 void removeLayers；P3 契约加强；P4 注释）→ 修复；ui_contract 34/5 双绿 + 8 目标复跑全绿 | 同上 | 输出在案 | 通过 | 交付文档

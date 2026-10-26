@@ -24,3 +24,14 @@
 ## 对 R21-D/#1677 的差异核对
 
 - 本轨不触碰 #1677 的 29 个文件；E4 中可独立实施的部分（本轨独占文件）没有发现无需 #1677 符号的前置缺口，故本 PR 不包含 mapspec/layout 生产改动。
+
+## R1-3 附：zh_CN 翻译孤儿条目清单（翻译轨可一次处理）
+
+本轨改动了以下英文源串（resources/translations/sicnu_zh_CN.ts 中旧条目将失效，需 lupdate + 补译）：
+1. cartography_dock.cpp: `DPI：` → `DPI:`
+2. qgslayoutdesignerdialog.cpp: `Deleted %1 item(s)` → `Deleted 1 item` / `Deleted %1 items`
+3. qgslayoutdesignerdialog.cpp: `Duplicated %1 item(s)` → 同上模式
+4. qgslayoutdesignerdialog.cpp: `Locked/Unlocked %1 item(s)` → 同上模式
+5. qgslayoutdesignerdialog.cpp: `Thematic composition arranged (%1 new component(s)…)` → 同上模式
+6. qgslayoutdesignerdialog.cpp: `Select item(s) to duplicate first.` → `Select one or more items to duplicate first.`
+7. active_view_host.cpp: 移除确认 `Remove the selected %1 layers…` → 单/复数两分支

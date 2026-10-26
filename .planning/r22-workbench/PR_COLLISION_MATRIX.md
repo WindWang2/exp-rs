@@ -16,3 +16,10 @@
 1. 重新 `gh pr list --state open --json files` 对照本轨 diff 文件列表逐文件核对。
 2. 若 #1677 在本轨 push 前合并：重估 E1/E4 BLOCKED 项是否转化为本轨可实施（但本 PR 不强制吸收，留后续波次）。
 3. `git fetch origin && git rev-parse origin/master` 确认基线未移动；若移动，评估 rebase 需求。
+
+## Push 前复查（2026-10-26 12:0x，LIVE）
+
+- `gh api commits/master` = `911e0b17a3...`（未移动；本地 fetch 一次 SSL 瞬断，按任务书以 API 为准并已记录）。
+- **#1673-#1676 已被关闭（未合并）**；#1677 仍 open（本轨 BLOCKED 项维持）。
+- 新 open：#1708/#1709/#1710/#1711/#1712（R22 infra/inference/data/teaching/science）。
+- 逐文件比对（GitHub files API vs 本轨 24 个非 planning 文件）：与全部 10 个 open PR **零交集**（含 tests/CMakeLists.txt——5 个 R22 PR 均未触碰该文件）。
