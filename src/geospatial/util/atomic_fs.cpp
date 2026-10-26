@@ -395,6 +395,14 @@ void writeJournalFile( const std::string &journalPath, const std::string &mainTa
   out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
   out.flush();
   out.close();
+  // #1701: a journal that hit ENOSPC mid-write is a truncated JSON that
+  // recoverFromJournalFile() parses as invalid and DELETES — silently
+  // discarding the group's only rollback record. The write must be proven,
+  // not assumed: a failed stream is an error while the targets are still
+  // untouched, exactly like the open failure above.
+  if ( !out.good() )
+    throw GeoError( ErrorCode::IoError,
+                    "atomic fs journal write did not complete (stream error): " + journalPath );
 
   fsyncFile( journalPath );
 }
@@ -655,6 +663,42 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
 
   const std::vector<std::string> stagedSidecars = sidecarsFor( stagedMainPath );
   const std::vector<std::string> targetSidecars = sidecarsFor( targetMainPath );
+
+  // #1701 (R2 hardening): sweep STALE member backups BEFORE the journal
+  // names them — but never delete the last surviving copy. Two residue
+  // shapes exist after recoverDatasetGroup():
+  //   a) target present + orphan .bak (a journal that failed to parse is
+  //      deleted WITHOUT touching .baks): the .bak is ancient residue that
+  //      a later crash-recovery must not "restore" over the good target —
+  //      remove it.
+  //   b) target ABSENT + .bak present: a previous run crashed between
+  //      backupInPlace's move-aside fallback (hardlink unsupported) and its
+  //      publish rename, AND its journal was destroyed unreadable — so
+  //      nothing recovered it. The .bak IS the target's only bytes:
+  //      resurrect it (which also makes the had_target bookkeeping below
+  //      truthful) instead of unlinking the last copy.
+  for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
+  {
+    const std::string backup = targetSidecars[i] + ".bak";
+    if ( fileExists( backup ) )
+    {
+      if ( !fileExists( targetSidecars[i] ) )
+        renameReplaceQuiet( backup, targetSidecars[i] );
+      else
+        removeFileQuiet( backup );
+    }
+  }
+  {
+    const std::string backup = targetMainPath + ".bak";
+    if ( fileExists( backup ) )
+    {
+      if ( !fileExists( targetMainPath ) )
+        renameReplaceQuiet( backup, targetMainPath );
+      else
+        removeFileQuiet( backup );
+    }
+  }
+
   std::vector<bool> hadTarget( targetSidecars.size(), false );
   const bool hadMainTarget = fileExists( targetMainPath );
   const std::string mainBackup = targetMainPath + ".bak";
@@ -674,6 +718,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     }
   }
   journalMembers.push_back( { stagedMainPath, targetMainPath, mainBackup, hadMainTarget } );
+
   writeJournalFile( journalPath, targetMainPath, journalMembers );
 
   auto cleanup = [ & ]( const std::string &failedName ) {
@@ -764,7 +809,24 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   }
 
   // Atomically mark committed
-  renameReplaceQuiet( journalPath, commitMarkerPath );
+  // #1701: an unlanded marker means the NEXT recovery reads the journal as
+  // uncommitted and rolls the group back. That is only sound while the
+  // backups still exist — deleting them below regardless of the rename
+  // result turned a marker failure into "delete freshly published targets
+  // with had_target=false and keep new bytes elsewhere": half committed,
+  // half destroyed. Fail LOUDLY, keep journal + backups: recovery then
+  // restores the full pre-publish group (or a retry re-publishes).
+  if ( !renameReplaceQuiet( journalPath, commitMarkerPath ) )
+  {
+    Json::Value details;
+    details["journal"] = journalPath;
+    details["commit_marker"] = commitMarkerPath;
+    details["recovery"] = "atomic_fs::recoverDatasetGroup(<main target>) restores the pre-publish group";
+    throw GeoError( ErrorCode::IoError,
+                    "group publish completed but the commit marker could not be "
+                    "installed; journal and backups kept for recovery: " + targetMainPath,
+                    details );
+  }
 
   // Success: drop the backup set
   removeFileQuiet( mainBackup );
@@ -789,6 +851,23 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
 
   const std::string mainTarget = live.back().second;
   recoverDatasetGroup( mainTarget );
+
+  // #1701 (R2 hardening): same resurrect-or-sweep as publishStagedGroup —
+  // a .bak whose target is absent is the target's only surviving bytes
+  // (move-aside fallback crash + unreadable journal); resurrect, never
+  // unlink. Residue with a healthy target is removed so it cannot become
+  // this run's rollback source.
+  for ( std::size_t i = 0; i < live.size(); ++i )
+  {
+    const std::string backup = live[i].second + ".bak";
+    if ( fileExists( backup ) )
+    {
+      if ( !fileExists( live[i].second ) )
+        renameReplaceQuiet( backup, live[i].second );
+      else
+        removeFileQuiet( backup );
+    }
+  }
 
   std::vector<bool> hadTarget( live.size(), false );
   std::vector<std::string> published;
@@ -876,8 +955,21 @@ void publishStagedMembers( const std::vector<std::pair<std::string, std::string>
     published.push_back( live[i].second );
   }
 
-  // Atomically mark committed
-  renameReplaceQuiet( journalPath, commitMarkerPath );
+  // Atomically mark committed — checked, same #1701 contract as
+  // publishStagedGroup: an unlanded marker plus deleted backups is a
+  // half-destroyed group at the next recovery; keep journal + backups and
+  // fail loudly instead.
+  if ( !renameReplaceQuiet( journalPath, commitMarkerPath ) )
+  {
+    Json::Value details;
+    details["journal"] = journalPath;
+    details["commit_marker"] = commitMarkerPath;
+    details["recovery"] = "atomic_fs::recoverDatasetGroup(<main target>) restores the pre-publish group";
+    throw GeoError( ErrorCode::IoError,
+                    "member publish completed but the commit marker could not be "
+                    "installed; journal and backups kept for recovery: " + mainTarget,
+                    details );
+  }
 
   for ( const auto &m : live )
     removeFileQuiet( m.second + ".bak" );

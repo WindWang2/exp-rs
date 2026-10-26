@@ -2,9 +2,12 @@
 
 #include "rs_classification_split.h"
 
+#include "processing/algorithms/portable_random.h"
+
 #include <algorithm>
 #include <map>
 #include <random>
+#include <utility>
 #include <vector>
 
 // Stratification is stratified by class; when groupIds is supplied the
@@ -12,6 +15,10 @@
 // reported OA/Kappa is not optimistically biased by spatial
 // autocorrelation. Pixel-level split is the fallback when groupIds is
 // empty or size-mismatched.
+//
+// Shuffles use the portable Fisher-Yates from portable_random.h (#1685):
+// std::shuffle's permutation is implementation-defined, so a seed=42 split
+// would differ between Windows student machines and the Linux CI.
 
 RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
                                                          const cv::Mat &y,
@@ -59,7 +66,7 @@ RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
       for ( const auto &grpPair : cg.second )
         groups.push_back( grpPair.first );
 
-      std::shuffle( groups.begin(), groups.end(), rng );
+      rs::algorithms::portable::fisherYatesShuffleRange( rng, groups.begin(), groups.end() );
       const int totalGroups = static_cast<int>( groups.size() );
 
       if ( totalGroups < 2 )
@@ -76,7 +83,7 @@ RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
         for ( const auto &grpPair : cg.second )
           for ( int r : grpPair.second )
             bucket.push_back( r );
-        std::shuffle( bucket.begin(), bucket.end(), rng );
+        rs::algorithms::portable::fisherYatesShuffleRange( rng, bucket.begin(), bucket.end() );
         const int total = static_cast<int>( bucket.size() );
         if ( total < kMinForSplit )
         {
@@ -128,7 +135,7 @@ RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
     for ( auto &kv : byClass )
     {
       std::vector<int> &bucket = kv.second;
-      std::shuffle( bucket.begin(), bucket.end(), rng );
+      rs::algorithms::portable::fisherYatesShuffleRange( rng, bucket.begin(), bucket.end() );
 
       const int total = static_cast<int>( bucket.size() );
       if ( total < kMinForSplit )

@@ -17,7 +17,7 @@
 
 #include "verification/checks_reproducibility.h"
 
-#include "verification/availability.h"
+#include "verification/verification_availability.h"
 #include "verification/checks_numeric.h"
 #include "verification/evidence.h"
 #include "verification/failure_codes.h"

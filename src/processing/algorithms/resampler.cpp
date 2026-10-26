@@ -32,7 +32,10 @@ double sampleClamped(const float* buffer, int width, int height, int x, int y)
 
 double sampleNearest(const float* buffer, int width, int height, double u, double v, double noData)
 {
-    if (u < 0.0 || v < 0.0 || u > width - 1 || v > height - 1)
+    // Footprint is [-0.5, width-0.5]: the outer half-pixel ring between the
+    // first/last pixel center and the raster edge is still covered by the
+    // source (GDAL semantics, #1686). Beyond that ring there is no coverage.
+    if (u < -0.5 || v < -0.5 || u > width - 0.5 || v > height - 0.5)
         return noData;
     const int iu = std::clamp(static_cast<int>(std::floor(u + 0.5)), 0, width - 1);
     const int iv = std::clamp(static_cast<int>(std::floor(v + 0.5)), 0, height - 1);
@@ -118,7 +121,11 @@ double Resampler::interpolate(const float* buffer, int width, int height,
         return noDataValue;
     if (!std::isfinite(u) || !std::isfinite(v))
         return noDataValue;
-    if (u < 0.0 || v < 0.0 || u > width - 1 || v > height - 1)
+    // Footprint boundary is the raster edge, not the outer pixel centers
+    // (#1686): [u, v] within [-0.5, width-0.5] × [-0.5, height-0.5] is
+    // valid coverage and samples with edge-clamped taps; a pixel-center
+    // boundary silently NoDatas the outer half-pixel ring of every warp.
+    if (u < -0.5 || v < -0.5 || u > width - 0.5 || v > height - 0.5)
         return noDataValue;
 
     switch (method) {
