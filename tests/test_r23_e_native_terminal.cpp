@@ -72,7 +72,10 @@ struct ProbeResult
     bool valid = false;
 };
 
-/// Waits (bounded) for the probe file, then parses its three lines.
+/// Waits (bounded) for the probe file, then parses its three lines. The
+/// shell creates the file at redirect-open and fills the lines a moment
+/// later, so a poll may observe a half-written file: only a probe whose
+/// last line (cwd) is present counts as complete (review R1 F4).
 ProbeResult waitForProbe( const std::filesystem::path &probe, int timeoutMs = 5000 )
 {
     for ( int elapsed = 0; elapsed < timeoutMs; elapsed += 25 )
@@ -92,8 +95,9 @@ ProbeResult waitForProbe( const std::filesystem::path &probe, int timeoutMs = 50
                 result.args = QString::fromStdString( args );
                 result.cwd = QString::fromStdString( cwd );
                 result.valid = true;
+                return result;
             }
-            return result;
+            // incomplete write window — keep polling
         }
     }
     return {};

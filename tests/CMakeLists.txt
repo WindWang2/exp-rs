@@ -16798,7 +16798,7 @@ endif()
 if(Python_EXECUTABLE)
   add_test(NAME r23_e_merge_registration_integrity
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_merge_registration_integrity.py
-            --repo-root ${CMAKE_SOURCE_DIR} --base origin/master --head HEAD)
+            --repo-root ${CMAKE_SOURCE_DIR} --base origin/master --head HEAD --require-refs)
   set_tests_properties(r23_e_merge_registration_integrity PROPERTIES TIMEOUT 120)
   sicnu_set_test_env(r23_e_merge_registration_integrity)
 endif()
