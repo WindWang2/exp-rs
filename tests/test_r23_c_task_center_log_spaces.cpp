@@ -83,7 +83,13 @@ struct ParkedRelease
 {
     std::promise<void> release;
     std::shared_future<void> released = release.get_future().share();
-    ~ParkedRelease() { release.set_value(); }
+    ~ParkedRelease()
+    {
+        // Fires the park release even when an assertion aborts the case; a
+        // double fire (happy path released it already) is swallowed — a
+        // throwing destructor would terminate the worker join instead.
+        try { release.set_value(); } catch ( ... ) {}
+    }
 };
 
 int countLine( const sicnu::TaskCenter &center, long taskId, const std::string &needle )
@@ -128,11 +134,15 @@ TEST_CASE( "engine-internal cumulative appends still deliver after eviction (#17
 
     ParkedRelease parked;
     constexpr int kChattyLines = 12'000; // crosses the 10k cap once: dropped > 0
+    // The worker captures the shared future BY VALUE (r22 precedent in
+    // test_r22_agent_job_logs.cpp): the lambda outlives the test scope, and
+    // a failed assertion must not destroy the future under a parked worker.
     engine.registerExecutor( "r23c:parked-chatty",
-                             [&parked, kChattyLines]( const JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+                             [released = parked.released, kChattyLines](
+                               const JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
         for ( int i = 0; i < kChattyLines; ++i )
             ctx.logInfo( "abs " + std::to_string( i ) );
-        parked.released.wait();
+        released.wait();
         Json::Value r( Json::objectValue );
         r["output"] = "parked-done";
         return r;
@@ -203,8 +213,9 @@ TEST_CASE( "stale cumulative plus late deltas stay exactly-once under eviction (
     // counting is exact.
     ParkedRelease parked;
     engine.registerExecutor( "r23c:parked-silent",
-                             [&parked]( const JobRequest &, sicnu::operators::RSOperatorContext & ) {
-        parked.released.wait();
+                             [released = parked.released](
+                               const JobRequest &, sicnu::operators::RSOperatorContext & ) {
+        released.wait();
         Json::Value r( Json::objectValue );
         r["output"] = "silent-done";
         return r;
