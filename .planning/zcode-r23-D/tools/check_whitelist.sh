@@ -19,12 +19,22 @@ while IFS= read -r f; do
     tests/*) ;;
     .planning/zcode-r23-D/*) ;;
     docs/*) ;;
+    .gitignore) ;;
     *)
       echo "VIOLATION: $f"
       FAIL=1
       ;;
   esac
 done < /tmp/r23d-changed.txt
+
+echo "== .gitignore append-only check =="
+if git diff "${BASE}...HEAD" -- .gitignore | grep -E '^-' | grep -vE '^---' | grep -qE '.+'; then
+  echo "VIOLATION: .gitignore diff contains removed/changed lines"
+  git diff "${BASE}...HEAD" -- .gitignore | grep -E '^-' | grep -vE '^---' | head -5
+  FAIL=1
+else
+  echo "OK: pure additions"
+fi
 
 echo "== tests/CMakeLists.txt append-only check =="
 if git diff "${BASE}...HEAD" -- tests/CMakeLists.txt | grep -E '^-' | grep -vE '^---' | grep -qE '.+'; then

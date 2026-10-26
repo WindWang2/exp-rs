@@ -23,4 +23,12 @@
 4. `git diff --check` + 冲突标记扫描（check_whitelist.sh 内置）
 5. `ctest -N` 证明本轨新增测试与他轨注册并存
 
-- 重查时间戳：____（push 前填写）
+### 重查结果（2026-10-27 08:0x 本地，push 前执行）
+- `git fetch origin --prune`：**origin/master = ad98a7a70 未漂移**（无需 rebase/merge）
+- 新远端分支：`agent/r23-e-platform-plugin-release-20261026T170017Z` → **Open PR #1716**（r23-E：plugin isolation/worker compat，21 文件）
+- **与 #1716 文件交集 = 1：tests/CMakeLists.txt**（双方各自 append-only 注册块；E 块在前部区域、D 块在文件末尾）。#1716 未合并，本轨不预合并兄弟分支；后合并者按 #1715 先例做注册块并集（union），两侧均无删除行，预期为纯相邻追加冲突，解法唯一（两块都保留）
+- 本地 worktree：主仓（master）+ 本轨；无其他兄弟写入
+- `git diff --check`：clean；`check_whitelist.sh origin/master`：**WHITELIST: PASS**（.gitignore 与 tests/CMakeLists.txt 均 pure additions；冲突标记 0）
+- `ctest -N`（经 run_tests.cmd）：r23_d 5 用例在册（Test #1311-1315），与既有全部注册并存
+
+- 重查时间戳：2026-10-27T00:0xZ（UTC，push 前）
