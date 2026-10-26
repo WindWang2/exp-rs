@@ -137,7 +137,13 @@ RsObjectClassifyResult RsObjectClassify::classify(
     for ( int i = 0; i < predictions.rows; ++i )
     {
       const int raw = predictions.at<int>( i, 0 );
-      predictions.at<int>( i, 0 ) = kmeansRemap.value( raw, raw );
+      // Unmapped clusters received no Hungarian assignment (no labeled
+      // training segment fell in them) and must surface as unclassified 0 —
+      // the pixel pipeline's discipline (rs_classification_pipeline.cpp
+      // kmeansRemap.value(v, unclassified)). Passing the raw cluster id
+      // through used to leak ids outside the training label space into the
+      // class raster and the classes statistics.
+      predictions.at<int>( i, 0 ) = kmeansRemap.value( raw, 0 );
     }
   }
 

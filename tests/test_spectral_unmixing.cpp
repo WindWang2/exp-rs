@@ -334,3 +334,42 @@ TEST_CASE("FCLS on a brightness-off-simplex pixel equals the analytic constraine
     CHECK(fcls.abundances[0] == Approx(1.0f).margin(1e-3f));
     CHECK(fcls.abundances[1] == Approx(0.0f).margin(1e-3f));
 }
+
+// ===========================================================================
+// r21-A / AG2-F3 — OLS pixels whose least-squares solution clips to all
+// zeros must surface as NaN, not as a fabricated all-zero abundance vector
+// (which silently violates the sum-to-one contract).
+// ===========================================================================
+
+TEST_CASE("OLS unmix voids pixels whose LS solution clips to all zeros (AG2-F3)", "[unmixing][r21a]")
+{
+    // One bright endmember [1,1] against a dark pixel [-2,-2]: the
+    // unconstrained LS abundance is -2, clipping leaves sum == 0.
+    const std::vector<float> endmembers = {1.0f, 1.0f};
+    const std::vector<float> pixel = {-2.0f, -2.0f};
+    SpectralUnmixing::UnmixResult result;
+    QString err;
+    REQUIRE(SpectralUnmixing::unmix(pixel.data(), 1, 2, endmembers.data(), 1, &result, &err));
+    REQUIRE(result.abundances.size() == 1);
+    REQUIRE(result.reconstructionError.size() == 1);
+    CHECK(std::isnan(result.abundances[0]));
+    CHECK(std::isnan(result.reconstructionError[0]));
+}
+
+TEST_CASE("OLS unmix keeps valid partial-negative pixels intact (AG2-F3 control)", "[unmixing][r21a]")
+{
+    // Control: clipping one mildly negative abundance still leaves a
+    // positive sum, so the pixel keeps real (non-NaN) renormalized values.
+    // E1=(1,0), E2=(1,1); pixel (0.6,0.1) -> LS a=(0.5, 0.1): a mild
+    // negative would clip to 0 and renormalize without voiding; here both
+    // components already survive, so the pixel keeps real abundances.
+    const std::vector<float> endmembers = {1.0f, 0.0f, 1.0f, 1.0f};
+    const std::vector<float> pixel = {0.6f, 0.1f};
+    SpectralUnmixing::UnmixResult result;
+    QString err;
+    REQUIRE(SpectralUnmixing::unmix(pixel.data(), 1, 2, endmembers.data(), 2, &result, &err));
+    REQUIRE(result.abundances.size() == 2);
+    CHECK_FALSE(std::isnan(result.abundances[0]));
+    CHECK_FALSE(std::isnan(result.abundances[1]));
+    CHECK(Approx(result.abundances[0] + result.abundances[1]).margin(1e-5f) == 1.0f);
+}

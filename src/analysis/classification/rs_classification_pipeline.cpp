@@ -1215,15 +1215,47 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
           // re-decided (documented semantics, DECISIONS D-006/D-007).
           if ( applyCalibration )
           {
-            if ( appliedCalibration.classIds.size() != probs.cols )
+            // Column COUNT alone is not identity: probability column k refers
+            // to class classIds[k] (RsClassOrder contract), so a calibration
+            // model fitted on {1,2,3} against a backend trained on {1,2,4}
+            // used to pass this gate and silently calibrate class 4's column
+            // with class 3's curve — wrong values in every probability,
+            // uncertainty band and meanConfidence. The backend's disclosed
+            // label space is the ground truth to match.
+            const QVector<int> backendOrder = config.backend->classOrder();
+            // A backend that discloses no label space (KMeans/ISODATA/KNN/
+            // statistical backends, or a legacy model loaded without a labels
+            // sidecar) cannot have its identity checked — say so instead of
+            // silently degrading to the count-only gate the caller believes
+            // was replaced.
+            if ( backendOrder.isEmpty() )
             {
+              SICNU_LOG_WARN( SicnuLogTags::Classification,
+                                 QStringLiteral( "calibration applied but the backend discloses no "
+                                                 "class order; only the column count is checked" ) );
+            }
+            const bool idsMismatch = !backendOrder.isEmpty()
+                && backendOrder != appliedCalibration.classIds;
+            if ( appliedCalibration.classIds.size() != probs.cols || idsMismatch )
+            {
+              const auto joinIds = []( const QVector<int> &ids ) {
+                QString out;
+                for ( int i = 0; i < ids.size(); ++i )
+                {
+                  if ( i > 0 )
+                    out += QLatin1Char( ',' );
+                  out += QString::number( ids[i] );
+                }
+                return out;
+              };
               return failWithPartialOutput(
                 RsClassificationPipelineResult::Error::PredictionFailed,
                 QStringLiteral(
-                  "Calibration model has %1 classes but the backend produced "
-                  "%2 probability columns at tile (%3,%4)" )
-                  .arg( appliedCalibration.classIds.size() )
-                  .arg( probs.cols ).arg( tx ).arg( ty ) );
+                  "Calibration model class ids [%1] do not match the backend "
+                  "label space [%2] (probability columns) at tile (%3,%4)" )
+                  .arg( joinIds( appliedCalibration.classIds ),
+                        joinIds( backendOrder ) )
+                  .arg( tx ).arg( ty ) );
             }
             std::vector<float> raw(
               static_cast<size_t>( probs.rows ) * static_cast<size_t>( probs.cols ) );

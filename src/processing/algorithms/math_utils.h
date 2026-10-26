@@ -103,6 +103,14 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count);
 
 /**
+ * The exact sample-level predicate normalizedDifference() applies — finite
+ * operands, neither at/below the -999 negative-sentinel threshold, and not
+ * a pair of equal negatives. Fused kernels (e.g. dNBR) share it so their
+ * validity mask cannot drift from the staged form.
+ */
+bool bothNormalizable(float a, float b);
+
+/**
  * Apply linear scaling: out[i] = gain * in[i] + bias.
  *
  * This is the single kernel for DN-to-radiance / radiometric calibration

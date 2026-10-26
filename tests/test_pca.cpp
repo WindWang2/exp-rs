@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+
+#include <limits>
 #include <catch2/catch_approx.hpp>
 #include "processing/algorithms/image_enhancement.h"
 #include <vector>
@@ -273,5 +275,36 @@ TEST_CASE("Jacobi eigensolver converges beyond the old 200-rotation cap (#670)",
             resSq += static_cast<double>(diff) * diff;
         }
         CHECK(std::sqrt(resSq) / normA < 1e-4);
+    }
+}
+
+
+// r21-A / AG2-F1 — PCA means must come from the joint-finite sample (the
+// set computeCovarianceMatrix deletes listwise): per-band means biased the
+// covariance when bands carried disjoint NoData.
+TEST_CASE("PCA statistics use the joint-valid sample (AG2-F1)", "[pca][r21a]")
+{
+    const float nd = std::numeric_limits<float>::quiet_NaN();
+    // A: both bands share the same two invalid pixels -> joint == per-band.
+    // B: band 0 keeps sample 2, band 1 keeps sample 3 -> sets diverge.
+    std::vector<std::vector<float>> A = {
+        { 1.0f, 2.0f, nd, nd },
+        { 1.0f, 2.0f, nd, nd },
+    };
+    std::vector<std::vector<float>> B = {
+        { 1.0f, 2.0f, 3.0f, nd },
+        { 1.0f, 2.0f, nd, 4.0f },
+    };
+    const auto ra = ImageEnhancement::pca( A, 2 );
+    const auto rb = ImageEnhancement::pca( B, 2 );
+    REQUIRE( ra.output.size() == 2 );
+    REQUIRE( rb.output.size() == 2 );
+    // The joint-valid samples (0,1) hold identical inputs in A and B, so
+    // their projected components must be identical.
+    for ( int c = 0; c < 2; ++c )
+    {
+        INFO( "component " << c );
+        CHECK( rb.output[c][0] == Approx( ra.output[c][0] ).margin( 1e-3 ) );
+        CHECK( rb.output[c][1] == Approx( ra.output[c][1] ).margin( 1e-3 ) );
     }
 }

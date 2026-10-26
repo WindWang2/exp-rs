@@ -645,6 +645,13 @@ r6_dev.cmd
 !.planning/zcode-r20-03/
 .planning/zcode-r20-03/*
 !.planning/zcode-r20-03/*.md
+
+# R21-A track (remote-sensing scientific algorithms) planning artifacts
+# (markdown + the test runner script only; logs/builds stay local).
+!.planning/r21-A/
+.planning/r21-A/*
+!.planning/r21-A/*.md
+!.planning/r21-A/run-tests.sh
 *.agent-build.lock
 
 # R20-02 track (geospatial data / model runtime / persistence) planning artifacts (markdown only).

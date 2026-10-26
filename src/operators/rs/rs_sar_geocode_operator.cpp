@@ -292,6 +292,19 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
                                "Failed to create output raster: " + outputPath );
     out.setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
 
+    // SICNU_DEM_UNIT must reach the geometry kernels: a feet/decimeter DEM
+    // read raw shifted zero-Doppler geocoding by 3.28x/10x (the flatten
+    // family always honored the declaration — this operator didn't).
+    QString appliedDemUnit;
+    const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );
+    // Also log an UNKNOWN declared unit: demUnitScaleToMetres falls back to
+    // metres and says so in appliedDemUnit ("meters (assumed; declared '...')").
+    if ( demUnitScale != 1.0 || appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
+        context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
+                         + std::to_string( demUnitScale ) + ")" );
+    }
+
     std::vector<float> demScratch;
     // Per-tile working planes — one float/double per tile pixel each,
     // O(tile) total.
@@ -322,6 +335,12 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
         const int bw = tile.bufferWidth;
         const size_t bufN = static_cast<size_t>( bw ) * tile.bufferHeight;
         normalizeHalo( haloBuf, bufN, demHasSentinel, demSentinel, &demScratch );
+        if ( demUnitScale != 1.0 )
+        {
+            for ( float &v : demScratch )
+                if ( std::isfinite( v ) )
+                    v = static_cast<float>( v * demUnitScale );
+        }
         std::fill( cellState.begin(), cellState.end(), 0 );
 
         // Pass 1 — DEM gradients and forward geocoding per cell.

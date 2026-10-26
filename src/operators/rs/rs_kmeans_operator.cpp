@@ -335,15 +335,28 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     // tuned for z-score features (ADR 0050), and the GUI path fits the scaler
     // on train features. Fitting here mirrors that behavior on the direct-
     // trainX path, where the pipeline's fitScaler flag is otherwise ignored.
+    // scale must be read BEFORE the scaler is fitted and applied: this path
+    // hands the pipeline a pre-fitted scaler, so a late read would leave
+    // scale=false z-scoring anyway (trainX transformed, tile prediction
+    // gated on scaler.isFitted()) — byte-identical to scale=true.
+    const bool scale = getBool(params, "scale", true);
     RsFeatureScaler scaler;
-    scaler.fit(trainX);
+    if (scale)
+        scaler.fit(trainX);
 
     RsClassificationPipeline::Config cfg;
     cfg.sourceRaster = QString::fromStdString(inputPath);
     cfg.outputRaster = QString::fromStdString(outputPath);
     cfg.bandIndices = QVector<int>(bands.begin(), bands.end());
-    cfg.scaler = scaler;
-    cfg.trainX = scaler.isFitted() ? scaler.transform(trainX) : trainX;
+    if (scaler.isFitted())
+    {
+        cfg.scaler = scaler;
+        cfg.trainX = scaler.transform(trainX);
+    }
+    else
+    {
+        cfg.trainX = trainX;
+    }
     // KMeans fit() ignores y, but the pipeline requires a non-empty trainY
     // when the backend is not fitted. Dummy zeros satisfy the check.
     // methodName is metadata only (log + sidecar) — the cluster→class remap
@@ -353,8 +366,9 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     cfg.trainY = cv::Mat::zeros(nSamples, 1, CV_32S);
     // #682: the GUI always Z-scores features before KMeans; the operator used
     // to train on raw DN, so identical inputs clustered differently between
-    // surfaces. Standardize by default; explicit scale=false opts out.
-    const bool scale = getBool(params, "scale", true);
+    // surfaces. Standardize by default; explicit scale=false opts out (the
+    // scaler above is then left unfitted and the pipeline predicts on raw
+    // DN; cfg.fitScaler only matters for the empty-trainX branch).
     cfg.fitScaler = scale;
     const std::string algorithm =
         getEnum(params, "algorithm", {"kmeans", "isodata"}, "kmeans");

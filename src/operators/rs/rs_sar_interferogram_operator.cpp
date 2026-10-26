@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <limits>
 #include <string>
 #include <vector>
@@ -69,7 +70,14 @@ Json::Value RsSarInterferogramOperator::schema() const {
                                                 "Coherence window size in pixels (odd)", 5.0 );
     props["flattenRamp"] = makeEnumParam( "flattenRamp",
                                           "Robust flat-earth ramp removal (low-order "
-                                          "approximation, not topographic phase removal)",
+                                          "approximation, not topographic phase removal). "
+                                          "Fits the WRAPPED (-pi,pi] phase, so it removes "
+                                          "ramps of less than one fringe between neighbors "
+                                          "across the scene; a multi-fringe flat-earth ramp "
+                                          "needs prior unwrapping (rs:sar_unwrap) — the "
+                                          "run logs a reliability warning and stamps "
+                                          "SICNU_SAR_RAMP_RELIABILITY=low when the wrapped "
+                                          "field looks uniformly distributed",
                                           s_rampModes, "none" );
 
     Json::Value outputs( Json::objectValue );
@@ -193,9 +201,17 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
     // (O(1) working memory; the same twin indexed walk as the main pass).
     sicnu::sar::PhaseRampModel ramp;
     bool haveRamp = false;
+    std::string rampReliability = "none";
     if ( rampMode != "none" )
     {
         sicnu::sar::PhaseRampFitter fitter;
+        // Reliability probe: the fit consumes the WRAPPED phase, where a
+        // multi-fringe ramp distributes samples nearly uniformly over
+        // (-pi,pi] and the LSQ slope collapses to ~0 (the ramp silently
+        // survives). The circular resultant length R = |sum(e^{i phi})|/N
+        // distinguishes that (R ~ 0) from a sub-fringe ramp (R close to 1).
+        std::complex<double> phasorSum( 0.0, 0.0 );
+        uint64_t phasorCount = 0;
         const size_t tiles = masterStream.tileCount();
         std::vector<std::complex<float>> mbuf( masterStream.bandCount()
                                                * static_cast<size_t>( kTileDim + 2 * halo + 2 )
@@ -216,13 +232,37 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
                     // (ComplexBandTileStream BIP layout).
                     const size_t idx = static_cast<size_t>( y + halo ) * tile.bufferWidth
                                        + x + halo;
-                    fitter.addSample( tile.xOffset + x, tile.yOffset + y,
-                                      sicnu::sar::interferogramPhase( mbuf[idx], sbuf[idx] ) );
+                    const double phi = sicnu::sar::interferogramPhase( mbuf[idx], sbuf[idx] );
+                    fitter.addSample( tile.xOffset + x, tile.yOffset + y, phi );
+                    // Same validity rule as the fitter: interferogramPhase
+                    // returns NaN for non-finite/zero samples, and one NaN in
+                    // the sum would poison the resultant length into NaN
+                    // (NaN >= 0.15 is false) — stamping "low" on essentially
+                    // every real pair, since coregistration voids and layover
+                    // zeros are ordinary. Counting invalid pixels would also
+                    // dilute R for all-finite scenes.
+                    if ( std::isfinite( phi ) )
+                    {
+                        phasorSum += std::polar( 1.0, phi );
+                        ++phasorCount;
+                    }
                 }
         }
         if ( !fitter.fit( rampMode == "quadratic", 2, &ramp ) )
             throw RSOperatorError( ErrorCode::ComputationError,
                                    "flattenRamp fitting failed: too few valid sample pairs" );
+        const double resultant = ( phasorCount > 0 )
+            ? std::abs( phasorSum ) / static_cast<double>( phasorCount )
+            : 0.0;
+        rampReliability = ( resultant >= 0.15 ) ? "ok" : "low";
+        if ( rampReliability == "low" )
+            context.logWarning(
+                "flattenRamp: the wrapped phase is near-uniformly distributed "
+                "(resultant length "
+                + std::to_string( resultant )
+                + "); the low-order wrapped-domain fit cannot pin the ramp slope "
+                  "(multi-fringe flat-earth or heavy deformation) — consider unwrapping "
+                  "first (rs:sar_unwrap)" );
         haveRamp = true;
     }
 
@@ -237,6 +277,8 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
     out.setMetadataItem( "SICNU_SAR_INSAR_MASTER", masterPath.c_str() );
     out.setMetadataItem( "SICNU_SAR_INSAR_SLAVE", slavePath.c_str() );
     out.setMetadataItem( "SICNU_SAR_INSAR_RAMP", rampMode.c_str() );
+    if ( rampReliability != "none" )
+        out.setMetadataItem( "SICNU_SAR_RAMP_RELIABILITY", rampReliability.c_str() );
     // Non-finite input samples (coregistration voids, layover zeros in ramp
     // mode) come out as NaN complex samples; declare it like the coherence
     // band below does, so the interferogram's void convention is readable.

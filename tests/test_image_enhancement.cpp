@@ -517,3 +517,33 @@ TEST_CASE("ChunkedProcessor returns false for non-positive dimensions [r18a][wp6
     ChunkedProcessor zeroHeight(100, 0, 0);
     REQUIRE_FALSE(zeroHeight.process([&](const ChunkedProcessor::Chunk &) { return true; }));
 }
+
+
+// ===========================================================================
+// r21-A / AG2-F5 — in-memory stretch/equalize must treat ±Inf as invalid,
+// matching the streaming channel (#1538 family): an Inf sample used to
+// clamp into 255 (stretch) or 128 (equalize constant path) as fake data.
+// ===========================================================================
+TEST_CASE( "In-memory linearStretch and histogramEqualize void non-finite samples (AG2-F5)",
+           "[enhancement][r21a]" )
+{
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nd = -9999.0f;
+    std::vector<float> in = { 50.0f, inf, -inf, 75.0f, std::numeric_limits<float>::quiet_NaN() };
+    std::vector<float> out( 5, 0.0f );
+
+    ImageEnhancement::linearStretch( in.data(), out.data(), 5, 0.0f, 100.0f, nd );
+    CHECK( out[0] == Approx( 127.5f ).margin( 0.5f ) );
+    CHECK( out[1] == nd );
+    CHECK( out[2] == nd );
+    CHECK( out[3] == Approx( 191.25f ).margin( 0.5f ) );
+    CHECK( out[4] == nd );
+
+    // Constant (min==max) histogram path: Inf must not become 128.
+    std::vector<float> flat = { 42.0f, inf, 42.0f };
+    std::vector<float> out2( 3, 0.0f );
+    ImageEnhancement::histogramEqualize( flat.data(), out2.data(), 3, 256, nd );
+    CHECK( out2[0] == Approx( 128.0f ).margin( 0.5f ) );
+    CHECK( out2[1] == nd );
+    CHECK( out2[2] == Approx( 128.0f ).margin( 0.5f ) );
+}

@@ -92,7 +92,7 @@ Json::Value RsSarTerrainFlattenOperator::metadata() const {
     meta["tags"].append("terrain");
     meta["tags"].append("radiometry");
     meta["purpose"] = "Radiometric terrain flattening: sigma0 to gamma0 "
-                      "(sigma0·cosθ0/cosθi) using a co-registered DEM in radar "
+                      "(sigma0·sinθi/sinθ0) using a co-registered DEM in radar "
                       "geometry, writing a two-band product (band 1 = gamma0, "
                       "band 2 = validity mask 1/0/255).";
     meta["prerequisites"].append("sigma0 raster (linear power) and a DEM on the exact "
@@ -169,6 +169,14 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
         }
     } else if (params.isMember("look_azimuth") && params["look_azimuth"].isNumeric()) {
         lookAzimuthDeg = params["look_azimuth"].asDouble();
+        // Same finite-angle refusal as the primary spelling: a NaN azimuth
+        // survived fmod, produced NoData gamma0 pixels whose validity mask
+        // still said 1 (valid) — the mask contract broken from the legacy
+        // alias only.
+        if (!std::isfinite(lookAzimuthDeg)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "look_azimuth must be a finite angle in degrees");
+        }
     } else {
         lookAzimuthDeg = sicnu::sar::lookAzimuthFromHeading(headingDeg, lookDirection == "right");
     }
@@ -190,7 +198,7 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "input declares SICNU_SAR_DOMAIN=db; these filters operate on "
                                "linear power — convert with rs:sar_backscatter (or rs:sar_calibrate) first" );
-    // Declared-state preflight: the flattening factor sigma0·cosθ0/cosθi is
+    // Declared-state preflight: the flattening factor sigma0·sinθi/sinθ0 is
     // only lawful for sigma0 input. A declared gamma0/beta0 would be
     // double-corrected, a derived product carries no backscatter, and a
     // conflicting or unreadable declaration is never guessed. Legacy products
@@ -229,16 +237,17 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     if (!declaredUnit.isEmpty()) {
         demUnit = declaredUnit.toStdString();
     }
-    double demUnitScale = 1.0;
-    if (demUnit == "feet") {
-        demUnitScale = 0.3048;
-    } else if (demUnit == "decimeters") {
-        demUnitScale = 0.1;
-    } else if (demUnit != "meters") {
-        context.logWarning("Unknown DEM unit '" + demUnit + "' (SICNU_DEM_UNIT); "
-                           "assuming meters");
+    // Unit-name -> scale resolution is the shared sar_metadata helper (single
+    // owner of the mapping). An unknown unit keeps scale 1.0 with a warning,
+    // so a future unit only has to be added in one place.
+    QString appliedDemUnit;
+    const double demUnitScale =
+        sicnu::sar::demUnitScaleFromName( QString::fromStdString( demUnit ), &appliedDemUnit );
+    if ( appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
+        context.logWarning( "Unknown DEM unit '" + demUnit + "' (SICNU_DEM_UNIT); "
+                            "assuming meters" );
         demUnit = "meters";
-        demUnitScale = 1.0;
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).

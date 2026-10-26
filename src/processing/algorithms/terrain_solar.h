@@ -47,7 +47,8 @@ bool shadowDuration( const float *dem, int width, int height, float nodata,
                      ShadowDurationResult *out,
                      const std::function<bool()> &cancelled = {} );
 
-/// Solar position for @p dayOfYear (1–365) at @p solarHour (0–24 local
+/// Solar position for @p dayOfYear (1–366; 366 only occurs on Dec 31 of
+/// leap years and clamps onto the 365-day Spencer series) at @p solarHour (0–24 local
 /// SOLAR time) and @p latitudeDeg. Returns false for out-of-range inputs.
 bool sunPositionDeg( int dayOfYear, double solarHour, double latitudeDeg,
                      double *azimuthDeg, double *elevationDeg );

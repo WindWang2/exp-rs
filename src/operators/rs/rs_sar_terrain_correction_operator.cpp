@@ -86,7 +86,7 @@ Json::Value RsSarTerrainCorrectionOperator::metadata() const {
     meta["tags"].append("terrain");
     meta["tags"].append("radiometry");
     meta["purpose"] = "Full DEM terrain correction product: terrain-flattened gamma0 "
-                      "(sigma0·cosθ0/cosθi from a co-registered DEM in radar geometry) "
+                      "(sigma0·sinθi/sinθ0 from a co-registered DEM in radar geometry) "
                       "plus an optional layover/shadow validity mask and the local "
                       "incidence angle band.";
     meta["prerequisites"].append("sigma0 raster (linear power) and a DEM on the exact "
@@ -170,7 +170,7 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "input declares SICNU_SAR_DOMAIN=db; these filters operate on "
                                "linear power — convert with rs:sar_backscatter (or rs:sar_calibrate) first" );
-    // Declared-state preflight: the flattening factor sigma0·cosθ0/cosθi is
+    // Declared-state preflight: the flattening factor sigma0·sinθi/sinθ0 is
     // only lawful for sigma0 input. A declared gamma0/beta0 would be
     // double-corrected, a derived product carries no backscatter, and a
     // conflicting or unreadable declaration is never guessed. Legacy products
@@ -209,16 +209,17 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     if (!declaredUnit.isEmpty()) {
         demUnit = declaredUnit.toStdString();
     }
-    double demUnitScale = 1.0;
-    if (demUnit == "feet") {
-        demUnitScale = 0.3048;
-    } else if (demUnit == "decimeters") {
-        demUnitScale = 0.1;
-    } else if (demUnit != "meters") {
-        context.logWarning("Unknown DEM unit '" + demUnit + "' (SICNU_DEM_UNIT); "
-                           "assuming meters");
+    // Unit-name -> scale resolution is the shared sar_metadata helper (single
+    // owner of the mapping). An unknown unit keeps scale 1.0 with a warning,
+    // so a future unit only has to be added in one place.
+    QString appliedDemUnit;
+    const double demUnitScale =
+        sicnu::sar::demUnitScaleFromName( QString::fromStdString( demUnit ), &appliedDemUnit );
+    if ( appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
+        context.logWarning( "Unknown DEM unit '" + demUnit + "' (SICNU_DEM_UNIT); "
+                            "assuming meters" );
         demUnit = "meters";
-        demUnitScale = 1.0;
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).

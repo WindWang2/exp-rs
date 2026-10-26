@@ -147,16 +147,34 @@ namespace exp_spectral
         size_t left = minIdx;
         while ( left > start && static_cast<double>( normalized[left] ) < halfLevel )
           --left;
-        f.leftHalfWavelengthNm = left == minIdx
-                                   ? wavelengths[minIdx]
-                                   : interpolateCrossing( left, left + 1, halfLevel );
+        // When the wing never climbs to half-depth inside the run (trough
+        // truncated by a band gap or the scan window), extrapolating the
+        // crossing used to place it OUTSIDE the run — below the spectrum's
+        // first wavelength. The honest half-depth point is the run edge.
+        if ( static_cast<double>( normalized[left] ) < halfLevel )
+        {
+          f.leftHalfWavelengthNm = wavelengths[left]; // == wavelengths[start]
+        }
+        else
+        {
+          f.leftHalfWavelengthNm = left == minIdx
+                                       ? wavelengths[minIdx]
+                                       : interpolateCrossing( left, left + 1, halfLevel );
+        }
 
         size_t right = minIdx;
         while ( right < end && static_cast<double>( normalized[right] ) < halfLevel )
           ++right;
-        f.rightHalfWavelengthNm = right == minIdx
-                                    ? wavelengths[minIdx]
-                                    : interpolateCrossing( right, right - 1, halfLevel );
+        if ( static_cast<double>( normalized[right] ) < halfLevel )
+        {
+          f.rightHalfWavelengthNm = wavelengths[right]; // == wavelengths[end]
+        }
+        else
+        {
+          f.rightHalfWavelengthNm = right == minIdx
+                                        ? wavelengths[minIdx]
+                                        : interpolateCrossing( right, right - 1, halfLevel );
+        }
 
         f.fwhmNm = f.rightHalfWavelengthNm - f.leftHalfWavelengthNm;
 

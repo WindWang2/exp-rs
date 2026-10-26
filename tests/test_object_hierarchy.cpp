@@ -483,18 +483,40 @@ TEST_CASE( "ClassRaster paint partial classes leave unlabeled as 0", "[hierarchy
     REQUIRE( painted.labelAt( 3, 3 ) == 0 ); // seg 4 unlabeled
 }
 
-TEST_CASE( "ClassRaster paint rejects class id 0 and size mismatch", "[hierarchy][writeback]" )
+TEST_CASE( "ClassRaster paint writes NoData for class id 0 and rejects negatives",
+           "[hierarchy][writeback]" )
 {
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
     const QString ref = writeTinyRefRaster( tmp.path() );
     auto fine = makeFineMap();
 
-    QMap<quint32, int> bad;
-    bad[1] = 0;
-    auto r0 = RsClassRaster::paint( fine, bad, ref, tmp.path() + QStringLiteral( "/bad0.tif" ) );
-    REQUIRE_FALSE( r0.ok );
-    REQUIRE( r0.errorMessage.contains( QStringLiteral( ">= 1" ) ) );
+    // Class id 0 is the documented unclassified/NoData value (KMeans clusters
+    // without a Hungarian assignment, segments absent from segmentClasses):
+    // paint must SUCCEED and write 0 for that segment — not refuse.
+    QMap<quint32, int> withUnclassified;
+    withUnclassified[1] = 0;
+    withUnclassified[2] = 3;
+    const QString zeroPath = tmp.path() + QStringLiteral( "/zero.tif" );
+    auto r0 = RsClassRaster::paint( fine, withUnclassified, ref, zeroPath );
+    REQUIRE( r0.ok );
+    RsSegmentMap zeroMap = RsSegmentMap::fromGeoTIFF( zeroPath );
+    // Segment 1's pixels read back as 0 (NoData); segment 2's as class 3.
+    REQUIRE( zeroMap.labelAt( 0, 0 ) == 0 );
+    bool sawThree = false;
+    for ( int64_t r = 0; r < zeroMap.height(); ++r )
+        for ( int64_t c = 0; c < zeroMap.width(); ++c )
+            if ( zeroMap.labelAt( r, c ) == 3 )
+                sawThree = true;
+    REQUIRE( sawThree );
+
+    // Negative ids are still refused (not representable in Byte/UInt16).
+    QMap<quint32, int> negative;
+    negative[1] = -2;
+    auto rNeg = RsClassRaster::paint( fine, negative, ref,
+                                      tmp.path() + QStringLiteral( "/neg.tif" ) );
+    REQUIRE_FALSE( rNeg.ok );
+    REQUIRE( rNeg.errorMessage.contains( QStringLiteral( ">= 0" ) ) );
 
     // Wrong-size reference
     GDALAllRegister();

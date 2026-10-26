@@ -120,12 +120,21 @@ Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
     if (unit == "toa_reflectance") unitCode = 1;
     else if (unit == "brightness_temperature") unitCode = 2;
 
-    // Optional band selection (1-based indices). Empty -> all bands.
+    // Optional band selection (1-based indices). Empty -> all bands. A
+    // non-integral entry (2.5, "3") used to be silently dropped, which
+    // emptied the list and silently widened the run to ALL bands — refuse
+    // instead so the caller learns their request was malformed. Out-of-range
+    // integers remain refused by RadiometricCalibration::processFile.
     QList<int> bandIndices;
     if (params.isMember("bands") && params["bands"].isArray() && !params["bands"].empty()) {
         for (Json::ArrayIndex i = 0; i < params["bands"].size(); ++i) {
-            if (params["bands"][i].isIntegral())
-                bandIndices.append(params["bands"][i].asInt());
+            if (!params["bands"][i].isIntegral()) {
+                throw RSOperatorError(
+                    ErrorCode::InvalidParameter,
+                    "bands entries must be integers (1-based); entry " +
+                        std::to_string(i) + " is not integral");
+            }
+            bandIndices.append(params["bands"][i].asInt());
         }
     }
 

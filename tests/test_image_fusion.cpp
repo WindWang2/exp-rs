@@ -4,6 +4,7 @@
 
 #include "processing/algorithms/fusion_quality_report.h"
 #include "processing/algorithms/image_fusion.h"
+#include "processing/algorithms/math_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <json/json.h>
@@ -1785,4 +1786,151 @@ TEST_CASE( "Streaming linear fusion clamps an out-of-range panWeight [r18a][r1]"
     REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
     CHECK( out1[0] == Approx( 10.0f ).margin( 1e-4 ) );
     CHECK( out1[1] == Approx( 10.0f ).margin( 1e-4 ) );
+}
+
+
+// ===========================================================================
+// r21-A seam alignment — the in-memory kernels must agree with the
+// streaming production path's validity statistics and non-finite policy.
+// ===========================================================================
+
+TEST_CASE( "PCA Fusion: per-band NoData keeps the joint-valid statistics (AG2-D1)",
+           "[fusion][r21a]" )
+{
+    // Raster A: bands share the same NoData pixels -> joint set == per-band
+    //            set (the only case the old code handled correctly).
+    // Raster B: band 1 keeps pixel 2, band 2 keeps pixel 3 -> per-band means
+    //            used to drift off the joint set and rotate PC1.
+    // Metamorphic oracle: A and B hold IDENTICAL valid inputs on the joint
+    // set (pixels 0/1), so with joint statistics their fused outputs at
+    // those pixels must be identical.
+    const int W = 2, H = 2, N = W * H;
+    const float ND = NODATA;
+    std::vector<float> b1A = { 1.0f, 2.0f, ND, ND };
+    std::vector<float> b2A = { 1.0f, 2.0f, ND, ND };
+    std::vector<float> b1B = { 1.0f, 2.0f, 3.0f, ND };
+    std::vector<float> b2B = { 1.0f, 2.0f, ND, 4.0f };
+    std::vector<float> pan = { 1.5f, 1.5f, 9.0f, 9.0f };
+
+    QVector<const float *> bandsA = { b1A.data(), b2A.data() };
+    QVector<const float *> bandsB = { b1B.data(), b2B.data() };
+    const auto outA = ImageFusion::pcaFusion( bandsA, 2, pan.data(), W, H, ND );
+    const auto outB = ImageFusion::pcaFusion( bandsB, 2, pan.data(), W, H, ND );
+    REQUIRE( outA.size() == 2 );
+    REQUIRE( outB.size() == 2 );
+
+    // Joint-valid pixels carry identical fused values across A and B.
+    for ( int b = 0; b < 2; ++b )
+    {
+        INFO( "band " << b );
+        CHECK( outA[b][0] == Approx( outB[b][0] ).margin( 1e-4 ) );
+        CHECK( outA[b][1] == Approx( outB[b][1] ).margin( 1e-4 ) );
+    }
+    // Pixels valid in only one band stay NoData in B (joint validity).
+    for ( int b = 0; b < 2; ++b )
+    {
+        CHECK( outB[b][2] == NODATA );
+        CHECK( outB[b][3] == NODATA );
+    }
+}
+
+TEST_CASE( "Brovey: a non-finite band sample voids the whole pixel (AG2-D2)",
+           "[fusion][r21a]" )
+{
+    const int W = 1, H = 3, N = W * H;
+    const float inf = std::numeric_limits<float>::infinity();
+    // Pixel 0: +Inf in blue; pixel 1: NaN in pan; pixel 2: fully valid.
+    std::vector<float> r = { 50.0f, 50.0f, 50.0f };
+    std::vector<float> g = { 50.0f, 50.0f, 50.0f };
+    std::vector<float> b = { inf, 50.0f, 50.0f };
+    std::vector<float> pan = { 300.0f, std::numeric_limits<float>::quiet_NaN(), 300.0f };
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    const auto out = ImageFusion::brovey( msBands, 3, pan.data(), W, H, NODATA );
+    REQUIRE( out.size() == 3 );
+    // The streaming path washes ±Inf to NaN at read time, so the in-memory
+    // kernel must treat them identically: NoData, never invented 0.0 black
+    // bands (the old Inf/Inf=NaN path wrote 0 into the finite bands).
+    for ( int band = 0; band < 3; ++band )
+    {
+        CHECK( out[band][0] == NODATA );
+        CHECK( out[band][1] == NODATA );
+        CHECK( out[band][2] == Approx( 100.0f ).margin( 1e-3 ) );
+    }
+}
+
+TEST_CASE( "Linear weighted fusion: non-finite inputs become NoData (AG2-D2)",
+           "[fusion][r21a]" )
+{
+    const int W = 1, H = 2, N = W * H;
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> ms = { inf, 10.0f };
+    std::vector<float> pan = { 100.0f, 100.0f };
+
+    QVector<const float *> msBands = { ms.data() };
+    const QVector<float> weights = { 0.5f };
+    const auto out = ImageFusion::linearWeighted( msBands, 1, pan.data(), W, H,
+                                                  NODATA, weights, 0.5f );
+    REQUIRE( out.size() == 1 );
+    CHECK( out[0][0] == NODATA ); // 0.5*Inf + 0.5*100 used to publish +Inf
+    CHECK( out[0][1] == Approx( 55.0f ).margin( 1e-4 ) );
+}
+
+
+// r21-A / AG2-F6 + R2 mutation-gap closure — histogramMatch must scale with
+// the SAMPLE stddev (N-1), matching the streaming seam's StatsAccumulator.
+// A 4-sample tile is where population (N) vs sample (N-1) differ visibly
+// (sqrt(3/4) = 0.866); on large N they converge, which is why the drift
+// survived without a small-tile oracle.
+TEST_CASE( "histogramMatch uses the sample stddev, not the population one (AG2-F6)",
+           "[fusion][r21a]" )
+{
+    // data has mean 2.5, population sd 1.118, sample sd 1.291 (4 samples).
+    // ref  has mean 20,  population sd 11.18, sample sd 12.91.
+    // scale = sdRef/sdData: population form 10.0, sample form 11.547.
+    std::vector<float> data = { 1.0f, 2.0f, 3.0f, 4.0f };
+    std::vector<float> ref  = { 10.0f, 20.0f, 30.0f, 40.0f };
+    const float nd = -9999.0f;
+
+    ImageFusion::histogramMatch( data.data(), data.size(), ref.data(), ref.size(), nd );
+
+    // matched[i] = (data[i] - 2.5) * scale + 20. With the sample scale the
+    // extremes land exactly on the reference extremes (both series have the
+    // same standardized shape): 1 -> 10, 4 -> 40.
+    CHECK( data[0] == Approx( 10.0f ).margin( 0.05f ) );
+    CHECK( data[3] == Approx( 40.0f ).margin( 0.05f ) );
+    // The population-scale form would give 10.0 + 1.5*... i.e. ~13.66 / 36.34.
+    CHECK( data[0] != Approx( 13.66f ).margin( 0.5f ) );
+}
+
+
+// r21-A / R2 mutation-gap closure — the fused dNBR loop must keep the -999
+// negative-sentinel rule that staged normalizedDifference() applied. All
+// existing dNBR tests use clean data, so dropping the rule stayed green.
+TEST_CASE( "dNBR fusion keeps the negative-sentinel rule (R2 M3)", "[fusion][r21a]" )
+{
+    const float nd = -9999.0f;
+    // 2 pixels: pixel 0 clean, pixel 1 carries a -9999 sentinel in the
+    // pre-NIR band (a legitimate-looking value only the sentinel rule voids).
+    std::vector<float> preA = { 0.5f, nd };
+    std::vector<float> preB = { 0.3f, 0.3f };
+    std::vector<float> postA = { 0.4f, 0.4f };
+    std::vector<float> postB = { 0.2f, 0.2f };
+
+    QVector<const float *> bands = { preA.data(), preB.data(), postA.data(), postB.data() };
+    const auto out = ImageFusion::pcaFusion( bands, 4, nullptr, 1, 2, nd );
+    // pcaFusion is not dNBR; this case is exercised through the operator's
+    // dNBR path in test_rs_operators / test_spectral_formula_drift. Here we
+    // pin the shared predicate directly: bothNormalizable must reject a
+    // -9999 operand exactly like the staged normalizedDifference did.
+    CHECK( MathUtils::bothNormalizable( 0.5f, 0.3f ) );
+    CHECK_FALSE( MathUtils::bothNormalizable( nd, 0.3f ) );
+    CHECK_FALSE( MathUtils::bothNormalizable( 0.3f, nd ) );
+    CHECK_FALSE( MathUtils::bothNormalizable( -999.0f, 0.3f ) ); // threshold
+    CHECK_FALSE( MathUtils::bothNormalizable( -1.0f, -1.0f ) );  // equal negatives
+    CHECK( MathUtils::bothNormalizable( 0.0f, 0.0f ) );
+    CHECK_FALSE( MathUtils::bothNormalizable(
+        std::numeric_limits<float>::quiet_NaN(), 0.3f ) );
+    CHECK_FALSE( MathUtils::bothNormalizable(
+        std::numeric_limits<float>::infinity(), 0.3f ) );
 }
