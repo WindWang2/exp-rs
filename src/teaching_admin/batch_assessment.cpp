@@ -8,6 +8,8 @@
 #include <QJsonDocument>
 #include <QMutex>
 #include <QSet>
+#include "geospatial/common.h"
+#include "geospatial/util/atomic_fs.h"
 #include "platform/durable_sidecar.h"
 #include <algorithm>
 #include <cstring>
@@ -865,15 +867,12 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     return report;
 }
 
-bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QString &outPrefix )
+namespace {
+
+/// Pure gradebook-CSV payload builder (no I/O): both artifacts' bytes exist
+/// before anything is staged or published (#1695 pair publish).
+QByteArray batchCsvBytes( const BatchAssessmentReport &report )
 {
-    const QByteArray jsonBytes = QJsonDocument( report.toJson() ).toJson( QJsonDocument::Indented );
-    const QString jsonPath = outPrefix + QStringLiteral( ".json" );
-    const QString csvPath = outPrefix + QStringLiteral( ".csv" );
-
-    if ( !writeBytesAtomically( jsonPath, jsonBytes ) )
-        return false;
-
     QString csv;
     csv += QStringLiteral( "student_id,lab_id,score,verdict,status,message,missing_evidence,grader_digest,top_deduction,unavailable_reason,rubric_version,lab_version,software_version\r\n" );
     QVector<BatchRowResult> sorted = report.rows;
@@ -950,8 +949,64 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
     // Real UTF-8 BOM as BYTES: a QStringLiteral "ï»¿" would hold
     // code points U+00EF/U+00BB/U+00BF and toUtf8() would double-encode
     // them (C3 AF ...) — a BOM no spreadsheet recognizes.
-    if ( !writeBytesAtomically( csvPath, QByteArrayLiteral( "\xEF\xBB\xBF" ) + csv.toUtf8() ) )
+    return QByteArrayLiteral( "\xEF\xBB\xBF" ) + csv.toUtf8();
+}
+
+} // namespace
+
+bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QString &outPrefix )
+{
+    const QString jsonPath = outPrefix + QStringLiteral( ".json" );
+    const QString csvPath = outPrefix + QStringLiteral( ".csv" );
+    const QByteArray jsonBytes = QJsonDocument( report.toJson() ).toJson( QJsonDocument::Indented );
+    const QByteArray csvBytes = batchCsvBytes( report );
+
+    // #1695: the JSON/CSV pair must publish together or not at all. The old
+    // sequence (publish JSON, then build + publish CSV) left a fresh JSON
+    // beside a stale CSV whenever the second write failed (a directory
+    // squatting on the .csv name, ENOSPC after the JSON landed). Stage BOTH
+    // payloads beside their targets first — a staging failure touches
+    // nothing — then run the two-member atomic publish, which journals,
+    // moves the old pair aside and restores it on failure (atomic_fs
+    // authority). A final path that IS a directory can never be replaced by
+    // the rename publish, so refuse it up front rather than after the first
+    // member landed.
+    for ( const QString &finalPath : { jsonPath, csvPath } )
+    {
+        if ( QFileInfo( finalPath ).isDir() )
+            return false;
+    }
+
+    const std::string jsonTarget = jsonPath.toStdString();
+    const std::string csvTarget = csvPath.toStdString();
+    const std::string jsonStage = sicnu::geo::atomic_fs::reservedStagedPathFor( jsonTarget );
+    const std::string csvStage = sicnu::geo::atomic_fs::reservedStagedPathFor( csvTarget );
+    const auto discardStages = [&]() {
+        sicnu::geo::atomic_fs::discardStaged( jsonStage );
+        sicnu::geo::atomic_fs::discardStaged( csvStage );
+    };
+
+    if ( !writeBytesAtomically( QString::fromStdString( jsonStage ), jsonBytes )
+         || !writeBytesAtomically( QString::fromStdString( csvStage ), csvBytes ) )
+    {
+        discardStages();
         return false;
+    }
+
+    try
+    {
+        // Dependents first, completeness marker LAST: the CSV gradebook is
+        // the artifact consumers watch, so its landing marks the pair live.
+        sicnu::geo::atomic_fs::publishStagedMembers(
+          { { jsonStage, jsonTarget }, { csvStage, csvTarget } } );
+    }
+    catch ( const sicnu::geo::GeoError & )
+    {
+        // publishStagedMembers already rolled the targets back; the failed
+        // member's staged file is left for the caller to discard.
+        discardStages();
+        return false;
+    }
     return true;
 }
 
