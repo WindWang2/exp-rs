@@ -252,12 +252,17 @@ inline QString embeddedDriverPath( const QString &rest )
             return QString();
         return rest.mid( 1, end - 1 );
     }
+    // R1-F1: ANY scheme:// payload (s3://, gs://, oss://, ftp://, ... — not
+    // just the http(s)/file forms enumerated before) is a nested REMOTE or
+    // URL reference, never a plain file segment: hand the whole payload back
+    // so the recursive classifyReference() applies the URL-scheme policy
+    // (Zarr:s3://bucket must not degrade to the relative name "s3").
+    static const QRegularExpression kPayloadScheme(
+        QStringLiteral( "^[a-z][a-z0-9+.-]+://" ) );
     const QString lowered = rest.toLower();
-    if ( lowered.startsWith( QStringLiteral( "http://" ) )
-         || lowered.startsWith( QStringLiteral( "https://" ) )
-         || lowered.startsWith( QStringLiteral( "file:/" ) )
+    if ( kPayloadScheme.match( lowered ).hasMatch()
          || lowered.startsWith( QStringLiteral( "/vsi" ) ) )
-        return rest; // classified recursively, never a plain file segment
+        return rest;
     // Skip a Windows drive letter so GPKG:C:/x.gpkg:layer cuts at the LAYER
     // separator, not at "C:".
     int scanFrom = 0;
@@ -286,9 +291,12 @@ inline bool unknownDriverPayloadIsDangerous( const QString &rest )
          || first == QLatin1Char( '<' ) )
         return true;
     const QString lowered = trimmedRest.toLower();
-    if ( lowered.startsWith( QStringLiteral( "http://" ) )
-         || lowered.startsWith( QStringLiteral( "https://" ) )
-         || lowered.startsWith( QStringLiteral( "file:/" ) )
+    // R1-F1: any scheme:// payload is a remote reference — an unknown driver
+    // carrying one (TileDB:s3://bucket) must not fall back to relative-name
+    // treatment.
+    static const QRegularExpression kPayloadScheme(
+        QStringLiteral( "^[a-z][a-z0-9+.-]+://" ) );
+    if ( kPayloadScheme.match( lowered ).hasMatch()
          || lowered.startsWith( QStringLiteral( "/vsi" ) ) )
         return true;
     if ( trimmedRest.size() >= 2 && trimmedRest.at( 1 ) == QLatin1Char( ':' )
@@ -396,6 +404,13 @@ inline ReferenceVerdict classifyReference( const QString &pathValue )
         const QString rest = trimmed.mid( trimmed.indexOf( QLatin1Char( ':' ) ) + 1 );
         if ( isFileBackedGdalDriver( driver ) )
         {
+            // R1-F2: a payload that is ITSELF driver-shaped (CSV:GPKG:/abs,
+            // CSV:s3://bucket) is a nested connection string — classify it
+            // recursively instead of splitting it at the first ':' and
+            // "verifying" a fragment GDAL will never open. The recursion
+            // strips exactly one prefix per level, so it terminates.
+            if ( !gdalDriverPrefixOf( rest ).isEmpty() )
+                return classifyReference( rest );
             const QString embedded = embeddedDriverPath( rest );
             if ( embedded.isEmpty() )
             {

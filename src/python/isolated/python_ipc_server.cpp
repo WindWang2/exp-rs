@@ -187,27 +187,39 @@ void PythonIpcServer::onReadyRead()
       // If the id does not map to a pending request (or the line was not a
       // response), the discard simply stays silent as before.
       const QByteArray prefix = m_buffer.left( qMin( newlineIdx, 256 ) );
-      static const QRegularExpression kIdToken( QStringLiteral( "\"id\"\\s*:\\s*(-?\\d+)" ) );
-      const auto idMatch = kIdToken.match( QString::fromLatin1( prefix ) );
+      // R1-F4: anchor to the daemon's RESPONSE shape ("jsonrpc" key first,
+      // "id" second — the fixed key order serialized by sendResponse/worker
+      // daemon) so a giant daemon->host REQUEST line that merely embeds a
+      // colliding "id": N cannot retire an innocent in-flight request; and
+      // parse the id overflow-safely (toInt() failure would fall back to 0,
+      // which IS a live request id).
+      static const QRegularExpression kResponseId(
+          QStringLiteral( "^\\s*\\{\\s*\"jsonrpc\"\\s*:\\s*\"[^\"]*\"\\s*,\\s*\"id\"\\s*:\\s*(-?\\d+)" ) );
+      const auto idMatch = kResponseId.match( QString::fromLatin1( prefix ) );
       if ( idMatch.hasMatch() )
       {
-        const int salvagedId = idMatch.captured( 1 ).toInt();
-        auto it = m_callbacks.find( salvagedId );
-        if ( it != m_callbacks.end() )
+        bool idOk = false;
+        const qint64 parsedId = idMatch.captured( 1 ).toLongLong( &idOk );
+        if ( idOk && parsedId >= INT_MIN && parsedId <= INT_MAX )
         {
-          QJsonObject err;
-          err[QStringLiteral( "code" )] = -32001;
-          err[QStringLiteral( "message" )] = QStringLiteral(
-                                                "response exceeds the %1-byte IPC line limit; "
-                                                "return large results via a file/shared-memory "
-                                                "reference" )
-                                              .arg( kMaxLineBytes );
-          // Erase BEFORE invoking (#624): the callback may re-enter.
-          auto callback = std::move( it->second );
-          m_callbacks.erase( it );
-          callback( err, true );
+          const int salvagedId = static_cast<int>( parsedId );
+          auto it = m_callbacks.find( salvagedId );
+          if ( it != m_callbacks.end() )
+          {
+            QJsonObject err;
+            err[QStringLiteral( "code" )] = -32001;
+            err[QStringLiteral( "message" )] = QStringLiteral(
+                                                  "response exceeds the %1-byte IPC line limit; "
+                                                  "return large results via a file/shared-memory "
+                                                  "reference" )
+                                                .arg( kMaxLineBytes );
+            // Erase BEFORE invoking (#624): the callback may re-enter.
+            auto callback = std::move( it->second );
+            m_callbacks.erase( it );
+            callback( err, true );
+          }
+          dropInFlight( salvagedId );
         }
-        dropInFlight( salvagedId );
       }
       m_buffer.remove( 0, newlineIdx + 1 );
       continue;

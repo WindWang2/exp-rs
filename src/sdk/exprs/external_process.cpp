@@ -637,8 +637,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( !injector.empty() )
         {
             result.refusedByPolicy = true;
+            // R1-F7: the refusal covers BOTH deny-list hits (loader-class
+            // names) and malformed names (empty/'='/NUL — they splice the
+            // child envp entry into a different variable); say so.
             result.error = "env_injection (E5007): explicit environment key '" + injector
-                           + "' influences the dynamic linker and is refused";
+                           + "' is a loader-injection or malformed envp name and is refused";
             return result;
         }
     }
@@ -1168,8 +1171,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( !injector.empty() )
         {
             result.refusedByPolicy = true;
+            // R1-F7: the refusal covers BOTH deny-list hits (loader-class
+            // names) and malformed names (empty/'='/NUL — they splice the
+            // child envp entry into a different variable); say so.
             result.error = "env_injection (E5007): explicit environment key '" + injector
-                           + "' influences the dynamic linker and is refused";
+                           + "' is a loader-injection or malformed envp name and is refused";
             return result;
         }
     }

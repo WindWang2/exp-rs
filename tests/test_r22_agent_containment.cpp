@@ -136,6 +136,21 @@ TEST_CASE( "GDAL driver-prefixed connection strings cannot escape the workspace 
         CHECK( containment::pathOutsideWorkspace( QStringLiteral( "WEIRDDRV:<xml>config</xml>" ),
                                                   wsRoot, &detail ) );
         CHECK( containment::pathOutsideWorkspace( QStringLiteral( "WEIRDDRV:~/x" ), wsRoot, &detail ) );
+        // R1-F1: non-http scheme:// payloads never degrade to relative names.
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "Zarr:s3://bucket/arr" ),
+                                                  wsRoot, &detail ) );
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "CSV:s3://bucket/data.csv" ),
+                                                  wsRoot, &detail ) );
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "GeoJSON:ftp://h/x.json" ),
+                                                  wsRoot, &detail ) );
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "TileDB:s3://bucket/array" ),
+                                                  wsRoot, &detail ) );
+        // R1-F2: nested driver prefixes are classified recursively — the
+        // outer CSV: cannot vouch for an absolute GPKG: target.
+        CHECK( containment::pathOutsideWorkspace(
+            QStringLiteral( "CSV:GPKG:/etc/x.gpkg" ), wsRoot, &detail ) );
+        CHECK( containment::pathOutsideWorkspace(
+            QStringLiteral( "CSV:CSV:/etc/passwd" ), wsRoot, &detail ) );
         // A nested /vsicurl inside an unknown driver is still remote input.
         CHECK( containment::pathOutsideWorkspace( QStringLiteral( "WEIRDDRV:/vsicurl/http://x/y.json" ),
                                                   wsRoot, &detail ) );
@@ -181,6 +196,9 @@ TEST_CASE( "GDAL driver-prefixed connection strings cannot escape the workspace 
         // Known file-backed driver with an extractable path that does not
         // exist yet inside the workspace stays allowed (outputs).
         CHECK_FALSE( containment::pathOutsideWorkspace( QStringLiteral( "CSV:out/result.csv" ), wsRoot,
+                                                         &detail ) );
+        // R1-F2: nested in-workspace driver reference stays allowed.
+        CHECK_FALSE( containment::pathOutsideWorkspace( QStringLiteral( "CSV:GPKG:ok.gpkg" ), wsRoot,
                                                          &detail ) );
     }
 
@@ -232,10 +250,11 @@ TEST_CASE( "GDAL driver prefix classification details (#1704)", "[agent][mcp][sa
         QStringLiteral( "GPKG:C:/data/x.gpkg:layer" ) );
     CHECK( drive.kind == ReferenceKind::DriverPath );
     CHECK( drive.localPath == QStringLiteral( "C:/data/x.gpkg" ) );
+    // R1-F2: a scheme:// payload inside a file-backed driver recurses into
+    // the URL policy instead of degrading to a relative fragment.
     const containment::ReferenceVerdict url = containment::classifyReference(
         QStringLiteral( "GeoJSON:http://example.com/x.json" ) );
-    CHECK( url.kind == ReferenceKind::DriverPath );
-    CHECK( url.localPath == QStringLiteral( "http://example.com/x.json" ) );
+    CHECK( url.kind == ReferenceKind::Denied ); // remote disabled in this case
     // Unclosed quote / empty payload: fail closed.
     CHECK( containment::classifyReference( QStringLiteral( "NETCDF:\"/x.nc" ) ).kind
             == ReferenceKind::Denied );
