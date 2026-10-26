@@ -16779,3 +16779,13 @@ target_include_directories(test_r22_agent_ghost_algo PRIVATE
 )
 sicnu_discover_tests(test_r22_agent_ghost_algo RUN_SERIAL TRUE)
 # --- end R22-04 registration ---
+
+# --- r23-C (C05): TaskCenter cumulative/delta absolute-index-space contract
+# (R22-agent REVIEW_R2 R2-F3/R2-F6 closure). Same link shape as
+# test_task_center (TaskCenter + JobEngine + operator context).
+sicnu_add_test(test_r23_c_task_center_log_spaces)
+# --- end r23-C registration ---
+
+# --- r23-C (C10): gradebook pair publish atomicity (#1695-17e) ---
+sicnu_add_teaching_admin_test(test_r23_c_teaching_pair_publish)
+# --- end r23-C registration ---
