@@ -35,9 +35,11 @@ void AsyncGdalRunner::run(const GdalTask &task)
         connect(m_watcher, &QFutureWatcher<QString>::finished, this, [this]() {
             endRun();
 
-            // Parent dialog may already be gone.
+            // A parent that died mid-task gets nothing (its slots are gone);
+            // a runner constructed without a parent has nothing to guard and
+            // still delivers (#1695: null-parent completion was swallowed).
             const QPointer<QWidget> dialogGuard( m_parentWidget );
-            if ( !dialogGuard )
+            if ( m_hadParentWidget && !dialogGuard )
                 return;
 
             QString result = m_watcher->result();

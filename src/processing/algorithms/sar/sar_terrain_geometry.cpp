@@ -73,10 +73,23 @@ double terrainRadiometricFactor( double localIncidenceDeg, double incidenceDeg )
     if ( !std::isfinite( localIncidenceDeg ) || !std::isfinite( incidenceDeg ) ||
          incidenceDeg <= 0.0 || incidenceDeg >= 90.0 )
         return kNaN;
-    const double cosLocal = std::cos( localIncidenceDeg * kDegToRad );
-    if ( cosLocal <= 1e-6 ) // grazing/overturned local geometry
+    // #1146: the productive flatteners (terrainFlattenRaster, rs:sar_geocode's
+    // rtcFactor) use sin(θl)/sin(θ0). The cos(θ0)/cos(θl) form previously
+    // implemented here is the optical illumination correction and leaves a
+    // tanθ0/tanθl radiometry bias (up to ~4x on fore-slopes) — this exposed
+    // kernel must agree with the production formula, not contradict it.
+    const double sinRef = std::sin( incidenceDeg * kDegToRad );
+    if ( sinRef <= 1e-6 )
         return kNaN;
-    return std::cos( incidenceDeg * kDegToRad ) / cosLocal;
+    // Local incidence is a physical angle in (0, 90): 0 is a perfectly
+    // back-facing facet (undefined ratio), >= 90 is on/past the horizon
+    // (sin <= 0 -> the ratio would be negative or zero). Both are NaN.
+    if ( !( localIncidenceDeg > 0.0 ) || localIncidenceDeg >= 90.0 )
+        return kNaN;
+    const double sinLocal = std::sin( localIncidenceDeg * kDegToRad );
+    if ( sinLocal <= 1e-6 ) // grazing local geometry
+        return kNaN;
+    return sinLocal / sinRef;
 }
 
 double lookAzimuthFromHeading( double headingDeg, bool rightLooking )

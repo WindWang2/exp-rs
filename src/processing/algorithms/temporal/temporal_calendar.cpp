@@ -325,11 +325,30 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
     }
     else if ( options.method == RegularizeMethod::WindowMean )
     {
+      // Window membership comes from the day axis, not from the left/right
+      // bracketing anchors: those hold only the nearest finite observation
+      // on each side of t, so the old loop silently dropped in-window
+      // observations beyond them (and asymmetrically — an observation d days
+      // after t was kept while the equally distant one d days before t was
+      // not). The header contract is "mean of all observations within
+      // +- maxWindowDays". lowerBoundObs is upper_bound: the -1 walks back
+      // onto an observation exactly at t - radius, and the in-loop fabs
+      // check filters anything actually outside.
       const double radius = options.maxWindowDays;
+      // lowerBoundObs(x) is the last index at or before x. An observation
+      // exactly at t - radius is a window member (the in-loop |Δ| <= radius
+      // check keeps it), so the scan starts AT that index — not after it.
+      // Duplicate timestamps at the lower edge must ALL participate (the
+      // upper edge includes every duplicate by construction); walk back over
+      // the equal-day run so both edges treat duplicates identically.
+      int start = lowerBoundObs( tDays, nObs, t - radius );
+      while ( start > 0 && tDays[start - 1] == tDays[start] )
+        --start;
+      const int endExclusive = lowerBoundObs( tDays, nObs, t + radius ) + 1;
       double sum = 0.0;
       int count = 0;
       bool exactHit = false;
-      for ( int i = std::max( 0, left ); i < std::min( nObs, right + 1 ); ++i )
+      for ( int i = std::max( 0, start ); i < std::min( nObs, endExclusive ); ++i )
       {
         if ( !std::isfinite( series[i] ) )
           continue;

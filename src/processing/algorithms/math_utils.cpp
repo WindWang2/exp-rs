@@ -153,11 +153,20 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc)
         return stats;
     }
 
-    stats.mean = static_cast<float>(acc.sum / acc.count);
+    // The mean must stay double through the variance formula (#1684):
+    // truncating it to float first let the rounding error of mean² dominate
+    // sumSq/N for large-offset small-spread populations (10000.3 ± 0.5
+    // reported σ +17%; 1e6 ± 0.25 reported 64 instead of 0.25). stats.mean
+    // is still published as float, but the cancellation happens in double.
+    // Precision floor of this two-sum form: ~2·ε·(mean²/σ²) relative, i.e.
+    // ~0.7% for mean=1e6 σ=0.25; that is a property of the AccumulatorStats
+    // contract (sum/sumSq only), not of this function.
+    const double mean = acc.sum / static_cast<double>(acc.count);
+    stats.mean = static_cast<float>(mean);
 
     // Population stddev (N denominator)
     if (acc.count > 1) {
-        double variance = acc.sumSq / acc.count - stats.mean * stats.mean;
+        double variance = acc.sumSq / static_cast<double>(acc.count) - mean * mean;
         if (!std::isfinite(variance) || variance < 0.0)
             variance = 0.0;
         stats.stddev = static_cast<float>(std::sqrt(variance));
@@ -168,15 +177,24 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc)
     return stats;
 }
 
+bool bothNormalizable(float a, float b)
+{
+    if (!std::isfinite(a) || !std::isfinite(b))
+        return false;
+    if (a <= -999.0f || b <= -999.0f)
+        return false;
+    if (a == b && a < 0.0f)
+        return false;
+    return true;
+}
+
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count)
 {
     if (!a || !b || !out) return false;
     if (count == 0) return false;
 
     for (size_t i = 0; i < count; ++i) {
-        if (!std::isfinite(a[i]) || !std::isfinite(b[i]) ||
-            a[i] <= -999.0f || b[i] <= -999.0f ||
-            (a[i] == b[i] && a[i] < 0.0f)) {
+        if (!bothNormalizable(a[i], b[i])) {
             // Negative sentinel values (e.g. -9999) must never evaluate to false legitimate zero
             out[i] = std::numeric_limits<float>::quiet_NaN();
         } else {

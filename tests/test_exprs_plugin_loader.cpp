@@ -391,7 +391,8 @@ TEST_CASE( "granted permissions carry audit events in both policy modes",
         REQUIRE( record->manifest.permissions.size() == 2 );
         REQUIRE( registry.load( "org.test.audit" ) );
         REQUIRE( countGrants( registry.diagnostics(), "org.test.audit" ) == 2 );
-        for ( const PluginDiagnostic &item : registry.diagnostics().items() )
+        const exprs::PluginDiagnosticLog auditDiagSnapshot = registry.diagnostics();
+        for ( const PluginDiagnostic &item : auditDiagSnapshot.items() )
         {
             if ( item.code == PluginDiagnosticCode::PermissionGranted )
                 REQUIRE( PluginDiagnostic::codeString( item.code ) == "E5006" );
@@ -416,7 +417,8 @@ TEST_CASE( "granted permissions carry audit events in both policy modes",
         registry.configure( options );
         REQUIRE( registry.load( "org.test.audit" ) );
         REQUIRE( countGrants( registry.diagnostics(), "org.test.audit" ) == 2 );
-        for ( const PluginDiagnostic &item : registry.diagnostics().items() )
+        const exprs::PluginDiagnosticLog itemDiagSnapshot = registry.diagnostics();
+        for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
         {
             if ( item.code == PluginDiagnosticCode::PermissionGranted )
                 REQUIRE( item.message.find( "policy mode 'enforce'" ) != std::string::npos );
@@ -486,7 +488,8 @@ struct ReloadFixture
     }
     bool sawCode( PluginDiagnosticCode code ) const
     {
-        for ( const PluginDiagnostic &item : registry.diagnostics().items() )
+        const exprs::PluginDiagnosticLog itemDiagSnapshot = registry.diagnostics();
+        for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
         {
             if ( item.pluginId == id && item.code == code )
                 return true;
@@ -538,7 +541,8 @@ TEST_CASE( "hot reload is refused unless BOTH the caller and host policy allow d
         // The refusal is TYPED for THIS reason: an unloaded plugin is refused
         // with a TrustRejected record naming the state, not a silent false.
         bool sawNotLoadedRefusal = false;
-        for ( const PluginDiagnostic &item : registry.diagnostics().items() )
+        const exprs::PluginDiagnosticLog itemDiagSnapshot = registry.diagnostics();
+        for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
         {
             if ( item.pluginId == fixture.id
                  && item.code == PluginDiagnosticCode::TrustRejected
@@ -1189,7 +1193,8 @@ struct UpgradeFixture
 
     bool sawCode( PluginDiagnosticCode code ) const
     {
-        for ( const PluginDiagnostic &item : registry.diagnostics().items() )
+        const exprs::PluginDiagnosticLog itemDiagSnapshot = registry.diagnostics();
+        for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
         {
             if ( item.pluginId == id && item.code == code )
                 return true;

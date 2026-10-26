@@ -24,6 +24,20 @@ struct Stats {
 /**
  * Statistics computed from pre-accumulated sums.
  * Useful for streaming/segment-based statistics where the full array is not available.
+ *
+ * Precision contract (#1684): the mean is kept in double through the
+ * variance formula (sumSq/N - mean²), which is exact by the Sterbenz
+ * lemma whenever mean² is within a factor of two of sumSq/N. Two error
+ * floors remain, whichever dominates:
+ *   - the formula's own cancellation, ~eps·(mean²/σ²) — dominates only
+ *     above condition number mean²/σ² ~ 1/eps (≈4.5e15), i.e. far beyond
+ *     reflectance/DN magnitudes;
+ *   - the CALLER's accumulation of sum/sumSq: naive accumulation carries
+ *     ~sqrt(N)·eps·sumSq, which dominates for realistic large-offset
+ *     small-spread populations (mean/σ > ~1e6 at N=1e6).
+ * Accumulators feeding this struct over many pixels should sum values
+ * shifted by a representative offset or use Kahan compensation
+ * (see rs_segment_features.cpp).
  */
 struct AccumulatorStats {
     size_t count = 0;
@@ -87,6 +101,14 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
  * @return true on success
  */
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count);
+
+/**
+ * The exact sample-level predicate normalizedDifference() applies — finite
+ * operands, neither at/below the -999 negative-sentinel threshold, and not
+ * a pair of equal negatives. Fused kernels (e.g. dNBR) share it so their
+ * validity mask cannot drift from the staged form.
+ */
+bool bothNormalizable(float a, float b);
 
 /**
  * Apply linear scaling: out[i] = gain * in[i] + bias.

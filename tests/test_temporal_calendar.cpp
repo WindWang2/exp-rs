@@ -169,6 +169,68 @@ TEST_CASE( "regularizeSeries nearest + window_mean respect the window radius", "
   REQUIRE( mean.points[1].filled == true );
 }
 
+// r21-A / AG4-1 — the window mean used to average only the two bracketing
+// observations (the nearest finite anchors left/right of t), dropping every
+// other in-window observation and doing so asymmetrically (equidistant
+// before-t observations were dropped while after-t ones were kept).
+TEST_CASE( "regularizeSeries window_mean averages ALL observations inside the radius (AG4-1)",
+           "[temporal][calendar][r21a]" )
+{
+  // Observations every 8 days, values 1,1,1,5,5. At t=16 with radius 16 the
+  // window [0, 32] contains all five: expected mean 13/5 = 2.6.
+  std::vector<float> series{ 1.0f, 1.0f, 1.0f, 5.0f, 5.0f };
+  std::vector<double> tDays{ 0.0, 8.0, 16.0, 24.0, 32.0 };
+  std::vector<CalendarPoint> calendar{ { 16.0, "mid" } };
+
+  RegularizeOptions options;
+  options.method = RegularizeMethod::WindowMean;
+  options.maxWindowDays = 16.0;
+  const RegularizedSeries out = regularizeSeries( series, tDays, calendar, options );
+  REQUIRE( isNan( out.points[0].value ) == false );
+  REQUIRE( out.points[0].value == Approx( 2.6f ).margin( 1e-6 ) );
+  REQUIRE( out.points[0].validObservations == 5 );
+  // t=16 sits exactly on an observation -> not synthetic.
+  REQUIRE( out.points[0].filled == false );
+
+  // Symmetry: radius 8 around t=16 keeps {8,16,24} -> mean 7/3, and the
+  // before-t observation at day 8 must count exactly as much as the one at
+  // day 24 (the old loop kept only {16, 24} -> 3.0).
+  options.maxWindowDays = 8.0;
+  const RegularizedSeries sym = regularizeSeries( series, tDays, calendar, options );
+  REQUIRE( sym.points[0].value == Approx( 7.0f / 3.0f ).margin( 1e-6 ) );
+  REQUIRE( sym.points[0].validObservations == 3 );
+
+  // Boundary inclusivity: an observation exactly at t - radius participates.
+  options.maxWindowDays = 16.0;
+  std::vector<double> tDays2{ 0.0, 8.0, 16.0, 24.0, 32.0, 33.0 };
+  std::vector<float> series2{ 1.0f, 1.0f, 1.0f, 5.0f, 5.0f, 100.0f };
+  const RegularizedSeries incl = regularizeSeries( series2, tDays2, calendar, options );
+  // 33 is 17 away -> excluded; window stays the five -> 2.6.
+  REQUIRE( incl.points[0].value == Approx( 2.6f ).margin( 1e-6 ) );
+  REQUIRE( incl.points[0].validObservations == 5 );
+
+  // Duplicate timestamps at the LOWER edge all participate (the upper edge
+  // includes every duplicate by construction; the lower edge used to keep
+  // only the last one — the same asymmetry AG4-1 fixed for distinct days).
+  // days {0,0,0,10} vals {1,2,3,50}, t=10, r=10: window = all four.
+  std::vector<float> dupSeries{ 1.0f, 2.0f, 3.0f, 50.0f };
+  std::vector<double> dupDays{ 0.0, 0.0, 0.0, 10.0 };
+  std::vector<CalendarPoint> dupCalendar{ { 10.0, "t10" } };
+  options.maxWindowDays = 10.0;
+  const RegularizedSeries dup = regularizeSeries( dupSeries, dupDays, dupCalendar, options );
+  REQUIRE( dup.points[0].value == Approx( 14.0f ).margin( 1e-6 ) );
+  REQUIRE( dup.points[0].validObservations == 4 );
+
+  // Duplicates exactly AT t with radius 0: mean of both, not just the last.
+  std::vector<float> dupAtSeries{ 2.0f, 4.0f };
+  std::vector<double> dupAtDays{ 5.0, 5.0 };
+  std::vector<CalendarPoint> dupAtCalendar{ { 5.0, "t5" } };
+  options.maxWindowDays = 0.0;
+  const RegularizedSeries dupAt = regularizeSeries( dupAtSeries, dupAtDays, dupAtCalendar, options );
+  REQUIRE( dupAt.points[0].value == Approx( 3.0f ).margin( 1e-6 ) );
+  REQUIRE( dupAt.points[0].validObservations == 2 );
+}
+
 TEST_CASE( "regularizeSeries whittaker: bridges small gaps, splits large ones", "[temporal][calendar]" )
 {
   // Daily observations 0..6 on a calendar of every day; drop node 3.

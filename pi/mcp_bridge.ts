@@ -48,6 +48,26 @@ export function toolCategory(mcpName: string): string {
   return mcpName.split(":", 1)[0];
 }
 
+/** Poll-interval clamp for the wait tool (R21-C F4): the model controls
+ * poll_interval_ms, and 0/negative/non-finite values used to hit setTimeout
+ * directly — an event-loop-speed poll storm for the whole timeout window,
+ * where even the deadline check `Date.now() + interval > deadline` can
+ * never fire early with interval <= 0. Floor 100 ms, ceiling 60 s, default
+ * 1 s when absent or unusable. Exported beside piToolName so the shell
+ * imports it and node --test pins it (single source, same reason). */
+export const POLL_INTERVAL_FLOOR_MS = 100;
+export const POLL_INTERVAL_CEILING_MS = 60_000;
+export function clampPollIntervalMs(
+  value: number | undefined,
+  fallback = 1_000,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(
+    POLL_INTERVAL_CEILING_MS,
+    Math.max(POLL_INTERVAL_FLOOR_MS, Math.floor(value)),
+  );
+}
+
 /** Tail-keeping truncation for tool results: the caller sees HOW MUCH was
  * dropped (never a silent cut), and the tail — the part agents act on —
  * survives. Track 9: moved here for the same single-source reason as

@@ -429,28 +429,16 @@ void StdinReader::run()
             // shutdown with a bogus "-32700 line too long" (id:null).
             if ( std::cin.eof() && std::cin.gcount() == 0 )
                 break;
-            // Exact-boundary line: the buffer filled at precisely
-            // kMaxMcpLine chars before the delimiter, so getline set
-            // failbit — but if the very next char IS the newline (or EOF)
-            // the line is exactly at the cap, not over it. Consume the
-            // delimiter and deliver it like any other frame. peek() needs a
-            // clear() first: on a failed stream it returns EOF blindly.
-            if ( std::cin.gcount() == kMaxMcpLine )
-            {
-                std::cin.clear();
-                const int next = std::cin.peek();
-                if ( next == '\n' || next == EOF )
-                {
-                    if ( next == '\n' )
-                        std::cin.get();
-                    const QString line = QString::fromUtf8( buffer.data() ).trimmed();
-                    if ( !line.isEmpty() )
-                        emit lineRead( line );
-                    if ( next == EOF )
-                        break;
-                    continue;
-                }
-            }
+            // #1693: an "exact-boundary line" rescue branch used to live
+            // here (fail() && gcount()==kMaxMcpLine → peek for '\n'). It
+            // was dead code: istream::getline checks the DELIMITER before
+            // the n-1 limit, so storing exactly kMaxMcpLine chars followed
+            // by '\n' extracts the delimiter WITHOUT setting failbit (the
+            // non-fail path below delivers it), and hitting EOF after
+            // kMaxMcpLine stored chars sets eofbit, not failbit. Reaching
+            // fail() with gcount()==kMaxMcpLine therefore means the next
+            // character is neither '\n' nor EOF — the line is genuinely
+            // over the cap and belongs to the sentinel path below.
             // Unrecoverable stream error (badbit): clear() cannot repair a
             // broken streambuf — without this the loop spins emitting
             // sentinels forever on a dead stdin.
@@ -939,12 +927,30 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("preflight_algorithm"))
             {
+                // R21-C F2: the schema declares parameters as an object; a
+                // non-object (string/array) used to be silently downgraded
+                // to an empty map — preflight then validated the algorithm's
+                // DEFAULTS and answered ok (a lying preflight), and execute
+                // ran with defaults instead of refusing. Same typed refusal
+                // run_workflow already gives its pipeline argument.
+                const QVariant parametersArg = arguments.value(QStringLiteral("parameters"));
+                if (parametersArg.isValid() && !parametersArg.isNull()
+                    && parametersArg.typeId() != QMetaType::QVariantMap)
+                    throw McpToolError(toolName + QStringLiteral(": parameters must be an object"),
+                                       QStringLiteral("INVALID_PARAMETER"),
+                                       QStringLiteral("validation"));
                 resultData = handlePreflightAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(),
-                                                      arguments.value(QStringLiteral("parameters")).toMap());
+                                                      parametersArg.toMap());
             }
             else if (toolName == QStringLiteral("execute_algorithm"))
             {
-                resultData = handleExecuteAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(), arguments.value(QStringLiteral("parameters")).toMap());
+                const QVariant parametersArg = arguments.value(QStringLiteral("parameters"));
+                if (parametersArg.isValid() && !parametersArg.isNull()
+                    && parametersArg.typeId() != QMetaType::QVariantMap)
+                    throw McpToolError(toolName + QStringLiteral(": parameters must be an object"),
+                                       QStringLiteral("INVALID_PARAMETER"),
+                                       QStringLiteral("validation"));
+                resultData = handleExecuteAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(), parametersArg.toMap());
             }
             else if (toolName == QStringLiteral("list_operators"))
             {
@@ -958,8 +964,14 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("execute_operator"))
             {
+                const QVariant parametersArg = arguments.value(QStringLiteral("parameters"));
+                if (parametersArg.isValid() && !parametersArg.isNull()
+                    && parametersArg.typeId() != QMetaType::QVariantMap)
+                    throw McpToolError(toolName + QStringLiteral(": parameters must be an object"),
+                                       QStringLiteral("INVALID_PARAMETER"),
+                                       QStringLiteral("validation"));
                 resultData = handleExecuteOperator(arguments.value(QStringLiteral("operator_id")).toString(),
-                                                   arguments.value(QStringLiteral("parameters")).toMap());
+                                                   parametersArg.toMap());
             }
             else if (toolName == QStringLiteral("get_execution_status"))
             {
@@ -1151,7 +1163,20 @@ void McpServer::handleRequest(const QVariantMap &request)
                     m_cancelledRequestPipelines, rpcCancelMapKey(id),
                     resultData.value( QStringLiteral( "pipeline_id" ) ).toLongLong(), 1024 );
             }
-            if ( resultData.contains( QStringLiteral( "execution_id" ) ) )
+            // R21-C F1: every result carrying an execution_id used to arm
+            // the cancel map — including get_execution_status polls (they
+            // always echo it back), so an abort/timeout of the POLL itself
+            // cancelled the long-running execution the poll was merely
+            // reporting on. The gate is a POLLER blacklist, not a submitter
+            // whitelist: submitters also arrive through the direct-routed
+            // dispatchToolCall branches (view:/roi:/canvas:/layer:/raster:
+            // and every allowed tool id), and those must keep their cancel
+            // channel (R1-P2-1). Only the read-only status poll (and the
+            // cancel call itself — its id cancelling nothing is a no-op)
+            // are excluded.
+            if ( toolName != QStringLiteral( "get_execution_status" )
+                 && toolName != QStringLiteral( "cancel_execution" )
+                 && resultData.contains( QStringLiteral( "execution_id" ) ) )
             {
                 const auto executionId = sicnu::processing::ExecutionId::fromWire(
                     resultData.value( QStringLiteral( "execution_id" ) ).toString() );

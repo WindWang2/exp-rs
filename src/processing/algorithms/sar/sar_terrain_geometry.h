@@ -69,9 +69,11 @@ TerrainGeometryResult terrainGeometry( double dzdx, double dzdy,
 /// error that invalidated masks and radiometric flattening.)
 double lookAzimuthFromHeading( double headingDeg, bool rightLooking );
 
-/// Radiometric terrain factor cos(θi)/cos(θl) for the pixel (the standard
-/// first-order terrain normalization ratio; consumers apply it to already
-/// calibrated backscatter). NaN under the same degenerate conditions.
+/// Radiometric terrain factor sin(θl)/sin(θ0) for the pixel — the
+/// radiometric-terrain-correction ratio every production flattener applies
+/// (#1146; matches terrainFlattenRaster and rs:sar_geocode's rtcFactor).
+/// Consumers apply it to already calibrated sigma0. NaN under the same
+/// degenerate conditions (grazing reference/local geometry).
 double terrainRadiometricFactor( double localIncidenceDeg, double incidenceDeg );
 
 } // namespace sicnu::sar

@@ -759,3 +759,48 @@ TEST_CASE( "rs:temporal_sar_fusion refuses mismatched grids as a typed error",
         REQUIRE( !QFile::exists( fx.filePath( "should_not_exist.tif" ) ) );
     }
 }
+
+
+// ===========================================================================
+// r21-A / AG4-2 + R2 mutation-gap closure — a zero-variance pixel has no
+// defined standardized anomaly (0/0). Feeding z=0 used to fabricate CUSUM
+// accumulation (S = -drift * n) on perfectly constant pixels whenever
+// drift > 0, so stable pixels reported large |S| and any downstream
+// threshold flagged them.
+// ===========================================================================
+TEST_CASE( "temporal_monitor leaves a constant pixel's CUSUM at zero (AG4-2)",
+           "[temporal][operators][monitor][r21a]" )
+{
+    ensureApp();
+    Fixture fx;
+    // 4 scenes, 2 pixels: pixel 0 is perfectly constant (100), pixel 1 varies.
+    REQUIRE( writeTestScene( { fx.filePath( "c1.tif" ), { 100, 10 }, 2, 1,
+                              { 500000, 30, 0, 4500000, 0, -30 }, "2025-01-01" } ) );
+    REQUIRE( writeTestScene( { fx.filePath( "c2.tif" ), { 100, 40 }, 2, 1,
+                              { 500000, 30, 0, 4500000, 0, -30 }, "2025-02-01" } ) );
+    REQUIRE( writeTestScene( { fx.filePath( "c3.tif" ), { 100, 20 }, 2, 1,
+                              { 500000, 30, 0, 4500000, 0, -30 }, "2025-03-01" } ) );
+    REQUIRE( writeTestScene( { fx.filePath( "c4.tif" ), { 100, 90 }, 2, 1,
+                              { 500000, 30, 0, 4500000, 0, -30 }, "2025-04-01" } ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : { "c1.tif", "c2.tif", "c3.tif", "c4.tif" } )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "cusum";
+    params["drift"] = 0.5; // non-zero drift is what exposed the fabricated S
+    params["output"] = fx.filePath( QStringLiteral( "monitor_const.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_monitor", params );
+    REQUIRE( result["sceneCount"].asInt() == 4 );
+    const auto finalS = readBand( fx.filePath( "monitor_const.tif" ), 1 );
+    const auto maxAbs = readBand( fx.filePath( "monitor_const.tif" ), 2 );
+    // Constant pixel: no anomaly exists, so nothing accumulates (the bug gave
+    // finalS = -0.5*4 = -2 and maxAbs = 2).
+    REQUIRE( finalS[0] == 0.0 );
+    REQUIRE( maxAbs[0] == 0.0 );
+    // The varying pixel still accumulates normally (control).
+    REQUIRE( maxAbs[1] > 0.0 );
+}

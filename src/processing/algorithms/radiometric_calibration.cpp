@@ -928,7 +928,10 @@ namespace exp_radiometric
       return false;
 
     const double sinElevation = std::sin( params.sunElevationDeg * kPi / 180.0 );
-    if ( sinElevation <= 0.0 )
+    // NaN compares false against <= 0, so a NaN elevation used to sail past
+    // this gate and NaN every output pixel while returning true — violating
+    // this function's documented fail-closed contract. isfinite both ways.
+    if ( !( sinElevation > 0.0 ) || !std::isfinite( sinElevation ) )
       return false; // sun below/before horizon: geometry is unphysical, fail closed
 
     const bool useRadiancePath = params.esun > 0.0;

@@ -185,7 +185,13 @@ bool sunPositionDeg( int dayOfYear, double solarHour, double latitudeDeg,
 {
     if ( !azimuthDeg || !elevationDeg )
         return false;
-    if ( dayOfYear < 1 || dayOfYear > 365 )
+    // Accept 1..366: QDate::dayOfYear() yields 366 on Dec 31 of leap
+    // years and every temporal operator forwards it verbatim; refusing it
+    // failed the run exactly one day every four years. The Spencer series
+    // itself is the 365-day form, so 366 clamps onto day 365 (the series'
+    // γ wraps at year end; the 1-day difference is far below the series'
+    // ~0.0007 rad accuracy).
+    if ( dayOfYear < 1 || dayOfYear > 366 )
         return false;
     if ( !std::isfinite( solarHour ) || solarHour < 0.0 || solarHour > 24.0 )
         return false;
@@ -193,8 +199,9 @@ bool sunPositionDeg( int dayOfYear, double solarHour, double latitudeDeg,
         return false;
 
     // Spencer (1971) four-term declination series in radians.
+    const int spencerDay = std::min( dayOfYear, 365 );
     const double gamma = 2.0 * M_PI / 365.0
-                         * ( dayOfYear - 1 + ( solarHour - 12.0 ) / 24.0 );
+                         * ( spencerDay - 1 + ( solarHour - 12.0 ) / 24.0 );
     const double decl =
         0.006918 - 0.399912 * std::cos( gamma ) + 0.070257 * std::sin( gamma )
         - 0.006758 * std::cos( 2.0 * gamma ) + 0.000907 * std::sin( 2.0 * gamma )

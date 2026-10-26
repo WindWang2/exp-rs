@@ -1,0 +1,19 @@
+# R22-07 Issue Triage — dynamic verification against master@911e0b17 (2026-10-25)
+
+Every verdict below is backed by a live source check on the branch point, not by issue text.
+
+| Issue | Sev | Verdict at start | Evidence (master@911e0b17) |
+|---|---|---|---|
+| #1696 three-platform build broken | P1 | **OPEN_UNFIXED** | `src/lab/session_state.cpp` includes only `<utility>` while line 826 calls `std::sort` (verified by read + compile failure class); `src/verification/availability.h` exists and is the only case-colliding header in `src/` (`find src -iname availability.h` → 1 hit; `CMakeLists.txt:7` `CMAKE_INCLUDE_CURRENT_DIR ON`). |
+| #1697 offline bundle `--version` traversal → `rm -rf`/`rmdir /S /Q` | P1 | **OPEN_UNFIXED** | `scripts/build_offline_bundle.sh` parses `--version` with zero validation and builds `bundle="$out_dir/sicnu-lab-$version"` then `rm -rf "$bundle"`; `.cmd` twin identical (`rmdir /S /Q`). **RED executed** (sandbox): with a pre-existing `out/sicnu-lab-1.0`, `--version '1.0/../../victim'` on the master script deletes the canary outside `--out` (CANARY_DELETED_BY_OLD_SCRIPT). Note: without the pre-existing prefix component the traversal no-ops silently (ENOENT suppressed by `rm -f`), but `mkdir -p` still jams paths outside `--out`; the issue's repro (build 1.0 first) is the realistic flow. |
+| #1698 install tree: no INSTALL_RPATH, worker not installed | P1 | **OPEN_UNFIXED** | `git grep RPATH -- '*CMakeLists.txt' cmake` → empty; `src/cli/CMakeLists.txt` installs only `sicnu_geo_rs_cli`; `sicnu_worker` has no `install()`; `worker_execution_route.cpp` falls back to PATH. |
+| #1681 clang-tidy lane runs before generated headers exist | P1 | **OPEN_UNFIXED** | `.github/workflows/ci.yml`: "Clang-Tidy Lint" step precedes "Compile Core & Test Targets"; `qt_wrap_ui` headers + `*.pb.h` are build artifacts (349 files include `ui_*.h`). |
+| #1682 Windows/macOS ENABLE_TESTS=OFF, zero platform tests | P2 | **OPEN_UNFIXED** | ci.yml tier3 windows/macos configure `-DENABLE_TESTS=OFF`, last steps are bare `cmake --build`. |
+| #1699 wall-clock assertions flake under -j4/ASan | P2 | **OPEN_UNFIXED** | Verified present: `test_agent_ops_ui_smoke.cpp:64 CHECK(elapsed < 40)` (worker itself sleeps ≤50ms — threshold inside the blocking range), `test_execution_governor_11.cpp:370 < 50`, `test_data_manager.cpp:1156 < 2000`, `test_data_source_providers.cpp:503 < 2000`, `test_asset_catalog_index.cpp:324,331 < 2000`, `test_data_foundation_scale.cpp:147,252`, `test_execution_plane.cpp:298,430,959,1080` upper bounds (405 `>= 300` is a stable lower bound, untouched). |
+| #1683 CI/script hygiene list | P3 | **OPEN_UNFIXED (partial)** | No top-level `permissions:` in ci.yml; actions pinned by mutable tags; qca/qtkeychain `git clone --branch <tag>` without commit verification; `run_clang_tidy_changed.sh` diffs vs base tip (not merge-base). Root-dir legacy scripts (`build_r6.cmd` etc.) exist but are OUT OF WRITE SCOPE for this track (root files, not `scripts/**`). |
+
+## Dedup / collision checks
+
+- None of R21 open PRs (#1673–#1677) touch: `src/lab/session_state.cpp`, `src/verification/availability.h`, `scripts/build_offline_bundle.*`, `scripts/run_clang_tidy_changed.sh`, root `CMakeLists.txt`, `src/cli/CMakeLists.txt`, `.github/workflows/ci.yml`, or any of the #1699 test files **except** `tests/test_data_source_providers.cpp` (PR #1673 adds new symlink/canonical cases; my edit is the line-503 region comment+threshold — different region, mergeable; recorded in PR_COLLISION_MATRIX.md).
+- `tests/CMakeLists.txt`: #1673 and #1674 also append (their own blocks). My registration is a strictly append-only tail block; no shared lines.
+- #1662 124-issue sweep: checked via merged history — no prior fix of #1696/#1697/#1698 exists on master (the sweep's R17-infra issues were filed from that audit; nothing landed since).

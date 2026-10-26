@@ -141,6 +141,12 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     {
         QVector<double> sum;
         QVector<double> sumSq;
+        // Kahan compensation for sum/sumSq (#1684): per-object spectra can
+        // be large-offset small-spread (DN ~1e4, σ < 1), where naive
+        // accumulation injects ~sqrt(N)·eps·sumSq — enough to dominate the
+        // object stddev feature even with a double mean downstream.
+        QVector<double> sumComp;
+        QVector<double> sumSqComp;
         QVector<double> minVal;
         QVector<double> maxVal;
         QVector<double> glcmContrast;
@@ -270,6 +276,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             {
                 acc->sum.resize( nBands, 0.0 );
                 acc->sumSq.resize( nBands, 0.0 );
+                acc->sumComp.resize( nBands, 0.0 );
+                acc->sumSqComp.resize( nBands, 0.0 );
                 acc->minVal.resize( nBands, std::numeric_limits<double>::max() );
                 acc->maxVal.resize( nBands, std::numeric_limits<double>::lowest() );
                 acc->glcmContrast.resize( nBands, 0.0 );
@@ -279,8 +287,18 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             }
             const float v = bandBuf[i];
             // validMask already guarantees !isnan and !hasNoData for this band
-            acc->sum[b] += v;
-            acc->sumSq[b] += static_cast<double>( v ) * v;
+            {
+                // Kahan-compensated accumulation (#1684).
+                double y = static_cast<double>( v ) - acc->sumComp[b];
+                double t = acc->sum[b] + y;
+                acc->sumComp[b] = t - acc->sum[b] - y;
+                acc->sum[b] = t;
+                const double v2 = static_cast<double>( v ) * v;
+                y = v2 - acc->sumSqComp[b];
+                t = acc->sumSq[b] + y;
+                acc->sumSqComp[b] = t - acc->sumSq[b] - y;
+                acc->sumSq[b] = t;
+            }
             acc->minVal[b] = std::min( acc->minVal[b], static_cast<double>( v ) );
             acc->maxVal[b] = std::max( acc->maxVal[b], static_cast<double>( v ) );
         }

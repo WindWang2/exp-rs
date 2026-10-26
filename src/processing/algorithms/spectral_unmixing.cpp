@@ -152,6 +152,20 @@ bool unmix( const float *pixels, size_t count, int bands,
             for ( int e = 0; e < nEndmembers; ++e )
                 abundance[static_cast<size_t>( e )] /= sum;
         }
+        else
+        {
+            // Every LS abundance clipped to zero: the unconstrained solution
+            // is anti-correlated with every endmember (e.g. a dark target
+            // against bright endmembers). An all-zero abundance vector would
+            // silently violate the sum-to-one contract, so void the pixel
+            // with the NaN convention shared with the non-finite branch.
+            for ( int e = 0; e < nEndmembers; ++e )
+                result->abundances[p * static_cast<size_t>( nEndmembers ) + e] =
+                    std::numeric_limits<float>::quiet_NaN();
+            result->reconstructionError[p] =
+                std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
 
         for ( int e = 0; e < nEndmembers; ++e )
             result->abundances[p * static_cast<size_t>( nEndmembers ) + e] =

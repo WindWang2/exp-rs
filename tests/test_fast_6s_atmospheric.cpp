@@ -181,6 +181,23 @@ TEST_CASE("DOS2 dark-object floor, sentinels and guards", "[atmospheric][dos2]")
     REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, -20.0, 1500.0, 1.0)); // night
 }
 
+// r21-A / AG1-3 — the >0 gates passed +Inf/NaN through: an Inf ESUN made the
+// denominator Inf and silently zeroed the whole scene with return true; a
+// NaN elevation skipped the horizon gate (NaN <= 0 is false) and NaN'd every
+// pixel. All non-finite scalars must fail closed.
+TEST_CASE("DOS2 fails closed on non-finite esun/distance/elevation (AG1-3)", "[atmospheric][dos2][r21a]")
+{
+    float out = 99.0f;
+    const float r = 0.3f;
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, 90.0, inf, 1.0));  // Inf esun
+    REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, 90.0, nan, 1.0));  // NaN esun
+    REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, 90.0, 1500.0, inf)); // Inf d
+    REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, 90.0, 1500.0, 0.0)); // d <= 0
+    REQUIRE_FALSE(Fast6sLookup::executeDos2(&r, &out, 1, 0.1f, nan, 1500.0, 1.0)); // NaN elev
+}
+
 // R10-A/AN-9: locateTable must guard non-finite axis values the same way
 // locateUniform does. A NaN atmospheric parameter (aod/water vapor/angle)
 // used to fall through every clamp comparison, land on the first cell with

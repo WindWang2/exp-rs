@@ -246,7 +246,8 @@ TEST_CASE( "a busy plugin refuses the unload and stays fully usable",
     REQUIRE( fixture.registry.isLoaded( kHelloId ) );
     REQUIRE( fixture.sink.factories.count( "test:hello" ) == 1 );
     bool sawInUse = false;
-    for ( const PluginDiagnostic &item : fixture.registry.diagnostics().items() )
+    const exprs::PluginDiagnosticLog itemDiagSnapshot = fixture.registry.diagnostics();
+    for ( const PluginDiagnostic &item : itemDiagSnapshot.items() )
         if ( item.code == PluginDiagnosticCode::PluginInUse )
             sawInUse = true;
     REQUIRE( sawInUse );

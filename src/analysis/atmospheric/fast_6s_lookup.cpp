@@ -68,11 +68,15 @@ namespace exp_radiometric
     }
 
     /// Rayleigh scattering phase function with molecular depolarization
-    /// Δ = 0.0272, normalized over the scattering angle Θ.
+    /// Δ = 0.0272: P(Θ) = 3/(4(1+2δ))·[(1+3δ) + (1−δ)cos²Θ] (Hansen &
+    /// Travis 1974, the form 6S uses). The isotropic term is (1+3δ), not
+    /// (1+δ): the old form integrated to (2+δ)/(1+2δ) ≈ 0.961 instead of 1
+    /// over the scattering angle, biasing Rayleigh path reflectance low
+    /// (≈5% at Θ=90°) in every LUT cell.
     double rayleighPhase( double cosTheta )
     {
       constexpr double kDepolarization = 0.0272;
-      const double num = 0.75 * ( 1.0 + kDepolarization + ( 1.0 - kDepolarization ) * cosTheta * cosTheta );
+      const double num = 0.75 * ( 1.0 + 3.0 * kDepolarization + ( 1.0 - kDepolarization ) * cosTheta * cosTheta );
       return num / ( 1.0 + 2.0 * kDepolarization );
     }
 
@@ -310,11 +314,17 @@ namespace exp_radiometric
   {
     if ( radiance == nullptr || boa == nullptr || count == 0 )
       return false;
-    if ( !( esun > 0.0 ) )
+    // +Inf ESUN/distance passed the >0 test, made the denominator Inf and
+    // silently zeroed the whole scene; NaN elevation skipped the horizon
+    // gate (NaN <= 0 is false) and NaN'd every pixel with return true.
+    // Fail closed on any non-finite scalar.
+    if ( !( esun > 0.0 ) || !std::isfinite( esun ) )
+      return false;
+    if ( !( earthSunDistAu > 0.0 ) || !std::isfinite( earthSunDistAu ) )
       return false;
 
     const double sinElevation = std::sin( sunElevationDeg * kPi / 180.0 );
-    if ( sinElevation <= 0.0 )
+    if ( !( sinElevation > 0.0 ) || !std::isfinite( sinElevation ) )
       return false; // sun below the horizon: no physically meaningful DOS2
 
     // DOS2 (Chavez 1996): T_z = sin(elev), T_v = 1.0

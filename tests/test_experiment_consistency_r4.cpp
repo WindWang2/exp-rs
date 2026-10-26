@@ -390,6 +390,133 @@ TEST_CASE( "legacy decimal seeds outside the lossless domain are refused",
 }
 
 
+// risk A5: the importer installs the bundle's metrics record BEFORE the run
+// ("a metrics refusal must not leave a half-installed run"). When the run
+// install then fails, the metrics row must not survive as an orphan keyed to
+// a run id that was never installed. The run-install failure is injected
+// deterministically with a BEFORE INSERT RAISE(ABORT) trigger on
+// experiment_runs (direct DB surgery — the same technique as the artifact
+// store transaction tests): metrics install succeeds, run install aborts,
+// and the oracle reads the store's own run_metrics listing.
+TEST_CASE( "a failed run install leaves no orphan metric row",
+           "[experiment][bundle][r4]" )
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-r4-a5" ) );
+    experiment.setName( QStringLiteral( "orphan metrics" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-a5" ), QStringLiteral( "exp-r4-a5" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setStatus( RunStatus::Created );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Running );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    MetricRecord metric;
+    metric.runId = QStringLiteral( "run-a5" );
+    metric.protocol.setDatasetVersionId( committed->versionId() );
+    metric.protocol.setSplitManifestId( QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
+    metric.metrics = QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.875 } };
+    REQUIRE( experiments.saveMetricRecord( metric ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle-a5" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-a5" ), exportOptions );
+    REQUIRE( exportReport.ok );
+    REQUIRE( QFile::exists( QDir( exportReport.bundlePath ).filePath(
+        QStringLiteral( "metrics.json" ) ) ) );
+
+    ExperimentStore target;
+    const QString targetPath = dir.filePath( QStringLiteral( "target-a5.db" ) );
+    REQUIRE( target.open( targetPath ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-r4-a5-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+
+    // Block every run insert in the target store: the metrics record below
+    // installs fine, the run install aborts inside its transaction.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( targetPath.toUtf8().constData(), &raw,
+                                  SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+        char *err = nullptr;
+        REQUIRE( sqlite3_exec( raw,
+                               "CREATE TRIGGER block_run_insert BEFORE INSERT ON experiment_runs"
+                               " BEGIN SELECT RAISE(ABORT, 'run install blocked'); END;",
+                               nullptr, nullptr, &err ) == SQLITE_OK );
+        sqlite3_free( err );
+        sqlite3_close( raw );
+    }
+
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions options;
+    options.bundleDir = exportReport.bundlePath;
+    options.targetExperimentId = QStringLiteral( "exp-r4-a5-dst" );
+    const auto report = importer.importRun( options );
+
+    CHECK( !report.ok );
+    bool namesRunInstall = false;
+    for ( const QString &warning : report.warnings )
+        if ( warning.contains( QLatin1String( "run install failed" ) ) )
+            namesRunInstall = true;
+    CHECK( namesRunInstall );
+
+    // The oracle: no metric row may remain for a run that was never
+    // installed (the compensation leg deleted the just-saved record).
+    {
+        const auto remaining = target.listMetricRecords();
+        REQUIRE( remaining.has_value() );
+        CHECK( remaining.value().first == 0 );
+        CHECK( remaining.value().second.isEmpty() );
+    }
+
+    // Compensation did not break the store: with the block lifted the SAME
+    // bundle imports cleanly (and its metric lands for the new run).
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( targetPath.toUtf8().constData(), &raw,
+                                  SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+        char *err = nullptr;
+        REQUIRE( sqlite3_exec( raw, "DROP TRIGGER block_run_insert",
+                               nullptr, nullptr, &err ) == SQLITE_OK );
+        sqlite3_free( err );
+        sqlite3_close( raw );
+    }
+    const auto clean = importer.importRun( options );
+    REQUIRE( clean.ok );
+    const auto landed = target.metricRecordForRun( clean.runId );
+    REQUIRE( landed.has_value() );
+    CHECK( landed->metrics[QStringLiteral( "overall_accuracy" )] == 0.875 );
+}
+
+
 // ⑩ (item 10, whitelist-bounded minimal fix): splitManifestsForVersion can
 // only return a list, so a row that no longer parses used to shrink the
 // version's split evidence silently. The fix stays inside the one file this

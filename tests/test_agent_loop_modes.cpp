@@ -330,3 +330,37 @@ TEST_CASE( "a preflight ok verdict carrying proposals is never executed silently
     REQUIRE( result.terminalState == terminal_states::kRefused );
     REQUIRE( result.stopReason == stop_reasons::kPreflightBlocked );
 }
+
+TEST_CASE( "a second run on a delivered session never poisons the terminal journal",
+           "[agent_loop][modes][r21c]" )
+{
+    // R21-C F3: run() polices a swapped goal, but on an ALREADY-terminal
+    // session the refusal path still appended a "terminal: refused" journal
+    // entry after terminate() correctly refused (the machine is absorbing).
+    // The durable journal then carried two conflicting terminal events and
+    // replay() (last-write-wins) reported "refused" for a session that
+    // delivered. The refusal must stay typed WITHOUT a second terminal
+    // event; the decision record already witnesses the mismatch.
+    FakeScenario scenario;
+    SessionPolicy policy = SessionPolicy::defaults();
+    FakeSeams seams( scenario );
+    ScientificAgentSession session( policy, makeDependencies( seams ), {},
+                                    "sess-delivered-twice" );
+
+    const SessionResult delivered = session.run( makeRequest() );
+    REQUIRE( delivered.ok );
+    REQUIRE( delivered.terminalState == terminal_states::kDelivered );
+    REQUIRE( delivered.journal.replay().terminalState == terminal_states::kDelivered );
+
+    SessionRunRequest swapped;
+    swapped.goal = "a different mission entirely";
+    swapped.intent = "classify";
+    const SessionResult second = session.run( swapped );
+
+    // The misuse is still a typed refusal with the mismatch reason...
+    REQUIRE_FALSE( second.ok );
+    REQUIRE( second.stopReason == stop_reasons::kGoalMismatch );
+    // ...but the journal stays a one-terminal narrative: RED on master,
+    // replay() flipped to kRefused (last-write-wins duplicate terminal).
+    REQUIRE( second.journal.replay().terminalState == terminal_states::kDelivered );
+}

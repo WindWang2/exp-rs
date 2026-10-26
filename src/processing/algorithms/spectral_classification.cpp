@@ -365,10 +365,14 @@ bool continuumRemoval( const float *spectrum, const float *wavelengths, float *o
         }
 
         double v = static_cast<double>( spectrum[i] );
-        // Guard against a zero continuum (e.g. zero-spectrum endpoints).
+        // Guard against a zero continuum (e.g. zero-spectrum endpoints). A
+        // 0/0 ratio is undefined, not "on continuum": emitting 1.0 here used
+        // to fabricate data for zero-reflectance (black) targets. Void the
+        // band with the caller's sentinel — same discipline as the analysis
+        // kernel (src/analysis/hyperspectral/continuum_removal.cpp).
         out[i] = ( std::abs( continuum ) > 1e-12 )
                      ? static_cast<float>( v / continuum )
-                     : 1.0f;
+                     : nodata;
     }
 
     return true;

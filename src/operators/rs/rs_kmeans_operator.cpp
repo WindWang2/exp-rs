@@ -23,6 +23,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/nodata_utils.h"
+#include "processing/algorithms/portable_random.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include "rs_classification_pipeline.h"
@@ -39,6 +40,10 @@
 #include <random>
 #include <string>
 #include <vector>
+
+// Absolute-path alias: this TU lives in sicnu::operators::rs, where a
+// relative rs::algorithms lookup would resolve against the wrong namespace.
+namespace r22portable = ::rs::algorithms::portable;
 
 namespace sicnu::operators::rs {
 
@@ -217,8 +222,11 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         std::vector<std::vector<float>> reservoir(static_cast<size_t>(nFeat),
                                                   std::vector<float>(k, 0.0f));
         sampleIdx.resize(k);
+        // Reservoir replace draws use the portable fixed-algorithm index
+        // (#1685): std::uniform_int_distribution's algorithm is
+        // implementation-defined, so the sampled pixel subset — and with it
+        // the k-means seeding — differed across STLs for seed 42.
         std::mt19937 rng(42);
-        std::uniform_int_distribution<size_t> dist(0, std::numeric_limits<size_t>::max());
 
         constexpr int kTile = 256;
         std::vector<float> tileBuf(static_cast<size_t>(kTile) * kTile * static_cast<size_t>(nFeat));
@@ -258,8 +266,7 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
                     else
                     {
                         // Reservoir replace: j = uniform(0, seen); if j < k replace.
-                        const size_t j = static_cast<size_t>(
-                            dist(rng) % (seen + 1));
+                        const size_t j = r22portable::uniformIndex( rng, seen + 1 );
                         if (j < k)
                         {
                             sampleIdx[j] = seen;
@@ -328,15 +335,28 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     // tuned for z-score features (ADR 0050), and the GUI path fits the scaler
     // on train features. Fitting here mirrors that behavior on the direct-
     // trainX path, where the pipeline's fitScaler flag is otherwise ignored.
+    // scale must be read BEFORE the scaler is fitted and applied: this path
+    // hands the pipeline a pre-fitted scaler, so a late read would leave
+    // scale=false z-scoring anyway (trainX transformed, tile prediction
+    // gated on scaler.isFitted()) — byte-identical to scale=true.
+    const bool scale = getBool(params, "scale", true);
     RsFeatureScaler scaler;
-    scaler.fit(trainX);
+    if (scale)
+        scaler.fit(trainX);
 
     RsClassificationPipeline::Config cfg;
     cfg.sourceRaster = QString::fromStdString(inputPath);
     cfg.outputRaster = QString::fromStdString(outputPath);
     cfg.bandIndices = QVector<int>(bands.begin(), bands.end());
-    cfg.scaler = scaler;
-    cfg.trainX = scaler.isFitted() ? scaler.transform(trainX) : trainX;
+    if (scaler.isFitted())
+    {
+        cfg.scaler = scaler;
+        cfg.trainX = scaler.transform(trainX);
+    }
+    else
+    {
+        cfg.trainX = trainX;
+    }
     // KMeans fit() ignores y, but the pipeline requires a non-empty trainY
     // when the backend is not fitted. Dummy zeros satisfy the check.
     // methodName is metadata only (log + sidecar) — the cluster→class remap
@@ -346,8 +366,9 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     cfg.trainY = cv::Mat::zeros(nSamples, 1, CV_32S);
     // #682: the GUI always Z-scores features before KMeans; the operator used
     // to train on raw DN, so identical inputs clustered differently between
-    // surfaces. Standardize by default; explicit scale=false opts out.
-    const bool scale = getBool(params, "scale", true);
+    // surfaces. Standardize by default; explicit scale=false opts out (the
+    // scaler above is then left unfitted and the pipeline predicts on raw
+    // DN; cfg.fitScaler only matters for the empty-trainX branch).
     cfg.fitScaler = scale;
     const std::string algorithm =
         getEnum(params, "algorithm", {"kmeans", "isodata"}, "kmeans");

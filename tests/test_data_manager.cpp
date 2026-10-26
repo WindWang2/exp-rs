@@ -1153,7 +1153,13 @@ TEST_CASE( "restoreSource of a remote raster does not block on the application t
   QElapsedTimer timer;
   timer.start();
   const auto restored = manager.restoreSource( request );
-  CHECK( timer.elapsed() < 2000 );
+  // #1699: hang-guard, not a latency budget. The deferred/async behaviour
+  // is asserted structurally below (immediate Missing asset with the
+  // vsicurl canonical source); a genuinely blocking restoreSource would sit
+  // in the kernel's SYN-retry window for the TEST-NET address (~20s+), far
+  // above this ceiling, while a tight 2s ceiling only flaked under ASan or
+  // a loaded parallel ctest lane.
+  CHECK( timer.elapsed() < 10000 );
   REQUIRE( restored );
   const auto asset = manager.asset( restored.value() );
   REQUIRE( asset.has_value() );

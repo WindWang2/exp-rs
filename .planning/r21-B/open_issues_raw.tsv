@@ -1,0 +1,126 @@
+1658	[P3] tests/test_r14_D_durable_writes.cpp: 技术债汇总（1 项）
+1657	[P3] tests/test_m2_batch_a_dialogs.cpp:99, tests: 技术债汇总（1 项）
+1656	[P3] tests/test_execution_plane_8.cpp:93, tests: 技术债汇总（1 项）
+1655	[P3] tests/test_cartography_production_11.cpp: 技术债汇总（1 项）
+1654	[P3] src/workflow: 技术债汇总（1 项）
+1653	[P3] src/verification: 技术债汇总（1 项）
+1652	[P3] src/teaching_admin: 技术债汇总（2 项）
+1651	[P3] src/stubs: 技术债汇总（1 项）
+1650	[P3] src/sdk: 技术债汇总（2 项）
+1649	[P3] src/science_context: 技术债汇总（1 项）
+1648	[P3] src/recipes: 技术债汇总（1 项）
+1647	[P3] src/python: 技术债汇总（2 项）
+1646	[P3] src/processing: 技术债汇总（6 项）
+1645	[P3] src/preflight: 技术债汇总（1 项）
+1644	[P3] src/plugins: 技术债汇总（1 项）
+1643	[P3] src/planner: 技术债汇总（1 项）
+1642	[P3] src/operators: 技术债汇总（4 项）
+1641	[P3] src/native: 技术债汇总（1 项）
+1640	[P3] src/jobs: 技术债汇总（1 项）
+1639	[P3] src/help: 技术债汇总（2 项）
+1638	[P3] src/gui: 技术债汇总（3 项）
+1637	[P3] src/geospatial: 技术债汇总（4 项）
+1636	[P3] src/explain: 技术债汇总（1 项）
+1635	[P3] src/experiment: 技术债汇总（1 项）
+1634	[P3] src/contracts: 技术债汇总（5 项）
+1633	[P3] src/cli: 技术债汇总（3 项）
+1632	[P3] src/app: 技术债汇总（6 项）
+1631	[P3] src/analysis: 技术债汇总（3 项）
+1630	[P3] src/agentbench: 技术债汇总（2 项）
+1629	[P3] src/agent_ops: 技术债汇总（3 项）
+1628	[P3] src/agent: 技术债汇总（5 项）
+1627	[P3] build_r8sci.cmd: 技术债汇总（1 项）
+1626	[P3] CMakeLists.txt: 技术债汇总（1 项）
+1625	[P3] CLAUDE.md: 技术债汇总（1 项）
+1624	[P2] cmake/vendor_deps.cmake: vendored GDAL/PROJ/GEOS 的 ExternalProje…
+1623	[P2] CMakeLists.txt: D6 i18n 管线编译出的 sicnu_zh_CN.qm 没有任何 install 规则
+1622	[P2] tests/test_spectral_profile_widget.cpp:472, tests: 以墙钟耗时为通过门槛的性能…
+1621	[P2] tests/test_classification_studio_widget.cpp:227, tests: 以具体行为命名的…
+1620	[P2] src/gui: 替换 upstream qgssettingsregistrygui.cpp
+1619	[P2] src/gui: 自动生成的 309 个 weak 桩统一用 `void f(void)` 伪造 C++ ABI
+1618	[P2] src/native: openTerminalAtPath 对所选终端一律追加
+1617	[P2] src/native: iface.call(QDBus::NoBlock, ...) 之后检查
+1616	[P2] src/explain: numberToString 用「static_cast<long long> 再转回 double
+1615	[P2] src/help: helpIdForCode / helpIdFromMessage 每次调用都全量重建整张
+1614	[P2] src/help: HelpCompact::toJsonText 在预算不足以容纳 {"id","title"} 外壳时
+1613	[P2] src/faultlab: FaultScenario::verifier（rules_ref /
+1612	[P2] src/faultlab: kappa 计算把「已过滤非数值项的 score 向量」与「未过滤的 truthJson
+1611	[P2] src/faultlab: measureExtras 读 extras["index_pair"] 的
+1610	[P2] src/faultlab: checkNumber 对 delta_ge/delta_le/equals/not_equals/…
+1609	[P2] src/python: unload_plugin 只清理 algo_executors 和 loaded_plugins
+1608	[P2] src/python: execute_algorithm 把插件的原始返回值直接交给 json.dumps
+1607	[P2] src/teaching: jsoncpp 解析缺 stackLimit 钉定且不捕获 jsoncpp
+1606	[P2] src/contracts: ContractDescriptor::fromCanonicalJson 丢弃 output 参…
+1605	[P2] src/runtime: 事件环在达到容量后对每条新记录执行 erase(begin, begin+size/4)
+1604	[P2] src/runtime: FileTraceSink 的 writer 线程为每一条 trace 记录都重新构造一次
+1603	[P2] src/runtime: throttleWait 的 RSS 等待循环既无迭代上限也无总时限
+1602	[P2] src/verify_adapters: readFileBounded allocates and zero-fills ca…
+1601	[P2] src/verification: Two complete verifier cores both present thems…
+1600	[P2] src/verify: Grid fractions computed from a bounded 3x3-window
+1599	[P2] src/verification: Every builtin pack and every contract-derived …
+1598	[P2] src/verification: derivedStatus() folds only report.nodes, so the
+1597	[P2] src/cli: dataset/experiment/reproduce 的 parseOptions 静默跳过未知
+1596	[P2] src/cli: CLI 层存在 6 份各自实现的 flag 取值解析器
+1595	[P2] src/cli: `data catalog search` 的数值型 flag（--cloud-max/--limit）
+1594	[P2] src/workflow: substitutePlaceholders 对每个 ref
+1593	[P2] src/lab_pack: lab-pack 文档解析使用默认 Json::CharReaderBuilder（未设
+1592	[P2] src/plugins: 执行路径用 params.get(key, "").asString() 读取对端请求参数
+1591	[P2] src/analysis: RsSegmentMap 的尺寸/坐标缓存是 mutable 且在 const 方法里惰性构建
+1590	[P2] src/analysis: sieve 的边界多数投票把 NoData 标签 0 也计入票数
+1589	[P2] src/science_context: 状态失效传播链条在生产代码中完全未接线：invalidateAsset /
+1588	[P2] src/preflight: TemporalFactsProvider 只解析第一个可用的 temporal collecti…
+1587	[P2] src/data: mirrorAllAssets 用 (void) 丢弃每一次治理库写入的失败结果（upsertAsset
+1586	[P2] src/dataset: saveLeakageReport 的存在性 SELECT（第242-251行）与
+1585	[P2] src/dataset: pre_post_pair_leakage 的单向引用去重缺口：第432行以 `sample.id <
+1584	[P2] src/dataset: overlapping_patch 的启用门槛只检查 left 一侧的
+1583	[P2] src/dataset: auditFolds 把 config.foldCount 当作 fold 基数迭代
+1582	[P2] src/experiment: 分类评测路径静默跳过无对应 truth 的 prediction 行和无对应 predictio…
+1581	[P2] src/experiment: 导出器写入每个 bundle 的 lineage 切片 provenance.json
+1580	[P2] src/experiment: bundle 导入边界把 manifest 里的 run_id 未经
+1579	[P2] src/geospatial: resolveAgainst 把任何含字面 '%'（非合法百分号转义）的相对引用当作逃逸攻击拒绝
+1578	[P2] src/operators: schema 用 setRange 声明的数值区间只是元数据
+1577	[P2] src/operators: TensorRT 与 OpenVINO 两个 provider 的 artifactPath()
+1576	[P2] src/operators: OpenVINO provider 以 ProviderTraits{}（仅能寻址 cuda:0）…
+1575	[P2] src/operators: effectiveBatchSize 的每样本显存估算忽略 halo 与
+1574	[P2] src/agent_ops: apply() 的唯一异常边界只捕获 Json::LogicError
+1573	[P2] src/agent: onReplyError 是所有终态路径中唯一缺少 m_streamGeneration 护栏的
+1572	[P2] src/agent: onReplyFinished 在 reply->deleteLater() 之后
+1571	[P2] src/agent: WorkspaceCommandStack::undo()/redo() 在持有非递归 QMutex
+1570	[P2] src/agent: 两个 spectral 工具的 inputSchema 把 layer_id 声明为 required
+1569	[P2] src/processing: 外部工具失败时，runExternalTool 已经产出的详细诊断（退出码+工具输出、信号崩溃
+1568	[P2] src/processing: 外部 CLI 提供者用「声明输出路径 + .tif/.shp/.xml/.txt」试探替代物来判…
+1567	[P2] src/processing: GenericCliProvider 对每个用户 JSON 直接 new
+1566	[P2] src/processing: String/Any 类型端口对任意 JSON 值（含 null、对象
+1565	[P2] src/app: 用硬编码上界 5 索引 ladderLabelsZh，而不是 size()-1：只防护了空容器
+1564	[P2] src/app: VaCursorProbe 的 kDwellThrottleMs 停留节流在完成回调的
+1563	[P2] src/app: 精度报表 CSV 导出把用户自建的类别名与数值原样写入字段
+1562	[P2] src/app: Level 过滤下拉被接到一个空 lambda，完全不起作用
+1561	[P2] src/app: 出厂的光谱剖面 widget 在 GUI 线程里对 layer->source() 做同步
+1560	[P2] src/app: runGdalTask 的取消 hook 是空 lambda
+1559	[P2] src/app: GUI shell 把进程级单例 AgentServices 的 workspaceService
+1558	[P1] 测试套件健康度: 两个 issue 回归用例断言恒真
+1557	[P1] 原生集成与桩: macOS 通知图标 autorelease 后存裸指针 UAF
+1556	[P1] Python 绑定: 迁移失败路径泄漏 __shm_key__ 致 TypeError
+1555	[P1] Python 绑定: worker 池持 nodesMutex 触发 pending 回调
+1554	[P1] 运行时平面: ModelSessionPool 析构不持锁遍历 sessions
+1553	[P1] 运行时平面: ChunkGraph::addSink 绕过单消费者守卫
+1552	[P1] 工作流编排: SessionJournal::load 深度超限抛异常逃逸 fail-closed 契约
+1551	[P1] SDK 与插件平台: plugin.load 的 services 缺 isObject 门致 std::terminate
+1550	[P1] 分析算法: JM 可分性上溢把"完全可分"静默报成 0.0
+1549	[P1] 科学状态与场景适配: preflight allowAssumed=false 在共享缓存上是空操作
+1548	[P1] 数据基础: 身份解析冷路径持锁调用 probeAndStore 自死锁
+1547	[P1] 实验与谱系: 非身份维度差异被误判为 deviated
+1546	[P1] 实验与谱系: repeat_execution 内层变量遮蔽致全不可读拒绝成死代码
+1545	[P1] 地理空间 I/O 基础: range cache 探针不传播 SSRF 防护标志
+1544	[P1] 算子家族: 裸 GDALDatasetH 无 RAII，取消即泄漏句柄并留半个 GeoTIFF
+1543	[P1] 算子家族: python worker 写入超时不杀会话致跨请求串归属
+1542	[P1] 算子家族: cv::Mat↔ndarray 转换器返回悬空 ndarray 视图
+1541	[P1] 算子框架与模型运行时: 检测 lane 缺 CV_CN_MAX 护栏致通道回绕越界读
+1540	[P1] 代理运维: 审批武装与 lastResult 跨线程无锁竞争
+1539	[P1] 代理运维: 修复审批门空转——令牌线参数被丢弃、裸布尔无人读
+1538	[P1] 处理算法与提供者: HistogramEqualize 未拒 ±Inf 致 UB 与整幅结果错误
+1537	[P1] 应用面板与工作台: STAC searchNext 续翻旧查询分页并冒新代数
+1536	[P1] 应用面板与工作台: guided workflow 行号换算漏错误行数致选错实验
+1535	[P1] 应用外壳与主窗口: 算法 runner 析构后 feedback 遭后台任务 UAF
+1491	ci: master 自 2026-10-11 起无任何完成的 CI 结果（最近一次失败于 test_io_vector_contract:352）
+1467	bug(core-fork): local-modification cluster — silent scene-read failures become NaN composites; radiometric preflight GDALOpenEx's provider URIs; misc layering

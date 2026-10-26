@@ -35,15 +35,24 @@ void ImageFusion::histogramMatch( float *data, size_t n,
 
     double meanS = statsS.mean;
     double meanR = statsR.mean;
-    double stdS = statsS.stddev;
-    double stdR = statsR.stddev;
+    // Sample stddev (N-1) to match the streaming seam's StatsAccumulator;
+    // MathUtils::computeStatsWithNodata is the population estimator (N) and
+    // mis-scaled the match by sqrt((N-1)/N) on small tiles.
+    auto sampleStd = []( const MathUtils::Stats &st ) -> double {
+        return ( st.validCount > 1 )
+            ? st.stddev * std::sqrt( static_cast<double>( st.validCount )
+                                     / static_cast<double>( st.validCount - 1 ) )
+            : st.stddev;
+    };
+    double stdS = sampleStd( statsS );
+    double stdR = sampleStd( statsR );
 
     // Linear transform: matched = (data - meanS) * (stdR / stdS) + meanR
     // Guard against near-zero stddev (near-constant data with float jitter)
     double scale = ( stdS > 1e-10 ) ? ( stdR / stdS ) : 1.0;
     for ( size_t i = 0; i < n; ++i )
     {
-        if ( data[i] == nodata || std::isnan( data[i] ) )
+        if ( data[i] == nodata || !std::isfinite( data[i] ) )
             continue;
         data[i] = static_cast<float>( ( data[i] - meanS ) * scale + meanR );
     }
@@ -117,7 +126,7 @@ QVector<QVector<float>> ImageFusion::linearWeighted(
 
         for (size_t i = 0; i < n; ++i) {
             if (ms[i] == nodata || panBand[i] == nodata ||
-                std::isnan(ms[i]) || std::isnan(panBand[i])) {
+                !std::isfinite(ms[i]) || !std::isfinite(panBand[i])) {
                 out[i] = nodata;
             } else {
                 out[i] = msW * ms[i] + panWeight * panBand[i];
@@ -157,7 +166,7 @@ QVector<QVector<float>> ImageFusion::brovey(
         {
             if ( !validPixel[i] )
                 continue;
-            if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) )
+            if ( msBands[b][i] == nodata || !std::isfinite( msBands[b][i] ) )
             {
                 validPixel[i] = false;
             }
@@ -176,7 +185,7 @@ QVector<QVector<float>> ImageFusion::brovey(
         for ( size_t i = 0; i < n; ++i )
         {
             if ( !validPixel[i] ||
-                 panBand[i] == nodata || std::isnan( panBand[i] ) ||
+                 panBand[i] == nodata || !std::isfinite( panBand[i] ) ||
                  msSum[i] <= 1e-10f )  // negative band sums (negative reflectance) invert signs -> NoData
             {
                 result[b][i] = nodata;
@@ -208,43 +217,45 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
 
     const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-    // Step 1: Compute mean and covariance matrix
-    QVector<double> means( nBands, 0.0 );
-    QVector<uint64_t> counts( nBands, 0 );
     for ( int b = 0; b < nBands; ++b )
-    {
         if ( !msBands[b] )
             return result;
-        for ( size_t i = 0; i < n; ++i )
-        {
-            if ( msBands[b][i] != nodata && !std::isnan( msBands[b][i] ) )
-            {
-                means[b] += msBands[b][i];
-                counts[b]++;
-            }
-        }
-        if ( counts[b] > 0 )
-            means[b] /= static_cast<double>( counts[b] );
-    }
 
-    // Covariance matrix (symmetric)
-    QVector<double> cov( nBands * nBands, 0.0 );
+    // Step 1: mean and covariance over the SAME joint-valid sample — a
+    // pixel participates only when every band is finite and not the
+    // sentinel. Per-band means over each band's own valid set (the old
+    // form) biased the centered products by Nj*(mu_joint-mu_perband)^2
+    // whenever two bands had disjoint NoData, rotating PC1 away from the
+    // streaming path (processNativeFusion "pca") which always uses the
+    // joint set.
+    QVector<double> means( nBands, 0.0 );
     uint64_t actualValidPixels = 0;
     for ( size_t i = 0; i < n; ++i )
     {
         bool valid = true;
+        for ( int b = 0; b < nBands && valid; ++b )
+            valid = msBands[b][i] != nodata && std::isfinite( msBands[b][i] );
+        if ( !valid )
+            continue;
+        actualValidPixels++;
         for ( int b = 0; b < nBands; ++b )
-        {
-            if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) )
-            {
-                valid = false;
-                break;
-            }
-        }
+            means[b] += msBands[b][i];
+    }
+    if ( actualValidPixels <= 1 )
+        return result;
+    for ( int b = 0; b < nBands; ++b )
+        means[b] /= static_cast<double>( actualValidPixels );
+
+    // Covariance matrix (symmetric) over the identical joint-valid set.
+    QVector<double> cov( nBands * nBands, 0.0 );
+    for ( size_t i = 0; i < n; ++i )
+    {
+        bool valid = true;
+        for ( int b = 0; b < nBands && valid; ++b )
+            valid = msBands[b][i] != nodata && std::isfinite( msBands[b][i] );
         if ( !valid )
             continue;
 
-        actualValidPixels++;
         for ( int b1 = 0; b1 < nBands; ++b1 )
         {
             for ( int b2 = b1; b2 < nBands; ++b2 )
@@ -255,9 +266,7 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
             }
         }
     }
-    // Normalize by actual valid pixel count (not per-band minimum)
-    if ( actualValidPixels <= 1 )
-        return result;
+    // Normalize by actual valid pixel count (sample covariance, N-1)
     for ( int i = 0; i < nBands * nBands; ++i )
         cov[i] /= static_cast<double>( actualValidPixels - 1 );
     // Fill symmetric
@@ -327,7 +336,7 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
         // Skip nodata pixels
         bool valid = true;
         for ( int b = 0; b < nBands; ++b )
-            if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) )
+            if ( msBands[b][i] == nodata || !std::isfinite( msBands[b][i] ) )
                 { valid = false; break; }
         if ( !valid ) {
             for ( int pcIdx = 0; pcIdx < nBands; ++pcIdx )
@@ -357,14 +366,14 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
     for ( size_t i = 0; i < n; ++i )
     {
         // Skip nodata pixels
-        if ( panMatched[i] == nodata || std::isnan( panMatched[i] ) ) {
+        if ( panMatched[i] == nodata || !std::isfinite( panMatched[i] ) ) {
             for ( int b = 0; b < nBands; ++b )
                 result[b][i] = nodata;
             continue;
         }
         bool valid = true;
         for ( int pcIdx = 1; pcIdx < nBands; ++pcIdx )
-            if ( pc[pcIdx][i] == nodata || std::isnan( pc[pcIdx][i] ) )
+            if ( pc[pcIdx][i] == nodata || !std::isfinite( pc[pcIdx][i] ) )
                 { valid = false; break; }
         if ( !valid ) {
             for ( int b = 0; b < nBands; ++b )
@@ -411,7 +420,7 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     for ( size_t i = 0; i < n; ++i )
     {
         if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata ||
-             std::isnan( msR[i] ) || std::isnan( msG[i] ) || std::isnan( msB[i] ) )
+             !std::isfinite( msR[i] ) || !std::isfinite( msG[i] ) || !std::isfinite( msB[i] ) )
             intensity[i] = nodata;
         else
             intensity[i] = ( msR[i] + msG[i] + msB[i] ) / 3.0f;
@@ -426,7 +435,7 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     for ( size_t i = 0; i < n; ++i )
     {
         if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata ||
-             std::isnan( msR[i] ) || std::isnan( msG[i] ) || std::isnan( msB[i] ) )
+             !std::isfinite( msR[i] ) || !std::isfinite( msG[i] ) || !std::isfinite( msB[i] ) )
         {
             H[i] = nodata;
             S[i] = nodata;
@@ -447,9 +456,9 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
 
     for ( size_t i = 0; i < n; ++i )
     {
-        if ( H[i] == nodata || S[i] == nodata || std::isnan( H[i] ) ||
-             std::isnan( S[i] ) ||
-             panMatched[i] == nodata || std::isnan( panMatched[i] ) )
+        if ( H[i] == nodata || S[i] == nodata || !std::isfinite( H[i] ) ||
+             !std::isfinite( S[i] ) ||
+             panMatched[i] == nodata || !std::isfinite( panMatched[i] ) )
         {
             result[0][i] = nodata;
             result[1][i] = nodata;
@@ -504,7 +513,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
         double sum = 0.0;
         for ( int b = 0; b < nBands; ++b )
         {
-            if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) )
+            if ( msBands[b][i] == nodata || !std::isfinite( msBands[b][i] ) )
             { valid = false; break; }
             sum += msBands[b][i];
         }
@@ -544,8 +553,8 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
         QVector<float> work( n );
         for ( size_t i = 0; i < n; ++i )
         {
-            const bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
-                                 msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
+            const bool valid = ( gs[0][i] != nodata && std::isfinite( gs[0][i] ) &&
+                                 msBands[bandIdx][i] != nodata && std::isfinite( msBands[bandIdx][i] ) );
             validMask[i] = valid ? 1 : 0;
             work[i] = valid ? msBands[bandIdx][i] : 0.0f;
         }
@@ -623,12 +632,12 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
     {
         // A pixel is only reconstructable if synPan and all MS bands were valid
         // (gs components carry nodata otherwise) and pan is valid.
-        bool valid = ( panMatched[i] != nodata && !std::isnan( panMatched[i] ) );
+        bool valid = ( panMatched[i] != nodata && std::isfinite( panMatched[i] ) );
         if ( valid )
         {
             for ( int k = 0; k <= nBands; ++k )
             {
-                if ( gs[k][i] == nodata || std::isnan( gs[k][i] ) )
+                if ( gs[k][i] == nodata || !std::isfinite( gs[k][i] ) )
                 { valid = false; break; }
             }
         }
@@ -819,7 +828,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
     // honored — the previous single working sentinel (pan's, else the first
     // declaring MS band) let every other band's voids pass as data (#445's
     // per-band closure). The working sentinel the kernels see is NaN, which
-    // every kernel already guards via std::isnan (the IHS path documented
+    // every kernel already guards via !std::isfinite (the IHS path documented
     // that NaN inputs occur in production); void outputs are NaN with NaN
     // tags, matching the spectral-family wash convention.
     float panSentinel = std::numeric_limits<float>::quiet_NaN();

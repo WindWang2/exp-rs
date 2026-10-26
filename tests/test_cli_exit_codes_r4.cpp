@@ -251,6 +251,80 @@ TEST_CASE( "cli unreadable input files exit InvalidInput (6)", "[cli][exit-codes
     }
 }
 
+TEST_CASE( "cli unknown flags are refused, never silently ignored",
+           "[cli][exit-codes][r4][unknown-flag]" )
+{
+    // Issue #1597 (second half): dataset/experiment/reproduce already refuse
+    // unknown flags (rejectUnknownArgs); pipeline, workflow, catalog export
+    // and the data family still black-holed them — a typo'd optional flag
+    // ran the command anyway and exited 0 with a different result. Every
+    // case here was RED at introduction: the invocations below exited 0 on
+    // master because the unknown token was skipped silently.
+    TempDir dir( "unknownflag" );
+    const std::string workflow = dir.file( "ok-workflow.json" );
+    writeFile( workflow,
+               R"({"schema_version":1,"steps":[{"id":"s1","operator":"rs:spectral_index"}]})" );
+    const std::string pipeline = dir.file( "ok-pipeline.json" );
+    writeFile( pipeline, R"({"steps":[]})" );
+    const std::string emptyRoot = dir.file( "catalog-root" );
+    std::filesystem::create_directories( emptyRoot );
+
+    SECTION( "workflow validate with a typo'd flag" )
+    {
+        requireErrorEnvelope( "workflow validate " + workflow + " --dry-runn",
+                              "workflow", kInvalidInput );
+    }
+    SECTION( "workflow resume with a typo'd flag" )
+    {
+        requireErrorEnvelope( "workflow resume no-such-run-r4 --dry-runn", "workflow",
+                              kInvalidInput );
+    }
+    SECTION( "workflow resume with a bare run id stays a typed runtime failure" )
+    {
+        // R1-P0-1 regression guard: the unknown-flag gate pulled the run id
+        // out of args while the runner ALSO consumed a token — resume then
+        // hit takeFirst() on an empty list (SIGABRT, exit 134) or resumed
+        // the wrong run. The bare form must reach the runner and answer
+        // typed (no such checkpoint -> ExecutionFailure).
+        const Json::Value envelope =
+            requireErrorEnvelope( "workflow resume no-such-run-r4", "workflow",
+                                  kExecutionFailure );
+        CHECK( envelope.get( "error", "" ).asString().find( "no-such-run-r4" )
+               != std::string::npos );
+    }
+    SECTION( "workflow run with a typo'd flag" )
+    {
+        requireErrorEnvelope( "workflow run " + workflow + " --json-out", "workflow",
+                              kInvalidInput );
+    }
+    SECTION( "pipeline validate with a typo'd flag" )
+    {
+        requireErrorEnvelope( "pipeline validate " + pipeline + " --skipd", "pipeline",
+                              kInvalidInput );
+    }
+    SECTION( "data catalog search with an unknown flag" )
+    {
+        // The data family skipped anything not in its per-subcommand
+        // value-flag set, so `--platfrm xyz` vanished without a trace.
+        requireErrorEnvelope( "data catalog search " + emptyRoot + " --platfrm xyz", "data",
+                              kInvalidInput );
+    }
+    SECTION( "data catalog search with a trailing unknown flag (no value)" )
+    {
+        // The old loop bound (i + 1 < size) never even VISITED a flag in
+        // last position — the loudest silent drop of the family.
+        requireErrorEnvelope( "data catalog search " + emptyRoot + " --platfrm", "data",
+                              kInvalidInput );
+    }
+    SECTION( "data catalog search --max-items with a non-numeric value" )
+    {
+        // Issue #1595 residue: --cloud-max/--limit already parse-check;
+        // --max-items kept the bare toInt() and turned garbage into 0.
+        requireErrorEnvelope( "data catalog search " + emptyRoot + " --max-items abc", "data",
+                              kInvalidInput );
+    }
+}
+
 TEST_CASE( "cli schema violations exit ValidationFailure (2)", "[cli][exit-codes][r4]" )
 {
     TempDir dir( "validation" );

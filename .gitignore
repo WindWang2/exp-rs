@@ -645,6 +645,13 @@ r6_dev.cmd
 !.planning/zcode-r20-03/
 .planning/zcode-r20-03/*
 !.planning/zcode-r20-03/*.md
+
+# R21-A track (remote-sensing scientific algorithms) planning artifacts
+# (markdown + the test runner script only; logs/builds stay local).
+!.planning/r21-A/
+.planning/r21-A/*
+!.planning/r21-A/*.md
+!.planning/r21-A/run-tests.sh
 *.agent-build.lock
 
 # R20-02 track (geospatial data / model runtime / persistence) planning artifacts (markdown only).
@@ -672,3 +679,45 @@ r6_dev.cmd
 !.planning/r21-D/
 .planning/r21-D/*
 !.planning/r21-D/*.md
+
+# R21-C track (Pi/MCP harness, scientific decisions, workflow & plugin tool
+# contracts) planning artifacts (markdown only).
+!.planning/r21-C/
+.planning/r21-C/*
+!.planning/r21-C/*.md
+
+
+# R21-E track (zcode teaching/verification) planning artifacts (markdown,
+# plus the reproducible offline end-to-end + RED/GREEN chain scripts cited by
+# ORACLES.md — same precedent as zcode-r20-05/red-drivers).
+!.planning/r21-E/
+.planning/r21-E/*
+!.planning/r21-E/*.md
+!.planning/r21-E/*.sh
+
+# R21-B track (geospatial data / model runtime / reproducibility) planning artifacts (markdown only).
+!.planning/r21-B/*
+!.planning/r21-B/*.md
+
+
+# R22-01 science track (r22-science): planning notes (markdown only; logs/builds stay local).
+!.planning/r22-science/
+.planning/r22-science/*
+!.planning/r22-science/*.md
+
+# R22-06 teaching track (zcode r22-teaching): planning artifacts (markdown
+# only; build/test logs stay local).
+!.planning/r22-teaching/
+.planning/r22-teaching/*
+!.planning/r22-teaching/*.md
+
+# R22-03 track (remote-sensing AI inference correctness / GPU-CPU stability /
+# chunked throughput): planning artifacts (markdown only; logs/builds stay local).
+!.planning/r22-inference/
+.planning/r22-inference/*
+!.planning/r22-inference/*.md
+
+# R22-07 (r22-infra) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/r22-infra/
+.planning/r22-infra/*
+!.planning/r22-infra/*.md

@@ -366,6 +366,59 @@ TEST_CASE( "A missing source registers as Missing rather than disappearing",
   CHECK( std::holds_alternative<std::monostate>( asset->structure() ) );
 }
 
+TEST_CASE( "A missing source reached through a symlinked directory keeps one identity",
+           "[data_source_providers]" )
+{
+  QTemporaryDir dir;
+  const QString realDir = dir.path() + QStringLiteral( "/real" );
+  const QString linkDir = dir.path() + QStringLiteral( "/link" );
+  REQUIRE( QDir().mkpath( realDir ) );
+  REQUIRE( QFile::link( realDir, linkDir ) );
+
+  // The file does not exist yet: the provider cannot canonicalize the FILE,
+  // but the symlinked DIRECTORY component is still resolvable, so both
+  // spellings of the same not-yet-existing file must already collapse onto
+  // the real directory (what canonicalFilePath will yield once the file
+  // appears). Falling back to the raw absolute path instead keeps the symlink
+  // spelling in the SourceKey — and once the file appears, the same physical
+  // file registers twice under two AssetIds (R20-02 risk A1).
+  const OgrVectorSourceProvider vectorProvider;
+  const QString viaLink = linkDir + QStringLiteral( "/staged.gpkg" );
+  const QString viaReal = realDir + QStringLiteral( "/staged.gpkg" );
+
+  const auto resolvedViaLink = vectorProvider.resolve( ogrDescriptor( viaLink ) );
+  REQUIRE( resolvedViaLink );
+  CHECK( resolvedViaLink.value().state == AssetState::Missing );
+  CHECK( resolvedViaLink.value().canonicalSource ==
+         QFileInfo( viaReal ).absoluteFilePath() );
+
+  // Same collapse on the raster lane (ENVI-unrelated plain path).
+  const GdalRasterSourceProvider rasterProvider;
+  const auto rasterViaLink = rasterProvider.resolve( gdalDescriptor( viaLink ) );
+  REQUIRE( rasterViaLink );
+  CHECK( rasterViaLink.value().state == AssetState::Missing );
+  CHECK( rasterViaLink.value().canonicalSource ==
+         QFileInfo( viaReal ).absoluteFilePath() );
+
+  // And the dedup contract through the manager: register the missing file
+  // through the symlink spelling, materialize it, then register the real
+  // spelling — one asset, reused, never two AssetIds for one file.
+  DataManager manager;
+  RegisterRequest first;
+  first.source = ogrDescriptor( viaLink );
+  const auto firstResult = manager.registerSource( first );
+  REQUIRE_FALSE( firstResult.assetId.isNull() );
+
+  REQUIRE( QFile( vector_test_fixtures::syntheticGeoJsonPath() ).copy( viaReal ) );
+
+  RegisterRequest second;
+  second.source = ogrDescriptor( viaReal );
+  const auto secondResult = manager.registerSource( second );
+  CHECK( secondResult.assetId == firstResult.assetId );
+  CHECK( secondResult.reusedExisting );
+  CHECK( manager.assets().size() == 1 );
+}
+
 TEST_CASE( "Provider results carry no renderer state or credentials",
            "[data_source_providers]" )
 {
@@ -500,7 +553,12 @@ TEST_CASE( "Remote raster resolve on the application thread does not GDALOpen th
   QElapsedTimer timer;
   timer.start();
   const auto resolved = provider.resolve( source );
-  CHECK( timer.elapsed() < 2000 );
+  // #1699: hang-guard, not a latency budget — the deferred-resolution
+  // behaviour is asserted structurally right below (Missing state, Remote
+  // storage kind, deferred diagnostics). A blocking resolve would sit in
+  // the kernel's SYN-retry window for the TEST-NET address (~20s+); a
+  // tight 2s ceiling only flaked under ASan or a loaded parallel ctest.
+  CHECK( timer.elapsed() < 10000 );
 
   REQUIRE( resolved );
   CHECK( resolved.value().state == AssetState::Missing );

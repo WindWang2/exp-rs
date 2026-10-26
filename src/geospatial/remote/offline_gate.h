@@ -45,8 +45,11 @@ bool isPrivateHost( const std::string &hostOrUrl );
 /// Outcome of resolveForPinning().
 enum class HostPinStatus
 {
-    /// The host is an IP literal (or a loopback/metadata NAME): there is
-    /// nothing to pin because isPrivateHost() already judged the literal.
+    /// The host is a PUBLIC IP literal (or a loopback/metadata NAME): there
+    /// is nothing to pin. Under the process-wide private-network policy a
+    /// private IP literal is judged here as well and reports
+    /// PrivateAddress instead (#1679 defense-in-depth — the pinning path
+    /// no longer trusts the upstream gate's parser).
     NoResolutionNeeded,
     /// Every resolved address passed the egress policy; @p entries carries
     /// the CURLOPT_RESOLVE entry (see resolveForPinning).

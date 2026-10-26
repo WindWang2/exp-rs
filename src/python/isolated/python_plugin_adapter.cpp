@@ -171,6 +171,19 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
     if ( !success )
     {
         qWarning() << "PythonPluginAdapter: Timed out or failed to load plugin:" << m_packageName;
+        // #1691: revoke whatever the plugin managed to register BEFORE the
+        // timeout/failure — it ran with a live bridge bound and may already
+        // have pushed py: algorithms into the engine/registry. Without this
+        // the failed load leaves ghost catalog entries that always fail
+        // with "IPC Server not available" (the success-path unload does the
+        // same revocation, #755). A late daemon-side registration racing
+        // this revocation is not possible: registrations flow through THIS
+        // bridge's IPC handler, which dies with the bridge below.
+        if ( m_bridge )
+        {
+            m_bridge->unregisterRegisteredAlgorithms();
+            m_bridge.reset();
+        }
         if ( m_pool && m_workerNode )
         {
             // Sever the crash/rebind connections BEFORE releasing the node
