@@ -1021,7 +1021,9 @@ void QgsLayoutDesignerDialog::onDeleteSelectedItems()
         mLayout->removeLayoutItem(item);
     }
 
-    if (mWindow) mWindow->statusBar()->showMessage(tr("Deleted %1 item(s)").arg(selected.size()), 3000);
+    if (mWindow) mWindow->statusBar()->showMessage(
+        selected.size() == 1 ? tr("Deleted 1 item")
+                             : tr("Deleted %1 items").arg(selected.size()), 3000);
 }
 
 void QgsLayoutDesignerDialog::onDuplicateSelectedItems()
@@ -1031,7 +1033,7 @@ void QgsLayoutDesignerDialog::onDuplicateSelectedItems()
     const QList<QgsLayoutItem *> selected = mLayout->selectedLayoutItems();
     if (selected.isEmpty()) {
         if (mMessageBar)
-            mMessageBar->pushInfo(tr("Duplicate"), tr("Select item(s) to duplicate first."));
+            mMessageBar->pushInfo(tr("Duplicate"), tr("Select one or more items to duplicate first."));
         return;
     }
 
@@ -1057,7 +1059,9 @@ void QgsLayoutDesignerDialog::onDuplicateSelectedItems()
     if (!created.isEmpty() && mView)
         mView->setFocus();
 
-    if (mWindow) mWindow->statusBar()->showMessage(tr("Duplicated %1 item(s)").arg(created.size()), 3000);
+    if (mWindow) mWindow->statusBar()->showMessage(
+        created.size() == 1 ? tr("Duplicated 1 item")
+                            : tr("Duplicated %1 items").arg(created.size()), 3000);
 }
 
 void QgsLayoutDesignerDialog::onSelectAllItems()
@@ -1151,8 +1155,11 @@ void QgsLayoutDesignerDialog::onLockItems(bool locked)
     for (QgsLayoutItem *item : selected)
         item->setLocked(locked);
     if (mWindow)
-        mWindow->statusBar()->showMessage(locked ? tr("Locked %1 item(s)").arg(selected.size())
-                                                 : tr("Unlocked %1 item(s)").arg(selected.size()), 3000);
+        mWindow->statusBar()->showMessage(
+            locked ? (selected.size() == 1 ? tr("Locked 1 item")
+                                          : tr("Locked %1 items").arg(selected.size()))
+                   : (selected.size() == 1 ? tr("Unlocked 1 item")
+                                           : tr("Unlocked %1 items").arg(selected.size())), 3000);
 }
 
 // ---------------------------------------------------------------------------
@@ -1191,8 +1198,10 @@ void QgsLayoutDesignerDialog::onAutoArrange()
         }
     }
     mWindow->statusBar()->showMessage(
-        tr("Thematic composition arranged (%1 new component(s); existing non-auto items untouched)")
-            .arg(created), 5000);
+        created == 1
+            ? tr("Thematic composition arranged (1 new component; existing non-auto items untouched)")
+            : tr("Thematic composition arranged (%1 new components; existing non-auto items untouched)")
+                  .arg(created), 5000);
 }
 
 void QgsLayoutDesignerDialog::onSaveAsTemplate()

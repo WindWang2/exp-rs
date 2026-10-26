@@ -38,6 +38,28 @@ verify_path=""
 usage() { sed -n '5,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "build_offline_bundle: $*" >&2; exit 1; }
 
+# #1697: $version is concatenated into $bundle, which the non-incremental
+# path rm -rf's below. Accept exactly one safe path component — an alnum
+# first char, then only letters, digits, dot, underscore or hyphen — so no
+# path separator, traversal, or shell metacharacter can reach the deletion.
+# (This also refuses semver build metadata like "1.0.0+build" — '+' is not
+# whitelisted; pass a whitelisted version explicitly.) Checked when
+# assembling (an explicit --version never gets further than this; the
+# git-describe fallback value is validated again after it resolves).
+# LC_ALL=C keeps the ranges byte-exact — collation-interpreted ranges could
+# widen [A-Z] under UTF-8 locales (R2-3).
+check_version() {
+  LC_ALL=C
+  export LC_ALL
+  case "$1" in
+    [A-Za-z0-9]*) ;;
+    *) die "--version must be one path component (letters, digits, . _ -): $1" ;;
+  esac
+  case "$1" in
+    *[!A-Za-z0-9._-]*) die "--version must be one path component (letters, digits, . _ -): $1" ;;
+  esac
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-dir) [ $# -ge 2 ] || usage; build_dir=$2; shift 2 ;;
@@ -82,7 +104,34 @@ done
 [ -n "$version" ] || version=$( { git -C "$repo_root" describe --tags --always 2>/dev/null || true; } )
 [ -n "$version" ] || version="dev"
 [ -n "$out_dir" ] || out_dir="$repo_root/dist"
+check_version "$version"
+
 bundle="$out_dir/sicnu-lab-$version"
+
+# Defense in depth (#1697): with the whitelist above the bundle path cannot
+# escape --out, but never let the deletion target resolve outside it anyway.
+# realpath -m is GNU-specific; on hosts without it fall back to comparing the
+# raw (still whitelisted) strings on BOTH sides — never mix a canonicalized
+# path with a raw one, or a legal run through a symlinked --out could be
+# spuriously refused (R1-11).
+containment_raw=0
+if ! bundle_abs=$(realpath -m -- "$bundle" 2>/dev/null); then
+  bundle_abs=$bundle; containment_raw=1
+fi
+if ! out_abs=$(realpath -m -- "$out_dir" 2>/dev/null); then
+  out_abs=$out_dir; containment_raw=1
+fi
+if [ "$containment_raw" -eq 1 ]; then
+  bundle_abs=$bundle
+  out_abs=$out_dir
+fi
+out_abs="${out_abs%/}" # trailing-slash-free so the prefix test below needs a
+                      # real "/" boundary — "/a/bcd" must not match "/a/b/*"
+case "$bundle_abs/" in
+  "$out_abs/"*) ;;
+  *) die "refusing to operate on bundle path outside --out: $bundle_abs" ;;
+esac
+
 if [ "$incremental" -eq 1 ] && [ -d "$bundle" ]; then
   echo "== incremental: assembling over the existing bundle =="
   echo "   (a stale file from a previous layout fails the final verify — rerun"

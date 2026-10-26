@@ -11,6 +11,7 @@
 #include "platform/portable.h"
 
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
 #include "runtime/observability/fault_point.h"
@@ -140,8 +141,14 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
         // Stage-and-verify: copy to a pool-private temp, re-hash the STAGED
         // bytes, and only then rename into the content address. A partial
         // copy or a concurrent source rewrite can never become an object.
-        const QString tmp = objectPath + QStringLiteral( ".%1.puttmp" )
-                              .arg( static_cast<int>( sicnu::portable::pid() ) );
+        // #1680: the temp name must be unique per CALL, not per process —
+        // two pool instances (or threads) in one process staging the same
+        // digest used to share one ".<pid>.puttmp" and removed/overwrote
+        // each other's staged bytes mid-copy.
+        static std::atomic<unsigned> sPutTempCounter{ 0 };
+        const QString tmp = objectPath + QStringLiteral( ".%1.%2.puttmp" )
+                              .arg( static_cast<int>( sicnu::portable::pid() ) )
+                              .arg( sPutTempCounter.fetch_add( 1 ) + 1, 0, 16 );
         QFile::remove( tmp );
         // Injected staging failures (Verification 7.0 fault matrix): route
         // through the real failure paths — copy failure cleans the tmp file,
@@ -173,9 +180,20 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             QFile::remove( tmp );
             return std::nullopt;
         }
-        if ( SICNU_FAULT_POINT( "artifact_pool.stage_publish" ) || !QFile::rename( tmp, objectPath ) )
+        const bool publishFault = SICNU_FAULT_POINT( "artifact_pool.stage_publish" );
+        if ( publishFault || !QFile::rename( tmp, objectPath ) )
         {
+            // #1680: QFile::rename REFUSES to replace an existing
+            // destination. Two concurrent put()s of one digest both staged
+            // (neither saw the object yet); the loser's rename fails BECAUSE
+            // the winner just published the identical bytes. That is dedup
+            // working, not a failure: re-enter the loop — the top's digest
+            // re-verification either accepts the healthy object or, for a
+            // torn one, drops and re-stages it. Only a rename failure with
+            // NO object at the address is a real publish failure.
             QFile::remove( tmp );
+            if ( !publishFault && QFile::exists( objectPath ) )
+                continue;
             return std::nullopt;
         }
         // Commit the rename's directory entry too (durable_sidecar.cpp

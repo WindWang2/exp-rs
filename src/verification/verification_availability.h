@@ -1,5 +1,5 @@
 /***************************************************************************
-  availability.h — why a fact could not be obtained (RS14-10, Slice B)
+  verification_availability.h — why a fact could not be obtained (RS14-10, Slice B)
 
   Every fact the verifier uses arrives through a provider, and every provider
   answers with one of these three values. The distinction matters because the

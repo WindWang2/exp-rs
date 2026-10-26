@@ -95,6 +95,17 @@ struct BatchAssessmentConfig
     /// checkpointed, so a restart re-grades them instead of disguising them
     /// as finished.
     QString checkpointPath;
+    /// #1694: fingerprint of the grading RULES content (sha256 over the
+    /// rules/rubric file the grader will read; "labid:<id>" form when the
+    /// authority is addressed by id). Part of the config digest: editing a
+    /// rules file in place (same path, same version strings) changes the
+    /// digest and forces a full re-grade instead of adopting stale rows.
+    /// Computed via gradingRulesFingerprint(GraderCliConfig).
+    QString gradingRulesFingerprint;
+    /// #1694: identity of the grading AUTHORITY binary (resolved CLI path +
+    /// size + content fingerprint, via graderCliIdentity()). Swapping the
+    /// grader CLI changes the digest and invalidates old grades.
+    QString graderIdentity;
 };
 
 struct BatchAssessmentReport
@@ -117,6 +128,13 @@ struct BatchAssessmentReport
     int truncated = 0;
     /// Rows adopted from a matching checkpoint instead of re-graded.
     int resumed = 0;
+    /// #1694: true when a durable checkpoint existed with the right schema
+    /// but a DIFFERENT config digest — this run started fresh because the
+    /// grading config (rules content, grader identity, versions, …)
+    /// changed, not because no checkpoint was there. Published so the
+    /// console can say "rules changed, re-grading everything" instead of
+    /// looking like a first run.
+    bool checkpointInvalidated = false;
     /// Files discovery refused (reserved tool-output names) — accounted so
     /// a submission named e.g. zhang_feedback.json is an explicit refusal
     /// in the report/CSV instead of vanishing without a trace (#1466).

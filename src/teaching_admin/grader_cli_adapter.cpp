@@ -291,4 +291,127 @@ GradeCallable cliGradeCallable( const GraderCliConfig &cfg )
     };
 }
 
+namespace
+{
+
+QString shortFp( const QString &material )
+{
+    return QStringLiteral( "fp:" ) + sha256Hex( material.toUtf8() ).left( 12 );
+}
+
+} // namespace
+
+QString gradingRulesFingerprint( const GraderCliConfig &cfg, const QString &searchRoot )
+{
+    if ( cfg.labIdOrRulesPath.isEmpty() )
+        return QStringLiteral( "none" );
+    // Mirror the CLI's own shape test (resolveRulesPath): only a path ENDING
+    // in .rules.json is a direct file; anything else is a lab id even when
+    // a file of that name happens to exist (R2 finding 3 — fingerprinting
+    // an unrelated same-named file pinned the digest to a decoy while the
+    // CLI resolved the real rules elsewhere).
+    const bool isDirectRulesPath = cfg.labIdOrRulesPath.endsWith( QStringLiteral( ".rules.json" ) );
+    if ( isDirectRulesPath )
+    {
+        const QFileInfo info( cfg.labIdOrRulesPath );
+        if ( info.exists() && info.isFile() )
+        {
+            const QString content = sha256OfFile( cfg.labIdOrRulesPath );
+            if ( !content.isEmpty() )
+                return QStringLiteral( "sha256:" ) + content;
+            // Exists but unreadable: a rules file we cannot read is not a
+            // stable authority. Size keeps the marker deterministic per file;
+            // two equal-size unreadable files are indistinguishable, but both
+            // are already un-gradeable (the CLI would fail, not mis-grade).
+            return QStringLiteral( "unreadable:" ) + QString::number( info.size() );
+        }
+        // A .rules.json path that does not exist: the CLI fails with a typed
+        // usage error, so no grade can be adopted against this marker.
+        return QStringLiteral( "missing:" ) + cfg.labIdOrRulesPath;
+    }
+    // Lab id: mirror the CLI's own resolution (output_verifier's
+    // resolveRulesPath order — env dir first, then the source tree's
+    // data/labs/grading) so the fingerprint tracks the file the grader
+    // will actually read. R1 review: without this, editing
+    // data/labs/grading/<id>.rules.json in place was invisible to the
+    // checkpoint digest on the dock's primary configuration.
+    // R2 finding 2 (documented residual): the CLI's last search dir is its
+    // compile-time SICNU_SOURCE_DIR; when the console runs from a different
+    // tree than the grader was built in AND no env dir is set, the resolved
+    // file can diverge from what we hash — see CROSS_TRACK_FINDINGS.
+    QStringList searchDirs;
+    const QByteArray envDir = qgetenv( "SICNU_LAB_RULES_DIR" );
+    if ( !envDir.isEmpty() )
+        searchDirs << QString::fromLocal8Bit( envDir );
+    if ( !searchRoot.isEmpty() )
+        searchDirs << QDir( searchRoot ).filePath( QStringLiteral( "data/labs/grading" ) );
+    for ( const QString &dir : std::as_const( searchDirs ) )
+    {
+        const QString candidate =
+          QDir( dir ).filePath( cfg.labIdOrRulesPath + QStringLiteral( ".rules.json" ) );
+        if ( !QFileInfo::exists( candidate ) )
+            continue;
+        const QString content = sha256OfFile( candidate );
+        if ( !content.isEmpty() )
+            return QStringLiteral( "labid:" ) + cfg.labIdOrRulesPath
+                   + QStringLiteral( ";sha256:" ) + content;
+        return QStringLiteral( "labid:" ) + cfg.labIdOrRulesPath
+               + QStringLiteral( ";unreadable:" )
+               + QString::number( QFileInfo( candidate ).size() );
+    }
+    // Nothing resolvable here: the CLI will fail with a typed usage error
+    // (unknown lab), so no grade can be adopted against this marker anyway.
+    return QStringLiteral( "labid:" ) + cfg.labIdOrRulesPath;
+}
+
+QString graderCliIdentity( const QString &explicitCliPath )
+{
+    const QString cli = resolveGraderCli( explicitCliPath );
+    if ( cli.isEmpty() )
+        return QStringLiteral( "none" );
+    const QFileInfo info( cli );
+    const QString content = sha256OfFile( cli );
+    // No mtime on purpose: a touch of an identical binary keeps grades; a
+    // rebuild changes bytes and therefore the hash. The hash is a STREAMED
+    // full-content hash (R1 review): head+tail sampling left the interior
+    // of a multi-MiB CLI binary unfingerprinted — a same-size interior
+    // rebuild would have kept stale grades adoptable. Path is part of the
+    // identity so two different grader builds in different directories do
+    // not silently share checkpoints.
+    return QStringLiteral( "path:" ) + QDir::toNativeSeparators( info.absoluteFilePath() )
+           + QStringLiteral( ";size:" ) + QString::number( info.size() )
+           + ( content.isEmpty() ? QString() : QStringLiteral( ";sha256:" ) + content );
+}
+
+GradingVersionLabels gradingVersionLabels( const QJsonObject &rubricOrRules,
+                                           const QJsonObject &labSpec, const QString &labId,
+                                           const QString &rulesFingerprint )
+{
+    GradingVersionLabels labels;
+    // Rubric label: explicit authored version, else a short fingerprint of
+    // the authored content, else the rules-file fingerprint (the authority
+    // the grader actually reads), else an honest "none". Never a constant.
+    const QString rubricVersionMember =
+      rubricOrRules.value( QStringLiteral( "version" ) ).toString();
+    if ( !rubricVersionMember.isEmpty() )
+        labels.rubricVersion = rubricVersionMember;
+    else if ( !rubricOrRules.isEmpty() )
+        labels.rubricVersion = shortFp( QString::fromUtf8( canonicalJsonBytes( rubricOrRules ) ) );
+    else if ( !rulesFingerprint.isEmpty() )
+        labels.rubricVersion = shortFp( rulesFingerprint );
+    else
+        labels.rubricVersion = QStringLiteral( "none" );
+
+    const QString labVersionMember = labSpec.value( QStringLiteral( "version" ) ).toString();
+    if ( !labVersionMember.isEmpty() )
+        labels.labVersion = labVersionMember;
+    else if ( !labSpec.isEmpty() )
+        labels.labVersion = shortFp( QString::fromUtf8( canonicalJsonBytes( labSpec ) ) );
+    else if ( !labId.isEmpty() )
+        labels.labVersion = QStringLiteral( "labid:" ) + labId;
+    else
+        labels.labVersion = QStringLiteral( "none" );
+    return labels;
+}
+
 } // namespace sicnu::teaching_admin

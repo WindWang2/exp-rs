@@ -298,19 +298,20 @@ RangeDiskCacheStats RangeDiskBlockStore::stats()
 std::string RangeDiskBlockStore::identityBasis( const std::string &requestUrl, bool hasStrongEtag,
                                                 const std::string &etag, bool hasSize,
                                                 std::uint64_t sizeBytes,
-                                                const std::string &lastModified )
+                                                const std::string &lastModified,
+                                                std::uint64_t blockSize )
 {
   // Strong ETag only (byte-level provability). Size + Last-Modified is NOT
   // accepted for the disk layer (#1228 / #1186): HTTP Last-Modified is
   // second-resolution, so a same-second same-size rewrite would keep serving
   // the previous object's bytes under the old basis. Unprovable identity
-  // never masquerades as disk-cacheable. (hasSize/lastModified retained in
-  // the signature for call-site stability; unused.)
+  // never masquerades as disk-cacheable. (hasSize/sizeBytes/lastModified
+  // retained in the signature for call-site stability; unused.)
   (void) hasSize;
   (void) sizeBytes;
   (void) lastModified;
   if ( hasStrongEtag && !etag.empty() )
-    return "etag\n" + requestUrl + "\n" + etag;
+    return "etag\n" + requestUrl + "\n" + etag + "\nbs=" + std::to_string( blockSize );
   return std::string();
 }
 

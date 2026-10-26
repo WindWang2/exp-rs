@@ -39,6 +39,7 @@
 #include "processing/framework/execution_plane.h"
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 
 using namespace sicnu::processing;
 using sicnu::processing::ExecutionHandle;
@@ -294,7 +295,11 @@ TEST_CASE( "dispatchAndAwait does not deadlock on the bridge thread (#559)",
 
   INFO( "elapsed ms: " << elapsedMs << ", payload status: " << result["status"].asString() );
   REQUIRE( result["status"].asString() == "success" );
-  REQUIRE( elapsedMs < 6000 );
+  // #1699: below the 8s await, scaled under sanitizers. NOTE: at ASan's 4x
+  // the scaled budget exceeds the unscaled 8s await — in the sanitizer lane
+  // this bound is vacuous by then (the status REQUIREs carry the coverage);
+  // the Release lane enforces the base 6000ms.
+  REQUIRE( elapsedMs < sicnu::testsupport::wallClockBudgetMs( 6000 ) );
   REQUIRE( result["taskId"].asInt64() > 0 );
 }
 
@@ -426,7 +431,7 @@ TEST_CASE( "timeout cancels and a late completion yields one truthful outcome",
 
   REQUIRE( timeoutPayload["status"].asString() == "error" );
   REQUIRE( timeoutPayload["errorMessage"].asString() == "Tool call timed out" );
-  REQUIRE( hardElapsedMs < 5000 ); // ≈ grace window, far below the stub's runtime
+  REQUIRE( hardElapsedMs < sicnu::testsupport::wallClockBudgetMs( 5000 ) ); // ≈ grace window, far below the stub's runtime (#1699 scaled)
 
   // Drain the cancel-ignoring worker before the next test so it does not
   // occupy a worker slot / RAM estimate in the admission test below.
@@ -955,7 +960,10 @@ TEST_CASE( "awaitResult affinity starvation returns a structured error, never th
   CHECK_FALSE( payload.isMember( "output" ) );
   REQUIRE( commits.load() == 0 );
   REQUIRE( rollbackCalls.load() == 0 );
-  REQUIRE( elapsedMs < 8000 );
+  // #1699 scaled. NOTE: at ASan's 4x this exceeds the case's own structural
+  // timeout, so the sanitizer lane runs it vacuously — Release enforces the
+  // base 8000ms (see the commit-delivery timeout REQUIREs above).
+  REQUIRE( elapsedMs < sicnu::testsupport::wallClockBudgetMs( 8000 ) );
 }
 
 TEST_CASE( "async watcher delivery rolls back on verification failure (#1042)",
@@ -1076,7 +1084,7 @@ TEST_CASE( "shutdown wakes sync awaiters promptly (run last)",
   REQUIRE( awaiterReturned.load() );
   // shutdown() joins JobEngine workers (the stub finishes ≤400ms); the
   // awaiter must release within that window, not after its own 30s timeout.
-  REQUIRE( elapsedMs < 5000 );
+  REQUIRE( elapsedMs < sicnu::testsupport::wallClockBudgetMs( 5000 ) ); // #1699 scaled
 
   // Restore both singletons for any test registered after this one.
   sicnu::TaskCenter::instance().shutdownForTests();

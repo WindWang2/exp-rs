@@ -146,7 +146,7 @@ void CartographyDock::buildUi()
     m_stopBtn->setAccessibleName( tr( "Stop the current cartography task" ) );
     m_stopBtn->setEnabled( false );
     exportRow->addWidget( m_formatCombo );
-    exportRow->addWidget( new QLabel( tr( "DPI：" ), central ) );
+    exportRow->addWidget( new QLabel( tr( "DPI:" ), central ) );
     exportRow->addWidget( m_dpiSpin );
     exportRow->addWidget( m_directoryEdit, 1 );
     exportRow->addWidget( browseBtn );
