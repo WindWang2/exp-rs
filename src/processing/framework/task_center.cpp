@@ -2041,11 +2041,26 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
             }
             m_forwardedLogCounts[taskId] = seen;
         }
-        else if ( record.logLines.size() > forwarded )
+        else
         {
-            for ( std::size_t i = forwarded; i < record.logLines.size(); ++i )
-                newLines.push_back( QString::fromStdString( record.logLines[i].text ) );
-            m_forwardedLogCounts[taskId] = record.logLines.size();
+            // Cumulative record (progress copies, engine-internal appends,
+            // submit-time catch-up): #1705 retention means size() is only
+            // the RETAINED window, not the absolute appended count —
+            // droppedLogLines is the base of that window. Translate into
+            // the ABSOLUTE line space the delta branch above indexes (R22
+            // REVIEW_R2 R2-F3/F6): compare and store droppedLogLines +
+            // size(), and slice the window from max(forwarded, dropped).
+            // Without eviction (dropped == 0) this degenerates exactly to
+            // the historical slice [forwarded, size()).
+            const std::size_t absTotal = record.droppedLogLines + record.logLines.size();
+            if ( absTotal > forwarded )
+            {
+                const std::size_t start =
+                    std::max( forwarded, record.droppedLogLines ) - record.droppedLogLines;
+                for ( std::size_t i = start; i < record.logLines.size(); ++i )
+                    newLines.push_back( QString::fromStdString( record.logLines[i].text ) );
+                m_forwardedLogCounts[taskId] = absTotal;
+            }
         }
     }
     for ( const QString &line : newLines )
