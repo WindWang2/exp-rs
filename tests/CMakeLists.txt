@@ -16791,3 +16791,15 @@ if(Python_EXECUTABLE)
   sicnu_set_test_env(r23_e_python_worker_typed)
 endif()
 # --- end R23-E WP2 registration ---
+
+# --- R23-E WP3: merge-integrity gate — registration subset vs origin/master,
+# conflict markers in the shared merge surface, duplicate test registrations
+# (the #1715-class pre-push defense; static fallback when refs are missing).
+if(Python_EXECUTABLE)
+  add_test(NAME r23_e_merge_registration_integrity
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_merge_registration_integrity.py
+            --repo-root ${CMAKE_SOURCE_DIR} --base origin/master --head HEAD)
+  set_tests_properties(r23_e_merge_registration_integrity PROPERTIES TIMEOUT 120)
+  sicnu_set_test_env(r23_e_merge_registration_integrity)
+endif()
+# --- end R23-E WP3 registration ---
