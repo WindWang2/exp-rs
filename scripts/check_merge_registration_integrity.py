@@ -58,10 +58,16 @@ REGISTER_RE = re.compile(
 )
 # Pure-script tests register via add_test(NAME ...) with no target — the
 # #1715-class merge loss eats those blocks exactly as often (review R1 F2).
-ADD_TEST_RE = re.compile(r"\badd_test\s*\(\s*(?:NAME\s+)?([^\s)$,]+)")
+# The alternation captures QUOTED names ("M2-Challenger: ...") as one token;
+# surrounding quotes are stripped in _valid_name (review R2 N1 — master
+# carries 4 quoted registrations that were invisible to both subset and
+# duplicate checks).
+ADD_TEST_RE = re.compile(
+    r"\badd_test\s*\(\s*(?:NAME\s+)?(\"[^\"]*\"|[^\s)$,]+)"
+)
 
 MARKER_RE = re.compile(r"^(<<<<<<< |>>>>>>> |\|\|\|\|\|\|\| |=======$)")
-GIT_GREP_MARKER = r"^(<<<<<<< |>>>>>>> |\|\|\|\|\|\|\| |=======$)"
+GIT_GREP_MARKER = r"^(<<<<<<< |>>>>>>> |\|\|\|\|\|\|\| |=======\r?$)"
 
 # The five-track shared merge surface (highest-collision files first).
 DEFAULT_MARKER_PATHS = [
@@ -75,9 +81,15 @@ DEFAULT_MARKER_PATHS = [
 
 
 def git(repo: str, *args: str) -> "subprocess.CompletedProcess[str]":
-    return subprocess.run(
-        ["git", "-C", repo, *args], capture_output=True, text=True, check=False
-    )
+    try:
+        return subprocess.run(
+            ["git", "-C", repo, *args], capture_output=True, text=True, check=False
+        )
+    except OSError as exc:
+        # A missing/unlaunchable git is an io error, not a findings result —
+        # the documented exit contract says 2 (review R2 N5).
+        print(f"integrity: cannot run git ({exc})", file=sys.stderr)
+        sys.exit(2)
 
 
 def uncommented(text: str) -> str:
@@ -105,60 +117,97 @@ def uncommented(text: str) -> str:
     return "\n".join(lines)
 
 
-def _valid_name(name: str) -> bool:
-    if name.startswith("$") or name.startswith('"'):
-        return False  # foreach-computed names are not literal targets
+def _normalize_name(name: str | None) -> str | None:
+    """Canonical registration name, or None when the capture is not one.
+
+    Quoted add_test names ("M2-Challenger: ...") lose their quotes (CMake
+    allows spaces in test names — review R2 N1); foreach-computed ${...}
+    captures, quoted-but-empty names, path arguments of multi-line helpers
+    and exclusion pathspecs are not registrations."""
+    if not name:
+        return None
+    if name.startswith('"'):
+        name = name.strip()
+        if len(name) < 2 or not name.endswith('"'):
+            return None
+        name = name[1:-1]
+        return name or None
+    if name.startswith("$"):
+        return None  # foreach-computed names are not literal registrations
     if "/" in name or name.startswith("!"):
-        return False  # file arguments of multi-line helpers, negations
-    return True
+        return None  # file arguments of multi-line helpers, negations
+    return name
 
 
 def _branch_aware_counts(text: str, pattern: re.Pattern) -> dict[str, int]:
-    """Per-occurrence counts with if/elseif/else branch awareness.
+    """Per-name duplicate maxima with if/elseif/else branch awareness.
 
     CMake's alternative-registration idiom registers the SAME test/target
     name once per exclusive branch (``if(TARGET x) ... else() ...`` — e.g.
     classroom_batch_conformance on master): sibling branches of one if are
     ONE registration at configure time, so their occurrences must not count
-    as duplicates. The key keeps the ancestor branch indexes (registrations
-    under different sibling ifs still collide, as they should) but ignores
-    the branch index of the if the registration sits in.
+    as duplicates. The cell key is (name, full branch-index stack); a
+    duplicate is any single cell holding two or more occurrences (the
+    sequential-paste #1715 class), the same name under two sibling ifs
+    (identical stack), or a name both in a scope AND inside that scope's if
+    (they coexist whenever the condition holds — review R2 N4).
+
+    One-line ``if(A) add_test(...) endif()`` forms are tokenized in order so
+    the registration is attributed to the inner depth and the stack stays
+    balanced (review R2 N4; latent on today's tree, closed anyway).
     """
-    branch = [0]  # stack of current-branch indexes (one per open if)
+    branch = [0]
     cells: dict[tuple, int] = {}
+    keyword = re.compile(r"\b(if\s*\(|elseif\s*\(|else\b|endif\b)")
+
+    def bump(match: "re.Match") -> None:
+        name = _normalize_name(match.group(1))
+        if name is not None:
+            key = (name, tuple(branch))
+            cells[key] = cells.get(key, 0) + 1
 
     for line in uncommented(text).splitlines():
-        stripped = line.strip()
-        if re.match(r"^(elseif|else)\b", stripped):
-            if branch:
-                branch[-1] += 1
-            continue
-        if re.match(r"^if\s*\(", stripped):
-            branch.append(0)
-            continue
-        if re.match(r"^endif\b", stripped):
-            if len(branch) > 1:
-                branch.pop()
-            continue
-        for name in pattern.findall(line):
-            if not _valid_name(name):
+        last = 0
+        for kw in keyword.finditer(line):
+            # registrations before this keyword belong to the current stack
+            for m in pattern.finditer(line, last, kw.start()):
+                bump(m)
+            token = kw.group(0)
+            if token.startswith("elseif") or token == "else":
+                if branch:
+                    branch[-1] += 1
+            elif token.startswith("endif"):
+                if len(branch) > 1:
+                    branch.pop()
+            else:  # if(
+                branch.append(0)
+                # skip past the condition's closing paren so a registration
+                # inside a one-line if(...) body is scanned at the new depth
+                close = line.find(")", kw.end())
+                last = close + 1 if close != -1 else kw.end()
                 continue
-            cells[(name, tuple(branch))] = cells.get((name, tuple(branch)), 0) + 1
-    # A name is registered "effectively once" when every occurrence sits in
-    # a DIFFERENT exclusive branch cell. Duplicate = any single cell holds
-    # two or more occurrences (sequential paste, the #1715 class); the same
-    # name in two separate ifs lands in the SAME cell and collides too.
+            last = kw.end()
+        for m in pattern.finditer(line, last):
+            bump(m)
+
+    # Cell-level duplicates (sequential paste / sibling ifs)…
     per_name_max: dict[str, int] = {}
-    for (name, _sig), count in cells.items():
+    for (name, sig), count in cells.items():
         per_name_max[name] = max(per_name_max.get(name, 0), count)
+    # …plus scope-vs-own-if coexistence: a name registered in a scope AND in
+    # a direct child if of that same scope can be active twice.
+    for (name, sig), _count in list(cells.items()):
+        if len(sig) >= 1 and cells.get((name, sig[:-1]), 0) >= 1:
+            per_name_max[name] = max(per_name_max.get(name, 0), 2)
     return per_name_max
 
 
 def names_in_text(text: str, pattern: re.Pattern) -> set[str]:
     out = set()
     for name in pattern.findall(uncommented(text)):
-        if _valid_name(name):
-            out.add(name)
+        normalized = _normalize_name(name)
+        if normalized is not None:
+            out.add(normalized)
     return out
 
 
@@ -204,8 +253,9 @@ def marker_specs(paths: list[str], whole_tree: bool) -> list[str]:
     # `:!*.md` — exclude shorthand with default magic, where `*` crosses `/`
     # (a `:(glob)!*.md` spelling is glob magic with the LITERAL pattern
     # "!*.md" and excludes nothing — review R1 F1, verified by counterexample
-    # on nested and top-level .md files).
-    specs = [":!*.md"]
+    # on nested and top-level .md files). `*.MD` covers Windows-authored
+    # spellings (review R2 N2; git pathspecs are case-sensitive).
+    specs = [":!*.md", ":!*.MD"]
     if whole_tree:
         specs.append(":/")
     else:
@@ -251,12 +301,12 @@ def scan_markers_on_disk(repo_root: str, paths: list[str], tests_dir: str) -> li
         if os.path.isdir(full):
             for root, _dirs, files in os.walk(full):
                 for f in sorted(files):
-                    if f.endswith(".md"):
+                    if f.lower().endswith(".md"):
                         continue
                     child = os.path.join(root, f)
                     rel_child = os.path.relpath(child, repo_root).replace(os.sep, "/")
                     findings += _marker_hits(child, rel_child)
-        elif os.path.isfile(full) and not rel.endswith(".md"):
+        elif os.path.isfile(full) and not rel.lower().endswith(".md"):
             findings += _marker_hits(full, rel)
     return findings
 

@@ -24,11 +24,11 @@ Guards, each with a real failure mode if the fix regresses:
 """
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 
@@ -190,6 +190,9 @@ class DaemonHarness:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait(timeout=5)
+        # The daemon socket dir is ours alone — clean it (review R2 N3: the
+        # suite used to leak 3 temp dirs per test on every run).
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
 
 @unittest.skipUnless(_numpy_available(),
@@ -203,7 +206,9 @@ class PythonWorkerTypedContracts(unittest.TestCase):
     def setUp(self):
         import worker_daemon  # noqa: F401  (proves the module imports)
         self.marker_dir = tempfile.mkdtemp(prefix="r23e_markers_")
+        self.addCleanup(shutil.rmtree, self.marker_dir, ignore_errors=True)
         plugin_root = tempfile.mkdtemp(prefix="r23e_plugin_")
+        self.addCleanup(shutil.rmtree, plugin_root, ignore_errors=True)
         plugin_dir = os.path.join(plugin_root, "r23e_fixture_plugin")
         os.makedirs(plugin_dir)
         with open(os.path.join(plugin_dir, "__init__.py"), "w") as fh:
