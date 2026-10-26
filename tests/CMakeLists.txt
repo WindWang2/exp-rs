@@ -16805,3 +16805,49 @@ if(UNIX AND OpenCV_FOUND)
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
 # --- end R23-B provider stub-compile registration ---
+
+# ── R23-B: derived output.format head-role/confidence gate (B5 residual) ──
+# Append-only registration block for this track (docs: .planning/zcode-r23-B).
+# Preflight refusal suite for the derived collapse consuming a typed head
+# whose role/confidence contract it violates; same link surface as
+# test_model_runtime (engine + registry live in sicnu_operators).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r23_b_derived_output_roles test_r23_b_derived_output_roles.cpp)
+    target_link_libraries(test_r23_b_derived_output_roles PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r23_b_derived_output_roles)
+    target_include_directories(test_r23_b_derived_output_roles PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r23_b_derived_output_roles)
+endif()
+# --- end R23-B derived-output-roles registration ---
+
+# ── R23-B: run+metric single-transaction oracle (risk A5 closure) ──
+# Append-only registration block for this track (docs: .planning/zcode-r23-B).
+# Atomicity of upsertRunWithMetric under injected run-write failure, conflict/
+# mismatch refusals, and the pre-fix crash-window A/B (forked child, UNIX
+# only). Same light link surface as test_experiment_consistency_r4.
+qt_add_executable(test_r23_b_run_metric_transaction test_r23_b_run_metric_transaction.cpp)
+target_link_libraries(test_r23_b_run_metric_transaction PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_r23_b_run_metric_transaction PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
+# --- end R23-B run-metric-transaction registration ---
