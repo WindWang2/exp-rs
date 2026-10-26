@@ -3375,6 +3375,28 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_model_runtime_9)
 
+    # R22-03 inference track: #1706 multi-class feather accumulator
+    # regression — per-slot buffers, once-per-tile weights, argmax parity,
+    # window-slide isolation, NoData verdicts, uncertainty slot.
+    # Fake provider + synthetic rasters — runs in every OpenCV-enabled build.
+    add_executable(test_r22_inference_feather test_r22_inference_feather.cpp)
+    target_link_libraries(test_r22_inference_feather PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r22_inference_feather)
+    target_include_directories(test_r22_inference_feather PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r22_inference_feather)
+
     # Model Runtime 8.0 WP-A: the REAL ONNX Runtime lane. Built only when the
     # ORT provider is actually compiled in — hosts without the dependency skip
     # the target entirely (honest capability gate, never a fake pass).
