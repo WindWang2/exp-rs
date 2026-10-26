@@ -1,6 +1,6 @@
-// availability.cpp — see availability.h for why Missing and Refused differ.
+// availability.cpp — see verification_availability.h for why Missing and Refused differ.
 
-#include "verification/availability.h"
+#include "verification/verification_availability.h"
 
 namespace sicnu::verification
 {

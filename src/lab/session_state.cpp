@@ -4,6 +4,7 @@
 
 #include "session_state.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace sicnu::lab

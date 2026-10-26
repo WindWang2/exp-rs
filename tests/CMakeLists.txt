@@ -3375,6 +3375,28 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_model_runtime_9)
 
+    # R22-03 inference track: #1706 multi-class feather accumulator
+    # regression — per-slot buffers, once-per-tile weights, argmax parity,
+    # window-slide isolation, NoData verdicts, uncertainty slot.
+    # Fake provider + synthetic rasters — runs in every OpenCV-enabled build.
+    add_executable(test_r22_inference_feather test_r22_inference_feather.cpp)
+    target_link_libraries(test_r22_inference_feather PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r22_inference_feather)
+    target_include_directories(test_r22_inference_feather PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r22_inference_feather)
+
     # Model Runtime 8.0 WP-A: the REAL ONNX Runtime lane. Built only when the
     # ORT provider is actually compiled in — hosts without the dependency skip
     # the target entirely (honest capability gate, never a fake pass).
@@ -16456,3 +16478,18 @@ target_link_libraries(test_r22_data_security_consistency PRIVATE
     SQLite::SQLite3
 )
 # ── end R22-02 registrations ──
+
+# ── R22-07 (r22-infra): build/install/test-credibility hardening ──
+# Append-only registration block for this track's suites (docs:
+# .planning/r22-infra). #1697: pins build_offline_bundle.sh's --version
+# guard (traversal battery + legal/space/symlink/incremental legs). Pure
+# POSIX shell invoked through the interpreter (repo precedent for script
+# tests; no exec-bit dependency), POSIX-only hosts only — the Windows twin
+# (.cmd) is smoke-checked in the tier3 CI job instead.
+if(UNIX)
+  add_test(NAME test_r22_infra_bundle_guard
+    COMMAND sh "${CMAKE_SOURCE_DIR}/tests/test_r22_infra_bundle_guard.sh" --repo-root "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(test_r22_infra_bundle_guard PROPERTIES
+    TIMEOUT 120
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()

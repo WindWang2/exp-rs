@@ -25,14 +25,14 @@
   returning a sentinel value: every non-answer must be classified, because
   Missing and Refused drive different failure codes
   (VERIFY.EVIDENCE_UNAVAILABLE vs VERIFY.EVIDENCE_REFUSED) and a check reading
-  either one becomes Indeterminate. See availability.h for why that matters.
+  either one becomes Indeterminate. See verification_availability.h for why that matters.
 
   @p reason carries the provider's own explanation and is meaningful mainly for
   Refused; it lands in evidence.details so the human report can quote it.
  ***************************************************************************/
 #pragma once
 
-#include "verification/availability.h"
+#include "verification/verification_availability.h"
 
 #include <json/json.h>
 
