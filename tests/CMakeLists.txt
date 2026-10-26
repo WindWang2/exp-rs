@@ -16466,6 +16466,76 @@ sicnu_add_teaching_test(test_r15_E_teaching_stats_honesty)
 sicnu_add_teaching_admin_test(test_r15_E_batch_refusal_accounting)
 # --- end R20-05 restored registrations ---
 
+<<<<<<< HEAD
+# --- R22-04 (r22-agent, #1704): GDAL driver-prefix connection strings vs the
+# workspace sandbox. Light binary: the containment policy is header-only, so
+# Catch2 + Qt Core suffice (no qgis/GDAL chain) — mirrors the CLI pipeline
+# runner's use of the same header.
+qt_add_executable(test_r22_agent_containment test_r22_agent_containment.cpp)
+target_link_libraries(test_r22_agent_containment PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r22_agent_containment PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_agent_containment)
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1690): env-key splice validation + manifest-time
+# env-name charset gate. Light SDK binary (Catch2 + sicnu_sdk).
+sicnu_add_sdk_test(test_r22_agent_env_keys)
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1692): oversized IPC response lines must fail their
+# pending request immediately instead of hanging to the caller timeout.
+# Own main (QCoreApplication + Catch::Session), same link set as the python
+# channel tests (test_runtime_python_channel_r4).
+qt_add_executable(test_r22_agent_ipc test_r22_agent_ipc.cpp)
+target_link_libraries(test_r22_agent_ipc PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Network
+  sicnu_python_isolated
+  sicnu_jobs
+  sicnu_qgis_display
+  sicnu_processing
+  sicnu_operators
+  qgis_core
+)
+target_include_directories(test_r22_agent_ipc PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_agent_ipc)
+# R1-F6 note: test_r22_agent_ghost_algo spawns the REAL worker daemon
+# (subprocess python via PythonWorkerProcessPool) and needs a python with
+# numpy — set SICNU_PYTHON_EXECUTABLE when the system python lacks it.
+# test_r22_agent_ipc drives PythonIpcServer through an in-process fake
+# QLocalSocket worker (no daemon). Neither uses the embedded interpreter, so
+# both stay outside the if(SICNU_EMBED_PYTHON) gate; on a lane without any
+# numpy-capable python, expect ghost_algo to fail on daemon startup rather
+# than be skipped.
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1705): bounded JobEngine log retention. Same link
+# shape as test_job_engine (jobs + operators registry chain).
+add_executable(test_r22_agent_job_logs test_r22_agent_job_logs.cpp)
+target_link_libraries(test_r22_agent_job_logs PRIVATE Catch2::Catch2WithMain sicnu_jobs)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r22_agent_job_logs PRIVATE sicnu_operators)
+endif()
+target_include_directories(test_r22_agent_job_logs PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_r22_agent_job_logs)
+# --- end R22-04 registration ---
+
+# --- R22-04 (r22-agent, #1691): timed-out plugin loads must revoke their
+# py: registrations. Spawns the real worker daemon (RUN_SERIAL, mirrors
+# test_python_plugin_host).
+qt_add_executable(test_r22_agent_ghost_algo test_r22_agent_ghost_algo.cpp)
+target_link_libraries(test_r22_agent_ghost_algo PRIVATE
+=======
 # --- R22-05 (r22-workbench) async runner lifecycle contract (#1695 item 1) ---
 # Append-only registration. The runner implementations are compiled directly
 # into the test (deprecated legacy types not built into any library), mirroring
@@ -16537,10 +16607,28 @@ add_executable(test_r22_workbench_log_tagfilter
   ${CMAKE_SOURCE_DIR}/tests/test_log_panel_main.cpp
 )
 target_link_libraries(test_r22_workbench_log_tagfilter PRIVATE
+>>>>>>> origin/master
   Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+<<<<<<< HEAD
+  sicnu_python_isolated
+  Sicnu::qgis_display
+  sicnu_processing
+  sicnu_operators
+  Sicnu::data
+  qgis_core
+  GDAL::GDAL
+)
+target_include_directories(test_r22_agent_ghost_algo PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/python/isolated
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r22_agent_ghost_algo RUN_SERIAL TRUE)
+# --- end R22-04 registration ---
+=======
   qgis_core
   qgis_gui
   sicnu_processing
@@ -16657,3 +16745,4 @@ if(UNIX)
     TIMEOUT 120
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
+>>>>>>> origin/master

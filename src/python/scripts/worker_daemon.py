@@ -786,6 +786,27 @@ def main():
                     if encoded is None:
                         encoded = json.dumps(resp)
                     payload = (encoded + "\n").encode("utf-8")
+                    # #1692: the host frame reader drops any line above
+                    # 1 MiB (and severs the connection above 4 MiB). A large
+                    # algorithm result used to become a silently dropped
+                    # frame whose caller then hung until its 300 s timeout —
+                    # or, worse, a "crashed worker" replay that re-ran the
+                    # algorithm. Answer with a typed error instead: large
+                    # payloads belong behind a file/shared-memory reference.
+                    if len(payload) > 1048576:
+                        err_resp = {
+                            "jsonrpc": "2.0",
+                            "id": resp.get("id"),
+                            "error": {
+                                "code": -32001,
+                                "message": (
+                                    f"response of {len(payload)} bytes exceeds the "
+                                    "1 MiB IPC line limit; return large results "
+                                    "via a file/shared-memory reference"
+                                ),
+                            },
+                        }
+                        payload = (json.dumps(err_resp) + "\n").encode("utf-8")
                     s.sendall(payload)
                 except Exception as ex:
                     sys.stderr.write(f"WorkerDaemon processing error: {ex}\n")

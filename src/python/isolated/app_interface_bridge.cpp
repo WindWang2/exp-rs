@@ -285,6 +285,22 @@ AppInterfaceBridge::AppInterfaceBridge( sicnu::data::DataManager *dataManager, A
 {
 }
 
+AppInterfaceBridge::~AppInterfaceBridge()
+{
+  // #1691: last-resort net — unload() and the adapter's load-failure path
+  // revoke explicitly; anything that discards a bound bridge without going
+  // through them must not leave ghost py: entries behind. Idempotent (empty
+  // list is a no-op) and IPC-free, so it is safe at destruction time; a
+  // throwing registry is swallowed — destruction must not propagate.
+  try
+  {
+    unregisterRegisteredAlgorithms();
+  }
+  catch ( ... )
+  {
+  }
+}
+
 void AppInterfaceBridge::setDataManager( sicnu::data::DataManager *dataManager )
 {
   m_dataManager = dataManager;

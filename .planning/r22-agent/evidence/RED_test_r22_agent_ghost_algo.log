@@ -1,0 +1,30 @@
+Randomness seeded to: 1819964725
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+test_r22_agent_ghost_algo is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+a timed-out plugin load leaves no ghost py: algorithm (#1691)
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_ghost_algo.cpp:83
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_ghost_algo.cpp:115: FAILED:
+  CHECK_FALSE( ghostRegistered() )
+with expansion:
+  !true
+with message:
+  load error: Python plugin initialization failed: Stall Plugin
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_ghost_algo.cpp:118: FAILED:
+  CHECK_FALSE( ghostRegistered() )
+with expansion:
+  !true
+with message:
+  load error: Python plugin initialization failed: Stall Plugin
+
+===============================================================================
+test cases: 1 | 1 failed
+assertions: 7 | 5 passed | 2 failed
+

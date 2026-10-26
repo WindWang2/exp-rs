@@ -1,0 +1,163 @@
+Randomness seeded to: 536458459
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+test_r22_agent_containment is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+GDAL driver-prefixed connection strings cannot escape the workspace (#1704)
+  file-backed driver prefixes reading outside are rejected
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:80
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:83: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "CSV:/etc/passwd"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:84: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "CSV:"))) + secretCsv, wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:85: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "csv:"))) + secretCsv, wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:86: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "GPKG:"))) + secretGpkg + (QString(QtPrivate::qMakeStringPrivate(u"" ":layer"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:88: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "NETCDF:\""))) + outside.filePath( (QString(QtPrivate::qMakeStringPrivate(u"" "x.nc"))) ) + (QString(QtPrivate::qMakeStringPrivate(u"" "\":var"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:92: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "SQLite:"))) + secretGpkg, wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:95: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "CSV:../escape.csv"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:97: FAILED:
+  CHECK( detail.contains( (QString(QtPrivate::qMakeStringPrivate(u"" "GDAL connection string"))) ) )
+with expansion:
+  false
+
+-------------------------------------------------------------------------------
+GDAL driver-prefixed connection strings cannot escape the workspace (#1704)
+  network driver prefixes follow the remote default-deny
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:100
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:103: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WMS:http://169.254.169.254/latest/meta-data/"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:105: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "PG:host=attacker dbname=x"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:107: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "pg:host=attacker"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:109: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WFS:http://example.com/f"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:111: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "MSSQL:server=srv db=x"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:113: FAILED:
+  CHECK( detail.contains( (QString(QtPrivate::qMakeStringPrivate(u"" "SICNU_MCP_ALLOW_REMOTE"))) ) )
+with expansion:
+  false
+
+-------------------------------------------------------------------------------
+GDAL driver-prefixed connection strings cannot escape the workspace (#1704)
+  unknown driver prefixes with dangerous payloads are denied
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:122
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:125: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "BOGUSDRV:/etc/passwd"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:127: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "BOGUS:\""))) + secretCsv + (QString(QtPrivate::qMakeStringPrivate(u"" "\""))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:130: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WEIRDDRV:host=attacker"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:132: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WEIRDDRV:server=x port=5432"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:134: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WEIRDDRV:../up.csv"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:136: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WEIRDDRV:<xml>config</xml>"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:138: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WEIRDDRV:~/x"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:140: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WEIRDDRV:/vsicurl/http://x/y.json"))), wsRoot, &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:142: FAILED:
+  CHECK( detail.contains( (QString(QtPrivate::qMakeStringPrivate(u"" "Unknown GDAL driver prefix"))) ) )
+with expansion:
+  false
+
+-------------------------------------------------------------------------------
+GDAL driver-prefixed connection strings cannot escape the workspace (#1704)
+  no-workspace mode still applies the scheme policy
+-------------------------------------------------------------------------------
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:187
+...............................................................................
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:194: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "WMS:http://x/y"))), QString(), &detail ) )
+with expansion:
+  false
+
+/home/kevin/project/exp-rs-r22-agent-20261025T164309Z/tests/test_r22_agent_containment.cpp:196: FAILED:
+  CHECK( containment::pathOutsideWorkspace( (QString(QtPrivate::qMakeStringPrivate(u"" "PG:host=attacker"))), QString(), &detail ) )
+with expansion:
+  false
+
+===============================================================================
+test cases:  1 |  0 passed |  1 failed
+assertions: 50 | 25 passed | 25 failed
+

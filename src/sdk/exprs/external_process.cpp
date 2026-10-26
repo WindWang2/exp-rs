@@ -108,6 +108,21 @@ std::string dangerousEnvironmentKey( const ExternalProcessRequest &request )
         return {};
     for ( const std::string &name : request.environment.getMemberNames() )
     {
+        // #1690: the child envp entry is assembled as key + "=" + value and
+        // the loader/OS splits at the FIRST '='. A key that itself contains
+        // '=' therefore becomes a DIFFERENT variable in the child — the key
+        // "LD_PRELOAD=/x.so " (value arbitrary) spliced into the envp as
+        // "LD_PRELOAD=/x.so =v" made ld.so preload /x.so while the exact-
+        // match deny-list below saw only the full string. Empty names and
+        // embedded NULs splice the same way (or truncate the entry); no
+        // POSIX or Windows environment legitimately carries them. Refuse
+        // with the same E5007 channel before any comparison. The empty key
+        // reports a descriptive marker (the raw key would read as "clean").
+        if ( name.empty() )
+            return std::string( "<empty environment key>" );
+        if ( name.find( '=' ) != std::string::npos
+             || name.find( '\0' ) != std::string::npos )
+            return name;
         std::string upper;
         upper.reserve( name.size() );
         for ( const char c : name )
@@ -622,8 +637,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( !injector.empty() )
         {
             result.refusedByPolicy = true;
+            // R1-F7: the refusal covers BOTH deny-list hits (loader-class
+            // names) and malformed names (empty/'='/NUL — they splice the
+            // child envp entry into a different variable); say so.
             result.error = "env_injection (E5007): explicit environment key '" + injector
-                           + "' influences the dynamic linker and is refused";
+                           + "' is a loader-injection or malformed envp name and is refused";
             return result;
         }
     }
@@ -1153,8 +1171,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( !injector.empty() )
         {
             result.refusedByPolicy = true;
+            // R1-F7: the refusal covers BOTH deny-list hits (loader-class
+            // names) and malformed names (empty/'='/NUL — they splice the
+            // child envp entry into a different variable); say so.
             result.error = "env_injection (E5007): explicit environment key '" + injector
-                           + "' influences the dynamic linker and is refused";
+                           + "' is a loader-injection or malformed envp name and is refused";
             return result;
         }
     }
