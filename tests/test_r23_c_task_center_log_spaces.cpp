@@ -132,7 +132,6 @@ TEST_CASE( "engine-internal cumulative appends still deliver after eviction (#17
                              [&parked, kChattyLines]( const JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
         for ( int i = 0; i < kChattyLines; ++i )
             ctx.logInfo( "abs " + std::to_string( i ) );
-        ctx.setProgress( 0.5 );
         parked.released.wait();
         Json::Value r( Json::objectValue );
         r["output"] = "parked-done";

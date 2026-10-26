@@ -57,12 +57,6 @@ target_link_libraries(sicnu_teaching_admin
     sicnu_grader
 )
 
-# #1695-17e (r23-C): publishBatchOutputsAtomic stages the JSON/CSV pair and
-# publishes it through the atomic_fs member-commit seam (journalled backups +
-# rollback). PRIVATE: used from batch_assessment.cpp only; the objects are
-# already in every final link through sicnu_data's PRIVATE edge.
-target_link_libraries(sicnu_teaching_admin PRIVATE sicnu_geospatial)
-
 foreach(SICNU_TA_FORBIDDEN_LINK Qt6::Widgets qgis_gui Qt6::Network Sicnu::app)
   get_target_property(SICNU_TA_DIRECT_LINKS sicnu_teaching_admin LINK_LIBRARIES)
   if(SICNU_TA_FORBIDDEN_LINK IN_LIST SICNU_TA_DIRECT_LINKS)
