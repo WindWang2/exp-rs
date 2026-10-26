@@ -12,3 +12,4 @@
 
 ## 卡壳升级记录
 （连续 3 轮未通过时强制换假说；8 轮重审需求。当前无。）
+| 8 | 交付门：check_whitelist.sh PASS（纯追加/0 标记）+ 最终门 5/5 绿 + fetch 复查（master 未漂移；PR #1716 交集仅 tests/CMakeLists.txt append 块）+ push + **PR #1717 创建并 gh pr view 验证（OPEN/非 draft/base=master/head=044952b74）** | O0-O8 全勾（FINAL_REPORT.md） | 通过（交付） | 完成；PR 不自动合并 |

@@ -28,10 +28,11 @@
 - [x] **O7** 文档/测试/实现一致；无 mock-only、无永久 TODO、无空断言（R1 §D 逐条审查）、无假性能数据、无越权子进程
 - [x] **O8** PR 已提交（非 draft、base=master）——见下方回填（push 后）
 
-## PR 状态（push 后回填）
-- PR #____：https://github.com/WindWang2/exp-rs/pull/____
-- head SHA：____（4+1 提交）；gh pr view 证实 OPEN / 非 draft / base=master
-- push 前重查：origin/master=ad98a7a70 未漂移 / OpenPR=0 / 无新兄弟 worktree（时间戳见 PR_COLLISION_MATRIX.md）
+## PR 状态（已验证）
+- **PR #1717：https://github.com/WindWang2/exp-rs/pull/1717**
+- `gh pr view` 实测：state=OPEN、draft=false、base=master、head=agent/r23-d-lab-grading-evidence-20261026T165151Z@044952b74d917c4bdff5ea951dd6865bb0bda68a（5 提交：069fc43c4 RED → 2be7bc258 规则 → 7365c991a 修复 → ed30c9790 R1 修复 → 044952b74 账本）
+- push 前重查（2026-10-27 08:0x 本地）：origin/master=ad98a7a70 未漂移；Open PR=1（#1716 r23-E，交集仅 tests/CMakeLists.txt 双方 append 块，并集解法已记录）；无兄弟本地 worktree 写入
+- 不等待远端 CI（协议约定）；不自动合并、不删分支、不清理 worktree
 
 ## 资源消耗
 - 构建：3300+ 编译单元（两次大构建 + 多次增量），-j2 默认、协议条款内短暂 -j4，全程 free RAM ≥6.8GB 实测，无 OOM
