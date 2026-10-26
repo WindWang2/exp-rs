@@ -16486,12 +16486,14 @@ target_include_directories(test_r22_agent_ipc PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r22_agent_ipc)
-# R1-F6 note: the R22-04 ghost/ipc binaries spawn the REAL worker daemon
-# (subprocess python via PythonWorkerProcessPool), which needs a python with
-# numpy — SICNU_PYTHON_EXECUTABLE when the system python lacks it. They do
-# NOT use the embedded interpreter, so they stay outside the
-# if(SICNU_EMBED_PYTHON) gate; on a lane without any numpy-capable python,
-# expect these two to fail on daemon startup rather than be skipped.
+# R1-F6 note: test_r22_agent_ghost_algo spawns the REAL worker daemon
+# (subprocess python via PythonWorkerProcessPool) and needs a python with
+# numpy — set SICNU_PYTHON_EXECUTABLE when the system python lacks it.
+# test_r22_agent_ipc drives PythonIpcServer through an in-process fake
+# QLocalSocket worker (no daemon). Neither uses the embedded interpreter, so
+# both stay outside the if(SICNU_EMBED_PYTHON) gate; on a lane without any
+# numpy-capable python, expect ghost_algo to fail on daemon startup rather
+# than be skipped.
 # --- end R22-04 registration ---
 
 # --- R22-04 (r22-agent, #1705): bounded JobEngine log retention. Same link

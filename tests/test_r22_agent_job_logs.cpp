@@ -186,11 +186,12 @@ TEST_CASE( "oversized single log lines are truncated, not stored verbatim (#1705
   auto snap = eng.snapshot( id );
   REQUIRE( snap.has_value() );
   REQUIRE( snap->state == JobState::Succeeded );
+  INFO( "retained lines: " << snap->logLines.size()
+        << " dropped: " << snap->droppedLogLines );
   REQUIRE( snap->droppedLogLines == 0 );
   // Started, truncated fat line, "small", Succeeded — in order.
   REQUIRE( snap->logLines.size() == 4 );
   const std::string &fat = snap->logLines[1].text;
-  INFO( "fat line retained size: " << fat.size() );
   REQUIRE( fat.size() < 8 * 1024 );
   REQUIRE( fat.find( "[truncated" ) != std::string::npos );
   REQUIRE( fat.find( "small" ) == std::string::npos );

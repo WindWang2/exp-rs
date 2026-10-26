@@ -200,15 +200,18 @@ struct ReferenceVerdict
 /// absolute/remote embeddings cannot escape (#1704).
 inline bool isFileBackedGdalDriver( const QString &driver )
 {
+    // R2: entries must be the driver's SHORT NAME as it appears in a
+    // connection string. Space-bearing display names ("ESRI Shapefile",
+    // "MapInfo File") can never match gdalDriverPrefixOf() and were removed;
+    // "tiledbspatial" was a wrong guess — the real short name is "TileDB".
     static const QSet<QString> drivers = {
         QStringLiteral( "csv" ), QStringLiteral( "gpkg" ), QStringLiteral( "sqlite" ),
         QStringLiteral( "openfilegdb" ), QStringLiteral( "filegdb" ),
-        QStringLiteral( "esri shapefile" ), QStringLiteral( "mapinfo file" ),
         QStringLiteral( "kml" ), QStringLiteral( "geojson" ), QStringLiteral( "geojsonseq" ),
         QStringLiteral( "georss" ), QStringLiteral( "gpx" ), QStringLiteral( "ogr_gmt" ),
         QStringLiteral( "ogr_pds" ), QStringLiteral( "ogr_sdts" ), QStringLiteral( "ogr_vrt" ),
         QStringLiteral( "vrt" ), QStringLiteral( "netcdf" ), QStringLiteral( "hdf5" ),
-        QStringLiteral( "hdf4" ), QStringLiteral( "zarr" ), QStringLiteral( "tiledbspatial" ),
+        QStringLiteral( "hdf4" ), QStringLiteral( "zarr" ), QStringLiteral( "tiledb" ),
         QStringLiteral( "pdf" ), QStringLiteral( "cad" ), QStringLiteral( "dxf" ),
         QStringLiteral( "dwg" ), QStringLiteral( "ogr_ods" ), QStringLiteral( "ogr_xlsx" ),
         QStringLiteral( "ogr_xls" ), QStringLiteral( "jml" ), QStringLiteral( "svgp" ),
@@ -228,7 +231,12 @@ inline bool isNetworkGdalDriver( const QString &driver )
         QStringLiteral( "wfs" ), QStringLiteral( "wfs3" ), QStringLiteral( "oapif" ),
         QStringLiteral( "ogcapi" ), QStringLiteral( "pg" ), QStringLiteral( "postgresql" ),
         QStringLiteral( "mysql" ), QStringLiteral( "mssql" ), QStringLiteral( "mssqlspatial" ),
-        QStringLiteral( "oracle" ), QStringLiteral( "odbc" ), QStringLiteral( "elasticsearch" ),
+        // R2-F1: "oracle" was a display-name guess — the connection-string
+        // short name is "OCI" (OCI:usr/pwd@db), same class as PG:. Cloud/
+        // service drivers verified by short name: EEDA, AmigoCloud,
+        // GeoRaster.
+        QStringLiteral( "oci" ), QStringLiteral( "eeda" ), QStringLiteral( "amigocloud" ),
+        QStringLiteral( "georaster" ), QStringLiteral( "odbc" ), QStringLiteral( "elasticsearch" ),
         QStringLiteral( "carto" ), QStringLiteral( "cartodb" ), QStringLiteral( "gft" ),
         QStringLiteral( "mongodb" ), QStringLiteral( "mongodbv3" ), QStringLiteral( "plmos" ),
         QStringLiteral( "daas" ), QStringLiteral( "coap" ),
@@ -305,7 +313,8 @@ inline bool unknownDriverPayloadIsDangerous( const QString &rest )
     static const QStringList kvKeys = { QStringLiteral( "host=" ), QStringLiteral( "server=" ),
                                         QStringLiteral( "url=" ), QStringLiteral( "dbname=" ),
                                         QStringLiteral( "database=" ), QStringLiteral( "user=" ),
-                                        QStringLiteral( "service=" ), QStringLiteral( "port=" ) };
+                                        QStringLiteral( "service=" ), QStringLiteral( "port=" ),
+                                        QStringLiteral( "path=" ), QStringLiteral( "driver=" ) };
     for ( const QString &key : kvKeys )
         if ( lowered.startsWith( key ) || lowered.contains( QLatin1Char( ' ' ) + key ) )
             return true;
@@ -340,7 +349,7 @@ inline QString gdalDriverPrefixOf( const QString &pathValue )
 /// Scheme classification of a caller-supplied data reference. This runs
 /// whether or not a workspace root is configured, so remote access stays
 /// default-deny even for surfaces that have no filesystem sandbox.
-inline ReferenceVerdict classifyReference( const QString &pathValue )
+inline ReferenceVerdict classifyReference( const QString &pathValue, int depth = 0 )
 {
     ReferenceVerdict verdict;
     const QString trimmed = pathValue.trimmed();
@@ -407,10 +416,23 @@ inline ReferenceVerdict classifyReference( const QString &pathValue )
             // R1-F2: a payload that is ITSELF driver-shaped (CSV:GPKG:/abs,
             // CSV:s3://bucket) is a nested connection string — classify it
             // recursively instead of splitting it at the first ':' and
-            // "verifying" a fragment GDAL will never open. The recursion
-            // strips exactly one prefix per level, so it terminates.
+            // "verifying" a fragment GDAL will never open. R2-F2: the
+            // recursion strips exactly one prefix per level but a crafted
+            // "KML:"*100000 reference (a tenth of the 4 MiB frame cap)
+            // overflowed the stack — cap the depth and fail closed beyond
+            // it; legitimate nesting never exceeds a handful of levels.
             if ( !gdalDriverPrefixOf( rest ).isEmpty() )
-                return classifyReference( rest );
+            {
+                if ( depth >= 8 )
+                {
+                    verdict.kind = ReferenceKind::Denied;
+                    verdict.reason = QStringLiteral( "GDAL connection string nests more than "
+                                                     "8 driver prefixes; rejecting: %1" )
+                                         .arg( pathValue );
+                    return verdict;
+                }
+                return classifyReference( rest, depth + 1 );
+            }
             const QString embedded = embeddedDriverPath( rest );
             if ( embedded.isEmpty() )
             {

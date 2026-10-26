@@ -44,3 +44,19 @@
 ## NOT_EXECUTED（构建车道门控）
 
 - test_python_plugin_host / test_python_plugin_manager / test_plugin_host：注册于 `if(SICNU_EMBED_PYTHON)` 块内，本车道 SICNU_EMBED_PYTHON=OFF（与 R21-C 相同车道）。替代覆盖：#1691 由 test_r22_agent_ghost_algo（真实 worker_daemon 子进程 + AlgorithmEngine python_plugins provider 全链路）承担；#755 成功卸载路径代码未被本轨触碰（unload() 既有撤销逻辑原样）。
+
+## R2 修复后最终双跑（2026-10-26）
+
+| 测试 | Pass1 | Pass2 |
+|---|---|---|
+| test_r22_agent_containment | exit0，78 断言/2 例（+R2 用例：OCI/EEDA/AmigoCloud/GeoRaster/TileDB/50 层嵌套拒绝） | exit0，78/2 |
+| test_r22_agent_env_keys | exit0，46/4 | exit0，46/4 |
+| test_r22_agent_job_logs | exit0，24031/4 | exit0，24031/4 |
+| test_r22_agent_ipc | exit0，17/2 | exit0，17/2 |
+| test_r22_agent_ghost_algo | exit0，7/1 | exit0，7/1 |
+| test_job_engine | exit0，446/34（单跑） | — |
+| test_mcp_server | exit0，9686/31（单跑） | — |
+
+## KNOWN_BASELINE_FLAKY（与本轨无关，三方证据）
+
+- test_task_center "cancel in the launch submit window…(#1454)"（test_task_center.cpp:1758，20 次迭代取消竞态）：本会话早期绿、后期红（同二进制）；HEAD 状态回退验证同红；**纯 master 二进制（R21-C 车道构建）同刻同断言红**（/tmp/tc-r21c-master.log）。结论：环境态敏感的既有 flaky，非本轨回归。其余 33 例全绿。

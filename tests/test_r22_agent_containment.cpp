@@ -110,6 +110,15 @@ TEST_CASE( "GDAL driver-prefixed connection strings cannot escape the workspace 
                                                   &detail ) );
         CHECK( containment::pathOutsideWorkspace( QStringLiteral( "MSSQL:server=srv db=x" ), wsRoot,
                                                   &detail ) );
+        // R2-F1: the connection-string SHORT names, not display names —
+        // OCI is the Oracle driver ("oracle" never matched anything).
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "OCI:usr/pwd@db" ), wsRoot,
+                                                  &detail ) );
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "EEDA:..." ), wsRoot, &detail ) );
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "AmigoCloud:token" ), wsRoot,
+                                                  &detail ) );
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "GeoRaster:usr/pwd@db" ), wsRoot,
+                                                  &detail ) );
         CHECK( detail.contains( QStringLiteral( "SICNU_MCP_ALLOW_REMOTE" ) ) );
         // With the opt-in flag the SAME connection follows the remote policy
         // (allowed class, not a workspace path) — parity with http(s)://.
@@ -151,6 +160,23 @@ TEST_CASE( "GDAL driver-prefixed connection strings cannot escape the workspace 
             QStringLiteral( "CSV:GPKG:/etc/x.gpkg" ), wsRoot, &detail ) );
         CHECK( containment::pathOutsideWorkspace(
             QStringLiteral( "CSV:CSV:/etc/passwd" ), wsRoot, &detail ) );
+        // R2-F2: pathological nesting is a typed refusal, never a stack
+        // overflow ("KML:"x100000 used to SIGSEGV at a tenth of the frame
+        // cap). 50 levels >> the 8-level cap.
+        {
+            QString deep;
+            for ( int i = 0; i < 50; ++i )
+                deep += QStringLiteral( "KML:" );
+            deep += QStringLiteral( "x" );
+            CHECK( containment::pathOutsideWorkspace( deep, wsRoot, &detail ) );
+            CHECK( detail.contains( QStringLiteral( "nests more than" ) ) );
+        }
+        // TileDB by its real short name: relative local payload stays a
+        // contained workspace reference; s3 payload is remote (denied).
+        CHECK( containment::pathOutsideWorkspace( QStringLiteral( "TileDB:s3://b/a" ), wsRoot,
+                                                  &detail ) );
+        CHECK_FALSE( containment::pathOutsideWorkspace( QStringLiteral( "TileDB:arr.tdb" ), wsRoot,
+                                                          &detail ) );
         // A nested /vsicurl inside an unknown driver is still remote input.
         CHECK( containment::pathOutsideWorkspace( QStringLiteral( "WEIRDDRV:/vsicurl/http://x/y.json" ),
                                                   wsRoot, &detail ) );
