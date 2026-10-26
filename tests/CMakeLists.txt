@@ -16817,3 +16817,24 @@ target_compile_definitions(test_r23_e_plugin_typed_gates PRIVATE
 )
 add_dependencies(test_r23_e_plugin_typed_gates isolation_plugin exprs_plugin_host_worker)
 # --- end R23-E registration ---
+
+# --- R23-E WP5: native terminal lifecycle contract (#1618 guard) — Linux
+# only (QgsLinuxNative compiles nowhere else). Probe terminals on PATH
+# record argv + cwd; startDetached is async, hence RUN_SERIAL.
+if(UNIX AND NOT APPLE)
+  qt_add_executable(test_r23_e_native_terminal test_r23_e_native_terminal.cpp)
+  target_link_libraries(test_r23_e_native_terminal PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::DBus
+    qgis_native
+  )
+  target_include_directories(test_r23_e_native_terminal PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_r23_e_native_terminal RUN_SERIAL TRUE
+    TEST_PREFIX "test_r23_e_native_terminal::")
+endif()
+# --- end R23-E WP5 registration ---
