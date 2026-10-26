@@ -1,6 +1,8 @@
 // feature_matcher.cpp — D14 Package D implementation (ADR 0159).
 #include "processing/algorithms/feature_matcher.h"
 
+#include "processing/algorithms/portable_random.h"
+
 #include "processing/algorithms/detail/linalg.hpp"
 
 #include <algorithm>
@@ -222,9 +224,11 @@ FeatureMatcher::estimateHomographyRansac(const std::vector<std::pair<double, dou
     if (srcPts.size() != dstPts.size() || srcPts.size() < 4)
         return {identity, std::vector<bool>(srcPts.size(), false)};
 
-    // Degenerate guard: 4 collinear anchors can never define H.
+    // Degenerate guard: 4 collinear anchors can never define H. Sample
+    // indices come from the portable fixed-algorithm draw (#1685):
+    // std::uniform_int_distribution is implementation-defined, so RANSAC
+    // would pick different minimal sets on each STL for seed 42.
     std::mt19937 rng(42u);
-    std::uniform_int_distribution<size_t> pick(0, srcPts.size() - 1);
 
     std::array<double, 9> bestH = identity;
     std::vector<bool> bestMask(srcPts.size(), false);
@@ -238,7 +242,7 @@ FeatureMatcher::estimateHomographyRansac(const std::vector<std::pair<double, dou
         // Sample 4 distinct indices.
         sample.clear();
         while (sample.size() < 4) {
-            const size_t idx = pick(rng);
+            const size_t idx = rs::algorithms::portable::uniformIndex( rng, srcPts.size() );
             if (std::find(sample.begin(), sample.end(), idx) == sample.end())
                 sample.push_back(idx);
         }

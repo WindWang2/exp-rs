@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/endmember_extraction.h"
+#include "processing/algorithms/portable_random.h"
 #include "processing/algorithms/spectral_table.h"
 #include "processing/algorithms/spectral_wavelength.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -21,6 +22,10 @@
 #include <random>
 #include <unordered_set>
 #include <vector>
+
+// Absolute-path alias: this TU lives in sicnu::operators::rs, where a
+// relative rs::algorithms lookup would resolve against the wrong namespace.
+namespace r22portable = ::rs::algorithms::portable;
 
 namespace sicnu::operators::rs {
 
@@ -239,9 +244,10 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
         mean[b] /= static_cast<double>(validPixelCount);
 
     // Random projection directions — identical sequence to the full-scene
-    // kernel (mt19937(42), std::normal_distribution, per-projection normalize).
+    // kernel (mt19937(42), portable normal01 Box-Muller, per-projection
+    // normalize). normal01 replaces std::normal_distribution (#1685),
+    // whose algorithm is implementation-defined and differed across STLs.
     std::mt19937 rng(42);
-    std::normal_distribution<double> normal(0.0, 1.0);
     std::vector<std::vector<double>> dirs(static_cast<size_t>(projections),
                                           std::vector<double>(bandCount));
     std::vector<bool> dirValid(static_cast<size_t>(projections), true);
@@ -250,7 +256,8 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
         double norm = 0.0;
         for (int b = 0; b < bandCount; ++b)
         {
-            dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)] = normal(rng);
+            dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)] =
+                r22portable::normal01(rng);
             norm += dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)]
                     * dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)];
         }
