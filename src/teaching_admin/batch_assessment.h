@@ -188,7 +188,10 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
 /// the previous pair intact. Returns false when the pair was not published
 /// — a squatting directory on either final path, a staging/publish/rollback
 /// failure, or (commit-marker corner) a landed-but-unproven pair that a
-/// retry re-publishes idempotently. The two artifacts can never disagree.
+/// retry re-publishes idempotently. Single-writer contract (the console
+/// serializes publishes; concurrent same-prefix publishes and a rollback
+/// whose .bak restore itself failed are the authority's residual corners),
+/// and outPrefix must carry its directory (app callers always pass one).
 bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QString &outPrefix );
 
 /// Fail-closed loader for a PUBLISHED batch report document (`<prefix>.json`).

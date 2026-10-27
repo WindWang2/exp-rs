@@ -643,7 +643,7 @@ private:
     QList<PendingLog> m_pendingLogs;
     QMap<std::string, long> m_taskByJobId; ///< jobId → taskId, listener dispatch (ADR 0051)
     QMap<long, FusedChainBinding> m_fusedChains; ///< head taskId → members (Phase C)
-    QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key (logLines.size())
+    QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key: count of ABSOLUTE engine log lines already forwarded (delta offsets and cumulative droppedLogLines+size share this space)
     QMap<long, double> m_lastForwardedProgress; ///< per-task progress dedup
     QMap<long, QMap<long, TaskCompletionCallback>> m_completionCallbacks; ///< per-task terminal callbacks
     /// Per-task cached RAM estimate (#702): the registry-backed resolver runs

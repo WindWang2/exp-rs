@@ -2051,7 +2051,10 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
             // REVIEW_R2 R2-F3/F6): compare and store droppedLogLines +
             // size(), and slice the window from max(forwarded, dropped).
             // Without eviction (dropped == 0) this degenerates exactly to
-            // the historical slice [forwarded, size()).
+            // the historical slice [forwarded, size()). A forwarded <
+            // dropped gap means lines the retention already evicted before
+            // any consumer saw them — unrecoverable by design, the slice
+            // then starts at the window's front.
             const std::size_t absTotal = record.droppedLogLines + record.logLines.size();
             if ( absTotal > forwarded )
             {

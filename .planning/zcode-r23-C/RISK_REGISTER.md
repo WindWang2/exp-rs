@@ -10,3 +10,6 @@
 | R-6 | tests/CMakeLists.txt 并行 append 冲突 | 注册丢失/冲突标记（#1714 前科） | P1(流程) | push 前逐字节对照 origin/master 版本；仅 append |
 | R-7 | 本机 GCC 16.2.1 vs 项目惯用 gcc-15（账本记录 R22 用 gcc-15） | 编译器差异引入假红/假绿 | P2 | 记录实际工具链；若遇 ICE 按 R3 轨教训禁用 PCH 重配 |
 | R-8 | TaskCenter 为进程单例，测试间状态泄漏 | 闪断 | P2 | 沿用 shutdownForTests + clearExecutors 惯例；RUN_SERIAL 不必（直跑单进程） |
+| R-9 | R2-F2：atomic_fs::publishStagedMembers 对缺失 staged 成员静默跳过、空列表视为成功（src/geospatial/util/atomic_fs.cpp:842-850）——无并发删除时不可达 | 理论上 true-但未发布 | P3 | **非本轨白名单**（src/geospatial）：转交拥有轨；本轨调用点两 staged 文件由同进程刚写入，删除窗口不存在 |
+| R-10 | R2-F5：新 %n 源串 "entry(ies)" 未入 sicnu_zh_CN.ts（仓库无 .ts 新鲜度 CI 门）；"(ies)" 后缀对译者不友好 | 翻译缺失（中文无复数形态，功能无损） | P3 | 接受：与 QGIS core "feature(s)" 先例一致；.ts 由 lupdate 管线统一刷新，手工添加易与他轨冲突 |
+| R-11 | R2-F6：相对 outPrefix 时 journal/.bak 路径保持相对（staging 侧已 canonicalize） | 极角；app 调用方恒绝对路径 | P3 | 已在头文件契约注明「outPrefix 必须带目录成分」 |
