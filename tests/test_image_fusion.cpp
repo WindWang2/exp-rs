@@ -1904,30 +1904,36 @@ TEST_CASE( "histogramMatch uses the sample stddev, not the population one (AG2-F
 }
 
 
-// r21-A / R2 mutation-gap closure — the fused dNBR loop must keep the -999
-// negative-sentinel rule that staged normalizedDifference() applied. All
-// existing dNBR tests use clean data, so dropping the rule stayed green.
+// r21-A / R2 mutation-gap closure, rescoped by #1687: the fused dNBR loop
+// must still void legacy UNDECLARED -9999-family band values (they would
+// fabricate extreme dNBR change), but the protection now lives in the named
+// legacyNegativeSentinelFree seam the dNBR branch applies — the shared
+// bothNormalizable predicate is finite-only since #1687, because valid
+// slightly-negative reflectances (atmospheric correction) must compute.
 TEST_CASE( "dNBR fusion keeps the negative-sentinel rule (R2 M3)", "[fusion][r21a]" )
 {
     const float nd = -9999.0f;
-    // 2 pixels: pixel 0 clean, pixel 1 carries a -9999 sentinel in the
-    // pre-NIR band (a legitimate-looking value only the sentinel rule voids).
-    std::vector<float> preA = { 0.5f, nd };
-    std::vector<float> preB = { 0.3f, 0.3f };
-    std::vector<float> postA = { 0.4f, 0.4f };
-    std::vector<float> postB = { 0.2f, 0.2f };
 
-    QVector<const float *> bands = { preA.data(), preB.data(), postA.data(), postB.data() };
-    const auto out = ImageFusion::pcaFusion( bands, 4, nullptr, 1, 2, nd );
-    // pcaFusion is not dNBR; this case is exercised through the operator's
-    // dNBR path in test_rs_operators / test_spectral_formula_drift. Here we
-    // pin the shared predicate directly: bothNormalizable must reject a
-    // -9999 operand exactly like the staged normalizedDifference did.
-    CHECK( MathUtils::bothNormalizable( 0.5f, 0.3f ) );
-    CHECK_FALSE( MathUtils::bothNormalizable( nd, 0.3f ) );
-    CHECK_FALSE( MathUtils::bothNormalizable( 0.3f, nd ) );
-    CHECK_FALSE( MathUtils::bothNormalizable( -999.0f, 0.3f ) ); // threshold
-    CHECK_FALSE( MathUtils::bothNormalizable( -1.0f, -1.0f ) );  // equal negatives
+    // The dNBR seam rejects legacy undeclared sentinels ...
+    CHECK( MathUtils::legacyNegativeSentinelFree( 0.5f, 0.3f ) );
+    CHECK_FALSE( MathUtils::legacyNegativeSentinelFree( nd, 0.3f ) );
+    CHECK_FALSE( MathUtils::legacyNegativeSentinelFree( 0.3f, nd ) );
+    CHECK_FALSE( MathUtils::legacyNegativeSentinelFree( -999.0f, 0.3f ) );
+    CHECK_FALSE( MathUtils::legacyNegativeSentinelFree(
+        std::numeric_limits<float>::quiet_NaN(), 0.3f ) );
+    CHECK_FALSE( MathUtils::legacyNegativeSentinelFree(
+        std::numeric_limits<float>::infinity(), 0.3f ) );
+    // ... while physically-bounded reflectances — including the equal
+    // slightly-negative pairs atmospheric correction produces — pass.
+    CHECK( MathUtils::legacyNegativeSentinelFree( -0.01f, -0.01f ) );
+    CHECK( MathUtils::legacyNegativeSentinelFree( -1.0f, -1.0f ) );
+    CHECK( MathUtils::legacyNegativeSentinelFree( 0.0f, 0.0f ) );
+
+    // The shared predicate itself is finite-only (#1687): a finite -9999 is
+    // normalizable — undeclared sentinels are the dNBR seam's concern, not
+    // the kernel's guess.
+    CHECK( MathUtils::bothNormalizable( nd, 0.3f ) );
+    CHECK( MathUtils::bothNormalizable( -1.0f, -1.0f ) );
     CHECK( MathUtils::bothNormalizable( 0.0f, 0.0f ) );
     CHECK_FALSE( MathUtils::bothNormalizable(
         std::numeric_limits<float>::quiet_NaN(), 0.3f ) );

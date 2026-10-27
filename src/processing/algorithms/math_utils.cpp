@@ -190,6 +190,19 @@ bool bothNormalizable(float a, float b)
     return std::isfinite(a) && std::isfinite(b);
 }
 
+bool legacyNegativeSentinelFree(float a, float b)
+{
+    // Named, documented home for the legacy undeclared-sentinel screen the
+    // pre/post index-difference branch (dNBR family) applies ON TOP of
+    // finiteness: older pipelines stamped -9999-family band values without
+    // declaring NoData, and such values would otherwise surface as extreme
+    // (near +/-1) index change. Physically-bounded values — including the
+    // slightly-negative reflectances atmospheric correction produces — pass.
+    // The general kernels stay sentinel-blind (#1687): declared band NoData
+    // is the caller's authority and valid data must never be guessed away.
+    return bothNormalizable(a, b) && a > -999.0f && b > -999.0f;
+}
+
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count)
 {
     if (!a || !b || !out) return false;

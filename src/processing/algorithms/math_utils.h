@@ -123,6 +123,18 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
 bool bothNormalizable(float a, float b);
 
 /**
+ * Legacy undeclared-sentinel screen for pre/post band-pair index inputs
+ * (the dNBR family of fused kernels): additive to bothNormalizable, it
+ * voids values at/below the legacy -999 sentinel magnitude that older
+ * pipelines stamped WITHOUT declaring NoData — such values would
+ * otherwise fabricate extreme (near +/-1) index/difference change.
+ * Physically-bounded reflectances, including slightly-negative ones from
+ * atmospheric correction, pass. The general kernels stay sentinel-blind
+ * (#1687); declared band NoData remains the caller's authority.
+ */
+bool legacyNegativeSentinelFree(float a, float b);
+
+/**
  * Apply linear scaling: out[i] = gain * in[i] + bias.
  *
  * This is the single kernel for DN-to-radiance / radiometric calibration

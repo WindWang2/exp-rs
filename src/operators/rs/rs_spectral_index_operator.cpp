@@ -778,8 +778,13 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                               const float *postA = in[2];
                               const float *postB = in[3];
                               for (size_t i = 0; i < n; ++i) {
-                                  if (!MathUtils::bothNormalizable(preA[i], preB[i])
-                                      || !MathUtils::bothNormalizable(postA[i], postB[i])) {
+                                  // Legacy undeclared-sentinel screen lives at this
+                                  // seam (r21-A R2/M3, #1687): the shared predicate is
+                                  // finite-only, so the -9999-family values older
+                                  // pipelines stamped without a NoData tag are voided
+                                  // here instead of surfacing as extreme change.
+                                  if (!MathUtils::legacyNegativeSentinelFree(preA[i], preB[i])
+                                      || !MathUtils::legacyNegativeSentinelFree(postA[i], postB[i])) {
                                       outBlk[i] = nan;
                                       continue;
                                   }
