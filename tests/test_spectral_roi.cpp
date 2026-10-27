@@ -128,3 +128,32 @@ TEST_CASE( "ROI mean spectrum exposes wavelengths and guards inputs", "[spectral
         CHECK( std::isnan( result.mean[0] ) );
     }
 }
+
+// WAVELENGTH_UNITS is part of the band-metadata convention the wavelength
+// surfaces share (SpectralWavelength::normalizeToNm): a µm-stamped grid is
+// reported in nm, exactly like rs:mnf / rs:spectral_band_select resolve
+// it. The header contract says "band center wavelengths (nm)".
+TEST_CASE( "ROI mean spectrum normalizes µm-stamped wavelengths to nm",
+           "[spectral_roi]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString path = tmp.path() + QStringLiteral( "/um_roi.tif" );
+    makeRoiRaster( path, true );
+    GDALDatasetH ds = GDALOpen( path.toUtf8().constData(), GA_Update );
+    REQUIRE( ds != nullptr );
+    GDALSetMetadataItem( GDALGetRasterBand( ds, 1 ), "WAVELENGTH", "0.49", nullptr );
+    GDALSetMetadataItem( GDALGetRasterBand( ds, 1 ), "WAVELENGTH_UNITS", "um", nullptr );
+    GDALSetMetadataItem( GDALGetRasterBand( ds, 2 ), "WAVELENGTH", "0.665", nullptr );
+    GDALSetMetadataItem( GDALGetRasterBand( ds, 2 ), "WAVELENGTH_UNITS", "um", nullptr );
+    GDALClose( ds );
+
+    SpectralRoiProfile::RoiProfileResult result;
+    QString err;
+    QPolygonF roi;
+    roi << QPointF( 0, 0 ) << QPointF( 4, 0 ) << QPointF( 4, -2 ) << QPointF( 0, -2 );
+    REQUIRE( SpectralRoiProfile::meanSpectrum( path, roi, &result, &err ) );
+    REQUIRE( result.wavelengths.size() == 2 );
+    REQUIRE( result.wavelengths[0] == Approx( 490.0f ) );
+    REQUIRE( result.wavelengths[1] == Approx( 665.0f ) );
+}
