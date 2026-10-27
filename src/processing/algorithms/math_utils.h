@@ -85,14 +85,26 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata);
  * Compute statistics from pre-accumulated sums.
  * Uses population stddev (N denominator).
  *
+ * validCount semantics differ from computeStats(): the accumulator counts
+ * every sample its caller fed in (callers exclude invalid values before
+ * accumulating), while computeStats() filters NaN against the raw buffer —
+ * stats.validCount therefore means "samples in the accumulator" here and
+ * "finite values in the buffer" there (#1687).
+ *
  * @param acc  Accumulator with sum, sumSq, min, max, count
  * @return Stats structure (stddev uses population formula)
  */
 Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
 
 /**
- * Compute normalized difference: (a - b) / (a + b).
- * Result is NaN when (a + b) == 0.
+ * Compute normalized difference: (a - b) / (a + b). Result is NaN when
+ * either operand is non-finite or when (a + b) == 0; every finite pair
+ * with a non-zero sum is computed as-is, INCLUDING negative reflectances
+ * (atmospheric correction legitimately produces them, and an identical
+ * negative pair has the well-defined difference 0). Declared band NoData
+ * is the caller's authority: every production path resolves band sentinels
+ * to NaN before this kernel (operator BandSource::readTileBand, provider
+ * readBandData) — this kernel never guesses a sentinel threshold (#1687).
  *
  * @param a      First input array
  * @param b      Second input array
@@ -103,10 +115,10 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count);
 
 /**
- * The exact sample-level predicate normalizedDifference() applies — finite
- * operands, neither at/below the -999 negative-sentinel threshold, and not
- * a pair of equal negatives. Fused kernels (e.g. dNBR) share it so their
- * validity mask cannot drift from the staged form.
+ * The exact sample-level predicate normalizedDifference() applies: both
+ * operands finite. No sentinel guessing — see normalizedDifference() for
+ * the NoData authority contract. Fused kernels (e.g. dNBR) share it so
+ * their validity mask cannot drift from the staged form.
  */
 bool bothNormalizable(float a, float b);
 

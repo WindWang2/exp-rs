@@ -179,13 +179,15 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc)
 
 bool bothNormalizable(float a, float b)
 {
-    if (!std::isfinite(a) || !std::isfinite(b))
-        return false;
-    if (a <= -999.0f || b <= -999.0f)
-        return false;
-    if (a == b && a < 0.0f)
-        return false;
-    return true;
+    // Only non-finite inputs are invalid here (#1687): every production
+    // caller resolves the band's DECLARED NoData sentinel to NaN before
+    // this kernel runs (the operator's BandSource readTileBand, the
+    // providers' readBandData), so a magic negative threshold would only
+    // reject valid data — e.g. identical slightly-negative reflectances
+    // from atmospheric correction (a == b == -0.01 over dark water), whose
+    // normalized difference is a well-defined 0. A zero denominator is
+    // safeDiv's contract, not this gate.
+    return std::isfinite(a) && std::isfinite(b);
 }
 
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count)
@@ -194,8 +196,9 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
     if (count == 0) return false;
 
     for (size_t i = 0; i < count; ++i) {
+        // Non-finite operand (declared sentinels arrive pre-resolved to
+        // NaN) or a zero denominator -> NaN, never a saturated value.
         if (!bothNormalizable(a[i], b[i])) {
-            // Negative sentinel values (e.g. -9999) must never evaluate to false legitimate zero
             out[i] = std::numeric_limits<float>::quiet_NaN();
         } else {
             out[i] = safeDiv(a[i] - b[i], a[i] + b[i]);
