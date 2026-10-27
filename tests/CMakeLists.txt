@@ -16780,6 +16780,48 @@ target_include_directories(test_r22_agent_ghost_algo PRIVATE
 sicnu_discover_tests(test_r22_agent_ghost_algo RUN_SERIAL TRUE)
 # --- end R22-04 registration ---
 
+# --- R23-D (r23-d, CT-6 closure): the repo-documented lab-1 student flow
+# (foundry scene -> rs:spectral_index -> grade) regression. Links the
+# in-process foundry + the production spectral-index core + the teaching
+# grader (OutputVerifier). Rules authority: data/labs/grading/ndvi_landsat.
+# rules.json (foundry-calibrated) alongside the untouched fixture authority
+# ndvi_basics.rules.json.
+qt_add_executable(test_r23_d_ct6_lab_flow test_r23_d_ct6_lab_flow.cpp)
+target_link_libraries(test_r23_d_ct6_lab_flow PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  GDAL::GDAL
+  sicnu_agent
+  sicnu_operators
+  sicnu_sample_foundry
+)
+sicnu_link_jsoncpp(test_r23_d_ct6_lab_flow)
+target_include_directories(test_r23_d_ct6_lab_flow PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tools
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r23_d_ct6_lab_flow PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r23_d_ct6_lab_flow TEST_PREFIX test_r23_d_ct6_lab_flow:: TIMEOUT 300)
+# --- end R23-D registration ---
+
+# --- R23-D (r23-d, hardening pair): src/lab fail-closed contracts —
+# session-store depth bombs degrade to the typed lab.session.corrupt refusal
+# (jsoncpp's stackLimit contract is an exception), and expected_numeric
+# bounds must be finite (jsoncpp maps 1e999 literals to ±inf).
+add_executable(test_r23_d_lab_hardening test_r23_d_lab_hardening.cpp)
+target_link_libraries(test_r23_d_lab_hardening PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+target_include_directories(test_r23_d_lab_hardening PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r23_d_lab_hardening TEST_PREFIX test_r23_d_lab_hardening::)
+# --- end R23-D hardening registration ---
 # --- R23-E WP2: optional Python worker compat-layer regression guards
 # (#1608/#1609 + daemon typed-error contracts). Pure-python unittest that
 # spawns the REAL worker daemon over a private unix socket; skips loudly on
