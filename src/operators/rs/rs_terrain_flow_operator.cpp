@@ -192,6 +192,63 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
             throw RSOperatorError( ErrorCode::ComputationError, "Depression filling failed" );
     }
 
+    // D8 products route over the FILLED surface, but flowDirections needs
+    // slope > 0 strictly: a filled depression is a flat plateau whose
+    // interior would become dir = 0 sinks, silently truncating every
+    // drainage network at the first filled pit (the bowl's contributing
+    // area never reached its spill outlet). Resolve flats first — the same
+    // epsilon-gradient pass the D∞ path uses — but only when the filled
+    // surface actually contains flats, so flat-free scenes pay one O(n)
+    // detection scan instead of the resolution pass (R24-A; the pass more
+    // than doubles the chain cost when run unconditionally).
+    if ( product == "flow_direction" || product == "flow_accumulation"
+         || product == "watershed" || product == "stream_network" || product == "outlets" )
+    {
+        bool hasFlats = false;
+        for ( int y = 0; y < height && !hasFlats; ++y )
+        {
+            for ( int x = 0; x < width; ++x )
+            {
+                const float z = filled[static_cast<std::size_t>( y ) * width + x];
+                if ( z == nodata || std::isnan( z ) )
+                    continue;
+                for ( int dy = -1; dy <= 1 && !hasFlats; ++dy )
+                {
+                    for ( int dx = -1; dx <= 1; ++dx )
+                    {
+                        if ( dx == 0 && dy == 0 )
+                            continue;
+                        const int nx = x + dx, ny = y + dy;
+                        if ( nx < 0 || ny < 0 || nx >= width || ny >= height )
+                            continue;
+                        const float zn = filled[static_cast<std::size_t>( ny ) * width + nx];
+                        if ( zn != nodata && !std::isnan( zn ) && zn == z )
+                        {
+                            hasFlats = true;
+                            break;
+                        }
+                    }
+                }
+                if ( hasFlats )
+                    break;
+            }
+        }
+        if ( hasFlats )
+        {
+            context.reportProgress( 0.3, "Resolving filled flats" );
+            std::vector<float> resolved( n );
+            TerrainHydrology::FlatResolutionReport flatReport;
+            if ( !TerrainHydrology::resolveFlats( filled.data(), resolved.data(), width,
+                                                  height, nodata, &flatReport,
+                                                  [&context] { return context.isCancelled(); } ) )
+            {
+                context.throwIfCancelled();
+                throw RSOperatorError( ErrorCode::ComputationError, "Flat resolution failed" );
+            }
+            filled = std::move( resolved );
+        }
+    }
+
     std::vector<float> dir;
     if ( product == "flow_direction" || product == "flow_accumulation"
          || product == "watershed" || product == "stream_network" || product == "outlets" )
