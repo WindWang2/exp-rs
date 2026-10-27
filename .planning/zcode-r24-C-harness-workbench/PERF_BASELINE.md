@@ -3,7 +3,7 @@
 Policy per goal §4: no tight wall-clock pass thresholds; fixed fixtures, 5 samples, report values + variance; correctness gates stay structural.
 
 ## WP1 charts projection (the only hot-path change)
-Changed path: `buildWorkspaceState()` now reads `ChartRegistry::listCharts()` (mutex-copied array of bounded specs ≤ registry size) and emits ≤ `kMaxWorkspaceSummaryCharts` (25) JSON entries. The registry read is O(N) with N = live charts; workspace capture is called per agent conversation turn (debounced upstream), not per frame.
+Changed path: `buildWorkspaceState()` now asks `ChartRegistry::listChartSummaries(cap, &total)` — a mutex-guarded projection of id/kind/title ONLY (post-R1 shape; no full-spec deep copies) — and emits ≤ `kMaxWorkspaceSummaryCharts` (25) JSON entries plus a `charts_truncated` flag. Cost per capture is O(min(N, 25)) small objects regardless of registry size; the registry read holds the registry mutex for the projection only. Workspace capture runs per agent conversation turn (debounced upstream), never in a paint/event loop.
 
 5-run samples of `test_r24_c_workspace_charts.exe` (whole-process wall, incl. process spawn + QgsApplication::initQgis — the dominant fixed cost; the case itself creates 32 charts and runs 5 workspace captures):
 

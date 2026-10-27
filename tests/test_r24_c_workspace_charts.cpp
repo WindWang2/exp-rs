@@ -174,5 +174,19 @@ TEST_CASE( "chart registry rejects non-string titles and never reuses ids",
   const QString fourth = charts.createChart( makeInlineBarChart( "fourth" ), &error );
   CHECK( fourth == QStringLiteral( "chart-4" ) );
 
+  // R2-3: the title contract holds on the UPDATE path too — a patch with a
+  // non-string title is refused and leaves the stored spec untouched, while
+  // a valid patch lands. (updateChart validates the merged spec; a future
+  // regression validating only the patch, or skipping update validation,
+  // must fail here.)
+  Json::Value badTitlePatch( Json::objectValue );
+  badTitlePatch["title"] = 42;
+  CHECK( charts.updateChart( third, badTitlePatch, &error ) == false );
+  CHECK( charts.find( third )["title"].asString() == "third" );
+  Json::Value goodPatch( Json::objectValue );
+  goodPatch["title"] = "third (revised)";
+  CHECK( charts.updateChart( third, goodPatch, &error ) == true );
+  CHECK( charts.find( third )["title"].asString() == "third (revised)" );
+
   charts.clear();
 }

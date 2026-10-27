@@ -454,7 +454,12 @@ void TeachingAdminDock::onRunBatch()
                 // internally, so the directory is walked twice per batch —
                 // threading the list through BatchAssessmentConfig would
                 // change the read-only teaching_admin backend API; recorded
-                // as CT-C6 for its owner instead.
+                // as CT-C6 for its owner instead. Residual window (R2-4):
+                // discoverSubmissions has no cancel hook, so closing the
+                // dock mid-scan joins this walk in ~TeachingAdminDock for the
+                // scan's duration — the GUI thread no longer freezes during
+                // the scan itself (the #1695-3 defect), but close-time
+                // blocking remains bounded by one directory walk.
                 QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
                 const int discoveredTotal = sicnu::teaching_admin::discoverSubmissions(
                   cfg.submissionsDir, &discoverySkips ).size();

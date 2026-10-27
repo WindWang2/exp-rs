@@ -1,7 +1,7 @@
 # R24-C: Pi/MCP Harness × Qt/QGIS Workbench × Cartography — Experience, Contract & Stability Closure
 
 Baseline `origin/master`: `5fe642ec6339807823aa56612ba94668592a738d` (2026-10-27T02:00Z snapshot)
-Head: `d899169bf` (7 commits, worktree branch `agent/r24_c-20261027T022556Z`)
+Head: see `git log origin/master..HEAD` (11 commits incl. the R1/R2 review-fix rounds), worktree branch `agent/r24_c-20261027T022556Z`
 
 ## What this PR does
 Closes verified-open gaps that break the closed loop between the shipped Pi/MCP harness, the Qt/QGIS workbench and the cartography path — no new frameworks, no parallel surfaces, existing contracts only. Along the way it found and fixed a **surface-drift defect already failing on pristine master**.
@@ -14,6 +14,8 @@ Closes verified-open gaps that break the closed loop between the shipped Pi/MCP 
 5. **`116a78aa4` layout designer menu honesty (src/app/layout)** — the port shipped action-less Atlas/Report menus advertising unshipped features; menus no longer created, capability accessors report nullptr per the existing atlasToolbar() convention, headless atlas export unaffected. New regression: menu bar carries only menus with actions (57 assertions/10 cases ×2 PASS).
 6. **`d899169bf` teaching_admin GUI-thread + i18n (src/app/teaching_admin + zh_CN)** — #1695 items 2/3 (handed to C by #1713): submission discovery moved off the GUI thread into the batch worker (honest "discovering…" state, preview posted back queued; runBatchAssessment's own discovery unchanged), and the untranslatable `"entr%2"`+y/ies concat became a real `%n` plural with a numerus zh_CN entry.
 7. **`af1969d17` planning/evidence ledgers** (force-added per r23-track precedent).
+8. **R1 review round (`1470e89d9`)** — closed the official R1 findings: chart title type-safety on create+update (validateChartSpec rejects non-string titles; listChartSummaries type-guards every field), launch-class-only canary classification (`^Failed to launch`|EFTYPE — spawned-then-died/ENOENT/EPIPE rethrow), `listChartSummaries` (no full-spec deep copies per capture) + `charts_truncated`, monotonic chart ids (deleted ids never reused; clear() resets), QMap order documented, double-discovery documented (CT-C6), committed .pyc removed.
+9. **R2 review round (final commit)** — closed the official R2 findings: updateChart title-rejection regression (negative patch refused, stored spec untouched; positive patch lands — 63a/3c PASS ×2), D-10 amended to the shipped shape + close-time join window documented in-code, teaching dock smoke evidence (4/4 non-cancel cases PASS ×2 incl. rapid-destruction over the new worker path; the 5th case fails IDENTICALLY on pristine master in this environment — slow python stub grades 0 rows here, verified by rebuilding the test against origin/master's dock — pre-existing, not a regression), .pyc re-add reverted, docs/PR-body staleness fixed.
 
 ## Evidence (Windows host, MSVC 14.38 + Ninja, RelWithDebInfo build-r24_c, offscreen)
 - pi: `node --test pi/test` → 41 tests / 20 pass / **0 fail** / 21 skipped (host spawn canary, honest) / exit 0 (baseline before: 18 pass / 23 fail).
@@ -28,9 +30,8 @@ Closes verified-open gaps that break the closed loop between the shipped Pi/MCP 
 CT-D1 run_lab.cmd `--lab ndvi_landsat` one-liner (scripts owner; not a C E2E blocker) · #1695-5 publishBatchOutputsAtomic split (src/teaching_admin backend, read-only for C) · #1628-3 temporal tool wiring (data-track decision) · repair-engine DataType rule (no dtype-conversion operator exists in the registry — A-track work).
 
 ## Reviews
-- R1 (independent fresh context): <FILL>
-- R2 (independent, clean-diff second context): <FILL>
+- R1 (independent fresh context): NEEDS_FIXES 2×P2 + 6×P3 → ALL CLOSED in `1470e89d9`; re-verified GREEN ×2 (REVIEW_R1.md).
+- R2 (independent clean-diff second context): NEEDS_FIXES 4×P3, product code verified correct/platform-inert → ALL CLOSED in the R2 round commit (REVIEW_R2.md).
 
 ## Not run here
 Linux/macOS lanes (Windows host; pi changes POSIX-inert by construction, C++ edits platform-independent). Full app binary GUI smoke (not required by oracles; surface_mcp_host exercises the production McpServer). test_task_center "#1454 cancel-window" known-flaky per #1714/#1677 evidence.
-

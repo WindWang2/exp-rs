@@ -21,8 +21,10 @@ Driver: `.planning/zcode-r24-C-harness-workbench/run_tests.py` (canonical DLL en
 | Workflow cancel chain | run_tests.py test_r14_C_mcp_workflow_cancel | 21 assertions / 2 cases PASS |
 | **O-C1 real-binary smoke** | `EXP_RS_MCP_BIN=build-r24_c/surface_mcp_host.exe node .planning/.../r24c_real_binary_smoke.mjs` | PASS exit 0: initialize (server exp-rs-mcp) → tools/list 373 tools (incl. cartography:chart_*) → tools/call list_algorithms (real algorithm catalog) → unknown tool = typed JSON-RPC error frame via bridge → bridge alive → clean teardown |
 | Merge integrity | `python scripts/check_merge_registration_integrity.py --require-refs` | exit 0 (re-run pre-push) |
-| Whitespace | `git diff --check` | clean |
+| Whitespace | `git diff --check` | clean (EOF blank lines from the docs round removed in the R2 round) |
 | Perf 5× | see PERF_BASELINE.md | 1136.0/867.9/844.1/859.5/849.3 ms (charts test whole-process; steady ≈ 850 ms, first-run cold +270 ms) |
+| R1-fix round | run_tests.py test_r24_c_workspace_charts ×2 | 59a/3c PASS ×2 (pre-final); final with update-path case: **63a/3c PASS ×2** |
+| R2 dock smoke | run_tests.py + `~[cancel]` filter ×2 | 28a/4c PASS ×2 (incl. rapid-destruction over the new worker path). The `[cancel]` case FAILS IDENTICALLY against PRISTINE MASTER's dock in this environment (attribution: rebuilt test with origin/master teaching_admin_dock.cpp → same 'finished — graded 0 / 20'; slow python stub grades 0 rows here) — pre-existing environment failure, not a regression of this diff; full case passes on hosts where the stub grades (CI/POSIX). |
 
 ## Master defect found & fixed en route
 `test_surface_snapshot` fails on PRISTINE master: b43247dd7 (SAR flattenRamp wrapped-domain diagnostic) extended the operator schema description without re-pinning the three-way snapshot (last regen 3ff4e0ba4, 2026-10-21); CI has had no completed runs since 2026-10-11 (#1491). Fixed by regenerating the pin (single-line diff; commit 53dc38dd8).
