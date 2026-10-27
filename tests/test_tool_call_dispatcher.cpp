@@ -5,6 +5,7 @@
 // AtomicAlgorithmRegistry with stub adapters registered by the tests.
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 
 #include <QMetaType>
 #include <QString>
@@ -987,7 +988,11 @@ TEST_CASE( "ToolCallDispatcher synchronous dispatchAndAwait does not deadlock on
   const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - start );
 
   REQUIRE( result["status"].asString() == "success" );
-  REQUIRE( elapsed.count() < 2000 );
+  // #1699: hang-guard against the 2000ms await timeout, scaled for
+  // sanitizer/loaded lanes — at 4x it is vacuous by construction (the
+  // structural coverage is the success status above); Release enforces the
+  // 2000ms base.
+  REQUIRE( elapsed.count() < sicnu::testsupport::wallClockBudgetMs( 2000 ) );
 }
 
 

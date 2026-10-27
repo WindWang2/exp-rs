@@ -16,6 +16,7 @@
 #include <qgsrectangle.h>
 
 #include "contracts/spatial_contracts.h"
+#include "cartography/chart_registry.h"
 #include "data/asset_types.h"
 #include "data/band_role.h"
 #include "data/data_manager.h"
@@ -31,7 +32,6 @@ constexpr int kMaxLayers = 200;
 constexpr int kMaxModels = 25;
 constexpr int kMaxRunningTasks = 25;
 constexpr int kMaxWorkflowRuns = 20;
-
 QString assetKindLabel( sicnu::data::AssetKind kind )
 {
   using sicnu::data::AssetKind;
@@ -378,8 +378,32 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
   }
   body["layouts"] = layouts;
 
-  // --- charts (Phase L registry; empty until charts are created) -----------
+  // --- charts (live ChartRegistry — the registry cartography:chart_* mutates)
+  // The tool surface has always promised charts in this document (see the
+  // workspace_state description pinned in tests/surface_diff_snapshot.json);
+  // the registry is the single authority. Summaries are projected under the
+  // registry's own mutex (listChartSummaries — no full-spec deep copies), so
+  // a capture costs O(min(N, cap)) small objects regardless of registry
+  // size. Binding data is not projected — agents fetch a chart's spec via
+  // cartography:chart_get. Truncation is reported like assets_truncated.
   Json::Value charts( Json::arrayValue );
+  {
+    int totalCharts = 0;
+    const Json::Value summaries =
+      cartography::ChartRegistry::instance().listChartSummaries(
+        cartography::kMaxWorkspaceSummaryCharts, &totalCharts );
+    for ( const Json::Value &chart : summaries )
+    {
+      Json::Value c( Json::objectValue );
+      const QString chartId = QString::fromStdString( chart["id"].asString() );
+      c["id"] = entities.idFor( QStringLiteral( "chart" ), chartId ).toStdString();
+      c["chart_id"] = chartId.toStdString();
+      c["kind"] = chart["kind"].asString();
+      c["title"] = chart["title"].asString();
+      charts.append( c );
+    }
+    body["charts_truncated"] = totalCharts > cartography::kMaxWorkspaceSummaryCharts;
+  }
   body["charts"] = charts;
 
   // --- models (summary only; selection lives in spatial:select_model) ------

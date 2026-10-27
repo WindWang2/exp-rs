@@ -14,4 +14,10 @@ namespace SicnuAlgorithmHelp
   /** Multi-paragraph HTML/plain help for algorithm dialog (shortHelpString). */
   QString shortHelpString( const QString &algorithmName, const QString &displayName = QString(),
                            const QString &cliName = QString(), const QStringList &tags = {} );
+
+  /** Every catalog key (the algorithm names the catalog can answer for).
+   *  Drift gate input: each key must match a registered algorithm's name()
+   *  — a key no provider answers is unreachable help rotting in place
+   *  (#1646-5's regression guard). Sorted for stable assertions. */
+  QStringList catalogKeys();
 }

@@ -729,8 +729,12 @@ void QgsLayoutDesignerDialog::setupMenus()
     mItemsMenu->addAction(tr("Add Shape"), this, &QgsLayoutDesignerDialog::onAddShape);
     mItemsMenu->addAction(tr("Add Chart"), this, &QgsLayoutDesignerDialog::onAddChart);
 
-    mAtlasMenu = menuBar->addMenu(tr("&Atlas"));
-    mReportMenu = menuBar->addMenu(tr("&Report"));
+    // Atlas & Report menus are intentionally NOT created: this port ships
+    // no atlas/report GUI actions, and an action-less menu advertises
+    // features that do not exist (honest-UI gate). mAtlasMenu/mReportMenu
+    // stay nullptr — atlasMenu()/reportMenu() report "not supported" the
+    // same way atlasToolbar() already does. Headless atlas EXPORT remains
+    // available via the cartography:export atlas path (exportMapAtlas).
 
     mSettingsMenu = menuBar->addMenu(tr("&Settings"));
     if (mLayout) {

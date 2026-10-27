@@ -18,7 +18,36 @@ import { McpBridge } from "../mcp_bridge.ts";
 const here = dirname(fileURLToPath(import.meta.url));
 const fakeServer = join(here, "fake_mcp_server.mjs");
 
-test("an id:null error frame rejects all pending and the bridge recovers", async () => {
+test("an id:null error frame rejects all pending and the bridge recovers", async (t) => {
+  // Host canary: the fake server runs via its shebang, which Windows cannot
+  // exec (`spawn EFTYPE`, pre-existing limitation). Skip honestly there;
+  // non-spawn failures are rethrown (a real regression must fail, not skip).
+  {
+    const canaryDir = mkdtempSync(join(tmpdir(), "r18c-idnull-canary-"));
+    const probe = new McpBridge(fakeServer, [join(canaryDir, "s")]);
+    let canSpawn = true;
+    try {
+      await probe.request("tools/call", {});
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      // Launch-CLASS failures only: the bridge's own "Failed to launch"
+      // prefix, or the Windows shebang EFTYPE. Everything else — a child
+      // that spawned then died, a missing/renamed fixture (ENOENT), an
+      // EPIPE from a real regression — is rethrown: the suite must fail
+      // loudly, never skip green on a broken test fixture or bridge.
+      if (!/^Failed to launch|EFTYPE/i.test(msg))
+        throw err;
+      canSpawn = false;
+      console.log(`canary: fake MCP server cannot spawn on this host: ${msg}`);
+    } finally {
+      probe.stop();
+      rmSync(canaryDir, { recursive: true, force: true });
+    }
+    if (!canSpawn) {
+      t.skip("host cannot exec the fake MCP server (pre-existing Windows limitation)");
+      return;
+    }
+  }
   const counter = join(mkdtempSync(join(tmpdir(), "r18c-idnull-")), "spawns");
   const bridge = new McpBridge(fakeServer, [counter]);
   try {

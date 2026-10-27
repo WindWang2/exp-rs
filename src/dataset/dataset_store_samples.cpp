@@ -221,25 +221,52 @@ sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> 
         if ( !validated )
             return Result::failure( validated.diagnostics() );
     }
-    const auto status = versionStatusLocked( m_impl->db, versionId );
-    if ( !status )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
-                                           QStringLiteral( "version %1 does not exist" ).arg( versionId ) ) );
-    if ( *status != DatasetVersionStatus::Draft )
-        return Result::failure( notDraft( versionId ) );
-
+    // R24-B (#811 playbook): the draft gate runs INSIDE the BEGIN IMMEDIATE
+    // transaction — with the check outside, a concurrent commitVersion on a
+    // second connection serialized between the check and this begin() let
+    // samples land in a committed version (frozen-state contract broken with
+    // no error anywhere).
     if ( !m_impl->begin( nullptr ) )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            QStringLiteral( "cannot begin transaction" ) ) );
+    {
+        const auto status = versionStatusLocked( m_impl->db, versionId );
+        if ( !status )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                               QStringLiteral( "version %1 does not exist" )
+                                                   .arg( versionId ) ) );
+        }
+        if ( *status != DatasetVersionStatus::Draft )
+        {
+            m_impl->rollback();
+            return Result::failure( notDraft( versionId ) );
+        }
+    }
     qint64 nextOrder = 0;
     {
         StoreStmt maxOrder( m_impl->db, QStringLiteral(
             "SELECT COALESCE(MAX(roword),0) FROM samples WHERE dataset_version_id=?" ) );
-        if ( maxOrder )
+        if ( !maxOrder )
         {
-            maxOrder.bind( 1, versionId );
-            if ( maxOrder.stepRow() )
-                nextOrder = maxOrder.i64( 0 ) + 1;
+            // R24-B: a failed prepare is not "order starts at 0" — restarting
+            // roword silently duplicated pagination order for later rows.
+            // Capture the error BEFORE rollback (ROLLBACK resets it).
+            const QString message = maxOrder.error( m_impl->db );
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               message ) );
+        }
+        maxOrder.bind( 1, versionId );
+        if ( maxOrder.stepRow() )
+            nextOrder = maxOrder.i64( 0 ) + 1;
+        else if ( maxOrder.stepFailed() )
+        {
+            const QString message = maxOrder.error( m_impl->db );
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               message ) );
         }
     }
     StoreStmt insert( m_impl->db, QStringLiteral(
@@ -247,9 +274,10 @@ sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> 
         " weight, json, roword) VALUES(?,?,?,?,?,?,?,?)" ) );
     if ( !insert )
     {
+        const QString message = insert.error( m_impl->db );
         m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           message ) );
     }
     for ( const SampleRecord &sample : samples )
     {
@@ -265,13 +293,14 @@ sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> 
         insert.bind( 8, nextOrder++ );
         if ( !insert.step() )
         {
-            m_impl->rollback();
             // The PRIMARY KEY(version, sample_id) makes duplicates loud: a
-            // re-ingest must never silently overwrite a sample.
+            // re-ingest must never silently overwrite a sample. Capture the
+            // sqlite error BEFORE rollback (ROLLBACK resets it).
+            const QString message = insert.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.conflict" ),
                                                QStringLiteral( "sample %1 rejected: %2" )
-                                                   .arg( sample.sampleId(),
-                                                         insert.error( m_impl->db ) ) ) );
+                                                   .arg( sample.sampleId(), message ) ) );
         }
     }
     if ( !m_impl->commit( nullptr ) )
@@ -522,14 +551,6 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
     if ( isReadOnly() )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
                                            QStringLiteral( "store is read-only" ) ) );
-    const auto status = versionStatusLocked( m_impl->db, versionId.toString() );
-    if ( !status )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
-                                           QStringLiteral( "version %1 does not exist" )
-                                               .arg( versionId.toString() ) ) );
-    if ( *status != DatasetVersionStatus::Draft )
-        return Result::failure( notDraft( versionId.toString() ) );
-
     // #1171 + #1457: the delete must take the sample's facet rows with it —
     // every facet query reads sample_facets with no join to samples, so
     // orphaned rows kept counting ghosts in facetDistribution / crossCounts /
@@ -537,9 +558,27 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
     // the base row goes first so a missing sample reports not_found with the
     // facets untouched (rollback), and a failed facet delete rolls the base
     // row back instead of leaving the #1171 half-applied state.
+    // R24-B (#811 playbook, same as addSamples): the draft gate runs inside
+    // the transaction so a concurrent commit cannot slip between check and
+    // delete.
     if ( !m_impl->begin( nullptr ) )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            QStringLiteral( "cannot begin transaction" ) ) );
+    {
+        const auto status = versionStatusLocked( m_impl->db, versionId.toString() );
+        if ( !status )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                               QStringLiteral( "version %1 does not exist" )
+                                                   .arg( versionId.toString() ) ) );
+        }
+        if ( *status != DatasetVersionStatus::Draft )
+        {
+            m_impl->rollback();
+            return Result::failure( notDraft( versionId.toString() ) );
+        }
+    }
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "DELETE FROM samples WHERE dataset_version_id=? AND sample_id=?" ) );
     if ( !stmt )
@@ -621,13 +660,10 @@ sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &a
     if ( !validated )
         return Result::failure( validated.diagnostics() );
 
-    const auto status = versionStatusLocked( m_impl->db, annotation.datasetVersionId() );
-    if ( !status )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
-                                           QStringLiteral( "version %1 does not exist" )
-                                               .arg( annotation.datasetVersionId() ) ) );
-    if ( *status != DatasetVersionStatus::Draft )
-        return Result::failure( notDraft( annotation.datasetVersionId() ) );
+    // R24-B: the draft gate moved INTO the write transaction below (the
+    // insert used to be bare autocommit with the check out here — a
+    // concurrent commit on a second connection could slip between the two
+    // and freeze an annotation into a committed version).
 
     // Schema-aware fail-fast: a non-empty class code must resolve inside the
     // referenced schema version. An unknown code is refused at ingest — a
@@ -705,12 +741,36 @@ sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &a
                     .arg( annotation.revision() ) ) );
     }
 
+    // R24-B (#811 playbook): draft gate + insert share one BEGIN IMMEDIATE
+    // transaction (the insert used to be bare autocommit).
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
+    {
+        const auto status = versionStatusLocked( m_impl->db, annotation.datasetVersionId() );
+        if ( !status )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                               QStringLiteral( "version %1 does not exist" )
+                                                   .arg( annotation.datasetVersionId() ) ) );
+        }
+        if ( *status != DatasetVersionStatus::Draft )
+        {
+            m_impl->rollback();
+            return Result::failure( notDraft( annotation.datasetVersionId() ) );
+        }
+    }
     StoreStmt insert( m_impl->db, QStringLiteral(
         "INSERT INTO annotations(annotation_id, revision, target_sample_id,"
         " dataset_version_id, json, created_ms) VALUES(?,?,?,?,?,?)" ) );
     if ( !insert )
+    {
+        const QString message = insert.error( m_impl->db );
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           message ) );
+    }
     insert.bind( 1, annotation.annotationId() );
     insert.bind( 2, annotation.revision() );
     insert.bind( 3, annotation.targetSampleId() );
@@ -718,8 +778,15 @@ sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &a
     insert.bind( 5, jsonToText( annotation.toJson() ) );
     insert.bind( 6, QDateTime::currentMSecsSinceEpoch() );
     if ( !insert.step() )
+    {
+        const QString message = insert.error( m_impl->db );
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           message ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit failed" ) ) );
     return Result::success();
 }
 

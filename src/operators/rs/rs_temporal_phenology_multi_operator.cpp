@@ -282,6 +282,41 @@ Json::Value RsTemporalPhenologyMultiOperator::run( const Json::Value &params,
     yearOf[s] = date.isValid() ? date.year() : 0;
   }
 
+  // The phenology kernels need a strictly increasing day axis. keep_all
+  // duplicates make the time metric degenerate; both previously reached
+  // the kernel unvalidated and every pixel came back refused with the
+  // misleading reason "degenerate_seasonal_component" instead of the real
+  // cause. Fail fast, before any output is created (same contract as
+  // rs:temporal_decompose and rs:temporal_smooth, R24-A).
+  for ( int s = 0; s < sceneCount; ++s )
+  {
+    if ( !prepared.collection.scenes().at( s ).time.valid )
+      throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "rs:temporal_phenology_multi requires a fully timed collection; scene "
+              + prepared.collection.scenes().at( s ).path.toStdString()
+              + " has no acquisition time" );
+    if ( s > 0 && !( tDays[static_cast<size_t>( s )] >
+                     tDays[static_cast<size_t>( s - 1 )] ) )
+    {
+      const auto dateOf = [&]( int idx ) {
+        const auto &t = prepared.collection.scenes().at( static_cast<size_t>( idx ) ).time;
+        return t.valid ? t.dateString().toStdString() : "no time";
+      };
+      // Report the ACTUAL conflicting pair — the violation at s is against
+      // s-1. Printing (s, s+1) ran out of range when the violation sat on
+      // the last scene and blamed a scene that was not duplicated (R24-A
+      // R1 review P2-1; labels are 1-based scene numbers).
+      throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "rs:temporal_phenology_multi requires strictly increasing scene times; scenes "
+              + std::to_string( s ) + " (" + dateOf( s - 1 ) + ") and "
+              + std::to_string( s + 1 ) + " (" + dateOf( s )
+              + ") have a duplicate or out-of-order instant — use "
+                "duplicate_policy=reject or run rs:temporal_regularize first" );
+    }
+  }
+
   temporal::PhenologyMultiOptions phenologyOptions;
   phenologyOptions.maxCyclesPerYear = maxCycles;
   phenologyOptions.crossingFraction = crossingFraction;
