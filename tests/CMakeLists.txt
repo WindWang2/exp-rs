@@ -16889,7 +16889,7 @@ endif()
 
 # --- R24-B WP-B6 (P1): detection lane must not feed declared NoData
 # sentinels raw (raster-lane parity: sentinel → NaN → 0). ---
-sicnu_add_test(test_r24_b_detection_nodata TIMEOUT 300)
+sicnu_add_test(test_r24_b_detection_nodata TIMEOUT 300 TEST_PREFIX "r24_b_detection_nodata::")
 target_link_libraries(test_r24_b_detection_nodata PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -16905,14 +16905,12 @@ target_include_directories(test_r24_b_detection_nodata PRIVATE
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r24_b_detection_nodata
-    TEST_PREFIX "r24_b_detection_nodata::")
 # --- end R24-B detection-nodata registration ---
 
 # --- R24-B WP-B3 (P1): dataset store draft gates run inside the write
 # transaction (#811 playbook extended to samples/annotations/stage/commit/
 # addSourceAssetsToDraft). Barrier racer over two connections on one file. ---
-sicnu_add_test(test_r24_b_dataset_txn_gate TIMEOUT 300)
+sicnu_add_test(test_r24_b_dataset_txn_gate TIMEOUT 300 TEST_PREFIX "r24_b_dataset_txn_gate::")
 target_link_libraries(test_r24_b_dataset_txn_gate PRIVATE
     Catch2::Catch2WithMain
     Sicnu::dataset
@@ -16925,14 +16923,12 @@ target_include_directories(test_r24_b_dataset_txn_gate PRIVATE
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r24_b_dataset_txn_gate
-    TEST_PREFIX "r24_b_dataset_txn_gate::")
 # --- end R24-B dataset-txn-gate registration ---
 
 # --- R24-B WP-B7/B8 (#1581 residual): direction-preserving lineage slice
 # export + import re-attachment (run-id rewrite, legacy compat, hostile
 # items, dataset-side edges). ---
-sicnu_add_test(test_r24_b_lineage_reattach TIMEOUT 300)
+sicnu_add_test(test_r24_b_lineage_reattach TIMEOUT 300 TEST_PREFIX "r24_b_lineage_reattach::")
 target_link_libraries(test_r24_b_lineage_reattach PRIVATE
     Sicnu::experiment
     Sicnu::dataset
@@ -16943,14 +16939,12 @@ target_include_directories(test_r24_b_lineage_reattach PRIVATE
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r24_b_lineage_reattach
-    TEST_PREFIX "r24_b_lineage_reattach::")
 # --- end R24-B lineage-reattach registration ---
 
 # --- R24-B WP-B5: eo_preflight honesty (window-without-roles advisory,
 # WAVELENGTH_UNITS normalization) + detection-lane NoData parity is in
 # test_r24_b_detection_nodata. ---
-sicnu_add_test(test_r24_b_eo_preflight TIMEOUT 300)
+sicnu_add_test(test_r24_b_eo_preflight TIMEOUT 300 TEST_PREFIX "r24_b_eo_preflight::")
 target_link_libraries(test_r24_b_eo_preflight PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -16966,11 +16960,9 @@ target_include_directories(test_r24_b_eo_preflight PRIVATE
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r24_b_eo_preflight
-    TEST_PREFIX "r24_b_eo_preflight::")
 
 # --- R24-B WP-B1 (GAP-G1): literal-'%' filename resolution positives. ---
-sicnu_add_test(test_r24_b_uri_percent TIMEOUT 120)
+sicnu_add_test(test_r24_b_uri_percent TIMEOUT 120 TEST_PREFIX "r24_b_uri_percent::")
 target_link_libraries(test_r24_b_uri_percent PRIVATE
     Catch2::Catch2WithMain
     Sicnu::Geospatial
@@ -16982,12 +16974,10 @@ target_include_directories(test_r24_b_uri_percent PRIVATE
 set_target_properties(test_r24_b_uri_percent PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
-sicnu_discover_tests(test_r24_b_uri_percent
-    TEST_PREFIX "r24_b_uri_percent::")
 
 # --- R24-B WP-B7: publish occupancy (cross-process QLockFile fence),
 # unique stage paths + age-gated sweep, stage cleanup on fence refusal. ---
-sicnu_add_test(test_r24_b_publish_fence TIMEOUT 300)
+sicnu_add_test(test_r24_b_publish_fence TIMEOUT 300 TEST_PREFIX "r24_b_publish_fence::")
 target_link_libraries(test_r24_b_publish_fence PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -16998,12 +16988,10 @@ target_include_directories(test_r24_b_publish_fence PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r24_b_publish_fence
-    TEST_PREFIX "r24_b_publish_fence::")
 
 # --- R24-B WP-B4: leakage grid bucket-cast guard + open() schema-gate
 # tri-state. ---
-sicnu_add_test(test_r24_b_leakage_bucket TIMEOUT 300)
+sicnu_add_test(test_r24_b_leakage_bucket TIMEOUT 300 TEST_PREFIX "r24_b_leakage_bucket::")
 target_link_libraries(test_r24_b_leakage_bucket PRIVATE
     Catch2::Catch2WithMain
     Sicnu::dataset
@@ -17016,12 +17004,10 @@ target_include_directories(test_r24_b_leakage_bucket PRIVATE
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r24_b_leakage_bucket
-    TEST_PREFIX "r24_b_leakage_bucket::")
 
 # --- R24-B WP-B6 (oracle O-B3): tile-size / feather / re-run invariance
 # oracles for the raster classification lane. ---
-sicnu_add_test(test_r24_b_metamorphic TIMEOUT 600)
+sicnu_add_test(test_r24_b_metamorphic TIMEOUT 600 TEST_PREFIX "r24_b_metamorphic::")
 target_link_libraries(test_r24_b_metamorphic PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -17037,6 +17023,4 @@ target_include_directories(test_r24_b_metamorphic PRIVATE
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r24_b_metamorphic
-    TEST_PREFIX "r24_b_metamorphic::")
 # --- end R24-B block tail ---
