@@ -10,3 +10,4 @@
 - 第5轮 | 邻域回归 14 靶构建运行×2；RED_GREEN/PERF_BASELINE 落盘 | 见 TEST_RESULTS.md | 进行中 | R1 评审
 
 - 第6轮 | R1 评审（APPROVE-WITH-FIXES）：P1-1 image_fusion 钉子翻转；P2-1 三算子报错实际冲突对+末位越界修复（decompose/smooth 同修 master 既有缺陷）；P3-1..7 全采纳（注释不变量纠正/溢出守卫/float 回退/D8 可观测/文档/两个新负控——NoData 岛钉子按实证修正预期：种子格不抬升保持汇） | 25 靶两轮全绿（12+13）；12 提交 | 通过 | R2 评审
+- 第7轮 | R2 评审（APPROVE-WITH-FIXES，0×P0-P2，7×P3）：可观测性断言补齐（含无平地 D8 oracle，首版期望漏算西列纵向汇流已修正）、各向异性守卫收紧+文案、NaN/Inf SAR 用例、三份文档假证明改写、口径回填 | r2fix 两轮全绿（flow_flats 162/4 等）；14 提交 | 通过 | 终门+推送+PR
