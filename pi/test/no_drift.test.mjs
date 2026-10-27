@@ -15,7 +15,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpBridge } from "../mcp_bridge.ts";
@@ -71,9 +71,33 @@ test("the shared bridge clears the startup deadline on every settle path (F-PI-2
   assert.ok(cancelAt > finallyAt, "cancelStartupDeadline not in the startup finally");
 });
 
-test("a >32 MiB unbounded line kills the child; the next request recovers", async () => {
+test("a >32 MiB unbounded line kills the child; the next request recovers", async (t) => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
+  // Host canary: the fake server runs via its shebang, which Windows cannot
+  // exec (`spawn EFTYPE`, pre-existing limitation). Skip honestly there;
+  // non-spawn failures are rethrown (a real regression must fail, not skip).
+  {
+    const canaryDir = mkdtempSync(join(tmpdir(), "pi-drift-canary-"));
+    const probe = new McpBridge(fakeServer, [join(canaryDir, "s")]);
+    let canSpawn = true;
+    try {
+      await probe.request("tools/call", {});
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      if (!/EFTYPE|ENOENT|EACCES|EPIPE|Failed to launch|spawn/i.test(msg))
+        throw err;
+      canSpawn = false;
+      console.log(`canary: fake MCP server cannot spawn on this host: ${msg}`);
+    } finally {
+      probe.stop();
+      rmSync(canaryDir, { recursive: true, force: true });
+    }
+    if (!canSpawn) {
+      t.skip("host cannot exec the fake MCP server (pre-existing Windows limitation)");
+      return;
+    }
+  }
   const counter = join(mkdtempSync(join(tmpdir(), "pi-drift-")), "spawns");
   const bridge = new McpBridge(fakeServer, [counter]);
   try {

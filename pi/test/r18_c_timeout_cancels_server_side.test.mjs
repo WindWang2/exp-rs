@@ -29,7 +29,31 @@ function readNotifyLog(path) {
     .map((line) => JSON.parse(line));
 }
 
-test("a request timeout fires notifications/cancelled server-side", async () => {
+test("a request timeout fires notifications/cancelled server-side", async (t) => {
+  // The fake server is spawned via its shebang, which Windows cannot exec
+  // (`spawn EFTYPE`, pre-existing host limitation — same canary contract as
+  // mcp_bridge.test.mjs). Skip honestly instead of failing on such hosts;
+  // non-spawn failures are rethrown (a real regression must fail, not skip).
+  const dir0 = mkdtempSync(join(tmpdir(), "r18c-canary-"));
+  const canary = new McpBridge(fakeServer, [join(dir0, "spawns")]);
+  let canSpawn = true;
+  try {
+    await canary.request("tools/call", {});
+  } catch (err) {
+    const msg = String(err?.message ?? err);
+    if (!/EFTYPE|ENOENT|EACCES|EPIPE|Failed to launch|spawn/i.test(msg))
+      throw err;
+    canSpawn = false;
+    console.log(`canary: fake MCP server cannot spawn on this host: ${msg}`);
+  } finally {
+    canary.stop();
+    rmSync(dir0, { recursive: true, force: true });
+  }
+  if (!canSpawn) {
+    t.skip("host cannot exec the fake MCP server (pre-existing Windows limitation)");
+    return;
+  }
+
   const dir = mkdtempSync(join(tmpdir(), "r18c-timeout-"));
   const counter = join(dir, "spawns");
   const notifyLog = join(dir, "notify.log");
