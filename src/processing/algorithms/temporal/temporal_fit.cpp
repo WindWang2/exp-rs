@@ -95,7 +95,12 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
 {
   HarmonicFitResult result;
   const int n = static_cast<int>( y.size() );
-  const int terms = 1 + 2 * std::clamp( harmonics, 1, 6 );
+  // Clamp ONCE, at entry: terms and the design-row fill must agree on the
+  // harmonic order. The old split (terms from the clamped copy, the design
+  // loops from the raw parameter) wrote past double design[13] for
+  // harmonics >= 7 and left design[1..2] uninitialized for harmonics <= 0.
+  const int h = std::clamp( harmonics, 1, 6 );
+  const int terms = 1 + 2 * h;
   result.fitted.assign( n, kNan );
   if ( n == 0 || static_cast<int>( tDays.size() ) != n )
     return result;
@@ -120,7 +125,7 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
         continue;
       double design[13];
       design[0] = 1.0;
-      for ( int k = 1; k <= harmonics; ++k )
+      for ( int k = 1; k <= h; ++k )
       {
         const double omega = 2.0 * kPi * k * tDays[i] / 365.25;
         design[2 * k - 1] = std::sin( omega );
@@ -152,7 +157,7 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
         continue;
       double design[13];
       design[0] = 1.0;
-      for ( int k = 1; k <= harmonics; ++k )
+      for ( int k = 1; k <= h; ++k )
       {
         const double omega = 2.0 * kPi * k * tDays[i] / 365.25;
         design[2 * k - 1] = std::sin( omega );
