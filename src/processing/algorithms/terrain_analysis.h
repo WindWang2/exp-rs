@@ -78,7 +78,7 @@ class TerrainAnalysis
     // directional-second-derivative normalization (Esri-style, denominator
     // zx²+zy²) rather than ZT's (zx²+zy²)^1.5 — the formula is declared
     // here and pinned by the analytic tests either way:
-    //   zxx = (d+f−2e)/csx², zyy = (b+h−2e)/csy², zxy = (g+i−a−c)/(4 csx csy)
+    //   zxx = (d+f−2e)/csx², zyy = (b+h−2e)/csy², zxy = (a+i−c−g)/(4 csx csy)
     //   zx = (f−d)/(2 csx), zy = (h−b)/(2 csy)
     //   profile = (zx²·zxx + 2 zx·zy·zxy + zy²·zyy)/(zx²+zy²)
     //   plan    = (zy²·zxx − 2 zx·zy·zxy + zx²·zyy)/(zx²+zy²)
