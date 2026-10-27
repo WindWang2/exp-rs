@@ -63,6 +63,18 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     // Pass 1: map distance, curvature-adjusted elevation and the integer
     // distance ring of every cell (invalid ring for NoData).
     const double radius = params.radius > 0.0 ? params.radius : 0.0;
+    // Ring quantum: HALF the smallest cell step. The sweep requires every
+    // cell to have an in-grid 8-neighbour with a strictly smaller ring, and
+    // the toward-observer step lowers the metric distance by at least
+    // csx·|ux| + csy·|uy| >= m (u = unit radial, |ux|+|uy| >= 1,
+    // m = min(csx, csy)), so quantising by m/2 makes the ring quotient drop
+    // by >= 2 across that step — a margin of a full unit that survives
+    // double rounding even when the quotients land on exact integers
+    // (d/m an integer made ceil(d/m) collide for adjacent axial cells).
+    // Quantising by whole map units instead broke sub-metre grids (0.3 m
+    // UAV DSMs): same-ring neighbours had no legal predecessor and flat
+    // terrain went dark a few cells from the observer.
+    const double ringStep = 0.5 * std::min( cellSizeX, cellSizeY );
     std::vector<int> ring( n, kRingInvalid );
     std::vector<float> za( n, 0.0f );
     std::vector<float> distMap( n, 0.0f );
@@ -89,7 +101,7 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
             const double adjusted = dem[i] - params.curvatureFactor * d * d;
             za[i] = static_cast<float>( adjusted );
             distMap[i] = static_cast<float>( d );
-            const int r = static_cast<int>( std::ceil( d ) );
+            const int r = static_cast<int>( std::ceil( d / ringStep ) );
             ring[i] = r;
             maxRing = std::max( maxRing, r );
         }
