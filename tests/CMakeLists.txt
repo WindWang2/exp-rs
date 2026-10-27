@@ -17202,3 +17202,77 @@ target_include_directories(test_r24_a_perf_viewshed PRIVATE
 )
 sicnu_discover_tests(test_r24_a_perf_viewshed)
 # --- END R24-A registration ---
+
+# ── R23-B (zcode r23-b) registration blocks (union-merged with r23-D/E and r24_a) ──
+# ── R23-B (zcode r23-b) registration blocks (union-merged with r23-D/E) ──
+# ── R23-B (zcode r23-b): provider TU stub-compile gate (#1576/#1577) ──
+# Append-only registration block for this track (docs: .planning/zcode-r23-B).
+# The optional TensorRT/OpenVINO provider TUs compile nowhere by default
+# (both options default OFF in every lane), so union-merge code loss in them
+# ships silently — this happened in 9988aa15a9 (dangling selectDevice()
+# call, undeclared m_artifactPath, const method locking a non-mutable
+# mutex). Gate: -fsyntax-only both TUs against tests/fixtures/provider_stubs.
+if(UNIX AND OpenCV_FOUND)
+  get_target_property(_r23b_qt_core_incs Qt6::Core INTERFACE_INCLUDE_DIRECTORIES)
+  set(_r23b_stub_inc_args)
+  foreach(_r23b_dir IN ITEMS ${OpenCV_INCLUDE_DIRS} ${_r23b_qt_core_incs})
+    if(_r23b_dir AND NOT _r23b_dir MATCHES "\\$<" AND EXISTS "${_r23b_dir}")
+      list(APPEND _r23b_stub_inc_args -I "${_r23b_dir}")
+    endif()
+  endforeach()
+  add_test(NAME test_r23_b_provider_stub_compile
+    COMMAND sh "${CMAKE_SOURCE_DIR}/tests/test_r23_b_provider_stub_compile.sh"
+            --repo-root "${CMAKE_SOURCE_DIR}"
+            --cxx "${CMAKE_CXX_COMPILER}"
+            ${_r23b_stub_inc_args})
+  set_tests_properties(test_r23_b_provider_stub_compile PROPERTIES
+    TIMEOUT 120
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+# --- end R23-B provider stub-compile registration ---
+
+# ── R23-B: derived output.format head-role/confidence gate (B5 residual) ──
+# Append-only registration block for this track (docs: .planning/zcode-r23-B).
+# Preflight refusal suite for the derived collapse consuming a typed head
+# whose role/confidence contract it violates; same link surface as
+# test_model_runtime (engine + registry live in sicnu_operators).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r23_b_derived_output_roles test_r23_b_derived_output_roles.cpp)
+    target_link_libraries(test_r23_b_derived_output_roles PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r23_b_derived_output_roles)
+    target_include_directories(test_r23_b_derived_output_roles PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r23_b_derived_output_roles TEST_PREFIX test_r23_b_derived_output_roles::)
+endif()
+# --- end R23-B derived-output-roles registration ---
+
+# ── R23-B: run+metric single-transaction oracle (risk A5 closure) ──
+# Append-only registration block for this track (docs: .planning/zcode-r23-B).
+# Atomicity of upsertRunWithMetric under injected run-write failure, conflict/
+# mismatch refusals, and the pre-fix crash-window A/B (forked child, UNIX
+# only). Same light link surface as test_experiment_consistency_r4.
+qt_add_executable(test_r23_b_run_metric_transaction test_r23_b_run_metric_transaction.cpp)
+target_link_libraries(test_r23_b_run_metric_transaction PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_r23_b_run_metric_transaction PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
+# --- end R23-B run-metric-transaction registration ---

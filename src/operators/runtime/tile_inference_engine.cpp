@@ -1045,6 +1045,43 @@ class FeatherAccumulator
     void setClassTally( std::vector<long long> *tally ) { m_classTally = tally; }
 };
 
+void ensureDerivedModeMatchesHeadContract( const ModelInfo &model, RasterOutputMode mode )
+{
+  // Derived modes collapse head 0's class planes under probability
+  // semantics (argmax / threshold / top-1 band). A typed head whose
+  // declared role produces no class planes (embedding / detection /
+  // uncertainty / auxiliary) or whose confidence semantics are not
+  // probabilities would be collapsed into a fabricated product — the
+  // manifest contract says "consumers must not threshold across
+  // semantics". Refuse before any compute; legacy flat manifests
+  // (no output.heads[]) keep the historical permissive behavior, and a
+  // Probability request never collapses anything, so ANY head contract
+  // may write its raw stack (the gate is about the derived collapse
+  // only — guarding here keeps every call site trivially correct).
+  if ( mode == RasterOutputMode::Probability || model.output.heads.empty() )
+    return;
+  const ModelHeadContract &head = model.output.heads.front();
+  const bool classPlanes = head.role == "segmentation" || head.role == "classification";
+  if ( !classPlanes )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "derived output.format collapses head 0's class planes, but head '" + head.name
+        + "' of model '" + model.name + "' declares role '" + head.role
+        + "' — declare a segmentation/classification head or write the probability stack "
+          "and derive from it afterwards" );
+  // labels=argmax is order-preserving on logits (monotonic map), so a
+  // logit head may still produce a label raster; mask/confidence
+  // consume the [0,1] probability value itself, and "distance"
+  // (smaller = closer) inverts argmax outright.
+  if ( head.confidence == "distance"
+       || ( head.confidence == "logit" && mode != RasterOutputMode::Labels ) )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "derived output.format consumes [0,1] class probabilities, but head '" + head.name
+        + "' of model '" + model.name + "' declares confidence '" + head.confidence
+        + "' — write the raw stack or declare probability semantics" );
+}
+
 TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                                              const std::vector<int> &bands,
                                              const std::string &outputPath,
@@ -1127,6 +1164,12 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                              "derived output.format applies to single-head models; this "
                              "manifest declares " + std::to_string( m_model.output.tensorNames.size() )
                                + " tensor heads" );
+    // Derived modes collapse head 0's class planes under probability
+    // semantics (argmax / threshold / top-1 band): the typed head contract
+    // must claim class planes (risk B5 — shared gate, see
+    // ensureDerivedModeMatchesHeadContract). Refuse before any compute;
+    // legacy flat manifests keep the historical permissive behavior.
+    ensureDerivedModeMatchesHeadContract( m_model, mode );
     if ( mode == RasterOutputMode::Labels && m_model.postprocess.maskThreshold >= 0.0 )
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "postprocess.mask_threshold is meaningless with output.format=labels "

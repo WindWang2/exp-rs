@@ -868,6 +868,63 @@ sicnu::data::Result<void> writeRunInTxnLocked( sqlite3 *db, const ExperimentRun 
     return ResultT::success();
 }
 
+/// Inside a caller-owned transaction: the conflict check + insert of ONE
+/// metric record. Sets *alreadySameContent when the row exists with
+/// identical content (the historical re-save no-op success — callers
+/// decide whether that still commits the rest of their transaction).
+sicnu::data::Result<void> writeMetricInTxnLocked( sqlite3 *db, const MetricRecord &stored,
+                                                  bool *alreadySameContent )
+{
+    using ResultT = sicnu::data::Result<void>;
+    if ( alreadySameContent )
+        *alreadySameContent = false;
+    {
+        Stmt existing( db, QStringLiteral( "SELECT json FROM run_metrics WHERE run_id=?" ) );
+        if ( !existing )
+        {
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                existing.error( db ) ) );
+        }
+        existing.bind( 1, stored.runId );
+        if ( existing.stepRow() )
+        {
+            // Content comparison, not text comparison: a legacy row written
+            // before metrics_hash existed re-saves with a derived hash — the
+            // json TEXT differs, the record does not. Only true content
+            // differences are conflicts.
+            const auto existingRecord = MetricRecord::fromJson( textToJson( existing.text( 0 ) ) );
+            if ( existingRecord.has_value() && existingRecord->contentHash() == stored.contentHash() )
+            {
+                if ( alreadySameContent )
+                    *alreadySameContent = true;
+                return ResultT::success();
+            }
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.conflict" ),
+                QStringLiteral( "metrics for run %1 exist with different content" )
+                    .arg( stored.runId ) ) );
+        }
+    }
+    Stmt insert( db, QStringLiteral(
+        "INSERT INTO run_metrics(run_id, dataset_version_id, json, created_ms)"
+        " VALUES(?,?,?,?)" ) );
+    if ( !insert )
+    {
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            insert.error( db ) ) );
+    }
+    insert.bind( 1, stored.runId );
+    insert.bind( 2, stored.protocol.datasetVersionId() );
+    insert.bind( 3, jsonToText( stored.toJson() ) );
+    insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
+    if ( !insert.step() )
+    {
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            insert.error( db ) ) );
+    }
+    return ResultT::success();
+}
+
 } // namespace
 
 sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
@@ -893,6 +950,104 @@ sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
         return result;
     }
     return upsertRunImpl( run );
+}
+
+sicnu::data::Result<void> ExperimentStore::upsertRunWithMetric( const ExperimentRun &run,
+                                                                const MetricRecord &record )
+{
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
+    // Same unified-trace contract as upsertRun: one record per persisted run
+    // transition, the metric install riding the same event.
+    if ( sicnu::runtime::observability::trace::Trace::enabled() )
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const auto result = upsertRunWithMetricImpl( run, record );
+        sicnu::runtime::observability::trace::TraceEvent trace;
+        trace.event = "experiment_upsert";
+        trace.phase = "end";
+        trace.run = run.runId().toStdString();
+        trace.artifact = run.experimentId().toStdString();
+        trace.durationUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - started ).count();
+        trace.status = result ? "ok" : "error";
+        sicnu::runtime::observability::trace::Trace::publish( trace );
+        return result;
+    }
+    return upsertRunWithMetricImpl( run, record );
+}
+
+sicnu::data::Result<void> ExperimentStore::upsertRunWithMetricImpl( const ExperimentRun &run,
+                                                                    const MetricRecord &record )
+{
+    QReadLocker lifecycleGuard( &m_lifecycle ); // R15-B (#1449): no close() under a live call
+    using ResultT = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_read_only" ),
+                                            QStringLiteral( "store is read-only" ) ) );
+    if ( run.runId().isEmpty() || run.experimentId().isEmpty() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.invalid" ),
+                                            QStringLiteral( "run requires run_id + experiment_id" ) ) );
+    const auto validated = record.protocol.validate();
+    if ( !validated )
+        return ResultT::failure( validated.diagnostics() );
+
+    // Content-hash gate: identical semantics to saveMetricRecord (the single
+    // hashing authority; a non-empty hash that disagrees with the content is
+    // a tamper signal).
+    MetricRecord stored = record;
+    if ( stored.metricsHash.isEmpty() )
+        stored.metricsHash = stored.contentHash();
+    else if ( stored.metricsHash != stored.contentHash() )
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.metrics_hash_mismatch" ),
+            QStringLiteral( "metric record for run %1 carries a hash that does not"
+                            " match its content" )
+                .arg( record.runId ) ) );
+    // The atomicity promise is only meaningful when both rows name the SAME
+    // run: a metric keyed elsewhere would escape this transaction's
+    // all-or-nothing guarantee entirely.
+    if ( stored.runId != run.runId() )
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.invalid" ),
+            QStringLiteral( "metric record names run %1 but the run being installed is %2" )
+                .arg( stored.runId, run.runId() ) ) );
+
+    // Risk A5 closure: ONE BEGIN IMMEDIATE spans the run upsert AND the
+    // metric insert, so a crash or failure at any point leaves either both
+    // rows or neither — the importer's two-call sequence is retired.
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
+    const auto runWritten = writeRunInTxnLocked( m_impl->db, run );
+    if ( !runWritten )
+    {
+        m_impl->rollback();
+        return runWritten;
+    }
+    bool alreadySameContent = false;
+    const auto metricWritten = writeMetricInTxnLocked( m_impl->db, stored, &alreadySameContent );
+    if ( !metricWritten )
+    {
+        m_impl->rollback();
+        return metricWritten;
+    }
+    if ( SICNU_FAULT_POINT( "experiment_store.commit" ) )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "commit failed" ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "commit failed" ) ) );
+    }
+    return ResultT::success();
 }
 
 sicnu::data::Result<void> ExperimentStore::upsertRunImpl( const ExperimentRun &run )
@@ -1758,7 +1913,6 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord 
                             " match its content" )
                 .arg( record.runId ) ) );
 
-    const QString json = jsonToText( stored.toJson() );
     // #1173 doctrine (same as upsertExperiment): BEGIN IMMEDIATE around the
     // conflict check + insert so a concurrent connection cannot race a second
     // insert past the SELECT and degrade the UNIQUE failure into a generic
@@ -1766,50 +1920,19 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord 
     if ( !m_impl->begin( nullptr ) )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "cannot begin transaction" ) ) );
-    {
-        Stmt existing( m_impl->db, QStringLiteral( "SELECT json FROM run_metrics WHERE run_id=?" ) );
-        if ( !existing )
-        {
-            m_impl->rollback();
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
-                                                existing.error( m_impl->db ) ) );
-        }
-        existing.bind( 1, record.runId );
-        if ( existing.stepRow() )
-        {
-            // Content comparison, not text comparison: a legacy row written
-            // before metrics_hash existed re-saves with a derived hash — the
-            // json TEXT differs, the record does not. Only true content
-            // differences are conflicts.
-            const auto existingRecord = MetricRecord::fromJson( textToJson( existing.text( 0 ) ) );
-            const bool same = existingRecord.has_value() &&
-                              existingRecord->contentHash() == stored.contentHash();
-            m_impl->rollback();
-            if ( same )
-                return ResultT::success();
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.conflict" ),
-                                                QStringLiteral( "metrics for run %1 exist with different content" )
-                                                    .arg( record.runId ) ) );
-        }
-    }
-    Stmt insert( m_impl->db, QStringLiteral(
-        "INSERT INTO run_metrics(run_id, dataset_version_id, json, created_ms)"
-        " VALUES(?,?,?,?)" ) );
-    if ( !insert )
+    bool alreadySameContent = false;
+    const auto written = writeMetricInTxnLocked( m_impl->db, stored, &alreadySameContent );
+    if ( !written )
     {
         m_impl->rollback();
-        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
-                                            insert.error( m_impl->db ) ) );
+        return written;
     }
-    insert.bind( 1, record.runId );
-    insert.bind( 2, record.protocol.datasetVersionId() );
-    insert.bind( 3, json );
-    insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
-    if ( !insert.step() )
+    if ( alreadySameContent )
     {
+        // Re-saving identical content is a no-op success (historical
+        // behavior): roll back the empty transaction, report success.
         m_impl->rollback();
-        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
-                                            insert.error( m_impl->db ) ) );
+        return ResultT::success();
     }
     if ( !m_impl->commit( nullptr ) )
     {

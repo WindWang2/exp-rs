@@ -9,9 +9,10 @@
  *     the guarded range cache (/vsirangecache/: host check, per-hop guard,
  *     DNS pinning); the /vsicurl? option form is refused;
  *   - /vsiwebhdfs/ refuses private hosts (host check; no pinning);
- *   - CPLHTTPFetch (GDAL HTTP/WMS-style drivers, probeRemote) refuses
- *     private hosts before dispatch (host check; redirects inside libcurl
- *     are not visible here).
+ *   - CPLHTTPFetch (GDAL HTTP/WMS-style drivers) refuses private hosts
+ *     before dispatch (host check; redirects inside libcurl are not
+ *     visible here). probeRemote runs on the guarded httpFetchStatus
+ *     transport instead, so its redirect hops are checked per hop.
  * httpFetch* and the range cache read offline::blockPrivateNetworks()
  * directly. Library defaults are unchanged: nothing is installed unless an
  * entry point engages the policy.

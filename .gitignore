@@ -726,6 +726,11 @@ r6_dev.cmd
 .planning/zcode-r23-A/*
 !.planning/zcode-r23-A/*.md
 
+# R23-B (zcode r23-b) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r23-B/
+.planning/zcode-r23-B/*
+!.planning/zcode-r23-B/*.md
+
 # r23-C track (zcode r23-C: Pi/MCP harness, Qt/QGIS workbench & cartography
 # interaction loop): planning artifacts (markdown only; logs/builds stay local).
 !.planning/zcode-r23-C/

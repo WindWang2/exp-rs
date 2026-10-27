@@ -145,7 +145,7 @@ class TensorRtRuntime final : public IModelRuntime
     {
       return m_cudaIndex > 0 ? "cuda:" + std::to_string( m_cudaIndex ) : "cuda";
     }
-    std::string artifactPath() const override { return m_artifactPath; }
+    std::string artifactPath() const override { return mArtifact; }
 
     ProviderRuntimeDetails providerDetails() const override
     {

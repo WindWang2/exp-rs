@@ -6,52 +6,35 @@
   Copyright            : (C) 2026 SICNU GEO RS
 
   Implementation notes (proven against GDAL 3.10+/curl 8.x on this stack):
-  * CPLHTTPFetch delivers response header pairs in papszHeaders as
-    "Name=value"; the HTTP status code may be absent (nStatus == 0) even on
-    success, so reachability is derived from the whole answer, not nStatus.
-  * The probe range is declared through the HEADERS option ("Range: ...")
-    and the fetch is double-bounded with MAX_FILE_SIZE so even a range-ignoring
-    origin cannot push more than maxProbeBytes into this process.
-  * Timeout strings arrive through CPL error state ("timed out").
+  * The probe runs on the shared guarded transport (httpFetchStatus), NOT
+    on a raw CPLHTTPFetch: the pinned GDAL follows redirects
+    unconditionally inside one CPLHTTPFetch call, so a first-hop egress
+    check made before the fetch never sees the redirect target (#1637
+    sub-4 / #1456 transport note). httpFetchStatus under the process
+    private-network policy installs the per-hop guard (and DNS pinning)
+    automatically — every redirect hop is checked before dispatch.
+  * Status code, filtered response headers, body and size-guard state
+    arrive structured; reachability is derived from the whole answer, not
+    the status line alone (guarded builds may report 0).
+  * The probe range goes through the structured range option and stays
+    double-bounded by maxResponseBytes so even a range-ignoring origin
+    cannot push more than maxProbeBytes into this process.
  ***************************************************************************/
 
 #include "geospatial/remote/probe_remote.h"
 
+#include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/offline_gate.h"
 #include "geospatial/util/resource_uri.h"
 
-#include <cpl_conv.h>
-#include <cpl_http.h>
-
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 
 namespace sicnu::geo
 {
 
 namespace
 {
-
-bool headerIs( const char *headerLine, const char *name, std::string &value )
-{
-  if ( headerLine == nullptr )
-    return false;
-  const char *equals = std::strchr( headerLine, '=' );
-  if ( equals == nullptr )
-    return false;
-  std::string key( headerLine, static_cast<std::size_t>( equals - headerLine ) );
-  std::transform( key.begin(), key.end(), key.begin(),
-                  [] ( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-  if ( key != name )
-    return false;
-  value = equals + 1;
-  while ( !value.empty() && ( value.front() == ' ' || value.front() == '\t' ) )
-    value.erase( value.begin() );
-  while ( !value.empty() && ( value.back() == ' ' || value.back() == '\t' || value.back() == '\r' ) )
-    value.pop_back();
-  return true;
-}
 
 bool containsIgnoreCase( const std::string &haystack, const char *needle )
 {
@@ -96,9 +79,9 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
 
   if ( offline::enabled() )
     throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( uri.display() ) );
-  // R15-B (R4-03): CPLHTTPFetch has no per-hop guard; under the process
-  // policy a private origin is refused before dispatch (the GDAL-level
-  // fetch hook repeats the check for every CPLHTTPFetch).
+  // Fail-closed fast path with the probe's own diagnostics; under the
+  // process policy the guarded transport repeats the check on EVERY hop
+  // (redirect targets included), which a raw CPLHTTPFetch cannot do.
   if ( offline::blockPrivateNetworks() && offline::isPrivateHost( target ) )
   {
     Json::Value details;
@@ -107,90 +90,70 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
                     "probeRemote: private / loopback / link-local hosts are blocked", details );
   }
 
-  // Option strings are built once, then the char* array — c_str() pointers
-  // into a growing container dangle; assemble the array after the strings.
   const std::uintmax_t probeBytes =
     options.maxProbeBytes == 0 ? 1 : std::min<std::uintmax_t>( options.maxProbeBytes, 1024 * 1024 );
-  std::vector<std::string> optionStrings;
-  optionStrings.reserve( 5 );
-  optionStrings.push_back( "TIMEOUT=" + std::to_string( options.timeoutSeconds ) );
-  optionStrings.push_back( "CONNECTTIMEOUT=" + std::to_string( options.connectTimeoutSeconds ) );
-  optionStrings.push_back( "RETRIES=" + std::to_string( options.maxRetries ) );
-  optionStrings.push_back( "MAX_FILE_SIZE=" + std::to_string( probeBytes ) );
-  optionStrings.push_back( "HEADERS=Range: bytes=0-" + std::to_string( probeBytes - 1 ) );
-  std::vector<const char *> optionKeys;
-  optionKeys.reserve( optionStrings.size() + 1 );
-  for ( const std::string &option : optionStrings )
-    optionKeys.push_back( option.c_str() );
-  optionKeys.push_back( nullptr );
+  HttpFetchOptions fetchOptions;
+  fetchOptions.timeoutSeconds = options.timeoutSeconds;
+  fetchOptions.connectTimeoutSeconds = options.connectTimeoutSeconds;
+  fetchOptions.maxRetries = options.maxRetries;
+  fetchOptions.maxResponseBytes = probeBytes;
+  fetchOptions.range = "bytes=0-" + std::to_string( probeBytes - 1 );
 
-  CPLHTTPResult *result = CPLHTTPFetch( target.c_str(), optionKeys.data() );
-  if ( result == nullptr )
-    throw GeoError( ErrorCode::NetworkError, "probeRemote: request could not be dispatched: " + uri.display() );
+  // httpFetchStatus: transport failures (dispatch, timeout, per-hop policy
+  // refusals) throw typed GeoErrors; HTTP error statuses come back
+  // structured so the probe's own 404/410 vs >=400 mapping stays intact.
+  const HttpFetchResult result = httpFetchStatus( target, fetchOptions );
 
   RemoteProbeResult probe;
-  probe.httpStatus = result->nStatus;
-  // effectiveUrl stays empty: this GDAL build's CPLHTTPResult does not
-  // expose the post-redirect URL; the field is reserved for transports that
-  // do. Redaction is applied by consumers via ResourceUri::display().
-
-  // Response headers: subset only, never request credentials.
-  const char *lastError = result->pszErrBuf != nullptr ? result->pszErrBuf : CPLGetLastErrorMsg();
-  bool timedOut = false;
-  if ( lastError != nullptr && containsIgnoreCase( lastError, "timed out" ) )
-    timedOut = true;
+  probe.httpStatus = result.httpStatus;
+  // effectiveUrl stays empty: the result's displayUrl is the REQUESTED url
+  // in redacted form, not the post-redirect target; the field is reserved
+  // for transports that expose it. Redaction is applied by consumers via
+  // ResourceUri::display().
 
   bool declaredLength = false;
   std::uintmax_t declaredLengthBytes = 0;
   bool rangeRewritten = false; // origin answered with Content-Range
-  if ( result->papszHeaders != nullptr )
+  if ( const std::string value = result.headerValue( "content-range" ); !value.empty() )
   {
-    for ( char **header = result->papszHeaders; *header; ++header )
+    rangeRewritten = true;
+    probe.acceptsRanges = true; // a Content-Range answer is the strongest proof
+    // "bytes 0-1023/4195070" → full size after '/'
+    const std::size_t slash = value.rfind( '/' );
+    if ( slash != std::string::npos )
     {
-      std::string value;
-      if ( headerIs( *header, "accept-ranges", value ) )
-        probe.acceptsRanges = containsIgnoreCase( value, "bytes" );
-      else if ( headerIs( *header, "content-range", value ) )
+      try
       {
-        rangeRewritten = true;
-        probe.acceptsRanges = true; // a Content-Range answer is the strongest proof
-        // "bytes 0-1023/4195070" → full size after '/'
-        const std::size_t slash = value.rfind( '/' );
-        if ( slash != std::string::npos )
-        {
-          try
-          {
-            declaredLengthBytes = std::stoull( value.substr( slash + 1 ) );
-            declaredLength = true;
-          }
-          catch ( const std::exception & )
-          {
-          }
-        }
+        declaredLengthBytes = std::stoull( value.substr( slash + 1 ) );
+        declaredLength = true;
       }
-      else if ( headerIs( *header, "content-length", value ) && !rangeRewritten )
+      catch ( const std::exception & )
       {
-        // Content-Range carries the authoritative full size; a plain
-        // Content-Length on a ranged answer would only be the slice size.
-        try
-        {
-          declaredLengthBytes = std::stoull( value );
-          declaredLength = true;
-        }
-        catch ( const std::exception & )
-        {
-        }
       }
-      else if ( headerIs( *header, "content-type", value ) )
-        probe.contentType = value;
     }
   }
+  if ( const std::string value = result.headerValue( "accept-ranges" ); !value.empty() && !rangeRewritten )
+    probe.acceptsRanges = containsIgnoreCase( value, "bytes" );
+  if ( !rangeRewritten )
+  {
+    if ( const std::string value = result.headerValue( "content-length" ); !value.empty() )
+    {
+      // Content-Range carries the authoritative full size; a plain
+      // Content-Length on a ranged answer would only be the slice size.
+      try
+      {
+        declaredLengthBytes = std::stoull( value );
+        declaredLength = true;
+      }
+      catch ( const std::exception & )
+      {
+      }
+    }
+  }
+  if ( const std::string value = result.headerValue( "content-type" ); !value.empty() )
+    probe.contentType = value;
 
-  const bool fetched = result->pabyData != nullptr && result->nDataLen > 0;
-  CPLHTTPDestroyResult( result );
-
-  if ( timedOut )
-    throw GeoError( ErrorCode::Timeout, "probeRemote: request exceeded its time budget: " + uri.display() );
+  const bool fetched = !result.body.empty();
 
   // Reachability: a body, an explicit status, or a declared length.
   probe.reachable = fetched || probe.httpStatus > 0 || declaredLength;
@@ -208,7 +171,7 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
   }
   if ( !fetched && declaredLength && declaredLengthBytes == 0 )
   {
-    // No status code exposed by this GDAL build, but an empty declared
+    // No status code exposed by this build, but an empty declared
     // length with no body is an origin error (5xx) or an empty object —
     // never a usable asset.
     throw GeoError( ErrorCode::NetworkError, "probeRemote: remote origin reported an error: " + uri.display() );
@@ -216,9 +179,7 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
 
   // Range support comes from a rewritten Content-Range (a real 206) or the
   // explicit Accept-Ranges header — already parsed above. A truncated 200
-  // from a range-ignoring origin must NOT be read as range support (the
-  // dropped heuristic "fetched <= probeBytes" would bless exactly that
-  // origin).
+  // from a range-ignoring origin must NOT be read as range support.
   if ( declaredLength )
   {
     probe.hasSize = true;
