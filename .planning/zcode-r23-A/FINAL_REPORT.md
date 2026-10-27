@@ -44,3 +44,8 @@
 
 ## 恢复
 - worktree/branch 保留;阻塞恢复命令:cd ../exp-rs-r23-A-20261026T164112Z && git log --oneline origin/master..HEAD;ctest --test-dir build-r23-A -R "math_utils|terrain|spectral|mnf|temporal_fit|image_enhancement|image_fusion|formula_drift" --parallel 1
+
+## PR(最终)
+- URL: https://github.com/WindWang2/exp-rs/pull/1722
+- 状态: OPEN、非 draft、base=master、head=agent/r23-a-science-algorithms-20261026T164112Z @ af006d973f
+- 不等待 CI;不自动合并;worktree/branch 保留。
