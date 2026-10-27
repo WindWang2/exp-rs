@@ -42,3 +42,7 @@
 - `test_d16_temporal_phenology_e2e`：已知环境性失败面 CT-R21-A-1（src/core/temporal_cube.cpp sceneInstant 对完整路径扫 `\d{8}`；本 worktree 路径含 `20261027`）。与本轨改动无交集（本轨未触 src/core 与 d16 代码）；在无 8 位数字路径下该套件在 r21-A/r23 已验证。已记 CROSS_TRACK_FINDINGS CT-R24A-7。
 - 全仓 ctest 广谱运行（~1081 注册测试）：本轨按"增量 target → 邻域 ctest"纪律执行上述 15 靶 + 9 新靶；未跑平台为 macOS/Linux（本机为 Windows，交叉平台未验证——诚实声明）。
 - 光谱/分类/镶嵌全家族深扫审计：第 3 个审计代理因账户限流（1302）失败，NOT_EXECUTED；#1646-6/#1687 相关光谱面已人工实读覆盖。
+
+## R1 修复轮复跑（P1-1/P2-1/P3 落地后，两轮）
+
+12 靶 + 13 靶邻域全部两轮 All tests passed（含翻转钉子后的 test_image_fusion、新增末位重复用例的 temporal_guards、新增 NoData 岛钉子的 flow_flats、float dist 回退后的 viewshed/perf）。日志 r1fix1_/r1fix2_*。

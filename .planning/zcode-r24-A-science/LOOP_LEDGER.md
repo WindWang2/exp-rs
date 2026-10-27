@@ -9,3 +9,4 @@
 - 第4轮 | fixture 修正后 GREEN×2 全绿（9/9 两轮）；perf AFTER 首版 viewshed +43~54% → 数学证明桶内排序冗余 → 移除后 196ms（比基线 283ms 快，1453 断言既有套件全过） | GREEN×2 ✓；性能零退化 ✓（PERF_BASELINE.md） | 通过 | 邻域回归×2 + 记账 + commit
 - 第5轮 | 邻域回归 14 靶构建运行×2；RED_GREEN/PERF_BASELINE 落盘 | 见 TEST_RESULTS.md | 进行中 | R1 评审
 
+- 第6轮 | R1 评审（APPROVE-WITH-FIXES）：P1-1 image_fusion 钉子翻转；P2-1 三算子报错实际冲突对+末位越界修复（decompose/smooth 同修 master 既有缺陷）；P3-1..7 全采纳（注释不变量纠正/溢出守卫/float 回退/D8 可观测/文档/两个新负控——NoData 岛钉子按实证修正预期：种子格不抬升保持汇） | 25 靶两轮全绿（12+13）；12 提交 | 通过 | R2 评审
