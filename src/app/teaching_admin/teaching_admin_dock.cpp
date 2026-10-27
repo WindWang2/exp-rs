@@ -473,7 +473,9 @@ void TeachingAdminDock::onRunBatch()
                         QStringList names;
                         for ( const auto &skip : discoverySkips )
                             names << QFileInfo( skip.path ).fileName();
-                        appendLog( tr( "discovery refused %n entry(s) (skipped, not graded): %1 — "
+                        // %n plural form (#1695): the "entr%2" y/ies splice fed the plural
+                        // suffix through .arg(), which no translation can re-order.
+                        appendLog( tr( "discovery refused %n entry(ies) (skipped, not graded): %1 — "
                                        "see the report for each refusal's reason and remedy",
                                        nullptr, discoverySkips.size() )
                                      .arg( names.join( QStringLiteral( ", " ) ) ) );

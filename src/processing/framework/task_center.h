@@ -362,6 +362,14 @@ public:
     /// binary can still submit.
     void shutdownForTests();
 
+    /// Test-only pass-through to the engine-record consumer (onJobRecord).
+    /// The engine listener is a single replacing slot whose synchronous
+    /// delivery cannot be re-ordered from a test, so the exactly-once log
+    /// forwarding contract under #1705 retention eviction (cumulative vs
+    /// absolute-index delta records) is only observable through controlled
+    /// record injection here.
+    void deliverJobRecordForTests( const sicnu::jobs::JobRecord &record );
+
     /// True once shutdown() has been called (await loops poll this so a
     /// shutdown never leaves a sync waiter blocked until its timeout).
     bool isShuttingDown() const { return m_isShuttingDown.load(); }
@@ -635,7 +643,7 @@ private:
     QList<PendingLog> m_pendingLogs;
     QMap<std::string, long> m_taskByJobId; ///< jobId → taskId, listener dispatch (ADR 0051)
     QMap<long, FusedChainBinding> m_fusedChains; ///< head taskId → members (Phase C)
-    QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key (logLines.size())
+    QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key: count of ABSOLUTE engine log lines already forwarded (delta offsets and cumulative droppedLogLines+size share this space)
     QMap<long, double> m_lastForwardedProgress; ///< per-task progress dedup
     QMap<long, QMap<long, TaskCompletionCallback>> m_completionCallbacks; ///< per-task terminal callbacks
     /// Per-task cached RAM estimate (#702): the registry-backed resolver runs
