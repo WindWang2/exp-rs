@@ -331,9 +331,10 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     }
 
     // The empty target-experiment-id refusal lives at step 5 (before any
-    // store mutation). The A5 protection installed below is the COMPENSATION
-    // leg: the metrics record is written before the run by design, and a
-    // failed run install deletes it again — no orphan metric row survives.
+    // store mutation). The A5 protection is the 6b single transaction: the
+    // run and its metrics record install through upsertRunWithMetric —
+    // either both rows land or neither does (no compensation leg, no crash
+    // window between two commits).
     run.setExperimentId( options.targetExperimentId );
     run.setExecutionRef( report.originalRunId.isEmpty()
                              ? QString()

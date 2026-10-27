@@ -11,7 +11,7 @@
 | RED（master TU 直接 stub-compile） | OV 3 error（m_artifactPath 未声明/selectDevice 未声明/const 锁非 mutable mutex）+ TRT 1 error（m_artifactPath 未声明）——输出见 RED_GREEN.md |
 | GREEN（修复 TU）×2 | 两 TU 0 error ×2 |
 | gate 变异反证 | 回喂 master OV TU → 3 error FAIL（exit 1）；恢复 → PASS |
-| ctest `test_r23_b_provider_stub_compile` | **Passed 3.47s**（Test #1151） |
+| ctest `test_r23_b_provider_stub_compile` | **Passed 3.47s**（测试序号随配置漂移，以名称为准） |
 
 ## W2 — derived output.format 头契约门
 | 轮 | 命令 | 结果 |

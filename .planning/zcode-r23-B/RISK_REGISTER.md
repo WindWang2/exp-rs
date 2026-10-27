@@ -11,3 +11,8 @@
 | R7 | r21-B A5 崩溃窗口修复若做跨表事务，导入器补偿语义删除后补偿失败路径行为变化 | 低/中 | 保留 warning 通道语义：事务失败本身即完整错误信息 | W3 决策点 |
 | R8 | 上下文/时长限制导致 W3/W4 无法完成 | 中/低 | 每 slice 独立 commit；LOOP_LEDGER 记录续跑指针；未完成项如实标 PARTIAL/NOT_STARTED | 持续 |
 | R9 | #1637 sub-4（probeRemote 重定向）为 latent 无生产调用方，修复价值低但改动面涉及共享 HTTP 传输 | 中/低 | 优先级最低；时间不足则仅记录（与 r22-data 遗留风险表一致） | 待定 |
+
+## R1 轮追加（2026-10-27）
+- R10（R1 P3-3，记录不修）：probeRemote 重写后重复响应头的平局语义从"后者胜"变为"先者胜"（HttpFetchResult::headers 契约）。仅当源站发出自相矛盾的重复 content-type 头时可观测（病态、RFC 未定义）；且新代码顺带修复了旧循环的真实顺序依赖缺陷（Content-Range 证明被后到的 Accept-Ranges: none 覆写）。改回反而重新引入非确定性。
+- R1 P3-2 澄清（不改代码）：upsertRunWithMetric 公共包装在 experiment_store.cpp:958 持有 QReadLocker（与 upsertRun:932 完全对称，Impl 内 :982 再持）；评审原文自注 "safe as written"，经复核为误读。
+- R1 P3-1/P3-4 已修（注释纠错 + 文档测试编号去配置化）。
