@@ -111,6 +111,15 @@ class LeakageReport
     qint64 sampleCount() const { return m_sampleCount; }
     int digestUnknownCount() const { return m_digestUnknownCount; }
 
+    /// R24-B: how many valid-bounds samples were EXCLUDED from the spatial
+    /// grid because their center quotient cannot be cast to a bucket index
+    /// (extreme coordinates ≥2^62 after the cell division — see bucketOf in
+    /// the .cpp). Those samples are not pair-compared, so a "clean" verdict
+    /// over a nonzero count here is weaker evidence — quantified like
+    /// digestUnknownCount, never hidden. -1 = spatial checks did not run.
+    void setUnbucketedCount( int count ) { m_unbucketedCount = count; }
+    int unbucketedCount() const { return m_unbucketedCount; }
+
     bool isClean() const { return m_findings.isEmpty(); }
 
     /// Counts by kind and severity + audited checks; embedded into split
@@ -127,6 +136,7 @@ class LeakageReport
     QVector<LeakageFinding> m_findings;
     qint64 m_sampleCount = 0;
     int m_digestUnknownCount = -1; // -1 = not computed
+    int m_unbucketedCount = -1;    // -1 = spatial checks did not run
 };
 
 class LeakageAuditor

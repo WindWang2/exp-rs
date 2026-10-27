@@ -16,6 +16,7 @@
 
 #include <json/json.h>
 
+#include <atomic>
 #include <mutex>
 #include <set>
 #include <string>
@@ -159,6 +160,31 @@ PublishFenceLease::PublishFenceLease( const QString &finalPath )
                              "another publish is already in progress for "
                                + finalPath.toStdString() );
   }
+  // R24-B: the in-process set only fenced THIS process — two CLI processes
+  // (or GUI + CLI) publishing the same artifact could interleave their
+  // park/swap/adopt windows and destroy each other's previous product
+  // exactly the way two threads could before the fence existed. A QLockFile
+  // on the fence key extends the SAME lease across processes; a lock held
+  // by a LIVE peer refuses typed. Failure to acquire rolls the in-process
+  // registration back first so this attempt leaves no trace.
+  const QFileInfo keyInfo( QString::fromStdString( m_key ) );
+  m_lock = std::make_unique<QLockFile>(
+    keyInfo.path() + QLatin1Char( '/' ) + QLatin1Char( '.' ) + keyInfo.fileName()
+      + QStringLiteral( ".publish.lock" ) );
+  // staleLockTime bounds the FOREIGN-HOST fallback (R1 review): pid
+  // liveness is only verifiable for local-host locks, so a crash on shared
+  // storage (NAS) would otherwise block the artifact forever. A live LOCAL
+  // holder is never stolen — its pid keeps the lock alive regardless of
+  // age; 6h only adopts locks whose owner cannot be probed at all.
+  m_lock->setStaleLockTime( 6 * 60 * 60 * 1000 );
+  if ( !m_lock->tryLock( 250 ) )
+  {
+    std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
+    g_publishFences.erase( m_key );
+    throw RSOperatorError( ErrorCode::AlreadyRunning,
+                           "another publish is already in progress for "
+                             + finalPath.toStdString() );
+  }
   m_held = true;
 }
 
@@ -166,8 +192,47 @@ PublishFenceLease::~PublishFenceLease()
 {
   if ( !m_held )
     return;
+  if ( m_lock )
+    m_lock->unlock(); // releases AND removes the cross-process lock file
   std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
   g_publishFences.erase( m_key );
+}
+
+QString uniqueStagePath( const QString &finalPath )
+{
+  static std::atomic<unsigned long long> nextToken{ 0 };
+  return QStringLiteral( "%1.%2x%3.tmp~" )
+    .arg( finalPath, QString::number( sicnu::portable::pid() ),
+          QString::number( nextToken.fetch_add( 1 ) ) );
+}
+
+void sweepStaleStagePaths( const QString &finalPath )
+{
+  // Age-gated: only litter older than a day is removed. An unconditional
+  // sweep would delete the stage of a CONCURRENT live writer (uniqueness
+  // makes concurrent attempts legal — that is the point); a live staged
+  // write is minutes at most, so anything a day old is crash litter. Both
+  // the raster "<final>.*.tmp~" family and the ensemble's hidden
+  // ".<leaf>.*.tmp~" member family are covered.
+  const QFileInfo info( finalPath );
+  const QDir dir( info.absolutePath() );
+  // QDir::Hidden: on POSIX the ensemble's ".<leaf>.*.tmp~" family starts
+  // with a dot and is excluded from plain QDir::Files listings (R1 review).
+  const QStringList stale = dir.entryList(
+    { info.fileName() + QStringLiteral( ".*.tmp~" ),
+      QStringLiteral( ".%1.*.tmp~" ).arg( info.fileName() ),
+      // Morphology intermediates ride the unique stage name with their own
+      // ".morph~" tail (R2 review) — crash litter self-heals with the rest.
+      info.fileName() + QStringLiteral( ".*.morph~" ) },
+    QDir::Files | QDir::Hidden );
+  const QDateTime cutoff = QDateTime::currentDateTime().addDays( -1 );
+  for ( const QString &name : stale )
+  {
+    const QFileInfo entry( dir.filePath( name ) );
+    const QDateTime modified = entry.lastModified();
+    if ( modified.isValid() && modified <= cutoff )
+      QFile::remove( dir.filePath( name ) );
+  }
 }
 
 std::string crsDisplayName( const QString &wkt )
@@ -299,15 +364,18 @@ void DetectionPublishGuard::removeBackupFamily()
 
 DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
                                               const QString &backupSuffix )
-    : m_fenceLease( finalPath ), // acquired FIRST: a concurrent guard on the same artifact must
-                                 // be refused typed before any adoption or park touches the path —
-                                 // the detection guard has exactly the "second guard adopts the
-                                 // first's parked pair" corruption window the ProductPublishGuard
-                                 // fence was added for
-      m_final( finalPath ),
+    : m_final( finalPath ),
       m_backup( finalPath + backupSuffix ),
       m_backupSuffix( backupSuffix )
 {
+  // Occupancy fence FIRST (a concurrent guard on the same artifact must
+  // be refused typed before any adoption or park touches the path — the
+  // detection guard has exactly the "second guard adopts the first's parked
+  // pair" corruption window the ProductPublishGuard fence was added for).
+  // Acquired in the body (R24-B): a cross-process fence refusal cannot
+  // disturb the half-initialized members of a throwing member-init.
+  m_fenceLease = std::make_unique<PublishFenceLease>( finalPath );
+
   // Crash-orphan recovery: a previous run that died between parking the
   // previous product and publishing the new one leaves the final path
   // ABSENT and the backup family present. Adopt the parked product back
@@ -489,15 +557,27 @@ void ProductPublishGuard::removeBackupFamily()
 ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QString &backupSuffix,
                                           const char *parkFaultPoint,
                                           const QString &stageForCleanup )
-    : m_fenceLease( finalPath ), // occupancy fence FIRST (declared first member): acquired before
-                                 // any adoption/park touches the path; a concurrent guard on the
-                                 // same artifact is refused typed. Released on EVERY exit — the
-                                 // member is destroyed when the constructor body throws, and the
-                                 // destructor releases it last, after the restore completed.
-      m_final( finalPath ),
+    : m_final( finalPath ),
       m_backup( finalPath + backupSuffix ),
       m_stageForCleanup( stageForCleanup )
 {
+  // Occupancy fence FIRST (declared first member, released last — after the
+  // restore completed). Acquired in the body (R24-B) so a fence refusal —
+  // including the new CROSS-PROCESS refusal — can still honor the documented
+  // stageForCleanup contract: a throwing member-init never ran the ctor
+  // body, so the freshly written stage file leaked on exactly the
+  // fence-contention path the header promises to clean.
+  try
+  {
+    m_fenceLease = std::make_unique<PublishFenceLease>( finalPath );
+  }
+  catch ( ... )
+  {
+    if ( !m_stageForCleanup.isEmpty() )
+      QFile::remove( m_stageForCleanup );
+    throw;
+  }
+
   const QString provPath = m_final + QStringLiteral( ".prov.json" );
   const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
   // Every throw path below must not leave the freshly written stage behind

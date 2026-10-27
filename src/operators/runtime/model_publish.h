@@ -12,16 +12,21 @@
 #include "operators/runtime/detection_tile_engine.h"
 #include "operators/runtime/model_runtime.h"
 
+#include <QLockFile>
 #include <QString>
 
 #include <json/json.h>
 
+#include <memory>
 #include <string>
 
 namespace sicnu::operators::runtime {
 
 /// Process-wide publish occupancy lease: ONE live guard per canonical
-/// artifact path per process. The fence key is the PLATFORM-TRUE identity of
+/// artifact path per process — and, R24-B, per MACHINE: the lease is backed
+/// by a QLockFile on the fence key, so two PROCESSES (GUI task + CLI, two
+/// CLI runs) publishing the same path serialize exactly like two threads
+/// did. The fence key is the PLATFORM-TRUE identity of
 /// the path (absolute + lexically clean + deepest-existing ancestor resolved
 /// through symlinks; case-folded only when a filesystem probe proves the
 /// location case-insensitive) — "./out.tif", "<cwd>/out.tif" and a symlinked
@@ -40,7 +45,8 @@ class PublishFenceLease
   public:
     PublishFenceLease() = default;
     /// Acquires the slot for finalPath; throws RSOperatorError(AlreadyRunning)
-    /// when another guard holds the same artifact.
+    /// when another guard (in this process or another) holds the same
+    /// artifact.
     explicit PublishFenceLease( const QString &finalPath );
     ~PublishFenceLease();
     PublishFenceLease( const PublishFenceLease & ) = delete;
@@ -49,6 +55,7 @@ class PublishFenceLease
   private:
     std::string m_key;
     bool m_held = false;
+    std::unique_ptr<QLockFile> m_lock;
 };
 
 /// The platform-true fence key for an artifact path (see PublishFenceLease).
@@ -56,6 +63,22 @@ class PublishFenceLease
 /// directly: relative/absolute/symlinked-directory spellings of one artifact
 /// MUST produce one key; genuinely distinct case-sensitive files must not.
 std::string canonicalPublishFenceKey( const QString &finalPath );
+
+/// R24-B: per-attempt staged-publish path for @p finalPath,
+/// "<final>.<pid>x<counter>.tmp~". The old fixed "<final>.tmp~" let two
+/// concurrent runs targeting one output path clobber each other's stage
+/// during the staged write (the occupancy fence only covers the swap
+/// window). Pair with sweepStaleStagePaths(finalPath) BEFORE creating the
+/// stage so crashed attempts keep self-healing like the fixed name did.
+QString uniqueStagePath( const QString &finalPath );
+
+/// R24-B: best-effort removal of staged-publish litter ("<final>.*.tmp~"
+/// and the ensemble's hidden ".<leaf>.*.tmp~" member family) left by
+/// CRASHED attempts. Age-gated (older than a day): an unconditional sweep
+/// would delete the stage of a concurrent live writer, which uniqueness
+/// made legal — that is the point of the unique names. Never matches the
+/// legacy fixed "<final>.tmp~" spelling.
+void sweepStaleStagePaths( const QString &finalPath );
 
 /// Compact CRS display string for payloads/sidecars: "EPSG:32633" when the
 /// SRS carries an authority code, else a truncated WKT; "" for undeclared.
@@ -101,10 +124,12 @@ class DetectionPublishGuard
     /// Removes the whole backup family (main + companions + prov backup).
     void removeBackupFamily();
 
-    /// Declared first: the fence is acquired before any other member is
-    /// initialized (and before any adoption/park runs) and released last
-    /// (reverse declaration order) — after the restore completed.
-    PublishFenceLease m_fenceLease;
+    /// Declared first so it is released LAST (reverse destruction order) —
+    /// after the restore completed. Acquired FIRST inside the constructor
+    /// body (before any adoption/park runs): a refusal at fence acquisition
+    /// must still be able to run the caller-side stage cleanup, which a
+    /// throwing member-init could not (R24-B).
+    std::unique_ptr<PublishFenceLease> m_fenceLease;
     QString m_final;
     QString m_backup;
     QString m_backupSuffix;
@@ -164,10 +189,10 @@ class ProductPublishGuard
     /// Removes the backup family (main + prov sidecar backup).
     void removeBackupFamily();
 
-    /// Declared first: the fence is acquired before any other member is
-    /// initialized (and before any adoption/park runs) and released last
-    /// (reverse declaration order) — after the restore completed.
-    PublishFenceLease m_fenceLease;
+    /// Declared first so it is released LAST (reverse destruction order) —
+    /// after the restore completed. Acquired FIRST inside the constructor
+    /// body (before any adoption/park runs) — see DetectionPublishGuard.
+    std::unique_ptr<PublishFenceLease> m_fenceLease;
     QString m_final;
     QString m_backup;
     QString m_stageForCleanup;
