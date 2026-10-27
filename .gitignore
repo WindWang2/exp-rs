@@ -725,3 +725,11 @@ r6_dev.cmd
 !.planning/zcode-r23-A/
 .planning/zcode-r23-A/*
 !.planning/zcode-r23-A/*.md
+
+# R23-D (r23-d lab/grader/faultlab/verification) track planning artifacts (markdown + tools; builds stay local).
+!.planning/zcode-r23-D/
+.planning/zcode-r23-D/*
+!.planning/zcode-r23-D/*.md
+!.planning/zcode-r23-D/tools/
+!.planning/zcode-r23-D/tools/*.cmd
+!.planning/zcode-r23-D/tools/*.sh
