@@ -1,7 +1,7 @@
 # fix(r24_a): 遥感科学算法数值正确性 — NoData/负反射率语义、viewshed 环归一化、D8 平地路由、时序守卫与 SAR 角域（RED→GREEN×2，双轮独立评审）
 
 R24-A science 轨。base `master@5fe642ec6339807823aa56612ba94668592a738d`（执行时刻远程事实基线；Open PR=0，144 open issues 已全量再分诊，FIXED_IN_MASTER 重做=0）。
-head `agent/r24_a-20261027T022732Z`（14 个提交，含 R1/R2 两轮评审修复）。
+head `agent/r24_a-20261027T022732Z`（15 个提交，含 R1/R2 两轮评审修复）。
 
 ## 修复清单（每项 RED→GREEN×2，详见 `.planning/zcode-r24-A-science/RED_GREEN.md`）
 
