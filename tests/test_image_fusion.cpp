@@ -1927,7 +1927,10 @@ TEST_CASE( "dNBR fusion keeps the negative-sentinel rule (R2 M3)", "[fusion][r21
     CHECK_FALSE( MathUtils::bothNormalizable( nd, 0.3f ) );
     CHECK_FALSE( MathUtils::bothNormalizable( 0.3f, nd ) );
     CHECK_FALSE( MathUtils::bothNormalizable( -999.0f, 0.3f ) ); // threshold
-    CHECK_FALSE( MathUtils::bothNormalizable( -1.0f, -1.0f ) );  // equal negatives
+    // #1687 (R24-A): equal negative operands are legitimate post-correction
+    // reflectance — (a-b)/(a+b) = 0/(2a) evaluates to 0, so the pair is
+    // valid now. The pre-R24 form rejected it with NaN.
+    CHECK( MathUtils::bothNormalizable( -1.0f, -1.0f ) );       // equal negatives
     CHECK( MathUtils::bothNormalizable( 0.0f, 0.0f ) );
     CHECK_FALSE( MathUtils::bothNormalizable(
         std::numeric_limits<float>::quiet_NaN(), 0.3f ) );

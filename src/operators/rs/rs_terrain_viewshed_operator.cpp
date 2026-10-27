@@ -344,8 +344,9 @@ Json::Value RsTerrainViewshedOperator::run( const Json::Value &params,
             out.abandon();
             context.throwIfCancelled(); // cancelled() hooks exit false first
             throw RSOperatorError( ErrorCode::ComputationError,
-                                   "Viewshed failed (observer outside the grid or "
-                                   "on NoData?)" );
+                                   "Viewshed failed (observer outside the grid, on "
+                                   "NoData, or a cell-size anisotropy beyond the "
+                                   "ring budget?)" );
         }
         Json::UInt64 visibleCount = 0;
         Json::UInt64 analysed = 0;

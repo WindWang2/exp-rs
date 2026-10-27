@@ -156,6 +156,15 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     const int band = getInt(params, "band", 1);
     const double incidenceDeg = getDouble(params, "incidenceDeg", 30.0);
     const double headingDeg = getDouble(params, "headingDeg", 0.0);
+    // Physical domain (0, 90) degrees — the refusal rs:sar_backscatter and
+    // rs:sar_terrain_masks already apply. Without it a theta of 95 keeps
+    // sin > 0 and streams a physically impossible RTC, and theta = 0 nulls
+    // the sin(theta0) denominator into a "successful" all-NoData product
+    // (R24-A).
+    if (!(incidenceDeg > 0.0 && incidenceDeg < 90.0))
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "incidenceDeg must be in (0, 90) degrees, got " +
+                                  std::to_string(incidenceDeg));
     const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirections, "right");
     // #785: heading (flight direction) and antenna look azimuth are orthogonal.
     // The look azimuth is heading ± 90 by antenna side, unless the caller
