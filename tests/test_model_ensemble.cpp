@@ -1220,6 +1220,21 @@ TEST_CASE( "ensemble derived collapse refuses non-class head contracts",
     CHECK( !QFile::exists( dir.filePath( QStringLiteral( "out.tif" ) ) ) );
   }
 
+  SECTION( "a typed non-class head keeps the DEFAULT probability request running" )
+  {
+    // N1 regression pin (R2 confirmation): the gate is about the derived
+    // collapse only — an embedding-headed ensemble writing its raw stack
+    // is a legal request and must not be refused.
+    registerWithHead( "ens-role-prob", "embedding", "distance" );
+    ModelExecutionRequest request = rasterRequest(
+      input.toStdString(), dir.filePath( QStringLiteral( "prob.tif" ) ).toStdString(),
+      "ens-role-prob" );
+    request.outputMode = RasterOutputMode::Probability;
+    ModelExecutionResult result;
+    REQUIRE_NOTHROW( result = sicnu::operators::runtime::runModelInference( request, context ) );
+    CHECK( QFile::exists( dir.filePath( QStringLiteral( "prob.tif" ) ) ) );
+  }
+
   SECTION( "segmentation head keeps the derived request running" )
   {
     registerWithHead( "ens-role-seg", "segmentation", "probability" );

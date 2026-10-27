@@ -1054,8 +1054,11 @@ void ensureDerivedModeMatchesHeadContract( const ModelInfo &model, RasterOutputM
   // probabilities would be collapsed into a fabricated product — the
   // manifest contract says "consumers must not threshold across
   // semantics". Refuse before any compute; legacy flat manifests
-  // (no output.heads[]) keep the historical permissive behavior.
-  if ( model.output.heads.empty() )
+  // (no output.heads[]) keep the historical permissive behavior, and a
+  // Probability request never collapses anything, so ANY head contract
+  // may write its raw stack (the gate is about the derived collapse
+  // only — guarding here keeps every call site trivially correct).
+  if ( mode == RasterOutputMode::Probability || model.output.heads.empty() )
     return;
   const ModelHeadContract &head = model.output.heads.front();
   const bool classPlanes = head.role == "segmentation" || head.role == "classification";
