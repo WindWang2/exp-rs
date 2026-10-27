@@ -10,4 +10,4 @@
 
 - [x] R1 评审结论与修复闭环（REVIEW_R1.md：APPROVE-WITH-FIXES，P1×1/P2×1/P3×7 全闭环）
 - [x] R2 评审结论与修复闭环（REVIEW_R2.md：APPROVE-WITH-FIXES，0×P0-P2，7×P3 全闭环）
-- [ ] PR URL / number
+- [x] PR URL / number：**https://github.com/WindWang2/exp-rs/pull/1718**（OPEN，非 draft，base=master，head=agent/r24_a-20261027T022732Z @ 7b83cb379）
