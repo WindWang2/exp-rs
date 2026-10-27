@@ -338,3 +338,61 @@ TEST_CASE( "spectral formula drift guard: degenerate denominators are NaN, never
     for ( float value : values )
         REQUIRE( std::isnan( value ) );
 }
+
+// r21-A R2/M3 seam, pinned END-TO-END (R1 P2-1): a pre-NIR band carrying an
+// UNDECLARED -9999 legacy sentinel (writeMultiBandConst stamps no nodata tag)
+// must void the dNBR pixel to NaN through the operator's fused path — the
+// MathUtils::legacyNegativeSentinelFree screen. Without the screen the finite
+// sentinel computes a ~+1 pre-NBR and fabricates extreme change (~+1.47 dNBR);
+// with the shared predicate alone (finite-only since #1687) nothing would
+// fail, so this test is the call site's only regression net.
+TEST_CASE( "spectral formula drift guard: dNBR voids undeclared -9999 sentinels",
+           "[spectral][drift][guard]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const BandValues v;
+    const QString pre = tmp.filePath( "pre_sentinel.tif" );
+    const QString post = tmp.filePath( "post_sentinel.tif" );
+    BandValues preV;
+    preV.nir = -9999.0; // legacy sentinel, deliberately UNDECLARED
+    REQUIRE( writeMultiBandConst( pre,
+                                  { preV.blue, preV.green, preV.red, preV.nir, preV.swir,
+                                    preV.swir2, preV.rededge },
+                                  2, 2 ) );
+    BandValues postV;
+    postV.nir = 0.25;
+    postV.swir2 = 0.70;
+    postV.rededge = 0.35;
+    REQUIRE( writeMultiBandConst( post,
+                                  { postV.blue, postV.green, postV.red, postV.nir, postV.swir,
+                                    postV.swir2, postV.rededge },
+                                  2, 2 ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:spectral_index" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = pre.toStdString();
+    params["postfire"] = post.toStdString();
+    params["output"] = tmp.filePath( "dnbr_sentinel.tif" ).toStdString();
+    params["index"] = "dNBR";
+    params["blue"] = 1;
+    params["green"] = 2;
+    params["red"] = 3;
+    params["nir"] = 4;
+    params["swir"] = 5;
+    params["swir2"] = 6;
+    params["rededge"] = 7;
+    RSOperatorContext ctx;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+
+    const auto values = readBand( tmp.filePath( "dnbr_sentinel.tif" ), 1 );
+    REQUIRE( values.size() == 4 );
+    for ( float value : values )
+    {
+        INFO( "dNBR pixel " << value << " (undeclared -9999 pre-NIR)" );
+        REQUIRE( std::isnan( value ) );
+    }
+}

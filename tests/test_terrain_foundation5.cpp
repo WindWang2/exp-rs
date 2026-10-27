@@ -464,3 +464,44 @@ TEST_CASE( "Priority-flood fill handles DEM with NoData collar/border (#848)",
   CHECK( filled[W * H - 1] == kNodataVal );
 }
 
+
+// The mixed second derivative must be the actual ∂²z/∂x∂y: for the saddle
+// z = x·y every interior cell has zxx = zyy = 0, zx = y, zy = x, zxy = 1,
+// so profile = 2·zx·zy·zxy/(zx²+zy²) = +1 and plan = −1 exactly. The
+// stencil for zxy is (a + i − c − g)/(4·csx·csy) — (g + i − a − c) is a
+// row-asymmetry combination that doubles the saddle value instead.
+TEST_CASE( "Zevenbergen-Thorne mixed derivative on the saddle z = x·y",
+           "[terrain][curvature]" )
+{
+  constexpr int kN = 5;
+  std::vector<float> dem( kN * kN );
+  for ( int y = 0; y < kN; ++y )
+    for ( int x = 0; x < kN; ++x )
+      dem[static_cast<size_t>( y ) * kN + x] =
+        static_cast<float>( x * y );
+
+  std::vector<float> prof( kN * kN ), plan( kN * kN ), total( kN * kN );
+  REQUIRE( TerrainAnalysis::curvatureProfile( dem.data(), prof.data(), kN, kN, 1, 1, kNodata ) );
+  REQUIRE( TerrainAnalysis::curvaturePlan( dem.data(), plan.data(), kN, kN, 1, 1, kNodata ) );
+  REQUIRE( TerrainAnalysis::curvatureTotal( dem.data(), total.data(), kN, kN, 1, 1, kNodata ) );
+
+  const size_t centre = static_cast<size_t>( 2 ) * kN + 2;
+  REQUIRE( prof[centre] == Catch::Approx( 1.0f ).margin( 1e-6 ) );
+  REQUIRE( plan[centre] == Catch::Approx( -1.0f ).margin( 1e-6 ) );
+  REQUIRE( total[centre] == Catch::Approx( 0.0f ).margin( 1e-6 ) );
+
+  // Same saddle values on anisotropic 0.5 m × 2 m cells: the ZT formulas
+  // carry csx/csy exactly, so zx = y/csx = 4, zy = x/csy = 1 and
+  // zxy = 1/(csx·csy) = 1 → profile = 2·4·1·1/17 = 8/17, plan = −8/17.
+  std::vector<float> dem2( kN * kN );
+  for ( int y = 0; y < kN; ++y )
+    for ( int x = 0; x < kN; ++x )
+      dem2[static_cast<size_t>( y ) * kN + x] =
+        static_cast<float>( x * y );
+  std::vector<float> prof2( kN * kN ), plan2( kN * kN );
+  REQUIRE( TerrainAnalysis::curvatureProfile( dem2.data(), prof2.data(), kN, kN, 0.5f, 2.0f, kNodata ) );
+  REQUIRE( TerrainAnalysis::curvaturePlan( dem2.data(), plan2.data(), kN, kN, 0.5f, 2.0f, kNodata ) );
+  const size_t c2 = static_cast<size_t>( 2 ) * kN + 2;
+  REQUIRE( prof2[c2] == Catch::Approx( 8.0 / 17.0 ).margin( 1e-6 ) );
+  REQUIRE( plan2[c2] == Catch::Approx( -8.0 / 17.0 ).margin( 1e-6 ) );
+}

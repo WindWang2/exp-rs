@@ -604,7 +604,11 @@ ZtDerivatives ztDerivatives( const float k9[9], double csx, double csy )
     ZtDerivatives z;
     z.zxx = ( d + f - 2 * e ) / ( csx * csx );
     z.zyy = ( b + h - 2 * e ) / ( csy * csy );
-    z.zxy = ( g + i - a - c ) / ( 4 * csx * csy );
+    // (a + i - c - g): the mixed partial d2z/dxdy is the x-difference of
+    // the y-slopes — [(i - c) - (g - a)] / (4 csx csy). The previous
+    // (g + i - a - c) combination is symmetric under an x-flip and cannot
+    // be a mixed partial; it doubled the saddle value of z = x·y.
+    z.zxy = ( a + i - c - g ) / ( 4 * csx * csy );
     z.zx = ( f - d ) / ( 2 * csx );
     z.zy = ( h - b ) / ( 2 * csy );
     return z;

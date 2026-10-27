@@ -293,3 +293,19 @@ TEST_CASE( "Disjoint grid ranges refuse to resample", "[spectral_wavelength]" )
     c.centersNm = { 550.0f, 650.0f };
     REQUIRE( rangesOverlap( a, c ) );
 }
+
+// digestHex/toJson walk row[b] for b < bandCount: a width-inconsistent
+// in-memory Table (only constructible in memory — fromJson enforces equal
+// widths) must be a typed refusal, never an out-of-bounds read.
+TEST_CASE( "SpectralTable refuses width-inconsistent tables at the serialization seams",
+           "[spectral_table]" )
+{
+    Table t;
+    t.bandCount = 3;
+    t.spectra = { { 1.0f, 2.0f } }; // two cells, bandCount says three
+
+    REQUIRE( SpectralTable::digestHex( t.spectra, t.bandCount ).isEmpty() );
+
+    const QJsonObject json = SpectralTable::toJson( t );
+    REQUIRE( json.isEmpty() );
+}

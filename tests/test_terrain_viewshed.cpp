@@ -301,3 +301,38 @@ TEST_CASE( "viewshed marks DEM-NoData cells with the declared nodataByte",
         }
     REQUIRE( nodataCount == nodataCells );
 }
+
+// Sub-metre grids (0.3–0.5 m UAV/lidar DSMs) reach viewshedR3 through the
+// agent terrain tool with the DEM's real cell size. The ring sweep must
+// stay connected there too: rings are quantised in units of the smallest
+// cell step, so every cell always has an in-grid predecessor with a
+// strictly smaller ring (the toward-observer step lowers the metric
+// distance by at least min(cellSizeX, cellSizeY)). Quantising by whole
+// map units instead left same-ring neighbours with no legal predecessor
+// and flat terrain went dark a few cells out.
+TEST_CASE( "viewshed on sub-metre cells sees the full flat plane",
+           "[terrain][viewshed]" )
+{
+    const int w = 21;
+    const int h = 21;
+    const Grid g = plane( w, h, 0.0, 0.0, 100.0 );
+    ViewshedParams p;
+    p.obsCol = 10;
+    p.obsRow = 10;
+    p.observerHeight = 2.0;
+    p.targetHeight = 0.0;
+    p.radius = 0.0;
+    std::vector<std::uint8_t> vis;
+    REQUIRE( viewshedR3( g.z.data(), w, h, kNo, 0.3, 0.3, p, &vis ) );
+    std::size_t visible = 0;
+    for ( std::size_t i = 0; i < vis.size(); ++i )
+        visible += vis[i];
+    CHECK( visible == vis.size() );
+
+    // Anisotropic sub-metre cells must stay connected as well.
+    REQUIRE( viewshedR3( g.z.data(), w, h, kNo, 0.25, 0.8, p, &vis ) );
+    visible = 0;
+    for ( std::size_t i = 0; i < vis.size(); ++i )
+        visible += vis[i];
+    CHECK( visible == vis.size() );
+}

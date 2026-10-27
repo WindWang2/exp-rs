@@ -547,3 +547,32 @@ TEST_CASE( "In-memory linearStretch and histogramEqualize void non-finite sample
     CHECK( out2[1] == nd );
     CHECK( out2[2] == Approx( 128.0f ).margin( 0.5f ) );
 }
+
+// linearStretchApplyTile is the tile replica of ImageEnhancement::linearStretch
+// and shares its validity mask: the full-frame kernel writes nodata for every
+// non-finite input (±Inf included), so the tile form must too — a +Inf glitch
+// pixel must never become a stretched 255 "valid" value.
+TEST_CASE( "Streaming linear stretch masks non-finite values like the full frame",
+           "[enhancement][streaming]" )
+{
+    const float nd = -9999.0f;
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const std::vector<float> in = { 10.0f, 90.0f, inf,   -inf,  nan,  50.0f,
+                                    20.0f, 30.0f, 40.0f, 60.0f, 70.0f, 80.0f };
+    std::vector<float> tileOut( in.size(), 0.0f );
+    IES::linearStretchApplyTile( in.data(), tileOut.data(), in.size(), 10.0f, 90.0f, nd );
+
+    std::vector<float> frameOut( in.size(), 0.0f );
+    ImageEnhancement::linearStretch( in.data(), frameOut.data(), in.size(), 10.0f, 90.0f, nd );
+
+    for ( size_t i = 0; i < in.size(); ++i )
+    {
+        INFO( "index " << i << " tile=" << tileOut[i] << " frame=" << frameOut[i] );
+        REQUIRE( tileOut[i] == frameOut[i] );
+    }
+    // The Inf/NaN positions are masked, not saturated.
+    REQUIRE( tileOut[2] == nd );
+    REQUIRE( tileOut[3] == nd );
+    REQUIRE( tileOut[4] == nd );
+}

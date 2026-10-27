@@ -721,6 +721,10 @@ r6_dev.cmd
 !.planning/r22-infra/
 .planning/r22-infra/*
 !.planning/r22-infra/*.md
+# r23-A track (remote sensing science algorithms & numerical performance) planning artifacts (markdown only).
+!.planning/zcode-r23-A/
+.planning/zcode-r23-A/*
+!.planning/zcode-r23-A/*.md
 
 # r23-C track (zcode r23-C: Pi/MCP harness, Qt/QGIS workbench & cartography
 # interaction loop): planning artifacts (markdown only; logs/builds stay local).

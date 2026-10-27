@@ -11,9 +11,11 @@ namespace SpectralAnomaly
 {
     /// Background statistics for the RX detector, computed in streaming passes.
     /// mean.size() == bands; covariance.size() == bands*bands (row-major). The
-    /// covariance is the biased sample covariance (sum of centered outer
-    /// products / count) — numerically equivalent to rxDetector's two-pass
-    /// computation (within floating-point rounding for multi-tile passes).
+    /// covariance is the sample covariance (sum of centered outer products /
+    /// (count−1) for count > 1, /count for count == 1) — the same N−1
+    /// estimator rxDetector's two-pass computation uses, shared with the
+    /// local-RX kernel (within floating-point rounding for multi-tile
+    /// passes).
     /// Exposed so streaming operators can compute stats in tile passes and then
     /// score per-tile without materializing the whole raster (perf goal §2c).
     /// Note: the mean and covariance passes are SEPARATE accumulators (a mean
@@ -55,7 +57,7 @@ namespace SpectralAnomaly
     /// Divide the accumulated covariance sum by count → biased covariance.
     void finalizeCovariance( BackgroundStats *stats );
 
-    /// Invert the (ridged) covariance. Adds a small ridge (1e-9) on the diagonal
+    /// Invert the (ridged) covariance. Adds a scale-aware ridge (max(1e-9, (trace/bands)·1e-7)) on the diagonal
     /// for robustness. Returns false when singular.
     bool invertCovariance( const std::vector<double> &covariance, int bands,
                            std::vector<double> *inverse );
@@ -88,7 +90,7 @@ namespace SpectralAnomaly
      *   RX(x) = (x - mu)^T Sigma^-1 (x - mu)
      *
      * where mu and Sigma are the sample mean / covariance of all pixels. The
-     * covariance is inverted with a small ridge (1e-9 on the diagonal) for
+     * covariance is inverted with a scale-aware ridge (max(1e-9, (trace/bands)·1e-7) on the diagonal) for
      * robustness; high values indicate anomalous pixels.
      *
      * @param pixels     pixel-major spectra: pixels[p * bands + b]

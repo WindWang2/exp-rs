@@ -1,6 +1,8 @@
 // src/processing/algorithms/spectral_roi.cpp — ROI mean spectrum
 #include "spectral_roi.h"
 
+#include "spectral_wavelength.h"
+
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QFileInfo>
@@ -285,9 +287,20 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
     for ( int b = 1; b <= bandCount; ++b )
     {
         const char *wl = GDALGetMetadataItem( GDALGetRasterBand( ds, b ), "WAVELENGTH", nullptr );
+        const char *units =
+            GDALGetMetadataItem( GDALGetRasterBand( ds, b ), "WAVELENGTH_UNITS", nullptr );
         bool ok = false;
         const double v = wl ? QString::fromUtf8( wl ).toDouble( &ok ) : 0.0;
-        result->wavelengths[b - 1] = ( ok && v > 0.0 ) ? static_cast<float>( v ) : 0.0f;
+        // Normalize through the module's single wavelength authority
+        // (empty units default to nm, µm grids report nm — the header
+        // contract) like every other WAVELENGTH reader; an unsupported
+        // unit keeps the "absent" 0 like an unparsable value.
+        float nm = 0.0f;
+        result->wavelengths[b - 1] =
+            ( ok && v > 0.0
+              && SpectralWavelength::normalizeToNm( v, units ? units : "", &nm ) )
+                ? nm
+                : 0.0f;
     }
 
     GDALClose( ds );

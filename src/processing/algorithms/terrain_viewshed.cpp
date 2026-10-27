@@ -61,14 +61,29 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     const double zaObs = dem[oi] + params.observerHeight;
 
     // Pass 1: map distance, curvature-adjusted elevation and the integer
-    // distance ring of every cell (invalid ring for NoData). Rings are in
-    // CELL units (ceil(d / minCell)), never map units: with sub-metre or
-    // degree-sized cells a map-unit bucket granularity makes inward
-    // neighbours share a cell's ring, orphaning whole wedges (and on
-    // geographic grids, the entire frame) into permanent false invisibility
-    // (R24-A).
+    // distance ring of every cell (invalid ring for NoData). Rings are
+    // quantised in DISTANCE units by half the smallest cell step
+    // (ceil(d / ringStep)), never by whole map units: with sub-metre or
+    // degree-sized cells a coarser bucket makes inward neighbours share a
+    // cell's ring, orphaning whole wedges (and on geographic grids, the
+    // entire frame) into permanent false invisibility (#1722 R23-A fix 2;
+    // R24-A had quantised by minCell, which still collided on sub-metre
+    // grids).
     const double minCell = std::min( cellSizeX, cellSizeY );
     const double radius = params.radius > 0.0 ? params.radius : 0.0;
+    // Ring quantum: HALF the smallest cell step. The sweep requires every
+    // cell to have an in-grid 8-neighbour with a strictly smaller ring, and
+    // the toward-observer step lowers the metric distance by at least
+    // csx·|ux| + csy·|uy| >= m (u = unit radial, |ux|+|uy| >= 1,
+    // m = min(csx, csy)), so quantising by m/2 drops the ring quotient by
+    // >= 2 in exact arithmetic — a margin that keeps the ROUNDED drop >= 1
+    // even when hypot/division rounding shaves a ulp or the quotients land
+    // exactly on integers (quantising by m made ceil(d/m) collide there for
+    // adjacent axial cells; quantising by whole map units broke sub-metre
+    // grids outright). The int cast stays safe for any physically real
+    // grid: exceeding INT_MAX rings needs d/m > 2^31, i.e. cell-size
+    // ratios beyond ~1e9 on a grid whose DEM still fits in memory.
+    const double ringStep = 0.5 * std::min( cellSizeX, cellSizeY );
     std::vector<int> ring( n, kRingInvalid );
     std::vector<float> za( n, 0.0f );
     std::vector<float> dist( n, 0.0f );
@@ -95,14 +110,16 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
             const double adjusted = dem[i] - params.curvatureFactor * d * d;
             za[i] = static_cast<float>( adjusted );
             dist[i] = static_cast<float>( d );
-            // Extreme cell-size anisotropy could push the cell-unit ring
-            // past int range (16384^2 cells at 1e4:1 aspect). Cap well
-            // below INT_MAX so the ringStart allocation stays in the
-            // operator's memory budget instead of throwing bad_alloc from
-            // inside the counting sort (R1 P3-2 / R2 P3-3).
-            if ( d / minCell > 1.0e8 )
+            // Extreme cell-size anisotropy could push the ring index past
+            // int range (16384^2 cells at 1e4:1 aspect). Cap well below
+            // INT_MAX so the ringStart allocation stays in the operator's
+            // memory budget instead of throwing bad_alloc from inside the
+            // counting sort (R1 P3-2 / R2 P3-3). The cap is expressed in
+            // the ring quantum actually used below (ringStep), not cell
+            // units, so the guarded quantity is the one that is cast.
+            if ( d / ringStep > 1.0e8 )
                 return false;
-            const int r = static_cast<int>( std::ceil( d / minCell ) );
+            const int r = static_cast<int>( std::ceil( d / ringStep ) );
             ring[i] = r;
             maxRing = std::max( maxRing, r );
         }

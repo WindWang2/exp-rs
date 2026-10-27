@@ -320,3 +320,26 @@ TEST_CASE("MNF chain handles a 256-band logical cube through forward+inverse",
     CHECK( rmseKeep128 >= 0.0 );
     CHECK( rmseKeep0 > rmseKeep128 );
 }
+
+// Empty selection is "keep all components" (inverse()'s contract, header
+// "empty = all components"): the dropped-mass RMSE of reconstructing with
+// everything is exactly zero, not the full projection mass.
+TEST_CASE("MNF reconstructionRmse treats the empty selection as all components",
+          "[mnf][kernel]")
+{
+    const int W = 12, H = 8;
+    const std::vector<float> cube = syntheticCube(W, H);
+    Model model;
+    QString error;
+    REQUIRE(fitCube(cube, W, H, 4, {}, &model, &error));
+
+    std::vector<double> y(4, 0.0);
+    forward(model, &cube[0], y.data(), 4);
+    CHECK(reconstructionRmse(model, y.data(), {}) == Approx(0.0).margin(1e-12));
+
+    // And it agrees with the explicit full enumeration.
+    CHECK(reconstructionRmse(model, y.data(), {0, 1, 2, 3})
+          == Approx(reconstructionRmse(model, y.data(), {0, 1, 2, 3})).margin(0.0));
+    CHECK(reconstructionRmse(model, y.data(), {})
+          == Approx(reconstructionRmse(model, y.data(), {0, 1, 2, 3})).margin(1e-12));
+}

@@ -105,14 +105,19 @@ TEST_CASE( "normalizedDifference evaluates equal-negative pairs to zero, not NaN
     CHECK( out[3] == 0.0f );                            // RED on master: NaN
 }
 
-TEST_CASE( "normalizedDifference keeps the undeclared-DN sentinel net and NaN propagation",
+TEST_CASE( "normalizedDifference is sentinel-blind but propagates NaN (#1687 ruling)",
            "[processing][math_utils][r24_a]" )
 {
     const float a[] = { -9999.0f, 0.3f, kNan, 0.4f };
     const float b[] = { 0.3f, kNan, 0.5f, 0.6f };
     float out[4] = { 1, 1, 1, 1 };
     REQUIRE( MathUtils::normalizedDifference( a, b, out, 4 ) );
-    CHECK( std::isnan( out[0] ) ); // undeclared -9999 fill stays invalid
+    // Merge ruling (#1722 x #1718): the shared kernel no longer guesses an
+    // undeclared -9999 fill — declared NoData is the only authority, and the
+    // legacy undeclared screen lives at the named dNBR seam
+    // (legacyNegativeSentinelFree). A finite -9999 pair therefore computes
+    // (1.00006) instead of being voided by a magic ceiling.
+    CHECK( out[0] == Catch::Approx( 1.00006f ).margin( 1e-4f ) );
     CHECK( std::isnan( out[1] ) ); // NaN operand propagates
     CHECK( std::isnan( out[2] ) );
     CHECK( out[3] == Catch::Approx( -0.2f ).margin( 1e-6f ) );
@@ -145,8 +150,10 @@ TEST_CASE( "sentinel-aware overloads route declared NoData exactly (#1687)",
     CHECK( MathUtils::bothNormalizable( 0.5f, -99.0f, kNone, kSentinel ) == false );
     // Equal negatives stay valid even when a sentinel is declared.
     CHECK( MathUtils::bothNormalizable( -0.01f, -0.01f, kSentinel, kSentinel ) );
-    // An undeclared -9999 fill is still caught through the shared net.
-    CHECK( MathUtils::bothNormalizable( -9999.0f, 0.5f, kSentinel, kNone ) == false );
+    // An undeclared -9999 fill is NOT caught here any more (#1722 ruling):
+    // this overload rejects only what the caller actually declared, and the
+    // undeclared family stays the dNBR seam's legacy screen.
+    CHECK( MathUtils::bothNormalizable( -9999.0f, 0.5f, kSentinel, kNone ) );
     // A non-finite declared sentinel disables that side's exact check.
     CHECK( MathUtils::bothNormalizable( 0.3f, 0.5f, kNone, kNone ) );
 
@@ -157,7 +164,10 @@ TEST_CASE( "sentinel-aware overloads route declared NoData exactly (#1687)",
     CHECK( std::isnan( out[0] ) );  // declared sentinel → invalid
     CHECK( out[1] == 0.0f );        // equal negatives with sentinels → 0
     CHECK( out[2] == Catch::Approx( -0.25f ).margin( 1e-6f ) );
-    CHECK( std::isnan( out[3] ) );  // undeclared fill via the shared net
+    // Undeclared -9999 is finite and matches no declared sentinel, so the
+    // sentinel-aware overload computes it (#1722 ruling; the dNBR seam's
+    // legacyNegativeSentinelFree is where undeclared fills are voided).
+    CHECK( out[3] == Catch::Approx( 1.00008f ).margin( 1e-4f ) );
     // Argument guards mirror the 4-argument form.
     CHECK_FALSE( MathUtils::normalizedDifference( a, b, out, 0, kSentinel, kSentinel ) );
     CHECK_FALSE( MathUtils::normalizedDifference( nullptr, b, out, 1, kSentinel, kSentinel ) );
@@ -190,6 +200,10 @@ TEST_CASE( "rs:ndvi operator path evaluates negative equal pairs, not NaN",
     CHECK( ndvi[1] == Catch::Approx( -0.25f ).margin( 1e-6f ) );
     // Declared sentinel pixel stays NoData.
     CHECK( std::isnan( ndvi[2] ) );
-    // Undeclared -9999 fill stays invalid via the legacy safety net.
-    CHECK( std::isnan( ndvi[3] ) );
+    // Undeclared -9999 fill: finite, and the band's DECLARED sentinel is
+    // -99, so #1687 (as ruled in #1722) computes it honestly — NDVI =
+    // (-9999-0.4)/(-9999+0.4) ≈ 1.00008. Legacy products that stamp -9999
+    // without declaring NoData must declare it; the dNBR seam keeps the
+    // legacy screen (legacyNegativeSentinelFree).
+    CHECK( ndvi[3] == Catch::Approx( 1.00008f ).margin( 1e-4f ) );
 }

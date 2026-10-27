@@ -611,6 +611,9 @@ namespace exp_spectral
     basis.reserve( static_cast<size_t>( endmemberCount ) );
     std::vector<size_t> chosen;
     chosen.reserve( static_cast<size_t>( endmemberCount ) );
+    // Squared norm of the first pick (farthest deviation from the mean):
+    // the cube's intrinsic scale, anchoring the degeneracy gate below.
+    double anchorNorm2 = 0.0;
 
     for ( int k = 0; k < endmemberCount; ++k )
     {
@@ -654,7 +657,18 @@ namespace exp_spectral
           haveCandidate = true;
         }
       }
-      if ( !haveCandidate || !( bestNorm > 1e-12 ) )
+      // Degeneracy gate, scale-free: the first pick anchors the cube's
+      // intrinsic scale; later picks are degenerate only RELATIVE to that
+      // anchor (residual length below 1e-6 of the anchor's). The previous
+      // absolute 1e-12 on the squared norm refused valid small-magnitude
+      // cubes (radiance in 1e-7 units) whose geometry is a perfect simplex.
+      if ( k == 0 )
+      {
+        if ( !haveCandidate || !( bestNorm > 0.0 ) )
+          return false; // every pixel coincides with the reference: no hull
+        anchorNorm2 = bestNorm;
+      }
+      else if ( !haveCandidate || !( bestNorm > 1e-12 * anchorNorm2 ) )
         return false; // every remaining pixel lies on the endmember hull:
                       // the cube carries fewer vertices than requested
 

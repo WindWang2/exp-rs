@@ -463,6 +463,9 @@ double reconstructionRmse( const Model &model, const double *y,
                            const std::vector<int> &components )
 {
     const int b = model.bandCount;
+    if ( components.empty() )
+        return 0.0; // empty = ALL components (inverse()'s contract): the
+                    // subset inverse is the full inverse, nothing is dropped
     std::vector<char> mask( static_cast<size_t>( b ), 1 );
     for ( int comp : components )
         if ( comp >= 0 && comp < b )
