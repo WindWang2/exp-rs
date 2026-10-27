@@ -6,6 +6,7 @@
 #include <QPointer>
 #include <QApplication>
 #include <QMainWindow>
+#include <QMenuBar>
 #include <QPaintEvent>
 #include <QSignalSpy>
 #include <QDoubleSpinBox>
@@ -428,6 +429,47 @@ TEST_CASE( "LayoutDesigner: page properties panel opens from the Layout menu",
 
   triggerAction( designer->layoutMenu(), QStringLiteral( "Page Properties..." ) );
   REQUIRE( designer->window()->findChild<QgsLayoutPagePropertiesWidget *>() != nullptr );
+
+  closeDesigner( designer, layout );
+}
+
+TEST_CASE( "LayoutDesigner: menu bar advertises only menus that carry actions",
+           "[layout][designer][menu-honesty][r24_c]" )
+{
+  // Honest-UI gate (r24-c): this port ships no atlas/report GUI actions, so
+  // no action-less "Atlas"/"Report" menu may sit in the designer's menu bar
+  // promising them. Capability accessors report nullptr instead — the same
+  // "not supported" convention atlasToolbar() already uses.
+  // Invariant scope: the menus present at CONSTRUCTION with a live layout
+  // (this harness); setupMenus populates Settings conditionally on mLayout,
+  // so a future lazily-populated menu would need this case rescoped, not
+  // the designer reverted.
+  ensureApp();
+  auto *project = QgsProject::instance();
+  auto *layout = new QgsPrintLayout( project );
+  layout->initializeDefaults();
+  layout->setName( QStringLiteral( "designer_menu_honesty" ) );
+  project->layoutManager()->addLayout( layout );
+
+  auto *designer = new QgsLayoutDesignerDialog( layout, nullptr, nullptr );
+  designer->window()->show();
+  QApplication::processEvents();
+
+  QMenuBar *bar = designer->window()->findChild<QMenuBar *>();
+  REQUIRE( bar != nullptr );
+  for ( QAction *topAction : bar->actions() )
+  {
+    QMenu *menu = topAction->menu();
+    if ( !menu )
+      continue; // separators / direct actions are fine
+    INFO( "menu without actions: " << menu->title().toStdString() );
+    CHECK( !menu->actions().isEmpty() );
+  }
+
+  // The unshipped capabilities are reported as unsupported, not as empty menus.
+  CHECK( designer->atlasMenu() == nullptr );
+  CHECK( designer->reportMenu() == nullptr );
+  CHECK( designer->atlasToolbar() == nullptr );
 
   closeDesigner( designer, layout );
 }
