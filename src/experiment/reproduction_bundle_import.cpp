@@ -11,6 +11,8 @@
 #include "experiment_ids.h"
 #include "experiment_types.h"
 
+#include "dataset/dataset_store.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -104,12 +106,19 @@ QJsonObject ReproductionBundleImportReport::toJson() const
     json.insert( QStringLiteral( "result_fingerprint" ), resultFingerprint );
     json.insert( QStringLiteral( "already_present" ), alreadyPresent );
     json.insert( QStringLiteral( "relocated_files" ), relocatedFiles );
+    json.insert( QStringLiteral( "lineage_edges_reattached" ), lineageEdgesReattached );
     json.insert( QStringLiteral( "warnings" ), QJsonArray::fromStringList( warnings ) );
     return json;
 }
 
 ReproductionBundleImporter::ReproductionBundleImporter( ExperimentStore &experimentStore )
     : m_experimentStore( &experimentStore )
+{
+}
+
+ReproductionBundleImporter::ReproductionBundleImporter(
+    ExperimentStore &experimentStore, sicnu::dataset::DatasetStore &datasetStore )
+    : m_experimentStore( &experimentStore ), m_datasetStore( &datasetStore )
 {
 }
 
@@ -445,16 +454,16 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         return report;
     }
 
-    // 7. Lineage slice (provenance.json). The exporter ALWAYS writes it
-    // (reproduction_bundle.cpp:409-426) and it is checksum-covered, so a
-    // bundle that carries it is trustworthy about what it says — but the
-    // slice keeps only the FAR endpoint of each edge
-    // ({"edge","other_kind","other_id"}), so the run-relative direction is
-    // dropped at export, and the importer holds no DatasetStore, so
-    // dataset-side edges have no table to land in. Re-attaching them would
-    // either guess a direction or assert provenance the target store never
-    // observed. The gap is therefore NAMED, never silent: the imported run
-    // stays an island in the lineage graph until it is re-linked by hand.
+    // 7. Lineage slice (provenance.json). R24-B (#1581 residual): the
+    // exporter now writes DIRECTION-PRESERVING items
+    // ({edge,from_kind,from_id,to_kind,to_id}); those are re-attached here,
+    // with the run endpoint rewritten to the installed run id (a fresh-id
+    // import would otherwise attach edges naming an id the store does not
+    // hold). Endpoints from the bundle are VALIDATED, never trusted: a
+    // self-consistent bundle can still lie about lineage (checksums prove
+    // self-consistency only). Legacy 3-key items keep the historical
+    // named-gap warning; dataset-side endpoints need the optional
+    // DatasetStore — without it that half stays a named gap.
     {
         QStringList sliceWarnings;
         const auto provenance =
@@ -472,17 +481,195 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                 report.warnings.append( QStringLiteral(
                     "provenance.json does not record a run_edges array" ) );
             }
-            else if ( const QJsonArray edges = edgesValue.toArray();
-                      !edges.isEmpty() )
+            else
             {
-                report.warnings.append(
-                    QStringLiteral( "provenance.json records %1 lineage edge(s) around"
-                                    " the recorded run that import cannot re-attach"
-                                    " (the bundle keeps only each edge's far endpoint,"
-                                    " so the run-relative direction is lost); the"
-                                    " imported run stays an island in the lineage"
-                                    " graph until it is re-linked by hand" )
-                        .arg( edges.size() ) );
+                const QJsonArray edges = edgesValue.toArray();
+                int reattached = 0;
+                int legacyItems = 0;
+                int datasetSideSkipped = 0;
+                int refused = 0;
+
+                // Validation vocabulary (lineage.h ADR 0138 node kinds).
+                const QSet<QString> kNodeKinds{
+                    QStringLiteral( "asset" ),      QStringLiteral( "dataset" ),
+                    QStringLiteral( "dataset_version" ), QStringLiteral( "sample" ),
+                    QStringLiteral( "annotation" ), QStringLiteral( "split" ),
+                    QStringLiteral( "experiment" ), QStringLiteral( "run" ),
+                    QStringLiteral( "artifact" ),   QStringLiteral( "metric" ),
+                };
+                const QSet<QString> kDatasetSideKinds{
+                    QStringLiteral( "asset" ),           QStringLiteral( "dataset" ),
+                    QStringLiteral( "dataset_version" ), QStringLiteral( "sample" ),
+                    QStringLiteral( "annotation" ),      QStringLiteral( "split" ),
+                };
+                // Same spirit as the RunId authority (experiment_ids.h):
+                // bounded length, conservative charset — an endpoint id names
+                // store rows and (for run/artifact) directories downstream.
+                auto validEndpointId = []( const QString &id )
+                {
+                    if ( id.isEmpty() || id.size() > 256 )
+                        return false;
+                    for ( const QChar c : id )
+                    {
+                        const bool okChar = c.isLetterOrNumber() || c == QLatin1Char( '.' )
+                                            || c == QLatin1Char( '_' ) || c == QLatin1Char( '-' )
+                                            || c == QLatin1Char( ':' );
+                        if ( !okChar )
+                            return false;
+                    }
+                    return true;
+                };
+
+                constexpr int kMaxReattachEdges = 256;
+                for ( qsizetype i = 0; i < edges.size(); ++i )
+                {
+                    const QJsonObject item = edges.at( i ).toObject();
+                    const QString fromKind = item.value( QStringLiteral( "from_kind" ) ).toString();
+                    const QString fromId = item.value( QStringLiteral( "from_id" ) ).toString();
+                    const QString toKind = item.value( QStringLiteral( "to_kind" ) ).toString();
+                    const QString toId = item.value( QStringLiteral( "to_id" ) ).toString();
+                    const QString edgeKind = item.value( QStringLiteral( "edge" ) ).toString();
+
+                    if ( fromKind.isEmpty() && toKind.isEmpty()
+                         && item.contains( QStringLiteral( "other_kind" ) ) )
+                    {
+                        // Legacy shape (other_kind/other_id only): the
+                        // direction was lost at export; keep the named-gap
+                        // warning verbatim for these. Items without either
+                        // shape fall through to the refused path below —
+                        // garbage is never mislabeled as old-export (R1).
+                        ++legacyItems;
+                        continue;
+                    }
+                    if ( reattached + 1 > kMaxReattachEdges )
+                    {
+                        report.warnings.append(
+                            QStringLiteral( "provenance.json records more than %1"
+                                            " re-attachable lineage edges — the rest are"
+                                            " skipped" )
+                                .arg( kMaxReattachEdges ) );
+                        refused += static_cast<int>( edges.size() ) - static_cast<int>( i );
+                        break;
+                    }
+                    const QString index = QString::number( i );
+                    const bool shapeOk = kNodeKinds.contains( fromKind )
+                                         && kNodeKinds.contains( toKind )
+                                         && validEndpointId( fromId )
+                                         && validEndpointId( toId ) && !edgeKind.isEmpty()
+                                         && edgeKind.size() <= 64
+                                         && !( fromKind == toKind && fromId == toId );
+                    if ( !shapeOk )
+                    {
+                        ++refused;
+                        report.warnings.append(
+                            QStringLiteral( "provenance.json run_edges[%1] is not a"
+                                            " well-formed lineage edge — skipped" )
+                                .arg( index ) );
+                        continue;
+                    }
+                    // Exactly one endpoint must be the recorded run; the
+                    // other endpoint must not silently claim a DIFFERENT run
+                    // (that would fabricate third-party provenance).
+                    const bool fromIsRun =
+                        fromKind == QLatin1String( "run" ) && fromId == report.originalRunId;
+                    const bool toIsRun =
+                        toKind == QLatin1String( "run" ) && toId == report.originalRunId;
+                    const bool otherIsForeignRun =
+                        ( fromIsRun ? toKind : fromKind ) == QLatin1String( "run" );
+                    if ( fromIsRun == toIsRun )
+                    {
+                        ++refused;
+                        report.warnings.append(
+                            QStringLiteral( "provenance.json run_edges[%1] must name the"
+                                            " recorded run as exactly one endpoint —"
+                                            " skipped" )
+                                .arg( index ) );
+                        continue;
+                    }
+                    if ( otherIsForeignRun )
+                    {
+                        ++refused;
+                        report.warnings.append(
+                            QStringLiteral( "provenance.json run_edges[%1] links the"
+                                            " recorded run to a different run — import"
+                                            " refuses to fabricate third-party"
+                                            " provenance" )
+                                .arg( index ) );
+                        continue;
+                    }
+
+                    // R1 review: report.runId is only assigned AFTER this
+                    // block — the rewrite source must be the upserted run's
+                    // id (identical to report.runId for keepOriginalRunId,
+                    // the fresh generated id otherwise).
+                    const QString finalRunId = run.runId();
+                    const bool datasetSide = fromIsRun
+                                                 ? kDatasetSideKinds.contains( toKind )
+                                                 : kDatasetSideKinds.contains( fromKind );
+                    sicnu::data::Result<void> inserted = sicnu::data::Result<void>::failure(
+                        Diagnostic{} );
+                    if ( datasetSide )
+                    {
+                        if ( !m_datasetStore )
+                        {
+                            ++datasetSideSkipped;
+                            continue;
+                        }
+                        inserted = m_datasetStore->addLineageEdge(
+                            fromIsRun ? QStringLiteral( "run" ) : fromKind,
+                            fromIsRun ? finalRunId : fromId, edgeKind,
+                            fromIsRun ? toKind : QStringLiteral( "run" ),
+                            fromIsRun ? toId : finalRunId );
+                    }
+                    else
+                    {
+                        inserted = m_experimentStore->addLineageEdge(
+                            fromIsRun ? QStringLiteral( "run" ) : fromKind,
+                            fromIsRun ? finalRunId : fromId, edgeKind,
+                            fromIsRun ? toKind : QStringLiteral( "run" ),
+                            fromIsRun ? toId : finalRunId );
+                    }
+                    if ( !inserted )
+                    {
+                        report.warnings.append(
+                            QStringLiteral( "lineage edge re-attach failed at"
+                                            " run_edges[%1]: %2" )
+                                .arg( index,
+                                      inserted.diagnostics().isEmpty()
+                                          ? QStringLiteral( "unknown error" )
+                                          : inserted.diagnostics().first().message ) );
+                        continue;
+                    }
+                    ++reattached;
+                }
+
+                report.lineageEdgesReattached = reattached;
+                if ( legacyItems > 0 )
+                {
+                    report.warnings.append(
+                        QStringLiteral( "provenance.json records %1 legacy lineage"
+                                        " item(s) without edge direction (old export);"
+                                        " those cannot be re-attached" )
+                            .arg( legacyItems ) );
+                }
+                if ( datasetSideSkipped > 0 )
+                {
+                    report.warnings.append(
+                        QStringLiteral( "provenance.json records %1 dataset-side lineage"
+                                        " edge(s) that import cannot re-attach without a"
+                                        " DatasetStore; the imported run's dataset-side"
+                                        " lineage stays unlinked" )
+                            .arg( datasetSideSkipped ) );
+                }
+                if ( reattached == 0 && legacyItems == 0 && datasetSideSkipped == 0
+                     && refused == 0 && !edges.isEmpty() )
+                {
+                    // Empty-ish arrays with zero work still deserve a note so
+                    // "no edges" stays distinguishable from "silently none".
+                    report.warnings.append(
+                        QStringLiteral( "provenance.json records no re-attachable lineage"
+                                        " edges around the recorded run" ) );
+                }
             }
         }
     }

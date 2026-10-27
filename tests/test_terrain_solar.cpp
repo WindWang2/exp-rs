@@ -175,3 +175,36 @@ TEST_CASE( "sunPositionDeg matches tabulated solar geometry within ±1.5°",
     CHECK_FALSE( sunPositionDeg( 81, 25.0, 40.0, &a2, &e2 ) );
     CHECK_FALSE( sunPositionDeg( 81, 12.0, 91.0, &a2, &e2 ) );
 }
+
+// At the poles the acos azimuth form divides by cos(lat)·cos(elev) = 0.
+// The function must still honour its contract: either a finite azimuth or
+// an honest refusal — never success with NaN. The polar limit of the same
+// convention is az = acos(∓cos(H)) (sun east at H=−90°, on the meridian at
+// noon, west at H=+90°), i.e. 180° at the north pole / 0° at the south
+// pole on the noon meridian.
+TEST_CASE( "sunPositionDeg at the poles returns a finite azimuth",
+           "[terrain][solar]" )
+{
+    double az = 0.0;
+    double elev = 0.0;
+
+    // North pole, solstice noon: elevation ≈ declination ≈ 23.4°, azimuth
+    // on the noon meridian (180° in the shared convention).
+    REQUIRE( sunPositionDeg( 172, 12.0, 90.0, &az, &elev ) );
+    CHECK( std::isfinite( az ) );
+    CHECK( az == Catch::Approx( 180.0 ).margin( 2.0 ) );
+    CHECK( elev == Catch::Approx( 23.4 ).margin( 1.0 ) );
+
+    // South pole, same instant: mirrored — azimuth ≈ 0°, sun below the
+    // horizon by the declination.
+    REQUIRE( sunPositionDeg( 172, 12.0, -90.0, &az, &elev ) );
+    CHECK( std::isfinite( az ) );
+    CHECK( az == Catch::Approx( 0.0 ).margin( 2.0 ) );
+    CHECK( elev == Catch::Approx( -23.4 ).margin( 1.0 ) );
+
+    // Afternoon on the pole: the limit continues the shared convention —
+    // the sun sits west of the meridian (≈270° at H=+90°).
+    REQUIRE( sunPositionDeg( 172, 18.0, 90.0, &az, &elev ) );
+    CHECK( std::isfinite( az ) );
+    CHECK( az == Catch::Approx( 270.0 ).margin( 2.0 ) );
+}

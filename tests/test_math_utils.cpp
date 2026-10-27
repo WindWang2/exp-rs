@@ -157,6 +157,109 @@ TEST_CASE("MathUtils::normalizedDifference", "[math_utils]")
     }
 }
 
+// #1687: the normalized difference (a-b)/(a+b) is defined for every finite
+// pair with a non-zero sum. Atmospheric correction legitimately produces
+// slightly-negative reflectances (dark water, shadows): an identical pair
+// a == b == -0.01 has a well-defined difference of 0 ("no index signal"),
+// and finite values below the old magic -999 threshold are measurements,
+// not NoData — declared sentinels are resolved to NaN by every production
+// caller (operator BandSource readTileBand, provider readBandData) before
+// this kernel runs, so the kernel only rejects non-finite inputs.
+TEST_CASE("MathUtils::normalizedDifference negative-reflectance contract (#1687)", "[math_utils]")
+{
+    SECTION("identical slightly-negative reflectances give 0, not NaN")
+    {
+        float a[] = {-0.01f, -0.5f, -7.0f};
+        float b[] = {-0.01f, -0.5f, -7.0f};
+        float out[3];
+
+        REQUIRE(MathUtils::normalizedDifference(a, b, out, 3));
+        for (int i = 0; i < 3; ++i)
+        {
+            INFO("index " << i << " value " << out[i]);
+            REQUIRE(std::isfinite(out[i]));
+            REQUIRE(out[i] == Catch::Approx(0.0f).margin(1e-6f));
+        }
+    }
+
+    SECTION("distinct negative reflectances compute the algebraic value")
+    {
+        float a[] = {-0.02f, -0.01f, -0.3f};
+        float b[] = {-0.01f, -0.03f, 0.1f};
+        float out[3];
+
+        REQUIRE(MathUtils::normalizedDifference(a, b, out, 3));
+        // (-0.01)/(-0.03)
+        REQUIRE(out[0] == Catch::Approx(1.0f / 3.0f).margin(1e-6f));
+        // (0.02)/(-0.04)
+        REQUIRE(out[1] == Catch::Approx(-0.5f).margin(1e-6f));
+        // (-0.4)/(-0.2)
+        REQUIRE(out[2] == Catch::Approx(2.0f).margin(1e-5f));
+    }
+
+    SECTION("finite values below the old -999 magic threshold are data, not NoData")
+    {
+        float a[] = {-1500.0f, -1000.0f, -999.5f};
+        float b[] = {-500.0f, -1000.0f, -0.5f};
+        float out[3];
+
+        REQUIRE(MathUtils::normalizedDifference(a, b, out, 3));
+        // (-1000)/(-2000)
+        REQUIRE(out[0] == Catch::Approx(0.5f));
+        // 0/(-2000)
+        REQUIRE(out[1] == Catch::Approx(0.0f).margin(1e-6f));
+        // (-999)/(-1000)
+        REQUIRE(out[2] == Catch::Approx(0.999f).margin(1e-3f));
+    }
+
+    SECTION("non-finite inputs stay NaN")
+    {
+        const float inf = std::numeric_limits<float>::infinity();
+        float a[] = {NaN, inf, 0.5f};
+        float b[] = {0.5f, 0.5f, -inf};
+        float out[3];
+
+        REQUIRE(MathUtils::normalizedDifference(a, b, out, 3));
+        REQUIRE(std::isnan(out[0]));
+        REQUIRE(std::isnan(out[1]));
+        REQUIRE(std::isnan(out[2]));
+    }
+
+    SECTION("zero sum with distinct operands stays NaN (safeDiv contract)")
+    {
+        float a[] = {0.5f, 3.0f, -0.25f};
+        float b[] = {-0.5f, -3.0f, 0.25f};
+        float out[3];
+
+        REQUIRE(MathUtils::normalizedDifference(a, b, out, 3));
+        REQUIRE(std::isnan(out[0]));
+        REQUIRE(std::isnan(out[1]));
+        REQUIRE(std::isnan(out[2]));
+    }
+}
+
+TEST_CASE("MathUtils::bothNormalizable predicate (#1687)", "[math_utils]")
+{
+    const float inf = std::numeric_limits<float>::infinity();
+
+    SECTION("finite pairs are normalizable, including equal negatives")
+    {
+        REQUIRE(MathUtils::bothNormalizable(0.8f, 0.2f));
+        REQUIRE(MathUtils::bothNormalizable(-0.01f, -0.01f));
+        REQUIRE(MathUtils::bothNormalizable(-0.02f, -0.01f));
+        REQUIRE(MathUtils::bothNormalizable(-1500.0f, -500.0f));
+        REQUIRE(MathUtils::bothNormalizable(0.0f, 0.0f));
+    }
+
+    SECTION("non-finite operands are not normalizable")
+    {
+        REQUIRE_FALSE(MathUtils::bothNormalizable(NaN, 0.5f));
+        REQUIRE_FALSE(MathUtils::bothNormalizable(0.5f, NaN));
+        REQUIRE_FALSE(MathUtils::bothNormalizable(inf, 0.5f));
+        REQUIRE_FALSE(MathUtils::bothNormalizable(0.5f, -inf));
+    }
+}
+
 TEST_CASE("MathUtils::safeDivDouble", "[math_utils]")
 {
     SECTION("normal division")

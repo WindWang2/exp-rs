@@ -21,7 +21,14 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const piDir = join(here, "..");
-const bridgeSource = readFileSync(join(piDir, "mcp_bridge.ts"), "utf8");
+// Normalize to LF: this file pins regexes over mcp_bridge.ts source, and a
+// Windows checkout (core.autocrlf) materializes CRLF on disk — the patterns
+// anchor on \n and false-fail there. The parity contract is about the SOURCE
+// TEXT, not the checkout's line-ending convention (r24-c #1682 finding).
+const bridgeSource = readFileSync(join(piDir, "mcp_bridge.ts"), "utf8").replaceAll(
+  "\r\n",
+  "\n",
+);
 
 test("the shared bridge tears the child down on stream desync (F-PI-1)", () => {
   // The overflow branch must route through the shared kill teardown, and

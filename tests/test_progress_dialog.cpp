@@ -1,5 +1,6 @@
 // Progress Dialog tests — verify progress tracking and cancel functionality
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 
 #include <QApplication>
 #include <QTimer>
@@ -109,7 +110,9 @@ TEST_CASE("ProgressDialog elapsed time", "[gui][progress]") {
 
     SECTION("Elapsed time starts at zero") {
         CHECK(dialog.elapsedMs() >= 0);
-        CHECK(dialog.elapsedMs() < 100); // Should be very small
+        // #1699: fresh-dialog elapsed must be ~0; scaled for sanitizer/loaded
+        // lanes — Release enforces the 100ms base.
+        CHECK(dialog.elapsedMs() < sicnu::testsupport::wallClockBudgetMs( 100 ));
     }
 }
 

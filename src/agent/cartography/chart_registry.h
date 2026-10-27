@@ -38,6 +38,11 @@ class QgsLayoutItemChart;
 
 namespace sicnu::agent::cartography {
 
+/// Cap for workspace-summary projections of the chart registry (the
+/// buildWorkspaceState charts array). Single source for the bound so the
+/// projection and its tests cannot drift apart.
+constexpr int kMaxWorkspaceSummaryCharts = 25;
+
 /// Workspace chart entity registry (stable "chart-N" ids).
 class ChartRegistry
 {
@@ -58,12 +63,24 @@ class ChartRegistry
     /// All chart specs (bounded consumers: workspace summary caps at 25).
     Json::Value listCharts() const;
 
+    /// Lightweight summaries ({id, kind, title}) for at most `max` charts,
+    /// projected under the registry mutex — callers that only need the
+    /// workspace overview must not deep-copy every full spec. When
+    /// `totalAvailable` is non-null it receives the FULL registry count
+    /// (before the cap), so callers can report truncation honestly.
+    /// Type-guarded projection: a spec that predates stricter validation can
+    /// never throw here. QMap iteration order is lexicographic by id
+    /// ("chart-1", "chart-10", …, "chart-2") — the cap drops a lexicographic
+    /// tail, not the newest charts; intentional, documented (r24-c R1).
+    Json::Value listChartSummaries( int max, int *totalAvailable = nullptr ) const;
+
     void clear();
 
   private:
     ChartRegistry() = default;
     mutable QMutex mMutex;
     QMap<QString, Json::Value> mCharts;
+    int mNextOrdinal = 1; ///< Monotonic id counter: deleted ids are never reused.
 };
 
 /// Structural validation of a chart spec (kind, binding, inline data).

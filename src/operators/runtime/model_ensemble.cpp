@@ -9,6 +9,8 @@
 #include "operators/runtime/model_publish.h"
 #include "operators/runtime/model_runtime.h"
 
+#include "platform/portable.h"
+
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <gdal.h>
@@ -1087,10 +1089,22 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   }
 
   const QFileInfo outputInfo( QString::fromStdString( request.outputPath ) );
-  for ( std::size_t i = 0; i < runs.size(); ++i )
+  // R24-B: the member/final stage names carry a per-attempt token — the old
+  // fixed spellings let two concurrent ensembles on one output path clobber
+  // each other's member stages during the (fence-free) staged writes. The
+  // age-gated sweep clears crash litter without touching a live writer.
   {
-    runs[i].stagedPath = QDir( outputInfo.absolutePath() ).filePath(
-      QString( ".%1.ensemble-member%2.tmp~" ).arg( outputInfo.fileName(), QString::number( i ) ) );
+    static std::atomic<unsigned long long> ensembleStageToken{ 0 };
+    const QString token = QString::number( sicnu::portable::pid() ) + QLatin1Char( 'x' )
+                          + QString::number( ensembleStageToken.fetch_add( 1 ) );
+    sweepStaleStagePaths( QString::fromStdString( request.outputPath ) );
+    const QDir outputDir( outputInfo.absolutePath() );
+    for ( std::size_t i = 0; i < runs.size(); ++i )
+    {
+      runs[i].stagedPath = outputDir.filePath(
+        QStringLiteral( ".%1.%2.ensemble-member%3.tmp~" )
+          .arg( outputInfo.fileName(), token, QString::number( i ) ) );
+    }
   }
 
   // RAII: every staged path (members + sidecars + final stage) is removed
@@ -1260,8 +1274,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   // after the combine pass fully succeeded; the staged guard removes it on
   // every failure path (after the writer is closed).
   const QString finalPath = QString::fromStdString( request.outputPath );
-  const QString stagePath = finalPath + QStringLiteral( ".tmp~" );
-  QFile::remove( stagePath );
+  // R24-B: unique per attempt (see the member-stage note above).
+  sweepStaleStagePaths( finalPath );
+  const QString stagePath = uniqueStagePath( finalPath );
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   if ( !driver )
     throw RSOperatorError( ErrorCode::GdalError, "GDAL GTiff driver is unavailable" );

@@ -207,6 +207,7 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
     qint64 mirrored = 0;
     qint64 prepared = 0;
     qint64 failedAssetBatches = 0, failedEdgeBatches = 0, failedRuns = 0, failedRunOutputBatches = 0;
+    qint64 ghostRemoveFailed = 0; // R24-B: reconcile-side removals that the store refused
     // Review-3 (N+1): batch store writes — one transaction per 256-row chunk
     // keeps bulk mirroring of large catalogs fast and memory bounded.
     constexpr int kBatchSize = 256;
@@ -314,24 +315,30 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
                 // Ghost reconciliation mirrors an already-decided authority:
                 // the asset row is dead everywhere, cascade the relationship
                 // cleanup explicitly (12.0 removeAsset guard defaults to
-                // refuse for every other caller).
-                ( void ) m_store.removeAsset( storedId,
-                                              GovernanceStore::RemoveAssetPolicy::Cascade );
+                // refuse for every other caller). R24-B: a refused cascade
+                // leaves a stale governance row behind — count it for the
+                // failure channel instead of discarding the Result.
+                if ( !m_store.removeAsset( storedId,
+                                           GovernanceStore::RemoveAssetPolicy::Cascade ) )
+                    ++ghostRemoveFailed;
         }
     }
     // Failure channel (issue #1587): a mirror the store rejected must leave
     // durable evidence — silently dropping it is the exact defect class the
     // checked-writer hardening (issue #758-1) removed from the store, and the
     // truthful `mirrored` count alone would under-report why.
-    if ( failedAssetBatches || failedEdgeBatches || failedRuns || failedRunOutputBatches )
+    if ( failedAssetBatches || failedEdgeBatches || failedRuns || failedRunOutputBatches
+         || ghostRemoveFailed )
     {
         qWarning( "WorkspaceService: mirrorAllAssets store writes failed "
-                  "(assetBatches=%lld edgeBatches=%lld runs=%lld runOutputBatches=%lld; "
+                  "(assetBatches=%lld edgeBatches=%lld runs=%lld runOutputBatches=%lld "
+                  "ghostRemoveFailed=%lld; "
                   "%lld of %lld asset rows indexed)",
                   static_cast<long long>( failedAssetBatches ),
                   static_cast<long long>( failedEdgeBatches ),
                   static_cast<long long>( failedRuns ),
                   static_cast<long long>( failedRunOutputBatches ),
+                  static_cast<long long>( ghostRemoveFailed ),
                   static_cast<long long>( mirrored ),
                   static_cast<long long>( prepared ) );
         audit( QStringLiteral( "system" ), QStringLiteral( "workspace.mirror_failed" ),
@@ -340,6 +347,7 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
                             { QLatin1String( "failedEdgeBatches" ), failedEdgeBatches },
                             { QLatin1String( "failedRuns" ), failedRuns },
                             { QLatin1String( "failedRunOutputBatches" ), failedRunOutputBatches },
+                            { QLatin1String( "ghostRemoveFailed" ), ghostRemoveFailed },
                             { QLatin1String( "mirrored" ), mirrored },
                             { QLatin1String( "prepared" ), prepared } } );
     }

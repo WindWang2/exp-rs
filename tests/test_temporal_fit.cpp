@@ -595,3 +595,50 @@ TEST_CASE( "doyAt leap-year bracket keeps day 366", "[temporal][phenology][p3-12
     REQUIRE( m.greenUpMidDoy == Approx( 366.0 ).margin( 0.6 ) );
     REQUIRE( m.sos == Approx( 366.0 ).margin( 0.6 ) );
 }
+
+// The documented harmonics domain is 1..6 and the operator clamps before
+// calling — but the kernel itself must be safe for any caller value: an
+// unclamped repeat of the parameter used to size the design row from the
+// clamped copy while filling it with the raw count (out-of-bounds stack
+// writes for harmonics >= 7, uninitialized design cells for harmonics <= 0).
+TEST_CASE( "Harmonic fit clamps the harmonic order once, at entry",
+           "[temporal][fit]" )
+{
+    ensureApp();
+    std::vector<float> y;
+    std::vector<double> t;
+    for ( int d = 0; d < 730; ++d )
+    {
+        const double td = static_cast<double>( d );
+        t.push_back( td );
+        y.push_back( static_cast<float>( 2.0 + 3.0 * std::sin( 2.0 * M_PI * td / 365.25 ) ) );
+    }
+
+    const HarmonicFitResult six = harmonicFit( y, t, 6, false );
+    REQUIRE( six.validCount == 730 );
+    REQUIRE( six.coefficients.size() == 13 );
+
+    // Overshooting the domain behaves exactly like its clamp: 13 terms,
+    // same coefficients, no stack corruption past design[12].
+    const HarmonicFitResult seven = harmonicFit( y, t, 7, false );
+    REQUIRE( seven.coefficients.size() == 13 );
+    REQUIRE( seven.validCount == 730 );
+    for ( size_t k = 0; k < six.coefficients.size(); ++k )
+    {
+        INFO( "coefficient " << k );
+        REQUIRE( seven.coefficients[k] == Approx( six.coefficients[k] ).margin( 0.0 ) );
+    }
+
+    // Zero/negative order clamps to the single-harmonic model: 3 terms,
+    // deterministic (no uninitialized design cells), recovers the signal.
+    const HarmonicFitResult zero = harmonicFit( y, t, 0, false );
+    REQUIRE( zero.coefficients.size() == 3 );
+    REQUIRE( zero.validCount == 730 );
+    const HarmonicFitResult one = harmonicFit( y, t, 1, false );
+    for ( size_t k = 0; k < one.coefficients.size(); ++k )
+    {
+        INFO( "coefficient " << k );
+        REQUIRE( zero.coefficients[k] == Approx( one.coefficients[k] ).margin( 1e-9 ) );
+    }
+    REQUIRE( zero.coefficients[1] == Approx( 3.0 ).margin( 1e-4 ) );
+}

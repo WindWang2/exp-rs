@@ -91,6 +91,12 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata);
  * Compute statistics from pre-accumulated sums.
  * Uses population stddev (N denominator).
  *
+ * validCount semantics differ from computeStats(): the accumulator counts
+ * every sample its caller fed in (callers exclude invalid values before
+ * accumulating), while computeStats() filters NaN against the raw buffer —
+ * stats.validCount therefore means "samples in the accumulator" here and
+ * "finite values in the buffer" there (#1687).
+ *
  * @param acc  Accumulator with sum, sumSq, min, max, count
  * @return Stats structure (stddev uses population formula)
  */
@@ -103,12 +109,23 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
  * Not a NoData authority — a band's DECLARED sentinel routes through the
  * sentinel-aware overloads below or the operators' pre-normalization
  * (nodata_utils.h owns that policy).
+ *
+ * Merge note (#1722 x #1718, #1687 ruling): this constant is retained for
+ * caller-side policies (SpectralIndices::isSentinelSample), but the shared
+ * kernels below do NOT apply it — the undeclared-fill screen lives at the
+ * named dNBR seam (legacyNegativeSentinelFree).
  */
 inline constexpr float kUndeclaredSentinelCeiling = -999.0f;
 
 /**
- * Compute normalized difference: (a - b) / (a + b).
- * Result is NaN when (a + b) == 0 or an operand is invalid.
+ * Compute normalized difference: (a - b) / (a + b). Result is NaN when
+ * either operand is non-finite or when (a + b) == 0; every finite pair
+ * with a non-zero sum is computed as-is, INCLUDING negative reflectances
+ * (atmospheric correction legitimately produces them, and an identical
+ * negative pair has the well-defined difference 0). Declared band NoData
+ * is the caller's authority: every production path resolves band sentinels
+ * to NaN before this kernel (operator BandSource::readTileBand, provider
+ * readBandData) — this kernel never guesses a sentinel threshold (#1687).
  *
  * @param a      First input array
  * @param b      Second input array
@@ -119,6 +136,14 @@ inline constexpr float kUndeclaredSentinelCeiling = -999.0f;
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count);
 
 /**
+ * The exact sample-level predicate normalizedDifference() applies: both
+ * operands finite. No sentinel guessing — see normalizedDifference() for
+ * the NoData authority contract. Fused kernels (e.g. dNBR) share it so
+ * their validity mask cannot drift from the staged form.
+ */
+bool bothNormalizable(float a, float b);
+
+/**
  * Sentinel-aware variant: an operand is additionally invalid when it
  * exactly equals that band's declared NoData value (non-finite declared
  * sentinels disable the check; matching is exact, never an epsilon —
@@ -127,26 +152,31 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
  * operators achieve the identical invalid mask by pre-normalizing
  * declared sentinels to NaN before calling the 4-argument form
  * (rs_spectral_index_operator's BandSource) — do not add a second
- * normalization layer on top of that path.
+ * normalization layer on top of that path. Kept from #1718; the
+ * undeclared-fill net is NOT reapplied here (#1722 ruling, see
+ * legacyNegativeSentinelFree).
  */
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count,
                           float noDataA, float noDataB);
 
 /**
- * The exact sample-level predicate normalizedDifference() applies — finite
- * operands and neither at/below the undeclared negative-sentinel ceiling.
- * Equal negative operands are VALID ((a-b)/(a+b) evaluates to 0; slight
- * negative reflectance after atmospheric correction is legitimate input,
- * #1687). Fused kernels (e.g. dNBR) share it so their validity mask
- * cannot drift from the staged form.
- */
-bool bothNormalizable(float a, float b);
-
-/**
  * Sentinel-aware predicate: the 2-argument form plus exact rejection of
- * declared per-band NoData values.
+ * declared per-band NoData values. Like the sentinel-aware
+ * normalizedDifference() above, it applies no undeclared-ceiling guess.
  */
 bool bothNormalizable(float a, float b, float noDataA, float noDataB);
+
+/**
+ * Legacy undeclared-sentinel screen for pre/post band-pair index inputs
+ * (the dNBR family of fused kernels): additive to bothNormalizable, it
+ * voids values at/below the legacy -999 sentinel magnitude that older
+ * pipelines stamped WITHOUT declaring NoData — such values would
+ * otherwise fabricate extreme (near +/-1) index/difference change.
+ * Physically-bounded reflectances, including slightly-negative ones from
+ * atmospheric correction, pass. The general kernels stay sentinel-blind
+ * (#1687); declared band NoData remains the caller's authority.
+ */
+bool legacyNegativeSentinelFree(float a, float b);
 
 /**
  * Apply linear scaling: out[i] = gain * in[i] + bias.

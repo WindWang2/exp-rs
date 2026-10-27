@@ -258,3 +258,30 @@ TEST_CASE("FCLS and unmixing refuse non-finite and zero-norm endmembers", "[spec
     CHECK_FALSE(::SpectralUnmixing::unmix(pixel.data(), 1, bands, zeroEnds.data(), p, &resUnmix, &err));
     CHECK(err.contains("zero energy"));
 }
+
+// VCA's degeneracy gate must be scale-free: a genuine simplex in radiance
+// units of 1e-7 (scaled reflectance, dark scenes) is still a simplex — an
+// absolute 1e-12 threshold on the squared deviation refused it outright.
+TEST_CASE("VCA degeneracy threshold is scale-free", "[spectral][unmixing][vca]")
+{
+    // Same 2-band simplex as the unit-scale case, scaled by 1e-7.
+    const float kScale = 1e-7f;
+    const float vertices[3][2] = {
+        { 2.0f * kScale, 0.0f },
+        { 0.0f, 2.0f * kScale },
+        { 2.0f * kScale, 2.0f * kScale },
+    };
+    std::vector<float> cube;
+    for ( const auto &v : vertices )
+        for ( int b = 0; b < 2; ++b )
+            cube.push_back( v[b] );
+    // An interior mixture keeps the hull honest.
+    cube.push_back( 0.7f * kScale );
+    cube.push_back( 0.9f * kScale );
+
+    std::vector<float> endmembers;
+    REQUIRE(exp_spectral::SpectralUnmixing::extractEndmembers(cube.data(), cube.size() / 2, 2, 3,
+                                               EndmemberExtractionMethod::VertexComponentAnalysis,
+                                               &endmembers));
+    REQUIRE(endmembers.size() == 3 * 2);
+}

@@ -16780,6 +16780,15 @@ target_include_directories(test_r22_agent_ghost_algo PRIVATE
 sicnu_discover_tests(test_r22_agent_ghost_algo RUN_SERIAL TRUE)
 # --- end R22-04 registration ---
 
+# --- r23-C (C05): TaskCenter cumulative/delta absolute-index-space contract
+# (R22-agent REVIEW_R2 R2-F3/R2-F6 closure). Same link shape as
+# test_task_center (TaskCenter + JobEngine + operator context).
+sicnu_add_test(test_r23_c_task_center_log_spaces)
+# --- end r23-C registration ---
+
+# --- r23-C (C10): gradebook pair publish atomicity (#1695-17e) ---
+sicnu_add_teaching_admin_test(test_r23_c_teaching_pair_publish)
+# --- end r23-C registration ---
 # --- R23-D (r23-d, CT-6 closure): the repo-documented lab-1 student flow
 # (foundry scene -> rs:spectral_index -> grade) regression. Links the
 # in-process foundry + the production spectral-index core + the teaching
@@ -16880,6 +16889,175 @@ if(UNIX AND NOT APPLE)
     TEST_PREFIX "test_r23_e_native_terminal::")
 endif()
 # --- end R23-E WP5 registration ---
+
+# BEGIN R24-C (agent/r24_c-20261027T022556Z): harness/workbench closed-loop
+# WP1 — workspace-state contract projects the live ChartRegistry (stable
+# entity ids, bounded 25) instead of a hardcoded empty "charts" array.
+qt_add_executable(test_r24_c_workspace_charts
+  test_r24_c_workspace_charts.cpp
+)
+target_link_libraries(test_r24_c_workspace_charts PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_data
+  sicnu_agent
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r24_c_workspace_charts PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r24_c_workspace_charts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_c_workspace_charts TEST_PREFIX "test_r24_c_workspace_charts::")
+# END R24-C
+
+# ===========================================================================
+# BEGIN R24-B (r24_b data/model/experiment track) — append-only block.
+# Every target in this block is prefixed test_r24_b_ and registered with an
+# explicit TEST_PREFIX so ctest -R 'r24_b' selects the whole track.
+# ===========================================================================
+
+# --- R24-B WP-B6 (P1): detection lane must not feed declared NoData
+# sentinels raw (raster-lane parity: sentinel → NaN → 0). ---
+sicnu_add_test(test_r24_b_detection_nodata TIMEOUT 300 TEST_PREFIX "r24_b_detection_nodata::")
+target_link_libraries(test_r24_b_detection_nodata PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r24_b_detection_nodata)
+target_include_directories(test_r24_b_detection_nodata PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+# --- end R24-B detection-nodata registration ---
+
+# --- R24-B WP-B3 (P1): dataset store draft gates run inside the write
+# transaction (#811 playbook extended to samples/annotations/stage/commit/
+# addSourceAssetsToDraft). Barrier racer over two connections on one file. ---
+sicnu_add_test(test_r24_b_dataset_txn_gate TIMEOUT 300 TEST_PREFIX "r24_b_dataset_txn_gate::")
+target_link_libraries(test_r24_b_dataset_txn_gate PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::dataset
+    Sicnu::data
+    Qt6::Core
+    SQLite::SQLite3
+)
+target_include_directories(test_r24_b_dataset_txn_gate PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+# --- end R24-B dataset-txn-gate registration ---
+
+# --- R24-B WP-B7/B8 (#1581 residual): direction-preserving lineage slice
+# export + import re-attachment (run-id rewrite, legacy compat, hostile
+# items, dataset-side edges). ---
+sicnu_add_test(test_r24_b_lineage_reattach TIMEOUT 300 TEST_PREFIX "r24_b_lineage_reattach::")
+target_link_libraries(test_r24_b_lineage_reattach PRIVATE
+    Sicnu::experiment
+    Sicnu::dataset
+    SQLite::SQLite3
+)
+target_include_directories(test_r24_b_lineage_reattach PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+# --- end R24-B lineage-reattach registration ---
+
+# --- R24-B WP-B5: eo_preflight honesty (window-without-roles advisory,
+# WAVELENGTH_UNITS normalization) + detection-lane NoData parity is in
+# test_r24_b_detection_nodata. ---
+sicnu_add_test(test_r24_b_eo_preflight TIMEOUT 300 TEST_PREFIX "r24_b_eo_preflight::")
+target_link_libraries(test_r24_b_eo_preflight PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r24_b_eo_preflight)
+target_include_directories(test_r24_b_eo_preflight PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+
+# --- R24-B WP-B1 (GAP-G1): literal-'%' filename resolution positives. ---
+sicnu_add_test(test_r24_b_uri_percent TIMEOUT 120 TEST_PREFIX "r24_b_uri_percent::")
+target_link_libraries(test_r24_b_uri_percent PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::Geospatial
+)
+target_include_directories(test_r24_b_uri_percent PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r24_b_uri_percent PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+# --- R24-B WP-B7: publish occupancy (cross-process QLockFile fence),
+# unique stage paths + age-gated sweep, stage cleanup on fence refusal. ---
+sicnu_add_test(test_r24_b_publish_fence TIMEOUT 300 TEST_PREFIX "r24_b_publish_fence::")
+target_link_libraries(test_r24_b_publish_fence PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_processing
+    sicnu_operators
+)
+target_include_directories(test_r24_b_publish_fence PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+
+# --- R24-B WP-B4: leakage grid bucket-cast guard + open() schema-gate
+# tri-state. ---
+sicnu_add_test(test_r24_b_leakage_bucket TIMEOUT 300 TEST_PREFIX "r24_b_leakage_bucket::")
+target_link_libraries(test_r24_b_leakage_bucket PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::dataset
+    Sicnu::data
+    Qt6::Core
+    SQLite::SQLite3
+)
+target_include_directories(test_r24_b_leakage_bucket PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+
+# --- R24-B WP-B6 (oracle O-B3): tile-size / feather / re-run invariance
+# oracles for the raster classification lane. ---
+sicnu_add_test(test_r24_b_metamorphic TIMEOUT 600 TEST_PREFIX "r24_b_metamorphic::")
+target_link_libraries(test_r24_b_metamorphic PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r24_b_metamorphic)
+target_include_directories(test_r24_b_metamorphic PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+# --- end R24-B block tail ---
 
 # --- BEGIN R24-A (zcode-r24-A-science) registration ---
 # R24-A science track: #1687 nodata/negative-reflectance semantics for the

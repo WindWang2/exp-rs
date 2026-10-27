@@ -28,7 +28,49 @@ function makeBridge(counterPath) {
   return new McpBridge(fakeServer, [counterPath]);
 }
 
-test("first request initializes against a healthy child", async () => {
+/// Host canary, resolved ONCE at module load: the fake server is spawned via
+/// its shebang, which Windows cannot exec directly (`spawn EFTYPE`,
+/// pre-existing host limitation documented in no_drift.test.mjs and
+/// scientific_workflow_compiler_11.test.mjs). Tests that need a live child
+/// register through testSpawn() and are SKIP-marked — never fail-marked — on
+/// such hosts, exactly like the older inline canary below. POSIX/CI hosts
+/// spawn normally and the coverage is unchanged.
+let spawnWorks = null; // null = unknown, true/false = canary verdict
+async function canarySpawns() {
+  if (spawnWorks !== null) return spawnWorks;
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    await bridge.request("tools/call", {});
+    spawnWorks = true;
+  } catch (err) {
+    // Spawn-CLASS failures only (shebang/EFTYPE, missing binary, perms)
+    // mean "this host cannot exec the fake server". Any other failure —
+    // e.g. a real bridge success-path regression on a POSIX CI host — is
+    // rethrown so the suite fails loudly instead of skipping green.
+    const msg = String(err?.message ?? err);
+    // Launch-CLASS failures only: the bridge's own "Failed to launch"
+      // prefix, or the Windows shebang EFTYPE. Everything else — a child
+      // that spawned then died, a missing/renamed fixture (ENOENT), an
+      // EPIPE from a real regression — is rethrown: the suite must fail
+      // loudly, never skip green on a broken test fixture or bridge.
+      if (!/^Failed to launch|EFTYPE/i.test(msg))
+      throw err;
+    spawnWorks = false;
+    console.log(`canary: fake MCP server cannot spawn on this host: ${msg}`);
+  } finally {
+    bridge.stop();
+  }
+  return spawnWorks;
+}
+
+const canSpawnFakeServer = await canarySpawns();
+const kSkipReason =
+  "host cannot exec the fake MCP server (pre-existing Windows limitation)";
+const testSpawn = (name, fn) =>
+  test(name, { skip: canSpawnFakeServer ? false : kSkipReason }, fn);
+
+testSpawn("first request initializes against a healthy child", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -41,7 +83,7 @@ test("first request initializes against a healthy child", async () => {
   }
 });
 
-test("a child crash respawns exactly once; concurrent requests share the start", async () => {
+testSpawn("a child crash respawns exactly once; concurrent requests share the start", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -72,7 +114,7 @@ test("a child crash respawns exactly once; concurrent requests share the start",
   }
 });
 
-test("explicit stop() is never resurrected by a request", async () => {
+testSpawn("explicit stop() is never resurrected by a request", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   await bridge.request("tools/call", {});
@@ -82,7 +124,7 @@ test("explicit stop() is never resurrected by a request", async () => {
   assert.equal(spawnCount(counter), 1);
 });
 
-test("idempotent start() does not double-spawn a healthy bridge", async () => {
+testSpawn("idempotent start() does not double-spawn a healthy bridge", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -102,7 +144,7 @@ test("start() after stop() is rejected", async () => {
   rmSync(dirname(counter), { recursive: true, force: true });
 });
 
-test("a desynced (unterminated >32MiB) stream is killed, not left as a zombie (F-PI-1)", async () => {
+testSpawn("a desynced (unterminated >32MiB) stream is killed, not left as a zombie (F-PI-1)", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -131,7 +173,7 @@ test("a desynced (unterminated >32MiB) stream is killed, not left as a zombie (F
   }
 });
 
-test("a healthy initialize does not leave the 30s startup deadline armed (F-PI-2)", async () => {
+testSpawn("a healthy initialize does not leave the 30s startup deadline armed (F-PI-2)", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -185,7 +227,7 @@ async function waitForCancellations(path, count, deadlineMs = 5000) {
   }
 }
 
-test("abort mid-flight rejects the call and notifies the server exactly once (#645)", async () => {
+testSpawn("abort mid-flight rejects the call and notifies the server exactly once (#645)", async () => {
   const counter = makeCounter();
   const notifyLog = join(dirname(counter), "notify.log");
   const bridge = new McpBridge(fakeServer, ["--notify-log", notifyLog, counter]);
@@ -219,7 +261,7 @@ test("abort mid-flight rejects the call and notifies the server exactly once (#6
   }
 });
 
-test("the late reply after an abort is dropped, not delivered (#645 no-leak)", async () => {
+testSpawn("the late reply after an abort is dropped, not delivered (#645 no-leak)", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -252,7 +294,7 @@ test("the late reply after an abort is dropped, not delivered (#645 no-leak)", a
   }
 });
 
-test("a pre-aborted signal rejects without a server round-trip for the call", async () => {
+testSpawn("a pre-aborted signal rejects without a server round-trip for the call", async () => {
   const counter = makeCounter();
   const notifyLog = join(dirname(counter), "notify.log");
   const bridge = new McpBridge(fakeServer, ["--notify-log", notifyLog, counter]);
@@ -276,7 +318,7 @@ test("a pre-aborted signal rejects without a server round-trip for the call", as
   }
 });
 
-test("a non-JSON server line is dropped; framing and pending calls survive", async () => {
+testSpawn("a non-JSON server line is dropped; framing and pending calls survive", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -292,7 +334,7 @@ test("a non-JSON server line is dropped; framing and pending calls survive", asy
   }
 });
 
-test("structured tool errors pass through with their taxonomy intact (#645)", async () => {
+testSpawn("structured tool errors pass through with their taxonomy intact (#645)", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -306,7 +348,7 @@ test("structured tool errors pass through with their taxonomy intact (#645)", as
   }
 });
 
-test("the bridge does NOT truncate: transport fidelity is the shell's budget boundary", async () => {
+testSpawn("the bridge does NOT truncate: transport fidelity is the shell's budget boundary", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -318,7 +360,7 @@ test("the bridge does NOT truncate: transport fidelity is the shell's budget bou
   }
 });
 
-test("an oversized outbound payload fails alone; other pending calls survive (R14-C FIX-4)", async () => {
+testSpawn("an oversized outbound payload fails alone; other pending calls survive (R14-C FIX-4)", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -343,7 +385,7 @@ test("an oversized outbound payload fails alone; other pending calls survive (R1
   }
 });
 
-test("a healthy initialize re-arms the fast-crash circuit (R14-C FIX-4)", async () => {
+testSpawn("a healthy initialize re-arms the fast-crash circuit (R14-C FIX-4)", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -366,7 +408,7 @@ test("a healthy initialize re-arms the fast-crash circuit (R14-C FIX-4)", async 
   }
 });
 
-test("the outbound cap counts UTF-8 bytes, not UTF-16 code units (R14-C FIX-4 rework)", async () => {
+testSpawn("the outbound cap counts UTF-8 bytes, not UTF-16 code units (R14-C FIX-4 rework)", async () => {
   const counter = makeCounter();
   const bridge = makeBridge(counter);
   try {
@@ -396,27 +438,6 @@ test("the outbound cap counts UTF-8 bytes, not UTF-16 code units (R14-C FIX-4 re
 // circuit never saw the failure (the exit handler never fires for a child
 // that never spawned).
 // ---------------------------------------------------------------------------
-
-/// The fake server is spawned via its shebang, which Windows cannot exec
-/// directly (pre-existing host limitation; scientific_workflow_compiler_11's
-/// canary documents the same constraint). Tests needing a live child gate on
-/// the canary — skipped otherwise, never silently.
-let spawnWorks = null; // null = unknown, true/false = canary verdict
-async function canarySpawns() {
-  if (spawnWorks !== null) return spawnWorks;
-  const counter = makeCounter();
-  const bridge = makeBridge(counter);
-  try {
-    await bridge.request("tools/call", {});
-    spawnWorks = true;
-  } catch (err) {
-    spawnWorks = false;
-    console.log(`canary: fake MCP server cannot spawn on this host: ${err?.message}`);
-  } finally {
-    bridge.stop();
-  }
-  return spawnWorks;
-}
 
 /** Resolve to the rejection Error, or a sentinel when the promise does not
  * reject within `ms` — a regression fails fast instead of hanging the run. */

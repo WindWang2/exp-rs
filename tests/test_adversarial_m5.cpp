@@ -5,6 +5,8 @@
  ***************************************************************************/
 
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
+#include <algorithm>               // std::min for the clamped classify window
 
 #include "app/widgets/histogram_widget.h"
 #include "app/widgets/roi_statistics_widget.h"
@@ -164,13 +166,20 @@ TEST_CASE( "Adversarial M5 - #798: Worker thread deadlock prevention and waitFor
         workerThreadDetected.store( JobEngine::isWorkerThread() );
 
         // Synchronous child wait on worker thread MUST be rejected to prevent pool deadlock (#798)
+        // #1699: classification window, not a latency budget — the rejected
+        // path returns after a lookup, the non-rejected path only after the
+        // FULL 500ms timeout. The window scales for sanitizer/loaded lanes
+        // but is clamped below the 500ms timeout boundary so a full-timeout
+        // wait can never be classified as "rejected immediately" at any scale.
+        const auto rejectWindowMs = std::min<long long>(
+            sicnu::testsupport::wallClockBudgetMs( 200 ), 400 );
         auto tStart = std::chrono::steady_clock::now();
         bool waitResult = JobEngine::instance().waitForJob( "non_existent_child", 500 );
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - tStart ).count();
 
         // Must reject immediately without waiting the full 500ms timeout
-        if ( !waitResult && elapsed < 200 )
+        if ( !waitResult && elapsed < rejectWindowMs )
             childWaitRejected.store( true );
 
         // waitUntilIdleForTests on worker thread MUST also return immediately
@@ -178,7 +187,7 @@ TEST_CASE( "Adversarial M5 - #798: Worker thread deadlock prevention and waitFor
         JobEngine::instance().waitUntilIdleForTests( 500 );
         auto elapsed2 = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - tStart2 ).count();
-        if ( elapsed2 < 200 )
+        if ( elapsed2 < rejectWindowMs )
             idleWaitRejected.store( true );
 
         return Json::Value( Json::objectValue );

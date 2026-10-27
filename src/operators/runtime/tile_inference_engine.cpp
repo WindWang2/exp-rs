@@ -1681,9 +1681,14 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       // path, so the output path only ever holds a COMPLETE raster — a crash
       // or failure leaves no truncated file that could look like a result.
       const QFileInfo outFi( QString::fromStdString( outputPath ) );
-      stagePath = QString::fromStdString( outputPath ) + QStringLiteral( ".tmp~" );
       QDir().mkpath( outFi.absolutePath() );
-      QFile::remove( stagePath );
+      // R24-B: the stage is unique per attempt ("<final>.<pid>x<n>.tmp~").
+      // The fixed "<final>.tmp~" let a concurrent run on the same output
+      // path QFile::remove + recreate the stage mid-write — the occupancy
+      // fence only covers the swap, not the staged write. The sweep keeps
+      // crashed attempts self-healing like the fixed name's pre-clean did.
+      sweepStaleStagePaths( QString::fromStdString( outputPath ) );
+      stagePath = uniqueStagePath( QString::fromStdString( outputPath ) );
       const int writerBands = mode == RasterOutputMode::Probability ? totalBands : writeBands;
       writer = std::make_unique<GdalStreamingOutput>( stagePath,
                                                       rasterW, rasterH, writerBands, writeType,
@@ -2407,19 +2412,24 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     flushPendingBatch( tileIndex );
   }
 
+  // R24-B (adversarial review, P1): a VALID tail batch could sit pending
+  // forever — the last tile deferring as all-NoData `continue`s past the
+  // batch-full check, and when a writer already exists neither the probe
+  // block nor flushDeferredNoData touches the pending mats, so the final
+  // valid strip never reached the model or the output (silently zeros in a
+  // Labels product, weight-0 NoData under feathering). Flush unconditionally:
+  // with an empty batch it is a no-op, and it makes the !writer prefix
+  // flush below redundant but harmless.
+  if ( !batchMats.empty() )
+    flushPendingBatch( totalTiles - 1 );
+
   // Entire raster is NoData: no regular batch ever ran, so the writer (and
   // with it the model's true output channel count) does not exist yet. One
   // zero-tile probe forward establishes the output shape — its result is
   // NaN-restored like any other invalid tile. The probe tile is popped from
-  // the deferred list and written by the normal flushBatch path.
-  // R20-02 (R2-1): a valid prefix can still sit UN-FLUSHED here — every
-  // later tile deferred per-tile as all-NoData means the batch never filled
-  // and no geometry flip flushed it. Pushing the probe (an edge-shaped
-  // tile, e.g. 36-wide) into that pending batch re-creates the exact
-  // "mixed tile sizes" refusal the geometry break above eliminates. Flush
-  // the pending prefix first; that creates the writer, the probe condition
-  // below short-circuits, and the remaining deferred tiles take the
-  // flushDeferredNoData path underneath.
+  // the deferred list and written by the normal flushBatch path. (R20-02's
+  // earlier "flush the pending prefix" leg is subsumed by the unconditional
+  // flush above and kept only as belt-and-braces.)
   if ( !deferredNoData.empty() && !writer && !batchMats.empty() )
     flushPendingBatch( totalTiles - 1 );
   if ( !deferredNoData.empty() && !writer )
@@ -2519,7 +2529,11 @@ void TileInferenceEngine::publishClassificationArtifact( const Json::Value &doc,
   // run leaves. Shared by the single-model writer and the ensemble combiner
   // (Platform 13.0) so ONE atomic-publish contract exists.
   const QFileInfo outFi( QString::fromStdString( outputPath ) );
-  const QString stagePath = outFi.absoluteFilePath() + QStringLiteral( ".stage~" );
+  // R24-B: unique per attempt — the fixed ".stage~" name left the staged
+  // write outside the (swap-time) fence, so two concurrent scene publishes
+  // on one output path interleaved writes on one shared stage file.
+  sweepStaleStagePaths( outFi.absoluteFilePath() );
+  const QString stagePath = uniqueStagePath( outFi.absoluteFilePath() );
   QFile stage( stagePath );
   if ( !stage.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     throw RSOperatorError( ErrorCode::FileNotWritable,
@@ -3815,9 +3829,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     if ( !writer )
     {
       const QFileInfo outFi( QString::fromStdString( outputPath ) );
-      stagePath = QString::fromStdString( outputPath ) + QStringLiteral( ".tmp~" );
       QDir().mkpath( outFi.absolutePath() );
-      QFile::remove( stagePath );
+      // R24-B: unique per attempt — see the single-input lane's note; the
+      // staged-write window is not covered by the swap-time fence.
+      sweepStaleStagePaths( QString::fromStdString( outputPath ) );
+      stagePath = uniqueStagePath( QString::fromStdString( outputPath ) );
       writer = std::make_unique<GdalStreamingOutput>( stagePath, rasterW, rasterH, totalBands,
                                                       /*GDT_Float32*/ 6,
                                                       primary.geoTransform(), primary.projection() );
@@ -4234,6 +4250,12 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                               "Tiled multi-input inference: " + std::to_string( done + skipped )
                                 + "/" + std::to_string( totalTiles ) );
     }
+
+    // R24-B (adversarial review, P1): a VALID tail batch could sit pending
+    // — trailing all-NoData tiles `continue` past the batch-full check, and
+    // this lane had no post-loop flush at all. Mirror the single-input fix.
+    if ( !batchCores.empty() )
+      flushBatch( totalTiles - 1 );
 
     if ( !deferredNoData.empty() && !writer )
     {

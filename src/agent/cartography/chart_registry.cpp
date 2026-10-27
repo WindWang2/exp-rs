@@ -943,6 +943,11 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
     problems.push_back(
       "kind must be one of bar|line|pie|histogram|area|scatter|stacked_bar|matrix|metric|"
       "grouped_bar|table|summary_table|topn_table|sparkline|accuracy_summary" );
+  // r24-c R1-2: title is optional but, when present, must be a string —
+  // summaries are projected via asString() (workspace_state), and a numeric
+  // or structured title accepted here would degrade every later capture.
+  if ( chart.isMember( "title" ) && !chart["title"].isString() )
+    problems.push_back( "title, when present, must be a string" );
   if ( !chart.isMember( "binding" ) || !chart["binding"].isObject() )
   {
     problems.push_back( "chart needs a binding object" );
@@ -1120,10 +1125,15 @@ QString ChartRegistry::createChart( Json::Value spec, QString *error )
     return QString();
   }
   QMutexLocker lock( &mMutex );
-  int ordinal = mCharts.size() + 1;
+  // Monotonic ids (r24-c R1-4): a deleted chart's id is never handed to a
+  // different chart, so WorkspaceEntityRegistry's natural key stays a stable
+  // referent for the lifetime of the process. mCharts.size()+1 alone would
+  // reuse "chart-3" for an unrelated chart after the tail was deleted.
+  int ordinal = qMax( mNextOrdinal, mCharts.size() + 1 );
   const QString prefix = QStringLiteral( "chart-" );
   while ( mCharts.contains( prefix + QString::number( ordinal ) ) )
     ++ordinal;
+  mNextOrdinal = ordinal + 1;
   const QString id = prefix + QString::number( ordinal );
   spec["id"] = id.toStdString();
   mCharts.insert( id, spec );
@@ -1181,10 +1191,40 @@ Json::Value ChartRegistry::listCharts() const
   return charts;
 }
 
+Json::Value ChartRegistry::listChartSummaries( int max, int *totalAvailable ) const
+{
+  QMutexLocker lock( &mMutex );
+  Json::Value summaries( Json::arrayValue );
+  int emitted = 0;
+  int total = 0;
+  for ( auto it = mCharts.constBegin(); it != mCharts.constEnd(); ++it )
+  {
+    if ( emitted < max )
+    {
+      Json::Value s( Json::objectValue );
+      const Json::Value &spec = it.value();
+      // Type guards (r24-c R1-2): the summary must tolerate specs that
+      // predate strict validation — it never throws, it degrades to "".
+      s["id"] = spec.isMember( "id" ) && spec["id"].isString() ? spec["id"].asString() : std::string();
+      s["kind"] = spec.isMember( "kind" ) && spec["kind"].isString() ? spec["kind"].asString() : std::string();
+      s["title"] = spec.isMember( "title" ) && spec["title"].isString() ? spec["title"].asString() : std::string();
+      summaries.append( s );
+      ++emitted;
+    }
+    ++total;
+  }
+  if ( totalAvailable )
+    *totalAvailable = total;
+  return summaries;
+}
+
 void ChartRegistry::clear()
 {
   QMutexLocker lock( &mMutex );
   mCharts.clear();
+  // clear() is a full reset (tests rely on "empty registry behaves like
+  // new"); the monotonic counter must restart with it.
+  mNextOrdinal = 1;
 }
 
 bool renderChartToFile( const Json::Value &chart, const QString &path, QString *error )

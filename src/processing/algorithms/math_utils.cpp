@@ -179,22 +179,28 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc)
 
 bool bothNormalizable(float a, float b)
 {
-    if (!std::isfinite(a) || !std::isfinite(b))
-        return false;
-    // Undeclared negative-DN sentinel net (#1687): reflectance domains are
-    // [-1,1] and DN domains non-negative, so no legitimate index input is
-    // <= this ceiling, while common undeclared fills (-9999, -32768) all
-    // are. Files that omit the NoData tag still get their fill pixels
-    // invalidated (see rs_temporal_index_operator's probe note); DECLARED
-    // sentinels above the ceiling (e.g. -99) are the caller's to pass via
-    // the sentinel-aware overloads or operator pre-normalization.
-    if (a <= kUndeclaredSentinelCeiling || b <= kUndeclaredSentinelCeiling)
-        return false;
-    // Equal negative operands are legitimate post-correction reflectance
-    // (dark water/shadow): (a-b)/(a+b) = 0/(2a) is well-defined and
-    // evaluates to 0. The pre-R24 form rejected the pair and emitted NaN,
-    // silently invalidating every equal-negative pixel (#1687).
-    return true;
+    // Only non-finite inputs are invalid here (#1687): every production
+    // caller resolves the band's DECLARED NoData sentinel to NaN before
+    // this kernel runs (the operator's BandSource readTileBand, the
+    // providers' readBandData), so a magic negative threshold would only
+    // reject valid data — e.g. identical slightly-negative reflectances
+    // from atmospheric correction (a == b == -0.01 over dark water), whose
+    // normalized difference is a well-defined 0. A zero denominator is
+    // safeDiv's contract, not this gate.
+    return std::isfinite(a) && std::isfinite(b);
+}
+
+bool legacyNegativeSentinelFree(float a, float b)
+{
+    // Named, documented home for the legacy undeclared-sentinel screen the
+    // pre/post index-difference branch (dNBR family) applies ON TOP of
+    // finiteness: older pipelines stamped -9999-family band values without
+    // declaring NoData, and such values would otherwise surface as extreme
+    // (near +/-1) index change. Physically-bounded values — including the
+    // slightly-negative reflectances atmospheric correction produces — pass.
+    // The general kernels stay sentinel-blind (#1687): declared band NoData
+    // is the caller's authority and valid data must never be guessed away.
+    return bothNormalizable(a, b) && a > -999.0f && b > -999.0f;
 }
 
 bool bothNormalizable(float a, float b, float noDataA, float noDataB)
@@ -203,7 +209,11 @@ bool bothNormalizable(float a, float b, float noDataA, float noDataB)
         return false;
     // Exact declared-sentinel match (nodata_utils.h discipline: never an
     // epsilon; a non-finite declared sentinel disables that side's check).
-    // Catches declared values above the undeclared ceiling, e.g. -99.
+    // Merge note (#1722 x #1718, #1687 ruling): the sentinel-aware overloads
+    // are KEPT from R24-A, but the undeclared ceiling net is not reapplied
+    // here — every caller that holds declared sentinels is already inside
+    // the NoData-aware layer, and undeclared -9999-family fills stay the
+    // dNBR seam's business (legacyNegativeSentinelFree).
     if (std::isfinite(noDataA) && a == noDataA)
         return false;
     if (std::isfinite(noDataB) && b == noDataB)
@@ -217,6 +227,8 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
     if (count == 0) return false;
 
     for (size_t i = 0; i < count; ++i) {
+        // Non-finite operand (declared sentinels arrive pre-resolved to
+        // NaN) or a zero denominator -> NaN, never a saturated value.
         if (!bothNormalizable(a[i], b[i])) {
             out[i] = std::numeric_limits<float>::quiet_NaN();
         } else {

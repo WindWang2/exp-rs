@@ -697,7 +697,10 @@ void linearStretchApplyTile( const float *in, float *out, size_t n,
 
     for ( size_t i = 0; i < n; i++ )
     {
-        if ( in[i] == nodata || std::isnan( in[i] ) )
+        // Same validity mask as the full-frame ImageEnhancement::linearStretch
+        // (sentinel OR non-finite): a ±Inf glitch pixel is NoData here too,
+        // never a saturated 255/0 "valid" value.
+        if ( in[i] == nodata || !std::isfinite( in[i] ) )
         {
             out[i] = nodata;
             continue;

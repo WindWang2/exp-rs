@@ -141,7 +141,7 @@ class ExecutionTelemetry
     ExecutionTelemetry();
     std::atomic<bool> m_enabled{ false };
     mutable std::mutex m_mutex;
-    std::vector<TelemetryEvent> m_events; ///< ring: push_back + erase-front
+    std::vector<TelemetryEvent> m_events; ///< ring buffer: fixed capacity, overwrite-oldest in place (R24-B note: the old erase-front comment was stale — see record())
     std::atomic<uint64_t> m_counters[static_cast<size_t>( Counter::_Count )]{};
     std::atomic<bool> m_overflowWarned{ false };
 };
