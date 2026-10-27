@@ -16822,3 +16822,61 @@ target_include_directories(test_r23_d_lab_hardening PRIVATE
 )
 sicnu_discover_tests(test_r23_d_lab_hardening TEST_PREFIX test_r23_d_lab_hardening::)
 # --- end R23-D hardening registration ---
+# --- R23-E WP2: optional Python worker compat-layer regression guards
+# (#1608/#1609 + daemon typed-error contracts). Pure-python unittest that
+# spawns the REAL worker daemon over a private unix socket; skips loudly on
+# hosts without numpy or AF_UNIX (the daemon is POSIX-only by design).
+if(Python_EXECUTABLE)
+  add_test(NAME r23_e_python_worker_typed
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_r23_e_python_worker_typed.py)
+  set_tests_properties(r23_e_python_worker_typed PROPERTIES TIMEOUT 180)
+  sicnu_set_test_env(r23_e_python_worker_typed)
+endif()
+# --- end R23-E WP2 registration ---
+
+# --- R23-E WP3: merge-integrity gate — registration subset vs origin/master,
+# conflict markers in the shared merge surface, duplicate test registrations
+# (the #1715-class pre-push defense; static fallback when refs are missing).
+if(Python_EXECUTABLE)
+  add_test(NAME r23_e_merge_registration_integrity
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_merge_registration_integrity.py
+            --repo-root ${CMAKE_SOURCE_DIR} --base origin/master --head HEAD --require-refs)
+  set_tests_properties(r23_e_merge_registration_integrity PROPERTIES TIMEOUT 120)
+  sicnu_set_test_env(r23_e_merge_registration_integrity)
+endif()
+# --- end R23-E WP3 registration ---
+
+# --- R23-E registration (r23-e-platform-plugin-release): typed-contract
+# regression guards for the #1662 sweep fixes (#1551/#1592) — hostile-typed
+# plugin.load/execution frames must be refused typed by the REAL
+# out-of-process worker, which must survive them (no std::terminate, no
+# unanswered-request timeout, no burned restart).
+sicnu_add_sdk_test(test_r23_e_plugin_typed_gates TEST_PREFIX "test_r23_e_plugin_typed_gates::")
+target_link_libraries(test_r23_e_plugin_typed_gates PRIVATE sicnu_plugins_hostprocess)
+target_compile_definitions(test_r23_e_plugin_typed_gates PRIVATE
+  SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
+  SICNU_TEST_PLUGIN_HOST_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
+)
+add_dependencies(test_r23_e_plugin_typed_gates isolation_plugin exprs_plugin_host_worker)
+# --- end R23-E registration ---
+
+# --- R23-E WP5: native terminal lifecycle contract (#1618 guard) — Linux
+# only (QgsLinuxNative compiles nowhere else). Probe terminals on PATH
+# record argv + cwd; startDetached is async, hence RUN_SERIAL.
+if(UNIX AND NOT APPLE)
+  qt_add_executable(test_r23_e_native_terminal test_r23_e_native_terminal.cpp)
+  target_link_libraries(test_r23_e_native_terminal PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::DBus
+    qgis_native
+  )
+  target_include_directories(test_r23_e_native_terminal PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_r23_e_native_terminal RUN_SERIAL TRUE
+    TEST_PREFIX "test_r23_e_native_terminal::")
+endif()
+# --- end R23-E WP5 registration ---
