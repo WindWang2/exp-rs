@@ -358,13 +358,16 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
                 " has no acquisition time" );
       if ( s > 0 && !( tDays[static_cast<size_t>( s )] >
                        tDays[static_cast<size_t>( s - 1 )] ) )
+        // The violation at s is against s-1 — report that pair (1-based
+        // labels), not (s, s+1) which can point past the last scene
+        // (R24-A R1 review P2-1).
         throw RSOperatorError(
             ErrorCode::InvalidInputData,
             "method '" + methodToken.toStdString() +
                 "' requires strictly increasing scene times; scenes " +
                 std::to_string( s ) + " and " + std::to_string( s + 1 ) +
-                " share an instant — use duplicate_policy=reject or run "
-                "rs:temporal_regularize first" );
+                " have a duplicate or out-of-order instant — use "
+                "duplicate_policy=reject or run rs:temporal_regularize first" );
     }
   }
 
