@@ -515,9 +515,15 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
 
   if ( contains( "cancel" ) )
     return InferenceFailureKind::Canceled;
+  // R24-B: MSVC's std::bad_alloc::what() is "bad allocation" (none of the
+  // libstdc++ spellings below match it), so a host-side OOM while packing
+  // blobs classified as Unknown on Windows and the tile engine's OOM ladder
+  // rethrew instead of degrading to tile-by-tile retries — platform-
+  // dependent behavior of a platform-independent ladder.
   if ( contains( "out of memory" ) || contains( "bad_alloc" )
-       || contains( "cuda_error_out_of_memory" ) || contains( "cudamalloc" )
-       || contains( "alloc failed" ) || contains( "allocation failure" ) )
+       || contains( "bad allocation" ) || contains( "cuda_error_out_of_memory" )
+       || contains( "cudamalloc" ) || contains( "alloc failed" )
+       || contains( "allocation failure" ) )
     return InferenceFailureKind::OutOfMemory;
   // Platform 9.0 taxonomy: a provider that hit its time budget is a Timeout
   // (LIVE but unresponsive), classified before the crash patterns — "timed

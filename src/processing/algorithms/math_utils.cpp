@@ -181,9 +181,32 @@ bool bothNormalizable(float a, float b)
 {
     if (!std::isfinite(a) || !std::isfinite(b))
         return false;
-    if (a <= -999.0f || b <= -999.0f)
+    // Undeclared negative-DN sentinel net (#1687): reflectance domains are
+    // [-1,1] and DN domains non-negative, so no legitimate index input is
+    // <= this ceiling, while common undeclared fills (-9999, -32768) all
+    // are. Files that omit the NoData tag still get their fill pixels
+    // invalidated (see rs_temporal_index_operator's probe note); DECLARED
+    // sentinels above the ceiling (e.g. -99) are the caller's to pass via
+    // the sentinel-aware overloads or operator pre-normalization.
+    if (a <= kUndeclaredSentinelCeiling || b <= kUndeclaredSentinelCeiling)
         return false;
-    if (a == b && a < 0.0f)
+    // Equal negative operands are legitimate post-correction reflectance
+    // (dark water/shadow): (a-b)/(a+b) = 0/(2a) is well-defined and
+    // evaluates to 0. The pre-R24 form rejected the pair and emitted NaN,
+    // silently invalidating every equal-negative pixel (#1687).
+    return true;
+}
+
+bool bothNormalizable(float a, float b, float noDataA, float noDataB)
+{
+    if (!bothNormalizable(a, b))
+        return false;
+    // Exact declared-sentinel match (nodata_utils.h discipline: never an
+    // epsilon; a non-finite declared sentinel disables that side's check).
+    // Catches declared values above the undeclared ceiling, e.g. -99.
+    if (std::isfinite(noDataA) && a == noDataA)
+        return false;
+    if (std::isfinite(noDataB) && b == noDataB)
         return false;
     return true;
 }
@@ -195,7 +218,23 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
 
     for (size_t i = 0; i < count; ++i) {
         if (!bothNormalizable(a[i], b[i])) {
-            // Negative sentinel values (e.g. -9999) must never evaluate to false legitimate zero
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+        } else {
+            out[i] = safeDiv(a[i] - b[i], a[i] + b[i]);
+        }
+    }
+
+    return true;
+}
+
+bool normalizedDifference(const float *a, const float *b, float *out, size_t count,
+                          float noDataA, float noDataB)
+{
+    if (!a || !b || !out) return false;
+    if (count == 0) return false;
+
+    for (size_t i = 0; i < count; ++i) {
+        if (!bothNormalizable(a[i], b[i], noDataA, noDataB)) {
             out[i] = std::numeric_limits<float>::quiet_NaN();
         } else {
             out[i] = safeDiv(a[i] - b[i], a[i] + b[i]);

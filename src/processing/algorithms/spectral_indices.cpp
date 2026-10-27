@@ -16,7 +16,10 @@ namespace SpectralIndices
 namespace {
 inline bool isSentinelSample(float v)
 {
-    return !std::isfinite(v) || v <= -999.0f;
+    // Same undeclared negative-DN sentinel net the shared normalized-
+    // difference kernel applies (math_utils.h owns the ceiling; #1687) —
+    // one constant, one policy, no per-file drift.
+    return !std::isfinite(v) || v <= MathUtils::kUndeclaredSentinelCeiling;
 }
 
 bool isScaledReflectance(const float *a, const float *b, size_t count)

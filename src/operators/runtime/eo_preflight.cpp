@@ -145,6 +145,17 @@ EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string 
     const ModelInputContract &contract = feed ? *feed
                                               : ( model.inputs.empty() ? model.input
                                                                        : model.inputs.front() );
+    if ( contract.bandRoles.empty() )
+    {
+      // R24-B: windows declared but the input contract binds no band roles —
+      // the per-role loop below degenerates to "never refuses, never
+      // advises", silently dropping the model's own sensitivity declaration.
+      // Name it so the gap is visible instead of absent.
+      report.advisories.push_back(
+        "wavelength: the model declares " + std::to_string( model.eo.wavelengthsNm.size() )
+        + " band sensitivity window(s) but the input contract binds no band_roles —"
+          " windows unchecked" );
+    }
     for ( std::size_t roleIdx = 0; roleIdx < contract.bandRoles.size(); ++roleIdx )
     {
       const std::string role = [&] {
@@ -156,10 +167,24 @@ EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string 
       const auto windowIt = model.eo.wavelengthsNm.find( role );
       if ( windowIt == model.eo.wavelengthsNm.end() )
         continue;
-      const int physicalBand =
-        static_cast<int>( roleIdx ) < static_cast<int>( fedBands.size() )
-          ? fedBands[roleIdx]
-          : static_cast<int>( roleIdx ) + 1;
+      // R24-B: a role beyond the explicit band selection used to fall back to
+      // file-order band roleIdx+1 — citing (and checking) a band the run
+      // never feeds. With an explicit selection the role simply has no fed
+      // band; name that instead.
+      int physicalBand = -1;
+      if ( roleIdx < fedBands.size() )
+        physicalBand = fedBands[roleIdx];
+      else if ( fedBands.empty() )
+        physicalBand = static_cast<int>( roleIdx ) + 1;
+      else
+      {
+        report.advisories.push_back(
+          "wavelength: role '" + role + "' (position " + std::to_string( roleIdx + 1 )
+          + ") is not covered by the " + std::to_string( fedBands.size() )
+          + "-band input selection — window " + describeWindow( windowIt->second )
+          + " unchecked" );
+        continue;
+      }
       if ( physicalBand < 1 || std::size_t( physicalBand ) > meta.bands.size() )
       {
         report.advisories.push_back( "wavelength: role '" + role + "' maps to band "

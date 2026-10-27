@@ -2047,18 +2047,16 @@ TEST_CASE( "bundle import refuses a manifest run_id that is not a valid RunId",
     }
 }
 
-TEST_CASE( "bundle import names the lineage slice it cannot re-attach",
+TEST_CASE( "bundle import re-attaches the direction-preserving lineage slice",
            "[experiment][repro][import][lineage]" )
 {
     // The exporter ALWAYS writes provenance.json — the lineage slice
     // around the run — and the import used to drop it without a word,
-    // leaving the imported run an island in the lineage graph. The slice
-    // cannot be re-attached faithfully: the bundle keeps only each edge's
-    // FAR endpoint ({"edge","other_kind","other_id"}), so the run-relative
-    // direction is lost at export, and the importer holds no DatasetStore
-    // for dataset-side edges. The contract is therefore the repo's
-    // "named, never silent" convention — the report says what was NOT
-    // reconstructed, and nothing is fabricated into the store.
+    // leaving the imported run an island in the lineage graph (issue
+    // #1581's original finding). R24-B closed the gap for
+    // direction-preserving exports: this test now pins the re-attachment
+    // (see the comment at its tail); legacy 3-key bundles keep the
+    // named-gap warning, pinned in tests/test_r24_b_lineage_reattach.cpp.
     QTemporaryDir dir;
     DatasetStore datasets;
     ExperimentStore experiments;
@@ -2125,16 +2123,22 @@ TEST_CASE( "bundle import names the lineage slice it cannot re-attach",
     options.targetExperimentId = QStringLiteral( "exp-dst" );
     const auto report = importer.importRun( options );
 
-    // The gap is named, not fatal: the run still imports as evidence.
+    // R24-B (#1581 residual closed): the exporter now writes
+    // direction-preserving run_edges items, and import re-attaches the
+    // experiment-side ones with the run endpoint rewritten to the installed
+    // id — the imported run is no longer a lineage island. Legacy 3-key
+    // items (and dataset-side endpoints without a DatasetStore) keep the
+    // named-gap warning; that compat contract is pinned separately in
+    // tests/test_r24_b_lineage_reattach.cpp.
     REQUIRE( report.ok );
     CHECK( target.runById( report.runId ).has_value() );
-    const QString named = report.warnings.join( QLatin1Char( ';' ) );
-    CHECK( named.contains( QStringLiteral( "cannot re-attach" ) ) );
-    CHECK( named.contains( QStringLiteral( "island in the lineage" ) ) );
-    CHECK( named.contains( QStringLiteral( "1 lineage edge" ) ) );
-    // And nothing was fabricated: the target store holds no lineage edge
-    // invented for the imported run.
-    CHECK( target.outgoingEdges( QStringLiteral( "run" ), report.runId ).isEmpty() );
+    CHECK( report.lineageEdgesReattached == 1 );
+    const auto out = target.outgoingEdges( QStringLiteral( "run" ), report.runId );
+    REQUIRE( out.size() == 1 );
+    CHECK( out.first().edgeKind == QStringLiteral( "produced" ) );
+    CHECK( out.first().toKind == QStringLiteral( "artifact" ) );
+    CHECK( out.first().toId == QStringLiteral( "ndvi.tif" ) );
+    // Nothing beyond the recorded slice was fabricated.
     CHECK( target.incomingEdges( QStringLiteral( "run" ), report.runId ).isEmpty() );
 }
 

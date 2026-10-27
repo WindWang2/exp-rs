@@ -123,11 +123,30 @@ bool DatasetStore::open( const QString &dbPath, QString *errorOut )
         return false;
     }
     QString existing;
+    bool gateReadFailed = false;
     {
         QMutexLocker lock( &m_impl->mutex );
         Stmt stmt( db, QStringLiteral( "SELECT value FROM ds_meta WHERE key='schema_version'" ) );
-        if ( stmt && stmt.stepRow() )
+        if ( !stmt )
+            gateReadFailed = true;
+        else if ( stmt.stepRow() )
             existing = stmt.text( 0 );
+        else if ( stmt.stepFailed() )
+            gateReadFailed = true;
+    }
+    if ( gateReadFailed )
+    {
+        // R24-B (#1448/#1457 discipline, applied to the schema gate): a
+        // FAILED gate read is not a fresh store. Falling through to the
+        // stamp path on an I/O / corruption error let this binary
+        // INSERT OR REPLACE a possibly-NEWER schema stamp with its own and
+        // then write v1 rows into a layout it does not understand.
+        if ( errorOut )
+            *errorOut = QStringLiteral( "cannot read the schema gate of %1 — "
+                                        "refusing to initialize or stamp the store" )
+                            .arg( dbPath );
+        close();
+        return false;
     }
     if ( !existing.isEmpty() && existing != QLatin1String( kDatasetStoreSchemaVersion ) )
     {
@@ -741,36 +760,63 @@ sicnu::data::Result<void> DatasetStore::addSourceAssetsToDraft(
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
                                            QStringLiteral( "store is read-only" ) ) );
 
+    // R24-B (#811 playbook): read-validate-write share one BEGIN IMMEDIATE
+    // transaction. The old shape read the row and checked mutability OUTSIDE
+    // any transaction and never verified the UPDATE matched a row, so (a) a
+    // concurrent commit between check and UPDATE silently matched 0 rows and
+    // still returned success (lost update), and (b) a concurrent
+    // stageVersion/commitVersion could interleave between the read and the
+    // manifest write.
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
     std::optional<DatasetVersionRecord> current;
     {
         Stmt stmt( m_impl->db, QStringLiteral(
             "SELECT " DATASET_VERSION_COLS " FROM dataset_versions WHERE id=?" ) );
         if ( !stmt )
+        {
+            const QString message = stmt.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               stmt.error( m_impl->db ) ) );
+                                               message ) );
+        }
         stmt.bind( 1, versionId.toString() );
         if ( stmt.stepRow() )
             current = recordFromRow( stmt );
         else if ( stmt.stepFailed() )
+        {
             // #1703-3: an I/O error is not absence — reporting it as
             // dataset.not_found sent callers hunting identity bugs that
             // were really SQLite failures (same contract as #1448/#1457).
+            const QString message = stmt.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                                QStringLiteral( "reading version %1 failed: %2" )
-                                                   .arg( versionId.toString(), stmt.error( m_impl->db ) ) ) );
+                                                   .arg( versionId.toString(), message ) ) );
+        }
     }
     if ( !current )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
                                            QStringLiteral( "version %1 does not exist" )
                                                .arg( versionId.toString() ) ) );
+    }
     if ( !current->isMutable() )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_draft" ),
                                            QStringLiteral( "only draft versions can be modified" ) ) );
+    }
 
     const QJsonObject stored = textToJson( current->manifestJson() );
     const auto parsed = DatasetManifest::fromJson( stored );
     if ( !parsed )
+    {
+        m_impl->rollback();
         return Result::failure( parsed.diagnostics() );
+    }
 
     DatasetManifest manifest = parsed.value();
     bool changed = false;
@@ -797,21 +843,42 @@ sicnu::data::Result<void> DatasetStore::addSourceAssetsToDraft(
         }
     }
 
-    if ( changed )
+    if ( !changed )
     {
-        const QString updatedJson = jsonToText( manifest.toJson() );
-        Stmt update( m_impl->db, QStringLiteral(
-            "UPDATE dataset_versions SET manifest_json=?, staged=0 WHERE id=? AND status='draft'" ) );
-        if ( !update )
-            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               update.error( m_impl->db ) ) );
-        update.bind( 1, updatedJson );
-        update.bind( 2, versionId.toString() );
-        if ( !update.step() )
-            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                               update.error( m_impl->db ) ) );
+        m_impl->rollback();
+        return Result::success();
     }
 
+    const QString updatedJson = jsonToText( manifest.toJson() );
+    Stmt update( m_impl->db, QStringLiteral(
+        "UPDATE dataset_versions SET manifest_json=?, staged=0 WHERE id=? AND status='draft'" ) );
+    if ( !update )
+    {
+        const QString message = update.error( m_impl->db );
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           message ) );
+    }
+    update.bind( 1, updatedJson );
+    update.bind( 2, versionId.toString() );
+    if ( !update.step() )
+    {
+        const QString message = update.error( m_impl->db );
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           message ) );
+    }
+    if ( update.changes( m_impl->db ) != 1 )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.conflict" ),
+                                           QStringLiteral( "version %1 left draft state during"
+                                                           " source-asset update" )
+                                               .arg( versionId.toString() ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit failed" ) ) );
     return Result::success();
 }
 
@@ -828,38 +895,62 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::stageVersion(
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
                                            QStringLiteral( "store is read-only" ) ) );
 
+    // R24-B (#811 playbook): the whole read-validate-stage-write runs inside
+    // one BEGIN IMMEDIATE transaction. The old non-transactional shape could
+    // overwrite a concurrent draft edit (e.g. addSourceAssetsToDraft) with
+    // the stale manifest snapshot read before the race.
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
     std::optional<DatasetVersionRecord> current;
     {
         Stmt stmt( m_impl->db, QStringLiteral(
             "SELECT " DATASET_VERSION_COLS " FROM dataset_versions WHERE id=?" ) );
         if ( !stmt )
+        {
+            const QString message = stmt.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               stmt.error( m_impl->db ) ) );
+                                               message ) );
+        }
         stmt.bind( 1, versionId.toString() );
         if ( stmt.stepRow() )
             current = recordFromRow( stmt );
         else if ( stmt.stepFailed() )
+        {
             // #1703-3: an I/O error is not absence — reporting it as
             // dataset.not_found sent callers hunting identity bugs that
             // were really SQLite failures (same contract as #1448/#1457).
+            const QString message = stmt.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                                QStringLiteral( "reading version %1 failed: %2" )
-                                                   .arg( versionId.toString(), stmt.error( m_impl->db ) ) ) );
+                                                   .arg( versionId.toString(), message ) ) );
+        }
     }
     if ( !current )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
                                            QStringLiteral( "version %1 does not exist" )
                                                .arg( versionId.toString() ) ) );
+    }
     if ( !current->isMutable() )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_draft" ),
                                            QStringLiteral( "only draft versions can be staged" ) ) );
+    }
 
     // Validate via a full parse round-trip: the staged document must load
     // under exactly the reader contract consumers will use.
     const QJsonObject stored = textToJson( current->manifestJson() );
     const auto parsed = DatasetManifest::fromJson( stored );
     if ( !parsed )
+    {
+        m_impl->rollback();
         return Result::failure( parsed.diagnostics() );
+    }
 
     // Canonical staged document: fingerprint excluded (stamping happens at
     // commit; a staged draft makes no content promise).
@@ -871,16 +962,30 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::stageVersion(
         "UPDATE dataset_versions SET manifest_json=?, staged=1"
         " WHERE id=? AND status='draft'" ) );
     if ( !update )
+    {
+        const QString message = update.error( m_impl->db );
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           update.error( m_impl->db ) ) );
+                                           message ) );
+    }
     update.bind( 1, stagedText );
     update.bind( 2, current->versionId() );
     if ( !update.step() )
+    {
+        const QString message = update.error( m_impl->db );
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           update.error( m_impl->db ) ) );
+                                           message ) );
+    }
     if ( update.changes( m_impl->db ) != 1 )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.conflict" ),
                                            QStringLiteral( "version left draft state during staging" ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit failed" ) ) );
 
     auto record = *current;
     record.setManifestJson( stagedText );
@@ -925,31 +1030,56 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersionImpl(
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
                                            QStringLiteral( "store is read-only" ) ) );
 
+    // R24-B (#811 playbook): the whole read-validate-fingerprint-commit runs
+    // inside one BEGIN IMMEDIATE transaction. The old shape read the row,
+    // checked draft+staged and parsed/canonicalized the manifest BEFORE
+    // taking the write lock, so a concurrent addSourceAssetsToDraft on a
+    // second connection could commit between that read and this begin():
+    // the UPDATE below then matched (status was still 'draft'), froze the
+    // STALE manifest (the concurrent asset edit was silently lost) and
+    // bypassed the staged gate the edit had reset.
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
     std::optional<DatasetVersionRecord> current;
     {
         Stmt stmt( m_impl->db, QStringLiteral(
             "SELECT " DATASET_VERSION_COLS " FROM dataset_versions WHERE id=?" ) );
         if ( !stmt )
+        {
+            const QString message = stmt.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               stmt.error( m_impl->db ) ) );
+                                               message ) );
+        }
         stmt.bind( 1, versionId.toString() );
         if ( stmt.stepRow() )
             current = recordFromRow( stmt );
         else if ( stmt.stepFailed() )
+        {
             // #1703-3: an I/O error is not absence — reporting it as
             // dataset.not_found sent callers hunting identity bugs that
             // were really SQLite failures (same contract as #1448/#1457).
+            const QString message = stmt.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
                                                QStringLiteral( "reading version %1 failed: %2" )
-                                                   .arg( versionId.toString(), stmt.error( m_impl->db ) ) ) );
+                                                   .arg( versionId.toString(), message ) ) );
+        }
     }
     if ( !current )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
                                            QStringLiteral( "version %1 does not exist" )
                                                .arg( versionId.toString() ) ) );
+    }
     if ( current->status() != DatasetVersionStatus::Draft )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_draft" ),
                                            QStringLiteral( "only draft versions can be committed" ) ) );
+    }
     // Commit REQUIRES a staged draft: staging is where the manifest is
     // validated under exactly the reader contract consumers use. Committing
     // an unstaged (never-validated) document would freeze unreadable content
@@ -958,25 +1088,38 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersionImpl(
         Stmt stagedCheck( m_impl->db, QStringLiteral(
             "SELECT 1 FROM dataset_versions WHERE id=? AND staged=1 AND status='draft'" ) );
         if ( !stagedCheck )
+        {
+            const QString message = stagedCheck.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               stagedCheck.error( m_impl->db ) ) );
+                                               message ) );
+        }
         stagedCheck.bind( 1, current->versionId() );
         if ( !stagedCheck.stepRow() )
+        {
+            m_impl->rollback();
             return Result::failure( storeDiag(
                 QStringLiteral( "dataset.not_staged" ),
                 QStringLiteral( "version %1 must be staged (validated) before commit" )
                     .arg( current->versionId() ) ) );
+        }
     }
 
     // Second gate, defense-in-depth: the staged document must still parse
     // under the strict reader (a foreign writer could have touched the row).
     const QJsonObject stagedManifest = textToJson( current->manifestJson() );
     if ( stagedManifest.isEmpty() )
+    {
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.manifest_invalid" ),
                                            QStringLiteral( "draft manifest is not staged JSON" ) ) );
+    }
     const auto validated = DatasetManifest::fromJson( stagedManifest );
     if ( !validated )
+    {
+        m_impl->rollback();
         return Result::failure( validated.diagnostics() );
+    }
 
     // Fingerprint covers the CANONICAL re-serialization of the validated
     // manifest (without the fingerprint field): the committed document is
@@ -990,24 +1133,32 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersionImpl(
     committedJson.insert( QStringLiteral( "fingerprint" ), fingerprint );
     const QString committedText = jsonToText( committedJson );
 
-    if ( !m_impl->begin( nullptr ) )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           QStringLiteral( "cannot begin transaction" ) ) );
     {
         Stmt update( m_impl->db, QStringLiteral(
             "UPDATE dataset_versions SET manifest_json=?, fingerprint=?,"
-            " status='committed', staged=0, committed_ms=? WHERE id=? AND status='draft'" ) );
+            " status='committed', staged=0, committed_ms=?"
+            " WHERE id=? AND status='draft' AND staged=1" ) );
         if ( !update )
         {
+            // Capture the sqlite error BEFORE rollback (ROLLBACK resets the
+            // connection error string).
+            const QString message = update.error( m_impl->db );
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                               update.error( m_impl->db ) ) );
+                                               message ) );
         }
         update.bind( 1, committedText );
         update.bind( 2, fingerprint );
         update.bind( 3, QDateTime::currentMSecsSinceEpoch() );
         update.bind( 4, current->versionId() );
-        if ( !update.step() || update.changes( m_impl->db ) != 1 )
+        if ( !update.step() )
+        {
+            const QString message = update.error( m_impl->db );
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               message ) );
+        }
+        if ( update.changes( m_impl->db ) != 1 )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.conflict" ),
