@@ -76,17 +76,22 @@ test("schema constants the bridge relies on stay pinned in C++", () => {
 
 test("compiler knowledge pages stay within the knowledge-page budget", () => {
   // tool_shortlist pages compiler knowledge at a hard budget; the on-disk
-  // pages it draws from must not silently outgrow it.
+  // pages it draws from must not silently outgrow it. Byte count is taken
+  // over LF-normalized content: a Windows checkout (core.autocrlf) pads
+  // every line with \r and inflates raw disk size past the budget without
+  // any content change (r24-c #1682 finding) — the budget governs the page
+  // CONTENT the runtime serves, not the checkout's line-ending convention.
   const pages = [
     "capability-index.md",
     "capability-temporal.md",
     "spatial-algorithm-guide.md",
   ];
   for (const page of pages) {
-    const bytes = readFileSync(join(here, "..", "knowledge", page)).length;
+    const content = readFileSync(join(here, "..", "knowledge", page), "utf8");
+    const bytes = Buffer.byteLength(content.replaceAll("\r\n", "\n"), "utf8");
     assert.ok(
       bytes <= 32 * 1024,
-      `${page} is ${bytes} bytes — knowledge pages must stay bounded`,
+      `${page} is ${bytes} content bytes — knowledge pages must stay bounded`,
     );
   }
 });

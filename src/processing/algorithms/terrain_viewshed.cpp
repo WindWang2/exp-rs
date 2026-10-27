@@ -61,7 +61,15 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     const double zaObs = dem[oi] + params.observerHeight;
 
     // Pass 1: map distance, curvature-adjusted elevation and the integer
-    // distance ring of every cell (invalid ring for NoData).
+    // distance ring of every cell (invalid ring for NoData). Rings are
+    // quantised in DISTANCE units by half the smallest cell step
+    // (ceil(d / ringStep)), never by whole map units: with sub-metre or
+    // degree-sized cells a coarser bucket makes inward neighbours share a
+    // cell's ring, orphaning whole wedges (and on geographic grids, the
+    // entire frame) into permanent false invisibility (#1722 R23-A fix 2;
+    // R24-A had quantised by minCell, which still collided on sub-metre
+    // grids).
+    const double minCell = std::min( cellSizeX, cellSizeY );
     const double radius = params.radius > 0.0 ? params.radius : 0.0;
     // Ring quantum: HALF the smallest cell step. The sweep requires every
     // cell to have an in-grid 8-neighbour with a strictly smaller ring, and
@@ -78,7 +86,7 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     const double ringStep = 0.5 * std::min( cellSizeX, cellSizeY );
     std::vector<int> ring( n, kRingInvalid );
     std::vector<float> za( n, 0.0f );
-    std::vector<float> distMap( n, 0.0f );
+    std::vector<float> dist( n, 0.0f );
     int maxRing = 0;
     for ( int y = 0; y < height; ++y )
     {
@@ -101,7 +109,16 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
                 continue; // outside the analysis radius: stays invisible
             const double adjusted = dem[i] - params.curvatureFactor * d * d;
             za[i] = static_cast<float>( adjusted );
-            distMap[i] = static_cast<float>( d );
+            dist[i] = static_cast<float>( d );
+            // Extreme cell-size anisotropy could push the ring index past
+            // int range (16384^2 cells at 1e4:1 aspect). Cap well below
+            // INT_MAX so the ringStart allocation stays in the operator's
+            // memory budget instead of throwing bad_alloc from inside the
+            // counting sort (R1 P3-2 / R2 P3-3). The cap is expressed in
+            // the ring quantum actually used below (ringStep), not cell
+            // units, so the guarded quantity is the one that is cast.
+            if ( d / ringStep > 1.0e8 )
+                return false;
             const int r = static_cast<int>( std::ceil( d / ringStep ) );
             ring[i] = r;
             maxRing = std::max( maxRing, r );
@@ -109,6 +126,18 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     }
 
     // Pass 2: CSR grouping of cells by ring (counting sort) for the sweep.
+    // No within-ring ordering is needed. The predecessor invariant (R1
+    // review P3-1 correction): for a cell at (a,b) cell-offsets from the
+    // observer with a,b >= 1, the DIAGONAL inward neighbour (a-1,b-1) is
+    // strictly closer by more than minCell (infimum minCell approached
+    // only as a->inf with b=1, never attained), so its ring is <= r-1; a
+    // cell on an axis (a=0 or b=0) is covered by its axial inward
+    // neighbour (distance drops by that axis's full cell size >= minCell,
+    // and ceil(t - s) <= ceil(t) - 1 for s >= 1). Every non-observer cell
+    // therefore has a strictly-smaller-ring in-bounds neighbour, and the
+    // ring sweep alone yields a valid predecessor order. (Do NOT narrow
+    // the pass-3 scan to axial neighbours only — the diagonal case above
+    // is the load-bearing one off-axis.)
     std::vector<std::size_t> ringStart( static_cast<std::size_t>( maxRing ) + 2, 0 );
     for ( int y = 0; y < height; ++y )
         for ( int x = 0; x < width; ++x )
@@ -135,6 +164,9 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
 
     // Pass 3: ring sweep. horizonMax[i] = max terrain angle along the best
     // path from the observer to i (including i itself); +inf = blocked.
+    // Cells only stay blocked when every strictly-smaller-ring path enters
+    // through NoData (see the pass-2 invariant note for why one such
+    // neighbour always exists otherwise).
     std::vector<float> horizonMax( n, kHorizonBlocked );
     std::uint8_t *out = visible->data();
     out[oi] = 1;
@@ -164,12 +196,12 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
             if ( pathMax == kHorizonBlocked )
                 continue; // every path enters through NoData: stays invisible
 
-            const float d = distMap[i];
+            const float d = std::max( dist[i], 1e-12f );
             const float terrainAngle =
-                ( za[i] - static_cast<float>( zaObs ) ) / std::max( d, 1e-12f );
+                static_cast<float>( ( za[i] - zaObs ) / d );
             out[i] = ( ( za[i] + static_cast<float>( params.targetHeight )
                          - static_cast<float>( zaObs ) )
-                           / std::max( d, 1e-12f ) )
+                           / d )
                      > pathMax
                  ? 1
                  : 0;

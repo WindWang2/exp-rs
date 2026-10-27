@@ -415,19 +415,29 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
     if ( !writeJson( QStringLiteral( "metrics.json" ), metrics ) )
         return report;
 
-    // Lineage slice (direct edges of the run node).
+    // Lineage slice (direct edges of the run node). R24-B (#1581 residual):
+    // items are DIRECTION-PRESERVING (from_*/to_* node pairs) so import can
+    // re-attach them; the legacy other_kind/other_id keys stay for old
+    // readers. The direction predicate compares (kind,id) — an id-only test
+    // misdirects any edge whose far endpoint merely shares the run id string.
     LineageGraph graph( m_datasetStore, m_experimentStore );
     LineageNodeId runNode{ QStringLiteral( "run" ), run.runId() };
     QJsonObject provenance;
     QJsonArray edges;
     for ( const LineageEdgeRecord &edge : graph.edgesOf( runNode ) )
     {
+        const bool runIsFrom =
+            edge.from.kind == runNode.kind && edge.from.id == run.runId();
         QJsonObject item;
         item.insert( QStringLiteral( "edge" ), edge.edgeKind );
+        item.insert( QStringLiteral( "from_kind" ), edge.from.kind );
+        item.insert( QStringLiteral( "from_id" ), edge.from.id );
+        item.insert( QStringLiteral( "to_kind" ), edge.to.kind );
+        item.insert( QStringLiteral( "to_id" ), edge.to.id );
         item.insert( QStringLiteral( "other_kind" ),
-                     edge.from.id == run.runId() ? edge.to.kind : edge.from.kind );
+                     runIsFrom ? edge.to.kind : edge.from.kind );
         item.insert( QStringLiteral( "other_id" ),
-                     edge.from.id == run.runId() ? edge.to.id : edge.from.id );
+                     runIsFrom ? edge.to.id : edge.from.id );
         edges.append( item );
     }
     provenance.insert( QStringLiteral( "run_edges" ), edges );

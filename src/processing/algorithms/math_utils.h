@@ -22,8 +22,14 @@ struct Stats {
 };
 
 /**
- * Statistics computed from pre-accumulated sums.
- * Useful for streaming/segment-based statistics where the full array is not available.
+ * Compute statistics from pre-accumulated sums.
+ * Uses population stddev (N denominator).
+ *
+ * Count semantics (#1687): validCount mirrors acc.count verbatim — the
+ * number of samples the CALLER fed into the accumulator. This function
+ * cannot re-filter non-finite values (they are no longer distinguishable
+ * once summed); feeding paths must pre-filter, unlike computeStats /
+ * computeStatsWithNodata which re-scan and exclude per element.
  *
  * Precision contract (#1684): the mean is kept in double through the
  * variance formula (sumSq/N - mean²), which is exact by the Sterbenz
@@ -97,6 +103,21 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata);
 Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
 
 /**
+ * Undeclared negative-DN sentinel ceiling for the index kernels: no
+ * legitimate index-domain input (reflectance [-1,1], DN non-negative) is
+ * at or below this value, while the common undeclared fill values are.
+ * Not a NoData authority — a band's DECLARED sentinel routes through the
+ * sentinel-aware overloads below or the operators' pre-normalization
+ * (nodata_utils.h owns that policy).
+ *
+ * Merge note (#1722 x #1718, #1687 ruling): this constant is retained for
+ * caller-side policies (SpectralIndices::isSentinelSample), but the shared
+ * kernels below do NOT apply it — the undeclared-fill screen lives at the
+ * named dNBR seam (legacyNegativeSentinelFree).
+ */
+inline constexpr float kUndeclaredSentinelCeiling = -999.0f;
+
+/**
  * Compute normalized difference: (a - b) / (a + b). Result is NaN when
  * either operand is non-finite or when (a + b) == 0; every finite pair
  * with a non-zero sum is computed as-is, INCLUDING negative reflectances
@@ -121,6 +142,29 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
  * their validity mask cannot drift from the staged form.
  */
 bool bothNormalizable(float a, float b);
+
+/**
+ * Sentinel-aware variant: an operand is additionally invalid when it
+ * exactly equals that band's declared NoData value (non-finite declared
+ * sentinels disable the check; matching is exact, never an epsilon —
+ * nodata_utils.h discipline). Reserved for callers that hold per-band
+ * declared sentinels (kernel-level composition); today's production
+ * operators achieve the identical invalid mask by pre-normalizing
+ * declared sentinels to NaN before calling the 4-argument form
+ * (rs_spectral_index_operator's BandSource) — do not add a second
+ * normalization layer on top of that path. Kept from #1718; the
+ * undeclared-fill net is NOT reapplied here (#1722 ruling, see
+ * legacyNegativeSentinelFree).
+ */
+bool normalizedDifference(const float *a, const float *b, float *out, size_t count,
+                          float noDataA, float noDataB);
+
+/**
+ * Sentinel-aware predicate: the 2-argument form plus exact rejection of
+ * declared per-band NoData values. Like the sentinel-aware
+ * normalizedDifference() above, it applies no undeclared-ceiling guess.
+ */
+bool bothNormalizable(float a, float b, float noDataA, float noDataB);
 
 /**
  * Legacy undeclared-sentinel screen for pre/post band-pair index inputs

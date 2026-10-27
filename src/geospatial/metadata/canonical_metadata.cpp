@@ -862,8 +862,42 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
       const auto wavelengthIt = info.metadata.find( "WAVELENGTH" );
       if ( wavelengthIt != info.metadata.end() && parseDouble( wavelengthIt->second, wavelength ) )
       {
-        info.wavelengthNm = wavelength;
-        info.hasWavelength = true;
+        // R24-B: external producers stamp WAVELENGTH in their own unit
+        // (ENVI/HDF-EOS-family: WAVELENGTH_UNITS=um is common). Reading the
+        // number as nm unconditionally turned a 0.66 µm red band into
+        // "0.66 nm" — eo_preflight then refused legitimate runs with a
+        // nonsensical message. Normalize via the declared unit; an UNKNOWN
+        // unit string leaves the wavelength unset (absence stays absence —
+        // the preflight advisory names it) instead of guessing.
+        bool unitKnown = true;
+        double unitFactorNm = 1.0;
+        const auto unitIt = info.metadata.find( "WAVELENGTH_UNITS" );
+        if ( unitIt != info.metadata.end() )
+        {
+          std::string unit = unitIt->second;
+          std::transform( unit.begin(), unit.end(), unit.begin(),
+                          []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+          const auto isMicron = []( const std::string &u )
+          { return u == "µm" || u == "μm" || u == "um" || u == "micron" || u == "microns"
+                   || u == "micrometer" || u == "micrometers"; };
+          if ( unit.empty() || unit == "nm" || unit == "nanometer" || unit == "nanometers" )
+            unitFactorNm = 1.0;
+          else if ( isMicron( unit ) )
+            unitFactorNm = 1000.0;
+          else if ( unit == "mm" || unit == "millimeter" || unit == "millimeters" )
+            unitFactorNm = 1e6;
+          else if ( unit == "cm" || unit == "centimeter" || unit == "centimeters" )
+            unitFactorNm = 1e7;
+          else if ( unit == "m" || unit == "meter" || unit == "meters" )
+            unitFactorNm = 1e9;
+          else
+            unitKnown = false;
+        }
+        if ( unitKnown )
+        {
+          info.wavelengthNm = wavelength * unitFactorNm;
+          info.hasWavelength = true;
+        }
       }
     }
     const auto fwhmIt = info.metadata.find( "FWHM" );

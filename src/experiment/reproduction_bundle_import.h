@@ -19,6 +19,11 @@
 
 #include "reproduction_bundle.h"
 
+namespace sicnu::dataset
+{
+class DatasetStore;
+}
+
 namespace sicnu::experiment
 {
 
@@ -48,6 +53,10 @@ struct ReproductionBundleImportReport
     QString resultFingerprint;
     bool alreadyPresent = false; ///< idempotent re-import (no rows changed)
     int relocatedFiles = 0;
+    /// R24-B (#1581 residual): direction-preserving run_edges items that were
+    /// re-attached into the target store(s), with the run endpoint rewritten
+    /// to the installed run id.
+    int lineageEdgesReattached = 0;
     QStringList warnings;
     QJsonObject toJson() const;
 };
@@ -58,6 +67,12 @@ class ReproductionBundleImporter
     /// @p experimentStore must outlive this importer (a bare pointer is
     /// held).
     explicit ReproductionBundleImporter( ExperimentStore &experimentStore );
+    /// R24-B: with a @p datasetStore, dataset-side lineage edges
+    /// (asset|dataset|dataset_version|sample|annotation|split endpoints) are
+    /// re-attached there too; without one they keep the named-gap warning
+    /// (the default constructor preserves the historical behavior).
+    ReproductionBundleImporter( ExperimentStore &experimentStore,
+                                sicnu::dataset::DatasetStore &datasetStore );
 
     /// Imports one bundle directory. Integrity (checksums) and schema
     /// version are hard gates; availability hooks are consulted best-effort
@@ -69,6 +84,7 @@ class ReproductionBundleImporter
 
   private:
     ExperimentStore *m_experimentStore = nullptr;
+    sicnu::dataset::DatasetStore *m_datasetStore = nullptr;
 };
 
 } // namespace sicnu::experiment

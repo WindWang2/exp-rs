@@ -4,6 +4,7 @@
 // documented binning formula (floor over [min,max] with the y axis flipped
 // for screen coordinates); the 40 ms budget is the spec's rendering gate.
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 
 #include <QApplication>
 #include <QColor>
@@ -108,5 +109,9 @@ TEST_CASE( "100k samples bin and render within the 40 ms budget",
                            std::chrono::steady_clock::now() - start )
                            .count();
   REQUIRE_FALSE( img.isNull() );
-  REQUIRE( elapsedMs < 40 );
+  // #1699: bin+render budget, scaled for sanitizer lanes (ASan ~4x ⇒ 160ms)
+  // and reproducible ad-hoc widening via SICNU_TEST_TIME_SCALE — Release
+  // enforces the 40ms base. The render-correctness oracle is the image
+  // checks above; this clock only guards the budget.
+  REQUIRE( elapsedMs < sicnu::testsupport::wallClockBudgetMs( 40 ) );
 }

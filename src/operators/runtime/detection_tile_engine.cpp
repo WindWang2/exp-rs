@@ -405,6 +405,22 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
 
   const int maxWin = static_cast<int>( checkedWindowSide( tileSize, halo ) );
   std::vector<float> windowBuffer( checkedWindowFloats( maxWin, bandCount ) );
+  // Per-band declared NoData sentinels (R24-B): the BIP read yields raw
+  // values, so a finite sentinel (-9999) reaches the sweep below unchanged
+  // and flows through preprocessing as a huge outlier. The raster/scene
+  // lanes convert declared sentinels to NaN first — same convention here.
+  std::vector<float> bandSentinel( static_cast<std::size_t>( bandCount ), 0.0f );
+  std::vector<bool> bandHasSentinel( static_cast<std::size_t>( bandCount ), false );
+  for ( int i = 0; i < bandCount; ++i )
+  {
+    bool has = false;
+    const double nd = ds.bandNoDataValue( bandList[static_cast<std::size_t>( i )], &has );
+    if ( has && std::isfinite( nd ) )
+    {
+      bandSentinel[static_cast<std::size_t>( i )] = static_cast<float>( nd );
+      bandHasSentinel[static_cast<std::size_t>( i )] = true;
+    }
+  }
   std::vector<cv::Mat> batchMats;
   std::vector<std::array<int, 4>> batchWindows; // winX, winY, winW, winH per pending tile
   std::vector<CoreTile> batchCores;
@@ -561,8 +577,16 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
         }
       }
 
-      // nodata_policy "zero": NaN (outside raster / declared sentinels) never
-      // reaches the model; normalize in place afterwards.
+      // nodata_policy "zero": declared sentinels are converted to NaN first
+      // (raster-lane parity, R24-B), so neither they nor the outside-raster
+      // NaN padding ever reaches the model; the sweep below then zeroes
+      // every non-finite value. Normalize in place afterwards.
+      for ( std::size_t i = 0; i < windowBuffer.size(); ++i )
+      {
+        const std::size_t c = i % static_cast<std::size_t>( bandCount );
+        if ( bandHasSentinel[c] && windowBuffer[i] == bandSentinel[c] )
+          windowBuffer[i] = std::numeric_limits<float>::quiet_NaN();
+      }
       for ( float &v : windowBuffer )
       {
         if ( !std::isfinite( v ) )

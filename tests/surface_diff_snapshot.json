@@ -9843,7 +9843,7 @@
           "flattenRamp" : 
           {
             "default" : "none",
-            "description" : "Robust flat-earth ramp removal (low-order approximation, not topographic phase removal)",
+            "description" : "Robust flat-earth ramp removal (low-order approximation, not topographic phase removal). Fits the WRAPPED (-pi,pi] phase, so it removes ramps of less than one fringe between neighbors across the scene; a multi-fringe flat-earth ramp needs prior unwrapping (rs:sar_unwrap) \u2014 the run logs a reliability warning and stamps SICNU_SAR_RAMP_RELIABILITY=low when the wrapped field looks uniformly distributed",
             "enum" : 
             [
               "none",

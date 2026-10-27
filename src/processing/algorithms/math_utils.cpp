@@ -203,6 +203,24 @@ bool legacyNegativeSentinelFree(float a, float b)
     return bothNormalizable(a, b) && a > -999.0f && b > -999.0f;
 }
 
+bool bothNormalizable(float a, float b, float noDataA, float noDataB)
+{
+    if (!bothNormalizable(a, b))
+        return false;
+    // Exact declared-sentinel match (nodata_utils.h discipline: never an
+    // epsilon; a non-finite declared sentinel disables that side's check).
+    // Merge note (#1722 x #1718, #1687 ruling): the sentinel-aware overloads
+    // are KEPT from R24-A, but the undeclared ceiling net is not reapplied
+    // here — every caller that holds declared sentinels is already inside
+    // the NoData-aware layer, and undeclared -9999-family fills stay the
+    // dNBR seam's business (legacyNegativeSentinelFree).
+    if (std::isfinite(noDataA) && a == noDataA)
+        return false;
+    if (std::isfinite(noDataB) && b == noDataB)
+        return false;
+    return true;
+}
+
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count)
 {
     if (!a || !b || !out) return false;
@@ -212,6 +230,23 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
         // Non-finite operand (declared sentinels arrive pre-resolved to
         // NaN) or a zero denominator -> NaN, never a saturated value.
         if (!bothNormalizable(a[i], b[i])) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+        } else {
+            out[i] = safeDiv(a[i] - b[i], a[i] + b[i]);
+        }
+    }
+
+    return true;
+}
+
+bool normalizedDifference(const float *a, const float *b, float *out, size_t count,
+                          float noDataA, float noDataB)
+{
+    if (!a || !b || !out) return false;
+    if (count == 0) return false;
+
+    for (size_t i = 0; i < count; ++i) {
+        if (!bothNormalizable(a[i], b[i], noDataA, noDataB)) {
             out[i] = std::numeric_limits<float>::quiet_NaN();
         } else {
             out[i] = safeDiv(a[i] - b[i], a[i] + b[i]);
