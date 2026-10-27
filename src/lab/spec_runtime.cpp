@@ -8,6 +8,7 @@
 
 #include "sha256.h"
 
+#include <cmath>
 #include <cstdio>
 #include <sstream>
 
@@ -319,6 +320,17 @@ class Parser
           question.hasExpectedNumeric = true;
           question.expectedMin = range[ "min" ].asDouble();
           question.expectedMax = range[ "max" ].asDouble();
+          // jsoncpp maps an out-of-range literal (1e999) to a ±infinity
+          // double, so isNumeric() alone lets infinite bounds through — and
+          // [-inf, +inf] accepts every answer. Finite bounds only (the same
+          // discipline as grader_types' isfinite gate on rule parameters).
+          if ( !std::isfinite( question.expectedMin ) ||
+               !std::isfinite( question.expectedMax ) )
+          {
+            add( "lab.runtime.field",
+                 locator + ".expected_numeric: min and max must be finite numbers" );
+            continue;
+          }
           if ( question.expectedMin > question.expectedMax )
           {
             add( "lab.runtime.field", locator + ".expected_numeric: min must be <= max" );

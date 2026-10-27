@@ -87,9 +87,23 @@ bool readJsonFile( const std::string &path, Json::Value &out, std::string &error
   std::string bytes( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
   Json::Value doc;
   std::string parseErrors;
-  if ( !makeStrictReader()->parse( bytes.data(), bytes.data() + bytes.size(), &doc, &parseErrors ) )
+  // jsoncpp's stackLimit contract is an exception, not a false return
+  // (json/reader.h: "Exceeding stackLimit ... will cause an exception") — a
+  // session file is untrusted on-disk content, so the parse is guarded like
+  // lab_pack/grader_json: a depth bomb degrades to the typed corruption
+  // refusal below, never an escaping Json::RuntimeError.
+  try
   {
-    error = "invalid JSON: " + parseErrors;
+    if ( !makeStrictReader()->parse( bytes.data(), bytes.data() + bytes.size(), &doc,
+                                     &parseErrors ) )
+    {
+      error = "invalid JSON: " + parseErrors;
+      return false;
+    }
+  }
+  catch ( const Json::Exception &exception )
+  {
+    error = std::string( "invalid JSON: " ) + exception.what();
     return false;
   }
   out = std::move( doc );
