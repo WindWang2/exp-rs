@@ -721,3 +721,7 @@ r6_dev.cmd
 !.planning/r22-infra/
 .planning/r22-infra/*
 !.planning/r22-infra/*.md
+# r23-A track (remote sensing science algorithms & numerical performance) planning artifacts (markdown only).
+!.planning/zcode-r23-A/
+.planning/zcode-r23-A/*
+!.planning/zcode-r23-A/*.md
