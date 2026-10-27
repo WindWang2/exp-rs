@@ -59,13 +59,15 @@ TEST_CASE( "extreme coordinates cannot UB the leakage grid and are counted "
                                                 SplitRole::Train, 0.0, 0.0, 10.0, 10.0 );
     AuditSample test = sampleWithBounds( QStringLiteral( "test-extreme" ), SplitRole::Test,
                                          0.0, 0.0, 10.0, 10.0 );
-    // Center (1e19, 1e19): quotient 1e19 > 2^63 → unbucketable (the old
-    // qint64 cast was UB; MSVC saturates to INT64_MIN so all such samples
-    // collapsed into one bucket that pair scans then silently skipped).
-    test.input.minX = 1e19;
-    test.input.maxX = 1e19;
-    test.input.minY = 1e19;
-    test.input.maxY = 1e19;
+    // Center (1e20, 1e20): the overlap check's default-on state sizes the
+    // x-cell at 2·maxHalfWidth = 10, so the guard fires only beyond
+    // 2^62·10 ≈ 4.6e19 — 1e20 keeps the quotient at 1e19, comfortably past
+    // the cap (the old qint64 cast was UB; MSVC saturates to INT64_MIN so
+    // all such samples collapsed into one bucket that pair scans skipped).
+    test.input.minX = 1e20;
+    test.input.maxX = 1e20;
+    test.input.minY = 1e20;
+    test.input.maxY = 1e20;
 
     const auto report =
         LeakageAuditor::audit( QStringLiteral( "v" ), QStringLiteral( "sp" ),
@@ -82,14 +84,15 @@ TEST_CASE( "extreme coordinates cannot UB the leakage grid and are counted "
     CHECK( reloaded->unbucketedCount() == 1 );
 
     // Control: ordinary coordinates still land in the grid and a genuinely
-    // overlapping cross-split pair still produces a spatial finding (the
-    // windows [0,10] and [1,11] overlap → overlapping_patch fires; the
-    // center distance is exactly the 1.0 threshold, which the strict <
-    // comparison does not count).
+    // close cross-split pair still produces a spatial finding — identical
+    // centers make the distance check fire strictly below the 1.0 threshold
+    // (exactly-at-threshold is intentionally not a finding), and no window
+    // dims means the overlap check correctly stays out (its #1584 both-sides
+    // evidence gate).
     const AuditSample trainNear = sampleWithBounds( QStringLiteral( "train-near" ),
                                                     SplitRole::Train, 0.0, 0.0, 10.0, 10.0 );
     const AuditSample testNear = sampleWithBounds( QStringLiteral( "test-near" ),
-                                                   SplitRole::Test, 1.0, 0.0, 11.0, 10.0 );
+                                                   SplitRole::Test, 0.0, 0.0, 10.0, 10.0 );
     const auto control = LeakageAuditor::audit(
         QStringLiteral( "v" ), QStringLiteral( "sp" ),
         QVector<AuditSample>{ trainNear, testNear }, config );

@@ -40,14 +40,17 @@ DatasetManifest makeManifest( const QString &datasetId, const QString &versionId
                                                     Qt::ISODateWithMs ) );
 
     SourceAssetRef base;
-    base.assetId = QStringLiteral( "base-00000000-0000-4000-8000-000000000000" );
+    base.assetId = QStringLiteral( "0b0b0b0b-1111-4222-8333-444444444444" );
     base.revision = 1;
     base.role = QStringLiteral( "image" );
     manifest.sourceAssets().append( base );
     for ( int i = 0; i < fillerAssets; ++i )
     {
         SourceAssetRef filler;
-        filler.assetId = QStringLiteral( "filler-%1-0000-4000-8000-000000000000" ).arg( i );
+        // Distinct UUID-shaped ids — the manifest validator rejects non-UUID
+        // asset ids ("source asset entry without a valid asset id").
+        filler.assetId = QStringLiteral( "aaaa%1-2222-4333-8444-000000000000" )
+                             .arg( i, 4, 16, QLatin1Char( '0' ) );
         filler.revision = 1;
         filler.role = QStringLiteral( "image" );
         manifest.sourceAssets().append( filler );
@@ -108,10 +111,21 @@ TEST_CASE( "commitVersion vs addSourceAssetsToDraft cannot both succeed "
                          makeManifest( datasetId.toString(), versionId.toString(), kFillerAssets ),
                          QStringLiteral( "racer draft" ) )
                      .has_value() );
-        REQUIRE( storeA.stageVersion( versionId ).has_value() );
+        {
+            const auto staged = storeA.stageVersion( versionId );
+            if ( !staged.has_value() && !staged.diagnostics().isEmpty() )
+                WARN( "stage setup failed: "
+                      << staged.diagnostics().first().code.toStdString() << ": "
+                      << staged.diagnostics().first().message.toStdString() );
+            REQUIRE( staged.has_value() );
+        }
 
         SourceAssetRef racerAsset;
-        racerAsset.assetId = QStringLiteral( "racer-%1-0000-4000-8000-000000000000" ).arg( round );
+        // UUID-shaped: when the assetter wins, the committer re-parses the
+        // manifest (with this asset inside) inside its transaction and must
+        // fail the STAGED gate — not a manifest parse error.
+        racerAsset.assetId = QStringLiteral( "bbbb%1-3333-4555-8666-000000000000" )
+                                 .arg( round, 4, 16, QLatin1Char( '0' ) );
         racerAsset.revision = 7;
         racerAsset.role = QStringLiteral( "label" );
 
@@ -223,7 +237,14 @@ TEST_CASE( "addSamples vs commitVersion: samples never land in a committed "
                          makeManifest( datasetId.toString(), versionId.toString(), 200 ),
                          QStringLiteral( "racer draft" ) )
                      .has_value() );
-        REQUIRE( storeA.stageVersion( versionId ).has_value() );
+        {
+            const auto staged = storeA.stageVersion( versionId );
+            if ( !staged.has_value() && !staged.diagnostics().isEmpty() )
+                WARN( "stage setup failed: "
+                      << staged.diagnostics().first().code.toStdString() << ": "
+                      << staged.diagnostics().first().message.toStdString() );
+            REQUIRE( staged.has_value() );
+        }
 
         SampleRecord sample;
         sample.setSampleId( QStringLiteral( "racer-sample-%1" ).arg( round ) );
