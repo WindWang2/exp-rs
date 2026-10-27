@@ -22,8 +22,14 @@ struct Stats {
 };
 
 /**
- * Statistics computed from pre-accumulated sums.
- * Useful for streaming/segment-based statistics where the full array is not available.
+ * Compute statistics from pre-accumulated sums.
+ * Uses population stddev (N denominator).
+ *
+ * Count semantics (#1687): validCount mirrors acc.count verbatim — the
+ * number of samples the CALLER fed into the accumulator. This function
+ * cannot re-filter non-finite values (they are no longer distinguishable
+ * once summed); feeding paths must pre-filter, unlike computeStats /
+ * computeStatsWithNodata which re-scan and exclude per element.
  *
  * Precision contract (#1684): the mean is kept in double through the
  * variance formula (sumSq/N - mean²), which is exact by the Sterbenz
@@ -91,8 +97,18 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata);
 Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
 
 /**
+ * Undeclared negative-DN sentinel ceiling for the index kernels: no
+ * legitimate index-domain input (reflectance [-1,1], DN non-negative) is
+ * at or below this value, while the common undeclared fill values are.
+ * Not a NoData authority — a band's DECLARED sentinel routes through the
+ * sentinel-aware overloads below or the operators' pre-normalization
+ * (nodata_utils.h owns that policy).
+ */
+inline constexpr float kUndeclaredSentinelCeiling = -999.0f;
+
+/**
  * Compute normalized difference: (a - b) / (a + b).
- * Result is NaN when (a + b) == 0.
+ * Result is NaN when (a + b) == 0 or an operand is invalid.
  *
  * @param a      First input array
  * @param b      Second input array
@@ -103,12 +119,31 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count);
 
 /**
+ * Sentinel-aware variant: an operand is additionally invalid when it
+ * exactly equals that band's declared NoData value (non-finite declared
+ * sentinels disable the check; matching is exact, never an epsilon —
+ * nodata_utils.h discipline). Use wherever the caller holds the band's
+ * declaration; the 4-argument form above only knows the undeclared-net
+ * ceiling and non-finite values.
+ */
+bool normalizedDifference(const float *a, const float *b, float *out, size_t count,
+                          float noDataA, float noDataB);
+
+/**
  * The exact sample-level predicate normalizedDifference() applies — finite
- * operands, neither at/below the -999 negative-sentinel threshold, and not
- * a pair of equal negatives. Fused kernels (e.g. dNBR) share it so their
- * validity mask cannot drift from the staged form.
+ * operands and neither at/below the undeclared negative-sentinel ceiling.
+ * Equal negative operands are VALID ((a-b)/(a+b) evaluates to 0; slight
+ * negative reflectance after atmospheric correction is legitimate input,
+ * #1687). Fused kernels (e.g. dNBR) share it so their validity mask
+ * cannot drift from the staged form.
  */
 bool bothNormalizable(float a, float b);
+
+/**
+ * Sentinel-aware predicate: the 2-argument form plus exact rejection of
+ * declared per-band NoData values.
+ */
+bool bothNormalizable(float a, float b, float noDataA, float noDataB);
 
 /**
  * Apply linear scaling: out[i] = gain * in[i] + bias.
