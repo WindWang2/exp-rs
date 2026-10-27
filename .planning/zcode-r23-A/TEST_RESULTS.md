@@ -27,3 +27,25 @@
 | test_math_utils | 22:19/3 | 负反射率 NaN/魔数拒绝(前述) |
 
 注:terrain_solar 实测推翻审计报告的"NaN"预测——lat=90 时 cos(lat)=6.1e-17≠0,主代码给出噪声支配的有限方位(不可复现);缺陷同真,修复用 |cosLat|<1e-12 阈值走解析极区极限(∓cosH)。
+
+## GREEN 批次(HEAD 修复后)
+
+### GREEN1(2026-10-27,10 二进制全部 exit=0)
+| 二进制 | 断言 | 用例 |
+|---|---|---|
+| test_math_utils | 109 | 8 |
+| test_terrain_viewshed | 1457 | 8 |
+| test_terrain_foundation5 | 277 | 14 |
+| test_spectral_roi | 43 | 3 |
+| test_terrain_solar | 80 | 6 |
+| test_temporal_fit | 212 | 27 |
+| test_mnf_transform | 1883 | 8 |
+| test_spectral_unmixing_fcls | 100 | 8 |
+| test_spectral_table | 64 | 10 |
+| test_image_enhancement | 6247 | 16 |
+
+### GREEN2(同命令重跑)
+全部 exit=0,断言数与 GREEN1 逐一相同(见上表;两轮日志 /tmp/r23a_g1_*.log、/tmp/r23a_g2_*.log)。
+
+### 开发中发现并修正的初版修复缺陷(viewshed)
+初版 ring 量化取 min(csx,csy):0.25/0.8 各向异性通过、但 0.3/0.3 仍有 12 暗元——轴向格距恰为量子的整数倍时,d/量子 的浮点商在精确整数边界上舍入上移,相邻轴向格同环。独立复现程序(dbg_viewshed.cpp,g++ 直接编译 terrain_viewshed.cpp)确认后改用 m/2 量子(商差 ≥2−ε≥1,双舍入下仍严格递减),并对 10 组对抗格网(0.25/0.25、0.5/0.5、1.5/1.5、0.125/3.0 等精确倍数与混合尺度)全部 0 暗元。教训入 LOOP_LEDGER。
