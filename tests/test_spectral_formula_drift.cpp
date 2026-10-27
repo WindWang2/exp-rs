@@ -343,7 +343,7 @@ TEST_CASE( "spectral formula drift guard: degenerate denominators are NaN, never
 // UNDECLARED -9999 legacy sentinel (writeMultiBandConst stamps no nodata tag)
 // must void the dNBR pixel to NaN through the operator's fused path — the
 // MathUtils::legacyNegativeSentinelFree screen. Without the screen the finite
-// sentinel computes a ~-1 pre-NBR and fabricates extreme change (~-1.5 dNBR);
+// sentinel computes a ~+1 pre-NBR and fabricates extreme change (~+1.47 dNBR);
 // with the shared predicate alone (finite-only since #1687) nothing would
 // fail, so this test is the call site's only regression net.
 TEST_CASE( "spectral formula drift guard: dNBR voids undeclared -9999 sentinels",

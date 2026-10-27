@@ -9,3 +9,6 @@
 | R4 FIX | 11 修复脚本应用 | 全部断言成功应用;viewshed 初版量化在 0.3 情形仍 12 暗元(浮点整数边界碰撞,独立复现程序确认)→ 量子减半加固,10 组对抗格网 0 暗元 | dbg 程序 | 修复完成 | PASS | GREEN |
 | R5 GREEN | 两轮全绿 | GREEN1+GREEN2:10 二进制 exit=0,断言数两轮逐一相同(10,972 断言);12 个主题提交(1 planning+10 fix+1 docs) | 见 TEST_RESULTS.md | 全绿 | PASS | 邻域回归 |
 | R5.1 教训 | 浮点边界 | 环量化类算法的"整数倍格距"输入必须进对抗测试集;审计报告的失败模式预测(NaN)与实测(噪声有限值)可能不同,修复前必须独立复现 | — | 登记入案 | PASS | — |
+| R6 邻域回归 | 13 族 | 12 绿+test_image_fusion 冲突(r21-A M3 钉旧规则)→ dNBR 具名缝方案(legacyNegativeSentinelFree)→全绿;共 24 族 | 见 TEST_RESULTS | M3 冲突解决 | PASS | R1 |
+| R7 R1 评审 | 独立复核 | R1(隔离上下文):4 变异 RED 复现+2 独立反例(z=x²y 曲率 9.6、南极 315°)+24 二进制全绿;APPROVE(1P2:seam 无端到端钉) | REVIEW_R1.md | P2 修复+P3 4 闭 2 登记 | PASS | R2 |
+| R8 R2 评审 | 不继承 R1 | R2:18 对抗格网不变量实测(17,280 格 0 破)、带缘跳变 0.28°、VCA 退化 20 个数量级余量、NDVI(-9999)→+1.00006 反例(R13 登记);2 变异 RED;APPROVE | REVIEW_R2.md | 注释精化+R13 披露 | PASS | 终态文档 |

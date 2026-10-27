@@ -67,13 +67,14 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     // cell to have an in-grid 8-neighbour with a strictly smaller ring, and
     // the toward-observer step lowers the metric distance by at least
     // csx·|ux| + csy·|uy| >= m (u = unit radial, |ux|+|uy| >= 1,
-    // m = min(csx, csy)), so quantising by m/2 makes the ring quotient drop
-    // by >= 2 across that step — a margin of a full unit that survives
-    // double rounding even when the quotients land on exact integers
-    // (d/m an integer made ceil(d/m) collide for adjacent axial cells).
-    // Quantising by whole map units instead broke sub-metre grids (0.3 m
-    // UAV DSMs): same-ring neighbours had no legal predecessor and flat
-    // terrain went dark a few cells from the observer.
+    // m = min(csx, csy)), so quantising by m/2 drops the ring quotient by
+    // >= 2 in exact arithmetic — a margin that keeps the ROUNDED drop >= 1
+    // even when hypot/division rounding shaves a ulp or the quotients land
+    // exactly on integers (quantising by m made ceil(d/m) collide there for
+    // adjacent axial cells; quantising by whole map units broke sub-metre
+    // grids outright). The int cast stays safe for any physically real
+    // grid: exceeding INT_MAX rings needs d/m > 2^31, i.e. cell-size
+    // ratios beyond ~1e9 on a grid whose DEM still fits in memory.
     const double ringStep = 0.5 * std::min( cellSizeX, cellSizeY );
     std::vector<int> ring( n, kRingInvalid );
     std::vector<float> za( n, 0.0f );
