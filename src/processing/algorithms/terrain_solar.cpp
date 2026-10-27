@@ -213,9 +213,27 @@ bool sunPositionDeg( int dayOfYear, double solarHour, double latitudeDeg,
                            + std::cos( lat ) * std::cos( decl ) * std::cos( hourAngle );
     const double elev = std::asin( std::clamp( sinElev, -1.0, 1.0 ) );
 
-    const double cosAz = ( std::sin( decl ) - std::sin( elev ) * std::sin( lat ) )
-                         / ( std::cos( elev ) * std::cos( lat ) );
-    double az = std::acos( std::clamp( cosAz, -1.0, 1.0 ) ); // 0..π from north
+    const double cosLat = std::cos( lat );
+    double az;
+    if ( std::abs( cosLat ) < 1e-12 )
+    {
+        // Polar limit of the acos form. At the poles the form's numerator
+        // (sinδ − sin(elev)·sin(lat)) is the difference of two O(1) values
+        // whose exact cancellation carries the signal, so dividing by
+        // cos(lat) ≈ 6e-17 amplifies rounding noise into the azimuth
+        // (observed 171°/8.8° where the physics says 180°/0°). The limit
+        // itself is analytic: cos(az) -> ∓cos(H) — sun east at H = −90°,
+        // on the noon meridian, west at H = +90°, the same convention
+        // every other latitude reports.
+        az = std::acos( std::clamp( ( lat >= 0.0 ? -1.0 : 1.0 ) * std::cos( hourAngle ),
+                                    -1.0, 1.0 ) );
+    }
+    else
+    {
+        const double cosAz = ( std::sin( decl ) - std::sin( elev ) * std::sin( lat ) )
+                             / ( std::cos( elev ) * cosLat );
+        az = std::acos( std::clamp( cosAz, -1.0, 1.0 ) ); // 0..π from north
+    }
     if ( hourAngle > 0.0 )
         az = 2.0 * M_PI - az; // afternoon: west of the meridian
 
