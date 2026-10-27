@@ -12,4 +12,10 @@ spatial_tools/temporal_spatial_tools.* not registered into SpatialToolRegistry; 
 ## CT-C4 (information): #1699 conversion pattern
 This track converts the 8 C-assigned wall-clock assertions using tests/sicnu_test_time_budget.h (r23-E three-way pattern). Remaining D-assigned file: tests/test_model_failure_matrix.cpp:1000 handled here as C/D-shared per r23-E table; if D track also converts it, keep union (no deletion).
 
+## CT-C5 (→ A track): repair-engine DataType/Dimension rules need an operator
+`workflow_repair_engine.h:16-19` has no closed-form rule for DataTypeMismatch ("no registered operator performs dtype conversion" — verified against the full rs:/gdal: operator id enumeration at 5fe642ec6) and DimensionMismatch is not emitted by the checker today. If A adds a deterministic dtype-cast operator (e.g. gdal:translate -ot semantics as an RSOperator), the repair table can close both kinds.
+
+## CT-C6 (→ teaching/D track): batch discovery walked twice per GUI run
+r24-c moved the teaching-admin preview scan off the GUI thread (source of truth: src/app/teaching_admin/teaching_admin_dock.cpp, "#1695-3"), but `runBatchAssessment` re-discovers internally, so the submissions directory is scanned twice per batch (two bounded walks; the first posts the pre-run refusal preview). A `discoveredSubmissions` seam in `BatchAssessmentConfig` (src/teaching_admin/batch_assessment.h — read-only for C) would let the GUI pass its list and halve network-share traffic.
+
 (Updated as work proceeds.)
