@@ -246,8 +246,11 @@ class OpenVinoRuntime final : public IModelRuntime
 
     // True when the manifest's runtime.device token explicitly asks for
     // CPU. An operator-side --device override never reaches the factory
-    // (model_execution_service.cpp passes it as explicitDevice), so it is
-    // honored through the verdict, never re-derived here.
+    // (model_execution_service.cpp passes it as explicitDevice), and that
+    // token also never lands in model.runtime.device — so the repair above
+    // can still serve an explicit cpu override on OpenVINO's GPU plugin
+    // (faithful to 9b42bc93f7; the override-vs-repair seam is a known
+    // follow-up, recorded by the r23-B R2 review).
     static bool manifestPinsCpu( const ModelInfo &model )
     {
       RequestedDevice request;

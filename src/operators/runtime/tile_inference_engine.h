@@ -94,6 +94,17 @@ enum class RasterOutputMode
   Confidence   ///< "confidence": float32 top-1 probability band
 };
 
+/// Typed preflight for derived output modes against the head-0 contract
+/// (risk B5): labels/mask/confidence collapse the FIRST head's [0,1] class
+/// probability planes, so a typed head whose role produces no class planes
+/// (embedding/detection/uncertainty/auxiliary) or whose confidence
+/// semantics are not probabilities (distance inverts argmax; logit only
+/// survives labels' order-preserving argmax) refuses BEFORE any compute.
+/// Legacy flat manifests (no output.heads[]) keep the historical
+/// permissive behavior. Shared by the single-model engine and the
+/// ensemble collapse so the contract lives in exactly one predicate.
+void ensureDerivedModeMatchesHeadContract( const ModelInfo &model, RasterOutputMode mode );
+
 /// Optional knobs for one engine run (Platform 3.0, goal §10).
 enum class TtaMode
 {

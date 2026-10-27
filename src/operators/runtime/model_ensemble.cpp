@@ -1054,6 +1054,13 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   const bool derived = mode != RasterOutputMode::Probability && combination != "weighted_vote";
   const std::string uncertaintyToken =
     ensembleModel.ensemble.uncertainty.empty() ? "auto" : ensembleModel.ensemble.uncertainty;
+  // Same head-contract gate as the single-model engine (risk B5): the
+  // request-level collapse consumes [0,1] class probability planes of the
+  // ensemble product head, so a typed head contract that disclaims class
+  // planes (or carries non-probability confidence semantics) must refuse
+  // BEFORE any member runs (members execute in Probability mode, so their
+  // own engine gate never sees the derived request).
+  ensureDerivedModeMatchesHeadContract( ensembleModel, mode );
   if ( derived )
   {
     // Under a derived request the natural uncertainty band IS the derived

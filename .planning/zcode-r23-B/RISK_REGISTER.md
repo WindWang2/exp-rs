@@ -16,3 +16,11 @@
 - R10（R1 P3-3，记录不修）：probeRemote 重写后重复响应头的平局语义从"后者胜"变为"先者胜"（HttpFetchResult::headers 契约）。仅当源站发出自相矛盾的重复 content-type 头时可观测（病态、RFC 未定义）；且新代码顺带修复了旧循环的真实顺序依赖缺陷（Content-Range 证明被后到的 Accept-Ranges: none 覆写）。改回反而重新引入非确定性。
 - R1 P3-2 澄清（不改代码）：upsertRunWithMetric 公共包装在 experiment_store.cpp:958 持有 QReadLocker（与 upsertRun:932 完全对称，Impl 内 :982 再持）；评审原文自注 "safe as written"，经复核为误读。
 - R1 P3-1/P3-4 已修（注释纠错 + 文档测试编号去配置化）。
+
+## R2 轮处置（2026-10-27）
+- R11（R2 P2-1，已修）：W2 测试注册缺 TEST_PREFIX 致 `ctest -R r23_b` 漏跑——已加前缀；现 7/7 可见全绿（先前 4/7）。
+- R12（R2 P2-2，已修）：ensemble 折叠缺头契约门——提取共享谓词 ensureDerivedModeMatchesHeadContract（tile_inference_engine.{h,cpp}），单模型引擎与 ensemble 折叠共用；新用例（embedding 拒绝 + segmentation 放行）入 test_model_ensemble.cpp；变异证明：门禁用 → 用例失败（refused=false + 产物存在），门恢复 → 125/16 全绿。
+- R13（R2 P3-1，已修注释）：manifestPinsCpu 注释如实化（--device 显式覆盖可能仍被修复路径送上 GPU 插件——忠实恢复 9b42bc93f7 的已知后续项）。
+- R14（R2 P3-2，记录不修）：无测试钉死导入器使用 upsertRunWithMetric（纯导入器回退到两调用可通过全部套件）。缓解：崩溃窗口用例 + 双轮评审 + 调用点 3 行 diff；行为级判别需进程内死亡注入，构造代价大于价值。
+- R15（R2 P3-3，记录）：probe 将 size-guard 截断体视为 fetched——与 master MAX_FILE_SIZE 语义一致，信息性。
+- R16（R2 P3-4，记录）：commit 失败路径双回滚（Impl 内部+调用方）为无害 no-op——沿仓内既有约定，未改。

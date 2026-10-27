@@ -1146,3 +1146,90 @@ TEST_CASE( "ensemble provenance member order is the declared order even when "
   CHECK( members[ 1 ][ "identity_tag" ].asString().find( "member-b" ) == 0 );
   CHECK( verdict.provenance[ "ensemble" ][ "member_concurrency" ].asInt() == 2 );
 }
+
+// R23-B (R2 P2-2): the request-level derived collapse over the weighted
+// mean must honor the ensemble product head's typed contract. Members run
+// Probability mode, so the single-model engine gate never sees the derived
+// request — the ensemble seam gates it before any member forward.
+TEST_CASE( "ensemble derived collapse refuses non-class head contracts",
+           "[models][ensemble][r23b]" )
+{
+  RegistryReset reset;
+  const ScaleProviderGuard guardA( "enshc-a", 2.0 );
+  const ScaleProviderGuard guardB( "enshc-b", 0.5 );
+  QTemporaryDir dir;
+  registerMember( "member-a", "enshc-a", dir );
+  registerMember( "member-b", "enshc-b", dir );
+
+  // Ensemble manifest with a typed output head carrying a non-class role —
+  // same shape as registerEnsemble, plus output.heads[0].
+  auto registerWithHead = [&]( const std::string &name, const std::string &role,
+                               const std::string &confidence ) {
+    Json::Value json( Json::objectValue );
+    json["name"] = name;
+    json["task"] = "segmentation";
+    json["framework"] = "onnx";
+    Json::Value &ensemble = json["ensemble"] = Json::Value( Json::objectValue );
+    Json::Value members( Json::arrayValue );
+    Json::Value a( Json::objectValue );
+    a["model"] = "member-a";
+    a["weight"] = 1.0;
+    members.append( a );
+    Json::Value b( Json::objectValue );
+    b["model"] = "member-b";
+    b["weight"] = 1.0;
+    members.append( b );
+    ensemble["members"] = members;
+    Json::Value &output = json["output"] = Json::Value( Json::objectValue );
+    Json::Value heads( Json::arrayValue );
+    Json::Value head( Json::objectValue );
+    head["name"] = "classes";
+    head["role"] = role;
+    head["confidence"] = confidence;
+    heads.append( head );
+    output["heads"] = heads;
+    std::string error;
+    if ( !ModelCatalog::instance().registerManifestJson(
+           Json::writeString( Json::StreamWriterBuilder(), json ),
+           dir.filePath( QStringLiteral( "ens/model.json" ) ).toStdString(), &error ) )
+      FAIL( "ensemble '" + name + "' rejected: " + error );
+  };
+
+  const QString input = writeConstantRaster( dir, "input.tif", 32, 2, 10.0f );
+  RSOperatorContext context;
+
+  SECTION( "embedding role refuses before any member forward" )
+  {
+    registerWithHead( "ens-role-emb", "embedding", "probability" );
+    ModelExecutionRequest request =
+      rasterRequest( input.toStdString(),
+                     dir.filePath( QStringLiteral( "out.tif" ) ).toStdString(), "ens-role-emb" );
+    request.outputMode = RasterOutputMode::Labels;
+    bool refused = false;
+    try
+    {
+      sicnu::operators::runtime::runModelInference( request, context );
+    }
+    catch ( const RSOperatorError &error )
+    {
+      refused = error.code() == sicnu::operators::ErrorCode::InvalidInputData
+                && std::string( error.message() ).find( "declares role 'embedding'" )
+                     != std::string::npos;
+    }
+    CHECK( refused );
+    CHECK( !QFile::exists( dir.filePath( QStringLiteral( "out.tif" ) ) ) );
+  }
+
+  SECTION( "segmentation head keeps the derived request running" )
+  {
+    registerWithHead( "ens-role-seg", "segmentation", "probability" );
+    ModelExecutionRequest request = rasterRequest(
+      input.toStdString(), dir.filePath( QStringLiteral( "out.tif" ) ).toStdString(),
+      "ens-role-seg" );
+    request.outputMode = RasterOutputMode::Labels;
+    ModelExecutionResult result;
+    REQUIRE_NOTHROW( result = sicnu::operators::runtime::runModelInference( request, context ) );
+    CHECK( QFile::exists( dir.filePath( QStringLiteral( "out.tif" ) ) ) );
+    CHECK( result.payload[ "combination" ].asString() == "weighted_mean" );
+  }
+}

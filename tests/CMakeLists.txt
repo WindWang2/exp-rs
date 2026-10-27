@@ -16828,7 +16828,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_SOURCE_DIR}/tests
         ${CMAKE_BINARY_DIR}
     )
-    sicnu_discover_tests(test_r23_b_derived_output_roles)
+    sicnu_discover_tests(test_r23_b_derived_output_roles TEST_PREFIX test_r23_b_derived_output_roles::)
 endif()
 # --- end R23-B derived-output-roles registration ---
 
