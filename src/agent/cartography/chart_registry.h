@@ -38,6 +38,11 @@ class QgsLayoutItemChart;
 
 namespace sicnu::agent::cartography {
 
+/// Cap for workspace-summary projections of the chart registry (the
+/// buildWorkspaceState charts array). Single source for the bound so the
+/// projection and its tests cannot drift apart.
+constexpr int kMaxWorkspaceSummaryCharts = 25;
+
 /// Workspace chart entity registry (stable "chart-N" ids).
 class ChartRegistry
 {

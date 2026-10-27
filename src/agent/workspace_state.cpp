@@ -16,6 +16,7 @@
 #include <qgsrectangle.h>
 
 #include "contracts/spatial_contracts.h"
+#include "cartography/chart_registry.h"
 #include "data/asset_types.h"
 #include "data/band_role.h"
 #include "data/data_manager.h"
@@ -31,7 +32,6 @@ constexpr int kMaxLayers = 200;
 constexpr int kMaxModels = 25;
 constexpr int kMaxRunningTasks = 25;
 constexpr int kMaxWorkflowRuns = 20;
-
 QString assetKindLabel( sicnu::data::AssetKind kind )
 {
   using sicnu::data::AssetKind;
@@ -378,8 +378,29 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
   }
   body["layouts"] = layouts;
 
-  // --- charts (Phase L registry; empty until charts are created) -----------
+  // --- charts (live ChartRegistry — the registry cartography:chart_* mutates)
+  // The tool surface has always promised charts in this document (see the
+  // workspace_state description pinned in tests/surface_diff_snapshot.json);
+  // the registry is the single authority, read under its own mutex. Bounded
+  // by the registry's declared summary cap; binding data is not projected —
+  // agents fetch a chart's spec via cartography:chart_get.
   Json::Value charts( Json::arrayValue );
+  {
+    const Json::Value all = cartography::ChartRegistry::instance().listCharts();
+    int chartCount = 0;
+    for ( const Json::Value &chart : all )
+    {
+      if ( chartCount++ >= cartography::kMaxWorkspaceSummaryCharts )
+        break;
+      Json::Value c( Json::objectValue );
+      const QString chartId = QString::fromStdString( chart["id"].asString() );
+      c["id"] = entities.idFor( QStringLiteral( "chart" ), chartId ).toStdString();
+      c["chart_id"] = chartId.toStdString();
+      c["kind"] = chart["kind"].asString();
+      c["title"] = chart["title"].asString();
+      charts.append( c );
+    }
+  }
   body["charts"] = charts;
 
   // --- models (summary only; selection lives in spatial:select_model) ------
