@@ -63,7 +63,6 @@ struct SingletonReset
         sicnu::TaskCenter::instance().shutdownForTests();
         JobEngine::instance().shutdownForTests();
         JobEngine::instance().clearExecutors();
-        JobEngine::instance().setMaxWorkers( 1 );
     }
     ~SingletonReset()
     {
@@ -198,6 +197,7 @@ TEST_CASE( "engine-internal cumulative appends still deliver after eviction (#17
     parked.release.set_value();
     engine.waitUntilIdleForTests( 15000 );
     waitStatus( center, taskId, sicnu::TaskStatus::Completed );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
 }
 
 TEST_CASE( "stale cumulative plus late deltas stay exactly-once under eviction (R2-F3)",
@@ -230,11 +230,16 @@ TEST_CASE( "stale cumulative plus late deltas stay exactly-once under eviction (
     waitStatus( center, taskId, sicnu::TaskStatus::Running );
     const std::string jobId = waitJobId( center, taskId );
     REQUIRE( !jobId.empty() );
-    // Started line (absolute index 0) forwarded by the Running record.
-    for ( int i = 0; i < 2000 && center.getTaskInfo( taskId ).logBuffer.isEmpty(); ++i )
+    // Anchor the synthetic index space on the engine's OWN "Started" line
+    // (absolute index 0, forwarded by the Running record): the task log is
+    // already non-empty at submit time ("Task queued with priority..."),
+    // so waiting for non-empty would race the Started line landing between
+    // the status flip and this read (R1-F1).
+    for ( int i = 0; i < 2000 && countLine( center, taskId, "Started" ) != 1; ++i )
         std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    REQUIRE( countLine( center, taskId, "Started" ) == 1 );
     const std::size_t base = static_cast<std::size_t>( center.getTaskInfo( taskId ).logBuffer.size() );
-    REQUIRE( base >= 1 );
+    REQUIRE( base >= 2 ); // queued line + Started
 
     const auto makeLine = []( std::size_t absoluteIndex ) {
         JobLogLine line;
@@ -311,4 +316,5 @@ TEST_CASE( "stale cumulative plus late deltas stay exactly-once under eviction (
     parked.release.set_value();
     engine.waitUntilIdleForTests( 15000 );
     waitStatus( center, taskId, sicnu::TaskStatus::Completed );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
 }

@@ -182,7 +182,13 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                                           std::atomic<bool> *cancelFlag = nullptr,
                                           const BatchProgressFn &progress = {} );
 
-/// Atomically publish JSON + CSV (temp + rename). Returns false on I/O failure.
+/// Publish the gradebook JSON + CSV pair together or not at all (#1695):
+/// both payloads are staged beside their targets and published through the
+/// journalled member-commit authority, so a second-artifact failure leaves
+/// the previous pair intact. Returns false when the pair was not published
+/// — a squatting directory on either final path, a staging/publish/rollback
+/// failure, or (commit-marker corner) a landed-but-unproven pair that a
+/// retry re-publishes idempotently. The two artifacts can never disagree.
 bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QString &outPrefix );
 
 /// Fail-closed loader for a PUBLISHED batch report document (`<prefix>.json`).

@@ -1002,8 +1002,12 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
     }
     catch ( const sicnu::geo::GeoError & )
     {
-        // publishStagedMembers already rolled the targets back; the failed
-        // member's staged file is left for the caller to discard.
+        // A failed member publish rolled the targets back to the old pair
+        // and left the staged file for the caller to discard. The one other
+        // throw site (commit-marker install failure) keeps the NEW pair and
+        // its journal/backups for recovery by design: either way the pair
+        // never disagrees — false here means "not proven published", and a
+        // retry is idempotent.
         discardStages();
         return false;
     }
