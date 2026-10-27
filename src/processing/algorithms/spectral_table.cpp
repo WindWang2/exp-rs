@@ -40,8 +40,13 @@ QString digestHex( const std::vector<std::vector<float>> &spectra, int bandCount
 {
     for ( const auto &row : spectra )
         if ( row.size() != static_cast<size_t>( bandCount ) )
+        {
+            qWarning( "SpectralTable::digestHex: refusing width-inconsistent table "
+                      "(row %zu of %d bands) — no digest computed",
+                      row.size(), bandCount );
             return {}; // width-inconsistent table: typed refusal — the cell
                        // walk below is only safe on equal-width rows
+        }
     QCryptographicHash hash( QCryptographicHash::Sha256 );
     const QString header = QStringLiteral( "%1/v%2/%3x%4\n" )
                              .arg( kKind,
@@ -166,8 +171,13 @@ QJsonObject toJson( const Table &table )
 {
     for ( const auto &row : table.spectra )
         if ( row.size() != static_cast<size_t>( table.bandCount ) )
+        {
+            qWarning( "SpectralTable::toJson: refusing width-inconsistent table "
+                      "(row %zu of %d bands) — no JSON emitted",
+                      row.size(), table.bandCount );
             return {}; // width-inconsistent table: typed refusal (digestHex
                        // and validate agree); never an out-of-bounds read
+        }
     QJsonObject root;
     root[QStringLiteral( "kind" )] = kKind;
     root[QStringLiteral( "version" )] = kFormatVersion;

@@ -14,7 +14,11 @@
 //     series + the standard hour-angle formula) from local SOLAR time — caller
 //     supplies solar (not civil) time, sidestepping equation-of-time and
 //     timezone errors. Declared accuracy ≈ ±0.5° declination, ±1° position;
-//     it generates sun tracks, it is not an ephemeris.
+//     it generates sun tracks, it is not an ephemeris. Within ~1e-10° of the
+//     poles (|cos(lat)| < 1e-12) the acos azimuth form is noise-dominated and
+//     the analytic polar limit az = acos(∓cos(H)) is reported instead — same
+//     east/noon/west convention as every other latitude, ≲1.5° deviation at
+//     the band edge.
 //
 // hillshadeSeries composes the existing TerrainAnalysis::hillshade kernel
 // over a sun track (operator side); no second hillshade implementation.
