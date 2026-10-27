@@ -70,9 +70,12 @@ TEST_CASE( "staged publish paths are unique per attempt and the sweep is "
   REQUIRE( stale.open( QIODevice::WriteOnly ) );
   stale.write( "crash litter" );
   stale.close();
-  // Age the litter: mtime one day and a second in the past.
+  // Age the litter: mtime one day and a second in the past (the file must
+  // be OPEN for setFileTime).
   const QDateTime old = QDateTime::currentDateTime().addDays( -1 ).addSecs( -5 );
+  REQUIRE( stale.open( QIODevice::ReadWrite ) );
   REQUIRE( stale.setFileTime( old, QFile::FileModificationTime ) );
+  stale.close();
 
   sweepStaleStagePaths( finalPath );
 

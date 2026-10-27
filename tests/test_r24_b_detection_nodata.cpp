@@ -189,7 +189,8 @@ bool registerManifest( const Json::Value &json, const std::string &manifestPath 
 // NoDataValue=`sentinel`, otherwise no sentinel is declared at all.
 bool writeNodataRaster( const QString &path, float valid, float sentinel, bool declareNoData )
 {
-  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    GDALAllRegister();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   if ( !driver )
     return false;
   GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), 16, 16, 3, GDT_Float32,

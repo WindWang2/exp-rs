@@ -123,6 +123,84 @@ ModelInfo labelsModel( int tileSize, int halo, const std::string &blend )
   return info;
 }
 
+} // namespace
+
+// Defined below (outside the anonymous namespace); used by the tail-batch
+// regression first.
+std::vector<std::uint16_t> readLabelsBand( const QString &path );
+
+TEST_CASE( "a valid tail batch survives trailing all-NoData tiles "
+           "(R24-B, R1 tail-batch fix)",
+           "[r24_b][metamorphic][tile][tail-batch]" )
+{
+  // 97 = 3*32 + 1: tiles 0..2 are full-width, tile 3 is the 1px tail
+  // column. Batch 2 flushes tiles 0+1 (creating the writer); tile 2 stays
+  // pending; tile 3 is all-NoData and defers with a `continue` that used to
+  // bypass the batch-full check — with no post-loop flush, tile 2's strip
+  // (x 64..95) was silently never written (zeros = class "a" in a Labels
+  // product). The fix flushes unconditionally.
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = dir.filePath( QStringLiteral( "tail-in.tif" ) );
+  {
+    sicnu::testing::RsSyntheticRasterBuilder builder( 97, 32, 3, GDT_Float32 );
+    builder.withNoData( -9999.0 );
+    builder.withCrs( QStringLiteral( "EPSG:4326" ) );
+    builder.writeToDisk( input );
+    GDALAllRegister();
+    GDALDataset *ds =
+      static_cast<GDALDataset *>( GDALOpen( input.toUtf8().constData(), GA_Update ) );
+    REQUIRE( ds );
+    std::vector<float> row( 97 );
+    for ( int y = 0; y < 32; ++y )
+      for ( int band = 1; band <= 3; ++band )
+      {
+        for ( int x = 0; x < 97; ++x )
+        {
+          if ( x == 96 )
+          {
+            row[x] = -9999.0f; // the all-NoData tail tile
+            continue;
+          }
+          const double t = ( x + y ) / 160.0;
+          row[x] = band == 1 ? float( 1.0 - t ) : ( band == 2 ? float( t ) : float( t * 0.5 ) );
+        }
+        REQUIRE( ds->GetRasterBand( band )
+                     ->RasterIO( GF_Write, 0, y, 97, 1, row.data(), 97, 1, GDT_Float32, 0,
+                                 0 ) == CE_None );
+      }
+    GDALClose( ds );
+  }
+
+  ModelInfo model = labelsModel( 32, 0, "" );
+  model.tiling.batchSize = 2;
+  TileInferenceEngine engine( model, ModelRuntimeRegistry::instance().acquire( model ) );
+  RSOperatorContext context;
+  const QString output = dir.filePath( QStringLiteral( "tail-out.tif" ) );
+  const auto stats = engine.run( input.toStdString(), {}, output.toStdString(), context );
+
+  // The valid strip x 64..95 must carry the argmax classes, not zeros. The
+  // argmax at these columns is class 1 (t >= 0.5 for y >= 16; and class 0
+  // only where t < 0.5). Assert BOTH appear in the strip — a zeroed strip
+  // (old code) is all class 0 with no class 1 anywhere in it.
+  const std::vector<std::uint16_t> labels = readLabelsBand( output );
+  REQUIRE( labels.size() == 97u * 32u );
+  int classZero = 0, classOne = 0;
+  for ( int y = 0; y < 32; ++y )
+    for ( int x = 64; x < 96; ++x )
+    {
+      const std::uint16_t label = labels[static_cast<std::size_t>( y ) * 97 + x];
+      if ( label == 0 )
+        ++classZero;
+      else if ( label == 1 )
+        ++classOne;
+    }
+  CHECK( classZero > 0 );
+  CHECK( classOne > 0 );
+  // And the model really ran on tile 2 (not just nodata-filled).
+  CHECK( stats.tilesProcessed >= 3 );
+}
+
 std::vector<std::uint16_t> readLabelsBand( const QString &path )
 {
   GDALAllRegister();
@@ -132,7 +210,8 @@ std::vector<std::uint16_t> readLabelsBand( const QString &path )
   const int h = ds->GetRasterYSize();
   REQUIRE( ds->GetRasterCount() == 1 );
   const GDALDataType type = ds->GetRasterBand( 1 )->GetRasterDataType();
-  REQUIRE( type == GDT_UInt16 );
+  // 3 classes fit a Byte labels product (UInt16 is only for >255 classes).
+  REQUIRE( type == GDT_Byte );
   std::vector<std::uint16_t> values( static_cast<std::size_t>( w ) * h );
   for ( int y = 0; y < h; ++y )
     REQUIRE( ds->GetRasterBand( 1 )
@@ -141,8 +220,6 @@ std::vector<std::uint16_t> readLabelsBand( const QString &path )
   GDALClose( ds );
   return values;
 }
-
-} // namespace
 
 TEST_CASE( "classification labels are invariant under tile size, feathering "
            "and re-runs (R24-B metamorphic)",
