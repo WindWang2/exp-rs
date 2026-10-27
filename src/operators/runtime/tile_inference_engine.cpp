@@ -2369,6 +2369,17 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     flushPendingBatch( tileIndex );
   }
 
+  // R24-B (adversarial review, P1): a VALID tail batch could sit pending
+  // forever — the last tile deferring as all-NoData `continue`s past the
+  // batch-full check, and when a writer already exists neither the probe
+  // block nor flushDeferredNoData touches the pending mats, so the final
+  // valid strip never reached the model or the output (silently zeros in a
+  // Labels product, weight-0 NoData under feathering). Flush unconditionally:
+  // with an empty batch it is a no-op, and it makes the !writer prefix
+  // flush below redundant but harmless.
+  if ( !batchMats.empty() )
+    flushPendingBatch( totalTiles - 1 );
+
   // Entire raster is NoData: no regular batch ever ran, so the writer (and
   // with it the model's true output channel count) does not exist yet. One
   // zero-tile probe forward establishes the output shape — its result is
@@ -2481,7 +2492,11 @@ void TileInferenceEngine::publishClassificationArtifact( const Json::Value &doc,
   // run leaves. Shared by the single-model writer and the ensemble combiner
   // (Platform 13.0) so ONE atomic-publish contract exists.
   const QFileInfo outFi( QString::fromStdString( outputPath ) );
-  const QString stagePath = outFi.absoluteFilePath() + QStringLiteral( ".stage~" );
+  // R24-B: unique per attempt — the fixed ".stage~" name left the staged
+  // write outside the (swap-time) fence, so two concurrent scene publishes
+  // on one output path interleaved writes on one shared stage file.
+  sweepStaleStagePaths( outFi.absoluteFilePath() );
+  const QString stagePath = uniqueStagePath( outFi.absoluteFilePath() );
   QFile stage( stagePath );
   if ( !stage.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     throw RSOperatorError( ErrorCode::FileNotWritable,
@@ -4198,6 +4213,12 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                               "Tiled multi-input inference: " + std::to_string( done + skipped )
                                 + "/" + std::to_string( totalTiles ) );
     }
+
+    // R24-B (adversarial review, P1): a VALID tail batch could sit pending
+    // — trailing all-NoData tiles `continue` past the batch-full check, and
+    // this lane had no post-loop flush at all. Mirror the single-input fix.
+    if ( !batchCores.empty() )
+      flushBatch( totalTiles - 1 );
 
     if ( !deferredNoData.empty() && !writer )
     {

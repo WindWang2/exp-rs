@@ -81,8 +81,11 @@ TEST_CASE( "extreme coordinates cannot UB the leakage grid and are counted "
     REQUIRE( reloaded.has_value() );
     CHECK( reloaded->unbucketedCount() == 1 );
 
-    // Control: ordinary coordinates still land in the grid and the
-    // distance check still fires for a genuinely-close cross-split pair.
+    // Control: ordinary coordinates still land in the grid and a genuinely
+    // overlapping cross-split pair still produces a spatial finding (the
+    // windows [0,10] and [1,11] overlap → overlapping_patch fires; the
+    // center distance is exactly the 1.0 threshold, which the strict <
+    // comparison does not count).
     const AuditSample trainNear = sampleWithBounds( QStringLiteral( "train-near" ),
                                                     SplitRole::Train, 0.0, 0.0, 10.0, 10.0 );
     const AuditSample testNear = sampleWithBounds( QStringLiteral( "test-near" ),

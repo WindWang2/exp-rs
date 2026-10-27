@@ -548,11 +548,14 @@ const auto installed = m_experimentStore->upsertRun( run );
                     const QString toId = item.value( QStringLiteral( "to_id" ) ).toString();
                     const QString edgeKind = item.value( QStringLiteral( "edge" ) ).toString();
 
-                    if ( fromKind.isEmpty() && toKind.isEmpty() )
+                    if ( fromKind.isEmpty() && toKind.isEmpty()
+                         && item.contains( QStringLiteral( "other_kind" ) ) )
                     {
                         // Legacy shape (other_kind/other_id only): the
                         // direction was lost at export; keep the named-gap
-                        // warning verbatim for these.
+                        // warning verbatim for these. Items without either
+                        // shape fall through to the refused path below —
+                        // garbage is never mislabeled as old-export (R1).
                         ++legacyItems;
                         continue;
                     }
@@ -613,7 +616,11 @@ const auto installed = m_experimentStore->upsertRun( run );
                         continue;
                     }
 
-                    const QString finalRunId = report.runId;
+                    // R1 review: report.runId is only assigned AFTER this
+                    // block — the rewrite source must be the upserted run's
+                    // id (identical to report.runId for keepOriginalRunId,
+                    // the fresh generated id otherwise).
+                    const QString finalRunId = run.runId();
                     const bool datasetSide = fromIsRun
                                                  ? kDatasetSideKinds.contains( toKind )
                                                  : kDatasetSideKinds.contains( fromKind );

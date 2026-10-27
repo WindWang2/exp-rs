@@ -252,18 +252,21 @@ sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> 
         {
             // R24-B: a failed prepare is not "order starts at 0" — restarting
             // roword silently duplicated pagination order for later rows.
+            // Capture the error BEFORE rollback (ROLLBACK resets it).
+            const QString message = maxOrder.error( m_impl->db );
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               maxOrder.error( m_impl->db ) ) );
+                                               message ) );
         }
         maxOrder.bind( 1, versionId );
         if ( maxOrder.stepRow() )
             nextOrder = maxOrder.i64( 0 ) + 1;
         else if ( maxOrder.stepFailed() )
         {
+            const QString message = maxOrder.error( m_impl->db );
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                               maxOrder.error( m_impl->db ) ) );
+                                               message ) );
         }
     }
     StoreStmt insert( m_impl->db, QStringLiteral(
@@ -271,9 +274,10 @@ sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> 
         " weight, json, roword) VALUES(?,?,?,?,?,?,?,?)" ) );
     if ( !insert )
     {
+        const QString message = insert.error( m_impl->db );
         m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           insert.error( m_impl->db ) ) );
+                                           message ) );
     }
     for ( const SampleRecord &sample : samples )
     {
@@ -289,13 +293,14 @@ sicnu::data::Result<void> DatasetStore::addSamples( const QVector<SampleRecord> 
         insert.bind( 8, nextOrder++ );
         if ( !insert.step() )
         {
-            m_impl->rollback();
             // The PRIMARY KEY(version, sample_id) makes duplicates loud: a
-            // re-ingest must never silently overwrite a sample.
+            // re-ingest must never silently overwrite a sample. Capture the
+            // sqlite error BEFORE rollback (ROLLBACK resets it).
+            const QString message = insert.error( m_impl->db );
+            m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.conflict" ),
                                                QStringLiteral( "sample %1 rejected: %2" )
-                                                   .arg( sample.sampleId(),
-                                                         insert.error( m_impl->db ) ) ) );
+                                                   .arg( sample.sampleId(), message ) ) );
         }
     }
     if ( !m_impl->commit( nullptr ) )

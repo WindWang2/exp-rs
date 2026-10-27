@@ -164,16 +164,19 @@ PublishFenceLease::PublishFenceLease( const QString &finalPath )
   // (or GUI + CLI) publishing the same artifact could interleave their
   // park/swap/adopt windows and destroy each other's previous product
   // exactly the way two threads could before the fence existed. A QLockFile
-  // on the fence key extends the SAME lease across processes: staleLockTime
-  // 0 means a lock is adopted as soon as its owning process is dead (pid
-  // liveness, never wall-clock guessing), and a lock held by a LIVE peer
-  // refuses typed. Failure to acquire rolls the in-process registration
-  // back first so this attempt leaves no trace.
+  // on the fence key extends the SAME lease across processes; a lock held
+  // by a LIVE peer refuses typed. Failure to acquire rolls the in-process
+  // registration back first so this attempt leaves no trace.
   const QFileInfo keyInfo( QString::fromStdString( m_key ) );
   m_lock = std::make_unique<QLockFile>(
     keyInfo.path() + QLatin1Char( '/' ) + QLatin1Char( '.' ) + keyInfo.fileName()
       + QStringLiteral( ".publish.lock" ) );
-  m_lock->setStaleLockTime( 0 );
+  // staleLockTime bounds the FOREIGN-HOST fallback (R1 review): pid
+  // liveness is only verifiable for local-host locks, so a crash on shared
+  // storage (NAS) would otherwise block the artifact forever. A live LOCAL
+  // holder is never stolen — its pid keeps the lock alive regardless of
+  // age; 6h only adopts locks whose owner cannot be probed at all.
+  m_lock->setStaleLockTime( 6 * 60 * 60 * 1000 );
   if ( !m_lock->tryLock( 250 ) )
   {
     std::lock_guard<std::mutex> fenceLock( g_publishFenceMutex );
@@ -213,10 +216,12 @@ void sweepStaleStagePaths( const QString &finalPath )
   // ".<leaf>.*.tmp~" member family are covered.
   const QFileInfo info( finalPath );
   const QDir dir( info.absolutePath() );
+  // QDir::Hidden: on POSIX the ensemble's ".<leaf>.*.tmp~" family starts
+  // with a dot and is excluded from plain QDir::Files listings (R1 review).
   const QStringList stale = dir.entryList(
     { info.fileName() + QStringLiteral( ".*.tmp~" ),
       QStringLiteral( ".%1.*.tmp~" ).arg( info.fileName() ) },
-    QDir::Files );
+    QDir::Files | QDir::Hidden );
   const QDateTime cutoff = QDateTime::currentDateTime().addDays( -1 );
   for ( const QString &name : stale )
   {

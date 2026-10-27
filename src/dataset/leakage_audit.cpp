@@ -686,7 +686,11 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                        return a.sampleB < b.sampleB;
                    return leakageKindToString( a.kind ) < leakageKindToString( b.kind );
                } );
-    report.setUnbucketedCount( unbucketedCount );
+    // -1 when the spatial grid never ran (R1 review): 0 would read as
+    // "grid ran, zero exclusions" — the overstatement this field exists to
+    // prevent.
+    report.setUnbucketedCount(
+        ( overlapCheck || distanceCheck || bufferCheck ) ? unbucketedCount : -1 );
     return Result::success( report );
 }
 
