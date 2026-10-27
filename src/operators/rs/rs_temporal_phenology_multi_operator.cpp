@@ -303,12 +303,17 @@ Json::Value RsTemporalPhenologyMultiOperator::run( const Json::Value &params,
         const auto &t = prepared.collection.scenes().at( static_cast<size_t>( idx ) ).time;
         return t.valid ? t.dateString().toStdString() : "no time";
       };
+      // Report the ACTUAL conflicting pair — the violation at s is against
+      // s-1. Printing (s, s+1) ran out of range when the violation sat on
+      // the last scene and blamed a scene that was not duplicated (R24-A
+      // R1 review P2-1; labels are 1-based scene numbers).
       throw RSOperatorError(
           ErrorCode::InvalidInputData,
           "rs:temporal_phenology_multi requires strictly increasing scene times; scenes "
-              + std::to_string( s ) + " (" + dateOf( s ) + ") and " + std::to_string( s + 1 )
-              + " (" + dateOf( s + 1 ) + ") share an instant — use duplicate_policy=reject "
-                "or run rs:temporal_regularize first" );
+              + std::to_string( s ) + " (" + dateOf( s - 1 ) + ") and "
+              + std::to_string( s + 1 ) + " (" + dateOf( s )
+              + ") have a duplicate or out-of-order instant — use "
+                "duplicate_policy=reject or run rs:temporal_regularize first" );
     }
   }
 

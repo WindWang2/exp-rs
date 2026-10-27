@@ -134,4 +134,50 @@ TEST_CASE( "rs:temporal_phenology_multi rejects duplicate acquisition instants",
     CHECK( message.find( "duplicate_policy" ) != std::string::npos );
     // The run must fail before creating the output raster.
     CHECK( !QFile::exists( dir.filePath( "out.tif" ) ) );
+
+    // End-position duplicate (R1 review P2-1): the conflict on the LAST two
+    // scenes used to run scenes().at(count) out of range through the error
+    // formatter and escape as std::out_of_range instead of the typed error.
+    // The message must report the actual conflicting pair, not (s, s+1)
+    // past the end.
+    QTemporaryDir dir2;
+    REQUIRE( dir2.isValid() );
+    const char *dates2[] = { "2024-03-01", "2024-03-17", "2024-04-02", "2024-04-18",
+                             "2024-05-04", "2024-05-20", "2024-06-05", "2024-06-21",
+                             "2024-06-21" };
+    Json::Value scenes2( Json::arrayValue );
+    for ( int i = 0; i < 9; ++i )
+    {
+        const QString name = QStringLiteral( "e%1.tif" ).arg( i );
+        REQUIRE( writeScene( dir2.filePath( name ),
+                             0.25f + 0.05f * static_cast<float>( i ),
+                             QString::fromLatin1( dates2[i] ) ) );
+        scenes2.append( dir2.filePath( name ).toStdString() );
+    }
+    Json::Value params2( Json::objectValue );
+    params2["scenes"] = scenes2;
+    params2["band"] = 1;
+    params2["output"] = dir2.filePath( "out2.tif" ).toStdString();
+    bool threw2 = false;
+    std::string message2;
+    try
+    {
+        RSOperatorContext context2;
+        op->run( params2, context2 );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw2 = true;
+        message2 = e.what();
+    }
+    catch ( ... )
+    {
+        threw2 = false; // out_of_range / anything else: the typed contract broke
+    }
+    REQUIRE( threw2 );
+    INFO( "operator error: " << message2 );
+    // 1-based labels of the conflicting pair: scenes 8 and 9 (the last two).
+    CHECK( message2.find( "2024-06-21" ) != std::string::npos );
+    CHECK( message2.find( "9 (2024-06-21)" ) != std::string::npos );
+    CHECK( !QFile::exists( dir2.filePath( "out2.tif" ) ) );
 }
