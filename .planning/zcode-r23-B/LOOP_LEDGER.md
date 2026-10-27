@@ -14,3 +14,11 @@
 - W2 patch 暂存：/tmp/r23b_w2_engine.patch（42 行）；当前工作树引擎文件=master 态（RED 构建）
 - 批量构建（RED 态）：后台 exec_fc98878d（flock 排队），目标 7 个测试族
 - 构建完成后顺序：跑 test_r23_b_derived_output_roles 记 RED → git apply /tmp/r23b_w2_engine.patch → 增量重建 → GREEN ×2 → 全家回归 → W3 决策 → R1/R2 → push+PR
+
+| 7 | 10-27 05:0x | 批量构建完成（3659 步；W2 测试缺 using 修复一次） | 全族实跑 | 通过 | RED/GREEN |
+| 8 | 10-27 05:1x | W2 RED（exit 42/6 失败）→ patch 回填 → GREEN×2 | 见 RED_GREEN.md | 通过 | W3/W4 验证 |
+| 9 | 10-27 05:2x | W3 37/3×2、W4 25/6+34/10、域族 110440/26 等全绿 ×2 | TEST_RESULTS.md | 通过 | 提交+评审 |
+| 10 | 10-27 14:4x | R1 APPROVE（4 P3）→ 闭环 679feb773e | 评审报告+复跑 | 通过 | R2 |
+| 11 | 10-27 15:2x | R2 APPROVE-WITH-FIXES（P2×2+P3×4）→ 闭环 d0e25e5099（ensemble 共享门+ctest 前缀） | 变异证明+125/16 | 通过 | 确认轮 |
+| 12 | 10-27 16:0x | R2 确认轮发现 N1（ensemble 门缺 mode 守卫）→ fc21d0d242 修复+回归钉 | 127/16 全绿 | 通过 | merge master |
+| 13 | 10-27 16:1x | master 前移→merge 5fe642ec63（union .gitignore/tests CMake，8/8 兄弟块核验）；merge 后全族复跑全绿 | 本文 | 通过 | push+PR |
