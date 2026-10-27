@@ -49,3 +49,9 @@
 
 ### 开发中发现并修正的初版修复缺陷(viewshed)
 初版 ring 量化取 min(csx,csy):0.25/0.8 各向异性通过、但 0.3/0.3 仍有 12 暗元——轴向格距恰为量子的整数倍时,d/量子 的浮点商在精确整数边界上舍入上移,相邻轴向格同环。独立复现程序(dbg_viewshed.cpp,g++ 直接编译 terrain_viewshed.cpp)确认后改用 m/2 量子(商差 ≥2−ε≥1,双舍入下仍严格递减),并对 10 组对抗格网(0.25/0.25、0.5/0.5、1.5/1.5、0.125/3.0 等精确倍数与混合尺度)全部 0 暗元。教训入 LOOP_LEDGER。
+
+## 邻域回归(M3 冲突发现与解决)
+- 13 个同域族:12 绿 + test_image_fusion 失败(4 断言)——r21-A R2/M3 回归钉住旧 bothNormalizable 哨兵规则,与 #1687 契约变化真实冲突。
+- 解决:新增具名缝 MathUtils::legacyNegativeSentinelFree(≤−999 legacy 未声明哨兵筛,不再拒等值负对),dNBR 融合分支改用;M3 测试重钉新缝+共享内核有限判据。
+- 复跑:test_image_fusion 1727 断言绿、test_math_utils 109 绿、test_rs_operators 9114 绿、test_e2e_phase2 4107 绿、test_change_detection 888684 绿、test_spectral_formula_drift 145 绿。
+- 其余邻域:test_terrain_analytics_e2e 1088、test_mnf 22、test_spectral_anomaly 90243、test_endmember_extraction 72、test_processing_integration 29、test_temporal_selection 118、test_temporal_uncertainty 75、test_band_math 130277、test_mosaic 38 —— 全绿。
