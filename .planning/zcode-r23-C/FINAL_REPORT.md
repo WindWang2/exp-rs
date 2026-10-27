@@ -2,7 +2,7 @@
 
 - BASE：origin/master `ad98a7a7041b9d6952f5d5fa4ac5cc46ac181dea`（2026-10-26 fetch；与任务起草快照一致）
 - HEAD：见 `git log -1`（本轨分支 `agent/r23-c-agent-workbench-20261026T164126Z`）
-- PR：见 PR_BODY.md / PR URL（创建后回填于 PR_BODY 顶部）
+- PR：**https://github.com/WindWang2/exp-rs/pull/1721**（OPEN、非 draft、base=master、head=6db4f8697b）
 - 变更规模：生产 5 文件（task_center.h/.cpp、batch_assessment.h/.cpp、teaching_admin/CMakeLists.txt、teaching_admin_dock.cpp）+ 测试 2 新文件 + tests/CMakeLists.txt(+10 行 append) + .gitignore(白名单块) + .planning/zcode-r23-C/**
 
 ## 工作包终态

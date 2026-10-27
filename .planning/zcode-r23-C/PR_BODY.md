@@ -1,4 +1,5 @@
 # r23-C: Pi/MCP Harness、Qt/QGIS 工作台与制图交互闭环
+> **PR**: https://github.com/WindWang2/exp-rs/pull/1721 (OPEN, non-draft, HEAD 6db4f8697b, merged origin/master 5fe642ec63)
 
 **BASE** `ad98a7a704` (origin/master, 2026-10-26) → **HEAD** `<本 PR 分支>`
 三轨并行（r23-A/B 同时执行，全局构建锁互斥实测有效）。
