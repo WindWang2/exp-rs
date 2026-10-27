@@ -61,11 +61,17 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     const double zaObs = dem[oi] + params.observerHeight;
 
     // Pass 1: map distance, curvature-adjusted elevation and the integer
-    // distance ring of every cell (invalid ring for NoData).
+    // distance ring of every cell (invalid ring for NoData). Rings are in
+    // CELL units (ceil(d / minCell)), never map units: with sub-metre or
+    // degree-sized cells a map-unit bucket granularity makes inward
+    // neighbours share a cell's ring, orphaning whole wedges (and on
+    // geographic grids, the entire frame) into permanent false invisibility
+    // (R24-A). The exact per-cell distance is kept for within-ring ordering.
+    const double minCell = std::min( cellSizeX, cellSizeY );
     const double radius = params.radius > 0.0 ? params.radius : 0.0;
     std::vector<int> ring( n, kRingInvalid );
     std::vector<float> za( n, 0.0f );
-    std::vector<float> distMap( n, 0.0f );
+    std::vector<double> dist( n, 0.0 );
     int maxRing = 0;
     for ( int y = 0; y < height; ++y )
     {
@@ -88,14 +94,19 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
                 continue; // outside the analysis radius: stays invisible
             const double adjusted = dem[i] - params.curvatureFactor * d * d;
             za[i] = static_cast<float>( adjusted );
-            distMap[i] = static_cast<float>( d );
-            const int r = static_cast<int>( std::ceil( d ) );
+            dist[i] = d;
+            const int r = static_cast<int>( std::ceil( d / minCell ) );
             ring[i] = r;
             maxRing = std::max( maxRing, r );
         }
     }
 
     // Pass 2: CSR grouping of cells by ring (counting sort) for the sweep.
+    // No within-ring ordering is needed: with cell-unit rings, the axial
+    // neighbour one step toward the observer reduces the distance by at
+    // least minCell, so ceil(d/minCell − 1) < ceil(d/minCell) — every
+    // non-observer cell has a strictly-smaller-ring in-bounds neighbour
+    // and the ring sweep alone produces a valid predecessor order.
     std::vector<std::size_t> ringStart( static_cast<std::size_t>( maxRing ) + 2, 0 );
     for ( int y = 0; y < height; ++y )
         for ( int x = 0; x < width; ++x )
@@ -122,6 +133,8 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
 
     // Pass 3: ring sweep. horizonMax[i] = max terrain angle along the best
     // path from the observer to i (including i itself); +inf = blocked.
+    // Cells only stay blocked when every strictly-smaller-ring path enters
+    // through NoData (the axial inward neighbour always exists otherwise).
     std::vector<float> horizonMax( n, kHorizonBlocked );
     std::uint8_t *out = visible->data();
     out[oi] = 1;
@@ -151,12 +164,12 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
             if ( pathMax == kHorizonBlocked )
                 continue; // every path enters through NoData: stays invisible
 
-            const float d = distMap[i];
+            const double d = std::max( dist[i], 1e-12 );
             const float terrainAngle =
-                ( za[i] - static_cast<float>( zaObs ) ) / std::max( d, 1e-12f );
+                static_cast<float>( ( za[i] - zaObs ) / d );
             out[i] = ( ( za[i] + static_cast<float>( params.targetHeight )
                          - static_cast<float>( zaObs ) )
-                           / std::max( d, 1e-12f ) )
+                           / static_cast<float>( d ) )
                      > pathMax
                  ? 1
                  : 0;
