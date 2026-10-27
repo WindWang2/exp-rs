@@ -122,9 +122,12 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
  * Sentinel-aware variant: an operand is additionally invalid when it
  * exactly equals that band's declared NoData value (non-finite declared
  * sentinels disable the check; matching is exact, never an epsilon —
- * nodata_utils.h discipline). Use wherever the caller holds the band's
- * declaration; the 4-argument form above only knows the undeclared-net
- * ceiling and non-finite values.
+ * nodata_utils.h discipline). Reserved for callers that hold per-band
+ * declared sentinels (kernel-level composition); today's production
+ * operators achieve the identical invalid mask by pre-normalizing
+ * declared sentinels to NaN before calling the 4-argument form
+ * (rs_spectral_index_operator's BandSource) — do not add a second
+ * normalization layer on top of that path.
  */
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count,
                           float noDataA, float noDataB);

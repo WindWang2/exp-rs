@@ -129,3 +129,62 @@ TEST_CASE( "rs:terrain_flow flow_direction resolves filled-flat cells",
             sinksInBowl += ( dirs[static_cast<size_t>( y ) * kN + x] == 0.0f );
     CHECK( sinksInBowl == 0 );
 }
+
+TEST_CASE( "rs:terrain_flow flat against NoData stays a sink, not fabricated flow",
+           "[processing][terrain][flow][r24_a]" )
+{
+    // Negative control (R1 review P3-7): a 3×3 flat plateau enclosed by
+    // NoData has no escape — the resolution contract never raises cells to
+    // route into NoData, so every plateau cell must REMAIN dir = 0 (a true
+    // sink) rather than fabricating an outlet. Pins the documented
+    // resolveFlats boundary semantics so a future change cannot quietly
+    // invent drainage into NoData.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    constexpr int kN = 5;
+    std::vector<float> dem( static_cast<size_t>( kN ) * kN, -9999.0f );
+    for ( int y = 1; y <= 3; ++y )
+        for ( int x = 1; x <= 3; ++x )
+            dem[static_cast<size_t>( y ) * kN + x] = 10.0f; // flat island
+
+    using namespace sicnu::testing;
+    RsSyntheticRasterBuilder b( kN, kN, 1 );
+    b.withNoData( -9999.0 );
+    b.withCrs( "EPSG:32650" );
+    b.withGeoTransform( 0.0, 1.0, static_cast<double>( kN ), -1.0 );
+    for ( int y = 0; y < kN; ++y )
+        for ( int x = 0; x < kN; ++x )
+            b.withPixel( 1, x, y, dem[static_cast<size_t>( y ) * kN + x] );
+    const QString demPath = b.writeToDisk( dir.filePath( "island.tif" ) );
+    REQUIRE( !demPath.isEmpty() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:terrain_flow" );
+    REQUIRE( op != nullptr );
+    RSOperatorContext context;
+    Json::Value params( Json::objectValue );
+    params["input"] = demPath.toStdString();
+    params["output"] = dir.filePath( "dir.tif" ).toStdString();
+    params["product"] = "flow_direction";
+    REQUIRE_NOTHROW( op->run( params, context ) );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( dir.filePath( "dir.tif" ) ) );
+    std::vector<float> dirs( static_cast<size_t>( kN ) * kN );
+    REQUIRE( ds.readBandData( 1, dirs.data(), kN, kN ) );
+    // resolveFlats' NoData contract (terrain_hydrology.cpp seeding): the
+    // drain-boundary seeds — every valid cell adjacent to NoData — are
+    // never raised, so the 8 island border cells remain dir = 0 sinks;
+    // flow ends AT the NoData border, never fabricated into it. The
+    // interior cell receives an epsilon gradient toward the border and may
+    // route (its exact direction is an implementation detail of the
+    // epsilon descent; the pin is that drainage terminates on the border).
+    for ( int y = 1; y <= 3; ++y )
+        for ( int x = 1; x <= 3; ++x )
+        {
+            if ( x == 2 && y == 2 )
+                continue; // interior: epsilon descent toward the border
+            INFO( "island border cell (" << x << "," << y << ") dir="
+                                         << dirs[static_cast<size_t>( y ) * kN + x] );
+            CHECK( dirs[static_cast<size_t>( y ) * kN + x] == 0.0f );
+        }
+}

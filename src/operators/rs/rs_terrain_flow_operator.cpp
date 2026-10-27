@@ -192,6 +192,12 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
             throw RSOperatorError( ErrorCode::ComputationError, "Depression filling failed" );
     }
 
+    // Observability for the gated flat resolution below (R1 review P3-4):
+    // when the D8 chain resolved flats, the result JSON must say so — the
+    // routed surface differs from the plain fill by the epsilon gradient.
+    bool hasFlats = false;
+    TerrainHydrology::FlatResolutionReport flatReport;
+
     // D8 products route over the FILLED surface, but flowDirections needs
     // slope > 0 strictly: a filled depression is a flat plateau whose
     // interior would become dir = 0 sinks, silently truncating every
@@ -204,7 +210,6 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
     if ( product == "flow_direction" || product == "flow_accumulation"
          || product == "watershed" || product == "stream_network" || product == "outlets" )
     {
-        bool hasFlats = false;
         for ( int y = 0; y < height && !hasFlats; ++y )
         {
             for ( int x = 0; x < width; ++x )
@@ -237,7 +242,6 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
         {
             context.reportProgress( 0.3, "Resolving filled flats" );
             std::vector<float> resolved( n );
-            TerrainHydrology::FlatResolutionReport flatReport;
             if ( !TerrainHydrology::resolveFlats( filled.data(), resolved.data(), width,
                                                   height, nodata, &flatReport,
                                                   [&context] { return context.isCancelled(); } ) )
@@ -261,6 +265,18 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
 
     std::vector<float> productData;
     Json::Value result( Json::objectValue );
+    // Flat-resolution observability (R1 review P3-4): surface what the D8
+    // gate did, mirroring the flat_resolve product's own fields.
+    if ( product == "flow_direction" || product == "flow_accumulation"
+         || product == "watershed" || product == "stream_network" || product == "outlets" )
+    {
+        result["flatResolution"] = hasFlats ? "epsilon" : "none";
+        if ( hasFlats )
+        {
+            result["flatEpsilon"] = flatReport.epsilon;
+            result["raisedCells"] = static_cast<Json::UInt64>( flatReport.raisedCells );
+        }
+    }
     if ( product == "fill" )
         productData = std::move( filled );
     else if ( product == "flow_direction" )

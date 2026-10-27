@@ -66,12 +66,12 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     // degree-sized cells a map-unit bucket granularity makes inward
     // neighbours share a cell's ring, orphaning whole wedges (and on
     // geographic grids, the entire frame) into permanent false invisibility
-    // (R24-A). The exact per-cell distance is kept for within-ring ordering.
+    // (R24-A).
     const double minCell = std::min( cellSizeX, cellSizeY );
     const double radius = params.radius > 0.0 ? params.radius : 0.0;
     std::vector<int> ring( n, kRingInvalid );
     std::vector<float> za( n, 0.0f );
-    std::vector<double> dist( n, 0.0 );
+    std::vector<float> dist( n, 0.0f );
     int maxRing = 0;
     for ( int y = 0; y < height; ++y )
     {
@@ -94,7 +94,12 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
                 continue; // outside the analysis radius: stays invisible
             const double adjusted = dem[i] - params.curvatureFactor * d * d;
             za[i] = static_cast<float>( adjusted );
-            dist[i] = d;
+            dist[i] = static_cast<float>( d );
+            // Extreme cell-size anisotropy could push the cell-unit ring
+            // past int range (16384^2 cells at 1e4:1 aspect); refuse
+            // rather than wrap (R1 review P3-2).
+            if ( d / minCell > static_cast<double>( std::numeric_limits<int>::max() ) - 2.0 )
+                return false;
             const int r = static_cast<int>( std::ceil( d / minCell ) );
             ring[i] = r;
             maxRing = std::max( maxRing, r );
@@ -102,11 +107,18 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     }
 
     // Pass 2: CSR grouping of cells by ring (counting sort) for the sweep.
-    // No within-ring ordering is needed: with cell-unit rings, the axial
-    // neighbour one step toward the observer reduces the distance by at
-    // least minCell, so ceil(d/minCell − 1) < ceil(d/minCell) — every
-    // non-observer cell has a strictly-smaller-ring in-bounds neighbour
-    // and the ring sweep alone produces a valid predecessor order.
+    // No within-ring ordering is needed. The predecessor invariant (R1
+    // review P3-1 correction): for a cell at (a,b) cell-offsets from the
+    // observer with a,b >= 1, the DIAGONAL inward neighbour (a-1,b-1) is
+    // strictly closer by more than minCell (infimum minCell approached
+    // only as a->inf with b=1, never attained), so its ring is <= r-1; a
+    // cell on an axis (a=0 or b=0) is covered by its axial inward
+    // neighbour (distance drops by that axis's full cell size >= minCell,
+    // and ceil(t - s) <= ceil(t) - 1 for s >= 1). Every non-observer cell
+    // therefore has a strictly-smaller-ring in-bounds neighbour, and the
+    // ring sweep alone yields a valid predecessor order. (Do NOT narrow
+    // the pass-3 scan to axial neighbours only — the diagonal case above
+    // is the load-bearing one off-axis.)
     std::vector<std::size_t> ringStart( static_cast<std::size_t>( maxRing ) + 2, 0 );
     for ( int y = 0; y < height; ++y )
         for ( int x = 0; x < width; ++x )
@@ -134,7 +146,8 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
     // Pass 3: ring sweep. horizonMax[i] = max terrain angle along the best
     // path from the observer to i (including i itself); +inf = blocked.
     // Cells only stay blocked when every strictly-smaller-ring path enters
-    // through NoData (the axial inward neighbour always exists otherwise).
+    // through NoData (see the pass-2 invariant note for why one such
+    // neighbour always exists otherwise).
     std::vector<float> horizonMax( n, kHorizonBlocked );
     std::uint8_t *out = visible->data();
     out[oi] = 1;
@@ -164,12 +177,12 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
             if ( pathMax == kHorizonBlocked )
                 continue; // every path enters through NoData: stays invisible
 
-            const double d = std::max( dist[i], 1e-12 );
+            const float d = std::max( dist[i], 1e-12f );
             const float terrainAngle =
                 static_cast<float>( ( za[i] - zaObs ) / d );
             out[i] = ( ( za[i] + static_cast<float>( params.targetHeight )
                          - static_cast<float>( zaObs ) )
-                           / static_cast<float>( d ) )
+                           / d )
                      > pathMax
                  ? 1
                  : 0;
