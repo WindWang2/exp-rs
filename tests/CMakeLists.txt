@@ -16881,6 +16881,31 @@ if(UNIX AND NOT APPLE)
 endif()
 # --- end R23-E WP5 registration ---
 
+# BEGIN R24-C (agent/r24_c-20261027T022556Z): harness/workbench closed-loop
+# WP1 — workspace-state contract projects the live ChartRegistry (stable
+# entity ids, bounded 25) instead of a hardcoded empty "charts" array.
+qt_add_executable(test_r24_c_workspace_charts
+  test_r24_c_workspace_charts.cpp
+)
+target_link_libraries(test_r24_c_workspace_charts PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_data
+  sicnu_agent
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r24_c_workspace_charts PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r24_c_workspace_charts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_c_workspace_charts TEST_PREFIX "test_r24_c_workspace_charts::")
+# END R24-C
+
 # ===========================================================================
 # BEGIN R24-B (r24_b data/model/experiment track) — append-only block.
 # Every target in this block is prefixed test_r24_b_ and registered with an

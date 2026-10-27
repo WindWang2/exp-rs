@@ -1,6 +1,7 @@
 // tests/test_temporal_profile_widget.cpp — D16 Package G: temporal profile
 // chart (layered rendering, hover contract, cached-background scrub proxy).
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 #include <catch2/catch_approx.hpp>
 
 #include "app/workbench/temporal_timeline_widget.h"
@@ -167,5 +168,7 @@ TEST_CASE( "Hover-only scrubbing keeps the render fast (double-buffer proxy)",
                                     std::chrono::high_resolution_clock::now() - start )
                                     .count();
     INFO( "hover ms: " << elapsedMs );
-    REQUIRE( elapsedMs < 200 );
+    // #1699: 100 hover repaints against the double-buffer proxy, scaled for
+    // sanitizer/loaded lanes — Release enforces the 200ms base.
+    REQUIRE( elapsedMs < sicnu::testsupport::wallClockBudgetMs( 200 ) );
 }

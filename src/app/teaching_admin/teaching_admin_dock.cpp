@@ -421,28 +421,13 @@ void TeachingAdminDock::onRunBatch()
     const QString gradingSearchRoot = repoRoot();
     m_batchCancel.store( false );
 
-    QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
-    const int total =
-      sicnu::teaching_admin::discoverSubmissions( cfg.submissionsDir, &discoverySkips ).size();
-    m_batchProgressLabel->setText( tr( "running 0 / %1" ).arg( total ) );
-    if ( !discoverySkips.isEmpty() )
-    {
-        // Preview honesty (#1466): refusals are visible BEFORE the run, so
-        // a mis-named, hidden or misplaced submission can be fixed while
-        // grading. The refusal classes differ (reserved output names →
-        // rename; hidden entries → clear the attribute; nested directories
-        // → move the file up one level), so the preview names the entries
-        // and defers the per-entry remediation to the report's reasons.
-        QStringList names;
-        for ( const auto &skip : discoverySkips )
-            names << QFileInfo( skip.path ).fileName();
-        appendLog( tr( "discovery refused %1 entr%2 (skipped, not graded): %3 — "
-                       "see the report for each refusal's reason and remedy" )
-                     .arg( discoverySkips.size() )
-                     .arg( discoverySkips.size() == 1 ? QStringLiteral( "y" )
-                                                      : QStringLiteral( "ies" ) )
-                     .arg( names.join( QStringLiteral( ", " ) ) ) );
-    }
+    // #1695-3 (r24-c): discovery walks the whole submissions directory — on
+    // a network share or a large class that scan blocked the GUI thread for
+    // seconds. It now runs as the worker's first step below; the console
+    // honestly shows "discovering…" until the preview posts back.
+    // runBatchAssessment keeps its own internal discovery for grading,
+    // exactly as before.
+    m_batchProgressLabel->setText( tr( "discovering submissions…" ) );
     m_batchCancelButton->setEnabled( true );
 
     const QString outPrefix = m_batchOutEdit->text();
@@ -458,6 +443,43 @@ void TeachingAdminDock::onRunBatch()
             // std::terminate — the GUI must survive a failed batch.
             try
             {
+                // #1695-3 (r24-c): discovery preview off the GUI thread. The
+                // scan walks every entry of the submissions directory, so it
+                // belongs beside the other blocking work, not on the event
+                // loop. Preview honesty (#1466) is preserved: refusals are
+                // visible BEFORE the first row is graded (the fingerprint
+                // below takes longer than the scan on any real class), with
+                // the same per-entry names and the report carrying reasons.
+                // Accepted cost (R1-7): runBatchAssessment re-discovers
+                // internally, so the directory is walked twice per batch —
+                // threading the list through BatchAssessmentConfig would
+                // change the read-only teaching_admin backend API; recorded
+                // as CT-C6 for its owner instead. Residual window (R2-4):
+                // discoverSubmissions has no cancel hook, so closing the
+                // dock mid-scan joins this walk in ~TeachingAdminDock for the
+                // scan's duration — the GUI thread no longer freezes during
+                // the scan itself (the #1695-3 defect), but close-time
+                // blocking remains bounded by one directory walk.
+                QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
+                const int discoveredTotal = sicnu::teaching_admin::discoverSubmissions(
+                  cfg.submissionsDir, &discoverySkips ).size();
+                QMetaObject::invokeMethod(
+                  this,
+                  [this, discoveredTotal, discoverySkips]() {
+                    m_batchProgressLabel->setText(
+                      tr( "running 0 / %1" ).arg( discoveredTotal ) );
+                    if ( !discoverySkips.isEmpty() )
+                    {
+                        QStringList names;
+                        for ( const auto &skip : discoverySkips )
+                            names << QFileInfo( skip.path ).fileName();
+                        appendLog( tr( "discovery refused %n entry(s) (skipped, not graded): %1 — "
+                                       "see the report for each refusal's reason and remedy",
+                                       nullptr, discoverySkips.size() )
+                                     .arg( names.join( QStringLiteral( ", " ) ) ) );
+                    }
+                  },
+                  Qt::QueuedConnection );
                 // #1694, off the GUI thread (R2 finding 4): the authority
                 // identity streams the rules file and the full grader
                 // binary — potentially ~100 MB — before any row is graded.

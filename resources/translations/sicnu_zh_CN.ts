@@ -100433,6 +100433,16 @@ Provenance badges: system fact | authoring guidance | inferred
       <translation>运行中 0 / %1</translation>
     </message>
     <message>
+      <source>discovering submissions…</source>
+      <translation>正在扫描提交…</translation>
+    </message>
+    <message numerus="yes">
+      <source>discovery refused %n entry(s) (skipped, not graded): %1 — see the report for each refusal's reason and remedy</source>
+      <translation>
+        <numerusform>发现时拒绝了 %n 个条目（已跳过、未评分）：%1 — 各条目的拒绝原因与补救见报告</numerusform>
+      </translation>
+    </message>
+    <message>
       <source>discovery refused %1 reserved-name file(s) (skipped, not graded): %2 — rename them if they are real submissions; see the report for reasons</source>
       <translation>发现时拒绝了 %1 个保留名文件（已跳过、未评分）：%2 — 如果它们是真实提交请重命名；原因见报告</translation>
     </message>
