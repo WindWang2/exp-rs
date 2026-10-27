@@ -91,7 +91,7 @@ TEST_CASE( "rs:temporal_phenology_multi rejects duplicate acquisition instants",
     ensureApp();
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
-    // Nine scenes (the operator's own minimum), two of them on the same
+    // Nine scenes (the operator requires at least 8), two of them on the same
     // day — keep_all (default) keeps both, the axis-degenerate case the
     // sibling operators already refuse typed.
     const char *dates[] = { "2024-03-01", "2024-03-17", "2024-04-02", "2024-04-18",

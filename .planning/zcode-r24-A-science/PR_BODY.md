@@ -1,14 +1,14 @@
 # fix(r24_a): 遥感科学算法数值正确性 — NoData/负反射率语义、viewshed 环归一化、D8 平地路由、时序守卫与 SAR 角域（RED→GREEN×2，双轮独立评审）
 
 R24-A science 轨。base `master@5fe642ec6339807823aa56612ba94668592a738d`（执行时刻远程事实基线；Open PR=0，144 open issues 已全量再分诊，FIXED_IN_MASTER 重做=0）。
-head `agent/r24_a-20261027T022732Z`（8 个提交）。
+head `agent/r24_a-20261027T022732Z`（15 个提交，含 R1/R2 两轮评审修复）。
 
 ## 修复清单（每项 RED→GREEN×2，详见 `.planning/zcode-r24-A-science/RED_GREEN.md`）
 
 | # | 缺陷 | 修复 |
 |---|---|---|
 | 1 | **#1687**：`bothNormalizable` 的 `a==b&&a<0` 条款把大气校正后合法的等值负反射率对（a=b=−0.01）NaN 化——(a−b)/(a+b)=0/(2a)=0 有定义；`<=−999` 魔数无单一所有者；`computeStatsFromAccumulators` validCount 语义未文档化 | 移除等值负对拒绝；`kUndeclaredSentinelCeiling` 命名常量（spectral_indices 的 isSentinelSample 收编）；新增声明哨兵感知重载（精确匹配、非有限哨兵禁用该侧、截住 −99 等网值之上的声明哨兵）；AccumulatorStats 契约注释 |
-| 2 | **viewshed 环桶按地图单位**（terrain_viewshed.cpp:92 `ceil(d)`）：0.5m 格网轴向偶数格全成孤儿（假不可见楔形）；度单位格网整幅假不可见（中间格不参与遮挡） | 环号归一化为 cell 单位 `ceil(d/minCell)`；轴向内邻必然严格更小环 ⇒ counting sort 语义保持、无需桶内排序（首版排序 +43~54% 开销被证明冗余后移除） |
+| 2 | **viewshed 环桶按地图单位**（terrain_viewshed.cpp:92 `ceil(d)`）：0.5m 格网轴向偶数格全成孤儿（假不可见楔形）；度单位格网整幅假不可见（中间格不参与遮挡） | 环号归一化为 cell 单位 `ceil(d/minCell)`；前驱不变量（对角内邻对 a,b≥1 格必降环、轴上格由轴向内邻覆盖，双评审独立证明）⇒ counting sort 语义保持、无需桶内排序（首版排序 +43~54% 开销据此移除） |
 | 3 | **D8 链不做平地解析**：填洼高原内部全 `dir=0` 汇，火山口汇水面积在溢出口静默截断——推荐的 fill→flow 工作流产出断流河网 | D8 产品在 fill 后 O(8n) 探测平地，有平地才接 `TerrainHydrology::resolveFlats`（与 D∞ 路径同源）；门控避免无平地场景 +81~107% 稳定开销 |
 | 4 | **rs:temporal_phenology_multi 漏重复时间戳守卫**（家族内 decompose/smooth 均有）：keep_all 下退化时间轴直达内核，全像素拒绝原因误报 "degenerate_seasonal_component" | 镜像兄弟算子的类型化拒绝（strictly increasing / duplicate_policy=reject / rs:temporal_regularize），输出创建前失败 |
 | 5 | **SAR 地形算子无角域校验**：flatten/correction 接受 95°（sin>0 产伪 RTC）与 0°（分母归零“成功”产全幅 NoData），与 backscatter/masks 的既有契约不一致 | 两算子补 (0,90) 类型化拒绝（同族消息契约） |

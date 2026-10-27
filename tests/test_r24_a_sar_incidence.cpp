@@ -97,7 +97,9 @@ TEST_CASE( "rs:sar_terrain_flatten rejects non-physical incidence angles",
         CHECK( QFile::exists( dir.filePath( "ctrl.tif" ) ) );
     }
 
-    for ( const double badTheta : { 0.0, -30.0, 90.0, 95.0, 700.0 } )
+    const double kNan = std::numeric_limits<double>::quiet_NaN();
+    const double kInf = std::numeric_limits<double>::infinity();
+    for ( const double badTheta : { 0.0, -30.0, 90.0, 95.0, 700.0, kNan, kInf, -kInf } )
     {
         Json::Value params( Json::objectValue );
         params["input"] = dir.filePath( "sigma0.tif" ).toStdString();
@@ -134,7 +136,9 @@ TEST_CASE( "rs:sar_terrain_correction rejects non-physical incidence angles",
         CHECK( QFile::exists( dir.filePath( "ctrl.tif" ) ) );
     }
 
-    for ( const double badTheta : { 0.0, -30.0, 90.0, 95.0, 700.0 } )
+    const double kNan = std::numeric_limits<double>::quiet_NaN();
+    const double kInf = std::numeric_limits<double>::infinity();
+    for ( const double badTheta : { 0.0, -30.0, 90.0, 95.0, 700.0, kNan, kInf, -kInf } )
     {
         Json::Value params( Json::objectValue );
         params["input"] = dir.filePath( "sigma0.tif" ).toStdString();

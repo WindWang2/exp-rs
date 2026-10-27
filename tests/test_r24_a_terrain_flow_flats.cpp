@@ -56,7 +56,8 @@ std::vector<float> craterDem()
 }
 
 std::vector<float> runFlowProduct( const QTemporaryDir &dir, const std::vector<float> &dem,
-                                   const char *product, const char *outName )
+                                   const char *product, const char *outName,
+                                   Json::Value *runResult = nullptr )
 {
     using namespace sicnu::testing;
     constexpr int kN = 11;
@@ -76,7 +77,10 @@ std::vector<float> runFlowProduct( const QTemporaryDir &dir, const std::vector<f
     params["input"] = demPath.toStdString();
     params["output"] = dir.filePath( outName ).toStdString();
     params["product"] = product;
-    REQUIRE_NOTHROW( op->run( params, context ) );
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, context ) );
+    if ( runResult )
+        *runResult = result;
 
     GdalDatasetWrapper ds;
     REQUIRE( ds.open( dir.filePath( outName ) ) );
@@ -93,8 +97,14 @@ TEST_CASE( "rs:terrain_flow accumulation routes a filled crater to its spill not
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     constexpr int kN = 11;
+    Json::Value run;
     const std::vector<float> acc =
-        runFlowProduct( dir, craterDem(), "flow_accumulation", "acc.tif" );
+        runFlowProduct( dir, craterDem(), "flow_accumulation", "acc.tif", &run );
+    // Observability fields (R2 review P3-2): the crater was resolved, and
+    // the result must say so.
+    CHECK( run["flatResolution"].asString() == "epsilon" );
+    CHECK( run["flatEpsilon"].asDouble() > 0.0 );
+    CHECK( run["raisedCells"].asUInt64() > 0 );
 
     // After filling, the 49-cell bowl is a plateau at 4 m whose only
     // escape is the notch (5,1). Every bowl cell plus the notch itself
@@ -186,5 +196,38 @@ TEST_CASE( "rs:terrain_flow flat against NoData stays a sink, not fabricated flo
             INFO( "island border cell (" << x << "," << y << ") dir="
                                          << dirs[static_cast<size_t>( y ) * kN + x] );
             CHECK( dirs[static_cast<size_t>( y ) * kN + x] == 0.0f );
+        }
+}
+
+TEST_CASE( "rs:terrain_flow flat-free surface reports flatResolution none",
+           "[processing][terrain][flow][r24_a]" )
+{
+    // The gate's false-negative face (R2 review P3-2): a strictly monotone
+    // DEM has no equal-elevation neighbours, so no flat resolution runs and
+    // the result must say "none" — and the accumulation still matches the
+    // plain chain (the slope oracle from test_terrain_foundation5).
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    constexpr int kN = 11;
+    std::vector<float> slope( static_cast<size_t>( kN ) * kN );
+    for ( int y = 0; y < kN; ++y )
+        for ( int x = 0; x < kN; ++x )
+            slope[static_cast<size_t>( y ) * kN + x] = static_cast<float>( 3 * x + y );
+    Json::Value run;
+    const std::vector<float> acc =
+        runFlowProduct( dir, slope, "flow_accumulation", "acc.tif", &run );
+    CHECK( run["flatResolution"].asString() == "none" );
+    CHECK( run.isMember( "raisedCells" ) == false );
+    // D8 oracle for z = 3x + y: every interior cell drains due WEST (slope
+    // 3 beats every other direction), so row x gets kN - x; the west
+    // column then drains NORTH (the only descent left) and funnels the
+    // whole grid into (0,0): column cell y carries 11 * (11 - y).
+    for ( int y = 0; y < kN; ++y )
+        for ( int x = 0; x < kN; ++x )
+        {
+            const float expected = ( x == 0 ) ? static_cast<float>( kN * ( kN - y ) )
+                                              : static_cast<float>( kN - x );
+            CHECK( acc[static_cast<size_t>( y ) * kN + x]
+                   == Catch::Approx( expected ).margin( 1e-6f ) );
         }
 }

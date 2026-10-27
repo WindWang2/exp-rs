@@ -96,9 +96,11 @@ bool viewshedR3( const float *dem, int width, int height, float nodata,
             za[i] = static_cast<float>( adjusted );
             dist[i] = static_cast<float>( d );
             // Extreme cell-size anisotropy could push the cell-unit ring
-            // past int range (16384^2 cells at 1e4:1 aspect); refuse
-            // rather than wrap (R1 review P3-2).
-            if ( d / minCell > static_cast<double>( std::numeric_limits<int>::max() ) - 2.0 )
+            // past int range (16384^2 cells at 1e4:1 aspect). Cap well
+            // below INT_MAX so the ringStart allocation stays in the
+            // operator's memory budget instead of throwing bad_alloc from
+            // inside the counting sort (R1 P3-2 / R2 P3-3).
+            if ( d / minCell > 1.0e8 )
                 return false;
             const int r = static_cast<int>( std::ceil( d / minCell ) );
             ring[i] = r;

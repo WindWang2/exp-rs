@@ -10,7 +10,7 @@
 | test_r24_a_nodata_semantics | All tests passed — 42 assertions / 6 cases（#1687 内核 + 哨兵重载 + rs:ndvi 生产路径负等值对） |
 | test_r24_a_temporal_pins | All tests passed — 14 / 3（whittaker n==3/4 金值 pin + 退化 n<3） |
 | test_r24_a_terrain_viewshed | All tests passed — 25 / 4（亚米/度格网全可见 oracle + 度格网墙遮挡 + 单元格网回归锚） |
-| test_r24_a_terrain_flow_flats | All tests passed — 16 / 2（火口 D8 溢出口 acc≥50 + 碗内零汇，算子级真实 GDAL E2E） |
+| test_r24_a_terrain_flow_flats | All tests passed — 162 / 4（火口 D8 溢出口 acc≥50 + 碗内零汇 + 可观测性 JSON + NoData 岛钉子 + 无平地 D8 汇流 oracle；R2 轮口径） |
 | test_r24_a_temporal_guards | All tests passed — 15 / 1（重复时间戳类型化拒绝 + 无半成品输出） |
 | test_r24_a_sar_incidence | All tests passed — 22 / 2（35° 对照成功；0/−30/90/95/700 拒绝；无半成品） |
 | test_r24_a_help_drift | All tests passed — 6 / 2（93 目录键 ↔ 三提供者注册名；活键返回目录文案） |
@@ -46,3 +46,7 @@
 ## R1 修复轮复跑（P1-1/P2-1/P3 落地后，两轮）
 
 12 靶 + 13 靶邻域全部两轮 All tests passed（含翻转钉子后的 test_image_fusion、新增末位重复用例的 temporal_guards、新增 NoData 岛钉子的 flow_flats、float dist 回退后的 viewshed/perf）。日志 r1fix1_/r1fix2_*。
+
+## R2 修复轮复跑（P3 落地后，两轮）
+
+flow_flats（162/4，新增可观测性断言 + 无平地用例）、sar_incidence（badTheta 扩 NaN/±Inf）、terrain_viewshed、temporal_guards、既有 test_terrain_viewshed 全部两轮 All tests passed。日志 r2fix1_/r2fix2_*。

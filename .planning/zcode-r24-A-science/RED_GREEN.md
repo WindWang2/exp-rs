@@ -22,7 +22,7 @@
 ## 修复（6 项，全部最小外科手术）
 
 1. **#1687**（math_utils.h/.cpp + spectral_indices.cpp）：移除 `a==b&&a<0` 等值负对拒绝（(a−b)/(a+b)=0/(2a)=0 有定义）；`kUndeclaredSentinelCeiling` 命名常量单一所有者（spectral_indices isSentinelSample 收编）；新增哨兵感知重载 `bothNormalizable(a,b,ndA,ndB)` / `normalizedDifference(…,ndA,ndB)`（精确匹配声明哨兵，非有限哨兵禁用该侧）；AccumulatorStats validCount 契约文档化。
-2. **viewshed 环归一化**（terrain_viewshed.cpp）：环号从 ceil(地图距离) 改为 ceil(d/minCell)（cell 单位）；修复亚米格假不可见楔形与度格网全幅假不可见。桶内精确排序（首版 +43~54% 开销）被证明冗余后移除——轴向内邻必然严格更小环，性能回到基线之下。
+2. **viewshed 环归一化**（terrain_viewshed.cpp）：环号从 ceil(地图距离) 改为 ceil(d/minCell)（cell 单位）；修复亚米格假不可见楔形与度格网全幅假不可见。桶内精确排序（首版 +43~54% 开销）被证明冗余后移除——前驱不变量（对角内邻对 a,b≥1 格必降环、轴上格由轴向内邻覆盖；R1/R2 评审独立证明）保证 counting sort 语义，性能回到基线之下。
 3. **D8 平地解析门控接入**（rs_terrain_flow_operator.cpp）：D8 产品链在 fill 后探测平地（O(8n) 扫描），有平地才跑 resolveFlats（避免无平地场景 +81~107% 的稳定开销）；火口汇水面积正确路由到溢出口。
 4. **phenology_multi 重复时间戳守卫**（rs_temporal_phenology_multi_operator.cpp）：镜像 decompose/smooth 的类型化拒绝（"strictly increasing … duplicate_policy=reject … rs:temporal_regularize"），输出创建前失败。
 5. **SAR 角域校验**（rs_sar_terrain_flatten/correction_operator.cpp）：incidenceDeg∈(0,90) 区间拒绝，消息与 masks/backscatter 同契约；修掉 95° 伪 RTC 与 0° 全幅 NoData"成功"。
