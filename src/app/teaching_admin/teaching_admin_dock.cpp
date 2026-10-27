@@ -450,6 +450,11 @@ void TeachingAdminDock::onRunBatch()
                 // visible BEFORE the first row is graded (the fingerprint
                 // below takes longer than the scan on any real class), with
                 // the same per-entry names and the report carrying reasons.
+                // Accepted cost (R1-7): runBatchAssessment re-discovers
+                // internally, so the directory is walked twice per batch —
+                // threading the list through BatchAssessmentConfig would
+                // change the read-only teaching_admin backend API; recorded
+                // as CT-C6 for its owner instead.
                 QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
                 const int discoveredTotal = sicnu::teaching_admin::discoverSubmissions(
                   cfg.submissionsDir, &discoverySkips ).size();

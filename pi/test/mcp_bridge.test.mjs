@@ -49,7 +49,12 @@ async function canarySpawns() {
     // e.g. a real bridge success-path regression on a POSIX CI host — is
     // rethrown so the suite fails loudly instead of skipping green.
     const msg = String(err?.message ?? err);
-    if (!/EFTYPE|ENOENT|EACCES|EPIPE|Failed to launch|spawn/i.test(msg))
+    // Launch-CLASS failures only: the bridge's own "Failed to launch"
+      // prefix, or the Windows shebang EFTYPE. Everything else — a child
+      // that spawned then died, a missing/renamed fixture (ENOENT), an
+      // EPIPE from a real regression — is rethrown: the suite must fail
+      // loudly, never skip green on a broken test fixture or bridge.
+      if (!/^Failed to launch|EFTYPE/i.test(msg))
       throw err;
     spawnWorks = false;
     console.log(`canary: fake MCP server cannot spawn on this host: ${msg}`);

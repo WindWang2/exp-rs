@@ -381,17 +381,19 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
   // --- charts (live ChartRegistry — the registry cartography:chart_* mutates)
   // The tool surface has always promised charts in this document (see the
   // workspace_state description pinned in tests/surface_diff_snapshot.json);
-  // the registry is the single authority, read under its own mutex. Bounded
-  // by the registry's declared summary cap; binding data is not projected —
-  // agents fetch a chart's spec via cartography:chart_get.
+  // the registry is the single authority. Summaries are projected under the
+  // registry's own mutex (listChartSummaries — no full-spec deep copies), so
+  // a capture costs O(min(N, cap)) small objects regardless of registry
+  // size. Binding data is not projected — agents fetch a chart's spec via
+  // cartography:chart_get. Truncation is reported like assets_truncated.
   Json::Value charts( Json::arrayValue );
   {
-    const Json::Value all = cartography::ChartRegistry::instance().listCharts();
-    int chartCount = 0;
-    for ( const Json::Value &chart : all )
+    int totalCharts = 0;
+    const Json::Value summaries =
+      cartography::ChartRegistry::instance().listChartSummaries(
+        cartography::kMaxWorkspaceSummaryCharts, &totalCharts );
+    for ( const Json::Value &chart : summaries )
     {
-      if ( chartCount++ >= cartography::kMaxWorkspaceSummaryCharts )
-        break;
       Json::Value c( Json::objectValue );
       const QString chartId = QString::fromStdString( chart["id"].asString() );
       c["id"] = entities.idFor( QStringLiteral( "chart" ), chartId ).toStdString();
@@ -400,6 +402,7 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
       c["title"] = chart["title"].asString();
       charts.append( c );
     }
+    body["charts_truncated"] = totalCharts > cartography::kMaxWorkspaceSummaryCharts;
   }
   body["charts"] = charts;
 

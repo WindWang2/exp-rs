@@ -124,6 +124,55 @@ TEST_CASE( "workspace state charts projection stays bounded and ignores invalid 
   const Json::Value doc = sicnu::agent::buildWorkspaceState( nullptr, nullptr );
   CHECK( doc["charts"].size() ==
          sicnu::agent::cartography::kMaxWorkspaceSummaryCharts );
+  // Truncation is reported honestly (mirrors assets_truncated).
+  CHECK( doc["charts_truncated"].asBool() == true );
+
+  charts.clear();
+
+  const Json::Value small = sicnu::agent::buildWorkspaceState( nullptr, nullptr );
+  CHECK( small["charts_truncated"].asBool() == false );
+}
+
+TEST_CASE( "chart registry rejects non-string titles and never reuses ids",
+           "[agent][workspace_state][r24_c]" )
+{
+  QgsProject::instance()->clear();
+  sicnu::agent::WorkspaceEntityRegistry::instance().clearInProcess();
+  auto &charts = sicnu::agent::cartography::ChartRegistry::instance();
+  charts.clear();
+
+  // R1-2 negative control: a numeric/structured title must be refused at the
+  // registry door — the workspace summary projects titles via asString() and
+  // must never see a non-string there.
+  QString error;
+  Json::Value numericTitle = makeInlineBarChart( "ok" );
+  numericTitle["title"] = 42;
+  CHECK( charts.createChart( numericTitle, &error ).isEmpty() );
+  Json::Value objectTitle = makeInlineBarChart( "ok" );
+  objectTitle["title"] = Json::Value( Json::objectValue );
+  CHECK( charts.createChart( objectTitle, &error ).isEmpty() );
+  CHECK( charts.listCharts().size() == 0 );
+
+  // A chart WITHOUT a title is legal (title optional) and projects as "".
+  Json::Value untitled = makeInlineBarChart( "placeholder" );
+  untitled.removeMember( "title" );
+  const QString untitledId = charts.createChart( untitled, &error );
+  REQUIRE( !untitledId.isEmpty() );
+  {
+    const Json::Value doc = sicnu::agent::buildWorkspaceState( nullptr, nullptr );
+    REQUIRE( doc["charts"].size() == 1 );
+    CHECK( doc["charts"][0]["title"].asString() == "" );
+  }
+
+  // R1-4: deleting the tail chart must not let the NEXT create reuse its id
+  // for an unrelated chart (entity referents stay meaningful).
+  const QString second = charts.createChart( makeInlineBarChart( "second" ), &error );
+  REQUIRE( second == QStringLiteral( "chart-2" ) );
+  REQUIRE( charts.removeChart( second ) );
+  const QString third = charts.createChart( makeInlineBarChart( "third" ), &error );
+  CHECK( third == QStringLiteral( "chart-3" ) ); // NOT a reused "chart-2"
+  const QString fourth = charts.createChart( makeInlineBarChart( "fourth" ), &error );
+  CHECK( fourth == QStringLiteral( "chart-4" ) );
 
   charts.clear();
 }

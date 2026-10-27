@@ -85,7 +85,12 @@ test("a >32 MiB unbounded line kills the child; the next request recovers", asyn
       await probe.request("tools/call", {});
     } catch (err) {
       const msg = String(err?.message ?? err);
-      if (!/EFTYPE|ENOENT|EACCES|EPIPE|Failed to launch|spawn/i.test(msg))
+      // Launch-CLASS failures only: the bridge's own "Failed to launch"
+      // prefix, or the Windows shebang EFTYPE. Everything else — a child
+      // that spawned then died, a missing/renamed fixture (ENOENT), an
+      // EPIPE from a real regression — is rethrown: the suite must fail
+      // loudly, never skip green on a broken test fixture or bridge.
+      if (!/^Failed to launch|EFTYPE/i.test(msg))
         throw err;
       canSpawn = false;
       console.log(`canary: fake MCP server cannot spawn on this host: ${msg}`);
