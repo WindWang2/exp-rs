@@ -12,3 +12,4 @@
 | R6 邻域回归 | 13 族 | 12 绿+test_image_fusion 冲突(r21-A M3 钉旧规则)→ dNBR 具名缝方案(legacyNegativeSentinelFree)→全绿;共 24 族 | 见 TEST_RESULTS | M3 冲突解决 | PASS | R1 |
 | R7 R1 评审 | 独立复核 | R1(隔离上下文):4 变异 RED 复现+2 独立反例(z=x²y 曲率 9.6、南极 315°)+24 二进制全绿;APPROVE(1P2:seam 无端到端钉) | REVIEW_R1.md | P2 修复+P3 4 闭 2 登记 | PASS | R2 |
 | R8 R2 评审 | 不继承 R1 | R2:18 对抗格网不变量实测(17,280 格 0 破)、带缘跳变 0.28°、VCA 退化 20 个数量级余量、NDVI(-9999)→+1.00006 反例(R13 登记);2 变异 RED;APPROVE | REVIEW_R2.md | 注释精化+R13 披露 | PASS | 终态文档 |
+| R9 交付 | O0-O8 收口 | merge master(5fe642e,仅 .gitignore 并集;tests/CMakeLists.txt 与 origin/master 逐字节一致)→12 族复跑全绿→push→PR #1722(OPEN 非 draft) | gh pr view 复核 | 交付完成 | PASS | 轨道收口 |
