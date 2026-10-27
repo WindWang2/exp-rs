@@ -1638,9 +1638,14 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       // path, so the output path only ever holds a COMPLETE raster — a crash
       // or failure leaves no truncated file that could look like a result.
       const QFileInfo outFi( QString::fromStdString( outputPath ) );
-      stagePath = QString::fromStdString( outputPath ) + QStringLiteral( ".tmp~" );
       QDir().mkpath( outFi.absolutePath() );
-      QFile::remove( stagePath );
+      // R24-B: the stage is unique per attempt ("<final>.<pid>x<n>.tmp~").
+      // The fixed "<final>.tmp~" let a concurrent run on the same output
+      // path QFile::remove + recreate the stage mid-write — the occupancy
+      // fence only covers the swap, not the staged write. The sweep keeps
+      // crashed attempts self-healing like the fixed name's pre-clean did.
+      sweepStaleStagePaths( QString::fromStdString( outputPath ) );
+      stagePath = uniqueStagePath( QString::fromStdString( outputPath ) );
       const int writerBands = mode == RasterOutputMode::Probability ? totalBands : writeBands;
       writer = std::make_unique<GdalStreamingOutput>( stagePath,
                                                       rasterW, rasterH, writerBands, writeType,
@@ -3772,9 +3777,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     if ( !writer )
     {
       const QFileInfo outFi( QString::fromStdString( outputPath ) );
-      stagePath = QString::fromStdString( outputPath ) + QStringLiteral( ".tmp~" );
       QDir().mkpath( outFi.absolutePath() );
-      QFile::remove( stagePath );
+      // R24-B: unique per attempt — see the single-input lane's note; the
+      // staged-write window is not covered by the swap-time fence.
+      sweepStaleStagePaths( QString::fromStdString( outputPath ) );
+      stagePath = uniqueStagePath( QString::fromStdString( outputPath ) );
       writer = std::make_unique<GdalStreamingOutput>( stagePath, rasterW, rasterH, totalBands,
                                                       /*GDT_Float32*/ 6,
                                                       primary.geoTransform(), primary.projection() );

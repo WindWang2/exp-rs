@@ -31,10 +31,23 @@ bool checkEnabled( const LeakageAuditConfig &config, const QString &name,
 }
 
 /// Grid bucketing for spatial pair checks: bucket index along one axis for
-/// the caller-chosen reach-consistent cell size.
-qint64 bucketOf( double x, double cell )
+/// the caller-chosen reach-consistent cell size. Checked (R24-B): the
+/// `qint64(floor(...))` cast is undefined behavior for quotients outside
+/// the integer range — an extreme-but-parseable WKT coordinate (1e19)
+/// wrapped to INT64_MIN on x64, so extreme samples collapsed into one
+/// garbage bucket and the spatial pair checks silently NEVER compared them
+/// ("clean" with the check listed as run). Same guard as split.cpp's
+/// blockIndexValid (#875): the caller must exclude and count what cannot
+/// be bucketed.
+constexpr double kMaxBucketIndex = 4611686018427387904.0; // 2^62
+
+bool bucketOf( double x, double cell, qint64 &bucket )
 {
-    return qint64( std::floor( x / cell ) );
+    const double quotient = x / cell;
+    if ( !std::isfinite( quotient ) || std::fabs( quotient ) >= kMaxBucketIndex )
+        return false;
+    bucket = qint64( std::floor( quotient ) );
+    return true;
 }
 
 void addFinding( LeakageReport &report, LeakageKind kind, const AuditSample &a,
@@ -168,6 +181,8 @@ QJsonObject LeakageReport::summary() const
                     QJsonArray::fromStringList( m_auditedChecks ) );
     if ( m_sampleCount > 0 && m_digestUnknownCount >= 0 )
         summary.insert( QStringLiteral( "digest_unknown_count" ), m_digestUnknownCount );
+    if ( m_unbucketedCount > 0 )
+        summary.insert( QStringLiteral( "unbucketed_count" ), m_unbucketedCount );
     QJsonObject byKind;
     QJsonObject bySeverity;
     for ( const LeakageFinding &finding : m_findings )
@@ -203,6 +218,8 @@ QJsonObject LeakageReport::toJson() const
     json.insert( QStringLiteral( "sample_count" ), m_sampleCount );
     if ( m_digestUnknownCount >= 0 )
         json.insert( QStringLiteral( "digest_unknown_count" ), m_digestUnknownCount );
+    if ( m_unbucketedCount >= 0 )
+        json.insert( QStringLiteral( "unbucketed_count" ), m_unbucketedCount );
     return json;
 }
 
@@ -228,6 +245,9 @@ sicnu::data::Result<LeakageReport> LeakageReport::fromJson( const QJsonObject &j
     if ( json.contains( QStringLiteral( "digest_unknown_count" ) ) )
         report.m_digestUnknownCount =
             int( json.value( QStringLiteral( "digest_unknown_count" ) ).toInteger() );
+    if ( json.contains( QStringLiteral( "unbucketed_count" ) ) )
+        report.m_unbucketedCount =
+            int( json.value( QStringLiteral( "unbucketed_count" ) ).toInteger() );
     for ( const QJsonValue &value : json.value( QStringLiteral( "findings" ) ).toArray() )
     {
         auto finding = LeakageFinding::fromJson( value.toObject() );
@@ -274,6 +294,10 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             ++digestUnknown;
     }
     report.setDigestUnknownCount( digestUnknown );
+    // R24-B: samples excluded from the spatial grid because their center
+    // quotient cannot be cast (see bucketOf) — quantified like
+    // digestUnknown so "clean" never overstates coverage.
+    int unbucketedCount = 0;
 
     // The checks the evidence could support; a named-but-unrunnable check is
     // dropped from auditedChecks (the report never claims it ran).
@@ -544,11 +568,21 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             const AuditSample &sample = samples.at( i );
             if ( sample.input.validBounds )
             {
-                const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0,
-                                            cellX );
-                const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0,
-                                            cellY );
-                buckets[qMakePair( cx, cy )].append( i );
+                qint64 cx = 0;
+                qint64 cy = 0;
+                // R24-B: unbucketable centers are EXCLUDED from the grid and
+                // counted (below) — casting them anyway is UB and used to
+                // collapse extreme samples into one garbage bucket that the
+                // pair scan then silently never compared.
+                if ( bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cellX, cx )
+                     && bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0, cellY, cy ) )
+                {
+                    buckets[qMakePair( cx, cy )].append( i );
+                }
+                else
+                {
+                    ++unbucketedCount;
+                }
             }
         }
         for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it )
@@ -652,6 +686,7 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                        return a.sampleB < b.sampleB;
                    return leakageKindToString( a.kind ) < leakageKindToString( b.kind );
                } );
+    report.setUnbucketedCount( unbucketedCount );
     return Result::success( report );
 }
 
