@@ -1,5 +1,7 @@
 // tests/test_agent_ops_ui_smoke.cpp — offscreen Control Center smoke
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
+#include <algorithm>               // std::min for the clamped reap window
 
 #include "app/agent_ops/agent_ops_control_center_panel.h"
 #include "agent_ops/ops_projection.h"
@@ -69,7 +71,12 @@ TEST_CASE("agent_ops UI dock: startWorker does not block on prior worker", "[age
 
     // Async reap is ~0ms; a blocking join of the uncanceled worker is
     // >=500ms. 200ms rejects the second regime with margin (see above).
-    CHECK(elapsed < 200);
+    // #1699: the window scales for sanitizer/loaded lanes but is clamped
+    // below the 500ms blocking regime so it can never classify a blocking
+    // join as async at any scale; Release enforces the 200ms base.
+    const auto reapWindowMs = std::min<long long>(
+        sicnu::testsupport::wallClockBudgetMs(200), 400);
+    CHECK(elapsed < reapWindowMs);
     dock.joinWorker();
     CHECK(runs.load() >= 1);
 }

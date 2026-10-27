@@ -9,6 +9,7 @@
 // identity ONNX fixture; synthetic rasters <= 512 px, except the sparse
 // 100k x 100k logical-extent case which never materializes pixels.
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 #include "support/bounded_wait.h"
 #include <catch2/matchers/catch_matchers_string.hpp>
 
@@ -997,7 +998,10 @@ TEST_CASE( "in-flight model acquisition can be cancelled without hanging (#1455)
     std::chrono::steady_clock::now() - start ).count();
 
   CHECK( waiterReturned.load() );
-  CHECK( elapsed < 500 );
+  // #1699: waiter-return bound, scaled for sanitizer/loaded lanes (Release
+  // enforces the 500ms base; the structural coverage is waiterReturned +
+  // the cancelled-error check).
+  CHECK( elapsed < sicnu::testsupport::wallClockBudgetMs( 500 ) );
   CHECK( waiterError.find( "cancelled" ) != std::string::npos );
 
   // Unblock the loader and join threads

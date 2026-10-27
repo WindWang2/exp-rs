@@ -8,6 +8,7 @@
 // DOMINATE the simulator on every seed; the simulator never calls the
 // planner. Budget/refuse/leak behavior asserts through public APIs only.
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
 
 #include "runtime/chunk/memory_planner.h"
 #include "runtime/exec/execution_governor.h"
@@ -373,7 +374,10 @@ TEST_CASE( "RSS watermark throttling blocks at high watermark and unblocks at lo
         gov.throttleWait( nullptr, std::chrono::milliseconds( 5 ) );
         const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0 ).count();
-        REQUIRE( elapsedMs < 500 );
+        // #1699: hang-guard, scaled for sanitizer/loaded lanes — Release
+        // enforces the 500ms base; the blocking oracle is the structural
+        // section below (entered/unblocked flags), not this clock.
+        REQUIRE( elapsedMs < sicnu::testsupport::wallClockBudgetMs( 500 ) );
     }
 
     SECTION( "At or above high watermark: throttleWait blocks until RSS drops below low watermark" )
