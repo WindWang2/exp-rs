@@ -2047,7 +2047,7 @@ TEST_CASE( "bundle import refuses a manifest run_id that is not a valid RunId",
     }
 }
 
-TEST_CASE( "bundle import names the lineage slice it cannot re-attach",
+TEST_CASE( "bundle import re-attaches the direction-preserving lineage slice",
            "[experiment][repro][import][lineage]" )
 {
     // The exporter ALWAYS writes provenance.json — the lineage slice

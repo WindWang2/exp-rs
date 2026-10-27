@@ -126,7 +126,9 @@ TEST_CASE( "commitVersion vs addSourceAssetsToDraft cannot both succeed "
             const auto result = store->commitVersion( versionId );
             out->ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().first().code;
+                out->code = result.diagnostics().isEmpty()
+                    ? QStringLiteral( "unknown" )
+                    : result.diagnostics().first().code;
         };
         auto assetter = [ & ]( DatasetStore *store, std::atomic<int> &gate, RacerOutcome *out )
         {
@@ -136,7 +138,9 @@ TEST_CASE( "commitVersion vs addSourceAssetsToDraft cannot both succeed "
             const auto result = store->addSourceAssetsToDraft( versionId, { racerAsset } );
             out->ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().first().code;
+                out->code = result.diagnostics().isEmpty()
+                    ? QStringLiteral( "unknown" )
+                    : result.diagnostics().first().code;
         };
 
         std::thread ta( committer, &storeA, std::ref( arrived ), &commitOut );
@@ -241,7 +245,9 @@ TEST_CASE( "addSamples vs commitVersion: samples never land in a committed "
             const auto result = store->commitVersion( versionId );
             out->ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().first().code;
+                out->code = result.diagnostics().isEmpty()
+                    ? QStringLiteral( "unknown" )
+                    : result.diagnostics().first().code;
         };
         auto sampler = [ & ]( DatasetStore *store, std::atomic<int> &gate, RacerOutcome *out )
         {
@@ -251,7 +257,9 @@ TEST_CASE( "addSamples vs commitVersion: samples never land in a committed "
             const auto result = store->addSamples( { sample } );
             out->ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().first().code;
+                out->code = result.diagnostics().isEmpty()
+                    ? QStringLiteral( "unknown" )
+                    : result.diagnostics().first().code;
         };
 
         std::thread ta( committer, &storeA, std::ref( arrived ), &commitOut );

@@ -1151,7 +1151,14 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersionImpl(
         update.bind( 2, fingerprint );
         update.bind( 3, QDateTime::currentMSecsSinceEpoch() );
         update.bind( 4, current->versionId() );
-        if ( !update.step() || update.changes( m_impl->db ) != 1 )
+        if ( !update.step() )
+        {
+            const QString message = update.error( m_impl->db );
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               message ) );
+        }
+        if ( update.changes( m_impl->db ) != 1 )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.conflict" ),

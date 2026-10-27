@@ -134,18 +134,18 @@ TEST_CASE( "a failed schema-gate read refuses open instead of stamping the "
     CHECK( store.isReadOnly() );
   }
 
-  // Corrupt the interior so the gate SELECT itself FAILS (mid-file page
-  // damage, away from the header): open must now REFUSE — the old code
-  // fell through to the fresh-store path and INSERT OR REPLACEd the 99
-  // stamp with its own, letting this binary write v1 rows into a layout
-  // it does not understand.
+  // Corrupt the page the gate SELECT actually traverses (R2 review: the
+  // first attempt scribbled at size/2, which lands in a table the gate never
+  // reads — the SELECT still succeeded and the test asserted against the
+  // forward-tolerance branch instead). Page 2 is ds_meta's root page in a
+  // fresh store (page 1 = sqlite_master root); smashing it makes
+  // "SELECT value FROM ds_meta" fail with SQLITE_CORRUPT.
   {
     QFile file( dbPath );
     REQUIRE( file.open( QIODevice::ReadWrite ) );
-    const qint64 size = file.size();
-    REQUIRE( size > 4096 );
-    REQUIRE( file.seek( size / 2 ) );
-    QByteArray garbage( 512, '\x7f' );
+    REQUIRE( file.size() >= 3 * 4096 );
+    REQUIRE( file.seek( 4096 ) );
+    QByteArray garbage( 4096, '\x7f' );
     REQUIRE( file.write( garbage ) == garbage.size() );
     file.close();
   }

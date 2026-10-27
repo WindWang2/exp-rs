@@ -220,7 +220,10 @@ void sweepStaleStagePaths( const QString &finalPath )
   // with a dot and is excluded from plain QDir::Files listings (R1 review).
   const QStringList stale = dir.entryList(
     { info.fileName() + QStringLiteral( ".*.tmp~" ),
-      QStringLiteral( ".%1.*.tmp~" ).arg( info.fileName() ) },
+      QStringLiteral( ".%1.*.tmp~" ).arg( info.fileName() ),
+      // Morphology intermediates ride the unique stage name with their own
+      // ".morph~" tail (R2 review) — crash litter self-heals with the rest.
+      info.fileName() + QStringLiteral( ".*.morph~" ) },
     QDir::Files | QDir::Hidden );
   const QDateTime cutoff = QDateTime::currentDateTime().addDays( -1 );
   for ( const QString &name : stale )
