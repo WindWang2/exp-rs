@@ -22,3 +22,4 @@
 | 11 | 10-27 15:2x | R2 APPROVE-WITH-FIXES（P2×2+P3×4）→ 闭环 d0e25e5099（ensemble 共享门+ctest 前缀） | 变异证明+125/16 | 通过 | 确认轮 |
 | 12 | 10-27 16:0x | R2 确认轮发现 N1（ensemble 门缺 mode 守卫）→ fc21d0d242 修复+回归钉 | 127/16 全绿 | 通过 | merge master |
 | 13 | 10-27 16:1x | master 前移→merge 5fe642ec63（union .gitignore/tests CMake，8/8 兄弟块核验）；merge 后全族复跑全绿 | 本文 | 通过 | push+PR |
+| 14 | 10-27 16:3x | push + PR #1723 创建（OPEN 非 draft，base=master，11 commits，HEAD c43644a210 已含 master 4c5b50be3c） | gh pr view 实证 | 通过 | 闭环 |
