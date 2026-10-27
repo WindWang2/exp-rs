@@ -139,6 +139,12 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     const int band = getInt(params, "band", 1);
     const double incidenceDeg = getDouble(params, "incidenceDeg", 30.0);
     const double headingDeg = getDouble(params, "headingDeg", 0.0);
+    // Physical domain (0, 90) degrees — the refusal rs:sar_backscatter and
+    // rs:sar_terrain_masks already apply (see flatten's twin note; R24-A).
+    if (!(incidenceDeg > 0.0 && incidenceDeg < 90.0))
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "incidenceDeg must be in (0, 90) degrees, got " +
+                                  std::to_string(incidenceDeg));
     const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirections, "right");
     // #785: the antenna look azimuth is orthogonal to the flight heading;
     // derive it from the antenna side unless the boresight is given

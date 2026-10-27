@@ -16881,6 +16881,151 @@ if(UNIX AND NOT APPLE)
 endif()
 # --- end R23-E WP5 registration ---
 
+# --- BEGIN R24-A (zcode-r24-A-science) registration ---
+# R24-A science track: #1687 nodata/negative-reflectance semantics for the
+# shared normalized-difference kernel family.
+qt_add_executable(test_r24_a_nodata_semantics test_r24_a_nodata_semantics.cpp)
+target_link_libraries(test_r24_a_nodata_semantics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r24_a_nodata_semantics)
+target_include_directories(test_r24_a_nodata_semantics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_nodata_semantics)
+
+# R24-A WP-A2: Whittaker n==3/n==4 golden pins (audit mis-flag disproven;
+# the pins document the verified-correct aliased-diagonal values).
+qt_add_executable(test_r24_a_temporal_pins test_r24_a_temporal_pins.cpp)
+target_link_libraries(test_r24_a_temporal_pins PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r24_a_temporal_pins PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_temporal_pins)
+
+# R24-A WP-A4: viewshed ring bucketing vs cell size (sub-metre + degree grids).
+qt_add_executable(test_r24_a_terrain_viewshed test_r24_a_terrain_viewshed.cpp)
+target_link_libraries(test_r24_a_terrain_viewshed PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r24_a_terrain_viewshed PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_terrain_viewshed)
+
+# R24-A WP-A4: D8 chain resolves filled flats (crater oracle, operator E2E).
+qt_add_executable(test_r24_a_terrain_flow_flats test_r24_a_terrain_flow_flats.cpp)
+target_link_libraries(test_r24_a_terrain_flow_flats PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r24_a_terrain_flow_flats)
+target_include_directories(test_r24_a_terrain_flow_flats PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_terrain_flow_flats)
+
+# R24-A WP-A2: rs:temporal_phenology_multi duplicate-instant typed guard.
+qt_add_executable(test_r24_a_temporal_guards test_r24_a_temporal_guards.cpp)
+target_link_libraries(test_r24_a_temporal_guards PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r24_a_temporal_guards)
+target_include_directories(test_r24_a_temporal_guards PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_temporal_guards)
+
+# R24-A WP-A3: SAR terrain flatten/correction incidence-angle domain gate.
+qt_add_executable(test_r24_a_sar_incidence test_r24_a_sar_incidence.cpp)
+target_link_libraries(test_r24_a_sar_incidence PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r24_a_sar_incidence)
+target_include_directories(test_r24_a_sar_incidence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_sar_incidence)
+
+# R24-A WP-A7: help-catalog key <-> registered-name drift gate (#1646-5
+# second half: the rot guard the issue asked for).
+qt_add_executable(test_r24_a_help_drift test_r24_a_help_drift.cpp)
+target_link_libraries(test_r24_a_help_drift PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+)
+target_include_directories(test_r24_a_help_drift PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_help_drift)
+
+# R24-A WP-A8: temporal-chain E2E (dated stack -> rs:temporal_smooth ->
+# reopenable stacked raster; reproducibility oracle).
+qt_add_executable(test_r24_a_e2e_temporal test_r24_a_e2e_temporal.cpp)
+target_link_libraries(test_r24_a_e2e_temporal PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r24_a_e2e_temporal)
+target_include_directories(test_r24_a_e2e_temporal PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_e2e_temporal)
+
+# R24-A WP-A6: performance evidence harness (timings printed, no gate).
+qt_add_executable(test_r24_a_perf_viewshed test_r24_a_perf_viewshed.cpp)
+target_link_libraries(test_r24_a_perf_viewshed PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_r24_a_perf_viewshed PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r24_a_perf_viewshed)
+# --- END R24-A registration ---
+
+# ── R23-B (zcode r23-b) registration blocks (union-merged with r23-D/E and r24_a) ──
 # ── R23-B (zcode r23-b) registration blocks (union-merged with r23-D/E) ──
 # ── R23-B (zcode r23-b): provider TU stub-compile gate (#1576/#1577) ──
 # Append-only registration block for this track (docs: .planning/zcode-r23-B).

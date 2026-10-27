@@ -105,6 +105,16 @@ const QHash<QString, Entry> &catalog()
 }
 } // namespace
 
+QStringList SicnuAlgorithmHelp::catalogKeys()
+{
+  QStringList keys;
+  keys.reserve( catalog().size() );
+  for ( auto it = catalog().constBegin(); it != catalog().constEnd(); ++it )
+    keys.append( it.key() );
+  keys.sort();
+  return keys;
+}
+
 QString SicnuAlgorithmHelp::shortDescription( const QString &algorithmName, const QString &displayName )
 {
   const auto it = catalog().constFind( algorithmName );
