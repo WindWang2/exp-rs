@@ -47,4 +47,51 @@ void cellSizesMetres( const GdalDatasetWrapper &ds, double *csx, double *csy )
     *csy = y;
 }
 
+std::optional<double> sceneLatitudeDeg( const GdalDatasetWrapper &ds )
+{
+    const QString wkt = ds.projection();
+    if ( wkt.isEmpty() )
+        return std::nullopt;
+
+    const std::array<double, 6> gt = ds.geoTransform();
+    if ( std::abs( gt[1] ) <= 0.0 || std::abs( gt[5] ) <= 0.0 )
+        return std::nullopt;
+
+    double latitude = 0.0;
+    if ( isGeographicCrs( wkt ) )
+    {
+        // Angular CRS: the centre row's Y IS the latitude.
+        latitude = MathUtils::sceneCentreLatitudeDeg( gt, ds.height() );
+    }
+    else
+    {
+        // Projected CRS: transform the raster centre to WGS84. Same
+        // import/transform/release discipline as MosaicPlanner's footprint
+        // envelope (src/processing/algorithms/mosaic_plan.cpp).
+        OGRSpatialReference src;
+        const QByteArray wktBytes = wkt.toUtf8();
+        if ( src.importFromWkt( wktBytes.constData() ) != OGRERR_NONE )
+            return std::nullopt;
+        OGRSpatialReference dst;
+        if ( dst.SetFromUserInput( "EPSG:4326" ) != OGRERR_NONE )
+            return std::nullopt;
+        OGRCoordinateTransformation *ct = OGRCreateCoordinateTransformation( &src, &dst );
+        if ( !ct )
+            return std::nullopt;
+        const double centreX = gt[0] + ( std::abs( gt[1] ) * ds.width() ) / 2.0;
+        const double centreY = gt[3] + ( std::abs( gt[5] ) * ds.height() ) / 2.0;
+        double x = centreX;
+        double y = centreY;
+        const bool ok = ct->Transform( 1, &x, &y ) != 0;
+        OGRCoordinateTransformation::DestroyCT( ct );
+        if ( !ok || !std::isfinite( y ) )
+            return std::nullopt;
+        latitude = y;
+    }
+
+    if ( !std::isfinite( latitude ) || latitude < -90.0 || latitude > 90.0 )
+        return std::nullopt;
+    return latitude;
+}
+
 } // namespace sicnu::processing::gdal_util
