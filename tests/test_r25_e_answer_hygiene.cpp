@@ -131,8 +131,8 @@ TEST_CASE( "recordAnswer refuses whitespace-only free-text answers", "[r25_e][la
   for ( const std::string &blank : { std::string( "   " ), std::string( " \t " ),
                                      std::string( "\n" ), std::string( " \r\n\t " ) } )
   {
-    const auto refused = sicnu::lab::recordAnswer( session, plan, "q_extent", *blank, std::nullopt );
-    INFO( "answer='" << *blank << "'" );
+    const auto refused = sicnu::lab::recordAnswer( session, plan, "q_extent", blank, std::nullopt );
+    INFO( "answer='" << blank << "'" );
     REQUIRE( !refused.ok );
     REQUIRE( refused.diagnostics.front().code == "lab.session.field" );
   }
@@ -147,8 +147,8 @@ TEST_CASE( "recordAnswer refuses whitespace-only free-text answers", "[r25_e][la
           std::string( "\xE2\x80\xAF\xE2\x80\xAF" ),            // narrow NBSP ×2
           std::string( "\xE3\x80\x80 \t\xC2\xA0" ) } )          // the whole family at once
   {
-    const auto refused = sicnu::lab::recordAnswer( session, plan, "q_extent", *blank, std::nullopt );
-    INFO( "answer-bytes=" << *blank );
+    const auto refused = sicnu::lab::recordAnswer( session, plan, "q_extent", blank, std::nullopt );
+    INFO( "answer-bytes=" << blank );
     REQUIRE( !refused.ok );
     REQUIRE( refused.diagnostics.front().code == "lab.session.field" );
   }
