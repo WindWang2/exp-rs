@@ -62,3 +62,9 @@ diff. Isolated in TEST_RESULTS.md / PERF_BASELINE.md.
 
 All 7 oracles closed (FINAL_REPORT.md); 11/11 ×2 (+final ×2) green; neighborhood
 green incl. full-shell lifecycle; R1→fix→R2→fix→retest complete; PR next.
+
+## PR filed
+
+- PR #1724: https://github.com/WindWang2/exp-rs/pull/1724 (OPEN, non-draft, base=master)
+- HEAD pushed: fed3d1389e (12 commits on 2610cb4741)
+- Per protocol: not waiting for remote CI; no auto-merge.
