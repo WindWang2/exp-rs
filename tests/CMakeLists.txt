@@ -109,7 +109,7 @@ function(sicnu_add_test NAME)
     Qt6::Widgets
     qgis_core
     qgis_gui
-    Sicnu::data
+    sicnu_data
     sicnu_processing
     sicnu_jobs
     sicnu_task_center
@@ -269,7 +269,7 @@ function(sicnu_add_dialog_test NAME)
     qgis_core
     qgis_gui
     sicnu_processing
-    Sicnu::data
+    sicnu_data
     ${ARG_EXTRA_LIBS}
   )
   target_include_directories(${NAME} PRIVATE
@@ -703,7 +703,7 @@ target_link_libraries(test_interaction_tools PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -726,7 +726,7 @@ target_link_libraries(test_raster_display_tools PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -812,7 +812,7 @@ target_link_libraries(test_workspace_snapshot PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::qgis_display
 )
@@ -833,7 +833,7 @@ target_link_libraries(test_workspace_state PRIVATE
   Qt6::Gui
   Qt6::Widgets
   qgis_core
-  Sicnu::data
+  sicnu_data
   sicnu_agent
 )
 if(TARGET jsoncpp)
@@ -856,7 +856,7 @@ target_link_libraries(test_agent_tools_3 PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_workflow
@@ -901,7 +901,7 @@ target_link_libraries(test_mapspec PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_workflow
@@ -934,7 +934,7 @@ target_link_libraries(test_cartography_production_11 PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_workflow
@@ -1105,7 +1105,7 @@ target_link_libraries(test_provenance_section PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -1138,7 +1138,7 @@ target_link_libraries(test_explain_step_panel PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -1320,7 +1320,7 @@ target_link_libraries(test_adversarial_m4 PRIVATE
   qgis_core
   qgis_gui
   Sicnu::qgis_display
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_adversarial_m4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1345,7 +1345,7 @@ target_link_libraries(test_adversarial_m5 PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -1376,7 +1376,7 @@ target_link_libraries(test_adversarial_m6 PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_workflow
@@ -1408,7 +1408,7 @@ target_link_libraries(test_interactive_session_contract PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -1440,7 +1440,7 @@ qt_add_executable(test_data_manager
 target_link_libraries(test_data_manager PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_data_manager PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1640,7 +1640,7 @@ target_link_libraries(test_e2e_science_numerics PRIVATE
   Qt6::Core
   qgis_core
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   GDAL::GDAL
 )
 target_include_directories(test_e2e_science_numerics PRIVATE
@@ -2544,7 +2544,7 @@ target_link_libraries(test_mcp_server PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2586,7 +2586,7 @@ target_link_libraries(test_r14_C_mcp_workflow_cancel PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2630,7 +2630,7 @@ target_link_libraries(test_surface_parity PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2672,7 +2672,7 @@ target_link_libraries(surface_snapshot_gen PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2707,7 +2707,7 @@ target_link_libraries(test_surface_snapshot PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2743,7 +2743,7 @@ target_link_libraries(test_surface_protocol_r4 PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2779,7 +2779,7 @@ target_link_libraries(test_capability_surface_parity PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2824,7 +2824,7 @@ target_link_libraries(test_algorithm_search PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2857,7 +2857,7 @@ target_link_libraries(test_surface_protocol PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2893,7 +2893,7 @@ target_link_libraries(test_r18_c_progress_units PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2926,7 +2926,7 @@ target_link_libraries(test_r18_c_rpc_cancel_id_namespace PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2959,7 +2959,7 @@ target_link_libraries(test_r18_c_surface_pagination PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -2992,7 +2992,7 @@ target_link_libraries(surface_mcp_host PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
@@ -3049,7 +3049,7 @@ target_link_libraries(test_agent_tool_catalog PRIVATE
   sicnu_agent
   sicnu_processing
   sicnu_operators
-  Sicnu::data
+  sicnu_data
   sicnu_task_center
 )
 if(TARGET jsoncpp)
@@ -3119,7 +3119,7 @@ target_link_libraries(test_spatial_scientist_benchmark PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_workflow
@@ -4162,7 +4162,7 @@ target_link_libraries(test_mlops8_e2e PRIVATE
   SQLite::SQLite3
   sicnu_workflow
   sicnu_workflow_runtime
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
@@ -4188,7 +4188,7 @@ target_link_libraries(test_lab_report PRIVATE
   SQLite::SQLite3
   sicnu_workflow
   sicnu_workflow_runtime
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
@@ -4228,7 +4228,7 @@ qt_add_executable(test_remote_pool_init test_remote_pool_init.cpp)
 target_link_libraries(test_remote_pool_init PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
   GDAL::GDAL
 )
 target_include_directories(test_remote_pool_init PRIVATE
@@ -4318,7 +4318,7 @@ target_link_libraries(test_ui_scale_benchmark PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -4627,7 +4627,7 @@ target_link_libraries(test_comparison_widget PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   GDAL::GDAL
 )
 # gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
@@ -4671,7 +4671,7 @@ target_link_libraries(test_preferences_dialog PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   GDAL::GDAL
 )
 target_include_directories(test_preferences_dialog PRIVATE
@@ -5154,7 +5154,7 @@ target_link_libraries(test_georef_dual_window PRIVATE
   qgis_core
   qgis_analysis
   qgis_app_georef
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_georef_dual_window PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5181,7 +5181,7 @@ target_link_libraries(test_georef_session_adapters PRIVATE
   qgis_app_georef
   sicnu_jobs
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_georef_session_adapters PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5465,7 +5465,7 @@ target_link_libraries(test_rpc_transformer PRIVATE
   qgis_core
   qgis_analysis
   GDAL::GDAL
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_rpc_transformer PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5491,7 +5491,7 @@ target_link_libraries(test_georef_window_rpc_mode PRIVATE
   qgis_analysis
   qgis_app_georef
   sicnu_jobs
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_georef_window_rpc_mode PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5814,7 +5814,7 @@ target_link_libraries(test_band_ratio PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_band_ratio PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5843,7 +5843,7 @@ if(TARGET qgis_app_classify)
     sicnu_task_center
     GDAL::GDAL
     ${OpenCV_LIBRARIES}
-  Sicnu::data
+  sicnu_data
   )
   target_include_directories(test_classification_task_center PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -5878,7 +5878,7 @@ if(TARGET qgis_app_classify)
     Sicnu::session_map
     sicnu_jobs
     sicnu_task_center
-  Sicnu::data
+  sicnu_data
   )
   target_include_directories(test_classification_window PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -5954,7 +5954,7 @@ if(TARGET qgis_app_classify)
     Qt6::Widgets
     Qt6::Test
     sicnu_processing
-    Sicnu::data
+    sicnu_data
     qgis_core
     qgis_gui
   )
@@ -6349,7 +6349,7 @@ sicnu_add_test(test_layout_tools)
     Catch2::Catch2WithMain
     qgis_analysis
     Qt6::Core
-  Sicnu::data
+  sicnu_data
   )
   target_include_directories(test_classification_project PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -6369,7 +6369,7 @@ sicnu_add_test(test_layout_tools)
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
-  Sicnu::data
+  sicnu_data
   )
   target_include_directories(test_classify_session_state PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/classification
@@ -6387,7 +6387,7 @@ sicnu_add_test(test_layout_tools)
     qgis_app_classify
     Qt6::Core
     Qt6::Widgets
-  Sicnu::data
+  sicnu_data
   )
   target_include_directories(test_classify_workflow_controller PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/classification
@@ -7849,7 +7849,7 @@ target_link_libraries(test_processing_dialogs PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_processing_dialogs PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -7864,7 +7864,7 @@ target_link_libraries(test_dialog_edge_cases PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_dialog_edge_cases PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8012,7 +8012,7 @@ qt_add_executable(test_data_source_providers
 target_link_libraries(test_data_source_providers PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_data_source_providers PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8384,7 +8384,7 @@ sicnu_link_jsoncpp(test_llm_streaming_client)
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
   sicnu_agent
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   GDAL::GDAL
 )
@@ -8479,7 +8479,7 @@ target_link_libraries(test_data_manager_panel PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_jobs
   sicnu_operators
   Sicnu::qgis_display
@@ -8509,7 +8509,7 @@ target_link_libraries(test_workspace_browser_wiring PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_jobs
   sicnu_operators
 )
@@ -8570,7 +8570,7 @@ qt_add_executable(test_processing_asset_resolver
 target_link_libraries(test_processing_asset_resolver PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_processing_asset_resolver PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8584,7 +8584,7 @@ qt_add_executable(test_derivation_record
 target_link_libraries(test_derivation_record PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_derivation_record PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8603,7 +8603,7 @@ target_link_libraries(test_output_committer PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_output_committer PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8622,7 +8622,7 @@ target_link_libraries(test_spectral_index_asset_pipeline PRIVATE
   qgis_gui
   sicnu_operators
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_spectral_index_asset_pipeline PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8639,7 +8639,7 @@ target_link_libraries(test_data_manager_reap PRIVATE
   Qt6::Test
   qgis_core
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_data_manager_reap PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8697,7 +8697,7 @@ target_link_libraries(test_data_manager_promote PRIVATE
   Qt6::Core
   Qt6::Test
   qgis_core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_data_manager_promote PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8713,7 +8713,7 @@ target_link_libraries(test_data_manager_collection PRIVATE
   Qt6::Core
   Qt6::Test
   qgis_core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_data_manager_collection PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8730,7 +8730,7 @@ target_link_libraries(test_collection_import_service PRIVATE
   Qt6::Test
   qgis_core
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_collection_import_service PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8871,7 +8871,7 @@ target_link_libraries(test_product_import_dialog PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   sicnu_operators
 )
 target_include_directories(test_product_import_dialog PRIVATE
@@ -8909,7 +8909,7 @@ target_link_libraries(test_batch_processing_dialog PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_batch_processing_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8941,7 +8941,7 @@ target_link_libraries(test_grid_compat_dialog_utils PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_grid_compat_dialog_utils PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8985,7 +8985,7 @@ target_link_libraries(test_spectral_library_dialog PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_spectral_library_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9064,7 +9064,7 @@ target_link_libraries(test_crs_selector PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -9091,7 +9091,7 @@ target_link_libraries(test_schema_form_builder_v2 PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_operators
-  Sicnu::data
+  sicnu_data
   GDAL::GDAL
   Sicnu::help
 )
@@ -9122,7 +9122,7 @@ target_link_libraries(test_schema_form_4 PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_operators
-  Sicnu::data
+  sicnu_data
   GDAL::GDAL
   Sicnu::help
 )
@@ -9211,7 +9211,7 @@ target_link_libraries(test_asset_catalog_index PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_jobs
   sicnu_operators
   sicnu_workflow
@@ -9361,7 +9361,7 @@ target_link_libraries(test_catalog_pagination PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_jobs
   sicnu_operators
   Sicnu::qgis_display
@@ -9389,7 +9389,7 @@ target_link_libraries(test_workbench_enum_provider PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
-  Sicnu::data
+  sicnu_data
   sicnu_operators
   GDAL::GDAL
   Sicnu::help
@@ -9513,7 +9513,7 @@ qt_add_executable(test_virtual_raster_recipe
 target_link_libraries(test_virtual_raster_recipe PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_virtual_raster_recipe PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9527,7 +9527,7 @@ qt_add_executable(test_remote_map_structure
 target_link_libraries(test_remote_map_structure PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_remote_map_structure PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9542,7 +9542,7 @@ target_link_libraries(test_xyz_source_provider PRIVATE
   Catch2::Catch2WithMain
   Catch2::Catch2
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_xyz_source_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9557,7 +9557,7 @@ target_link_libraries(test_remote_map_services PRIVATE
   Catch2::Catch2WithMain
   Catch2::Catch2
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_remote_map_services PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9576,7 +9576,7 @@ target_link_libraries(test_remote_map_display PRIVATE
   qgis_core
   qgis_gui
   Sicnu::qgis_display
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_remote_map_display PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9607,7 +9607,7 @@ target_link_libraries(test_data_manager_dependency PRIVATE
   Qt6::Core
   Qt6::Test
   qgis_core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_data_manager_dependency PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9624,7 +9624,7 @@ target_link_libraries(test_virtual_raster_preflight PRIVATE
   Qt6::Test
   qgis_core
   sicnu_processing
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_virtual_raster_preflight PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9638,7 +9638,7 @@ qt_add_executable(test_raster_grid_compat
 target_link_libraries(test_raster_grid_compat PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_raster_grid_compat PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9658,7 +9658,7 @@ target_link_libraries(test_virtual_raster_create PRIVATE
   qgis_core
   qgis_gui
   Sicnu::qgis_display
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_virtual_raster_create PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9760,7 +9760,7 @@ target_link_libraries(test_workflow_pipeline_ui PRIVATE
   sicnu_workflow
   sicnu_workflow_runtime
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   Sicnu::help
 )
 target_include_directories(test_workflow_pipeline_ui PRIVATE
@@ -9782,7 +9782,7 @@ target_link_libraries(test_rs_golden_e2e PRIVATE
   qgis_analysis
   sicnu_processing
   sicnu_operators
-  Sicnu::data
+  sicnu_data
   GDAL::GDAL
 )
 target_include_directories(test_rs_golden_e2e PRIVATE
@@ -9843,7 +9843,7 @@ target_link_libraries(test_subsystem_stability PRIVATE
   qgis_core
   qgis_gui
   qgis_analysis
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -9871,7 +9871,7 @@ target_link_libraries(test_e2e_phase2 PRIVATE
   qgis_core
   qgis_gui
   qgis_analysis
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -9914,7 +9914,7 @@ target_link_libraries(test_e2e_open_issues PRIVATE
   Sicnu::dataset
   Sicnu::experiment
   Sicnu::Geospatial
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -9951,7 +9951,7 @@ target_link_libraries(test_r12b_e2e_durability PRIVATE
   Sicnu::Geospatial
   Sicnu::dataset
   Sicnu::experiment
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   GDAL::GDAL
   SQLite::SQLite3
@@ -10038,7 +10038,7 @@ target_link_libraries(test_workflow_engine_v2 PRIVATE
   Qt6::Core
   sicnu_workflow
   sicnu_workflow_runtime
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
@@ -10056,7 +10056,7 @@ add_executable(test_workflow_incremental_cache test_workflow_incremental_cache.c
 target_link_libraries(test_workflow_incremental_cache PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
 )
 target_include_directories(test_workflow_incremental_cache PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -10070,7 +10070,7 @@ target_link_libraries(test_workflow_recovery PRIVATE
   Qt6::Core
   sicnu_workflow
   sicnu_workflow_runtime
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
@@ -10098,7 +10098,7 @@ target_link_libraries(workflow_crash_helper PRIVATE
   Qt6::Core
   sicnu_workflow
   sicnu_workflow_runtime
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
@@ -10119,7 +10119,7 @@ target_link_libraries(test_workflow_crash_recovery_r4 PRIVATE
   Qt6::Core
   sicnu_workflow
   sicnu_workflow_runtime
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
@@ -10193,7 +10193,7 @@ target_link_libraries(test_workflow_run_coordinator PRIVATE
   Qt6::Core
   sicnu_workflow
   sicnu_workflow_runtime
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_task_center
   sicnu_jobs
@@ -10242,7 +10242,7 @@ target_link_libraries(test_workflow_artifact_gc PRIVATE
   sicnu_workflow
   sicnu_workflow_runtime
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   sicnu_task_center
   sicnu_jobs
 )
@@ -10361,7 +10361,7 @@ target_link_libraries(test_m3_stress PRIVATE
   Sicnu::qgis_display
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_jobs
   sicnu_operators
   GDAL::GDAL
@@ -10398,7 +10398,7 @@ target_link_libraries(test_m3_adversarial_challenge PRIVATE
   Sicnu::qgis_display
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_jobs
   sicnu_operators
   GDAL::GDAL
@@ -10459,7 +10459,7 @@ target_link_libraries(test_final_challenger_2_empirical PRIVATE
   Sicnu::qgis_display
   sicnu_processing
   sicnu_task_center
-  Sicnu::data
+  sicnu_data
   sicnu_jobs
   sicnu_operators
   GDAL::GDAL
@@ -11460,7 +11460,7 @@ target_link_libraries(test_fault_matrix PRIVATE
   Qt6::Core
   qgis_core
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   sicnu_workflow
   sicnu_runtime
   # R12-E (E12): the teaching behavior benchmark drives real fault scenarios;
@@ -11592,7 +11592,7 @@ target_link_libraries(test_contract_fuzz_agent PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   qgis_core
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_workflow
@@ -11702,7 +11702,7 @@ target_link_libraries(test_trace_chain_8 PRIVATE
   Qt6::Core
   qgis_core
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   Sicnu::dataset
   sicnu_experiment
   sicnu_runtime
@@ -11771,7 +11771,7 @@ target_link_libraries(test_contract_fuzz_ops PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   qgis_core
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_workflow
@@ -11971,7 +11971,7 @@ target_link_libraries(test_object_identity PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -12005,7 +12005,7 @@ target_link_libraries(test_mission_context PRIVATE
   Qt6::Xml
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -12045,7 +12045,7 @@ target_link_libraries(test_mission_runtime_store PRIVATE
   Qt6::Xml
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -12078,7 +12078,7 @@ target_link_libraries(test_mission_e2e_scaffolding PRIVATE
   Qt6::Xml
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -12155,7 +12155,7 @@ target_link_libraries(test_mission_timeline_surface PRIVATE
   Qt6::Xml
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   # R6: mission sidecar writes route through the platform authority.
   Sicnu::Platform
 )
@@ -12227,7 +12227,7 @@ target_link_libraries(test_view_link PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   Sicnu::Geospatial
   sicnu_qgis_display
 )
@@ -12254,7 +12254,7 @@ target_link_libraries(test_processing_catalog_ux PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_agent
   sicnu_operators
   sicnu_processing
@@ -13011,7 +13011,7 @@ target_link_libraries(test_challenger_m3_2_harness PRIVATE
   Qt6::Gui
   Qt6::Widgets
   qgis_core
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_operators
   sicnu_runtime
@@ -13031,7 +13031,7 @@ target_link_libraries(test_challenger_m2_1_harness PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -13056,7 +13056,7 @@ target_link_libraries(test_challenger_m2_2_harness PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -13080,7 +13080,7 @@ target_link_libraries(test_challenger_m3_1_harness PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
-  Sicnu::data
+  sicnu_data
   sicnu_processing
   sicnu_jobs
   sicnu_task_center
@@ -13875,7 +13875,7 @@ qt_add_executable(test_data_scale
 target_link_libraries(test_data_scale PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
-  Sicnu::data
+  sicnu_data
   # The governance plan oracle asserts SQLite's own query plan for the paged
   # SELECT, so the suite needs the SQLite C API directly (sicnu_data links it
   # PRIVATE, which does not propagate to consumers).
@@ -13973,7 +13973,7 @@ function(sicnu_add_mission_runtime_test NAME)
     Qt6::Widgets
     qgis_core
     qgis_gui
-    Sicnu::data
+    sicnu_data
     # R6: the shared mission sources write sidecars through the platform authority.
     Sicnu::Platform
   )
@@ -15410,7 +15410,7 @@ add_executable(test_canonical_digest_parity test_canonical_digest_parity.cpp
 target_link_libraries(test_canonical_digest_parity PRIVATE
   Catch2::Catch2WithMain
   Sicnu::teaching_admin
-  Sicnu::data
+  sicnu_data
   Qt6::Core
 )
 target_include_directories(test_canonical_digest_parity PRIVATE
@@ -15628,7 +15628,7 @@ target_link_libraries(test_parity_state_mirror_r4 PRIVATE
   sicnu_operators
   sicnu_task_center
   sicnu_processing
-  Sicnu::data
+  sicnu_data
   # guided_workflow_widget.cpp (embedded) uses spatial_tool.h, whose body
   # lives in sicnu_agent (build wiring drift: companion bodies).
   sicnu_agent
@@ -16902,7 +16902,7 @@ target_link_libraries(test_r24_c_workspace_charts PRIVATE
   Qt6::Gui
   Qt6::Widgets
   qgis_core
-  Sicnu::data
+  sicnu_data
   sicnu_agent
 )
 if(TARGET jsoncpp)
@@ -17280,6 +17280,7 @@ sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_ru
 # ── R25-D (zcode r25-D qt/qgis workbench cartography track) ──────────────────
 # Append-only registration block. Union rule: never reorder/dedupe/delete
 # other tracks' blocks (scripts/check_merge_registration_integrity.py guards).
+# END R25-D
 # BEGIN R25-D
 # Light surface: pure ContextRules for the cartography.* availability family
 # + source scans of the production wiring (same direct-TU embed shape as
@@ -17341,12 +17342,12 @@ sicnu_discover_tests(test_r25_d_cartography_dock TEST_PREFIX test_r25_d_cartogra
 add_executable(test_r25_d_operator_preflight
   test_r25_d_operator_preflight.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
-  ${CMAKE_SOURCE_DIR}/src/processing/framework/algorithm_meta_store.cpp
 )
 target_link_libraries(test_r25_d_operator_preflight PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
+  sicnu_processing
 )
 target_include_directories(test_r25_d_operator_preflight PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -17391,7 +17392,7 @@ target_link_libraries(test_r25_d_e2e_display_cartography PRIVATE
   qgis_core
   qgis_gui
   Sicnu::qgis_display
-  Sicnu::data
+  sicnu_data
   sicnu_task_center
   sicnu_operators
   sicnu_agent
@@ -17421,4 +17422,3 @@ target_include_directories(test_r25_d_canvas_invalidation PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r25_d_canvas_invalidation TEST_PREFIX test_r25_d_canvas_invalidation::)
-# END R25-D

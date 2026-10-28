@@ -11,7 +11,16 @@ namespace sicnu::app
 
 QString operatorPreflightSummary( const std::string &operatorId )
 {
-    const auto entry = sicnu::processing::AlgorithmMetaStore::instance().find( operatorId );
+    // The store has no lazy load: pure GUI sessions never run the MCP
+    // discovery path that populates it, so the preflight line would stay
+    // empty exactly where users need it. One process-wide load here (the
+    // function-local static is thread-safe; loadFromDirectory overwrites
+    // idempotently, so an MCP-side load simply re-reads the same sidecars).
+    [[maybe_unused]] static const bool sidecarsLoaded =
+      sicnu::processing::AlgorithmMetaStore::instance().loadDefaults() > 0;
+
+    const auto entry =
+      sicnu::processing::AlgorithmMetaStore::instance().find( operatorId );
     if ( !entry )
         return QString();
 

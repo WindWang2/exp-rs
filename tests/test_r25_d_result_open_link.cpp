@@ -39,8 +39,7 @@ TEST_CASE( "result-open surfaces route through the kind-inferring seam", "[r25d]
     SECTION( "job panel result tab opens any artifact kind" )
     {
         const QRegularExpression re(
-          QStringLiteral( "connect\\( m_jobPanel, &RsJobPanel::resultOpenRequested,\\s*"
-                          "this, &QgisDesktopWindow::(\\w+) \\);" ) );
+          QStringLiteral( R"(connect\( m_jobPanel, &RsJobPanel::resultOpenRequested,\s*this,\s*&QgisDesktopWindow::(\w+) \);)" ) );
         const auto match = re.match( docks );
         REQUIRE( match.hasMatch() );
         CHECK( match.captured( 1 ) == QStringLiteral( "loadDataLayer" ) );
@@ -49,8 +48,7 @@ TEST_CASE( "result-open surfaces route through the kind-inferring seam", "[r25d]
     SECTION( "task panel result summary opens any artifact kind" )
     {
         const QRegularExpression re(
-          QStringLiteral( "connect\\( m_taskPanel, &TaskPanelHost::resultOpenRequested,\\s*"
-                          "this, &QgisDesktopWindow::(\\w+) \\);" ) );
+          QStringLiteral( R"(connect\( m_taskPanel, &TaskPanelHost::resultOpenRequested,\s*this,\s*&QgisDesktopWindow::(\w+) \);)" ) );
         const auto match = re.match( docks );
         REQUIRE( match.hasMatch() );
         CHECK( match.captured( 1 ) == QStringLiteral( "loadDataLayer" ) );
@@ -59,7 +57,7 @@ TEST_CASE( "result-open surfaces route through the kind-inferring seam", "[r25d]
     SECTION( "governance rows open any artifact kind" )
     {
         const QRegularExpression re(
-          QStringLiteral( R"(connect\( m_workspaceBrowserPanel, &sicnu::app::WorkspaceBrowserPanel::openPathRequested,\s*this, \[this\]\( const QString &path \) \{ (\w+)\( path \); \} \);)" ) );
+          QStringLiteral( R"(connect\( m_workspaceBrowserPanel, &sicnu::app::WorkspaceBrowserPanel::openPathRequested,\s*this,\s*\[this\]\( const QString &path \) \{ (\w+)\( path \); \} \);)" ) );
         const auto match = re.match( docks );
         REQUIRE( match.hasMatch() );
         CHECK( match.captured( 1 ) == QStringLiteral( "loadDataLayer" ) );
@@ -71,9 +69,7 @@ TEST_CASE( "result-open surfaces route through the kind-inferring seam", "[r25d]
           readSource( QStringLiteral( "src/app/main_window_workbench.cpp" ) );
         REQUIRE_FALSE( workbench.isEmpty() );
         const QRegularExpression re(
-          QStringLiteral( "connect\\( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resultOpenRequested,\\s*"
-                          "this, \\[this\\]\\( const QString &path \\) \\{\\s*"
-                          "if \\( !(\\w+)\\( path \\) \\)" ) );
+          QStringLiteral( R"(connect\( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resultOpenRequested,\s*this,\s*\[this\]\( const QString &path \) \{\s*if \( !(\w+)\( path \) \))" ) );
         const auto match = re.match( workbench );
         REQUIRE( match.hasMatch() );
         CHECK( match.captured( 1 ) == QStringLiteral( "loadDataLayer" ) );

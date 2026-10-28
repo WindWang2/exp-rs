@@ -37,6 +37,7 @@
 #include "operators/rs/rs_operators_init.h"
 #include "processing/framework/task_center.h"
 
+#include <qgslayoutmanager.h>
 #include <qgsprintlayout.h>
 
 #include <json/json.h>

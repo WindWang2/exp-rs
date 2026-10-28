@@ -20,7 +20,7 @@
 
 #include "app/workbench/selection_context.h"
 
-using sicnu::app::ContextRules;
+namespace ContextRules = sicnu::app::ContextRules;
 using sicnu::app::SelectionContextSnapshot;
 
 namespace

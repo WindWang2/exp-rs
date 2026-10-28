@@ -113,12 +113,13 @@ TEST_CASE( "visibility edits coalesce into bounded canvas invalidations", "[r25d
       auto batch = displayManager.createBatchUpdate( viewId );
       for ( int i = 0; i < N; ++i )
         REQUIRE( displayManager.setLayerVisible( layerIds[i], i % 2 == 0 ) );
-    } // batch exit: exactly one deferred manager sync
+    } // visibility rides the bridge (deferred, coalesced); the manager's own
+    // sync counter is untouched by visibility edits — no per-toggle syncs.
     QCoreApplication::processEvents();
 
-    CHECK( displayManager.canvasLayerSyncCount( viewId ) == syncBefore + 1 );
+    CHECK( displayManager.canvasLayerSyncCount( viewId ) == syncBefore );
     // Bridge coalescing: the whole batch produced at most two canvas layer
-    // set changes (the queued bridge pass + the batch-exit sync) — never N.
+    // set changes (the queued bridge pass + any batch-exit sync) — never N.
     CHECK( layersSpy.count() <= 2 );
     // The settled canvas list is exactly the visible half.
     CHECK( canvas.layers().size() == N / 2 );

@@ -331,7 +331,7 @@ public:
     void showLabCockpit();
     void showTeachingAdmin();
     void options();
-
+    void showProcessingToolbox();
 
     // Raster processing dialogs
     void openImageEnhancementPanel();
