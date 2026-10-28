@@ -17,6 +17,7 @@
 #include <QString>
 
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,8 +57,8 @@ Json::Value RsSarTerrainFlattenOperator::schema() const {
     props["band"] = makeIntegerParam("band", "1-based input band", 1);
     props["dem"] = makeRasterParam("dem", "Co-registered DEM covering the exact same grid (radar geometry)");
     props["dem"]["x-rs-contract"] = makeDemInputContract();
-    props["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle θ0 in degrees (near-range center)", 30.0);
-    props["headingDeg"] = makeNumberParam("headingDeg", "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785)", 0.0);
+    props["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle θ0 in degrees (near-range center). Resolved parameter > declared SICNU_SAR_INCIDENCE_DEG on the input > 30.0 default with a warning", 30.0);
+    props["headingDeg"] = makeNumberParam("headingDeg", "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785). Resolved parameter > declared SICNU_SAR_HEADING_DEG on the input > 0.0 default", 0.0);
     props["lookDirection"] = makeEnumParam("lookDirection", "Antenna side relative to the flight path: the look azimuth is heading+90 (right) or heading-90 (left). Ignored when lookAzimuthDeg is given", s_lookDirections, "right");
     props["lookAzimuthDeg"] = makeNumberParam("lookAzimuthDeg", "Explicit antenna look azimuth (boresight ground azimuth, degrees clockwise from north); overrides headingDeg+lookDirection. Supply it explicitly or not at all — UIs must not auto-fill the default", 0.0);
     props["demUnit"] = makeEnumParam("demUnit", "DEM elevation unit (a declared SICNU_DEM_UNIT metadata on the DEM overrides it)", s_demUnits, "meters");
@@ -154,44 +155,7 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     }
 
     const int band = getInt(params, "band", 1);
-    const double incidenceDeg = getDouble(params, "incidenceDeg", 30.0);
-    const double headingDeg = getDouble(params, "headingDeg", 0.0);
-    // Physical domain (0, 90) degrees — the refusal rs:sar_backscatter and
-    // rs:sar_terrain_masks already apply. Without it a theta of 95 keeps
-    // sin > 0 and streams a physically impossible RTC, and theta = 0 nulls
-    // the sin(theta0) denominator into a "successful" all-NoData product
-    // (R24-A).
-    if (!(incidenceDeg > 0.0 && incidenceDeg < 90.0))
-        throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "incidenceDeg must be in (0, 90) degrees, got " +
-                                  std::to_string(incidenceDeg));
     const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirections, "right");
-    // #785: heading (flight direction) and antenna look azimuth are orthogonal.
-    // The look azimuth is heading ± 90 by antenna side, unless the caller
-    // supplies the boresight explicitly.
-    double lookAzimuthDeg;
-    if (params.isMember("lookAzimuthDeg") && params["lookAzimuthDeg"].isNumeric()) {
-        lookAzimuthDeg = params["lookAzimuthDeg"].asDouble();
-        if (!std::isfinite(lookAzimuthDeg)) {
-            throw RSOperatorError(ErrorCode::InvalidParameter,
-                                  "lookAzimuthDeg must be a finite angle in degrees");
-        }
-    } else if (params.isMember("look_azimuth") && params["look_azimuth"].isNumeric()) {
-        lookAzimuthDeg = params["look_azimuth"].asDouble();
-        // Same finite-angle refusal as the primary spelling: a NaN azimuth
-        // survived fmod, produced NoData gamma0 pixels whose validity mask
-        // still said 1 (valid) — the mask contract broken from the legacy
-        // alias only.
-        if (!std::isfinite(lookAzimuthDeg)) {
-            throw RSOperatorError(ErrorCode::InvalidParameter,
-                                  "look_azimuth must be a finite angle in degrees");
-        }
-    } else {
-        lookAzimuthDeg = sicnu::sar::lookAzimuthFromHeading(headingDeg, lookDirection == "right");
-    }
-    lookAzimuthDeg = std::fmod(lookAzimuthDeg, 360.0);
-    if (lookAzimuthDeg < 0.0)
-        lookAzimuthDeg += 360.0;
     std::string demUnit = getEnum(params, "demUnit", s_demUnits, "meters");
     const QString polarizations =
         QString::fromStdString( getString( params, "polarizations", "" ) );
@@ -225,6 +189,82 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "band out of range: " + std::to_string(band));
     }
+
+    // Scene-geometry provenance (R25-A FEAT-1): explicit parameter >
+    // metadata declared on the input (SICNU_SAR_INCIDENCE_DEG /
+    // SICNU_SAR_HEADING_DEG / SICNU_SAR_LOOK_AZIMUTH_DEG — rs:sar_terrain_masks
+    // and the geocode family stamp them) > documented default + warning. The
+    // old resolution never consulted the metadata, so a masks→flatten
+    // pipeline silently re-derived geometry from the 30°/0° defaults even
+    // though the input declared the scene's actual angles.
+    double incidenceDeg = 30.0;
+    std::string incidenceSource = "default";
+    if (params.isMember("incidenceDeg") && params["incidenceDeg"].isNumeric()) {
+        incidenceDeg = params["incidenceDeg"].asDouble();
+        incidenceSource = "parameter";
+    } else if (const std::optional<double> declared =
+                   sicnu::sar::datasetMetaDouble(src, sicnu::sar::kIncidenceKey)) {
+        incidenceDeg = *declared;
+        incidenceSource = "input_metadata";
+    } else {
+        context.logWarning("incidenceDeg not given and the input declares no "
+                           "SICNU_SAR_INCIDENCE_DEG; using the documented 30° default — "
+                           "pass incidenceDeg (or declare the metadata) for correct geometry");
+    }
+    double headingDeg = 0.0;
+    std::string headingSource = "default";
+    if (params.isMember("headingDeg") && params["headingDeg"].isNumeric()) {
+        headingDeg = params["headingDeg"].asDouble();
+        headingSource = "parameter";
+    } else if (const std::optional<double> declared =
+                   sicnu::sar::datasetMetaDouble(src, sicnu::sar::kHeadingKey)) {
+        headingDeg = *declared;
+        headingSource = "input_metadata";
+    }
+    // Physical domain (0, 90) degrees — the refusal rs:sar_backscatter and
+    // rs:sar_terrain_masks already apply. Without it a theta of 95 keeps
+    // sin > 0 and streams a physically impossible RTC, and theta = 0 nulls
+    // the sin(theta0) denominator into a "successful" all-NoData product
+    // (R24-A). Applies to the RESOLVED value: metadata-declared garbage
+    // fails closed with the source named.
+    if (!(incidenceDeg > 0.0 && incidenceDeg < 90.0))
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "incidenceDeg must be in (0, 90) degrees, got " +
+                                  std::to_string(incidenceDeg) + " (source: " + incidenceSource + ")");
+    // #785: heading (flight direction) and antenna look azimuth are orthogonal.
+    // The look azimuth is heading ± 90 by antenna side; an explicit parameter
+    // (either spelling) beats the declared SICNU_SAR_LOOK_AZIMUTH_DEG, which
+    // beats the heading derivation.
+    double lookAzimuthDeg = 0.0;
+    std::string lookAzimuthSource = "derived_from_heading";
+    if (params.isMember("lookAzimuthDeg") && params["lookAzimuthDeg"].isNumeric()) {
+        lookAzimuthDeg = params["lookAzimuthDeg"].asDouble();
+        // Same finite-angle refusal as the legacy spelling below: a NaN azimuth
+        // survived fmod, produced NoData gamma0 pixels whose validity mask
+        // still said 1 (valid) — the mask contract broken from the legacy
+        // alias only.
+        if (!std::isfinite(lookAzimuthDeg)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "lookAzimuthDeg must be a finite angle in degrees");
+        }
+        lookAzimuthSource = "parameter";
+    } else if (params.isMember("look_azimuth") && params["look_azimuth"].isNumeric()) {
+        lookAzimuthDeg = params["look_azimuth"].asDouble();
+        if (!std::isfinite(lookAzimuthDeg)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "look_azimuth must be a finite angle in degrees");
+        }
+        lookAzimuthSource = "parameter";
+    } else if (const std::optional<double> declared =
+                   sicnu::sar::datasetMetaDouble(src, sicnu::sar::kLookAzimuthKey)) {
+        lookAzimuthDeg = *declared;
+        lookAzimuthSource = "input_metadata";
+    } else {
+        lookAzimuthDeg = sicnu::sar::lookAzimuthFromHeading(headingDeg, lookDirection == "right");
+    }
+    lookAzimuthDeg = std::fmod(lookAzimuthDeg, 360.0);
+    if (lookAzimuthDeg < 0.0)
+        lookAzimuthDeg += 360.0;
 
     GdalDatasetWrapper demDs;
     if (!demDs.open(QString::fromStdString(demPath))) {
@@ -311,6 +351,16 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
         dst.setMetadataItem("SICNU_SAR_DOMAIN_ASSUMED", "linear_power");
     dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
                         QString::number(lookAzimuthDeg, 'g', 10));
+    // Propagate the resolved scene geometry so the next SAR consumer
+    // inherits it (chainability with rs:sar_terrain_masks). Default-sourced
+    // values are NOT stamped: a guessed 30°/0° written as metadata would
+    // launder the guess into provenance downstream (R25-A FEAT-1).
+    if (incidenceSource != "default")
+        dst.setMetadataItem(QLatin1String(sicnu::sar::kIncidenceKey),
+                            QString::number(incidenceDeg, 'g', 10));
+    if (headingSource != "default")
+        dst.setMetadataItem(QLatin1String(sicnu::sar::kHeadingKey),
+                            QString::number(headingDeg, 'g', 10));
 
     QString error;
     if (!dst.closeWithError(&error)) {
@@ -327,6 +377,9 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     result["incidenceDeg"] = incidenceDeg;
     result["headingDeg"] = headingDeg;
     result["lookAzimuthDeg"] = lookAzimuthDeg;
+    result["incidenceSource"] = incidenceSource;
+    result["headingSource"] = headingSource;
+    result["lookAzimuthSource"] = lookAzimuthSource;
     result["lookDirection"] = lookDirection;
     result["demUnit"] = demUnit;
     context.reportProgress(1.0, "SAR terrain flattening complete");

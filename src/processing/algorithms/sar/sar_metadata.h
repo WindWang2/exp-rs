@@ -13,6 +13,7 @@
 
 #include <QString>
 
+#include <optional>
 #include <vector>
 
 class GdalDatasetWrapper;
@@ -73,6 +74,12 @@ bool isSarDerivedState( const QString &state );
 
 /// Reads a dataset-level metadata item (default domain, empty when absent).
 QString datasetMeta( const GdalDatasetWrapper &ds, const char *key );
+
+/// Numeric dataset-level metadata item: the value parsed as a double, or
+/// nullopt when absent / unparsable / non-finite. Single owner of the parse
+/// so geometry fallbacks (R25-A: param > declared metadata > default+warning)
+/// cannot drift between consumers.
+std::optional<double> datasetMetaDouble( const GdalDatasetWrapper &ds, const char *key );
 
 /// Scale factor of the DEM's declared SICNU_DEM_UNIT to metres: "feet" →
 /// 0.3048, "decimeters" → 0.1, "meters"/undeclared → 1.0. An unknown unit
