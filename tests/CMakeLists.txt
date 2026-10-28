@@ -17373,3 +17373,22 @@ target_include_directories(test_r25_a_qa_confidence PRIVATE
 )
 sicnu_discover_tests(test_r25_a_qa_confidence TEST_PREFIX test_r25_a_qa_confidence::)
 # --- end R25-A qa-confidence registration ---
+
+# ── R25-A FEAT-3: post-classification change class-area table ──
+add_executable(test_r25_a_change_area_table test_r25_a_change_area_table.cpp)
+target_link_libraries(test_r25_a_change_area_table PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_change_area_table)
+target_include_directories(test_r25_a_change_area_table PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_change_area_table TEST_PREFIX test_r25_a_change_area_table::)
+# --- end R25-A change-area-table registration ---
