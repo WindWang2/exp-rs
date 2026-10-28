@@ -17392,3 +17392,22 @@ target_include_directories(test_r25_a_change_area_table PRIVATE
 )
 sicnu_discover_tests(test_r25_a_change_area_table TEST_PREFIX test_r25_a_change_area_table::)
 # --- end R25-A change-area-table registration ---
+
+# ── R25-A W7: optical preprocessing chain E2E (qa_mask -> apply_mask -> NDVI) ──
+add_executable(test_r25_a_optical_chain_e2e test_r25_a_optical_chain_e2e.cpp)
+target_link_libraries(test_r25_a_optical_chain_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_optical_chain_e2e)
+target_include_directories(test_r25_a_optical_chain_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_optical_chain_e2e TEST_PREFIX test_r25_a_optical_chain_e2e::)
+# --- end R25-A optical-chain-e2e registration ---
