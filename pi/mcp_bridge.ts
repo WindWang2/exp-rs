@@ -24,6 +24,58 @@ export const MAX_LINE_BUFFER_BYTES = 32 * 1024 * 1024;
  * written keeps the failure to that one call (R14-C FIX-4). */
 export const MAX_OUTBOUND_LINE_BYTES = 4 * 1024 * 1024;
 
+/** Typed bridge-failure codes (R25-C). Every error the BRIDGE itself creates
+ * carries one (err.bridgeError + err.retryable) so Pi classifies
+ * retryability without parsing prose — the same rationale as the tool-level
+ * errorCode/errorCategory passthrough (#645). Server-originated JSON-RPC
+ * errors are NOT retyped: they already carry their own code/data. */
+export const BRIDGE_ERRORS = {
+  /** Child died mid-conversation; the lazy respawn makes a retry sane. */
+  CHILD_EXITED: "CHILD_EXITED",
+  /** A crash-triggered (or failed-start) respawn failed; the next request
+   * retries the start automatically, so retrying is allowed. */
+  RESTART_FAILED: "RESTART_FAILED",
+  /** Spawn-class failure (ENOENT/EACCES/EFTYPE) — the binary itself. */
+  LAUNCH_FAILED: "LAUNCH_FAILED",
+  /** Per-request deadline fired; notifications/cancelled was already sent
+   * so server-side work stopped too (R18-C C05). */
+  REQUEST_TIMEOUT: "REQUEST_TIMEOUT",
+  /** >32 MiB inbound line: stdio framing desynced; the child is killed and
+   * the next request lazy-respawns (F-PI-1). */
+  STREAM_DESYNC: "STREAM_DESYNC",
+  /** Outbound payload exceeds the server's 4 MiB line cap. NOT retryable
+   * as-is: the caller must split the argument or use a file path. */
+  PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
+  /** Explicit stop(); terminal — the bridge is never resurrected. */
+  BRIDGE_STOPPED: "BRIDGE_STOPPED",
+  /** Caller aborted via AbortSignal; server-side cancel already fired. */
+  ABORTED: "ABORTED",
+} as const;
+export type BridgeErrorCode = (typeof BRIDGE_ERRORS)[keyof typeof BRIDGE_ERRORS];
+
+/** One bridge-thrown error with its typed classification attached. */
+export function bridgeFailure(
+  message: string,
+  code: BridgeErrorCode,
+  retryable: boolean,
+): Error {
+  const err = new Error(message);
+  (err as any).bridgeError = code;
+  (err as any).retryable = retryable;
+  return err;
+}
+
+/** Identity + drift report for one completed handshake (R25-C). The shell
+ * uses previousServerInfo to detect a respawn onto a DIFFERENT binary
+ * version and re-list the tool catalog (stale registerTool sets are
+ * otherwise undetectable — the bridge respawns transparently). */
+export interface GenerationInfo
+{
+  generation: number;
+  serverInfo: any;
+  previousServerInfo: any;
+}
+
 export type Pending = {
   resolve: (value: any) => void;
   reject: (err: Error) => void;
@@ -114,6 +166,16 @@ export class McpBridge {
   private lastSpawnAt = 0;
   private fastCrashCount = 0;
   private lastExitError: string | null = null;
+  /** Handshake identity of the CURRENT generation (R25-C): captured from
+   * the initialize response so a respawn onto a different binary version is
+   * observable instead of silently absorbed. Null before the first
+   * successful handshake. */
+  private serverInfoValue: any = null;
+  private protocolVersionValue: string | null = null;
+  /** Number of completed handshakes (successful generations), R25-C. */
+  private generationsValue = 0;
+  /** Fired after every completed handshake (including the first). */
+  private onGeneration?: (info: GenerationInfo) => void;
 
   readonly bin: string;
   readonly extraArgs: string[];
@@ -123,12 +185,17 @@ export class McpBridge {
   constructor(
     bin: string,
     extraArgs: string[],
-    options: { startupTimeoutMs?: number; requestTimeoutMs?: number } = {},
+    options: {
+      startupTimeoutMs?: number;
+      requestTimeoutMs?: number;
+      onGeneration?: (info: GenerationInfo) => void;
+    } = {},
   ) {
     this.bin = bin;
     this.extraArgs = extraArgs;
     this.startupTimeoutMs = options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+    this.onGeneration = options.onGeneration;
     installExitHook();
     activeBridges.add(this);
   }
@@ -137,12 +204,33 @@ export class McpBridge {
     return this.startError;
   }
 
+  /** The CURRENT generation's serverInfo ({name, version}) from the last
+   * completed initialize handshake; null before the first (R25-C). */
+  get serverInfo(): any {
+    return this.serverInfoValue;
+  }
+
+  /** The CURRENT generation's protocolVersion string; null before the first
+   * completed handshake (R25-C). */
+  get protocolVersion(): string | null {
+    return this.protocolVersionValue;
+  }
+
+  /** Count of completed handshakes — increments on every successful
+   * (re)spawn, so a value >1 means the child crashed and was replaced
+   * (R25-C drift observability). */
+  get generations(): number {
+    return this.generationsValue;
+  }
+
   /** Idempotent lifecycle entry: a healthy child short-circuits, concurrent
    * callers share one in-flight start, and after a crash exactly one
    * respawn happens per start batch (#669). */
   start(): Promise<void> {
     if (this.stopped) {
-      return Promise.reject(new Error("exp-rs MCP bridge was stopped"));
+      return Promise.reject(
+        bridgeFailure("exp-rs MCP bridge was stopped", BRIDGE_ERRORS.BRIDGE_STOPPED, false),
+      );
     }
     if (this.child && !this.exited) return Promise.resolve();
     if (!this.starting) {
@@ -202,7 +290,7 @@ export class McpBridge {
     const spawnFailure = new Promise<never>((_, reject) => {
       child.once("error", (err) => {
         this.startError = `Failed to launch ${this.bin}: ${err?.message ?? err}`;
-        reject(new Error(this.startError));
+        reject(bridgeFailure(this.startError, BRIDGE_ERRORS.LAUNCH_FAILED, false));
       });
     });
 
@@ -230,8 +318,10 @@ export class McpBridge {
       if (this.child !== spawned) return;
       this.exited = true;
       const tail = this.stderrTail.trim();
-      const err = new Error(
+      const err = bridgeFailure(
         `exp-rs MCP server exited (code ${code})${tail ? `; stderr tail:\n${tail}` : ""}`,
+        BRIDGE_ERRORS.CHILD_EXITED,
+        true,
       );
       this.lastExitError = err.message;
       // Circuit-breaker accounting: a child dying within 10s of spawn is a
@@ -265,8 +355,9 @@ export class McpBridge {
       cancelStartupDeadline = () => clearTimeout(t);
       spawnFailure.catch(() => {}).finally(() => clearTimeout(t));
     });
+    let generationInfo: GenerationInfo | null = null;
     try {
-      await Promise.race([
+      const initResult = await Promise.race([
         this.request("initialize", {
           protocolVersion: "2024-11-05",
           capabilities: {},
@@ -275,6 +366,18 @@ export class McpBridge {
         spawnFailure,
         startupDeadline,
       ]);
+      // R25-C: capture the handshake identity so generation drift (a
+      // respawn onto a rebuilt/older binary) is observable — the response
+      // used to be discarded, making every respawn indistinguishable.
+      this.protocolVersionValue = initResult?.protocolVersion ?? null;
+      const previousServerInfo = this.serverInfoValue;
+      this.serverInfoValue = initResult?.serverInfo ?? null;
+      this.generationsValue++;
+      generationInfo = {
+        generation: this.generationsValue,
+        serverInfo: this.serverInfoValue,
+        previousServerInfo,
+      };
     } catch (err) {
       this.discardFailedStart(child, err);
       throw err;
@@ -290,6 +393,20 @@ export class McpBridge {
     // (R14-C FIX-4).
     this.fastCrashCount = 0;
     this.notify("notifications/initialized", {});
+    // R25-C: announce the completed generation AFTER the child is fully
+    // initialized, so a shell callback may immediately re-list the tool
+    // catalog. Wrapped: a throwing callback must not break the start path
+    // the rest of the session depends on.
+    if (generationInfo) {
+      try {
+        this.onGeneration?.(generationInfo);
+      } catch (err) {
+        console.error(
+          "[exp-rs-spatial] onGeneration callback failed:",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
   }
 
   /** A generation whose handshake failed (spawn ENOENT/EACCES, initialize
@@ -308,7 +425,13 @@ export class McpBridge {
     this.startError = this.startError ?? message;
     this.lastExitError = `exp-rs MCP server failed to start: ${message}`;
     this.fastCrashCount++;
-    const failure = new Error(this.lastExitError);
+    // RESTART_FAILED, retryable: the next request automatically retries the
+    // start, so a caller-side retry is consistent with bridge behavior.
+    const failure = bridgeFailure(
+      this.lastExitError,
+      BRIDGE_ERRORS.RESTART_FAILED,
+      true,
+    );
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
       p.reject(failure);
@@ -345,9 +468,11 @@ export class McpBridge {
       // child so the next request takes the lazy-respawn path instead of
       // talking into a zombie stream (whole-repo review F-PI-1).
       this.failDesyncedStream(
-        new Error(
+        bridgeFailure(
           `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_BYTES} bytes; ` +
             `stdio framing desynced - respawning`,
+          BRIDGE_ERRORS.STREAM_DESYNC,
+          true,
         ),
       );
       return;
@@ -422,15 +547,21 @@ export class McpBridge {
   request(method: string, params: any, signal?: AbortSignal): Promise<any> {
     return new Promise((resolve, reject) => {
       if (this.stopped) {
-        reject(new Error("exp-rs MCP bridge was stopped"));
+        reject(
+          bridgeFailure("exp-rs MCP bridge was stopped", BRIDGE_ERRORS.BRIDGE_STOPPED, false),
+        );
         return;
       }
       if (!this.child || this.exited) {
         if (this.fastCrashCount >= 5) {
           reject(
-            new Error(
+            bridgeFailure(
               `exp-rs MCP server keeps crashing (${this.fastCrashCount} fast crashes); ` +
                 `lazy respawn disabled. Last exit: ${this.lastExitError ?? "unknown"}`,
+              // CHILD_EXITED but NOT retryable: the circuit breaker disabled
+              // lazy respawn, so a retry cannot succeed until a manual start.
+              BRIDGE_ERRORS.CHILD_EXITED,
+              false,
             ),
           );
           return;
@@ -442,8 +573,12 @@ export class McpBridge {
           .then(() => this.request(method, params, signal).then(resolve, reject))
           .catch((err) =>
             reject(
-              new Error(
+              bridgeFailure(
                 `exp-rs MCP server crashed and restart failed: ${err?.message ?? err}`,
+                // A start() failure here already burned one respawn attempt;
+                // the next request retries automatically, so allow a retry.
+                BRIDGE_ERRORS.RESTART_FAILED,
+                true,
               ),
             ),
           );
@@ -461,7 +596,13 @@ export class McpBridge {
         // CPU after the client has already given up on it (R18-C C05).
         this.notify("notifications/cancelled", { requestId: id });
         cleanup();
-        reject(new Error(`MCP request timed out: ${method}`));
+        reject(
+          bridgeFailure(
+            `MCP request timed out: ${method}`,
+            BRIDGE_ERRORS.REQUEST_TIMEOUT,
+            true,
+          ),
+        );
       }, this.requestTimeoutMs);
       // Abort must also stop SERVER-side work: fire notifications/cancelled
       // for this rpc id so the server cancels the task behind the call -
@@ -471,7 +612,7 @@ export class McpBridge {
         clearTimeout(timer);
         this.notify("notifications/cancelled", { requestId: id });
         cleanup();
-        reject(new Error("Aborted during exp-rs tool call"));
+        reject(bridgeFailure("Aborted during exp-rs tool call", BRIDGE_ERRORS.ABORTED, true));
       };
       if (signal) {
         if (signal.aborted) {
@@ -508,9 +649,11 @@ export class McpBridge {
         clearTimeout(timer);
         cleanup();
         reject(
-          new Error(
+          bridgeFailure(
             `MCP request payload exceeds the server's ${MAX_OUTBOUND_LINE_BYTES}-byte line cap ` +
               `(${payloadBytes} bytes, method ${method}); split the argument or use a file path`,
+            BRIDGE_ERRORS.PAYLOAD_TOO_LARGE,
+            false,
           ),
         );
         return;
@@ -520,7 +663,16 @@ export class McpBridge {
           this.pending.delete(id);
           clearTimeout(timer);
           cleanup();
-          reject(new Error(`MCP write failed: ${err.message}`));
+          // Write failures are virtually always EPIPE-class: the child's
+          // stdin closed because it is dying. Typed CHILD_EXITED/retryable —
+          // the exit event or the next request's lazy respawn will confirm.
+          reject(
+            bridgeFailure(
+              `MCP write failed: ${err.message}`,
+              BRIDGE_ERRORS.CHILD_EXITED,
+              true,
+            ),
+          );
         }
       });
     });
@@ -534,7 +686,7 @@ export class McpBridge {
   stop(): void {
     this.stopped = true;
     this.exited = true;
-    const err = new Error("exp-rs MCP bridge stopped");
+    const err = bridgeFailure("exp-rs MCP bridge stopped", BRIDGE_ERRORS.BRIDGE_STOPPED, false);
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
       p.reject(err);

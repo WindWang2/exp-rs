@@ -44,6 +44,21 @@ import {
 // therefore contract-testable — from node --test against
 // tests/surface_diff_snapshot.json.
 
+/** R25-C catalog-drift bookkeeping: after a crash the bridge lazily
+ * respawns a NEW server generation, but Pi's registered tool set is from
+ * generation 1 forever. Pi's ExtensionAPI exposes no tool unregister, so
+ * drift cannot be silently "fixed" here — it is DETECTED (re-list on every
+ * respawn), reported through exprs_status, and warned loudly, so the agent
+ * knows which registrations are stale instead of trusting them blindly. */
+const catalogDrift = {
+  lastCheckedGeneration: 0,
+  serverVersion: null as string | null,
+  previousServerVersion: null as string | null,
+  added: [] as string[],
+  removed: [] as string[],
+  lastError: null as string | null,
+};
+
 /** Runs a bridge request, cancellable via AbortSignal: on abort the local
  * promise rejects AND the server is told to cancel the work behind the rpc
  * id (notifications/cancelled) - previously the race was local-only and the
@@ -97,7 +112,46 @@ export default async function (pi: ExtensionAPI) {
   const categories = wantedCategories();
   const extraArgs = (process.env.EXP_RS_MCP_ARGS ?? "").split(" ").filter(Boolean);
   const bin = detectBinary();
-  const bridge = new McpBridge(bin ?? "sicnu_geo_rs", extraArgs);
+  /** MCP tool names registered with Pi for the CURRENT session (R25-C drift
+   * detection — see catalogDrift above). */
+  const registeredToolNames = new Set<string>();
+  const bridge = new McpBridge(bin ?? "sicnu_geo_rs", extraArgs, {
+    // R25-C: every completed handshake (re)checks the catalog so a respawn
+    // onto a drifted server binary is REPORTED, not silently absorbed.
+    onGeneration: (info) => {
+      catalogDrift.lastCheckedGeneration = info.generation;
+      catalogDrift.serverVersion = info.serverInfo?.version ?? null;
+      catalogDrift.previousServerVersion = info.previousServerInfo?.version ?? null;
+      if (info.generation <= 1 || registeredToolNames.size === 0) return;
+      // Fire-and-forget: the handshake must not block on the re-list, and a
+      // failed re-list must not break the fresh generation.
+      bridge
+        .request("tools/list", { includeSchemas: true })
+        .then((list: any) => {
+          const current = new Set<string>(
+            (list?.tools ?? [])
+              .map((t: any) => t.name)
+              .filter((n: string) => categories.has(toolCategory(n))),
+          );
+          const added = [...current].filter((n) => !registeredToolNames.has(n));
+          const removed = [...registeredToolNames].filter((n) => !current.has(n));
+          catalogDrift.added = added;
+          catalogDrift.removed = removed;
+          catalogDrift.lastError = null;
+          if (added.length || removed.length) {
+            console.warn(
+              `[exp-rs-spatial] server respawned (generation ${info.generation}` +
+                `${info.previousServerInfo?.version !== undefined && info.previousServerInfo ? `, was v${info.previousServerInfo.version}` : ""}) and the tool catalog drifted: ` +
+                `+[${added.join(", ")}] -[${removed.join(", ")}]. ` +
+                `Pi registrations are from generation 1; restart the Pi session to re-register.`,
+            );
+          }
+        })
+        .catch((err: any) => {
+          catalogDrift.lastError = String(err?.message ?? err);
+        });
+    },
+  });
 
   const guidelines = [
     "exp-rs spatial tools: call exprs_search_algorithms or exprs_list_algorithms to discover capabilities before planning a remote-sensing workflow.",
@@ -183,6 +237,7 @@ export default async function (pi: ExtensionAPI) {
     for (const tool of list?.tools ?? []) {
       const category = toolCategory(tool.name);
       if (!categories.has(category)) continue;
+      registeredToolNames.add(tool.name);
       const schema =
         tool.inputSchema && tool.inputSchema.type === "object"
           ? tool.inputSchema
@@ -233,8 +288,24 @@ export default async function (pi: ExtensionAPI) {
         const live = bridge.alive
           ? "bridge: CONNECTED (child process alive)"
           : `bridge: DISCONNECTED${bridge.error ? ` (${bridge.error})` : ""}`;
+        // R25-C generation honesty: how many server generations this session
+        // burned (>=2 means a crash happened), which version answered the
+        // last handshake, and whether the tool catalog drifted on respawn.
+        const identity =
+          `server: ${bridge.serverInfo?.name ?? "unknown"} v${bridge.serverInfo?.version ?? "?"}` +
+          ` (protocol ${bridge.protocolVersion ?? "?"}), generation ${bridge.generations}`;
+        let drift = "";
+        if (bridge.generations > 1) {
+          const parts: string[] = [];
+          if (catalogDrift.added.length) parts.push(`added: ${catalogDrift.added.join(", ")}`);
+          if (catalogDrift.removed.length) parts.push(`removed: ${catalogDrift.removed.join(", ")}`);
+          if (catalogDrift.lastError) parts.push(`re-list failed: ${catalogDrift.lastError}`);
+          drift =
+            ` catalog drift since registration: ${parts.length ? parts.join("; ") : "none detected"}` +
+            ` (Pi registrations are from generation 1; restart the session after a crash to re-register)`;
+        }
         return {
-          content: [{ type: "text" as const, text: `${live}\n${message}` }],
+          content: [{ type: "text" as const, text: `${live}\n${identity}${drift}\n${message}` }],
           details: {},
         };
       },
