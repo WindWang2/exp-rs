@@ -158,15 +158,18 @@ TEST_CASE( "cancelled discovery yields no partial list", "[r25_e][batch][discove
         QVector<DiscoverySkip> legacySkips;
         const auto legacy = discoverSubmissions( tree.submissions.path(), &legacySkips );
 
-        QVector<DiscoverySkip> flaglessSkips;
-        const auto withNullFlag = discoverSubmissions( tree.submissions.path(), &flaglessSkips, nullptr );
+        QVector<DiscoverySkip> nullFlagSkips;
+        const auto withNullFlag =
+          discoverSubmissions( tree.submissions.path(), &nullFlagSkips, nullptr );
         std::atomic<bool> notCancelled{ false };
+        QVector<DiscoverySkip> clearFlagSkips;
         const auto withClearFlag =
-          discoverSubmissions( tree.submissions.path(), &flaglessSkips, &notCancelled );
+          discoverSubmissions( tree.submissions.path(), &clearFlagSkips, &notCancelled );
 
         REQUIRE( sameItems( legacy, withNullFlag ) );
         REQUIRE( sameItems( legacy, withClearFlag ) );
-        REQUIRE( sameSkips( legacySkips, flaglessSkips ) );
+        REQUIRE( sameSkips( legacySkips, nullFlagSkips ) );
+        REQUIRE( sameSkips( legacySkips, clearFlagSkips ) );
         // The tree's shape: two submissions discovered, the reserved output
         // refused and accounted.
         REQUIRE( legacy.size() == 2 );
@@ -198,9 +201,16 @@ TEST_CASE( "mid-walk cancellation aborts the discovery walk", "[r25_e][batch][di
 TEST_CASE( "preDiscovered seam grades exactly the caller's walk (CT-C6)",
            "[r25_e][batch][discovery]" )
 {
+    // Reserved tool-output names only refuse INSIDE a student directory (a
+    // root-level file is the flat pass's business — master semantics), so
+    // the accounted refusal lives in alice's folder here.
     ClassTree tree{ { QStringLiteral( "alice" ), QStringLiteral( "bob" ),
-                      QStringLiteral( "cara" ) },
-                    { QStringLiteral( "zhang_feedback.json" ) } };
+                      QStringLiteral( "cara" ) } };
+    {
+        QFile f( tree.submissions.filePath( QStringLiteral( "alice/alice_feedback.json" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "tool-output" );
+    }
     const QString ckpt = tree.checkpointPath();
 
     // Run A: internal discovery (the seam is empty — the legacy path).
