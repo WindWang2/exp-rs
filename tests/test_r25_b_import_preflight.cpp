@@ -310,4 +310,10 @@ TEST_CASE( "import preflight report serializes with the schema stamp",
     // The serialized document is valid JSON end to end.
     const QJsonDocument doc( json );
     CHECK_FALSE( doc.isNull() );
+
+    // Determinism discriminator (perf baseline companion): the same input
+    // state must serialize to the byte-identical document on re-inspection.
+    const ImportPreflightReport second = ImportPreflight::inspect( path );
+    const QJsonDocument secondDoc( second.toJson() );
+    CHECK( doc == secondDoc );
 }
