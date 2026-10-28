@@ -349,12 +349,16 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     // assumption (downstream guards can see and warn on the flag).
     if ( declaredDomain.isEmpty() )
         dst.setMetadataItem("SICNU_SAR_DOMAIN_ASSUMED", "linear_power");
-    dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
-                        QString::number(lookAzimuthDeg, 'g', 10));
     // Propagate the resolved scene geometry so the next SAR consumer
     // inherits it (chainability with rs:sar_terrain_masks). Default-sourced
-    // values are NOT stamped: a guessed 30°/0° written as metadata would
-    // launder the guess into provenance downstream (R25-A FEAT-1).
+    // values are NOT stamped: a guessed 30°/0° (or the 90° look azimuth
+    // those defaults derive) written as metadata would launder the guess
+    // into provenance downstream (R25-A FEAT-1, R1-9).
+    const bool lookAzimuthResolved =
+        lookAzimuthSource != "derived_from_heading" || headingSource != "default";
+    if (lookAzimuthResolved)
+        dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
+                            QString::number(lookAzimuthDeg, 'g', 10));
     if (incidenceSource != "default")
         dst.setMetadataItem(QLatin1String(sicnu::sar::kIncidenceKey),
                             QString::number(incidenceDeg, 'g', 10));

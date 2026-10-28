@@ -105,10 +105,19 @@ Json::Value RsTerrainSolarOperator::schema() const {
         "separated by ';' or spaces. Takes precedence over generation.", "" );
     props["day_of_year"] = makeNumberParam( "day_of_year",
         "Day of year (1–365) for generated tracks", 81.0 );
-    props["latitude"] = makeNumberParam( "latitude",
-        "Latitude in degrees for generated tracks. Derived from the raster CRS "
-        "(centre transformed to WGS84) when omitted; required explicitly when "
-        "the DEM has no CRS. Ignored when sun_track is given", 40.0 );
+    // No declared default (R1-11): run() derives from the raster CRS and
+    // fails closed without one — a schema-side 40.0 would make UIs auto-fill
+    // and silently override the derivation.
+    {
+        Json::Value latitudeParam( Json::objectValue );
+        latitudeParam["type"] = "number";
+        latitudeParam["description"] =
+            "Latitude in degrees for generated tracks. Derived from the raster "
+            "CRS (centre transformed to WGS84) when omitted; required "
+            "explicitly when the DEM has no CRS. Ignored when sun_track is "
+            "given";
+        props["latitude"] = latitudeParam;
+    }
     props["start_hour"] = makeNumberParam( "start_hour",
         "Local SOLAR time start hour for generated tracks", 6.0 );
     props["end_hour"] = makeNumberParam( "end_hour",

@@ -107,10 +107,12 @@ Json::Value RsTerrainFlowOperator::executionEstimate() const {
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
     // Up to 6 full float frames (input, filled, directions, accumulation,
-    // network mask/orders) for the stream_network product; stated per 4096²
-    // as the documented scale anchor.
+    // network mask/orders) for the stream_network product; the exact-count
+    // flow_accumulation path peaks at ~8 frames (dem + filled + dir +
+    // uint64 counts + Float64 product + indegree), stated per 4096² as the
+    // documented scale anchor.
     est["estimatedRamBytes"] = Json::Value::UInt64(
-        6ULL * 4096ULL * 4096ULL * sizeof( float ) );
+        8ULL * 4096ULL * 4096ULL * sizeof( float ) );
     return est;
 }
 
@@ -501,7 +503,12 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
         productDataF64.resize( n );
         for ( std::size_t i = 0; i < n; ++i )
         {
-            if ( hasNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+            // EXACTLY the kernel's NoData predicate (R1-3): when the band
+            // declares nothing the sentinel float IS NaN, so the hasNodata
+            // prefix would skip NaN cells and publish a phantom 0.0 count
+            // under a NaN-NoData output — the #783 regression the float
+            // path never had.
+            if ( filled[i] == nodata || std::isnan( filled[i] ) )
             {
                 productDataF64[i] = static_cast<double>( nodata );
                 continue;

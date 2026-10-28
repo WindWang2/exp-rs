@@ -522,7 +522,10 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     result["cloudConfidence"] = cloudConfidence;
     if (source == "sentinel2_scl") {
         Json::Value hist(Json::objectValue);
-        for (int c = 0; c < 12; ++c)
+        // 0..15: the readability gate admits the extended SCL domain, so
+        // classes 12..15 must appear in the summary rather than being
+        // counted and silently dropped (R1-10).
+        for (int c = 0; c < 16; ++c)
             if (sclHistogram[c] > 0)
                 hist[std::to_string(c)] = Json::Value::UInt64(sclHistogram[c]);
         result["sclClassHistogram"] = hist;

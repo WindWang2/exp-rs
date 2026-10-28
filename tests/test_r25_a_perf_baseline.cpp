@@ -152,6 +152,11 @@ TEST_CASE( "perf baseline: spectral resample 1024x1024 50->3 bands",
     params["wavelengths"].append( 500.0 );
     params["wavelengths"].append( 600.0 );
     params["wavelengths"].append( 700.0 );
+    // Explicit nm source axis: the throughput lane measures the resampling
+    // pipeline, not metadata resolution (that is DEF-7's oracle).
+    params["sourceWavelengths"] = Json::Value( Json::arrayValue );
+    for ( int b = 0; b < kBands; ++b )
+        params["sourceWavelengths"].append( 460.0 + 10.0 * b );
 
     const double rssBefore = peakRssMiB();
     std::vector<double> mpx;

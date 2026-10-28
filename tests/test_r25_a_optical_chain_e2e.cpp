@@ -78,6 +78,7 @@ QString writeProduct( const QTemporaryDir &dir )
     RsSyntheticRasterBuilder b( 2, 2, 5, GDT_Float32 );
     b.withCrs( "EPSG:32650" );
     b.withGeoTransform( 500000.0, 10.0, 2000000.0, -10.0 );
+    b.withNoData( -9999.0 ); // apply_mask requires declared per-band NoData
     // band 1 blue / 2 green / 3 red / 4 nir
     const float red[4] = { 0.10f, 0.20f, 0.03f, 0.04f };
     const float nir[4] = { 0.50f, 0.25f, 0.02f, 0.03f };

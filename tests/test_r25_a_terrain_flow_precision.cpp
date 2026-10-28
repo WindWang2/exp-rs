@@ -27,6 +27,7 @@
 #include <json/json.h>
 
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <vector>
 
@@ -151,10 +152,11 @@ TEST_CASE( "rs:terrain_flow flow_accumulation publishes Float64 exact counts",
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
-    // A tilted plane: elevation = x + y drains everything to (0, H-1) —
-    // south-west corner. 3000×3000 = 9M cells is well below 2^24; the
-    // operator E2E checks dtype + exactness plumbing (the >2^24 magnitude
-    // is covered at kernel level above to keep the E2E affordable).
+    // A tilted plane z = x + y: the NW diagonal is steepest, so every cell
+    // chains into the origin (0,0). 300×300 = 90k cells is well below 2^24;
+    // the operator E2E checks dtype + exactness plumbing (the >2^24
+    // magnitude is covered at kernel level above to keep the E2E
+    // affordable).
     constexpr int kSide = 300;
     RsSyntheticRasterBuilder b( kSide, kSide, 1 );
     b.withCrs( "EPSG:32650" );
@@ -184,4 +186,46 @@ TEST_CASE( "rs:terrain_flow flow_accumulation publishes Float64 exact counts",
     // every cell drains into the origin (0,0), whose exact count equals
     // the grid size.
     CHECK( accum[0] == static_cast<double>( kSide ) * kSide );
+}
+
+TEST_CASE( "flow_accumulation keeps the NaN sentinel without declared NoData",
+           "[terrain][flow][r25a][operator][e2e]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // Tilted plane with a NaN wall down column 4 (no declared nodata — NaN
+    // is the marker). The Float64 product must carry NaN at those cells
+    // (#783 spirit), never a phantom 0.0 count (R1-3).
+    constexpr int kSide = 32;
+    RsSyntheticRasterBuilder b( kSide, kSide, 1, GDT_Float32 );
+    b.withCrs( "EPSG:32650" );
+    b.withGeoTransform( 0.0, 1.0, static_cast<double>( kSide ), -1.0 );
+    for ( int y = 0; y < kSide; ++y )
+        for ( int x = 0; x < kSide; ++x )
+            b.withPixel( 1, x, y,
+                         x == 4 ? std::numeric_limits<float>::quiet_NaN()
+                                : static_cast<float>( x + y ) );
+    const QString demPath = b.writeToDisk( dir.filePath( "nanwall.tif" ) );
+    REQUIRE( !demPath.isEmpty() );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = demPath.toStdString();
+    params["output"] = dir.filePath( "accum_nan.tif" ).toStdString();
+    params["product"] = "flow_accumulation";
+    const RunResult run = runOperator( "rs:terrain_flow", params );
+    REQUIRE( run.ok );
+    GdalDatasetWrapper outDs;
+    REQUIRE( outDs.open( dir.filePath( "accum_nan.tif" ) ) );
+    CHECK( outDs.bandDataType( 1 ) == GDT_Float64 );
+    std::vector<double> accum( static_cast<size_t>( kSide ) * kSide );
+    REQUIRE( outDs.readBandDataNative( 1, accum.data(), kSide, kSide ) );
+    for ( int y = 0; y < kSide; ++y )
+    {
+        INFO( "row " << y );
+        CHECK( std::isnan( accum[static_cast<size_t>( y ) * kSide + 4] ) );
+        // West of the wall drains within its own block; east of the wall
+        // likewise — finite, exact counts everywhere else.
+        CHECK( std::isfinite( accum[static_cast<size_t>( y ) * kSide + 0] ) );
+        CHECK( std::isfinite( accum[static_cast<size_t>( y ) * kSide + 5] ) );
+    }
 }

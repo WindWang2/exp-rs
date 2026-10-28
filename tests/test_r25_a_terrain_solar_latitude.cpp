@@ -76,16 +76,21 @@ QString writeGeographicDem( const QTemporaryDir &dir, double centreLat )
     return b.writeToDisk( dir.filePath( "dem_geo.tif" ) );
 }
 
-// Flat 11x1 DEM in UTM 50N centred at ~45.13°N (northing 5,000,500).
+// Flat 11x1001 DEM in UTM 50N, 30 m cells, top northing 5,000,505. The
+// SIGNED affine centre is northing 5,000,505 - 30*500.5 = 4,985,490 ≈
+// 45.00°N; an abs()-walked "centre" lands at ≈ 5,002,510 ≈ 45.26°N — the
+// 0.26° gap is what the latitude assertion pins (R1-2: a 1-row fixture was
+// blind to the sign).
 QString writeProjectedDem( const QTemporaryDir &dir )
 {
     constexpr int kW = 11;
-    constexpr int kH = 1;
+    constexpr int kH = 1001;
     RsSyntheticRasterBuilder b( kW, kH, 1 );
     b.withCrs( "EPSG:32650" );
-    b.withGeoTransform( 449950.0, 10.0, 5000505.0, -10.0 );
-    for ( int x = 0; x < kW; ++x )
-        b.withPixel( 1, x, 0, 10.0f );
+    b.withGeoTransform( 449850.0, 30.0, 5000505.0, -30.0 );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            b.withPixel( 1, x, y, 10.0f );
     return b.writeToDisk( dir.filePath( "dem_utm.tif" ) );
 }
 
@@ -135,7 +140,8 @@ TEST_CASE( "rs:terrain_solar derives latitude from a projected CRS via WGS84",
     REQUIRE( run.ok );
     CHECK( run.json["daylightSamples"].asUInt64() == 17 ); // RED on master: 19
     CHECK( run.json["latitudeSource"].asString() == "raster_crs" );
-    CHECK( run.json["latitude"].asDouble() == Catch::Approx( 45.13 ).epsilon( 0.01 ) );
+    // Signed-centre truth ≈ 45.00°N (the abs() bug reported ≈ 45.26°).
+    CHECK( run.json["latitude"].asDouble() == Catch::Approx( 45.00 ).epsilon( 0.02 ) );
 }
 
 TEST_CASE( "rs:terrain_solar fails closed without latitude and without CRS",

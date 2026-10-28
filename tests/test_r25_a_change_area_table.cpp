@@ -116,9 +116,10 @@ TEST_CASE( "rs:post_classification_change names the geographic area basis",
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
-    // EPSG:4326, 0.001° cells at the equator (~111 km × 111 km). The exact
-    // area value uses the WGS84 arc at the scene-centre latitude (0°); the
-    // BASIS string is the contract under test, plus a sanity bound.
+    // EPSG:4326, 0.001° cells at the equator (~111 m × 111 m; 1° ≈ 111.32
+    // km, so 0.001° ≈ 111 m — cell area ≈ 1.24e4 m²). The exact value uses
+    // the WGS84 arc at the scene-centre latitude (0°); the BASIS string is
+    // the contract under test, plus a sanity bound (R1-5).
     RsSyntheticRasterBuilder b( 3, 2, 1, GDT_Byte );
     b.withCrs( "EPSG:4326" );
     b.withGeoTransform( 20.0, 0.001, 0.0005, -0.001 );
@@ -136,9 +137,9 @@ TEST_CASE( "rs:post_classification_change names the geographic area basis",
     REQUIRE( run.ok );
     CHECK( run.json["cellAreaBasis"].asString() == "geographic_scene_centre" );
     CHECK( run.json["changedAreaKm2"].asDouble() == Catch::Approx( 0.0 ).margin( 1e-12 ) );
-    // 0.001° ≈ 111.3 km per side at the equator → ~12,390 km2 per cell.
-    CHECK( run.json["cellAreaM2"].asDouble() > 1.0e10 );
-    CHECK( run.json["cellAreaM2"].asDouble() < 1.3e10 );
+    // 0.001° ≈ 111.3 m per side at the equator → ~1.24e4 m² per cell.
+    CHECK( run.json["cellAreaM2"].asDouble() > 1.0e4 );
+    CHECK( run.json["cellAreaM2"].asDouble() < 1.5e4 );
     CHECK( run.json["toAreasKm2"][1].asDouble()
            == Catch::Approx( 6.0 * run.json["cellAreaM2"].asDouble() / 1.0e6 ).epsilon( 1e-9 ) );
 }

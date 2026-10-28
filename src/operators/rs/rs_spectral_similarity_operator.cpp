@@ -266,9 +266,16 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
     result["output"] = outputPath;
     result["refs"] = refCount;
     result["form"] = formText;
-    result["meanScore"] = finiteScores > 0
-                              ? scoreSum / static_cast<double>(finiteScores)
-                              : 0.0;
+    // Null (not 0.0, which reads as a perfect match) when pixels were
+    // labelled but every score overflowed to infinity (R1-12); the count
+    // makes the QA summary actionable.
+    if (finiteScores > 0)
+        result["meanScore"] = scoreSum / static_cast<double>(finiteScores);
+    else if (labelledPixels > 0)
+        result["meanScore"] = Json::Value();
+    else
+        result["meanScore"] = 0.0;
+    result["infiniteScores"] = static_cast<Json::UInt64>(labelledPixels - finiteScores);
     result["labelledPixels"] = static_cast<Json::UInt64>(labelledPixels);
     result["referenceSource"] = refsResolved.sourceDescription.toStdString();
     if (refsResolved.resampled)

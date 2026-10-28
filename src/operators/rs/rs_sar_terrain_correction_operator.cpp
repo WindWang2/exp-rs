@@ -323,11 +323,15 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
         // #1165: numeric-domain assumption provenance (see terrain_flatten).
         if ( sicnu::sar::readDomain( src ).isEmpty() )
             dst.setMetadataItem("SICNU_SAR_DOMAIN_ASSUMED", "linear_power");
-    dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
-                        QString::number(lookAzimuthDeg, 'g', 10));
     // Propagate the resolved scene geometry (chainability with
-    // rs:sar_terrain_masks); default-sourced guesses are NOT stamped
-    // (R25-A FEAT-1 — same ruling as rs:sar_terrain_flatten).
+    // rs:sar_terrain_masks); default-sourced guesses are NOT stamped —
+    // including the 90° look azimuth the default heading derives (R25-A
+    // FEAT-1, R1-9 — same ruling as rs:sar_terrain_flatten).
+    const bool lookAzimuthResolved =
+        lookAzimuthSource != "derived_from_heading" || headingSource != "default";
+    if (lookAzimuthResolved)
+        dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
+                            QString::number(lookAzimuthDeg, 'g', 10));
     if (incidenceSource != "default")
         dst.setMetadataItem(QLatin1String(sicnu::sar::kIncidenceKey),
                             QString::number(incidenceDeg, 'g', 10));
@@ -357,6 +361,8 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     result["incidenceBand"] = incidenceBand;
     result["maskBand"] = maskBand;
     result["layout"] = layout;
+    result["incidenceDeg"] = incidenceDeg;
+    result["headingDeg"] = headingDeg;
     result["lookAzimuthDeg"] = lookAzimuthDeg;
     result["incidenceSource"] = incidenceSource;
     result["headingSource"] = headingSource;

@@ -154,6 +154,28 @@ TEST_CASE( "rs:spectral_derivative keeps the nm default and refuses unknown unit
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
 
+    SECTION( "explicit wavelengths parameter keeps its nm contract" )
+    {
+        const QString cube = writeRampCube( dir, "ramp_param.tif" );
+        Json::Value params( Json::objectValue );
+        params["input"] = cube.toStdString();
+        params["output"] = dir.filePath( "deriv_param.tif" ).toStdString();
+        params["order"] = 1;
+        Json::Value axis( Json::arrayValue );
+        for ( int b = 0; b < 50; ++b )
+            axis.append( 460.0 + 10.0 * b );
+        params["wavelengths"] = axis;
+        const RunResult run = runOperator( "rs:spectral_derivative", params );
+        REQUIRE( run.ok );
+        GdalDatasetWrapper outDs;
+        REQUIRE( outDs.open( dir.filePath( "deriv_param.tif" ) ) );
+        std::vector<float> deriv( 49 );
+        REQUIRE( outDs.readBandData( 1, deriv.data(), 4, 4 ) );
+        CHECK( deriv[0] == Catch::Approx( 1.0 / 490.0 ).epsilon( 1e-6 ) );
+        CHECK( run.json["outputWavelengthsNm"][0].asDouble()
+               == Catch::Approx( 465.0 ).epsilon( 1e-6 ) );
+    }
+
     SECTION( "no WAVELENGTH_UNITS defaults to nm (pinned behaviour)" )
     {
         const QString cube = writeRampCube( dir, "ramp_nm.tif" );
@@ -292,6 +314,7 @@ TEST_CASE( "rs:apply_mask preserves WAVELENGTH_UNITS band metadata",
     RsSyntheticRasterBuilder src( 4, 4, 3, GDT_Float32 );
     src.withCrs( "EPSG:32650" );
     src.withGeoTransform( 0.0, 1.0, 4.0, -1.0 );
+    src.withNoData( -9999.0 ); // apply_mask requires declared per-band NoData
     for ( int band = 1; band <= 3; ++band )
         for ( int y = 0; y < 4; ++y )
             for ( int x = 0; x < 4; ++x )
