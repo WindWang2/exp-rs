@@ -234,8 +234,10 @@ QJsonObject ImportPreflightReport::toJson() const
     QJsonObject identity;
     identity.insert( QStringLiteral( "token" ), identityToken );
     identity.insert( QStringLiteral( "strength" ), identityStrength );
-    identity.insert( QStringLiteral( "size_bytes" ), static_cast<double>( identitySizeBytes ) );
-    identity.insert( QStringLiteral( "hashed_bytes" ), static_cast<double>( identityHashedBytes ) );
+    identity.insert( QStringLiteral( "size_bytes" ),
+                     static_cast<qint64>( identitySizeBytes ) );
+    identity.insert( QStringLiteral( "hashed_bytes" ),
+                     static_cast<qint64>( identityHashedBytes ) );
     json.insert( QStringLiteral( "identity" ), identity );
 
     QJsonObject dedup;
@@ -244,7 +246,7 @@ QJsonObject ImportPreflightReport::toJson() const
     {
         dedup.insert( QStringLiteral( "existing_asset_id" ), existingAssetId );
         dedup.insert( QStringLiteral( "existing_asset_revision" ),
-                      static_cast<double>( existingAssetRevision ) );
+                      static_cast<qint64>( existingAssetRevision ) );
     }
     json.insert( QStringLiteral( "dedup" ), dedup );
 
@@ -416,13 +418,28 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
     for ( const geo::ProductAdapter *candidate : candidates )
         report.candidateAdapterIds.append( QString::fromStdString( candidate->id() ) );
 
-    if ( candidates.size() > 1 )
+    // Ambiguity = more than one SPECIFIC adapter claims the path. The
+    // GenericRaster fallback accepts every openable raster by design (the
+    // documented first-match specificity rule), so it never creates an
+    // ambiguity — only two competing PRODUCT families do.
+    int specificCandidates = 0;
+    QString firstSpecific;
+    for ( const geo::ProductAdapter *candidate : candidates )
+    {
+        if ( candidate->id() != "generic_raster" )
+        {
+            ++specificCandidates;
+            if ( firstSpecific.isEmpty() )
+                firstSpecific = QString::fromStdString( candidate->id() );
+        }
+    }
+    if ( specificCandidates > 1 )
     {
         addFinding( report, QStringLiteral( "import.adapter_ambiguous" ), severityInfo(),
-                    QStringLiteral( "%1 adapter families claim this path; the first (%2) wins by "
-                                    "registration order" )
-                        .arg( candidates.size() )
-                        .arg( report.candidateAdapterIds.constFirst() ),
+                    QStringLiteral( "%1 product adapter families claim this path; the first "
+                                    "(%2) wins by registration order" )
+                        .arg( specificCandidates )
+                        .arg( firstSpecific ),
                     QStringLiteral( "confirm the intended product family before importing" ) );
     }
 
@@ -525,10 +542,34 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
         }
         catch ( const geo::GeoError &vectorError )
         {
-            addFinding( report, QStringLiteral( "import.unreadable" ), severityError(),
-                        QStringLiteral( "source is neither an openable raster nor vector (%1)" )
-                            .arg( QString::fromUtf8( geo::GeoError::errorCodeName( vectorError.code() ) ) ),
-                        QStringLiteral( "verify the file format is supported and not corrupted" ) );
+            // A directory PRODUCT whose root is not directly openable is the
+            // normal shape (SAFE containers, MTL scenes): the adapter already
+            // enumerated and verified the constituents; registration goes
+            // through the collection path. Only plain files are refusals.
+            const bool healthyProduct =
+                recognizedAsProduct && !report.completeness.isEmpty()
+                && report.completeness != QLatin1String( "invalid" )
+                && report.completeness != QLatin1String( "unsupported_version" );
+            if ( healthyProduct )
+            {
+                addFinding( report, QStringLiteral( "import.directory_product_root" ),
+                            severityInfo(),
+                            QStringLiteral( "directory product: the root is not a directly "
+                                            "openable dataset — constituents are enumerated "
+                                            "by the %1 adapter" )
+                                .arg( report.adapterId ),
+                            QStringLiteral( "import through the collection path (per-constituent "
+                                            "registration with completeness tracking)" ) );
+            }
+            else
+            {
+                addFinding( report, QStringLiteral( "import.unreadable" ), severityError(),
+                            QStringLiteral( "source is neither an openable raster nor vector (%1)" )
+                                .arg( QString::fromUtf8(
+                                    geo::GeoError::errorCodeName( vectorError.code() ) ) ),
+                            QStringLiteral( "verify the file format is supported and not "
+                                            "corrupted" ) );
+            }
         }
     }
     if ( !opened && report.resourceKind == ImportPreflightResourceKind::Unknown )

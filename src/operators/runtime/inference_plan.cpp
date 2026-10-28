@@ -1,6 +1,8 @@
 // src/operators/runtime/inference_plan.cpp — see inference_plan.h.
 #include "operators/runtime/inference_plan.h"
 
+#include "geospatial/common.h"
+
 #include "operators/framework/model_readiness.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_error.h"
@@ -12,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace sicnu::operators::runtime
 {
@@ -57,9 +60,9 @@ bool hasError( const InferencePlan &plan )
 }
 
 /// One read-only input inspection; failure lands as an error finding.
-bool inspectInputRaster( InferencePlan &plan, const std::string &path, const std::string &name,
-                         const std::vector<int> &bandSelection, int frames,
-                         InferencePlanInput &input )
+bool inspectInputRaster( InferencePlan &plan, const ModelInfo &model, const std::string &path,
+                         const std::string &name, const std::vector<int> &bandSelection,
+                         int frames, InferencePlanInput &input )
 {
   GdalDatasetWrapper ds;
   if ( !ds.open( QString::fromStdString( path ) ) )
@@ -101,6 +104,22 @@ bool inspectInputRaster( InferencePlan &plan, const std::string &path, const std
                 "input raster has a degenerate grid: " + path );
     return false;
   }
+  // The engine's own dtype contract validator over the fed bands (#632/#705:
+  // EVERY fed band, not band 1 alone). An empty selection means "all bands".
+  std::vector<int> allBands;
+  if ( bandSelection.empty() )
+  {
+    allBands.reserve( input.bandCount );
+    for ( int b = 1; b <= input.bandCount; ++b )
+      allBands.push_back( b );
+  }
+  const std::vector<int> &bands = bandSelection.empty() ? allBands : bandSelection;
+  const std::string dtypeError = TileInferenceEngine::inputDTypeMismatch(
+    model, bands, [ &ds ]( int band ) { return ds.bandDataType( band ); } );
+  if ( !dtypeError.empty() )
+    addFinding( plan, "plan.dtype_mismatch", "error", dtypeError,
+                "align the manifest input.dtype with the raster's band types or "
+                "convert the raster" );
   return true;
 }
 
@@ -193,6 +212,7 @@ Json::Value InferencePlan::toJson() const
   tiling["tiles_planned"] = tilesPlanned;
   tiling["batch_size"] = batchSize;
   tiling["batches_estimated"] = batchesEstimated;
+  tiling["fed_channels"] = fedChannels;
   tiling["batch_working_set_mib"] = batchWorkingSetMiB;
   json["tiling"] = tiling;
 
@@ -266,8 +286,6 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
   plan.sceneClassification = request.asSceneClassification;
   plan.outputMode = request.outputMode;
 
-  const bool multiInput = !request.namedInputs.empty();
-
   // Inputs were already existence-checked by the resolving overload; feeds
   // still need the per-path check when callers come in through this entry.
   for ( const NamedRasterFeed &feed : request.namedInputs )
@@ -282,7 +300,7 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                     "Input raster not found (feed '" + feed.name + "'): " + path );
     }
   }
-  if ( !multiInput && !params::fileExists( request.inputPath ) )
+  if ( request.namedInputs.empty() && !params::fileExists( request.inputPath ) )
     addFinding( plan, "plan.input_missing", "error",
                 "Input raster not found: " + request.inputPath );
 
@@ -307,26 +325,37 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                 "fix the manifest task or pick the matching operator" );
   }
 
-  // --- gate 4: runtime/device readiness (no session acquired) --------------
-  const ModelHardwareCapabilities hw = ModelRuntimeRegistry::instance().hardware();
-  std::string runtimeReason;
-  const ModelReadiness runtimeReadiness =
-    evaluateRuntimeReadiness( model, hw, &runtimeReason );
-  plan.runtimeReadinessName = modelReadinessName( runtimeReadiness );
-  plan.runtimeReason = runtimeReason;
-  plan.runtimeReady = runtimeReadiness == ModelReadiness::Ready;
-  if ( !plan.runtimeReady )
+  // --- gate 4: runtime/device readiness (run-seam ORDER: ensembles route to
+  // their own engine BEFORE this gate — mirror that order, per-member
+  // readiness is the ensemble engine's concern, not this static check) ------
+  if ( plan.isEnsemble )
   {
-    addFinding( plan, "plan.runtime_not_ready", "error",
-                "Model '" + model.name + "' cannot execute: " + runtimeReason );
+    plan.runtimeReady = true;
+    plan.runtimeReadinessName = modelReadinessName( ModelReadiness::Ready );
+    addFinding( plan, "plan.ensemble_route", "info",
+                "ensemble model: " + std::to_string( plan.ensembleMembers )
+                  + " members execute through the ensemble engine; per-member readiness "
+                    "is evaluated there, the grid plan below is the combined skeleton" );
+  }
+  else
+  {
+    const ModelHardwareCapabilities hw = ModelRuntimeRegistry::instance().hardware();
+    std::string runtimeReason;
+    const ModelReadiness runtimeReadiness = evaluateRuntimeReadiness( model, hw, &runtimeReason );
+    plan.runtimeReadinessName = modelReadinessName( runtimeReadiness );
+    plan.runtimeReason = runtimeReason;
+    plan.runtimeReady = runtimeReadiness == ModelReadiness::Ready;
+    if ( !plan.runtimeReady )
+      addFinding( plan, "plan.runtime_not_ready", "error",
+                  "Model '" + model.name + "' cannot execute: " + runtimeReason );
   }
 
   // --- gate 5: lane incompatibilities --------------------------------------
-  if ( multiInput && request.asDetection )
+  if ( !request.namedInputs.empty() && request.asDetection )
     addFinding( plan, "plan.detection_multi_input_unsupported", "error",
                 "detection decode runs on the single-input path — multi-input "
                   "detection heads are not wired yet" );
-  if ( request.asSceneClassification && ( request.asDetection || multiInput ) )
+  if ( request.asSceneClassification && ( request.asDetection || !request.namedInputs.empty() ) )
     addFinding( plan, "plan.scene_lane_conflict", "error",
                 "scene classification runs the single-input path — it classifies "
                   "ONE scene in ONE forward pass" );
@@ -341,7 +370,7 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     addFinding( plan, "plan.contract_unwired", "error", error.message(),
                 "provide the named feeds the model contract demands" );
   }
-  if ( !multiInput )
+  if ( request.namedInputs.empty() )
   {
     try
     {
@@ -362,29 +391,76 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                   "cuda, cuda:N, auto)" );
   }
 
+  // --- gate 7b: detection knob bounds (the run seam's own [0,1]/(0,1]) ------
+  if ( request.asDetection && request.confOverride > 1.0 )
+    addFinding( plan, "plan.conf_bounds", "error",
+                "conf must be in [0, 1] (declared " + std::to_string( request.confOverride )
+                  + ")" );
+  if ( request.asDetection && request.nmsIouOverride >= 0.0
+       && ( request.nmsIouOverride <= 0.0 || request.nmsIouOverride > 1.0 ) )
+    addFinding( plan, "plan.nms_bounds", "error",
+                "nms_iou must be in (0, 1] (declared "
+                  + std::to_string( request.nmsIouOverride ) + ")" );
+
   // --- gate 8: input grids (read-only open; no pixels touched) -------------
   int primaryWidth = 0;
   int primaryHeight = 0;
   int fedChannels = 0;
   bool gridsOk = true;
-  if ( multiInput )
+  if ( !request.namedInputs.empty() )
   {
-    for ( const NamedRasterFeed &feed : request.namedInputs )
+    // Bind feeds to input contracts the way the multi-input engine does:
+    // by name first, then positional (model.inputs[feedContract[f]]).
+    const auto contractFor = [ &model ]( std::size_t feedIndex,
+                                         const std::string &feedName ) -> const ModelInputContract *
     {
-      const std::string &firstPath =
-        feed.paths.empty() ? std::string() : feed.paths.front();
+      for ( const ModelInputContract &contract : model.inputs )
+      {
+        if ( !contract.name.empty() && contract.name == feedName )
+          return &contract;
+      }
+      return feedIndex < model.inputs.size() ? &model.inputs[feedIndex] : nullptr;
+    };
+    for ( std::size_t f = 0; f < request.namedInputs.size(); ++f )
+    {
+      const NamedRasterFeed &feed = request.namedInputs[f];
+      const ModelInputContract *contract = contractFor( f, feed.name );
+      // Channels feed the batch budget EXACTLY as the engine accounts them:
+      // bands × DECLARED temporal length (the contract axis, not the provided
+      // frame count) — the engine budgets on the largest feed.
+      const int declaredFrames =
+        contract && contract->temporalLength > 0 ? contract->temporalLength : 1;
+      const std::string &firstPath = feed.paths.empty() ? std::string() : feed.paths.front();
       InferencePlanInput input;
       if ( !firstPath.empty()
-           && inspectInputRaster( plan, firstPath, feed.name, feed.bands,
-                                  static_cast<int>( feed.paths.size() ), input ) )
+           && inspectInputRaster( plan, model, firstPath, feed.name, feed.bands,
+                                  declaredFrames, input ) )
       {
-        plan.inputs.push_back( input );
+        const std::int64_t channels64 =
+          static_cast<std::int64_t>( input.fedBands ) * declaredFrames;
+        if ( channels64 > CV_CN_MAX )
+          addFinding( plan, "plan.channels_over_limit", "error",
+                      "feed '" + feed.name + "': bands × temporal_length = "
+                        + std::to_string( channels64 ) + " channels but cv::Mat supports at most "
+                        + std::to_string( CV_CN_MAX ),
+                      "declare input.bands to select a subset" );
+        fedChannels = std::max( fedChannels, static_cast<int>( channels64 ) );
         if ( primaryWidth == 0 )
         {
           primaryWidth = input.width;
           primaryHeight = input.height;
-          fedChannels = input.fedBands;
         }
+        else if ( input.width != primaryWidth || input.height != primaryHeight )
+        {
+          addFinding( plan, "plan.feed_grid_difference", "info",
+                      "feed '" + feed.name + "' declares a different grid ("
+                        + std::to_string( input.width ) + "×" + std::to_string( input.height )
+                        + ") than the primary feed (" + std::to_string( primaryWidth ) + "×"
+                        + std::to_string( primaryHeight )
+                        + ") — the engine verifies co-registration (and pre-aligns when the "
+                          "contract allows) at run time" );
+        }
+        plan.inputs.push_back( input );
       }
       else
       {
@@ -392,23 +468,36 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
       }
     }
   }
-  else if ( inspectInputRaster( plan, request.inputPath, {}, request.bands, 1,
+  else if ( inspectInputRaster( plan, model, request.inputPath, {}, request.bands, 1,
                                 plan.inputs.emplace_back() ) )
   {
     primaryWidth = plan.inputs.front().width;
     primaryHeight = plan.inputs.front().height;
     fedChannels = plan.inputs.front().fedBands;
+    if ( fedChannels > CV_CN_MAX )
+      addFinding( plan, "plan.channels_over_limit", "error",
+                  "input selection carries " + std::to_string( fedChannels )
+                    + " bands but cv::Mat supports at most " + std::to_string( CV_CN_MAX ),
+                  "declare input.bands to select a subset" );
   }
   else
   {
     gridsOk = false;
   }
 
-  // --- gate 9: preprocess channel contract (engine refuses at run time) ----
-  if ( gridsOk && fedChannels > 0 )
+  // --- gate 9: band_roles arity + preprocess channel contract --------------
+  if ( gridsOk )
   {
+    if ( !model.input.bandRoles.empty()
+         && model.input.bandRoles.size()
+              != static_cast<std::size_t>( plan.inputs.front().fedBands ) )
+      addFinding( plan, "plan.band_roles_arity", "error",
+                  "model manifest declares " + std::to_string( model.input.bandRoles.size() )
+                    + " band roles but " + std::to_string( plan.inputs.front().fedBands )
+                    + " bands are fed",
+                  "pass an explicit band list or fix the manifest" );
     const ModelPreprocessContract &pre = model.preprocess;
-    if ( pre.normalize == "mean_std" )
+    if ( pre.normalize == "mean_std" && fedChannels > 0 )
     {
       if ( !pre.mean.empty() && pre.mean.size() != static_cast<std::size_t>( fedChannels ) )
         addFinding( plan, "plan.preprocess_channel_mismatch", "error",
@@ -423,12 +512,37 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     }
   }
 
-  // --- gate 10: output mode × head contract (the r23-B shared predicate) ---
+  // --- gate 10: EFFECTIVE output mode + head contract -----------------------
+  // The engine resolves the effective mode from the manifest when the request
+  // leaves the default Probability; every derived-mode conflict the run
+  // raises is planned here (uncertainty, multi-head, mask_threshold, head
+  // role/confidence semantics).
   if ( !request.asDetection && !request.asSceneClassification )
   {
     try
     {
-      ensureDerivedModeMatchesHeadContract( model, request.outputMode );
+      const RasterOutputMode effectiveMode =
+        request.outputMode != RasterOutputMode::Probability
+          ? request.outputMode
+          : TileInferenceEngine::rasterOutputMode( model );
+      plan.outputMode = effectiveMode;
+      if ( effectiveMode != RasterOutputMode::Probability )
+      {
+        const std::string uncertainty = TileInferenceEngine::uncertaintyMethod( model );
+        if ( !uncertainty.empty() )
+          addFinding( plan, "plan.output_mode_conflict", "error",
+                      "output.uncertainty requires the full probability stack — remove "
+                        "output.format or output.uncertainty" );
+        if ( model.output.tensorNames.size() > 1 )
+          addFinding( plan, "plan.output_mode_conflict", "error",
+                      "derived output.format applies to single-head models; this manifest "
+                        "declares " + std::to_string( model.output.tensorNames.size() )
+                        + " tensor heads" );
+        if ( effectiveMode == RasterOutputMode::Labels && model.postprocess.maskThreshold >= 0.0 )
+          addFinding( plan, "plan.output_mode_conflict", "error",
+                      "postprocess.mask_threshold is meaningless with output.format=labels" );
+        ensureDerivedModeMatchesHeadContract( model, effectiveMode );
+      }
     }
     catch ( const RSOperatorError &error )
     {
@@ -439,23 +553,65 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     }
   }
 
-  // --- gate 11: EO domain contract (metadata only; enforced facts only) ----
-  if ( !multiInput )
+  // --- gate 11: EO domain contract (metadata only) --------------------------
+  // Lane fidelity: the raster lane enforces per input, the multi-input lane
+  // enforces per feed PATH with the bound contract, the scene lane enforces
+  // on its scene window — the DETECTION lane never enforces EO.
+  if ( model.eo.declared && !request.asDetection )
   {
-    try
+    plan.eoApplicable = true;
+    const auto enforceOne = [ & ]( const std::string &path, const std::vector<int> &bands,
+                                   const ModelInputContract *contract )
     {
-      const EoPreflightReport eo = enforceEoPreflight( model, request.inputPath, request.bands );
-      plan.eoApplicable = eo.applicable;
-      plan.eoAdvisoryCount = static_cast<int>( eo.advisories.size() );
-    }
-    catch ( const RSOperatorError &error )
+      try
+      {
+        const EoPreflightReport eo = enforceEoPreflight( model, path, bands, contract );
+        plan.eoAdvisoryCount += static_cast<int>( eo.advisories.size() );
+      }
+      catch ( const RSOperatorError &error )
+      {
+        plan.eoEnforcedOk = false;
+        addFinding( plan, "plan.eo_contract_violation", "error", error.message(),
+                    "feed an input matching the manifest eo contract (calibration / "
+                    "wavelength windows / grid family)" );
+      }
+      catch ( const geo::GeoError &error )
+      {
+        // The EO inspector's own metadata reads may fail before any contract
+        // verdict — the run seam surfaces that as its typed refusal.
+        plan.eoEnforcedOk = false;
+        addFinding( plan, "plan.eo_contract_violation", "error",
+                    std::string( "eo preflight could not inspect the input: " ) + error.what(),
+                    "verify the input raster opens and carries the declared metadata" );
+      }
+    };
+    if ( !request.namedInputs.empty() )
     {
-      plan.eoApplicable = true; // the refusal proves an eo section applies
-      plan.eoEnforcedOk = false;
-      addFinding( plan, "plan.eo_contract_violation", "error", error.message(),
-                  "feed an input matching the manifest eo contract (calibration / "
-                  "wavelength windows / grid family)" );
+      const auto contractFor = [ &model ]( std::size_t feedIndex,
+                                           const std::string &feedName ) -> const ModelInputContract *
+      {
+        for ( const ModelInputContract &contract : model.inputs )
+        {
+          if ( !contract.name.empty() && contract.name == feedName )
+            return &contract;
+        }
+        return feedIndex < model.inputs.size() ? &model.inputs[feedIndex] : nullptr;
+      };
+      for ( std::size_t f = 0; f < request.namedInputs.size(); ++f )
+      {
+        const ModelInputContract *contract = contractFor( f, request.namedInputs[f].name );
+        for ( const std::string &path : request.namedInputs[f].paths )
+          enforceOne( path, request.namedInputs[f].bands, contract );
+      }
     }
+    else
+    {
+      enforceOne( request.inputPath, request.bands, nullptr );
+    }
+    if ( plan.eoApplicable && plan.eoAdvisoryCount > 0 && plan.eoEnforcedOk )
+      addFinding( plan, "plan.eo_advisories", "info",
+                  std::to_string( plan.eoAdvisoryCount )
+                    + " EO preflight advisories recorded (non-enforced observations)" );
   }
 
   // --- gate 12: blend contract ---------------------------------------------
@@ -470,8 +626,16 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
   }
 
   // --- grid / batch plan (the engine's own static planners) -----------------
-  if ( gridsOk && primaryWidth > 0 && primaryHeight > 0 )
+  if ( request.asSceneClassification )
   {
+    // The scene lane is ONE forward pass over the scene window — a tile grid
+    // would be fiction, so the plan reports none.
+    addFinding( plan, "plan.scene_single_pass", "info",
+                "scene classification runs one forward pass — no tile grid applies" );
+  }
+  else if ( gridsOk && primaryWidth > 0 && primaryHeight > 0 )
+  {
+    const ModelHardwareCapabilities hw = ModelRuntimeRegistry::instance().hardware();
     const int tileSize =
       std::min( TileInferenceEngine::effectiveTileSize( model ),
                 std::max( primaryWidth, primaryHeight ) );
@@ -480,27 +644,18 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     plan.gridX = ( primaryWidth + tileSize - 1 ) / tileSize;
     plan.gridY = ( primaryHeight + tileSize - 1 ) / tileSize;
     plan.tilesPlanned = plan.gridX * plan.gridY;
+    plan.fedChannels = fedChannels;
     int batchSize = TileInferenceEngine::effectiveBatchSize( model, hw, tileSize, fedChannels );
     if ( request.batchSizeOverride > 0 )
       batchSize = std::min( batchSize, request.batchSizeOverride );
     plan.batchSize = std::max( 1, batchSize );
-    plan.batchesEstimated =
-      ( plan.tilesPlanned + plan.batchSize - 1 ) / plan.batchSize;
-    // Working-set estimate: one batch of float32 tiles, input + output plane.
+    plan.batchesEstimated = ( plan.tilesPlanned + plan.batchSize - 1 ) / plan.batchSize;
+    // Working-set estimate: one batch of float32 tiles, input + output plane
+    // (estimate only — providers may stage more; resize-to-input changes the
+    // model-side geometry, not the raster I/O side).
     const double bytesPerTile = static_cast<double>( tileSize ) * tileSize * fedChannels * 4.0;
-    plan.batchWorkingSetMiB =
-      plan.batchSize * bytesPerTile * 2.0 / ( 1024.0 * 1024.0 );
-    if ( plan.eoApplicable && plan.eoAdvisoryCount > 0 )
-      addFinding( plan, "plan.eo_advisories", "info",
-                  std::to_string( plan.eoAdvisoryCount )
-                    + " EO preflight advisories recorded (non-enforced observations)" );
+    plan.batchWorkingSetMiB = plan.batchSize * bytesPerTile * 2.0 / ( 1024.0 * 1024.0 );
   }
-
-  if ( plan.isEnsemble )
-    addFinding( plan, "plan.ensemble_route", "info",
-                "ensemble model: " + std::to_string( plan.ensembleMembers )
-                  + " members execute through the ensemble engine; the grid plan above "
-                    "is the combined execution skeleton" );
 
   plan.verdict = hasError( plan ) ? InferencePlan::Verdict::Refused : InferencePlan::Verdict::Ready;
   return plan;
@@ -624,12 +779,27 @@ InferenceQualitySummary summarizeInferenceQuality( const ModelExecutionResult &r
         static_cast<double>( stats.outWidth ) * static_cast<double>( stats.outHeight );
       summary.classifiedPixelRatio = pixels > 0 ? total / pixels : 0.0;
     }
-    if ( stats.eoPreflight.isObject() )
+    // EO presence: single-input lanes record an OBJECT report, multi-input
+    // lanes an ARRAY of per-feed reports — anything non-null is presence.
+    if ( !stats.eoPreflight.isNull() )
     {
       summary.eoPreflightPresent = true;
-      const Json::Value advisories = stats.eoPreflight.get( "advisories", Json::Value() );
-      summary.eoAdvisoryCount =
-        advisories.isArray() ? static_cast<int>( advisories.size() ) : 0;
+      if ( stats.eoPreflight.isObject() )
+      {
+        const Json::Value advisories = stats.eoPreflight.get( "advisories", Json::Value() );
+        summary.eoAdvisoryCount =
+          advisories.isArray() ? static_cast<int>( advisories.size() ) : 0;
+      }
+      else if ( stats.eoPreflight.isArray() )
+      {
+        for ( const Json::Value &entry : stats.eoPreflight )
+        {
+          const Json::Value advisories =
+            entry.get( "report", Json::Value() ).get( "advisories", Json::Value() );
+          if ( advisories.isArray() )
+            summary.eoAdvisoryCount += static_cast<int>( advisories.size() );
+        }
+      }
     }
   }
 

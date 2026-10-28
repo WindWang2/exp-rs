@@ -301,6 +301,98 @@ TEST_CASE( "plan shares the run seam's typed refusals", "[r25_b][inference_plan]
   }
 }
 
+TEST_CASE( "plan mirrors the engine gates R1 closed: dtype, roles, channels, "
+           "mode conflicts, detection knobs, scene lane",
+           "[r25_b][inference_plan][r1]" )
+{
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = dir.filePath( QStringLiteral( "r1-in.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 3, GDT_Float32 ).writeToDisk( input );
+  const std::string output = dir.filePath( QStringLiteral( "r1-out.tif" ) ).toStdString();
+
+  SECTION( "dtype contract" )
+  {
+    ModelInfo model = planModel();
+    model.input.dtype = "uint8"; // raster bands are Float32
+    const InferencePlan plan = sicnu::operators::runtime::planModelInference(
+      singleInputRequest( input.toStdString(), output ), model );
+    CHECK( plan.verdict == InferencePlan::Verdict::Refused );
+    CHECK( plan.findingCode( "plan.dtype_mismatch" ) != nullptr );
+  }
+
+  SECTION( "band roles arity" )
+  {
+    ModelInfo model = planModel();
+    model.input.bandRoles = { "red", "green" }; // 2 roles, 3 bands fed
+    const InferencePlan plan = sicnu::operators::runtime::planModelInference(
+      singleInputRequest( input.toStdString(), output ), model );
+    CHECK( plan.verdict == InferencePlan::Verdict::Refused );
+    CHECK( plan.findingCode( "plan.band_roles_arity" ) != nullptr );
+  }
+
+  SECTION( "manifest-derived mode conflicts (uncertainty + derived format)" )
+  {
+    ModelInfo model = planModel();
+    model.output.format = "labels";
+    model.output.uncertainty = "entropy";
+    // request leaves the default Probability: the engine derives `labels`
+    // from the manifest and refuses the uncertainty conflict.
+    const InferencePlan plan = sicnu::operators::runtime::planModelInference(
+      singleInputRequest( input.toStdString(), output ), model );
+    CHECK( plan.verdict == InferencePlan::Verdict::Refused );
+    CHECK( plan.findingCode( "plan.output_mode_conflict" ) != nullptr );
+  }
+
+  SECTION( "detection knob bounds" )
+  {
+    ModelExecutionRequest request = singleInputRequest( input.toStdString(), output );
+    request.asDetection = true;
+    request.confOverride = 2.5;
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( request, planModel() );
+    CHECK( plan.findingCode( "plan.conf_bounds" ) != nullptr );
+  }
+
+  SECTION( "scene lane plans no tile grid" )
+  {
+    ModelExecutionRequest request = singleInputRequest( input.toStdString(), output );
+    request.asSceneClassification = true;
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( request, planModel() );
+    CHECK( plan.tilesPlanned == 0 );
+    CHECK( plan.findingCode( "plan.scene_single_pass" ) != nullptr );
+  }
+
+  SECTION( "multi-input temporal accounting feeds the batch budget" )
+  {
+    ModelInfo model = planModel();
+    model.inputs.clear();
+    sicnu::operators::ModelInputContract temporal;
+    temporal.name = "frames";
+    temporal.temporalLength = 3;
+    model.inputs = { temporal };
+
+    ModelExecutionRequest request;
+    request.modelReference = "r25-b-plan";
+    request.outputPath = output;
+    sicnu::operators::runtime::NamedRasterFeed feed;
+    feed.name = "frames";
+    feed.paths = { input.toStdString() };
+    request.namedInputs = { feed };
+
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( request, model );
+    REQUIRE( plan.verdict == InferencePlan::Verdict::Ready );
+    REQUIRE( plan.inputs.size() == 1 );
+    // 3 raster bands × DECLARED 3 frames = 9 channels in the budget — the
+    // engine's admission accounting, not the provided frame count (1).
+    CHECK( plan.inputs.front().frames == 3 );
+    CHECK( plan.fedChannels == 9 );
+    CHECK( plan.toJson()["tiling"]["fed_channels"].asInt() == 9 );
+  }
+}
+
 TEST_CASE( "quality summary refuses empty results and flags lost tiles",
            "[r25_b][inference_quality]" )
 {

@@ -27,8 +27,20 @@ effectiveBatchSize`), so the plan and the engine cannot drift:
 
 A `ready` verdict means "every gate the run checks passes and the grid is
 computable". A `refused` verdict carries the same message the run would
-throw. Ensembles report the combined-execution skeleton with an info
-finding (per-member planning is not part of v1).
+throw. Gate coverage after review R1: input dtype contract (the engine's
+own `inputDTypeMismatch` over every fed band), band-roles arity,
+bands×temporal-length vs `CV_CN_MAX` (multi-input admitted on the largest
+feed, exactly like the engine), detection `conf`/`nms_iou` bounds, and the
+manifest-derived effective output mode with its conflict family
+(uncertainty, multi-head, mask_threshold). Lane fidelity: the EO contract
+is enforced per input / per feed path with the bound contract on the
+raster, multi-input and scene lanes — the detection lane never enforces
+EO, and neither does the plan. Ensembles skip the static runtime-readiness
+gate (the run routes them to the ensemble engine first) and report the
+combined skeleton with an info finding; per-member planning is not part of
+v1. The batch working-set number is an estimate: raster-side float32
+in/out per batch; provider staging and `to_input` resize change real peak
+(see `batch_working_set_mib` notes).
 
 The resolved-model overload `planModelInference(request, model)` skips
 reference resolution for callers that already hold a `ModelInfo`.

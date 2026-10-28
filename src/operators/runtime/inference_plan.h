@@ -96,6 +96,10 @@ struct InferencePlan
   int tilesPlanned = 0;
   int batchSize = 1;
   int batchesEstimated = 0;    ///< ceil(tiles / batch)
+  /// Channels the batch budget accounts (single input: fed bands; multi
+  /// input: max over feeds of bands × DECLARED temporal length — exactly the
+  /// engine's admission accounting).
+  int fedChannels = 0;
   /// Working-set estimate for ONE batch: batchSize × tile² × fedChannels ×
   /// float32 in+out. Labeled estimate — actual peak depends on the provider.
   double batchWorkingSetMiB = 0.0;

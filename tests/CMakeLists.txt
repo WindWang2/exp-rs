@@ -17293,6 +17293,9 @@ target_include_directories(test_r25_b_import_preflight PRIVATE
 sicnu_discover_tests(test_r25_b_import_preflight TEST_PREFIX test_r25_b_import_preflight::)
 # --- end R25-B import-preflight registration ---
 # --- R25-B feature 2: explainable inference plan + quality summary -----------
+# OpenCV-gated (same condition as src/operators compiles the runtime TUs and
+# the test_model_runtime precedent): the plan/engine headers pull opencv2.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
 sicnu_add_test(test_r25_b_inference_plan TIMEOUT 300 TEST_PREFIX "test_r25_b_inference_plan::")
 target_link_libraries(test_r25_b_inference_plan PRIVATE
   Catch2::Catch2WithMain
@@ -17309,6 +17312,7 @@ target_include_directories(test_r25_b_inference_plan PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
   ${CMAKE_BINARY_DIR}
 )
+endif()
 # --- end R25-B inference-plan registration ---
 # --- R25-B feature 3: typed replay deviation entries (schema v2) ------------
 sicnu_add_test(test_r25_b_replay_deviation_v2 TEST_PREFIX "test_r25_b_replay_deviation_v2::" TIMEOUT 300)
@@ -17324,6 +17328,8 @@ target_include_directories(test_r25_b_replay_deviation_v2 PRIVATE
 # --- end R25-B replay-deviation-v2 registration ---
 # --- R25-B W7: cross-seam end-to-end (preflight → register → plan → run →
 # quality → experiment record → deviation v2) over production code paths. ---
+# OpenCV-gated (engine headers; same condition as the inference-plan test).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
 sicnu_add_test(test_r25_b_end_to_end TEST_PREFIX "test_r25_b_end_to_end::" TIMEOUT 300)
 target_link_libraries(test_r25_b_end_to_end PRIVATE
   Catch2::Catch2WithMain
@@ -17345,5 +17351,6 @@ target_include_directories(test_r25_b_end_to_end PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
   ${CMAKE_BINARY_DIR}
 )
+endif()
 # --- end R25-B end-to-end registration ---
 # END R25-B
