@@ -145,6 +145,22 @@ TEST_CASE( "recordAnswer refuses whitespace-only free-text answers", "[r25_e][la
     REQUIRE( refused.diagnostics.front().code == "lab.session.field" );
   }
 
+  // Unicode space family (Chinese cohorts): ideographic spaces (U+3000),
+  // no-break spaces (U+00A0) and narrow NBSP (U+202F) carry no content
+  // either — std::isspace cannot see them, so the boundary decodes them
+  // itself. Mixed ASCII+Unicode blanks are still blank.
+  for ( const std::string *blank :
+        { std::string( "\xE3\x80\x80\xE3\x80\x80" ),           // 　　 (U+3000 ×2)
+          std::string( " \xC2\xA0 " ),                          // NBSP between spaces
+          std::string( "\xE2\x80\xAF\xE2\x80\xAF" ),            // narrow NBSP ×2
+          std::string( "\xE3\x80\x80 \t\xC2\xA0" ) } )          // the whole family at once
+  {
+    const auto refused = sicnu::lab::recordAnswer( session, plan, "q_extent", *blank, std::nullopt );
+    INFO( "answer-bytes=" << *blank );
+    REQUIRE( !refused.ok );
+    REQUIRE( refused.diagnostics.front().code == "lab.session.field" );
+  }
+
   // The session carries no answer afterwards: completion still lists the
   // question as missing, and answering for real still works.
   REQUIRE( session.questionAnswers.empty() );
@@ -162,6 +178,15 @@ TEST_CASE( "recordAnswer keeps accepting free text that merely contains whitespa
   // student's wording, not a blank answer — the rejection must not eat it.
   REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", " about 30 m ", std::nullopt ).ok );
   REQUIRE( session.questionAnswers.front().answer == " about 30 m " );
+
+  // A Chinese answer using an ideographic space as its inner separator is
+  // content with a space in it, not a blank answer.
+  session.questionAnswers.clear();
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent",
+                                     "\xE7\xBA\xA6\xE3\x80\x80""30\xE3\x80\x80\xE7\xB1\xB3", // 约　30　米
+                                     std::nullopt ).ok );
+  REQUIRE( session.questionAnswers.front().answer ==
+           std::string( "\xE7\xBA\xA6\xE3\x80\x80""30\xE3\x80\x80\xE7\xB1\xB3" ) );
 
   // Numeric questions still accept an empty text payload (the value is the
   // answer) and choice questions are untouched by this boundary.
@@ -204,6 +229,17 @@ TEST_CASE( "session reload refuses blank non-numeric answers (#1678 discipline)"
     Json::Value doc = sicnu::lab::sessionToJson( session );
     REQUIRE( doc[ "question_answers" ].isArray() );
     doc[ "question_answers" ][0][ "answer" ] = "   ";
+    const auto refused = sicnu::lab::sessionFromJson( doc );
+    REQUIRE( !refused.ok );
+    REQUIRE( refused.diagnostics.front().code == "lab.session.schema" );
+  }
+
+  // …including the Unicode blanks the C locale cannot see (U+3000).
+  {
+    sicnu::lab::LabSession session = startedSession();
+    REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "the clipped extent", std::nullopt ).ok );
+    Json::Value doc = sicnu::lab::sessionToJson( session );
+    doc[ "question_answers" ][0][ "answer" ] = "\xE3\x80\x80\xE3\x80\x80";
     const auto refused = sicnu::lab::sessionFromJson( doc );
     REQUIRE( !refused.ok );
     REQUIRE( refused.diagnostics.front().code == "lab.session.schema" );

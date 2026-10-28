@@ -306,8 +306,14 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
     }
     REQUIRE( sawUnavailable );
 
-    // cancellation mid-flight
-    cancel.store( true );
+    // cancellation mid-flight — the flag flips after the first row grades,
+    // so completed work is kept and the never-started remainder is typed
+    // cancelled (never a disguised failure). (r25-E: the flag used to be
+    // set BEFORE the run, which since the cooperative-discovery fix aborts
+    // discovery itself and made cancelled==total pass vacuously over zero
+    // rows.)
+    cancel.store( false );
+    int gradedBeforeCancel = 0;
     auto cancelled = runBatchAssessment(
         cfg,
         [&]( const SubmissionItem &item ) {
@@ -317,11 +323,15 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
             row.verdict = QStringLiteral( "pass" );
             row.score = 1;
             row.artifactPath = item.path;
+            if ( ++gradedBeforeCancel >= 1 )
+                cancel.store( true );
             return row;
         },
         &cancel );
     REQUIRE( cancelled.cancelledEarly );
-    REQUIRE( cancelled.cancelled == cancelled.total );
+    REQUIRE( cancelled.graded >= 1 );
+    REQUIRE( cancelled.cancelled >= 1 );
+    REQUIRE( cancelled.cancelled + cancelled.graded == cancelled.total );
 
     QTemporaryDir outDir;
     REQUIRE( outDir.isValid() );
