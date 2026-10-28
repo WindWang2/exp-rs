@@ -163,7 +163,7 @@ TEST_CASE( "optical chain: qa_mask -> apply_mask -> NDVI NoData propagation",
     REQUIRE( hasNd );
     std::vector<float> nirBand( 4 );
     REQUIRE( maskedDs.readBandData( 4, nirBand.data(), 2, 2 ) );
-    CHECK( std::isnan( nirBand[2] ) || nirBand[2] == static_cast<float>( nd ) );
+    CHECK( ( std::isnan( nirBand[2] ) || nirBand[2] == static_cast<float>( nd ) ) );
     CHECK( nirBand[0] == Catch::Approx( 0.50f ) );
 
     GDALDatasetH maskedH = GDALOpen( dir.filePath( "masked.tif" ).toUtf8().constData(),

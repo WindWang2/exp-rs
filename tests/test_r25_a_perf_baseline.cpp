@@ -112,7 +112,7 @@ TEST_CASE( "perf baseline: terrain flow accumulation 2048x2048",
     std::vector<double> mpx;
     for ( int run = 0; run < 5; ++run )
     {
-        params["output"] = dir.filePath( std::string( "accum" ) + std::to_string( run ) + ".tif" )
+        params["output"] = dir.filePath( QStringLiteral( "accum%1.tif" ).arg( run ) )
                                .toStdString();
         const auto t0 = std::chrono::steady_clock::now();
         const Json::Value result = runOp( "rs:terrain_flow", params );
@@ -157,7 +157,7 @@ TEST_CASE( "perf baseline: spectral resample 1024x1024 50->3 bands",
     std::vector<double> mpx;
     for ( int run = 0; run < 5; ++run )
     {
-        params["output"] = dir.filePath( std::string( "res" ) + std::to_string( run ) + ".tif" )
+        params["output"] = dir.filePath( QStringLiteral( "res%1.tif" ).arg( run ) )
                                .toStdString();
         const auto t0 = std::chrono::steady_clock::now();
         const Json::Value result = runOp( "rs:spectral_resample", params );
@@ -187,7 +187,7 @@ TEST_CASE( "perf baseline: post-classification change 1024x1024",
         {
             const float cls = static_cast<float>( ( x / 64 + y / 64 ) % 4 );
             before.withPixel( 1, x, y, cls );
-            after.withPixel( 1, x, y, static_cast<float>( ( cls + 1 ) % 4 ) );
+            after.withPixel( 1, x, y, static_cast<float>( ( static_cast<int>( cls ) + 1 ) % 4 ) );
         }
     const QString beforePath = before.writeToDisk( dir.filePath( "before.tif" ) );
     const QString afterPath = after.writeToDisk( dir.filePath( "after.tif" ) );
@@ -202,7 +202,7 @@ TEST_CASE( "perf baseline: post-classification change 1024x1024",
     std::vector<double> mpx;
     for ( int run = 0; run < 5; ++run )
     {
-        params["output"] = dir.filePath( std::string( "chg" ) + std::to_string( run ) + ".tif" )
+        params["output"] = dir.filePath( QStringLiteral( "chg%1.tif" ).arg( run ) )
                                .toStdString();
         const auto t0 = std::chrono::steady_clock::now();
         const Json::Value result = runOp( "rs:post_classification_change", params );
