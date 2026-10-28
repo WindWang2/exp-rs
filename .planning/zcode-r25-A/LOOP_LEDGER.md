@@ -19,3 +19,6 @@
 - PERF_BASELINE.md 数据回填
 - R1 子代理评审 → 修复 → R2（主代理，NOT_INDEPENDENT 披露）
 - merge-integrity + push + PR
+
+| 10 | R1 独立子代理评审（全量 diff） | REQUEST-CHANGES: P0×1/P1×7/P2×1/P3×7 | ✅ 全部处置（REVIEW_R1.md；commit 7e383e245d）；16 文件语法预检复过 | R2 评审 + 构建实测 |
+| 11 | R1-P0 根因分析：python replace 无 assert 的无声空操作 | 复查 sar_metadata.cpp 确认定义缺失 | ✅ 补定义；教训入账（后续补丁全带 assert） | - |
