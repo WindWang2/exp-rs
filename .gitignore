@@ -750,3 +750,8 @@ r6_dev.cmd
 !.planning/zcode-r24-A-science/*.md
 !.planning/zcode-r24-A-science/*.cmd
 !.planning/zcode-r24-A-science/*.py
+
+# R25-E (zcode-r25-E teaching/grading/verification) track planning artifacts (markdown only; logs and builds stay local).
+!.planning/zcode-r25-E/
+.planning/zcode-r25-E/*
+!.planning/zcode-r25-E/*.md
