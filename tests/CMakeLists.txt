@@ -17354,3 +17354,22 @@ target_include_directories(test_r25_a_sar_geometry_fallback PRIVATE
 )
 sicnu_discover_tests(test_r25_a_sar_geometry_fallback TEST_PREFIX test_r25_a_sar_geometry_fallback::)
 # --- end R25-A sar-geometry-fallback registration ---
+
+# ── R25-A FEAT-2: qa_mask cloud_confidence + SCL class histogram ──
+add_executable(test_r25_a_qa_confidence test_r25_a_qa_confidence.cpp)
+target_link_libraries(test_r25_a_qa_confidence PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_qa_confidence)
+target_include_directories(test_r25_a_qa_confidence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_qa_confidence TEST_PREFIX test_r25_a_qa_confidence::)
+# --- end R25-A qa-confidence registration ---
