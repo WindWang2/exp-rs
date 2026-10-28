@@ -750,3 +750,11 @@ r6_dev.cmd
 !.planning/zcode-r24-A-science/*.md
 !.planning/zcode-r24-A-science/*.cmd
 !.planning/zcode-r24-A-science/*.py
+
+# R25-D (zcode r25-D: Qt/QGIS workbench interaction, display performance &
+# cartography deepening) track planning artifacts (markdown + build scripts;
+# logs and builds stay local).
+!.planning/zcode-r25-D/
+.planning/zcode-r25-D/*
+!.planning/zcode-r25-D/*.md
+!.planning/zcode-r25-D/*.sh
