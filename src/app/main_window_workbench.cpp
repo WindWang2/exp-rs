@@ -102,6 +102,9 @@
 #include <qgsmaplayer.h>
 
 #include "processing/framework/task_center.h"
+#include <layout/qgslayoutdesignerdialog.h>
+#include "agent/layout_tools/layout_service.h"
+#include <qgsprintlayout.h>
 
 namespace
 {
@@ -778,6 +781,16 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             addLayer( snap.activeLayer );
             for ( QgsMapLayer *layer : snap.selectedLayers )
                 addLayer( layer );
+            // R25-D: the promised canvas fallback. Without it an unselected
+            // canvas drafted nothing while the cartography.* availability
+            // (hasMapLayers, canvas presence) said Compose was ready — the
+            // click would land on "No map layers available". The canvas
+            // layer set IS the render order (the Layers concept, §1).
+            if ( sources.isEmpty() && m_mapCanvas )
+            {
+                for ( QgsMapLayer *layer : m_mapCanvas->layers() )
+                    addLayer( layer );
+            }
             return sources;
         },
         [this]() -> QString {
@@ -791,6 +804,24 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_cartographyDock->hide();
     connect( m_cartographyDock, &sicnu::app::CartographyDock::statusMessage, this,
              [this]( const QString &message ) { statusBar()->showMessage( message, 8000 ); } );
+    // R25-D: compose → hand-tune in the layout designer → export. The dock
+    // never opens windows; this is the SAME QgsLayoutDesignerDialog surface
+    // project.newLayout opens (src/app/layout), so the composed MapSpec
+    // layout and manual layout design share one editor, not two.
+    connect( m_cartographyDock, &sicnu::app::CartographyDock::openLayoutDesignerRequested, this,
+             [this]( const QString &layoutName ) {
+                 QgsPrintLayout *layout =
+                   sicnu::agent::layout_tools::LayoutService::instance().findLayout( layoutName );
+                 if ( !layout )
+                 {
+                     statusBar()->showMessage(
+                       tr( "Layout %1 is unavailable (it may have been removed)." ).arg( layoutName ), 8000 );
+                     return;
+                 }
+                 auto *designer = new QgsLayoutDesignerDialog( layout, m_mapCanvas, this );
+                 designer->window()->setAttribute( Qt::WA_DeleteOnClose );
+                 designer->window()->show();
+             } );
     if ( m_windowMenu )
     {
         if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.cartography" ), true ) )

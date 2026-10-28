@@ -22,9 +22,11 @@
 #include <QPushButton>
 
 #include "app/cartography/cartography_dock.h"
+#include "agent/layout_tools/layout_service.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
+#include <qgsprintlayout.h>
 
 #ifndef SICNU_CARTOGRAPHY_DATA_DIR
 #define SICNU_CARTOGRAPHY_DATA_DIR "data/cartography"
@@ -124,4 +126,48 @@ TEST_CASE( "compose click without layers surfaces an actionable status, never a 
   REQUIRE( statusSpy.size() >= 1 );
   const QString message = statusSpy.first().at( 0 ).toString();
   CHECK( message.contains( QStringLiteral( "layer" ), Qt::CaseInsensitive ) );
+}
+
+TEST_CASE( "designer hand-off: gated on a composed layout, emits for the shell to open", "[r25d][cartography][dock][designer]" )
+{
+  CartographyDock dock( [] { return QStringList{ QStringLiteral( "/tmp/fixture-a.tif" ) }; },
+                        [] { return QStringLiteral( "/tmp" ); } );
+  dock.show();
+  QSignalSpy designerSpy( &dock, &CartographyDock::openLayoutDesignerRequested );
+  QSignalSpy statusSpy( &dock, &CartographyDock::statusMessage );
+
+  auto *designer = buttonOf( &dock, "rsCartographyDesigner" );
+  REQUIRE( designer );
+
+  SECTION( "nothing composed — disabled with the reason, slot declines politely" )
+  {
+    CHECK_FALSE( designer->isEnabled() );
+    CHECK( designer->toolTip().contains( QStringLiteral( "Compose" ) ) );
+    dock.openInLayoutDesigner();
+    CHECK( designerSpy.isEmpty() );
+    REQUIRE( statusSpy.size() == 1 );
+    CHECK( statusSpy.first().at( 0 ).toString().contains( QStringLiteral( "Compose" ) ) );
+  }
+
+  SECTION( "composed layout present — enabled, click emits the layout name" )
+  {
+    // Register a REAL layout under the name the dock will adopt (findLayout
+    // resolves through the project layout manager), so the resolution
+    // succeeds and the hand-off signal fires.
+    QgsPrintLayout *layout = sicnu::agent::layout_tools::LayoutService::instance().createLayout(
+      QStringLiteral( "handoff-designer-map" ) );
+    REQUIRE( layout );
+
+    Json::Value spec( Json::objectValue );
+    spec["layout_name"] = "handoff-designer-map";
+    dock.adoptSpec( spec );
+    CHECK( designer->isEnabled() );
+
+    dock.openInLayoutDesigner();
+    REQUIRE( designerSpy.size() == 1 );
+    CHECK( designerSpy.first().at( 0 ).toString() == QStringLiteral( "handoff-designer-map" ) );
+
+    sicnu::agent::layout_tools::LayoutService::instance().deleteLayout(
+      QStringLiteral( "handoff-designer-map" ) );
+  }
 }

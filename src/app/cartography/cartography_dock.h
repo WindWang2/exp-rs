@@ -70,6 +70,10 @@ class CartographyDock : public QgsDockWidget
   public slots:
     /// Builds a draft from the current inputs and runs cartography:compose.
     void runCompose();
+    /// Emits openLayoutDesignerRequested for the composed layout (no-op with
+    /// a status message when none exists — the button gating normally makes
+    /// that unreachable).
+    void openInLayoutDesigner();
     /// Runs cartography:preflight on the current/drafted spec.
     void runPreflight();
     /// Runs cartography:repair and adopts the repaired spec.
@@ -85,6 +89,10 @@ class CartographyDock : public QgsDockWidget
   signals:
     /// Status-line friendly progress/feedback (the shell routes to the bar).
     void statusMessage( const QString &message );
+    /// R25-D: the user asked to hand-tune the composed layout in the layout
+    /// designer. The dock never opens windows (no-engine rule) — the shell
+    /// owns the QgsLayoutDesignerDialog, exactly like project.newLayout.
+    void openLayoutDesignerRequested( const QString &layoutName );
 
   private:
     void buildUi();
@@ -115,6 +123,7 @@ class CartographyDock : public QgsDockWidget
     QPushButton *m_composeBtn = nullptr;
     QPushButton *m_preflightBtn = nullptr;
     QPushButton *m_repairBtn = nullptr;
+    QPushButton *m_designerBtn = nullptr;
     QPushButton *m_exportBtn = nullptr;
     QPushButton *m_produceBtn = nullptr;
     QPushButton *m_stopBtn = nullptr;

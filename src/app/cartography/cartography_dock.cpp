@@ -149,6 +149,13 @@ void CartographyDock::buildUi()
     m_stopBtn->setObjectName( QStringLiteral( "rsCartographyStop" ) );
     m_stopBtn->setAccessibleName( tr( "Stop the current cartography task" ) );
     m_stopBtn->setEnabled( false );
+    m_designerBtn = new QPushButton( tr( "Open in Designer…" ), central );
+    m_designerBtn->setObjectName( QStringLiteral( "rsCartographyDesigner" ) );
+    m_designerBtn->setAccessibleName( tr( "Open the composed layout in the layout designer" ) );
+    m_designerBtn->setToolTip(
+      tr( "Hand-tune the composed layout in the layout designer — the same "
+          "designer project.newLayout opens. Export keeps working afterwards." ) );
+    exportRow->addWidget( m_designerBtn );
     exportRow->addWidget( m_formatCombo );
     exportRow->addWidget( new QLabel( tr( "DPI:" ), central ) );
     exportRow->addWidget( m_dpiSpin );
@@ -188,6 +195,7 @@ void CartographyDock::buildUi()
     layout->addWidget( m_reportView, 1 );
 
     connect( m_composeBtn, &QPushButton::clicked, this, &CartographyDock::runCompose );
+    connect( m_designerBtn, &QPushButton::clicked, this, &CartographyDock::openInLayoutDesigner );
     connect( m_preflightBtn, &QPushButton::clicked, this, &CartographyDock::runPreflight );
     connect( m_repairBtn, &QPushButton::clicked, this, &CartographyDock::runRepair );
     connect( m_exportBtn, &QPushButton::clicked, this, &CartographyDock::runExport );
@@ -397,6 +405,8 @@ void CartographyDock::refreshActionStates()
     setAction( m_produceBtn, !busy && draftable, draftReason );
     setAction( m_exportBtn, !busy && draftable && hasComposedLayout,
                busy ? busyReason : ( !draftable ? draftReason : noComposition ) );
+    setAction( m_designerBtn, !busy && hasComposedLayout,
+               busy ? busyReason : noComposition );
     setAction( m_stopBtn, busy, QString() );
     if ( m_templateCombo )
         m_templateCombo->setEnabled( !busy );
@@ -601,6 +611,29 @@ void CartographyDock::runProduce()
           const int pages = result.isMember( "page_count" ) ? result["page_count"].asInt() : 0;
           emit statusMessage( tr( "Production finished: %1 (%2 pages)" ).arg( delivered ).arg( pages ) );
       } );
+}
+
+void CartographyDock::openInLayoutDesigner()
+{
+    if ( m_runningTaskId >= 0 )
+    {
+        emit statusMessage( tr( "A cartography task is running (click Stop to cancel)." ) );
+        return;
+    }
+    if ( m_composedLayoutName.isEmpty() )
+    {
+        emit statusMessage( tr( "Compose a layout first — the designer needs a compiled layout." ) );
+        return;
+    }
+    if ( !LayoutService::instance().findLayout( m_composedLayoutName ) )
+    {
+        emit statusMessage( tr( "Layout %1 is unavailable (it may have been removed)." )
+                                .arg( m_composedLayoutName ) );
+        return;
+    }
+    // The dock never opens windows: the shell owns the designer dialog, the
+    // same surface project.newLayout opens (no second layout editor).
+    emit openLayoutDesignerRequested( m_composedLayoutName );
 }
 
 void CartographyDock::cancelRunningJob()
