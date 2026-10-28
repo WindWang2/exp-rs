@@ -117,14 +117,6 @@ sicnu::lab::LabSession startedSession()
   return result.value;
 }
 
-bool isBlank( const std::string &s )
-{
-  for ( const char c : s )
-    if ( !std::isspace( static_cast<unsigned char>( c ) ) )
-      return false;
-  return true;
-}
-
 } // namespace
 
 TEST_CASE( "recordAnswer refuses whitespace-only free-text answers", "[r25_e][lab_runtime][answers]" )
@@ -136,7 +128,7 @@ TEST_CASE( "recordAnswer refuses whitespace-only free-text answers", "[r25_e][la
   // answers — the recorded evidence would claim the student responded
   // while carrying no content. Refused with the same typed code as the
   // empty string, so callers see one vocabulary.
-  for ( const std::string *blank : { std::string( "   " ), std::string( " \t " ),
+  for ( const std::string &blank : { std::string( "   " ), std::string( " \t " ),
                                      std::string( "\n" ), std::string( " \r\n\t " ) } )
   {
     const auto refused = sicnu::lab::recordAnswer( session, plan, "q_extent", *blank, std::nullopt );
@@ -149,7 +141,7 @@ TEST_CASE( "recordAnswer refuses whitespace-only free-text answers", "[r25_e][la
   // no-break spaces (U+00A0) and narrow NBSP (U+202F) carry no content
   // either — std::isspace cannot see them, so the boundary decodes them
   // itself. Mixed ASCII+Unicode blanks are still blank.
-  for ( const std::string *blank :
+  for ( const std::string &blank :
         { std::string( "\xE3\x80\x80\xE3\x80\x80" ),           // 　　 (U+3000 ×2)
           std::string( " \xC2\xA0 " ),                          // NBSP between spaces
           std::string( "\xE2\x80\xAF\xE2\x80\xAF" ),            // narrow NBSP ×2
