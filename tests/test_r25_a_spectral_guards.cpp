@@ -24,6 +24,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <QString>
 #include <QTemporaryDir>
 
 #include <gdal.h>
@@ -228,4 +229,98 @@ TEST_CASE( "sidClassify never labels a disjoint pixel as its first reference",
     CHECK( labels[0] == 1 ); // RED on master: 0 with divergence 0.0
     CHECK( std::isfinite( divergences[0] ) );
     CHECK( divergences[0] > 0.0f );
+}
+
+TEST_CASE( "rs:spectral_resample honours WAVELENGTH_UNITS on the source axis",
+           "[spectral][resample][r25a][operator][e2e]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // Same μm-stamped ramp cube as the derivative case: 460..950 nm axis
+    // declared as 0.46..0.95 μm, reflectance r(λ) = (λ−460)/490.
+    const QString cube = writeRampCube( dir, "ramp_resample_um.tif" );
+    REQUIRE( !cube.isEmpty() );
+    std::vector<double> umAxis;
+    for ( int b = 0; b < 50; ++b )
+        umAxis.push_back( 0.46 + 0.01 * b );
+    stampWavelengths( cube, umAxis, QStringLiteral( "Micrometers" ) );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = cube.toStdString();
+    params["output"] = dir.filePath( "resampled.tif" ).toStdString();
+    Json::Value targets( Json::arrayValue );
+    targets.append( 500.0 );
+    targets.append( 600.0 );
+    targets.append( 700.0 );
+    params["wavelengths"] = targets; // target axis, nm
+    const RunResult run = runOperator( "rs:spectral_resample", params );
+    REQUIRE( run.ok );
+    CHECK( run.json["bands"].asInt() == 3 );
+
+    // Linear interpolation of the ramp at 500/600/700 nm is exact:
+    // r = (λ−460)/490. RED on master: the μm source axis (0.46..0.95 "nm")
+    // places every nm target out of range → all NaN.
+    GdalDatasetWrapper outDs;
+    REQUIRE( outDs.open( dir.filePath( "resampled.tif" ) ) );
+    std::vector<float> band( 16 );
+    const double expected[3] = { 40.0 / 490.0, 140.0 / 490.0, 240.0 / 490.0 };
+    for ( int b = 0; b < 3; ++b )
+    {
+        REQUIRE( outDs.readBandData( b + 1, band.data(), 4, 4 ) );
+        for ( float v : band )
+            CHECK( v == Catch::Approx( expected[b] ).epsilon( 1e-5 ) );
+    }
+}
+
+TEST_CASE( "rs:apply_mask preserves WAVELENGTH_UNITS band metadata",
+           "[optical][mask][r25a][operator][e2e]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // 3-band cube stamped in μm + an all-valid (0 = keep) mask.
+    RsSyntheticRasterBuilder mask( 4, 4, 1, GDT_Byte );
+    mask.withCrs( "EPSG:32650" );
+    mask.withGeoTransform( 0.0, 1.0, 4.0, -1.0 );
+    for ( int y = 0; y < 4; ++y )
+        for ( int x = 0; x < 4; ++x )
+            mask.withPixel( 1, x, y, 0.0f );
+    const QString maskPath = mask.writeToDisk( dir.filePath( "keep_mask.tif" ) );
+    REQUIRE( !maskPath.isEmpty() );
+
+    // Rebuild a small μm-stamped 3-band source (writeRampCube is 50-band;
+    // masking cares about metadata, three bands suffice).
+    RsSyntheticRasterBuilder src( 4, 4, 3, GDT_Float32 );
+    src.withCrs( "EPSG:32650" );
+    src.withGeoTransform( 0.0, 1.0, 4.0, -1.0 );
+    for ( int band = 1; band <= 3; ++band )
+        for ( int y = 0; y < 4; ++y )
+            for ( int x = 0; x < 4; ++x )
+                src.withPixel( band, x, y, 0.1f * band );
+    const QString srcPath = src.writeToDisk( dir.filePath( "um_src.tif" ) );
+    REQUIRE( !srcPath.isEmpty() );
+    stampWavelengths( srcPath, { 0.48, 0.56, 0.65 }, QStringLiteral( "Micrometers" ) );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = srcPath.toStdString();
+    params["mask"] = maskPath.toStdString();
+    params["output"] = dir.filePath( "masked.tif" ).toStdString();
+    const RunResult run = runOperator( "rs:apply_mask", params );
+    REQUIRE( run.ok );
+
+    // The units tag must survive the masking seam: WAVELENGTH travels, so
+    // its units must too (RED on master: units dropped, 0.48 read as nm
+    // downstream).
+    GDALDatasetH out = GDALOpen( dir.filePath( "masked.tif" ).toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( out != nullptr );
+    GDALRasterBandH b1 = GDALGetRasterBand( out, 1 );
+    REQUIRE( b1 != nullptr );
+    const char *units = GDALGetMetadataItem( b1, "WAVELENGTH_UNITS", nullptr );
+    CHECK( units != nullptr ); // RED on master: nullptr
+    if ( units )
+        CHECK( QString::fromUtf8( units ).compare( QStringLiteral( "Micrometers" ),
+                                                   Qt::CaseInsensitive ) == 0 );
+    const char *wl = GDALGetMetadataItem( b1, "WAVELENGTH", nullptr );
+    REQUIRE( wl != nullptr );
+    CHECK( QString::fromUtf8( wl ).toDouble() == Catch::Approx( 0.48 ) );
+    GDALClose( out );
 }
