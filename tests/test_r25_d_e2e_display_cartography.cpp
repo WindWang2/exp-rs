@@ -135,6 +135,10 @@ Json::Value runTaskCenterJob( const std::string &algorithmId, const Json::Value 
   const long taskId = TaskCenter::instance().submitJob( request );
   REQUIRE( taskId > 0 );
   const sicnu::AlgorithmTaskInfo info = TaskCenter::instance().waitForTask( taskId );
+  INFO( "task #" << taskId << " (" << algorithmId << ") terminal state: "
+        << static_cast<int>( info.status )
+        << ", error: " << info.errorMessage.toStdString()
+        << ", log: " << info.logBuffer.join( "\n" ).toStdString() );
   REQUIRE( info.status == sicnu::TaskStatus::Completed );
   return info.resultPayload;
 }
@@ -152,15 +156,23 @@ TEST_CASE( "product → display → operator result → same view → MapSpec co
   DataManager dataManager;
   QgisDisplayManager displayManager( &dataManager );
   QgsMapCanvas canvas;
-  QgsLayerTree tree;
-  QgsMapLayerStore store;
-  const DisplayViewId viewId = createView( displayManager, canvas, tree, store );
+  // Production main-view shape: the main view's registered tree/store IS
+  // the project root/store (ui-architecture §12.1) — compose resolves frame
+  // layer refs against exactly these.
+  QgsLayerTree *tree = QgsProject::instance()->layerTreeRoot();
+  QgsMapLayerStore *store = QgsProject::instance()->layerStore();
+  const DisplayViewId viewId = createView( displayManager, canvas, *tree, *store );
 
   const sicnu::data::AssetId inputAsset = registerRasterPath( dataManager, inputPath );
   const auto added = displayManager.addLayer( viewId, inputAsset, { QStringLiteral( "Product" ), true } );
   REQUIRE( added );
   REQUIRE( canvas.layers().size() == 1 );
-  REQUIRE( canvas.extent().width() > 0.0 );
+  // The materialized canvas layer is a REAL, valid, georeferenced layer.
+  // (The canvas WIDGET's own extent needs a show/zoom cycle and stays unset
+  // offscreen — the LAYER extent is the data truth.)
+  QgsMapLayer *canvasLayer = canvas.layers().first();
+  REQUIRE( canvasLayer->isValid() );
+  REQUIRE( canvasLayer->extent().width() > 0.0 );
 
   // ── 2. Real TaskCenter job: rs:ndvi over the registry dispatch ─────────
   const QString ndviPath = QDir( dir.path() ).filePath( QStringLiteral( "ndvi.tif" ) );

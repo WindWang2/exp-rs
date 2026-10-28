@@ -17,7 +17,12 @@
 #include "processing/framework/algorithm_meta_store.h"
 
 #include <QDir>
+#include <QFile>
+#include <QRegularExpression>
+#include <QTextStream>
 #include <json/json.h>
+
+#include <algorithm>
 
 #ifndef SICNU_TEST_DATA_ROOT
 #define SICNU_TEST_DATA_ROOT CMAKE_SOURCE_DIR
@@ -84,14 +89,21 @@ TEST_CASE( "WorkflowSessionController wires the preflight line at both tool surf
 
   // The single-tool surface (openTool) and the node-selection surface
   // (selectStep) BOTH must project the sidecar-derived line into the panel
-  // — one knowledge source, no per-site re-derivation.
+  // — one knowledge source, no per-site re-derivation. The block spans from
+  // the function definition to the NEXT function definition (the call sits
+  // after showTool, so a boundary at the next showTool would exclude it).
   const auto blockContains = [&source]( const QString &anchor, const QString &needle ) {
     const int pos = source.indexOf( anchor );
     if ( pos < 0 )
       return false;
-    const int nextShowTool = source.indexOf( QStringLiteral( "m_panel->showTool(" ), pos + 1 );
-    const int end = nextShowTool > 0 ? nextShowTool : source.size();
-    return source.mid( pos, end - pos ).contains( needle );
+    QRegularExpression nextFunction( QStringLiteral(
+      R"(\n[A-Za-z_][A-Za-z0-9_:<>&* \t]*WorkflowSessionController::)" ) );
+    const int end = pos + 4000;
+    const auto match = nextFunction.match( source, pos + anchor.size() );
+    const int blockEnd = ( match.hasMatch() && match.capturedStart() < end )
+                           ? match.capturedStart()
+                           : std::min<qsizetype>( end, source.size() );
+    return source.mid( pos, blockEnd - pos ).contains( needle );
   };
 
   // openTool site
