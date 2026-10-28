@@ -17402,4 +17402,23 @@ target_include_directories(test_r25_d_e2e_display_cartography PRIVATE
 )
 sicnu_link_jsoncpp(test_r25_d_e2e_display_cartography)
 sicnu_discover_tests(test_r25_d_e2e_display_cartography TEST_PREFIX test_r25_d_e2e_display_cartography:: TIMEOUT 300)
+# R25-D W3: canvas invalidation discipline pin — counts, not wall time.
+add_executable(test_r25_d_canvas_invalidation
+  test_r25_d_canvas_invalidation.cpp
+)
+target_link_libraries(test_r25_d_canvas_invalidation PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_r25_d_canvas_invalidation PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_d_canvas_invalidation TEST_PREFIX test_r25_d_canvas_invalidation::)
 # END R25-D
