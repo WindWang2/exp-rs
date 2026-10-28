@@ -17314,3 +17314,8 @@ set_target_properties(test_r25_e_repo_flow_contract PROPERTIES
 )
 sicnu_discover_tests(test_r25_e_repo_flow_contract TEST_PREFIX "test_r25_e_repo_flow_contract::")
 # --- end R25-E repo-flow-contract registration ---
+
+# ── R25-E: feedback pack grading evidence + class summary run integrity ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_feedback_evidence)
+# --- end R25-E feedback-evidence registration ---
