@@ -14,8 +14,9 @@ QString operatorPreflightSummary( const std::string &operatorId )
     // The store has no lazy load: pure GUI sessions never run the MCP
     // discovery path that populates it, so the preflight line would stay
     // empty exactly where users need it. One process-wide load here (the
-    // function-local static is thread-safe; loadFromDirectory overwrites
-    // idempotently, so an MCP-side load simply re-reads the same sidecars).
+    // function-local static is thread-safe). NB: loadFromDirectory is a
+    // last-loader-wins reload — a future caller installing a custom
+    // sidecar directory would be overwritten by this defaults load.
     [[maybe_unused]] static const bool sidecarsLoaded =
       sicnu::processing::AlgorithmMetaStore::instance().loadDefaults() > 0;
 

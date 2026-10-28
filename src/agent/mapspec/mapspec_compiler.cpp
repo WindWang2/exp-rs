@@ -40,6 +40,7 @@
 #include <qgsmaplayer.h>
 
 #include <QDir>
+#include <QFileInfo>
 #include <QVariant>
 #include <QVector>
 
@@ -137,8 +138,10 @@ QgsMapLayer *resolveProjectLayer( const std::string &ref )
       return byId;
     // Source-path tier: exact match first, then the canonical form so
     // symlinked/relative spellings of the same file resolve too.
-    const QString wanted =
-      QDir( naturalKey ).canonicalPath();  // empty when not a real path
+    // (canonicalFilePath: the documented file-level canonical form; empty
+    // when the path does not exist, which keeps the tier inert for
+    // non-path refs.)
+    const QString wanted = QFileInfo( naturalKey ).canonicalFilePath();
     const auto layers = project->layerStore()->mapLayers();
     for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
     {
