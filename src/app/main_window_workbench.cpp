@@ -515,7 +515,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_historyPanel->hide(); // available on demand (窗口 menu / registry command)
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resultOpenRequested, this,
              [this]( const QString &path ) {
-                 if ( !loadRasterLayer( path ) )
+                 if ( !loadDataLayer( path ) )
                      statusBar()->showMessage( tr( "Cannot open the artifacts on the map: %1" ).arg( path ), 5000 );
              } );
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::compareRequested, this,

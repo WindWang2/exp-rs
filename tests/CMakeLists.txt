@@ -17357,4 +17357,21 @@ target_compile_definitions(test_r25_d_operator_preflight PRIVATE
 )
 sicnu_link_jsoncpp(test_r25_d_operator_preflight)
 sicnu_discover_tests(test_r25_d_operator_preflight TEST_PREFIX test_r25_d_operator_preflight::)
+# R25-D Loop 6: result→layer linkage source pin (vector artifacts must open
+# through the kind-inferring seam on every manual result surface).
+add_executable(test_r25_d_result_open_link
+  test_r25_d_result_open_link.cpp
+)
+target_link_libraries(test_r25_d_result_open_link PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r25_d_result_open_link PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r25_d_result_open_link PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r25_d_result_open_link TEST_PREFIX test_r25_d_result_open_link::)
 # END R25-D
