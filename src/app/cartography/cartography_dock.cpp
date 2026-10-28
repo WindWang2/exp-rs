@@ -64,6 +64,10 @@ CartographyDock::CartographyDock( LayerSourcesProvider layers, WorkDirProvider w
     setWindowTitle( tr( "Cartography Workbench" ) );
     buildUi();
     reloadTemplates();
+    refreshActionStates();
+    // The layer stack changes while the dock is hidden; re-derive the
+    // honest gating every time the surface becomes visible.
+    connect( this, &QDockWidget::visibilityChanged, this, &CartographyDock::refreshActionStates );
 }
 
 void CartographyDock::buildUi()
@@ -346,13 +350,56 @@ bool CartographyDock::submitOperatorJob(
 
 void CartographyDock::setBusy( bool busy )
 {
-    m_composeBtn->setEnabled( !busy );
-    m_preflightBtn->setEnabled( !busy );
-    m_repairBtn->setEnabled( !busy );
-    m_exportBtn->setEnabled( !busy );
-    m_produceBtn->setEnabled( !busy );
-    m_stopBtn->setEnabled( busy );
-    m_templateCombo->setEnabled( !busy );
+    // The task id is authoritative (assigned by the callers around the
+    // submit/complete transitions); this refresh only re-derives the
+    // buttons from it.
+    refreshActionStates();
+}
+
+void CartographyDock::refreshActionStates()
+{
+    // Honest gating, derived from live facts in one place:
+    //  - a running cartography task disables every action (Stop wins);
+    //  - no templates / no map layers → nothing can be drafted or produced;
+    //  - Export additionally needs a composed layout (its own prerequisite,
+    //    not derivable from the canvas state).
+    // A disabled button keeps its label and APPENDS the blocking reason to
+    // its tooltip — never a silent dead button, never a stale reason after
+    // the blocker clears.
+    const bool busy = m_runningTaskId >= 0;
+    const bool hasTemplates = m_templateCombo && m_templateCombo->count() > 0;
+    const bool hasLayers = m_layers && !m_layers().isEmpty();
+    const bool hasComposedLayout = !m_composedLayoutName.isEmpty();
+    const bool draftable = hasTemplates && hasLayers;
+
+    const auto setAction = []( QPushButton *button, bool enabled, const QString &blockedReason ) {
+        if ( !button )
+            return;
+        if ( !button->property( "baseToolTip" ).isValid() )
+            button->setProperty( "baseToolTip", button->toolTip() );
+        const QString baseTip = button->property( "baseToolTip" ).toString();
+        button->setEnabled( enabled );
+        button->setToolTip( !enabled && !blockedReason.isEmpty()
+                              ? ( baseTip.isEmpty() ? blockedReason
+                                                    : baseTip + QStringLiteral( "\n" ) + blockedReason )
+                              : baseTip );
+    };
+
+    const QString noTemplates = tr( "No map templates available: check the data/cartography/templates directory." );
+    const QString noLayers = tr( "Add map layers to the canvas before composing a map." );
+    const QString noComposition = tr( "Compose a layout first — export needs a compiled layout." );
+    const QString busyReason = tr( "A cartography task is running (click Stop to cancel)." );
+
+    const QString draftReason = busy ? busyReason : ( !hasTemplates ? noTemplates : noLayers );
+    setAction( m_composeBtn, !busy && draftable, draftReason );
+    setAction( m_preflightBtn, !busy && draftable, draftReason );
+    setAction( m_repairBtn, !busy && draftable, draftReason );
+    setAction( m_produceBtn, !busy && draftable, draftReason );
+    setAction( m_exportBtn, !busy && draftable && hasComposedLayout,
+               busy ? busyReason : ( !draftable ? draftReason : noComposition ) );
+    setAction( m_stopBtn, busy, QString() );
+    if ( m_templateCombo )
+        m_templateCombo->setEnabled( !busy );
 }
 
 void CartographyDock::showReport( const QString &heading, const Json::Value &payload )
@@ -366,6 +413,7 @@ void CartographyDock::adoptSpec( const Json::Value &spec )
     m_currentSpec = spec;
     if ( spec.isObject() && spec.isMember( "layout_name" ) && spec["layout_name"].isString() )
         m_composedLayoutName = QString::fromStdString( spec["layout_name"].asString() );
+    refreshActionStates();
 }
 
 void CartographyDock::runCompose()

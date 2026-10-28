@@ -56,6 +56,17 @@ class CartographyDock : public QgsDockWidget
     /// The last structured report text shown in the dock (for tests).
     QString lastReportText() const;
 
+    /// Re-derives the action buttons' enabled/tooltip state from the live
+    /// facts (busy, templates, layers, composed layout). Public so hosts
+    /// that mutate the layer stack can ask for a refresh, and tests can pin
+    /// the honest-gating contract.
+    void refreshActionStates();
+
+    /// Adopts a MapSpec drafted elsewhere (workflow preset, agent tool,
+    /// test) as the dock's current draft — the handoff seam into the same
+    /// compose → check → fix → export chain a user-driven draft takes.
+    void adoptSpec( const Json::Value &spec );
+
   public slots:
     /// Builds a draft from the current inputs and runs cartography:compose.
     void runCompose();
@@ -93,7 +104,6 @@ class CartographyDock : public QgsDockWidget
     /// Renders page 0 of the named compiled layout into the preview label.
     void updatePreview( const QString &layoutName );
     void showReport( const QString &heading, const Json::Value &payload );
-    void adoptSpec( const Json::Value &spec );
 
     LayerSourcesProvider m_layers;
     WorkDirProvider m_workDir;

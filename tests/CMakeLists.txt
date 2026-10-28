@@ -17276,3 +17276,85 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 )
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
+
+# ── R25-D (zcode r25-D qt/qgis workbench cartography track) ──────────────────
+# Append-only registration block. Union rule: never reorder/dedupe/delete
+# other tracks' blocks (scripts/check_merge_registration_integrity.py guards).
+# BEGIN R25-D
+# Light surface: pure ContextRules for the cartography.* availability family
+# + source scans of the production wiring (same direct-TU embed shape as
+# test_command_registry).
+add_executable(test_r25_d_cartography_ux
+  test_r25_d_cartography_ux.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_r25_d_cartography_ux PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_r25_d_cartography_ux PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r25_d_cartography_ux PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r25_d_cartography_ux TEST_PREFIX test_r25_d_cartography_ux::)
+
+# Full-shell surface: the REAL CartographyDock (template registry, TaskCenter
+# connections) against the button-gating contract — #1312 full-shell link
+# precedent (same explicit links as test_workbench_full_shell_lifecycle).
+add_executable(test_r25_d_cartography_dock
+  test_r25_d_cartography_dock.cpp
+)
+target_compile_definitions(test_r25_d_cartography_dock PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
+target_link_libraries(test_r25_d_cartography_dock PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r25_d_cartography_dock PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r25_d_cartography_dock)
+set_target_properties(test_r25_d_cartography_dock PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r25_d_cartography_dock TEST_PREFIX test_r25_d_cartography_dock::)
+# R25-D Loop 2: pre-run preflight derivation (AlgorithmMetaStore sidecars →
+# the task panel's estimate seam) + wiring source scan. Direct-TU embed.
+add_executable(test_r25_d_operator_preflight
+  test_r25_d_operator_preflight.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/framework/algorithm_meta_store.cpp
+)
+target_link_libraries(test_r25_d_operator_preflight PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+)
+target_include_directories(test_r25_d_operator_preflight PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r25_d_operator_preflight PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_r25_d_operator_preflight)
+sicnu_discover_tests(test_r25_d_operator_preflight TEST_PREFIX test_r25_d_operator_preflight::)
+# END R25-D
