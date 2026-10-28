@@ -173,6 +173,7 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
 
     double scoreSum = 0.0;
     uint64_t labelledPixels = 0;
+    uint64_t finiteScores = 0;
     int tilesSeen = 0;
 
     try {
@@ -214,7 +215,16 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
                     if (labels[p] >= 0) {
                         tileLabels[p] = static_cast<float>(labels[p]);
                         ++labelledPixels;
-                        scoreSum += scores[p];
+                        // The ClassicTan kernel deliberately maps an
+                        // over/underflowing sid*tan(sam) to +inf so the
+                        // ORDERING keeps working (spectral_hybrid_similarity);
+                        // those extremes must stay out of the mean or a
+                        // single near-orthogonal pixel reports meanScore=inf
+                        // for the whole run (R25-A W3 audit P3).
+                        if (std::isfinite(scores[p])) {
+                            scoreSum += scores[p];
+                            ++finiteScores;
+                        }
                     }
                     if (!scorePath.empty())
                         tileScores[p] = scores[p];
@@ -256,8 +266,8 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
     result["output"] = outputPath;
     result["refs"] = refCount;
     result["form"] = formText;
-    result["meanScore"] = labelledPixels > 0
-                              ? scoreSum / static_cast<double>(labelledPixels)
+    result["meanScore"] = finiteScores > 0
+                              ? scoreSum / static_cast<double>(finiteScores)
                               : 0.0;
     result["labelledPixels"] = static_cast<Json::UInt64>(labelledPixels);
     result["referenceSource"] = refsResolved.sourceDescription.toStdString();
