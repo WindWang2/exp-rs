@@ -44,3 +44,21 @@ Verdict: 2×P0 compile + 2×P1 runtime/data + 1×P1 protocol. All closed in comm
 - R1-8 P1 114 foreign tests/CMakeLists.txt lines rewritten by stray sed → file rebuilt master+append-only (0 deletions); integrity script: 1063→1069 targets, 0 lost
 - R1-9..11 P3 noted: QObject::tr context (kept, consistent with command_defs), temporal preview still loadRasterLayer (defensible, noted), double blank line (fixed with R1-1)
 Also verified clean: command/ribbon registration ORDER (registry before ribbon build), dock busy ordering, designer lambda parity with newLayout, four loadDataLayer error-path parity, E2E isolation, boundary compliance (src/app only).
+
+## R2 (independent, fresh context, agent_b11ff0bb)
+
+Verdict: no new defects; HEAD mergeable. Working-tree-only P0 was the temporary
+master-revert used for the CP11 comparison (never committed; restored). 2 P3s
+taken (1a698e7652): QFileInfo::canonicalFilePath + loader-semantics note.
+
+## CP11 comparison verdict (Loop 4 closure)
+
+Rebuilt test_cartography_production_11 against the MASTER-state compiler:
+29/32 — identical failures (2 produce + atlas corpus). The 3 failures are
+host/template baseline (GDAL PNG update-access; atlas coverage_layer), NOT this
+diff. Isolated in TEST_RESULTS.md / PERF_BASELINE.md.
+
+## Terminal state
+
+All 7 oracles closed (FINAL_REPORT.md); 11/11 ×2 (+final ×2) green; neighborhood
+green incl. full-shell lifecycle; R1→fix→R2→fix→retest complete; PR next.
