@@ -17322,4 +17322,28 @@ target_include_directories(test_r25_b_replay_deviation_v2 PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 # --- end R25-B replay-deviation-v2 registration ---
+# --- R25-B W7: cross-seam end-to-end (preflight → register → plan → run →
+# quality → experiment record → deviation v2) over production code paths. ---
+sicnu_add_test(test_r25_b_end_to_end TEST_PREFIX "test_r25_b_end_to_end::" TIMEOUT 300)
+target_link_libraries(test_r25_b_end_to_end PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_data
+  sicnu_geospatial
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r25_b_end_to_end)
+target_include_directories(test_r25_b_end_to_end PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+# --- end R25-B end-to-end registration ---
 # END R25-B
