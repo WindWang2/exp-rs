@@ -106,6 +106,20 @@ struct BatchAssessmentConfig
     /// size + content fingerprint, via graderCliIdentity()). Swapping the
     /// grader CLI changes the digest and invalidates old grades.
     QString graderIdentity;
+    /// CT-C6: discovery result the caller ALREADY walked (e.g. the console's
+    /// pre-run preview scan). When items is non-empty the orchestrator uses
+    /// it verbatim instead of re-walking cfg.submissionsDir — one directory
+    /// walk per run, not two (halves network-share traffic). Transport, not
+    /// grading authority: deliberately OUTSIDE batchConfigDigest (a restart
+    /// must adopt checkpoint rows regardless of who walked the directory),
+    /// and the caller owns freshness (same contract as the internal walk:
+    /// item paths are graded as they are found on disk at grade time).
+    /// Empty items ⇒ internal discovery, exactly as before.
+    QVector<SubmissionItem> preDiscovered;
+    /// The refusals that accompanied preDiscovered (the preview scan's skip
+    /// accounting). Published into report.skippedFiles when the seam is in
+    /// use; ignored when preDiscovered is empty.
+    QVector<DiscoverySkip> preDiscoveredSkips;
 };
 
 struct BatchAssessmentReport
@@ -157,6 +171,20 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir );
 /// the refusals).
 QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
                                              QVector<DiscoverySkip> *skipped );
+
+/// Cooperative-cancellation form (CT-C6/#1695-17c residual): the walk
+/// observes @p cancelFlag before every directory entry (root pass,
+/// per-student pass and flat pass alike), so a UI that flips the flag
+/// bounds its wait to ONE entry instead of a whole class directory — a
+/// network-share walk can no longer hold a joining destructor (or a
+/// cancelled run) hostage. A cancelled walk returns an EMPTY item list and
+/// an EMPTY skip list, never a partial discovery: a silent subset would
+/// grade some students while looking complete, which is exactly the
+/// vanish #1466 forbids. The flag is only read; workers may set it from
+/// any thread.
+QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
+                                             QVector<DiscoverySkip> *skipped,
+                                             const std::atomic<bool> *cancelFlag );
 
 SubmissionKind classifySubmission( const QString &path );
 

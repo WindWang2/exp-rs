@@ -413,9 +413,25 @@ bool entryRefused( const QFileInfo &fi, QString *reason )
 QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
                                              QVector<DiscoverySkip> *skipped )
 {
+    return discoverSubmissions( submissionsDir, skipped, nullptr );
+}
+
+QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
+                                             QVector<DiscoverySkip> *skipped,
+                                             const std::atomic<bool> *cancelFlag )
+{
     QVector<SubmissionItem> items;
     QDir root( submissionsDir );
     if ( !root.exists() )
+        return items;
+    // Cooperative cancellation (CT-C6): checked before EVERY entry of every
+    // pass. A cancelled walk yields nothing — no items, no skips — because a
+    // partial discovery list would silently grade a subset while looking
+    // complete (the #1466 vanish discipline).
+    const auto cancelled = [cancelFlag]() {
+        return cancelFlag != nullptr && cancelFlag->load( std::memory_order_relaxed );
+    };
+    if ( cancelled() )
         return items;
 
     // One-level student directories. Enumerated with NO filter so links and
@@ -426,6 +442,13 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
     const auto subdirs = allEntries( root );
     for ( const QFileInfo &subInfo : subdirs )
     {
+        if ( cancelled() )
+        {
+            items.clear();
+            if ( skipped )
+                skipped->clear();
+            return items;
+        }
         // NFC (R14-E audit F4): macOS/zip-tool extractors can decompose
         // combining marks, so 张三(NFC) and 张三(NFD) would otherwise grade
         // as two students and break count reconciliation. One canonical
@@ -464,6 +487,13 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
         const auto files = allEntries( sd );
         for ( const QFileInfo &fi : files )
         {
+            if ( cancelled() )
+            {
+                items.clear();
+                if ( skipped )
+                    skipped->clear();
+                return items;
+            }
             const QString name = fi.fileName();
             QString entryReason;
             if ( entryRefused( fi, &entryReason ) )
@@ -521,6 +551,13 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
     const auto flat = allEntries( root );
     for ( const QFileInfo &fi : flat )
     {
+        if ( cancelled() )
+        {
+            items.clear();
+            if ( skipped )
+                skipped->clear();
+            return items;
+        }
         // Hidden DIRECTORIES were already accounted (and attributed to
         // their own name) by the student-directory pass; handling them
         // here as well would book the same path twice.
@@ -586,7 +623,24 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     report.labVersion = cfg.labVersion;
     report.softwareVersion = cfg.softwareVersion;
 
-    auto items = discoverSubmissions( cfg.submissionsDir, &report.skippedFiles );
+    // CT-C6: when the caller already walked the directory (the console's
+    // preview scan), its result is the discovery — no second walk. The seam
+    // is transport, not authority: the digest deliberately ignores it, and
+    // an empty seam means internal discovery, byte-identical to before.
+    // The internal walk observes the run's cancel flag too, so cancelling
+    // bounds the wait to one entry on this path as well.
+    const bool useSeam = !cfg.preDiscovered.isEmpty();
+    const auto items = useSeam ? cfg.preDiscovered
+                               : discoverSubmissions( cfg.submissionsDir, &report.skippedFiles,
+                                                      cancelFlag );
+    if ( useSeam )
+        report.skippedFiles = cfg.preDiscoveredSkips;
+    // A walk that came back empty BECAUSE the flag flipped must not read as
+    // "the class submitted nothing": type the report as cancelled so the
+    // 0-total is attributable (0-total-but-not-cancelled stays reserved for
+    // a genuinely empty discovery).
+    if ( items.isEmpty() && cancelFlag != nullptr && cancelFlag->load( std::memory_order_relaxed ) )
+        report.cancelledEarly = true;
     const int discovered = items.size();
     report.total = discovered;
     // maxSubmissions >= 0 caps the processed count (0 = dry-run: nothing
