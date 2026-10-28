@@ -17319,3 +17319,11 @@ sicnu_discover_tests(test_r25_e_repo_flow_contract TEST_PREFIX "test_r25_e_repo_
 # Append-only registration block for this track (docs: .planning/zcode-r25-E).
 sicnu_add_teaching_admin_test(test_r25_e_feedback_evidence)
 # --- end R25-E feedback-evidence registration ---
+
+# ── R25-E: teacher whole-class E2E on the production seams ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_teacher_e2e)
+
+# ── R25-E: batch durable state under hostile input (fail-closed matrix) ──
+sicnu_add_teaching_admin_test(test_r25_e_adversarial_checkpoint)
+# --- end R25-E e2e+adversarial registration ---
