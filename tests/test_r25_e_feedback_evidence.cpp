@@ -141,10 +141,11 @@ TEST_CASE( "the cohort leak guard holds over the extended pack (#1689 regression
       assertNoCrossStudentLeak( pack, QStringLiteral( "alice" ), { QStringLiteral( "alice" ), QStringLiteral( "bob" ) } );
     REQUIRE( ownOk.ok );
 
-    // …and a foreign id planted anywhere the guard scans — including the
-    // new evidence block — still withholds the pack.
+    // …and a foreign id planted in the NEW evidence block itself (R1
+    // finding 7: the plant must live in the member under test, not an old
+    // one) still withholds the pack.
     BatchRowResult leaker = row( QStringLiteral( "alice" ) );
-    leaker.message = QStringLiteral( "compared with bob submission" );
+    leaker.topDeduction = QStringLiteral( "bob" );
     const QJsonObject leakingPack = buildFeedbackPack( FeedbackPackInput{ leaker } );
     const ValidationResult blocked =
       assertNoCrossStudentLeak( leakingPack, QStringLiteral( "alice" ), { QStringLiteral( "alice" ), QStringLiteral( "bob" ) } );

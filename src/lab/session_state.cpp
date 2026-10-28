@@ -15,17 +15,8 @@ namespace sicnu::lab
 namespace
 {
 
-/// #1695-17d: an answer whose every character is whitespace carries no
-/// student content — recording it would let completion gating count an
-/// unanswered question as answered. Blank means "nothing but whitespace";
-/// text with ANY non-whitespace character is the student's wording and
-/// passes (leading/trailing spaces included).
-///
-/// The check is Unicode-space aware because this is a Chinese-cohort
-/// platform and std::isspace is byte-wise C-locale: an answer of ideographic
-/// spaces (U+3000) or no-break spaces (U+00A0) would otherwise sail through
-/// both boundaries as "content". jsoncpp hands us UTF-8 bytes, so the space
-/// family is matched as byte sequences — no Qt, no locale dependence.
+/// The Unicode space family that isspace() cannot see. UTF-8 sequences,
+/// checked byte-wise so the module stays Qt-free (jsoncpp hands us UTF-8).
 bool isUtf8SpaceAt( const char *p, std::size_t remaining, std::size_t &consumed )
 {
   static const char *const kSpaces[] = {
@@ -53,7 +44,15 @@ bool isUtf8SpaceAt( const char *p, std::size_t remaining, std::size_t &consumed 
   return false;
 }
 
-bool isBlankAnswer( const std::string &s )
+} // namespace
+
+/// #1695-17d: an answer whose every character is whitespace carries no
+/// student content — recording it would let completion gating count an
+/// unanswered question as answered. Blank means "nothing but whitespace";
+/// text with ANY non-whitespace character is the student's wording and
+/// passes (leading/trailing spaces included). Exported (session_state.h)
+/// as the ONE definition shared with the spec validator's choices check.
+bool isBlankAnswerText( const std::string &s )
 {
   std::size_t i = 0;
   while ( i < s.size() )
@@ -73,6 +72,9 @@ bool isBlankAnswer( const std::string &s )
   }
   return true;
 }
+
+namespace
+{
 
 bool isSafeSessionName( const std::string &s )
 {
@@ -413,7 +415,7 @@ LabResult<> recordAnswer( LabSession &session, const LabRuntimePlan &plan,
     case QuestionKind::FreeText:
       // #1695-17d: refuse blank (whitespace-only) text with the same typed
       // code as the empty string — one vocabulary for "no content".
-      if ( isBlankAnswer( answerText ) )
+      if ( isBlankAnswerText( answerText ) )
         return LabResult<>::failure( { LabDiag{ "lab.session.field",
                                                 "free-text answer must not be empty or blank" } } );
       answer.answer = answerText;
@@ -752,7 +754,7 @@ LabResult<LabSession> sessionFromJson( const Json::Value &doc )
         answer.hasNumeric = true;
         answer.numeric = parsed;
       }
-      else if ( isBlankAnswer( answer.answer ) )
+      else if ( isBlankAnswerText( answer.answer ) )
       {
         // #1695-17d reload boundary: an answer with NO numeric payload and
         // no non-whitespace text is the same non-answer the record

@@ -915,7 +915,13 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
 
     // Final durable checkpoint: adopted + newly completed rows, so an
     // interrupted RESTART of the restart still resumes instead of redoing.
-    if ( !cfg.checkpointPath.isEmpty() )
+    // R1 finding 2 (r25-E): a run cancelled DURING ITS OWN internal
+    // discovery discovers nothing (typed empty) — rewriting the checkpoint
+    // from zero slots would publish {total:0, rows:[]} and destroy the
+    // prior run's durable rows, breaking the durability contract above.
+    // A cancelled-nothing-graded run leaves the previous checkpoint intact.
+    const bool cancelledDuringDiscovery = items.isEmpty() && report.cancelledEarly;
+    if ( !cfg.checkpointPath.isEmpty() && !cancelledDuringDiscovery )
         checkpointAll();
 
     return report;
@@ -1161,6 +1167,30 @@ bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report
                          && static_cast<double>( declared ) == totalValue.toDouble();
     }
     report.total = declaredUsable ? declared : report.rows.size();
+    // R1 finding 1 (r25-E): the console builds the class summary — including
+    // the run_integrity lens — from THIS reloaded report, so the report-level
+    // accounting members must round-trip. They were dropped here, which made
+    // every production summary print false zeros for the exact #1466/#1694
+    // surfaces the summary exists to surface (skipped files, invalidated
+    // checkpoints, resumed rows). Absent members keep their zero defaults —
+    // an old report without them reads honestly as "not recorded".
+    report.cancelledEarly = o.value( QStringLiteral( "cancelled_early" ) ).toBool( false );
+    report.truncated = o.value( QStringLiteral( "truncated" ) ).toInt( 0 );
+    report.resumed = o.value( QStringLiteral( "resumed" ) ).toInt( 0 );
+    report.checkpointInvalidated =
+      o.value( QStringLiteral( "checkpoint_invalidated" ) ).toBool( false );
+    const QJsonArray skips = o.value( QStringLiteral( "skipped_files" ) ).toArray();
+    for ( const QJsonValue &sv : skips )
+    {
+        if ( !sv.isObject() )
+            continue; // refusal bookkeeping is additive; a bad entry is skipped, not fatal
+        const QJsonObject so = sv.toObject();
+        DiscoverySkip skip;
+        skip.studentId = so.value( QStringLiteral( "student_id" ) ).toString();
+        skip.path = so.value( QStringLiteral( "path" ) ).toString();
+        skip.reason = so.value( QStringLiteral( "reason" ) ).toString();
+        report.skippedFiles.push_back( skip );
+    }
     if ( warning )
     {
         if ( declaredUsable && declared != report.rows.size() )

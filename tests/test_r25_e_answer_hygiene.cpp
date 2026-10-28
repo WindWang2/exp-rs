@@ -185,6 +185,33 @@ TEST_CASE( "recordAnswer keeps accepting free text that merely contains whitespa
   REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_ndvi", "", 0.35 ).ok );
 }
 
+TEST_CASE( "the spec validator refuses blank declared choices (record/reload coherence)",
+           "[r25_e][lab_runtime][answers]" )
+{
+  // A whitespace-only declared choice could be RECORDED (it matches itself)
+  // but the session would then never reload — the reload boundary refuses
+  // blank non-numeric answers. The spec is where that contradiction dies
+  // (R1 finding 3); ASCII and Unicode (U+3000) blanks are both refused.
+  for ( const std::string &blankChoice : { std::string( "   " ), std::string( "\xE3\x80\x80" ) } )
+  {
+    std::string doc = validV3Doc();
+    const std::string marker = "\"kind\": \"free_text\" }";
+    REQUIRE( doc.find( marker ) != std::string::npos );
+    // Append a choice question with the blank entry.
+    doc.replace( doc.find( marker ), marker.size(),
+                 "\"kind\": \"free_text\" },\n        { \"id\": \"q_blank\", \"prompt\": \"Pick\", "
+                 "\"prompt_zh\": \"选择\", \"kind\": \"choice\", \"choices\": [ \"" +
+                   blankChoice + "\" ] }" );
+    const auto result = sicnu::lab::parseRuntimeBlock( parseJson( doc ) );
+    REQUIRE( !result.ok );
+    bool sawBlankChoiceDiag = false;
+    for ( const auto &diag : result.diagnostics )
+      if ( diag.message.find( "must not be blank" ) != std::string::npos )
+        sawBlankChoiceDiag = true;
+    REQUIRE( sawBlankChoiceDiag );
+  }
+}
+
 TEST_CASE( "session reload refuses blank non-numeric answers (#1678 discipline)",
            "[r25_e][lab_runtime][answers]" )
 {

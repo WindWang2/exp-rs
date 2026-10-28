@@ -193,19 +193,29 @@ TEST_CASE( "teacher loop: import class -> batch grade -> publish pair -> feedbac
     REQUIRE( sawUnavailable );
 
     // Class summary: the anomaly lens shows the refused file and the run's
-    // integrity in one view.
-    const QJsonObject summary = buildClassSummary( report );
+    // integrity in one view — built from the RELOADED published report,
+    // exactly the production path (the console summarizes what it loads,
+    // not the in-memory object; R1 finding 1 pinned that the report-level
+    // accounting members must survive the round-trip or the lens prints
+    // false zeros).
+    const QJsonObject summary = buildClassSummary( reloaded );
     const QJsonObject integrity = summary.value( QStringLiteral( "run_integrity" ) ).toObject();
     REQUIRE( integrity.value( QStringLiteral( "skipped_files" ) ).toInt() == 1 );
     REQUIRE( integrity.value( QStringLiteral( "resumed_rows" ) ).toInt() == 0 );
 
     // Restart honesty (the #1694 seam-transport angle): re-running with the
     // SAME config adopts the checkpoint rows instead of re-grading, and the
-    // summary reports the adoption.
+    // report-level resumed counter survives the publish→reload round-trip
+    // (the production summary path).
     BatchAssessmentConfig resumeCfg = cfg;
     const BatchAssessmentReport resumed = runBatchAssessment( resumeCfg, gradeLikeTheCli );
     REQUIRE( resumed.resumed == 3 );
-    const QJsonObject resumedSummary = buildClassSummary( resumed );
+    REQUIRE( publishBatchOutputsAtomic( resumed, cls.outPrefix() ) );
+    BatchAssessmentReport reloadedResume;
+    REQUIRE( loadBatchReportFromFile( cls.outPrefix() + QStringLiteral( ".json" ),
+                                      reloadedResume, error, &warning ) );
+    REQUIRE( reloadedResume.resumed == 3 );
+    const QJsonObject resumedSummary = buildClassSummary( reloadedResume );
     REQUIRE( resumedSummary.value( QStringLiteral( "run_integrity" ) ).toObject()
                .value( QStringLiteral( "resumed_rows" ) )
                .toInt() == 3 );

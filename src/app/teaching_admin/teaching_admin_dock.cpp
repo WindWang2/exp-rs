@@ -452,8 +452,9 @@ void TeachingAdminDock::onRunBatch()
                 // the same per-entry names and the report carrying reasons.
                 // CT-C6 (r25-E): the scan is now cooperative (it observes
                 // m_batchCancel before every entry, so ~TeachingAdminDock's
-                // cancel-then-join is bounded by ONE entry, not a whole
-                // network-share walk) and its result feeds the batch through
+                // cancel-then-join is bounded by one directory listing plus
+                // one entry, not a whole-class walk) and its result feeds
+                // the batch through
                 // BatchAssessmentConfig::preDiscovered — the directory is
                 // walked ONCE per run instead of twice (the orchestrator
                 // used to re-discover internally).

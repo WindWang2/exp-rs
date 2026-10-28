@@ -50,8 +50,10 @@ struct ClassTree
     QDir submissions;
 
     // studentIds each get one artifact file; reserved-named files are added
-    // so the skip accounting is exercised on every walk.
-    explicit ClassTree( const QStringList &studentIds, const QStringList &reservedFiles = {} )
+    // so the skip accounting is exercised on every walk; flatRootFiles adds
+    // root-level submissions so the flat pass carries real work too.
+    explicit ClassTree( const QStringList &studentIds, const QStringList &reservedFiles = {},
+                        int flatRootFiles = 0 )
     {
         submissions = dir.path() + QStringLiteral( "/submissions" );
         submissions.mkpath( QStringLiteral( "." ) );
@@ -69,6 +71,12 @@ struct ClassTree
             QFile f( submissions.filePath( reserved ) );
             REQUIRE( f.open( QIODevice::WriteOnly ) );
             f.write( "tool-output" );
+        }
+        for ( int i = 0; i < flatRootFiles; ++i )
+        {
+            QFile f( submissions.filePath( QStringLiteral( "flat_%1.tif" ).arg( i, 3, 10, QLatin1Char( '0' ) ) ) );
+            REQUIRE( f.open( QIODevice::WriteOnly ) );
+            f.write( "payload" );
         }
     }
 
@@ -101,14 +109,15 @@ BatchRowResult passingRow( const SubmissionItem &item )
     return row;
 }
 
-/// A wide tree (many student dirs) so a mid-walk flip necessarily lands
-/// inside the walk on any realistic machine.
+/// A wide tree (many student dirs AND root-level flat files): a mid-walk
+/// flip necessarily lands inside the walk, and BOTH walk passes (student
+/// dirs + flat root files) carry real entries.
 ClassTree wideTree()
 {
     QStringList students;
     for ( int i = 0; i < 4000; ++i )
         students << QStringLiteral( "student_%1" ).arg( i, 4, 10, QLatin1Char( '0' ) );
-    return ClassTree{ students };
+    return ClassTree{ students, {}, 200 };
 }
 
 bool sameItems( const QVector<SubmissionItem> &a, const QVector<SubmissionItem> &b )
@@ -179,23 +188,37 @@ TEST_CASE( "cancelled discovery yields no partial list", "[r25_e][batch][discove
 
 TEST_CASE( "mid-walk cancellation aborts the discovery walk", "[r25_e][batch][discovery]" )
 {
-    ClassTree tree = wideTree();
+    SECTION( "flip while the walk is running (both passes carry entries)" )
+    {
+        ClassTree tree = wideTree();
 
-    std::atomic<bool> cancel{ false };
-    // Flip the flag after the walk has certainly started (the watcher
-    // thread's sleep is not a timing gate on the ASSERTION — the assertion
-    // is on the result's emptiness, which holds whether the flip lands at
-    // entry 1 or entry 3999).
-    std::thread watcher( [ &cancel ]() {
-        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-        cancel.store( true, std::memory_order_relaxed );
-    } );
-    QVector<DiscoverySkip> skips;
-    const auto items = discoverSubmissions( tree.submissions.path(), &skips, &cancel );
-    watcher.join();
+        std::atomic<bool> cancel{ false };
+        // Flip the flag after the walk has certainly started. The sleep is
+        // deliberately SHORT (1 ms): the assertion holds whenever the flip
+        // lands at or after the walk's start (cancelled ⇒ empty), and a
+        // long sleep is the racy direction — the walk could finish first
+        // and a completed walk is legitimately non-empty.
+        std::thread watcher( [ &cancel ]() {
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            cancel.store( true, std::memory_order_relaxed );
+        } );
+        QVector<DiscoverySkip> skips;
+        const auto items = discoverSubmissions( tree.submissions.path(), &skips, &cancel );
+        watcher.join();
 
-    REQUIRE( items.isEmpty() );
-    REQUIRE( skips.isEmpty() );
+        REQUIRE( items.isEmpty() );
+        REQUIRE( skips.isEmpty() );
+    }
+
+    SECTION( "flip before the walk starts is deterministically empty" )
+    {
+        ClassTree tree = wideTree();
+        std::atomic<bool> cancel{ true };
+        QVector<DiscoverySkip> skips;
+        const auto items = discoverSubmissions( tree.submissions.path(), &skips, &cancel );
+        REQUIRE( items.isEmpty() );
+        REQUIRE( skips.isEmpty() );
+    }
 }
 
 TEST_CASE( "preDiscovered seam grades exactly the caller's walk (CT-C6)",
@@ -282,4 +305,56 @@ TEST_CASE( "direct-API run cancelled during internal discovery is typed cancelle
       []( const SubmissionItem &item ) { return passingRow( item ); }, &noCancel );
     REQUIRE( control.total == 2 );
     REQUIRE( !control.cancelledEarly );
+}
+
+TEST_CASE( "cancel during internal discovery preserves the prior checkpoint (R1 finding 2)",
+           "[r25_e][batch][discovery][checkpoint]" )
+{
+    ClassTree tree{ { QStringLiteral( "alice" ), QStringLiteral( "bob" ) } };
+    const auto grader = []( const SubmissionItem &item ) { return passingRow( item ); };
+
+    // Run A completes and durably checkpoints both rows.
+    {
+        const auto first = runBatchAssessment( baseConfig( tree.submissions.path(),
+                                                            tree.checkpointPath() ),
+                                               grader );
+        REQUIRE( first.graded == 2 );
+    }
+
+    // Run B, same config, cancelled during ITS internal discovery: nothing
+    // was graded, so nothing may be published — and the durable rows from
+    // run A must survive (rewriting {total:0, rows:[]} would destroy the
+    // class's resume state).
+    {
+        std::atomic<bool> cancel{ true };
+        const auto cancelled = runBatchAssessment(
+          baseConfig( tree.submissions.path(), tree.checkpointPath() ), grader, &cancel );
+        REQUIRE( cancelled.total == 0 );
+        REQUIRE( cancelled.cancelledEarly );
+    }
+
+    // Run C proves it: same config, no cancel — BOTH rows are adopted from
+    // the checkpoint run A wrote, not re-graded.
+    {
+        const auto resumed = runBatchAssessment(
+          baseConfig( tree.submissions.path(), tree.checkpointPath() ), grader );
+        REQUIRE( resumed.resumed == 2 );
+        REQUIRE( resumed.total == 2 );
+    }
+}
+
+TEST_CASE( "an empty-but-uncancelled class is not typed cancelled (R1 finding 8)",
+           "[r25_e][batch][discovery]" )
+{
+    QTemporaryDir dir;
+    const QDir submissions = dir.path() + QStringLiteral( "/empty" );
+    submissions.mkpath( QStringLiteral( "." ) );
+
+    const auto report = runBatchAssessment(
+      baseConfig( submissions.path(), QString() ),
+      []( const SubmissionItem &item ) { return passingRow( item ); } );
+    REQUIRE( report.total == 0 );
+    // 0-total is reserved for a genuinely empty discovery; the cancelled
+    // typing is only for runs whose flag actually flipped.
+    REQUIRE( !report.cancelledEarly );
 }

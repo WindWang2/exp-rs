@@ -175,9 +175,10 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
 /// Cooperative-cancellation form (CT-C6/#1695-17c residual): the walk
 /// observes @p cancelFlag before every directory entry (root pass,
 /// per-student pass and flat pass alike), so a UI that flips the flag
-/// bounds its wait to ONE entry instead of a whole class directory — a
-/// network-share walk can no longer hold a joining destructor (or a
-/// cancelled run) hostage. A cancelled walk returns an EMPTY item list and
+/// bounds its wait to ONE DIRECTORY LISTING (the in-flight readdir of the
+/// current directory) plus at most one entry — a whole-class walk on a
+/// network share can no longer hold a joining destructor (or a cancelled
+/// run) hostage. A cancelled walk returns an EMPTY item list and
 /// an EMPTY skip list, never a partial discovery: a silent subset would
 /// grade some students while looking complete, which is exactly the
 /// vanish #1466 forbids. The flag is only read; workers may set it from

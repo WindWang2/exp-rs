@@ -313,7 +313,7 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
     // discovery itself and made cancelled==total pass vacuously over zero
     // rows.)
     cancel.store( false );
-    int gradedBeforeCancel = 0;
+    std::atomic<int> gradedBeforeCancel{ 0 };
     auto cancelled = runBatchAssessment(
         cfg,
         [&]( const SubmissionItem &item ) {
@@ -323,7 +323,7 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
             row.verdict = QStringLiteral( "pass" );
             row.score = 1;
             row.artifactPath = item.path;
-            if ( ++gradedBeforeCancel >= 1 )
+            if ( gradedBeforeCancel.fetch_add( 1 ) + 1 >= 1 )
                 cancel.store( true );
             return row;
         },
