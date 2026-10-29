@@ -1,7 +1,7 @@
 # r25-A: 遥感科学算法与处理链正确性、性能及现有算法能力深化
 
 - **BASE**: `2610cb4741e69a89124921e44c03e340e2522ee2` (origin/master)
-- **HEAD**: `84a4ec95c70fcfd6248059a37a80564937a20b3e`（分支 `agent/r25-A-science-processing-20261028T140339Z`，24 commits，已 push）
+- **HEAD**: `bc93bc8d7a26871a2ca13ea713de79f3d7fa3112`（分支 `agent/r25-A-science-processing-20261028T140339Z`，24 commits，已 push）
 - **Issue 归属**: 任务书候选 #1538/#1550/#1631/#1646/#1687 经实时复核全部 FIXED_IN_MASTER（#1718/#1722 已修，本 PR 只出确认报告，见 `.planning/zcode-r25-A/ISSUE_TRIAGE.md`）；本 PR 全部为新缺陷与新深化。
 
 ## 新缺陷（master-RED 实测 → HEAD-GREEN×2）
