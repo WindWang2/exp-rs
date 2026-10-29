@@ -15,3 +15,5 @@
 | 11 | R1 独立评审（APPROVE-WITH-FIXES 1P1/3P2/6P3）→ 全采纳 → a8d38071eb | 见 REVIEW_R1.md | 通过 | 全量复跑 |
 | 12 | R1 修复后全量：GREEN3+GREEN4 = 109/109 ×2，exit 0 ×2 | /tmp/r25e-green{3,4}.log | 通过 | R2 |
 | 13 | R2 独立评审（后台子代理，进行中） | — | — | 等待 |
+| 14 | R2 独立评审（APPROVE-WITH-FIXES 1P2/4P3）→ 201db42c6e + 测试提交；变异证明（恢复旧守卫→2 红→还原） | REVIEW_R2.md | 通过 | 终验 |
+| 15 | 终验：GREEN6+GREEN7 = 112/112 ×2 exit 0；diff --check 0；merge gate 1063→1069 lost 0 | /tmp/r25e-green{6,7}.log | 通过 | push+PR（待网络恢复） |
