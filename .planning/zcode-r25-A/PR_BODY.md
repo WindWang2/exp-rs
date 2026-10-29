@@ -1,7 +1,7 @@
 # r25-A: 遥感科学算法与处理链正确性、性能及现有算法能力深化
 
 - **BASE**: `2610cb4741e69a89124921e44c03e340e2522ee2` (origin/master)
-- **HEAD**: `e8f7ec1170`（分支 `agent/r25-A-science-processing-20261028T140339Z`）
+- **HEAD**: `84a4ec95c70fcfd6248059a37a80564937a20b3e`（分支 `agent/r25-A-science-processing-20261028T140339Z`，24 commits，已 push）
 - **Issue 归属**: 任务书候选 #1538/#1550/#1631/#1646/#1687 经实时复核全部 FIXED_IN_MASTER（#1718/#1722 已修，本 PR 只出确认报告，见 `.planning/zcode-r25-A/ISSUE_TRIAGE.md`）；本 PR 全部为新缺陷与新深化。
 
 ## 新缺陷（master-RED 实测 → HEAD-GREEN×2）
@@ -47,6 +47,6 @@ flock ~/.cache/exp-rs-build.lock cmake --build build-r25-A --parallel 2 --target
 - R2（新上下文子代理，REQUEST-CHANGES P0×1/P1×1/P3×5）→ 全部处置 → REVIEW_R2.md；test_surface_snapshot 17868 断言绿
 
 ## 跨轨风险与未执行项
-- `tests/surface_diff_snapshot.json` 与 R25-C 同文件：若 R25-C 先生成，需按 union 重新生成（见 PR_COLLISION_MATRIX R10）
+- **共享文件合并要求**：`tests/surface_diff_snapshot.json` 同时被本轨与开放 PR #1727 (R25-C) 修改（双方均基于 master 各自重新生成）。本轨快照含本轨 4 处 schema 变更；合并双方后须用 `surface_snapshot_gen` 按 union 再生成一次，Git 不能文本自动合并该文件。`tests/CMakeLists.txt` 与 `.gitignore` 均为 append-only 块，union 安全。
 - R8 GDAL 轴序策略依赖（已 ±90 门 + 注释）、R9 cellSizesMetres 恒等 gt 守卫（病态输入）登记 RISK_REGISTER 后续
 - 未执行：GPU/TensorRT/在线 STAC/macOS/Windows NOT_EXECUTED（无资源）；性能为共享宿主 Debug 构建数据，无 master 对照硬门（repo 纪律）
