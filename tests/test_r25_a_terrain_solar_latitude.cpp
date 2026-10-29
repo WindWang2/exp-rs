@@ -19,12 +19,15 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <QTemporaryDir>
+
+#include <gdal.h>
 
 #include <json/json.h>
 
@@ -127,6 +130,19 @@ TEST_CASE( "rs:terrain_solar derives latitude from a projected CRS via WGS84",
     REQUIRE( dir.isValid() );
     const QString demPath = writeProjectedDem( dir );
     REQUIRE( !demPath.isEmpty() );
+    // Diagnose the derivation: what does the written raster actually declare?
+    {
+        GdalDatasetWrapper probe;
+        REQUIRE( probe.open( demPath ) );
+        const QString wkt = probe.projection();
+        INFO( "wkt empty=" << wkt.isEmpty() << " len=" << wkt.length() );
+        INFO( "wkt: " << wkt.left( 200 ).toStdString() );
+        const std::optional<double> lat =
+            sicnu::processing::gdal_util::sceneLatitudeDeg( probe );
+        INFO( "sceneLatitudeDeg has_value=" << ( lat.has_value() ? "yes" : "no" )
+              << ( lat ? ( *lat ) : 0.0 ) );
+        REQUIRE( lat.has_value() );
+    }
 
     Json::Value params( Json::objectValue );
     params["input"] = demPath.toStdString();
@@ -149,14 +165,31 @@ TEST_CASE( "rs:terrain_solar fails closed without latitude and without CRS",
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
-    constexpr int kW = 5;
-    constexpr int kH = 1;
-    RsSyntheticRasterBuilder b( kW, kH, 1 ); // deliberately no CRS
-    b.withGeoTransform( 0.0, 1.0, 0.0, -1.0 );
-    for ( int x = 0; x < kW; ++x )
-        b.withPixel( 1, x, 0, 10.0f );
-    const QString demPath = b.writeToDisk( dir.filePath( "dem_nocrs.tif" ) );
-    REQUIRE( !demPath.isEmpty() );
+    // Write the raster with raw GDAL: RsSyntheticRasterBuilder leaves the
+    // GTiff driver's default WGS84 geographic CRS in place when withCrs is
+    // never called, so it cannot express a genuinely CRS-less DEM.
+    const QString demPath = dir.filePath( "dem_nocrs.tif" );
+    {
+        GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+        REQUIRE( driver != nullptr );
+        GDALDatasetH ds = GDALCreate( driver, demPath.toUtf8().constData(), 5, 1, 1,
+                                      GDT_Float32, nullptr );
+        REQUIRE( ds != nullptr );
+        const double gt[6] = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+        GDALSetGeoTransform( ds, const_cast<double *>( gt ) );
+        GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+        REQUIRE( band != nullptr );
+        const float values[5] = { 10.0f, 10.0f, 10.0f, 10.0f, 10.0f };
+        REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, 5, 1,
+                               const_cast<float *>( values ), 5, 1, GDT_Float32, 0, 0 )
+                 == CE_None );
+        GDALClose( ds );
+    }
+    {
+        GdalDatasetWrapper probe;
+        REQUIRE( probe.open( demPath ) );
+        REQUIRE( probe.projection().isEmpty() ); // genuinely CRS-less
+    }
 
     Json::Value params( Json::objectValue );
     params["input"] = demPath.toStdString();

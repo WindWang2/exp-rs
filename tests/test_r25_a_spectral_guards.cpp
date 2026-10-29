@@ -136,10 +136,13 @@ TEST_CASE( "rs:spectral_derivative honours WAVELENGTH_UNITS (μm cube)",
     // RED on master: 1/0.49 = 2.0408... (1000x).
     GdalDatasetWrapper outDs;
     REQUIRE( outDs.open( dir.filePath( "deriv.tif" ) ) );
-    std::vector<float> deriv( 49 );
-    REQUIRE( outDs.readBandData( 1, deriv.data(), 4, 4 ) );
-    CHECK( deriv[0] == Catch::Approx( 1.0 / 490.0 ).epsilon( 1e-6 ) );
-    CHECK( deriv[48] == Catch::Approx( 1.0 / 490.0 ).epsilon( 1e-6 ) );
+    CHECK( outDs.bandCount() == 49 );
+    std::vector<float> first( 16 );
+    std::vector<float> last( 16 );
+    REQUIRE( outDs.readBandData( 1, first.data(), 4, 4 ) );
+    REQUIRE( outDs.readBandData( 49, last.data(), 4, 4 ) );
+    CHECK( first[0] == Catch::Approx( 1.0 / 490.0 ).epsilon( 1e-6 ) );
+    CHECK( last[0] == Catch::Approx( 1.0 / 490.0 ).epsilon( 1e-6 ) );
 
     // Midpoint of the first band pair: (460 + 470)/2 = 465 nm.
     // RED on master: 0.465.

@@ -95,9 +95,18 @@ std::optional<double> sceneLatitudeDeg( const GdalDatasetWrapper &ds )
         double y = gt[3] + gt[4] * halfW + gt[5] * halfH;
         const bool ok = ct->Transform( 1, &x, &y ) != 0;
         OGRCoordinateTransformation::DestroyCT( ct );
-        if ( !ok || !std::isfinite( y ) )
+        if ( !ok )
             return std::nullopt;
-        latitude = y;
+        // The projected -> EPSG:4326 transform on this GDAL build emits the
+        // pair in EPSG's own authority order: the FIRST output double is
+        // the LATITUDE, the second the longitude (verified on the UTM 50N
+        // fixture: easting 449,850 / northing 5,000,505 -> 45.02 lat /
+        // 116.37 lon). Reading them the other way passes the longitude in
+        // as the latitude, which the ±90 gate then rejects as a derivation
+        // failure.
+        latitude = x;
+        if ( !std::isfinite( latitude ) || latitude < -90.0 || latitude > 90.0 )
+            return std::nullopt;
     }
 
     if ( !std::isfinite( latitude ) || latitude < -90.0 || latitude > 90.0 )
