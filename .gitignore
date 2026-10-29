@@ -750,3 +750,9 @@ r6_dev.cmd
 !.planning/zcode-r24-A-science/*.md
 !.planning/zcode-r24-A-science/*.cmd
 !.planning/zcode-r24-A-science/*.py
+
+# R25-C (zcode-r25-C: Pi/MCP harness, workflow execution & plugin tool
+# contracts) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r25-C/
+.planning/zcode-r25-C/*
+!.planning/zcode-r25-C/*.md

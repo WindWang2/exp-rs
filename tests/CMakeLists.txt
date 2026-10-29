@@ -17276,3 +17276,68 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 )
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
+
+# BEGIN R25-C
+# R25-C (Pi/MCP harness, workflow execution & plugin tool contracts):
+# capability-honesty entry projection (prerequisites/limitations/guarantees).
+add_executable(test_r25_c_capability_honesty test_r25_c_capability_honesty.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r25_c_capability_honesty PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r25_c_capability_honesty PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r25_c_capability_honesty PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r25_c_capability_honesty PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_c_capability_honesty TEST_PREFIX test_r25_c_capability_honesty:: TIMEOUT 300)
+# R25-C W3: workflow resume diagnostics over the real tools/call dispatch.
+add_executable(test_r25_c_workflow_resume_diagnostics test_r25_c_workflow_resume_diagnostics.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+  sicnu_workflow
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r25_c_workflow_resume_diagnostics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_c_workflow_resume_diagnostics TEST_PREFIX test_r25_c_workflow_resume_diagnostics:: TIMEOUT 300)
+# END R25-C
