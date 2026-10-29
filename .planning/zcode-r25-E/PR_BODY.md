@@ -1,7 +1,7 @@
 # r25-E: 本科遥感实验、LabSpec评分反馈与科学验证闭环深化
 
 **BASE SHA**: `2610cb4741e69a89124921e44c03e340e2522ee2`（origin/master，2026-10-27 16:49 UTC merge #1723；push 前复查未漂移）
-**HEAD SHA**: `ec777d0e9a5fcc5c0887488ae8456f52da18467a`
+**HEAD SHA**: `e4356c15d0`（PR 创建后追加 docs 回填提交；开发 HEAD 为 `1300e63775`）
 **分支**: `agent/r25-E-teaching-grading-verification-20261028T170411Z`（16 commits）
 **Worktree**: `exp-rs-r25-E-20261028T170411Z`（从 origin/master 新建，源仓未动）
 
