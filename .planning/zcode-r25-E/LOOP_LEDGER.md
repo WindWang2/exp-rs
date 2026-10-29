@@ -17,3 +17,5 @@
 | 13 | R2 独立评审（后台子代理，进行中） | — | — | 等待 |
 | 14 | R2 独立评审（APPROVE-WITH-FIXES 1P2/4P3）→ 201db42c6e + 测试提交；变异证明（恢复旧守卫→2 红→还原） | REVIEW_R2.md | 通过 | 终验 |
 | 15 | 终验：GREEN6+GREEN7 = 112/112 ×2 exit 0；diff --check 0；merge gate 1063→1069 lost 0 | /tmp/r25e-green{6,7}.log | 通过 | push+PR（待网络恢复） |
+| 16 | push/PR 被外部网络阻断（DNS 拦截 github.com→198.18.0.72；SSH 同 IP 即断）；如实报告阻断 + 本地可恢复命令；FINAL_REPORT 记录 | getent/curl/ssh 实测 | 阻断记录 | 重试 |
+| 17 | 网络恢复 → fetch 复核（master 未漂移）→ #1724(r25-D) 冲突分析（仅 .gitignore+tests/CMakeLists.txt append 交集，union）→ push 成功 → **PR #1725 创建（OPEN, 非 draft, base=master, head@1300e63775, 34 files）** | gh pr view 实测 | 通过 | 收尾 |

@@ -1,6 +1,6 @@
 # FINAL_REPORT — R25-E（本科遥感实验、LabSpec评分反馈与科学验证闭环深化）
 
-**状态：DONE（除 push/PR——外部网络阻断，证据见下）**。BASE `2610cb4741`，分支 `agent/r25-E-teaching-grading-verification-20261028T170411Z`（17 commits），worktree `exp-rs-r25-E-20261028T170411Z`。
+**状态：DONE（含 push+PR；中途外部网络阻断 25+ 分钟后恢复，已诚实记录于 LOOP_LEDGER 第 16 轮）**。BASE `2610cb4741`，分支 `agent/r25-E-teaching-grading-verification-20261028T170411Z`（17 commits），worktree `exp-rs-r25-E-20261028T170411Z`。
 
 ## 交付（RED→GREEN×2 + 变异证明 + 双轮独立评审闭环）
 
@@ -31,17 +31,12 @@ R2（fresh 子代理，未读 R1 报告）：APPROVE-WITH-FIXES 1P2/4P3 → 全�
 ## 门禁（本地全过）
 `git diff --check` exit 0；`check_merge_registration_integrity.py --require-refs` exit 0（1063→1069，lost 0/dup 0/marker 0）；tests/CMakeLists.txt 纯尾部 append（3 个标记块）；.gitignore 仅尾部 allow-list；构建零产物泄漏。
 
-## 阻断项：push/PR 未能执行（外部网络）
-- 精确错误：`git fetch origin --prune` → `fatal: unable to access 'https://github.com/WindWang2/exp-rs.git/': TLS connect error: error:0A000126:SSL routines::unexpected eof while reading`；`gh pr list` → `Post "https://api.github.com/graphql": EOF`
-- 根因证据：`getent ahosts github.com` → `198.18.0.72`（RFC2544 保留段伪造 IP；IPv6 `2001:2::48`）；`ssh -T git@github.com` → `Connection closed by 198.18.0.72 port 22`；TCP 443 可连但 TLS 立即 EOF。会话早期 gh CLI 曾可用（144 open issues 实查），此后沙箱对 GitHub 的 DNS/连接被拦截，持续 25+ 分钟重试未恢复。
-- **本地可恢复**（worktree 就绪，17 commits 干净）：
-  ```bash
-  cd /home/kevin/projects/rs-studio/exp-rs-r25-E-20261028T170411Z
-  git fetch origin --prune                       # 确认 master 未漂移（断线前=2610cb4741）
-  git push -u origin agent/r25-E-teaching-grading-verification-20261028T170411Z
-  gh pr create --repo WindWang2/exp-rs --base master \
-    --head agent/r25-E-teaching-grading-verification-20261028T170411Z \
-    --title "r25-E: 本科遥感实验、LabSpec评分反馈与科学验证闭环深化" \
-    --body-file .planning/zcode-r25-E/PR_BODY.md
-  ```
-  PR_BODY.md 已含 BASE/HEAD SHA、分支、Issue 归属、每个 WP 的 RED/GREEN×2、命令与退出码、R1/R2、跨轨风险、未执行平台。**未谎称已提交 PR。**
+## PR 状态（已验证）
+- **PR #1725：https://github.com/WindWang2/exp-rs/pull/1725**
+- `gh pr view` 实测：state=OPEN、draft=false、base=master、head=agent/r25-E-teaching-grading-verification-20261028T170411Z@1300e63775abf17133a2d220b36c7af1e08730c2、34 files changed
+- push 前复查：origin/master=2610cb4741 未漂移；唯一开放 PR=#1724(r25-D)，交集仅 .gitignore+tests/CMakeLists.txt（双方纯 append，union 解法已记录于 PR_COLLISION_MATRIX）；src/ 零交集
+- 不等待远端 CI（协议约定）；不自动合并、不删分支、不清理 worktree
+
+## 网络阻断记录（诚实存档，非当前状态）
+- 阻断期现象：`git fetch` → `TLS connect error: error:0A000126:SSL routines::unexpected eof while reading`；`gh` → `Post "https://api.github.com/graphql": EOF`；`getent ahosts github.com` → 198.18.0.72（RFC2544 保留段伪造 IP）；SSH 22 端口连到同一伪造 IP 后立即关闭。持续 25+ 分钟重试未恢复，期间已在上一轮回复中如实报告"PR 未创建"。
+- 恢复后动作：fetch 复核 → 冲突分析 → push → gh pr create → 验证 OPEN/非 draft。**从未在阻断期谎称已提交 PR。**
