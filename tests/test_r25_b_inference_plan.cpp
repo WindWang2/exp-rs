@@ -336,12 +336,16 @@ TEST_CASE( "plan mirrors the engine gates R1 closed: dtype, roles, channels, "
     ModelInfo model = planModel();
     model.output.format = "labels";
     model.output.uncertainty = "entropy";
-    // request leaves the default Probability: the engine derives `labels`
-    // from the manifest and refuses the uncertainty conflict.
-    const InferencePlan plan = sicnu::operators::runtime::planModelInference(
-      singleInputRequest( input.toStdString(), output ), model );
+    // The request leaves the DEFAULT Probability so the plan must resolve the
+    // manifest's `labels` itself (rasterOutputMode) and refuse the conflict —
+    // an explicit Labels request would bypass the derivation under test.
+    ModelExecutionRequest derived = singleInputRequest( input.toStdString(), output );
+    derived.outputMode = RasterOutputMode::Probability;
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( derived, model );
     CHECK( plan.verdict == InferencePlan::Verdict::Refused );
     CHECK( plan.findingCode( "plan.output_mode_conflict" ) != nullptr );
+    CHECK( plan.outputMode == RasterOutputMode::Labels );
   }
 
   SECTION( "detection knob bounds" )
@@ -373,6 +377,7 @@ TEST_CASE( "plan mirrors the engine gates R1 closed: dtype, roles, channels, "
     sicnu::operators::ModelInputContract temporal;
     temporal.name = "frames";
     temporal.temporalLength = 3;
+    temporal.missingTimestep = "zero"; // legal: one provided frame fills zeros
     sicnu::operators::ModelInputContract context;
     context.name = "context";
     model.inputs = { temporal, context };
@@ -398,6 +403,127 @@ TEST_CASE( "plan mirrors the engine gates R1 closed: dtype, roles, channels, "
     CHECK( plan.inputs.front().frames == 3 );
     CHECK( plan.fedChannels == 9 );
     CHECK( plan.toJson()["tiling"]["fed_channels"].asInt() == 9 );
+  }
+}
+
+TEST_CASE( "plan mirrors the run seam per feed: dtype, frame arity, detection "
+           "contract (R2 closure)",
+           "[r25_b][inference_plan][r2]" )
+{
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString floatRaster = dir.filePath( QStringLiteral( "r2-f32.tif" ) );
+  const QString uint8Raster = dir.filePath( QStringLiteral( "r2-u8.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 3, GDT_Float32 ).writeToDisk( floatRaster );
+  sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 1, GDT_Byte ).writeToDisk( uint8Raster );
+  const std::string output = dir.filePath( QStringLiteral( "r2-out.tif" ) ).toStdString();
+
+  SECTION( "per-feed dtype: mixed-dtype multimodal contracts plan Ready" )
+  {
+    // Optical (float32) + DEM (uint8): the plan validates EACH feed against
+    // its OWN bound contract — a single-input-only check would false-refuse.
+    ModelInfo model = planModel();
+    model.inputs.clear();
+    sicnu::operators::ModelInputContract optical;
+    optical.name = "optical";
+    optical.dtype = "float32";
+    sicnu::operators::ModelInputContract dem;
+    dem.name = "dem";
+    dem.dtype = "uint8";
+    model.inputs = { optical, dem };
+
+    ModelExecutionRequest request;
+    request.modelReference = "r25-b-plan";
+    request.outputPath = output;
+    sicnu::operators::runtime::NamedRasterFeed opticalFeed;
+    opticalFeed.name = "optical";
+    opticalFeed.paths = { floatRaster.toStdString() };
+    sicnu::operators::runtime::NamedRasterFeed demFeed;
+    demFeed.name = "dem";
+    demFeed.paths = { uint8Raster.toStdString() };
+    request.namedInputs = { opticalFeed, demFeed };
+
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( request, model );
+    CHECK( plan.verdict == InferencePlan::Verdict::Ready );
+  }
+
+  SECTION( "per-feed dtype mismatch on the SECOND feed is refused" )
+  {
+    // DEM feed declared float32 but is Byte — the engine's per-feed check
+    // fires; the plan must too (R2-1b).
+    ModelInfo model = planModel();
+    model.inputs.clear();
+    sicnu::operators::ModelInputContract optical;
+    optical.name = "optical";
+    optical.dtype = "float32";
+    sicnu::operators::ModelInputContract dem;
+    dem.name = "dem";
+    dem.dtype = "float32";
+    model.inputs = { optical, dem };
+
+    ModelExecutionRequest request;
+    request.modelReference = "r25-b-plan";
+    request.outputPath = output;
+    sicnu::operators::runtime::NamedRasterFeed opticalFeed;
+    opticalFeed.name = "optical";
+    opticalFeed.paths = { floatRaster.toStdString() };
+    sicnu::operators::runtime::NamedRasterFeed demFeed;
+    demFeed.name = "dem";
+    demFeed.paths = { uint8Raster.toStdString() };
+    request.namedInputs = { opticalFeed, demFeed };
+
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( request, model );
+    CHECK( plan.verdict == InferencePlan::Verdict::Refused );
+    CHECK( plan.findingCode( "plan.dtype_mismatch" ) != nullptr );
+  }
+
+  SECTION( "temporal feed arity: one provided frame under refuse is refused" )
+  {
+    // Two-input model so the temporal feed is a legal multi-input shape;
+    // the frame-arity gate is the axis under test.
+    ModelInfo model = planModel();
+    model.inputs.clear();
+    sicnu::operators::ModelInputContract temporal;
+    temporal.name = "frames";
+    temporal.temporalLength = 3; // missing_timestep defaults to refuse
+    sicnu::operators::ModelInputContract context;
+    context.name = "context";
+    model.inputs = { temporal, context };
+
+    ModelExecutionRequest request;
+    request.modelReference = "r25-b-plan";
+    request.outputPath = output;
+    sicnu::operators::runtime::NamedRasterFeed feed;
+    feed.name = "frames";
+    feed.paths = { floatRaster.toStdString() };
+    sicnu::operators::runtime::NamedRasterFeed contextFeed;
+    contextFeed.name = "context";
+    contextFeed.paths = { floatRaster.toStdString() };
+    request.namedInputs = { feed, contextFeed };
+
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( request, model );
+    CHECK( plan.verdict == InferencePlan::Verdict::Refused );
+    CHECK( plan.findingCode( "plan.feed_frame_arity" ) != nullptr );
+
+    // With missing_timestep=zero the same shape plans Ready (9 channels).
+    temporal.missingTimestep = "zero";
+    model.inputs = { temporal, context };
+    const InferencePlan okPlan =
+      sicnu::operators::runtime::planModelInference( request, model );
+    CHECK( okPlan.verdict == InferencePlan::Verdict::Ready );
+    CHECK( okPlan.fedChannels == 9 );
+  }
+
+  SECTION( "detection contract: no output.detection is refused" )
+  {
+    ModelExecutionRequest request = singleInputRequest( floatRaster.toStdString(), output );
+    request.asDetection = true;
+    const InferencePlan plan =
+      sicnu::operators::runtime::planModelInference( request, planModel() );
+    CHECK( plan.findingCode( "plan.detection_contract_missing" ) != nullptr );
   }
 }
 

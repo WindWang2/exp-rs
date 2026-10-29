@@ -6,14 +6,14 @@ R25-B feature 2, `src/operators/runtime/inference_plan.h`.
 
 Answers "what will this run do, and would it be refused?" **without
 executing anything**: no session is acquired, no output file is written,
-no pixels are read (metadata opens only). It walks the same gate sequence
-as the run seam — input existence → model resolution/readiness → task
+no pixels are read (metadata opens only). It walks the run seam's gate
+sequence — input existence → model resolution/readiness → task
 intent → runtime/device readiness → lane incompatibilities → contract
 wiring (`rejectUnwiredContracts`) → feature cube → device token →
 preprocess channel contract → output mode × head contract
 (`ensureDerivedModeMatchesHeadContract`) → EO preflight
-(`enforceEoPreflight`, enforced facts) → blend contract — converting every
-typed refusal the run would raise into an `error` finding instead.
+(`enforceEoPreflight`, enforced facts) → blend contract — converting each typed
+refusal into an `error` finding instead.
 
 It then computes the execution skeleton with **the engine's own static
 planners** (`TileInferenceEngine::effectiveTileSize/effectiveHalo/
@@ -25,9 +25,11 @@ effectiveBatchSize`), so the plan and the engine cannot drift:
 - `batch_working_set_mib` — one batch of float32 tiles, input + output
   plane; labeled estimate
 
-A `ready` verdict means "every gate the run checks passes and the grid is
-computable". A `refused` verdict carries the same message the run would
-throw. Gate coverage after review R1: input dtype contract (the engine's
+A `ready` verdict means "every gate the plan checks passes and the grid is
+computable" — the checked gate list is exactly the one enumerated below
+(a static read-only pass, not a run rehearsal; provider-side graph
+validation remains the run's own step). A `refused` verdict carries the same message the run would
+throw. Gate coverage after reviews R1+R2: input dtype contract (the engine's
 own `inputDTypeMismatch` over every fed band), band-roles arity,
 bands×temporal-length vs `CV_CN_MAX` (multi-input admitted on the largest
 feed, exactly like the engine), detection `conf`/`nms_iou` bounds, and the
@@ -63,6 +65,14 @@ Projects a `ModelExecutionResult` into:
 
 Refuses (typed `InvalidInputData`) results with neither raster nor
 detection stats rather than fabricating a zero summary.
+
+Multi-input fidelity: feeds bind to input contracts by name then
+positionally (duplicate and unmatched names are typed refusals, exactly as
+`runMultiInput`); per-feed dtype / band-roles / effective-preprocess arity
+are validated per bound contract; the frame axis follows the engine
+(dynamic-T takes the provided count, otherwise the declared
+`temporal_length` with the `missing_timestep` policy); the batch budget
+accounts `max(bands × declared frames)` over feeds.
 
 Tests: `tests/test_r25_b_inference_plan.cpp` — the plan's grid is checked
 **metamorphically** against a real engine run (exact tile counts, batch

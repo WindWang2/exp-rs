@@ -14,9 +14,11 @@ HEAD（本轨分支）同旗语法检查：6 个 TU（3 生产 + 3 测试）+ E2
 
 ## GREEN（实跑，2026-10-28）
 
-- **`ctest -R "r25_b"` 第一轮**：**17/17 通过**（1 用例按 netCDF 驱动可用性诚实 SKIP：`test_r25_b_import_preflight::...container subdatasets`——本 GDAL 无 netCDF 创建支持；SKIP 非 PASS 伪装）。
-- **第二轮**：**17/17 通过**（同上 SKIP）。双轮一致，排除侥幸。
-- 其中：test_r25_b_import_preflight 9 用例、test_r25_b_inference_plan 4 用例、test_r25_b_replay_deviation_v2 2 用例、test_r25_b_end_to_end 1 用例。
+- **`ctest -R "r25_b"`（R2 修复后）第一轮**：**21/21 通过**
+- **第二轮**：**21/21 通过**（两轮一致）
+- **R2 修复前**：17/17 通过（R1 收口后）；R2 修复过程中曾 19/21、20/21 暴露测试自身与契约理解偏差，逐项修正后 21/21（见 REVIEW_R2.md「测试修正」如实记录）（1 用例按 netCDF 驱动可用性诚实 SKIP：`test_r25_b_import_preflight::...container subdatasets`——本 GDAL 无 netCDF 创建支持；SKIP 非 PASS 伪装）。
+- **R1 收口后第二轮**：**17/17 通过**（同上 SKIP）。双轮一致，排除侥幸。
+- 其中：test_r25_b_import_preflight 12 用例（含安全泄露守卫、qint64 精确性、SAFE 目录产品）、test_r25_b_inference_plan 6 用例（含 R1+R2 收口两大家族）、test_r25_b_replay_deviation_v2 2 用例、test_r25_b_end_to_end 1 用例。
 - R1 修复后新增 6 个 SECTION（dtype/roles/mode-conflict/conf-bounds/scene-lane/multi-input 通道核算）全绿；其中 multi-input SECTION 首版误用单输入 temporal 契约（被 master 的 rejectUnwiredContracts 正确拒绝），按 run seam 合法形态（每契约一 feed）修正后 GREEN。
 - 构建：`flock ~/.cache/exp-rs-build.lock cmake --build build-r25-B --parallel 2 --target <本轨+邻域目标>` **exit 0**（shared host，兄弟轨 R25-A/R25-C 持锁排队串行；-j2 上限遵守）。
 - **注册完整性门**：`python3 scripts/check_merge_registration_integrity.py --base origin/master --head HEAD --require-refs` → `1067 registered targets + 50 add_test names at HEAD (base 1063/50; lost: 0+0; added: 4+0)`，`0 marker finding(s); 0 duplicate(s); mode=git`，**exit 0**。

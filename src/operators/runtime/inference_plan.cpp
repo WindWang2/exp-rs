@@ -3,6 +3,7 @@
 
 #include "geospatial/common.h"
 
+#include "operators/framework/bounded_math.h"
 #include "operators/framework/model_readiness.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_error.h"
@@ -10,11 +11,15 @@
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <gdal.h>
+
 #include <QString>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <map>
 
 namespace sicnu::operators::runtime
 {
@@ -59,10 +64,28 @@ bool hasError( const InferencePlan &plan )
   return false;
 }
 
+/// Dtype acceptance table, verbatim from the multi-input engine's per-feed
+/// check (tile_inference_engine.cpp:3359-3366): the plan must accept exactly
+/// what the run accepts.
+const std::map<std::string, int> &acceptedInputDtypes()
+{
+  static const std::map<std::string, int> table = {
+    { "float32", GDT_Float32 }, { "float64", GDT_Float64 },
+    { "float16", GDT_Float32 }, { "uint16", GDT_UInt16 },
+    { "int16", GDT_Int16 },     { "uint8", GDT_Byte },
+    { "int32", GDT_Int32 },     { "uint32", GDT_UInt32 },
+  };
+  return table;
+}
+
 /// One read-only input inspection; failure lands as an error finding.
-bool inspectInputRaster( InferencePlan &plan, const ModelInfo &model, const std::string &path,
+/// @p dtype is the BOUND contract's declared dtype ("" = unspecified) —
+/// per-feed for the multi-input lane, the single input contract for the
+/// single-input lane.
+bool inspectInputRaster( InferencePlan &plan, const std::string &path,
                          const std::string &name, const std::vector<int> &bandSelection,
-                         int frames, InferencePlanInput &input )
+                         int frames, const std::string &dtype,
+                         const std::string &label, InferencePlanInput &input )
 {
   GdalDatasetWrapper ds;
   if ( !ds.open( QString::fromStdString( path ) ) )
@@ -104,22 +127,32 @@ bool inspectInputRaster( InferencePlan &plan, const ModelInfo &model, const std:
                 "input raster has a degenerate grid: " + path );
     return false;
   }
-  // The engine's own dtype contract validator over the fed bands (#632/#705:
-  // EVERY fed band, not band 1 alone). An empty selection means "all bands".
-  std::vector<int> allBands;
-  if ( bandSelection.empty() )
+  // Per-feed dtype contract (the engine's per-feed check, verbatim semantics):
+  // every fed band's GDAL type must match the declared dtype.
+  if ( !dtype.empty() )
   {
-    allBands.reserve( input.bandCount );
-    for ( int b = 1; b <= input.bandCount; ++b )
-      allBands.push_back( b );
+    const auto accepted = acceptedInputDtypes().find( dtype );
+    if ( accepted == acceptedInputDtypes().end() )
+    {
+      addFinding( plan, "plan.dtype_unsupported", "error",
+                  label + ": manifest declares unsupported input dtype '" + dtype + "'" );
+      return false;
+    }
+    const int first = bandSelection.empty() ? 1 : bandSelection.front();
+    const int last = bandSelection.empty() ? input.bandCount : bandSelection.back();
+    for ( int band = first; band <= last; ++band )
+    {
+      if ( ds.bandDataType( band ) != accepted->second )
+      {
+        addFinding( plan, "plan.dtype_mismatch", "error",
+                    label + ": manifest requires input dtype '" + dtype + "' but band "
+                      + std::to_string( band ) + " has GDAL type "
+                      + std::to_string( ds.bandDataType( band ) ),
+                    "convert the raster or update the manifest" );
+        return false;
+      }
+    }
   }
-  const std::vector<int> &bands = bandSelection.empty() ? allBands : bandSelection;
-  const std::string dtypeError = TileInferenceEngine::inputDTypeMismatch(
-    model, bands, [ &ds ]( int band ) { return ds.bandDataType( band ); } );
-  if ( !dtypeError.empty() )
-    addFinding( plan, "plan.dtype_mismatch", "error", dtypeError,
-                "align the manifest input.dtype with the raster's band types or "
-                "convert the raster" );
   return true;
 }
 
@@ -403,39 +436,129 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                   + std::to_string( request.nmsIouOverride ) + ")" );
 
   // --- gate 8: input grids (read-only open; no pixels touched) -------------
+  // Feed→contract binding mirrors runMultiInput's resolution exactly: named
+  // feeds match by contract name (a duplicate binding is a typed refusal,
+  // an unmatched name is a typed refusal), unnamed feeds bind positionally.
   int primaryWidth = 0;
   int primaryHeight = 0;
   int fedChannels = 0;
   bool gridsOk = true;
   if ( !request.namedInputs.empty() )
   {
-    // Bind feeds to input contracts the way the multi-input engine does:
-    // by name first, then positional (model.inputs[feedContract[f]]).
-    const auto contractFor = [ &model ]( std::size_t feedIndex,
-                                         const std::string &feedName ) -> const ModelInputContract *
+    std::vector<std::size_t> boundContracts( request.namedInputs.size(), 0 );
+    const auto bindContract = [ &model, &plan, &boundContracts ]( std::size_t feedIndex,
+                                                 const std::string &feedName,
+                                                 std::size_t *contractIndex )
     {
-      for ( const ModelInputContract &contract : model.inputs )
+      if ( feedName.empty() )
       {
-        if ( !contract.name.empty() && contract.name == feedName )
-          return &contract;
+        *contractIndex = feedIndex; // positional
+        return;
       }
-      return feedIndex < model.inputs.size() ? &model.inputs[feedIndex] : nullptr;
+      for ( std::size_t c = 0; c < model.inputs.size(); ++c )
+      {
+        if ( !model.inputs[c].name.empty() && model.inputs[c].name == feedName )
+        {
+          for ( std::size_t g = 0; g < feedIndex; ++g )
+          {
+            if ( boundContracts[g] == c )
+            {
+              addFinding( plan, "plan.contract_unwired", "error",
+                          "two feeds share the input name '" + feedName + "'" );
+              return;
+            }
+          }
+          *contractIndex = c;
+          return;
+        }
+      }
+      const std::string declared = model.inputs.empty() || model.inputs[0].name.empty()
+                                     ? std::string( "<unnamed>" )
+                                     : model.inputs[0].name;
+      addFinding( plan, "plan.contract_unwired", "error",
+                  "feed '" + feedName + "' matches no declared model input (declared: "
+                      + declared + "...)" );
     };
     for ( std::size_t f = 0; f < request.namedInputs.size(); ++f )
     {
       const NamedRasterFeed &feed = request.namedInputs[f];
-      const ModelInputContract *contract = contractFor( f, feed.name );
-      // Channels feed the batch budget EXACTLY as the engine accounts them:
-      // bands × DECLARED temporal length (the contract axis, not the provided
-      // frame count) — the engine budgets on the largest feed.
-      const int declaredFrames =
-        contract && contract->temporalLength > 0 ? contract->temporalLength : 1;
-      const std::string &firstPath = feed.paths.empty() ? std::string() : feed.paths.front();
-      InferencePlanInput input;
-      if ( !firstPath.empty()
-           && inspectInputRaster( plan, model, firstPath, feed.name, feed.bands,
-                                  declaredFrames, input ) )
+      if ( feed.paths.empty() )
       {
+        addFinding( plan, "plan.feed_empty", "error",
+                    "named input '" + feed.name + "' provides no raster paths" );
+        gridsOk = false;
+        continue;
+      }
+      std::size_t contractIndex = 0;
+      bindContract( f, feed.name, &contractIndex );
+      const ModelInputContract *contract =
+        contractIndex < model.inputs.size() ? &model.inputs[contractIndex] : nullptr;
+      // Frame axis, exactly as the engine resolves it: dynamic-T (sequence
+      // collapse) takes the PROVIDED count; otherwise the DECLARED
+      // temporal_length (0 = single frame).
+      const bool dynamicT =
+        contract && contract->temporalCollapse == "sequence" && contract->temporalDynamic;
+      const int declaredFrames =
+        dynamicT ? static_cast<int>( feed.paths.size() )
+                 : ( contract && contract->temporalLength > 0 ? contract->temporalLength : 1 );
+      // Frame arity gates the engine enforces before any read.
+      if ( contract && !dynamicT )
+      {
+        const int temporalLength = contract->temporalLength;
+        const std::string missingPolicy =
+          contract->missingTimestep.empty() ? std::string( "refuse" ) : contract->missingTimestep;
+        if ( static_cast<int>( feed.paths.size() ) > temporalLength && temporalLength > 0 )
+          addFinding( plan, "plan.feed_frame_arity", "error",
+                      "feed '" + feed.name + "' provides "
+                        + std::to_string( feed.paths.size() )
+                        + " frames but the input contract declares temporal_length "
+                        + std::to_string( temporalLength ) );
+        if ( temporalLength >= 2 && static_cast<int>( feed.paths.size() ) == 1
+             && missingPolicy != "zero" )
+          addFinding( plan, "plan.feed_frame_arity", "error",
+                      "feed '" + feed.name + "' provides 1 frame but the input contract "
+                        "declares temporal_length " + std::to_string( temporalLength )
+                        + " and missing_timestep=refuse (declare missing_timestep=zero to "
+                          "fill missing frames explicitly)" );
+        if ( declaredFrames > kMaxTemporalFrames )
+          addFinding( plan, "plan.feed_frame_arity", "error",
+                      "feed '" + feed.name + "': " + std::to_string( declaredFrames )
+                        + " temporal frames exceed the temporal lane bound of "
+                        + std::to_string( kMaxTemporalFrames ) );
+      }
+      const std::string &firstPath = feed.paths.front();
+      InferencePlanInput input;
+      if ( inspectInputRaster( plan, firstPath, feed.name, feed.bands, declaredFrames,
+                               contract ? contract->dtype : std::string(),
+                               feed.name.empty() ? std::string( "input" )
+                                                 : std::string( "feed '" + feed.name + "'" ),
+                               input ) )
+      {
+        // Per-feed band_roles arity (the engine's per-feed check).
+        if ( contract && !contract->bandRoles.empty()
+             && contract->bandRoles.size() != static_cast<std::size_t>( input.fedBands ) )
+          addFinding( plan, "plan.band_roles_arity", "error",
+                      "feed '" + feed.name + "': manifest declares "
+                        + std::to_string( contract->bandRoles.size() ) + " band roles but "
+                        + std::to_string( input.fedBands ) + " bands are fed" );
+        // Per-feed EFFECTIVE preprocess arity (M3 override or global).
+        const ModelPreprocessContract &feedPre =
+          contract && contract->preprocessDeclared ? contract->preprocess : model.preprocess;
+        if ( feedPre.normalize == "mean_std" )
+        {
+          if ( !feedPre.mean.empty()
+               && feedPre.mean.size() != static_cast<std::size_t>( input.fedBands ) )
+            addFinding( plan, "plan.preprocess_channel_mismatch", "error",
+                        "feed '" + feed.name + "': preprocess.mean declares "
+                          + std::to_string( feedPre.mean.size() ) + " channels but "
+                          + std::to_string( input.fedBands ) + " bands are fed" );
+          if ( !feedPre.stdv.empty()
+               && feedPre.stdv.size() != static_cast<std::size_t>( input.fedBands ) )
+            addFinding( plan, "plan.preprocess_channel_mismatch", "error",
+                        "feed '" + feed.name + "': preprocess.std declares "
+                          + std::to_string( feedPre.stdv.size() ) + " channels but "
+                          + std::to_string( input.fedBands ) + " bands are fed" );
+        }
         const std::int64_t channels64 =
           static_cast<std::int64_t>( input.fedBands ) * declaredFrames;
         if ( channels64 > CV_CN_MAX )
@@ -468,8 +591,10 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
       }
     }
   }
-  else if ( inspectInputRaster( plan, model, request.inputPath, {}, request.bands, 1,
-                                plan.inputs.emplace_back() ) )
+  else if ( inspectInputRaster(
+              plan, request.inputPath, {}, request.bands, 1,
+              model.input.dtype.empty() ? std::string() : model.input.dtype,
+              std::string( "input" ), plan.inputs.emplace_back() ) )
   {
     primaryWidth = plan.inputs.front().width;
     primaryHeight = plan.inputs.front().height;
@@ -485,9 +610,22 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     gridsOk = false;
   }
 
-  // --- gate 9: band_roles arity + preprocess channel contract --------------
-  if ( gridsOk )
+  // --- gate 9: single-input contracts the run seam enforces -----------------
+  // (multi-input per-feed roles/preprocess arity live in gate 8, mirroring
+  // the engine's per-feed checks)
+  if ( request.namedInputs.empty() && gridsOk )
   {
+    if ( !model.inputs.empty() && model.inputs[0].preprocessDeclared )
+      addFinding( plan, "plan.preprocess_override_unsupported", "error",
+                  "inputs[0].preprocess override is only executed by the multi-input "
+                    "engine (named_inputs); a single-input model must declare its "
+                    "preprocessing in the global preprocess section" );
+    if ( model.preprocess.pad > 0 || !std::isnan( model.preprocess.clampMin )
+         || !std::isnan( model.preprocess.clampMax ) )
+      addFinding( plan, "plan.multimodal_only_knob", "error",
+                  "preprocess.pad / clamp_min / clamp_max are executed by the multi-input "
+                    "engine (runMultiInput); this single-input model must drop them from the "
+                    "manifest to run here" );
     if ( !model.input.bandRoles.empty()
          && model.input.bandRoles.size()
               != static_cast<std::size_t>( plan.inputs.front().fedBands ) )
@@ -512,6 +650,53 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     }
   }
 
+  // --- gate 9b: lane-specific contracts (detection / scene) ------------------
+  if ( request.asDetection && !request.asSceneClassification )
+  {
+    // DetectionTileEngine::checkContract, mirrored statically.
+    if ( !model.output.detectionDeclared )
+      addFinding( plan, "plan.detection_contract_missing", "error",
+                  "model '" + model.name + "' has no output.detection contract — it cannot "
+                    "run as detection" );
+    else
+    {
+      if ( const std::string detectionError = model.output.detection.validate();
+           !detectionError.empty() )
+        addFinding( plan, "plan.detection_contract_invalid", "error", detectionError );
+      if ( model.preprocess.resize != "to_input" || model.input.width <= 0
+           || model.input.height <= 0 )
+        addFinding( plan, "plan.detection_contract_invalid", "error",
+                    "detection models must declare preprocess.resize=to_input with "
+                      "input.width/height (the head decodes boxes in the fixed input frame)" );
+      if ( model.preprocess.pad > 0 || !std::isnan( model.preprocess.clampMin )
+           || !std::isnan( model.preprocess.clampMax ) )
+        addFinding( plan, "plan.detection_contract_invalid", "error",
+                    "preprocess.pad / clamp_min / clamp_max are executed by the multi-input "
+                      "engine; this detection model must drop them from the manifest" );
+    }
+  }
+  if ( request.asSceneClassification )
+  {
+    if ( model.output.classes.empty() )
+      addFinding( plan, "plan.scene_contract_invalid", "error",
+                  "scene classification requires output.classes in the manifest" );
+    if ( model.output.tensorNames.size() > 1 )
+      addFinding( plan, "plan.scene_contract_invalid", "error",
+                  "scene classification consumes ONE head; this manifest declares "
+                    + std::to_string( model.output.tensorNames.size() ) + " tensor names" );
+    const std::string confidenceSemantics =
+      model.output.heads.empty() ? std::string() : model.output.heads.front().confidence;
+    if ( confidenceSemantics == "distance" )
+      addFinding( plan, "plan.scene_contract_invalid", "error",
+                  "head confidence semantics 'distance' is not a classification "
+                    "distribution — scene classification refuses it" );
+    if ( model.preprocess.pad > 0 || !std::isnan( model.preprocess.clampMin )
+         || !std::isnan( model.preprocess.clampMax ) )
+      addFinding( plan, "plan.scene_contract_invalid", "error",
+                  "preprocess.pad / clamp_min / clamp_max are executed by the multi-input "
+                    "engine; this scene-classification model must drop them from the manifest" );
+  }
+
   // --- gate 10: EFFECTIVE output mode + head contract -----------------------
   // The engine resolves the effective mode from the manifest when the request
   // leaves the default Probability; every derived-mode conflict the run
@@ -519,6 +704,7 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
   // role/confidence semantics).
   if ( !request.asDetection && !request.asSceneClassification )
   {
+    bool effectiveModeResolved = false;
     try
     {
       const RasterOutputMode effectiveMode =
@@ -526,6 +712,7 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
           ? request.outputMode
           : TileInferenceEngine::rasterOutputMode( model );
       plan.outputMode = effectiveMode;
+      effectiveModeResolved = true;
       if ( effectiveMode != RasterOutputMode::Probability )
       {
         const std::string uncertainty = TileInferenceEngine::uncertaintyMethod( model );
@@ -546,10 +733,23 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     }
     catch ( const RSOperatorError &error )
     {
-      plan.headContractOk = false;
-      plan.headContractNote = error.message();
-      addFinding( plan, "plan.head_contract_violation", "error", error.message(),
-                  "choose an output mode the model's head supports (manifest output.heads)" );
+      // A manifest-derived output.format that the catalog cannot resolve is a
+      // manifest error (not a head-contract decision): keep the codes apart so
+      // remediation points at the right section.
+      if ( !effectiveModeResolved )
+      {
+        plan.headContractOk = false;
+        plan.headContractNote = error.message();
+        addFinding( plan, "plan.output_mode_unsupported", "error", error.message(),
+                    "fix the manifest output.format vocabulary (see the model catalog docs)" );
+      }
+      else
+      {
+        plan.headContractOk = false;
+        plan.headContractNote = error.message();
+        addFinding( plan, "plan.head_contract_violation", "error", error.message(),
+                    "choose an output mode the model's head supports (manifest output.heads)" );
+      }
     }
   }
 
@@ -614,6 +814,27 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                     + " EO preflight advisories recorded (non-enforced observations)" );
   }
 
+  // --- gate 11b: derived-path postprocess contracts (single-input lane) ------
+  if ( request.namedInputs.empty() && !request.asDetection && !request.asSceneClassification
+       && plan.outputMode != RasterOutputMode::Probability )
+  {
+    if ( !model.postprocess.morphology.empty() )
+      addFinding( plan, "plan.postprocess_contract_conflict", "error",
+                  "postprocess.morphology executes on labels/mask products — declare an "
+                    "output.format or drop the morphology contract" );
+    if ( !std::isnan( model.postprocess.calibrationTemperature ) )
+    {
+      const TileBlend resolvedBlend =
+        request.blend == TileBlend::Unset
+          ? ( model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None )
+          : request.blend;
+      if ( resolvedBlend == TileBlend::Feather )
+        addFinding( plan, "plan.postprocess_contract_conflict", "error",
+                    "postprocess.calibration_temperature is not executed on the feather-blended "
+                      "derived path — drop the blend contract or the calibration" );
+    }
+  }
+
   // --- gate 12: blend contract ---------------------------------------------
   {
     TileBlend blend = request.blend;
@@ -626,12 +847,32 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
   }
 
   // --- grid / batch plan (the engine's own static planners) -----------------
+  plan.fedChannels = fedChannels;
   if ( request.asSceneClassification )
   {
     // The scene lane is ONE forward pass over the scene window — a tile grid
-    // would be fiction, so the plan reports none.
+    // would be fiction, so the plan reports none. The scene bounds are still
+    // planned (they are refusals the run enforces).
     addFinding( plan, "plan.scene_single_pass", "info",
                 "scene classification runs one forward pass — no tile grid applies" );
+    if ( gridsOk && primaryWidth > 0 && primaryHeight > 0 )
+    {
+      constexpr long long kMaxScenePixels = 2048LL * 2048LL;
+      constexpr long long kMaxSceneFloats = 33554432LL; // 128 MiB float32 samples
+      if ( static_cast<long long>( primaryWidth ) * primaryHeight > kMaxScenePixels )
+        addFinding( plan, "plan.scene_bounds", "error",
+                    "scene classification feeds the whole raster as ONE window; input is "
+                      + std::to_string( primaryWidth ) + "x" + std::to_string( primaryHeight )
+                      + " px which exceeds the 4194304 px scene bound — feed a chip or "
+                        "resampled scene, or use the tiled operators for full rasters" );
+      if ( static_cast<long long>( primaryWidth ) * primaryHeight * fedChannels
+           > kMaxSceneFloats )
+        addFinding( plan, "plan.scene_bounds", "error",
+                    "scene window " + std::to_string( primaryWidth ) + "x"
+                      + std::to_string( primaryHeight ) + " x " + std::to_string( fedChannels )
+                      + " bands exceeds the scene sample bound (33554432 floats) — reduce "
+                        "the bands fed or the scene size" );
+    }
   }
   else if ( gridsOk && primaryWidth > 0 && primaryHeight > 0 )
   {
@@ -644,17 +885,49 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     plan.gridX = ( primaryWidth + tileSize - 1 ) / tileSize;
     plan.gridY = ( primaryHeight + tileSize - 1 ) / tileSize;
     plan.tilesPlanned = plan.gridX * plan.gridY;
-    plan.fedChannels = fedChannels;
     int batchSize = TileInferenceEngine::effectiveBatchSize( model, hw, tileSize, fedChannels );
     if ( request.batchSizeOverride > 0 )
       batchSize = std::min( batchSize, request.batchSizeOverride );
     plan.batchSize = std::max( 1, batchSize );
     plan.batchesEstimated = ( plan.tilesPlanned + plan.batchSize - 1 ) / plan.batchSize;
+    // Window admission budget (checkedWindowSide / checkedWindowFloats): the
+    // engine refuses an oversized window BEFORE any allocation; the plan
+    // mirrors the same arithmetic so a refusal never arrives mid-run.
+    const int halo = plan.halo;
+    const int pad = std::max( 0, model.preprocess.pad );
+    const std::int64_t windowSide =
+      static_cast<std::int64_t>( tileSize ) + 2 * halo + 2 * pad;
+    if ( windowSide > kMaxWindowPx )
+      addFinding( plan, "plan.window_budget", "error",
+                  "the inference window side tile+2*halo+2*pad = " + std::to_string( tileSize )
+                    + "+2*" + std::to_string( halo ) + "+2*" + std::to_string( pad ) + " = "
+                    + std::to_string( windowSide ) + " px exceeds the window bound of "
+                    + std::to_string( kMaxWindowPx ) + " px",
+                  "reduce tile_size, halo or preprocess.pad" );
+    else
+    {
+      const std::int64_t windowFloats = windowSide * windowSide * fedChannels;
+      if ( windowFloats > static_cast<std::int64_t>( kMaxWindowFloats ) )
+        addFinding( plan, "plan.window_budget", "error",
+                    "the inference window needs " + std::to_string( windowFloats )
+                      + " float elements (side " + std::to_string( windowSide ) + " × channels "
+                      + std::to_string( fedChannels ) + "), above the "
+                      + std::to_string( kMaxWindowFloats )
+                      + "-element window budget",
+                    "reduce tile_size, halo, preprocess.pad or the fed channel count" );
+    }
     // Working-set estimate: one batch of float32 tiles, input + output plane
     // (estimate only — providers may stage more; resize-to-input changes the
     // model-side geometry, not the raster I/O side).
     const double bytesPerTile = static_cast<double>( tileSize ) * tileSize * fedChannels * 4.0;
     plan.batchWorkingSetMiB = plan.batchSize * bytesPerTile * 2.0 / ( 1024.0 * 1024.0 );
+    // An ensemble executes every member over the same grid: the combined
+    // tile count is the member skeleton times the member count.
+    if ( plan.isEnsemble )
+    {
+      plan.tilesPlanned *= plan.ensembleMembers;
+      plan.batchesEstimated *= plan.ensembleMembers;
+    }
   }
 
   plan.verdict = hasError( plan ) ? InferencePlan::Verdict::Refused : InferencePlan::Verdict::Ready;

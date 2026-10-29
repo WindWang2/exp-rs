@@ -19,6 +19,7 @@
 
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QRegularExpression>
 
 namespace sicnu::data
 {
@@ -36,8 +37,13 @@ bool isRemoteSpelling( const QString &path )
          lowered.startsWith( QLatin1String( "gs://" ) ) )
         return true;
     // Every GDAL virtual system manager prefix (/vsicurl/, /vsis3/,
-    // /vsizip/, /vsitar/, /vsigzip/, ...) denotes non-local access.
-    return lowered.startsWith( QLatin1String( "/vsi" ) );
+    // /vsizip/, /vsitar/, /vsigzip/, ...) denotes non-local access — also
+    // after a Windows drive letter (C:/vsicurl/...) so a Windows caller gets
+    // the out-of-scope verdict instead of a local-open attempt.
+    static const QRegularExpression driveVsi( QLatin1String( "^[A-Za-z]:/vsi" ) );
+    return lowered.contains( driveVsi )
+           || lowered.startsWith( QLatin1String( "/vsi" ) )
+           || lowered.contains( QLatin1String( ":/vsi" ) );
 }
 
 QString severityError() { return QStringLiteral( "error" ); }
@@ -422,6 +428,9 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
     // GenericRaster fallback accepts every openable raster by design (the
     // documented first-match specificity rule), so it never creates an
     // ambiguity — only two competing PRODUCT families do.
+    // adaptersAccepting() evaluates accepts() on every adapter — bounded and
+    // read-only, but the CN adapters directory-scan, so the loop stops at the
+    // SECOND specific claim: one match cannot be an ambiguity.
     int specificCandidates = 0;
     QString firstSpecific;
     for ( const geo::ProductAdapter *candidate : candidates )
@@ -431,6 +440,8 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
             ++specificCandidates;
             if ( firstSpecific.isEmpty() )
                 firstSpecific = QString::fromStdString( candidate->id() );
+            else
+                break;
         }
     }
     if ( specificCandidates > 1 )

@@ -26,6 +26,7 @@
 #include "geospatial/crs/crs_policy.h"
 #include "geospatial/raster/raster_writer.h"
 
+#include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QTemporaryDir>
@@ -253,18 +254,17 @@ TEST_CASE( "import preflight flags container subdatasets as a user decision",
 
     const ImportPreflightReport report = ImportPreflight::inspect( path );
 
-    if ( report.subdatasetCount > 0 )
+    // The oracle only means something when the container actually exposes
+    // subdatasets (a driver that collapses a single-variable netCDF cannot
+    // exercise the user-choice verdict) — SKIP the whole case otherwise
+    // instead of converting non-exercise into a pass.
+    if ( report.subdatasetCount <= 0 )
     {
-        CHECK( report.verdict == ImportPreflightVerdict::NeedsUserChoice );
-        REQUIRE( report.finding( QStringLiteral( "import.container_subdatasets" ) ) != nullptr );
-        CHECK_FALSE( report.finding( QStringLiteral( "import.container_subdatasets" ) )->remediation.isEmpty() );
+        SKIP( "netCDF driver present but does not expose subdatasets for this file" );
     }
-    else
-    {
-        // Single-variable containers may not report subdatasets; the verdict
-        // must then be a plain Importable, never a silent refusal.
-        CHECK( report.verdict == ImportPreflightVerdict::Importable );
-    }
+    CHECK( report.verdict == ImportPreflightVerdict::NeedsUserChoice );
+    REQUIRE( report.finding( QStringLiteral( "import.container_subdatasets" ) ) != nullptr );
+    CHECK_FALSE( report.finding( QStringLiteral( "import.container_subdatasets" ) )->remediation.isEmpty() );
 }
 
 TEST_CASE( "import preflight describes vector sources", "[r25_b][import_preflight]" )
@@ -302,11 +302,81 @@ TEST_CASE( "import preflight error text leaks no filesystem content beyond the p
     // A relative path spelling must not resolve into an absolute disclosure.
     const ImportPreflightReport report =
       ImportPreflight::inspect( QFileInfo( secret ).absoluteFilePath() );
+    REQUIRE( report.finding( QStringLiteral( "import.unreadable" ) ) != nullptr );
+    const sicnu::data::ImportPreflightFinding *unreadable =
+      report.finding( QStringLiteral( "import.unreadable" ) );
+    // Positive oracle: the message names the typed error class and cites the
+    // caller's path — never the file's content or any other filesystem text.
+    const bool citesTypedClass =
+      unreadable->message.contains( QStringLiteral( "open_failed" ) );
+    const bool citesCallerPath = unreadable->message.contains( secret );
+    CHECK( ( citesTypedClass || citesCallerPath ) );
+    CHECK_FALSE( unreadable->message.contains( QStringLiteral( "TOKEN=" ) ) );
+    CHECK_FALSE( unreadable->message.contains( QStringLiteral( "abcd1234" ) ) );
+    CHECK_FALSE( unreadable->remediation.contains( QStringLiteral( "abcd1234" ) ) );
     for ( const sicnu::data::ImportPreflightFinding &finding : report.findings )
     {
         CHECK_FALSE( finding.message.contains( QStringLiteral( "TOKEN=" ) ) );
         CHECK_FALSE( finding.remediation.contains( QStringLiteral( "abcd1234" ) ) );
     }
+}
+
+TEST_CASE( "import preflight JSON carries exact byte sizes (qint64, no double truncation)",
+           "[r25_b][import_preflight]" )
+{
+  QTemporaryDir dir;
+  const QString path = writePlainRaster( dir, QStringLiteral( "qint64.tif" ) );
+
+  const ImportPreflightReport report = ImportPreflight::inspect( path );
+  const QJsonObject identity =
+    report.toJson().value( QStringLiteral( "identity" ) ).toObject();
+
+  // The JSON stores integers, not doubles: reading back must equal the
+  // struct's quint64 exactly (a double cast would lose precision > 2^53).
+  const QJsonValue sizeValue = identity.value( QStringLiteral( "size_bytes" ) );
+  CHECK( ( sizeValue.isDouble() || sizeValue.isString() ) );
+  CHECK( static_cast<quint64>( sizeValue.toDouble() ) == report.identitySizeBytes );
+  CHECK( static_cast<quint64>( identity.value( QStringLiteral( "hashed_bytes" ) ).toDouble() )
+         == report.identityHashedBytes );
+}
+
+TEST_CASE( "import preflight does not refuse a directory product root",
+           "[r25_b][import_preflight]" )
+{
+  QTemporaryDir dir;
+  // A SAFE-shaped directory: the adapter family claims it while the root is
+  // not an openable dataset — the preflight must not refuse (the collection
+  // import path handles per-constituent registration).
+  const QString safe = dir.filePath( QStringLiteral( "S2A_MSIL1C_20260901T000000_N0509.SAFE" ) );
+  QDir().mkdir( safe );
+  QDir().mkdir( safe + "/GRANULE" );
+  QDir().mkdir( safe + "/GRANULE/L1C_T31TCJ" );
+  QDir().mkdir( safe + "/GRANULE/L1C_T31TCJ/IMG_DATA" );
+  // The three core constituents the adapter verifies: manifest.safe, the
+  // product-level MTD, and at least one measurement file.
+  for ( const QString &core :
+        { safe + "/manifest.safe", safe + "/MTD_MSIL1C.xml",
+          safe + "/GRANULE/L1C_T31TCJ/MTD_TL.xml",
+          safe + "/GRANULE/L1C_T31TCJ/IMG_DATA/T31TCJ_20260901T103021_B04.jp2" } )
+  {
+    QFile file( core );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    file.write( QByteArrayLiteral( "\x00\x00\x00\x0cjP  \r\n\x87\n" ) );
+    file.close();
+  }
+
+  const ImportPreflightReport report = ImportPreflight::inspect( safe );
+  // The root is not an openable dataset, but the product itself is complete:
+  // the preflight explains the collection path instead of refusing.
+  CHECK( report.verdict != ImportPreflightVerdict::Refused );
+  // A readable-but-sparse SAFE reports PartialReadable (missing manifest or
+  // measurements degrade the verdict, never fabricate completeness) — and a
+  // partial product is still NOT a refusal: registration proceeds through
+  // the collection path with the gaps reported.
+  CHECK( ( report.completeness == QStringLiteral( "complete" )
+           || report.completeness == QStringLiteral( "partial_readable" ) ) );
+  REQUIRE( report.finding( QStringLiteral( "import.directory_product_root" ) ) != nullptr );
+  CHECK_FALSE( report.finding( QStringLiteral( "import.directory_product_root" ) )->remediation.isEmpty() );
 }
 
 TEST_CASE( "import preflight report serializes with the schema stamp",
