@@ -287,6 +287,28 @@ TEST_CASE( "import preflight describes vector sources", "[r25_b][import_prefligh
     CHECK( report.verdict == ImportPreflightVerdict::Importable );
 }
 
+TEST_CASE( "import preflight error text leaks no filesystem content beyond the path",
+           "[r25_b][import_preflight][security]" )
+{
+    QTemporaryDir dir;
+    // A file with a secret-looking name outside the reported path must not
+    // appear in the report's messages (the report cites the caller's path
+    // and nothing else).
+    const QString secret = dir.filePath( QStringLiteral( "secret-content-not-in-report.txt" ) );
+    {
+        std::ofstream out( secret.toStdString() );
+        out << "TOKEN=abcd1234";
+    }
+    // A relative path spelling must not resolve into an absolute disclosure.
+    const ImportPreflightReport report =
+      ImportPreflight::inspect( QFileInfo( secret ).absoluteFilePath() );
+    for ( const sicnu::data::ImportPreflightFinding &finding : report.findings )
+    {
+        CHECK_FALSE( finding.message.contains( QStringLiteral( "TOKEN=" ) ) );
+        CHECK_FALSE( finding.remediation.contains( QStringLiteral( "abcd1234" ) ) );
+    }
+}
+
 TEST_CASE( "import preflight report serializes with the schema stamp",
            "[r25_b][import_preflight]" )
 {
