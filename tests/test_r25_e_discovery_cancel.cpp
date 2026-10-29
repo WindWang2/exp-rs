@@ -412,20 +412,43 @@ TEST_CASE( "zero durable rows never rewrite an existing checkpoint (R2 finding 1
         REQUIRE( first.graded == 2 );
     }
 
-    SECTION( "every row cancelled mid-flight leaves the checkpoint intact" )
+    SECTION( "every row cancelled after discovery leaves the checkpoint intact" )
     {
-        std::atomic<bool> cancel{ false };
+        // The dock's real window (R2 finding 1, door C): the preview walk
+        // is handed in through the seam, then the rules file and the whole
+        // grader binary are streamed — a Cancel clicked there flips the
+        // flag AFTER discovery, so items stay non-empty while every worker
+        // returns before its first item. That is the library-level shape:
+        // seam + pre-set flag.
+        // Byte-level proof: the checkpoint file on disk is untouched by
+        // the cancelled run (not merely "still loads").
+        QFile ckptBefore( tree.checkpointPath() );
+        REQUIRE( ckptBefore.open( QIODevice::ReadOnly ) );
+        const QByteArray checkpointBytesBefore = ckptBefore.readAll();
+        ckptBefore.close();
+
+        QVector<DiscoverySkip> skips;
+        const auto walked = discoverSubmissions( tree.submissions.path(), &skips );
+        REQUIRE( walked.size() == 2 );
+
+        // A DIFFERENT rules version than run A's (no adoption — the
+        // checkpoint belongs to the old digest), the seam in place, the
+        // flag already flipped by the Cancel click during the fingerprint
+        // streaming: the exact shape of the dock's window.
         BatchAssessmentConfig cfg = baseConfig( tree.submissions.path(), tree.checkpointPath() );
-        const auto cancelled = runBatchAssessment(
-          cfg,
-          [&cancel]( const SubmissionItem &item ) {
-              cancel.store( true, std::memory_order_relaxed ); // flips before row 1 returns
-              return passingRow( item );
-          },
-          &cancel );
+        cfg.rubricVersion = QStringLiteral( "r1-edited" );
+        cfg.preDiscovered = walked;
+        cfg.preDiscoveredSkips = skips;
+        std::atomic<bool> cancel{ true };
+        const auto cancelled = runBatchAssessment( cfg, passingRow, &cancel );
         REQUIRE( cancelled.total == 2 );
         REQUIRE( cancelled.cancelled == 2 );
         REQUIRE( cancelled.graded == 0 );
+
+        QFile ckptAfter( tree.checkpointPath() );
+        REQUIRE( ckptAfter.open( QIODevice::ReadOnly ) );
+        REQUIRE( ckptAfter.readAll() == checkpointBytesBefore );
+        ckptAfter.close();
     }
 
     SECTION( "absent submissions root leaves the checkpoint intact" )
