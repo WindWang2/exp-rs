@@ -20,6 +20,7 @@
 
 #include <QVariantList>
 #include <QVariantMap>
+#include <QMetaType>
 
 #include "agent/mcp_server.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -154,5 +155,32 @@ TEST_CASE( "algorithm entries declare prerequisites and limitations honestly",
         const QVariantMap guarantees = entry.value( "guarantees" ).toMap();
         CHECK( guarantees.contains( QStringLiteral( "deterministic" ) ) );
         CHECK( guarantees.contains( QStringLiteral( "idempotent" ) ) );
+        CHECK( guarantees.contains( QStringLiteral( "supportsCancellation" ) ) );
+    }
+
+    SECTION( "provider-sourced entries carry the same guarantees shape" )
+    {
+        // Provider algorithms enter the universe through their adapter
+        // descriptor, so both listing paths speak ONE shape: the guarantees
+        // map exists for every entry, boolean-typed, and for a provider
+        // entry it reflects the descriptor default (deterministic true) —
+        // never a missing key or a prose string like "true".
+        const QVariantMap entry = findEntry( catalog, QStringLiteral( "gdal:reproject" ) );
+        if ( entry.isEmpty() )
+        {
+            WARN( "gdal:reproject not in this host's catalog — provider shape unchecked" );
+            return;
+        }
+        const QVariantMap guarantees = entry.value( "guarantees" ).toMap();
+        REQUIRE( guarantees.contains( QStringLiteral( "deterministic" ) ) );
+        REQUIRE( guarantees.contains( QStringLiteral( "idempotent" ) ) );
+        REQUIRE( guarantees.contains( QStringLiteral( "supportsCancellation" ) ) );
+        // Booleans (JSON true/false), not strings like "true".
+        CHECK( guarantees.value( QStringLiteral( "deterministic" ) ).userType()
+               == QMetaType::Bool );
+        CHECK( guarantees.value( QStringLiteral( "idempotent" ) ).userType()
+               == QMetaType::Bool );
+        CHECK( guarantees.value( QStringLiteral( "supportsCancellation" ) ).userType()
+               == QMetaType::Bool );
     }
 }

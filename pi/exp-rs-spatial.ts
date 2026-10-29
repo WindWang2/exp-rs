@@ -51,12 +51,12 @@ import {
  * respawn), reported through exprs_status, and warned loudly, so the agent
  * knows which registrations are stale instead of trusting them blindly. */
 const catalogDrift = {
-  lastCheckedGeneration: 0,
-  serverVersion: null as string | null,
-  previousServerVersion: null as string | null,
   added: [] as string[],
   removed: [] as string[],
   lastError: null as string | null,
+  /// True while a post-respawn re-list is still in flight. exprs_status must
+  /// not claim "none detected" while the comparison has not completed.
+  reListInFlight: false,
 };
 
 /** Runs a bridge request, cancellable via AbortSignal: on abort the local
@@ -119,12 +119,11 @@ export default async function (pi: ExtensionAPI) {
     // R25-C: every completed handshake (re)checks the catalog so a respawn
     // onto a drifted server binary is REPORTED, not silently absorbed.
     onGeneration: (info) => {
-      catalogDrift.lastCheckedGeneration = info.generation;
-      catalogDrift.serverVersion = info.serverInfo?.version ?? null;
-      catalogDrift.previousServerVersion = info.previousServerInfo?.version ?? null;
       if (info.generation <= 1 || registeredToolNames.size === 0) return;
       // Fire-and-forget: the handshake must not block on the re-list, and a
-      // failed re-list must not break the fresh generation.
+      // failed re-list must not break the fresh generation. The in-flight
+      // flag keeps exprs_status honest while the comparison has not landed.
+      catalogDrift.reListInFlight = true;
       bridge
         .request("tools/list", { includeSchemas: true })
         .then((list: any) => {
@@ -138,6 +137,7 @@ export default async function (pi: ExtensionAPI) {
           catalogDrift.added = added;
           catalogDrift.removed = removed;
           catalogDrift.lastError = null;
+          catalogDrift.reListInFlight = false;
           if (added.length || removed.length) {
             console.warn(
               `[exp-rs-spatial] server respawned (generation ${info.generation}` +
@@ -149,6 +149,7 @@ export default async function (pi: ExtensionAPI) {
         })
         .catch((err: any) => {
           catalogDrift.lastError = String(err?.message ?? err);
+          catalogDrift.reListInFlight = false;
         });
     },
   });
@@ -300,6 +301,10 @@ export default async function (pi: ExtensionAPI) {
           if (catalogDrift.added.length) parts.push(`added: ${catalogDrift.added.join(", ")}`);
           if (catalogDrift.removed.length) parts.push(`removed: ${catalogDrift.removed.join(", ")}`);
           if (catalogDrift.lastError) parts.push(`re-list failed: ${catalogDrift.lastError}`);
+          // An unfinished re-list has made NO comparison yet: saying "none
+          // detected" would be a claim this session has not established.
+          if (!parts.length && catalogDrift.reListInFlight)
+            parts.push("comparison still in flight (no drift observed yet)");
           drift =
             ` catalog drift since registration: ${parts.length ? parts.join("; ") : "none detected"}` +
             ` (Pi registrations are from generation 1; restart the session after a crash to re-register)`;

@@ -140,10 +140,17 @@ export function installExitHook(): void {
   if (exitHookInstalled) return;
   exitHookInstalled = true;
   // During exit, timers never fire, so stop()'s SIGKILL escalation cannot
-  // run. Best-effort: SIGTERM + destroy stdin — the server exits on stdin
-  // EOF (an orphaned child would otherwise linger, not be reaped).
+  // run. Best-effort teardown: destroy stdin (the server exits on stdin
+  // EOF) and escalate to SIGKILL IMMEDIATELY — a child that ignores
+  // SIGTERM while wedged in Qt teardown would otherwise outlive this
+  // process as an unreapable orphan holding the workflow run's flock
+  // (observed in the R25-C crash→resume E2E: a lingering host made
+  // resume_workflow refuse "owned by a live process" against a session
+  // that no longer exists). SIGKILL here is safe: the bridge is already
+  // unreachable, so there is nothing graceful left to flush.
   process.on("exit", () => {
     for (const bridge of activeBridges) bridge.stop();
+    for (const bridge of activeBridges) bridge.killNow();
   });
 }
 
@@ -395,11 +402,22 @@ export class McpBridge {
     this.notify("notifications/initialized", {});
     // R25-C: announce the completed generation AFTER the child is fully
     // initialized, so a shell callback may immediately re-list the tool
-    // catalog. Wrapped: a throwing callback must not break the start path
-    // the rest of the session depends on.
+    // catalog. The callback is third-party code (the hook is exported API),
+    // so BOTH failure modes are contained: a synchronous throw AND a
+    // returned rejected promise — the latter would otherwise surface as an
+    // unhandledRejection and terminate the Node process by default.
     if (generationInfo) {
       try {
-        this.onGeneration?.(generationInfo);
+        const outcome = this.onGeneration?.(generationInfo) as
+          | Promise<unknown>
+          | undefined;
+        if (outcome && typeof (outcome as any).then === "function")
+          (outcome as Promise<unknown>).then(undefined, (err: unknown) => {
+            console.error(
+              "[exp-rs-spatial] onGeneration callback failed:",
+              err instanceof Error ? err.message : err,
+            );
+          });
       } catch (err) {
         console.error(
           "[exp-rs-spatial] onGeneration callback failed:",
@@ -443,8 +461,17 @@ export class McpBridge {
   /** Shared teardown ladder: destroy stdin (the server exits on EOF even
    * inside the process-exit hook, where timers never run), SIGTERM for a
    * graceful Qt flush, then an armed SIGKILL so a stalled child cannot
-   * keep `exited` false forever. The killer is unref'd so an about-to-die
-   * bridge never pins the event loop for the 5s grace period. */
+   * keep `exited` false forever.
+   *
+   * The killer is armed with a LISTENER so it survives a quiet event loop
+   * and is cleared on exit — NOT unref'd. An unref'd killer never fires
+   * while nothing else keeps the loop alive, which is exactly the
+   * crash-teardown case: the SIGTERM was ignored by a wedged Qt child and
+   * the SIGKILL escalation silently never happened, leaving the orphan
+   * holding the workflow run's flock forever (R25-C E2E crash→resume
+   * chain: "owned by a live process" refused against a dead session). A
+   * 5s grace timer with a listener cannot pin a healthy session: it is
+   * cleared the moment the child exits. */
   private terminateChild(child: ChildProcess): void {
     try {
       child.stdin?.destroy();
@@ -453,8 +480,8 @@ export class McpBridge {
     }
     child.kill();
     const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
-    killer.unref();
     child.once("exit", () => clearTimeout(killer));
+    child.once("error", () => clearTimeout(killer));
   }
 
   private onStdout(chunk: string): void {
@@ -575,10 +602,14 @@ export class McpBridge {
             reject(
               bridgeFailure(
                 `exp-rs MCP server crashed and restart failed: ${err?.message ?? err}`,
-                // A start() failure here already burned one respawn attempt;
-                // the next request retries automatically, so allow a retry.
-                BRIDGE_ERRORS.RESTART_FAILED,
-                true,
+                // PRESERVE the start() failure's own class when it has one:
+                // a spawn-class failure (LAUNCH_FAILED — binary missing or
+                // not executable) stays non-retryable, a runtime start
+                // failure (initialize timeout) stays retryable. Retyping
+                // everything RESTART_FAILED/retryable would tell Pi to
+                // retry a missing binary forever.
+                (err as any)?.bridgeError ?? BRIDGE_ERRORS.RESTART_FAILED,
+                (err as any)?.retryable ?? true,
               ),
             ),
           );
@@ -701,6 +732,19 @@ export class McpBridge {
     }
     activeBridges.delete(this);
     this.child = null;
+  }
+
+  /** Immediate, unconditional SIGKILL for the current child. Used by the
+   * process-exit hook, where no timer can run and a SIGTERM-ignoring
+   * child would leak. */
+  killNow(): void {
+    const child = this.child;
+    if (!child || this.exited) return;
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // already gone
+    }
   }
 
   /** True when the child process is alive (for exprs_status liveness). */

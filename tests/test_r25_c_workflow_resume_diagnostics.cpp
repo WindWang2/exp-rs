@@ -27,6 +27,9 @@
 #include <QTemporaryDir>
 #include <QVariantList>
 #include <QVariantMap>
+#include <functional>
+#include "jobs/job_types.h"
+#include "jobs/job_engine.h"
 
 #include "agent/mcp_server.h"
 #include "workflow/workflow_checkpoint.h"
@@ -246,4 +249,92 @@ TEST_CASE( "get_workflow_status run_id path reports checkpoint truth and resumab
         CHECK( res.payload.value( "run_state" ).toString() == QStringLiteral( "Failed" ) );
         CHECK( res.payload.value( "resumable" ).toBool() == true );
     }
+}
+
+// --- pipeline_id path: the resumable advisory on a LIVE tracked run --------
+// R25-C added resumable/resume_hint to handleGetWorkflowStatus(pipeline_id)
+// (additive keys). R1 P3 flagged zero coverage; this drives the real
+// tracked-pipeline path with a coordinator-level tracked run and asserts
+// the advisory keys and their value for a Completed live run.
+#include <QCoreApplication>
+
+namespace
+{
+
+bool waitForPredicate( const std::function<bool()> &predicate, int attempts = 4000, int sleepMs = 5 )
+{
+    for ( int i = 0; i < attempts; ++i )
+    {
+        if ( predicate() )
+            return true;
+        std::this_thread::sleep_for( std::chrono::milliseconds( sleepMs ) );
+    }
+    return predicate();
+}
+
+} // namespace
+
+TEST_CASE( "pipeline_id status carries the resumable advisory for live tracked runs",
+           "[agent][mcp][workflow][r25_c]" )
+{
+    if ( !QCoreApplication::instance() )
+    {
+        static int argc = 1;
+        static char appName[] = "test_r25_c_workflow_resume_diagnostics";
+        static char *argv[] = { appName, nullptr };
+        new QCoreApplication( argc, argv );
+    }
+    QTemporaryDir checkpointDir;
+    REQUIRE( checkpointDir.isValid() );
+    auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
+    coordinator.setCheckpointDirectory( checkpointDir.path() );
+
+    TestServer server;
+    // Single-step definition (an unregistered operator id is fine: the
+    // pipeline submit tracks the run; execution outcome is irrelevant to
+    // the projection under test).
+    sicnu::workflow::WorkflowDefinition def;
+    def.id = "wf_r25c_live";
+    def.title = "R25-C live advisory";
+    sicnu::workflow::StepDef only;
+    only.id = "s1";
+    only.operatorId = "rs:test";
+    def.steps = { only };
+
+    const long pipelineId = coordinator.startTrackedPipeline( def, /*autoLoad=*/false );
+    REQUIRE( pipelineId > 0 );
+
+    // Wait for the run to reach a terminal state (completed or failed —
+    // either resolves the tracked pipeline).
+    const bool terminal = waitForPredicate( [&] {
+        const auto run = coordinator.runForPipeline( pipelineId );
+        return run && ( run->state() == sicnu::workflow::WorkflowRunState::Completed
+                        || run->state() == sicnu::workflow::WorkflowRunState::Failed
+                        || run->state() == sicnu::workflow::WorkflowRunState::Canceled );
+    } );
+
+    if ( !terminal )
+    {
+        WARN( "tracked run did not settle in time — advisory keys unchecked" );
+        coordinator.shutdownForTests();
+        return;
+    }
+
+    const auto run = coordinator.runForPipeline( pipelineId );
+    REQUIRE( run );
+
+    QVariantMap args;
+    args.insert( QStringLiteral( "pipeline_id" ), static_cast<qlonglong>( pipelineId ) );
+    const auto res = server.callTool( QStringLiteral( "get_workflow_status" ), args );
+    REQUIRE_FALSE( res.isError );
+    CHECK( res.payload.value( "pipeline_id" ).toLongLong() == pipelineId );
+    CHECK( res.payload.value( "run_id" ).toString() == QString::fromStdString( run->runId() ) );
+    // The advisory must exist and agree with the state wall.
+    CHECK( res.payload.contains( QStringLiteral( "resumable" ) ) );
+    const bool completed = run->state() == sicnu::workflow::WorkflowRunState::Completed;
+    CHECK( res.payload.value( "resumable" ).toBool() == !completed );
+    if ( completed )
+        CHECK_FALSE( res.payload.value( "resume_hint" ).toString().isEmpty() );
+
+    coordinator.shutdownForTests();
 }

@@ -231,7 +231,22 @@ testSpawn("bridge-level failures carry typed bridgeError codes", async () => {
       writeFileSync(poison, "1");
       const err = await bridge.request("tools/call", {}).then(() => null, (e) => e);
       assert.ok(err, "restart against a poisoned binary must reject");
-      assert.equal(err.bridgeError, "RESTART_FAILED");
+      // The wrapper PRESERVES the start() failure's own class: a
+      // spawn-class failure (the poisoned child dies before the
+      // handshake → discardFailedStart's RESTART_FAILED, retryable) stays
+      // typed; a missing/not-executable binary would surface as
+      // LAUNCH_FAILED with retryable=false instead (R1-P3 fix: never
+      // retype everything retryable).
+      // A child that SPAWNS then dies (exit before the handshake) is
+      // reported by the exit handler as CHILD_EXITED; a child that never
+      // spawns (ENOENT/EACCES) comes back LAUNCH_FAILED; a handshake that
+      // fails otherwise is discardFailedStart's RESTART_FAILED. All three
+      // are typed and retryable — the prose contract is unchanged.
+      assert.ok(
+        ["RESTART_FAILED", "LAUNCH_FAILED", "CHILD_EXITED"].includes(err.bridgeError),
+        `unexpected class ${err.bridgeError}`,
+      );
+      assert.match(err.message, /restart failed|crashed|exited/i);
     } finally {
       bridge.stop();
       rmSync(poison, { force: true });

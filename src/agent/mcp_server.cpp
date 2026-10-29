@@ -1601,6 +1601,7 @@ static QVariantMap algorithmEntryMap( const sicnu::processing::AlgorithmDescript
         QVariantMap guarantees;
         guarantees[QStringLiteral("deterministic")] = desc.agentMetadata.deterministic;
         guarantees[QStringLiteral("idempotent")] = desc.agentMetadata.idempotent;
+        guarantees[QStringLiteral("supportsCancellation")] = desc.agentMetadata.supportsCancellation;
         algMap[QStringLiteral("guarantees")] = guarantees;
     }
 
@@ -1648,6 +1649,13 @@ static QVariantMap providerEntryMap( const QgsProcessingAlgorithm *alg )
     algMap[QStringLiteral("tags")] = tags;
     algMap[QStringLiteral("memoryPolicy")] = QStringLiteral("unknown");
     algMap[QStringLiteral("largeRasterSafe")] = false;
+    // R25-C shape symmetry with descriptor entries: provider algorithms
+    // declare no determinism/idempotency contract, so both keys are
+    // present and honestly null (absent metadata) — not fabricated trues.
+    QVariantMap providerGuarantees;
+    providerGuarantees[QStringLiteral("deterministic")] = QVariant();
+    providerGuarantees[QStringLiteral("idempotent")] = QVariant();
+    algMap[QStringLiteral("guarantees")] = providerGuarantees;
 
     // Preserve the provider's native metadata map (purpose, help, ...)
     // for backward compatibility with MCP clients.
@@ -3116,12 +3124,38 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
     return result;
 }
 
+/// R25-C: a checkpoint-recorded output path shown in a diagnostic must not
+/// disclose more than the workspace sandbox allows. Paths inside the root
+/// pass through verbatim (the agent needs them to resolve artifacts);
+/// anything outside collapses to its file name, and a non-path string
+/// (placeholder tokens) is returned unchanged.
+static std::string diagnosticArtifactPath( const std::string &rawPath, const QString &wsRoot )
+{
+    const QString path = QString::fromStdString( rawPath );
+    if ( path.isEmpty() )
+        return rawPath;
+    QFileInfo info( path );
+    if ( !info.isAbsolute() && !path.startsWith( QStringLiteral( "/" ), Qt::CaseInsensitive ) )
+        return rawPath; // placeholder/token, not a filesystem path
+    const QString canonical = info.canonicalFilePath();
+    const QString resolved = canonical.isEmpty() ? path : canonical;
+    const QString root = QDir( wsRoot ).canonicalPath();
+    if ( !root.isEmpty()
+         && ( resolved == root || resolved.startsWith( root + QLatin1Char( '/' ) ) ) )
+        return rawPath;
+    // Outside the sandbox: keep only the leaf name — enough to identify the
+    // artifact in conversation, not enough to map the host filesystem.
+    return info.fileName().toStdString();
+}
+
 QVariantMap McpServer::handleGetWorkflowStatusByRun(const QString &runId)
 {
     // Same filesystem-reach guard as resume_workflow: the run id reaches
     // checkpointPathFor's path interpolation, so "foo/../../bar" must not
     // probe outside the checkpoint directory.
-    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+$" ) );
+    // \Z (not $): QRegularExpression's $ also matches before a trailing
+    // newline, which would admit "run\n" as an id. \Z anchors end-of-string.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\Z" ) );
     if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
     {
         throw McpToolError(
@@ -3185,11 +3219,6 @@ QVariantMap McpServer::handleGetWorkflowStatusByRun(const QString &runId)
     {
         hint = QStringLiteral( "run is terminal (Completed): nothing to resume" );
     }
-    else if ( state == QStringLiteral( "Canceled" ) )
-    {
-        // unreachable (Canceled is resumable above) — kept for clarity
-        hint = QStringLiteral( "call resume_workflow with this run_id" );
-    }
     else
     {
         hint = QStringLiteral( "run state is %1 (active); if the owning process died, resume_workflow's ownership check reconciles it to Interrupted" ).arg( state );
@@ -3198,6 +3227,7 @@ QVariantMap McpServer::handleGetWorkflowStatusByRun(const QString &runId)
     result[QStringLiteral("resume_hint")] = hint;
 
     QVariantList steps;
+    const QString wsRoot = sicnu::agent::tool_catalog::containment::effectiveMcpWorkspaceRoot();
     for ( const auto &plan : run->stepPlans() )
     {
         QVariantMap step;
@@ -3205,7 +3235,8 @@ QVariantMap McpServer::handleGetWorkflowStatusByRun(const QString &runId)
         step[QStringLiteral("operator")] = QString::fromStdString( plan.operatorId );
         step[QStringLiteral("status")] = QString::fromStdString( plan.status );
         if ( !plan.outputLayerPath.empty() )
-            step[QStringLiteral("output_path")] = QString::fromStdString( plan.outputLayerPath );
+            step[QStringLiteral("output_path")] =
+                QString::fromStdString( diagnosticArtifactPath( plan.outputLayerPath, wsRoot ) );
         steps.append( step );
     }
     result[QStringLiteral("steps")] = steps;
@@ -3248,7 +3279,9 @@ QVariantMap McpServer::handleResumeWorkflow(const QString &runId)
     // The run id is interpolated into the checkpoint file path, so restrict
     // it to run-id characters — a caller-supplied "foo/../../bar" must not
     // escape the checkpoint directory and load an arbitrary JSON document.
-    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+$" ) );
+    // \Z (not $): QRegularExpression's $ also matches before a trailing
+    // newline, which would admit "run\n" as an id. \Z anchors end-of-string.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\Z" ) );
     if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
     {
         throw McpToolError(

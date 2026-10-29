@@ -183,9 +183,13 @@ test(
       assert.ok(runId, "run_id observed in the aggregate status");
 
       // Kill the host generation mid-run: the bridge's teardown ladder
-      // destroys stdin + SIGTERM/SIGKILL — the run is left non-terminal on
-      // disk exactly as after a real crash.
+      // destroys stdin (the server exits on EOF) and arms SIGTERM→SIGKILL.
+      // The run is left non-terminal on disk exactly as after a real crash.
       bridge.stop();
+      // The SIGKILL escalation is the guaranteed terminator; wait past it so
+      // the dead holder's flock is released before the fresh session probes
+      // ownership (resume refuses "owned by a live process" while it is not).
+      await sleep(6000);
       assert.equal(bridge.generations, 1);
 
       // A fresh bridge = a fresh session (Pi restarting after a crash): the
@@ -199,8 +203,17 @@ test(
         });
         assert.ok(init2?.serverInfo, "generation-2 handshake");
 
-        const diag = await call(bridge2, "get_workflow_status", { run_id: runId });
-        assert.ok(!diag.isError, `run_id diagnostics failed: ${diag.text.slice(0, 300)}`);
+        // The checkpoint write is asynchronous (persistRun drops m_mutex
+        // first); poll the diagnostic until the run is durably on disk —
+        // an in-memory-only view would make "resume" unprovable here.
+        let diag = null;
+        for (let attempt = 0; attempt < 40 && !diag; attempt++) {
+          const r = await call(bridge2, "get_workflow_status", { run_id: runId });
+          assert.ok(!r.isError, `run_id diagnostics failed: ${r.text.slice(0, 300)}`);
+          if (payload(r.text).checkpoint_present) diag = r;
+          else await sleep(250);
+        }
+        assert.ok(diag, "checkpoint durable after the crash");
         const d = payload(diag.text);
         assert.equal(d.run_id, runId);
         assert.ok(d.checkpoint_present, "checkpoint present after the crash");
@@ -210,8 +223,24 @@ test(
         assert.ok(d.resume_hint, "resume hint present");
 
         // Resume: the unfinished sleeping step re-executes to completion.
-        const resumed = await call(bridge2, "resume_workflow", { run_id: runId });
-        assert.ok(!resumed.isError, `resume failed: ${resumed.text.slice(0, 300)}`);
+        // A SIGKILLed holder's flock release can lag the process-table
+        // update by a moment on a loaded host; resume_workflow fails typed
+        // "owned by a live process" during that window (correct
+        // production behavior). Retry bounded — the lock IS released.
+        let resumed = null;
+        let lastResumeText = null;
+        for (let attempt = 0; attempt < 20 && !resumed; attempt++) {
+          const r = await call(bridge2, "resume_workflow", { run_id: runId });
+          if (!r.isError) {
+            resumed = r;
+            break;
+          }
+          if (!/owned by a live process/i.test(r.text)) {
+            throw new Error(`resume failed: ${r.text.slice(0, 300)}`);
+          }
+          await sleep(500);
+        }
+        assert.ok(resumed, "resume succeeded after the dead holder's lock was released");
         const rDoc = payload(resumed.text);
         assert.ok(rDoc.pipeline_id >= 0, "resumed pipeline id");
         let done = "";
