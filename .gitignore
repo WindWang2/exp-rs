@@ -756,3 +756,4 @@ r6_dev.cmd
 !.planning/zcode-r25-B/
 .planning/zcode-r25-B/*
 !.planning/zcode-r25-B/*.md
+!.planning/zcode-r25-B/*.sh
