@@ -12,13 +12,25 @@
 
 HEAD（本轨分支）同旗语法检查：6 个 TU（3 生产 + 3 测试）+ E2E TU 全部 **exit 0**。
 
-## GREEN（待构建完成后填写）
+## GREEN（实跑，2026-10-28）
 
-- [ ] `ctest -R "r25_b"` 第一轮
-- [ ] `ctest -R "r25_b"` 第二轮
-- [ ] 邻域回归（r23_b/r24_b/data_manager/experiment/model_runtime/mlops9）
-- [ ] E2E
+- **`ctest -R "r25_b"` 第一轮**：**17/17 通过**（1 用例按 netCDF 驱动可用性诚实 SKIP：`test_r25_b_import_preflight::...container subdatasets`——本 GDAL 无 netCDF 创建支持；SKIP 非 PASS 伪装）。
+- **第二轮**：**17/17 通过**（同上 SKIP）。双轮一致，排除侥幸。
+- 其中：test_r25_b_import_preflight 9 用例、test_r25_b_inference_plan 4 用例、test_r25_b_replay_deviation_v2 2 用例、test_r25_b_end_to_end 1 用例。
+- R1 修复后新增 6 个 SECTION（dtype/roles/mode-conflict/conf-bounds/scene-lane/multi-input 通道核算）全绿；其中 multi-input SECTION 首版误用单输入 temporal 契约（被 master 的 rejectUnwiredContracts 正确拒绝），按 run seam 合法形态（每契约一 feed）修正后 GREEN。
+- 构建：`flock ~/.cache/exp-rs-build.lock cmake --build build-r25-B --parallel 2 --target <本轨+邻域目标>` **exit 0**（shared host，兄弟轨 R25-A/R25-C 持锁排队串行；-j2 上限遵守）。
+- **注册完整性门**：`python3 scripts/check_merge_registration_integrity.py --base origin/master --head HEAD --require-refs` → `1067 registered targets + 50 add_test names at HEAD (base 1063/50; lost: 0+0; added: 4+0)`，`0 marker finding(s); 0 duplicate(s); mode=git`，**exit 0**。
+- **`git diff --check`**：干净。
+
+## 邻域回归
+
+命令：`ctest -R "r24_b_|r23_b_|test_data_manager|test_dataset_core|test_experiment_consistency_r4|test_model_runtime$|test_mlops9_evidence|test_collection_import_service" -j1 --output-on-failure`
+
+| 轮次 | 结果 |
+|---|---|
+| 首轮 | 39/45 ran；6 个 NOT_BUILT（构建目标未纳入首次闭包）→ 补齐目标 |
+| 补齐后 | **40/40 通过，0 failed，0 NOT_BUILT**（含 r24_b 全 8 套件、r23_b 2、mlops9、experiment_consistency_r4、dataset_core、model_runtime、collection_import、data_manager 全族） |
 
 ## 构建环境备注
 
-共享宿主：R25-A/R25-C 并行构建持锁排队；`CMAKE_BUILD_PARALLEL_LEVEL=2`、flock 单锁、ctest -j1。构建命令与退出码在 GREEN 段记录。
+共享宿主：R25-A/R25-C 并行构建持锁排队；`CMAKE_BUILD_PARALLEL_LEVEL=2`、flock 单锁、ctest -j1、QT_QPA_PLATFORM=offscreen。墙钟性能见 PERF_BASELINE.md（仅报告，不设硬门槛）。

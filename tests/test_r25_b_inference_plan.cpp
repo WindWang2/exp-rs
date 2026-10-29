@@ -366,27 +366,35 @@ TEST_CASE( "plan mirrors the engine gates R1 closed: dtype, roles, channels, "
 
   SECTION( "multi-input temporal accounting feeds the batch budget" )
   {
+    // Legal multi-input shape (the run seam's own contract): one feed per
+    // declared input; the temporal input carries the DECLARED frame axis.
     ModelInfo model = planModel();
     model.inputs.clear();
     sicnu::operators::ModelInputContract temporal;
     temporal.name = "frames";
     temporal.temporalLength = 3;
-    model.inputs = { temporal };
+    sicnu::operators::ModelInputContract context;
+    context.name = "context";
+    model.inputs = { temporal, context };
 
     ModelExecutionRequest request;
     request.modelReference = "r25-b-plan";
     request.outputPath = output;
-    sicnu::operators::runtime::NamedRasterFeed feed;
-    feed.name = "frames";
-    feed.paths = { input.toStdString() };
-    request.namedInputs = { feed };
+    sicnu::operators::runtime::NamedRasterFeed frames;
+    frames.name = "frames";
+    frames.paths = { input.toStdString() };
+    sicnu::operators::runtime::NamedRasterFeed contextFeed;
+    contextFeed.name = "context";
+    contextFeed.paths = { input.toStdString() };
+    request.namedInputs = { frames, contextFeed };
 
     const InferencePlan plan =
       sicnu::operators::runtime::planModelInference( request, model );
     REQUIRE( plan.verdict == InferencePlan::Verdict::Ready );
-    REQUIRE( plan.inputs.size() == 1 );
+    REQUIRE( plan.inputs.size() == 2 );
     // 3 raster bands × DECLARED 3 frames = 9 channels in the budget — the
-    // engine's admission accounting, not the provided frame count (1).
+    // engine's admission accounting (largest feed), not the provided frame
+    // count (1) and not the static feed's 3.
     CHECK( plan.inputs.front().frames == 3 );
     CHECK( plan.fedChannels == 9 );
     CHECK( plan.toJson()["tiling"]["fed_channels"].asInt() == 9 );
