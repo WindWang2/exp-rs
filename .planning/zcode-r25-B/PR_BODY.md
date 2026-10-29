@@ -1,7 +1,7 @@
 # r25-B: 地理空间数据资产、EO 模型推理与实验可复现工程深化 — 导入预检解释报告 / 可解释推理计划与质量摘要 / 复现差异原因报告（RED→GREEN×2，双轮独立评审）
 
 **BASE** `2610cb4741e69a89124921e44c03e340e2522ee2`（= origin/master @ 2026-10-27）
-**HEAD** `<见本 PR commits>`
+**HEAD** `d777573994`（11 commits: 侦察账本 → F1-F3 → E2E/文档 → RED/GREEN 证据 → R1 收口 → R2 收口 → 评审/perf 文档）
 **分支** `agent/r25-B-data-model-runtime-20261028T140313Z`
 **平台** Linux 本机实跑（GCC 16.2.1 / Ninja -j2 / Release / Qt 6.12 / GDAL 3.13.3，共享宿主 flock 单锁）。Windows/macOS：NOT_EXECUTED。
 
@@ -46,8 +46,8 @@ F1 预检开销 vs registerSource、F2 plan 开销（只读解析级）、F3 v2 
 
 ## 双轮独立评审
 
-- R1（fresh 子代理，全量 diff）：结论与 path:line 清单在 REVIEW_R1.md。
-- R2（另一 fresh 上下文，复审 R1 修复+合并风险）：REVIEW_R2.md。
+- **R1**（fresh 子代理，全量 diff，REQUEST_CHANGES：1×P0+1×P1+5×P2+6×P3）：全部 P0/P1/P2 + 主要 P3 关闭（OpenCV 门、多输入通道核算按引擎 admission 语义、EO lane 保真+GeoError 全量、引擎门覆盖、generic 歧义修正、目录产品 verdict、qint64、scene/ensemble lane 诚实化）。处置表 `REVIEW_R1.md`。
+- **R2**（另一 fresh 上下文，复审 R1 修复+并行合并风险+跨平台，APPROVE_WITH_FIXES：R1 修复自身引入 1×P2 + 6×P2 覆盖缺口 + P3 族）：全部关闭（per-feed dtype/roles/preprocess 按绑定 contract、temporal 帧元数+missing_timestep+dynamic-T、检测/scene/单输入 lane 契约门、窗口 admission 预算、ensemble tile 乘算、feed 绑定重名拒绝、测试钉）。处置表 `REVIEW_R2.md`（含 3 项测试侧修正的如实记录）。
 
 ## 跨轨说明
 
@@ -60,4 +60,16 @@ F1 预检开销 vs registerSource、F2 plan 开销（只读解析级）、F3 v2 
 - Windows/macOS：NOT_EXECUTED（评审确认跨平台面：QFileInfo/QLocale 未用，路径处理 QString/GDAL 标准 API）。
 - 线上 CI：按任务书不等待。
 
-不 auto-merge；worktree 与分支保留供 review/恢复。
+## Push/PR 状态
+
+**BLOCKED（外部）**：push 时 GitHub 持续不可达（`TLS connect error: unexpected eof while reading`，api.github.com EOF；连续探测 >15 分钟、多协议 HTTPS 均 000；非本轨代码问题）。本地全部完成：分支 `agent/r25-B-data-model-runtime-20261028T140313Z` 11 commits ahead of origin/master（0 behind），worktree `/home/kevin/projects/rs-studio/exp-rs-r25-B-20261028T140313Z` 保留；网络恢复后一条命令即可完成：
+
+```bash
+git push -u origin agent/r25-B-data-model-runtime-20261028T140313Z
+gh pr create --repo WindWang2/exp-rs --base master \
+  --head agent/r25-B-data-model-runtime-20261028T140313Z \
+  --title "r25-B: 地理空间数据资产、EO 模型推理与实验可复现工程深化" \
+  --body-file .planning/zcode-r25-B/PR_BODY.md
+```
+
+不 auto-merge；不等线上 CI。
