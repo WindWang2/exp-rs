@@ -358,3 +358,89 @@ TEST_CASE( "an empty-but-uncancelled class is not typed cancelled (R1 finding 8)
     // typing is only for runs whose flag actually flipped.
     REQUIRE( !report.cancelledEarly );
 }
+
+TEST_CASE( "the seam's authority: the caller's list is the discovery (R2 finding F)",
+           "[r25_e][batch][discovery][seam]" )
+{
+    // The single-walk claim is only observable if the orchestrator ACTS on
+    // the seam: hand it a list that internal discovery would not produce
+    // (a one-student subset of a two-student class). If the orchestrator
+    // ignored the seam it would re-discover and grade BOTH students — so
+    // this pins the property no equivalence test can (both walks over the
+    // same, unchanged directory are observationally identical).
+    ClassTree tree{ { QStringLiteral( "alice" ), QStringLiteral( "bob" ) } };
+    QVector<DiscoverySkip> skips;
+    const auto walked = discoverSubmissions( tree.submissions.path(), &skips );
+    REQUIRE( walked.size() == 2 );
+
+    // The caller grades a SUBSET — e.g. it previewed before the second
+    // student submitted. Its list is authoritative for this run.
+    QVector<SubmissionItem> subset;
+    for ( const auto &item : walked )
+        if ( item.studentId == QLatin1String( "alice" ) )
+            subset.append( item );
+    REQUIRE( subset.size() == 1 );
+
+    BatchAssessmentConfig cfg = baseConfig( tree.submissions.path(), QString() );
+    cfg.preDiscovered = subset;
+    cfg.preDiscoveredSkips = skips;
+    const auto report =
+      runBatchAssessment( cfg, []( const SubmissionItem &item ) { return passingRow( item ); } );
+
+    REQUIRE( report.total == 1 );          // exactly the caller's list…
+    REQUIRE( report.rows.size() == 1 );
+    REQUIRE( report.rows.front().studentId == QLatin1String( "alice" ) );
+    // …and the caller's skip accounting is what gets published, not a
+    // re-derived one.
+    REQUIRE( report.skippedFiles.size() == skips.size() );
+}
+
+TEST_CASE( "zero durable rows never rewrite an existing checkpoint (R2 finding 1)",
+           "[r25_e][batch][discovery][checkpoint]" )
+{
+    // Two doors into the same loss: a run whose every row is cancelled
+    // (items non-empty, zero filled slots) and a run over a momentarily
+    // absent submissions root (internal discovery empty, no flag). Both
+    // must leave the prior checkpoint intact — the next run adopts it.
+    ClassTree tree{ { QStringLiteral( "alice" ), QStringLiteral( "bob" ) } };
+    const auto grader = []( const SubmissionItem &item ) { return passingRow( item ); };
+
+    // Run A completes and durably checkpoints both rows.
+    {
+        const auto first =
+          runBatchAssessment( baseConfig( tree.submissions.path(), tree.checkpointPath() ), grader );
+        REQUIRE( first.graded == 2 );
+    }
+
+    SECTION( "every row cancelled mid-flight leaves the checkpoint intact" )
+    {
+        std::atomic<bool> cancel{ false };
+        BatchAssessmentConfig cfg = baseConfig( tree.submissions.path(), tree.checkpointPath() );
+        const auto cancelled = runBatchAssessment(
+          cfg,
+          [&cancel]( const SubmissionItem &item ) {
+              cancel.store( true, std::memory_order_relaxed ); // flips before row 1 returns
+              return passingRow( item );
+          },
+          &cancel );
+        REQUIRE( cancelled.total == 2 );
+        REQUIRE( cancelled.cancelled == 2 );
+        REQUIRE( cancelled.graded == 0 );
+    }
+
+    SECTION( "absent submissions root leaves the checkpoint intact" )
+    {
+        QTemporaryDir gone;
+        REQUIRE( gone.remove() );
+        BatchAssessmentConfig cfg = baseConfig( gone.path(), tree.checkpointPath() );
+        const auto empty = runBatchAssessment( cfg, grader );
+        REQUIRE( empty.total == 0 );
+        REQUIRE( !empty.cancelledEarly );
+    }
+
+    // Either way the next run adopts both rows: the checkpoint still holds
+    // run A's evidence.
+    const auto resumed =
+      runBatchAssessment( baseConfig( tree.submissions.path(), tree.checkpointPath() ), grader );
+    REQUIRE( resumed.resumed == 2 );
+}

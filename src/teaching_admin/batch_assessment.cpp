@@ -915,13 +915,19 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
 
     // Final durable checkpoint: adopted + newly completed rows, so an
     // interrupted RESTART of the restart still resumes instead of redoing.
-    // R1 finding 2 (r25-E): a run cancelled DURING ITS OWN internal
-    // discovery discovers nothing (typed empty) — rewriting the checkpoint
-    // from zero slots would publish {total:0, rows:[]} and destroy the
-    // prior run's durable rows, breaking the durability contract above.
-    // A cancelled-nothing-graded run leaves the previous checkpoint intact.
-    const bool cancelledDuringDiscovery = items.isEmpty() && report.cancelledEarly;
-    if ( !cfg.checkpointPath.isEmpty() && !cancelledDuringDiscovery )
+    // R1 finding 2 + R2 finding 1: the guard keys on "this run produced
+    // NOTHING durable", not on the reason. A run that discovered nothing
+    // (cancelled during its own walk, a momentarily-absent submissions
+    // root, a maxSubmissions=0 dry run) or whose every row was cancelled
+    // would rewrite the checkpoint as {rows: []} and destroy rows a LATER
+    // run could still adopt — including the class's graded evidence from a
+    // prior run. Writing nothing durable is the honest action: the previous
+    // checkpoint (or its absence) stays exactly as it was.
+    int durableRows = 0;
+    for ( int i = 0; i < processLimit; ++i )
+        if ( filled[static_cast<std::size_t>( i )] )
+            ++durableRows;
+    if ( !cfg.checkpointPath.isEmpty() && durableRows > 0 )
         checkpointAll();
 
     return report;
@@ -1174,16 +1180,51 @@ bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report
     // surfaces the summary exists to surface (skipped files, invalidated
     // checkpoints, resumed rows). Absent members keep their zero defaults —
     // an old report without them reads honestly as "not recorded".
+    // R2 findings 2-3: the members are validated the way `total` is — a
+    // negative or non-integer count degrades to 0 with a warning (never a
+    // negative row count in the teacher's integrity lens), and a malformed
+    // skipped_files entry is a typed refusal, exactly like a malformed row:
+    // the refusal accounting is what run_integrity surfaces, so silently
+    // dropping an entry would understate it (#1466).
+    const auto readCount = [ & ]( const QString &key ) {
+        const QJsonValue v = o.value( key );
+        if ( v.isUndefined() )
+            return 0;
+        if ( !v.isDouble() || v.toDouble() < 0.0 )
+        {
+            if ( warning )
+                *warning = QStringLiteral( "report declares a non-integer or negative '%1'; "
+                                           "using 0" ).arg( key );
+            return 0;
+        }
+        const int n = v.toInt();
+        if ( static_cast<double>( n ) != v.toDouble() )
+        {
+            if ( warning )
+                *warning = QStringLiteral( "report declares a non-integer '%1'; using 0" ).arg( key );
+            return 0;
+        }
+        return n;
+    };
     report.cancelledEarly = o.value( QStringLiteral( "cancelled_early" ) ).toBool( false );
-    report.truncated = o.value( QStringLiteral( "truncated" ) ).toInt( 0 );
-    report.resumed = o.value( QStringLiteral( "resumed" ) ).toInt( 0 );
+    report.truncated = readCount( QStringLiteral( "truncated" ) );
+    report.resumed = readCount( QStringLiteral( "resumed" ) );
     report.checkpointInvalidated =
       o.value( QStringLiteral( "checkpoint_invalidated" ) ).toBool( false );
-    const QJsonArray skips = o.value( QStringLiteral( "skipped_files" ) ).toArray();
+    const QJsonValue skipsValue = o.value( QStringLiteral( "skipped_files" ) );
+    if ( !skipsValue.isUndefined() && !skipsValue.isArray() )
+    {
+        error = QStringLiteral( "%1 has a non-array skipped_files member" ).arg( path );
+        return false;
+    }
+    const QJsonArray skips = skipsValue.toArray();
     for ( const QJsonValue &sv : skips )
     {
         if ( !sv.isObject() )
-            continue; // refusal bookkeeping is additive; a bad entry is skipped, not fatal
+        {
+            error = QStringLiteral( "%1 has a non-object entry in skipped_files[]" ).arg( path );
+            return false;
+        }
         const QJsonObject so = sv.toObject();
         DiscoverySkip skip;
         skip.studentId = so.value( QStringLiteral( "student_id" ) ).toString();

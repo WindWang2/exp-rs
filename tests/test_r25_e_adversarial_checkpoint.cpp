@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "teaching_admin/batch_assessment.h"
+#include "teaching_admin/class_summary.h"
 
 #include <QDir>
 #include <QFile>
@@ -218,4 +219,66 @@ TEST_CASE( "A6: truncated garbage checkpoint degrades to a fresh start",
     REQUIRE( report.total == 1 );
     REQUIRE( report.resumed == 0 );
     REQUIRE( report.graded == 1 );
+}
+
+TEST_CASE( "A7: hostile report-level accounting members fail safe, typed (R2 finding 2-3)",
+           "[r25_e][adversarial][report]" )
+{
+    QTemporaryDir dir;
+    const QString path = dir.path() + QStringLiteral( "/grades.json" );
+
+    SECTION( "negative / non-integer counts degrade to 0 with a warning" )
+    {
+        const QByteArray doc =
+          R"({"schema":"sicnu.teaching.batch_orchestration/1","lab_id":"lab","total":1,)"
+          R"("graded":1,"resumed":-7,"truncated":1.5,"cancelled_early":false,)"
+          R"("checkpoint_invalidated":false,"skipped":0,"skipped_files":[],)"
+          R"("rows":[{"student_id":"alice","lab_id":"lab","status":"pass","score":90.0,)"
+          R"("verdict":"pass","artifact_path":"/a.tif"}]})";
+        writeFile( path, doc );
+
+        BatchAssessmentReport report;
+        QString error, warning;
+        REQUIRE( loadBatchReportFromFile( path, report, error, &warning ) );
+        REQUIRE( report.resumed == 0 );
+        REQUIRE( report.truncated == 0 );
+        REQUIRE( !warning.isEmpty() );
+        // The teacher's integrity lens therefore never shows an impossible
+        // negative count.
+        const QJsonObject summary = buildClassSummary( report );
+        REQUIRE( summary.value( QStringLiteral( "run_integrity" ) ).toObject()
+                   .value( QStringLiteral( "resumed_rows" ) ).toInt() == 0 );
+    }
+
+    SECTION( "a malformed skipped_files entry is a typed refusal, not a silent drop" )
+    {
+        const QByteArray doc =
+          R"({"schema":"sicnu.teaching.batch_orchestration/1","lab_id":"lab","total":1,)"
+          R"("graded":1,"resumed":0,"truncated":0,"cancelled_early":false,)"
+          R"("checkpoint_invalidated":false,"skipped":1,"skipped_files":["not-an-object"],)"
+          R"("rows":[{"student_id":"alice","lab_id":"lab","status":"pass","score":90.0,)"
+          R"("verdict":"pass","artifact_path":"/a.tif"}]})";
+        writeFile( path, doc );
+
+        BatchAssessmentReport report;
+        QString error, warning;
+        // Same stance as a malformed row: refuse the document rather than
+        // understate the #1466 refusal accounting.
+        REQUIRE( !loadBatchReportFromFile( path, report, error, &warning ) );
+        REQUIRE( !error.isEmpty() );
+    }
+
+    SECTION( "a non-array skipped_files member is a typed refusal" )
+    {
+        const QByteArray doc =
+          R"({"schema":"sicnu.teaching.batch_orchestration/1","lab_id":"lab","total":1,)"
+          R"("graded":1,"skipped_files":7,)"
+          R"("rows":[{"student_id":"alice","lab_id":"lab","status":"pass","score":90.0,)"
+          R"("verdict":"pass","artifact_path":"/a.tif"}]})";
+        writeFile( path, doc );
+
+        BatchAssessmentReport report;
+        QString error, warning;
+        REQUIRE( !loadBatchReportFromFile( path, report, error, &warning ) );
+    }
 }

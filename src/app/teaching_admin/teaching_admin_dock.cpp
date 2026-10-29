@@ -600,7 +600,10 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QSt
     m_batchOutEdit->setEnabled( true );
     const QString state =
       reportJson.value( QStringLiteral( "cancelled_early" ) ).toBool()
-        ? tr( "cancelled (durable partial results published)" )
+        ? ( reportJson.value( QStringLiteral( "rows" ) ).toArray().isEmpty()
+              ? tr( "cancelled (nothing graded — previous outputs and checkpoint "
+                    "left untouched)" )
+              : tr( "cancelled (durable partial results published)" ) )
         : tr( "finished" );
     // Skipped refusals ride the summary (#1466): graded + skipped is the
     // full accounting of what discovery saw.
