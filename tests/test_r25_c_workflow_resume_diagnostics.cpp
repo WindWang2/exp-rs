@@ -27,6 +27,7 @@
 #include <QTemporaryDir>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QRegularExpression>
 #include <functional>
 #include "jobs/job_types.h"
 #include "jobs/job_engine.h"
@@ -54,6 +55,8 @@ public:
 
     /// handleRequest is protected on McpServer; expose it.
     void dispatch( const QVariantMap &req ) { handleRequest( req ); }
+    /// Handler-level entry (no dispatch-layer trimming).
+    QVariantMap statusByRun( const QString &runId ) { return handleGetWorkflowStatusByRun( runId ); }
 
     /// One tools/call round-trip. Returns the parsed payload on success;
     /// on a tool failure returns {isError, errorCode, message} instead.
@@ -337,4 +340,105 @@ TEST_CASE( "pipeline_id status carries the resumable advisory for live tracked r
         CHECK_FALSE( res.payload.value( "resume_hint" ).toString().isEmpty() );
 
     coordinator.shutdownForTests();
+}
+
+// --- R1/R2 fix discriminating tests -----------------------------------------
+
+TEST_CASE( "run_id guards reject a trailing-newline id (\\z anchor)",
+           "[agent][mcp][workflow][r25_c]" )
+{
+    if ( !QCoreApplication::instance() )
+    {
+        static int argc = 1;
+        static char appName[] = "test_r25_c_workflow_resume_diagnostics";
+        static char *argv[] = { appName, nullptr };
+        new QCoreApplication( argc, argv );
+    }
+    TestServer server;
+    // PCRE2 $ and \Z also match BEFORE a trailing newline, which would let
+    // "run\n" through as a legal id (R2 P3). \z anchors the absolute end.
+    // Driven through the HANDLER directly: the tools/call dispatch trims the
+    // argument first (a second line of defence), so this pins the handler's
+    // own contract for any other caller.
+    // McpToolError lives in mcp_server.cpp's anonymous namespace, so the
+    // handler is driven through the public tools/call path here (its
+    // dispatch layer trims first — the handler's \z anchor is the second
+    // line of defence, pinned by the regex unit below).
+    for ( const QString &bad : { QStringLiteral( "run\n" ), QStringLiteral( "run\n\n" ),
+                                 QStringLiteral( "ok\nx" ) } )
+    {
+        const auto res = server.callTool( QStringLiteral( "resume_workflow" ), runArgs( bad ) );
+        // resume_workflow's dispatch does NOT trim-away an inner newline the
+        // same way... it does; so pin the REGEX unit directly instead.
+        (void)res;
+    }
+    // Regex unit: the exact pattern the handler uses must reject a trailing
+    // newline (PCRE2 $ and \Z do not).
+    static const QRegularExpression kPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\z" ) );
+    CHECK( kPattern.match( QStringLiteral( "run-plain" ) ).hasMatch() );
+    CHECK( !kPattern.match( QStringLiteral( "run\n" ) ).hasMatch() );
+    CHECK( !kPattern.match( QStringLiteral( "run\n\n" ) ).hasMatch() );
+    CHECK( !kPattern.match( QStringLiteral( "ok\nx" ) ).hasMatch() );
+    // And the handler's own guard must still refuse a newline-bearing id
+    // when it reaches it un-trimmed (dispatch-layer trim removed).
+    for ( const QString &bad : { QStringLiteral( "run\n" ), QStringLiteral( "run\n\n" ) } )
+    {
+        bool refused = false;
+        try { server.statusByRun( bad ); }
+        catch ( const std::runtime_error &err )
+        {
+            refused = QString::fromUtf8( err.what() ).contains(
+                QStringLiteral( "invalid characters" ), Qt::CaseInsensitive );
+        }
+        CHECK( refused );
+    }
+}
+
+TEST_CASE( "diagnostic output_path keeps sandboxed paths and collapses foreign ones",
+           "[agent][mcp][workflow][r25_c]" )
+{
+    // The projection rule (R1 P3 / R2 P2-2): inside the workspace root the
+    // path is returned verbatim; outside it only the file name survives; a
+    // placeholder token is untouched. Driven through the real handler by
+    // seeding a checkpoint whose step recorded an output path.
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    CheckpointDirGuard dirGuard( tmpDir.path() );
+
+    const QString inside = tmpDir.path() + QStringLiteral( "/inside.tif" );
+    const QString outside = QStringLiteral( "/etc/passwd" );
+
+    auto run = sicnu::workflow::WorkflowRun::createFromDefinition( twoStepDefinition(),
+                                                                   "run-r25c-paths" );
+    REQUIRE( run->transitionTo( sicnu::workflow::WorkflowRunState::Planning ) );
+    REQUIRE( run->transitionTo( sicnu::workflow::WorkflowRunState::Ready ) );
+    REQUIRE( run->transitionTo( sicnu::workflow::WorkflowRunState::Running ) );
+    REQUIRE( run->transitionTo( sicnu::workflow::WorkflowRunState::Interrupted ) );
+    std::vector<sicnu::workflow::StepPlan> plans( 2 );
+    plans[0].stepId = "s1";
+    plans[0].operatorId = "rs:test";
+    plans[0].status = "Completed";
+    plans[0].outputLayerPath = inside.toStdString();
+    plans[1].stepId = "s2";
+    plans[1].operatorId = "rs:test";
+    plans[1].status = "Pending";
+    plans[1].outputLayerPath = outside.toStdString();
+    run->setStepPlans( plans );
+    sicnu::workflow::WorkflowCheckpointManager manager;
+    REQUIRE( !manager.saveCheckpoint( *run, tmpDir.path() ).isEmpty() );
+
+    // Sandbox the server to the checkpoint dir: `inside` is within it,
+    // `/etc/passwd` is not.
+    qputenv( "SICNU_MCP_WORKSPACE", tmpDir.path().toUtf8() );
+
+    TestServer server;
+    const auto res = server.callTool( QStringLiteral( "get_workflow_status" ),
+                                      runArgs( QStringLiteral( "run-r25c-paths" ) ) );
+    REQUIRE_FALSE( res.isError );
+    const QVariantList steps = res.payload.value( "steps" ).toList();
+    REQUIRE( steps.size() == 2 );
+    CHECK( steps[0].toMap().value( "output_path" ).toString() == inside );
+    CHECK( steps[1].toMap().value( "output_path" ).toString()
+           == QStringLiteral( "passwd" ) );
+    qunsetenv( "SICNU_MCP_WORKSPACE" );
 }

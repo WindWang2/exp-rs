@@ -1655,6 +1655,7 @@ static QVariantMap providerEntryMap( const QgsProcessingAlgorithm *alg )
     QVariantMap providerGuarantees;
     providerGuarantees[QStringLiteral("deterministic")] = QVariant();
     providerGuarantees[QStringLiteral("idempotent")] = QVariant();
+    providerGuarantees[QStringLiteral("supportsCancellation")] = QVariant();
     algMap[QStringLiteral("guarantees")] = providerGuarantees;
 
     // Preserve the provider's native metadata map (purpose, help, ...)
@@ -3137,11 +3138,12 @@ static std::string diagnosticArtifactPath( const std::string &rawPath, const QSt
     QFileInfo info( path );
     if ( !info.isAbsolute() && !path.startsWith( QStringLiteral( "/" ), Qt::CaseInsensitive ) )
         return rawPath; // placeholder/token, not a filesystem path
+    // containment::canonicalPathWithin is the sandbox's own rule (it handles
+    // a "/" root, where a naive `root + "/"` becomes "//" and nothing
+    // matches — R2 P2-2).
     const QString canonical = info.canonicalFilePath();
     const QString resolved = canonical.isEmpty() ? path : canonical;
-    const QString root = QDir( wsRoot ).canonicalPath();
-    if ( !root.isEmpty()
-         && ( resolved == root || resolved.startsWith( root + QLatin1Char( '/' ) ) ) )
+    if ( sicnu::agent::tool_catalog::containment::canonicalPathWithin( resolved, wsRoot ) )
         return rawPath;
     // Outside the sandbox: keep only the leaf name — enough to identify the
     // artifact in conversation, not enough to map the host filesystem.
@@ -3153,9 +3155,10 @@ QVariantMap McpServer::handleGetWorkflowStatusByRun(const QString &runId)
     // Same filesystem-reach guard as resume_workflow: the run id reaches
     // checkpointPathFor's path interpolation, so "foo/../../bar" must not
     // probe outside the checkpoint directory.
-    // \Z (not $): QRegularExpression's $ also matches before a trailing
-    // newline, which would admit "run\n" as an id. \Z anchors end-of-string.
-    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\Z" ) );
+    // \z (PCRE2 absolute end): $ AND \Z both also match BEFORE a trailing
+    // newline, which would admit "run\n" as an id (R2 P3, proven with
+    // pcre2test). \z anchors the true end-of-subject only.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\z" ) );
     if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
     {
         throw McpToolError(
@@ -3279,9 +3282,10 @@ QVariantMap McpServer::handleResumeWorkflow(const QString &runId)
     // The run id is interpolated into the checkpoint file path, so restrict
     // it to run-id characters — a caller-supplied "foo/../../bar" must not
     // escape the checkpoint directory and load an arbitrary JSON document.
-    // \Z (not $): QRegularExpression's $ also matches before a trailing
-    // newline, which would admit "run\n" as an id. \Z anchors end-of-string.
-    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\Z" ) );
+    // \z (PCRE2 absolute end): $ AND \Z both also match BEFORE a trailing
+    // newline, which would admit "run\n" as an id (R2 P3, proven with
+    // pcre2test). \z anchors the true end-of-subject only.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\z" ) );
     if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
     {
         throw McpToolError(

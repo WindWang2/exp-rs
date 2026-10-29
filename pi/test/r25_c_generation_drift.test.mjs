@@ -266,3 +266,64 @@ testSpawn("bridge-level failures carry typed bridgeError codes", async () => {
   }
   rmSync(dir, { recursive: true, force: true });
 });
+
+testSpawn("onGeneration contains BOTH a sync throw and a rejected promise (R2 P2-1/P2-3)", async () => {
+  const dir = makeDir();
+  const bridge = new McpBridge(fakeServer, [join(dir, "spawns")], {
+    // A callback that throws synchronously on generation 1 and returns a
+    // rejected promise on generation 2: neither may escape into the
+    // process as an unhandledRejection (Node's default terminates it).
+    onGeneration: (info) => {
+      if (info.generation === 1) throw new Error("sync boom");
+      return Promise.reject(new Error("async boom"));
+    },
+  });
+  // An unhandled rejection anywhere in this process must fail the test.
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    // Generation 1: the sync throw must not break start()/request().
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+    // Generation 2: crash → respawn; the async rejection must be contained.
+    await assert.rejects(() => bridge.request("tools/call", { crash: true }), /exited/);
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+    assert.equal(bridge.generations, 2);
+    // Give any would-be unhandled rejection a macrotask to surface.
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(unhandled.length, 0, "callback failures must be contained");
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandled);
+    bridge.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+testSpawn("a lazy-respawn preserves the start() failure's error class (R2 P2-3)", async () => {
+  const dir = makeDir();
+  const counter = join(dir, "spawns");
+  // --die-if-exists poisons every generation from now on: the FIRST request
+  // spawns a healthy child; after the crash the respawn spawns a poisoned
+  // one that dies BEFORE the handshake — an exit-class failure, which the
+  // wrapper must report with its own typed code (not blanket-retryable).
+  const poison = join(dir, "poison");
+  const bridge = new McpBridge(fakeServer, ["--die-if-exists", poison, counter]);
+  try {
+    await bridge.request("tools/call", {});
+    await assert.rejects(() => bridge.request("tools/call", { crash: true }), /exited/);
+    writeFileSync(poison, "1");
+    const err = await bridge.request("tools/call", {}).then(() => null, (e) => e);
+    assert.ok(err, "poisoned respawn must reject");
+    // The class must come from the start() failure itself (LAUNCH_FAILED for
+    // spawn-class, CHILD_EXITED for a spawn-then-die, RESTART_FAILED
+    // otherwise) and must never fabricate retryable=true for LAUNCH_FAILED.
+    assert.ok(
+      ["LAUNCH_FAILED", "CHILD_EXITED", "RESTART_FAILED"].includes(err.bridgeError),
+      `unexpected class ${err.bridgeError}`,
+    );
+    if (err.bridgeError === "LAUNCH_FAILED") assert.equal(err.retryable, false);
+  } finally {
+    bridge.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

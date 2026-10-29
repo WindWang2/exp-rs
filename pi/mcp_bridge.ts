@@ -149,8 +149,12 @@ export function installExitHook(): void {
   // that no longer exists). SIGKILL here is safe: the bridge is already
   // unreachable, so there is nothing graceful left to flush.
   process.on("exit", () => {
-    for (const bridge of activeBridges) bridge.stop();
+    // SIGKILL FIRST: stop() removes the bridge from activeBridges and nulls
+    // its child reference, so a second loop would iterate zero bridges —
+    // the killNow() escalation was dead code and a SIGTERM-ignoring child
+    // still leaked (R2 P2-1).
     for (const bridge of activeBridges) bridge.killNow();
+    for (const bridge of activeBridges) bridge.stop();
   });
 }
 
