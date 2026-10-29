@@ -19,6 +19,18 @@ flock $HOME/.cache/exp-rs-build.lock cmake --build build-r25-A --parallel 2 --ta
 | test_r25_a_optical_chain_e2e | 44 / 1 passed | 同 |
 合计 **429 assertions ×2 全绿**（RED 证据见 ORACLES.md 的判别说明：master 行为在注释中标出，如 daylightSamples=9 vs 13、float32 累积 16785408 vs 精确 16785409、SID=0.0 vs inf、导数 1000×、incidenceDeg=30 vs 40 等）
 
+## R2 闭环后重验（HEAD = 27a9eab316..ade8f377e1）
+- 7 个测试二进制 schema 变更后全部重建并重跑：429 assertions 全绿（同上表）
+- **test_surface_snapshot：All tests passed (17868 assertions, 7 cases)** —— R2-2 重新生成快照后门禁绿
+- surface_diff_snapshot.json 由 surface_snapshot_gen 重新生成（16+/6-，含 cloud_confidence）
+
+## master-RED 内核实测（独立编译，git show origin/master）
+```
+MASTER-SID disjoint = 0.000000            (HEAD: +inf)
+MASTER-SID classify label=0 div=0.000000  (HEAD: label=1, finite div)
+MASTER-ACC corner = 16785408 exact = 16785409 delta = 1  (HEAD: exact)
+```
+
 ## 邻域回归（既有测试，HEAD 无新增失败）
 | 测试 | 结果 |
 |---|---|
