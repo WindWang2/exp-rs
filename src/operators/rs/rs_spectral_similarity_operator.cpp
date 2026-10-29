@@ -45,7 +45,13 @@ Json::Value RsSpectralSimilarityOperator::schema() const {
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Label raster path");
     outputs["refs"] = makeIntegerParam("refs", "Number of reference spectra", 0);
-    outputs["meanScore"] = makeNumberParam("meanScore", "Mean best score over labelled pixels", 0.0);
+    outputs["meanScore"] = makeNumberParam(
+        "meanScore",
+        "Mean best score over FINITE labelled-pixel scores (scores that "
+        "overflowed to infinity are excluded and counted in infiniteScores; "
+        "JSON null when every labelled score was infinite)", 0.0);
+    outputs["infiniteScores"] = makeIntegerParam(
+        "infiniteScores", "Labelled pixels whose score overflowed to infinity", 0);
     outputs["form"] = makeStringParam("form", "Hybrid form applied");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
