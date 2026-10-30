@@ -39,13 +39,14 @@
 #include <string>
 #include <vector>
 
+#include "harness_verification.h"
+
 namespace sicnu::workflow {
 struct StepPlan;
 }
 
 namespace sicnu::agent::harness {
 
-struct ArtifactVerification;
 struct VerificationExpectations;
 
 namespace evidence {
@@ -104,6 +105,31 @@ SidecarResult writeVerificationEvidence( const std::string &outputPath,
 /// evidence or re-flip verdicts).
 std::optional<ArtifactVerification> readVerificationEvidence( const std::string &outputPath,
                                                               const std::string &runId );
+
+/// R26: tri-state evidence inspection. `Absent` = no sidecar (first
+/// evaluation); `Reusable` = intact record for THIS run (authoritative
+/// reuse); `ForeignRun` = intact record for another run (the artifact was
+/// re-executed — fresh evaluation is legitimate); `Corrupt` = a sidecar
+/// exists for this run but is unreadable/malformed. `Corrupt` must fail
+/// closed: silently recomputing would let a poll re-flip a verdict and
+/// would erase the audit trail of the damaged evidence.
+enum class EvidenceState
+{
+  Absent,
+  Reusable,
+  ForeignRun,
+  Corrupt
+};
+
+struct EvidenceInspection
+{
+  EvidenceState state = EvidenceState::Absent;
+  ArtifactVerification verification; ///< valid when state == Reusable
+  std::string reason;                ///< Corrupt diagnostics for the run doc
+};
+
+EvidenceInspection inspectVerificationEvidence( const std::string &outputPath,
+                                                 const std::string &runId );
 
 } // namespace evidence
 

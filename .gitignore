@@ -750,3 +750,7 @@ r6_dev.cmd
 !.planning/zcode-r24-A-science/*.md
 !.planning/zcode-r24-A-science/*.cmd
 !.planning/zcode-r24-A-science/*.py
+# R26-harness track (Pi/MCP harness closed-loop) planning artifacts (markdown only).
+!.planning/zcode-r26-harness/
+.planning/zcode-r26-harness/*
+!.planning/zcode-r26-harness/*.md

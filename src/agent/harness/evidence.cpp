@@ -122,19 +122,58 @@ SidecarResult writeUncertaintySidecar( const std::string &outputPath,
   return atomicWrite( outputPath + ".uncertainty.json", doc );
 }
 
+/// R26: classifies an existing provenance sidecar for the replace decision.
+/// Only a parseable harness-written envelope (kind=harness_provenance)
+/// naming a DIFFERENT run is stale bookkeeping the harness owns and may
+/// replace; anything else (engine DerivationRecord — no envelope — or an
+/// unparseable file) keeps the never-overwrite contract.
+bool provenanceIsStaleHarnessEnvelope( const std::string &sidecarPath,
+                                       const Json::Value &runIdentity )
+{
+  QFile file( QString::fromStdString( sidecarPath ) );
+  if ( !file.open( QIODevice::ReadOnly ) )
+    return false;
+  const QByteArray raw = file.readAll();
+  Json::Value doc;
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+  if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &doc, &errors ) )
+    return false; // unknown owner — the engine's lane, never overwrite
+  if ( doc.get( "kind", "" ).asString() != "harness_provenance" )
+    return false; // engine DerivationRecord shape: engine provenance wins
+  // runIdentity carries run_id at its top level (see runIdentityFor); the
+  // sidecar nests that same object under "run".
+  const std::string currentRun = runIdentity.get( "run_id", "" ).asString();
+  const std::string recordedRun = doc.get( "run", Json::Value() )
+                                    .get( "run_id", "" )
+                                    .asString();
+  if ( currentRun.empty() )
+    return false; // no run identity to attribute the replacement to
+  return recordedRun != currentRun;
+}
+
 SidecarResult writeProvenanceSidecarIfAbsent( const std::string &outputPath,
                                               const Json::Value &runIdentity )
 {
   const std::string sidecarPath = outputPath + ".provenance.json";
   if ( QFileInfo::exists( QString::fromStdString( sidecarPath ) ) )
-    return {}; // the engine already wrote derivation provenance — never overwrite
+  {
+    // The engine's own derivation provenance always wins. A harness
+    // envelope from a PREVIOUS run is stale bookkeeping for re-executed
+    // artifact bytes: keeping it would attribute the new output to the old
+    // run, so it is replaced atomically (R26).
+    if ( !provenanceIsStaleHarnessEnvelope( sidecarPath, runIdentity ) )
+      return {};
+  }
 
   Json::Value doc = makeEnvelope( "harness_provenance", outputPath );
   doc["source"] = "harness_run_identity";
   doc["run"] = runIdentity;
   // Narrow the exists-then-write window once more: an engine sidecar landing
   // between the first check and here must win.
-  if ( QFileInfo::exists( QString::fromStdString( sidecarPath ) ) )
+  if ( QFileInfo::exists( QString::fromStdString( sidecarPath ) ) &&
+       !provenanceIsStaleHarnessEnvelope( sidecarPath, runIdentity ) )
     return {};
   return atomicWrite( sidecarPath, doc );
 }
@@ -203,27 +242,50 @@ SidecarResult writeVerificationEvidence( const std::string &outputPath,
   return atomicWrite( outputPath + ".verification.json", doc );
 }
 
-std::optional<ArtifactVerification> readVerificationEvidence( const std::string &outputPath,
-                                                              const std::string &runId )
+EvidenceInspection inspectVerificationEvidence( const std::string &outputPath,
+                                                 const std::string &runId )
 {
+  EvidenceInspection inspection;
   QFile file( QString::fromStdString( outputPath + ".verification.json" ) );
   if ( !file.open( QIODevice::ReadOnly ) )
-    return std::nullopt;
+  {
+    inspection.state = EvidenceState::Absent;
+    return inspection;
+  }
   const QByteArray raw = file.readAll();
   Json::Value doc;
   Json::CharReaderBuilder builder;
   std::string errors;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &doc, &errors ) )
-    return std::nullopt;
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "unparseable verification sidecar: " + errors;
+    return inspection;
+  }
   if ( doc.get( "kind", "" ).asString() != "verification_evidence" )
-    return std::nullopt;
-  if ( doc.get( "run", Json::Value() ).get( "run_id", "" ).asString() != runId )
-    return std::nullopt; // a different run overwrote the artifact — re-evaluate
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "sidecar kind is not verification_evidence";
+    return inspection;
+  }
+  const std::string recordedRun =
+    doc.get( "run", Json::Value() ).get( "run_id", "" ).asString();
+  if ( recordedRun != runId )
+  {
+    // A different run overwrote the artifact — re-evaluation is the honest
+    // path for the new run.
+    inspection.state = EvidenceState::ForeignRun;
+    return inspection;
+  }
 
   const Json::Value &record = doc.get( "verification", Json::Value() );
   if ( !record.isObject() )
-    return std::nullopt;
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "verification record is not an object";
+    return inspection;
+  }
 
   ArtifactVerification artifact;
   artifact.path = outputPath;
@@ -236,12 +298,20 @@ std::optional<ArtifactVerification> readVerificationEvidence( const std::string 
   else if ( verdict == "FAIL" )
     artifact.verdict = Verdict::Fail;
   else
-    return std::nullopt;
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "unknown verdict string: " + verdict;
+    return inspection;
+  }
 
   for ( const Json::Value &entry : record.get( "checks", Json::Value( Json::arrayValue ) ) )
   {
     if ( !entry.isObject() || !entry.isMember( "check" ) || !entry.isMember( "passed" ) )
-      return std::nullopt;
+    {
+      inspection.state = EvidenceState::Corrupt;
+      inspection.reason = "malformed verification check entry";
+      return inspection;
+    }
     VerificationCheck check;
     check.check = entry.get( "check", "" ).asString();
     check.passed = entry.get( "passed", false ).asBool();
@@ -250,7 +320,18 @@ std::optional<ArtifactVerification> readVerificationEvidence( const std::string 
     check.details = entry.get( "details", Json::Value( Json::objectValue ) );
     artifact.checks.push_back( std::move( check ) );
   }
-  return artifact;
+  inspection.state = EvidenceState::Reusable;
+  inspection.verification = std::move( artifact );
+  return inspection;
+}
+
+std::optional<ArtifactVerification> readVerificationEvidence( const std::string &outputPath,
+                                                              const std::string &runId )
+{
+  EvidenceInspection inspection = inspectVerificationEvidence( outputPath, runId );
+  if ( inspection.state != EvidenceState::Reusable )
+    return std::nullopt;
+  return std::move( inspection.verification );
 }
 
 } // namespace sicnu::agent::harness::evidence
