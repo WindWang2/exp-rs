@@ -1,6 +1,10 @@
 # FINAL REPORT — R26-02 workbench
 
-状态：**已完成并通过本地验证**（PR 创建后贴 URL）。时间：2026-10-31。
+状态：**已完成并通过本地验证**。时间：2026-10-31。
+
+## PR
+- URL: https://github.com/WindWang2/exp-rs/pull/1730
+- base: master @ 2610cb4741 · head: agent/r26-workbench-20261030T151124Z @ a0edd38334 · 非 draft · 未自动合并
 
 ## 交付物
 - 1 个正式 PR（`gh pr create`，base master，head agent/r26-workbench-20261030T151124Z，非 draft，不自动合并）
