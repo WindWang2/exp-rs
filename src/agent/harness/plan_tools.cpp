@@ -1484,6 +1484,10 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
         Json::Value evidenceEntry( Json::objectValue );
         evidenceEntry["path"] = path;
         evidenceEntry["verification_sidecar"] = path + ".verification.json";
+        // Same key shape as the other branches so consumers that read
+        // .asString() on these keys never see an absent-key throw (R1 P3-2).
+        evidenceEntry["provenance_sidecar"] = Json::Value();
+        evidenceEntry["uncertainty_declared"] = false;
         evidenceEntry["verification_evidence_integrity"] = "corrupt";
         evidenceEntry["note"] =
           "persisted verification evidence for this run is unreadable; the "

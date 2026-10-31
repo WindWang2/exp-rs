@@ -54,7 +54,7 @@
         "when" : "\u53c2\u6570\u4e0d\u662f JSON \u5bf9\u8c61\uff0c\u6216\u7f3a\u5c11 inputA/inputB/model/output \u5fc5\u586b\u9879"
       }
     ],
-    "family" : "classification",
+    "family" : "change",
     "io" : 
     {
       "inputs" : 

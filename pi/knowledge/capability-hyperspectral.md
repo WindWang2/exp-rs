@@ -2,7 +2,7 @@
 
 # 高光谱分析（hyperspectral）
 
-共 12 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 13 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:ace
 
@@ -80,6 +80,29 @@
 - 教学概念：端元、纯像元、单形
 - 适用课程：高光谱遥感
 - 典型练习：提取研究区 4 个端元并与 USGS 光谱库比对。
+
+## rs:local_rx_anomaly
+
+局部（双窗口）RX 异常检测：以内窗口作保护带，计算各像元对局部背景的马氏距离，捕捉全局 RX 会平均掉的局部异常。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：covariance（string）、max（numeric）、mean（numeric）、output（raster）、scoredPixels（integer）、unscoredPixels（integer）
+- 参数：covariance（enum）、innerWindow（integer）、loading（numeric）、minSamples（integer）、outerWindow（integer）、output（string）、qualityOut（string）
+- 前置条件：需给定内窗口（guard window）与外窗口尺寸；有效背景样本不足的像元输出 NaN（计入 unscoredPixels），绝不硬评分。；波段数很高时建议 covariance=diagonal（全协方差在窗口样本量下不稳定）。
+- 局限：Pixels whose window has fewer valid background samples than the minimum stay NaN (reported in unscoredPixels), never faked.；Raster edges use clamped (shrunken) windows; no replicated border pixels enter the statistics.
+- 适用地物：港口、机场等背景相对均质的区域、背景与目标尺度差异明显的城区
+- 适用场景：局部异常目标定位、小目标检测预处理
+- 适用性备注：内窗口为保护带：目标位于内窗口、背景统计取自内外窗之间。
+- 失败模式：
+  - `DATASET_NOT_FOUND` — 输入多波段栅格文件不存在或无法用 GDAL 打开。处置：确认 input 路径存在且为可读栅格
+  - `INVALID_PARAMETER` — outerWindow 非奇数或小于 3、innerWindow 非奇数/小于 1/不小于 outerWindow、covariance 取值不在 full/diagonal 之内、loading 为负或非有限。处置：按约束设置窗口与协方差参数（outer 为 >=3 的奇数，inner 为小于 outer 的奇数）
+  - `NOT_SUPPORTED` — 输入栅格波段数少于 2（无法估计局部协方差），或 full 协方差模式下波段数超过 8192。处置：提供至少 2 个波段；高光谱场景改用 covariance=diagonal
+  - `EXECUTION_FAILED` — 瓦片 halo 读取、分数/质量栅格写出或栅格 finalize 失败，或 RX 内核计算返回错误。处置：检查输出路径可写与磁盘空间，缩小 AOI 后重试
+- 教学概念：局部 RX、双窗口（guard window）、马氏距离、背景协方差
+- 适用课程：高光谱遥感、异常检测
+- 典型练习：对同一高光谱场景分别运行全局 RX 与局部 RX，比较局部背景差异区域的检出差异，并解释内窗口保护带的作用。
 
 ## rs:matched_filter
 

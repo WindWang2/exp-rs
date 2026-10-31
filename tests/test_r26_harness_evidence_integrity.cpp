@@ -116,7 +116,9 @@ std::string readRawFile( const std::string &path )
     QFile file( QString::fromStdString( path ) );
     if ( !file.open( QIODevice::ReadOnly ) )
         return {};
-    return std::string( file.readAll().constData() );
+    // size()-based read: constData()+std::string truncates at the first NUL.
+    const QByteArray bytes = file.readAll();
+    return std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) );
 }
 
 bool writeFileRaw( const std::string &path, const std::string &bytes )
@@ -249,6 +251,64 @@ TEST_CASE( "A3: a corrupt verification sidecar for this run fails closed",
 
     // The corrupt bytes stay in place for audit — no silent rewrite.
     CHECK( readRawFile( sidecar ) == corrupt );
+}
+
+TEST_CASE( "A3b: a run-less verification sidecar for this run fails closed too",
+           "[harness][r26][evidence]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string raster =
+      writeTinyRaster( dir.filePath( QStringLiteral( "a3b.tif" ) ) );
+    REQUIRE( QFileInfo::exists( QString::fromStdString( raster ) ) );
+    const std::string sidecar = raster + ".verification.json";
+
+    const auto run = completedRun( "run-a3b", raster );
+    const Json::Value firstPoll = runResultDocument( run, nullptr, true );
+    REQUIRE( firstPoll["status"].asString() == "completed" );
+
+    // Parseable verification_evidence whose run block is missing: it names
+    // no run, so it cannot be attributed to a stale previous run — the
+    // record must be preserved (not overwritten by a recompute).
+    const std::string noRun =
+      R"({"schema_version":"1.0","kind":"verification_evidence","artifact":")"
+      + raster + R"(","verification":{"verdict":"PASS","checks":[]}})";
+    REQUIRE( writeFileRaw( sidecar, noRun ) );
+
+    const Json::Value secondPoll = runResultDocument( run, nullptr, true );
+
+    CHECK( secondPoll["status"].asString() == "failed" );
+    bool integrityReported = false;
+    for ( const Json::Value &artifact : secondPoll["verification"]["artifacts"] )
+        for ( const Json::Value &check : artifact["checks"] )
+            if ( check.get( "check", "" ).asString() == "verification_evidence_integrity" )
+                integrityReported = true;
+    CHECK( integrityReported );
+    // Unattributable evidence is preserved for audit, never rewritten.
+    CHECK( readRawFile( sidecar ) == noRun );
+}
+
+TEST_CASE( "A2c: a run-less harness provenance envelope is never replaced",
+           "[harness][r26][evidence]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string raster =
+      writeTinyRaster( dir.filePath( QStringLiteral( "a2c.tif" ) ) );
+    REQUIRE( QFileInfo::exists( QString::fromStdString( raster ) ) );
+    const std::string sidecar = raster + ".provenance.json";
+
+    // A harness-shaped envelope with no run identity cannot be attributed
+    // to a stale run — the never-overwrite contract keeps it byte-identical.
+    const std::string noRun = R"({"schema_version":"1.0","kind":"harness_provenance",)"
+                              R"("artifact":")" + raster + R"("})";
+    REQUIRE( writeFileRaw( sidecar, noRun ) );
+
+    const auto run = completedRun( "run-a2c", raster );
+    const Json::Value doc = runResultDocument( run, nullptr, true );
+    REQUIRE( doc["status"].asString() == "completed" );
+
+    CHECK( readRawFile( sidecar ) == noRun );
 }
 
 TEST_CASE( "B: workflow_session delete failures are typed failures on the tool surface",

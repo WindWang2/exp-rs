@@ -336,6 +336,9 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
         if ( view.facts->resolutionM >= 0 )
             resolutionSet.insert( view.facts->resolutionM );
     }
+    // A single consumable asset needs no cross-scene alignment, so an
+    // unknown CRS on it is not a fabricated-fact hazard: the alignment
+    // gate below only becomes meaningful with more than one consumable.
     if ( consumableCount > 1 && !unknownCrsRefs.empty() )
     {
         std::string refsJoined;

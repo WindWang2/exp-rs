@@ -318,6 +318,26 @@ class DiagnoseRunTool final : public SpatialTool
           outputPaths.push_back( step.outputLayerPath );
       for ( const std::string &path : outputPaths )
       {
+        // R1: the diagnose surface must see corrupt evidence the same way
+        // the persisting path does — a silently recomputed "no failures"
+        // would hand the repair loop a success conclusion for a run whose
+        // evidence is damaged (readVerificationEvidence maps Corrupt to
+        // nullopt; inspect keeps the distinction).
+        const evidence::EvidenceInspection inspection =
+          evidence::inspectVerificationEvidence( path, runId );
+        if ( inspection.state == evidence::EvidenceState::Corrupt )
+        {
+          Json::Value entry( Json::objectValue );
+          entry["artifact"] = path;
+          entry["check"] = "verification_evidence_integrity";
+          entry["code"] = "OUTPUT_INVALID";
+          Json::Value details( Json::objectValue );
+          details["error"] = inspection.reason;
+          details["verification_sidecar"] = path + ".verification.json";
+          entry["details"] = details;
+          verificationFailures.append( entry );
+          continue;
+        }
         const auto verification = evidence::readVerificationEvidence( path, runId );
         if ( !verification )
           continue;

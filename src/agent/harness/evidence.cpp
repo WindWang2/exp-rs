@@ -148,6 +148,11 @@ bool provenanceIsStaleHarnessEnvelope( const std::string &sidecarPath,
   const std::string recordedRun = doc.get( "run", Json::Value() )
                                     .get( "run_id", "" )
                                     .asString();
+  // A harness envelope whose run block is missing or malformed names no
+  // run at all: it cannot be attributed to a stale previous run, so the
+  // never-overwrite contract applies (fail closed, R1).
+  if ( recordedRun.empty() )
+    return false;
   if ( currentRun.empty() )
     return false; // no run identity to attribute the replacement to
   return recordedRun != currentRun;
@@ -271,6 +276,16 @@ EvidenceInspection inspectVerificationEvidence( const std::string &outputPath,
   }
   const std::string recordedRun =
     doc.get( "run", Json::Value() ).get( "run_id", "" ).asString();
+  // R1: a verification_evidence sidecar whose run block is missing or
+  // malformed names no run. Treating that as ForeignRun would recompute
+  // and then overwrite an unattributable record — the exact audit-trail
+  // loss the Corrupt branch exists to prevent.
+  if ( recordedRun.empty() )
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "verification sidecar carries no run identity";
+    return inspection;
+  }
   if ( recordedRun != runId )
   {
     // A different run overwrote the artifact — re-evaluation is the honest
