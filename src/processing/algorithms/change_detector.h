@@ -43,7 +43,10 @@ class ChangeDetector
     static std::vector<float> computeNormalizedDifference( std::span<const float> t1,
                                                            std::span<const float> t2 );
 
-    /// ln((t2 + eps) / (t1 + eps)); identical inputs yield exactly 0.
+    /// ln((t2 + eps) / (t1 + eps)) with the library log-ratio semantics
+    /// (change_detection.cpp): identical finite inputs yield exactly 0;
+    /// non-finite inputs propagate NaN (a missing pixel is never reported as
+    /// "no change"); negative radiance clamps to 0 before the epsilon shift.
     static std::vector<float> computeLogRatio( std::span<const float> t1,
                                                std::span<const float> t2,
                                                float epsilon = 1e-4f );

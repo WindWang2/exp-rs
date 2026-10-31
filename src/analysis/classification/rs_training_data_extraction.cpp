@@ -104,6 +104,12 @@ void buildMatrices( GDALDataset *ds,
   // is reproducible (QHash iteration is per-process random).
   QVector<QPair<int, quint64>> samples;
   std::vector<int> sampleGroups;
+  // Position in the per-class shuffle order (capped branch only). The cap
+  // is applied to the *kept* samples after NoData/ignore filtering, so the
+  // rank lets that later stage keep the first `maxSamplesPerClass` valid
+  // pixels in the same shuffle order instead of the first N raw pixels
+  // (whose NoData members would silently consume the cap, R26-S2).
+  std::vector<int> sampleRank;
   sampleGroups.reserve( pixelClass.size() );
   if ( options.maxSamplesPerClass > 0 )
   {
@@ -121,18 +127,28 @@ void buildMatrices( GDALDataset *ds,
       auto &vec = kv.second;
       std::sort( vec.begin(), vec.end(),
                  []( const auto &a, const auto &b ) { return a.first < b.first; } );
-      // Shuffle the pair vector, then truncate. Portable Fisher-Yates
-      // (#1685): std::shuffle is implementation-defined, which would make
-      // the kept sample subset differ across STLs for the same seed.
+      // Shuffle the pair vector. Portable Fisher-Yates (#1685): std::shuffle
+      // is implementation-defined, which would make the kept sample subset
+      // differ across STLs for the same seed. No truncation here — the cap
+      // moves after NoData filtering (R26-S2).
       rs::algorithms::portable::fisherYatesShuffle( rng, vec );
-      if ( vec.size() > static_cast<size_t>( options.maxSamplesPerClass ) )
-        vec.resize( static_cast<size_t>( options.maxSamplesPerClass ) );
-      std::sort( vec.begin(), vec.end(),
+      // Pair each pixel with its shuffle rank, then restore ascending pixel
+      // order inside the class: the rank rides along so the post-filter cap
+      // keeps the shuffle prefix while the row order stays the deterministic
+      // (class, pixel) ascending order. byClass is a std::map, so classes
+      // append in ascending id — the whole vector ends up (class, pixel)
+      // sorted without a global sort pass (R1: avoids 2-3x whole-batch
+      // copies on the capped path).
+      std::vector<std::pair<quint64, int>> ranked( vec.size() );
+      for ( size_t k = 0; k < vec.size(); ++k )
+        ranked[k] = std::make_pair( vec[k].first, static_cast<int>( k ) );
+      std::sort( ranked.begin(), ranked.end(),
                  []( const auto &a, const auto &b ) { return a.first < b.first; } );
-      for ( auto &pr : vec )
+      for ( const auto &pr : ranked )
       {
         samples.push_back( qMakePair( kv.first, pr.first ) );
-        sampleGroups.push_back( pr.second );
+        sampleGroups.push_back( pixelGroup.value( pr.first, -1 ) );
+        sampleRank.push_back( pr.second );
       }
     }
   }
@@ -247,6 +263,43 @@ void buildMatrices( GDALDataset *ds,
     out.X.release();
     out.y.release();
     return;
+  }
+
+  // R26-S2 — cap *kept* samples per class (the header contract): iterate the
+  // kept rows of each class in the recorded shuffle order and keep the first
+  // maxSamplesPerClass valid ones. With no invalid pixels this selects
+  // exactly the historical prefix of the shuffle, so the no-NoData behaviour
+  // (and its pinned test) is unchanged.
+  if ( options.maxSamplesPerClass > 0 )
+  {
+    std::map<int, std::vector<std::pair<int, int>>> keptByClass; // class → (rank, sampleIdx)
+    for ( int s : keepRows )
+      keptByClass[out.y.at<int>( s, 0 )].emplace_back( sampleRank[static_cast<size_t>( s )], s );
+    std::vector<char> keepFlag( static_cast<size_t>( samples.size() ), 0 );
+    for ( auto &kv : keptByClass )
+    {
+      auto &kept = kv.second;
+      std::sort( kept.begin(), kept.end() );
+      const size_t cap = static_cast<size_t>( options.maxSamplesPerClass );
+      for ( size_t k = 0; k < kept.size() && k < cap; ++k )
+        keepFlag[static_cast<size_t>( kept[k].second )] = 1;
+    }
+    QVector<int> cappedRows;
+    cappedRows.reserve( keepRows.size() );
+    for ( int s : keepRows )
+      if ( keepFlag[static_cast<size_t>( s )] )
+        cappedRows.push_back( s );
+    keepRows = cappedRows;
+    // Defensive only: cap >= 1 and a non-empty keptByClass keep at least one
+    // row per class, so keepRows cannot empty out here.
+    if ( keepRows.isEmpty() )
+    {
+      out.error = RsTrainingDataResult::Error::NoValidPixels;
+      out.errorMessage = QStringLiteral( "No valid training pixels extracted" );
+      out.X.release();
+      out.y.release();
+      return;
+    }
   }
 
   if ( keepRows.size() < options.minSamples )

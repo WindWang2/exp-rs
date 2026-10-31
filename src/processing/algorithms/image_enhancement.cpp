@@ -56,9 +56,20 @@ void ImageEnhancement::percentClipStretch(const float *input, float *output, siz
     }
 
     std::sort(valid.begin(), valid.end());
-    size_t clipCount = static_cast<size_t>(valid.size() * pct / 100.0f);
+    // Clamp the per-side clip fraction before it reaches size_t arithmetic:
+    // pct >= 100 underflows `hi` (valid.size()-1-clipCount wraps to SIZE_MAX,
+    // reading far out of bounds), and a negative pct casts to a huge unsigned
+    // value. Both extremes clip everything, whose only defined degenerate
+    // result is the full-range stretch — the same fallback the streaming
+    // PercentClipSelector uses (R26-S1).
+    const float pctClamped = std::clamp(pct, 0.0f, 50.0f);
+    size_t clipCount = static_cast<size_t>(static_cast<float>(valid.size()) * pctClamped / 100.0f);
+    if (clipCount >= valid.size())
+        clipCount = 0;
     size_t lo = clipCount;
     size_t hi = valid.size() - 1 - clipCount;
+    // Unreachable with the clamp above (clipCount <= size/2 < size); kept as
+    // the defensive fallback the streaming implementation also carries.
     if (hi <= lo) {
         lo = 0;
         hi = valid.size() - 1;

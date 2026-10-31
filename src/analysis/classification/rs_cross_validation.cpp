@@ -51,11 +51,21 @@ RsCrossValidation::Result RsCrossValidation::kFold(
   for ( int i = 0; i < y.rows; ++i )
     byClass[y.at<int>( i, 0 )].append( i );
 
+  // Consume the shared RNG in ascending class-id order. QHash iteration
+  // order is unspecified and differs across Qt versions / key sets, so a
+  // hash-ordered pass made each bucket's shuffle depend on how many draws
+  // the previously-iterated classes had consumed — the same seed then
+  // produced different folds after a Qt upgrade (R26-S5). The sibling
+  // RsSpatialCrossValidation::randomFolds already sorts its keys for the
+  // same "reproducible from seed" contract.
+  QList<int> classIdsSorted = byClass.keys();
+  std::sort( classIdsSorted.begin(), classIdsSorted.end() );
+
   // Shuffle each bucket with a deterministic seed.
   std::mt19937 rng( seed );
-  for ( auto it = byClass.begin(); it != byClass.end(); ++it )
+  for ( const int cls : classIdsSorted )
   {
-    QVector<int> &bucket = it.value();
+    QVector<int> &bucket = byClass[cls];
     // Hand-rolled Fisher-Yates: std::shuffle's permutation is
     // implementation-defined, so the fold assignment would not replay
     // across standard libraries — same discipline as
@@ -71,9 +81,9 @@ RsCrossValidation::Result RsCrossValidation::kFold(
   // Round-robin assign indices to folds (stratified).
   // Distribute all samples so that even classes with < k samples are tested across folds.
   QVector<QVector<int>> foldTest( k );
-  for ( auto it = byClass.constBegin(); it != byClass.constEnd(); ++it )
+  for ( const int cls : classIdsSorted )
   {
-    const QVector<int> &bucket = it.value();
+    const QVector<int> &bucket = byClass.value( cls );
     for ( int i = 0; i < bucket.size(); ++i )
       foldTest[i % k].append( bucket[i] );
   }
@@ -191,7 +201,13 @@ RsCrossValidation::Result RsCrossValidation::kFold(
       }
       catch ( ... )
       {
-        // Fallback to raw prediction if Hungarian remap fails
+        // Hungarian remap failed: predictions stay in cluster-id space and
+        // are scored as unclassified below rather than compared raw against
+        // class ids (R26-S6).
+        SICNU_LOG_WARN( SicnuLogTags::Classification,
+                        QStringLiteral( "CV fold %1: cluster remap unavailable; "
+                                        "predictions counted as unclassified" )
+                          .arg( fi + 1 ) );
       }
     }
 
@@ -212,7 +228,17 @@ RsCrossValidation::Result RsCrossValidation::kFold(
     {
       int pVal = pred.at<int>( i, 0 );
       if ( backend->needsLabelRemap() )
-        pVal = clusterRemap.isEmpty() ? pVal : clusterRemap.value( pVal, 0 );
+      {
+        // Cluster ids live in a different id space than class ids. Without
+        // a remap table (Hungarian probe failed) they must never be scored
+        // against the true labels — a raw cluster id that happens to equal
+        // a class id produced a fake perfect fold (R26-S6). Unclassified 0
+        // matches the rs_object_classify discipline instead.
+        if ( clusterRemap.isEmpty() )
+          pVal = 0;
+        else
+          pVal = clusterRemap.value( pVal, 0 );
+      }
       if ( pVal == testY.at<int>( i, 0 ) )
         ++correct;
     }
