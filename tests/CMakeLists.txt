@@ -17277,6 +17277,11 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# BEGIN R25-C
+# R25-C (Pi/MCP harness, workflow execution & plugin tool contracts):
+# capability-honesty entry projection (prerequisites/limitations/guarantees).
+add_executable(test_r25_c_capability_honesty test_r25_c_capability_honesty.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r25_c_capability_honesty PRIVATE
 # BEGIN R25-B (r25-B data/model/experiment track) — append-only block.
 # --- R25-B feature 1: import preflight explanation report --------------------
 qt_add_executable(test_r25_b_import_preflight test_r25_b_import_preflight.cpp)
@@ -17425,6 +17430,22 @@ target_link_libraries(test_r25_d_cartography_ux PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r25_c_capability_honesty PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r25_c_capability_honesty PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r25_c_capability_honesty PRIVATE
 )
 target_include_directories(test_r25_d_cartography_ux PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -17461,6 +17482,39 @@ target_include_directories(test_r25_d_cartography_dock PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+sicnu_discover_tests(test_r25_c_capability_honesty TEST_PREFIX test_r25_c_capability_honesty:: TIMEOUT 300)
+# R25-C W3: workflow resume diagnostics over the real tools/call dispatch.
+add_executable(test_r25_c_workflow_resume_diagnostics test_r25_c_workflow_resume_diagnostics.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+  sicnu_workflow
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r25_c_workflow_resume_diagnostics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_c_workflow_resume_diagnostics TEST_PREFIX test_r25_c_workflow_resume_diagnostics:: TIMEOUT 300)
+# END R25-C
 sicnu_link_jsoncpp(test_r25_d_cartography_dock)
 set_target_properties(test_r25_d_cartography_dock PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r25_d_cartography_dock TEST_PREFIX test_r25_d_cartography_dock::)

@@ -100,6 +100,23 @@ class WorkflowRunCoordinator : public QObject {
     /// handed out directly; its internal locking keeps concurrent reads safe.
     std::shared_ptr<WorkflowRun> runForPipeline( long pipelineId ) const;
 
+    /// R25-C read-only diagnostic lookup for a caller holding only a run id:
+    /// after a restart the in-memory pipeline map is gone, but the run's
+    /// checkpoint outlives the process. Prefers this process's tracked run;
+    /// otherwise loads the checkpoint read-only — checkpoints are saved
+    /// atomically, so the snapshot is consistent though possibly stale
+    /// while a live owner keeps writing. Null when neither exists. Never
+    /// takes the run lock and never mutates state: this is an OBSERVATION,
+    /// not recovery — resumeRun keeps its own ownership-reconcile
+    /// semantics, and a stale active checkpoint state must not be treated
+    /// as resumable without resumeRun's live-owner check.
+    std::shared_ptr<WorkflowRun> runForRunIdReadOnly( const std::string &runId );
+
+    /// True when a checkpoint file exists for @p runId right now. Read-only
+    /// existence probe (no load, no lock): callers reporting resumability
+    /// distinguish "tracked in memory" from "survives a process crash".
+    bool hasCheckpointFor( const std::string &runId ) const;
+
     /// Current TaskCenter pipeline id tracked for @a runId (-1 when none).
     long pipelineIdForRun( const std::string &runId ) const;
 
