@@ -14,9 +14,12 @@
 ### GREEN 轮 1 + 轮 2（修复后，连续两轮）
 spectral_ux 12/12 · roi_histogram 33/33 · dialogs 25/25 · guided 24/24 · classification_ux 46/46 · help 14/14 —— **两轮均全绿**
 
+### R2 修复后终验（含 R2 新增 cancel 门禁用例，连续两轮）
+spectral_ux 12/12 · roi_histogram 33/33 · dialogs 25/25 · guided 35/35（3 用例）· classification_ux 46/46 · help 14/14 = **165 断言 / 17 用例，两轮全绿**
+
 ## 受影响既有测试回归（修复后）
 test_roi_statistics_widget 29/29 · test_spectral_profile_widget 154/154 · test_histogram_stretch_widget 108/108 ·
-test_change_detection_dialog 127/127 · test_guided_workflow_widget 124/124 · test_classification_window 33/33 · test_help_core 2173/2173 —— **全绿**
+test_change_detection_dialog 127/127 · test_guided_workflow_widget 124/124 · test_classification_window 33/33 · test_help_core 2173/2173 —— **全绿**（R2 修复后复跑一次同样全绿）
 
 ## 注册完整性（当前工作树，含未提交新测试）
 integrity: 1063 registered targets + 50 add_test names（base origin/master: 1063/50; lost: 0+0; added: 0+0）；0 marker finding(s)；0 duplicate(s)
