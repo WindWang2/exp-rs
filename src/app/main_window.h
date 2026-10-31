@@ -332,7 +332,6 @@ public:
     void showTeachingAdmin();
     void options();
     void showProcessingToolbox();
-    void showProcessingHistory();
 
     // Raster processing dialogs
     void openImageEnhancementPanel();

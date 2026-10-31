@@ -413,9 +413,25 @@ bool entryRefused( const QFileInfo &fi, QString *reason )
 QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
                                              QVector<DiscoverySkip> *skipped )
 {
+    return discoverSubmissions( submissionsDir, skipped, nullptr );
+}
+
+QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
+                                             QVector<DiscoverySkip> *skipped,
+                                             const std::atomic<bool> *cancelFlag )
+{
     QVector<SubmissionItem> items;
     QDir root( submissionsDir );
     if ( !root.exists() )
+        return items;
+    // Cooperative cancellation (CT-C6): checked before EVERY entry of every
+    // pass. A cancelled walk yields nothing — no items, no skips — because a
+    // partial discovery list would silently grade a subset while looking
+    // complete (the #1466 vanish discipline).
+    const auto cancelled = [cancelFlag]() {
+        return cancelFlag != nullptr && cancelFlag->load( std::memory_order_relaxed );
+    };
+    if ( cancelled() )
         return items;
 
     // One-level student directories. Enumerated with NO filter so links and
@@ -426,6 +442,13 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
     const auto subdirs = allEntries( root );
     for ( const QFileInfo &subInfo : subdirs )
     {
+        if ( cancelled() )
+        {
+            items.clear();
+            if ( skipped )
+                skipped->clear();
+            return items;
+        }
         // NFC (R14-E audit F4): macOS/zip-tool extractors can decompose
         // combining marks, so 张三(NFC) and 张三(NFD) would otherwise grade
         // as two students and break count reconciliation. One canonical
@@ -464,6 +487,13 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
         const auto files = allEntries( sd );
         for ( const QFileInfo &fi : files )
         {
+            if ( cancelled() )
+            {
+                items.clear();
+                if ( skipped )
+                    skipped->clear();
+                return items;
+            }
             const QString name = fi.fileName();
             QString entryReason;
             if ( entryRefused( fi, &entryReason ) )
@@ -521,6 +551,13 @@ QVector<SubmissionItem> discoverSubmissions( const QString &submissionsDir,
     const auto flat = allEntries( root );
     for ( const QFileInfo &fi : flat )
     {
+        if ( cancelled() )
+        {
+            items.clear();
+            if ( skipped )
+                skipped->clear();
+            return items;
+        }
         // Hidden DIRECTORIES were already accounted (and attributed to
         // their own name) by the student-directory pass; handling them
         // here as well would book the same path twice.
@@ -586,7 +623,24 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     report.labVersion = cfg.labVersion;
     report.softwareVersion = cfg.softwareVersion;
 
-    auto items = discoverSubmissions( cfg.submissionsDir, &report.skippedFiles );
+    // CT-C6: when the caller already walked the directory (the console's
+    // preview scan), its result is the discovery — no second walk. The seam
+    // is transport, not authority: the digest deliberately ignores it, and
+    // an empty seam means internal discovery, byte-identical to before.
+    // The internal walk observes the run's cancel flag too, so cancelling
+    // bounds the wait to one entry on this path as well.
+    const bool useSeam = !cfg.preDiscovered.isEmpty();
+    const auto items = useSeam ? cfg.preDiscovered
+                               : discoverSubmissions( cfg.submissionsDir, &report.skippedFiles,
+                                                      cancelFlag );
+    if ( useSeam )
+        report.skippedFiles = cfg.preDiscoveredSkips;
+    // A walk that came back empty BECAUSE the flag flipped must not read as
+    // "the class submitted nothing": type the report as cancelled so the
+    // 0-total is attributable (0-total-but-not-cancelled stays reserved for
+    // a genuinely empty discovery).
+    if ( items.isEmpty() && cancelFlag != nullptr && cancelFlag->load( std::memory_order_relaxed ) )
+        report.cancelledEarly = true;
     const int discovered = items.size();
     report.total = discovered;
     // maxSubmissions >= 0 caps the processed count (0 = dry-run: nothing
@@ -861,7 +915,19 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
 
     // Final durable checkpoint: adopted + newly completed rows, so an
     // interrupted RESTART of the restart still resumes instead of redoing.
-    if ( !cfg.checkpointPath.isEmpty() )
+    // R1 finding 2 + R2 finding 1: the guard keys on "this run produced
+    // NOTHING durable", not on the reason. A run that discovered nothing
+    // (cancelled during its own walk, a momentarily-absent submissions
+    // root, a maxSubmissions=0 dry run) or whose every row was cancelled
+    // would rewrite the checkpoint as {rows: []} and destroy rows a LATER
+    // run could still adopt — including the class's graded evidence from a
+    // prior run. Writing nothing durable is the honest action: the previous
+    // checkpoint (or its absence) stays exactly as it was.
+    int durableRows = 0;
+    for ( int i = 0; i < processLimit; ++i )
+        if ( filled[static_cast<std::size_t>( i )] )
+            ++durableRows;
+    if ( !cfg.checkpointPath.isEmpty() && durableRows > 0 )
         checkpointAll();
 
     return report;
@@ -1107,6 +1173,65 @@ bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report
                          && static_cast<double>( declared ) == totalValue.toDouble();
     }
     report.total = declaredUsable ? declared : report.rows.size();
+    // R1 finding 1 (r25-E): the console builds the class summary — including
+    // the run_integrity lens — from THIS reloaded report, so the report-level
+    // accounting members must round-trip. They were dropped here, which made
+    // every production summary print false zeros for the exact #1466/#1694
+    // surfaces the summary exists to surface (skipped files, invalidated
+    // checkpoints, resumed rows). Absent members keep their zero defaults —
+    // an old report without them reads honestly as "not recorded".
+    // R2 findings 2-3: the members are validated the way `total` is — a
+    // negative or non-integer count degrades to 0 with a warning (never a
+    // negative row count in the teacher's integrity lens), and a malformed
+    // skipped_files entry is a typed refusal, exactly like a malformed row:
+    // the refusal accounting is what run_integrity surfaces, so silently
+    // dropping an entry would understate it (#1466).
+    const auto readCount = [ & ]( const QString &key ) {
+        const QJsonValue v = o.value( key );
+        if ( v.isUndefined() )
+            return 0;
+        if ( !v.isDouble() || v.toDouble() < 0.0 )
+        {
+            if ( warning )
+                *warning = QStringLiteral( "report declares a non-integer or negative '%1'; "
+                                           "using 0" ).arg( key );
+            return 0;
+        }
+        const int n = v.toInt();
+        if ( static_cast<double>( n ) != v.toDouble() )
+        {
+            if ( warning )
+                *warning = QStringLiteral( "report declares a non-integer '%1'; using 0" ).arg( key );
+            return 0;
+        }
+        return n;
+    };
+    report.cancelledEarly = o.value( QStringLiteral( "cancelled_early" ) ).toBool( false );
+    report.truncated = readCount( QStringLiteral( "truncated" ) );
+    report.resumed = readCount( QStringLiteral( "resumed" ) );
+    report.checkpointInvalidated =
+      o.value( QStringLiteral( "checkpoint_invalidated" ) ).toBool( false );
+    const QJsonValue skipsValue = o.value( QStringLiteral( "skipped_files" ) );
+    if ( !skipsValue.isUndefined() && !skipsValue.isArray() )
+    {
+        error = QStringLiteral( "%1 has a non-array skipped_files member" ).arg( path );
+        return false;
+    }
+    const QJsonArray skips = skipsValue.toArray();
+    for ( const QJsonValue &sv : skips )
+    {
+        if ( !sv.isObject() )
+        {
+            error = QStringLiteral( "%1 has a non-object entry in skipped_files[]" ).arg( path );
+            return false;
+        }
+        const QJsonObject so = sv.toObject();
+        DiscoverySkip skip;
+        skip.studentId = so.value( QStringLiteral( "student_id" ) ).toString();
+        skip.path = so.value( QStringLiteral( "path" ) ).toString();
+        skip.reason = so.value( QStringLiteral( "reason" ) ).toString();
+        report.skippedFiles.push_back( skip );
+    }
     if ( warning )
     {
         if ( declaredUsable && declared != report.rows.size() )

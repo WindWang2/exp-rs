@@ -638,8 +638,13 @@ void QgisDesktopWindow::setupMenu()
     tip( processingMenu->addAction( ic( "toolbox" ), tr( "Toolbox" ),
                                     this, &QgisDesktopWindow::showProcessingToolbox ),
          tr( "Opens the Processing Toolbox: GDAL / OTB / built-in algorithms." ) );
-    tip( processingMenu->addAction( ic( "log_viewer" ), tr( "History" ),
-                                    this, &QgisDesktopWindow::showProcessingHistory ),
+    // R25-D: History projects the registry command (workbench.processingHistory
+    // → the unified ProcessingHistoryPanel over TaskCenter + workflow runs).
+    // The old direct slot opened QGIS's LocalProfile history dialog — a
+    // foreign registry this product's tasks never write to, i.e. a second,
+    // empty-looking surface for the same capability (single-handler law,
+    // ui-architecture §1).
+    tip( addCmd( processingMenu, "workbench.processingHistory" ),
          tr( "View the history of processing algorithms that have run." ) );
     processingMenu->addSeparator();
     tip( processingMenu->addAction( ic( "b_tch" ), tr( "Batch Processing..." ),
