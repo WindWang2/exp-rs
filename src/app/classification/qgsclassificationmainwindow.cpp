@@ -438,23 +438,57 @@ bool QgsClassificationMainWindow::saveRoisToPath( QString path )
 
 void QgsClassificationMainWindow::closeEvent( QCloseEvent *e )
 {
-  if ( mSession.isDirty() )
+  // In-flight compute first: closing used to kill a running classification
+  // silently (the job handle cancels in the destructor) with no chance to
+  // keep an 80%-done run alive.
+  if ( hasInFlightCompute() )
   {
-    const auto ans = QMessageBox::question(
-      this, tr( "Unsaved ROIs" ),
-      tr( "ROIs / classes have unsaved changes. Save them?" ),
-      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-      QMessageBox::Save );
-    if ( ans == QMessageBox::Cancel )
+    const auto runAns = QMessageBox::question(
+      this, tr( "Task still running" ),
+      tr( "A classification task is still running. Close the window and cancel it?" ),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( runAns != QMessageBox::Yes )
     {
       e->ignore();
       return;
     }
-    if ( ans == QMessageBox::Save )
+  }
+
+  if ( mSession.isDirty() )
+  {
+    if ( m_rois && m_rois->size() > 0 )
     {
-      if ( !saveRoisToPath( mSession.lastRoisPath() ) )
+      const auto ans = QMessageBox::question(
+        this, tr( "Unsaved ROIs" ),
+        tr( "ROIs / classes have unsaved changes. Save them?" ),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save );
+      if ( ans == QMessageBox::Cancel )
       {
-        // User cancelled dialog or write failed — keep window open.
+        e->ignore();
+        return;
+      }
+      if ( ans == QMessageBox::Save )
+      {
+        if ( !saveRoisToPath( mSession.lastRoisPath() ) )
+        {
+          // User cancelled dialog or write failed — keep window open.
+          e->ignore();
+          return;
+        }
+      }
+    }
+    else
+    {
+      // Dirty classes but zero ROIs: the Save branch can never succeed (ROI
+      // export refuses empty sets) and used to wedge the window open. Offer
+      // an honest discard-only choice instead.
+      const auto ans = QMessageBox::question(
+        this, tr( "Unsaved class changes" ),
+        tr( "Class definitions changed but there are no ROIs to export. Discard the changes and close?" ),
+        QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel );
+      if ( ans != QMessageBox::Discard )
+      {
         e->ignore();
         return;
       }
@@ -1014,10 +1048,74 @@ void QgsClassificationMainWindow::runMergeClasses( const QList<int> &sources,
     return;
   }
 
-  // Reconcile the target class definition so the recoded raster's palette and
-  // the post-process sidecar reflect the merged category.
+  // A merge while a post-process/classify job runs would rewrite the class
+  // definitions but silently drop the recode (startPostProcessTask refuses
+  // under busy) — leaving class table and raster inconsistent.
+  if ( m_classifyBusy )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "A classification task is running — wait for it to finish before merging classes" ),
+        5000 );
+    return;
+  }
+
+  // Reconcile the sample layer AND the class definitions so the merged
+  // category is the only one left: the recoded raster, the class table, the
+  // palette sidecar and any later Apply must all agree that the source
+  // classes no longer exist (previously the sources survived in m_rois, so
+  // the next Apply un-merged the result).
+  const QSet<int> sourceSet( sources.cbegin(), sources.cend() );
+  if ( m_sampleLayer && m_sampleLayer->featureCount() > 0 )
+  {
+    const bool wasEditable = m_sampleLayer->isEditable();
+    if ( !wasEditable && !m_sampleLayer->startEditing() )
+    {
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "Cannot start editing the sample layer to relabel merged samples" ), 5000 );
+      return;
+    }
+    const int fieldIdx = m_sampleLayer->fields().indexOf( QStringLiteral( "cls_id" ) );
+    if ( fieldIdx >= 0 )
+    {
+      QgsFeatureIterator it = m_sampleLayer->getFeatures();
+      QgsFeature f;
+      while ( it.nextFeature( f ) )
+      {
+        if ( sourceSet.contains( f.attribute( QStringLiteral( "cls_id" ) ).toInt() ) )
+        {
+          QgsAttributeMap attr;
+          attr.insert( fieldIdx, QVariant( targetId ) );
+          m_sampleLayer->changeAttributeValues( f.id(), attr );
+        }
+      }
+    }
+    if ( !wasEditable )
+    {
+      // commitChanges() fires editingStopped → onSampleLayerEdited → one
+      // rebuild. If it fails, no editingStopped arrives and the explicit
+      // rebuild below is the only safety net.
+      const bool committed = m_sampleLayer->commitChanges();
+      if ( committed )
+        rebuildRoisFromSampleLayer();
+      else
+        m_sampleLayer->rollBack();
+    }
+    // When the layer was already in an editing session the buffer holds the
+    // relabels but no editingStopped fires — rebuild explicitly so m_rois
+    // never keeps stale absorbed-class ROIs.
+    if ( wasEditable )
+      rebuildRoisFromSampleLayer();
+  }
   if ( m_rois && targetId > 0 )
-    m_rois->setClassDef( RsClassDef( targetId, targetName, targetColor ) );
+  {
+    QHash<int, RsClassDef> defs = m_rois->classDefs();
+    for ( int srcId : sources )
+      defs.remove( srcId );
+    defs.insert( targetId, RsClassDef( targetId, targetName, targetColor ) );
+    m_rois->setClassDefs( defs );  // single changed emission
+  }
 
   RsPostProcessConfig cfg;
   cfg.inputPath = input;
@@ -2201,6 +2299,22 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
 
 bool QgsClassificationMainWindow::openSourceRaster()
 {
+  // Switching images clears every collected sample ROI (geometries from
+  // another CRS/extent cannot be re-rasterized onto the new image, #407):
+  // the clear itself is required, this guard makes the destructive
+  // consequence explicit instead of silent data loss after the file dialog.
+  if ( m_sampleLayer && m_sampleLayer->featureCount() > 0 )
+  {
+    const auto ans = QMessageBox::question(
+      this, tr( "Discard sample ROIs?" ),
+      tr( "Opening a new image clears the %1 sample ROI(s) collected for the "
+          "current image. They cannot be reused on another image. Open a new "
+          "image anyway?" )
+        .arg( m_sampleLayer->featureCount() ),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( ans != QMessageBox::Yes )
+      return false;
+  }
   const QString path = QFileDialog::getOpenFileName(
     this, tr( "Open source raster" ), QString(),
     tr( "Raster (*.tif *.tiff *.img *.jp2);;All files (*)" ) );
@@ -2347,12 +2461,23 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
 bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
                                                      cv::Mat &X,
                                                      cv::Mat &y,
-                                                     std::vector<int> *groupIds ) const
+                                                     std::vector<int> *groupIds,
+                                                     QString *errorMessage ) const
 {
+  if ( errorMessage )
+    errorMessage->clear();
   if ( !m_rois || bands.isEmpty() || m_sourceRasterPath.isEmpty() )
+  {
+    if ( errorMessage )
+      *errorMessage = tr( "No source raster or no bands selected" );
     return false;
+  }
   if ( m_sourceWidth <= 0 || m_sourceHeight <= 0 )
+  {
+    if ( errorMessage )
+      *errorMessage = tr( "Source raster is not loaded" );
     return false;
+  }
 
   QVector<RsTrainingGeometry> geometries;
   geometries.reserve( m_rois->rois().size() );
@@ -2373,7 +2498,11 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
   const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
     m_sourceRasterPath, bands, geometries, options );
   if ( !res.ok )
+  {
+    if ( errorMessage )
+      *errorMessage = res.errorMessage;
     return false;
+  }
   X = res.X;
   y = res.y;
   if ( groupIds )
@@ -2479,7 +2608,13 @@ void QgsClassificationMainWindow::applyClassification()
   {
     cv::Mat X, y;
     std::vector<int> groupIds;
-    if ( !buildTrainingData( bands, X, y, &groupIds ) || X.rows < 10 )
+    QString extractError;
+    if ( !buildTrainingData( bands, X, y, &groupIds, &extractError ) )
+    {
+      statusBar()->showMessage( extractError, 6000 );
+      return;
+    }
+    if ( X.rows < 10 )
     {
       statusBar()->showMessage(
         tr( "Not enough training samples (< 10 pixels) — draw ROIs or load saved samples first" ), 6000 );
@@ -2703,7 +2838,14 @@ void QgsClassificationMainWindow::applyPreview()
 
   cv::Mat X, y;
   std::vector<int> previewGroupIds;
-  if ( !buildTrainingData( bands, X, y, &previewGroupIds ) || X.rows < 10 )
+  QString previewExtractError;
+  if ( !buildTrainingData( bands, X, y, &previewGroupIds, &previewExtractError ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( previewExtractError, 6000 );
+    return;
+  }
+  if ( X.rows < 10 )
   {
     if ( statusBar() )
       statusBar()->showMessage(
@@ -3075,7 +3217,14 @@ void QgsClassificationMainWindow::runCrossValidation()
       bands.push_back( i );
   }
   cv::Mat X, y;
-  if ( !buildTrainingData( bands, X, y ) || X.rows < 25 )
+  QString cvExtractError;
+  if ( !buildTrainingData( bands, X, y, nullptr, &cvExtractError ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( cvExtractError, 6000 );
+    return;
+  }
+  if ( X.rows < 25 )
   {
     if ( statusBar() )
       statusBar()->showMessage( tr( "CV requires ≥ 25 pixels" ), 5000 );

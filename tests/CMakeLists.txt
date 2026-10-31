@@ -17277,6 +17277,122 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# ── BEGIN R26-workbench (R26-02): workbench UX regression tests ─────────────
+# Append-only block for the R26-02 workbench track. Sources are compiled
+# directly (existing widget-test pattern) to keep the link surface small.
+
+# WP5: spectral profile NoData honesty
+add_executable(test_r26_workbench_spectral_ux
+  test_r26_workbench_spectral_ux.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_profile_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_composite_palette.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_r26_workbench_spectral_ux PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+  sicnu_runtime
+)
+target_include_directories(test_r26_workbench_spectral_ux PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r26_workbench_spectral_ux PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r26_workbench_spectral_ux)
+
+# WP6/WP7: ROI statistics state recovery + histogram stretch re-anchoring
+add_executable(test_r26_workbench_roi_histogram
+  test_r26_workbench_roi_histogram.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/piecewise_linear_enhancement.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/qgs_display_stretch.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_r26_workbench_roi_histogram PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+  sicnu_runtime
+)
+target_include_directories(test_r26_workbench_roi_histogram PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r26_workbench_roi_histogram PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r26_workbench_roi_histogram)
+
+# WP1–WP4: classification studio interaction honesty (full window)
+add_executable(test_r26_workbench_classification_ux
+  test_r26_workbench_classification_ux.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_r26_workbench_classification_ux PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_classify
+  Sicnu::session_map
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_data
+)
+target_include_directories(test_r26_workbench_classification_ux PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/classification
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r26_workbench_classification_ux PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_r26_workbench_classification_ux PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r26_workbench_classification_ux)
+
+# WP8: change-detection dialog terminal-state honesty (+ real operator E2E)
+sicnu_add_dialog_test(test_r26_workbench_dialogs
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+)
+
+# WP9: guided workflow completion honesty
+add_executable(test_r26_workbench_guided
+  test_r26_workbench_guided.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/guided_workflow_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+)
+target_link_libraries(test_r26_workbench_guided PRIVATE
 # ── BEGIN R26-harness: evidence integrity / planner fact gates / family drift ──
 # Append-only registration block for this track (docs: .planning/zcode-r26-harness).
 sicnu_add_test(test_r26_harness_evidence_integrity)
@@ -17751,6 +17867,24 @@ target_link_libraries(test_r25_d_canvas_invalidation PRIVATE
   Qt6::Test
   qgis_core
   qgis_gui
+  sicnu_task_center
+  jsoncpp
+  sicnu_agent
+)
+target_include_directories(test_r26_workbench_guided PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r26_workbench_guided PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r26_workbench_guided PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r26_workbench_guided)
+
+# WP10: HelpCompact extreme-budget regression (#1614 residual)
+sicnu_add_help_test(test_r26_workbench_help)
+# ── END R26-workbench ────────────────────────────────────────────────────────
   Sicnu::qgis_display
 )
 target_include_directories(test_r25_d_canvas_invalidation PRIVATE

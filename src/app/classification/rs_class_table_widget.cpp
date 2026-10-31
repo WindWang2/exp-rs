@@ -249,6 +249,7 @@ void RsClassTableWidget::onCellDoubleClicked( int row, int column )
 
     const int classId = colorItem->data( Qt::UserRole ).toInt();
     const QColor oldColor = colorItem->background().color();
+    const QString nameBefore = nameItem->text();
     const QColor newColor = QColorDialog::getColor( oldColor, this, tr( "Choose Class Color" ) );
     if ( newColor.isValid() && newColor != oldColor )
     {
@@ -256,11 +257,14 @@ void RsClassTableWidget::onCellDoubleClicked( int row, int column )
       colorItem->setBackground( newColor );
       mBlockItemChanged = false;
 
+      // setClassDef emits classDefChanged, which rebuild() answers by
+      // clearing the table — destroying nameItem. Copy the text first and
+      // never touch the item after the model update.
       if ( mRois )
       {
-        mRois->setClassDef( RsClassDef( classId, nameItem->text(), newColor ) );
+        mRois->setClassDef( RsClassDef( classId, nameBefore, newColor ) );
       }
-      emit classDefEdited( classId, nameItem->text(), newColor );
+      emit classDefEdited( classId, nameBefore, newColor );
     }
   }
 }

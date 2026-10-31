@@ -8,6 +8,7 @@
 
 #include <QWidget>
 #include <QList>
+#include <QSet>
 #include <QString>
 
 #include <json/json.h>
@@ -71,6 +72,9 @@ public:
 
     // Load available workflows from the LabSpec directory
     void loadWorkflows();
+    /// Same load against an explicit directory (test seam; production always
+    /// goes through loadWorkflows()/data/labs).
+    void loadWorkflowsFromDir( const QString &dir );
 
     // Get all available workflows
     QList<Workflow> workflows() const { return m_workflows; }
@@ -116,4 +120,8 @@ private:
     int m_currentWorkflowIndex = -1;
     int m_currentStepIndex = 0;
     bool m_workflowActive = false;
+    /// Step indices (in the CURRENT workflow) whose operator run ended in
+    /// failure. workflowCompleted() must not fire while this is non-empty —
+    /// navigation is allowed, but "Experiment complete!" would be a lie.
+    QSet<int> m_failedSteps;
 };

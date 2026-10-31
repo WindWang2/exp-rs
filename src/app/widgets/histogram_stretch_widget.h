@@ -65,6 +65,7 @@ private Q_SLOTS:
     void onHistogramCutoffsChanged( double black, double white, double gamma );
     void onPiecewisePointsChanged( const QVector<QPointF> &points );
     void onRasterLayerDestroyed();
+    void onHistogramDataReady();
 
 private:
     void setupUi();
@@ -97,4 +98,8 @@ private:
     double m_dataMin = 0.0;
     double m_dataMax = 255.0;
     bool m_updating = false;
+    /// True once the user made a manual min/max/gamma adjustment for the
+    /// current layer/band: async bandDataReady landings then stop re-anchoring
+    /// the spinboxes so the user's cutoffs are never overwritten.
+    bool m_spinsTouched = false;
 };
