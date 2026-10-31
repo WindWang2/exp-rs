@@ -17277,6 +17277,56 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# ── R25-E: free-text answer hygiene at both session boundaries (#1695-17d) ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+# Same Qt-free link surface as test_lab_runtime: Catch2 + sicnu_lab_runtime
+# (jsoncpp transitively); the layer guard is the link graph.
+add_executable(test_r25_e_answer_hygiene test_r25_e_answer_hygiene.cpp)
+target_link_libraries(test_r25_e_answer_hygiene PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+sicnu_discover_tests(test_r25_e_answer_hygiene TEST_PREFIX "test_r25_e_answer_hygiene::")
+# --- end R25-E answer-hygiene registration ---
+
+# ── R25-E: cooperative discovery cancellation + CT-C6 single-walk seam ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_discovery_cancel)
+# --- end R25-E discovery-cancel registration ---
+
+# ── R25-E: repo student-flow script ↔ grading authority coherence (CT-D1) ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+add_executable(test_r25_e_repo_flow_contract test_r25_e_repo_flow_contract.cpp)
+target_link_libraries(test_r25_e_repo_flow_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r25_e_repo_flow_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_definitions(test_r25_e_repo_flow_contract PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r25_e_repo_flow_contract PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_r25_e_repo_flow_contract TEST_PREFIX "test_r25_e_repo_flow_contract::")
+# --- end R25-E repo-flow-contract registration ---
+
+# ── R25-E: feedback pack grading evidence + class summary run integrity ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_feedback_evidence)
+# --- end R25-E feedback-evidence registration ---
+
+# ── R25-E: teacher whole-class E2E on the production seams ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_teacher_e2e)
+
+# ── R25-E: batch durable state under hostile input (fail-closed matrix) ──
+sicnu_add_teaching_admin_test(test_r25_e_adversarial_checkpoint)
+# --- end R25-E e2e+adversarial registration ---
 # ── R25-D (zcode r25-D qt/qgis workbench cartography track) ──────────────────
 # Append-only registration block. Union rule: never reorder/dedupe/delete
 # other tracks' blocks (scripts/check_merge_registration_integrity.py guards).

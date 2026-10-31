@@ -5,11 +5,74 @@
 #include "session_state.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstring>
 #include <utility>
 
 namespace sicnu::lab
 {
+namespace
+{
+
+/// The Unicode space family that isspace() cannot see. UTF-8 sequences,
+/// checked byte-wise so the module stays Qt-free (jsoncpp hands us UTF-8).
+bool isUtf8SpaceAt( const char *p, std::size_t remaining, std::size_t &consumed )
+{
+  static const char *const kSpaces[] = {
+    "\xC2\xA0",     // U+00A0 no-break space
+    "\xE1\x9A\x80", // U+1680 ogham space mark
+    "\xE2\x80\x80", "\xE2\x80\x81", "\xE2\x80\x82", "\xE2\x80\x83",
+    "\xE2\x80\x84", "\xE2\x80\x85", "\xE2\x80\x86", "\xE2\x80\x87",
+    "\xE2\x80\x88", "\xE2\x80\x89", "\xE2\x80\x8A", // U+2000..U+200A en/em/… spaces
+    "\xE2\x80\xA8", // U+2028 line separator
+    "\xE2\x80\xA9", // U+2029 paragraph separator
+    "\xE2\x80\xAF", // U+202F narrow no-break space
+    "\xE2\x81\x9F", // U+205F medium mathematical space
+    "\xE3\x80\x80", // U+3000 ideographic space (CJK cohorts)
+    "\xEF\xBB\xBF", // U+FEFF zero-width no-break space
+  };
+  for ( const char *space : kSpaces )
+  {
+    const std::size_t len = std::strlen( space );
+    if ( remaining >= len && std::memcmp( p, space, len ) == 0 )
+    {
+      consumed = len;
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+/// #1695-17d: an answer whose every character is whitespace carries no
+/// student content — recording it would let completion gating count an
+/// unanswered question as answered. Blank means "nothing but whitespace";
+/// text with ANY non-whitespace character is the student's wording and
+/// passes (leading/trailing spaces included). Exported (session_state.h)
+/// as the ONE definition shared with the spec validator's choices check.
+bool isBlankAnswerText( const std::string &s )
+{
+  std::size_t i = 0;
+  while ( i < s.size() )
+  {
+    const unsigned char ch = static_cast<unsigned char>( s[i] );
+    if ( ch < 0x80 )
+    {
+      if ( !std::isspace( ch ) )
+        return false;
+      i += 1;
+      continue;
+    }
+    std::size_t consumed = 0;
+    if ( !isUtf8SpaceAt( s.data() + i, s.size() - i, consumed ) )
+      return false;
+    i += consumed;
+  }
+  return true;
+}
+
 namespace
 {
 
@@ -350,9 +413,11 @@ LabResult<> recordAnswer( LabSession &session, const LabRuntimePlan &plan,
   switch ( question->kind )
   {
     case QuestionKind::FreeText:
-      if ( answerText.empty() )
+      // #1695-17d: refuse blank (whitespace-only) text with the same typed
+      // code as the empty string — one vocabulary for "no content".
+      if ( isBlankAnswerText( answerText ) )
         return LabResult<>::failure( { LabDiag{ "lab.session.field",
-                                                "free-text answer must not be empty" } } );
+                                                "free-text answer must not be empty or blank" } } );
       answer.answer = answerText;
       break;
     case QuestionKind::Numeric:
@@ -688,6 +753,17 @@ LabResult<LabSession> sessionFromJson( const Json::Value &doc )
         }
         answer.hasNumeric = true;
         answer.numeric = parsed;
+      }
+      else if ( isBlankAnswerText( answer.answer ) )
+      {
+        // #1695-17d reload boundary: an answer with NO numeric payload and
+        // no non-whitespace text is the same non-answer the record
+        // boundary refuses (#1678 discipline) — a hand-edited or corrupted
+        // document cannot smuggle it back in. Numeric answers legitimately
+        // carry an empty text member: the value is the payload.
+        diags.push_back( LabDiag{ "lab.session.schema",
+                                  "answer text must not be blank for a non-numeric answer" } );
+        continue;
       }
       answer.seq = node[ "seq" ].asInt64();
       session.questionAnswers.push_back( std::move( answer ) );

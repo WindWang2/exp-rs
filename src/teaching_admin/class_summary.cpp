@@ -67,6 +67,20 @@ QJsonObject buildClassSummary( const BatchAssessmentReport &report )
         { QStringLiteral( "common_errors" ), errors },
         { QStringLiteral( "rubric_score_distribution" ), scoreHist },
         { QStringLiteral( "missing_evidence_distribution" ), missing },
+        // R25-E: the run-integrity anomalies a teacher must see at a glance
+        // (the "查看异常" lens) — all sourced from the report itself: how
+        // many rows were adopted from a checkpoint, whether the checkpoint
+        // was invalidated by a rules/grader change (#1694's honest signal),
+        // discovery truncation, refused files (#1466) and early
+        // cancellation.
+        { QStringLiteral( "run_integrity" ),
+          QJsonObject{
+              { QStringLiteral( "resumed_rows" ), report.resumed },
+              { QStringLiteral( "checkpoint_invalidated" ), report.checkpointInvalidated },
+              { QStringLiteral( "truncated_rows" ), report.truncated },
+              { QStringLiteral( "skipped_files" ), report.skippedFiles.size() },
+              { QStringLiteral( "cancelled_early" ), report.cancelledEarly },
+          } },
         { QStringLiteral( "versions" ),
           QJsonObject{
               { QStringLiteral( "rubric" ), report.rubricVersion },

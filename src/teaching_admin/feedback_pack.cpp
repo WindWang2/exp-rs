@@ -22,6 +22,18 @@ QJsonObject buildFeedbackPack( const FeedbackPackInput &in )
               { QStringLiteral( "message" ), in.row.message },
               { QStringLiteral( "missing_evidence" ), in.row.missingEvidence },
           } },
+        // R25-E: the auditable why, sourced from the row the grader
+        // actually produced — first deduction id, transcript digest, and
+        // (for unavailable rows) the typed grader-side reason that says
+        // "re-runnable", not "failed". Nothing is invented: a row without
+        // deductions keeps visibly empty members rather than a fabricated
+        // explanation.
+        { QStringLiteral( "grading_evidence" ),
+          QJsonObject{
+              { QStringLiteral( "top_deduction" ), in.row.topDeduction },
+              { QStringLiteral( "grader_digest" ), in.row.graderDigest },
+              { QStringLiteral( "unavailable_reason" ), in.row.unavailableReason },
+          } },
         { QStringLiteral( "dimensions" ), in.dimensionScores },
         { QStringLiteral( "verifier_findings" ), in.verifierFindings },
         { QStringLiteral( "missing_evidence" ), in.missingEvidence },
