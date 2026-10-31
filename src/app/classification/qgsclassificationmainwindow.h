@@ -146,7 +146,11 @@ class QgsClassificationMainWindow : public QMainWindow
     bool buildTrainingData( const QVector<int> &bands,
                             cv::Mat &X,
                             cv::Mat &y,
-                            std::vector<int> *groupIds = nullptr ) const;
+                            std::vector<int> *groupIds = nullptr,
+                            /// Extraction failure detail (e.g. band out of
+                            /// range) so callers can surface the real cause
+                            /// instead of a generic "not enough samples".
+                            QString *errorMessage = nullptr ) const;
     RsPixelIgnoreOptions currentIgnoreOptions() const;
     /// Open one post-process algorithm dialog (Sieve / Majority / …).
     void openPostProcessDialog( int algorithm /* RsPostProcessDialog::Algorithm */ );

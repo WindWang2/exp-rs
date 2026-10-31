@@ -165,8 +165,14 @@ std::string familyForGroup( const std::string &group )
   return it == kGroupFamily.end() ? std::string( "io" ) : it->second;
 }
 
-/// Authored id → family map: complete over the 115 rs: operators (the guard
-/// test pins totality). One line per operator keeps review diffs readable.
+/// Authored id → family map: operators whose family cannot be derived
+/// from their operator group (or whose group default would be wrong).
+/// R26: the guard is tests/test_r26_capability_family_drift.cpp — an
+/// operator absent here AND carrying a group the kGroupFamily table does
+/// not know would make canonicalFamily silently default to "io"; a wrong
+/// known-group default is caught by validateEntry (canonical == sidecar
+/// family) in test_capability_knowledge. One line per operator keeps
+/// review diffs readable.
 const std::map<std::string, std::string> &familyMap()
 {
   static const std::map<std::string, std::string> kMap = {
@@ -207,6 +213,8 @@ const std::map<std::string, std::string> &familyMap()
     // sar: everything sar_* (calibration → terrain flattening → texture)
     { "rs:sar_backscatter", "sar" },
     { "rs:sar_calibrate", "sar" },
+    { "rs:sar_coregister", "sar" },
+    { "rs:sar_coregister_local", "sar" },
     { "rs:sar_change", "sar" },
     { "rs:sar_dualpol_features", "sar" },
     { "rs:sar_geocode", "sar" },
@@ -227,12 +235,15 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:temporal_decompose", "temporal" },
     { "rs:temporal_extract_series", "temporal" },
     { "rs:temporal_gap_fill", "temporal" },
+    { "rs:temporal_harmonic_breaks", "temporal" },
     { "rs:temporal_harmonic_fit", "temporal" },
     { "rs:temporal_index_series", "temporal" },
     { "rs:temporal_model_select", "temporal" },
     { "rs:temporal_monitor", "temporal" },
     { "rs:temporal_phenology", "temporal" },
     { "rs:temporal_phenology_multi", "temporal" },
+    { "rs:temporal_region_features", "temporal" },
+    { "rs:temporal_regularize", "temporal" },
     { "rs:temporal_seasonal_breaks", "temporal" },
     { "rs:temporal_sar_fusion", "temporal" },
     { "rs:temporal_sen_trend", "temporal" },
@@ -245,11 +256,13 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:feature_normalize", "classification" },
     { "rs:feature_select", "classification" },
     { "rs:feature_stack", "classification" },
+    { "rs:classify", "classification" },
     { "rs:infer", "classification" },
     { "rs:kmeans_classification", "classification" },
     { "rs:sam_classify", "classification" },
     { "rs:supervised_classification", "classification" },
     // change
+    { "rs:change", "change" },
     { "rs:change_cva", "change" },
     { "rs:change_cva_angle", "change" },
     { "rs:change_detection", "change" },
@@ -274,6 +287,7 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:continuum_removal", "hyperspectral" },
     { "rs:cem_detection", "hyperspectral" },
     { "rs:endmember_extraction", "hyperspectral" },
+    { "rs:local_rx_anomaly", "hyperspectral" },
     { "rs:matched_filter", "hyperspectral" },
     { "rs:osp_detection", "hyperspectral" },
     { "rs:spectral_spatial_fuse", "hyperspectral" },
@@ -295,8 +309,10 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:proximity", "raster_spatial" },
     { "rs:rasterize", "raster_spatial" },
     { "rs:recode", "raster_spatial" },
+    { "rs:register_images", "raster_spatial" },
     { "rs:resample", "raster_spatial" },
     { "rs:sieve", "raster_spatial" },
+    { "rs:stack_register", "raster_spatial" },
     { "rs:threshold_raster", "raster_spatial" },
     { "rs:zonal_stats", "raster_spatial" },
     // io: sensor import / georeference entry points

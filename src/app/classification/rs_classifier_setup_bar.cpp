@@ -266,6 +266,19 @@ void RsClassifierSetupBar::setTrainRatio( double ratio )
 
 void RsClassifierSetupBar::setCurrentKind( RsClassifierKind kind )
 {
+  // Restored settings can carry any int. An unknown value would leave every
+  // algorithm button unchecked and Apply without a backend until deep inside
+  // the pipeline; fall back to the default instead.
+  switch ( kind )
+  {
+    case RsClassifierKind::NormalBayes:
+    case RsClassifierKind::SvmRbf:
+    case RsClassifierKind::KMeans:
+      break;
+    default:
+      kind = RsClassifierKind::NormalBayes;
+      break;
+  }
   mKind = kind;
   if ( mBtnNormalBayes )
     mBtnNormalBayes->setChecked( kind == RsClassifierKind::NormalBayes );

@@ -450,6 +450,14 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
         const QString wavelength = input.bandMetadataItem(b, "WAVELENGTH");
         if (!wavelength.isEmpty())
             GDALSetMetadataItem(outBand, "WAVELENGTH", wavelength.toUtf8().constData(), nullptr);
+        // Unit fidelity (R25-A DEF-6): WAVELENGTH without its units is a
+        // trap — every nm-defaulting consumer downstream would read a
+        // μm-stamped cube's 0.46..0.95 axis as nanometres. The units tag
+        // travels with the values, exactly as the producer declared them.
+        const QString wavelengthUnits = input.bandMetadataItem(b, "WAVELENGTH_UNITS");
+        if (!wavelengthUnits.isEmpty())
+            GDALSetMetadataItem(outBand, "WAVELENGTH_UNITS",
+                                wavelengthUnits.toUtf8().constData(), nullptr);
         const QString fwhm = input.bandMetadataItem(b, "FWHM");
         if (!fwhm.isEmpty())
             GDALSetMetadataItem(outBand, "FWHM", fwhm.toUtf8().constData(), nullptr);

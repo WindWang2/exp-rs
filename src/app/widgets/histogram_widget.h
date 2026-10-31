@@ -75,6 +75,11 @@ public:
 Q_SIGNALS:
     void cutoffsChanged( double black, double white, double gamma );
     void piecewisePointsChanged( const QVector<QPointF> &points );
+    /// Emitted on the GUI thread when an async scan landed fresh BandData in
+    /// the cache. Anchored consumers (e.g. HistogramStretchWidget min/max
+    /// spinboxes) re-read realDataMin()/realDataMax() instead of staying on
+    /// the pre-scan 0..255 placeholder range.
+    void bandDataReady();
 
 protected:
     void paintEvent( QPaintEvent *event ) override;

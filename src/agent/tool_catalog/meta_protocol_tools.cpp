@@ -146,8 +146,13 @@ const std::vector<MetaToolDef> &table()
             { "seed", "integer", "Optional seed pin (non-negative).", false } } },
         { "get_workflow_status",
           "Get the aggregate status of a workflow submitted with run_workflow: overall "
-          "state plus per-step execution ids, statuses, and progress.",
-          { { "pipeline_id", "integer", "Pipeline id returned by run_workflow.", true } } },
+          "state plus per-step execution ids, statuses, and progress. Pass run_id "
+          "instead of pipeline_id to query a run from a previous session (after a "
+          "server restart the pipeline id is gone but the checkpoint survives): the "
+          "result then reports the checkpointed run state, per-step plan statuses, "
+          "and a resumable verdict with a resume hint.",
+          { { "pipeline_id", "integer", "Pipeline id returned by run_workflow. Optional when run_id is given.", false },
+            { "run_id", "string", "Workflow run id (e.g. held from a previous session). Queries the checkpoint directly and includes resume diagnostics. Optional.", false } } },
         { "resume_workflow",
           "Resume an interrupted workflow run from its last checkpoint: steps that "
           "already completed are skipped and the run continues from the first "

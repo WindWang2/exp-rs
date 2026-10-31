@@ -210,6 +210,12 @@ protected:
     // MCP Methods — Spatial workflow & spatial tool layer (ADR 0122)
     QVariantMap handleRunWorkflow(const QVariantMap &arguments);
     QVariantMap handleGetWorkflowStatus(long pipelineId);
+    /// R25-C run_id diagnostic path: after a server restart the pipeline
+    /// map is gone but checkpoints outlive the process — an agent holding
+    /// only a run_id gets run state, per-step plan statuses, checkpoint
+    /// presence, and a resumability verdict mirroring resumeRun's state
+    /// wall (advisory only; resumeRun keeps the ownership authority).
+    QVariantMap handleGetWorkflowStatusByRun(const QString &runId);
     QVariantMap handleResumeWorkflow(const QString &runId);
     QVariantMap handleAgentSession(const QVariantMap &arguments);
     QVariantMap handleSpatialToolCall(const QString &toolId, const QVariantMap &parameters);

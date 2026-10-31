@@ -161,6 +161,7 @@ void ChangeDetectionDialog::setupUi()
 
   setupOutputRow( mainLayout );
   m_statusLabel = SicnuUi::makeHintLabel( this, tr( "Ready" ) );
+  m_statusLabel->setObjectName( QStringLiteral( "rsChangeDetectionStatus" ) );
   mainLayout->addWidget( m_statusLabel );
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
@@ -389,5 +390,21 @@ void ChangeDetectionDialog::onRun()
                                    .arg( result["changedPercent"].asDouble(), 0, 'f', 2 );
                        m_statusLabel->setText( text );
                      }
+                     else
+                     {
+                       // Success without summary statistics: replace the
+                       // Running state so the label never lies about a task
+                       // that already finished.
+                       m_statusLabel->setText( tr( "Finished. See the log panel for the output path." ) );
+                     }
                    } );
+}
+
+void ChangeDetectionDialog::cleanupRunResources()
+{
+  // Runs on EVERY terminal path, and on success AFTER the result callback
+  // (which may already have written the change statistics): only lift the
+  // "Running..." state, never overwrite a finished message.
+  if ( m_statusLabel && m_statusLabel->text() == tr( "Running..." ) )
+    m_statusLabel->setText( tr( "Run ended — see the log panel." ) );
 }

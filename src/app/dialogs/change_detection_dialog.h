@@ -33,6 +33,10 @@ protected:
     bool validateInputs() override;
     bool shouldAutoAcceptOnSuccess() const override { return false; }
     void onRun() override;
+    /// Runs on every terminal path (success, failure, cancel). On success it
+    /// runs AFTER the result callback, so it only lifts a still-present
+    /// "Running..." state (failure/cancel) without overwriting statistics.
+    void cleanupRunResources() override;
 
 private slots:
     void updateBandSelectors();

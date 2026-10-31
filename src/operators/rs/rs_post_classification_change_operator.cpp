@@ -10,6 +10,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/post_classification.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 #include "processing/gdal/gdal_grid_compat.h"
 
 #include <QString>
@@ -62,6 +63,16 @@ Json::Value RsPostClassificationChangeOperator::schema() const {
     outputs["unchangedPixels"] = makeIntegerParam("unchangedPixels", "Pixels whose class stayed", 0);
     outputs["totalPixels"] = makeIntegerParam("totalPixels", "Evaluated (valid) pixel count", 0);
     outputs["changedPercent"] = makeNumberParam("changedPercent", "Percentage of evaluated pixels that changed", 0.0);
+    outputs["cellAreaM2"] = makeNumberParam("cellAreaM2",
+        "Per-cell area in m2 (projected grid, or the geographic scene-centre approximation)", 0.0);
+    outputs["cellAreaBasis"] = makeStringParam("cellAreaBasis",
+        "'projected_grid' or 'geographic_scene_centre'", "");
+    outputs["fromAreasKm2"] = makeStringParam("fromAreasKm2",
+        "Per-class area on the before date (row order of the transition matrix)", "");
+    outputs["toAreasKm2"] = makeStringParam("toAreasKm2",
+        "Per-class area on the after date (column order of the transition matrix)", "");
+    outputs["changedAreaKm2"] = makeNumberParam("changedAreaKm2",
+        "Total area of pixels whose class changed", 0.0);
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"before", "after", "output"});
@@ -290,6 +301,21 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
         validPixels += v;
     const uint64_t changed = validPixels - unchanged;
 
+    // Class-area table (R25-A FEAT-3): pixel counts are grid-relative; km2
+    // makes the report comparable across sensors/resolutions. Geographic
+    // CRS rasters use the scene-centre arc approximation (single owner:
+    // gdal_util::cellSizesMetres — same #612 rule as every metre-denominated
+    // product), with the basis named so consumers can qualify it.
+    double cellAreaM2 = 0.0;
+    {
+        double csx = 0.0, csy = 0.0;
+        sicnu::processing::gdal_util::cellSizesMetres(beforeDs, &csx, &csy);
+        cellAreaM2 = csx * csy;
+    }
+    const bool geographic =
+        sicnu::processing::gdal_util::isGeographicCrs(beforeDs.projection());
+    const double km2PerCell = cellAreaM2 / 1.0e6;
+
     // ---- Pass 2: write the change-type map (UInt16 code = from*C + to).
     context.throwIfCancelled();
     context.reportProgress(0.5, "Writing change-type map");
@@ -385,6 +411,17 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
     result["changedPercent"] = validPixels == 0
         ? 0.0
         : 100.0 * static_cast<double>(changed) / static_cast<double>(validPixels);
+    result["cellAreaM2"] = cellAreaM2;
+    result["cellAreaBasis"] = geographic ? "geographic_scene_centre" : "projected_grid";
+    Json::Value fromAreas(Json::arrayValue);
+    Json::Value toAreas(Json::arrayValue);
+    for (int c = 0; c < classCount; ++c) {
+        fromAreas.append(static_cast<double>(fromTotals[c]) * km2PerCell);
+        toAreas.append(static_cast<double>(toTotals[c]) * km2PerCell);
+    }
+    result["fromAreasKm2"] = fromAreas;
+    result["toAreasKm2"] = toAreas;
+    result["changedAreaKm2"] = static_cast<double>(changed) * km2PerCell;
     return result;
 }
 

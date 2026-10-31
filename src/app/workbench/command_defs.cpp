@@ -340,11 +340,16 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     }
     // ── Cartography workflow-node commands (Workbench 10.0, C-1) ──────
     // Each handler runs the SAME operator a workflow node dispatches; the
-    // dock only collects inputs and renders reports/preview.
+    // dock only collects inputs and renders reports/preview. Drafting reads
+    // the canvas layer stack, so every entry in the family requires map
+    // layers to exist (presence, not selection) — an empty view can only
+    // ever fail, and the projection says so instead of clicking through.
     {
         RS_CMD( d, "cartography.compose", QObject::tr( "Compose Map Layout" ),
                 QObject::tr( "Compile the drafted MapSpec into a print layout with a quality report." ),
                 "print_l_yout", QObject::tr( "Cartography" ) );
+        d.availability = ContextRules::hasMapLayers;
+        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window] {
             if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
             {
@@ -358,6 +363,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "cartography.preflight", QObject::tr( "Preflight Map Layout" ),
                 QObject::tr( "Run the deterministic preflight report on the current MapSpec draft." ),
                 "to_ology_check", QObject::tr( "Cartography" ) );
+        d.availability = ContextRules::hasMapLayers;
+        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window] {
             if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
             {
@@ -371,6 +378,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "cartography.repair", QObject::tr( "Repair Map Layout" ),
                 QObject::tr( "Apply the bounded repair pass and show the applied/still_reported ledger." ),
                 "toolbox", QObject::tr( "Cartography" ) );
+        d.availability = ContextRules::hasMapLayers;
+        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window] {
             if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
             {
@@ -384,6 +393,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "cartography.export", QObject::tr( "Export Map Layout..." ),
                 QObject::tr( "Atomic governed export (png/pdf/svg) with sha256 evidence." ),
                 "ch_rt_l_yer", QObject::tr( "Cartography" ) );
+        d.availability = ContextRules::hasMapLayers;
+        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window] {
             if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
             {
