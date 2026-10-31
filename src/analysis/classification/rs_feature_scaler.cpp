@@ -156,7 +156,10 @@ bool RsFeatureScaler::fromJson( const QJsonObject &obj )
   // reader does not implement — both would rescale bands with the wrong
   // statistics (R26-S12), the same drift the length checks below guard
   // against. A missing version is tolerated (pre-versioning sidecars).
-  const int methodInt = obj.value( QStringLiteral( "method" ) ).toInt( -1 );
+  const QJsonValue methodValue = obj.value( QStringLiteral( "method" ) );
+  if ( !methodValue.isDouble() )
+    return false; // absent or non-numeric: no discriminator to trust
+  const int methodInt = methodValue.toInt( -1 );
   if ( methodInt != static_cast<int>( Method::ZScore )
        && methodInt != static_cast<int>( Method::MinMax ) )
     return false;

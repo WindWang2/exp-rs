@@ -228,8 +228,9 @@ TEST_CASE( "R26-S2 training cap applies after NoData filtering",
   REQUIRE( tmp.isValid() );
   GDALAllRegister();
 
-  // Odd rows are NoData: class 1 (whole 16x16 raster) has 128 valid pixels,
-  // class 2 (rows 12..15, cols 0..3) has 8 valid pixels.
+  // Odd rows are NoData. The class-2 ROI (rows 12..15, cols 0..3) overrides
+  // the class-1 ROI, so class 1 keeps 16x16 - 16 = 240 candidate pixels of
+  // which 120 are valid; class 2 has 16 candidates of which 8 are valid.
   const QString raster = tmp.path() + "/src.tif";
   createRaster( raster, 16, 16, 1,
                 []( int, int r, int c ) {
@@ -332,6 +333,8 @@ TEST_CASE( "R26-S4 Mann-Kendall tied timestamps", "[r26][temporal][trend]" )
   // benchmark); the defect under test is var(S): with duplicate timestamps
   // (temporal operators' keep_all policy) the z/p statistics were computed
   // from an inflated variance that ignored the timestamp tie term.
+  // With two time-tied pairs the usable time-ordered pairs number 2 of 3,
+  // so |tau-a| can only reach 2/3 on a strictly increasing series.
   SECTION( "duplicate dates: var(S) subtracts the time-tie term" )
   {
     const std::vector<float> y = { 1, 2, 3 };
@@ -339,7 +342,7 @@ TEST_CASE( "R26-S4 Mann-Kendall tied timestamps", "[r26][temporal][trend]" )
     const auto r = sicnu::temporal::TrendAnalyzer::computeMannKendall( y, t );
     CHECK( r.valid );
     CHECK( r.sampleCount == 3 );
-    CHECK( r.tau == approx( 2.0 / 3.0 ) ); // tau-a: S/n0 with one tied-time pair
+    CHECK( r.tau == approx( 2.0 / 3.0 ) ); // tau-a: S=2 over all n0=3 pairs
     // varS = (n(n-1)(2n+5) - time-tie term) / 18 = (66 - 18)/18.
     CHECK( r.tauVariance == approx( 48.0 / 18.0 ) );
     CHECK( r.senSlope == approx( 1.5 ) );
@@ -375,8 +378,9 @@ TEST_CASE( "R26-S4 Mann-Kendall tied timestamps", "[r26][temporal][trend]" )
   SECTION( "doubly-tied input never publishes a negative variance" )
   {
     // Both axes tied (constant y on two dates): the raw algebra gives
-    // (156 - 144 - 144)/18 < 0 — the published var(S) must clamp to 0 and
-    // the degenerate z=0/p=1 branch must be taken (R1 P2-2).
+    // (156 - 156 - 36)/18 = -2 < 0 — the published var(S) must clamp to 0
+    // and the degenerate z=0/p=1 branch must be taken (R1 P2-2).
+    // (base 4·3·13=156; value ties 4·3·13=156; time ties 2·1·9+2·1·9=36)
     const std::vector<float> y = { 7, 7, 7, 7 };
     const std::vector<double> t = { 0, 0, 1, 1 };
     const auto r = sicnu::temporal::TrendAnalyzer::computeMannKendall( y, t );
@@ -577,6 +581,32 @@ TEST_CASE( "R26-S8 polygonize keeps 8-connected objects whole",
       RsClassRaster::polygonize( raster, tmp.path() + "/diag.shp" );
     REQUIRE( res.ok );
     CHECK( countFeatures( tmp.path() + "/diag.shp" ) == 1 );
+    // The single feature is one polygon whose ring touches itself at the
+    // shared corner — that self-touch is the TRUE topology of an object
+    // whose pixels connect only diagonally, and OGR_G_IsValid() (strict OGC
+    // rules, GEOS-backed) reports it invalid. This is pinned deliberately:
+    // object identity (one object = one feature) outranks OGC strictness,
+    // and a consumer that needs strictly valid geometry must post-process
+    // (GEOS makeValid) rather than split the object. Splitting it — the old
+    // 4-connected behaviour — silently changed the object count, which is
+    // the defect S8 fixes.
+    {
+      GDALDatasetH ds = GDALOpenEx( ( tmp.path() + "/diag.shp" ).toUtf8().constData(),
+                                    GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
+      REQUIRE( ds != nullptr );
+      OGRLayerH lyr = GDALDatasetGetLayer( ds, 0 );
+      REQUIRE( lyr != nullptr );
+      OGRFeatureH feat = OGR_L_GetNextFeature( lyr );
+      REQUIRE( feat != nullptr );
+      OGRGeometryH geom = OGR_F_GetGeometryRef( feat );
+      REQUIRE( geom != nullptr );
+      const OGRwkbGeometryType gt = OGR_G_GetGeometryType( geom );
+      CHECK( ( gt == wkbPolygon || gt == wkbPolygon25D ) );
+      CHECK( !OGR_G_IsValid( geom ) ); // single-corner self-touch: documented
+      CHECK( OGR_G_GetGeometryCount( geom ) == 1 ); // one ring, not two parts
+      OGR_F_Destroy( feat );
+      GDALClose( ds );
+    }
   }
   SECTION( "4-connected pair stays one object (regression guard)" )
   {

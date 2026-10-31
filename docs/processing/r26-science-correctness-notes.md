@@ -34,6 +34,10 @@
 - 多数票平票规则"取较小 id"在 id 0 参与时同样成立（rs_majority_vote.h）。
 - 类栅格矢量化的连通性与分割器一致（8 连通）：对角相邻同标签输出为
   单一多边形（GDALPolygonize 8CONNECTED=8），栅格↔矢量对象身份守恒。
+  注意：对角相连对象的轮廓是**单点自接触 ring**，严格 OGC 判定无效
+  （GEOS/PostGIS ST_IsValid=false）——这是该类对象的真实拓扑。需要严格
+  有效几何的下游应自行 makeValid，而不是把对象拆成两个多边形（那正是
+  旧 4 连通行为的缺陷）。
 
 ## 变化检测（processing/algorithms/change_detector.cpp、operators/rs/rs_change_streaming.cpp）
 - ChangeDetector::computeLogRatio 与库级 logRatio 语义对齐：非有限输入

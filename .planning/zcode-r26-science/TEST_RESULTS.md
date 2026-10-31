@@ -27,6 +27,12 @@ ccache launcher），-j4 + flock ~/.cache/exp-rs-build.lock；ctest -j1。
 - S4 修订后（tau-a 契约保留 + varS 时间并列项）+ E2E 加入：
   ctest test_r26_science_oracles Passed（13 cases, 342 assertions 含 E2E 152）
 
+## 复审后最终验证（R1+R2 修复全部落地）
+- 16 个套件 × 连续两轮全绿（RUN A / RUN B，逐二进制退出码 0）
+- test_r26_science_oracles: 354 assertions / 13 cases
+- 注册完整性: 1064 targets + 51 add_test（base 1063/50；added 1+1，lost 0+0）
+- git diff --check 干净；ctest test_r26_science_oracles Passed
+
 ## 既有回归（修复后 HEAD，直接执行二进制）
 | 套件 | 结果 |
 |------|------|

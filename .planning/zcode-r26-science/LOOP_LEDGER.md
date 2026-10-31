@@ -12,3 +12,5 @@
 | 8 | 注册表 E2E（rs:change_detection 真实链路 152 断言） | ctest Passed | OK | perf |
 | 9 | 性能基线 3 规格×5 进程 + run2 复现（CROSS_TRACK 记录） | 见 PERF_BASELINE | OK | R1 评审 |
 | 10 | R1 独立评审（后台）+ 修复 | 进行中 | — | R2 |
+| 11 | R1 评审 approve-with-fixes：P1-1 capped 内存收紧 + 8×P2 修复 | 复验 4 套件全绿 | OK | R2 |
+| 12 | R2 独立复审 approve：6×P2 修复（含 S8 自接触行为固化、scaler isDouble） | 16 套件×2 轮全绿 + 注册完整性 | OK | 提交+PR |

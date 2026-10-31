@@ -12,7 +12,11 @@
     var(S)  = [n(n−1)(2n+5) − Σ_p t_p(t_p−1)(2t_p+5) − Σ_q s_q(s_q−1)(2s_q+5)] / 18
               (tie groups p of the response y and tie groups q of duplicate
                timestamps; the q-term is 0 when acquisition times are unique,
-               so the Gilbert benchmark keeps its published value)
+               so the Gilbert benchmark keeps its published value. When BOTH
+               axes carry ties the exact variance has an additional
+               cross-term and this two-moment form slightly UNDER-estimates
+               var(S) — p is then mildly anti-conservative; ignoring the
+               q-term altogether, the pre-R26 behaviour, over-estimated it)
     z       = (S ∓ 1)/√var(S)   (±1 continuity correction; 0 when S = 0)
     p       = erfc(|z|/√2)      (two-sided standard-normal tail)
     slope   = median of pairwise (y_j − y_i)/(t_j − t_i) over t_i < t_j
