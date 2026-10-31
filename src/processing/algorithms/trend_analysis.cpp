@@ -52,22 +52,43 @@ MannKendallResult mannKendallImpl( const std::vector<double> &ts,
                 --S;
         }
 
-    // Tie-corrected variance (Gilbert 1987 eq. 16.5 style).
-    std::vector<float> sorted( ys );
-    std::sort( sorted.begin(), sorted.end() );
-    double tieTerm = 0.0;
-    for ( std::size_t i = 0; i < n; )
+    // Tie-corrected variance (Gilbert 1987 eq. 16.5 style) on both axes:
+    // repeated values (y, e.g. rounded reflectance) AND repeated
+    // timestamps (t, e.g. duplicate acquisitions kept by the temporal
+    // operators' keep_all policy). Both terms use the same t(t-1)(2t+5)
+    // shape; the timestamp term is zero when acquisition times are unique,
+    // which keeps the Gilbert benchmark (unique times) bit-identical. tau
+    // stays tau-a per the header contract (R26-S4).
+    auto tieVarTerm = []( const std::vector<double> &axisSorted )
     {
-        std::size_t j = i;
-        while ( j < n && sorted[j] == sorted[i] )
-            ++j;
-        const double tp = static_cast<double>( j - i );
-        if ( tp > 1.0 )
-            tieTerm += tp * ( tp - 1.0 ) * ( 2.0 * tp + 5.0 );
-        i = j;
-    }
+        double term = 0.0;
+        const std::size_t m = axisSorted.size();
+        for ( std::size_t i = 0; i < m; )
+        {
+            std::size_t j = i;
+            while ( j < m && axisSorted[j] == axisSorted[i] )
+                ++j;
+            const double tp = static_cast<double>( j - i );
+            if ( tp > 1.0 )
+                term += tp * ( tp - 1.0 ) * ( 2.0 * tp + 5.0 );
+            i = j;
+        }
+        return term;
+    };
+    std::vector<double> tsSorted( ts );
+    std::sort( tsSorted.begin(), tsSorted.end() );
+    const double timeTieTerm = tieVarTerm( tsSorted );
+    std::vector<double> ySorted( ys.begin(), ys.end() );
+    std::sort( ySorted.begin(), ySorted.end() );
+    const double valueTieTerm = tieVarTerm( ySorted );
     const double nn = static_cast<double>( n );
-    const double varS = ( nn * ( nn - 1.0 ) * ( 2.0 * nn + 5.0 ) - tieTerm ) / 18.0;
+    // Both tie terms can exceed the base term when both axes are heavily
+    // tied (e.g. constant y on two distinct dates): the algebra then yields
+    // a negative variance. Clamp before publishing it — a negative var(S) is
+    // meaningless to consumers (R1); the z/p branches already route
+    // varS <= 0 to the degenerate z=0/p=1 outcome below.
+    const double varS = std::max(
+        0.0, ( nn * ( nn - 1.0 ) * ( 2.0 * nn + 5.0 ) - valueTieTerm - timeTieTerm ) / 18.0 );
     r.tauVariance = varS;
     r.tau = S / ( 0.5 * nn * ( nn - 1.0 ) );
 

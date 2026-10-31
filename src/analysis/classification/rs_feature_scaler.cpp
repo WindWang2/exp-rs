@@ -151,7 +151,22 @@ bool RsFeatureScaler::fromJson( const QJsonObject &obj )
   mMin.clear();
   mMax.clear();
 
-  mMethod = static_cast<Method>( obj.value( QStringLiteral( "method" ) ).toInt( 0 ) );
+  // Fail closed on a foreign discriminator: an out-of-range method silently
+  // fell through to ZScore and an unknown version promised a schema this
+  // reader does not implement — both would rescale bands with the wrong
+  // statistics (R26-S12), the same drift the length checks below guard
+  // against. A missing version is tolerated (pre-versioning sidecars).
+  const QJsonValue methodValue = obj.value( QStringLiteral( "method" ) );
+  if ( !methodValue.isDouble() )
+    return false; // absent or non-numeric: no discriminator to trust
+  const int methodInt = methodValue.toInt( -1 );
+  if ( methodInt != static_cast<int>( Method::ZScore )
+       && methodInt != static_cast<int>( Method::MinMax ) )
+    return false;
+  const int version = obj.value( QStringLiteral( "version" ) ).toInt( 1 );
+  if ( version != 1 )
+    return false;
+  mMethod = static_cast<Method>( methodInt );
   const QJsonArray meanArr = obj.value( QStringLiteral( "mean" ) ).toArray();
   const QJsonArray stdArr = obj.value( QStringLiteral( "std" ) ).toArray();
   const QJsonArray minArr = obj.value( QStringLiteral( "min" ) ).toArray();

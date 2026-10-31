@@ -17277,6 +17277,37 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# ── R26-science: correctness oracle suite (RED→GREEN per work package) ──
+# Append-only registration block for this track (docs: .planning/zcode-r26-science).
+# Covers classification sampling/evaluation, segmentation tie-break/
+# polygonize, change log-ratio/area units, temporal trend statistics and
+# enhancement degenerate-input contracts on master's production kernels.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r26_science_oracles test_r26_science_oracles.cpp)
+    target_link_libraries(test_r26_science_oracles PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        qgis_analysis
+        sicnu_processing
+        sicnu_operators
+        sicnu_temporal_timeline
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r26_science_oracles)
+    target_include_directories(test_r26_science_oracles PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/analysis
+        ${CMAKE_SOURCE_DIR}/src/analysis/classification
+        ${OpenCV_INCLUDE_DIRS}
+        ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME test_r26_science_oracles COMMAND test_r26_science_oracles)
+    set_tests_properties(test_r26_science_oracles PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 300)
+endif()
+# --- end R26-science oracle registration ---
 # ── BEGIN R26-workbench (R26-02): workbench UX regression tests ─────────────
 # Append-only block for the R26-02 workbench track. Sources are compiled
 # directly (existing widget-test pattern) to keep the link surface small.

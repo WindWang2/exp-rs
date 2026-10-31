@@ -107,16 +107,22 @@ std::vector<float> ChangeDetector::computeLogRatio( std::span<const float> t1, s
     return {};
   const float eps = std::max( epsilon, 1e-12f );
   std::vector<float> out( t1.size() );
+  const float nan = std::numeric_limits<float>::quiet_NaN();
   for ( size_t i = 0; i < t1.size(); ++i )
   {
-    const float a = t1[i] + eps;
-    const float b = t2[i] + eps;
-    // Domain guard: the operator is defined for positive shifted radiance;
-    // non-finite or non-positive arguments collapse to the neutral 0.
-    if ( !( a > 0.0f && b > 0.0f ) )
-      out[i] = 0.0f;
-    else
-      out[i] = std::log( b / a );
+    // Same semantics as the library log-ratio (change_detection.cpp):
+    // non-finite input propagates NaN (a missing/cloud pixel must not be
+    // reported as "no change"), negative radiance clamps to 0 before the
+    // epsilon shift. Collapsing either case to the neutral 0 silently
+    // masked NoData pixels as stable (R26-S9).
+    if ( !std::isfinite( t1[i] ) || !std::isfinite( t2[i] ) )
+    {
+      out[i] = nan;
+      continue;
+    }
+    const double a = std::max( static_cast<double>( t1[i] ), 0.0 ) + static_cast<double>( eps );
+    const double b = std::max( static_cast<double>( t2[i] ), 0.0 ) + static_cast<double>( eps );
+    out[i] = static_cast<float>( std::log( b ) - std::log( a ) );
   }
   return out;
 }

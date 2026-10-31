@@ -759,6 +759,25 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
             const auto arc = MathUtils::wgs84ArcAtLatitudeDeg( phiDeg );
             pixelArea = std::abs( gt[1] ) * arc.perDegLon * std::abs( gt[5] ) * arc.perDegLat;
         }
+        else if ( pixelArea > 0.0 )
+        {
+            // Projected CRS with a non-metre linear unit (US survey foot,
+            // etc.): |gt|·|gt| counts square CRS units, not m² — scaling by
+            // the linear unit squared keeps the "always m2" contract of the
+            // schema and of the geographic branch above (R26-S10).
+            OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
+            if ( srs != nullptr )
+            {
+                if ( OSRSetFromUserInput( srs, beforeDs.projection().toUtf8().constData() ) == OGRERR_NONE
+                     && OSRIsProjected( srs ) )
+                {
+                    const double metresPerUnit = OSRGetLinearUnits( srs, nullptr );
+                    if ( metresPerUnit > 0.0 && std::abs( metresPerUnit - 1.0 ) > 1e-9 )
+                        pixelArea *= metresPerUnit * metresPerUnit;
+                }
+                OSRDestroySpatialReference( srs );
+            }
+        }
         if ( pixelArea > 0.0 )
         {
             result["changedArea"] = static_cast<double>( derived.changed ) * pixelArea;
