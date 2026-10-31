@@ -30,6 +30,7 @@
 #include <gdal.h>
 #include <QMetaObject>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -83,6 +84,7 @@ void RoiStatisticsWidget::setupUi()
     // Buttons
     auto *btnLayout = new QHBoxLayout();
     m_refreshBtn = new QPushButton(tr("Refresh"));
+    m_refreshBtn->setObjectName(QStringLiteral("rsRoiStatsRefreshBtn"));
     m_refreshBtn->setToolTip(tr("Recomputes statistics for the current ROI."));
     m_exportBtn = new QPushButton(tr("Export CSV"));
     m_exportBtn->setToolTip(tr("Exports the statistics table as a CSV file."));
@@ -93,6 +95,11 @@ void RoiStatisticsWidget::setupUi()
 
     connect(m_refreshBtn, &QPushButton::clicked, this, &RoiStatisticsWidget::computeStatistics);
     connect(m_exportBtn, &QPushButton::clicked, this, [this]() {
+        if (m_stats.isEmpty()) {
+            QMessageBox::information(this, tr("Export"),
+                                     tr("No statistics yet — click Refresh first."));
+            return;
+        }
         QString path = QFileDialog::getSaveFileName(this, tr("Export Statistics"), QString(), tr("CSV (*.csv)"));
         if (path.isEmpty()) return;
 
@@ -101,13 +108,20 @@ void RoiStatisticsWidget::setupUi()
         // bytes actually landed.
         QByteArray bytes;
         QTextStream out(&bytes, QIODevice::WriteOnly);
+        // CSV numbers must use '.' decimals regardless of the user's locale —
+        // a German default locale would emit "1234,56" and shift every column.
+        out.setLocale(QLocale::c());
         out << "Band,Min,Max,Mean,StdDev,Pixels\n";
         for (int i = 0; i < m_stats.size(); ++i) {
+            const auto csvNum = [](double v) {
+                return std::isfinite(v) ? QString::number(v, 'f', 6)
+                                        : QString(); // all-NoData band → empty cell
+            };
             out << (i + 1) << ","
-                << m_stats[i].min << ","
-                << m_stats[i].max << ","
-                << m_stats[i].mean << ","
-                << m_stats[i].stddev << ","
+                << csvNum(m_stats[i].min) << ","
+                << csvNum(m_stats[i].max) << ","
+                << csvNum(m_stats[i].mean) << ","
+                << csvNum(m_stats[i].stddev) << ","
                 << m_stats[i].pixelCount << "\n";
         }
         out.flush();
@@ -132,6 +146,11 @@ void RoiStatisticsWidget::setRasterLayer(QgsRasterLayer *layer)
     m_computing = false;
     m_rasterLayer = layer;
     m_stats.clear();
+    // A layer switch is a fresh, idle state: the in-flight worker's landing
+    // will early-return on the epoch guard and never re-enable the button or
+    // rewrite the summary, so restore both here (disabled by computeStatistics).
+    m_refreshBtn->setEnabled(true);
+    m_summaryLabel->setText(tr("Select a raster layer and ROI to compute statistics."));
     updateTable();
 }
 
@@ -307,9 +326,14 @@ void RoiStatisticsWidget::computeStatistics()
                 return;
             }
             GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
-            if (!band) continue;
-            if (GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize,
-                             buf.data(), bufW, bufH, GDT_Float32, 0, 0) != CE_None) {
+            if (!band || GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize,
+                                      buf.data(), bufW, bufH, GDT_Float32, 0, 0) != CE_None) {
+                // Unreadable band: no measurement — render as no-data, not 0.00.
+                stats[b].pixelCount = 0;
+                stats[b].mean = std::numeric_limits<double>::quiet_NaN();
+                stats[b].stddev = std::numeric_limits<double>::quiet_NaN();
+                stats[b].min = std::numeric_limits<double>::quiet_NaN();
+                stats[b].max = std::numeric_limits<double>::quiet_NaN();
                 continue;
             }
 
@@ -344,10 +368,20 @@ void RoiStatisticsWidget::computeStatistics()
                 st = MathUtils::computeStats(roiPixels.data(), roiPixels.size());
             }
             stats[b].pixelCount = static_cast<int>(st.validCount);
-            stats[b].mean = st.mean;
-            stats[b].stddev = st.stddev;
-            stats[b].min = st.min;
-            stats[b].max = st.max;
+            if (st.validCount == 0) {
+                // All-NoData / empty ROI: zeros would read as a legitimate
+                // all-zero measurement. NaN renders as "—" in the table and
+                // is skipped by CSV consumers.
+                stats[b].mean = std::numeric_limits<double>::quiet_NaN();
+                stats[b].stddev = std::numeric_limits<double>::quiet_NaN();
+                stats[b].min = std::numeric_limits<double>::quiet_NaN();
+                stats[b].max = std::numeric_limits<double>::quiet_NaN();
+            } else {
+                stats[b].mean = st.mean;
+                stats[b].stddev = st.stddev;
+                stats[b].min = st.min;
+                stats[b].max = st.max;
+            }
         }
         GDALClose(ds);
 
@@ -357,11 +391,19 @@ void RoiStatisticsWidget::computeStatistics()
             self->m_stats = std::move(stats);
             self->m_computing = false;
             self->m_refreshBtn->setEnabled(true);
-            const int displayPixels = self->m_stats.isEmpty() ? 0 : self->m_stats[0].pixelCount;
+            // Per-band pixel counts can differ (a band whose read failed has
+            // none): summarize the widest band so one unreadable band cannot
+            // claim "no valid pixels" while another has data.
+            int displayPixels = 0;
+            for ( const auto &band : self->m_stats )
+                displayPixels = std::max( displayPixels, band.pixelCount );
             self->m_summaryLabel->setText(
-                RoiStatisticsWidget::tr("Statistics computed for %1 bands, %2 pixels")
-                    .arg(self->m_stats.size())
-                    .arg(displayPixels));
+                displayPixels > 0
+                    ? RoiStatisticsWidget::tr("Statistics computed for %1 bands, %2 pixels")
+                          .arg(self->m_stats.size())
+                          .arg(displayPixels)
+                    : RoiStatisticsWidget::tr("Computed %1 bands — no valid pixels in the ROI (all NoData or empty)")
+                          .arg(self->m_stats.size()));
             self->updateTable();
             SICNU_LOG_INFO(SicnuLogTags::Widgets,
                            QString("ROI statistics computed: %1 bands, %2 pixels")
@@ -373,13 +415,19 @@ void RoiStatisticsWidget::computeStatistics()
 
 void RoiStatisticsWidget::updateTable()
 {
+    // NaN stats (all-NoData / empty ROI) must not render as "0.00" — that
+    // reads as a real measurement of zero. "—" says "no value".
+    const auto statText = [](double v, int precision) {
+        return std::isfinite(v) ? QString::number(v, 'f', precision)
+                                : QStringLiteral("—");
+    };
     m_statsTable->setRowCount(m_stats.size());
     for (int i = 0; i < m_stats.size(); ++i) {
         m_statsTable->setItem(i, 0, new QTableWidgetItem(tr("Band %1").arg(i + 1)));
-        m_statsTable->setItem(i, 1, new QTableWidgetItem(QString::number(m_stats[i].min, 'f', 2)));
-        m_statsTable->setItem(i, 2, new QTableWidgetItem(QString::number(m_stats[i].max, 'f', 2)));
-        m_statsTable->setItem(i, 3, new QTableWidgetItem(QString::number(m_stats[i].mean, 'f', 2)));
-        m_statsTable->setItem(i, 4, new QTableWidgetItem(QString::number(m_stats[i].stddev, 'f', 4)));
+        m_statsTable->setItem(i, 1, new QTableWidgetItem(statText(m_stats[i].min, 2)));
+        m_statsTable->setItem(i, 2, new QTableWidgetItem(statText(m_stats[i].max, 2)));
+        m_statsTable->setItem(i, 3, new QTableWidgetItem(statText(m_stats[i].mean, 2)));
+        m_statsTable->setItem(i, 4, new QTableWidgetItem(statText(m_stats[i].stddev, 4)));
         m_statsTable->setItem(i, 5, new QTableWidgetItem(QString::number(m_stats[i].pixelCount)));
     }
 }
