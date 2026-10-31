@@ -131,6 +131,13 @@ struct EvidenceInspection
 EvidenceInspection inspectVerificationEvidence( const std::string &outputPath,
                                                  const std::string &runId );
 
+/// Type-gated core of inspectVerificationEvidence (throws Json::Exception
+/// only via jsoncpp internals — the public wrapper converts that into
+/// EvidenceState::Corrupt). Split out so the catch-all stays auditable.
+EvidenceInspection inspectVerificationFields( const Json::Value &doc,
+                                              const std::string &outputPath,
+                                              const std::string &runId );
+
 } // namespace evidence
 
 } // namespace sicnu::agent::harness

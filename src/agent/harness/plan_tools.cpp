@@ -1486,8 +1486,14 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
         evidenceEntry["verification_sidecar"] = path + ".verification.json";
         // Same key shape as the other branches so consumers that read
         // .asString() on these keys never see an absent-key throw (R1 P3-2).
-        evidenceEntry["provenance_sidecar"] = Json::Value();
-        evidenceEntry["uncertainty_declared"] = false;
+        // The sidecars themselves are probed (read-only) so a run whose
+        // provenance/uncertainty records survived still reports them (R2 P3).
+        evidenceEntry["provenance_sidecar"] =
+          QFileInfo::exists( QString::fromStdString( path + ".provenance.json" ) )
+            ? Json::Value( path + ".provenance.json" )
+            : Json::Value();
+        evidenceEntry["uncertainty_declared"] =
+          QFileInfo::exists( QString::fromStdString( path + ".uncertainty.json" ) );
         evidenceEntry["verification_evidence_integrity"] = "corrupt";
         evidenceEntry["note"] =
           "persisted verification evidence for this run is unreadable; the "

@@ -79,24 +79,34 @@ TEST_CASE( "F2: no capability sidecar falls through to the unknown-group io defa
     const auto entries = dir.entryList( { "*.json" }, QDir::Files );
 
     std::vector<std::string> silentlyIo;
+    std::size_t skipped = 0;
     for ( const QString &entry : entries )
     {
         QFile file( dir.filePath( entry ) );
         if ( !file.open( QIODevice::ReadOnly ) )
+        {
+            ++skipped;
             continue;
+        }
         const QByteArray raw = file.readAll();
         Json::Value doc;
         Json::CharReaderBuilder builder;
         std::string errors;
         std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
         if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &doc, &errors ) )
+        {
+            ++skipped;
             continue;
+        }
 
         const std::string id = doc.get( "id", "" ).asString();
         const std::string group =
           doc.get( "capability", Json::Value() ).get( "operator_group", "" ).asString();
         if ( id.empty() || group.empty() )
+        {
+            ++skipped;
             continue;
+        }
         // "io" is a legitimate resolution only for the data-formats group;
         // every other "io" is the unknown-group default — silent
         // misclassification.
@@ -104,6 +114,7 @@ TEST_CASE( "F2: no capability sidecar falls through to the unknown-group io defa
             silentlyIo.push_back( id + " (group " + group + ")" );
     }
 
+    INFO( "unreadable/unattributable sidecars skipped: " << skipped );
     INFO( "silently-io operators: "
           << [&] {
                    std::string joined;

@@ -311,6 +311,45 @@ TEST_CASE( "A2c: a run-less harness provenance envelope is never replaced",
     CHECK( readRawFile( sidecar ) == noRun );
 }
 
+TEST_CASE( "A3c: a type-confused verification sidecar fails closed, never throws",
+           "[harness][r26][evidence]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string raster =
+      writeTinyRaster( dir.filePath( QStringLiteral( "a3c.tif" ) ) );
+    REQUIRE( QFileInfo::exists( QString::fromStdString( raster ) ) );
+    const std::string sidecar = raster + ".verification.json";
+
+    const auto run = completedRun( "run-a3c", raster );
+    const Json::Value firstPoll = runResultDocument( run, nullptr, true );
+    REQUIRE( firstPoll["status"].asString() == "completed" );
+
+    SECTION( "run_id of the wrong type" )
+    {
+        // Parseable JSON, wrong types — jsoncpp's asString()/nested get()
+        // would throw on these; the inspector must classify, not escape.
+        const std::string wrongType = R"({"schema_version":"1.0",)"
+                                      R"("kind":"verification_evidence","run":"oops"})";
+        REQUIRE( writeFileRaw( sidecar, wrongType ) );
+        const Json::Value secondPoll = runResultDocument( run, nullptr, true );
+        CHECK( secondPoll["status"].asString() == "failed" );
+        CHECK( readRawFile( sidecar ) == wrongType );
+    }
+
+    SECTION( "checks entries with wrong-typed fields" )
+    {
+        const std::string wrongType = R"({"schema_version":"1.0",)"
+                                      R"("kind":"verification_evidence","run":{"run_id":"run-a3c"},)"
+                                      R"("verification":{"verdict":"PASS","checks":[)"
+                                      R"({"check":"x","passed":"true"}]}})";
+        REQUIRE( writeFileRaw( sidecar, wrongType ) );
+        const Json::Value secondPoll = runResultDocument( run, nullptr, true );
+        CHECK( secondPoll["status"].asString() == "failed" );
+        CHECK( readRawFile( sidecar ) == wrongType );
+    }
+}
+
 TEST_CASE( "B: workflow_session delete failures are typed failures on the tool surface",
            "[harness][r26][session]" )
 {

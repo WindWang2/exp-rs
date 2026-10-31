@@ -140,14 +140,19 @@ bool provenanceIsStaleHarnessEnvelope( const std::string &sidecarPath,
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &doc, &errors ) )
     return false; // unknown owner — the engine's lane, never overwrite
-  if ( doc.get( "kind", "" ).asString() != "harness_provenance" )
+  // Type-gated like the verification inspector: a wrong-typed run block
+  // must not throw past the caller (R2).
+  if ( !doc.isObject() || !doc.isMember( "kind" ) || !doc[ "kind" ].isString() )
+    return false;
+  if ( doc[ "kind" ].asString() != "harness_provenance" )
     return false; // engine DerivationRecord shape: engine provenance wins
+  if ( !doc.isMember( "run" ) || !doc[ "run" ].isObject()
+       || !doc[ "run" ].isMember( "run_id" ) || !doc[ "run" ][ "run_id" ].isString() )
+    return false; // no attributable run — never overwrite
   // runIdentity carries run_id at its top level (see runIdentityFor); the
   // sidecar nests that same object under "run".
   const std::string currentRun = runIdentity.get( "run_id", "" ).asString();
-  const std::string recordedRun = doc.get( "run", Json::Value() )
-                                    .get( "run_id", "" )
-                                    .asString();
+  const std::string recordedRun = doc[ "run" ][ "run_id" ].asString();
   // A harness envelope whose run block is missing or malformed names no
   // run at all: it cannot be attributed to a stale previous run, so the
   // never-overwrite contract applies (fail closed, R1).
@@ -268,14 +273,54 @@ EvidenceInspection inspectVerificationEvidence( const std::string &outputPath,
     inspection.reason = "unparseable verification sidecar: " + errors;
     return inspection;
   }
-  if ( doc.get( "kind", "" ).asString() != "verification_evidence" )
+  // R2: a legally-parsed sidecar can still carry wrong TYPES (bitrot, hand
+  // edits). jsoncpp's asString()/asBool() and nested get() throw on those,
+  // which would escape both consumers as an opaque error instead of the
+  // typed integrity failure — type-gate every read and keep a catch-all so
+  // the Corrupt classification is the load-bearing wall, never an exception.
+  try
+  {
+    return inspectVerificationFields( doc, outputPath, runId );
+  }
+  catch ( const Json::Exception &exception )
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = std::string( "malformed verification sidecar: " ) + exception.what();
+    return inspection;
+  }
+}
+
+EvidenceInspection inspectVerificationFields( const Json::Value &doc,
+                                              const std::string &outputPath,
+                                              const std::string &runId )
+{
+  EvidenceInspection inspection;
+  if ( !doc.isObject() )
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "sidecar document is not an object";
+    return inspection;
+  }
+  if ( !doc.isMember( "kind" ) || !doc[ "kind" ].isString()
+       || doc[ "kind" ].asString() != "verification_evidence" )
   {
     inspection.state = EvidenceState::Corrupt;
     inspection.reason = "sidecar kind is not verification_evidence";
     return inspection;
   }
-  const std::string recordedRun =
-    doc.get( "run", Json::Value() ).get( "run_id", "" ).asString();
+  if ( !doc.isMember( "run" ) || !doc[ "run" ].isObject() )
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "verification sidecar carries no run identity";
+    return inspection;
+  }
+  if ( !doc[ "run" ].isMember( "run_id" ) || !doc[ "run" ][ "run_id" ].isString() )
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "verification sidecar run_id is missing or not a string";
+    return inspection;
+  }
+  const std::string recordedRun = doc[ "run" ][ "run_id" ].asString();
   // R1: a verification_evidence sidecar whose run block is missing or
   // malformed names no run. Treating that as ForeignRun would recompute
   // and then overwrite an unattributable record — the exact audit-trail
@@ -301,11 +346,23 @@ EvidenceInspection inspectVerificationEvidence( const std::string &outputPath,
     inspection.reason = "verification record is not an object";
     return inspection;
   }
+  if ( !record.isMember( "verdict" ) || !record[ "verdict" ].isString() )
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "verification verdict is missing or not a string";
+    return inspection;
+  }
+  if ( record.isMember( "kind" ) && !record[ "kind" ].isString() )
+  {
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "verification kind is not a string";
+    return inspection;
+  }
 
   ArtifactVerification artifact;
   artifact.path = outputPath;
-  artifact.kind = record.get( "kind", "" ).asString();
-  const std::string verdict = record.get( "verdict", "" ).asString();
+  artifact.kind = record[ "kind" ].isString() ? record[ "kind" ].asString() : std::string();
+  const std::string verdict = record[ "verdict" ].asString();
   if ( verdict == "PASS" )
     artifact.verdict = Verdict::Pass;
   else if ( verdict == "PASS_WITH_WARNINGS" )
@@ -319,20 +376,31 @@ EvidenceInspection inspectVerificationEvidence( const std::string &outputPath,
     return inspection;
   }
 
-  for ( const Json::Value &entry : record.get( "checks", Json::Value( Json::arrayValue ) ) )
+  const Json::Value &checks = record.get( "checks", Json::Value( Json::arrayValue ) );
+  if ( !checks.isArray() )
   {
-    if ( !entry.isObject() || !entry.isMember( "check" ) || !entry.isMember( "passed" ) )
+    inspection.state = EvidenceState::Corrupt;
+    inspection.reason = "verification checks are not an array";
+    return inspection;
+  }
+  for ( const Json::Value &entry : checks )
+  {
+    if ( !entry.isObject() || !entry.isMember( "check" ) || !entry[ "check" ].isString()
+         || !entry.isMember( "passed" ) || !entry[ "passed" ].isBool() )
     {
       inspection.state = EvidenceState::Corrupt;
       inspection.reason = "malformed verification check entry";
       return inspection;
     }
     VerificationCheck check;
-    check.check = entry.get( "check", "" ).asString();
-    check.passed = entry.get( "passed", false ).asBool();
-    check.severity = entry.get( "severity", check.passed ? "info" : "error" ).asString();
-    check.code = entry.get( "code", "" ).asString();
-    check.details = entry.get( "details", Json::Value( Json::objectValue ) );
+    check.check = entry[ "check" ].asString();
+    check.passed = entry[ "passed" ].asBool();
+    check.severity = entry[ "severity" ].isString()
+                       ? entry[ "severity" ].asString()
+                       : std::string( check.passed ? "info" : "error" );
+    check.code = entry[ "code" ].isString() ? entry[ "code" ].asString() : std::string();
+    check.details = entry[ "details" ].isObject() ? entry[ "details" ]
+                                                  : Json::Value( Json::objectValue );
     artifact.checks.push_back( std::move( check ) );
   }
   inspection.state = EvidenceState::Reusable;

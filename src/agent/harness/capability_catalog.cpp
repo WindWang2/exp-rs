@@ -165,11 +165,14 @@ std::string familyForGroup( const std::string &group )
   return it == kGroupFamily.end() ? std::string( "io" ) : it->second;
 }
 
-/// Authored id → family map: complete over the rs: operators. R26: the
-/// guard is tests/test_r26_capability_family_drift.cpp — every planner
-/// slotTable/contracts operator must appear here or carry a group the
-/// kGroupFamily table maps; otherwise canonicalFamily silently defaults to
-/// "io". One line per operator keeps review diffs readable.
+/// Authored id → family map: operators whose family cannot be derived
+/// from their operator group (or whose group default would be wrong).
+/// R26: the guard is tests/test_r26_capability_family_drift.cpp — an
+/// operator absent here AND carrying a group the kGroupFamily table does
+/// not know would make canonicalFamily silently default to "io"; a wrong
+/// known-group default is caught by validateEntry (canonical == sidecar
+/// family) in test_capability_knowledge. One line per operator keeps
+/// review diffs readable.
 const std::map<std::string, std::string> &familyMap()
 {
   static const std::map<std::string, std::string> kMap = {
