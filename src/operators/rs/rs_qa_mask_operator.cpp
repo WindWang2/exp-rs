@@ -17,6 +17,7 @@
 #include <gdal.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -38,6 +39,16 @@ const std::vector<std::string>& qaMasks() {
     static const std::vector<std::string> s = {
         "cloud_and_shadow", "cloud", "cloud_shadow", "snow", "water", "all"
     };
+    return s;
+}
+
+const std::vector<std::string>& cloudConfidences() {
+    // R25-A FEAT-2: how aggressively ambiguous cloud classes screen.
+    // standard (default, the historical behaviour) masks every cloud-family
+    // class; relaxed drops the AMBIGUOUS members — Sentinel-2 SCL class 8
+    // (medium-probability cloud) and the Landsat dilated-cloud bit — for
+    // studies that prefer data coverage over cloud-leak safety.
+    static const std::vector<std::string> s = { "standard", "relaxed" };
     return s;
 }
 
@@ -84,14 +95,17 @@ std::string resolveSource(const std::string& requested, const QString& bandName,
 /// Builds the mask rule for the requested mask selection and source.
 /// Returns false for a combination the source does not support.
 bool buildMaskRule(const std::string& source, const std::string& maskSelection,
+                   const std::string& cloudConfidence,
                    uint32_t* landsatFlags, bool sclClasses[16])
 {
     for (int i = 0; i < 16; ++i)
         sclClasses[i] = false;
 
     if (source == "landsat_qa_pixel") {
+        const bool relaxed = cloudConfidence == "relaxed";
         const uint32_t cloud = QaMask::LandsatMaskCloud
-                               | QaMask::LandsatMaskDilatedCloud
+                               | (relaxed ? QaMask::LandsatMaskNone
+                                          : QaMask::LandsatMaskDilatedCloud)
                                | QaMask::LandsatMaskCirrus;
         if (maskSelection == "cloud")
             *landsatFlags = cloud;
@@ -114,13 +128,23 @@ bool buildMaskRule(const std::string& source, const std::string& maskSelection,
     }
 
     if (source == "sentinel2_scl") {
+        const bool relaxed = cloudConfidence == "relaxed";
         auto select = [&](std::initializer_list<int> classes) {
             for (int c : classes)
                 sclClasses[c] = true;
         };
+        // cloud family: relaxed drops SCL 8 (medium probability) — the
+        // ambiguous member (R25-A FEAT-2).
+        const int cloudMedium =
+            relaxed ? -1 : static_cast<int>( QaMask::SclCloudMediumProbability );
+        const auto withCloud = [&](std::initializer_list<int> rest) {
+            select(rest);
+            if (cloudMedium >= 0)
+                sclClasses[cloudMedium] = true;
+            select({QaMask::SclCloudHighProbability, QaMask::SclThinCirrus});
+        };
         if (maskSelection == "cloud")
-            select({QaMask::SclCloudMediumProbability, QaMask::SclCloudHighProbability,
-                    QaMask::SclThinCirrus});
+            withCloud({});
         else if (maskSelection == "cloud_shadow")
             select({QaMask::SclCloudShadow});
         else if (maskSelection == "snow")
@@ -128,15 +152,12 @@ bool buildMaskRule(const std::string& source, const std::string& maskSelection,
         else if (maskSelection == "water")
             select({QaMask::SclWater});
         else if (maskSelection == "cloud_and_shadow")
-            select({QaMask::SclCloudShadow, QaMask::SclCloudMediumProbability,
-                    QaMask::SclCloudHighProbability, QaMask::SclThinCirrus});
+            withCloud({QaMask::SclCloudShadow});
         else if (maskSelection == "all")
             // F-OPS-3: SCL 0 = NO_DATA — an unreadable classification word
             // must fail closed like every other unreadable QA sample.
-            select({QaMask::SclNoData, QaMask::SclSaturated, QaMask::SclDarkFeatures,
-                    QaMask::SclCloudShadow, QaMask::SclCloudMediumProbability,
-                    QaMask::SclCloudHighProbability, QaMask::SclThinCirrus,
-                    QaMask::SclSnow});
+            withCloud({QaMask::SclNoData, QaMask::SclSaturated, QaMask::SclDarkFeatures,
+                       QaMask::SclCloudShadow, QaMask::SclSnow});
         else
             return false;
         return true;
@@ -155,6 +176,12 @@ Json::Value RsQaMaskOperator::schema() const {
     props["qa_band"] = makeIntegerParam("qa_band", "1-based QA band (optional; when omitted, resolved from the input's product band roles)", 0);
     props["source"] = makeEnumParam("source", "QA source interpretation", qaSources(), "auto");
     props["mask"] = makeEnumParam("mask", "Classes to mask out", qaMasks(), "cloud_and_shadow");
+    props["cloud_confidence"] = makeEnumParam(
+        "cloud_confidence",
+        "Cloud screening aggressiveness: standard masks every cloud-family class "
+        "(default); relaxed drops the ambiguous members (SCL medium-probability "
+        "cloud, Landsat dilated cloud) for data-hungry studies",
+        cloudConfidences(), "standard");
     props["bits"] = makeIntegerParam("bits", "Bit flags for generic_bitmask source", 0);
 
     Json::Value outputs(Json::objectValue);
@@ -164,6 +191,10 @@ Json::Value RsQaMaskOperator::schema() const {
     outputs["maskedPixels"] = makeIntegerParam("maskedPixels", "Masked pixel count", 0);
     outputs["totalPixels"] = makeIntegerParam("totalPixels", "Evaluated pixel count", 0);
     outputs["maskedPercent"] = makeNumberParam("maskedPercent", "Masked pixel percentage", 0.0);
+    outputs["cloudConfidence"] = makeStringParam("cloudConfidence", "Applied cloud-confidence mode", "");
+    outputs["sclClassHistogram"] = makeStringParam(
+        "sclClassHistogram",
+        "sentinel2_scl only: class -> readable-sample count (QA quality summary)", "");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"input", "output"});
@@ -218,6 +249,8 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     const int qaBandExplicit = getInt(params, "qa_band", 0);
     const std::string sourceRequested = getEnum(params, "source", qaSources(), "auto");
     const std::string maskSelection = getEnum(params, "mask", qaMasks(), "cloud_and_shadow");
+    const std::string cloudConfidence = getEnum(params, "cloud_confidence", cloudConfidences(),
+                                                "standard");
     const uint16_t genericBits = static_cast<uint16_t>(getInt(params, "bits", 0));
 
     ensureGdalInit();
@@ -251,7 +284,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
 
     uint32_t landsatFlags = 0;
     bool sclClasses[16] = {};
-    if (!buildMaskRule(source, maskSelection, &landsatFlags, sclClasses)) {
+    if (!buildMaskRule(source, maskSelection, cloudConfidence, &landsatFlags, sclClasses)) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Mask selection '" + maskSelection +
                                   "' is not supported for source '" + source + "'");
@@ -282,6 +315,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     std::vector<uint8_t> scl(blockSize);
     std::vector<uint8_t> unknown(blockSize);
     size_t irregular = 0;
+    std::array<uint64_t, 16> sclHistogram = {};
     // F-OPS-3: an unreadable QA sample is a FAILED quality observation, not a
     // trusted-clear one. The sample is flagged `unknown` and the mask kernel
     // output is OR-ed with the flag below, so NaN / negative sentinels /
@@ -325,6 +359,8 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
                            QString::fromStdString(source));
     output.setMetadataItem(QStringLiteral("SICNU_QA_MASK_SELECTION"),
                            QString::fromStdString(maskSelection));
+    output.setMetadataItem(QStringLiteral("SICNU_QA_CLOUD_CONFIDENCE"),
+                           QString::fromStdString(cloudConfidence));
 
     const int totalBlocks = (height + blockRows - 1) / blockRows;
     size_t masked = 0;
@@ -427,6 +463,13 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
                     unknown[i] = 1;
                 scl[i] = static_cast<uint8_t>(values[i]);
             }
+            // QA quality summary (R25-A FEAT-2): the class mix explains a
+            // maskedPercent far better than the log line — one histogram for
+            // the whole scene, readable samples only (unreadable ones are
+            // already counted as `irregular`).
+            for (size_t i = 0; i < n; ++i)
+                if (!unknown[i])
+                    ++sclHistogram[scl[i]];
             QaMask::sclMask(scl.data(), mask.data(), n, sclClasses);
         } else if (source == "generic_bitmask") {
             QaMask::genericBitmaskMask(values.data(), mask.data(), n, genericBits);
@@ -476,6 +519,17 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     result["output"] = outputPath;
     result["source"] = source;
     result["maskClasses"] = maskSelection;
+    result["cloudConfidence"] = cloudConfidence;
+    if (source == "sentinel2_scl") {
+        Json::Value hist(Json::objectValue);
+        // 0..15: the readability gate admits the extended SCL domain, so
+        // classes 12..15 must appear in the summary rather than being
+        // counted and silently dropped (R1-10).
+        for (int c = 0; c < 16; ++c)
+            if (sclHistogram[c] > 0)
+                hist[std::to_string(c)] = Json::Value::UInt64(sclHistogram[c]);
+        result["sclClassHistogram"] = hist;
+    }
     result["maskedPixels"] = static_cast<Json::UInt64>(masked);
     result["unreadableSamples"] = static_cast<Json::UInt64>(irregular);
     result["totalPixels"] = static_cast<Json::UInt64>(pixelCount);

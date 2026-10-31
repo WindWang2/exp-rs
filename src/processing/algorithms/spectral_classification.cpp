@@ -55,14 +55,27 @@ double spectralDivergence( const float *t, const float *r, size_t bands, float n
         return std::numeric_limits<double>::quiet_NaN();
 
     // Symmetric KL divergence over the normalized (probability) spectra.
+    // Zero bands are treated as "no observation" (their terms contribute 0,
+    // the pinned partial-overlap contract) — but when the supports are
+    // fully DISJOINT there is no shared observation at all and the
+    // divergence is +inf, the information-theoretic limit. The pre-R25-A
+    // loop skipped every term and returned 0.0, the value that means
+    // "spectrally identical": a disjoint-support spectrum tied with real
+    // matches in sidClassify and won by lowest reference index (R25-A DEF-5).
     double sid = 0.0;
+    bool anyShared = false;
     for ( size_t b = 0; b < bands; ++b )
     {
         const double p = static_cast<double>( t[b] ) / sumT;
         const double q = static_cast<double>( r[b] ) / sumR;
         if ( p > 0.0 && q > 0.0 )
+        {
+            anyShared = true;
             sid += p * std::log( p / q ) + q * std::log( q / p );
+        }
     }
+    if ( !anyShared )
+        return std::numeric_limits<double>::infinity();
     return sid;
 }
 
@@ -145,16 +158,23 @@ bool sidClassify( const float *pixels, size_t count, int bands,
                 const double *logQ = &refLogProb[static_cast<size_t>( c ) * bands];
 
                 double div = 0.0;
+                bool anyShared = false;
                 for ( int b = 0; b < bands; ++b )
                 {
                     const double pb = pProb[b];
                     const double qb = q[b];
                     if ( pb > 0.0 && qb > 0.0 )
                     {
+                        anyShared = true;
                         const double diffLog = pLog[b] - logQ[b];
                         div += ( pb - qb ) * diffLog;
                     }
                 }
+                // Fully disjoint supports: maximal divergence (never a
+                // candidate for best match), same ruling as
+                // spectralDivergence (R25-A DEF-5).
+                if ( !anyShared )
+                    div = std::numeric_limits<double>::infinity();
                 if ( div < bestDiv )
                 {
                     bestDiv = div;

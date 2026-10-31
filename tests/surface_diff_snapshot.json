@@ -8461,6 +8461,17 @@
             "description" : "Bit flags for generic_bitmask source",
             "type" : "integer"
           },
+          "cloud_confidence" : 
+          {
+            "default" : "standard",
+            "description" : "Cloud screening aggressiveness: standard masks every cloud-family class (default); relaxed drops the ambiguous members (SCL medium-probability cloud, Landsat dilated cloud) for data-hungry studies",
+            "enum" : 
+            [
+              "standard",
+              "relaxed"
+            ],
+            "type" : "string"
+          },
           "input" : 
           {
             "description" : "Raster containing the QA band",
@@ -10638,13 +10649,13 @@
           "headingDeg" : 
           {
             "default" : 0.0,
-            "description" : "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785)",
+            "description" : "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785). Resolved parameter > declared SICNU_SAR_HEADING_DEG on the input > 0.0 default",
             "type" : "number"
           },
           "incidenceDeg" : 
           {
             "default" : 30.0,
-            "description" : "Scene incidence angle \u03b80 in degrees (near-range center)",
+            "description" : "Scene incidence angle \u03b80 in degrees (near-range center). Resolved parameter > declared SICNU_SAR_INCIDENCE_DEG on the input > 30.0 default with a warning",
             "type" : "number"
           },
           "input" : 
@@ -10742,13 +10753,13 @@
           "headingDeg" : 
           {
             "default" : 0.0,
-            "description" : "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785)",
+            "description" : "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785). Resolved parameter > declared SICNU_SAR_HEADING_DEG on the input > 0.0 default",
             "type" : "number"
           },
           "incidenceDeg" : 
           {
             "default" : 30.0,
-            "description" : "Scene incidence angle \u03b80 in degrees (near-range center)",
+            "description" : "Scene incidence angle \u03b80 in degrees (near-range center). Resolved parameter > declared SICNU_SAR_INCIDENCE_DEG on the input > 30.0 default with a warning",
             "type" : "number"
           },
           "input" : 
@@ -15122,8 +15133,7 @@
           },
           "latitude" : 
           {
-            "default" : 40.0,
-            "description" : "Latitude in degrees for generated tracks",
+            "description" : "Latitude in degrees for generated tracks. Derived from the raster CRS (centre transformed to WGS84) when omitted; required explicitly when the DEM has no CRS. Ignored when sun_track is given",
             "type" : "number"
           },
           "nodata" : 

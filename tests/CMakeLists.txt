@@ -17277,6 +17277,11 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# ── R25-A: science algorithms & processing chains (this track) ──
+# Append-only registration block (.planning/zcode-r25-A). DEF-1: terrain_solar
+# latitude provenance (CRS-derived / explicit / fail-closed).
+add_executable(test_r25_a_terrain_solar_latitude test_r25_a_terrain_solar_latitude.cpp)
+target_link_libraries(test_r25_a_terrain_solar_latitude PRIVATE
 # BEGIN R25-C
 # R25-C (Pi/MCP harness, workflow execution & plugin tool contracts):
 # capability-honesty entry projection (prerequisites/limitations/guarantees).
@@ -17309,6 +17314,9 @@ target_link_libraries(test_r25_b_inference_plan PRIVATE
   sicnu_processing
   sicnu_task_center
   sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_terrain_solar_latitude)
+target_include_directories(test_r25_a_terrain_solar_latitude PRIVATE
   ${OpenCV_LIBS}
 )
 sicnu_link_jsoncpp(test_r25_b_inference_plan)
@@ -17317,6 +17325,21 @@ target_include_directories(test_r25_b_inference_plan PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
   ${CMAKE_BINARY_DIR}
 )
+sicnu_discover_tests(test_r25_a_terrain_solar_latitude TEST_PREFIX test_r25_a_terrain_solar_latitude::)
+# --- end R25-A terrain-solar-latitude registration ---
+
+# ── R25-A DEF-2: exact D8 flow accumulation counts (Float64 product) ──
+add_executable(test_r25_a_terrain_flow_precision test_r25_a_terrain_flow_precision.cpp)
+target_link_libraries(test_r25_a_terrain_flow_precision PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_terrain_flow_precision)
+target_include_directories(test_r25_a_terrain_flow_precision PRIVATE
 endif()
 # --- end R25-B inference-plan registration ---
 # --- R25-B feature 3: typed replay deviation entries (schema v2) ------------
@@ -17356,6 +17379,122 @@ target_include_directories(test_r25_b_end_to_end PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
   ${CMAKE_BINARY_DIR}
 )
+sicnu_discover_tests(test_r25_a_terrain_flow_precision TEST_PREFIX test_r25_a_terrain_flow_precision::)
+# --- end R25-A terrain-flow-precision registration ---
+
+# ── R25-A DEF-4/DEF-5: wavelength-unit honouring + SID disjoint supports ──
+add_executable(test_r25_a_spectral_guards test_r25_a_spectral_guards.cpp)
+target_link_libraries(test_r25_a_spectral_guards PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_spectral_guards)
+target_include_directories(test_r25_a_spectral_guards PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_spectral_guards TEST_PREFIX test_r25_a_spectral_guards::)
+# --- end R25-A spectral-guards registration ---
+
+# ── R25-A FEAT-1: SAR terrain geometry param > metadata > default chain ──
+add_executable(test_r25_a_sar_geometry_fallback test_r25_a_sar_geometry_fallback.cpp)
+target_link_libraries(test_r25_a_sar_geometry_fallback PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_sar_geometry_fallback)
+target_include_directories(test_r25_a_sar_geometry_fallback PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_sar_geometry_fallback TEST_PREFIX test_r25_a_sar_geometry_fallback::)
+# --- end R25-A sar-geometry-fallback registration ---
+
+# ── R25-A FEAT-2: qa_mask cloud_confidence + SCL class histogram ──
+add_executable(test_r25_a_qa_confidence test_r25_a_qa_confidence.cpp)
+target_link_libraries(test_r25_a_qa_confidence PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_qa_confidence)
+target_include_directories(test_r25_a_qa_confidence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_qa_confidence TEST_PREFIX test_r25_a_qa_confidence::)
+# --- end R25-A qa-confidence registration ---
+
+# ── R25-A FEAT-3: post-classification change class-area table ──
+add_executable(test_r25_a_change_area_table test_r25_a_change_area_table.cpp)
+target_link_libraries(test_r25_a_change_area_table PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_change_area_table)
+target_include_directories(test_r25_a_change_area_table PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_change_area_table TEST_PREFIX test_r25_a_change_area_table::)
+# --- end R25-A change-area-table registration ---
+
+# ── R25-A W7: optical preprocessing chain E2E (qa_mask -> apply_mask -> NDVI) ──
+add_executable(test_r25_a_optical_chain_e2e test_r25_a_optical_chain_e2e.cpp)
+target_link_libraries(test_r25_a_optical_chain_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_optical_chain_e2e)
+target_include_directories(test_r25_a_optical_chain_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_optical_chain_e2e TEST_PREFIX test_r25_a_optical_chain_e2e::)
+# --- end R25-A optical-chain-e2e registration ---
+
+# ── R25-A W5: performance baselines (report-only, no wall-clock gate) ──
+add_executable(test_r25_a_perf_baseline test_r25_a_perf_baseline.cpp)
+target_link_libraries(test_r25_a_perf_baseline PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_perf_baseline)
+target_include_directories(test_r25_a_perf_baseline PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_perf_baseline TEST_PREFIX test_r25_a_perf_baseline:: TIMEOUT 900)
+# --- end R25-A perf-baseline registration ---
 endif()
 # --- end R25-B end-to-end registration ---
 # END R25-B
