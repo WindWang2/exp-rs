@@ -18,12 +18,40 @@
 #include "experiment_types.h"
 
 #include <QJsonObject>
+#include <QStringList>
+#include <QVector>
 
 namespace sicnu::experiment
 {
 
-/// Layout version of deviation reports.
-inline constexpr int kReplayDeviationSchemaVersion = 1;
+/// Layout version of deviation reports. v2 adds deviation_details[] (typed
+/// entries with domain attribution + remediation); every v1 field keeps its
+/// name and semantics, and the verdict logic is untouched.
+inline constexpr int kReplayDeviationSchemaVersion = 2;
+
+/// Which side of the experiment a deviation belongs to (R25-B): the data
+/// pins, the model pins, the experiment's own configuration, or the
+/// environment record. One vocabulary for consumers to route remediation.
+enum class ReplayDeviationDomain
+{
+    Data,
+    Model,
+    Experiment,
+    Environment
+};
+
+/// One typed deviation (v2). Carries everything the flat v1 string did,
+/// plus the domain attribution and an actionable remediation.
+struct ReplayDeviationEntry
+{
+    QString dimension;      ///< pin/diagnostic dimension ("model", "dataset", ...)
+    ReplayDeviationDomain domain = ReplayDeviationDomain::Experiment;
+    bool identityPin = false; ///< true when this dimension decides the verdict
+    QString detail;         ///< what differs (same text as the v1 list)
+    QString remediation;    ///< actionable next step; never empty
+
+    QJsonObject toJson() const;
+};
 
 struct ReplayDeviationReport
 {
@@ -48,6 +76,9 @@ struct ReplayDeviationReport
     QJsonObject environmentDrift;
     /// Human-readable deviation list (one entry per deviation).
     QStringList deviations;
+    /// Typed deviation entries (schema v2): one per string above, with
+    /// domain attribution, identity-pin flag and remediation.
+    QVector<ReplayDeviationEntry> deviationDetails;
     /// Typed evidence gaps preventing a stronger verdict.
     QStringList evidenceGaps;
 

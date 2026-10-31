@@ -11,6 +11,7 @@
 #include <QTextStream>
 
 #include <cmath>
+#include <optional>
 
 namespace sicnu::sar
 {
@@ -38,6 +39,18 @@ QString datasetMeta( const GdalDatasetWrapper &ds, const char *key )
   const char *value =
     GDALGetMetadataItem( static_cast<GDALDatasetH>( ds.dataset() ), key, nullptr );
   return value ? QString::fromUtf8( value ) : QString();
+}
+
+std::optional<double> datasetMetaDouble( const GdalDatasetWrapper &ds, const char *key )
+{
+  const QString raw = datasetMeta( ds, key ).trimmed();
+  if ( raw.isEmpty() )
+    return std::nullopt;
+  bool ok = false;
+  const double value = raw.toDouble( &ok );
+  if ( !ok || !std::isfinite( value ) )
+    return std::nullopt;
+  return value;
 }
 
 double demUnitScaleFromName( const QString &declaredUnit, QString *appliedUnit )

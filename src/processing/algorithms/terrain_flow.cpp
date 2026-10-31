@@ -41,6 +41,32 @@ inline bool isCastableFlowCode( float d )
     return std::isfinite( d ) && d >= 0.0f && d <= 128.0f;
 }
 
+// True when the direction code itself is unusable for routing (masked,
+// sentinel, or non-code value).
+inline bool isDirNoDataValue( float d )
+{
+    if ( !isCastableFlowCode( d ) )
+        return true;
+    const int code = static_cast<int>( d );
+    if ( static_cast<float>( code ) != d )
+        return true;
+    switch ( code )
+    {
+        case 0:
+        case 1:
+        case 2:
+        case 4:
+        case 8:
+        case 16:
+        case 32:
+        case 64:
+        case 128:
+            return false;
+        default:
+            return true;
+    }
+}
+
 } // namespace
 
 bool fillDepressions( const float *dem, float *filled, int width, int height, float nodata )
@@ -168,38 +194,46 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
 {
     if ( !dir || !acc || width <= 0 || height <= 0 )
         return false;
+    std::vector<std::uint64_t> counts;
+    if ( !flowAccumulationCounts( dir, width, height, filled, nodata, &counts ) )
+        return false;
     const size_t n = static_cast<size_t>( width ) * height;
-
     const bool maskNodata = filled != nullptr;
-    const auto isDirNoData = []( float d ) {
-        // Magnitude gate BEFORE the cast — an out-of-range float→int cast is
-        // UB, and Float32 sentinels (±3.4e38, ±Inf, NaN) arrive here from
-        // arbitrary dir buffers (#853).
-        if ( !isCastableFlowCode( d ) )
-            return true;
-        const int code = static_cast<int>( d );
-        if ( static_cast<float>( code ) != d )
-            return true;
-        switch ( code )
-        {
-            case 0:
-            case 1:
-            case 2:
-            case 4:
-            case 8:
-            case 16:
-            case 32:
-            case 64:
-            case 128:
-                return false;
-            default:
-                return true;
-        }
-    };
     const auto isNodata = [&]( size_t i ) {
         if ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
             return true;
-        return isDirNoData( dir[i] );
+        return isDirNoDataValue( dir[i] );
+    };
+    for ( size_t i = 0; i < n; ++i )
+    {
+        if ( isNodata( i ) )
+        {
+            // Sentinel contract (#783): masked cells carry the declared
+            // sentinel (or their own dir sentinel when no mask was given)
+            // so the written raster marks them NoData.
+            acc[i] = ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+                         ? nodata
+                         : dir[i];
+            continue;
+        }
+        acc[i] = static_cast<float>( counts[i] );
+    }
+    return true;
+}
+
+bool flowAccumulationCounts( const float *dir, int width, int height,
+                             const float *filled, float nodata,
+                             std::vector<std::uint64_t> *counts )
+{
+    if ( !dir || !counts || width <= 0 || height <= 0 )
+        return false;
+    const size_t n = static_cast<size_t>( width ) * height;
+
+    const bool maskNodata = filled != nullptr;
+    const auto isNodata = [&]( size_t i ) {
+        if ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+            return true;
+        return isDirNoDataValue( dir[i] );
     };
 
     const auto downstreamOf = [&]( size_t i ) -> size_t {
@@ -224,15 +258,21 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
     // nor receivers, and their accumulator carries the sentinel so the
     // written GeoTIFF marks them NoData instead of a 1.0 phantom ridge
     // (#783 — ocean/masked cells used to drain nothing yet report 1.0).
+    //
+    // Exact-integer accumulation (R25-A DEF-2): the previous float32
+    // `acc[down] += acc[i]` lost count exactness once a watershed exceeded
+    // 2^24 cells (float32 cannot represent odd integers above 2^24; a
+    // 4097×4097 funnel's outlet reported 16785408 instead of 16785409),
+    // and the rounding compounded along the routing order. Counts are
+    // integers bounded by the cell count, so std::uint64_t is exact for
+    // any addressable grid.
     std::vector<int> indegree( n, 0 );
+    counts->assign( n, 0 );
     for ( size_t i = 0; i < n; ++i )
     {
         if ( isNodata( i ) )
-        {
-            acc[i] = ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) ) ? nodata : dir[i];
             continue;
-        }
-        acc[i] = 1.0f;
+        ( *counts )[i] = 1;
         const size_t down = downstreamOf( i );
         if ( down != i && !isNodata( down ) )
             ++indegree[down];
@@ -247,7 +287,7 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
         const size_t down = downstreamOf( i );
         if ( down != i && !isNodata( down ) )
         {
-            acc[down] += acc[i];
+            ( *counts )[down] += ( *counts )[i];
             if ( --indegree[down] == 0 )
                 queue.push_back( down );
         }

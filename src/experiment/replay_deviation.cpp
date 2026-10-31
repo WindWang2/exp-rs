@@ -23,8 +23,85 @@ Diagnostic deviationError( const QString &message )
                        DiagnosticSeverity::Error };
 }
 
+// --- v2: domain attribution + remediation for every deviation ---------------
+
+ReplayDeviationDomain domainOf( const QString &dimension )
+{
+    if ( dimension == QLatin1String( "dataset" ) || dimension == QLatin1String( "split" ) )
+        return ReplayDeviationDomain::Data;
+    if ( dimension == QLatin1String( "model" ) )
+        return ReplayDeviationDomain::Model;
+    if ( dimension == QLatin1String( "environment" ) )
+        return ReplayDeviationDomain::Environment;
+    // config / seed / algorithm and the artifacts / runtime diagnostics all
+    // describe the experiment's own execution record.
+    return ReplayDeviationDomain::Experiment;
+}
+
+QString remediationFor( const QString &dimension, bool identityPin )
+{
+    if ( dimension == QLatin1String( "dataset" ) )
+        return QStringLiteral(
+            "pin the original dataset version id before replaying (the replay must "
+            "read the same dataset version, not a re-imported sibling)" );
+    if ( dimension == QLatin1String( "split" ) )
+        return QStringLiteral(
+            "regenerate the split from the recorded split manifest/seed instead of "
+            "re-partitioning, so train/holdout membership is identical" );
+    if ( dimension == QLatin1String( "model" ) )
+        return QStringLiteral(
+            "resolve the same model identity@version and content digest before "
+            "replaying; a re-trained or re-serialized model is a different model" );
+    if ( dimension == QLatin1String( "algorithm" ) )
+        return QStringLiteral(
+            "run the same algorithm/operator version as the original (the revision "
+            "pin is part of the experiment identity)" );
+    if ( dimension == QLatin1String( "config" ) )
+        return QStringLiteral(
+            "diff the canonical parameter JSON of both runs and align the replay "
+            "with the recorded configuration" );
+    if ( dimension == QLatin1String( "seed" ) )
+        return QStringLiteral( "re-run with the recorded random seed" );
+    if ( dimension == QLatin1String( "environment" ) )
+        return QStringLiteral(
+            "environment drift is reported, not punished; align the drifted fields "
+            "only when the experiment declares Strict determinism" );
+    if ( dimension == QLatin1String( "artifacts" ) )
+        return QStringLiteral(
+            "output digests differ on otherwise-equal identity: compare the two "
+            "artifact sets directly (this is a record, not an identity break)" );
+    if ( dimension == QLatin1String( "runtime" ) )
+        return QStringLiteral(
+            "wall time beyond the jitter policy on otherwise-equal identity: "
+            "informational only — performance reruns are expected to drift" );
+    if ( dimension == QLatin1String( "result" ) )
+        return QStringLiteral(
+            "all identity pins are equal but the result fingerprints differ under "
+            "Strict determinism: audit threading/vendor-kernel nondeterminism or "
+            "declare the true determinism grade in the run record" );
+    return identityPin
+             ? QStringLiteral( "align this identity pin with the recorded original "
+                               "before treating the replay as the same experiment" )
+             : QStringLiteral( "review the recorded diagnostic before consuming the replay" );
+}
+
+/// Appends one deviation in BOTH forms: the exact v1 human string (kept
+/// byte-identical for existing consumers) and the typed v2 entry.
+void appendDeviation( ReplayDeviationReport &report, const QString &dimension,
+                      bool identityPin, const QString &v1String, const QString &detail )
+{
+    report.deviations.append( v1String );
+    ReplayDeviationEntry entry;
+    entry.dimension = dimension;
+    entry.domain = domainOf( dimension );
+    entry.identityPin = identityPin;
+    entry.detail = detail;
+    entry.remediation = remediationFor( dimension, identityPin );
+    report.deviationDetails.append( entry );
+}
+
 void collectEnvironmentDrift( const ExperimentRun &original, const ExperimentRun &replay,
-                              QJsonObject &drift, QStringList &deviations )
+                              QJsonObject &drift )
 {
     const QJsonObject originalFields = original.environment().redacted().toJson();
     const QJsonObject replayFields = replay.environment().redacted().toJson();
@@ -47,11 +124,42 @@ void collectEnvironmentDrift( const ExperimentRun &original, const ExperimentRun
         entry.insert( QStringLiteral( "original" ), a );
         entry.insert( QStringLiteral( "replay" ), b );
         drift.insert( name, entry );
-        deviations.append( QStringLiteral( "environment field '%1' changed" ).arg( name ) );
     }
 }
 
 } // namespace
+
+namespace
+{
+
+QString domainToString( ReplayDeviationDomain domain )
+{
+    switch ( domain )
+    {
+        case ReplayDeviationDomain::Data:
+            return QStringLiteral( "data" );
+        case ReplayDeviationDomain::Model:
+            return QStringLiteral( "model" );
+        case ReplayDeviationDomain::Experiment:
+            return QStringLiteral( "experiment" );
+        case ReplayDeviationDomain::Environment:
+            return QStringLiteral( "environment" );
+    }
+    return QStringLiteral( "experiment" );
+}
+
+} // namespace
+
+QJsonObject ReplayDeviationEntry::toJson() const
+{
+    QJsonObject json;
+    json.insert( QStringLiteral( "dimension" ), dimension );
+    json.insert( QStringLiteral( "domain" ), domainToString( domain ) );
+    json.insert( QStringLiteral( "identity_pin" ), identityPin );
+    json.insert( QStringLiteral( "detail" ), detail );
+    json.insert( QStringLiteral( "remediation" ), remediation );
+    return json;
+}
 
 QJsonObject ReplayDeviationReport::toJson() const
 {
@@ -80,6 +188,10 @@ QJsonObject ReplayDeviationReport::toJson() const
     json.insert( QStringLiteral( "environment_drift" ), environmentDrift );
     json.insert( QStringLiteral( "deviations" ),
                  QJsonArray::fromStringList( deviations ) );
+    QJsonArray details;
+    for ( const ReplayDeviationEntry &entry : deviationDetails )
+        details.append( entry.toJson() );
+    json.insert( QStringLiteral( "deviation_details" ), details );
     json.insert( QStringLiteral( "evidence_gaps" ),
                  QJsonArray::fromStringList( evidenceGaps ) );
     return json;
@@ -128,8 +240,10 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
         if ( item.differs && kIdentityDimensions.contains( item.dimension ) )
         {
             identityDiffers = true;
-            report.deviations.append(
-                QStringLiteral( "pin '%1' differs: %2" ).arg( item.dimension, item.detail ) );
+            appendDeviation(
+                report, item.dimension, true,
+                QStringLiteral( "pin '%1' differs: %2" ).arg( item.dimension, item.detail ),
+                item.detail );
         }
     }
     // Diagnostics (artifacts/runtime) still surface — as deviations of
@@ -137,9 +251,10 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
     for ( const RunDiffItem &item : comparison.dimensions )
     {
         if ( item.differs && !kIdentityDimensions.contains( item.dimension ) )
-            report.deviations.append(
-                QStringLiteral( "diagnostic '%1' differs: %2" )
-                    .arg( item.dimension, item.detail ) );
+            appendDeviation(
+                report, item.dimension, false,
+                QStringLiteral( "diagnostic '%1' differs: %2" ).arg( item.dimension, item.detail ),
+                item.detail );
     }
 
     // Evidence completeness gates the verdict strength.
@@ -149,8 +264,14 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
     if ( original->artifacts().isEmpty() || replay->artifacts().isEmpty() )
         report.evidenceGaps.append( QStringLiteral( "artifact evidence missing on one side" ) );
 
-    collectEnvironmentDrift( original.value(), replay.value(), report.environmentDrift,
-                             report.deviations );
+    collectEnvironmentDrift( original.value(), replay.value(), report.environmentDrift );
+    for ( const QString &field : report.environmentDrift.keys() )
+    {
+        appendDeviation(
+            report, QStringLiteral( "environment" ), true,
+            QStringLiteral( "environment field '%1' changed" ).arg( field ),
+            QStringLiteral( "field '%1' changed between the runs" ).arg( field ) );
+    }
 
     if ( !report.evidenceGaps.isEmpty() )
     {
@@ -182,7 +303,9 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
     else
     {
         report.verdict = ReplayDeviationReport::Verdict::Deviated;
-        report.deviations.append(
+        appendDeviation(
+            report, QStringLiteral( "result" ), true,
+            QStringLiteral( "result fingerprints differ under Strict determinism" ),
             QStringLiteral( "result fingerprints differ under Strict determinism" ) );
     }
     return Result<ReplayDeviationReport>::success( report );
