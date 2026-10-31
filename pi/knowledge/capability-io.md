@@ -2,7 +2,7 @@
 
 # 数据导入（io）
 
-共 10 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 8 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:cn_product_import
 
@@ -118,28 +118,6 @@ MODIS 数据导入：读取 MODIS HDF 产品（MOD13Q1 等），完成重投影�
 - 适用课程：遥感数据处理
 - 典型练习：导入一年 MOD13Q1 NDVI 并重投影到研究区 UTM 网格。
 
-## rs:register_images
-
-跨模态（光学-SAR）影像配准：匹配、拟合、重采样到参考框架并报告 CE90/残差场质量，拒配时 fail-closed 不写输出，低置信结果标记待审。
-
-- 确定性：逐位一致（bit_exact）
-- 模态：optical、sar
-- 输出：ce90Px（numeric）、coverageRatio（numeric）、inlierCount（integer）、inlierRmsePx（numeric）、output（raster）、reason（string）、rmsePx（numeric）、status（string）
-- 参数：maxDim（integer）、metric（enum）、output（string）、reference（string）、reportPath（string）、resampling（enum）、source（string）
-- 前置条件：Source and reference rasters readable by GDAL
-- 局限：拒配时 fail-closed 不写输出：宁缺毋滥；低置信配准结果会标记待审，不声称达到标称精度。；配准精度报告（CE90/残差场）基于匹配点拟合，不等于全图逐像元几何精度。
-- 适用地物：光学-SAR 跨模态叠合区
-- 适用场景：跨模态影像配准、变化检测前的几何统一
-- 适用性备注：输出配准结果与 CE90/残差场质量报告；低置信结果标记待审。
-- 失败模式：
-  - `COREGISTRATION_FAILED` — 跨模态匹配被拒（too_few_matches、flat_region、low_peak_snr 等），或共识内点少于 3 个、仿射拟合失败。处置：更换 metric（如 mutual_information）、检查两景重叠与辐射差异后重试
-  - `DATASET_NOT_FOUND` — source 或 reference 栅格无法用 GDAL 打开，或读取其 band 1 失败。处置：确认两幅影像路径正确且可被 GDAL 读取
-  - `INVALID_PARAMETER` — 缺少必需参数 source、reference 或 output。处置：补齐三个必需参数
-  - `EXECUTION_FAILED` — 仿射求解后的重采样 warp 失败，或输出 GeoTIFF 创建/写入失败。处置：检查输出路径可写、磁盘空间与 GDAL 驱动可用性
-- 教学概念：影像配准、特征匹配、CE90 精度评定、残差场、重采样
-- 适用课程：摄影测量与遥感、微波遥感
-- 典型练习：对光学与 SAR 影像执行跨模态配准，读取 CE90 与残差场报告，并验证拒配（fail-closed）路径不产出结果文件。
-
 ## rs:sentinel2_import
 
 Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率（含 10/20/60m 多分辨率组织）与 SCL 掩膜。
@@ -158,27 +136,6 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 - 适用课程：遥感数据处理
 - 典型练习：导入 L1C 产品并组织 10m 四波段子集供后续指数计算。
 - 可接下游：rs:atmospheric_correction
-
-## rs:stack_register
-
-多景影像堆栈配准：对成对平移观测做全局平移最小二乘平差，输出各景偏移与回路闭合漂移指标（最大/RMS 边残差），断开景被报告而非静默丢弃。
-
-- 确定性：逐位一致（bit_exact）
-- 模态：optical、sar
-- 输出：disconnectedScenes（integer）、maxEdgeResidualPx（numeric）、reference（string）、rmsEdgeResidualPx（numeric）、status（string）
-- 参数：observations（string）、reference（string）、reportPath（string）、scenes（string）
-- 前置条件：Pairwise translations measured by rs:register_images (or the agent tool)
-- 局限：仅估计全局平移：旋转、缩放与局部形变需上游处理；断开景被显式报告而非静默丢弃，闭合漂移超阈值时应人工复核。
-- 适用地物：多时相堆栈生产区
-- 适用场景：时序堆栈构建前的平移配准
-- 适用性备注：仅处理成对平移观测（无旋转/缩放）。
-- 失败模式：
-  - `COREGISTRATION_FAILED` — 成对观测约束不足，平差解算被拒（观测为空、控制几何退化或超出场景上限）。处置：用 rs:register_images 补齐成对 tx/ty 观测，或拆分场景集后重试
-  - `INVALID_PARAMETER` — 缺少必需参数 scenes 或 observations。处置：传入场景 id 数组与成对观测数组
-  - `EXECUTION_FAILED` — 解算报告 sidecar（reportPath）原子写入失败。处置：检查报告路径可写后重试
-- 教学概念：全局平移平差、最小二乘、回路闭合漂移、边残差
-- 适用课程：遥感数字图像处理
-- 典型练习：对多景影像执行堆栈配准，解读回路闭合漂移指标（最大/RMS 边残差）并定位被报告的断开景。
 
 ## rs:zy3_import
 

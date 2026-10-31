@@ -17277,6 +17277,22 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# ── BEGIN R26-harness: evidence integrity / planner fact gates / family drift ──
+# Append-only registration block for this track (docs: .planning/zcode-r26-harness).
+sicnu_add_test(test_r26_harness_evidence_integrity)
+sicnu_link_jsoncpp(test_r26_harness_evidence_integrity)
+
+add_executable(test_r26_planner_fact_gates test_r26_planner_fact_gates.cpp)
+target_link_libraries(test_r26_planner_fact_gates PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_r26_planner_fact_gates PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_r26_planner_fact_gates TEST_PREFIX "test_r26_planner_fact_gates::")
+
+sicnu_add_test(test_r26_capability_family_drift)
+sicnu_link_jsoncpp(test_r26_capability_family_drift)
+# ── END R26-harness ──
 # ── R25-A: science algorithms & processing chains (this track) ──
 # Append-only registration block (.planning/zcode-r25-A). DEF-1: terrain_solar
 # latitude provenance (CRS-derived / explicit / fail-closed).

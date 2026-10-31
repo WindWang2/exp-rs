@@ -580,8 +580,15 @@ class WorkflowSessionTool final : public SpatialTool
 
       if ( action == "delete" )
       {
+        // A delete that did not happen must not read as tool success:
+        // agents keying on success would believe the checkpoint is gone.
+        // Refused ids and missing files both fail typed (R26).
+        if ( !store.deleteSession( sessionId ) )
+          return SpatialToolResult::failure(
+            "session delete refused or failed: " + sessionId,
+            error_codes::kInvalidParameter, "validation" );
         Json::Value out( Json::objectValue );
-        out["ok"] = store.deleteSession( sessionId );
+        out["ok"] = true;
         return SpatialToolResult::ok( std::move( out ) );
       }
 

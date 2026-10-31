@@ -317,14 +317,42 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
     // ---- grid alignment gate ---------------------------------------------
     std::set<std::string> crsSet;
     std::set<double> resolutionSet;
+    std::vector<std::string> unknownCrsRefs;
+    std::size_t consumableCount = 0;
     for ( const auto &view : assets )
     {
         if ( !view.consumable )
             continue;
-        if ( !view.facts->crs.empty() )
-            crsSet.insert( lowerCopy( view.facts->crs ) );
+        ++consumableCount;
+        if ( view.facts->crs.empty() )
+        {
+            // "" = unknown (planning_context.h). An unknown CRS must not
+            // silently join the CRS set: skipping it made an ""+EPSG pair
+            // read as "same grid" — a fabricated alignment fact.
+            unknownCrsRefs.push_back( view.facts->ref );
+            continue;
+        }
+        crsSet.insert( lowerCopy( view.facts->crs ) );
         if ( view.facts->resolutionM >= 0 )
             resolutionSet.insert( view.facts->resolutionM );
+    }
+    // A single consumable asset needs no cross-scene alignment, so an
+    // unknown CRS on it is not a fabricated-fact hazard: the alignment
+    // gate below only becomes meaningful with more than one consumable.
+    if ( consumableCount > 1 && !unknownCrsRefs.empty() )
+    {
+        std::string refsJoined;
+        for ( std::size_t i = 0; i < unknownCrsRefs.size() && i < 4; ++i )
+            refsJoined += ( i ? ", " : "" ) + unknownCrsRefs[i];
+        if ( unknownCrsRefs.size() > 4 )
+            refsJoined += ", …";
+        questions.push_back( PlanOpenQuestion{
+            "", "insufficient_data", true,
+            std::to_string( unknownCrsRefs.size() ) + " consumable asset(s) declare no CRS ("
+                + refsJoined + "): grid alignment with the other consumable assets cannot be "
+                  "verified, so the planner cannot claim a shared grid",
+            "declare the CRS for these assets or pre-align them before planning" } );
+        plan.verdict = "feasible_with_gaps";
     }
     if ( crsSet.size() > 1 || resolutionSet.size() > 1 )
     {
@@ -416,6 +444,39 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
                     "provide a calibration capability for this domain pair" } );
                 plan.verdict = "feasible_with_gaps";
             }
+        }
+    }
+
+    // ---- band-role fact gate -----------------------------------------------
+    // The chosen analysis operator's contract may demand role-tagged bands
+    // (wavelengthPolicy=band_roles). Without any declared band_roles facts
+    // the planner cannot ground that demand: the harness science preflight
+    // would refuse at execution time, so a plain "feasible" here is an
+    // over-claim. Declared roles stay feasible — whether the SPECIFIC roles
+    // satisfy the operator is the preflight's call, not a planner guess.
+    if ( const ContractsContract *analysisContract =
+           sicnu::contracts::findScientificContract( analysis.operatorId );
+         analysisContract && analysisContract->wavelengthPolicy == "band_roles" )
+    {
+        bool anyRolesDeclared = false;
+        for ( const auto &view : assets )
+        {
+            if ( view.consumable && !view.facts->bandRoles.empty() )
+            {
+                anyRolesDeclared = true;
+                break;
+            }
+        }
+        if ( !anyRolesDeclared )
+        {
+            questions.push_back( PlanOpenQuestion{
+                "", "insufficient_data", true,
+                "the analysis capability " + analysis.operatorId
+                    + " requires role-tagged bands (contract wavelengthPolicy=band_roles) but no "
+                      "consumable asset declares band_roles; the plan cannot be grounded",
+                "declare band roles (e.g. nir/red) for the input assets or choose an operator "
+                "that takes explicit band numbers" } );
+            plan.verdict = "feasible_with_gaps";
         }
     }
 

@@ -79,7 +79,9 @@ const struct Entry {
     { "SCENE_TRUTH_INVALID",     { "validation", RetryClass::None } },
     { "ORBIT_SEGMENT_INVALID",   { "validation", RetryClass::None } },
     { "ORBIT_EPOCH_MISMATCH",    { "validation", RetryClass::None } },
-    { "WAVELENGTH_INCOMPATIBLE", { "validation", RetryClass::None } },
+    // (R26) WAVELENGTH_INCOMPATIBLE is already registered by the Compiler
+    // 10.0 block above — the InSAR 11.0 duplicate is dropped; a re-added
+    // duplicate key in this brace-init would silently keep the first entry.
     { "BASELINE_NO_ZERO_DOPPLER_MASTER", { "validation", RetryClass::None } },
     { "BASELINE_NO_ZERO_DOPPLER_SLAVE",  { "validation", RetryClass::None } },
     { "BASELINE_STATE_INTERPOLATION_FAILED", { "runtime", RetryClass::Manual } },
