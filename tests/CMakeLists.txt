@@ -17277,6 +17277,83 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# BEGIN R25-B (r25-B data/model/experiment track) — append-only block.
+# --- R25-B feature 1: import preflight explanation report --------------------
+qt_add_executable(test_r25_b_import_preflight test_r25_b_import_preflight.cpp)
+target_link_libraries(test_r25_b_import_preflight PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  sicnu_geospatial
+)
+target_include_directories(test_r25_b_import_preflight PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_b_import_preflight TEST_PREFIX test_r25_b_import_preflight::)
+# --- end R25-B import-preflight registration ---
+# --- R25-B feature 2: explainable inference plan + quality summary -----------
+# OpenCV-gated (same condition as src/operators compiles the runtime TUs and
+# the test_model_runtime precedent): the plan/engine headers pull opencv2.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
+sicnu_add_test(test_r25_b_inference_plan TIMEOUT 300 TEST_PREFIX "test_r25_b_inference_plan::")
+target_link_libraries(test_r25_b_inference_plan PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r25_b_inference_plan)
+target_include_directories(test_r25_b_inference_plan PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+endif()
+# --- end R25-B inference-plan registration ---
+# --- R25-B feature 3: typed replay deviation entries (schema v2) ------------
+sicnu_add_test(test_r25_b_replay_deviation_v2 TEST_PREFIX "test_r25_b_replay_deviation_v2::" TIMEOUT 300)
+target_link_libraries(test_r25_b_replay_deviation_v2 PRIVATE
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_r25_b_replay_deviation_v2 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+# --- end R25-B replay-deviation-v2 registration ---
+# --- R25-B W7: cross-seam end-to-end (preflight → register → plan → run →
+# quality → experiment record → deviation v2) over production code paths. ---
+# OpenCV-gated (engine headers; same condition as the inference-plan test).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
+sicnu_add_test(test_r25_b_end_to_end TEST_PREFIX "test_r25_b_end_to_end::" TIMEOUT 300)
+target_link_libraries(test_r25_b_end_to_end PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_data
+  sicnu_geospatial
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r25_b_end_to_end)
+target_include_directories(test_r25_b_end_to_end PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+endif()
+# --- end R25-B end-to-end registration ---
+# END R25-B
 # ── R25-E: free-text answer hygiene at both session boundaries (#1695-17d) ──
 # Append-only registration block for this track (docs: .planning/zcode-r25-E).
 # Same Qt-free link surface as test_lab_runtime: Catch2 + sicnu_lab_runtime

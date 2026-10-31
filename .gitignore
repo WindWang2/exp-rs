@@ -751,6 +751,12 @@ r6_dev.cmd
 !.planning/zcode-r24-A-science/*.cmd
 !.planning/zcode-r24-A-science/*.py
 
+# R25-B (zcode r25-B: geospatial data assets / EO model inference / experiment
+# reproducibility) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r25-B/
+.planning/zcode-r25-B/*
+!.planning/zcode-r25-B/*.md
+!.planning/zcode-r25-B/*.sh
 # R25-E (zcode-r25-E teaching/grading/verification) track planning artifacts (markdown only; logs and builds stay local).
 !.planning/zcode-r25-E/
 .planning/zcode-r25-E/*
