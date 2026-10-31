@@ -757,3 +757,14 @@ r6_dev.cmd
 .planning/zcode-r25-B/*
 !.planning/zcode-r25-B/*.md
 !.planning/zcode-r25-B/*.sh
+# R25-E (zcode-r25-E teaching/grading/verification) track planning artifacts (markdown only; logs and builds stay local).
+!.planning/zcode-r25-E/
+.planning/zcode-r25-E/*
+!.planning/zcode-r25-E/*.md
+# R25-D (zcode r25-D: Qt/QGIS workbench interaction, display performance &
+# cartography deepening) track planning artifacts (markdown + build scripts;
+# logs and builds stay local).
+!.planning/zcode-r25-D/
+.planning/zcode-r25-D/*
+!.planning/zcode-r25-D/*.md
+!.planning/zcode-r25-D/*.sh
