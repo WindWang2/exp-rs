@@ -755,3 +755,34 @@ r6_dev.cmd
 !.planning/zcode-r26-workbench/
 .planning/zcode-r26-workbench/*
 !.planning/zcode-r26-workbench/*.md
+# R26-harness track (Pi/MCP harness closed-loop) planning artifacts (markdown only).
+!.planning/zcode-r26-harness/
+.planning/zcode-r26-harness/*
+!.planning/zcode-r26-harness/*.md
+
+# R25-A (zcode-r25-A) track planning artifacts (markdown only; logs and builds stay local).
+!.planning/zcode-r25-A/
+.planning/zcode-r25-A/*
+!.planning/zcode-r25-A/*.md
+# R25-C (zcode-r25-C: Pi/MCP harness, workflow execution & plugin tool
+# contracts) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r25-C/
+.planning/zcode-r25-C/*
+!.planning/zcode-r25-C/*.md
+# R25-B (zcode r25-B: geospatial data assets / EO model inference / experiment
+# reproducibility) track planning artifacts (markdown only; logs/builds stay local).
+!.planning/zcode-r25-B/
+.planning/zcode-r25-B/*
+!.planning/zcode-r25-B/*.md
+!.planning/zcode-r25-B/*.sh
+# R25-E (zcode-r25-E teaching/grading/verification) track planning artifacts (markdown only; logs and builds stay local).
+!.planning/zcode-r25-E/
+.planning/zcode-r25-E/*
+!.planning/zcode-r25-E/*.md
+# R25-D (zcode r25-D: Qt/QGIS workbench interaction, display performance &
+# cartography deepening) track planning artifacts (markdown + build scripts;
+# logs and builds stay local).
+!.planning/zcode-r25-D/
+.planning/zcode-r25-D/*
+!.planning/zcode-r25-D/*.md
+!.planning/zcode-r25-D/*.sh

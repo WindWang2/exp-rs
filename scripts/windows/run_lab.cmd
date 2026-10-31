@@ -34,7 +34,12 @@ set "RC=%errorlevel%"
 if not "%RC%"=="0" exit /b %RC%
 
 echo === [3/3] grading ===
-"%CLI%" --offline lab --lab ndvi_basics --grade "output\lab1_ndvi.tif" --out "output\lab1_report.json"
+rem CT-D1 (r25-E): steps 1-2 produce the foundry scene (256x256 EPSG:32648,
+rem seed 42). The foundry authority is ndvi_landsat.rules.json — the repo-side
+rem twin of the bundle overlay, parameter-identical. The fixture authority
+rem ndvi_basics (128x128 EPSG:4326 committed scene) grades a DIFFERENT scene
+rem and would pin this artifact at 45/100 (R21-E CT-6 / R23-D measured).
+"%CLI%" --offline lab --lab ndvi_landsat --grade "output\lab1_ndvi.tif" --out "output\lab1_report.json"
 set "RC=%errorlevel%"
 if "%RC%"=="0" ( echo RESULT: lab 1 PASSED - output\lab1_report.json
 ) else if "%RC%"=="1" ( echo RESULT: lab 1 graded BELOW the pass line - output\lab1_report.json

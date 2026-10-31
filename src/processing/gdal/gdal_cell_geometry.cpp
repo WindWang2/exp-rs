@@ -47,4 +47,71 @@ void cellSizesMetres( const GdalDatasetWrapper &ds, double *csx, double *csy )
     *csy = y;
 }
 
+std::optional<double> sceneLatitudeDeg( const GdalDatasetWrapper &ds )
+{
+    const QString wkt = ds.projection();
+    if ( wkt.isEmpty() )
+        return std::nullopt;
+
+    const std::array<double, 6> gt = ds.geoTransform();
+    if ( std::abs( gt[1] ) <= 0.0 || std::abs( gt[5] ) <= 0.0 )
+        return std::nullopt;
+    // The exact identity geotransform is GDAL's "no georeferencing" marker
+    // (a CRS without a sane affine would silently place the scene at
+    // lat = rows/2 in the geographic branch) — fail closed instead (R1-14).
+    if ( gt[0] == 0.0 && gt[1] == 1.0 && gt[2] == 0.0 && gt[3] == 0.0
+         && gt[4] == 0.0 && gt[5] == 1.0 )
+        return std::nullopt;
+
+    double latitude = 0.0;
+    if ( isGeographicCrs( wkt ) )
+    {
+        // Angular CRS: the centre row's Y IS the latitude.
+        latitude = MathUtils::sceneCentreLatitudeDeg( gt, ds.height() );
+    }
+    else
+    {
+        // Projected CRS: transform the raster centre to WGS84. Same
+        // import/transform/release discipline as MosaicPlanner's footprint
+        // envelope (src/processing/algorithms/mosaic_plan.cpp).
+        //
+        // The centre is the SIGNED affine midpoint (R1-2): with north-up
+        // rasters gt[5] < 0, so an abs() walked half a scene ABOVE the top
+        // edge and derived a latitude off by the full scene height. The
+        // full form also carries the rotation terms gt[2]/gt[4].
+        OGRSpatialReference src;
+        const QByteArray wktBytes = wkt.toUtf8();
+        if ( src.importFromWkt( wktBytes.constData() ) != OGRERR_NONE )
+            return std::nullopt;
+        OGRSpatialReference dst;
+        if ( dst.SetFromUserInput( "EPSG:4326" ) != OGRERR_NONE )
+            return std::nullopt;
+        OGRCoordinateTransformation *ct = OGRCreateCoordinateTransformation( &src, &dst );
+        if ( !ct )
+            return std::nullopt;
+        const double halfW = static_cast<double>( ds.width() ) / 2.0;
+        const double halfH = static_cast<double>( ds.height() ) / 2.0;
+        double x = gt[0] + gt[1] * halfW + gt[2] * halfH;
+        double y = gt[3] + gt[4] * halfW + gt[5] * halfH;
+        const bool ok = ct->Transform( 1, &x, &y ) != 0;
+        OGRCoordinateTransformation::DestroyCT( ct );
+        if ( !ok )
+            return std::nullopt;
+        // The projected -> EPSG:4326 transform on this GDAL build emits the
+        // pair in EPSG's own authority order: the FIRST output double is
+        // the LATITUDE, the second the longitude (verified on the UTM 50N
+        // fixture: easting 449,850 / northing 5,000,505 -> 45.02 lat /
+        // 116.37 lon). Reading them the other way passes the longitude in
+        // as the latitude, which the ±90 gate then rejects as a derivation
+        // failure.
+        latitude = x;
+        if ( !std::isfinite( latitude ) || latitude < -90.0 || latitude > 90.0 )
+            return std::nullopt;
+    }
+
+    if ( !std::isfinite( latitude ) || latitude < -90.0 || latitude > 90.0 )
+        return std::nullopt;
+    return latitude;
+}
+
 } // namespace sicnu::processing::gdal_util

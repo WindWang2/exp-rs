@@ -14,6 +14,8 @@ qt_add_library(sicnu_data STATIC
   data_asset.h
   data_manager.cpp
   data_manager.h
+  import_preflight.cpp
+  import_preflight.h
   data_result.h
   derivation_record.cpp
   derivation_record.h

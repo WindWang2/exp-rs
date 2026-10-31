@@ -1444,12 +1444,17 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
       const VerificationExpectations &expectationsForArtifact =
         declaredOutput ? derived : baseDerived;
 
-      // Write-once: an existing verification sidecar for THIS run is
-      // authoritative — reuse its verdict and checks verbatim.
-      if ( const auto reused = evidence::readVerificationEvidence( path, run->runId() ) )
+      // Write-once: an intact verification sidecar for THIS run is
+      // authoritative — reuse its verdict and checks verbatim. A sidecar
+      // that exists for this run but is unreadable is an integrity failure:
+      // recomputing would re-flip verdicts between polls and erase the
+      // damaged-evidence audit trail, so the run fails closed instead (R26).
+      const evidence::EvidenceInspection inspection =
+        evidence::inspectVerificationEvidence( path, run->runId() );
+      if ( inspection.state == evidence::EvidenceState::Reusable )
       {
-        verifications.push_back( *reused );
-        artifacts.append( reused->toJson() );
+        verifications.push_back( inspection.verification );
+        artifacts.append( inspection.verification.toJson() );
         Json::Value evidenceEntry( Json::objectValue );
         evidenceEntry["path"] = path;
         evidenceEntry["reused"] = true;
@@ -1462,8 +1467,41 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
         evidenceArtifacts.append( evidenceEntry );
         continue;
       }
-
-      // First evaluation for this run+artifact.
+      if ( inspection.state == evidence::EvidenceState::Corrupt )
+      {
+        ArtifactVerification artifact;
+        artifact.path = path;
+        VerificationCheck failed;
+        failed.check = "verification_evidence_integrity";
+        failed.passed = false;
+        failed.severity = "error";
+        failed.code = error_codes::kOutputInvalid;
+        failed.details["error"] = inspection.reason;
+        failed.details["verification_sidecar"] = path + ".verification.json";
+        appendCheck( artifact, std::move( failed ) );
+        verifications.push_back( artifact );
+        artifacts.append( artifact.toJson() );
+        Json::Value evidenceEntry( Json::objectValue );
+        evidenceEntry["path"] = path;
+        evidenceEntry["verification_sidecar"] = path + ".verification.json";
+        // Same key shape as the other branches so consumers that read
+        // .asString() on these keys never see an absent-key throw (R1 P3-2).
+        // The sidecars themselves are probed (read-only) so a run whose
+        // provenance/uncertainty records survived still reports them (R2 P3).
+        evidenceEntry["provenance_sidecar"] =
+          QFileInfo::exists( QString::fromStdString( path + ".provenance.json" ) )
+            ? Json::Value( path + ".provenance.json" )
+            : Json::Value();
+        evidenceEntry["uncertainty_declared"] =
+          QFileInfo::exists( QString::fromStdString( path + ".uncertainty.json" ) );
+        evidenceEntry["verification_evidence_integrity"] = "corrupt";
+        evidenceEntry["note"] =
+          "persisted verification evidence for this run is unreadable; the "
+          "damaged sidecar is preserved for audit and is not recomputed";
+        evidenceArtifacts.append( evidenceEntry );
+        continue;
+      }
+      // Absent / ForeignRun: first evaluation for this run+artifact.
       ArtifactVerification artifact;
 
       // 1. Uncertainty: operator-declared facts only; a method that produces
@@ -1515,7 +1553,10 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
           appendCheck( artifact, std::move( failed ) );
         }
 
-        // 5. Persist the verification evidence itself.
+        // 5. Persist the verification evidence itself. A verdict that
+        // cannot be persisted has no auditable backing — the run must not
+        // read as completed (error-class, same contract as the declared-
+        // uncertainty check above: evidence never silently disappears).
         verificationWritten = evidence::writeVerificationEvidence(
           path, artifact, expectationsForArtifact, runIdentity, harvest );
         if ( !verificationWritten.written && !verificationWritten.error.empty() )
@@ -1523,7 +1564,7 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
           VerificationCheck failed;
           failed.check = "verification_evidence_written";
           failed.passed = false;
-          failed.severity = "warning";
+          failed.severity = "error";
           failed.code = error_codes::kOutputInvalid;
           failed.details["error"] = verificationWritten.error;
           appendCheck( artifact, std::move( failed ) );

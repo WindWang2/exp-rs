@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_resampling.h"
+#include "processing/algorithms/spectral_wavelength.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QFile>
@@ -161,24 +162,32 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
     // metadata (written by product stacking).
     if (sourceWavelengths.empty())
     {
-        sourceWavelengths.resize(bandCount);
-        bool anyMissing = false;
+        // Normalize through the shared unit discipline (R25-A DEF-7, twin of
+        // the derivative operator's DEF-4): the raw read treated a
+        // μm-stamped cube as 0.46..0.95 nm, so every nm target fell outside
+        // the source range and the whole output silently became NaN.
+        std::vector<std::pair<double, std::string>> raw;
+        raw.reserve(static_cast<size_t>(bandCount));
         for (int b = 1; b <= bandCount; ++b)
         {
             const QString wl = ds.bandMetadataItem(b, "WAVELENGTH");
             bool ok = false;
             const double v = wl.toDouble(&ok);
             if (!ok || v <= 0.0)
-            {
-                anyMissing = true;
-                break;
-            }
-            sourceWavelengths[b - 1] = static_cast<float>(v);
+                throw RSOperatorError(
+                    ErrorCode::InvalidParameter,
+                    "Input bands carry no WAVELENGTH metadata; pass sourceWavelengths explicitly");
+            raw.emplace_back(v, ds.bandMetadataItem(b, "WAVELENGTH_UNITS").toStdString());
         }
-        if (anyMissing)
+        SpectralWavelength::Grid grid;
+        const SpectralWavelength::Status status =
+            SpectralWavelength::gridFromBandValues(raw, {}, &grid);
+        if (status != SpectralWavelength::Status::Ok)
             throw RSOperatorError(
                 ErrorCode::InvalidParameter,
-                "Input bands carry no WAVELENGTH metadata; pass sourceWavelengths explicitly");
+                std::string("source wavelength axis rejected: ")
+                    + SpectralWavelength::statusText(status));
+        sourceWavelengths = grid.centersNm;
     }
     if (static_cast<int>(sourceWavelengths.size()) != bandCount)
         throw RSOperatorError(ErrorCode::InvalidParameter,

@@ -45,7 +45,13 @@ Json::Value RsSpectralSimilarityOperator::schema() const {
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Label raster path");
     outputs["refs"] = makeIntegerParam("refs", "Number of reference spectra", 0);
-    outputs["meanScore"] = makeNumberParam("meanScore", "Mean best score over labelled pixels", 0.0);
+    outputs["meanScore"] = makeNumberParam(
+        "meanScore",
+        "Mean best score over FINITE labelled-pixel scores (scores that "
+        "overflowed to infinity are excluded and counted in infiniteScores; "
+        "JSON null when every labelled score was infinite)", 0.0);
+    outputs["infiniteScores"] = makeIntegerParam(
+        "infiniteScores", "Labelled pixels whose score overflowed to infinity", 0);
     outputs["form"] = makeStringParam("form", "Hybrid form applied");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
@@ -173,6 +179,7 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
 
     double scoreSum = 0.0;
     uint64_t labelledPixels = 0;
+    uint64_t finiteScores = 0;
     int tilesSeen = 0;
 
     try {
@@ -214,7 +221,16 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
                     if (labels[p] >= 0) {
                         tileLabels[p] = static_cast<float>(labels[p]);
                         ++labelledPixels;
-                        scoreSum += scores[p];
+                        // The ClassicTan kernel deliberately maps an
+                        // over/underflowing sid*tan(sam) to +inf so the
+                        // ORDERING keeps working (spectral_hybrid_similarity);
+                        // those extremes must stay out of the mean or a
+                        // single near-orthogonal pixel reports meanScore=inf
+                        // for the whole run (R25-A W3 audit P3).
+                        if (std::isfinite(scores[p])) {
+                            scoreSum += scores[p];
+                            ++finiteScores;
+                        }
                     }
                     if (!scorePath.empty())
                         tileScores[p] = scores[p];
@@ -256,9 +272,16 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
     result["output"] = outputPath;
     result["refs"] = refCount;
     result["form"] = formText;
-    result["meanScore"] = labelledPixels > 0
-                              ? scoreSum / static_cast<double>(labelledPixels)
-                              : 0.0;
+    // Null (not 0.0, which reads as a perfect match) when pixels were
+    // labelled but every score overflowed to infinity (R1-12); the count
+    // makes the QA summary actionable.
+    if (finiteScores > 0)
+        result["meanScore"] = scoreSum / static_cast<double>(finiteScores);
+    else if (labelledPixels > 0)
+        result["meanScore"] = Json::Value();
+    else
+        result["meanScore"] = 0.0;
+    result["infiniteScores"] = static_cast<Json::UInt64>(labelledPixels - finiteScores);
     result["labelledPixels"] = static_cast<Json::UInt64>(labelledPixels);
     result["referenceSource"] = refsResolved.sourceDescription.toStdString();
     if (refsResolved.resampled)

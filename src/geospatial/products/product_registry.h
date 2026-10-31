@@ -106,6 +106,14 @@ class ProductAdapterRegistry
     /// fallback in registration order.
     ProductAdapter *adapterFor( const std::string &path ) const;
 
+    /// Every adapter whose accepts() fires for @p path, in registration
+    /// order (the first entry is what adapterFor() would choose). Read-only
+    /// ambiguity surface: a length > 1 result means the path shape is claimed
+    /// by more than one family and the first-match policy is what resolves
+    /// it — callers that need to explain the decision (import preflight)
+    /// report the full candidate list instead of hiding it.
+    std::vector<ProductAdapter *> adaptersAccepting( const std::string &path ) const;
+
     /// adapterFor(path)->enumerate(path).
     ProductAssets describe( const std::string &path ) const;
 
