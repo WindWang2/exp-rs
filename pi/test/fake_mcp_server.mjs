@@ -33,8 +33,19 @@
  *   valid response (framing-tolerance contract).
  * - arguments {huge: N}: reply with an N-char text (transport fidelity:
  *   the bridge must NOT truncate; MAX_RESULT_CHARS is the shell's budget).
+ *
+ * R25-C additive modes (generation-drift contract), opt-in via argv:
+ * - --version-file <path> (argv): serverInfo.version is READ FROM the file
+ *   at every `initialize`, so a test can rewrite it between a crash and the
+ *   lazy respawn and assert the bridge observes the version drift.
+ * - --tools-file <path> (argv): `tools/list` reads a JSON array of
+ *   {name, description?} from the file, so the catalog can change across
+ *   generations the same way. Absent/unreadable file → empty tool list.
+ * - --die-if-exists <path> (argv): if the file EXISTS at spawn time, exit(1)
+ *   immediately (before answering anything) — lets a test make the NEXT
+ *   generation unstartable so the bridge's restart-failure path settles.
  */
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 function argAfter(flag) {
@@ -47,10 +58,27 @@ function argAfter(flag) {
 // (["--mcp", "--notify-log", path, counter]). The notify log rides its own
 // "--notify-log <path>" pair.
 const notifyLog = argAfter("--notify-log");
+const versionFile = argAfter("--version-file");
+const toolsFile = argAfter("--tools-file");
+const dieIfExists = argAfter("--die-if-exists");
 const hangInitialize = args.includes("--hang-initialize");
 const hangToolCalls = args.includes("--hang-tool-calls");
-const counterPath = [...args].reverse().find((a) => !a.startsWith("--") && a !== notifyLog);
+// The counter must not collide with the VALUE of any flag/value pair.
+const pairValues = new Set([notifyLog, versionFile, toolsFile, dieIfExists]);
+const counterPath = [...args]
+  .reverse()
+  .find((a) => !a.startsWith("--") && !pairValues.has(a));
 appendFileSync(counterPath, "1\n");
+// --die-if-exists: a poisoned generation dies before the handshake so the
+// bridge's restart-failure path settles (R25-C typed-error contract).
+if (dieIfExists) {
+  try {
+    readFileSync(dieIfExists);
+    process.exit(1);
+  } catch {
+    // file absent → healthy generation
+  }
+}
 
 let buffer = "";
 process.stdin.setEncoding("utf8");
@@ -92,7 +120,32 @@ function handle(line) {
     // --hang-initialize: spawn + counter still work; the handshake reply is
     // withheld forever, so the bridge-side startup deadline is what settles.
     if (hangInitialize) return;
-    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "fake", version: "0" } } });
+    // --version-file: the version is read per-handshake so a test can
+    // rewrite it between generations (R25-C version-drift contract).
+    let version = "0";
+    if (versionFile) {
+      try {
+        version = readFileSync(versionFile, "utf8").trim() || "0";
+      } catch {
+        // unreadable/absent → keep the default
+      }
+    }
+    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "fake", version } } });
+    return;
+  }
+  if (msg.method === "tools/list") {
+    // --tools-file: JSON array of {name, description?} read per-request so
+    // the catalog can drift across generations (R25-C catalog-drift
+    // contract). Absent/unreadable → empty list (never a fake catalog).
+    let tools = [];
+    if (toolsFile) {
+      try {
+        tools = JSON.parse(readFileSync(toolsFile, "utf8"));
+      } catch {
+        tools = [];
+      }
+    }
+    send({ jsonrpc: "2.0", id: msg.id, result: { tools } });
     return;
   }
   if (msg.method === "tools/call") {

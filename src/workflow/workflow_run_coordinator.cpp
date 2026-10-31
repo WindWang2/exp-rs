@@ -1781,6 +1781,47 @@ long WorkflowRunCoordinator::pipelineIdForRun( const std::string &runId ) const
     return -1;
 }
 
+std::shared_ptr<WorkflowRun> WorkflowRunCoordinator::runForRunIdReadOnly( const std::string &runId )
+{
+    // In-memory first: a run this process tracks (live or terminal) is the
+    // freshest truth and needs no filesystem access.
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        const auto it = m_pipelineByRunId.find( runId );
+        if ( it != m_pipelineByRunId.end() )
+        {
+            const auto runIt = m_runsByPipeline.find( it->second );
+            if ( runIt != m_runsByPipeline.end() && runIt->second )
+                return runIt->second;
+        }
+        // Same terminal-run fallback as pipelineIdForRun (#1097/#1228): the
+        // reverse map drops terminal runs, m_runsByPipeline keeps history.
+        for ( const auto &kv : m_runsByPipeline )
+            if ( kv.second && kv.second->runId() == runId )
+                return kv.second;
+    }
+    // Checkpoint fallback: atomic saves make a read-only load consistent
+    // (possibly one save behind a live owner). loadCheckpoint re-validates
+    // the payload (unsafe runId, unsupported version, bad enums) — a reject
+    // is reported as "no run" so a corrupt file cannot masquerade as one.
+    // No run lock is taken: probing ownership is resumeRun's job.
+    const QString path = checkpointPathFor( runId );
+    if ( path.isEmpty() || !QFile::exists( path ) )
+        return nullptr;
+    QString err;
+    std::shared_ptr<WorkflowRun> loaded( m_checkpoints.loadCheckpoint( path, &err ) );
+    if ( !loaded )
+        qWarning() << "[workflow] read-only checkpoint load rejected for run"
+                   << QString::fromStdString( runId ) << ":" << err;
+    return loaded;
+}
+
+bool WorkflowRunCoordinator::hasCheckpointFor( const std::string &runId ) const
+{
+    const QString path = checkpointPathFor( runId );
+    return !path.isEmpty() && QFile::exists( path );
+}
+
 std::vector<std::shared_ptr<WorkflowRun>> WorkflowRunCoordinator::runs() const
 {
     std::lock_guard<std::mutex> lock( m_mutex );

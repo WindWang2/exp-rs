@@ -586,7 +586,7 @@
       "name" : "run_workflow"
     },
     {
-      "description" : "Get the aggregate status of a workflow submitted with run_workflow: overall state plus per-step execution ids, statuses, and progress.",
+      "description" : "Get the aggregate status of a workflow submitted with run_workflow: overall state plus per-step execution ids, statuses, and progress. Pass run_id instead of pipeline_id to query a run from a previous session (after a server restart the pipeline id is gone but the checkpoint survives): the result then reports the checkpointed run state, per-step plan statuses, and a resumable verdict with a resume hint.",
       "family" : "meta",
       "inputSchema" : 
       {
@@ -594,14 +594,15 @@
         {
           "pipeline_id" : 
           {
-            "description" : "Pipeline id returned by run_workflow.",
+            "description" : "Pipeline id returned by run_workflow. Optional when run_id is given.",
             "type" : "integer"
+          },
+          "run_id" : 
+          {
+            "description" : "Workflow run id (e.g. held from a previous session). Queries the checkpoint directly and includes resume diagnostics. Optional.",
+            "type" : "string"
           }
         },
-        "required" : 
-        [
-          "pipeline_id"
-        ],
         "type" : "object"
       },
       "name" : "get_workflow_status"

@@ -40,6 +40,7 @@
 #include <qgsmaplayer.h>
 
 #include <QDir>
+#include <QFileInfo>
 #include <QVariant>
 #include <QVector>
 
@@ -116,7 +117,15 @@ bool scaleBarUnitFor( const std::string &unit, Qgis::DistanceUnit *out )
 
 /// Resolves one declared frame/inset layer ref the exact way the layout
 /// property layer will (workspace natural key, then the project store by
-/// name and id). Returns null when the ref resolves to nothing (CARTO-5).
+/// name and id, and finally by SOURCE path). Returns null when the ref
+/// resolves to nothing (CARTO-5).
+///
+/// The source-path tier closes the GUI loop: the CartographyDock and the
+/// workflow cartography presets seed frame layer refs from canvas layer
+/// SOURCES, and a source path is an unambiguous reference for exactly the
+/// layers it names — but QGIS layer names are basenames/display names and
+/// ids are UUIDs, so without this tier compose refused every canvas layer
+/// with "unresolvable reference(s)" (R25-D W7 E2E evidence).
 QgsMapLayer *resolveProjectLayer( const std::string &ref )
 {
   const QString naturalKey = resolveLayerRef( ref );
@@ -127,6 +136,22 @@ QgsMapLayer *resolveProjectLayer( const std::string &ref )
       return matches.first();
     if ( QgsMapLayer *byId = project->layerStore()->mapLayer( naturalKey ) )
       return byId;
+    // Source-path tier: exact match first, then the canonical form so
+    // symlinked/relative spellings of the same file resolve too.
+    // (canonicalFilePath: the documented file-level canonical form; empty
+    // when the path does not exist, which keeps the tier inert for
+    // non-path refs.)
+    const QString wanted = QFileInfo( naturalKey ).canonicalFilePath();
+    const auto layers = project->layerStore()->mapLayers();
+    for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
+    {
+      QgsMapLayer *layer = it.value();
+      if ( !layer )
+        continue;
+      const QString source = layer->source();
+      if ( source == naturalKey || ( !wanted.isEmpty() && source == wanted ) )
+        return layer;
+    }
   }
   return nullptr;
 }

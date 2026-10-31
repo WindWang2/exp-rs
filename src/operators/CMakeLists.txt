@@ -74,6 +74,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/detection_tile_engine.cpp
         runtime/model_publish.cpp
         runtime/model_execution_service.cpp
+        runtime/inference_plan.cpp
         runtime/model_ensemble.cpp
         runtime/provenance_verify.cpp
     )

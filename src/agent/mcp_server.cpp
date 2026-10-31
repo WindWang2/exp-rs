@@ -1093,13 +1093,24 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("get_workflow_status"))
             {
-                bool idOk = false;
-                const long pipelineId = arguments.value(QStringLiteral("pipeline_id")).toLongLong(&idOk);
-                if (!idOk || pipelineId < 0)
-                    throw McpToolError(
-                        QStringLiteral("get_workflow_status: Invalid or missing pipeline_id"),
-                        QStringLiteral("INVALID_PARAMETER"), QStringLiteral("validation"));
-                resultData = handleGetWorkflowStatus(pipelineId);
+                // R25-C: run_id routes to the checkpoint-backed diagnostic
+                // path — after a restart pipeline ids are gone, but the
+                // agent still holds run ids from the previous session.
+                const QString runId = arguments.value(QStringLiteral("run_id")).toString().trimmed();
+                if (!runId.isEmpty())
+                {
+                    resultData = handleGetWorkflowStatusByRun(runId);
+                }
+                else
+                {
+                    bool idOk = false;
+                    const long pipelineId = arguments.value(QStringLiteral("pipeline_id")).toLongLong(&idOk);
+                    if (!idOk || pipelineId < 0)
+                        throw McpToolError(
+                            QStringLiteral("get_workflow_status: Invalid or missing pipeline_id"),
+                            QStringLiteral("INVALID_PARAMETER"), QStringLiteral("validation"));
+                    resultData = handleGetWorkflowStatus(pipelineId);
+                }
             }
             else if (toolName == QStringLiteral("resume_workflow"))
             {
@@ -1563,6 +1574,37 @@ static QVariantMap algorithmEntryMap( const sicnu::processing::AlgorithmDescript
     algMap[QStringLiteral("memoryPolicy")] = QString::fromStdString(desc.agentMetadata.memoryPolicy);
     algMap[QStringLiteral("largeRasterSafe")] = desc.agentMetadata.largeRasterSafe;
 
+    // R25-C capability honesty: declared prerequisites/limitations were
+    // dropped from the discovery projection while get_algorithm_schema and
+    // preflight already consumed them — an agent choosing from list/search
+    // saw memory policy and tags but no required preconditions or known
+    // limits. Keys are OMITTED when nothing is declared: bounded token
+    // cost, never empty arrays.
+    if (!desc.agentMetadata.prerequisites.empty())
+    {
+        QVariantList prereqs;
+        for (const auto &p : desc.agentMetadata.prerequisites)
+            prereqs.append(QString::fromStdString(p));
+        algMap[QStringLiteral("prerequisites")] = prereqs;
+    }
+    if (!desc.agentMetadata.limitations.empty())
+    {
+        QVariantList limits;
+        for (const auto &l : desc.agentMetadata.limitations)
+            limits.append(QString::fromStdString(l));
+        algMap[QStringLiteral("limitations")] = limits;
+    }
+    {
+        // Compact planning guarantees preflight already advertises
+        // per-parameter; exposing them at discovery lets an agent reason
+        // about re-run safety BEFORE committing to an algorithm.
+        QVariantMap guarantees;
+        guarantees[QStringLiteral("deterministic")] = desc.agentMetadata.deterministic;
+        guarantees[QStringLiteral("idempotent")] = desc.agentMetadata.idempotent;
+        guarantees[QStringLiteral("supportsCancellation")] = desc.agentMetadata.supportsCancellation;
+        algMap[QStringLiteral("guarantees")] = guarantees;
+    }
+
     // Surface the descriptor's agent purpose (provider metadata() or
     // generated) under the same "metadata" key the provider branch
     // below uses, so both listing paths speak one shape (#620).
@@ -1607,6 +1649,14 @@ static QVariantMap providerEntryMap( const QgsProcessingAlgorithm *alg )
     algMap[QStringLiteral("tags")] = tags;
     algMap[QStringLiteral("memoryPolicy")] = QStringLiteral("unknown");
     algMap[QStringLiteral("largeRasterSafe")] = false;
+    // R25-C shape symmetry with descriptor entries: provider algorithms
+    // declare no determinism/idempotency contract, so both keys are
+    // present and honestly null (absent metadata) — not fabricated trues.
+    QVariantMap providerGuarantees;
+    providerGuarantees[QStringLiteral("deterministic")] = QVariant();
+    providerGuarantees[QStringLiteral("idempotent")] = QVariant();
+    providerGuarantees[QStringLiteral("supportsCancellation")] = QVariant();
+    algMap[QStringLiteral("guarantees")] = providerGuarantees;
 
     // Preserve the provider's native metadata map (purpose, help, ...)
     // for backward compatibility with MCP clients.
@@ -3040,6 +3090,17 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
         result[QStringLiteral("run_state")] =
             QString::fromStdString(sicnu::workflow::workflowRunStateToString(run->state()));
         result[QStringLiteral("run_progress")] = run->progress();
+        // R25-C: same resumability advisory as the run_id path, so a
+        // canceled/failed live run tells the agent its recovery move.
+        const QString state = result[QStringLiteral("run_state")].toString();
+        const bool resumable = ( state == QStringLiteral( "Interrupted" ) || state == QStringLiteral( "Failed" )
+                                 || state == QStringLiteral( "Canceled" ) )
+                               && !run->definition().steps.empty();
+        result[QStringLiteral("resumable")] = resumable;
+        if ( resumable )
+            result[QStringLiteral("resume_hint")] =
+                QStringLiteral( "call resume_workflow with run_id '%1'; completed steps whose outputs still verify are skipped" )
+                    .arg( result[QStringLiteral("run_id")].toString() );
     }
 
     QVariantList steps;
@@ -3059,6 +3120,127 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
             step[QStringLiteral("status")] = QStringLiteral("skipped");
         }
         steps.append(step);
+    }
+    result[QStringLiteral("steps")] = steps;
+    return result;
+}
+
+/// R25-C: a checkpoint-recorded output path shown in a diagnostic must not
+/// disclose more than the workspace sandbox allows. Paths inside the root
+/// pass through verbatim (the agent needs them to resolve artifacts);
+/// anything outside collapses to its file name, and a non-path string
+/// (placeholder tokens) is returned unchanged.
+static std::string diagnosticArtifactPath( const std::string &rawPath, const QString &wsRoot )
+{
+    const QString path = QString::fromStdString( rawPath );
+    if ( path.isEmpty() )
+        return rawPath;
+    QFileInfo info( path );
+    if ( !info.isAbsolute() && !path.startsWith( QStringLiteral( "/" ), Qt::CaseInsensitive ) )
+        return rawPath; // placeholder/token, not a filesystem path
+    // containment::canonicalPathWithin is the sandbox's own rule (it handles
+    // a "/" root, where a naive `root + "/"` becomes "//" and nothing
+    // matches — R2 P2-2).
+    const QString canonical = info.canonicalFilePath();
+    const QString resolved = canonical.isEmpty() ? path : canonical;
+    if ( sicnu::agent::tool_catalog::containment::canonicalPathWithin( resolved, wsRoot ) )
+        return rawPath;
+    // Outside the sandbox: keep only the leaf name — enough to identify the
+    // artifact in conversation, not enough to map the host filesystem.
+    return info.fileName().toStdString();
+}
+
+QVariantMap McpServer::handleGetWorkflowStatusByRun(const QString &runId)
+{
+    // Same filesystem-reach guard as resume_workflow: the run id reaches
+    // checkpointPathFor's path interpolation, so "foo/../../bar" must not
+    // probe outside the checkpoint directory.
+    // \z (PCRE2 absolute end): $ AND \Z both also match BEFORE a trailing
+    // newline, which would admit "run\n" as an id (R2 P3, proven with
+    // pcre2test). \z anchors the true end-of-subject only.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\z" ) );
+    if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
+    {
+        throw McpToolError(
+          QStringLiteral( "get_workflow_status: run_id contains invalid characters (allowed: letters, digits, '_', '-', '.')" ),
+          QStringLiteral( "INVALID_PARAMETER" ),
+          QStringLiteral( "validation" ) );
+    }
+
+    auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
+    // Read-only observation: in-memory run first (freshest), else the
+    // checkpoint (atomic saves ⇒ consistent, possibly one save stale). No
+    // run lock, no state mutation — resumeRun keeps the ownership authority.
+    const std::string id = runId.toStdString();
+    const long pipelineId = coordinator.pipelineIdForRun( id );
+    const auto run = coordinator.runForRunIdReadOnly( id );
+    if ( !run )
+    {
+        throw McpToolError(
+          QStringLiteral( "get_workflow_status: no in-memory run and no checkpoint for run id '%1'" ).arg( runId ),
+          QStringLiteral( "UNKNOWN_RUN" ),
+          QStringLiteral( "validation" ) );
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("run_id")] = runId;
+    const QString state = QString::fromStdString( sicnu::workflow::workflowRunStateToString( run->state() ) );
+    result[QStringLiteral("run_state")] = state;
+    result[QStringLiteral("run_progress")] = run->progress();
+    if ( pipelineId >= 0 )
+    {
+        result[QStringLiteral("pipeline_id")] = static_cast<qlonglong>( pipelineId );
+        result[QStringLiteral("source")] = QStringLiteral( "live" );
+    }
+    else
+    {
+        result[QStringLiteral("source")] = QStringLiteral( "checkpoint" );
+    }
+    // Honest presence probe (not implied by resolution): a live run whose
+    // checkpoint has not been persisted yet does not survive a crash.
+    result[QStringLiteral("checkpoint_present")] = coordinator.hasCheckpointFor( id );
+
+    // Resumability ADVISORY mirroring resumeRun's state wall: only
+    // Interrupted/Failed/Canceled runs resume, and a degenerate zero-step
+    // lineage never does (its checkpoint carries no executable steps).
+    // Active states stay non-resumable here on purpose: whether a dead
+    // owner's active checkpoint may be reconciled is resumeRun's
+    // live-owner decision, not an observation's.
+    bool resumable = state == QStringLiteral( "Interrupted" ) || state == QStringLiteral( "Failed" )
+                     || state == QStringLiteral( "Canceled" );
+    QString hint;
+    if ( run->definition().steps.empty() )
+    {
+        resumable = false;
+        hint = QStringLiteral( "zero-step lineage: a rejected degenerate run cannot be resumed" );
+    }
+    else if ( resumable )
+    {
+        hint = QStringLiteral( "call resume_workflow with this run_id; completed steps whose outputs still verify are skipped" );
+    }
+    else if ( state == QStringLiteral( "Completed" ) )
+    {
+        hint = QStringLiteral( "run is terminal (Completed): nothing to resume" );
+    }
+    else
+    {
+        hint = QStringLiteral( "run state is %1 (active); if the owning process died, resume_workflow's ownership check reconciles it to Interrupted" ).arg( state );
+    }
+    result[QStringLiteral("resumable")] = resumable;
+    result[QStringLiteral("resume_hint")] = hint;
+
+    QVariantList steps;
+    const QString wsRoot = sicnu::agent::tool_catalog::containment::effectiveMcpWorkspaceRoot();
+    for ( const auto &plan : run->stepPlans() )
+    {
+        QVariantMap step;
+        step[QStringLiteral("step_id")] = QString::fromStdString( plan.stepId );
+        step[QStringLiteral("operator")] = QString::fromStdString( plan.operatorId );
+        step[QStringLiteral("status")] = QString::fromStdString( plan.status );
+        if ( !plan.outputLayerPath.empty() )
+            step[QStringLiteral("output_path")] =
+                QString::fromStdString( diagnosticArtifactPath( plan.outputLayerPath, wsRoot ) );
+        steps.append( step );
     }
     result[QStringLiteral("steps")] = steps;
     return result;
@@ -3100,7 +3282,10 @@ QVariantMap McpServer::handleResumeWorkflow(const QString &runId)
     // The run id is interpolated into the checkpoint file path, so restrict
     // it to run-id characters — a caller-supplied "foo/../../bar" must not
     // escape the checkpoint directory and load an arbitrary JSON document.
-    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+$" ) );
+    // \z (PCRE2 absolute end): $ AND \Z both also match BEFORE a trailing
+    // newline, which would admit "run\n" as an id (R2 P3, proven with
+    // pcre2test). \z anchors the true end-of-subject only.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+\\z" ) );
     if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
     {
         throw McpToolError(
