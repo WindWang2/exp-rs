@@ -39,7 +39,9 @@ bool bai(const float *red, const float *nir, float *out, size_t count, bool isSc
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <atomic>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -128,6 +130,13 @@ Json::Value RsSpectralIndexOperator::metadata() const {
                                "unit reflectance for the computation; an explicit scale param wins "
                                "over the metadata stamp. Ratio indices are scale-invariant and "
                                "inputs are never rescaled on disk.");
+    meta["limitations"].append("SICNU_NUMERIC_OFFSET (Sentinel-2 L2A baseline >= 04.00 "
+                               "BOA_ADD_OFFSET = -1000, Landsat C2 REFLECTANCE_ADD = -0.2) is "
+                               "honoured for EVERY index: scale cancels in ratio indices but a "
+                               "non-zero offset does not, so bands are un-offset "
+                               "(physical = (stored - offset)/scale) before the formula. An "
+                               "explicit offset param (stored-value space) wins over the stamp; "
+                               "a dNBR postfire raster uses its own declared offset.");
     meta["limitations"].append("MSAVI, EVI2 and BAI are unit-reflectance-anchored like EVI/SAVI; without "
                                "declared scale metadata they fall back to the same documented magnitude "
                                "heuristic (grid-and-radiometric-policy §2), which can misfire on all-dark "
@@ -246,6 +255,39 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             }
         }
     }
+    // #1740/#1755: the affine term of the scale contract —
+    // physical = (stored - offset) / scale. Per-BandSource below (a dNBR
+    // postfire raster may declare a different offset than the pre raster);
+    // an explicit "offset" param overrides every source.
+    std::optional<double> paramOffsetOverride;
+    if (params.isMember("offset")) {
+        if (!params["offset"].isNumeric()) {
+            throw RSOperatorError(ErrorCode::TypeMismatch,
+                                  "Parameter 'offset' must be a number");
+        }
+        const double o = params["offset"].asDouble();
+        if (!std::isfinite(o)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "Parameter 'offset' must be finite (stored-value space, "
+                                  "physical = (stored - offset)/scale)");
+        }
+        paramOffsetOverride = o;
+    }
+    const auto readDeclaredOffset = [&](GdalDatasetWrapper &dataset) -> double {
+        if (paramOffsetOverride)
+            return *paramOffsetOverride;
+        if (void *handle = dataset.dataset()) {
+            if (const char *rawOffset = GDALGetMetadataItem(
+                    static_cast<GDALDatasetH>(handle),
+                    SatelliteProducts::kNumericOffsetKey, nullptr)) {
+                bool ok = false;
+                const double o = QString::fromUtf8(rawOffset).toDouble(&ok);
+                if (ok && std::isfinite(o))
+                    return o;
+            }
+        }
+        return 0.0;
+    };
     // Recipe/user override: `scale` is ALWAYS multiplicative for finite > 0
     // (stored * scale = unit reflectance), e.g. Landsat C2 0.0001 or scale=2
     // for ×2. domainFromDeclaredScale and SICNU_NUMERIC_SCALE use a divisor
@@ -267,6 +309,9 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     }
     if (!indexNeedsScale) {
         numericDomain = sicnu::processing::contracts::defaultUnitDomain();
+        // Ratio indices: the scale cancels in (a-b)/(a+b), but a NON-ZERO
+        // offset does NOT (#1755) — BandSources still subtract it, and the
+        // resolvedBy marker says which case ran.
         numericDomain.resolvedBy = QStringLiteral("not-needed-ratio-index");
     } else if (hasDeclaredScale) {
         numericDomain = sicnu::processing::contracts::domainFromDeclaredScale(declaredScale);
@@ -370,6 +415,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // domain ONCE from a bounded decimated whole-raster probe over the
     // participating bands (#801 — never per tile).
     if (indexNeedsScale && !hasDeclaredScale) {
+        const double probeOffset = readDeclaredOffset(ds);
         double observedMaxAbs = 0.0;
         int probeBands[3] = { nirBand, redBand, 0 };
         int probeBandCount = 2;
@@ -411,9 +457,14 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         // and falsely flips the scene into DN scale) or
                         // noise — never a reason to divide every pixel by
                         // the canonical DN divisor.
-                        if (v > 0.0f)
+                        // #1740: measure magnitude on the UN-OFFSET value
+                        // (stored - offset) — an offset-bearing DN scene
+                        // otherwise looks brighter than its reflectance and
+                        // the probe picks the wrong domain.
+                        const float vv = v - static_cast<float>(probeOffset);
+                        if (vv > 0.0f)
                             observedMaxAbs = std::max(observedMaxAbs,
-                                                      static_cast<double>(v));
+                                                      static_cast<double>(vv));
                     }
                 }
             }
@@ -450,9 +501,11 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 
     // A (dataset, band) pair with the band's finite NoData sentinel resolved
     // once. Blocks read through it apply the same normalization the
-    // full-raster path used (sentinel / non-finite -> NaN) and, for
-    // scale-sensitive indices (#680), the numeric-scale normalization
-    // (finite values divided by the stamped scale).
+    // full-raster path used (sentinel / non-finite -> NaN) and, when the
+    // numeric contract requires it (#680 scale, #1740/#1755 offset), the
+    // affine normalization (finite values -> (v - offset) * invScale; the
+    // ratio paths leave invScale at 1 and subtract only the offset — the
+    // scale cancels in the ratio but the offset does not).
     struct BandSource
     {
         GdalDatasetWrapper *ds = nullptr;
@@ -460,6 +513,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         bool hasNodata = false;
         double nodata = 0.0;
         float invScale = 1.0f; // 1/SICNU_NUMERIC_SCALE when #680 applies, else 1
+        float offset = 0.0f;   // stored-space SICNU_NUMERIC_OFFSET (#1740)
+        bool applyTransform = false;
     };
     auto makeSource = [&](GdalDatasetWrapper &dataset, int bandNum,
                           bool applyScale = false) {
@@ -471,6 +526,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             src.hasNodata = false;
         if (applyScale && applyNumericScale)
             src.invScale = static_cast<float>(1.0 / numericScale);
+        src.offset = static_cast<float>(readDeclaredOffset(dataset));
+        src.applyTransform = (src.invScale != 1.0f) || (src.offset != 0.0f);
         return src;
     };
 
@@ -481,18 +538,23 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                                     spec.width, spec.height, buf)) {
             throw RSOperatorError(ErrorCode::GdalError,
                                   "Failed to read band " + std::to_string(src.band) +
-                                  " for tile " + std::to_string(spec.index));
+                                      " for tile " + std::to_string(spec.index));
         }
         const size_t count = static_cast<size_t>(spec.width) * spec.height;
+        const auto normalizeOne = [&](float v) {
+            if (src.invScale != 1.0f)
+                return (v - src.offset) * src.invScale;
+            return v - src.offset;
+        };
         if (src.hasNodata) {
             const float nodataF = static_cast<float>(src.nodata);
-            if (src.invScale != 1.0f) {
+            if (src.applyTransform) {
                 for (size_t i = 0; i < count; ++i) {
                     const float v = buf[i];
                     if (v == nodataF || !std::isfinite(v))
                         buf[i] = std::numeric_limits<float>::quiet_NaN();
                     else
-                        buf[i] = v * src.invScale;
+                        buf[i] = normalizeOne(v);
                 }
             } else {
                 for (size_t i = 0; i < count; ++i) {
@@ -501,10 +563,10 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         buf[i] = std::numeric_limits<float>::quiet_NaN();
                 }
             }
-        } else if (src.invScale != 1.0f) {
+        } else if (src.applyTransform) {
             for (size_t i = 0; i < count; ++i) {
                 if (std::isfinite(buf[i]))
-                    buf[i] *= src.invScale;
+                    buf[i] = normalizeOne(buf[i]);
             }
         }
     };
@@ -547,6 +609,11 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     canonicalParams["rededge"] = redEdgeBand;
     if (applyNumericScale) {
         canonicalParams["numericScale"] = numericScale;
+    }
+    // #1740/#1755: record the affine term actually applied to the primary
+    // raster's bands (per-source offsets live in the BandSources).
+    if (const double primaryOffset = readDeclaredOffset(ds); primaryOffset != 0.0) {
+        canonicalParams["numericOffset"] = primaryOffset;
     }
     if (params.isMember("postfire") && params["postfire"].isString()) {
         canonicalParams["postfire"] = params["postfire"].asString();
@@ -599,6 +666,11 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         }
     };
 
+    // Output quality counters (D: verifiable output quality) — finite output
+    // pixels vs total. Atomics: the chunked runner may invoke sinks from its
+    // worker lane.
+    std::atomic<long long> totalPixels{0};
+    std::atomic<long long> finitePixels{0};
     auto sink = [&](const sicnu::runtime::chunk::TilePayload &payload) {
         ensureOutput();
         const auto &spec = payload.spec;
@@ -618,6 +690,15 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             throw RSOperatorError(ErrorCode::FileNotWritable,
                                   "Failed to write tile " + std::to_string(spec.index));
         }
+        long long tileTotal = 0;
+        long long tileFinite = 0;
+        for (const float v : *payload.pixels) {
+            ++tileTotal;
+            if (std::isfinite(v))
+                ++tileFinite;
+        }
+        totalPixels.fetch_add(tileTotal, std::memory_order_relaxed);
+        finitePixels.fetch_add(tileFinite, std::memory_order_relaxed);
     };
 
     ChunkedRunResult chunkResult;
@@ -942,6 +1023,9 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                               "Spectral index computation failed");
     }
 
+    // Capture before close(): the calibration record in the result must read
+    // the dataset metadata while the handle is still open.
+    const double primaryOffsetForSummary = readDeclaredOffset(ds);
     ds.close();
 
     context.reportProgress(1.0, indexName + " complete");
@@ -954,6 +1038,32 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // Provenance: how the numeric domain was resolved (once, dataset-level).
     result["numeric_domain"] =
         sicnu::processing::jsonValueFromQJson( numericDomain.toJson() );
+    // Output quality summary (R27-T01 D): valid-pixel ratio, NoData share
+    // and the calibration record actually applied to the primary raster.
+    {
+        const long long total = totalPixels.load();
+        const long long finite = finitePixels.load();
+        if (total > 0) {
+            result["valid_pixel_ratio"] = static_cast<double>(finite)
+                                          / static_cast<double>(total);
+            result["nodata_pixel_ratio"] =
+                static_cast<double>(total - finite) / static_cast<double>(total);
+        }
+        result["nonfinite_output_pixels"] =
+            static_cast<Json::Int64>(total - finite);
+        Json::Value calibration(Json::objectValue);
+        if (applyNumericScale)
+            calibration["scale"] = numericScale;
+        if (primaryOffsetForSummary != 0.0)
+            calibration["offset"] = primaryOffsetForSummary;
+        if (calibration.isMember("scale") || calibration.isMember("offset")) {
+            calibration["source"] = paramOffsetOverride
+                                        ? "param"
+                                        : "SICNU_NUMERIC_SCALE/OFFSET metadata";
+            calibration["contract"] = "physical = (stored - offset) / scale";
+            result["calibration"] = calibration;
+        }
+    }
     result["total_tiles"] = static_cast<Json::UInt64>(chunkResult.totalTiles);
     result["tiles_computed"] = static_cast<Json::UInt64>(chunkResult.tilesComputed);
     result["tiles_reused"] = static_cast<Json::UInt64>(chunkResult.tilesReused);

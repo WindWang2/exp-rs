@@ -557,6 +557,36 @@ double sentinel2QuantificationValue(const QString& mtdPath)
     return 0.0;
 }
 
+/// Parses the Sentinel-2 L2A BOA_ADD_OFFSET from an MTD_MSIL2A.xml.
+/// Every L2A product with Processing Baseline >= 04.00 (since Jan 2022)
+/// ships DN = rho*QUANTIFICATION + BOA_ADD_OFFSET with the offset at -1000;
+/// pre-04.00 products carry no tag (offset 0). Returns NaN when the tag is
+/// absent or unparseable (#1740).
+double sentinel2BoaAddOffset(const QString& mtdPath)
+{
+    QFile f(mtdPath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return std::numeric_limits<double>::quiet_NaN();
+    const QString xml = QString::fromUtf8(f.readAll());
+    const QStringList tags{
+        QStringLiteral("BOA_ADD_OFFSET"),
+        QStringLiteral("RADIO_ADD_OFFSET"),
+    };
+    for (const QString& tag : tags) {
+        const QRegularExpression re(
+            QStringLiteral("<%1>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
+            QRegularExpression::CaseInsensitiveOption);
+        const auto m = re.match(xml);
+        if (!m.hasMatch())
+            continue;
+        bool ok = false;
+        const double v = m.captured(1).toDouble(&ok);
+        if (ok && std::isfinite(v))
+            return v;
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
 } // namespace
 
 QStringList unresolvableBands(const ProductInfo& product, const QStringList& bandNames)
@@ -1715,6 +1745,23 @@ bool stackToGeoTiff(const ProductInfo& product,
         }
         int hasNoData = 0;
         double ndVal = GDALGetRasterNoDataValue(srcBand, &hasNoData);
+        // #1759: USGS/ESA integer products ship DN=0 fill pixels without a
+        // NoData tag (Landsat C2 L1/L2, S2 L2A). On an UNDECLARED integer
+        // source band of such a product whose data actually contains a 0,
+        // declare 0 as the stacked band's NoData — downstream consumers can
+        // no longer publish fill as valid data (thermal DN0 with a positive
+        // radiance offset used to come out as a plausible 147.5 K). Bands
+        // without any 0 pixel, float sources and non-USGS/ESA products keep
+        // the historical behaviour.
+        const GDALDataType srcType = GDALGetRasterDataType(srcBand);
+        const bool integerSource = srcType == GDT_Byte || srcType == GDT_UInt16
+                                   || srcType == GDT_Int16 || srcType == GDT_UInt32
+                                   || srcType == GDT_Int32;
+        const bool fillInferenceEligible =
+            !hasNoData && integerSource
+            && (product.type == ProductType::Landsat
+                || product.type == ProductType::Sentinel2);
+        bool sawZeroFill = false;
 
         GDALRasterBandH dstBand = GDALGetRasterBand(outDs, i + 1);
         for (int y = 0; y < height; y += kBlockRows) {
@@ -1736,11 +1783,25 @@ bool stackToGeoTiff(const ProductInfo& product,
                 return failRemovingPartial(errorMessage,
                                            QStringLiteral("Failed to write band %1").arg(selected[i].name));
             }
+            if (fillInferenceEligible && !sawZeroFill) {
+                for (size_t j = 0; j < buffer.size(); ++j) {
+                    if (buffer[j] == 0.0f) {
+                        sawZeroFill = true;
+                        break;
+                    }
+                }
+            }
         }
         GDALClose(src);
 
         if (hasNoData) {
             GDALSetRasterNoDataValue(dstBand, ndVal);
+        } else if (sawZeroFill) {
+            GDALSetRasterNoDataValue(dstBand, 0.0);
+            GDALSetMetadataItem(dstBand, "SICNU_FILL_INFERRED", "DN0", nullptr);
+            qInfo() << "stackToGeoTiff: band" << selected[i].name
+                    << "has undeclared DN0 fill pixels; declaring 0 as NoData "
+                       "(USGS/ESA integer fill convention, #1759)";
         }
 
         GDALSetDescription(dstBand, selected[i].name.toUtf8().constData());
@@ -1855,32 +1916,44 @@ bool stackToGeoTiff(const ProductInfo& product,
     if ( importedState )
         GDALSetMetadataItem( outDs, kRadiometricStateKey, importedState, nullptr );
 
-    // #680: the state key above records *intent* (surface reflectance), not
-    // the numeric encoding. Level-2 pixels are stacked verbatim (no gain/bias
-    // applied), so stamp the divisor that recovers unit reflectance:
-    // reflectance = stored_pixel / SICNU_NUMERIC_SCALE. Scale-sensitive
-    // consumers (EVI/SAVI additive constants) read this key; ratio indices
-    // are scale-invariant. Stored pixel values are never rescaled here
-    // (back-compat with existing callers and stacked outputs).
+    // #680/#1740: the state key above records *intent* (surface reflectance),
+    // not the numeric encoding. Level-2 pixels are stacked verbatim (no
+    // gain/bias applied), so stamp the affine contract that recovers unit
+    // reflectance: reflectance = (stored - SICNU_NUMERIC_OFFSET)
+    // / SICNU_NUMERIC_SCALE. Offset 0 products (old S2 baselines, pure-scale
+    // Landsat) leave the key unstamped so legacy consumers see exactly the
+    // old divide-only contract. Scale-sensitive consumers (EVI/SAVI additive
+    // constants) AND ratio consumers (NDVI is NOT offset-invariant) read
+    // these keys; stored pixel values are never rescaled here (back-compat
+    // with existing callers and stacked outputs).
     const bool isSurfaceReflectanceImport =
         importedState && std::strcmp( importedState, kRadiometricStateSurfaceReflectance ) == 0;
     if ( isSurfaceReflectanceImport )
     {
         double numericScale = 0.0;
+        double numericOffset = std::numeric_limits<double>::quiet_NaN();
         if ( product.type == ProductType::Sentinel2 )
         {
             // S2 L2A: honour the MTD quantification when parseable, otherwise
-            // the ESA-published BOA quantification of 10000.
+            // the ESA-published BOA quantification of 10000. Baseline >= 04.00
+            // carries BOA_ADD_OFFSET = -1000 (DN = rho*Q - 1000): stamp it so
+            // indices can un-offset before dividing (#1740).
             const double quant = sentinel2QuantificationValue( product.metadataPath );
             numericScale = quant > 0.0 ? quant : 10000.0;
+            const double boaOffset = sentinel2BoaAddOffset( product.metadataPath );
+            if ( std::isfinite( boaOffset ) && boaOffset != 0.0 )
+                numericOffset = boaOffset;
         }
         else if ( product.type == ProductType::Landsat )
         {
             // Landsat Collection 2 L2: REFLECTANCE_MULT_BAND_n already is the
-            // reflectance-per-DN factor (the reciprocal of the quantification).
-            // Stamp 1/mult only when ONE uniform mult covers the stacked
-            // reflectance bands; mixed/missing coefficients cannot be described
-            // by a single divisor, so stamp nothing (and say so).
+            // reflectance-per-DN factor (the reciprocal of the quantification)
+            // and REFLECTANCE_ADD is the affine term (rho = DN*mult + add,
+            // typically -0.2). Stamp 1/mult only when ONE uniform mult/add
+            // pair covers the stacked reflectance bands; the offset key gets
+            // -add/mult so (stored - offset)/scale == DN*mult + add exactly.
+            // Mixed/missing coefficients cannot be described by a single
+            // divisor, so stamp nothing (and say so).
             static const QRegularExpression bandNumRe(
                 QStringLiteral( "^B(\\d+)$" ) );
             double mult = 0.0;
@@ -1917,19 +1990,17 @@ bool stackToGeoTiff(const ProductInfo& product,
                     break;
                 }
             }
-            // A pure scale contract requires the additive term to be zero:
-            // Landsat C2 L2 carries REFLECTANCE_ADD = -0.2, so dividing by
-            // 1/mult alone leaves DN*mult = rho + 0.2 — EVI/SAVI would run on
-            // biased reflectance (review P1). Stamp only when add == 0.
-            if ( uniform && multBands > 0 && mult > 0.0 && std::abs( add ) <= 1e-12 )
+            if ( uniform && multBands > 0 && mult > 0.0 )
             {
                 numericScale = 1.0 / mult;
+                if ( std::abs( add ) > 1e-12 )
+                    numericOffset = -add / mult;
             }
             else if ( multBands > 0 )
             {
-                qWarning() << "stackToGeoTiff: Landsat reflectance coefficients are not a pure "
-                              "scale (non-uniform MULT or non-zero ADD); SICNU_NUMERIC_SCALE "
-                              "not stamped — run rs:radiometric_calibration for true reflectance";
+                qWarning() << "stackToGeoTiff: Landsat reflectance coefficients are not a "
+                              "uniform MULT/ADD pair; SICNU_NUMERIC_SCALE not stamped — run "
+                              "rs:radiometric_calibration for true reflectance";
             }
         }
         if ( numericScale > 0.0 && std::isfinite( numericScale ) )
@@ -1937,6 +2008,12 @@ bool stackToGeoTiff(const ProductInfo& product,
             GDALSetMetadataItem( outDs, kNumericScaleKey,
                                  QByteArray::number( numericScale, 'g', 12 ).constData(),
                                  nullptr );
+            if ( std::isfinite( numericOffset ) && numericOffset != 0.0 )
+            {
+                GDALSetMetadataItem( outDs, kNumericOffsetKey,
+                                     QByteArray::number( numericOffset, 'g', 12 ).constData(),
+                                     nullptr );
+            }
         }
     }
 
