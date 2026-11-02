@@ -50,7 +50,9 @@ namespace
           if ( auto *dialog = qobject_cast<QFileDialog *>( widget ) )
           {
             dialog->selectFile( target );
-            dialog->accept();
+            // QFileDialog::accept() is protected in Qt6; call the public
+            // QDialog::accept (dynamic dispatch applies the selection).
+            static_cast<QDialog *>( dialog )->accept();
             armSaveDialogAnswer( target, 0 );
             return;
           }
