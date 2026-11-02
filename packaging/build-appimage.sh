@@ -29,9 +29,14 @@ APPDIR="$BUILD_DIR/AppDir"
 # shellcheck source=appimage_toolchain.sh
 source "$SCRIPT_DIR/appimage_toolchain.sh"
 
-LINUXDEPLOY_TAG="1-alpha-20240109"
+# #1748: the original 1-alpha-20240109 pin no longer exists upstream (404),
+# so every fetch failed closed on the PENDING checksums. Repinned to the
+# newest 1-alpha tags per tool (they release independently) with recorded
+# sha256s in appimage-tool-checksums.txt.
+LINUXDEPLOY_TAG="1-alpha-20251107-1"
+LINUXDEPLOY_QT_TAG="1-alpha-20250213-1"
 LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_TAG}/linuxdeploy-x86_64.AppImage"
-LINUXDEPLOY_QT_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${LINUXDEPLOY_TAG}/linuxdeploy-plugin-qt-x86_64.AppImage"
+LINUXDEPLOY_QT_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${LINUXDEPLOY_QT_TAG}/linuxdeploy-plugin-qt-x86_64.AppImage"
 MAX_MB=900
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }

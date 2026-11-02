@@ -602,7 +602,7 @@ TEST_CASE( "REAL process crash: committed tiles survive a hard kill (R2)",
         // Cannot resolve the test binary path on this host — record and skip
         // the child-process layer (fault-injection layers above still cover
         // the same windows).
-        SUCCEED( "self exe path unavailable; child-process crash layer skipped" );
+        SKIP( "self exe path unavailable; child-process crash layer skipped" );
         return;
     }
 

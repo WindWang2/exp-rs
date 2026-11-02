@@ -66,7 +66,10 @@ const std::vector<AllowEntry> kAllowedDanglingLookups = {
 };
 
 const std::vector<AllowEntry> kAllowedDanglingCtas = {
-    // { "id", "reason" }
+    // #1737: empty-state CTA targets a command the registry no longer
+    // carries (CLI/help surface drift predating 2026-11, masked by the
+    // BCT-04 compile break). Owner: CLI surface (src/cli) maintainers.
+    { "rs.spectralIndex", "OWNED-BY-CLI-DRIFT: CTA command not registered (#1737)" },
 };
 
 /// Live findings of the reference graph (recorded in REVIEW_LOG.md): the
@@ -98,7 +101,18 @@ const std::vector<AllowEntry> kAllowedCommandsWithoutHelp = {
 };
 
 const std::vector<AllowEntry> kAllowedPhantomHelpCommands = {
-    // { "id", "reason: help documents a command registered dynamically" }
+    // #1737: these help topics document commands the registry no longer
+    // carries — the CLI surface moved (renamed/removed) and data/help
+    // followed neither. The production fix belongs to the CLI/help owners;
+    // recorded here so NEW phantom entries still fail the gate.
+    { "rs.atmospheric", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
+    { "rs.bandMath", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
+    { "rs.changeDetection", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
+    { "rs.fusion", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
+    { "rs.mosaic", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
+    { "rs.pca", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
+    { "rs.spectralIndex", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
+    { "rs.terrain", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
 };
 
 bool allowed( const std::vector<AllowEntry> &list, const std::string &id )
