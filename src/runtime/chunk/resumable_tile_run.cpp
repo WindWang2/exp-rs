@@ -248,11 +248,37 @@ void ResumableTileRun::wipeState( bool includeMarker ) const
         std::filesystem::remove( sicnu::portable::pathFromUtf8( m_markerPath ), ec );
 }
 
+ExclusivePathLock ResumableTileRun::acquireStateLock() const
+{
+    ExclusivePathLock lock;
+    std::string error;
+    const auto refusal = lock.tryAcquire( m_config.statePath + ".lock", error );
+    switch ( refusal )
+    {
+    case ExclusivePathLock::Refusal::None:
+        return lock;
+    case ExclusivePathLock::Refusal::HeldElsewhere:
+        throw ChunkRunLockHeld( m_config.statePath );
+    case ExclusivePathLock::Refusal::OpenFailed:
+    case ExclusivePathLock::Refusal::LockFailed:
+        // Fail-closed: an unusable lock must never degrade into an unlocked
+        // mutation of shared state (R7).
+        throw std::runtime_error( "resumable tile run: state lock unusable ("
+                                  + std::string( ExclusivePathLock::refusalName( refusal ) )
+                                  + ": " + error + ")" );
+    }
+    throw std::runtime_error( "resumable tile run: unknown lock refusal" );
+}
+
 ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &cancel,
                                                     Callbacks cb )
 {
     if ( !cb.compute || !cb.consume || !cb.publish )
         throw std::logic_error( "resumable tile run: compute/consume/publish callbacks required" );
+
+    // R7: the whole mutation owns the state exclusively; the lock releases
+    // on every exit path (return, cancel throw, error throw) via RAII.
+    ExclusivePathLock stateLock = acquireStateLock();
 
     Result result;
     result.totalTiles = m_totalTiles;
@@ -408,11 +434,13 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
 
 void ResumableTileRun::abandon()
 {
+    ExclusivePathLock stateLock = acquireStateLock();
     wipeState( /*includeMarker=*/false );
 }
 
 void ResumableTileRun::cleanupAfterPublish()
 {
+    ExclusivePathLock stateLock = acquireStateLock();
     std::error_code ec;
     std::filesystem::remove_all( sicnu::portable::pathFromUtf8( m_runDir ), ec );
     std::filesystem::remove( sicnu::portable::pathFromUtf8( m_journalPath ), ec );
