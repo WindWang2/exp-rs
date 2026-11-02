@@ -22,6 +22,7 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QStatusBar>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QtTest>
