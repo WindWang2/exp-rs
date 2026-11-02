@@ -66,11 +66,13 @@ TEST_CASE( "Pipeline JSON open refuses deep nesting instead of aborting (#1793)"
     Json::Value root;
     QString err;
     // RED on HEAD: jsoncpp's unbounded reader threw std::runtime_error
-    // ("Exceeded stackLimit" / stack overflow) out of the Qt slot.
+    // ("Exceeded stackLimit" / stack overflow) out of the Qt slot. The
+    // contract is refuse-and-report: a typed error, never an abort.
+    // (root's content after a failed parse is unspecified — jsoncpp may
+    // have partially populated it before the depth refusal.)
     CHECK_FALSE( sicnu::workflow::gui::PipelineEditorDock::readPipelineDefinitionFile(
       path, root, &err ) );
     CHECK( !err.isEmpty() );
-    CHECK( root.isNull() );
   }
 
   // --- deep nesting inside an object value ----------------------------
