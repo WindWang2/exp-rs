@@ -67,9 +67,12 @@ void CrossSectionWidget::extractProfile(const QgsPointXY &start, const QgsPointX
         sicnu::app::RsScanPool::instance().nextGeneration(this);
     m_scanGeneration = scanGeneration;
     QPointer<CrossSectionWidget> self(this);
+    // Owner key captured on the GUI thread (isStale's map is keyed by raw
+    // address — reading QPointer internals off-thread would race).
+    const void *ownerKey = static_cast<const void *>(this);
 
     sicnu::app::RsScanPool::instance().pool().start(
-        [self, source, start, end, requestId, scanGeneration]() {
+        [self, ownerKey, source, start, end, requestId, scanGeneration]() {
             QVector<double> values;
             QVector<double> distances;
 
@@ -105,6 +108,16 @@ void CrossSectionWidget::extractProfile(const QgsPointXY &start, const QgsPointX
 
                         for (int i = 0; i < steps; ++i)
                         {
+                            // Cooperative cancellation every 128 samples
+                            // (review S2): a superseding request or widget
+                            // death frees the pool worker instead of reading
+                            // a whole remote transect for a dropped result.
+                            if ((i & 127) == 0 &&
+                                sicnu::app::RsScanPool::instance().isStale(scanGeneration, ownerKey))
+                            {
+                                GDALClose(ds);
+                                return;
+                            }
                             const double t = static_cast<double>(i) / (steps - 1);
                             const int ix = static_cast<int>(sx + t * dx);
                             const int iy = static_cast<int>(sy + t * dy);

@@ -49,7 +49,9 @@ signals:
     /// generation, or no next link). Emitted INSTEAD of silently returning
     /// so the UI can settle its pending state (the More button must not
     /// stay disabled forever). A silent no-op is a contract violation:
-    /// every searchNext() call terminates in exactly one signal.
+    /// every searchNext() call that does not LAUNCH a fetch terminates in
+    /// exactly one terminal signal; a launched fetch that its successor
+    /// supersedes terminates in searchDropped instead.
     void searchNextUnavailable(const QString &reason);
 
 public:

@@ -121,15 +121,18 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
     sicnu::app::RsScanPool::instance().nextGeneration( this );
   m_scanGeneration = scanGeneration;
   QPointer<RsRoiToolMagicWand> self( this );
+  // Owner key captured on the GUI thread (isStale's map is keyed by raw
+  // address — reading QPointer internals off-thread would race).
+  const void *ownerKey = static_cast<const void *>( this );
 
   sicnu::app::RsScanPool::instance().pool().start(
-    [self, rasterPath, map, tolerance, classId, requestId, scanGeneration]() {
+    [self, ownerKey, rasterPath, map, tolerance, classId, requestId, scanGeneration]() {
       WandResult result;
       result.classId = classId;
 
       // Cooperative cancellation: a newer click or tool death ends the read
       // at this seam instead of finishing stale work.
-      if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, self.data() ) )
+      if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, ownerKey ) )
         return;
 
       GDALAllRegister();
@@ -188,6 +191,13 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
              != CE_None )
         {
           qWarning() << "RsRoiToolMagicWand: failed to read band" << gdalBand;
+          GDALClose( ds );
+          return;
+        }
+        // Cooperative cancellation between band reads (review S3): a newer
+        // click or tool death stops the remaining reads.
+        if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, ownerKey ) )
+        {
           GDALClose( ds );
           return;
         }

@@ -3390,6 +3390,10 @@ long QgsClassificationMainWindow::startCrossValidationTask(
 
 void QgsClassificationMainWindow::recomputeSpectralCurves()
 {
+  // Every exit supersedes in-flight work: an early clear/return without
+  // this bump would let a dispatched worker land afterwards and repaint
+  // stale curves over the cleared state (review S2).
+  ++m_spectralRecomputeEpoch;
   if ( !m_spectralCurve )
     return;
   if ( m_sourceRasterPath.isEmpty() || !m_rois )
@@ -3473,11 +3477,15 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
     sicnu::app::RsScanPool::instance().nextGeneration( this );
   m_spectralRecomputeScan = scanGeneration;
   QPointer<QgsClassificationMainWindow> self( this );
+  // Owner key captured on the GUI thread: isStale's owner map is keyed by
+  // raw address — reading the QPointer's internals off-thread would race
+  // with GUI-thread destruction (review S3).
+  const void *ownerKey = static_cast<const void *>( this );
 
   sicnu::app::RsScanPool::instance().pool().start(
-    [self, rasterPath, bands, idxByClass, classList, W, H, requestEpoch, scanGeneration]() {
+    [self, ownerKey, rasterPath, bands, idxByClass, classList, W, H, requestEpoch, scanGeneration]() {
       QVector<RsSpectralCurveWidget::Curve> curves;
-      if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, self.data() ) )
+      if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, ownerKey ) )
         return;
 
       GDALDataset *ds = static_cast<GDALDataset *>(
@@ -3520,7 +3528,10 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
       {
         const int classId = it.key();
         const QVector<quint64> &px = it.value();
-        classPixelCount[classId] = px.size();
+        // Count only pixels the bounds filter keeps, so the mean divides by
+        // what was actually accumulated (member-vs-dataset divergence used
+        // to bias the mean low).
+        int kept = 0;
         for ( quint64 i : px )
         {
           const int row = static_cast<int>( i / static_cast<quint64>( W ) );
@@ -3528,7 +3539,9 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
           if ( row < 0 || row >= dsH || col < 0 || col >= dsW )
             continue;
           pixelsByRow[row].push_back( qMakePair( classId, col ) );
+          ++kept;
         }
+        classPixelCount[classId] = kept;
       }
 
       std::vector<float> rowBuf( static_cast<size_t>( dsW ) );
@@ -3560,7 +3573,7 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
           }
           // Cooperative cancellation between scanlines: a newer recompute
           // or window death stops the read instead of finishing stale work.
-          if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, self.data() ) )
+          if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, ownerKey ) )
           {
             GDALClose( ds );
             return;

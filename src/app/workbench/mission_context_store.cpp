@@ -182,6 +182,18 @@ bool persistMissionContextWithProject( const QString &projectFilePath, QDomDocum
         if ( saveMissionContextToSidecar( projectFilePath, ctx, &sideErr ) )
         {
             sideWriteOk = true;
+            // #1795 hygiene: a healthy write retires old failure backups —
+            // keep the newest one only (the recoverable previous state the
+            // issue demands), so repeated failures cannot accumulate.
+            const QString side = missionSidecarPathForProject( projectFilePath );
+            const QDir sideDir = QFileInfo( side ).dir();
+            const QStringList stale =
+                sideDir.entryList( QStringList()
+                                   << QFileInfo( side ).fileName()
+                                          + QStringLiteral( ".failed-*.bak" ),
+                                   QDir::Files, QDir::Name | QDir::Reversed );
+            for ( int i = 1; i < stale.size(); ++i ) // index 0 = newest, kept
+                QFile::remove( sideDir.filePath( stale.at( i ) ) );
         }
         else
         {

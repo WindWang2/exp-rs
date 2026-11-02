@@ -126,6 +126,12 @@ bool QgisDesktopWindow::checkUnsavedChanges()
             }
             else
             {
+                // #1747: same save preflight as saveProject — a direct
+                // write() here would still fire writeProject (whose
+                // downgrade refusal cannot abort) and overwrite the file
+                // with no SICNU block during close.
+                if (refuseUnserializableProjectData())
+                    return false; // the user must resolve the governance state first
                 QgsProject::instance()->write();
             }
         }
