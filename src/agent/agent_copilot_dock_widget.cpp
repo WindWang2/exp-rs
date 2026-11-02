@@ -9,6 +9,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
+#include "agent/copilot_tool_gate.h"
 
 #include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
@@ -653,6 +654,54 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     m_lastError = reason;
     updateToolCallCard( toolCallId, tr( "rejected" ), reason );
     setRunStage( tr( "Failed" ) );
+    updateRunInspector();
+    return;
+  }
+
+  // Single-tool-call gate (#1763 / AS-014): the MCP surface sandboxes every
+  // call; the GUI dispatcher did not. Prompt injection via tool results or
+  // dataset metadata could drive arbitrary-path read/write or /vsicurl
+  // fetches through a single call — so the SAME containment + remote
+  // default-deny policy runs here, before submission, and write-shaped
+  // calls get the human Confirm the plan flow already requires.
+  const auto gate = copilot_gate::gateSingleCall( cppEnvelope );
+  if ( !gate.refusalReason.isEmpty() )
+  {
+    const QString reason = tr( "Tool call blocked by the workspace policy: %1" )
+                               .arg( gate.refusalReason );
+    handleToolCallRejection( reason, toolCallJson );
+    m_lastError = reason;
+    if ( m_toolCallCards.contains( toolCallId ) )
+      updateToolCallCard( toolCallId, tr( "rejected" ), reason );
+    setRunStage( tr( "Failed" ) );
+    updateRunInspector();
+    return;
+  }
+  if ( gate.needsApproval )
+  {
+    // Route the write through the existing human approval card (one-step
+    // plan): the operator sees exactly what will be written where before
+    // anything executes, and the model receives the outcome through the
+    // same role:"tool" follow-up the plan path uses.
+    Json::Value oneStepPlan( Json::objectValue );
+    Json::Value steps( Json::arrayValue );
+    Json::Value step( Json::objectValue );
+    step["id"] = "copilot_single_write";
+    step["name"] = cppEnvelope.isMember( "name" ) && cppEnvelope["name"].isString()
+                       ? cppEnvelope["name"].asString()
+                       : std::string();
+    step["params"] = cppEnvelope.isMember( "parameters" ) && cppEnvelope["parameters"].isObject()
+                         ? cppEnvelope["parameters"]
+                         : Json::Value( Json::objectValue );
+    steps.append( step );
+    oneStepPlan["steps"] = steps;
+    appendPlanApprovalCard(
+        QJsonObject::fromVariantMap( processing::jsonObjectToVariantMap( oneStepPlan ) ),
+        toolCallJson );
+    if ( m_toolCallCards.contains( toolCallId ) )
+      updateToolCallCard( toolCallId, tr( "awaiting approval" ),
+                          tr( "Write tool call routed to operator approval" ) );
+    setRunStage( tr( "Awaiting approval" ) );
     updateRunInspector();
     return;
   }
