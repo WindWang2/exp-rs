@@ -1500,12 +1500,66 @@ QVariant TaskCenter::substituteVariantRecursive( const QVariant &value,
     return value;
 }
 
+// #1780 (WE-21): scan substituted task parameters for a step/task
+// placeholder that survived resolution. Env refs are excluded — env
+// expansion policy lives in the workflow substitution layer (#1776).
+QString firstUnresolvedStepPlaceholder( const QVariantMap &params )
+{
+    std::function<QString( const QVariant & )> visit = [&]( const QVariant &value ) -> QString {
+        if ( value.type() == QVariant::Map )
+        {
+            const QVariantMap map = value.toMap();
+            for ( auto it = map.cbegin(); it != map.cend(); ++it )
+            {
+                const QString hit = visit( it.value() );
+                if ( !hit.isEmpty() )
+                    return hit;
+            }
+        }
+        else if ( value.type() == QVariant::List )
+        {
+            const QVariantList list = value.toList();
+            for ( const QVariant &item : list )
+            {
+                const QString hit = visit( item );
+                if ( !hit.isEmpty() )
+                    return hit;
+            }
+        }
+        else if ( value.type() == QVariant::String )
+        {
+            const std::string text = value.toString().toStdString();
+            for ( const auto &ref : sicnu::workflow::parsePlaceholders( text ) )
+            {
+                if ( !ref.isEnvVar )
+                    return QString::fromStdString( ref.rawRef );
+            }
+        }
+        return QString();
+    };
+    for ( auto it = params.cbegin(); it != params.cend(); ++it )
+    {
+        const QString hit = visit( it.value() );
+        if ( !hit.isEmpty() )
+            return hit;
+    }
+    return QString();
+}
+
 void TaskCenter::applyPlaceholdersForTask( long taskId )
 {
     if ( !m_tasks.contains( taskId ) )
         return;
 
     auto resolveRef = [&]( const sicnu::workflow::PlaceholderRef &ref ) -> std::string {
+        // #1779 (WE-20): ${task.parent} with MULTIPLE parents is ambiguous —
+        // binding to whichever parent is listed first made the data flow
+        // arbitrary. An explicit ref (step id or ${task.<id>}) stays valid;
+        // the keyword form only resolves when exactly one parent exists.
+        // Ambiguous/unresolvable refs stay raw here and the #1780 launch
+        // gate refuses the task with a typed error.
+        if ( ref.isParentKeyword && m_tasks[taskId].parentTaskIds.size() > 1 )
+            return ref.rawRef;
         for ( long parentId : m_tasks[taskId].parentTaskIds )
         {
             if ( !m_tasks.contains( parentId ) )
@@ -1753,6 +1807,11 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         UpstreamResolver resolver =
             [this, fingerprintParents]( const sicnu::workflow::PlaceholderRef &ref,
                                         const QString & ) -> UpstreamResolution {
+            // #1779 (WE-20): the keyword parent ref is only meaningful with
+            // exactly one parent; with several it must not fingerprint
+            // against an arbitrary first pick.
+            if ( ref.isParentKeyword && fingerprintParents.size() > 1 )
+                return {};
             for ( long parentId : fingerprintParents )
             {
                 const auto parentIt = m_tasks.constFind( parentId );
@@ -2760,6 +2819,36 @@ void TaskCenter::processNextQueuedTasks()
         // parameters), so per-candidate per-pass re-substitution — the old
         // pass's dominant per-candidate cost — was pure overhead.
         applyPlaceholdersForTask( entry.taskId );
+
+        // #1780 (WE-21) pre-launch gate: an unresolved step/task placeholder
+        // must never be dispatched as a literal "$step.port" parameter — the
+        // old path ran the operator with the raw reference and the failure
+        // surfaced later as a confusing operator error (or worse, succeeded
+        // against a wrong default). Refuse here, at the last point before
+        // staging, with the offending ref in the task error.
+        {
+            const QString unresolved =
+                firstUnresolvedStepPlaceholder( task.parameterMap );
+            if ( !unresolved.isEmpty() )
+            {
+                setTaskStatusLocked( task, TaskStatus::Failed );
+                task.errorMessage = QStringLiteral(
+                                        "Unresolved workflow placeholder %1 in task parameters "
+                                        "(the referenced step/port did not produce a value)" )
+                                        .arg( unresolved );
+                task.endTime = QDateTime::currentDateTimeUtc();
+                appendTaskLogLocked( task.logBuffer,
+                                     QStringLiteral( "[%1] %2" )
+                                         .arg( task.endTime.toString( QStringLiteral( "hh:mm:ss" ) ),
+                                               task.errorMessage ) );
+                updatePipelineForTaskLocked( entry.taskId );
+                queueTaskUpdatedLocked( entry.taskId );
+                traceTaskEvent( "admission", "unresolved_placeholder", entry.taskId,
+                                task.algorithmId );
+                ++scanned;
+                continue;
+            }
+        }
 
         // Dispatch-time verification (#726): the submission-time fingerprint
         // was computed over statically-resolved parameters; if the real
