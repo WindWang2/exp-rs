@@ -54,9 +54,10 @@ Json::Value parseRefs( const QString &raw, bool *ok )
 }
 
 /// Reads the repair-approval token document. The token is a small JSON
-/// object minted by `session approve-repair`; anything missing, unparseable
-/// or non-object is a typed refusal — an approval must never be silently
-/// dropped on its way to the driver (CT-B, R20-03).
+/// object minted by the HUMAN channel (the Control Center dock's Approve
+/// flow; `session approve-repair` itself is refused — #1733); anything
+/// missing, unparseable or non-object is a typed refusal — an approval must
+/// never be silently dropped on its way to the driver (CT-B, R20-03).
 bool readApprovalTokenFile( const QString &path, Json::Value &token, std::string &error )
 {
     QFile file( path );
@@ -193,12 +194,13 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
             // CT-B (R20-03): the bare-bool spellings armed nothing —
             // args["approve"] had zero consumers and the legacy
             // approve_pending_repair is exactly what the driver refuses.
-            // Refuse at parse time and point at the token channel: mint via
-            // `session approve-repair`, arm via --repair-approval.
+            // #1733: minting is human-only (Control Center UI); refuse at
+            // parse time and point at the token channel.
             (void)next( "approve" );
             return sessionError(
-                io, "a bare --approve arms nothing: mint the token with `session "
-                    "approve-repair`, then pass it with --repair-approval <token.json>",
+                io, "a bare --approve arms nothing: repair approvals are minted by "
+                    "the operator in the Control Center UI (human-only, #1733) and "
+                    "carried with --repair-approval <token.json>",
                 exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                 "--repair-approval <token.json> [--approval-now-ms <ms>]",
                 flag.toStdString() );
