@@ -111,6 +111,12 @@ LineageQueryResult traverse( const LineageNodeId &start, bool upstream,
     // graph for the complete lineage.
     if ( !frontier.isEmpty() )
         result.budgetExhausted = true;
+    // #1770 (WE-07): hitting the depth cap with a non-empty frontier drops
+    // those nodes silently — the report must disclose the truncation just
+    // like the node cap does, so downstream readers never mistake a pruned
+    // graph for the complete lineage.
+    if ( !frontier.isEmpty() )
+        result.budgetExhausted = true;
     std::sort( result.nodes.begin(), result.nodes.end(),
                []( const LineageNode &a, const LineageNode &b ) {
                    if ( a.depth != b.depth )

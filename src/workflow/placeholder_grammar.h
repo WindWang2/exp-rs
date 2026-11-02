@@ -50,6 +50,14 @@ std::string resolvePlaceholderPort( const Json::Value &resultPayload,
                                     const std::string &portName );
 
 /**
+ * #1780 (WE-21): true when @p text still carries a step/task placeholder
+ * ($step.port, ${task.parent.output}, …). The TaskCenter pre-launch gate
+ * refuses tasks whose substituted parameters test positive — the literal
+ * reference must never be dispatched to an operator.
+ */
+bool containsUnresolvedStepPlaceholder( const std::string &text );
+
+/**
  * #1776 (WE-15): true when the env name is secret-shaped (key/token/secret/
  * password/credential fragments) and must never be expanded, even under an
  * allow-listed prefix.

@@ -222,6 +222,19 @@ std::string resolvePlaceholderPort( const Json::Value &resultPayload,
   return std::string();
 }
 
+bool containsUnresolvedStepPlaceholder( const std::string &text )
+{
+  // #1780 (WE-21): shared detector for the pre-launch gate — true when the
+  // text still carries a step/task placeholder (env refs are policy-gated
+  // separately by #1776 and are not "unresolved workflow data").
+  for ( const auto &ref : parsePlaceholders( text ) )
+  {
+    if ( !ref.isEnvVar )
+      return true;
+  }
+  return false;
+}
+
 bool envNameLooksSecret( const std::string &name )
 {
   // #1776 (WE-15): secret-shaped names are refused even when an allow-list

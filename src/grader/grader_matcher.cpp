@@ -7,9 +7,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 namespace sicnu::grader {
 
@@ -727,10 +729,77 @@ bool isAsciiWordChar( char ch )
 
 std::string match::normalizeAnswerText( const std::string &text )
 {
+    // #1777 (WE-16): teaching answers arrive in mixed scripts. The old
+    // normalizer was ASCII-only, so a full-width "ＮＤＶＩ" never matched
+    // the keyword "ndvi" and the conflict check compared raw bytes. Fold
+    // the Unicode width/compatibility ranges that matter for grading
+    // (U+FF01..U+FF5E full-width ASCII, U+3000/U+00A0 ideographic and NB
+    // spaces) to their ASCII equivalents, pass every other code point
+    // (CJK included) through unchanged, then apply the ASCII case/space
+    // rules. Still locale-free and deterministic.
+    std::string folded;
+    folded.reserve( text.size() );
+    std::size_t i = 0;
+    while ( i < text.size() ) {
+        const unsigned char lead = static_cast<unsigned char>( text[i] );
+        if ( lead < 0x80 ) {
+            folded.push_back( static_cast<char>( lead ) );
+            ++i;
+            continue;
+        }
+        // Decode one UTF-8 sequence (2..4 bytes, best-effort pass-through
+        // for malformed input — grading must never crash on hostile bytes).
+        const std::size_t sequence = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+        if ( sequence == 1 || i + sequence > text.size() ) {
+            folded.push_back( static_cast<char>( lead ) );
+            ++i;
+            continue;
+        }
+        std::uint32_t codePoint = lead & ( 0xFF >> ( sequence + 1 ) );
+        bool valid = true;
+        for ( std::size_t k = 1; k < sequence; ++k ) {
+            const unsigned char cont = static_cast<unsigned char>( text[i + k] );
+            if ( ( cont & 0xC0 ) != 0x80 ) {
+                valid = false;
+                break;
+            }
+            codePoint = ( codePoint << 6 ) | ( cont & 0x3F );
+        }
+        if ( !valid ) {
+            folded.push_back( static_cast<char>( lead ) );
+            ++i;
+            continue;
+        }
+        std::uint32_t mapped = codePoint;
+        if ( codePoint >= 0xFF01 && codePoint <= 0xFF5E )
+            mapped = codePoint - 0xFEE0; // full-width ASCII → ASCII
+        else if ( codePoint == 0x3000 || codePoint == 0x00A0 )
+            mapped = ' ';
+        if ( mapped < 0x80 ) {
+            folded.push_back( static_cast<char>( mapped ) );
+        } else {
+            // Re-encode the (possibly unmapped) code point as UTF-8.
+            if ( mapped < 0x800 ) {
+                folded.push_back( static_cast<char>( 0xC0 | ( mapped >> 6 ) ) );
+                folded.push_back( static_cast<char>( 0x80 | ( mapped & 0x3F ) ) );
+            } else if ( mapped < 0x10000 ) {
+                folded.push_back( static_cast<char>( 0xE0 | ( mapped >> 12 ) ) );
+                folded.push_back( static_cast<char>( 0x80 | ( ( mapped >> 6 ) & 0x3F ) ) );
+                folded.push_back( static_cast<char>( 0x80 | ( mapped & 0x3F ) ) );
+            } else {
+                folded.push_back( static_cast<char>( 0xF0 | ( mapped >> 18 ) ) );
+                folded.push_back( static_cast<char>( 0x80 | ( ( mapped >> 12 ) & 0x3F ) ) );
+                folded.push_back( static_cast<char>( 0x80 | ( ( mapped >> 6 ) & 0x3F ) ) );
+                folded.push_back( static_cast<char>( 0x80 | ( mapped & 0x3F ) ) );
+            }
+        }
+        i += sequence;
+    }
+
     std::string out;
-    out.reserve( text.size() );
+    out.reserve( folded.size() );
     bool pendingSpace = false;
-    for ( const char raw : text ) {
+    for ( const char raw : folded ) {
         if ( isAsciiSpace( raw ) ) {
             pendingSpace = !out.empty();
             continue;
@@ -761,6 +830,61 @@ bool match::containsKeyword( const std::string &haystack, const std::string &nee
     return false;
 }
 
+namespace
+{
+
+/// #1777 (WE-16): negation tokens for answer matching, ASCII and CJK.
+/// Kept in normalized (lowercased) form; matched boundary-aligned against
+/// the text immediately preceding a keyword occurrence.
+const char *const kNegationTokens[] = {
+    "not",     "no",      "non",     "never",  "without", "isn't",  "is not",
+    "aren't",  "doesn't", "don't",   "didn't", "won't",   "can't",  "cannot",
+    "lacks",   "lacks of",
+    "不",       "不是",     "没",      "没有",    "非",      "无",     "未",
+    "并非",     "缺乏",
+};
+
+/// True when the normalized @p haystack contains @p needle as a whole word
+/// at least once WITHOUT a negation token directly in front of it (#1777:
+/// "not deforestation" must not credit the concept "deforestation").
+bool containsKeywordUnnegated( const std::string &haystack, const std::string &needle )
+{
+    const auto isWordChar = []( char ch ) { return isAsciiWordChar( ch ); };
+    std::size_t position = 0;
+    while ( ( position = haystack.find( needle, position ) ) != std::string::npos ) {
+        const bool leftOk = position == 0 || !isWordChar( haystack[position - 1] );
+        const std::size_t end = position + needle.size();
+        const bool rightOk = end == haystack.size() || !isWordChar( haystack[end] );
+        if ( leftOk && rightOk ) {
+            // Look at up to 16 bytes before the occurrence (one optional
+            // separating space): a boundary-aligned negation token negates
+            // THIS occurrence; later occurrences may still be unnegated.
+            std::size_t windowBegin = position > 16 ? position - 16 : 0;
+            std::string window = haystack.substr( windowBegin, position - windowBegin );
+            if ( !window.empty() && window.back() == ' ' )
+                window.pop_back();
+            bool negated = false;
+            for ( const char *token : kNegationTokens ) {
+                const std::string_view candidate( token );
+                if ( window.size() >= candidate.size()
+                     && window.compare( window.size() - candidate.size(), candidate.size(),
+                                        candidate ) == 0
+                     && ( window.size() == candidate.size()
+                          || !isWordChar( window[window.size() - candidate.size() - 1] ) ) ) {
+                    negated = true;
+                    break;
+                }
+            }
+            if ( !negated )
+                return true;
+        }
+        ++position;
+    }
+    return false;
+}
+
+} // namespace
+
 namespace {
 
 bool conceptHit( const AnswerConcept &answerConcept, const std::string &normalized )
@@ -768,7 +892,7 @@ bool conceptHit( const AnswerConcept &answerConcept, const std::string &normaliz
     for ( const auto &group : answerConcept.keywordGroups ) {
         bool all = true;
         for ( const std::string &keyword : group ) {
-            if ( !match::containsKeyword( normalized, match::normalizeAnswerText( keyword ) ) ) {
+            if ( !containsKeywordUnnegated( normalized, match::normalizeAnswerText( keyword ) ) ) {
                 all = false;
                 break;
             }
@@ -782,7 +906,7 @@ bool conceptHit( const AnswerConcept &answerConcept, const std::string &normaliz
 bool misconceptionHit( const AnswerMisconception &answerMisconception, const std::string &normalized )
 {
     for ( const std::string &pattern : answerMisconception.patterns )
-        if ( match::containsKeyword( normalized, match::normalizeAnswerText( pattern ) ) )
+        if ( containsKeywordUnnegated( normalized, match::normalizeAnswerText( pattern ) ) )
             return true;
     return false;
 }
@@ -805,10 +929,13 @@ CriterionJudgment match::judgeAnswer( const Criterion &criterion, const Evidence
     }
 
     // Conflicting submissions on one question are ambiguous recorded truth.
+    // #1777 (WE-16): compare NORMALIZED text — "ＮＤＶＩ上升" and "ndvi上升"
+    // are the same answer, not a conflict.
     bool conflicting = false;
     const Json::Value &reference = answers.front()->facts["answerText"];
+    const std::string referenceNormalized = normalizeAnswerText( reference.asString() );
     for ( const GradeEvidenceItem *item : answers )
-        if ( item->facts["answerText"].asString() != reference.asString() )
+        if ( normalizeAnswerText( item->facts["answerText"].asString() ) != referenceNormalized )
             conflicting = true;
     if ( conflicting ) {
         judgment.status = OutcomeStatus::Indeterminate;
@@ -823,7 +950,7 @@ CriterionJudgment match::judgeAnswer( const Criterion &criterion, const Evidence
     for ( const GradeEvidenceItem *item : answers )
         judgment.evidenceIds.push_back( item->evidenceId );
 
-    const std::string normalized = normalizeAnswerText( reference.asString() );
+    const std::string normalized = referenceNormalized;
 
     double earned = 0.0;
     bool missingConcept = false;
