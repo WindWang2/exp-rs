@@ -18125,6 +18125,8 @@ sicnu_discover_tests(test_r27_t04_stac_pagination)
 
 add_executable(test_r27_t04_cross_section_async
   test_r27_t04_cross_section_async.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/cross_section_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_r27_t04_cross_section_async PRIVATE
   Catch2::Catch2WithMain
@@ -18134,7 +18136,6 @@ target_link_libraries(test_r27_t04_cross_section_async PRIVATE
   Qt6::Test
   qgis_core
   qgis_gui
-  Sicnu::qgis_display
 )
 target_include_directories(test_r27_t04_cross_section_async PRIVATE
   ${CMAKE_SOURCE_DIR}/src
