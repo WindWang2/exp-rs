@@ -24,6 +24,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
