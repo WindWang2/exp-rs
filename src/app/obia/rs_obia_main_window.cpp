@@ -523,6 +523,19 @@ bool RsObiaMainWindow::loadRasterFile( const QString &path )
     mRasterLayer = layer;
     mRasterPath = path;
     mBandCount = layer->bandCount();
+    // #1805 F13: read the geotransform ONCE per raster — the segment tools'
+    // map-tool activations reuse the cache instead of GDALOpen per click.
+    mRasterGtValid = false;
+    if ( GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly ) )
+    {
+        mRasterGtValid = GDALGetGeoTransform( rds, mRasterGt ) == CE_None;
+        GDALClose( rds );
+    }
+    if ( !mRasterGtValid )
+    {
+        mRasterGt[0] = 0; mRasterGt[1] = 1; mRasterGt[2] = 0;
+        mRasterGt[3] = 0; mRasterGt[4] = 0; mRasterGt[5] = 1;
+    }
     m_sessionMap->zoomToLayer( layer );
 
     // Reset segmentation / hierarchy
@@ -1064,16 +1077,9 @@ void RsObiaMainWindow::applySegmentationResult(
     }
     mSelectTool->setSegmentMap( mSegMap );
 
-    double gt[6] = { 0, 1, 0, 0, 0, 1 };
-    // #655: read the geotransform once here (the rasterize loop used to
-    // re-open the dataset PER FEATURE just to copy the projection).
-    GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
-    if ( rds )
-    {
-        GDALGetGeoTransform( rds, gt );
-        GDALClose( rds );
-    }
-    mSelectTool->setGeoTransform( gt );
+    // #1805 F13: serve the map tool from the cache filled at raster open —
+    // no GUI-thread GDALOpen per interaction.
+    mSelectTool->setGeoTransform( mRasterGt );
     mCanvas->setMapTool( mSelectTool );
 
     updateSegmentTable();
@@ -1234,16 +1240,9 @@ void RsObiaMainWindow::applyHierarchyResult( RsObjectHierarchy hierarchy,
     }
     mSelectTool->setSegmentMap( mSegMap );
 
-    double gt[6] = { 0, 1, 0, 0, 0, 1 };
-    // #655: read the geotransform once here (the rasterize loop used to
-    // re-open the dataset PER FEATURE just to copy the projection).
-    GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
-    if ( rds )
-    {
-        GDALGetGeoTransform( rds, gt );
-        GDALClose( rds );
-    }
-    mSelectTool->setGeoTransform( gt );
+    // #1805 F13: serve the map tool from the cache filled at raster open —
+    // no GUI-thread GDALOpen per interaction.
+    mSelectTool->setGeoTransform( mRasterGt );
     mCanvas->setMapTool( mSelectTool );
 
     updateSegmentTable();

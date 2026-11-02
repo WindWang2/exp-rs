@@ -144,6 +144,11 @@ int TemporalTimelineBar::nearestIndex( int x ) const
 {
     if ( m_times.isEmpty() )
         return -1;
+    // #1805 F17: the x → time mapping divides by (width - 16); at or below
+    // 16 px that denominator is zero/negative — the NaN/Inf double-to-int
+    // conversion is UB. Snap to the first sample instead of computing.
+    if ( width() <= 16 )
+        return 0;
     qint64 min = std::numeric_limits<qint64>::max();
     qint64 max = std::numeric_limits<qint64>::min();
     for ( qint64 t : m_times )

@@ -71,9 +71,12 @@ void QgsMacNative::setIconPath(const QString &iconPath) {
   // dangling before showDesktopNotification() hands it to
   // notification.contentImage. This class owns the image — release the
   // previous one here, the last one in ~QgsUserNotificationCenter (#1557).
-  NSImage *icon =
-      [[NSImage alloc] initWithCGImage:QPixmap(iconPath).toImage().toCGImage()
-                                  size:NSZeroSize];
+  // #1805 F6: QImage::toCGImage() follows the Create rule — the caller owns
+  // the returned CGImageRef and NSImage does not take it over. Release it
+  // after the NSImage is built or every icon set leaks the CGImage.
+  CGImageRef iconCG = QPixmap(iconPath).toImage().toCGImage();
+  NSImage *icon = [[NSImage alloc] initWithCGImage:iconCG size:NSZeroSize];
+  CGImageRelease(iconCG);
   [mQgsUserNotificationCenter->_qgisIcon release];
   mQgsUserNotificationCenter->_qgisIcon = icon;
 }
@@ -126,8 +129,12 @@ QgsNative::NotificationResult QgsMacNative::showDesktopNotification(
   } else {
     const QPixmap px = QPixmap::fromImage(settings.image);
     // autorelease: contentImage assignment retains — a bare alloc leaked (#634).
-    image = [[[NSImage alloc] initWithCGImage:px.toImage().toCGImage()
+    // #1805 F6: toCGImage() follows the Create rule — release the CGImage
+    // after the NSImage is built (NSImage does not take it over).
+    CGImageRef notifyCG = px.toImage().toCGImage();
+    image = [[[NSImage alloc] initWithCGImage:notifyCG
                                         size:NSZeroSize] autorelease];
+    CGImageRelease(notifyCG);
   }
   notification.contentImage = image;
 
