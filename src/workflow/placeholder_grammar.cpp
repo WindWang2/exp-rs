@@ -203,8 +203,13 @@ std::string resolvePlaceholderPort( const Json::Value &resultPayload,
     if ( !s.empty() )
       return s;
   }
-  // 2. Canonical/default output: the task's detected output path when the
-  //    caller has one, else the payload's "output" convention.
+  // 2. #1775 (WE-14): only the canonical "output" port falls back to the
+  //    task's detected output path / payload "output" convention. A NAMED
+  //    port that the producer never declared must stay unresolved (empty) —
+  //    the old code silently bound unknown and case-mismatched ports to the
+  //    default output, dispatching wrong data with no diagnostic.
+  if ( portName != "output" )
+    return std::string();
   if ( !canonicalOutputPath.empty() )
     return canonicalOutputPath;
   if ( resultPayload.isObject() && resultPayload.isMember( "output" )
@@ -214,22 +219,43 @@ std::string resolvePlaceholderPort( const Json::Value &resultPayload,
     if ( !s.empty() )
       return s;
   }
-  // 3. Case-insensitive portName scan of the payload.
-  if ( resultPayload.isObject() )
-  {
-    for ( const auto &name : resultPayload.getMemberNames() )
-    {
-      if ( QString::fromStdString( name ).compare( QString::fromStdString( portName ),
-                                                   Qt::CaseInsensitive ) == 0
-           && resultPayload[name].isString() )
-      {
-        const std::string s = resultPayload[name].asString();
-        if ( !s.empty() )
-          return s;
-      }
-    }
-  }
   return std::string();
+}
+
+bool envNameLooksSecret( const std::string &name )
+{
+  // #1776 (WE-15): secret-shaped names are refused even when an allow-list
+  // prefix would match (e.g. SICNU_API_KEY) — resolved params and
+  // provenance must never carry credentials.
+  static const char *kSecretFragments[] = { "key", "token", "secret", "password", "credential" };
+  std::string lower;
+  lower.reserve( name.size() );
+  for ( char c : name )
+    lower.push_back( static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ) );
+  for ( const char *fragment : kSecretFragments )
+    if ( lower.find( fragment ) != std::string::npos )
+      return true;
+  return false;
+}
+
+bool isEnvExpansionAllowed( const std::string &name )
+{
+  // #1776 (WE-15): workflow parameter expansion may only read a declared
+  // allow-list of environment names (shipped pipeline conventions plus the
+  // project namespaces), never arbitrary process env — expanded values are
+  // persisted into resolvedParams/provenance, so an unbounded getenv leaked
+  // whatever the host carried.
+  if ( name.empty() || envNameLooksSecret( name ) )
+    return false;
+  static const char *kExactAllowed[] = { "WORK", "S2_SAFE_DIR",
+                                         "LANDSAT_MTL_OR_SCENE_DIR", "TEST_EXP_RS_WORK" };
+  for ( const char *allowed : kExactAllowed )
+    if ( name == allowed )
+      return true;
+  for ( const char *prefix : { "SICNU_", "EXP_RS_" } )
+    if ( name.rfind( prefix, 0 ) == 0 )
+      return true;
+  return false;
 }
 
 std::string substitutePlaceholders( const std::string &text,
@@ -272,10 +298,16 @@ std::string substitutePlaceholders( const std::string &text,
     std::string replacement = resolver( ref );
     if ( ( replacement.empty() || replacement == ref.rawRef ) && ref.isEnvVar )
     {
-      const char *val = std::getenv( ref.envVarName.c_str() );
-      if ( val )
+      // #1776 (WE-15): allow-listed env names only — arbitrary getenv is
+      // gone, so a workflow parameter can no longer exfiltrate host env
+      // (secrets included) into resolved params/provenance.
+      if ( isEnvExpansionAllowed( ref.envVarName ) )
       {
-        replacement = std::string( val );
+        const char *val = std::getenv( ref.envVarName.c_str() );
+        if ( val )
+        {
+          replacement = std::string( val );
+        }
       }
     }
     if ( !replacement.empty() && replacement != ref.rawRef )
