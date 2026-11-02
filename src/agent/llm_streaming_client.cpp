@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QHostAddress>
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QSslError>
@@ -77,11 +78,14 @@ ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfil
   if ( !profile.apiKey.isEmpty() )
   {
     const QUrl endpoint( endpointUrl );
+    // R1-F10: the full loopback range, not just the two canonical spellings
+    // — QHostAddress::isLoopback() covers 127.0.0.0/8, ::1 and the mapped
+    // forms; "localhost" names resolve here without a lookup.
+    const bool loopback =
+        endpoint.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0
+        || QHostAddress( endpoint.host() ).isLoopback();
     const bool plaintextNonLoopback =
-      endpoint.scheme() == QStringLiteral( "http" )
-      && endpoint.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) != 0
-      && endpoint.host() != QStringLiteral( "127.0.0.1" )
-      && endpoint.host() != QStringLiteral( "::1" );
+        endpoint.scheme() == QStringLiteral( "http" ) && !loopback;
     if ( plaintextNonLoopback )
     {
       payload.refusalReason = QStringLiteral(

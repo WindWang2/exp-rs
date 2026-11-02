@@ -135,6 +135,10 @@ class OperationsCoordinator {
     /// True when an approval is armed for the next launch (tests/surface).
     bool hasPendingRepairApproval() const;
 
+    /// Capacity of the consumed-approval ring (tests size the fill loop to
+    /// it instead of hardcoding the constant twice).
+    static constexpr std::size_t consumedApprovalCapacity() { return kMaxConsumedDigests; }
+
     /// The most recent run()/resume() outcome on this coordinator (nullopt
     /// before the first one) — the backing store for the status/timeline/
     /// export surface actions.
@@ -248,13 +252,19 @@ class OperationsCoordinator {
     /// evicted, so a still-live token can never be aged out of the ring
     /// (#1733 — the old oldest-first eviction plus an unbounded ttl was a
     /// replay window). Arming fails closed (APPROVAL_REPLAY_RING_FULL) when
-    /// the ring is full of live entries.
+    /// the ring is full of live entries; consuming while full of live
+    /// entries also fails closed (R1-F3: the launch proceeds WITHOUT the
+    /// approval and the gate asks again — never a silent eviction of a
+    /// still-live entry that a held token could then replay).
+    /// Capacity 64: every entry required a human mint within one ≤30 min
+    /// TTL window, so overflow without the fail-closed refusal already
+    /// implies an operator-driven storm, not a model-reachable state.
     struct ConsumedApproval {
         std::string digest;
         long long expiresAtMs;
     };
     std::vector<ConsumedApproval> mConsumedApprovals;
-    static constexpr std::size_t kMaxConsumedDigests = 16;
+    static constexpr std::size_t kMaxConsumedDigests = 64;
     std::optional<OpsRunResult> mLastResult;
 };
 

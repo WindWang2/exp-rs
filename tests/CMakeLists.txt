@@ -13577,17 +13577,6 @@ set_tests_properties(test_editing_e2e PROPERTIES
 # major refusal, min_reader_schema, symlink escape — plus the PS twin lane
 # when pwsh exists. Python-only on purpose: no C++ tree rebuild is needed to
 # hold the packaging contract, and the verifier is a standalone artifact.
-add_executable(test_r27_t03_copilot_gate test_r27_t03_copilot_gate.cpp)
-target_link_libraries(test_r27_t03_copilot_gate PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  jsoncpp
-)
-target_include_directories(test_r27_t03_copilot_gate PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_r27_t03_copilot_gate TEST_PREFIX "test_r27_t03_copilot_gate::")
 
 if(Python_EXECUTABLE)
   add_test(NAME bundle_manifest_conformance
@@ -18042,6 +18031,12 @@ target_include_directories(test_r27_t03_copilot_gate PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r27_t03_copilot_gate TEST_PREFIX "test_r27_t03_copilot_gate::")
+
+add_test(NAME r27_t03_cli_invalid_input
+  COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:sicnu_geo_rs_cli>
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/r27_t03_cli_invalid_input.cmake)
+set_tests_properties(r27_t03_cli_invalid_input PROPERTIES TIMEOUT 300)
+sicnu_set_test_env(r27_t03_cli_invalid_input)
 
 if(Python_EXECUTABLE)
   add_test(NAME r27_t03_python_worker

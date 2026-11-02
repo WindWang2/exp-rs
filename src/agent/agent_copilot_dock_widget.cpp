@@ -664,7 +664,12 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   // fetches through a single call — so the SAME containment + remote
   // default-deny policy runs here, before submission, and write-shaped
   // calls get the human Confirm the plan flow already requires.
-  const auto gate = copilot_gate::gateSingleCall( cppEnvelope );
+  // R1-F1: the gate runs on the DISPATCHER-parsed arguments (the wire shape
+  // is OpenAI's {function:{name, arguments}} — the raw envelope's top-level
+  // "parameters" key never exists there), and the approval card is built
+  // from the same parsed arguments.
+  const Json::Value callArguments = m_toolCallDispatcher.argumentsFor( cppEnvelope );
+  const auto gate = copilot_gate::gateCallArguments( callArguments );
   if ( !gate.refusalReason.isEmpty() )
   {
     const QString reason = tr( "Tool call blocked by the workspace policy: %1" )
@@ -690,9 +695,8 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     step["name"] = cppEnvelope.isMember( "name" ) && cppEnvelope["name"].isString()
                        ? cppEnvelope["name"].asString()
                        : std::string();
-    step["params"] = cppEnvelope.isMember( "parameters" ) && cppEnvelope["parameters"].isObject()
-                         ? cppEnvelope["parameters"]
-                         : Json::Value( Json::objectValue );
+    step["params"] = callArguments.isObject() ? callArguments
+                                              : Json::Value( Json::objectValue );
     steps.append( step );
     oneStepPlan["steps"] = steps;
     appendPlanApprovalCard(

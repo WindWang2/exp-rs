@@ -213,7 +213,9 @@ TEST_CASE("r27/t03 approval: the consumed ring only forgets expired entries",
     // Fill the ring with LIVE consumed tokens (mint+arm+consume via the
     // human channel; each run consumes the armed approval). A ttl longer
     // than the whole loop keeps every consumed entry inside its window.
-    for (int i = 0; i < static_cast<int>(16); ++i)
+    // Capacity is kMaxConsumedDigests (64): each entry required a human
+    // mint inside one TTL window (R1-F3).
+    for (std::size_t i = 0; i < wired.coord->consumedApprovalCapacity(); ++i)
     {
         std::string err;
         Json::Value token = wired.coord->mintRepairApprovalForOperator(1000 + i * 10,
@@ -226,7 +228,7 @@ TEST_CASE("r27/t03 approval: the consumed ring only forgets expired entries",
         REQUIRE_FALSE(wired.coord->hasPendingRepairApproval());
     }
 
-    // Ring full of unexpired consumptions: arming a 17th LIVE token fails
+    // Ring full of unexpired consumptions: arming one more LIVE token fails
     // CLOSED (#1733) — the old oldest-first eviction was the replay window.
     std::string err;
     Json::Value live = wired.coord->mintRepairApprovalForOperator(2000, 60000, &err);

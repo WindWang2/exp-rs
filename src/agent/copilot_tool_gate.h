@@ -25,6 +25,9 @@
 #include <QStringList>
 #include <QSet>
 
+#include <memory>
+#include <string>
+
 namespace sicnu::agent::copilot_gate {
 
 /// Free-text argument slots: caller prose that tools persist or echo, never
@@ -100,7 +103,9 @@ inline bool isWriteSlot( const QString &key )
         QStringLiteral( "out_path" ),     QStringLiteral( "out" ),
         QStringLiteral( "dest" ),         QStringLiteral( "destination" ),
         QStringLiteral( "save_path" ),    QStringLiteral( "save_to" ),
-        QStringLiteral( "target_path" ),  QStringLiteral( "write_to" ),
+        QStringLiteral( "save_file" ),    QStringLiteral( "target_path" ),
+        QStringLiteral( "write_to" ),     QStringLiteral( "filename" ),
+        QStringLiteral( "target" ),
     };
     return kWrite.contains( key );
 }
@@ -133,9 +138,7 @@ inline bool valueTreeIsWriteShaped( const Json::Value &value, const QString &key
     return false;
 }
 
-/// The gate verdict for one copilot tool-call envelope ({name, parameters}
-/// shape — the dispatcher's parseEnvelope normalizes before this point, but
-/// the gate reads the raw envelope defensively).
+/// The gate verdict for one copilot tool call.
 struct SingleCallGate
 {
     /// Non-empty when the call must be REFUSED (containment/remote policy).
@@ -145,24 +148,74 @@ struct SingleCallGate
     bool needsApproval = false;
 };
 
-inline SingleCallGate gateSingleCall( const Json::Value &envelope )
+/// Gates the PARSED argument object of a tool call (what the dispatcher's
+/// argumentsFor()/parseEnvelope extracts). This is the primary entry: the
+/// production wire shape is OpenAI's {function:{name, arguments}} — R1-F1:
+/// gating only the top-level "parameters" key of the raw envelope missed
+/// every real call.
+inline SingleCallGate gateCallArguments( const Json::Value &arguments )
 {
     SingleCallGate verdict;
     const QString root = tool_catalog::containment::effectiveMcpWorkspaceRoot();
-    if ( envelope.isObject() )
-    {
-        for ( const char *argKey : { "parameters", "arguments", "params" } )
-        {
-            if ( envelope.isMember( argKey ) )
-            {
-                verdict.refusalReason = containmentViolation( envelope[argKey], root );
-                if ( valueTreeIsWriteShaped( envelope[argKey] ) )
-                    verdict.needsApproval = true;
-                break;
-            }
-        }
-    }
+    verdict.refusalReason = containmentViolation( arguments, root );
+    if ( valueTreeIsWriteShaped( arguments ) )
+        verdict.needsApproval = true;
     return verdict;
+}
+
+/// Unwraps a raw tool-call envelope to its argument object. Understands the
+/// shapes ToolCallDispatcher::parseEnvelope accepts: {name, parameters},
+/// {name, arguments}, {name, params}, {function:{name, arguments}} — where
+/// `arguments` may be a JSON-encoded STRING (OpenAI streams it that way).
+/// Returns a null value when nothing extractable is present.
+inline Json::Value envelopeArguments( const Json::Value &envelope )
+{
+    if ( !envelope.isObject() )
+        return {};
+    if ( envelope["function"].isObject() )
+    {
+        const Json::Value &inner = envelope["function"];
+        for ( const char *key : { "arguments", "parameters", "params" } )
+        {
+            if ( inner.isMember( key ) )
+                return inner[key];
+        }
+        return {};
+    }
+    for ( const char *key : { "parameters", "arguments", "params" } )
+    {
+        if ( envelope.isMember( key ) )
+            return envelope[key];
+    }
+    return {};
+}
+
+/// Decodes a JSON-encoded STRING argument blob into its object form; other
+/// values pass through untouched. The dispatcher parses string arguments
+/// before executing, so the gate must scan the DECODED form too.
+inline Json::Value decodeStringArguments( const Json::Value &arguments )
+{
+    if ( arguments.isString() )
+    {
+        Json::CharReaderBuilder builder;
+        std::string errors;
+        Json::Value decoded;
+        const std::string text = arguments.asString();
+        std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+        if ( reader->parse( text.data(), text.data() + text.size(), &decoded, &errors ) )
+            return decoded;
+    }
+    return arguments;
+}
+
+/// Gates a RAW tool-call envelope (any dispatcher-accepted shape, including
+/// the OpenAI {function:{name, arguments}} production shape and string-
+/// encoded argument blobs).
+inline SingleCallGate gateSingleCall( const Json::Value &envelope )
+{
+    Json::Value arguments = envelopeArguments( envelope );
+    arguments = decodeStringArguments( arguments );
+    return gateCallArguments( arguments );
 }
 
 } // namespace sicnu::agent::copilot_gate

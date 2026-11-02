@@ -202,8 +202,12 @@ void AgentOpsControlCenterDock::ensureWorkerThread()
                 mQueuedTask = nullptr;
                 mQueuedCancel.reset();
                 mTaskQueued = false;
+                // Inside the dequeue critical section (R1-F2): marking the
+                // task running BEFORE releasing the mutex closes the window
+                // where joinWorker()'s !queued && !running predicate could
+                // observe "idle" between the dequeue and the task start.
+                mWorkerRunning.store( true );
             }
-            mWorkerRunning.store( true );
             if ( task )
             {
                 task( *cancel );

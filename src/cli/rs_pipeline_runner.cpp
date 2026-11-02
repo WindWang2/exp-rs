@@ -1056,6 +1056,9 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
     result.errorMessage = "Cannot resume run " + runId + ": "
                           + ( resumeError.isEmpty() ? QStringLiteral( "unknown run" )
                                                     : resumeError ).toStdString();
+    // #1798: an unknown/unusable caller-supplied run id is invalid input,
+    // not an execution failure (R1-F4: the exit-6 mapping was dead code).
+    result.invalidInput = true;
     reportLog( "error", result.errorMessage );
     flushRecording( 0 );
     return result;

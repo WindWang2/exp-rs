@@ -138,13 +138,19 @@ std::string dangerousEnvironmentKey( const ExternalProcessRequest &request )
         // sh/bash), node's --require/--import policy hook, Python's
         // interactive bootstrap, interpreter module paths, Perl/Ruby
         // opt-line hooks, and glibc tunables (CVE-2023-4911 class).
+        // Exported-function prefixes ("BASH_FUNC_foo%%=() {...}") are code
+        // injected into every bash child (ShellShock class).
+        if ( upper.rfind( "BASH_FUNC_", 0 ) == 0 )
+            return name;
         if ( upper == "BASH_ENV" || upper == "ENV" || upper == "NODE_OPTIONS"
              || upper == "NODE_PRELOAD" || upper == "NODE_PATH"
              || upper == "PYTHONSTARTUP" || upper == "PYTHONINSPECT"
              || upper == "PYTHONHOME" || upper == "PYTHONPATH"
-             || upper == "PERL5OPT" || upper == "PERL5LIB"
+             || upper == "PERL5OPT" || upper == "PERL5LIB" || upper == "PERLLIB"
              || upper == "RUBYOPT" || upper == "RUBYLIB"
-             || upper == "GLIBC_TUNABLES" || upper == "MALLOC_PRELOAD" )
+             || upper == "GLIBC_TUNABLES" || upper == "GCONV_PATH"
+             || upper == "MALLOC_PRELOAD" || upper == "JAVA_TOOL_OPTIONS"
+             || upper == "JDK_JAVA_OPTIONS" || upper == "JVM_OPTS" )
             return name;
     }
     return {};

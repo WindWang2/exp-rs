@@ -50,8 +50,8 @@ bool valueLooksSecret(const std::string &s)
     const std::string k = lower(s);
     static const char *prefixes[] = {
         "bearer ", "basic ", "ghp_", "gho_", "ghu_", "ghs_", "ghr_",
-        "github_pat_", "sk-", "sk_", "xoxb ", "xoxa ", "xoxp ", "xoxs ",
-        "aka", "-----begin openssl private key-----",
+        "github_pat_", "sk-", "sk_", "xoxb-", "xoxa-", "xoxp-", "xoxs-",
+        "xapp-", "xoxe-", "aka", "-----begin openssl private key-----",
         "-----begin private key-----", "-----begin rsa private key-----",
         "-----begin ec private key-----", "-----begin openssh private key-----",
     };

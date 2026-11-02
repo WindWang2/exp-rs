@@ -551,9 +551,10 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         // Record the consumed token BEFORE clearing: replay of the same
         // approval must not arm a later launch. The entry carries the
         // token's own expiry so the ring only forgets it once the window is
-        // over (#1733); a full ring of live entries drops the oldest here —
-        // the launch itself was already human-authorized, and arming (not
-        // launching) is where the ring fails closed.
+        // over (#1733). R1-F3: a ring FULL of live entries fails closed
+        // here too — the launch proceeds WITHOUT the approval (typed
+        // refusal, the gate asks again) instead of silently evicting a
+        // still-live entry a held token could then replay.
         const long long consumedExpiry =
             mPendingRepairApproval->token["expires_at_ms"].isInt64()
                 ? mPendingRepairApproval->token["expires_at_ms"].asInt64()
@@ -563,9 +564,17 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         {
             dropExpiredConsumedApprovals(request.approvalNowMs);
             if (mConsumedApprovals.size() >= kMaxConsumedDigests)
-                mConsumedApprovals.erase(mConsumedApprovals.begin());
-            mConsumedApprovals.push_back(
-                {mPendingRepairApproval->token["digest"].asString(), consumedExpiry});
+            {
+                if (approvalError.empty())
+                    approvalError = "APPROVAL_REPLAY_RING_FULL";
+                pendingApproval = false;
+                approvedPlanId.clear();
+            }
+            else
+            {
+                mConsumedApprovals.push_back(
+                    {mPendingRepairApproval->token["digest"].asString(), consumedExpiry});
+            }
         }
         mPendingRepairApproval.reset();
     }
@@ -815,8 +824,9 @@ RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &dia
             tokenError = approvalCheckToError(check);
         }
         // Consumed entries remember their own expiry; only expired ones are
-        // forgotten later (#1733). A full ring of live entries drops the
-        // oldest HERE as at launch: the consumption itself was authorized.
+        // forgotten later (#1733). R1-F3: a ring FULL of live entries fails
+        // closed — the approval is withdrawn (the gate asks again) instead
+        // of evicting a still-live entry a held token could then replay.
         const long long consumedExpiry =
             mPendingRepairApproval->token["expires_at_ms"].isInt64()
                 ? mPendingRepairApproval->token["expires_at_ms"].asInt64()
@@ -826,9 +836,16 @@ RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &dia
         {
             dropExpiredConsumedApprovals(ctx.approvalNowMs);
             if (mConsumedApprovals.size() >= kMaxConsumedDigests)
-                mConsumedApprovals.erase(mConsumedApprovals.begin());
-            mConsumedApprovals.push_back(
-                {mPendingRepairApproval->token["digest"].asString(), consumedExpiry});
+            {
+                ctx.humanApprovedRepair = false;
+                ctx.approvedFindingsDigest.clear();
+                tokenError = "APPROVAL_REPLAY_RING_FULL";
+            }
+            else
+            {
+                mConsumedApprovals.push_back(
+                    {mPendingRepairApproval->token["digest"].asString(), consumedExpiry});
+            }
         }
         mPendingRepairApproval.reset();
         tokenErrorOut = tokenError;

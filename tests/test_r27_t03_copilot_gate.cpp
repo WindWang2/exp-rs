@@ -116,3 +116,65 @@ TEST_CASE( "copilot single calls are contained and remote-denied (#1763)",
         CHECK( gate.needsApproval );
     }
 }
+
+TEST_CASE( "the production OpenAI wire shape reaches the gate (R1-F1)",
+           "[r27t03][copilot][p2]" )
+{
+    EnvGuard guard;
+    qunsetenv( "SICNU_MCP_ALLOW_REMOTE" );
+    QTemporaryDir workspace;
+    REQUIRE( workspace.isValid() );
+    qputenv( "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() );
+
+    // llm_streaming_client emits {id, type, function:{name, arguments}} —
+    // the first cut of the gate scanned only top-level "parameters" and
+    // missed EVERY real call. This is the shape on the wire.
+    const auto openAiEnvelope = []( const Json::Value &arguments ) {
+        Json::Value doc( Json::objectValue );
+        doc["id"] = "call_1";
+        doc["type"] = "function";
+        Json::Value fn( Json::objectValue );
+        fn["name"] = "rs:export_raster";
+        fn["arguments"] = arguments;
+        doc["function"] = fn;
+        return doc;
+    };
+
+    {
+        Json::Value params( Json::objectValue );
+        params["input"] = "scene.tif";
+        params["output_path"] = "/home/user/.ssh/authorized_keys";
+        const auto gate = gateSingleCall( openAiEnvelope( params ) );
+        INFO( "output_path=/home/user/.ssh/authorized_keys via function.arguments" );
+        CHECK_FALSE( gate.refusalReason.isEmpty() );
+    }
+    {
+        Json::Value params( Json::objectValue );
+        params["input"] = "/vsicurl/http://169.254.169.254/latest/";
+        const auto gate = gateSingleCall( openAiEnvelope( params ) );
+        CHECK_FALSE( gate.refusalReason.isEmpty() );
+    }
+    {
+        Json::Value params( Json::objectValue );
+        params["input"] = "scene.tif";
+        params["output"] = "result.tif";
+        const auto gate = gateSingleCall( openAiEnvelope( params ) );
+        CHECK( gate.refusalReason.isEmpty() );
+        CHECK( gate.needsApproval );
+    }
+
+    // OpenAI streams `arguments` as a JSON-encoded STRING; the dispatcher
+    // parses it before executing, so the gate must scan the decoded form.
+    {
+        Json::Value argsString( "{\"output_path\": \"/outside/x.tif\"}" );
+        const auto gate = gateSingleCall( openAiEnvelope( argsString ) );
+        INFO( "string-encoded arguments blob" );
+        CHECK_FALSE( gate.refusalReason.isEmpty() );
+    }
+    {
+        Json::Value argsString( "{\"output_path\": \"ndvi.tif\"}" );
+        const auto gate = gateSingleCall( openAiEnvelope( argsString ) );
+        CHECK( gate.refusalReason.isEmpty() );
+        CHECK( gate.needsApproval );
+    }
+}
