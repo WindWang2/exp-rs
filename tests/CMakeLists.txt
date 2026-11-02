@@ -18099,6 +18099,7 @@ sicnu_discover_tests(test_r27_t04_project_downgrade)
 add_executable(test_r27_t04_stac_pagination
   test_r27_t04_stac_pagination.cpp
   ${CMAKE_SOURCE_DIR}/src/app/stac_client.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/stac_browser_dialog.cpp
 )
 target_link_libraries(test_r27_t04_stac_pagination PRIVATE
   Catch2::Catch2WithMain
