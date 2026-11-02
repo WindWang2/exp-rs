@@ -812,6 +812,19 @@ bool processFileDos(const QString &sourcePath, const QString &targetPath,
 
     bool hasSrcNoData = false;
     const double bandNoData = srcDataset.bandNoDataValue(bandNum, &hasSrcNoData);
+    // #1756: Landsat C2 L1/L2 and S2 integer products ship DN=0 fill pixels
+    // with no NoData tag. On an UNDECLARED integer band, DN0 is fill by the
+    // USGS/ESA convention: it must not win the dark-object histogram (that
+    // shifted every output pixel by the fill's reflectance) and must come
+    // out NoData, never as valid "reflectance". Declared bands keep their
+    // exact historical behaviour.
+    const int srcBandType = srcDataset.bandDataType(bandNum);
+    const bool dn0IsFill =
+        !hasSrcNoData
+        && (srcBandType == GDT_Byte || srcBandType == GDT_UInt16
+            || srcBandType == GDT_Int16 || srcBandType == GDT_UInt32
+            || srcBandType == GDT_Int32);
+    long long dn0FillCount = 0;
 
     constexpr int kTile = 256;
     const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
@@ -850,8 +863,10 @@ bool processFileDos(const QString &sourcePath, const QString &targetPath,
                     if (!toToaReflectance(pixels, rhoToa.data(), n, coeffs, sensor, sunElevationDeg))
                         return false;
                     for (size_t i = 0; i < n; ++i) {
-                        if (pixels[i] == statsNoDataF)
+                        if (pixels[i] == statsNoDataF
+                            || (dn0IsFill && pixels[i] == 0.0f)) {
                             rhoToa[i] = std::numeric_limits<float>::quiet_NaN();
+                        }
                     }
                     if (binning)
                         stats.accumulateBins(rhoToa.data(), n);
@@ -896,7 +911,10 @@ bool processFileDos(const QString &sourcePath, const QString &targetPath,
                     || (hasSrcNoData
                         && (!std::isnan(bandNoData)
                                 ? pixels[i] == static_cast<float>(bandNoData)
-                                : std::isnan(pixels[i])));
+                                : std::isnan(pixels[i])))
+                    || (dn0IsFill && pixels[i] == 0.0f);
+                if (dn0IsFill && pixels[i] == 0.0f)
+                    ++dn0FillCount;
                 if (invalid) {
                     out[i] = std::numeric_limits<float>::quiet_NaN();
                     continue;
@@ -937,6 +955,10 @@ bool processFileDos(const QString &sourcePath, const QString &targetPath,
                                 : publishError;
         return false;
     }
+    if (dn0IsFill && dn0FillCount > 0)
+        qInfo() << "processFileDos: excluded" << dn0FillCount
+                << "DN0 fill pixels from band" << bandNum
+                << "(undeclared NoData; USGS/ESA integer fill convention, #1756)";
     return true;
 }
 
