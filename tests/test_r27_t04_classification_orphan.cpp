@@ -172,11 +172,13 @@ TEST_CASE( "Classification: merge rollback keeps class definitions (source contr
 
   const qsizetype rollbackPos = body.indexOf( QStringLiteral( "rollBack()" ) );
   REQUIRE( rollbackPos >= 0 );
-  const qsizetype afterRollback = body.indexOf( QChar::LineFeed, rollbackPos );
-  const qsizetype mergeBodyEnd = body.indexOf( QStringLiteral( "setClassDefs" ), rollbackPos );
-  CHECK( mergeBodyEnd < 0 ); // RED pre-fix: defs were dropped after rollback
-
-  // The rollback branch must exit the merge before the recode runs.
-  const QString rollbackBlock = body.mid( rollbackPos, afterRollback - rollbackPos + 200 );
-  CHECK( rollbackBlock.contains( QStringLiteral( "return" ) ) );
+  // The rollback branch must EXIT the merge before any class definition is
+  // dropped: the return sits between the rollBack and the (success-path)
+  // setClassDefs. RED pre-fix: no return — defs were dropped after rollback.
+  const qsizetype returnPos = body.indexOf( QStringLiteral( "return" ),
+                                            body.indexOf( QChar::LineFeed, rollbackPos ) );
+  const qsizetype defsPos = body.indexOf( QStringLiteral( "setClassDefs" ), rollbackPos );
+  REQUIRE( returnPos >= 0 );
+  REQUIRE( defsPos > returnPos );
+  CHECK( returnPos < defsPos );
 }
