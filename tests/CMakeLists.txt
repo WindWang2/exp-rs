@@ -13577,6 +13577,18 @@ set_tests_properties(test_editing_e2e PROPERTIES
 # major refusal, min_reader_schema, symlink escape — plus the PS twin lane
 # when pwsh exists. Python-only on purpose: no C++ tree rebuild is needed to
 # hold the packaging contract, and the verifier is a standalone artifact.
+add_executable(test_r27_t03_copilot_gate test_r27_t03_copilot_gate.cpp)
+target_link_libraries(test_r27_t03_copilot_gate PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  jsoncpp
+)
+target_include_directories(test_r27_t03_copilot_gate PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r27_t03_copilot_gate TEST_PREFIX "test_r27_t03_copilot_gate::")
+
 if(Python_EXECUTABLE)
   add_test(NAME bundle_manifest_conformance
     COMMAND "${Python_EXECUTABLE}"
@@ -17277,179 +17289,204 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
-# ── R26-science: correctness oracle suite (RED→GREEN per work package) ──
-# Append-only registration block for this track (docs: .planning/zcode-r26-science).
-# Covers classification sampling/evaluation, segmentation tie-break/
-# polygonize, change log-ratio/area units, temporal trend statistics and
-# enhancement degenerate-input contracts on master's production kernels.
-if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
-    add_executable(test_r26_science_oracles test_r26_science_oracles.cpp)
-    target_link_libraries(test_r26_science_oracles PRIVATE
-        Catch2::Catch2WithMain
-        Qt6::Core
-        qgis_core
-        qgis_analysis
-        sicnu_processing
-        sicnu_operators
-        sicnu_temporal_timeline
-        ${OpenCV_LIBS}
-    )
-    sicnu_link_jsoncpp(test_r26_science_oracles)
-    target_include_directories(test_r26_science_oracles PRIVATE
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/analysis
-        ${CMAKE_SOURCE_DIR}/src/analysis/classification
-        ${OpenCV_INCLUDE_DIRS}
-        ${CMAKE_BINARY_DIR}
-    )
-    add_test(NAME test_r26_science_oracles COMMAND test_r26_science_oracles)
-    set_tests_properties(test_r26_science_oracles PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        TIMEOUT 300)
-endif()
-# --- end R26-science oracle registration ---
-# ── BEGIN R26-workbench (R26-02): workbench UX regression tests ─────────────
-# Append-only block for the R26-02 workbench track. Sources are compiled
-# directly (existing widget-test pattern) to keep the link surface small.
 
-# WP5: spectral profile NoData honesty
-add_executable(test_r26_workbench_spectral_ux
-  test_r26_workbench_spectral_ux.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_profile_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_composite_palette.cpp
-  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+# ── R25-D (zcode r25-D qt/qgis workbench cartography track) ──────────────────
+# Append-only registration block. Union rule: never reorder/dedupe/delete
+# other tracks' blocks (scripts/check_merge_registration_integrity.py guards).
+# END R25-D
+# BEGIN R25-D
+# Light surface: pure ContextRules for the cartography.* availability family
+# + source scans of the production wiring (same direct-TU embed shape as
+# test_command_registry).
+add_executable(test_r25_d_cartography_ux
+  test_r25_d_cartography_ux.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
-target_link_libraries(test_r26_workbench_spectral_ux PRIVATE
+target_link_libraries(test_r25_d_cartography_ux PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
-  Qt6::Test
-  Qt6::Concurrent
   qgis_core
   qgis_gui
-  sicnu_processing
-  GDAL::GDAL
-  sicnu_runtime
 )
-target_include_directories(test_r26_workbench_spectral_ux PRIVATE
+target_include_directories(test_r25_d_cartography_ux PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r25_d_cartography_ux PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r25_d_cartography_ux TEST_PREFIX test_r25_d_cartography_ux::)
+
+# Full-shell surface: the REAL CartographyDock (template registry, TaskCenter
+# connections) against the button-gating contract — #1312 full-shell link
+# precedent (same explicit links as test_workbench_full_shell_lifecycle).
+add_executable(test_r25_d_cartography_dock
+  test_r25_d_cartography_dock.cpp
+)
+target_compile_definitions(test_r25_d_cartography_dock PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
+target_link_libraries(test_r25_d_cartography_dock PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r25_d_cartography_dock PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-set_target_properties(test_r26_workbench_spectral_ux PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_r26_workbench_spectral_ux)
-
-# WP6/WP7: ROI statistics state recovery + histogram stretch re-anchoring
-add_executable(test_r26_workbench_roi_histogram
-  test_r26_workbench_roi_histogram.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/display/piecewise_linear_enhancement.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/display/qgs_display_stretch.cpp
-  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+sicnu_link_jsoncpp(test_r25_d_cartography_dock)
+set_target_properties(test_r25_d_cartography_dock PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r25_d_cartography_dock TEST_PREFIX test_r25_d_cartography_dock::)
+# R25-D Loop 2: pre-run preflight derivation (AlgorithmMetaStore sidecars →
+# the task panel's estimate seam) + wiring source scan. Direct-TU embed.
+add_executable(test_r25_d_operator_preflight
+  test_r25_d_operator_preflight.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
 )
-target_link_libraries(test_r26_workbench_roi_histogram PRIVATE
+target_link_libraries(test_r25_d_operator_preflight PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  qgis_core
-  qgis_gui
   sicnu_processing
-  GDAL::GDAL
-  sicnu_runtime
 )
-target_include_directories(test_r26_workbench_roi_histogram PRIVATE
+target_include_directories(test_r25_d_operator_preflight PRIVATE
   ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-set_target_properties(test_r26_workbench_roi_histogram PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_r26_workbench_roi_histogram)
-
-# WP1–WP4: classification studio interaction honesty (full window)
-add_executable(test_r26_workbench_classification_ux
-  test_r26_workbench_classification_ux.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+target_compile_definitions(test_r25_d_operator_preflight PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-target_link_libraries(test_r26_workbench_classification_ux PRIVATE
+sicnu_link_jsoncpp(test_r25_d_operator_preflight)
+sicnu_discover_tests(test_r25_d_operator_preflight TEST_PREFIX test_r25_d_operator_preflight::)
+# R25-D Loop 6: result→layer linkage source pin (vector artifacts must open
+# through the kind-inferring seam on every manual result surface).
+add_executable(test_r25_d_result_open_link
+  test_r25_d_result_open_link.cpp
+)
+target_link_libraries(test_r25_d_result_open_link PRIVATE
   Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r25_d_result_open_link PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r25_d_result_open_link PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r25_d_result_open_link TEST_PREFIX test_r25_d_result_open_link::)
+# R25-D W7: end-to-end display/cartography contract test — every step rides
+# the production seam the shell uses (DataManager → QgisDisplayManager →
+# TaskCenter/JobEngine → cartography operators → QgsProject roundtrip).
+add_executable(test_r25_d_e2e_display_cartography
+  test_r25_d_e2e_display_cartography.cpp
+)
+target_compile_definitions(test_r25_d_e2e_display_cartography PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
+target_link_libraries(test_r25_d_e2e_display_cartography PRIVATE
+  Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
-  Qt6::Test
   qgis_core
   qgis_gui
-  qgis_analysis
-  qgis_app_classify
-  Sicnu::session_map
-  sicnu_jobs
-  sicnu_task_center
+  Sicnu::qgis_display
   sicnu_data
+  sicnu_task_center
+  sicnu_operators
+  sicnu_agent
 )
-target_include_directories(test_r26_workbench_classification_ux PRIVATE
+target_include_directories(test_r25_d_e2e_display_cartography PRIVATE
   ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/analysis
-  ${CMAKE_SOURCE_DIR}/src/analysis/classification
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_SOURCE_DIR}/src/app/classification
   ${CMAKE_BINARY_DIR}
 )
-set_target_properties(test_r26_workbench_classification_ux PROPERTIES AUTOMOC ON)
-target_compile_definitions(test_r26_workbench_classification_ux PRIVATE
+sicnu_link_jsoncpp(test_r25_d_e2e_display_cartography)
+sicnu_discover_tests(test_r25_d_e2e_display_cartography TEST_PREFIX test_r25_d_e2e_display_cartography:: TIMEOUT 300)
+# R25-D W3: canvas invalidation discipline pin — counts, not wall time.
+add_executable(test_r25_d_canvas_invalidation
+  test_r25_d_canvas_invalidation.cpp
+)
+target_link_libraries(test_r25_d_canvas_invalidation PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_r25_d_canvas_invalidation PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_d_canvas_invalidation TEST_PREFIX test_r25_d_canvas_invalidation::)
+
+# ── R25-E: free-text answer hygiene at both session boundaries (#1695-17d) ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+# Same Qt-free link surface as test_lab_runtime: Catch2 + sicnu_lab_runtime
+# (jsoncpp transitively); the layer guard is the link graph.
+add_executable(test_r25_e_answer_hygiene test_r25_e_answer_hygiene.cpp)
+target_link_libraries(test_r25_e_answer_hygiene PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+sicnu_discover_tests(test_r25_e_answer_hygiene TEST_PREFIX "test_r25_e_answer_hygiene::")
+# --- end R25-E answer-hygiene registration ---
+
+# ── R25-E: cooperative discovery cancellation + CT-C6 single-walk seam ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_discovery_cancel)
+# --- end R25-E discovery-cancel registration ---
+
+# ── R25-E: repo student-flow script ↔ grading authority coherence (CT-D1) ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+add_executable(test_r25_e_repo_flow_contract test_r25_e_repo_flow_contract.cpp)
+target_link_libraries(test_r25_e_repo_flow_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r25_e_repo_flow_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_definitions(test_r25_e_repo_flow_contract PRIVATE
   SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-sicnu_discover_tests(test_r26_workbench_classification_ux)
-
-# WP8: change-detection dialog terminal-state honesty (+ real operator E2E)
-sicnu_add_dialog_test(test_r26_workbench_dialogs
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+set_target_properties(test_r25_e_repo_flow_contract PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
 )
+sicnu_discover_tests(test_r25_e_repo_flow_contract TEST_PREFIX "test_r25_e_repo_flow_contract::")
+# --- end R25-E repo-flow-contract registration ---
 
-# WP9: guided workflow completion honesty
-add_executable(test_r26_workbench_guided
-  test_r26_workbench_guided.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/guided_workflow_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-)
-target_link_libraries(test_r26_workbench_guided PRIVATE
-# ── BEGIN R26-harness: evidence integrity / planner fact gates / family drift ──
-# Append-only registration block for this track (docs: .planning/zcode-r26-harness).
-sicnu_add_test(test_r26_harness_evidence_integrity)
-sicnu_link_jsoncpp(test_r26_harness_evidence_integrity)
+# ── R25-E: feedback pack grading evidence + class summary run integrity ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_feedback_evidence)
+# --- end R25-E feedback-evidence registration ---
 
-add_executable(test_r26_planner_fact_gates test_r26_planner_fact_gates.cpp)
-target_link_libraries(test_r26_planner_fact_gates PRIVATE
-  Catch2::Catch2WithMain
-  sicnu_planner
-)
-target_include_directories(test_r26_planner_fact_gates PRIVATE ${CMAKE_SOURCE_DIR}/src)
-sicnu_discover_tests(test_r26_planner_fact_gates TEST_PREFIX "test_r26_planner_fact_gates::")
+# ── R25-E: teacher whole-class E2E on the production seams ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_teacher_e2e)
 
-sicnu_add_test(test_r26_capability_family_drift)
-sicnu_link_jsoncpp(test_r26_capability_family_drift)
-# ── END R26-harness ──
-# ── R25-A: science algorithms & processing chains (this track) ──
-# Append-only registration block (.planning/zcode-r25-A). DEF-1: terrain_solar
-# latitude provenance (CRS-derived / explicit / fail-closed).
-add_executable(test_r25_a_terrain_solar_latitude test_r25_a_terrain_solar_latitude.cpp)
-target_link_libraries(test_r25_a_terrain_solar_latitude PRIVATE
-# BEGIN R25-C
-# R25-C (Pi/MCP harness, workflow execution & plugin tool contracts):
-# capability-honesty entry projection (prerequisites/limitations/guarantees).
-add_executable(test_r25_c_capability_honesty test_r25_c_capability_honesty.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
-target_link_libraries(test_r25_c_capability_honesty PRIVATE
+# ── R25-E: batch durable state under hostile input (fail-closed matrix) ──
+sicnu_add_teaching_admin_test(test_r25_e_adversarial_checkpoint)
+# --- end R25-E e2e+adversarial registration ---
+
 # BEGIN R25-B (r25-B data/model/experiment track) — append-only block.
 # --- R25-B feature 1: import preflight explanation report --------------------
 qt_add_executable(test_r25_b_import_preflight test_r25_b_import_preflight.cpp)
@@ -17477,9 +17514,6 @@ target_link_libraries(test_r25_b_inference_plan PRIVATE
   sicnu_processing
   sicnu_task_center
   sicnu_operators
-)
-sicnu_link_jsoncpp(test_r25_a_terrain_solar_latitude)
-target_include_directories(test_r25_a_terrain_solar_latitude PRIVATE
   ${OpenCV_LIBS}
 )
 sicnu_link_jsoncpp(test_r25_b_inference_plan)
@@ -17488,21 +17522,6 @@ target_include_directories(test_r25_b_inference_plan PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r25_a_terrain_solar_latitude TEST_PREFIX test_r25_a_terrain_solar_latitude::)
-# --- end R25-A terrain-solar-latitude registration ---
-
-# ── R25-A DEF-2: exact D8 flow accumulation counts (Float64 product) ──
-add_executable(test_r25_a_terrain_flow_precision test_r25_a_terrain_flow_precision.cpp)
-target_link_libraries(test_r25_a_terrain_flow_precision PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  qgis_core
-  sicnu_processing
-  sicnu_task_center
-  sicnu_operators
-)
-sicnu_link_jsoncpp(test_r25_a_terrain_flow_precision)
-target_include_directories(test_r25_a_terrain_flow_precision PRIVATE
 endif()
 # --- end R25-B inference-plan registration ---
 # --- R25-B feature 3: typed replay deviation entries (schema v2) ------------
@@ -17538,6 +17557,112 @@ target_link_libraries(test_r25_b_end_to_end PRIVATE
 )
 sicnu_link_jsoncpp(test_r25_b_end_to_end)
 target_include_directories(test_r25_b_end_to_end PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+endif()
+# --- end R25-B end-to-end registration ---
+# END R25-B
+
+# BEGIN R25-C
+# R25-C (Pi/MCP harness, workflow execution & plugin tool contracts):
+# capability-honesty entry projection (prerequisites/limitations/guarantees).
+add_executable(test_r25_c_capability_honesty test_r25_c_capability_honesty.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r25_c_capability_honesty PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r25_c_capability_honesty PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r25_c_capability_honesty PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r25_c_capability_honesty PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_c_capability_honesty TEST_PREFIX test_r25_c_capability_honesty:: TIMEOUT 300)
+# R25-C W3: workflow resume diagnostics over the real tools/call dispatch.
+add_executable(test_r25_c_workflow_resume_diagnostics test_r25_c_workflow_resume_diagnostics.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+  sicnu_workflow
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r25_c_workflow_resume_diagnostics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_c_workflow_resume_diagnostics TEST_PREFIX test_r25_c_workflow_resume_diagnostics:: TIMEOUT 300)
+# END R25-C
+
+# ── R25-A: science algorithms & processing chains (this track) ──
+# Append-only registration block (.planning/zcode-r25-A). DEF-1: terrain_solar
+# latitude provenance (CRS-derived / explicit / fail-closed).
+add_executable(test_r25_a_terrain_solar_latitude test_r25_a_terrain_solar_latitude.cpp)
+target_link_libraries(test_r25_a_terrain_solar_latitude PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_terrain_solar_latitude)
+target_include_directories(test_r25_a_terrain_solar_latitude PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_a_terrain_solar_latitude TEST_PREFIX test_r25_a_terrain_solar_latitude::)
+# --- end R25-A terrain-solar-latitude registration ---
+
+# ── R25-A DEF-2: exact D8 flow accumulation counts (Float64 product) ──
+add_executable(test_r25_a_terrain_flow_precision test_r25_a_terrain_flow_precision.cpp)
+target_link_libraries(test_r25_a_terrain_flow_precision PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r25_a_terrain_flow_precision)
+target_include_directories(test_r25_a_terrain_flow_precision PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/tests
   ${CMAKE_BINARY_DIR}
@@ -17658,239 +17783,140 @@ target_include_directories(test_r25_a_perf_baseline PRIVATE
 )
 sicnu_discover_tests(test_r25_a_perf_baseline TEST_PREFIX test_r25_a_perf_baseline:: TIMEOUT 900)
 # --- end R25-A perf-baseline registration ---
-endif()
-# --- end R25-B end-to-end registration ---
-# END R25-B
-# ── R25-E: free-text answer hygiene at both session boundaries (#1695-17d) ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-# Same Qt-free link surface as test_lab_runtime: Catch2 + sicnu_lab_runtime
-# (jsoncpp transitively); the layer guard is the link graph.
-add_executable(test_r25_e_answer_hygiene test_r25_e_answer_hygiene.cpp)
-target_link_libraries(test_r25_e_answer_hygiene PRIVATE
+
+# ── BEGIN R26-harness: evidence integrity / planner fact gates / family drift ──
+# Append-only registration block for this track (docs: .planning/zcode-r26-harness).
+sicnu_add_test(test_r26_harness_evidence_integrity)
+sicnu_link_jsoncpp(test_r26_harness_evidence_integrity)
+
+add_executable(test_r26_planner_fact_gates test_r26_planner_fact_gates.cpp)
+target_link_libraries(test_r26_planner_fact_gates PRIVATE
   Catch2::Catch2WithMain
-  sicnu_lab_runtime
+  sicnu_planner
 )
-sicnu_discover_tests(test_r25_e_answer_hygiene TEST_PREFIX "test_r25_e_answer_hygiene::")
-# --- end R25-E answer-hygiene registration ---
+target_include_directories(test_r26_planner_fact_gates PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_r26_planner_fact_gates TEST_PREFIX "test_r26_planner_fact_gates::")
 
-# ── R25-E: cooperative discovery cancellation + CT-C6 single-walk seam ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-sicnu_add_teaching_admin_test(test_r25_e_discovery_cancel)
-# --- end R25-E discovery-cancel registration ---
+sicnu_add_test(test_r26_capability_family_drift)
+sicnu_link_jsoncpp(test_r26_capability_family_drift)
+# ── END R26-harness ──
 
-# ── R25-E: repo student-flow script ↔ grading authority coherence (CT-D1) ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-add_executable(test_r25_e_repo_flow_contract test_r25_e_repo_flow_contract.cpp)
-target_link_libraries(test_r25_e_repo_flow_contract PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-)
-target_include_directories(test_r25_e_repo_flow_contract PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-)
-target_compile_definitions(test_r25_e_repo_flow_contract PRIVATE
-  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
-set_target_properties(test_r25_e_repo_flow_contract PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-)
-sicnu_discover_tests(test_r25_e_repo_flow_contract TEST_PREFIX "test_r25_e_repo_flow_contract::")
-# --- end R25-E repo-flow-contract registration ---
+# ── BEGIN R26-workbench (R26-02): workbench UX regression tests ─────────────
+# Append-only block for the R26-02 workbench track. Sources are compiled
+# directly (existing widget-test pattern) to keep the link surface small.
 
-# ── R25-E: feedback pack grading evidence + class summary run integrity ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-sicnu_add_teaching_admin_test(test_r25_e_feedback_evidence)
-# --- end R25-E feedback-evidence registration ---
-
-# ── R25-E: teacher whole-class E2E on the production seams ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-sicnu_add_teaching_admin_test(test_r25_e_teacher_e2e)
-
-# ── R25-E: batch durable state under hostile input (fail-closed matrix) ──
-sicnu_add_teaching_admin_test(test_r25_e_adversarial_checkpoint)
-# --- end R25-E e2e+adversarial registration ---
-# ── R25-D (zcode r25-D qt/qgis workbench cartography track) ──────────────────
-# Append-only registration block. Union rule: never reorder/dedupe/delete
-# other tracks' blocks (scripts/check_merge_registration_integrity.py guards).
-# END R25-D
-# BEGIN R25-D
-# Light surface: pure ContextRules for the cartography.* availability family
-# + source scans of the production wiring (same direct-TU embed shape as
-# test_command_registry).
-add_executable(test_r25_d_cartography_ux
-  test_r25_d_cartography_ux.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+# WP5: spectral profile NoData honesty
+add_executable(test_r26_workbench_spectral_ux
+  test_r26_workbench_spectral_ux.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_profile_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_composite_palette.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
-target_link_libraries(test_r25_d_cartography_ux PRIVATE
+target_link_libraries(test_r26_workbench_spectral_ux PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
   qgis_core
   qgis_gui
   sicnu_processing
-  sicnu_task_center
-  sicnu_data
-  sicnu_agent
-  Sicnu::experiment
-  Sicnu::experiment_bridge
   GDAL::GDAL
-  Sicnu::agent_ops
+  sicnu_runtime
 )
-if(TARGET sicnu_operators)
-  target_link_libraries(test_r25_c_capability_honesty PRIVATE sicnu_operators)
-endif()
-if(TARGET jsoncpp)
-  target_link_libraries(test_r25_c_capability_honesty PRIVATE jsoncpp)
-endif()
-target_include_directories(test_r25_c_capability_honesty PRIVATE
-)
-target_include_directories(test_r25_d_cartography_ux PRIVATE
+target_include_directories(test_r26_workbench_spectral_ux PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-target_compile_definitions(test_r25_d_cartography_ux PRIVATE
-  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
-sicnu_discover_tests(test_r25_d_cartography_ux TEST_PREFIX test_r25_d_cartography_ux::)
+set_target_properties(test_r26_workbench_spectral_ux PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r26_workbench_spectral_ux)
 
-# Full-shell surface: the REAL CartographyDock (template registry, TaskCenter
-# connections) against the button-gating contract — #1312 full-shell link
-# precedent (same explicit links as test_workbench_full_shell_lifecycle).
-add_executable(test_r25_d_cartography_dock
-  test_r25_d_cartography_dock.cpp
+# WP6/WP7: ROI statistics state recovery + histogram stretch re-anchoring
+add_executable(test_r26_workbench_roi_histogram
+  test_r26_workbench_roi_histogram.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/piecewise_linear_enhancement.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/qgs_display_stretch.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
-target_compile_definitions(test_r25_d_cartography_dock PRIVATE
-  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
-)
-target_link_libraries(test_r25_d_cartography_dock PRIVATE
-  Catch2::Catch2
+target_link_libraries(test_r26_workbench_roi_histogram PRIVATE
+  Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
   Qt6::Test
   qgis_core
   qgis_gui
-  sicnu_geo_rs_shell
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
-  Sicnu::agent_ops
-)
-target_include_directories(test_r25_d_cartography_dock PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_r25_c_capability_honesty TEST_PREFIX test_r25_c_capability_honesty:: TIMEOUT 300)
-# R25-C W3: workflow resume diagnostics over the real tools/call dispatch.
-add_executable(test_r25_c_workflow_resume_diagnostics test_r25_c_workflow_resume_diagnostics.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
-target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  qgis_core
-  qgis_gui
   sicnu_processing
-  sicnu_task_center
-  sicnu_data
-  sicnu_agent
-  Sicnu::experiment
-  Sicnu::experiment_bridge
   GDAL::GDAL
-  Sicnu::agent_ops
-  sicnu_workflow
+  sicnu_runtime
 )
-if(TARGET sicnu_operators)
-  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE sicnu_operators)
-endif()
-if(TARGET jsoncpp)
-  target_link_libraries(test_r25_c_workflow_resume_diagnostics PRIVATE jsoncpp)
-endif()
-target_include_directories(test_r25_c_workflow_resume_diagnostics PRIVATE
+target_include_directories(test_r26_workbench_roi_histogram PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r25_c_workflow_resume_diagnostics TEST_PREFIX test_r25_c_workflow_resume_diagnostics:: TIMEOUT 300)
-# END R25-C
-sicnu_link_jsoncpp(test_r25_d_cartography_dock)
-set_target_properties(test_r25_d_cartography_dock PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_r25_d_cartography_dock TEST_PREFIX test_r25_d_cartography_dock::)
-# R25-D Loop 2: pre-run preflight derivation (AlgorithmMetaStore sidecars →
-# the task panel's estimate seam) + wiring source scan. Direct-TU embed.
-add_executable(test_r25_d_operator_preflight
-  test_r25_d_operator_preflight.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
+set_target_properties(test_r26_workbench_roi_histogram PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r26_workbench_roi_histogram)
+
+# WP1–WP4: classification studio interaction honesty (full window)
+add_executable(test_r26_workbench_classification_ux
+  test_r26_workbench_classification_ux.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
-target_link_libraries(test_r25_d_operator_preflight PRIVATE
+target_link_libraries(test_r26_workbench_classification_ux PRIVATE
   Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  sicnu_processing
-)
-target_include_directories(test_r25_d_operator_preflight PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-target_compile_definitions(test_r25_d_operator_preflight PRIVATE
-  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
-sicnu_link_jsoncpp(test_r25_d_operator_preflight)
-sicnu_discover_tests(test_r25_d_operator_preflight TEST_PREFIX test_r25_d_operator_preflight::)
-# R25-D Loop 6: result→layer linkage source pin (vector artifacts must open
-# through the kind-inferring seam on every manual result surface).
-add_executable(test_r25_d_result_open_link
-  test_r25_d_result_open_link.cpp
-)
-target_link_libraries(test_r25_d_result_open_link PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-)
-target_include_directories(test_r25_d_result_open_link PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-target_compile_definitions(test_r25_d_result_open_link PRIVATE
-  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
-sicnu_discover_tests(test_r25_d_result_open_link TEST_PREFIX test_r25_d_result_open_link::)
-# R25-D W7: end-to-end display/cartography contract test — every step rides
-# the production seam the shell uses (DataManager → QgisDisplayManager →
-# TaskCenter/JobEngine → cartography operators → QgsProject roundtrip).
-add_executable(test_r25_d_e2e_display_cartography
-  test_r25_d_e2e_display_cartography.cpp
-)
-target_compile_definitions(test_r25_d_e2e_display_cartography PRIVATE
-  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
-)
-target_link_libraries(test_r25_d_e2e_display_cartography PRIVATE
-  Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
   qgis_core
   qgis_gui
-  Sicnu::qgis_display
-  sicnu_data
+  qgis_analysis
+  qgis_app_classify
+  Sicnu::session_map
+  sicnu_jobs
   sicnu_task_center
-  sicnu_operators
-  sicnu_agent
+  sicnu_data
 )
-target_include_directories(test_r25_d_e2e_display_cartography PRIVATE
+target_include_directories(test_r26_workbench_classification_ux PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/classification
   ${CMAKE_BINARY_DIR}
 )
-sicnu_link_jsoncpp(test_r25_d_e2e_display_cartography)
-sicnu_discover_tests(test_r25_d_e2e_display_cartography TEST_PREFIX test_r25_d_e2e_display_cartography:: TIMEOUT 300)
-# R25-D W3: canvas invalidation discipline pin — counts, not wall time.
-add_executable(test_r25_d_canvas_invalidation
-  test_r25_d_canvas_invalidation.cpp
+set_target_properties(test_r26_workbench_classification_ux PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_r26_workbench_classification_ux PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-target_link_libraries(test_r25_d_canvas_invalidation PRIVATE
+sicnu_discover_tests(test_r26_workbench_classification_ux)
+
+# WP8: change-detection dialog terminal-state honesty (+ real operator E2E)
+sicnu_add_dialog_test(test_r26_workbench_dialogs
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+)
+
+# WP9: guided workflow completion honesty
+add_executable(test_r26_workbench_guided
+  test_r26_workbench_guided.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/guided_workflow_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+)
+target_link_libraries(test_r26_workbench_guided PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
@@ -17916,10 +17942,111 @@ sicnu_discover_tests(test_r26_workbench_guided)
 # WP10: HelpCompact extreme-budget regression (#1614 residual)
 sicnu_add_help_test(test_r26_workbench_help)
 # ── END R26-workbench ────────────────────────────────────────────────────────
-  Sicnu::qgis_display
+
+# ── R26-science: correctness oracle suite (RED→GREEN per work package) ──
+# Append-only registration block for this track (docs: .planning/zcode-r26-science).
+# Covers classification sampling/evaluation, segmentation tie-break/
+# polygonize, change log-ratio/area units, temporal trend statistics and
+# enhancement degenerate-input contracts on master's production kernels.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r26_science_oracles test_r26_science_oracles.cpp)
+    target_link_libraries(test_r26_science_oracles PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        qgis_analysis
+        sicnu_processing
+        sicnu_operators
+        sicnu_temporal_timeline
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r26_science_oracles)
+    target_include_directories(test_r26_science_oracles PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/analysis
+        ${CMAKE_SOURCE_DIR}/src/analysis/classification
+        ${OpenCV_INCLUDE_DIRS}
+        ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME test_r26_science_oracles COMMAND test_r26_science_oracles)
+    set_tests_properties(test_r26_science_oracles PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 300)
+endif()
+# --- end R26-science oracle registration ---
+
+# ── BEGIN R27-T3: agent approval/sandbox/SDK-plugin hardening (this track) ──
+# Append-only registration block (.planning/r27-t03). P0 #1733 approval gate,
+# P1 #1741/#1742 containment & dock lifecycle, P2 #1760-1763/#1796-1799 hardening.
+add_executable(test_r27_t03_approval_gate test_r27_t03_approval_gate.cpp)
+target_link_libraries(test_r27_t03_approval_gate PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::agent_ops
+  sicnu_agent_loop
+  jsoncpp
 )
-target_include_directories(test_r25_d_canvas_invalidation PRIVATE
+target_include_directories(test_r27_t03_approval_gate PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r27_t03_approval_gate TEST_PREFIX "test_r27_t03_approval_gate::")
+
+add_executable(test_r27_t03_dock_lifecycle test_r27_t03_dock_lifecycle.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/agent_ops/agent_ops_control_center_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/agent_ops/agent_ops_control_center_panel.cpp
+)
+target_link_libraries(test_r27_t03_dock_lifecycle PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Sicnu::agent_ops
+)
+target_include_directories(test_r27_t03_dock_lifecycle PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+)
+set_target_properties(test_r27_t03_dock_lifecycle PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t03_dock_lifecycle TEST_PREFIX "test_r27_t03_dock_lifecycle::" TIMEOUT 180)
+
+add_executable(test_r27_t03_containment_gdal_prefix test_r27_t03_containment_gdal_prefix.cpp)
+target_link_libraries(test_r27_t03_containment_gdal_prefix PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r27_t03_containment_gdal_prefix PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r25_d_canvas_invalidation TEST_PREFIX test_r25_d_canvas_invalidation::)
+sicnu_discover_tests(test_r27_t03_containment_gdal_prefix TEST_PREFIX "test_r27_t03_containment_gdal_prefix::")
+
+add_executable(test_r27_t03_secret_redaction test_r27_t03_secret_redaction.cpp)
+target_link_libraries(test_r27_t03_secret_redaction PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::agent_ops
+  jsoncpp
+)
+target_include_directories(test_r27_t03_secret_redaction PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_r27_t03_secret_redaction TEST_PREFIX "test_r27_t03_secret_redaction::")
+
+sicnu_add_sdk_test(test_r27_t03_external_env_guard TEST_PREFIX "test_r27_t03_external_env_guard::")
+
+add_executable(test_r27_t03_copilot_gate test_r27_t03_copilot_gate.cpp)
+target_link_libraries(test_r27_t03_copilot_gate PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  jsoncpp
+)
+target_include_directories(test_r27_t03_copilot_gate PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r27_t03_copilot_gate TEST_PREFIX "test_r27_t03_copilot_gate::")
+
+if(Python_EXECUTABLE)
+  add_test(NAME r27_t03_python_worker
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_r27_t03_python_worker.py)
+  set_tests_properties(r27_t03_python_worker PROPERTIES TIMEOUT 180)
+  sicnu_set_test_env(r27_t03_python_worker)
+endif()
+# ── END R27-T3 ──
