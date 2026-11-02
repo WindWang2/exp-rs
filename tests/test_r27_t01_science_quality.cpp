@@ -142,14 +142,33 @@ void writeTinyS2Band( const QString &path, float value )
 //   SAVI(L=0.5) = (0.40*1.5)/(0.65+0.25+0.5) = 0.6/1.4 = 0.4285714…
 //   NDWI = (0.35-0.65)/(0.35+0.65) = -0.3
 QString makeS2Safe( const QTemporaryDir &tmp, const char *boaOffsetTag,
-                     const QString &name )
+                     const QString &name, const char *offsetForm = "plain" )
 {
     const QString safe = tmp.path() + "/" + name + ".SAFE";
     const QString img = safe + "/GRANULE/L2A_T32TQQ/IMG_DATA/R10m";
     QDir().mkpath( img );
-    QString radiometric = "<BOA_QUANTIFICATION_VALUE>10000</BOA_QUANTIFICATION_VALUE>";
-    if ( boaOffsetTag )
-        radiometric += QString( "<BOA_ADD_OFFSET>" ) + boaOffsetTag + "</BOA_ADD_OFFSET>";
+    // Real ESA MTDs carry attributes on the quantification tag and write the
+    // offset PER BAND — either attributed direct entries or a nested list
+    // (see radiometric_calibration.cpp's parser); "plain" is the legacy
+    // fixture form.
+    QString radiometric =
+        "<BOA_QUANTIFICATION_VALUE unit=\"none\">10000</BOA_QUANTIFICATION_VALUE>";
+    if ( boaOffsetTag ) {
+        if ( offsetForm == std::string( "bandid" ) )
+            radiometric += QString( "<BOA_ADD_OFFSET band_id=\"1\">" ) + boaOffsetTag
+                           + "</BOA_ADD_OFFSET>"
+                           + "<BOA_ADD_OFFSET band_id=\"2\">" + boaOffsetTag
+                           + "</BOA_ADD_OFFSET>";
+        else if ( offsetForm == std::string( "list" ) )
+            radiometric += QString( "<BOA_ADD_OFFSET><BOA_LIST_TO_VALUES>" )
+                           + "<BOA_LIST_VALUE band_id=\"1\">" + boaOffsetTag
+                           + "</BOA_LIST_VALUE>"
+                           + "<BOA_LIST_VALUE band_id=\"2\">" + boaOffsetTag
+                           + "</BOA_LIST_VALUE>"
+                           + "</BOA_LIST_TO_VALUES></BOA_ADD_OFFSET>";
+        else
+            radiometric += QString( "<BOA_ADD_OFFSET>" ) + boaOffsetTag + "</BOA_ADD_OFFSET>";
+    }
     QFile mtd( safe + "/MTD_MSIL2A.xml" );
     REQUIRE( mtd.open( QIODevice::WriteOnly | QIODevice::Text ) );
     mtd.write( ( "<n1:Level-2A_User_Product>"
@@ -159,6 +178,7 @@ QString makeS2Safe( const QTemporaryDir &tmp, const char *boaOffsetTag,
                  "</n1:Level-2A_User_Product>" )
                    .toUtf8() );
     mtd.close();
+    Q_UNUSED( boaOffsetTag );
     writeTinyS2Band( img + "/T32TQQ_20240615T000000_B02_10m.tif", 1800.f );
     writeTinyS2Band( img + "/T32TQQ_20240615T000000_B03_10m.tif", 2500.f );
     writeTinyS2Band( img + "/T32TQQ_20240615T000000_B04_10m.tif", 1500.f );
@@ -539,15 +559,56 @@ TEST_CASE( "R27-A3 Sentinel-2 L2A PB>=04.00 stamps and applies BOA_ADD_OFFSET",
     for ( float v : savi )
         CHECK( v == approx( 0.6 / 1.4 ) );
 
-    // NDWI = (0.35-0.65)/(0.35+0.65) = -0.3.
-    (void)runIndex( "NDWI", "ndwi.tif" );
+    // NDWI = (0.35-0.65)/(0.35+0.65) = -0.3 — and the run result must
+    // publish the calibration record + output quality ratios (R27-T01 D).
+    const Json::Value ndwiResult = runIndex( "NDWI", "ndwi.tif" );
     std::vector<float> ndwi = readBand1( tmp.path() + "/ndwi.tif" );
     REQUIRE( !ndwi.empty() );
     for ( float v : ndwi )
         CHECK( v == approx( -0.3 ) );
+    REQUIRE( ndwiResult.isMember( "calibration" ) );
+    CHECK( ndwiResult["calibration"]["offset"].asDouble() == approx( -1000.0 ) );
+    CHECK( ndwiResult["calibration"]["offsetSource"].asString() ==
+           "SICNU_NUMERIC_OFFSET metadata" );
+    CHECK( ndwiResult["calibration"]["contract"].asString() !=
+           std::string() );
+    REQUIRE( ndwiResult.isMember( "valid_pixel_ratio" ) );
+    CHECK( ndwiResult["valid_pixel_ratio"].asDouble() == approx( 1.0 ) );
+    CHECK( ndwiResult["nodata_pixel_ratio"].asDouble() == approx( 0.0 ) );
 
     // --- Old baseline (no BOA_ADD_OFFSET tag): no offset stamp; indices ---
     // --- keep the plain /scale semantics (protocol distinction).        ---
+    // --- Real ESA forms (PB>=04.00): attributed per-band entries and the
+    // --- nested BOA_LIST_TO_VALUES list must both stamp the offset (S0-1).
+    for ( const char *form : { "bandid", "list" } ) {
+        QTemporaryDir tmp2;
+        REQUIRE( tmp2.isValid() );
+        const QString safe2 = makeS2Safe( tmp2, "-1000",
+                                          "S2C_MSIL2A_20240615T000000_N9999_R000_T32TQQ_20240615T000000",
+                                          form );
+        SatelliteProducts::ProductInfo info2;
+        QString err2;
+        REQUIRE( SatelliteProducts::discoverSentinel2( safe2, &info2,
+                                                       QStringLiteral( "10m" ), &err2 ) );
+        const QString stacked2 = tmp2.path() + "/s2_stack_form.tif";
+        REQUIRE( SatelliteProducts::stackToGeoTiff(
+            info2, { QStringLiteral( "B04" ), QStringLiteral( "B08" ) }, stacked2, &err2 ) );
+        GDALDatasetH ds2 = GDALOpen( stacked2.toUtf8().constData(), GA_ReadOnly );
+        REQUIRE( ds2 != nullptr );
+        const char *scale2 = GDALGetMetadataItem( ds2, "SICNU_NUMERIC_SCALE", nullptr );
+        REQUIRE( scale2 != nullptr ); // attributed <... unit="none"> must match
+        CHECK( QString::fromUtf8( scale2 ).toDouble() == approx( 10000.0 ) );
+        const char *offset2 = GDALGetMetadataItem( ds2, "SICNU_NUMERIC_OFFSET", nullptr );
+        REQUIRE( offset2 != nullptr );
+        CHECK( QString::fromUtf8( offset2 ).toDouble() == approx( -1000.0 ) );
+        // Per-band stamps cover the affine bands of a mixed stack.
+        const char *bandOffset = GDALGetMetadataItem(
+            GDALGetRasterBand( ds2, 1 ), "SICNU_NUMERIC_OFFSET", nullptr );
+        REQUIRE( bandOffset != nullptr );
+        CHECK( QString::fromUtf8( bandOffset ).toDouble() == approx( -1000.0 ) );
+        GDALClose( ds2 );
+    }
+
     const QString safeOld = makeS2Safe(
         tmp, nullptr, "S2B_MSIL2A_20170725T000000_N9999_R000_T32TQQ_20170725T000000" );
     SatelliteProducts::ProductInfo infoOld;
@@ -654,7 +715,9 @@ TEST_CASE( "R27-B4 ratio index on offset DN equals ratio on physical reflectance
     auto op = registry.create( "rs:spectral_index" );
     REQUIRE( op != nullptr );
 
-    const auto ndviOf = [&]( const QString &in, const QString &out ) {
+    // Explicit offset param (stored-value space) wins over the stamp.
+    const auto ndviOf = [&]( const QString &in, const QString &out,
+                             const Json::Value &extra = Json::Value() ) {
         sicnu::operators::RSOperatorContext ctx;
         Json::Value params( Json::objectValue );
         params["input"] = in.toStdString();
@@ -662,17 +725,29 @@ TEST_CASE( "R27-B4 ratio index on offset DN equals ratio on physical reflectance
         params["index"] = "NDVI";
         params["red"] = 2;
         params["nir"] = 1;
+        for ( const auto &key : extra.getMemberNames() )
+            params[key] = extra[key];
         (void)op->run( params, ctx );
         return readBand1( out );
     };
-
     const std::vector<float> fromPhysical = ndviOf( physPath, tmp.path() + "/ndvi_phys.tif" );
     const std::vector<float> fromDn = ndviOf( dnPath, tmp.path() + "/ndvi_dn.tif" );
+    // Offset param on the PHYSICAL raster (which carries no stamp) must NOT
+    // perturb it (offset 0 param = no-op); offset param on a DN raster
+    // without stamps reproduces the un-offset NDVI only when correct.
+    {
+        Json::Value extra( Json::objectValue );
+        extra["offset"] = 0.0;
+        const std::vector<float> neutral =
+            ndviOf( physPath, tmp.path() + "/ndvi_phys_o0.tif", extra );
+        for ( size_t i = 0; i < neutral.size(); ++i )
+            CHECK( neutral[i] == approx( fromPhysical[i] ) );
+    }
     REQUIRE( fromPhysical.size() == fromDn.size() );
     REQUIRE( !fromPhysical.empty() );
     for ( size_t i = 0; i < fromPhysical.size(); ++i )
-        // Offset must be honoured (the broken path computed (a-b)/(a+b) on
-        // offset DN and stayed at 0.375 instead of the true 0.5).
+        // Offset must be honoured (the broken path computed the ratio on
+        // offset DN: 4000/7000 = 0.5714 instead of the true 0.4444).
         CHECK( fromDn[i] == approx( fromPhysical[i] ) );
     CHECK( fromPhysical[0] == approx( ( 0.65f - 0.25f ) / ( 0.65f + 0.25f ) ) );
 }
@@ -956,10 +1031,25 @@ TEST_CASE( "R27-B6 reproject keeps classes and NoData honest",
         CHECK( zeroCount == 0 );
     }
 
-    SECTION( "explicit bilinear on a categorical raster is refused" )
+    SECTION( "explicit bilinear on a STRUCTURAL (palette) categorical raster is refused" )
     {
-        const QString src = tmp.path() + "/classes2.tif";
+        // Byte map with a color table: structural categorical evidence.
+        const QString src = tmp.path() + "/classes_palette.tif";
         REQUIRE( writeTif( src, GDT_Byte, W, H, 1, { cls } ) );
+        {
+            GDALDatasetH ds = GDALOpen( src.toUtf8().constData(), GA_Update );
+            REQUIRE( ds != nullptr );
+            GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+            GDALColorTableH ct = GDALCreateColorTable( GPI_RGB );
+            for ( int ci = 0; ci <= 5; ++ci ) {
+                GDALColorEntry e = { static_cast<short>( 40 * ci ), 0,
+                                     static_cast<short>( 255 - 40 * ci ), 255 };
+                GDALSetColorEntry( ct, ci, &e );
+            }
+            GDALSetRasterColorTable( band, ct );
+            GDALDestroyColorTable( ct );
+            GDALClose( ds );
+        }
         auto op = registry.create( "gdal:reproject" );
         sicnu::operators::RSOperatorContext ctx;
         Json::Value params( Json::objectValue );
@@ -969,6 +1059,62 @@ TEST_CASE( "R27-B6 reproject keeps classes and NoData honest",
         params["resampling"] = "bilinear";
         REQUIRE_THROWS_AS( op->run( params, ctx ), sicnu::operators::RSOperatorError );
         REQUIRE( !QFile::exists( tmp.path() + "/refused.tif" ) );
+    }
+
+    SECTION( "explicit bilinear on a PROBE-only class map is overridden to nearest" )
+    {
+        // No palette/RAT — only the few-distinct-values data probe fires. A
+        // coarse continuous raster could look the same, so the operator must
+        // NOT refuse; it overrides to nearest and the class set is preserved.
+        const QString src = tmp.path() + "/classes_probe.tif";
+        const QString ref = tmp.path() + "/reference_probe.tif";
+        REQUIRE( writeTif( src, GDT_Byte, W, H, 1, { cls } ) );
+        makeReference( ref );
+        auto op = registry.create( "gdal:reproject" );
+        sicnu::operators::RSOperatorContext ctx;
+        Json::Value params( Json::objectValue );
+        params["input"] = src.toStdString();
+        params["output"] = ( tmp.path() + "/probe_overridden.tif" ).toStdString();
+        params["reference"] = ref.toStdString();
+        params["resampling"] = "bilinear";
+        params["nodata"] = 255;
+        const Json::Value res = op->run( params, ctx );
+        CHECK( res["resampling"].asString() == "nearest" );
+        CHECK( res["categorical"].asBool() == true );
+        const auto [classes, pixels] = collectClasses( tmp.path() + "/probe_overridden.tif" );
+        (void)pixels;
+        for ( float c : classes )
+            CHECK( ( c == 1.0f || c == 5.0f || c == 255.0f ) );
+    }
+
+    SECTION( "uniform declared source NoData pins src+dst (import-path parity)" )
+    {
+        std::vector<float> cont( static_cast<size_t>( W ) * H, 17.5f );
+        const QString src = tmp.path() + "/declared.tif";
+        REQUIRE( writeTif( src, GDT_Float32, W, H, 1, { cont },
+                           {}, /*declareNodata=*/true, -9999.0 ) );
+        const QString ref = tmp.path() + "/reference_nd.tif";
+        makeReference( ref );
+        auto op = registry.create( "gdal:reproject" );
+        sicnu::operators::RSOperatorContext ctx;
+        Json::Value params( Json::objectValue );
+        params["input"] = src.toStdString();
+        params["output"] = ( tmp.path() + "/declared_out.tif" ).toStdString();
+        params["reference"] = ref.toStdString();
+        (void)op->run( params, ctx );
+        // Outside the footprint the declared sentinel reads back exactly.
+        GDALDatasetH ds = GDALOpen( ( tmp.path() + "/declared_out.tif" ).toUtf8().constData(),
+                                    GA_ReadOnly );
+        REQUIRE( ds != nullptr );
+        int hasNd = 0;
+        const double nd = GDALGetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), &hasNd );
+        GDALClose( ds );
+        CHECK( hasNd == 1 );
+        CHECK( nd == -9999.0 );
+        const std::vector<float> v = readBand1( tmp.path() + "/declared_out.tif" );
+        const size_t nNd = static_cast<size_t>(
+            std::count( v.begin(), v.end(), -9999.0f ) );
+        CHECK( nNd > 0 ); // voids carry the declared sentinel, not zeros
     }
 
     SECTION( "explicit near on a categorical raster is honoured" )
@@ -1020,6 +1166,38 @@ TEST_CASE( "R27-B7 brightness temperature hand reference (regression pin)",
     // L(15000) = 5.113 -> 607.76/5.113 = 118.85 -> +1 -> ln(119.85) = 4.786
     // BT = 1260.56/4.786 = 263.4 K
     CHECK( bt[1] == Catch::Approx( 263.4 ).margin( 0.1 ) );
+}
+
+TEST_CASE( "R27-B7 brightness temperature masks DN0 fill when the flag is set",
+           "[r27][thermal][fill]" )
+{
+    using RadiometricCalibration::BandCoefficients;
+    using RadiometricCalibration::toBrightnessTemperature;
+
+    BandCoefficients c;
+    c.k1 = 607.76;
+    c.k2 = 1260.56;
+    c.radianceGain = 3.342e-4;
+    c.radianceBias = 0.1; // positive AL: DN0 used to yield a finite garbage K
+    c.hasRadiance = true;
+
+    SECTION( "dn0IsFill: DN0 -> NaN, never a plausible Kelvin value" )
+    {
+        c.dn0IsFill = true;
+        const std::vector<float> dn = { 0.0f, 22000.0f };
+        std::vector<float> bt( dn.size(), -1 );
+        REQUIRE( toBrightnessTemperature( dn.data(), bt.data(), dn.size(), c ) );
+        CHECK( std::isnan( bt[0] ) );
+        CHECK( bt[1] == Catch::Approx( 285.6 ).margin( 0.1 ) );
+    }
+
+    SECTION( "flag off keeps the legacy finite behaviour (declared scenes)" )
+    {
+        const std::vector<float> dn = { 0.0f };
+        std::vector<float> bt( dn.size(), -1 );
+        REQUIRE( toBrightnessTemperature( dn.data(), bt.data(), dn.size(), c ) );
+        CHECK( std::isfinite( bt[0] ) ); // L = 0.1 > 0 computes a value
+    }
 }
 
 TEST_CASE( "R27-B7 import infers USGS DN0 fill on undeclared integer bands",

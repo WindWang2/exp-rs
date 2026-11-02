@@ -542,9 +542,12 @@ double sentinel2QuantificationValue(const QString& mtdPath)
         QStringLiteral("QUANTIFICATION_VALUE"),
         QStringLiteral("RADIO_QUANTIFICATION_VALUE"),
     };
+    // Real ESA MTDs may carry attributes on the tag (PB >= 04.00 writes
+    // <BOA_QUANTIFICATION_VALUE unit="none">10000<...>) — an attribute-blind
+    // "<TAG>" pattern never matches them (#1740 review S0).
     for (const QString& tag : tags) {
         const QRegularExpression re(
-            QStringLiteral("<%1>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
+            QStringLiteral("<%1[^>]*>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
             QRegularExpression::CaseInsensitiveOption);
         const auto m = re.match(xml);
         if (!m.hasMatch())
@@ -560,29 +563,68 @@ double sentinel2QuantificationValue(const QString& mtdPath)
 /// Parses the Sentinel-2 L2A BOA_ADD_OFFSET from an MTD_MSIL2A.xml.
 /// Every L2A product with Processing Baseline >= 04.00 (since Jan 2022)
 /// ships DN = rho*QUANTIFICATION + BOA_ADD_OFFSET with the offset at -1000;
-/// pre-04.00 products carry no tag (offset 0). Returns NaN when the tag is
-/// absent or unparseable (#1740).
+/// pre-04.00 products carry no tag (offset 0). Returns NaN when no entry is
+/// parseable. ESA writes the value per band — either as an attributed direct
+/// entry (<BOA_ADD_OFFSET band_id="N">-1000</BOA_ADD_OFFSET>) or as a nested
+/// list (<BOA_ADD_OFFSET><BOA_LIST_TO_VALUES><BOA_LIST_VALUE band_id="N">v)
+/// — and a single dataset-wide stamp is only honest when every entry agrees
+/// (they all carry -1000 on current baselines); disagreeing per-band offsets
+/// deliberately return NaN (no stamp, no silent wrong constant).
 double sentinel2BoaAddOffset(const QString& mtdPath)
 {
     QFile f(mtdPath);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
         return std::numeric_limits<double>::quiet_NaN();
     const QString xml = QString::fromUtf8(f.readAll());
-    const QStringList tags{
+    const QStringList outerTags{
         QStringLiteral("BOA_ADD_OFFSET"),
         QStringLiteral("RADIO_ADD_OFFSET"),
     };
-    for (const QString& tag : tags) {
-        const QRegularExpression re(
-            QStringLiteral("<%1>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
+    for (const QString& tag : outerTags) {
+        QList<double> values;
+        // Direct (possibly attributed) entries.
+        const QRegularExpression direct(
+            QStringLiteral("<%1[^>]*>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
             QRegularExpression::CaseInsensitiveOption);
-        const auto m = re.match(xml);
-        if (!m.hasMatch())
+        auto it = direct.globalMatch(xml);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            bool ok = false;
+            const double v = m.captured(1).toDouble(&ok);
+            if (ok && std::isfinite(v))
+                values.append(v);
+        }
+        // Nested per-band list inside the same outer tag (see the sibling
+        // parser in radiometric_calibration.cpp for the container variants).
+        if (values.isEmpty()) {
+            const QRegularExpression block(
+                QStringLiteral("<%1[^>]*>(.*?)</%1>").arg(tag),
+                QRegularExpression::CaseInsensitiveOption
+                    | QRegularExpression::DotMatchesEverythingOption);
+            const QRegularExpression entry(
+                QStringLiteral("<BOA_LIST_VALUE[^>]*>\\s*([-+0-9.eE]+)\\s*</BOA_LIST_VALUE>"),
+                QRegularExpression::CaseInsensitiveOption);
+            auto bit = block.globalMatch(xml);
+            while (bit.hasNext() && values.isEmpty()) {
+                const auto bm = bit.next();
+                auto eit = entry.globalMatch(bm.captured(1));
+                while (eit.hasNext()) {
+                    const auto em = eit.next();
+                    bool ok = false;
+                    const double v = em.captured(1).toDouble(&ok);
+                    if (ok && std::isfinite(v))
+                        values.append(v);
+                }
+            }
+        }
+        if (values.isEmpty())
             continue;
-        bool ok = false;
-        const double v = m.captured(1).toDouble(&ok);
-        if (ok && std::isfinite(v))
-            return v;
+        const double first = values.first();
+        for (double v : values) {
+            if (v != first)
+                return std::numeric_limits<double>::quiet_NaN();
+        }
+        return first;
     }
     return std::numeric_limits<double>::quiet_NaN();
 }
@@ -1757,8 +1799,11 @@ bool stackToGeoTiff(const ProductInfo& product,
         const bool integerSource = srcType == GDT_Byte || srcType == GDT_UInt16
                                    || srcType == GDT_Int16 || srcType == GDT_UInt32
                                    || srcType == GDT_Int32;
+        // QA bands are exempt even when explicitly requested: their DN0 is a
+        // VALID class (e.g. QA_RADSAT 0 = "clear"), not fill (review R1 P3-3).
+        const bool isQaBand = selected[i].role == BandRole::QA;
         const bool fillInferenceEligible =
-            !hasNoData && integerSource
+            !hasNoData && integerSource && !isQaBand
             && (product.type == ProductType::Landsat
                 || product.type == ProductType::Sentinel2);
         bool sawZeroFill = false;
@@ -1932,6 +1977,12 @@ bool stackToGeoTiff(const ProductInfo& product,
     {
         double numericScale = 0.0;
         double numericOffset = std::numeric_limits<double>::quiet_NaN();
+        // Bands (1-based output indices) that carry the affine contract; the
+        // DATASET-level stamp is only honest when every selected band
+        // qualifies — a default Landsat stack also carries thermal B1x bands
+        // (different affine), so those stacks get per-band stamps only
+        // (review R1 P2-1).
+        std::vector<int> affineBands;
         if ( product.type == ProductType::Sentinel2 )
         {
             // S2 L2A: honour the MTD quantification when parseable, otherwise
@@ -1943,6 +1994,12 @@ bool stackToGeoTiff(const ProductInfo& product,
             const double boaOffset = sentinel2BoaAddOffset( product.metadataPath );
             if ( std::isfinite( boaOffset ) && boaOffset != 0.0 )
                 numericOffset = boaOffset;
+            static const QRegularExpression s2Reflective(
+                QStringLiteral( "^B[0-9]+A?$" ) );
+            for ( int i = 0; i < selected.size(); ++i ) {
+                if ( s2Reflective.match( selected[i].name ).hasMatch() )
+                    affineBands.push_back( i + 1 );
+            }
         }
         else if ( product.type == ProductType::Landsat )
         {
@@ -1960,8 +2017,9 @@ bool stackToGeoTiff(const ProductInfo& product,
             double add = 0.0;
             int multBands = 0;
             bool uniform = true;
-            for ( const BandFile &bf : selected )
+            for ( int i = 0; i < selected.size(); ++i )
             {
+                const BandFile &bf = selected[i];
                 const auto m = bandNumRe.match( bf.name );
                 if ( !m.hasMatch() )
                     continue;
@@ -1978,6 +2036,7 @@ bool stackToGeoTiff(const ProductInfo& product,
                 if ( !okM || !std::isfinite( v ) || v <= 0.0 )
                     continue; // e.g. thermal ST_* bands carry no reflectance mult
                 ++multBands;
+                affineBands.push_back( i + 1 );
                 if ( multBands == 1 )
                 {
                     mult = v;
@@ -2003,16 +2062,46 @@ bool stackToGeoTiff(const ProductInfo& product,
                               "rs:radiometric_calibration for true reflectance";
             }
         }
+        const bool allSelectedAffine =
+            !affineBands.empty()
+            && affineBands.size() == static_cast<size_t>( selected.size() );
         if ( numericScale > 0.0 && std::isfinite( numericScale ) )
         {
-            GDALSetMetadataItem( outDs, kNumericScaleKey,
-                                 QByteArray::number( numericScale, 'g', 12 ).constData(),
-                                 nullptr );
-            if ( std::isfinite( numericOffset ) && numericOffset != 0.0 )
+            // Per-band stamps describe exactly the bands that carry the
+            // contract (thermal/QA/SCL bands in a mixed stack stay clean);
+            // the dataset-wide stamp is written only when every selected
+            // band qualifies (legacy single-contract consumers stay correct).
+            for ( int bandIdx : affineBands )
             {
-                GDALSetMetadataItem( outDs, kNumericOffsetKey,
-                                     QByteArray::number( numericOffset, 'g', 12 ).constData(),
+                GDALRasterBandH band = GDALGetRasterBand( outDs, bandIdx );
+                if ( !band )
+                    continue;
+                GDALSetMetadataItem( band, kNumericScaleKey,
+                                     QByteArray::number( numericScale, 'g', 12 ).constData(),
                                      nullptr );
+                if ( std::isfinite( numericOffset ) && numericOffset != 0.0 )
+                {
+                    GDALSetMetadataItem( band, kNumericOffsetKey,
+                                         QByteArray::number( numericOffset, 'g', 12 ).constData(),
+                                         nullptr );
+                }
+            }
+            if ( allSelectedAffine )
+            {
+                GDALSetMetadataItem( outDs, kNumericScaleKey,
+                                     QByteArray::number( numericScale, 'g', 12 ).constData(),
+                                     nullptr );
+                if ( std::isfinite( numericOffset ) && numericOffset != 0.0 )
+                {
+                    GDALSetMetadataItem( outDs, kNumericOffsetKey,
+                                         QByteArray::number( numericOffset, 'g', 12 ).constData(),
+                                         nullptr );
+                }
+            }
+            else if ( !affineBands.empty() )
+            {
+                qInfo() << "stackToGeoTiff: mixed band set — affine scale/offset stamped "
+                           "per band only (dataset-wide contract skipped)";
             }
         }
     }

@@ -273,13 +273,28 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         }
         paramOffsetOverride = o;
     }
-    const auto readDeclaredOffset = [&](GdalDatasetWrapper &dataset) -> double {
+    // Offset resolution order: explicit param > BAND-level stamp (the
+    // per-band contract covers mixed stacks — thermal/QA bands stay clean)
+    // > dataset-level stamp (single-contract stacks). @a bandNum 0 skips the
+    // band level.
+    const auto readDeclaredOffset = [&](GdalDatasetWrapper &dataset, int bandNum) -> double {
         if (paramOffsetOverride)
             return *paramOffsetOverride;
         if (void *handle = dataset.dataset()) {
+            GDALDatasetH dsH = static_cast<GDALDatasetH>(handle);
+            if (bandNum >= 1) {
+                if (GDALRasterBandH band = GDALGetRasterBand(dsH, bandNum)) {
+                    if (const char *rawBandOffset = GDALGetMetadataItem(
+                            band, SatelliteProducts::kNumericOffsetKey, nullptr)) {
+                        bool ok = false;
+                        const double o = QString::fromUtf8(rawBandOffset).toDouble(&ok);
+                        if (ok && std::isfinite(o))
+                            return o;
+                    }
+                }
+            }
             if (const char *rawOffset = GDALGetMetadataItem(
-                    static_cast<GDALDatasetH>(handle),
-                    SatelliteProducts::kNumericOffsetKey, nullptr)) {
+                    dsH, SatelliteProducts::kNumericOffsetKey, nullptr)) {
                 bool ok = false;
                 const double o = QString::fromUtf8(rawOffset).toDouble(&ok);
                 if (ok && std::isfinite(o))
@@ -415,7 +430,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // domain ONCE from a bounded decimated whole-raster probe over the
     // participating bands (#801 — never per tile).
     if (indexNeedsScale && !hasDeclaredScale) {
-        const double probeOffset = readDeclaredOffset(ds);
+        const double probeOffset = readDeclaredOffset(ds, nirBand);
         double observedMaxAbs = 0.0;
         int probeBands[3] = { nirBand, redBand, 0 };
         int probeBandCount = 2;
@@ -526,7 +541,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             src.hasNodata = false;
         if (applyScale && applyNumericScale)
             src.invScale = static_cast<float>(1.0 / numericScale);
-        src.offset = static_cast<float>(readDeclaredOffset(dataset));
+        src.offset = static_cast<float>(readDeclaredOffset(dataset, bandNum));
         src.applyTransform = (src.invScale != 1.0f) || (src.offset != 0.0f);
         return src;
     };
@@ -612,7 +627,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     }
     // #1740/#1755: record the affine term actually applied to the primary
     // raster's bands (per-source offsets live in the BandSources).
-    if (const double primaryOffset = readDeclaredOffset(ds); primaryOffset != 0.0) {
+    if (const double primaryOffset = readDeclaredOffset(ds, nirBand); primaryOffset != 0.0) {
         canonicalParams["numericOffset"] = primaryOffset;
     }
     if (params.isMember("postfire") && params["postfire"].isString()) {
@@ -668,7 +683,10 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 
     // Output quality counters (D: verifiable output quality) — finite output
     // pixels vs total. Atomics: the chunked runner may invoke sinks from its
-    // worker lane.
+    // worker lane. Coverage note: counters observe freshly SUNK tiles; a
+    // resumed run that reuses already-published tiles (tiles_reused > 0)
+    // reports only the recomputed subset — check tiles_reused before reading
+    // these as whole-raster ratios.
     std::atomic<long long> totalPixels{0};
     std::atomic<long long> finitePixels{0};
     auto sink = [&](const sicnu::runtime::chunk::TilePayload &payload) {
@@ -1025,7 +1043,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 
     // Capture before close(): the calibration record in the result must read
     // the dataset metadata while the handle is still open.
-    const double primaryOffsetForSummary = readDeclaredOffset(ds);
+    const double primaryOffsetForSummary = readDeclaredOffset(ds, nirBand);
     ds.close();
 
     context.reportProgress(1.0, indexName + " complete");
@@ -1052,14 +1070,17 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         result["nonfinite_output_pixels"] =
             static_cast<Json::Int64>(total - finite);
         Json::Value calibration(Json::objectValue);
-        if (applyNumericScale)
+        const bool scaleFromParam = params.isMember("scale");
+        if (applyNumericScale) {
             calibration["scale"] = numericScale;
-        if (primaryOffsetForSummary != 0.0)
+            calibration["scaleSource"] = scaleFromParam ? "param" : "SICNU_NUMERIC_SCALE metadata";
+        }
+        if (primaryOffsetForSummary != 0.0) {
             calibration["offset"] = primaryOffsetForSummary;
+            calibration["offsetSource"] = paramOffsetOverride ? "param"
+                                                              : "SICNU_NUMERIC_OFFSET metadata";
+        }
         if (calibration.isMember("scale") || calibration.isMember("offset")) {
-            calibration["source"] = paramOffsetOverride
-                                        ? "param"
-                                        : "SICNU_NUMERIC_SCALE/OFFSET metadata";
             calibration["contract"] = "physical = (stored - offset) / scale";
             result["calibration"] = calibration;
         }

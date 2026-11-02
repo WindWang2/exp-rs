@@ -255,9 +255,10 @@ void speckleTileLee( const GdalBlockStream::Tile &tile, const float *haloBuf,
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
-            // an Inf center entering the kernel produced finite garbage.
-            if ( !std::isfinite( pixel ) )
+            // Preserve NaN center pixels. ±Inf centres are excluded from the
+            // local statistics and still get a finite filtered value (#634
+            // semantics shared with the non-streaming kernels).
+            if ( std::isnan( pixel ) )
             {
                 out = pixel;
                 continue;
@@ -308,9 +309,10 @@ void speckleTileFrost( const GdalBlockStream::Tile &tile, const float *haloBuf,
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
-            // an Inf center entering the kernel produced finite garbage.
-            if ( !std::isfinite( pixel ) )
+            // Preserve NaN center pixels. ±Inf centres are excluded from the
+            // local statistics and still get a finite filtered value (#634
+            // semantics shared with the non-streaming kernels).
+            if ( std::isnan( pixel ) )
             {
                 out = pixel;
                 continue;
@@ -329,7 +331,10 @@ void speckleTileFrost( const GdalBlockStream::Tile &tile, const float *haloBuf,
                 for ( int dx = -half; dx <= half; ++dx )
                 {
                     const float neighbor = row[dx];
-                    // Skip non-finite neighbours (NaN and ±Inf)
+                    // Skip non-finite neighbours: frost accumulates
+                    // neighbour values directly (no integral-image
+                    // exclusion), so an Inf neighbour would poison every
+                    // window that touches it (#1738 class).
                     if ( !std::isfinite( neighbor ) )
                         continue;
                     // Weight: exp(-damping * distance * CV²)
@@ -355,9 +360,10 @@ void speckleTileKuan( const GdalBlockStream::Tile &tile, const float *haloBuf,
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
-            // an Inf center entering the kernel produced finite garbage.
-            if ( !std::isfinite( pixel ) )
+            // Preserve NaN center pixels. ±Inf centres are excluded from the
+            // local statistics and still get a finite filtered value (#634
+            // semantics shared with the non-streaming kernels).
+            if ( std::isnan( pixel ) )
             {
                 out = pixel;
                 continue;
@@ -392,9 +398,10 @@ void speckleTileGammaMap( const GdalBlockStream::Tile &tile, const float *haloBu
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
-            // an Inf center entering the kernel produced finite garbage.
-            if ( !std::isfinite( pixel ) )
+            // Preserve NaN center pixels. ±Inf centres are excluded from the
+            // local statistics and still get a finite filtered value (#634
+            // semantics shared with the non-streaming kernels).
+            if ( std::isnan( pixel ) )
             {
                 out = pixel;
                 continue;

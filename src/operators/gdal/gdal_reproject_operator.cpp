@@ -20,37 +20,41 @@ namespace sicnu::operators::gdal {
 
 namespace {
 
-/// #1758: does this raster carry discrete class values? Structural
-/// declarations first (palette/RAT/category names/metadata via the shared
-/// util), then the data probe: a single-band INTEGER raster whose decimated
-/// value domain collapses to <=16 distinct values is a classification map —
-/// bilinear on it invents class ids (1 and 5 blend to 3). Continuous int16
-/// DEMs keep their interpolation (hundreds of distinct values).
-bool rasterLooksLikeClassMap(GDALDatasetH hDS)
+/// #1758: does this raster carry discrete class values, and is that
+/// STRUCTURAL (palette/RAT/category names/metadata via the shared util) or
+/// only a data-probe heuristic (single-band integer raster whose decimated
+/// value domain collapses to <=16 distinct values — bilinear on such a map
+/// invents class ids, 1 and 5 blend to 3)? The distinction sets policy:
+/// structural evidence is certain and REFUSES interpolating requests; the
+/// probe alone can false-positive on a legitimately coarse continuous raster
+/// (a tiny int16 DEM tile with few elevations), so it only forces nearest
+/// with a visible warning.
+enum class CategoricalEvidence { None, Structural, Probe };
+CategoricalEvidence classifyRaster(GDALDatasetH hDS)
 {
     if (util::isCategoricalDataset(hDS))
-        return true;
+        return CategoricalEvidence::Structural;
     const int bandCount = GDALGetRasterCount(hDS);
     if (bandCount != 1)
-        return false;
+        return CategoricalEvidence::None;
     GDALRasterBandH band = GDALGetRasterBand(hDS, 1);
     if (!band)
-        return false;
+        return CategoricalEvidence::None;
     const GDALDataType type = GDALGetRasterDataType(band);
     if (type != GDT_Byte && type != GDT_UInt16 && type != GDT_Int16
         && type != GDT_UInt32 && type != GDT_Int32) {
-        return false;
+        return CategoricalEvidence::None;
     }
     const int w = GDALGetRasterXSize(hDS);
     const int h = GDALGetRasterYSize(hDS);
     if (w <= 0 || h <= 0)
-        return false;
+        return CategoricalEvidence::None;
     const int dw = std::min(64, w);
     const int dh = std::min(64, h);
     std::vector<float> buf(static_cast<size_t>(dw) * dh);
     if (GDALRasterIO(band, GF_Read, 0, 0, w, h, buf.data(), dw, dh,
                      GDT_Float32, 0, 0) != CE_None) {
-        return false; // probe failed: keep the structural answer only
+        return CategoricalEvidence::None; // probe failed: structural only
     }
     int hasNd = 0;
     const double nd = GDALGetRasterNoDataValue(band, &hasNd);
@@ -62,9 +66,9 @@ bool rasterLooksLikeClassMap(GDALDatasetH hDS)
             continue;
         distinct.insert(v);
         if (distinct.size() > 16)
-            return false;
+            return CategoricalEvidence::None;
     }
-    return !distinct.empty();
+    return distinct.empty() ? CategoricalEvidence::None : CategoricalEvidence::Probe;
 }
 
 bool isInterpolatingResampling(const std::string &r)
@@ -198,9 +202,14 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
     }
 
     // #1758: categorical guard. A class map must never be interpolated —
-    // bilinear blends 1 and 5 into a fabricated 3. An EXPLICIT interpolating
-    // request is refused (the caller is told why); the defaulted case
-    // switches to nearest with a log line (continuous rasters unaffected).
+    // bilinear blends 1 and 5 into a fabricated 3. Policy by evidence
+    // strength: STRUCTURAL declarations (palette/RAT/metadata) make an
+    // explicit interpolating request a typed refusal — the raster is
+    // certainly categorical and the caller must say nearest. The data PROBE
+    // alone (integer + few distinct values) can false-positive on coarse
+    // continuous rasters, so there it only overrides to nearest with a
+    // warning (defaulted and explicit alike). Continuous rasters are
+    // unaffected either way.
     GdalDatasetWrapper srcInfo;
     if (!srcInfo.open(QString::fromStdString(inputPath))) {
         throw RSOperatorError(ErrorCode::GdalError,
@@ -208,18 +217,22 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
     }
     GDALDatasetH srcH = static_cast<GDALDatasetH>(srcInfo.dataset());
     std::vector<std::string> nodataOptions;
-    const bool categorical = rasterLooksLikeClassMap(srcH);
+    const CategoricalEvidence categoricalEvidence = classifyRaster(srcH);
+    const bool categorical = categoricalEvidence != CategoricalEvidence::None;
     if (categorical && isInterpolatingResampling(resampling)) {
-        if (explicitResampling) {
+        if (categoricalEvidence == CategoricalEvidence::Structural && explicitResampling) {
             throw RSOperatorError(
                 ErrorCode::InvalidParameter,
-                "Input raster is a categorical class map (integer values, few "
-                "distinct classes); resampling '" + resampling + "' would "
-                "invent class values outside the input class set. Use "
+                "Input raster is declared categorical (palette/color table/RAT/"
+                "category metadata); resampling '" + resampling + "' would invent "
+                "class values outside the input class set. Use "
                 "resampling=nearest (the default for categorical rasters).");
         }
-        context.logInfo("gdal:reproject: categorical raster detected; using "
-                        "nearest resampling to preserve the input class set (#1758).");
+        context.logWarning(
+            "gdal:reproject: raster looks categorical (integer values, few "
+            "distinct classes); overriding resampling '" + resampling + "' to "
+            "nearest to preserve the input value set (#1758). Declare a "
+            "palette/RAT if this raster is truly continuous.");
         resampling = "nearest";
     }
 

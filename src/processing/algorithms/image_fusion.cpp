@@ -1169,8 +1169,8 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
                     if ( msR[i] != nodata && msG[i] != nodata && msB[i] != nodata &&
-                         panBuf[i] != nodata && !!std::isfinite( msR[i] ) &&
-                         !!std::isfinite( msG[i] ) && !!std::isfinite( msB[i] ) && !!std::isfinite( panBuf[i] ) )
+                         panBuf[i] != nodata && std::isfinite( msR[i] ) &&
+                         std::isfinite( msG[i] ) && std::isfinite( msB[i] ) && std::isfinite( panBuf[i] ) )
                     {
                         float intensity = ( msR[i] + msG[i] + msB[i] ) / 3.0f;
                         statsI.add( intensity );
