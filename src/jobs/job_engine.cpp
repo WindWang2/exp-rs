@@ -49,8 +49,14 @@ const std::string &JobEngine::currentJobId()
 
 JobEngine &JobEngine::instance()
 {
-  static JobEngine e;
-  return e;
+  // Immortal singleton (#1767): workers are spawned DETACHED and a stuck
+  // worker may still be unwinding after shutdown() returned — the engine
+  // object must outlive every worker, so it is heap-allocated and never
+  // destroyed (process exit reclaims it). A function-local static OBJECT
+  // would run its destructor at exit while a detached worker still touches
+  // it (use-after-destroy).
+  static JobEngine *e = new JobEngine();
+  return *e;
 }
 
 int JobEngine::defaultWorkerCount( unsigned hardwareConcurrency )
@@ -76,20 +82,23 @@ JobEngine::~JobEngine()
   shutdown();
 }
 
-void JobEngine::shutdown()
+std::size_t JobEngine::shutdown()
 {
-  std::vector<std::thread> toJoin;
+  std::vector<std::thread> toDrop;
   std::vector<JobRecord> cancelledRecords;
   std::vector<std::function<void()>> cancelHooks;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( m_shuttingDown || m_terminated )
-      return;
+      return 0;
     m_shuttingDown = true;
     m_terminated = true; // sticky (#684): submit() must never respawn workers
     m_stop.store( true );
     m_generation++;
-    toJoin.swap( m_workers );
+    toDrop.swap( m_workers );
+    // #1767: no per-job deadlines survive shutdown — the watchdog has
+    // nothing left to guard.
+    m_jobDeadlines.clear();
 
     // Arm cancel flags of running jobs and collect cancel hooks. Also cover
     // the tryPick→runOperatorJob window: a job popped as Running whose flag
@@ -172,16 +181,46 @@ void JobEngine::shutdown()
   for ( const auto &rec : cancelledRecords )
     notify( rec );
 
-  for ( auto &t : toJoin )
-  {
-    if ( t.joinable() )
-      t.join();
-  }
+  // Bounded worker-exit wait (#1767 / RIO-8): a worker parked in a
+  // non-cancellable operator cannot be interrupted — after the deadline it
+  // is abandoned (already detached at spawn; it unwinds against this
+  // immortal engine, can never pick another job via the generation/stop
+  // gates, and its exit bookkeeping needs no join). Returns the stuck count.
+  const std::size_t stuck = waitWorkersExitedBounded( m_shutdownJoinTimeoutMs );
+  // The thread objects were never joined (spawn-time detach): destroying
+  // them is a no-op on detached threads.
+  toDrop.clear();
 
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     m_shuttingDown = false;
   }
+  return stuck;
+}
+
+std::size_t JobEngine::waitWorkersExitedBounded( int timeoutMs )
+{
+  if ( timeoutMs < 0 )
+    timeoutMs = 0;
+  std::unique_lock<std::mutex> lock( m_mutex );
+  const bool allExited = m_cv.wait_for(
+      lock, std::chrono::milliseconds( timeoutMs ),
+      [this] { return m_liveWorkers.load( std::memory_order_acquire ) == 0; } );
+  return allExited ? std::size_t( 0 )
+                   : static_cast<std::size_t>(
+                         m_liveWorkers.load( std::memory_order_acquire ) );
+}
+
+void JobEngine::setShutdownJoinTimeoutMs( int ms )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_shutdownJoinTimeoutMs = ms < 0 ? 0 : ms;
+}
+
+int JobEngine::shutdownJoinTimeoutMs() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_shutdownJoinTimeoutMs;
 }
 
 void JobEngine::setMaxWorkers( int n )
@@ -549,19 +588,22 @@ void JobEngine::shutdownForTests()
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     m_stop.store( true );
+    // #1767: same bounded discipline as production shutdown — a stuck
+    // worker must not hang the test binary either. Stragglers stay
+    // generation-gated out of job picking, so reuse stays correct.
+    m_jobDeadlines.clear();
   }
   m_cv.notify_all();
 
-  std::vector<std::thread> toJoin;
+  std::vector<std::thread> toDrop;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
-    toJoin.swap( m_workers );
+    toDrop.swap( m_workers );
   }
-  for ( auto &t : toJoin )
-  {
-    if ( t.joinable() )
-      t.join();
-  }
+  // Test jobs are cooperative by construction; the bound is generous but
+  // finite (detached spawn makes an over-deadline worker non-fatal).
+  waitWorkersExitedBounded( 30'000 );
+  toDrop.clear();
 
   {
     std::lock_guard<std::mutex> lock( m_mutex );
@@ -602,7 +644,78 @@ void JobEngine::ensureWorkersLocked()
   const int allowed = m_maxWorkers + m_transientAllowance;
   while ( static_cast<int>( m_workers.size() ) < allowed )
   {
-    m_workers.emplace_back( [this, gen] { workerLoop( gen ); } );
+    // #1767: spawn DETACHED against the immortal singleton and count the
+    // exit — shutdown() waits on m_liveWorkers with a deadline instead of
+    // joining blindly, and a worker stuck past the deadline simply keeps
+    // unwinding on its own.
+    m_liveWorkers.fetch_add( 1, std::memory_order_relaxed );
+    m_workers.emplace_back( [this, gen]
+    {
+      workerLoop( gen );
+      m_liveWorkers.fetch_sub( 1, std::memory_order_release );
+      // Serialize against a shutdown() waiter's predicate check (empty
+      // critical section) so this notify can never land between "checked
+      // liveWorkers != 0" and "blocked" — the exit is observed immediately,
+      // not at the deadline.
+      {
+        std::lock_guard<std::mutex> lock( m_mutex );
+      }
+      m_cv.notify_all();
+    } );
+    m_workers.back().detach();
+  }
+}
+
+void JobEngine::ensureWatchdogLocked()
+{
+  if ( m_watchdogStarted )
+    return;
+  m_watchdogStarted = true;
+  m_watchdog = std::thread( [this] { watchdogLoop(); } );
+  // Immortal engine (#1767): the watchdog never needs joining; park-and-
+  // wake costs nothing when no job carries a deadline.
+  m_watchdog.detach();
+}
+
+void JobEngine::watchdogLoop()
+{
+  while ( true )
+  {
+    std::string fire;
+    {
+      std::unique_lock<std::mutex> lock( m_mutex );
+      if ( m_jobDeadlines.empty() )
+      {
+        // No budgets armed: park until the next arm/notify (spurious
+        // wakeups are harmless re-checks).
+        m_cv.wait( lock );
+        continue;
+      }
+      auto it = m_jobDeadlines.begin();
+      const int64_t earliest = it->second;
+      const int64_t now = nowUnixMs();
+      if ( now < earliest )
+      {
+        m_cv.wait_until( lock,
+                         std::chrono::system_clock::time_point(
+                             std::chrono::milliseconds( earliest ) ) );
+        continue;
+      }
+      fire = it->first;
+      m_jobDeadlines.erase( it );
+    }
+    // Fire OUTSIDE m_mutex: cancel() re-enters the engine and may invoke
+    // the job's CancelHook (which is also run lock-free by contract).
+    if ( !fire.empty() && cancel( fire ) )
+    {
+      // The log line records WHY the job now unwinds as Cancelled; the
+      // operator still finishes the cancellation cooperatively.
+      std::lock_guard<std::mutex> lock( m_mutex );
+      auto it = m_jobs.find( fire );
+      if ( it != m_jobs.end() )
+        appendLog( it->second, JobLogLevel::Warning,
+                   "Wall-clock budget elapsed; cancellation fired" );
+    }
   }
 }
 
@@ -823,6 +936,7 @@ void JobEngine::finishJobLocked( JobRecord &rec, bool wasExclusive )
   m_cancelFlags.erase( rec.id );
   m_jobBodies.erase( rec.id );
   m_deltaLogCursor.erase( rec.id );
+  m_jobDeadlines.erase( rec.id ); // #1767: terminal — the budget is spent
 }
 
 void JobEngine::runOperatorJob( const std::string &jobId )
@@ -856,6 +970,14 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     }
     appendLog( rec, JobLogLevel::Info, "Started" );
     startedCopy = rec;
+    // #1767: arm the optional wall-clock budget exactly once, at the
+    // Running transition — the watchdog fires the cancel path at deadline.
+    if ( request.timeoutMs > 0 )
+    {
+      m_jobDeadlines[jobId] = nowUnixMs() + request.timeoutMs;
+      ensureWatchdogLocked();
+      m_cv.notify_all();
+    }
 
     auto bit = m_jobBodies.find( jobId );
     if ( bit != m_jobBodies.end() && bit->second.executor )
@@ -1010,6 +1132,11 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       auto it = m_jobs.find( jobId );
       if ( it == m_jobs.end() )
         return;
+      // #1803 RIO-9: same terminal-immutability gate as the log callback
+      // (#1693) — a late progress tick from the operator's own lingering
+      // threads must not mutate (and re-notify) a terminal record.
+      if ( isTerminalState( it->second.state ) )
+        return;
       // Skip the whole-record copy + notify when nothing observable changed:
       // high-frequency ticks with the same value were the main source of
       // per-callback O(logs) churn (#634). New log lines still get through —
@@ -1128,18 +1255,20 @@ void JobEngine::runOperatorJob( const std::string &jobId )
   };
 
   auto finishSuccess = [&]( Json::Value result ) {
-    if ( wasCancelled() )
-    {
-      finishTerminal( { .cancelled = true,
-                        .statusMessage = "Cancelled",
-                        .logLevel = JobLogLevel::Info,
-                        .logText = "Cancelled" } );
-      return;
-    }
+    // #1803 RIO-10: an executor that RETURNED A RESULT has completed its
+    // work — a cancel flag that was armed in the final microseconds (or an
+    // operator that finishes despite cancellation) must not rebrand the
+    // completed run as Cancelled and silently discard the result. The
+    // terminal state is Succeeded, with the late cancel recorded in the
+    // log; a job that observed its cancel flag and chose to abort reports
+    // the Cancelled OPERATOR CODE instead (handled by finishError below).
+    const bool lateCancel = static_cast<bool>( cancelFlag && cancelFlag->load() );
     finishTerminal( { .state = JobState::Succeeded,
-                      .statusMessage = "Succeeded",
+                      .statusMessage = lateCancel ? "Succeeded (cancel arrived after completion)"
+                                                  : "Succeeded",
                       .logLevel = JobLogLevel::Info,
-                      .logText = "Succeeded",
+                      .logText = lateCancel ? "Succeeded; cancel arrived after completion"
+                                            : "Succeeded",
                       .complete = true,
                       .hasResult = true,
                       .result = std::move( result ) } );
