@@ -6034,7 +6034,8 @@ sicnu_add_test(test_layout_tools)
 
   # Magic-wand ROI tool: roiDrawn geometry must reproduce the flooded pixels (#283).
   add_executable(test_roi_tool_magicwand test_roi_tool_magicwand.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp)
   target_link_libraries(test_roi_tool_magicwand PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -17973,6 +17974,7 @@ sicnu_discover_tests(test_r27_t04_roi_spectrum_reinvoke)
 
 add_executable(test_r27_t04_classification_orphan
   test_r27_t04_classification_orphan.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
@@ -18007,6 +18009,7 @@ sicnu_discover_tests(test_r27_t04_classification_orphan)
 
 add_executable(test_r27_t04_recompute_async
   test_r27_t04_recompute_async.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
@@ -18038,6 +18041,7 @@ sicnu_discover_tests(test_r27_t04_recompute_async)
 
 add_executable(test_r27_t04_export_atomic
   test_r27_t04_export_atomic.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
@@ -18139,6 +18143,7 @@ sicnu_discover_tests(test_r27_t04_cross_section_async)
 
 add_executable(test_r27_t04_magicwand_async
   test_r27_t04_magicwand_async.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
 )
 target_link_libraries(test_r27_t04_magicwand_async PRIVATE
