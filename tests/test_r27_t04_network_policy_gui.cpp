@@ -66,7 +66,7 @@ TEST_CASE( "GUI entry engages the private-network policy before init (#1765, sou
            "[app][network][ssrf][r27t04][source]" )
 {
   ensureApp();
-  QFile source( QStringLiteral( kMainCpp ) );
+  QFile source( QString::fromLatin1( kMainCpp ) );
   REQUIRE( source.open( QIODevice::ReadOnly | QIODevice::Text ) );
   const QString text = QString::fromUtf8( source.readAll() );
 
