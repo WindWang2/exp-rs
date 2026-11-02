@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "app/agent_ops/agent_ops_control_center_dock.h"
 
+#include "agent_ops/repair_approval.h"
+
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QMetaObject>
@@ -34,11 +36,12 @@ AgentOpsControlCenterDock::AgentOpsControlCenterDock(const QString &title, QWidg
             this, &AgentOpsControlCenterDock::onApproveRepairRequested);
     connect(m_panel, &AgentOpsControlCenterPanel::exportRequested,
             this, &AgentOpsControlCenterDock::onExportRequested);
+    connect(this, &AgentOpsControlCenterDock::approvalStatusChanged,
+            m_panel, &AgentOpsControlCenterPanel::setApprovalStatus);
 }
 
 AgentOpsControlCenterDock::~AgentOpsControlCenterDock()
 {
-    m_aliveFlag->store( false, std::memory_order_release );
     mCancelRequested.store( true );
     if ( mCurrentWorkerCancel )
     {
@@ -48,17 +51,17 @@ AgentOpsControlCenterDock::~AgentOpsControlCenterDock()
     {
         coord->requestCancel();
     }
+    {
+        std::lock_guard<std::mutex> lock( mTaskMutex );
+        mWorkerQuit = true;
+        mQueuedTask = nullptr; // pending work is dropped, never started, never dangling
+        mTaskQueued = false;
+    }
+    mTaskCv.notify_all();
     if ( mWorkerThread.joinable() )
     {
         mWorkerThread.join();
     }
-    std::lock_guard<std::mutex> lock( m_reaperMutex );
-    for ( auto &w : m_retiredWorkers )
-    {
-        if ( w.thread.joinable() )
-            w.thread.join();
-    }
-    m_retiredWorkers.clear();
 }
 
 void AgentOpsControlCenterDock::setDriver(sicnu::agent_ops::OpsDriver *driver)
@@ -133,13 +136,14 @@ void AgentOpsControlCenterDock::requestResume()
 
 void AgentOpsControlCenterDock::requestApproveRepair()
 {
-    // Nothing is armed from here: the coordinator's approval state (armed
-    // approval, consumed digests, last projection, lastResult) belongs to
-    // the coordinator thread — the worker inside run()/resume() — so arming
-    // it on the GUI thread would race the in-flight session (#1540; the
-    // contract in operations_coordinator.h). The token remembered by
-    // armRepairApproval() is armed by the worker at the next launch
-    // (startSession), which is also the launch that consumes it.
+    // The human gate (#1733): the click records OPERATOR INTENT on the GUI
+    // thread; the token itself is minted by the coordinator (process-local
+    // HMAC secret) on the executor thread immediately before the launch
+    // that consumes it — the coordinator's approval state is never touched
+    // from the GUI thread (#1540 contract in operations_coordinator.h), and
+    // no model-reachable surface can record this intent.
+    mOperatorApprovalIntent = true;
+    publishApprovalStatus(tr("operator approval recorded; it will be minted and armed at the next launch"));
     emit approveRepairRequested();
 }
 
@@ -173,80 +177,89 @@ void AgentOpsControlCenterDock::onExportRequested()
     requestExport();
 }
 
-void AgentOpsControlCenterDock::pruneReaperThreadsLocked()
+void AgentOpsControlCenterDock::ensureWorkerThread()
 {
-    for ( auto it = m_retiredWorkers.begin(); it != m_retiredWorkers.end(); )
+    // Serialized executor (#1742/AS-006): exactly one thread, one task at a
+    // time. A retiring task's coordinator state writes are strictly ordered
+    // before the next task's — the overlapping-worker race (two tasks inside
+    // run()/armRepairApproval at once) is structurally impossible now.
+    if ( mWorkerThread.joinable() )
     {
-        if ( it->done && it->done->load( std::memory_order_acquire ) )
-        {
-            if ( it->thread.joinable() )
-                it->thread.join();
-            it = m_retiredWorkers.erase( it );
-        }
-        else
-        {
-            ++it;
-        }
+        return;
     }
+    mWorkerThread = std::thread( [this]() {
+        for ( ;; )
+        {
+            std::function<void( const std::atomic<bool> & )> task;
+            std::shared_ptr<std::atomic<bool>> cancel;
+            {
+                std::unique_lock<std::mutex> lock( mTaskMutex );
+                mTaskCv.wait( lock, [this]() { return mWorkerQuit || mTaskQueued; } );
+                if ( mWorkerQuit )
+                    return; // pending work was dropped by the quitter
+                task = std::move( mQueuedTask );
+                cancel = mQueuedCancel;
+                mQueuedTask = nullptr;
+                mQueuedCancel.reset();
+                mTaskQueued = false;
+            }
+            mWorkerRunning.store( true );
+            if ( task )
+            {
+                task( *cancel );
+            }
+            {
+                // Under the mutex + followed by notify: joinWorker()'s
+                // predicate watches this flag, and a cv predicate state
+                // change without a matching notification could otherwise
+                // park the barrier past the moment it became true.
+                std::lock_guard<std::mutex> lock( mTaskMutex );
+                mWorkerRunning.store( false );
+            }
+            mTaskCv.notify_all();
+        }
+    } );
 }
 
 void AgentOpsControlCenterDock::startWorker(std::function<void(const std::atomic<bool> &cancelRequested)> task)
 {
-    if (mWorkerThread.joinable())
+    // Cancel the live task (if any): cooperative — it observes its flag and
+    // exits; the queued replacement runs strictly after it returns.
+    mCancelRequested.store(true);
+    if (mCurrentWorkerCancel)
     {
-        mCancelRequested.store(true);
-        if (mCurrentWorkerCancel)
-        {
-            mCurrentWorkerCancel->store(true);
-        }
-        if (auto *coord = coordinator())
-        {
-            coord->requestCancel();
-        }
-        std::lock_guard<std::mutex> lock( m_reaperMutex );
-        pruneReaperThreadsLocked();
-        auto done = std::make_shared<std::atomic<bool>>( false );
-        std::thread reaper( [t = std::move( mWorkerThread ), done]() mutable {
-            if ( t.joinable() )
-                t.join();
-            done->store( true, std::memory_order_release );
-        } );
-        m_retiredWorkers.push_back( { std::move( reaper ), done } );
+        mCurrentWorkerCancel->store(true);
     }
-
+    if (auto *coord = coordinator())
+    {
+        coord->requestCancel();
+    }
     auto taskCancel = std::make_shared<std::atomic<bool>>(false);
+    {
+        std::lock_guard<std::mutex> lock( mTaskMutex );
+        // One-deep queue: only the LATEST requested task matters; an older
+        // never-started task is replaced (its cancel flag is set so a stale
+        // shared_ptr holder still observes cancellation).
+        if ( mQueuedCancel )
+        {
+            mQueuedCancel->store( true );
+        }
+        mQueuedTask = std::move(task);
+        mQueuedCancel = taskCancel;
+        mTaskQueued = true;
+    }
     mCurrentWorkerCancel = taskCancel;
     mCancelRequested.store(false);
-    const uint64_t gen = ++mWorkerGeneration;
-    mWorkerRunning.store(true);
-
-    mWorkerThread = std::thread([this, alive = m_aliveFlag, taskCancel, gen, task = std::move(task)]() {
-        if (task)
-        {
-            task(*taskCancel);
-        }
-        if (!alive->load(std::memory_order_acquire))
-            return;
-        if (mWorkerGeneration.load() == gen)
-        {
-            mWorkerRunning.store(false);
-        }
-    });
+    ensureWorkerThread();
+    mTaskCv.notify_all();
 }
 
 void AgentOpsControlCenterDock::joinWorker()
 {
-    if (mWorkerThread.joinable())
-    {
-        mWorkerThread.join();
-    }
-    std::lock_guard<std::mutex> lock( m_reaperMutex );
-    for ( auto &w : m_retiredWorkers )
-    {
-        if ( w.thread.joinable() )
-            w.thread.join();
-    }
-    m_retiredWorkers.clear();
+    // Barrier over the serialized executor: wait until nothing runs and
+    // nothing is queued. The executor thread itself stays alive.
+    std::unique_lock<std::mutex> lock( mTaskMutex );
+    mTaskCv.wait( lock, [this]() { return !mTaskQueued && !mWorkerRunning.load(); } );
 }
 
 void AgentOpsControlCenterDock::startSession(const sicnu::agent_ops::OpsRunRequest &request)
@@ -257,26 +270,53 @@ void AgentOpsControlCenterDock::startSession(const sicnu::agent_ops::OpsRunReque
         return;
     }
     coord->clearCancel();
-    // Hand the remembered approval token to the worker BY VALUE: the copy
-    // happens on this (GUI) thread before the worker starts, and the worker
-    // arms it on the coordinator thread immediately before the run() that
-    // consumes it. Arming it here on the GUI thread would race the in-flight
-    // session's run()/finish() — the coordinator's approval state is
-    // coordinator-thread state (#1540; contract in operations_coordinator.h).
+    // Snapshot the human-gate inputs on the GUI thread; the worker mints
+    // and arms on the coordinator thread immediately before the run() that
+    // consumes them (#1733, #1540).
     const Json::Value approvalToken = m_pendingRepairApprovalToken;
-    startWorker([this, coord, request, approvalToken](const std::atomic<bool> &) {
-        if (!approvalToken.isNull())
+    const bool mintForOperator = mOperatorApprovalIntent;
+    m_pendingRepairApprovalToken = Json::Value();
+    mOperatorApprovalIntent = false;
+    startWorker([this, coord, request, approvalToken, mintForOperator](const std::atomic<bool> &) {
+        Json::Value approval = approvalToken;
+        if (mintForOperator)
+        {
+            std::string mintError;
+            approval = coord->mintRepairApprovalForOperator(
+                QDateTime::currentMSecsSinceEpoch(), 0, &mintError);
+            if (approval.isNull())
+            {
+                const QString status = tr("repair approval not minted: %1")
+                                           .arg(QString::fromStdString(mintError));
+                qWarning("agent ops: %s", status.toUtf8().constData());
+                QMetaObject::invokeMethod(this, [this, status]() {
+                    emit approvalStatusChanged(status);
+                }, Qt::QueuedConnection);
+            }
+        }
+        if (!approval.isNull())
         {
             // The verifier treats nowMs <= 0 as an unusable clock and fails
-            // closed (expired), so a zero clock could never arm an approval —
-            // arm at the real wall clock. (#1451)
-            // The typed refusal must not vanish: qWarning reaches the
-            // application message log, so the operator sees why the approval
-            // did not arm. (#1451)
+            // closed (expired), so arm at the real wall clock (#1451). The
+            // typed refusal is surfaced into the panel, not only the log
+            // (#1760).
             const std::string error = coord->armRepairApproval(
-                approvalToken, QDateTime::currentMSecsSinceEpoch());
+                approval, QDateTime::currentMSecsSinceEpoch());
             if (!error.empty())
-                qWarning("agent ops: repair approval not armed: %s", error.c_str());
+            {
+                const QString status = tr("repair approval not armed: %1")
+                                           .arg(QString::fromStdString(error));
+                qWarning("agent ops: %s", status.toUtf8().constData());
+                QMetaObject::invokeMethod(this, [this, status]() {
+                    emit approvalStatusChanged(status);
+                }, Qt::QueuedConnection);
+            }
+            else
+            {
+                QMetaObject::invokeMethod(this, [this]() {
+                    emit approvalStatusChanged(tr("repair approval armed for this launch"));
+                }, Qt::QueuedConnection);
+            }
         }
         sicnu::agent_ops::OpsRunResult res = coord->run(request);
         QMetaObject::invokeMethod(this, [this, res]() {
@@ -315,20 +355,41 @@ void AgentOpsControlCenterDock::startResume(const std::string &journalDirectory,
 
 std::string AgentOpsControlCenterDock::armRepairApproval(const Json::Value &tokenDoc, long long nowMs)
 {
-    // Remember the token; the worker thread arms it on the coordinator at the
-    // next launch (see startSession). The coordinator's approval state
-    // (armed approval, consumed digests, last projection, lastResult)
-    // belongs to the coordinator thread — the thread inside run()/resume(),
-    // i.e. this dock's worker — so calling coord->armRepairApproval() here on
-    // the GUI thread would race the in-flight session's run()/finish()
-    // (#1540; contract in operations_coordinator.h). The typed refusal
-    // therefore surfaces from the worker at launch (qWarning) rather than
-    // from this call, and the launch-time wall clock is the verification
-    // clock (nowMs <= 0 would fail closed as an unusable clock anyway).
-    (void)nowMs;
+    // #1760 (AS-008): a garbage token is refused NOW, on the caller's
+    // thread, with the typed code — the old shape stored anything and
+    // reported success unconditionally. The full MAC/binding verification
+    // still happens on the coordinator thread inside the launch that arms
+    // the token (shape alone proves nothing about authenticity), and its
+    // verdict reaches the panel through approvalStatusChanged.
+    (void)nowMs; // the launch-time wall clock is the verification clock
+    const char *shape = sicnu::agent_ops::validateRepairApprovalTokenShape(tokenDoc);
+    if (std::string(shape) != sicnu::agent_ops::approval_check::kOk)
+    {
+        const std::string error =
+            std::string("APPROVAL_") + (shape == sicnu::agent_ops::approval_check::kTtlExcessive
+                                           ? "TTL_EXCESSIVE"
+                                           : "MALFORMED");
+        m_lastApprovalResult = error;
+        publishApprovalStatus(tr("repair approval refused: %1").arg(QString::fromStdString(error)));
+        return error;
+    }
     m_pendingRepairApprovalToken = tokenDoc;
     m_lastApprovalResult.clear();
+    publishApprovalStatus(tr("repair approval accepted; it will be armed at the next launch"));
     return {};
+}
+
+void AgentOpsControlCenterDock::publishApprovalStatus(const QString &status)
+{
+    if (QThread::currentThread() == thread())
+    {
+        m_lastApprovalResult = status.toStdString();
+        emit approvalStatusChanged(status);
+        return;
+    }
+    QMetaObject::invokeMethod(this, [this, status]() {
+        emit approvalStatusChanged(status);
+    }, Qt::QueuedConnection);
 }
 
 void AgentOpsControlCenterDock::setProjection(const sicnu::agent_ops::OpsProjection &projection)
