@@ -17959,3 +17959,48 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         TIMEOUT 300)
 endif()
 # --- end R26-science oracle registration ---
+
+# ── BEGIN R27-T2 (data assets / RS I/O / chunk-model runtime reliability) ──
+# Append-only registration block for this track (docs: .planning/r27-t02).
+sicnu_add_test(test_r27_t02_chunk_graph TIMEOUT 120)
+target_link_libraries(test_r27_t02_chunk_graph PRIVATE sicnu_runtime)
+
+sicnu_add_test(test_r27_t02_resume_lock TIMEOUT 300)
+target_link_libraries(test_r27_t02_resume_lock PRIVATE sicnu_runtime)
+
+sicnu_add_test(test_r27_t02_job_engine TIMEOUT 300)
+target_link_libraries(test_r27_t02_job_engine PRIVATE sicnu_jobs)
+
+sicnu_add_test(test_r27_t02_safe_remote TIMEOUT 120)
+target_link_libraries(test_r27_t02_safe_remote PRIVATE sicnu_geospatial sicnu_data)
+
+# Milestone D: four-state import session over ImportPreflight + DataManager
+# (same link surface as the r25_b import-preflight test).
+add_executable(test_r27_t02_import_session test_r27_t02_import_session.cpp)
+target_link_libraries(test_r27_t02_import_session PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  sicnu_geospatial
+)
+target_include_directories(test_r27_t02_import_session PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r27_t02_import_session TEST_PREFIX "test_r27_t02_import_session::")
+
+# P3 hardening oracles (WHERE guard / audit retention / CRS no-net / mirror
+# downgrade refusal); same link surface as the io/governance suites.
+sicnu_add_test(test_r27_t02_p3_hardening TIMEOUT 300)
+target_link_libraries(test_r27_t02_p3_hardening PRIVATE SQLite::SQLite3)
+
+# Milestone E: tail-batch exactness + injected journal/cancel recovery.
+sicnu_add_test(test_r27_t02_tail_fault TIMEOUT 300)
+target_link_libraries(test_r27_t02_tail_fault PRIVATE sicnu_runtime)
+
+# Real worker processes (SICNU_WORKER_EXE), same harness as test_worker_host.
+sicnu_add_test(test_r27_t02_worker_lease TIMEOUT 300 RUN_SERIAL TRUE)
+target_compile_definitions(test_r27_t02_worker_lease PRIVATE
+    SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
+)
+# ── END R27-T2 ──
