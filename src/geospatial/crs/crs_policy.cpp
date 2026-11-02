@@ -119,6 +119,19 @@ Crs &Crs::operator=( Crs &&other ) noexcept
   return *this;
 }
 
+namespace
+{
+/// RIO-12 (#1803): user-input CRS definitions must never reach the network
+/// or the filesystem: plain OSRSetFromUserInput happily fetches "http://..."
+/// and opens file paths. The Ex form denies both explicitly.
+OGRErr setUserInputNoNetworkNoFile( OGRSpatialReferenceH handle, const char *text )
+{
+  const char *const options[] = { "ALLOW_NETWORK_ACCESS=NO", "ALLOW_FILE_ACCESS=NO",
+                                  nullptr };
+  return OSRSetFromUserInputEx( handle, text, options );
+}
+} // namespace
+
 Crs Crs::fromAuthid( const std::string &authid )
 {
   if ( authid.empty() )
@@ -134,7 +147,7 @@ Crs Crs::fromAuthid( const std::string &authid )
   }
   else
   {
-    error = OSRSetFromUserInput( handle, authid.c_str() );
+    error = setUserInputNoNetworkNoFile( handle, authid.c_str() );
   }
   if ( error != OGRERR_NONE )
   {
@@ -172,7 +185,7 @@ Crs Crs::fromUserInput( const std::string &text )
   if ( text.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "fromUserInput: empty CRS text" );
   OGRSpatialReferenceH handle = OSRNewSpatialReference( nullptr );
-  const OGRErr error = OSRSetFromUserInput( handle, text.c_str() );
+  const OGRErr error = setUserInputNoNetworkNoFile( handle, text.c_str() );
   if ( error != OGRERR_NONE )
   {
     OSRDestroySpatialReference( handle );

@@ -428,6 +428,22 @@ VectorFieldStatistics VectorReader::fieldStatistics( const std::string &fieldNam
     throw GeoError( ErrorCode::InvalidArgument, "fieldStatistics: unknown field", details );
   }
 
+  // RIO-7 (#1803): the WHERE clause is caller-supplied OGR SQL with no
+  // parameter binding — statement-breaking tokens are rejected BEFORE the
+  // string is spliced, so a caller (or a tool parameter) cannot smuggle a
+  // second statement or a comment-truncation past the aggregate contract.
+  if ( whereClause.find( ';' ) != std::string::npos
+       || whereClause.find( "--" ) != std::string::npos
+       || whereClause.find( "/*" ) != std::string::npos )
+  {
+    Json::Value details;
+    details["field"] = fieldName;
+    details["where"] = whereClause;
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "fieldStatistics: WHERE clause contains statement-breaking "
+                    "tokens (';', '--', '/*') and was refused", details );
+  }
+
   // Quoted identifiers; the WHERE clause is caller-supplied OGR SQL,
   // evaluated by the driver as declared in the contract.
   const std::string quote = quoteSqlIdentifier( fieldName );

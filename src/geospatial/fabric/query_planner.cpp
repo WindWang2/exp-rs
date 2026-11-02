@@ -314,12 +314,19 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
         CatalogContinuation continuation;
         std::uint64_t inputIndex = 0;
         std::size_t previousOffset = 0;
+        std::string previousHref;
+        bool sawContinuation = false;
         int guard = 0;
         while ( true )
         {
             if ( cancel.cancelled() )
                 throw GeoError( ErrorCode::Cancelled, "catalog walk cancelled" );
-            if ( ++guard > 100000 )
+            // RIO-14 (#1803): the page guard bounds the walk, but a remote
+            // that keeps answering with the SAME continuation used to spend
+            // the entire budget (up to 10k requests) before it tripped.
+            // 10k pages is far beyond any scene budget at real page sizes;
+            // keep it as the hard bound and stop repetition earlier below.
+            if ( ++guard > 10000 )
                 throw GeoError( ErrorCode::ResourceExhausted,
                                 "catalog pagination failed to terminate" );
             const CatalogPage page = service.searchPage( query, continuation, cancel );
@@ -341,7 +348,16 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
             if ( page.records.empty() && page.next.localOffset == previousOffset &&
                  page.next.remoteHref.empty() )
                 return;   // no progress and no continuation: stop honestly
+            // RIO-14: a repeated CONTINUATION (same offset AND href) means
+            // the next fetch would replay this exact page — duplicate
+            // records forever. Stop honestly regardless of page size
+            // instead of burning the guard budget on identical requests.
+            if ( sawContinuation && page.next.localOffset == previousOffset &&
+                 page.next.remoteHref == previousHref )
+                return;
             previousOffset = page.next.localOffset;
+            previousHref = page.next.remoteHref;
+            sawContinuation = true;
             continuation = page.next;
         }
     };
