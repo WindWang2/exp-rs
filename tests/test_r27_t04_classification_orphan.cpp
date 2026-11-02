@@ -117,9 +117,11 @@ TEST_CASE( "Classification: orphan classId samples are skipped, never OOB (#1746
   REQUIRE( sampleLayer != nullptr );
 
   // One healthy sample for a real class …
-  addSample( sampleLayer, 1, 0.0, 0.0 );
+  // gt {0,1,0,0,0,-1} (north-up): pixel centers live at y = -(r+0.5), so
+  // samples must sit in the negative-y half to rasterize onto the raster.
+  addSample( sampleLayer, 1, 0.0, -10.0 );
   // … and one whose cls_id names no class in the table (hand-edited field).
-  addSample( sampleLayer, 99, 10.0, 10.0 );
+  addSample( sampleLayer, 99, 10.0, -20.0 );
   REQUIRE( sampleLayer->featureCount() == 2 );
 
   // HEAD RED: this call crashed writing through the orphan's empty band
