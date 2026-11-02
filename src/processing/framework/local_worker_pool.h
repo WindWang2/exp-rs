@@ -77,6 +77,10 @@ struct WorkerPoolHealthSnapshot
     /// never reused (a gauge of live-quarantined workers is not meaningful
     /// — quarantined workers do not stay in the pool).
     qint64 quarantinedWorkers = 0;
+    /// Live entries in the lease tracker RIGHT NOW (#1764 / RIO-2): with
+    /// teardown-time reset this tracks the live worker population, not the
+    /// number of recycled generations.
+    qint64 trackedLeases = 0;
     bool healthy() const { return configuredMax <= 0 || aliveWorkers <= configuredMax; }
 };
 
