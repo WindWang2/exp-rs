@@ -4,6 +4,7 @@
 
 #include <QDomDocument>
 #include <QDomElement>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -187,15 +188,23 @@ bool persistMissionContextWithProject( const QString &projectFilePath, QDomDocum
             problems.append( QStringLiteral( "sidecar: %1" ).arg( sideErr ) );
             // Restore prefers an existing sidecar over XML. A failed write that
             // leaves a prior .mission.json in place would shadow the XML channel
-            // on the next open — remove the stale file so a successful XML write
-            // is not silently discarded. If removal also fails, refuse success.
+            // on the next open — move the stale file aside so a successful XML
+            // write is not silently discarded. #1795: RENAME to a dated backup
+            // instead of deleting: if the project-file write then fails too,
+            // the mission state must stay recoverable, never vanish from both
+            // channels. Restore only ever reads the exact sidecar name, so the
+            // backup cannot shadow anything. If the move also fails, refuse
+            // success.
             const QString side = missionSidecarPathForProject( projectFilePath );
             if ( QFileInfo::exists( side ) )
             {
-                if ( !QFile::remove( side ) )
+                const QString backup = QStringLiteral( "%1.failed-%2.bak" )
+                                         .arg( side )
+                                         .arg( QDateTime::currentMSecsSinceEpoch() );
+                if ( !QFile::rename( side, backup ) )
                 {
                     problems.append(
-                        QStringLiteral( "sidecar: failed write left irremovable stale file: %1" )
+                        QStringLiteral( "sidecar: failed write left an unmovable stale file: %1" )
                             .arg( side ) );
                     if ( error )
                         *error = problems.join( QStringLiteral( "; " ) );
@@ -210,6 +219,8 @@ bool persistMissionContextWithProject( const QString &projectFilePath, QDomDocum
                         *error = problems.join( QStringLiteral( "; " ) );
                     return false;
                 }
+                problems.append(
+                    QStringLiteral( "sidecar: previous state preserved as %1" ).arg( backup ) );
             }
         }
     }

@@ -98,6 +98,28 @@ QList<QgsMapLayer *> orderedProjectLayers(QgsProject &project) {
 } // namespace
 
 data::Result<void>
+DataProjectSerializer::canWrite(const ProjectContext &context) {
+  // Same condition the write() refusal below enforces, exposed for a save
+  // preflight (#1747): QgsProject::writeProject cannot abort the save, so
+  // the GUI must refuse BEFORE QgsProject::write() or the file is still
+  // overwritten with no SICNU extension block.
+  const sicnu::workspace::WorkspaceService &workspaceService =
+      context.workspaceService();
+  const bool liveStore = workspaceService.storeIntegrityOk();
+  const bool hasCache = workspaceService.hasCachedProjectJson();
+  if (workspaceService.isV3Seen() && !liveStore && !hasCache) {
+    return data::Result<void>::failure(projectDiagnostic(
+        QStringLiteral("workspace.downgrade_refused"),
+        QStringLiteral("governed state was previously written as v3 but the "
+                       "governance store is unavailable and no cached "
+                       "document exists; saving now would permanently "
+                       "destroy the governed state by rewriting the project "
+                       "as v1")));
+  }
+  return data::Result<void>::success();
+}
+
+data::Result<void>
 DataProjectSerializer::write(QDomDocument &document,
                              const ProjectContext &context) const {
   QDomElement root = document.documentElement();
@@ -128,20 +150,17 @@ DataProjectSerializer::write(QDomDocument &document,
   //      (store closed, corrupt, or read-only);
   //   3. v3 seen but no document recoverable -> refuse: report failure instead
   //      of rewriting a v3 project as v1 (the GUI surfaces the diagnostic;
-  //      the on-disk state is stale but the loss is loud, not silent).
+  //      callers that ran the canWrite() preflight never reach this branch).
   const sicnu::workspace::WorkspaceService &workspaceService =
       context.workspaceService();
   const bool liveStore = workspaceService.storeIntegrityOk();
   const bool hasCache = workspaceService.hasCachedProjectJson();
   const bool writeV3 = liveStore || hasCache || workspaceService.isV3Seen();
   if (writeV3 && !liveStore && !hasCache) {
-    return data::Result<void>::failure(projectDiagnostic(
-        QStringLiteral("workspace.downgrade_refused"),
-        QStringLiteral("governed state was previously written as v3 but the "
-                       "governance store is unavailable and no cached "
-                       "document exists; refusing to downgrade the project "
-                       "to v1 because that would permanently destroy the "
-                       "governed state")));
+    // Same downgrade_refused diagnostic as canWrite() — write() cannot be
+    // pre-empted by its caller (QgsProject::writeProject cannot abort), so
+    // the refusal stays loud here too (#1747).
+    return canWrite(context);
   }
   extension.setAttribute(QStringLiteral("version"),
                          writeV3 ? QStringLiteral("3")

@@ -14,11 +14,13 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QMouseEvent>
 #include <QPointF>
 #include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <gdal_priv.h>
 
@@ -53,6 +55,20 @@ QString createRaster( const QString &path, int W, int H,
                                     GDT_Float32, 0, 0 );
   GDALClose( ds );
   return path;
+}
+
+/// #1791: the fill runs on the bounded scan pool and lands through the
+/// event loop — pump until @p spy fires (or fail after a bounded wait).
+void pumpUntil( const QSignalSpy &spy, int count = 1, int timeoutMs = 10000 )
+{
+  QElapsedTimer timer;
+  timer.start();
+  while ( spy.count() < count )
+  {
+    REQUIRE( timer.elapsed() < timeoutMs );
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+    QThread::msleep( 5 );
+  }
 }
 } // namespace
 
@@ -96,6 +112,9 @@ TEST_CASE( "RoiToolMagicWand: roiDrawn geometry reproduces the flooded L-shape, 
   QgsMapMouseEvent mme( &canvas, &me );
   tool.canvasReleaseEvent( &mme );
 
+  // #1791: the fill completes asynchronously off the GUI thread.
+  pumpUntil( drawn );
+  pumpUntil( exact );
   REQUIRE( drawn.count() == 1 );
   REQUIRE( exact.count() == 1 );
 
@@ -123,6 +142,14 @@ TEST_CASE( "RoiToolMagicWand: roiDrawn geometry reproduces the flooded L-shape, 
                    Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
   QgsMapMouseEvent mme2( &canvas, &me2 );
   tool.canvasReleaseEvent( &mme2 );
+  // The second click's fill supersedes the first (same geometry, one landing).
+  QElapsedTimer quietTimer;
+  quietTimer.start();
+  while ( quietTimer.elapsed() < 300 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+    QThread::msleep( 10 );
+  }
   REQUIRE( clipped.count() == 0 );
 }
 
@@ -157,5 +184,6 @@ TEST_CASE( "RoiToolMagicWand: regionClipped fires when the fill hits the search 
   QgsMapMouseEvent mme( &canvas, &me );
   tool.canvasReleaseEvent( &mme );
 
+  pumpUntil( clipped );
   REQUIRE( clipped.count() == 1 );
 }

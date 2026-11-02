@@ -340,7 +340,12 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
         m_roiSpectrumTool = nullptr;
         if ( m_mapCanvas && m_mapCanvas->mapTool() == abandoned )
             m_mapCanvas->unsetMapTool( abandoned );
-        delete abandoned;
+        // #1745: unsetMapTool deactivates the tool, and deactivate()
+        // deleteLater()s an unfinished polygon's tool. A sync delete of the
+        // same object would race that deferred release — release ownership
+        // exactly once, always deferred: deleteLater is idempotent (Qt frees
+        // the object a single time even when scheduled repeatedly).
+        abandoned->deleteLater();
     }
 
     // The tool computes the ROI mean spectrum and reports it into the Spectral

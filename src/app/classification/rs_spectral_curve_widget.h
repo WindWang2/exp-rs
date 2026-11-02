@@ -43,6 +43,9 @@ class RsSpectralCurveWidget : public QWidget
     void setClassCurves( const QVector<Curve> &curves );
     void setSelectedClass( int classId );
 
+    /// Read-only projection of the displayed curves (test/inspection seam).
+    const QVector<Curve> &curves() const { return mCurves; }
+
     QSize sizeHint() const override { return QSize( 400, 180 ); }
     QSize minimumSizeHint() const override { return QSize( 360, 140 ); }
 

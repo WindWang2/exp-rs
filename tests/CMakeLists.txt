@@ -17944,3 +17944,298 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
 endif()
 # --- end R26-science oracle registration ---
 
+
+# ── R27-T04 (Qt/QGIS workbench: ROI/spectral/classification safety, STAC
+#    pagination honesty, GUI-thread IO, atomic persistence) ───────────────
+add_executable(test_r27_t04_roi_spectrum_reinvoke
+  test_r27_t04_roi_spectrum_reinvoke.cpp
+)
+target_link_libraries(test_r27_t04_roi_spectrum_reinvoke PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r27_t04_roi_spectrum_reinvoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r27_t04_roi_spectrum_reinvoke)
+set_target_properties(test_r27_t04_roi_spectrum_reinvoke PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_roi_spectrum_reinvoke)
+
+add_executable(test_r27_t04_classification_orphan
+  test_r27_t04_classification_orphan.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_r27_t04_classification_orphan PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_classify
+  Sicnu::session_map
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_data
+)
+target_include_directories(test_r27_t04_classification_orphan PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/classification
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r27_t04_classification_orphan PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_r27_t04_classification_orphan PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r27_t04_classification_orphan)
+
+add_executable(test_r27_t04_recompute_async
+  test_r27_t04_recompute_async.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_r27_t04_recompute_async PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_classify
+  Sicnu::session_map
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_data
+)
+target_include_directories(test_r27_t04_recompute_async PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/classification
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r27_t04_recompute_async PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_recompute_async)
+
+add_executable(test_r27_t04_export_atomic
+  test_r27_t04_export_atomic.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_r27_t04_export_atomic PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_classify
+  Sicnu::session_map
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_data
+)
+target_include_directories(test_r27_t04_export_atomic PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/classification
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r27_t04_export_atomic PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_export_atomic)
+
+add_executable(test_r27_t04_project_downgrade
+  test_r27_t04_project_downgrade.cpp
+)
+target_link_libraries(test_r27_t04_project_downgrade PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r27_t04_project_downgrade PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r27_t04_project_downgrade)
+set_target_properties(test_r27_t04_project_downgrade PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_project_downgrade)
+
+add_executable(test_r27_t04_stac_pagination
+  test_r27_t04_stac_pagination.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/stac_client.cpp
+)
+target_link_libraries(test_r27_t04_stac_pagination PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  Sicnu::Geospatial
+)
+target_include_directories(test_r27_t04_stac_pagination PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r27_t04_stac_pagination)
+set_target_properties(test_r27_t04_stac_pagination PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_stac_pagination)
+
+add_executable(test_r27_t04_cross_section_async
+  test_r27_t04_cross_section_async.cpp
+)
+target_link_libraries(test_r27_t04_cross_section_async PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_r27_t04_cross_section_async PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r27_t04_cross_section_async PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_cross_section_async)
+
+add_executable(test_r27_t04_magicwand_async
+  test_r27_t04_magicwand_async.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+)
+target_link_libraries(test_r27_t04_magicwand_async PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_classify
+)
+target_include_directories(test_r27_t04_magicwand_async PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/classification
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r27_t04_magicwand_async PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_magicwand_async)
+
+add_executable(test_r27_t04_pipeline_json
+  test_r27_t04_pipeline_json.cpp
+)
+target_link_libraries(test_r27_t04_pipeline_json PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r27_t04_pipeline_json PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r27_t04_pipeline_json)
+set_target_properties(test_r27_t04_pipeline_json PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_pipeline_json)
+
+add_executable(test_r27_t04_mission_sidecar
+  test_r27_t04_mission_sidecar.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+)
+target_link_libraries(test_r27_t04_mission_sidecar PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_data
+  Sicnu::Platform
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r27_t04_mission_sidecar PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r27_t04_mission_sidecar PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r27_t04_mission_sidecar PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_mission_sidecar)
+
+add_executable(test_r27_t04_network_policy_gui
+  test_r27_t04_network_policy_gui.cpp
+)
+target_link_libraries(test_r27_t04_network_policy_gui PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Sicnu::Geospatial
+)
+target_include_directories(test_r27_t04_network_policy_gui PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r27_t04_network_policy_gui PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r27_t04_network_policy_gui PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t04_network_policy_gui)
+# ── END R27-T04 ────────────────────────────────────────────────────────────

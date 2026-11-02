@@ -1,12 +1,15 @@
 // cross_section_widget.cpp — Cross-Section Profile Widget
 #include "cross_section_widget.h"
+#include "rs_scan_pool.h"
 #include "core/sicnu_logging.h"
 
 #include <qgsrasterlayer.h>
 #include <qgsrasterdataprovider.h>
 #include <qgspointxy.h>
 
+#include <QMetaObject>
 #include <QPainter>
+#include <QPointer>
 #include <QScrollBar>
 #include <QFont>
 #include <QFontMetrics>
@@ -21,86 +24,132 @@ CrossSectionWidget::CrossSectionWidget(QWidget *parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 }
 
+CrossSectionWidget::~CrossSectionWidget()
+{
+    // #1790: stop the in-flight sampling when the widget dies — the landing
+    // is dropped by the QPointer anyway; this ends the work itself (#797).
+    if (m_scanGeneration)
+        sicnu::app::RsScanPool::instance().cancel(m_scanGeneration, this);
+}
+
 void CrossSectionWidget::setRasterLayer(QgsRasterLayer *layer)
 {
+    // A layer switch invalidates any sampling still in flight for the old
+    // source: its landing must not repaint over the new layer's state.
+    ++m_requestEpoch;
     m_rasterLayer = layer;
     clear();
 }
 
 void CrossSectionWidget::extractProfile(const QgsPointXY &start, const QgsPointXY &end)
 {
-    m_values.clear();
-    m_distances.clear();
-    m_hasData = false;
-
+    // #1790: this used to GDALOpen + per-sample GDALRasterIO on the GUI
+    // thread — a network-backed or long transect froze the event loop for
+    // the whole read. The sampling now runs on the bounded scan pool
+    // (#797, RoiStatisticsWidget pattern): plain values cross the thread
+    // boundary, the result lands through the application event loop, and a
+    // newer request (or widget death) drops it.
     if (!m_rasterLayer || !m_rasterLayer->dataProvider())
         return;
 
-    m_layerName = m_rasterLayer->name();
-
-    // Open raster
-    GDALDatasetH ds = GDALOpen(m_rasterLayer->source().toUtf8().constData(), GA_ReadOnly);
-    if (!ds) return;
-
-    GDALRasterBandH band = GDALGetRasterBand(ds, 1);
-    if (!band) { GDALClose(ds); return; }
-
-    // Get geotransform
-    double gt[6];
-    GDALGetGeoTransform(ds, gt);
-
-    // Convert world coordinates to pixel coordinates
-    // Handle rotated rasters (#634): gt[2]/gt[4] (rotation) was ignored,
-    // so samples were shifted on any geotransform with shear.
-    double invGt[6];
-    if ( !GDALInvGeoTransform( gt, invGt ) )
-    {
-        GDALClose( ds );
+    const QString source = m_rasterLayer->source();
+    if (source.isEmpty())
         return;
-    }
-    const double sx = invGt[0] + start.x() * invGt[1] + start.y() * invGt[2];
-    const double sy = invGt[3] + start.x() * invGt[4] + start.y() * invGt[5];
-    const double ex = invGt[0] + end.x() * invGt[1] + end.y() * invGt[2];
-    const double ey = invGt[3] + end.x() * invGt[4] + end.y() * invGt[5];
 
-    // Sample along the line
-    double dx = ex - sx;
-    double dy = ey - sy;
-    double length = std::sqrt(dx * dx + dy * dy);
-    int steps = std::max(2, static_cast<int>(length));
+    m_values.clear();
+    m_distances.clear();
+    m_hasData = false;
+    m_layerName = m_rasterLayer->name();
+    update();
 
-    m_values.resize(steps);
-    m_distances.resize(steps);
+    const quint64 requestId = ++m_requestEpoch;
+    const quint64 scanGeneration =
+        sicnu::app::RsScanPool::instance().nextGeneration(this);
+    m_scanGeneration = scanGeneration;
+    QPointer<CrossSectionWidget> self(this);
 
-    double totalDist = std::sqrt((end.x() - start.x()) * (end.x() - start.x()) +
-                                 (end.y() - start.y()) * (end.y() - start.y()));
+    sicnu::app::RsScanPool::instance().pool().start(
+        [self, source, start, end, requestId, scanGeneration]() {
+            QVector<double> values;
+            QVector<double> distances;
 
-    for (int i = 0; i < steps; ++i) {
-        double t = static_cast<double>(i) / (steps - 1);
-        double px = sx + t * dx;
-        double py = sy + t * dy;
+            GDALDatasetH ds = GDALOpen(source.toUtf8().constData(), GA_ReadOnly);
+            if (ds)
+            {
+                GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+                if (band)
+                {
+                    double gt[6];
+                    GDALGetGeoTransform(ds, gt);
+                    double invGt[6];
+                    if (GDALInvGeoTransform(gt, invGt))
+                    {
+                        const double sx = invGt[0] + start.x() * invGt[1] + start.y() * invGt[2];
+                        const double sy = invGt[3] + start.x() * invGt[4] + start.y() * invGt[5];
+                        const double ex = invGt[0] + end.x() * invGt[1] + end.y() * invGt[2];
+                        const double ey = invGt[3] + end.x() * invGt[4] + end.y() * invGt[5];
 
-        int ix = static_cast<int>(px);
-        int iy = static_cast<int>(py);
+                        const double dx = ex - sx;
+                        const double dy = ey - sy;
+                        const double length = std::sqrt(dx * dx + dy * dy);
+                        const int steps = std::max(2, static_cast<int>(length));
 
-        if (ix >= 0 && ix < GDALGetRasterXSize(ds) && iy >= 0 && iy < GDALGetRasterYSize(ds)) {
-            double val = 0.0;
-            GDALRasterIO(band, GF_Read, ix, iy, 1, 1, &val, 1, 1, GDT_Float64, 0, 0);
-            m_values[i] = val;
-        } else {
-            m_values[i] = std::numeric_limits<double>::quiet_NaN();
-        }
+                        values.resize(steps);
+                        distances.resize(steps);
 
-        m_distances[i] = t * totalDist;
-    }
+                        const double totalDist =
+                            std::sqrt((end.x() - start.x()) * (end.x() - start.x()) +
+                                      (end.y() - start.y()) * (end.y() - start.y()));
+                        const int W = GDALGetRasterXSize(ds);
+                        const int H = GDALGetRasterYSize(ds);
 
-    GDALClose(ds);
+                        for (int i = 0; i < steps; ++i)
+                        {
+                            const double t = static_cast<double>(i) / (steps - 1);
+                            const int ix = static_cast<int>(sx + t * dx);
+                            const int iy = static_cast<int>(sy + t * dy);
+                            if (ix >= 0 && ix < W && iy >= 0 && iy < H)
+                            {
+                                double val = 0.0;
+                                GDALRasterIO(band, GF_Read, ix, iy, 1, 1, &val, 1, 1,
+                                             GDT_Float64, 0, 0);
+                                values[i] = val;
+                            }
+                            else
+                            {
+                                values[i] = std::numeric_limits<double>::quiet_NaN();
+                            }
+                            distances[i] = t * totalDist;
+                        }
+                    }
+                }
+                GDALClose(ds);
+            }
 
-    // Compute min/max
+            // One marshalled hop onto the GUI thread; dropped when the
+            // widget (or its request) is already gone.
+            QMetaObject::invokeMethod(qApp, [self, requestId, values, distances]() {
+                if (self)
+                    self->landProfile(requestId, values, distances);
+            });
+        });
+}
+
+void CrossSectionWidget::landProfile(quint64 requestId, const QVector<double> &values,
+                                     const QVector<double> &distances)
+{
+    if (requestId != m_requestEpoch)
+        return; // superseded by a newer extractProfile / layer switch
+
+    m_values = values;
+    m_distances = distances;
+
     m_minValue = std::numeric_limits<double>::max();
     m_maxValue = std::numeric_limits<double>::lowest();
-    for (double v : m_values) {
-        if (std::isnan(v)) continue;
+    for (double v : m_values)
+    {
+        if (std::isnan(v))
+            continue;
         m_minValue = std::min(m_minValue, v);
         m_maxValue = std::max(m_maxValue, v);
     }
@@ -109,11 +158,12 @@ void CrossSectionWidget::extractProfile(const QgsPointXY &start, const QgsPointX
     update();
 
     SICNU_LOG_INFO(SicnuLogTags::Widgets,
-                   QString("Cross-section profile extracted: %1 points").arg(steps));
+                   QString("Cross-section profile extracted: %1 points").arg(m_values.size()));
 }
 
 void CrossSectionWidget::clear()
 {
+    ++m_requestEpoch;
     m_values.clear();
     m_distances.clear();
     m_hasData = false;
