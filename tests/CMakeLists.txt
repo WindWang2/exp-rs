@@ -18213,6 +18213,7 @@ target_link_libraries(test_r27_t04_mission_sidecar PRIVATE
   Qt6::Xml
   qgis_core
   qgis_gui
+  Sicnu::qgis_display
   sicnu_data
   Sicnu::Platform
 )

@@ -16,7 +16,7 @@
 
 #include "app/workbench/mission_context_store.h"
 
-#include <QApplication>
+#include <QCoreApplication>
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
@@ -24,7 +24,6 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTemporaryDir>
-#include <QtTest>
 
 namespace
 {
