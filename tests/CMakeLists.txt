@@ -17944,3 +17944,28 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
 endif()
 # --- end R26-science oracle registration ---
 
+
+# ── BEGIN R27-T01 (zcode-r27-t01) science numeric-quality oracles ────────────
+# Append-only registration block for this track (docs: .planning/r27-t01).
+# Covers #1738/#1739/#1740/#1752-#1759/#1801: terrain Inf parity, DEM unit
+# fail-closed, SICNU_NUMERIC_OFFSET calibration chain, changeMask/stretch/
+# fusion Inf, DOS DN0 fill, gdal:reproject NoData+categorical, thermal DN0.
+add_executable(test_r27_t01_science_quality test_r27_t01_science_quality.cpp)
+target_link_libraries(test_r27_t01_science_quality PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r27_t01_science_quality)
+target_include_directories(test_r27_t01_science_quality PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+add_test(NAME test_r27_t01_science_quality COMMAND test_r27_t01_science_quality)
+set_tests_properties(test_r27_t01_science_quality PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 600)
+# ── END R27-T01 ──────────────────────────────────────────────────────────────
