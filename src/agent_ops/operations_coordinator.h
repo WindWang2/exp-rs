@@ -112,13 +112,25 @@ class OperationsCoordinator {
 
     /// Arms a minted repair-approval token for the NEXT launch. The token is
     /// verified here (binding to this coordinator and to the last projected
-    /// recovery plan, digest, expiry at `nowMs`) and verified AGAIN at
+    /// recovery plan, HMAC digest, expiry at `nowMs`) and verified AGAIN at
     /// launch. Returns an empty string on success, else a typed refusal
     /// code (NO_PENDING_REPAIR_PLAN, APPROVAL_MALFORMED, APPROVAL_TAMPERED,
     /// APPROVAL_WRONG_PLAN, APPROVAL_WRONG_COORDINATOR, APPROVAL_EXPIRED,
-    /// APPROVAL_REPLAYED). One-shot: the next run() consumes the armed
-    /// approval, and a consumed token is refused as a replay.
+    /// APPROVAL_TTL_EXCESSIVE, APPROVAL_REPLAYED, APPROVAL_REPLAY_RING_FULL).
+    /// One-shot: the next run() consumes the armed approval, and a consumed
+    /// token is refused as a replay.
     std::string armRepairApproval(const Json::Value &tokenDoc, long long nowMs);
+
+    /// The HUMAN mint channel (#1733): mints a token for the last projected
+    /// repair plan, HMAC-keyed by this coordinator's process-local secret.
+    /// Never exposed on the session surface / OpsDriver / MCP — those paths
+    /// refuse approve_repair (APPROVAL_HUMAN_CHANNEL_ONLY); only trusted
+    /// local UI code reaches this method. Returns a null token on refusal
+    /// with `error` set (NO_PENDING_REPAIR_PLAN, APPROVAL_TTL_EXCESSIVE,
+    /// APPROVAL_MINTING_FAILED). Coordinator-thread only (reads the
+    /// last-projection bookkeeping like armRepairApproval).
+    Json::Value mintRepairApprovalForOperator(long long nowMs, long long ttlMs,
+                                              std::string *error = nullptr) const;
 
     /// True when an approval is armed for the next launch (tests/surface).
     bool hasPendingRepairApproval() const;
@@ -168,6 +180,10 @@ class OperationsCoordinator {
     std::string verifyApprovalAgainstLastProjection(const Json::Value &tokenDoc,
                                                     long long nowMs) const;
 
+    /// Forgets consumed-approval entries whose token window has expired at
+    /// `nowMs`. Coordinator-thread only (called from arm/launch paths).
+    void dropExpiredConsumedApprovals(long long nowMs);
+
     Dependencies mDeps;
     LiveSessionRecorder mRecorder;
     DiagnosticBridge mDiagnostic;
@@ -202,16 +218,21 @@ class OperationsCoordinator {
     // like run()/resume() themselves). It belongs to exactly ONE thread: the
     // coordinator thread, i.e. whichever thread is executing run()/resume()
     // (a driver's worker). Every entry point that touches this state
-    // (armRepairApproval, hasPendingRepairApproval,
-    // lastProjectedFindingsDigest, lastResult, evaluateRecovery, run,
-    // resume) must be called FROM that thread; a surface on another thread
-    // (the GUI) hands its request to the coordinator thread instead of
-    // calling in — the Control Center dock arms a remembered approval token
-    // inside its worker task, immediately before the launch that consumes
-    // it. pause/cancel remain the cross-thread-safe exceptions (atomics),
-    // and the active-session registry they propagate through is the one
-    // mutex-guarded exception.
+    // (armRepairApproval, mintRepairApprovalForOperator,
+    // hasPendingRepairApproval, lastProjectedFindingsDigest, lastResult,
+    // evaluateRecovery, run, resume) must be called FROM that thread; a
+    // surface on another thread (the GUI) hands its request to the
+    // coordinator thread instead of calling in — the Control Center dock
+    // mints and arms its remembered approval inside its worker task,
+    // immediately before the launch that consumes it. pause/cancel remain
+    // the cross-thread-safe exceptions (atomics), and the active-session
+    // registry they propagate through is the one mutex-guarded exception.
     const long long mInstanceId;
+    /// Process-local HMAC key for repair-approval tokens (#1733). Generated
+    /// once per coordinator from the OS entropy source; never copied, never
+    /// serialized, never returned on any wire surface — the model-facing
+    /// surfaces cannot mint, and relayed tokens cannot be forged.
+    const std::string mApprovalSecret;
     struct ArmedApproval {
         Json::Value token;
         std::string findingsDigest;
@@ -222,11 +243,17 @@ class OperationsCoordinator {
     /// non-const because it consumes approval state and refreshes this).
     std::string mLastProjectedFindingsDigest;
     /// Digests of tokens already consumed by a launch: re-presenting one is
-    /// a replay, refused even though the token itself is still intact. The
-    /// ring is bounded; once the oldest digest is forgotten, a long-TTL
-    /// token can arm again — TTL bounds bound that window (mint with a
-    /// sane ttlMs; expiry is enforced at every verify).
-    std::vector<std::string> mConsumedApprovalDigests;
+    /// a replay, refused even though the token itself is still intact. Each
+    /// entry carries the token's own expiry; only EXPIRED entries are
+    /// evicted, so a still-live token can never be aged out of the ring
+    /// (#1733 — the old oldest-first eviction plus an unbounded ttl was a
+    /// replay window). Arming fails closed (APPROVAL_REPLAY_RING_FULL) when
+    /// the ring is full of live entries.
+    struct ConsumedApproval {
+        std::string digest;
+        long long expiresAtMs;
+    };
+    std::vector<ConsumedApproval> mConsumedApprovals;
     static constexpr std::size_t kMaxConsumedDigests = 16;
     std::optional<OpsRunResult> mLastResult;
 };
