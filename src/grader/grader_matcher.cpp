@@ -451,11 +451,23 @@ std::pair<double, std::string> scoreMetricValue( const MetricExpectation &metric
         const double full = metric.value - metric.tolerance;
         if ( value >= full - kBandEps )
             return { 1.0, {} };
+        // #1744 (WE-11): full credit is reserved for the band. The teacher's
+        // ramp [windowFrom, windowTo] rises toward the band edge, and its
+        // ceiling is what a ramp anchored at the band edge would award at
+        // windowTo: (windowTo - windowFrom) / (full - windowFrom). A window
+        // that touches the band edge (windowTo == full) has ceiling 1, so
+        // mid-window values keep their R18-E pinned fractions; a window that
+        // stops short caps every band-failing value — inside the ramp or in
+        // the (windowTo, full) gap — strictly below full. The old clamp let
+        // the gap award 1.0 to a value that failed the band.
         if ( metric.hasLinearWindow && value > metric.windowFrom ) {
             const double span = metric.windowTo - metric.windowFrom;
-            if ( span > 0.0 ) {
+            const double toBand = full - metric.windowFrom;
+            if ( span > 0.0 && toBand > 0.0 ) {
                 const double fraction = ( value - metric.windowFrom ) / span;
-                return { std::clamp( fraction, 0.0, 1.0 ), "grader:metric-partial-window" };
+                const double ceiling = span / toBand;
+                return { std::clamp( std::min( fraction, ceiling ), 0.0, 1.0 ),
+                         "grader:metric-partial-window" };
             }
         }
         return { 0.0, "grader:metric-below-band" };
@@ -469,17 +481,18 @@ std::pair<double, std::string> scoreMetricValue( const MetricExpectation &metric
         // where credit ends. The old branch required from > to — a shape
         // the loader refuses — so every parseable AtMost window silently
         // awarded zero instead of the declared partial credit.
-        // Exact AtLeast mirror (R18-E V1, round-2 review): the ramp branch
-        // is entered for every value below windowTo, and the fraction
-        // clamps — so the gap between the full band and windowFrom earns
-        // FULL credit (AtLeast awards its (windowTo, threshold) gap the
-        // same way via the same clamp), the ramp [from, to] descends to 0,
-        // and values at/beyond windowTo fall to above-band.
+        // #1744 (WE-11), exact AtLeast mirror: the ramp ceiling is
+        // (windowTo - windowFrom) / (windowTo - full) — full credit stays
+        // reserved for the band (values <= full). The old clamp awarded the
+        // (full, windowFrom] gap FULL credit.
         if ( metric.hasLinearWindow && value < metric.windowTo ) {
             const double span = metric.windowTo - metric.windowFrom;
-            if ( span > 0.0 ) {
+            const double toBand = metric.windowTo - full;
+            if ( span > 0.0 && toBand > 0.0 ) {
                 const double fraction = ( metric.windowTo - value ) / span;
-                return { std::clamp( fraction, 0.0, 1.0 ), "grader:metric-partial-window" };
+                const double ceiling = span / toBand;
+                return { std::clamp( std::min( fraction, ceiling ), 0.0, 1.0 ),
+                         "grader:metric-partial-window" };
             }
         }
         return { 0.0, "grader:metric-above-band" };
