@@ -127,10 +127,24 @@ std::string dangerousEnvironmentKey( const ExternalProcessRequest &request )
         upper.reserve( name.size() );
         for ( const char c : name )
             upper.push_back( static_cast<char>( ::toupper( static_cast<unsigned char>( c ) ) ) );
-        if ( upper == "LD_PRELOAD" || upper == "LD_AUDIT" || upper == "LD_LIBRARY_PATH"
-             || upper == "LD_CONFIG_FILE" || upper == "DYLD_INSERT_LIBRARIES"
-             || upper == "DYLD_LIBRARY_PATH" || upper == "DYLD_FRAMEWORK_PATH"
-             || upper == "DYLD_FALLBACK_LIBRARY_PATH" )
+        // #1761: every dynamic-loader injection vector starts with LD_ or
+        // DYLD_ — an exact-match enumeration would keep missing future
+        // glibc/ld.so additions, so the families are refused by prefix.
+        if ( upper.rfind( "LD_", 0 ) == 0 || upper.rfind( "DYLD_", 0 ) == 0 )
+            return name;
+        // #1761 (AS-009): interpreter-adjacent injectors reach code
+        // execution in common child tools without touching the loader —
+        // shell startup files (BASH_ENV/ENV run for every non-interactive
+        // sh/bash), node's --require/--import policy hook, Python's
+        // interactive bootstrap, interpreter module paths, Perl/Ruby
+        // opt-line hooks, and glibc tunables (CVE-2023-4911 class).
+        if ( upper == "BASH_ENV" || upper == "ENV" || upper == "NODE_OPTIONS"
+             || upper == "NODE_PRELOAD" || upper == "NODE_PATH"
+             || upper == "PYTHONSTARTUP" || upper == "PYTHONINSPECT"
+             || upper == "PYTHONHOME" || upper == "PYTHONPATH"
+             || upper == "PERL5OPT" || upper == "PERL5LIB"
+             || upper == "RUBYOPT" || upper == "RUBYLIB"
+             || upper == "GLIBC_TUNABLES" || upper == "MALLOC_PRELOAD" )
             return name;
     }
     return {};
