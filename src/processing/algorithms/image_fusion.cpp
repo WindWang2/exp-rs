@@ -414,7 +414,7 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     // the calibrated/QUAC inputs carry NaN NoData, and NaN == nodata is
     // always false, so the sentinel compare alone lets NaN reach the IHS
     // math — whose NaN results the non-negative clamp then folds to 0.0f
-    // (silent black pixels). Every sibling kernel checks isnan explicitly;
+    // (silent black pixels). Every sibling kernel checks finiteness explicitly;
     // parity here (kernels used directly by panels/tests).
     QVector<float> intensity( n );
     for ( size_t i = 0; i < n; ++i )
@@ -1018,7 +1018,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     for ( size_t i = 0; i < tileSize; ++i )
                     {
                         if ( msData[i] == nodata || panBuf[i] == nodata ||
-                             std::isnan( msData[i] ) || std::isnan( panBuf[i] ) )
+                             !std::isfinite( msData[i] ) || !std::isfinite( panBuf[i] ) )
                         {
                             outData[i] = nodata;
                         }
@@ -1088,7 +1088,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     {
                         if ( !validPixel[i] )
                             continue;
-                        if ( msData[i] == nodata || std::isnan( msData[i] ) )
+                        if ( msData[i] == nodata || !std::isfinite( msData[i] ) )
                             validPixel[i] = false;
                         else
                             msSum[i] += msData[i];
@@ -1103,7 +1103,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     for ( size_t i = 0; i < tileSize; ++i )
                     {
                         if ( !validPixel[i] ||
-                             panBuf[i] == nodata || std::isnan( panBuf[i] ) ||
+                             panBuf[i] == nodata || !std::isfinite( panBuf[i] ) ||
                              msSum[i] <= 1e-10f )  // negative band sums invert signs -> NoData
                         {
                             outData[i] = nodata;
@@ -1169,8 +1169,8 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
                     if ( msR[i] != nodata && msG[i] != nodata && msB[i] != nodata &&
-                         panBuf[i] != nodata && !std::isnan( msR[i] ) &&
-                         !std::isnan( msG[i] ) && !std::isnan( msB[i] ) && !std::isnan( panBuf[i] ) )
+                         panBuf[i] != nodata && !!std::isfinite( msR[i] ) &&
+                         !!std::isfinite( msG[i] ) && !!std::isfinite( msB[i] ) && !!std::isfinite( panBuf[i] ) )
                     {
                         float intensity = ( msR[i] + msG[i] + msB[i] ) / 3.0f;
                         statsI.add( intensity );
@@ -1210,8 +1210,8 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
                     if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata ||
-                         panBuf[i] == nodata || std::isnan( msR[i] ) ||
-                         std::isnan( msG[i] ) || std::isnan( msB[i] ) || std::isnan( panBuf[i] ) )
+                         panBuf[i] == nodata || !std::isfinite( msR[i] ) ||
+                         !std::isfinite( msG[i] ) || !std::isfinite( msB[i] ) || !std::isfinite( panBuf[i] ) )
                     {
                         outBuf[0][i] = nodata;
                         outBuf[1][i] = nodata;
@@ -1292,13 +1292,13 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
-                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    if ( panBuf[i] == nodata || !std::isfinite( panBuf[i] ) )
                         continue;
 
                     bool validMs = true;
                     for ( int b = 0; b < nMsBands; ++b )
                     {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        if ( msBuf[b][i] == nodata || !std::isfinite( msBuf[b][i] ) )
                         {
                             validMs = false;
                             break;
@@ -1352,13 +1352,13 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
-                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    if ( panBuf[i] == nodata || !std::isfinite( panBuf[i] ) )
                         continue;
 
                     bool validMs = true;
                     for ( int b = 0; b < nMsBands; ++b )
                     {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        if ( msBuf[b][i] == nodata || !std::isfinite( msBuf[b][i] ) )
                         {
                             validMs = false;
                             break;
@@ -1457,7 +1457,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
-                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    if ( panBuf[i] == nodata || !std::isfinite( panBuf[i] ) )
                     {
                         for ( int b = 0; b < nMsBands; ++b )
                             outBuf[b][i] = nodata;
@@ -1467,7 +1467,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     bool validMs = true;
                     for ( int b = 0; b < nMsBands; ++b )
                     {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        if ( msBuf[b][i] == nodata || !std::isfinite( msBuf[b][i] ) )
                         {
                             validMs = false;
                             break;
@@ -1568,14 +1568,14 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
-                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    if ( panBuf[i] == nodata || !std::isfinite( panBuf[i] ) )
                         continue;
 
                     bool validMs = true;
                     double synVal = 0.0;
                     for ( int b = 0; b < nMsBands; ++b )
                     {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        if ( msBuf[b][i] == nodata || !std::isfinite( msBuf[b][i] ) )
                         {
                             validMs = false;
                             break;
@@ -1641,7 +1641,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
-                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    if ( panBuf[i] == nodata || !std::isfinite( panBuf[i] ) )
                     {
                         for ( int b = 0; b < nMsBands; ++b )
                             outBuf[b][i] = nodata;
@@ -1652,7 +1652,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     double synVal = 0.0;
                     for ( int b = 0; b < nMsBands; ++b )
                     {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        if ( msBuf[b][i] == nodata || !std::isfinite( msBuf[b][i] ) )
                         {
                             validMs = false;
                             break;
@@ -1764,7 +1764,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         const int bx = xOff + cc - hx0;
                         const int by = yOff + rr - hy0;
                         const float center = halo[static_cast<size_t>( by ) * hw + bx];
-                        if ( center == nodata || std::isnan( center ) )
+                        if ( center == nodata || !std::isfinite( center ) )
                         {
                             for ( int b = 0; b < nMsBands; ++b )
                                 outBuf[b][i] = nodata;
@@ -1782,7 +1782,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                                 if ( hxp < 0 || hyp < 0 || hxp >= hw || hyp >= hh )
                                     continue;
                                 const float v = halo[static_cast<size_t>( hyp ) * hw + hxp];
-                                if ( std::isnan( v ) || v == nodata )
+                                if ( !std::isfinite( v ) || v == nodata )
                                     continue;
                                 sum += v;
                                 ++cnt;
@@ -1800,7 +1800,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         for ( int b = 0; b < nMsBands; ++b )
                         {
                             const float msV = msBuf[b][i];
-                            if ( msV == nodata || std::isnan( msV ) )
+                            if ( msV == nodata || !std::isfinite( msV ) )
                                 outBuf[b][i] = nodata;
                             else
                                 outBuf[b][i] = msV + highPass;

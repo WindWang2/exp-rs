@@ -255,8 +255,9 @@ void speckleTileLee( const GdalBlockStream::Tile &tile, const float *haloBuf,
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve NaN center pixels
-            if ( std::isnan( pixel ) )
+            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
+            // an Inf center entering the kernel produced finite garbage.
+            if ( !std::isfinite( pixel ) )
             {
                 out = pixel;
                 continue;
@@ -307,8 +308,9 @@ void speckleTileFrost( const GdalBlockStream::Tile &tile, const float *haloBuf,
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve NaN center pixels
-            if ( std::isnan( pixel ) )
+            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
+            // an Inf center entering the kernel produced finite garbage.
+            if ( !std::isfinite( pixel ) )
             {
                 out = pixel;
                 continue;
@@ -327,8 +329,8 @@ void speckleTileFrost( const GdalBlockStream::Tile &tile, const float *haloBuf,
                 for ( int dx = -half; dx <= half; ++dx )
                 {
                     const float neighbor = row[dx];
-                    // Skip NaN neighbours
-                    if ( std::isnan( neighbor ) )
+                    // Skip non-finite neighbours (NaN and ±Inf)
+                    if ( !std::isfinite( neighbor ) )
                         continue;
                     // Weight: exp(-damping * distance * CV²)
                     const float dist = distLut[static_cast<size_t>( dy + half ) * kernelSize + ( dx + half )];
@@ -353,8 +355,9 @@ void speckleTileKuan( const GdalBlockStream::Tile &tile, const float *haloBuf,
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve NaN center pixels
-            if ( std::isnan( pixel ) )
+            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
+            // an Inf center entering the kernel produced finite garbage.
+            if ( !std::isfinite( pixel ) )
             {
                 out = pixel;
                 continue;
@@ -389,8 +392,9 @@ void speckleTileGammaMap( const GdalBlockStream::Tile &tile, const float *haloBu
         {
             const float pixel = haloBuf[static_cast<size_t>( y + halo ) * bufW + ( x + halo )];
             float &out = coreOut[static_cast<size_t>( y ) * tile.width + x];
-            // Preserve NaN center pixels
-            if ( std::isnan( pixel ) )
+            // Preserve non-finite (NaN/±Inf) center pixels (#1738 class):
+            // an Inf center entering the kernel produced finite garbage.
+            if ( !std::isfinite( pixel ) )
             {
                 out = pixel;
                 continue;
@@ -718,7 +722,7 @@ void piecewiseLinearStretchTile( const float *in, float *out, size_t n,
     {
         for ( size_t i = 0; i < n; i++ )
         {
-            out[i] = ( in[i] == nodata || std::isnan( in[i] ) ) ? nodata : in[i];
+            out[i] = ( in[i] == nodata || !std::isfinite( in[i] ) ) ? nodata : in[i];
         }
         return;
     }
@@ -726,7 +730,7 @@ void piecewiseLinearStretchTile( const float *in, float *out, size_t n,
     for ( size_t i = 0; i < n; i++ )
     {
         const float val = in[i];
-        if ( val == nodata || std::isnan( val ) )
+        if ( val == nodata || !std::isfinite( val ) )
         {
             out[i] = nodata;
             continue;
@@ -1040,7 +1044,7 @@ bool streamBandStretch( const GdalDatasetWrapper &src, int bandNum, float nodata
                 if ( eqConstant )
                 {
                     for ( size_t i = 0; i < n; ++i )
-                        outTile[i] = ( px[i] == nodata || std::isnan( px[i] ) ) ? nodata : 128.0f;
+                        outTile[i] = ( px[i] == nodata || !std::isfinite( px[i] ) ) ? nodata : 128.0f;
                 }
                 else
                 {

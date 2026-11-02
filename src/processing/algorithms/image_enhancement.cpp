@@ -771,8 +771,8 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
-                if (std::isnan(pixel)) {
+                // Preserve non-finite (NaN/±Inf) center pixels (#1738 class)
+                if (!std::isfinite(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
                 }
@@ -840,8 +840,8 @@ void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
-                if (std::isnan(pixel)) {
+                // Preserve non-finite (NaN/±Inf) center pixels (#1738 class)
+                if (!std::isfinite(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
                 }
@@ -919,8 +919,8 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
-                if (std::isnan(pixel)) {
+                // Preserve non-finite (NaN/±Inf) center pixels (#1738 class)
+                if (!std::isfinite(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
                 }
@@ -941,7 +941,7 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
                         float neighbor = input[ny * width + nx];
 
                         // Skip NaN neighbors
-                    if (std::isnan(neighbor)) continue;
+                    if (!std::isfinite(neighbor)) continue;
 
                     // Use precomputed distance
                     float dist = distLut[(dy + half) * kernelSize + (dx + half)];
@@ -1000,8 +1000,8 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
-                if (std::isnan(pixel)) {
+                // Preserve non-finite (NaN/±Inf) center pixels (#1738 class)
+                if (!std::isfinite(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
                 }
@@ -1073,8 +1073,8 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
-                if (std::isnan(pixel)) {
+                // Preserve non-finite (NaN/±Inf) center pixels (#1738 class)
+                if (!std::isfinite(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
                 }

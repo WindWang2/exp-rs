@@ -167,7 +167,7 @@ RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
         for ( size_t i = 0; i < nPx; ++i )
         {
             float v = floatBuf[i];
-            if ( std::isnan( v ) || v < 0 )
+            if ( !std::isfinite( v ) || v < 0 )
                 labels[i] = 0;
             else
                 labels[i] = static_cast<quint32>( v + 0.5f );
