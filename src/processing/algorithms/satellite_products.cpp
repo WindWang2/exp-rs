@@ -547,7 +547,7 @@ double sentinel2QuantificationValue(const QString& mtdPath)
     // "<TAG>" pattern never matches them (#1740 review S0).
     for (const QString& tag : tags) {
         const QRegularExpression re(
-            QStringLiteral("<%1[^>]*>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
+            QStringLiteral("<%1(?![A-Z_])[^>]*>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
             QRegularExpression::CaseInsensitiveOption);
         const auto m = re.match(xml);
         if (!m.hasMatch())
@@ -584,7 +584,7 @@ double sentinel2BoaAddOffset(const QString& mtdPath)
         QList<double> values;
         // Direct (possibly attributed) entries.
         const QRegularExpression direct(
-            QStringLiteral("<%1[^>]*>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
+            QStringLiteral("<%1(?![A-Z_])[^>]*>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
             QRegularExpression::CaseInsensitiveOption);
         auto it = direct.globalMatch(xml);
         while (it.hasNext()) {
@@ -598,7 +598,7 @@ double sentinel2BoaAddOffset(const QString& mtdPath)
         // parser in radiometric_calibration.cpp for the container variants).
         if (values.isEmpty()) {
             const QRegularExpression block(
-                QStringLiteral("<%1[^>]*>(.*?)</%1>").arg(tag),
+                QStringLiteral("<%1(?![A-Z_])[^>]*>(.*?)</%1>").arg(tag),
                 QRegularExpression::CaseInsensitiveOption
                     | QRegularExpression::DotMatchesEverythingOption);
             const QRegularExpression entry(

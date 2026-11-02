@@ -244,9 +244,40 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     double declaredScale = 0.0;
     bool hasDeclaredScale = false;
     if (void *datasetHandle = ds.dataset()) {
-        if (const char *rawScale = GDALGetMetadataItem(
-                static_cast<GDALDatasetH>(datasetHandle),
-                SatelliteProducts::kNumericScaleKey, nullptr)) {
+        GDALDatasetH dsH = static_cast<GDALDatasetH>(datasetHandle);
+        // Band-level stamps first (a mixed Landsat stack stamps only its
+        // reflectance bands — the dataset key is absent there); the dataset
+        // key remains the fallback for single-contract stacks. Band-level
+        // values must agree — disagreeing stamps resolve nothing (probe).
+        // Without this the mixed-stack EVI/SAVI domain fell back to the
+        // statistics probe and mis-anchored the additive constants
+        // (review R2 P1-1).
+        double bandLevelScale = 0.0;
+        int bandLevelBands = 0;
+        bool bandLevelUniform = true;
+        for (int b = 1; b <= bandCount; ++b) {
+            if (GDALRasterBandH band = GDALGetRasterBand(dsH, b)) {
+                if (const char *rawBandScale = GDALGetMetadataItem(
+                        band, SatelliteProducts::kNumericScaleKey, nullptr)) {
+                    bool okB = false;
+                    const double vB = QString::fromUtf8(rawBandScale).toDouble(&okB);
+                    if (okB && std::isfinite(vB) && vB > 0.0) {
+                        if (bandLevelBands == 0) {
+                            bandLevelScale = vB;
+                        } else if (std::abs(vB - bandLevelScale)
+                                   > 1e-9 * std::abs(bandLevelScale)) {
+                            bandLevelUniform = false;
+                        }
+                        ++bandLevelBands;
+                    }
+                }
+            }
+        }
+        if (bandLevelBands > 0 && bandLevelUniform) {
+            declaredScale = bandLevelScale;
+            hasDeclaredScale = true;
+        } else if (const char *rawScale = GDALGetMetadataItem(
+                       dsH, SatelliteProducts::kNumericScaleKey, nullptr)) {
             bool ok = false;
             const double v = QString::fromUtf8(rawScale).toDouble(&ok);
             if (ok && std::isfinite(v) && v > 0.0) {

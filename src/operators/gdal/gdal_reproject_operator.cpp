@@ -249,6 +249,7 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
     {
         const int bandCount = GDALGetRasterCount(srcH);
         int declaredBands = 0;
+        int nanDeclaredBands = 0;
         double firstNd = 0.0;
         bool uniform = true;
         bool allFloat = bandCount > 0;
@@ -263,7 +264,15 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
                 allFloat = false;
             int hasNd = 0;
             const double nd = GDALGetRasterNoDataValue(band, &hasNd);
-            if (hasNd && std::isfinite(nd)) {
+            if (!hasNd)
+                continue;
+            if (std::isnan(nd)) {
+                // A declared NaN sentinel (this pipeline's own float outputs)
+                // is a real declaration — gdalwarp accepts nan srcnodata.
+                ++nanDeclaredBands;
+                continue;
+            }
+            if (std::isfinite(nd)) {
                 if (declaredBands == 0)
                     firstNd = nd;
                 else if (nd != firstNd)
@@ -272,13 +281,19 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
             }
         }
         const bool uniformDeclared = declaredBands == bandCount && bandCount > 0 && uniform;
+        const bool uniformNan = nanDeclaredBands == bandCount && bandCount > 0 && allFloat;
         if (!hasNodata) {
             if (uniformDeclared) {
                 nodataOptions.emplace_back("-srcnodata");
                 nodataOptions.emplace_back(fmtDouble(firstNd));
                 nodataOptions.emplace_back("-dstnodata");
                 nodataOptions.emplace_back(fmtDouble(firstNd));
-            } else if (declaredBands == 0 && allFloat) {
+            } else if (uniformNan) {
+                nodataOptions.emplace_back("-srcnodata");
+                nodataOptions.emplace_back("nan");
+                nodataOptions.emplace_back("-dstnodata");
+                nodataOptions.emplace_back("nan");
+            } else if (declaredBands == 0 && nanDeclaredBands == 0 && allFloat) {
                 nodataOptions.emplace_back("-dstnodata");
                 nodataOptions.emplace_back("nan");
             }

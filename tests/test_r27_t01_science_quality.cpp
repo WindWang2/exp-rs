@@ -11,6 +11,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <gdal_priv.h>
@@ -166,6 +167,10 @@ QString makeS2Safe( const QTemporaryDir &tmp, const char *boaOffsetTag,
                            + "<BOA_LIST_VALUE band_id=\"2\">" + boaOffsetTag
                            + "</BOA_LIST_VALUE>"
                            + "</BOA_LIST_TO_VALUES></BOA_ADD_OFFSET>";
+        else if ( offsetForm == std::string( "disagree" ) )
+            radiometric += QString( "<BOA_ADD_OFFSET band_id=\"1\">" ) + boaOffsetTag
+                           + "</BOA_ADD_OFFSET>"
+                           + "<BOA_ADD_OFFSET band_id=\"2\">-500</BOA_ADD_OFFSET>";
         else
             radiometric += QString( "<BOA_ADD_OFFSET>" ) + boaOffsetTag + "</BOA_ADD_OFFSET>";
     }
@@ -241,6 +246,13 @@ QString makeLandsatScene( const QTemporaryDir &tmp, bool withDn0Fill = false )
         "    SUN_ELEVATION = 60.0\n"
         "    CLOUD_COVER = 0.0\n"
         "  END_GROUP = IMAGE_ATTRIBUTES\n"
+        "  GROUP = LEVEL1_PROCESSING_RECORD\n"
+        "    FILE_NAME_BAND_2 = \"LC08_L2SP_123032_20240615_02_T1_B2.TIF\"\n"
+        "    FILE_NAME_BAND_3 = \"LC08_L2SP_123032_20240615_02_T1_B3.TIF\"\n"
+        "    FILE_NAME_BAND_4 = \"LC08_L2SP_123032_20240615_02_T1_B4.TIF\"\n"
+        "    FILE_NAME_BAND_5 = \"LC08_L2SP_123032_20240615_02_T1_B5.TIF\"\n"
+        "    FILE_NAME_BAND_QA_PIXEL = \"LC08_L2SP_123032_20240615_02_T1_QA_PIXEL.TIF\"\n"
+        "  END_GROUP = LEVEL1_PROCESSING_RECORD\n"
         "  GROUP = LEVEL2_SURFACE_REFLECTANCE_PARAMETERS\n"
         "    REFLECTANCE_MULT_BAND_1 = 2.5e-05\n"
         "    REFLECTANCE_ADD_BAND_1 = -0.2\n"
@@ -578,6 +590,29 @@ TEST_CASE( "R27-A3 Sentinel-2 L2A PB>=04.00 stamps and applies BOA_ADD_OFFSET",
 
     // --- Old baseline (no BOA_ADD_OFFSET tag): no offset stamp; indices ---
     // --- keep the plain /scale semantics (protocol distinction).        ---
+    // --- Disagreeing per-band offsets must NOT stamp (fail-closed, R2 P3-1):
+    // --- a single dataset-wide constant cannot describe them.
+    {
+        QTemporaryDir tmpD;
+        REQUIRE( tmpD.isValid() );
+        const QString safeD = makeS2Safe( tmpD, "-1000",
+                                          "S2A_MSIL2A_20240615T000001_N9999_R000_T32TQQ_20240615T000001",
+                                          "disagree" );
+        SatelliteProducts::ProductInfo infoD;
+        QString errD;
+        REQUIRE( SatelliteProducts::discoverSentinel2( safeD, &infoD,
+                                                       QStringLiteral( "10m" ), &errD ) );
+        const QString stackedD = tmpD.path() + "/s2_stack_disagree.tif";
+        REQUIRE( SatelliteProducts::stackToGeoTiff(
+            infoD, { QStringLiteral( "B04" ), QStringLiteral( "B08" ) }, stackedD, &errD ) );
+        GDALDatasetH dsD = GDALOpen( stackedD.toUtf8().constData(), GA_ReadOnly );
+        REQUIRE( dsD != nullptr );
+        CHECK( GDALGetMetadataItem( dsD, "SICNU_NUMERIC_OFFSET", nullptr ) == nullptr );
+        CHECK( GDALGetMetadataItem( GDALGetRasterBand( dsD, 1 ),
+                                    "SICNU_NUMERIC_OFFSET", nullptr ) == nullptr );
+        GDALClose( dsD );
+    }
+
     // --- Real ESA forms (PB>=04.00): attributed per-band entries and the
     // --- nested BOA_LIST_TO_VALUES list must both stamp the offset (S0-1).
     for ( const char *form : { "bandid", "list" } ) {
@@ -1239,6 +1274,45 @@ TEST_CASE( "R27-B7 import infers USGS DN0 fill on undeclared integer bands",
 // ===========================================================================
 // C1 (#1801 OS-6 pin): GLCM windows containing Inf must NaN-poison metrics.
 // ===========================================================================
+
+TEST_CASE( "R27-B7 DN0 inference exempts QA bands (0 is a valid class there)",
+           "[r27][import][fill][qa]" )
+{
+    ensureGdal();
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // Landsat scene whose QA_PIXEL tile is all-zero ("clear" everywhere) and
+    // B2 is fill-free: stacking ONLY the QA band must not declare 0 NoData.
+    const QString mtl = makeLandsatScene( tmp, /*withDn0Fill=*/false );
+    const QString dir = QFileInfo( mtl ).absolutePath();
+    {
+        GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+        REQUIRE( driver != nullptr );
+        GDALDatasetH ds = GDALCreate( driver,
+                                      ( dir + "/LC08_L2SP_123032_20240615_02_T1_QA_PIXEL.TIF" )
+                                          .toUtf8()
+                                          .constData(),
+                                      4, 4, 1, GDT_UInt16, nullptr );
+        REQUIRE( ds != nullptr );
+        std::vector<uint16_t> zeros( 16, 0 );
+        REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, 4, 4,
+                               zeros.data(), 4, 4, GDT_UInt16, 0, 0 ) == CE_None );
+        GDALClose( ds );
+    }
+    SatelliteProducts::ProductInfo info;
+    QString err;
+    REQUIRE( SatelliteProducts::discoverLandsat( mtl, &info ) );
+    const QString stacked = tmp.path() + "/qa_only_stack.tif";
+    REQUIRE( SatelliteProducts::stackToGeoTiff( info, { QStringLiteral( "QA_PIXEL" ) },
+                                                stacked, &err ) );
+    GDALDatasetH ds = GDALOpen( stacked.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds != nullptr );
+    int hasNodata = 0;
+    (void)GDALGetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), &hasNodata );
+    GDALClose( ds );
+    CHECK( hasNodata == 0 ); // DN0 is "clear" on QA bands, never fill
+}
 
 TEST_CASE( "R27-C1 GLCM Inf window poisons metrics (regression pin)",
            "[r27][glcm][inf]" )
