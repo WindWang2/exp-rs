@@ -61,7 +61,7 @@ namespace
         band[static_cast<size_t>( r ) * W + c ] = valueFn( r, c );
     ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, W, H, band.data(), W, H, GDT_Float32, 0, 0 );
     GDALClose( ds );
-    return {};
+    return path;
   }
 
   QgsMapMouseEvent clickAt( QgsMapCanvas &canvas, double mapX, double mapY,
