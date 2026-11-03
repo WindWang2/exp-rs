@@ -397,8 +397,13 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
             ++predictionsWithUnknownPredictedLabel;
             continue;
         }
-        // Honor ignore labels from protocol.
-        if ( def.protocol().ignoreLabels().contains( *it ) )
+        // Honor ignore labels from protocol: the contract (evaluation.h) is
+        // "excluded from ALL metric denominators", so a row is skipped when
+        // EITHER side carries an ignore label — a prediction naming an
+        // ignored class used to land in the matrix as a false positive for
+        // the kept truth class, inflating its error rate.
+        if ( def.protocol().ignoreLabels().contains( *it ) ||
+             def.protocol().ignoreLabels().contains( pred.predictedClass ) )
         {
             ++predictionsIgnoredByLabel;
             continue;

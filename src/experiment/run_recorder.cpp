@@ -172,7 +172,8 @@ VoidResult ExperimentRunRecorder::markSucceeded( const QString &runId,
 }
 
 VoidResult ExperimentRunRecorder::markFailed( const QString &runId, const QString &errorCode,
-                                              const QString &message )
+                                              const QString &message,
+                                              const QJsonObject &metrics )
 {
     auto loaded = loadRun( runId );
     if ( !loaded )
@@ -180,12 +181,19 @@ VoidResult ExperimentRunRecorder::markFailed( const QString &runId, const QStrin
     ExperimentRun run = loaded.value();
     run.setStatus( RunStatus::Failed );
     run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    // MERGE (not replace), same as markSucceeded: a failure that carries
+    // evidence (the workflow evidence of a Failed execution event) must not
+    // have it dropped on the floor — the caller constructing it and the
+    // recorder discarding it was evidence loss dressed as success.
+    QJsonObject merged = run.metrics();
+    const QJsonObject additions = RunEnvironment::redactSecretKeys( metrics );
+    for ( auto it = additions.begin(); it != additions.end(); ++it )
+        merged.insert( it.key(), it.value() );
     QJsonObject evidence;
     evidence.insert( QStringLiteral( "error_code" ), errorCode );
     evidence.insert( QStringLiteral( "message" ), message );
-    QJsonObject metrics = run.metrics();
-    metrics.insert( QStringLiteral( "error" ), evidence );
-    run.setMetrics( RunEnvironment::redactSecretKeys( metrics ) );
+    merged.insert( QStringLiteral( "error" ), evidence );
+    run.setMetrics( RunEnvironment::redactSecretKeys( merged ) );
     auto written = m_store->upsertRun( run );
     if ( !written )
         return VoidResult::failure( written.diagnostics() );

@@ -287,6 +287,26 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     }
     warnings.clear();
 
+    // Software pin: the exporter ALWAYS writes software.json, and
+    // run.softwareRevision() is part of the execution identity that
+    // runExecutionFingerprint hashes — an importer that never read it back
+    // could not reproduce the recorded fingerprint for any run whose
+    // software_revision was pinned (the identity gate would reject every
+    // such bundle). Read it before the gate below; the same
+    // always-written contract as model_refs.json applies, so absence is a
+    // bundle defect, not a shrug.
+    if ( const auto software = loadJson( dir, QStringLiteral( "software.json" ), &warnings ) )
+    {
+        run.setSoftwareRevision(
+            software->value( QStringLiteral( "software_revision" ) ).toString() );
+    }
+    else
+    {
+        report.warnings.append( warnings );
+        return report;
+    }
+    warnings.clear();
+
     // 4. Identity must be self-consistent: the recorded execution
     // fingerprint must match what the pins hash to now. A bundle whose pins
     // were tampered (checksums forged wholesale) still cannot disagree with

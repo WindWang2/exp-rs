@@ -42,6 +42,11 @@ struct BenchmarkSeedSummary
 {
     QString metricName;
     QString scope;
+    // swarm-review EXP-3: the bucket key is name+scope+classCode, so the
+    // class code is part of the row identity — carry it (the sort below
+    // orders on it) or per-class rows compare equivalent and the layout
+    // drifts with the process-seeded QHash order.
+    QString classCode;
     double mean = 0.0;
     double stddev = 0.0;
     qint64 count = 0;

@@ -638,7 +638,15 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         {
           yt.append( config.testY.at<int>( i, 0 ) );
           const int rawPred = pred.at<int>( i, 0 );
-          const int mappedPred = kmeansRemap.isEmpty() ? rawPred : kmeansRemap.value( rawPred, 0 );
+          // swarm-review EXP-6: an unmapped cluster falls back to the
+          // configured unclassified sentinel, exactly like the Apply path
+          // below. The old hard-coded 0 fabricated a class-0 prediction
+          // whenever 0 was a real training class, inflating OA/kappa with
+          // samples the model never actually classified.
+          const int mappedPred = kmeansRemap.isEmpty()
+                                   ? rawPred
+                                   : kmeansRemap.value( rawPred,
+                                                        config.ignoreOptions.unclassifiedValue );
           yp.append( mappedPred );
         }
       }

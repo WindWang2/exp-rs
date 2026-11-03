@@ -486,7 +486,8 @@ Result<QString> ExperimentRunBridge::handleExecutionEvent( const ExecutionEvent 
             runId, QStringLiteral( "workflow.failed" ),
             event.errorMessage.isEmpty()
                 ? QStringLiteral( "execution reported Failed (no error detail supplied)" )
-                : event.errorMessage );
+                : event.errorMessage,
+            metrics );
         if ( !recorded )
             return Result<QString>::failure( recorded.diagnostics() );
         return Result<QString>::success( runId );

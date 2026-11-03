@@ -207,14 +207,24 @@ Result<BenchmarkDefinition> BenchmarkDefinition::fromJson( const QJsonObject &js
         quint64( qMax<qint64>( 0, json.value( QStringLiteral( "label_schema_version" ) ).toInteger() ) );
     def.m_metricNames = json.value( QStringLiteral( "metric_names" ) ).toVariant().toStringList();
 
-    const auto protocol = EvaluationProtocol::fromJson( json.value( QStringLiteral( "protocol" ) ).toObject() );
+    // swarm-review EXP-2: the definition pins are authoritative when the
+    // protocol omits them (validate() above accepts an empty protocol pin),
+    // so backfill them into the protocol DOCUMENT before parsing it.
+    // EvaluationProtocol::fromJson validates what it parses, so a protocol
+    // with empty pins used to fail here and made the post-parse backfill
+    // below dead code — a definition this exporter writes was one the
+    // importer refused ("writable but not readable"), and one such row made
+    // hydrateFromStore fail store-wide. Backfill first, parse second.
+    QJsonObject protocolJson = json.value( QStringLiteral( "protocol" ) ).toObject();
+    if ( protocolJson.value( QStringLiteral( "dataset_version_id" ) ).toString().isEmpty() )
+        protocolJson.insert( QStringLiteral( "dataset_version_id" ), def.m_datasetVersionId );
+    if ( protocolJson.value( QStringLiteral( "split_manifest_id" ) ).toString().isEmpty() )
+        protocolJson.insert( QStringLiteral( "split_manifest_id" ), def.m_splitManifestId );
+
+    const auto protocol = EvaluationProtocol::fromJson( protocolJson );
     if ( !protocol )
         return Result<BenchmarkDefinition>::failure( protocol.diagnostics() );
     def.m_protocol = *protocol;
-    if ( def.m_protocol.datasetVersionId().isEmpty() )
-        def.m_protocol.setDatasetVersionId( def.m_datasetVersionId );
-    if ( def.m_protocol.splitManifestId().isEmpty() )
-        def.m_protocol.setSplitManifestId( def.m_splitManifestId );
 
     def.m_refusePseudoLabelsInTest =
         json.value( QStringLiteral( "refuse_pseudo_labels_in_test" ) ).toBool( true );
