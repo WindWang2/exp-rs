@@ -1166,6 +1166,11 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         {
           // RIO-13 (#1803): explicit generation stamp — deleting "index"
         // alone must not make this manifest pass as pre-checksum v1.
+        // (Residual, accepted: a manifest stripped of index, version stamp,
+        // every chunkKey AND every sha256 is byte-indistinguishable from a
+        // genuine v1 manifest and replays size-only — inherent to v1
+        // compatibility; an attacker with manifest write access can equally
+        // mint a matching sha256 for their own bytes.)
         manifest["manifestVersion"] = 2;
         Json::Value &assetIndex = manifest["index"][indexKey];
           if ( !assetIndex.isObject() )

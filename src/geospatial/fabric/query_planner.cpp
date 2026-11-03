@@ -234,6 +234,16 @@ Json::Value FabricPlan::toJson() const
     return json;
 }
 
+bool catalogContinuationRepeats( const CatalogContinuation &previous,
+                                 const CatalogContinuation &next )
+{
+    // RIO-14: offset alone is insufficient for remote backends (cursors);
+    // href alone is insufficient for local offsets. Both identifying the
+    // NEXT request with the one just issued is a replay.
+    return next.localOffset == previous.localOffset
+           && next.remoteHref == previous.remoteHref;
+}
+
 FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
                        const CancelToken &cancel )
 {
@@ -352,8 +362,10 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
             // the next fetch would replay this exact page — duplicate
             // records forever. Stop honestly regardless of page size
             // instead of burning the guard budget on identical requests.
-            if ( sawContinuation && page.next.localOffset == previousOffset &&
-                 page.next.remoteHref == previousHref )
+            CatalogContinuation previous = continuation;
+            previous.localOffset = previousOffset;
+            previous.remoteHref = previousHref;
+            if ( sawContinuation && catalogContinuationRepeats( previous, page.next ) )
                 return;
             previousOffset = page.next.localOffset;
             previousHref = page.next.remoteHref;

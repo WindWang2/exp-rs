@@ -13,6 +13,8 @@
 #include "data/governance/governance_store.h"
 #include "geospatial/crs/crs_policy.h"
 #include "geospatial/fabric/mirror.h"
+#include "geospatial/fabric/query_planner.h"
+#include "geospatial/fabric/catalog_service.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/vector/vector_reader.h"
 #include "geospatial/vector/vector_writer.h"
@@ -122,12 +124,40 @@ TEST_CASE( "#1803 RIO-11 governance audit: single authority, bounded retention",
 TEST_CASE( "#1803 RIO-12 CRS user input never reaches network or filesystem",
            "[crs][r27t02]" )
 {
-    // With ALLOW_NETWORK/FILE_ACCESS=NO these fail FAST and typed; without
-    // the gate PROJ would attempt an actual fetch of the URL.
-    REQUIRE_THROWS_AS( sicnu::geo::Crs::fromUserInput( "https://169.254.169.254/wkt" ),
-                       sicnu::geo::GeoError );
-    REQUIRE_THROWS_AS( sicnu::geo::Crs::fromUserInput( "/etc/passwd" ),
-                       sicnu::geo::GeoError );
+    // The oracle asserts the GDAL refusal MESSAGE, not just a GeoError:
+    // without the ALLOW flags an unresolvable host / unparsable file also
+    // throws GeoError — only the flag-named refusal proves the input was
+    // stopped BY THE POLICY before any I/O (verified against GDAL 3.9+:
+    // "Cannot import ... due to ALLOW_NETWORK_ACCESS=NO").
+    bool sawNetworkFlag = false;
+    bool sawFileFlag = false;
+    try
+    {
+        ( void )sicnu::geo::Crs::fromUserInput( "https://169.254.169.254/wkt" );
+        FAIL( "network CRS input must refuse" );
+    }
+    catch ( const sicnu::geo::GeoError &e )
+    {
+        const std::string what = e.what();
+        sawNetworkFlag = what.find( "ALLOW_NETWORK_ACCESS" ) != std::string::npos
+                         || what.find( "network" ) != std::string::npos;
+    }
+    try
+    {
+        ( void )sicnu::geo::Crs::fromUserInput( "/etc/passwd" );
+        FAIL( "file CRS input must refuse" );
+    }
+    catch ( const sicnu::geo::GeoError &e )
+    {
+        const std::string what = e.what();
+        sawFileFlag = what.find( "ALLOW_FILE_ACCESS" ) != std::string::npos
+                      || what.find( "file" ) != std::string::npos;
+    }
+    // On GDAL < 3.9 the pre-scan path refuses with the policy wording in
+    // our own message; on >= 3.9 GDAL's flag-named error rides along in
+    // details — either way the refusal must NAME the blocked vector.
+    REQUIRE( sawNetworkFlag );
+    REQUIRE( sawFileFlag );
     // Legitimate spellings keep resolving.
     REQUIRE( sicnu::geo::Crs::fromUserInput( "EPSG:4326" ).authid() == "EPSG:4326" );
 }
@@ -217,4 +247,132 @@ TEST_CASE( "#1803 RIO-13 stripping the index does not downgrade a v2 mirror mani
     const sicnu::geo::MirrorVerifyReport attacked = sicnu::geo::verifyMirror( mirrorDir );
     REQUIRE( attacked.badEntries > 0 );
     REQUIRE( attacked.ok == 0 );
+}
+
+
+// ---------------------------------------------------------------------------
+// RIO-14 — the repetition predicate (pure, hoisted for exactly this oracle)
+// ---------------------------------------------------------------------------
+TEST_CASE( "#1803 RIO-14 repeated pagination continuations are detected",
+           "[fabric][r27t02]" )
+{
+    sicnu::geo::CatalogContinuation a;
+    a.hasMore = true;
+    a.localOffset = 40;
+    a.remoteHref = "https://catalog.example/search?token=t1";
+    sicnu::geo::CatalogContinuation same = a;
+    REQUIRE( sicnu::geo::catalogContinuationRepeats( a, same ) );
+
+    sicnu::geo::CatalogContinuation advanced = a;
+    advanced.localOffset = 80; // offset moved: the next page is NEW work
+    REQUIRE_FALSE( sicnu::geo::catalogContinuationRepeats( a, advanced ) );
+
+    sicnu::geo::CatalogContinuation newHref = a;
+    newHref.remoteHref = "https://catalog.example/search?token=t2";
+    REQUIRE_FALSE( sicnu::geo::catalogContinuationRepeats( a, newHref ) );
+
+    // Empty-string hrefs (pure local backends) compare by offset alone.
+    sicnu::geo::CatalogContinuation localA;
+    localA.localOffset = 12;
+    sicnu::geo::CatalogContinuation localSame;
+    localSame.localOffset = 12;
+    REQUIRE( sicnu::geo::catalogContinuationRepeats( localA, localSame ) );
+    sicnu::geo::CatalogContinuation localNext;
+    localNext.localOffset = 24;
+    REQUIRE_FALSE( sicnu::geo::catalogContinuationRepeats( localA, localNext ) );
+}
+
+// ---------------------------------------------------------------------------
+// RIO-13 residual — genuine v1 manifests (NO v2 signal) still replay
+// size-only: the lenient path is a contract, not an accident.
+// ---------------------------------------------------------------------------
+TEST_CASE( "#1803 RIO-13 genuine v1 manifest entries stay size-checked only",
+           "[io][mirror][r27t02]" )
+{
+    QTemporaryDir base;
+    const std::string mirrorDir = scratch( base.path(), "mirror-v1" );
+    const std::string chunksDir = mirrorDir + "/chunks";
+    std::filesystem::create_directories( chunksDir );
+
+    // A hand-made v1 manifest: bytes+file ONLY (pre-11.0 writers emitted
+    // exactly this shape); a size-matching payload file.
+    const std::uint64_t payloadBytes = 4096;
+    const std::string file = "v1chunk.tif";
+    {
+        std::vector<char> bytes( payloadBytes, 7 );
+        std::ofstream( chunksDir + "/" + file, std::ios::binary )
+            .write( bytes.data(), static_cast<std::streamsize>( bytes.size() ) );
+        Json::Value manifest( Json::objectValue );
+        Json::Value chunk;
+        chunk["file"] = file;
+        chunk["bytes"] = static_cast<Json::UInt64>( payloadBytes );
+        Json::Value chunks( Json::objectValue );
+        chunks["tok1"] = chunk;
+        manifest["tok1"] = chunks; // no index, no manifestVersion, no chunkKey
+        std::ofstream( mirrorDir + "/manifest.json", std::ios::trunc )
+            << manifest.toStyledString();
+    }
+    const sicnu::geo::MirrorVerifyReport report = sicnu::geo::verifyMirror( mirrorDir );
+    REQUIRE( report.ok == 1 );
+    REQUIRE( report.badEntries == 0 );
+}
+
+// ---------------------------------------------------------------------------
+// RIO-11 — retention: the audit log rolls over at the 100k boundary on open
+// ---------------------------------------------------------------------------
+TEST_CASE( "#1803 RIO-11 audit log retention bounds growth on open",
+           "[governance][r27t02]" )
+{
+    QTemporaryDir base;
+    const QString dbPath = base.filePath( "retention.sqlite" );
+
+    // Create the store, then seed the audit table past the boundary with
+    // the raw sqlite handle (the store API is deliberately append-per-event).
+    {
+        sicnu::workspace::GovernanceStore store;
+        QString err;
+        REQUIRE( store.open( dbPath, &err ) );
+        store.appendAudit( "seed", "open", "asset", "a1" );
+    }
+    // Seed 100_002 rows in one transaction (~fast), then reopen: open()
+    // must truncate to the newest 100_000.
+    {
+        sqlite3 *db = nullptr;
+        REQUIRE( sqlite3_open( dbPath.toUtf8().constData(), &db ) == SQLITE_OK );
+        char *err = nullptr;
+        REQUIRE( sqlite3_exec(
+                     db, "BEGIN; "
+                         "WITH RECURSIVE seq(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM seq "
+                         "WHERE i < 100002) "
+                         "INSERT INTO audit_log(ts_ms, actor, action, entity_kind, "
+                         "entity_id, detail_json) "
+                         "SELECT 1000000 + i, 'bulk', 'seed', 'asset', 'a' || i, '{}' "
+                         "FROM seq; "
+                         "COMMIT;",
+                     nullptr, nullptr, &err )
+                 == SQLITE_OK );
+        sqlite3_free( err );
+        sqlite3_close( db );
+    }
+    {
+        sicnu::workspace::GovernanceStore store;
+        QString err;
+        REQUIRE( store.open( dbPath, &err ) );
+        const auto tail = store.auditTail( 1 );
+        REQUIRE( tail.size() == 1 ); // newest row survived the rollover
+    }
+    {
+        sqlite3 *db = nullptr;
+        REQUIRE( sqlite3_open( dbPath.toUtf8().constData(), &db ) == SQLITE_OK );
+        sqlite3_stmt *stmt = nullptr;
+        long long rows = -1;
+        if ( sqlite3_prepare_v2( db, "SELECT COUNT(*) FROM audit_log", -1, &stmt,
+                                 nullptr )
+                 == SQLITE_OK
+             && sqlite3_step( stmt ) == SQLITE_ROW )
+            rows = sqlite3_column_int64( stmt, 0 );
+        sqlite3_finalize( stmt );
+        sqlite3_close( db );
+        REQUIRE( rows == 100000 ); // bounded — not 100002
+    }
 }

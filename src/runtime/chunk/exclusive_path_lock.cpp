@@ -76,6 +76,7 @@ ExclusivePathLock::Refusal ExclusivePathLock::tryAcquire( const std::string &loc
     {
         errorOut = "CreateFileW failed (" + std::to_string( GetLastError() ) + ") on "
                    + lockFilePath;
+        m_path.clear();
         return Refusal::OpenFailed;
     }
     OVERLAPPED overlapped{};
@@ -86,6 +87,7 @@ ExclusivePathLock::Refusal ExclusivePathLock::tryAcquire( const std::string &loc
         CloseHandle( handle );
         // ERROR_LOCK_VIOLATION is the "someone else holds it" answer.
         errorOut = "LockFileEx failed (" + std::to_string( err ) + ") on " + lockFilePath;
+        m_path.clear();
         return err == ERROR_LOCK_VIOLATION ? Refusal::HeldElsewhere : Refusal::LockFailed;
     }
     m_handle = handle;
@@ -117,6 +119,7 @@ ExclusivePathLock::Refusal ExclusivePathLock::tryAcquire( const std::string &loc
     {
         errorOut = std::string( "open failed: " ) + std::strerror( errno ) + " on "
                    + lockFilePath;
+        m_path.clear();
         return Refusal::OpenFailed;
     }
     if ( ::flock( fd, LOCK_EX | LOCK_NB ) != 0 )
@@ -125,6 +128,7 @@ ExclusivePathLock::Refusal ExclusivePathLock::tryAcquire( const std::string &loc
         ::close( fd );
         errorOut = std::string( "flock failed: " ) + std::strerror( err ) + " on "
                    + lockFilePath;
+        m_path.clear();
         // EWOULDBLOCK means another open description holds the lock; anything
         // else (EINTR aside) is an OS-level failure the caller must surface.
         return err == EWOULDBLOCK || err == EAGAIN ? Refusal::HeldElsewhere

@@ -119,18 +119,29 @@ Crs &Crs::operator=( Crs &&other ) noexcept
   return *this;
 }
 
-namespace
+/// See crs_policy.h: the shared safe user-input CRS import (RIO-12).
+OGRErr osrSetFromUserInputNoNetworkNoFile( OGRSpatialReferenceH handle,
+                                           const char *text )
 {
-/// RIO-12 (#1803): user-input CRS definitions must never reach the network
-/// or the filesystem: plain OSRSetFromUserInput happily fetches "http://..."
-/// and opens file paths. The Ex form denies both explicitly.
-OGRErr setUserInputNoNetworkNoFile( OGRSpatialReferenceH handle, const char *text )
-{
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 9, 0 )
   const char *const options[] = { "ALLOW_NETWORK_ACCESS=NO", "ALLOW_FILE_ACCESS=NO",
                                   nullptr };
   return OSRSetFromUserInputEx( handle, text, options );
+#else
+  const std::string input( text );
+  const auto hasNetworkSpelling = input.rfind( "http://", 0 ) == 0
+                                  || input.rfind( "https://", 0 ) == 0
+                                  || input.rfind( "ftp://", 0 ) == 0;
+  // File shapes: an absolute path, a Windows drive letter or an explicit
+  // file:// scheme. Relative names are PROJ authority lookups (safe).
+  const auto hasFileSpelling = input.rfind( "file://", 0 ) == 0 || !input.empty()
+                               && ( input[0] == '/'
+                                    || ( input.size() > 2 && input[1] == ':' ) );
+  if ( hasNetworkSpelling || hasFileSpelling )
+    return OGRERR_FAILURE; // typed refusal upstream; never fetch/open
+  return OSRSetFromUserInput( handle, text );
+#endif
 }
-} // namespace
 
 Crs Crs::fromAuthid( const std::string &authid )
 {
@@ -147,7 +158,7 @@ Crs Crs::fromAuthid( const std::string &authid )
   }
   else
   {
-    error = setUserInputNoNetworkNoFile( handle, authid.c_str() );
+    error = osrSetFromUserInputNoNetworkNoFile( handle, authid.c_str() );
   }
   if ( error != OGRERR_NONE )
   {
@@ -185,7 +196,7 @@ Crs Crs::fromUserInput( const std::string &text )
   if ( text.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "fromUserInput: empty CRS text" );
   OGRSpatialReferenceH handle = OSRNewSpatialReference( nullptr );
-  const OGRErr error = setUserInputNoNetworkNoFile( handle, text.c_str() );
+  const OGRErr error = osrSetFromUserInputNoNetworkNoFile( handle, text.c_str() );
   if ( error != OGRERR_NONE )
   {
     OSRDestroySpatialReference( handle );
@@ -194,7 +205,13 @@ Crs Crs::fromUserInput( const std::string &text )
     const std::string gdalError = lastCplError();
     if ( !gdalError.empty() )
       details["gdal_error"] = gdalError;
-    throw GeoError( ErrorCode::InvalidCrs, "Cannot resolve CRS from user input", details );
+    // The GDAL refusal (e.g. "... due to ALLOW_NETWORK_ACCESS=NO") rides in
+    // the MESSAGE too: callers diagnosing logs must see WHICH vector was
+    // blocked without digging into details.
+    const std::string message =
+        "Cannot resolve CRS from user input"
+        + ( gdalError.empty() ? std::string() : " (" + gdalError + ")" );
+    throw GeoError( ErrorCode::InvalidCrs, message, details );
   }
   return Crs( importAndValidate( handle, ErrorCode::InvalidCrs, "Cannot resolve CRS from user input", text ) );
 }

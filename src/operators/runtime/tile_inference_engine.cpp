@@ -1,5 +1,6 @@
 // src/operators/runtime/tile_inference_engine.cpp
 #include "operators/runtime/tile_inference_engine.h"
+#include "geospatial/crs/crs_policy.h"
 
 #include "operators/runtime/eo_preflight.h"
 #include "operators/runtime/model_publish.h"
@@ -158,8 +159,14 @@ int compareCrs( const QString &primaryCrs, const QString &otherCrs )
     return -1;
   OGRSpatialReference primary;
   OGRSpatialReference other;
-  if ( primary.SetFromUserInput( primaryCrs.toUtf8().constData() ) != OGRERR_NONE
-       || other.SetFromUserInput( otherCrs.toUtf8().constData() ) != OGRERR_NONE )
+  // Dataset-carried projections are untrusted input — RIO-12: never let a
+  // CRS string fetch a URL or open a file.
+  if ( sicnu::geo::osrSetFromUserInputNoNetworkNoFile(
+           OGRSpatialReference::ToHandle( &primary ), primaryCrs.toUtf8().constData() )
+       != OGRERR_NONE
+       || sicnu::geo::osrSetFromUserInputNoNetworkNoFile(
+              OGRSpatialReference::ToHandle( &other ), otherCrs.toUtf8().constData() )
+              != OGRERR_NONE )
     return 1; // unparsable declarations cannot be verified equal
   return primary.IsSame( &other ) ? 0 : 1;
 }

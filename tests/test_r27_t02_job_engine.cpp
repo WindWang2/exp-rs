@@ -183,6 +183,7 @@ TEST_CASE( "#1767 shutdown is bounded when a worker ignores cancellation; engine
     // engine, then recover the engine for reuse (test contract).
     neverReleased.set_value();
     eng.shutdownForTests();
+    eng.setShutdownJoinTimeoutMs( 5000 ); // hygiene: later cases keep the default
     REQUIRE_FALSE( eng.isTerminated() );
 
     // Reuse proof: a fresh job runs to completion after the recovery.

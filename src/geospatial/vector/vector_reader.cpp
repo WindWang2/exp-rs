@@ -431,7 +431,11 @@ VectorFieldStatistics VectorReader::fieldStatistics( const std::string &fieldNam
   // RIO-7 (#1803): the WHERE clause is caller-supplied OGR SQL with no
   // parameter binding — statement-breaking tokens are rejected BEFORE the
   // string is spliced, so a caller (or a tool parameter) cannot smuggle a
-  // second statement or a comment-truncation past the aggregate contract.
+  // SECOND STATEMENT or a comment-truncation into the aggregate call. Not a
+  // complete injection stop: compound SELECTs (UNION) need none of these
+  // tokens and remain possible against RDBMS-backed sources — in-tree
+  // callers pass trusted clauses only. (Literal strings legitimately
+  // containing ';'/'--'/'/*' are refused too: fail-closed by design.)
   if ( whereClause.find( ';' ) != std::string::npos
        || whereClause.find( "--" ) != std::string::npos
        || whereClause.find( "/*" ) != std::string::npos )

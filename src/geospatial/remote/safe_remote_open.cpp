@@ -30,6 +30,8 @@ const char *safeOpenStatusName( SafeOpenStatus status )
       return "private-target";
     case SafeOpenStatus::CacheUnavailable:
       return "cache-unavailable";
+    case SafeOpenStatus::GuardUnavailable:
+      return "guard-unavailable";
   }
   return "unknown";
 }
@@ -48,6 +50,8 @@ const char *SafeRemotePathResult::code() const
       return "remote.open.private_target";
     case SafeOpenStatus::CacheUnavailable:
       return "remote.open.cache_unavailable";
+    case SafeOpenStatus::GuardUnavailable:
+      return "remote.open.guard_unavailable";
   }
   return "remote.open.unknown";
 }
@@ -93,14 +97,29 @@ SafeRemotePathResult safeRemoteRasterPath( const std::string &urlOrVsicurl )
   }
 
   // 4. Guarded transport gate: the range cache's VSI handler owns the actual
-  //    fetches (per-hop egress policy, redirect guard, DNS pin). Without it
-  //    there is NO guarded path — refuse rather than degrade to raw
-  //    /vsicurl/ (the exact bypass this API exists to close).
+  //    fetches. Without it there is NO guarded path — refuse rather than
+  //    degrade to raw /vsicurl/ (the exact bypass this API exists to close).
   if ( !RemoteRangeCache::installed() )
   {
     result.status = SafeOpenStatus::CacheUnavailable;
     result.message = "safe remote open: remote range cache is not installed — "
                      "refusing to open unguarded: "
+                     + url;
+    return result;
+  }
+  // 4b. Guard POSTURE gate (R2-F5): the per-hop egress policy / redirect
+  //     guard / DNS pinning only arm when the private-network policy is on
+  //     (process-wide or in the cache config). With neither engaged the Ok
+  //     path would ride a transport that follows redirects unconditionally —
+  //     redirect-to-private SSRF would survive this verdict. Refuse rather
+  //     than return an unguarded "guarded" path.
+  if ( !offline::blockPrivateNetworks()
+       && !RemoteRangeCache::currentConfig().blockPrivateNetworks )
+  {
+    result.status = SafeOpenStatus::GuardUnavailable;
+    result.message = "safe remote open: egress policy is not engaged "
+                     "(block-private-networks off in process and range-cache "
+                     "config) — refusing to open unguarded: "
                      + url;
     return result;
   }

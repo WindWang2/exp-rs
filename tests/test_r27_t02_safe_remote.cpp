@@ -2,10 +2,11 @@
 // the safe remote open authority refuses every unguarded path and maps
 // legal https COGs onto the guarded range-cache transport.
 //
-// No test here touches the network: refusals are judged from URL shape and
-// process flags alone (that is the point — an unauthorized target must be
-// refused BEFORE any socket could open), and the Ok case asserts the path
-// mapping, not a fetch.
+// Refusals are judged from URL shape and process flags: an unauthorized
+// target is refused BEFORE any socket could open. (Caveat, honestly: the
+// private-net gate resolves arbitrary HOSTNAMES via getaddrinfo to judge
+// their addresses — the literal-IP cases below never do; the Ok case also
+// resolves example.com. Nothing FETCHES; DNS lookups can still occur.)
 #include <catch2/catch_test_macros.hpp>
 
 #include "data/providers/remote_source_cache.h"
@@ -14,6 +15,7 @@
 #include "geospatial/remote/safe_remote_open.h"
 
 using namespace sicnu::geo::remote;
+using sicnu::geo::RangeCacheConfig;
 using sicnu::geo::RemoteRangeCache;
 
 namespace
@@ -101,11 +103,28 @@ TEST_CASE( "#1765 safe open: legal https maps onto the guarded range-cache path"
            "[remote][r27t02][safe_open]" )
 {
     RemoteRangeCache::uninstall();
-    RemoteRangeCache::install( {} );
+    RangeCacheConfig config; // default…
+    config.blockPrivateNetworks = true; // …but the guard posture ENGAGED:
+    // without it the cache transport follows redirects unconditionally and
+    // safeRemoteRasterPath refuses GuardUnavailable (R2-F5) instead of
+    // handing back an unguarded "guarded" path.
+    RemoteRangeCache::install( config );
     struct CacheGuard
     {
         ~CacheGuard() { RemoteRangeCache::uninstall(); }
     } cacheGuard;
+
+    // Unguarded posture refusal: same install with the policy OFF fails
+    // closed (proves the posture gate, not just the install gate).
+    {
+        RemoteRangeCache::uninstall();
+        RemoteRangeCache::install( {} );
+        const auto unguarded = safeRemoteRasterPath( "https://example.com/public.tif" );
+        REQUIRE( unguarded.status == SafeOpenStatus::GuardUnavailable );
+        REQUIRE( unguarded.path.empty() );
+        RemoteRangeCache::uninstall();
+        RemoteRangeCache::install( config );
+    }
 
     const auto r = safeRemoteRasterPath( "https://example.com/public.tif" );
     REQUIRE( r.status == SafeOpenStatus::Ok );
@@ -127,8 +146,13 @@ TEST_CASE( "#1803 RIO-6 RemoteDatasetPool::acquire routes remote URLs through th
     REQUIRE_FALSE( static_cast<bool>( sicnu::data::RemoteDatasetPool::instance().acquire(
         "/vsicurl/https://169.254.169.254/never.tif", GDAL_OF_RASTER ) ) );
     // No guarded transport installed (whatever earlier cases left): public
-    // remote URL also fails closed now instead of a raw /vsicurl/ open.
+    // remote URL also fails closed now instead of a raw /vsicurl/ open
+    // (CacheUnavailable; and with a cache but no policy: GuardUnavailable).
     RemoteRangeCache::uninstall();
     REQUIRE_FALSE( static_cast<bool>( sicnu::data::RemoteDatasetPool::instance().acquire(
         "/vsicurl/https://example.com/never.tif", GDAL_OF_RASTER ) ) );
+    RemoteRangeCache::install( {} );
+    REQUIRE_FALSE( static_cast<bool>( sicnu::data::RemoteDatasetPool::instance().acquire(
+        "/vsicurl/https://example.com/never.tif", GDAL_OF_RASTER ) ) );
+    RemoteRangeCache::uninstall();
 }

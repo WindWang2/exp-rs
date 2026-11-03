@@ -26,6 +26,10 @@
 //   * re-entrant acquisition by the SAME process through a SECOND instance
 //     conflicts too (separate open descriptions), so two threads in one
 //     app are mutually excluded the same way two processes are.
+//   * scope: LOCAL filesystems. Linux NFS flock() is client-local by
+//     default — two processes on DIFFERENT hosts sharing a scratch dir can
+//     both "acquire" (fcntl/F_SETLK would be the network-visible form;
+//     out of scope until a network-scratch use case exists).
 #pragma once
 
 #include <string>

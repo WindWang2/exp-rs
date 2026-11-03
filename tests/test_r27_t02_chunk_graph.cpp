@@ -120,6 +120,19 @@ TEST_CASE( "#1743 a rejected duplicate join leaves the inputs consumable (strong
     REQUIRE( sunk == 2 );
 }
 
+TEST_CASE( "#1743 addJoin rejects out-of-range node ids at runtime",
+           "[chunk][graph][r27t02]" )
+{
+    ChunkGraph graph;
+    const auto src = graph.addSource( countedSource( 1, 1.f ) );
+    REQUIRE_THROWS_AS( graph.addJoin( { src, src + 100 }, []( std::vector<TilePayload> && )
+                                      { return TilePayload{}; } ),
+                       std::logic_error );
+    REQUIRE_THROWS_AS( graph.addJoin( { -1 }, []( std::vector<TilePayload> && )
+                                      { return TilePayload{}; } ),
+                       std::logic_error );
+}
+
 TEST_CASE( "#1803 RIO-3 addJoin({}) is a runtime rejection, not an assert",
            "[chunk][graph][r27t02]" )
 {

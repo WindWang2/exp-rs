@@ -8,6 +8,7 @@
 
 #include "platform/durable_sidecar.h"
 
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -102,7 +103,8 @@ int ImportSessionSummary::pendingCount() const
 QJsonObject ImportSessionSummary::toJson() const
 {
     QJsonObject root;
-    root.insert( QStringLiteral( "schema" ), QStringLiteral( "sicnu.import.session/1" ) );
+    root.insert( QStringLiteral( "schema" ),
+                 QStringLiteral( "sicnu.import.session/%1" ).arg( kSchemaVersion ) );
     root.insert( QStringLiteral( "state" ), stateName( state ) );
     root.insert( QStringLiteral( "registered" ), registeredCount() );
     root.insert( QStringLiteral( "refused" ), refusedCount() );
@@ -365,6 +367,9 @@ void ImportSession::saveJournal()
     }
     else
     {
+        // A later successful publish HEALS the error (R2-F7): one transient
+        // failure must not brand every subsequent summary non-durable.
+        m_journalError.clear();
         m_journalDurable = true;
     }
 }
@@ -387,26 +392,29 @@ void ImportSession::loadJournal()
     if ( root.value( QStringLiteral( "schema" ) ).toString()
          != QStringLiteral( "sicnu.import.session/1" ) )
         return;
+    // Path-keyed matching (R2-F7): a reordered or extended source list must
+    // not silently drop the resume state of every item after the first
+    // positional mismatch.
+    QHash<QString, QJsonObject> journaled;
     const QJsonArray items = root.value( QStringLiteral( "items" ) ).toArray();
-    std::size_t i = 0;
     for ( const auto &value : items )
     {
-        if ( i >= m_items.size() )
-            break;
         const QJsonObject j = value.toObject();
-        if ( j.value( QStringLiteral( "path" ) ).toString() != m_items[ i ].path )
-        {
-            ++i;
+        journaled.insert( j.value( QStringLiteral( "path" ) ).toString(), j );
+    }
+    for ( auto &item : m_items )
+    {
+        const auto it = journaled.constFind( item.path );
+        if ( it == journaled.constEnd() )
             continue;
-        }
+        const QJsonObject j = *it;
         const QString state = j.value( QStringLiteral( "state" ) ).toString();
         if ( state == QLatin1String( "registered" ) || state == QLatin1String( "skipped" ) )
-            m_items[ i ].state = ImportSessionItemState::Skipped;
+            item.state = ImportSessionItemState::Skipped;
         else if ( state == QLatin1String( "refused" ) )
-            m_items[ i ].state = ImportSessionItemState::Refused;
-        m_items[ i ].assetId = j.value( QStringLiteral( "asset_id" ) ).toString();
-        m_items[ i ].message = j.value( QStringLiteral( "message" ) ).toString();
-        ++i;
+            item.state = ImportSessionItemState::Refused;
+        item.assetId = j.value( QStringLiteral( "asset_id" ) ).toString();
+        item.message = j.value( QStringLiteral( "message" ) ).toString();
     }
     // A loaded journal implies prior progress: the session starts resumable
     // from Cancelled/Failed semantics; resume() re-runs Pending items.

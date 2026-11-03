@@ -7,8 +7,10 @@
  * DNS pinning — #1456/#1485/#1545). A raw "/vsicurl/<href>" handed to
  * GDALOpenEx bypasses ALL of it (CPLHTTPFetch follows redirects
  * unconditionally and consults its own resolver), which is exactly the hole
- * the STAC browser dialog had. This header is the stable backend API every
- * caller (dialogs, RemoteDatasetPool, CLI) uses instead:
+ * the STAC browser dialog HAD (the dialog's own rewire belongs to the
+ * workbench track). This header is the stable backend API for adopters —
+ * RemoteDatasetPool::acquire routes through it today; dialogs/CLI adopt it
+ * as they migrate:
  *
  *     const auto r = geo::remote::safeRemoteRasterPath( href );
  *     if ( !r ) { surface r.code() + r.message; }
@@ -19,14 +21,16 @@
  *                     and unwrapped); anything else is a typed refusal.
  *   2. offline gate — offline mode refuses before any socket could open.
  *   3. private-net  — loopback / RFC 1918 / link-local / cloud-metadata
- *      deny-by-default (literal IPs and well-known private NAMES; no DNS
- *      needed, so the refusal itself never touches the network). Deeper
- *      defenses (per-hop redirect policy, DNS rebinding pin) are enforced
- *      by the range cache transport on every actual fetch.
- *   4. cache gate   — the range cache must be installed; the returned path
- *                     is its VSI prefix path. When the cache is not
- *                     installed this REFUSES (CacheUnavailable) instead of
- *                     degrading to an unguarded /vsicurl/ open.
+ *      deny-by-default. IP literals and well-known private NAMES are judged
+ *      without DNS; an arbitrary hostname resolves (getaddrinfo) to judge
+ *      its addresses — the one place this gate can touch the network, and
+ *      the reason callers should keep it off latency-sensitive threads.
+ *   4. cache gate   — the range cache must be installed AND the egress
+ *      policy engaged (process-wide block-private-networks, or
+ *      RangeCacheConfig::blockPrivateNetworks): without the policy the
+ *      cache's transport follows redirects unconditionally, so the Ok path
+ *      would not actually be guarded. CacheUnavailable / GuardUnavailable
+ *      refuse instead of degrading to an unguarded /vsicurl/ open.
  *
  * Qt-free; typed statuses, no exceptions for flow control.
  ***************************************************************************/
@@ -45,7 +49,11 @@ enum class SafeOpenStatus : std::uint8_t
   SchemeRefused,     ///< not an http(s) remote URL (after /vsicurl/ unwrap)
   OfflineRefused,    ///< process offline mode engaged
   PrivateTarget,     ///< loopback / private / link-local / cloud-metadata
-  CacheUnavailable   ///< range cache not installed — no guarded transport
+  CacheUnavailable,  ///< range cache not installed — no guarded transport
+  GuardUnavailable   ///< cache present but the egress policy (per-hop
+                     ///< redirect guard / DNS pinning) is not engaged — an
+                     ///< Ok path without it would follow redirects
+                     ///< unconditionally (R2-F5)
 };
 
 struct SafeRemotePathResult

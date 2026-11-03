@@ -50,6 +50,14 @@
 namespace sicnu::geo
 {
 
+/// RIO-14 (#1803): true when @p next is byte-identical to @p previous in the
+/// pagination sense (same local offset AND same remote href) — the next
+/// request would replay the page just served. The catalog walk stops on
+/// this instead of spending its whole page budget on duplicate requests.
+/// Pure predicate, exported for the regression oracle.
+bool catalogContinuationRepeats( const class CatalogContinuation &previous,
+                                 const class CatalogContinuation &next );
+
 /// The declarative input. Either a catalog URI (local tree or STAC API
 /// root) OR an in-memory record set — at least one must be present.
 struct FabricIntent
