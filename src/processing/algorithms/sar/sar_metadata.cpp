@@ -58,26 +58,85 @@ double demUnitScaleFromName( const QString &declaredUnit, QString *appliedUnit )
     // Trim: a declared " feet" (leading/trailing whitespace from a hand-edited
     // or generated sidecar) must resolve like "feet", not fall through to the
     // assumed-metres branch.
+    //
+    // #1739: alias table is case/whitespace tolerant and covers the common
+    // non-metre DEM units; an UNRECOGNIZED non-empty declaration must not
+    // silently scale as metres (declared "cm" used to apply 1.0 → 100×
+    // heights). Unknown names keep scale 1.0 but mark the resolved label so
+    // operators can refuse (isKnownDemUnitName).
     const QString unit = declaredUnit.trimmed().toLower();
     double scale = 1.0;
     QString resolved = QStringLiteral( "meters" );
-    if ( unit == QLatin1String( "feet" ) )
+    if ( unit.isEmpty() || unit == QLatin1String( "meters" )
+         || unit == QLatin1String( "metres" ) || unit == QLatin1String( "meter" )
+         || unit == QLatin1String( "metre" ) || unit == QLatin1String( "m" ) )
+    {
+        scale = 1.0;
+        resolved = QStringLiteral( "meters" );
+    }
+    else if ( unit == QLatin1String( "feet" ) || unit == QLatin1String( "foot" )
+              || unit == QLatin1String( "ft" ) )
     {
         scale = 0.3048;
-        resolved = unit;
+        resolved = QStringLiteral( "feet" );
     }
-    else if ( unit == QLatin1String( "decimeters" ) )
+    else if ( unit == QLatin1String( "us_survey_foot" )
+              || unit == QLatin1String( "survey_foot" )
+              || unit == QLatin1String( "survey foot" )
+              || unit == QLatin1String( "us survey foot" )
+              || unit == QLatin1String( "us-ft" ) )
+    {
+        scale = 1200.0 / 3937.0;
+        resolved = QStringLiteral( "us_survey_foot" );
+    }
+    else if ( unit == QLatin1String( "inches" ) || unit == QLatin1String( "inch" )
+              || unit == QLatin1String( "in" ) )
+    {
+        scale = 0.0254;
+        resolved = QStringLiteral( "inches" );
+    }
+    else if ( unit == QLatin1String( "decimeters" ) || unit == QLatin1String( "decimetres" )
+              || unit == QLatin1String( "decimeter" ) || unit == QLatin1String( "decimetre" )
+              || unit == QLatin1String( "dm" ) )
     {
         scale = 0.1;
-        resolved = unit;
+        resolved = QStringLiteral( "decimeters" );
     }
-    else if ( !unit.isEmpty() && unit != QLatin1String( "meters" ) )
+    else if ( unit == QLatin1String( "centimeters" ) || unit == QLatin1String( "centimetres" )
+              || unit == QLatin1String( "centimeter" ) || unit == QLatin1String( "centimetre" )
+              || unit == QLatin1String( "cm" ) )
+    {
+        scale = 0.01;
+        resolved = QStringLiteral( "centimeters" );
+    }
+    else if ( unit == QLatin1String( "millimeters" ) || unit == QLatin1String( "millimetres" )
+              || unit == QLatin1String( "millimeter" ) || unit == QLatin1String( "millimetre" )
+              || unit == QLatin1String( "mm" ) )
+    {
+        scale = 0.001;
+        resolved = QStringLiteral( "millimeters" );
+    }
+    else if ( unit == QLatin1String( "kilometers" ) || unit == QLatin1String( "kilometres" )
+              || unit == QLatin1String( "kilometer" ) || unit == QLatin1String( "kilometre" )
+              || unit == QLatin1String( "km" ) )
+    {
+        scale = 1000.0;
+        resolved = QStringLiteral( "kilometers" );
+    }
+    else
     {
         resolved = QStringLiteral( "meters (assumed; declared '" ) + unit + "')";
     }
     if ( appliedUnit )
         *appliedUnit = resolved;
     return scale;
+}
+
+bool isKnownDemUnitName( const QString &unit )
+{
+    QString applied;
+    demUnitScaleFromName( unit, &applied );
+    return !applied.contains( QLatin1String( "assumed" ) );
 }
 
 double demUnitScaleToMetres( const GdalDatasetWrapper &ds, QString *appliedUnit )

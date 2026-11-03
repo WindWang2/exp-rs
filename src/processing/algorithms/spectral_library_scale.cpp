@@ -125,7 +125,7 @@ std::vector<float> MatchIndex::resampleQueryToBucket(
     // treats such an entry as incomparable (skipped, absent from the output).
     for ( const float v : resampled )
     {
-        if ( std::isnan( v ) )
+        if ( !std::isfinite( v ) )
             return {};
     }
     *ok = true;

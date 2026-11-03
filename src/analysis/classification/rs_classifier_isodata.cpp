@@ -298,6 +298,36 @@ bool RsClassifierIsodata::fit( const cv::Mat &X, const cv::Mat &y )
       break;
   }
 
+  // OS-21 (#1801): the loop can exit right after a split/merge/discard with
+  // centres that were never re-assigned against the samples (the convergence
+  // check sits before those structural steps). One final assignment + mean
+  // pass makes the published centres the exact means of the final partition;
+  // empty clusters keep their seed position instead of collapsing to NaN.
+  {
+    const int kCount = centers.rows;
+    if ( kCount > 0 && n > 0 )
+    {
+      std::vector<int> counts( kCount, 0 );
+      cv::Mat sums( kCount, d, CV_64F, cv::Scalar( 0.0 ) );
+      for ( int i = 0; i < n; ++i )
+      {
+        const int k = nearestCenter( centers, data.ptr<float>( i ), d );
+        ++counts[k];
+        const float *x = data.ptr<float>( i );
+        for ( int j = 0; j < d; ++j )
+          sums.at<double>( k, j ) += x[j];
+      }
+      cv::Mat updated( kCount, d, CV_32F );
+      for ( int k = 0; k < kCount; ++k )
+        for ( int j = 0; j < d; ++j )
+          updated.at<float>( k, j ) =
+            counts[k] > 0
+              ? static_cast<float>( sums.at<double>( k, j ) / counts[k] )
+              : centers.at<float>( k, j );
+      centers = updated;
+    }
+  }
+
   m_centers = centers;
   SICNU_LOG_INFO( SicnuLogTags::Classification,
                   QString( "ISODATA training complete: %1 clusters" ).arg( m_centers.rows ) );
