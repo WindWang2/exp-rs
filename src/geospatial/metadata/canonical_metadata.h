@@ -158,7 +158,10 @@ struct FieldInfo
 struct VectorLayerInfo
 {
     std::string name;
-    std::string geometryTypeName;   ///< "Point", "Polygon", "MultiPolygon", "None", ...
+    // swarm-review GEO-1: this carries OGRGeometryTypeToName's DISPLAY spelling
+    // ("Line String", "Multi Polygon", "3D Point", "Unknown (any)", "None"),
+    // not the compact WKT dialect — VectorWriter accepts both.
+    std::string geometryTypeName;   ///< OGRGeometryTypeToName output ("Point", "Line String", "Multi Polygon", "3D Point", "None", ...)
     std::int64_t featureCount = -1; ///< -1 = not cheaply available
     bool featureCountExact = false; ///< true when driver reported an exact count
     CrsInfo crs;

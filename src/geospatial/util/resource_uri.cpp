@@ -29,9 +29,15 @@ struct VsiPrefixEntry
 
 /// GDAL VSI virtual-file prefixes the foundation recognizes. Network families
 /// classify as VsiRemote, local/memory containers as VsiVirtual.
-const std::array<VsiPrefixEntry, 15> &vsiPrefixes()
+/// swarm-review GEO-8: this table is the CLASSIFICATION half of the network
+/// gate — offline_gate.cpp's kNetworkVsi is the refusal half. It drifted:
+/// /vsiwebhdfs/, /vsiadls_streaming/ and /vsioss_streaming/ were refused as
+/// remote by the gate while ResourceUri::parse classified the same handle as
+/// an invalid local path. The two tables must name the same network family
+/// (tests/test_swarm_fix_geospatial.cpp asserts the containment).
+const std::array<VsiPrefixEntry, 18> &vsiPrefixes()
 {
-  static const std::array<VsiPrefixEntry, 15> kPrefixes{ {
+  static const std::array<VsiPrefixEntry, 18> kPrefixes{ {
     { "/vsicurl/", true },
     { "/vsicurl_streaming/", true },
     { "/vsis3/", true },
@@ -41,8 +47,11 @@ const std::array<VsiPrefixEntry, 15> &vsiPrefixes()
     { "/vsiaz/", true },
     { "/vsiaz_streaming/", true },
     { "/vsiadls/", true },
+    { "/vsiadls_streaming/", true },
     { "/vsihdfs/", true },
+    { "/vsiwebhdfs/", true },
     { "/vsioss/", true },
+    { "/vsioss_streaming/", true },
     { "/vsiswift/", true },
     { "/vsizip/", false },
     { "/vsitar/", false },

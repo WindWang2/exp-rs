@@ -809,6 +809,13 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
       bool sourceHasNoData = false;
       bool sourceNoDataIsNaN = false;
       double sourceNoDataValue = 0.0;
+      // swarm-review GEO-4: the scatter's BandInfo is built by hand, and it
+      // used to omit dtype — bandSentinelMatches then skipped its Float32
+      // narrowing comparison (#874) and a float-quantized sentinel matched
+      // nothing, marking NoData pixels valid. Carry the source band's dtype
+      // out of both branches (same copy-out discipline as the NoData facts:
+      // the mirrored reader dies with this scope).
+      std::string sourceDtype;
       if ( mirrorHitPath.empty() )
       {
         values = reader.readWindow( { band }, readWindow, options.maxWindowBytes );
@@ -819,6 +826,7 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
         sourceHasNoData = bandInfo->hasNoData;
         sourceNoDataIsNaN = bandInfo->noDataIsNaN;
         sourceNoDataValue = bandInfo->noDataValue;
+        sourceDtype = bandInfo->dtype;
       }
       else
       {
@@ -833,6 +841,7 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
         sourceHasNoData = bandInfo.hasNoData;
         sourceNoDataIsNaN = bandInfo.noDataIsNaN;
         sourceNoDataValue = bandInfo.noDataValue;
+        sourceDtype = bandInfo.dtype;
         // The scatter maps world → ASSET pixels; the chunk buffer is
         // chunk-local. Bound the scatter by the chunk's ASSET-pixel window
         // (review R13): origin-only chunks worked by accident before.
@@ -851,6 +860,7 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
       // FirstWins scatter (shared lambda above).
       BandInfo scatterBandInfo;
       scatterBandInfo.index = band;
+      scatterBandInfo.dtype = sourceDtype;
       scatterBandInfo.hasNoData = sourceHasNoData;
       scatterBandInfo.noDataValue = sourceNoDataValue;
       scatterBandInfo.noDataIsNaN = sourceNoDataIsNaN;

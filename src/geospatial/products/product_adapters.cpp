@@ -67,7 +67,11 @@ constexpr std::uintmax_t kMaxSidecarBytes = 4ull * 1024 * 1024;
 
 bool readFileText( const std::string &path, std::string &out )
 {
-  std::ifstream in( path, std::ios::binary );
+  // swarm-review GEO-6: open through the wide-char filesystem path — a
+  // narrow std::ifstream on Windows cannot address product directories with
+  // non-ANSI (Chinese) names and fails silently (same fix as the CN reader
+  // in cn_product_metadata.cpp).
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in.is_open() )
     return false;
   // Genuinely bounded read (chunked, refuse when the total exceeds the

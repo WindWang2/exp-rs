@@ -34,6 +34,8 @@ OGRwkbGeometryType geometryTypeFromName( const std::string &name )
     const char *name;
     OGRwkbGeometryType type;
   };
+  // Compact OGR WKT dialect — the spelling operator schemas and direct
+  // callers use ("LineString", "MultiPolygon", ...).
   static const Mapping kMappings[] = {
     { "Point", wkbPoint },
     { "LineString", wkbLineString },
@@ -45,7 +47,63 @@ OGRwkbGeometryType geometryTypeFromName( const std::string &name )
     { "Unknown", wkbUnknown },
     { "None", wkbNone },
   };
+  // swarm-review GEO-1: OGR's display dialect — spaced base names, "3D "
+  // 25D prefixes, curve spellings, "Unknown (any)". This is what
+  // OGRGeometryTypeToName actually emits, and canonical_metadata.cpp:958 is
+  // the only producer of geometryTypeName, so this dialect — not the compact
+  // one above — is what every conversion carries. The table above knew none of
+  // these spellings, so Line/Multi/25D/collection layers fell through to
+  // wkbUnknown and create() threw: only Point/Polygon/None could convert.
+  // Every name below was verified against the runtime libgdal (GDAL 3.9).
+  // Curve types are named for round-tripping; drivers that cannot create them
+  // fail closed at layer creation. M/ZM ("Measured ..." / "3D Measured ...")
+  // spellings are deliberately absent: no supported driver creates an M layer,
+  // and an unmapped name still fails closed with its spelling in the details.
+  static const Mapping kDisplayNames[] = {
+    { "Line String", wkbLineString },
+    { "Multi Point", wkbMultiPoint },
+    { "Multi Line String", wkbMultiLineString },
+    { "Multi Polygon", wkbMultiPolygon },
+    { "Geometry Collection", wkbGeometryCollection },
+    { "Circular String", wkbCircularString },
+    { "Compound Curve", wkbCompoundCurve },
+    { "Curve Polygon", wkbCurvePolygon },
+    { "Multi Curve", wkbMultiCurve },
+    { "Multi Surface", wkbMultiSurface },
+    { "Curve", wkbCurve },
+    { "Surface", wkbSurface },
+    { "PolyhedralSurface", wkbPolyhedralSurface },
+    { "TIN", wkbTIN },
+    { "Triangle", wkbTriangle },
+    { "Unknown (any)", wkbUnknown },
+    { "3D Point", wkbPoint25D },
+    { "3D Line String", wkbLineString25D },
+    { "3D Polygon", wkbPolygon25D },
+    { "3D Multi Point", wkbMultiPoint25D },
+    { "3D Multi Line String", wkbMultiLineString25D },
+    { "3D Multi Polygon", wkbMultiPolygon25D },
+    { "3D Geometry Collection", wkbGeometryCollection25D },
+    // 25D curves use the ISO Z codes (1008..1017), not the 99-402 high bit.
+    { "3D Circular String", wkbCircularStringZ },
+    { "3D Compound Curve", wkbCompoundCurveZ },
+    { "3D Curve Polygon", wkbCurvePolygonZ },
+    { "3D Multi Curve", wkbMultiCurveZ },
+    { "3D Multi Surface", wkbMultiSurfaceZ },
+    { "3D Curve", wkbCurveZ },
+    { "3D Surface", wkbSurfaceZ },
+    { "3D PolyhedralSurface", wkbPolyhedralSurfaceZ },
+    { "3D TIN", wkbTINZ },
+    { "3D Triangle", wkbTriangleZ },
+    // The 25D flag on an unknown type carries no layer-creation meaning;
+    // flatten it so the fail-closed gate below keeps its meaning.
+    { "3D Unknown (any)", wkbUnknown },
+  };
   for ( const Mapping &mapping : kMappings )
+  {
+    if ( name == mapping.name )
+      return mapping.type;
+  }
+  for ( const Mapping &mapping : kDisplayNames )
   {
     if ( name == mapping.name )
       return mapping.type;

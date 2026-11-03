@@ -12,6 +12,7 @@
 
 #include "geospatial/gdal_guard.h"
 #include "geospatial/util/atomic_fs.h"
+#include "geospatial/util/gdal_compat.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -44,6 +45,24 @@ GDALDataType dataTypeFromName( const std::string &name, const std::string &conte
     details["dtype"] = name;
     throw GeoError( ErrorCode::Unsupported, "Complex pixel types are not supported by the write contract", details );
   }
+  // swarm-review GEO-11: 64-bit integers were accepted here but the
+  // writeWindow fidelity gate has no range case for them (out-of-range values
+  // saturated silently in GDAL), and RasterReader refuses to read the type
+  // back ("exceeds exact double representation" — doubles are exact only to
+  // 2^53). Refuse at create time so the writer stays symmetric with the
+  // reader instead of producing a raster nothing can re-open.
+#if SICNU_GDAL_INT64_DATATYPES
+  if ( type == GDT_Int64 || type == GDT_UInt64 )
+  {
+    Json::Value details;
+    details["dtype"] = name;
+    details["context"] = context;
+    throw GeoError( ErrorCode::Unsupported,
+                    "64-bit integer pixel types are not supported by the write contract "
+                    "(no exact double representation; the reader refuses them too)",
+                    details );
+  }
+#endif
   return type;
 }
 
