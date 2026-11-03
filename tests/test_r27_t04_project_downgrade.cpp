@@ -147,13 +147,18 @@ namespace
     REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
     file.write( xml.toUtf8() );
     file.close();
-    // Governance store gone too: nothing can re-serialize the governed state
-    // (same sidecar naming as WorkspaceService::defaultStorePathFor).
+    // Governance store UNAVAILABLE (#1747 precondition): deleting the db
+    // is not enough — openStore() would just recreate an empty one, and a
+    // live (empty) store makes the downgrade legal again (v3 from a fresh
+    // store). A DIRECTORY at the sidecar path makes the SQLite open fail,
+    // which is the actual "store unavailable" runtime condition.
     const QString sidecar =
       QFileInfo( projectPath ).dir().filePath(
         QFileInfo( projectPath ).completeBaseName() + QStringLiteral( ".governance.db" ) );
     if ( QFileInfo::exists( sidecar ) )
       QFile::remove( sidecar );
+    QDir().mkdir( sidecar );
+    REQUIRE( QFileInfo( sidecar ).isDir() );
   }
 
   QByteArray readFileBytes( const QString &path )
