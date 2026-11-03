@@ -60,7 +60,9 @@ bool changeMask(const float *diff, uint8_t *mask, size_t count, float threshold)
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Change mask: %1 pixels, threshold=%2" ).arg( count ).arg( threshold ) );
 
     for (size_t i = 0; i < count; ++i) {
-        if (std::isnan(diff[i]))
+        // Non-finite diff is NoData (#1752): +Inf >= threshold used to be
+        // classified as change (mask 1) and -Inf as no-change (0).
+        if (!std::isfinite(diff[i]))
             mask[i] = 255; // No data
         else
             mask[i] = (diff[i] >= threshold) ? 1 : 0;
@@ -131,7 +133,7 @@ bool cvaMagnitude(const float *const *beforeBands, const float *const *afterBand
                 return false;
             }
             const float d = afterBands[b][p] - beforeBands[b][p];
-            if (std::isnan(d)) {
+            if (!std::isfinite(d)) {
                 hasNan = true;
                 break;
             }
@@ -156,7 +158,7 @@ bool cvaMagnitudeBip(const float *beforeBip, const float *afterBip,
         bool hasNan = false;
         for (int b = 0; b < bandCount; ++b) {
             const float d = aRow[b] - bRow[b];
-            if (std::isnan(d)) {
+            if (!std::isfinite(d)) {
                 hasNan = true;
                 break;
             }

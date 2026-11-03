@@ -226,7 +226,11 @@ bool BandTools::processExtractBandsFile( const QString &sourcePath, const QStrin
         const double nd = src.bandNoDataValue( srcBand, &hasNodata );
         if ( hasNodata )
             dst.setBandNoDataValue( ob + 1, nd );
-        const char *bandKeys[] = { "SICNU_BAND_ROLE", "WAVELENGTH", "FWHM" };
+        // Band-level affine stamps travel with the band (mixed stacks carry
+        // them per band — #1740 review R2 P2-1).
+        const char *bandKeys[] = { "SICNU_BAND_ROLE", "WAVELENGTH", "FWHM",
+                                   SatelliteProducts::kNumericScaleKey,
+                                   SatelliteProducts::kNumericOffsetKey };
         for ( const char *key : bandKeys )
         {
             const QString v = src.bandMetadataItem( srcBand, key );
@@ -235,7 +239,8 @@ bool BandTools::processExtractBandsFile( const QString &sourcePath, const QStrin
         }
     }
     for ( const char *dsKey : { SatelliteProducts::kRadiometricStateKey,
-                                SatelliteProducts::kNumericScaleKey } )
+                                SatelliteProducts::kNumericScaleKey,
+                                SatelliteProducts::kNumericOffsetKey } )
     {
         const char *raw = GDALGetMetadataItem(
             static_cast<GDALDatasetH>( src.dataset() ), dsKey, nullptr );

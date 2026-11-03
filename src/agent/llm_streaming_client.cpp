@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QHostAddress>
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QSslError>
@@ -69,6 +70,32 @@ ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfil
   payload.request.setTransferTimeout( configuredTransferTimeoutMs() );
   payload.request.setHeader( QNetworkRequest::ContentTypeHeader, QStringLiteral( "application/json" ) );
 
+  // AS-015 (#1802): a Bearer key over plaintext http to a NON-loopback
+  // host would broadcast the credential to every hop. Loopback plaintext
+  // stays allowed (local runtimes: ollama, llama.cpp server, LM Studio);
+  // anything else must use https. The request is refused before it is
+  // sent — the payload carries the typed reason the error path emits.
+  if ( !profile.apiKey.isEmpty() )
+  {
+    const QUrl endpoint( endpointUrl );
+    // R1-F10: the full loopback range, not just the two canonical spellings
+    // — QHostAddress::isLoopback() covers 127.0.0.0/8, ::1 and the mapped
+    // forms; "localhost" names resolve here without a lookup.
+    const bool loopback =
+        endpoint.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0
+        || QHostAddress( endpoint.host() ).isLoopback();
+    const bool plaintextNonLoopback =
+        endpoint.scheme() == QStringLiteral( "http" ) && !loopback;
+    if ( plaintextNonLoopback )
+    {
+      payload.refusalReason = QStringLiteral(
+        "Refusing to send the API key over plaintext http to a non-loopback "
+        "host (%1); use an https endpoint or a local runtime."
+      ).arg( endpoint.host() );
+      return payload;
+    }
+  }
+
   if ( !profile.apiKey.isEmpty() )
   {
     payload.request.setRawHeader( "Authorization", QString( "Bearer %1" ).arg( profile.apiKey ).toUtf8() );
@@ -102,6 +129,16 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const Q
   ++m_streamGeneration;
 
   const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools );
+
+  // AS-015: a refused payload never reaches the network — the typed reason
+  // rides the same errorOccurred → finished path every other failure uses,
+  // so the copilot UI reports it like any provider error.
+  if ( !payload.refusalReason.isEmpty() )
+  {
+    emit errorOccurred( payload.refusalReason );
+    emit finished();
+    return;
+  }
 
   m_currentReply = m_networkManager->post( payload.request, payload.body );
 

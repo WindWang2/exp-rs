@@ -889,7 +889,7 @@ std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
                     bool hasOutOfRange = false;
                     for ( float v : resampledSpectrum )
                     {
-                        if ( std::isnan( v ) )
+                        if ( !std::isfinite( v ) )
                         {
                             hasOutOfRange = true;
                             break;

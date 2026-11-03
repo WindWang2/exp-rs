@@ -27,7 +27,9 @@ using namespace params;
 
 namespace {
 
-const std::vector<std::string> s_demUnits = { "meters", "feet", "decimeters" };
+const std::vector<std::string> s_demUnits = { "meters", "feet", "decimeters",
+                                           "centimeters", "millimeters",
+                                           "kilometers", "inches" };
 const std::vector<std::string> s_lookDirections = { "right", "left" };
 
 Json::Value makeSarInputContract() {
@@ -287,16 +289,18 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
         demUnit = declaredUnit.toStdString();
     }
     // Unit-name -> scale resolution is the shared sar_metadata helper (single
-    // owner of the mapping). An unknown unit keeps scale 1.0 with a warning,
-    // so a future unit only has to be added in one place.
+    // owner of the mapping). An unknown unit is a REFUSAL (#1739): assuming
+    // metres on a declared non-metre DEM misplaces heights by 100x/3.28x.
     QString appliedDemUnit;
     const double demUnitScale =
         sicnu::sar::demUnitScaleFromName( QString::fromStdString( demUnit ), &appliedDemUnit );
     if ( appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
     {
-        context.logWarning( "Unknown DEM unit '" + demUnit + "' (SICNU_DEM_UNIT); "
-                            "assuming meters" );
-        demUnit = "meters";
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "Unknown DEM unit '" + demUnit +
+                                  "' (SICNU_DEM_UNIT/demUnit); refusing to assume meters. "
+                                  "Declare a known unit (meters/feet/inches/dm/cm/mm/km) "
+                                  "or fix the DEM metadata.");
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).

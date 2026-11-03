@@ -29,6 +29,9 @@ class AgentOpsControlCenterPanel : public QWidget
     void setProjection(const sicnu::agent_ops::OpsProjection &projection);
     void setDelivery(const sicnu::agent_ops::FinalDelivery &delivery);
     void setCurrentDecisionJson(const QString &json);
+    /// Human-gate visibility (#1760): the current repair-approval state
+    /// (recorded / armed / typed refusal) as visible text.
+    void setApprovalStatus(const QString &status);
 
   signals:
     void pauseRequested();
@@ -41,6 +44,7 @@ class AgentOpsControlCenterPanel : public QWidget
     void updateControls(const Json::Value &controls);
 
     QLabel *m_header = nullptr;
+    QLabel *m_approvalStatus = nullptr;
     QTableWidget *m_timeline = nullptr;
     QTextEdit *m_decision = nullptr;
     QTextEdit *m_resources = nullptr;

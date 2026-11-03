@@ -271,11 +271,22 @@ GradeOutcome grade( const GradingRubric &rubric, const GradeEvidence &evidence )
     report.totalPoints = rubric.totalPoints;
     report.passingScore = rubric.passingScore;
     report.score = score;
+    // #1773 (WE-12): requiredStages used to be evaluated and reported but
+    // never gated the verdict — a student could Pass with a declared
+    // required stage missing (or out of order). A missing required stage
+    // keeps its earned evidence points but can never read as Pass; the
+    // score falls back to Partial so the teacher sees the gap.
+    bool requiredStageMissing = false;
+    for ( const StageOutcome &stage : report.requiredStageOutcomes )
+        if ( !stage.satisfied )
+            requiredStageMissing = true;
     if ( zeroViolated )
         report.verdict = ReportVerdict::Blocked;
-    else if ( score >= rubric.passingScore - kScoreEps )
+    else if ( score >= rubric.passingScore - kScoreEps && !requiredStageMissing )
         report.verdict = ReportVerdict::Pass;
-    else if ( score > kScoreEps )
+    else if ( score > kScoreEps || score >= rubric.passingScore - kScoreEps )
+        // The second disjunct is the #1773 downgrade: a pass-level score
+        // with a missing required stage lands here as Partial.
         report.verdict = ReportVerdict::Partial;
     else
         report.verdict = ReportVerdict::Fail;

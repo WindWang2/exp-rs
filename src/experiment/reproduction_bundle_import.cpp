@@ -7,12 +7,14 @@
 #include "reproduction_bundle_import.h"
 
 #include <cmath>
+#include <filesystem>
 
 #include "experiment_ids.h"
 #include "experiment_types.h"
 
 #include "dataset/dataset_store.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -32,10 +34,34 @@ Diagnostic importDiag( const QString &code, const QString &message )
     return Diagnostic{ code, message, DiagnosticSeverity::Error };
 }
 
-/// Loads one bundle JSON document; nullopt (with @p ok=false) when missing
-/// or unparsable.
+/// #1783 (WE-27): the member table from checksums.txt (name → sha256 hex).
+/// Every re-read of a member verifies the digest of the BYTES ACTUALLY READ
+/// against this table, so a file swapped between the integrity gate and the
+/// parse/copy use is caught at use time instead of being trusted.
+QHash<QString, QString> checksumTable( const QDir &dir )
+{
+    QHash<QString, QString> table;
+    QFile file( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
+    if ( !file.open( QIODevice::ReadOnly ) )
+        return table;
+    const QStringList lines = QString::fromUtf8( file.readAll() )
+                                  .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+    for ( QString line : lines )
+    {
+        if ( line.endsWith( QLatin1Char( '\r' ) ) )
+            line.chop( 1 );
+        if ( line.size() > 66 && line.indexOf( QStringLiteral( "  " ) ) == 64 )
+            table.insert( line.mid( 66 ), line.left( 64 ) );
+    }
+    return table;
+}
+
+/// Loads one bundle JSON document; nullopt (with a warning) when missing,
+/// unparsable, or its content no longer matches the verified checksum
+/// (#1783 verify-then-reopen TOCTOU: we hash the exact bytes we parse).
 std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
-                                     QStringList *warnings )
+                                     QStringList *warnings,
+                                     const QHash<QString, QString> &digests )
 {
     QFile file( dir.filePath( name ) );
     if ( !file.open( QIODevice::ReadOnly ) )
@@ -43,7 +69,20 @@ std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
         warnings->append( QStringLiteral( "%1 missing" ).arg( name ) );
         return std::nullopt;
     }
-    const QJsonDocument document = QJsonDocument::fromJson( file.readAll() );
+    const QByteArray bytes = file.readAll();
+    if ( const QString expected = digests.value( name ); !expected.isEmpty() )
+    {
+        const QString actual =
+            QString::fromLatin1( QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex() );
+        if ( actual != expected )
+        {
+            warnings->append( QStringLiteral( "%1 changed after integrity verification"
+                                              " (digest mismatch) — refusing to parse" )
+                                  .arg( name ) );
+            return std::nullopt;
+        }
+    }
+    const QJsonDocument document = QJsonDocument::fromJson( bytes );
     if ( !document.isObject() )
     {
         warnings->append( QStringLiteral( "%1 is not a JSON object" ).arg( name ) );
@@ -149,9 +188,14 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         }
     }
 
+    // #1783 (WE-27): snapshot the verified member digests once; every later
+    // read re-checks the bytes it actually consumed against them, closing
+    // the verify-then-reopen TOCTOU for the parse paths.
+    const QHash<QString, QString> verifiedDigests = checksumTable( dir );
+
     // 2. Schema gate.
     QStringList warnings;
-    const auto manifest = loadJson( dir, QStringLiteral( "manifest.json" ), &warnings );
+    const auto manifest = loadJson( dir, QStringLiteral( "manifest.json" ), &warnings, verifiedDigests );
     if ( !manifest )
     {
         report.warnings.append( warnings );
@@ -171,7 +215,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     report.originalRunId = manifest->value( QStringLiteral( "run_id" ) ).toString();
 
     // 3. Run document.
-    const auto runConfig = loadJson( dir, QStringLiteral( "run_config.json" ), &warnings );
+    const auto runConfig = loadJson( dir, QStringLiteral( "run_config.json" ), &warnings, verifiedDigests );
     if ( !runConfig )
     {
         report.warnings.append( warnings );
@@ -251,7 +295,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
 
     // Environment + software re-parsed through the strict readers; a foreign
     // document fails the import instead of half-populating the record.
-    if ( const auto environment = loadJson( dir, QStringLiteral( "environment.json" ), &warnings ) )
+    if ( const auto environment = loadJson( dir, QStringLiteral( "environment.json" ), &warnings, verifiedDigests ) )
     {
         const auto parsed = RunEnvironment::fromJson( *environment );
         if ( !parsed )
@@ -273,7 +317,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     warnings.clear();
 
     // Model pin (empty document = the run had no model identity).
-    if ( const auto modelRefs = loadJson( dir, QStringLiteral( "model_refs.json" ), &warnings ) )
+    if ( const auto modelRefs = loadJson( dir, QStringLiteral( "model_refs.json" ), &warnings, verifiedDigests ) )
     {
         run.setModelId( modelRefs->value( QStringLiteral( "model_id" ) ).toString() );
         run.setModelDigest( modelRefs->value( QStringLiteral( "model_digest" ) ).toString() );
@@ -394,7 +438,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     // process died between the two commits and stranded an orphan metric
     // row keyed to a run id that was never installed).
     std::optional<MetricRecord> metricToInstall;
-    if ( const auto metrics = loadJson( dir, QStringLiteral( "metrics.json" ), &warnings ) )
+    if ( const auto metrics = loadJson( dir, QStringLiteral( "metrics.json" ), &warnings, verifiedDigests ) )
     {
         if ( !metrics->isEmpty() )
         {
@@ -467,7 +511,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     {
         QStringList sliceWarnings;
         const auto provenance =
-            loadJson( dir, QStringLiteral( "provenance.json" ), &sliceWarnings );
+            loadJson( dir, QStringLiteral( "provenance.json" ), &sliceWarnings, verifiedDigests );
         if ( !provenance )
         {
             report.warnings.append( sliceWarnings );
@@ -730,15 +774,54 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     refusal = QStringLiteral( "resolves outside the bundle data/ directory" );
                 else if ( !verifiedMembers.contains( memberName ) )
                     refusal = QStringLiteral( "is not covered by checksums.txt" );
+                else
+                {
+                    // #1784 (WE-28): a hard link's canonical path IS the
+                    // data/ path, so the outside-directory check cannot see
+                    // it — a hard-linked host file would pass every gate
+                    // above and be copied out. Refuse shared inodes.
+                    std::error_code linkError;
+                    const quint32 links = std::filesystem::hard_link_count(
+                        entry.absoluteFilePath().toStdWString(), linkError );
+                    if ( linkError || links > 1 )
+                        refusal =
+                            QStringLiteral( "shares an inode with another file (hard link)" );
+                }
                 if ( !refusal.isEmpty() )
                 {
                     report.warnings.append( QStringLiteral( "refused to relocate %1: %2" )
                                                 .arg( entry.fileName(), refusal ) );
                     continue;
                 }
+                // #1783 (WE-27): read the source ONCE, hash exactly those
+                // bytes against the verified table, then write them out —
+                // the copy can never contain bytes the integrity gate did
+                // not vouch for, even if the file was swapped mid-import.
+                QFile source( entry.absoluteFilePath() );
+                if ( !source.open( QIODevice::ReadOnly ) )
+                {
+                    report.warnings.append(
+                        QStringLiteral( "cannot read %1" ).arg( entry.fileName() ) );
+                    continue;
+                }
+                const QByteArray bytes = source.readAll();
+                source.close();
+                const QString expectedDigest = verifiedDigests.value( memberName );
+                const QString actualDigest = QString::fromLatin1(
+                    QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex() );
+                if ( !expectedDigest.isEmpty() && actualDigest != expectedDigest )
+                {
+                    report.warnings.append(
+                        QStringLiteral( "%1 changed after integrity verification"
+                                        " (digest mismatch) — refused" )
+                            .arg( entry.fileName() ) );
+                    continue;
+                }
                 const QString destination = target.filePath( entry.fileName() );
                 QFile::remove( destination ); // relocation is last-writer-wins
-                if ( QFile::copy( entry.absoluteFilePath(), destination ) )
+                QFile destinationFile( destination );
+                if ( destinationFile.open( QIODevice::WriteOnly | QIODevice::Truncate )
+                     && destinationFile.write( bytes ) == bytes.size() )
                     ++report.relocatedFiles;
                 else
                     report.warnings.append(

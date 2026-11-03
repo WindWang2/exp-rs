@@ -197,8 +197,9 @@ const std::vector<MetaToolDef> &table()
           "(journal_directory,session_id,goal), reconcile (journal_directory,"
           "session_id — inspect a journal without resuming, incl. "
           "duplicate-submit hazards), status/timeline/export "
-          "(session_id), pause/cancel/clear_pause/clear_cancel, "
-          "approve_repair, actions.",
+          "(session_id), pause/cancel/clear_pause/clear_cancel, actions. "
+          "Repair approval is human-only: the operator mints it in the "
+          "local Control Center UI, never through this tool (#1733).",
           { { "action", "string", "One of the session surface actions.", true },
             { "goal", "string", "Session goal (run/resume).", false },
             { "intent", "string", "Intent hint, e.g. 'ndvi'.", false },
@@ -207,8 +208,7 @@ const std::vector<MetaToolDef> &table()
             { "session_id", "string", "Session id for resume/reconcile/status/export.", false },
             { "refs", "object", "Slot -> reference map (paths / asset ids) for run.", false },
             { "domain", "string", "Autonomy domain (default 'research').", false },
-            { "role", "string", "Autonomy role.", false },
-            { "approve", "boolean", "approve_repair: record one-shot pending approval.", false } } },
+            { "role", "string", "Autonomy role.", false } } },
     };
     return kMetaTools;
 }

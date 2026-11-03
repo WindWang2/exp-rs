@@ -103,7 +103,7 @@ TEST_CASE( "mosaic panel dispatches rs:mosaic, not a callable lambda", "[archite
                          QStringLiteral( "/src/app/panels/mosaic_panel.cpp" );
     QFile f( path );
     if ( !f.exists() )
-        SUCCEED( "panel not present in this build configuration" );
+        SKIP( "panel not present in this build configuration" );
     else
     {
         REQUIRE( f.open( QIODevice::ReadOnly | QIODevice::Text ) );

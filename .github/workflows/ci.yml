@@ -449,6 +449,10 @@ jobs:
           if ($LASTEXITCODE -ne 2) { throw "expected guard refusal (exit 2), got exit $LASTEXITCODE; output: $out" }
           if ($out -notmatch 'refusing unsafe --version') { throw "exit 2 but no refusal message; output: $out" }
           Write-Output "guard refused unsafe --version (exit 2)"
+          # #1734: GHA's pwsh wrapper exits with $LASTEXITCODE when the script
+          # ends — the asserted refusal (2) above would otherwise fail the
+          # green step right after the success message.
+          $global:LASTEXITCODE = 0
 
       # #1698: the Windows tier stayed compile-only, so install-rule rot
       # (missing INSTALL_RPATH targets, uninstalled worker) went unnoticed.

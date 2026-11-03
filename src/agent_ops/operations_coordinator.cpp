@@ -39,6 +39,8 @@ std::string approvalCheckToError(const char *check)
         return "APPROVAL_WRONG_PLAN";
     if (std::string(check) == approval_check::kWrongCoordinator)
         return "APPROVAL_WRONG_COORDINATOR";
+    if (std::string(check) == approval_check::kTtlExcessive)
+        return "APPROVAL_TTL_EXCESSIVE";
     return "APPROVAL_MALFORMED";
 }
 
@@ -147,8 +149,44 @@ OperationsCoordinator::OperationsCoordinator(Dependencies deps,
                                              LiveSessionRecorder::Options recorderOptions)
     : mDeps(std::move(deps)), mRecorder(std::move(recorderOptions)),
       mRecovery(mDeps.repairCapabilityProvider), mBridgedDiagnoser(mDeps.seams.diagnoser),
-      mInstanceId(nextRepairApprovalInstanceId())
+      mInstanceId(nextRepairApprovalInstanceId()),
+      mApprovalSecret(generateRepairApprovalSecretHex())
 {
+}
+
+Json::Value OperationsCoordinator::mintRepairApprovalForOperator(long long nowMs,
+                                                                 long long ttlMs,
+                                                                 std::string *error) const
+{
+    // The human mint channel (#1733): in-process only, never reachable from
+    // the session surface / OpsDriver / MCP. The secret never leaves this
+    // coordinator, so a minted token cannot be forged or extended by any
+    // wire peer that later relays it. Reads the last-projection bookkeeping,
+    // so it belongs to the coordinator thread (same contract as
+    // armRepairApproval); the dock's worker mints immediately before arming
+    // the launch that consumes the token.
+    if (error)
+        error->clear();
+    const std::string findingsDigest = lastProjectedFindingsDigest();
+    if (findingsDigest.empty())
+    {
+        if (error)
+            *error = "NO_PENDING_REPAIR_PLAN";
+        return Json::Value();
+    }
+    if (ttlMs <= 0)
+        ttlMs = kRepairApprovalDefaultTtlMs;
+    if (ttlMs > kRepairApprovalMaxTtlMs)
+    {
+        if (error)
+            *error = "APPROVAL_TTL_EXCESSIVE";
+        return Json::Value();
+    }
+    Json::Value token = mintRepairApprovalToken(findingsDigest, mInstanceId, nowMs, ttlMs,
+                                                mApprovalSecret);
+    if (token.isNull() && error)
+        *error = "APPROVAL_MINTING_FAILED";
+    return token;
 }
 
 void OperationsCoordinator::requestCancel()
@@ -201,7 +239,7 @@ std::string OperationsCoordinator::verifyApprovalAgainstLastProjection(
     if (targetDigest.empty())
         return "NO_PENDING_REPAIR_PLAN";
     const char *check =
-        verifyRepairApprovalToken(tokenDoc, targetDigest, mInstanceId, nowMs);
+        verifyRepairApprovalToken(tokenDoc, targetDigest, mInstanceId, nowMs, mApprovalSecret);
     if (std::string(check) == approval_check::kOk)
         return {};
     return approvalCheckToError(check);
@@ -221,13 +259,21 @@ std::string OperationsCoordinator::armRepairApproval(const Json::Value &tokenDoc
     {
         // Replay first: a token this coordinator already consumed by a launch
         // cannot arm again, whatever the current projection is — one approval
-        // authorizes exactly one repair launch.
+        // authorizes exactly one repair launch. Only entries whose token
+        // window has EXPIRED leave the ring (#1733): evicting a live entry
+        // would hand a still-valid approval back to a replay.
         const std::string tokenDigest = tokenDoc["digest"].asString();
-        for (const std::string &consumed : mConsumedApprovalDigests)
+        const long long expiresAt = tokenDoc["expires_at_ms"].isInt64()
+                                        ? tokenDoc["expires_at_ms"].asInt64()
+                                        : 0;
+        dropExpiredConsumedApprovals(nowMs);
+        for (const ConsumedApproval &consumed : mConsumedApprovals)
         {
-            if (consumed == tokenDigest)
+            if (consumed.digest == tokenDigest)
                 return "APPROVAL_REPLAYED";
         }
+        if (mConsumedApprovals.size() >= kMaxConsumedDigests)
+            return "APPROVAL_REPLAY_RING_FULL";
 
         const std::string error = verifyApprovalAgainstLastProjection(tokenDoc, nowMs);
         if (!error.empty())
@@ -246,6 +292,21 @@ std::string OperationsCoordinator::armRepairApproval(const Json::Value &tokenDoc
 bool OperationsCoordinator::hasPendingRepairApproval() const
 {
     return mPendingRepairApproval.has_value();
+}
+
+void OperationsCoordinator::dropExpiredConsumedApprovals(long long nowMs)
+{
+    // nowMs <= 0 means "no usable clock": nothing can be proven expired, so
+    // the ring keeps everything (fail closed — verification at that clock
+    // refuses the token as expired anyway).
+    if (nowMs <= 0)
+        return;
+    mConsumedApprovals.erase(
+        std::remove_if(mConsumedApprovals.begin(), mConsumedApprovals.end(),
+                       [nowMs](const ConsumedApproval &entry) {
+                           return entry.expiresAtMs > 0 && entry.expiresAtMs < nowMs;
+                       }),
+        mConsumedApprovals.end());
 }
 
 OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&session,
@@ -443,11 +504,13 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
             // Single-use is symmetric: a driver-held token goes through the
             // SAME consumed ring as an armed one — a consumed token presented
             // with the request is a replay, never a second authorization.
+            // Only entries whose window expired are forgotten (#1733).
             const std::string tokenDigest = request.repairApproval["digest"].asString();
+            dropExpiredConsumedApprovals(request.approvalNowMs);
             bool replayed = false;
-            for (const std::string &consumed : mConsumedApprovalDigests)
+            for (const ConsumedApproval &consumed : mConsumedApprovals)
             {
-                if (consumed == tokenDigest)
+                if (consumed.digest == tokenDigest)
                 {
                     replayed = true;
                     break;
@@ -477,7 +540,7 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     {
         const char *check = verifyRepairApprovalToken(
             mPendingRepairApproval->token, mPendingRepairApproval->findingsDigest,
-            mInstanceId, request.approvalNowMs);
+            mInstanceId, request.approvalNowMs, mApprovalSecret);
         if (std::string(check) == approval_check::kOk)
         {
             pendingApproval = true;
@@ -486,13 +549,32 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         else if (approvalError.empty())
             approvalError = approvalCheckToError(check);
         // Record the consumed token BEFORE clearing: replay of the same
-        // approval must not arm a later launch.
-        if (mConsumedApprovalDigests.size() >= kMaxConsumedDigests)
-            mConsumedApprovalDigests.erase(mConsumedApprovalDigests.begin());
+        // approval must not arm a later launch. The entry carries the
+        // token's own expiry so the ring only forgets it once the window is
+        // over (#1733). R1-F3: a ring FULL of live entries fails closed
+        // here too — the launch proceeds WITHOUT the approval (typed
+        // refusal, the gate asks again) instead of silently evicting a
+        // still-live entry a held token could then replay.
+        const long long consumedExpiry =
+            mPendingRepairApproval->token["expires_at_ms"].isInt64()
+                ? mPendingRepairApproval->token["expires_at_ms"].asInt64()
+                : 0;
         if (mPendingRepairApproval->token.isObject() &&
             mPendingRepairApproval->token["digest"].isString())
         {
-            mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+            dropExpiredConsumedApprovals(request.approvalNowMs);
+            if (mConsumedApprovals.size() >= kMaxConsumedDigests)
+            {
+                if (approvalError.empty())
+                    approvalError = "APPROVAL_REPLAY_RING_FULL";
+                pendingApproval = false;
+                approvedPlanId.clear();
+            }
+            else
+            {
+                mConsumedApprovals.push_back(
+                    {mPendingRepairApproval->token["digest"].asString(), consumedExpiry});
+            }
         }
         mPendingRepairApproval.reset();
     }
@@ -727,7 +809,8 @@ RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &dia
     {
         const std::string targetDigest = lastProjectedFindingsDigest();
         const char *check = verifyRepairApprovalToken(
-            mPendingRepairApproval->token, targetDigest, mInstanceId, ctx.approvalNowMs);
+            mPendingRepairApproval->token, targetDigest, mInstanceId, ctx.approvalNowMs,
+            mApprovalSecret);
         std::string tokenError;
         if (std::string(check) == approval_check::kOk)
         {
@@ -740,12 +823,29 @@ RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &dia
             ctx.approvedFindingsDigest.clear();
             tokenError = approvalCheckToError(check);
         }
-        if (mConsumedApprovalDigests.size() >= kMaxConsumedDigests)
-            mConsumedApprovalDigests.erase(mConsumedApprovalDigests.begin());
+        // Consumed entries remember their own expiry; only expired ones are
+        // forgotten later (#1733). R1-F3: a ring FULL of live entries fails
+        // closed — the approval is withdrawn (the gate asks again) instead
+        // of evicting a still-live entry a held token could then replay.
+        const long long consumedExpiry =
+            mPendingRepairApproval->token["expires_at_ms"].isInt64()
+                ? mPendingRepairApproval->token["expires_at_ms"].asInt64()
+                : 0;
         if (mPendingRepairApproval->token.isObject() &&
             mPendingRepairApproval->token["digest"].isString())
         {
-            mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+            dropExpiredConsumedApprovals(ctx.approvalNowMs);
+            if (mConsumedApprovals.size() >= kMaxConsumedDigests)
+            {
+                ctx.humanApprovedRepair = false;
+                ctx.approvedFindingsDigest.clear();
+                tokenError = "APPROVAL_REPLAY_RING_FULL";
+            }
+            else
+            {
+                mConsumedApprovals.push_back(
+                    {mPendingRepairApproval->token["digest"].asString(), consumedExpiry});
+            }
         }
         mPendingRepairApproval.reset();
         tokenErrorOut = tokenError;

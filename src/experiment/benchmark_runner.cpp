@@ -136,7 +136,8 @@ Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
 
 QVector<MetricResult> metricResultsFromConfusion( const ConfusionMatrix &matrix,
                                                   const QStringList &metricNames,
-                                                  const QString &scope )
+                                                  const QString &scope,
+                                                  qint64 abstentions )
 {
     QVector<MetricResult> out;
     const QString defVer = QStringLiteral( "exp-rs.evaluation/1" );
@@ -154,8 +155,18 @@ QVector<MetricResult> metricResultsFromConfusion( const ConfusionMatrix &matrix,
         out.append( metric );
     };
 
-    add( QStringLiteral( "overall_accuracy" ), matrix.overallAccuracy(), matrix.total() );
-    add( QStringLiteral( "oa" ), matrix.overallAccuracy(), matrix.total() );
+    // #1787 (WE-33): headline accuracy counts abstentions as wrong. The
+    // diagonal stays matrix-pure (per-class metrics are untouched); the
+    // DENOMINATOR grows by the abstained predictions, so a model that
+    // answers nothing scores ~0 instead of the scored-only fraction.
+    const qint64 scored = matrix.total();
+    const qint64 denominator = scored + abstentions;
+    const double headlineAccuracy =
+        denominator > 0 ? matrix.overallAccuracy() * double( scored ) / double( denominator )
+                        : 0.0;
+    add( QStringLiteral( "overall_accuracy" ), headlineAccuracy, denominator );
+    add( QStringLiteral( "oa" ), headlineAccuracy, denominator );
+    add( QStringLiteral( "accuracy_scored_only" ), matrix.overallAccuracy(), scored );
     add( QStringLiteral( "kappa" ), matrix.kappa(), matrix.total() );
     add( QStringLiteral( "macro_f1" ), matrix.macroF1() );
     add( QStringLiteral( "macro_precision" ), matrix.macroPrecision() );
@@ -376,6 +387,7 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
     qint64 predictionsWithUnknownTruthLabel = 0;
     qint64 predictionsWithUnknownPredictedLabel = 0;
     qint64 predictionsIgnoredByLabel = 0;
+    qint64 predictionsAbstained = 0;
     QSet<QString> matchedIds;
     for ( const BenchmarkPrediction &pred : request.predictions )
     {
@@ -386,12 +398,22 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
             continue;
         }
         const int t = labelIndex.value( *it, -1 );
-        const int p = labelIndex.value( pred.predictedClass, -1 );
         if ( t < 0 )
         {
             ++predictionsWithUnknownTruthLabel;
             continue;
         }
+        // #1787 (WE-33): an empty predicted class is an abstention. It used
+        // to fall into the unknown-label skip (p < 0) and never cost the
+        // headline accuracy a single point. Count it explicitly; the metric
+        // layer divides by (scored + abstained) so abstentions read as
+        // wrong while per-class metrics stay untouched.
+        if ( pred.predictedClass.isEmpty() )
+        {
+            ++predictionsAbstained;
+            continue;
+        }
+        const int p = labelIndex.value( pred.predictedClass, -1 );
         if ( p < 0 )
         {
             ++predictionsWithUnknownPredictedLabel;
@@ -460,11 +482,13 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
                      predictionsWithUnknownPredictedLabel );
     coverage.insert( QStringLiteral( "predictions_skipped_by_ignore_labels" ),
                      predictionsIgnoredByLabel );
+    coverage.insert( QStringLiteral( "predictions_abstained" ), predictionsAbstained );
     rawMetrics.insert( QStringLiteral( "coverage" ), coverage );
     result.setRawMetrics( rawMetrics );
     result.metrics() =
         metricResultsFromConfusion( matrix, def.metricNames(),
-                                    QStringLiteral( "subset:%1" ).arg( def.protocol().subset() ) );
+                                    QStringLiteral( "subset:%1" ).arg( def.protocol().subset() ),
+                                    predictionsAbstained );
 
     // Honest reproducibility gaps — never fabricate a score.
     QStringList gaps;

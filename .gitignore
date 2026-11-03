@@ -791,3 +791,8 @@ r6_dev.cmd
 # planning artifacts (markdown only).
 !.planning/r27-t02/
 !.planning/r27-t02/*.md
+
+# R27-T05 track (workflow/experiment/teaching-grading/release) planning notes (markdown only).
+!.planning/r27-t05/
+.planning/r27-t05/*
+!.planning/r27-t05/*.md
