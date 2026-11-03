@@ -15,9 +15,10 @@ The lock is an exclusively-created file at `<build-dir>.agent-build.lock`
 (next to, never inside, the build tree). It records the holder's pid, host,
 start time and command for diagnostics, and is only broken when the holder
 pid is dead AND the lock is older than --stale-after (default 3600 s), so a
-live build is never interrupted. Both the pid and the staleness clock are
-host-local: a build directory shared over a network with another machine can
-only ever be reported busy (fail-closed), never stolen.
+live build is never interrupted. The pid gate is host-local; the age comes
+from the holder's wall-clock start epoch, falling back to the lock file's
+mtime, so a lock left behind by a REBOOT still ages out — a monotonic stamp
+resets at boot and would read as a negative age forever (PSB-3).
 
 Usage:
     python scripts/dev/resource_guard.py --lock-dir build-dev -- \\\\
@@ -75,9 +76,45 @@ def _holder_record(payload: list[str]) -> dict:
         "pid": os.getpid(),
         "host": socket.gethostname(),
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "started_epoch": time.time(),
         "started_monotonic": time.monotonic(),
         "command": payload,
     }
+
+
+def _lock_age_seconds(path: Path, holder: dict) -> float | None:
+    """Age of an existing lock in seconds, or None when it cannot be established.
+
+    Wall clock first: `started_epoch` is a real instant, so it keeps growing
+    across reboots and a dead holder's lock eventually goes stale.
+
+    The monotonic stamp is only a fallback, and only a same-boot one: it is
+    read from the holder's OWN boot, so after a restart
+    `time.monotonic() - started` is a large NEGATIVE number — every surviving
+    lock then looked brand-new forever and its (dead) holder's build lease
+    could never be broken (PSB-3, swarm review 2026-11-04). A negative result
+    from either clock (host clock stepped backwards, record from a machine
+    whose clock runs ahead) is discarded rather than trusted.
+
+    Last resort is the file's mtime — the one timestamp the filesystem keeps
+    honest across reboots — which is also what an empty or corrupt lock
+    (holder SIGKILLed between create and write) falls back to. If even that
+    cannot be read, the caller must refuse to break the lock (fail-closed).
+    """
+    started = holder.get("started_epoch")
+    if isinstance(started, (int, float)) and not isinstance(started, bool):
+        age = time.time() - started
+        if age >= 0:
+            return age
+    started_mono = holder.get("started_monotonic")
+    if isinstance(started_mono, (int, float)) and not isinstance(started_mono, bool):
+        age = time.monotonic() - started_mono
+        if age >= 0:
+            return age
+    try:
+        return max(time.time() - path.stat().st_mtime, 0.0)
+    except OSError:
+        return None
 
 
 def _is_stale(path: Path, stale_after: float) -> tuple[bool, dict]:
@@ -85,24 +122,19 @@ def _is_stale(path: Path, stale_after: float) -> tuple[bool, dict]:
 
     Both gates must say "dead": the recorded holder pid (host-local) must not
     be alive, and the lock must be older than `stale_after`. Age comes from
-    the holder record when it is readable, and from the file's own mtime
-    otherwise — an empty or corrupt lock (e.g. the holder was SIGKILLed in the
-    window between creating the file and writing its record) must still be
-    breakable once old enough, or nobody could ever build here again.
+    the holder's wall-clock start epoch, then the file's own mtime — an empty
+    or corrupt lock (e.g. the holder was SIGKILLed in the window between
+    creating the file and writing its record) must still be breakable once
+    old enough, or nobody could ever build here again. An age that cannot be
+    established at all is never stale: breaking on ignorance would be the
+    opposite of fail-closed.
     """
     holder = _read_holder(path)
     pid = holder.get("pid")
     if isinstance(pid, int) and pid_alive(pid):
         return False, holder
-    started = holder.get("started_monotonic")
-    if isinstance(started, (int, float)):
-        age = time.monotonic() - started
-    else:
-        try:
-            age = time.time() - path.stat().st_mtime
-        except OSError:
-            return False, holder
-    if age < stale_after:
+    age = _lock_age_seconds(path, holder)
+    if age is None or age < stale_after:
         return False, holder
     return True, holder
 

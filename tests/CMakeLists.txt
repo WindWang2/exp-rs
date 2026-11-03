@@ -3104,6 +3104,25 @@ target_include_directories(test_spatial_contracts PRIVATE
 )
 sicnu_discover_tests(test_spatial_contracts)
 
+# swarm-review AG-C fix regressions (2026-11-04): vector dataset-understanding
+# shape, bounded vector extent scan, malformed spectral point rejection,
+# invalid-raster / 0-band guards, classification JM failure semantics,
+# class_count semantics, and the preflight path heuristic.
+add_executable(test_swarm_fix_agent_spatial test_swarm_fix_agent_spatial.cpp)
+target_link_libraries(test_swarm_fix_agent_spatial PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  qgis_core
+  sicnu_agent
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_swarm_fix_agent_spatial)
+target_include_directories(test_swarm_fix_agent_spatial PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swarm_fix_agent_spatial)
+
 # Spatial Scientist 3.0 benchmark harness (Phase Q) — 100+ structured tasks.
 qt_add_executable(test_spatial_scientist_benchmark
   test_spatial_scientist_benchmark.cpp
@@ -4385,7 +4404,7 @@ sicnu_set_test_env(sicnu_env_gdal_driver_path)
 # is available: the test imports the .ts bridge directly, which requires
 # type stripping (default-on only on node >= 22.18 / >= 23.6).
 find_program(SICNU_NODE_EXECUTABLE node)
-if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.mjs)
+if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test)
     execute_process(
         COMMAND ${SICNU_NODE_EXECUTABLE} --version
         OUTPUT_VARIABLE _sicnu_node_version
@@ -4397,40 +4416,29 @@ if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.
         if(_sicnu_node_major GREATER 23
            OR (_sicnu_node_major EQUAL 23 AND _sicnu_node_minor GREATER_EQUAL 6)
            OR (_sicnu_node_major EQUAL 22 AND _sicnu_node_minor GREATER_EQUAL 18))
-            add_test(
-                NAME pi_bridge_lifecycle
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/mcp_bridge.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_bridge_lifecycle PROPERTIES TIMEOUT 120)
-            sicnu_set_test_env(pi_bridge_lifecycle)
-
-            add_test(
-                NAME pi_prompt_templates
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/prompt_templates.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_prompt_templates PROPERTIES TIMEOUT 60)
-            sicnu_set_test_env(pi_prompt_templates)
-
-            add_test(
-                NAME pi_remote_sensing_assets
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/remote_sensing_assets.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_remote_sensing_assets PROPERTIES TIMEOUT 60)
-            sicnu_set_test_env(pi_remote_sensing_assets)
-
-            add_test(
-                NAME pi_scientific_workflow_compiler
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_scientific_workflow_compiler PROPERTIES TIMEOUT 120)
-            sicnu_set_test_env(pi_scientific_workflow_compiler)
-
-            add_test(
-                NAME pi_scientific_workflow_compiler_11
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler_11.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_scientific_workflow_compiler_11 PROPERTIES TIMEOUT 120)
-            sicnu_set_test_env(pi_scientific_workflow_compiler_11)
+            # PSB-1 (swarm review 2026-11-04): this block used to hand-list
+            # four suites, three of which pi/test/ never shipped
+            # (prompt_templates / remote_sensing_assets /
+            # scientific_workflow_compiler — only the _11 variants exist), so
+            # every lane with node installed failed them as "test not found";
+            # the same hand-list omitted the six real suites (no_drift,
+            # bridge_parity, r18_c_*, r21_c_*, surface_snapshot — the F-PI-1 /
+            # F-PI-2 behaviour anchors), so no lane ran them at all.
+            # Register the suite exactly the way pi/package.json's own "test"
+            # script does: node --test expands the glob itself, so the
+            # registration can neither name a file that does not exist nor
+            # silently drop a suite that lands later. The glob guard keeps a
+            # tree with an empty pi/test from registering a command node would
+            # fail on.
+            file(GLOB _sicnu_pi_suites ${CMAKE_SOURCE_DIR}/pi/test/*.test.mjs)
+            if(_sicnu_pi_suites)
+                add_test(
+                    NAME pi_test_suite
+                    COMMAND ${SICNU_NODE_EXECUTABLE} --test test/*.test.mjs
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+                set_tests_properties(pi_test_suite PROPERTIES TIMEOUT 300)
+                sicnu_set_test_env(pi_test_suite)
+            endif()
         else()
             message(STATUS "node ${_sicnu_node_version} lacks default type stripping — pi bridge lifecycle tests skipped")
         endif()
@@ -4440,6 +4448,7 @@ if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.
     unset(_sicnu_node_version)
     unset(_sicnu_node_major)
     unset(_sicnu_node_minor)
+    unset(_sicnu_pi_suites)
 endif()
 
 
@@ -16869,6 +16878,19 @@ target_compile_definitions(test_r23_e_plugin_typed_gates PRIVATE
 add_dependencies(test_r23_e_plugin_typed_gates isolation_plugin exprs_plugin_host_worker)
 # --- end R23-E registration ---
 
+# --- swarm-review 2026-11-04 SDK-series registration (SWARM_REVIEW.md
+# SDK-1/SDK-2/SDK-3): an out-of-int-domain manifest_version must be refused
+# TYPED (never a Json::LogicError escaping discovery/startup), a forged
+# host-process registration report must fail the load typed (never kill the
+# host through the isolation boundary), and a SIGCHLD=SIG_IGN embedder must
+# never see a failed external tool reported as exit code 0. The SDK-2 cases
+# drive a python3 forged worker written into a scratch dir at run time (the
+# REAL worker never forges its own report), so they SKIP on lanes without
+# python3 rather than pass vacuously.
+sicnu_add_sdk_test(test_swarm_fix_sdk TEST_PREFIX "test_swarm_fix_sdk::")
+target_link_libraries(test_swarm_fix_sdk PRIVATE sicnu_plugins_hostprocess)
+# --- end swarm-review SDK-series registration ---
+
 # --- R23-E WP5: native terminal lifecycle contract (#1618 guard) — Linux
 # only (QgsLinuxNative compiles nowhere else). Probe terminals on PATH
 # record argv + cwd; startDetached is async, hence RUN_SERIAL.
@@ -17276,3 +17298,318 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 )
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
+
+# ─────────────────────────────────────────────────────────────────────────────
+# swarm-review 2026-11-04 (SWARM_REVIEW.md) — regression suites for the 131
+# fixed findings. One suite per finding family; every case is authored to FAIL
+# against the pre-fix tree (see each file's header for the red/green evidence).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# operators/rs — OPS-R1/R2 series (incl. the P0 sar_network_inversion guard).
+add_executable(test_swarm_fix_ops_rs test_swarm_fix_ops_rs.cpp)
+target_link_libraries(test_swarm_fix_ops_rs PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  sicnu_runtime
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_swarm_fix_ops_rs)
+target_include_directories(test_swarm_fix_ops_rs PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swarm_fix_ops_rs TIMEOUT 300)
+
+# operators/runtime+framework+io — OPS-RT series (incl. the P1 ensemble member
+# derived-contract gate). Model runtime suites need the OpenCV providers.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+  add_executable(test_swarm_fix_ops_rt test_swarm_fix_ops_rt.cpp)
+  target_link_libraries(test_swarm_fix_ops_rt PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+    GDAL::GDAL
+  )
+  sicnu_link_jsoncpp(test_swarm_fix_ops_rt)
+  target_include_directories(test_swarm_fix_ops_rt PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_swarm_fix_ops_rt TIMEOUT 300)
+endif()
+
+# processing algorithms — PROC-F/A1/A2 series (incl. the P1 hillshade
+# degrees→metres conversion and the P1 resolveFlats float32 epsilon).
+add_executable(test_swarm_fix_processing test_swarm_fix_processing.cpp)
+target_link_libraries(test_swarm_fix_processing PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_swarm_fix_processing)
+target_include_directories(test_swarm_fix_processing PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swarm_fix_processing TIMEOUT 300)
+
+# agent harness — AG-H series (incl. the P1 confirmMapOutput repair loop).
+# Compiles the stdio MCP server + shell job adapter into the suite (own main).
+qt_add_executable(test_swarm_fix_agent_harness
+  test_swarm_fix_agent_harness.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mcp_server.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+)
+target_link_libraries(test_swarm_fix_agent_harness PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow_runtime
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_swarm_fix_agent_harness PRIVATE jsoncpp)
+endif()
+target_include_directories(test_swarm_fix_agent_harness PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_swarm_fix_agent_harness PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
+sicnu_discover_tests(test_swarm_fix_agent_harness TIMEOUT 300)
+
+# agent cartography/mapspec/layout — AG-M series (ramp/point/colorbar/atlas).
+qt_add_executable(test_swarm_fix_agent_cartography test_swarm_fix_agent_cartography.cpp)
+target_link_libraries(test_swarm_fix_agent_cartography PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_agent
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_swarm_fix_agent_cartography PRIVATE jsoncpp)
+endif()
+target_include_directories(test_swarm_fix_agent_cartography PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swarm_fix_agent_cartography TIMEOUT 300)
+
+# geospatial I/O foundation — GEO series (incl. the P1 OGR geometry-type
+# dialect mismatch that made vectorConvert fail for every non-Point/Polygon
+# layer). Light Qt-free target (sicnu_add_io_test).
+sicnu_add_io_test(test_swarm_fix_geospatial)
+
+# core first-party (plugin_host / temporal_cube / spatial_split) — CORE series
+# (incl. the geotransform-mismatch refusal and the NaN-cloud BestPixel gate).
+add_executable(test_swarm_fix_core test_swarm_fix_core.cpp)
+target_link_libraries(test_swarm_fix_core PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_core
+  sicnu_processing
+  sicnu_temporal_timeline
+  Sicnu::Geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_swarm_fix_core PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swarm_fix_core TIMEOUT 300)
+
+# app shell/dialogs/workflow — APP series (incl. the preferences-CRS silent
+# rewrite and the canvas↔runtime desync on Run).
+qt_add_executable(test_swarm_fix_app
+  test_swarm_fix_app.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_scene.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_port_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_connection_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_canvas_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_georef_params_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_rms_scatter_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/obia/rs_segment_select_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classifier_setup_bar.cpp
+)
+target_link_libraries(test_swarm_fix_app PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  sicnu_processing
+  sicnu_operators
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  Sicnu::help
+)
+target_include_directories(test_swarm_fix_app PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_SOURCE_DIR}/src/app/obia
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_swarm_fix_app PROPERTIES AUTOMOC ON)
+sicnu_link_jsoncpp(test_swarm_fix_app)
+sicnu_discover_tests(test_swarm_fix_app TIMEOUT 300)
+
+# data/dataset foundations — DAT series (incl. the leakage-audit audited_checks
+# overclaim and the VRT single-write-authority migration).
+sicnu_add_test(test_swarm_fix_data TIMEOUT 180)
+target_link_libraries(test_swarm_fix_data PRIVATE
+  Sicnu::dataset
+  SQLite::SQLite3
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_swarm_fix_data)
+
+# experiment/analysis — EXP series (incl. the reproduction-bundle
+# software_revision loss and the benchmark protocol write/read asymmetry).
+qt_add_executable(test_swarm_fix_experiment test_swarm_fix_experiment.cpp)
+target_link_libraries(test_swarm_fix_experiment PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+sicnu_link_jsoncpp(test_swarm_fix_experiment)
+target_include_directories(test_swarm_fix_experiment PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swarm_fix_experiment TIMEOUT 300)
+
+# workflow/cli/contracts — WFC series (incl. the fail-open non-object params
+# and the hardcoded 30-minute pipeline timeout).
+if(NOT WIN32)
+  sicnu_add_test(test_swarm_fix_workflow_cli TIMEOUT 300)
+  target_link_libraries(test_swarm_fix_workflow_cli PRIVATE
+    sicnu_workflow
+    GDAL::GDAL
+  )
+  sicnu_link_jsoncpp(test_swarm_fix_workflow_cli)
+  target_include_directories(test_swarm_fix_workflow_cli PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+  target_compile_definitions(test_swarm_fix_workflow_cli PRIVATE
+    SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+  )
+endif()
+
+# tail modules (planner/scientific_state/faultlab/agent_loop/teaching/…)
+# — LT1/LT2 series (incl. the planner multi-domain data-flow break and the
+# empty-artifact verification fail-open).
+qt_add_executable(test_swarm_fix_tail test_swarm_fix_tail.cpp)
+target_link_libraries(test_swarm_fix_tail PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_planner
+  sicnu_scientific_state
+  sicnu_faultlab
+  sicnu_explain
+  Sicnu::teaching
+  sicnu_lab_runtime
+  Sicnu::teaching_admin
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_swarm_fix_tail)
+target_include_directories(test_swarm_fix_tail PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_swarm_fix_tail PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+sicnu_discover_tests(test_swarm_fix_tail TEST_PREFIX "test_swarm_fix_tail::" TIMEOUT 300)
+
+# vendored QGIS local modifications — VD series (zip bomb ceiling, stat
+# guards, render-job registry disconnect, settle semantics).
+qt_add_executable(test_swarm_fix_vendored test_swarm_fix_vendored.cpp)
+target_link_libraries(test_swarm_fix_vendored PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_swarm_fix_vendored PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swarm_fix_vendored TIMEOUT 300)
+# --- end swarm-review 2026-11-04 registration ---

@@ -113,8 +113,16 @@ async function canarySpawns() {
     await bridge.request("tools/call", {});
     spawnWorks = true;
   } catch (err) {
+    // Launch-CLASS failures only: the bridge's own "Failed to launch" prefix,
+    // or the Windows shebang EFTYPE. Everything else — a child that spawned
+    // then died, a missing/renamed fixture (ENOENT), an EPIPE from a real
+    // regression — is rethrown: the suite must fail loudly, never skip green
+    // on a broken test fixture or bridge (PSB-4, swarm review 2026-11-04;
+    // same classification as mcp_bridge.test.mjs).
+    const msg = String(err?.message ?? err);
+    if (!/^Failed to launch|EFTYPE/i.test(msg)) throw err;
     spawnWorks = false;
-    console.log(`canary: fake MCP server cannot spawn on this host: ${err?.message}`);
+    console.log(`canary: fake MCP server cannot spawn on this host: ${msg}`);
   } finally {
     bridge.stop();
   }

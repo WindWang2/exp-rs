@@ -231,6 +231,9 @@ class LockLifecycleTest(unittest.TestCase):
             self.assertGreater(holder["pid"], 0)
             self.assertIn("command", holder)
             self.assertIn("started_monotonic", holder)
+            # PSB-3: the wall-clock epoch is the reboot-safe age source.
+            self.assertIn("started_epoch", holder)
+            self.assertLessEqual(abs(holder["started_epoch"] - time.time()), 60.0)
 
     def test_inherited_makeflags_j_is_stripped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -298,6 +301,64 @@ class LockLifecycleTest(unittest.TestCase):
                              "--", sys.executable, "-c", "print('ran')"], cwd=root)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertFalse(lock.exists())
+
+    def test_lock_from_a_previous_boot_is_broken(self) -> None:
+        """PSB-3: a monotonic stamp does not survive a reboot.
+
+        `started_monotonic` is read on the holder's OWN boot, so after a
+        restart `time.monotonic() - started` is a large NEGATIVE number: the
+        age gate never opened, and a lock whose holder pid was already dead
+        could never be broken — the build lease was wedged until somebody
+        deleted the file by hand. The age must come from the wall clock (the
+        holder's start epoch), with the file mtime as the fallback for a
+        record that carries no usable epoch.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            lock = root / "build.agent-build.lock"
+            # The previous boot's monotonic clock runs AHEAD of this boot's,
+            # which is exactly what a reboot leaves behind, and the record is
+            # in the pre-PSB-3 format (no epoch stamp).
+            holder = {"pid": 1 << 30, "host": "fixture",
+                      "started_utc": "2020-01-01T00:00:00Z",
+                      "started_monotonic": time.monotonic() + 86400.0,
+                      "command": ["previous-boot"]}
+            lock.write_text(json.dumps(holder), encoding="utf-8")
+            # The lock really is two hours old (mtime is the filesystem's
+            # reboot-honest timestamp); only the monotonic stamp is nonsense.
+            old = time.time() - 7200.0
+            os.utime(lock, (old, old))
+            proc = run_tool("resource_guard.py",
+                            ["--lock-dir", str(root / "build"),
+                             "--", sys.executable, "-c", "print('ran')"], cwd=root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse(lock.exists())
+
+    def test_future_dated_lock_is_never_broken(self) -> None:
+        """A clock that stepped backwards must not make a lock "stale".
+
+        Symmetric to the reboot case: a start epoch in the future (host clock
+        adjusted back, or a record from a machine running ahead) yields a
+        negative age, which is discarded rather than trusted. With no other
+        age source the guard must refuse to break the lock — breaking on
+        ignorance is the opposite of fail-closed.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            lock = root / "build.agent-build.lock"
+            holder = {"pid": 1 << 30, "host": "fixture",
+                      "started_utc": "2999-01-01T00:00:00Z",
+                      "started_epoch": time.time() + 86400.0,
+                      "started_monotonic": time.monotonic() + 86400.0,
+                      "command": ["future"]}
+            lock.write_text(json.dumps(holder), encoding="utf-8")
+            proc = run_tool("resource_guard.py",
+                            ["--lock-dir", str(root / "build"),
+                             "--", sys.executable, "-c", "print('ran')"], cwd=root)
+            self.assertEqual(proc.returncode, 75, proc.stderr)
+            self.assertTrue(lock.exists())
 
     def test_live_holder_lock_is_never_broken(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
