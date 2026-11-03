@@ -35,6 +35,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgspointxy.h>
+#include <qgsrasterlayer.h>
 #include <qgsrectangle.h>
 #include <qgsvectorlayer.h>
 
@@ -149,23 +150,26 @@ TEST_CASE( "Async sampling slots stay millisecond-scale (#1790/#1791/#1794 bench
       t.start();
       w.recomputeSpectralCurves();
       slotUs.push_back( t.nsecsElapsed() / 1000 );
-      // Wait for THIS recompute's landing (fresh curves arrive every call:
-      // each landing replaces the set, so wait until a landing follows).
-      const int before = i; // generation counter not exposed; wait fixed
+      // End-to-end: until this recompute's curves land. After the first
+      // call the set stays size 4, so gate on the FIRST call's landing and
+      // measure the slot cost only for the rest (each still schedules the
+      // full read on the pool).
       QElapsedTimer total;
       total.start();
-      pumpUntil( [&] { return total.elapsed() > 0 && curves->curves().size() == 4; }, 30000 );
-      // re-arm: after the first call curves stay size 4; use a short settle
       if ( i == 0 )
       {
+        pumpUntil( [&] { return curves->curves().size() == 4; }, 30000 );
+        totalUs.push_back( total.nsecsElapsed() / 1000 );
         QElapsedTimer settle;
-        while ( settle.elapsed() < 300 )
+        while ( settle.elapsed() < 400 )
           QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
       }
-      totalUs.push_back( total.nsecsElapsed() / 1000 );
+      else
+      {
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+      }
       QThread::msleep( 1 );
     }
-    (void)before;
     INFO( "recompute slot p50=" << percentile( slotUs, 0.5 ) << "ms p95=" << percentile( slotUs, 0.95 )
                                << "ms; end-to-end p95=" << percentile( totalUs, 0.95 ) << "ms" );
     // HEAD did the WHOLE scanline read inside the slot; the async seam must
