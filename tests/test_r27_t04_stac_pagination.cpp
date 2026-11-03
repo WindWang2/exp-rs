@@ -176,3 +176,32 @@ TEST_CASE( "STAC browser appends More pages and settles terminal states (#1788/#
   CHECK( !more->isVisibleTo( &dlg ) );
   CHECK( !more->isEnabled() );
 }
+
+TEST_CASE( "selectCogHref refuses deep nesting instead of throwing (R1 S2 regression)",
+           "[stac][json][r27t04]" )
+{
+  ensureApp();
+
+  // Well-formed item → still resolves an asset href.
+  {
+    QVariantMap asset;
+    asset.insert( QStringLiteral( "href" ), QStringLiteral( "https://example.test/a.tif" ) );
+    QVariantMap assets;
+    assets.insert( QStringLiteral( "cog" ), asset );
+    QVariantMap item;
+    item.insert( QStringLiteral( "assets" ), assets );
+    CHECK_FALSE( StacClient::selectCogHref( QJsonObject::fromVariantMap( item ) ).isEmpty() );
+  }
+
+  // 70-deep nesting (past the pinned stackLimit=64): typed refusal, no
+  // jsoncpp throw out of the Qt slot — the #1793 vector for catalog data.
+  QVariantMap deep;
+  deep.insert( QStringLiteral( "leaf" ), 1 );
+  for ( int i = 0; i < 70; ++i )
+  {
+    QVariantMap wrap;
+    wrap.insert( QStringLiteral( "n" ), deep );
+    deep = wrap;
+  }
+  CHECK( StacClient::selectCogHref( QJsonObject::fromVariantMap( deep ) ).isEmpty() );
+}

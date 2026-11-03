@@ -203,7 +203,9 @@ bool persistMissionContextWithProject( const QString &projectFilePath, QDomDocum
                 if ( okNum )
                     stale.insert( ms, entry.absoluteFilePath() );
             }
-            // Index 0 (newest) is kept; the rest are retired.
+            // Ascending ms order: every entry except the LAST (newest)
+            // recoverable state is retired (R2 S3: the old comment had the
+            // ordering backwards).
             for ( int i = 0; i + 1 < stale.size(); ++i )
                 QFile::remove( stale.values().at( i ) );
         }

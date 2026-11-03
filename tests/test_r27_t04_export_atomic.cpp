@@ -111,6 +111,24 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
     QStringList() << QFileInfo( dest ).fileName() + QStringLiteral( ".tmp-*" ) );
   CHECK( staging.isEmpty() );
 
+  // --- dest == src via a SYMLINKED DIRECTORY: refused ----------------
+  // (the R1 S2 scenario: dest's canonical is empty while it does not exist,
+  // so only the resolved parent dir catches it).
+  QTemporaryDir symTmp;
+  REQUIRE( symTmp.isValid() );
+  const QString realDir = symTmp.filePath( QStringLiteral( "real" ) );
+  const QString linkDir = symTmp.filePath( QStringLiteral( "link" ) );
+  REQUIRE( QDir().mkpath( realDir ) );
+  REQUIRE( QFile::link( realDir, linkDir ) );
+  const QString srcInReal = realDir + QStringLiteral( "/data.tif" );
+  const QByteArray realBytes( 512, 'z' );
+  writeFile( srcInReal, realBytes );
+  const QString destViaLink = linkDir + QStringLiteral( "/data.tif" );
+  armModalCloser();
+  CHECK_FALSE( w.copyPathTo( srcInReal, destViaLink ) );
+  QApplication::processEvents( QEventLoop::AllEvents, 200 );
+  CHECK( readFile( srcInReal ) == realBytes ); // never replaced
+
   QFile::remove( src );
   QFile::remove( dest );
 }
