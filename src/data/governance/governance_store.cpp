@@ -791,6 +791,20 @@ bool GovernanceStore::open( const QString &dbPath, QString *errorOut )
                 return true;
             }
         }
+        // swarm-review DAT-6: a failed schema probe must not fall through to
+        // createSchema() as "old database" — the version is UNKNOWN, and
+        // createSchema's INSERT OR REPLACE would stamp '1' over a store we
+        // could not read (possibly a v2 one). Fail closed instead, exactly
+        // like WorkspaceCatalog/ArtifactStore/DatasetStore (#1448/#1457
+        // doctrine: an unreadable store is an error, never a blank one).
+        if ( v && v.stepFailed() )
+        {
+            if ( errorOut )
+                *errorOut = QStringLiteral( "cannot read governance schema version (%1)" )
+                                .arg( v.error() );
+            close();
+            return false;
+        }
     }
     if ( !m_impl->createSchema() )
     {

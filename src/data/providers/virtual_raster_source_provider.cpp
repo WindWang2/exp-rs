@@ -2,7 +2,6 @@
 
 #include <cmath>
 
-#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QTextStream>
@@ -13,6 +12,7 @@
 #include "../data_asset.h"
 #include "../virtual_raster_recipe.h"
 #include "gdal_runtime.h"
+#include "platform/durable_sidecar.h"
 
 namespace sicnu::data::providers
 {
@@ -339,19 +339,50 @@ Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
                                   "derived from the recipe and its inputs" ) ) );
   }
 
-  // Write the artifact at the managed scratch path and resolve structure from
-  // it. The path is deterministic per recipe (the DataManager derives it from
-  // the recipe hash), so re-resolution regenerates in place.
-  QFile file( source.canonicalSource );
-  if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) )
+  // Publish through the single sidecar write authority (#1457/WP09+WP11, the
+  // same authority the DataManager's relocate rewrite already uses): the old
+  // QFile path truncated the previous VRT on open and ignored write()'s
+  // return, so a full disk or an interrupted run left a torn file that the
+  // structure probe below then read back as a "valid" dataset. temp+fsync+
+  // rename keeps the old artifact intact on any failure. The explicit cap
+  // keeps the sidecar-class 32 MiB default from silently narrowing VRT
+  // payloads: composed-band VRT XML sits far below this, but a runaway
+  // generator must still be refused instead of filling the disk.
+  // swarm-review DAT-2: resolve() no longer writes the VRT with a truncating
+  // QFile; last-good rotation stays off (the VRT is a disposable build
+  // artifact regenerated from the recipe, matching the relocate call site).
+  const QByteArray xmlBytes = xml.toUtf8();
+  constexpr std::size_t kVrtPublishCap = std::size_t( 256 ) * 1024 * 1024;
+  const sicnu::platform::sidecar::WriteResult published =
+    sicnu::platform::sidecar::write(
+      { source.canonicalSource.toUtf8().constData(),
+        std::string( xmlBytes.constData(),
+                     static_cast<std::size_t>( xmlBytes.size() ) ),
+        "", kVrtPublishCap } );
+  if ( !published )
   {
+    // Pre-publish failures (EmptyPath/TooLarge/ClaimFailed/WriteFailed/
+    // DurabilityFailed/PublishFailed/StagedCleanupFailed) leave the previous
+    // artifact untouched — the caller keeps whatever was there before.
     return Result<internal::ResolvedSource>::failure(
       diagnostic( QStringLiteral( "virtual_raster.write_failed" ),
-                  QStringLiteral( "Could not write the virtual raster artifact to "
-                                  "%1" ).arg( source.canonicalSource ) ) );
+                  QStringLiteral( "Could not publish the virtual raster artifact to "
+                                  "%1: %2" )
+                    .arg( source.canonicalSource,
+                          QString::fromUtf8( published.error.c_str() ) ) ) );
   }
-  file.write( xml.toUtf8() );
-  file.close();
+  if ( published.status == sicnu::platform::sidecar::WriteStatus::VerifyFailed )
+  {
+    // The rename already committed but the read-back byte compare failed:
+    // the target holds suspect bytes. Fail closed instead of resolving a
+    // structure from an artifact that may not match the recipe (the relocate
+    // path surfaces the same state as an error diagnostic, #1473).
+    return Result<internal::ResolvedSource>::failure(
+      diagnostic( QStringLiteral( "virtual_raster.verify_failed" ),
+                  QStringLiteral( "Virtual raster published but read-back verification "
+                                  "failed — the target holds suspect bytes: %1" )
+                    .arg( source.canonicalSource ) ) );
+  }
 
   ensureGdalRuntime();
   CPLPushErrorHandler( CPLQuietErrorHandler );

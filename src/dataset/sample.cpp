@@ -111,76 +111,109 @@ std::optional<SourceAssetRef> decodeSourceAsset( const QJsonObject &json )
 
 // --- payload encode/decode (kind ↔ payload coherence enforced by caller) ----
 
-QJsonObject encodePayload( SampleKind kind, const SamplePayload &payload )
+QJsonObject encodePayload( SampleKind kind, const SamplePayload &payload,
+                           QVector<Diagnostic> *diagnostics = nullptr )
 {
     QJsonObject json;
+    // swarm-review DAT-5: a kind that does not carry its matching payload
+    // type used to reach std::get and throw std::bad_variant_access out of
+    // toJson() (a default-constructed SampleRecord is kind=Point over
+    // variant=monostate). Report it instead: empty object + diagnostic, so
+    // the record stays inspectable and the defect is visible.
+    auto mismatch = [&]( const QString &expected ) {
+        if ( diagnostics )
+            diagnostics->append( Diagnostic{
+                QStringLiteral( "dataset.sample_invalid" ),
+                QStringLiteral( "sample kind %1 does not carry a %2 payload; "
+                                "payload serialized as an empty object" )
+                    .arg( sampleKindToString( kind ), expected ),
+                DiagnosticSeverity::Error } );
+        return QJsonObject();
+    };
     switch ( kind )
     {
         case SampleKind::Point:
         {
-            const auto &point = std::get<PointSample>( payload );
-            json.insert( QStringLiteral( "x" ), point.x );
-            json.insert( QStringLiteral( "y" ), point.y );
+            const auto *point = std::get_if<PointSample>( &payload );
+            if ( !point )
+                return mismatch( QStringLiteral( "point" ) );
+            json.insert( QStringLiteral( "x" ), point->x );
+            json.insert( QStringLiteral( "y" ), point->y );
             break;
         }
         case SampleKind::Pixel:
         {
-            const auto &pixel = std::get<PixelSample>( payload );
-            json.insert( QStringLiteral( "column" ), pixel.column );
-            json.insert( QStringLiteral( "row" ), pixel.row );
+            const auto *pixel = std::get_if<PixelSample>( &payload );
+            if ( !pixel )
+                return mismatch( QStringLiteral( "pixel" ) );
+            json.insert( QStringLiteral( "column" ), pixel->column );
+            json.insert( QStringLiteral( "row" ), pixel->row );
             break;
         }
         case SampleKind::Window:
         {
-            const auto &window = std::get<WindowSample>( payload );
-            json.insert( QStringLiteral( "window" ), encodeWindow( window.window ) );
-            if ( !window.groundFootprintWkt.isEmpty() )
-                json.insert( QStringLiteral( "ground_footprint" ), window.groundFootprintWkt );
+            const auto *window = std::get_if<WindowSample>( &payload );
+            if ( !window )
+                return mismatch( QStringLiteral( "window" ) );
+            json.insert( QStringLiteral( "window" ), encodeWindow( window->window ) );
+            if ( !window->groundFootprintWkt.isEmpty() )
+                json.insert( QStringLiteral( "ground_footprint" ), window->groundFootprintWkt );
             break;
         }
         case SampleKind::Patch:
         {
-            const auto &patch = std::get<PatchSample>( payload );
-            json.insert( QStringLiteral( "window" ), encodeWindow( patch.window ) );
-            if ( !patch.groundFootprintWkt.isEmpty() )
-                json.insert( QStringLiteral( "ground_footprint" ), patch.groundFootprintWkt );
+            const auto *patch = std::get_if<PatchSample>( &payload );
+            if ( !patch )
+                return mismatch( QStringLiteral( "patch" ) );
+            json.insert( QStringLiteral( "window" ), encodeWindow( patch->window ) );
+            if ( !patch->groundFootprintWkt.isEmpty() )
+                json.insert( QStringLiteral( "ground_footprint" ), patch->groundFootprintWkt );
             json.insert( QStringLiteral( "border_policy" ),
-                         borderPolicyToString( patch.borderPolicy ) );
-            json.insert( QStringLiteral( "nodata_mode" ), noDataModeToString( patch.noDataMode ) );
-            json.insert( QStringLiteral( "nodata_threshold" ), patch.noDataThreshold );
-            json.insert( QStringLiteral( "valid_fraction" ), patch.validFraction );
-            json.insert( QStringLiteral( "validity_flag" ), patch.validityFlag );
-            if ( !patch.generatorConfigHash.isEmpty() )
-                json.insert( QStringLiteral( "generator_config_hash" ), patch.generatorConfigHash );
+                         borderPolicyToString( patch->borderPolicy ) );
+            json.insert( QStringLiteral( "nodata_mode" ), noDataModeToString( patch->noDataMode ) );
+            json.insert( QStringLiteral( "nodata_threshold" ), patch->noDataThreshold );
+            json.insert( QStringLiteral( "valid_fraction" ), patch->validFraction );
+            json.insert( QStringLiteral( "validity_flag" ), patch->validityFlag );
+            if ( !patch->generatorConfigHash.isEmpty() )
+                json.insert( QStringLiteral( "generator_config_hash" ), patch->generatorConfigHash );
             break;
         }
         case SampleKind::Polygon:
         {
-            json.insert( QStringLiteral( "wkt" ), std::get<PolygonSample>( payload ).wkt );
+            const auto *polygon = std::get_if<PolygonSample>( &payload );
+            if ( !polygon )
+                return mismatch( QStringLiteral( "polygon" ) );
+            json.insert( QStringLiteral( "wkt" ), polygon->wkt );
             break;
         }
         case SampleKind::Object:
         {
-            const auto &object = std::get<ObjectSample>( payload );
-            json.insert( QStringLiteral( "asset_id" ), object.assetId );
-            json.insert( QStringLiteral( "object_ref" ), object.objectRef );
-            if ( object.bounds.isValid() )
-                json.insert( QStringLiteral( "bounds" ), encodeWindow( object.bounds ) );
+            const auto *object = std::get_if<ObjectSample>( &payload );
+            if ( !object )
+                return mismatch( QStringLiteral( "object" ) );
+            json.insert( QStringLiteral( "asset_id" ), object->assetId );
+            json.insert( QStringLiteral( "object_ref" ), object->objectRef );
+            if ( object->bounds.isValid() )
+                json.insert( QStringLiteral( "bounds" ), encodeWindow( object->bounds ) );
             break;
         }
         case SampleKind::Pair:
         {
-            const auto &pair = std::get<PairSample>( payload );
-            json.insert( QStringLiteral( "primary_ref" ), pair.primaryRef );
-            json.insert( QStringLiteral( "secondary_ref" ), pair.secondaryRef );
-            json.insert( QStringLiteral( "pair_role" ), pair.pairRole );
+            const auto *pair = std::get_if<PairSample>( &payload );
+            if ( !pair )
+                return mismatch( QStringLiteral( "pair" ) );
+            json.insert( QStringLiteral( "primary_ref" ), pair->primaryRef );
+            json.insert( QStringLiteral( "secondary_ref" ), pair->secondaryRef );
+            json.insert( QStringLiteral( "pair_role" ), pair->pairRole );
             break;
         }
         case SampleKind::Temporal:
         {
-            const auto &temporal = std::get<TemporalSample>( payload );
+            const auto *temporal = std::get_if<TemporalSample>( &payload );
+            if ( !temporal )
+                return mismatch( QStringLiteral( "temporal" ) );
             QJsonArray observations;
-            for ( const TemporalObservation &observation : temporal.observations )
+            for ( const TemporalObservation &observation : temporal->observations )
             {
                 QJsonObject item;
                 item.insert( QStringLiteral( "time_utc" ),
@@ -195,18 +228,20 @@ QJsonObject encodePayload( SampleKind kind, const SamplePayload &payload )
                 observations.append( item );
             }
             json.insert( QStringLiteral( "observations" ), observations );
-            if ( temporal.targetTimeUtc.isValid() )
+            if ( temporal->targetTimeUtc.isValid() )
                 json.insert( QStringLiteral( "target_time_utc" ),
-                             temporal.targetTimeUtc.toString( Qt::ISODateWithMs ) );
-            if ( !temporal.temporalMask.isEmpty() )
-                json.insert( QStringLiteral( "temporal_mask" ), temporal.temporalMask );
+                             temporal->targetTimeUtc.toString( Qt::ISODateWithMs ) );
+            if ( !temporal->temporalMask.isEmpty() )
+                json.insert( QStringLiteral( "temporal_mask" ), temporal->temporalMask );
             break;
         }
         case SampleKind::MultiModal:
         {
-            const auto &multi = std::get<MultiModalSample>( payload );
+            const auto *multi = std::get_if<MultiModalSample>( &payload );
+            if ( !multi )
+                return mismatch( QStringLiteral( "multimodal" ) );
             QJsonArray members;
-            for ( const MultiModalMember &member : multi.members )
+            for ( const MultiModalMember &member : multi->members )
             {
                 QJsonObject item;
                 item.insert( QStringLiteral( "modality" ), member.modality );
@@ -424,7 +459,26 @@ QJsonObject SampleRecord::toJson() const
     }
     json.insert( QStringLiteral( "source_assets" ), sourceAssets );
     json.insert( QStringLiteral( "provenance" ), m_provenance );
-    json.insert( QStringLiteral( "payload" ), encodePayload( m_kind, m_payload ) );
+    // swarm-review DAT-5: surface a kind↔payload mismatch as data in the
+    // serialized form instead of letting std::bad_variant_access escape.
+    // Valid records never carry the key, so the schema round-trip is
+    // unchanged; a mismatched one stays inspectable (and is refused by
+    // validateSample on the way back in).
+    QVector<Diagnostic> payloadDiagnostics;
+    const QJsonObject payloadJson = encodePayload( m_kind, m_payload, &payloadDiagnostics );
+    json.insert( QStringLiteral( "payload" ), payloadJson );
+    if ( !payloadDiagnostics.isEmpty() )
+    {
+        QJsonArray errors;
+        for ( const Diagnostic &diagnostic : payloadDiagnostics )
+        {
+            QJsonObject item;
+            item.insert( QStringLiteral( "code" ), diagnostic.code );
+            item.insert( QStringLiteral( "message" ), diagnostic.message );
+            errors.append( item );
+        }
+        json.insert( QStringLiteral( "payload_errors" ), errors );
+    }
     return json;
 }
 

@@ -1131,9 +1131,14 @@ sicnu::data::Result<SplitManifest> SplitEngine::generateFolds( SplitManifest man
         {
             // Groups shuffled once; round-robin over folds keeps group sizes
             // approximately balanced without any group crossing folds.
-            QMap<QString, QVector<int>> byGroup;
-            for ( int i = 0; i < inputs.size(); ++i )
-                byGroup[inputs.at( i ).groupId].append( i );
+            // swarm-review DAT-4: build the table through keyTable so empty
+            // groupIds get the same `sample:%1` own-group fallback the grouped
+            // engines use — the hand-rolled map collapsed every ungrouped
+            // sample into one "" pseudo-group that could never cross folds
+            // (one fold held all of them, the rest held none).
+            const auto byGroup = keyTable( inputs, []( const SplitInput &input ) {
+                return input.groupId;
+            } );
             if ( byGroup.size() < config.foldCount )
                 return Result::failure( splitError(
                     QStringLiteral( "group_k_fold requires at least as many groups (%1)"

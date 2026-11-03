@@ -10,6 +10,12 @@
 // (identity + grouping + label + time + spatial bounds). Building it from
 // SampleRecords + annotation tips is the caller's adapter job — the engine
 // stays decoupled from payload shapes and remains trivially testable.
+//
+// Empty grouping keys: every group-keyed method (Grouped, Temporal,
+// GroupKFold, leave-one-out family) falls back to a per-sample own group
+// ("sample:<id>", see split.cpp keyTable) — an empty groupId never collapses
+// ungrouped samples into one shared pseudo-group, which would pin them all to
+// a single fold/role and make the grouping claim meaningless.
 #pragma once
 
 #include "dataset_ids.h"

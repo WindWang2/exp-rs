@@ -313,6 +313,16 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
         // findings of a kind the report does not claim.
         supported.removeAll( QStringLiteral( "temporal_future_leakage" ) );
     }
+    // swarm-review DAT-1: a non-positive threshold switches the check off
+    // below (distanceCheck/bufferCheck gate on `> 0.0`), so a configured but
+    // switched-off check must not stay in the supported set — the default
+    // config (both thresholds 0) would otherwise report the checks as audited
+    // and clean on evidence that never ran, and verdictFromLeakageReport
+    // could hand back Pass. Same drop pattern as the fold case above.
+    if ( config.distanceThreshold <= 0.0 )
+        supported.removeAll( QStringLiteral( "distance_below_threshold" ) );
+    if ( config.bufferDistance <= 0.0 )
+        supported.removeAll( QStringLiteral( "buffer_overlap" ) );
     // The audited set is the INTERSECTION of the evidence-supported checks
     // and the requested ones; a named-but-unsupported check is dropped from
     // the claims (and therefore from execution) rather than run on invalid

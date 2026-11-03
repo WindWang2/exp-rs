@@ -290,6 +290,7 @@ ArtifactStore::~ArtifactStore()
 
 bool ArtifactStore::open( const QString &dbPath, QString *errorOut )
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     close();
     m_impl = new Impl;
     if ( sqlite3_open_v2( dbPath.toUtf8().constData(), &m_impl->db,
@@ -346,6 +347,7 @@ bool ArtifactStore::open( const QString &dbPath, QString *errorOut )
 
 void ArtifactStore::close()
 {
+    QWriteLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !m_impl )
         return;
     {
@@ -357,18 +359,27 @@ void ArtifactStore::close()
     m_impl = nullptr;
 }
 
-bool ArtifactStore::isOpen() const
-{
-    return m_impl && m_impl->db;
-}
-
 bool ArtifactStore::stepFailed() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     return m_impl ? m_impl->stepFailed : false;
+}
+
+bool ArtifactStore::isOpen() const
+{
+    // swarm-review DAT-7: R15-B (#1449) lifecycle lock, same as the
+    // GovernanceStore / DatasetStore / WorkspaceCatalog siblings — the check
+    // and the Impl dereference it guards must not straddle a concurrent
+    // close(). A non-null Impl always carries a live connection: open() only
+    // publishes m_impl after sqlite3_open_v2 succeeded (failures go through
+    // close()), and every early-return path nulls it again.
+    QReadLocker lifecycleGuard( &m_lifecycle );
+    return m_impl != nullptr;
 }
 
 Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistration &reg )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || reg.logicalKey.isEmpty() || reg.storagePath.isEmpty() || reg.kind.isEmpty() )
         return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.invalid" ),
                                                       QStringLiteral( "store closed or registration missing identity/payload/kind" ) ) );
@@ -399,14 +410,28 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
     QString *errorOut = nullptr;
 
-    // Find the logical artifact's current head (artifact_id + version).
+    // The mutex is recursive: a caller may already hold an open transaction
+    // (nested register). A failed BEGIN here means we must not run the INSERT
+    // (it would join the caller's transaction) nor COMMIT it away.
+    if ( SICNU_FAULT_POINT( "artifact_store.begin" ) || !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
+        return Result<ArtifactRecord>::failure(
+            diag( QStringLiteral( "artifact.transaction" ), lastError( m_impl->db ) ) );
+
+    // Find the logical artifact's current head (artifact_id + version) INSIDE
+    // the write transaction. swarm-review DAT-7: read outside BEGIN IMMEDIATE,
+    // two concurrent registrations of the same logical key could both observe
+    // the same MAX(version) and collide on PRIMARY KEY(logical_key, version) —
+    // one registration lost, or two rows claiming the same head version.
     QString artifactId;
     int nextVersion = 1;
     {
         Stmt s( m_impl->db,
                 "SELECT artifact_id, MAX(version) FROM artifacts WHERE logical_key=?", errorOut );
         if ( !s )
+        {
+            m_impl->exec( "ROLLBACK", nullptr );
             return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), lastError( m_impl->db ) ) );
+        }
         s.bind( 1, reg.logicalKey );
         if ( s.stepRow() && !s.isNull( 0 ) )
         {
@@ -417,18 +442,13 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
         {
             if ( m_impl )
                 m_impl->stepFailed = true;
+            m_impl->exec( "ROLLBACK", nullptr );
             return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), s.error() ) );
         }
     }
     if ( artifactId.isEmpty() )
         artifactId = QUuid::createUuid().toString( QUuid::WithoutBraces );
 
-    // The mutex is recursive: a caller may already hold an open transaction
-    // (nested register). A failed BEGIN here means we must not run the INSERT
-    // (it would join the caller's transaction) nor COMMIT it away.
-    if ( SICNU_FAULT_POINT( "artifact_store.begin" ) || !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
-        return Result<ArtifactRecord>::failure(
-            diag( QStringLiteral( "artifact.transaction" ), lastError( m_impl->db ) ) );
     {
         Stmt s( m_impl->db,
                 "INSERT INTO artifacts(artifact_id, logical_key, version, producer_fingerprint,"
@@ -497,6 +517,7 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
 
 Result<void> ArtifactStore::updateContentDigest( const QString &artifactId, const QString &digest )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || artifactId.isEmpty() || digest.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing id/digest" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -521,6 +542,7 @@ Result<void> ArtifactStore::updateContentDigest( const QString &artifactId, cons
 
 std::optional<ArtifactRecord> ArtifactStore::artifactById( const QString &artifactId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || artifactId.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -535,6 +557,7 @@ std::optional<ArtifactRecord> ArtifactStore::artifactById( const QString &artifa
 
 std::optional<ArtifactRecord> ArtifactStore::latestByLogicalKey( const QString &logicalKey ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || logicalKey.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -550,6 +573,7 @@ std::optional<ArtifactRecord> ArtifactStore::latestByLogicalKey( const QString &
 
 std::optional<ArtifactRecord> ArtifactStore::latestByPath( const QString &storagePath ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || storagePath.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -567,6 +591,7 @@ std::optional<ArtifactRecord> ArtifactStore::latestByPath( const QString &storag
 
 QVector<ArtifactRecord> ArtifactStore::versionsByLogicalKey( const QString &logicalKey ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     QVector<ArtifactRecord> out;
     if ( !isOpen() || logicalKey.isEmpty() )
         return out;
@@ -588,6 +613,7 @@ QVector<ArtifactRecord> ArtifactStore::versionsByLogicalKey( const QString &logi
 
 QVector<ArtifactRecord> ArtifactStore::byProducerFingerprint( const QString &fingerprint ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     QVector<ArtifactRecord> out;
     if ( !isOpen() || fingerprint.isEmpty() )
         return out;
@@ -610,6 +636,7 @@ QVector<ArtifactRecord> ArtifactStore::byProducerFingerprint( const QString &fin
 
 std::optional<ArtifactRecord> ArtifactStore::liveByContentDigest( const QString &digest ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || digest.isEmpty() )
         return std::nullopt;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -626,6 +653,7 @@ std::optional<ArtifactRecord> ArtifactStore::liveByContentDigest( const QString 
 Result<void> ArtifactStore::attachRef( const QString &artifactId, const QString &refKind,
                                        const QString &refId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || artifactId.isEmpty() || refKind.isEmpty() || refId.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing ref identity" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -649,6 +677,7 @@ Result<void> ArtifactStore::attachRef( const QString &artifactId, const QString 
 Result<void> ArtifactStore::detachRef( const QString &artifactId, const QString &refKind,
                                        const QString &refId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || artifactId.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing ref identity" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -665,6 +694,7 @@ Result<void> ArtifactStore::detachRef( const QString &artifactId, const QString 
 
 int ArtifactStore::refCount( const QString &artifactId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || artifactId.isEmpty() )
         return 0;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -677,6 +707,7 @@ int ArtifactStore::refCount( const QString &artifactId ) const
 
 QVector<ArtifactRef> ArtifactStore::refsOf( const QString &artifactId ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     QVector<ArtifactRef> out;
     if ( !isOpen() || artifactId.isEmpty() )
         return out;
@@ -706,6 +737,7 @@ QVector<ArtifactRef> ArtifactStore::refsOf( const QString &artifactId ) const
 
 Result<void> ArtifactStore::retain( const QString &artifactId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "store closed" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -723,6 +755,7 @@ Result<void> ArtifactStore::retain( const QString &artifactId )
 
 Result<void> ArtifactStore::markTrash( const QString &artifactId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "store closed" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -740,6 +773,7 @@ Result<void> ArtifactStore::markTrash( const QString &artifactId )
 
 bool ArtifactStore::touch( const QString &artifactId )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || artifactId.isEmpty() )
         return false;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -753,6 +787,7 @@ bool ArtifactStore::touch( const QString &artifactId )
 
 QVector<ArtifactRecord> ArtifactStore::reapable( qint64 lastTouchCutoffMs ) const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     QVector<ArtifactRecord> out;
     if ( !isOpen() )
         return out;
@@ -777,6 +812,7 @@ QVector<ArtifactRecord> ArtifactStore::reapable( qint64 lastTouchCutoffMs ) cons
 
 Result<void> ArtifactStore::forget( const QString &artifactId, ForgetItemPolicy policy )
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() || artifactId.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing id" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -840,6 +876,7 @@ Result<void> ArtifactStore::forget( const QString &artifactId, ForgetItemPolicy 
 
 qint64 ArtifactStore::count() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() )
         return 0;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
@@ -849,6 +886,7 @@ qint64 ArtifactStore::count() const
 
 QString ArtifactStore::schemaVersion() const
 {
+    QReadLocker lifecycleGuard( &m_lifecycle ); // swarm-review DAT-7: R15-B (#1449)
     if ( !isOpen() )
         return QString();
     return m_impl->schemaVersion;
