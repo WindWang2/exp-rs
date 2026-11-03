@@ -3266,6 +3266,20 @@ QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
                            QStringLiteral("INVALID_PARAMETER"),
                            QStringLiteral("validation"));
     }
+    // #1733 (AS-007): this tool is the MODEL-facing channel. Approval
+    // minting is human-only — refuse here (fail fast, typed) instead of
+    // relying on the session surface refusal further down, so the boundary
+    // rule is enforced at the trust transition itself. The operator mints
+    // through the trusted local UI (Control Center dock).
+    if (action == "approve_repair")
+    {
+        throw McpToolError(
+            QStringLiteral("scientific:agent_session: approve_repair is a human-only "
+                           "action; repair approvals are minted by the operator in the "
+                           "local Control Center UI, never over the model tool channel"),
+            QStringLiteral("APPROVAL_HUMAN_CHANNEL_ONLY"),
+            QStringLiteral("authorization"));
+    }
     const Json::Value args = sicnu::processing::variantToJsonValue(arguments);
     const Json::Value doc = m_agentOpsDriver->apply(action, args);
     QVariantMap result = sicnu::processing::jsonValueToVariant(doc).toMap();

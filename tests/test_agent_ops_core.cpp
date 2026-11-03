@@ -781,14 +781,14 @@ TEST_CASE("agent_ops session surface implements every advertised action",
     REQUIRE_FALSE(noGoal["ok"].asBool());
     REQUIRE(noGoal["error"].asString() == "MISSING_ARGS");
 
-    // approve_repair without a projected recovery plan is a typed refusal —
-    // an approval must bind to a real plan, never arm a bare flag.
+    // approve_repair over the driver surface is a HUMAN-CHANNEL refusal
+    // (#1733): the mint is never driver-reachable, with or without a plan.
     Json::Value approveArgs(Json::objectValue);
     approveArgs["now_ms"] = Json::Int64(1000);
     approveArgs["ttl_ms"] = Json::Int64(5000);
     auto approved = sessionSurfaceApply(coord, "approve_repair", approveArgs);
     REQUIRE_FALSE(approved["ok"].asBool());
-    REQUIRE(approved["error"].asString() == "NO_PENDING_REPAIR_PLAN");
+    REQUIRE(approved["error"].asString() == "APPROVAL_HUMAN_CHANNEL_ONLY");
 }
 
 TEST_CASE("agent_ops failed-session diagnostic stays inside the evidence", "[agent_ops][diagnostic]")
@@ -1227,13 +1227,14 @@ TEST_CASE("repair approval tokens bind findings, coordinator and clock window",
           "[agent_ops][approval]")
 {
     const std::string findings = "aaaabbbbccccdddd";
-    const Json::Value token = mintRepairApprovalToken(findings, 7, 1000, 5000);
+    const std::string secret = generateRepairApprovalSecretHex();
+    const Json::Value token = mintRepairApprovalToken(findings, 7, 1000, 5000, secret);
     REQUIRE(token.isObject());
     REQUIRE(token["kind"].asString() == std::string(kRepairApprovalKind));
     REQUIRE(token["findings_digest"].asString() == findings);
-    const auto verify = [](const Json::Value &doc, const std::string &digest,
-                           long long coordinator, long long now) {
-        return std::string(verifyRepairApprovalToken(doc, digest, coordinator, now));
+    const auto verify = [&secret](const Json::Value &doc, const std::string &digest,
+                                  long long coordinator, long long now) {
+        return std::string(verifyRepairApprovalToken(doc, digest, coordinator, now, secret));
     };
     REQUIRE(verify(token, findings, 7, 1000) == approval_check::kOk);
     REQUIRE(verify(token, findings, 7, 6000) == approval_check::kOk);
@@ -1255,10 +1256,25 @@ TEST_CASE("repair approval tokens bind findings, coordinator and clock window",
     REQUIRE(verify(digestFlip, findings, 7, 2000) == approval_check::kTampered);
     REQUIRE(verify(Json::Value(), findings, 7, 2000) == approval_check::kMalformed);
 
+    // A token MACed with a DIFFERENT secret never verifies (#1733): a wire
+    // peer that observed every field still cannot forge authenticity.
+    REQUIRE(std::string(verifyRepairApprovalToken(token, findings, 7, 2000,
+                                                  generateRepairApprovalSecretHex())) ==
+            approval_check::kTampered);
+
     // Minting never invents an approval: unusable arguments produce nothing.
-    CHECK(mintRepairApprovalToken("", 7, 1000, 5000).isNull());
-    CHECK(mintRepairApprovalToken(findings, 0, 1000, 5000).isNull());
-    CHECK(mintRepairApprovalToken(findings, 7, 1000, 0).isNull());
+    CHECK(mintRepairApprovalToken("", 7, 1000, 5000, secret).isNull());
+    CHECK(mintRepairApprovalToken(findings, 0, 1000, 5000, secret).isNull());
+    CHECK(mintRepairApprovalToken(findings, 7, 1000, 0, secret).isNull());
+    // #1733: an excessive ttl is refused at the source, and a shape-valid
+    // token whose window exceeds the bound is refused at verification.
+    CHECK(mintRepairApprovalToken(findings, 7, 1000, kRepairApprovalMaxTtlMs + 1,
+                                  secret).isNull());
+    Json::Value fatWindow = token;
+    fatWindow["expires_at_ms"] = Json::Int64(1000 + kRepairApprovalMaxTtlMs + 1);
+    fatWindow["digest"] = "0000000000000000"; // shape-valid hex, MAC wrong anyway
+    REQUIRE(std::string(validateRepairApprovalTokenShape(fatWindow)) == std::string(approval_check::kTtlExcessive));
+    REQUIRE(verify(fatWindow, findings, 7, 2000) == approval_check::kTtlExcessive);
 }
 
 TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
@@ -1272,7 +1288,8 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
 
     // No plan projected yet: there is nothing an approval could bind to.
     Json::Value premature = mintRepairApprovalToken("aaaabbbbccccdddd",
-                                                    coord.instanceId(), 1000, 5000);
+                                                    coord.instanceId(), 1000, 5000,
+                                                    generateRepairApprovalSecretHex());
     REQUIRE(coord.armRepairApproval(premature, 1000) == "NO_PENDING_REPAIR_PLAN");
 
     // Issue #1447: untyped malformed tokens must return APPROVAL_MALFORMED without LogicError
@@ -1322,25 +1339,44 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
         decision.repairPlan["provenance"]["findings_digest"].asString();
     REQUIRE(wired.lastProjectedFindingsDigest() == planDigest);
 
-    // A token naming a different finding set is refused before anything
-    // arms.
+    // #1733: a token minted by ANY other principal (a test acting as a
+    // forger, another coordinator) fails the MAC before the binding checks —
+    // the unkeyed digest of the old scheme is exactly what made
+    // self-approval possible.
     REQUIRE(wired.armRepairApproval(
                 mintRepairApprovalToken("ffffffffffffffff", wired.instanceId(), 1000,
-                                        5000),
-                1000) == "APPROVAL_WRONG_PLAN");
+                                        5000, generateRepairApprovalSecretHex()),
+                1000) == "APPROVAL_TAMPERED");
     REQUIRE_FALSE(wired.hasPendingRepairApproval());
 
-    // A token from ANOTHER coordinator cannot arm here.
+    // A token from ANOTHER coordinator cannot arm here (its secret differs,
+    // so the MAC fails first; the refusal is the same fail-closed verdict).
     OperationsCoordinator::Dependencies otherDeps;
     FakeSeams otherSeams(scenario);
     otherDeps.seams = makeDeps(otherSeams);
     OperationsCoordinator otherCoord(otherDeps);
-    Json::Value foreign = mintRepairApprovalToken(planDigest, otherCoord.instanceId(),
-                                                  1000, 5000);
-    REQUIRE(wired.armRepairApproval(foreign, 1000) == "APPROVAL_WRONG_COORDINATOR");
+    std::string otherMintError;
+    Json::Value foreign = otherCoord.mintRepairApprovalForOperator(1000, 5000,
+                                                                   &otherMintError);
+    REQUIRE(otherMintError == "NO_PENDING_REPAIR_PLAN"); // nothing projected there
+    (void)foreign;
+    REQUIRE(wired.armRepairApproval(
+                mintRepairApprovalToken(planDigest, otherCoord.instanceId(), 1000, 5000,
+                                        generateRepairApprovalSecretHex()),
+                1000) == "APPROVAL_TAMPERED");
+
+    // The HUMAN channel mints against the coordinator's own secret. Two
+    // mints for the same binding carry different nonces — both authentic,
+    // neither forgeable from the other.
+    std::string mintError;
+    Json::Value token = wired.mintRepairApprovalForOperator(1000, 5000, &mintError);
+    REQUIRE(token.isObject());
+    REQUIRE(mintError.empty());
+    Json::Value spareToken = wired.mintRepairApprovalForOperator(1000, 5000, &mintError);
+    REQUIRE(spareToken.isObject());
+    REQUIRE(token["nonce"].asString() != spareToken["nonce"].asString());
 
     // Expiry at arm time is refused.
-    Json::Value token = mintRepairApprovalToken(planDigest, wired.instanceId(), 1000, 5000);
     REQUIRE(wired.armRepairApproval(token, 1000 + 5001) == "APPROVAL_EXPIRED");
 
     // Arming ok, then the next launch consumes it — whatever the outcome.
@@ -1363,17 +1399,15 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
     // decision carried no plan, arming against the stale digest is refused.
     // A genuinely NEW token (different clock window -> different digest)
     // for the stale digest is refused on the binding, not on replay.
-    Json::Value staleDigestToken = mintRepairApprovalToken(planDigest,
-                                                           wired.instanceId(), 4500,
-                                                           5000);
-    REQUIRE(wired.armRepairApproval(staleDigestToken, 5000) ==
-            "NO_PENDING_REPAIR_PLAN");
+    // The spare token (never consumed, MAC-valid) still cannot arm while
+    // no plan is projected — the binding target is gone.
+    REQUIRE(wired.armRepairApproval(spareToken, 5000) == "NO_PENDING_REPAIR_PLAN");
     RecoveryContext refreshCtx;
     auto refreshed =
         wired.evaluateRecovery(preflightFixableDiagnostic(), refreshCtx);
     REQUIRE(wired.lastProjectedFindingsDigest() == planDigest);
-    Json::Value shortToken2 = mintRepairApprovalToken(planDigest, wired.instanceId(),
-                                                      5000, 100);
+    Json::Value shortToken2 = wired.mintRepairApprovalForOperator(5000, 100, &mintError);
+    REQUIRE(shortToken2.isObject());
     REQUIRE(wired.armRepairApproval(shortToken2, 5000).empty());
     OpsRunRequest expiredReq;
     expiredReq.session = ndviRequest();
@@ -1401,8 +1435,11 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
     REQUIRE(firstDecision.reasonCode == "REPAIR_NEEDS_APPROVAL");
     const std::string radiometricDigest =
         firstDecision.repairPlan["provenance"]["findings_digest"].asString();
+    std::string flowMintError;
     Json::Value flowToken =
-        mintRepairApprovalToken(radiometricDigest, flow.instanceId(), 1000, 50000);
+        flow.mintRepairApprovalForOperator(1000, 50000, &flowMintError);
+    REQUIRE(flowToken.isObject());
+    REQUIRE(flowToken["findings_digest"].asString() == radiometricDigest);
     REQUIRE(flow.armRepairApproval(flowToken, 1000).empty());
     RecoveryContext secondCtx;
     secondCtx.humanApprovedRepair = false; // bare bool never trusted
@@ -1429,8 +1466,11 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
         cross.evaluateRecovery(preflightFixableDiagnostic("GRID_MISMATCH"), gridCtx);
     const std::string gridDigest =
         gridDecision.repairPlan["provenance"]["findings_digest"].asString();
+    std::string crossMintError;
     Json::Value gridToken =
-        mintRepairApprovalToken(gridDigest, cross.instanceId(), 1000, 50000);
+        cross.mintRepairApprovalForOperator(1000, 50000, &crossMintError);
+    REQUIRE(gridToken.isObject());
+    REQUIRE(gridToken["findings_digest"].asString() == gridDigest);
     REQUIRE(cross.armRepairApproval(gridToken, 1000).empty());
     RecoveryContext radioCtx;
     radioCtx.approvalNowMs = 2000;
@@ -1440,7 +1480,7 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
     REQUIRE(radioDecision.reasonCode == "REPAIR_NEEDS_APPROVAL");
     REQUIRE(radioDecision.approvalError == "APPROVAL_WRONG_PLAN");
 }
-TEST_CASE("the surface approve_repair action mints and arms a bound token",
+TEST_CASE("the surface approve_repair action is human-channel-only (#1733)",
           "[agent_ops][approval][surface]")
 {
     FakeCapabilityProvider provider;
@@ -1452,41 +1492,54 @@ TEST_CASE("the surface approve_repair action mints and arms a bound token",
     deps.repairCapabilityProvider = &provider;
     OperationsCoordinator coord(deps);
 
-    // Without a projected plan: typed refusal, not a silent flag.
+    // With or without a projected plan, with or without arguments, the
+    // driver-reachable surface NEVER mints: the action is human-only and
+    // the refusal names the channel, not the plan state (#1733). A model
+    // that relays a plausible now/ttl pair gets exactly this answer.
     auto noPlan = sessionSurfaceApply(coord, "approve_repair",
                                       Json::Value(Json::objectValue));
     REQUIRE_FALSE(noPlan["ok"].asBool());
-    REQUIRE(noPlan["error"].asString() == "NO_PENDING_REPAIR_PLAN");
+    REQUIRE(noPlan["error"].asString() == "APPROVAL_HUMAN_CHANNEL_ONLY");
+    REQUIRE_FALSE(coord.hasPendingRepairApproval());
 
     RecoveryContext ctx;
     auto decision = coord.evaluateRecovery(preflightFixableDiagnostic(), ctx);
     REQUIRE(decision.repairPlan["status"].asString() == "planned");
 
-    // A driver claiming a finding set the coordinator never projected is
-    // refused before minting.
+    Json::Value mintArgs(Json::objectValue);
+    mintArgs["now_ms"] = Json::Int64(1000);
+    mintArgs["ttl_ms"] = Json::Int64(9e15); // the AS-007 self-approve shape
+    auto refused = sessionSurfaceApply(coord, "approve_repair", mintArgs);
+    REQUIRE_FALSE(refused["ok"].asBool());
+    REQUIRE(refused["error"].asString() == "APPROVAL_HUMAN_CHANNEL_ONLY");
+    REQUIRE_FALSE(coord.hasPendingRepairApproval());
+
     Json::Value wrongPlanArgs(Json::objectValue);
     wrongPlanArgs["findings_digest"] = "ffffffffffffffff";
     wrongPlanArgs["now_ms"] = Json::Int64(1000);
     wrongPlanArgs["ttl_ms"] = Json::Int64(5000);
     auto wrong = sessionSurfaceApply(coord, "approve_repair", wrongPlanArgs);
     REQUIRE_FALSE(wrong["ok"].asBool());
-    REQUIRE(wrong["error"].asString() == "APPROVAL_WRONG_PLAN");
+    REQUIRE(wrong["error"].asString() == "APPROVAL_HUMAN_CHANNEL_ONLY");
 
-    // The honest flow: no digest argument (approve what you last saw),
-    // clock window from the driver, token bound to the projected science.
-    Json::Value args(Json::objectValue);
-    args["now_ms"] = Json::Int64(1000);
-    args["ttl_ms"] = Json::Int64(5000);
-    auto approved = sessionSurfaceApply(coord, "approve_repair", args);
-    REQUIRE(approved["ok"].asBool());
-    REQUIRE(approved["findings_digest"].asString() ==
-            coord.lastProjectedFindingsDigest());
-    REQUIRE(approved["repair_approval"].isObject());
+    // The advertised action list no longer offers approve_repair to
+    // drivers; the human gate is invisible to the model by discovery.
+    const Json::Value actions = sessionSurfaceActions();
+    bool advertised = false;
+    for (const auto &a : actions["actions"])
+        if (a.asString() == "approve_repair")
+            advertised = true;
+    REQUIRE_FALSE(advertised);
+
+    // The human channel still works: the operator-side mint binds the
+    // projected science with the coordinator's own secret.
+    std::string mintError;
+    Json::Value token = coord.mintRepairApprovalForOperator(1000, 5000, &mintError);
+    REQUIRE(token.isObject());
+    REQUIRE(mintError.empty());
+    REQUIRE(token["findings_digest"].asString() == coord.lastProjectedFindingsDigest());
+    REQUIRE(coord.armRepairApproval(token, 1000).empty());
     REQUIRE(coord.hasPendingRepairApproval());
-    REQUIRE(std::string(verifyRepairApprovalToken(approved["repair_approval"],
-                                                  coord.lastProjectedFindingsDigest(),
-                                                  coord.instanceId(), 6000)) ==
-            approval_check::kOk);
 }
 
 TEST_CASE("a mixed-risk plan is approval-gated as a whole (max risk over all candidates)",
@@ -1620,8 +1673,12 @@ TEST_CASE("round-2 residuals: forged ctx refused, direct token symmetric, pause 
     REQUIRE(refused.approvalError == "APPROVAL_REQUIRED");
     REQUIRE_FALSE(forged.humanApprovedRepair);
 
-    // The honest flow arms the token; the SAME evaluation then proceeds.
-    Json::Value token = mintRepairApprovalToken(digest, coord.instanceId(), 1000, 50000);
+    // The honest flow mints through the HUMAN channel and arms the token;
+    // the SAME evaluation then proceeds.
+    std::string honestMintError;
+    Json::Value token = coord.mintRepairApprovalForOperator(1000, 50000,
+                                                            &honestMintError);
+    REQUIRE(token.isObject());
     REQUIRE(coord.armRepairApproval(token, 1000).empty());
     RecoveryContext honest;
     honest.approvalNowMs = 2000;
@@ -1653,8 +1710,10 @@ TEST_CASE("round-2 residuals: forged ctx refused, direct token symmetric, pause 
         preflightFixableDiagnostic("INVALID_RADIOMETRY"), pauseCtx);
     const std::string pauseDigest =
         pauseProbe.repairPlan["provenance"]["findings_digest"].asString();
+    std::string pauseMintError;
     Json::Value pauseToken =
-        mintRepairApprovalToken(pauseDigest, paused.instanceId(), 1000, 50000);
+        paused.mintRepairApprovalForOperator(1000, 50000, &pauseMintError);
+    REQUIRE(pauseToken.isObject());
     REQUIRE(paused.armRepairApproval(pauseToken, 1000).empty());
     paused.requestPause();
     OpsRunRequest pausedReq;

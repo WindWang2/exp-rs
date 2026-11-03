@@ -17969,3 +17969,85 @@ set_tests_properties(test_r27_t01_science_quality PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   TIMEOUT 600)
 # ── END R27-T01 ──────────────────────────────────────────────────────────────
+
+# ── BEGIN R27-T3: agent approval/sandbox/SDK-plugin hardening (this track) ──
+# Append-only registration block (.planning/r27-t03). P0 #1733 approval gate,
+# P1 #1741/#1742 containment & dock lifecycle, P2 #1760-1763/#1796-1799 hardening.
+add_executable(test_r27_t03_approval_gate test_r27_t03_approval_gate.cpp)
+target_link_libraries(test_r27_t03_approval_gate PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::agent_ops
+  sicnu_agent_loop
+  jsoncpp
+)
+target_include_directories(test_r27_t03_approval_gate PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_r27_t03_approval_gate TEST_PREFIX "test_r27_t03_approval_gate::")
+
+add_executable(test_r27_t03_dock_lifecycle test_r27_t03_dock_lifecycle.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/agent_ops/agent_ops_control_center_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/agent_ops/agent_ops_control_center_panel.cpp
+)
+target_link_libraries(test_r27_t03_dock_lifecycle PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Sicnu::agent_ops
+)
+target_include_directories(test_r27_t03_dock_lifecycle PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+)
+set_target_properties(test_r27_t03_dock_lifecycle PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r27_t03_dock_lifecycle TEST_PREFIX "test_r27_t03_dock_lifecycle::" TIMEOUT 180)
+
+add_executable(test_r27_t03_containment_gdal_prefix test_r27_t03_containment_gdal_prefix.cpp)
+target_link_libraries(test_r27_t03_containment_gdal_prefix PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r27_t03_containment_gdal_prefix PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r27_t03_containment_gdal_prefix TEST_PREFIX "test_r27_t03_containment_gdal_prefix::")
+
+add_executable(test_r27_t03_secret_redaction test_r27_t03_secret_redaction.cpp)
+target_link_libraries(test_r27_t03_secret_redaction PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::agent_ops
+  jsoncpp
+)
+target_include_directories(test_r27_t03_secret_redaction PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_r27_t03_secret_redaction TEST_PREFIX "test_r27_t03_secret_redaction::")
+
+sicnu_add_sdk_test(test_r27_t03_external_env_guard TEST_PREFIX "test_r27_t03_external_env_guard::")
+
+add_executable(test_r27_t03_copilot_gate test_r27_t03_copilot_gate.cpp)
+target_link_libraries(test_r27_t03_copilot_gate PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  jsoncpp
+)
+target_include_directories(test_r27_t03_copilot_gate PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r27_t03_copilot_gate TEST_PREFIX "test_r27_t03_copilot_gate::")
+
+add_test(NAME r27_t03_cli_invalid_input
+  COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:sicnu_geo_rs_cli>
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/r27_t03_cli_invalid_input.cmake)
+set_tests_properties(r27_t03_cli_invalid_input PROPERTIES TIMEOUT 300)
+sicnu_set_test_env(r27_t03_cli_invalid_input)
+
+if(Python_EXECUTABLE)
+  add_test(NAME r27_t03_python_worker
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_r27_t03_python_worker.py)
+  set_tests_properties(r27_t03_python_worker PROPERTIES TIMEOUT 180)
+  sicnu_set_test_env(r27_t03_python_worker)
+endif()
+# ── END R27-T3 ──

@@ -9,6 +9,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
+#include "agent/copilot_tool_gate.h"
 
 #include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
@@ -653,6 +654,70 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     m_lastError = reason;
     updateToolCallCard( toolCallId, tr( "rejected" ), reason );
     setRunStage( tr( "Failed" ) );
+    updateRunInspector();
+    return;
+  }
+
+  // Single-tool-call gate (#1763 / AS-014): the MCP surface sandboxes every
+  // call; the GUI dispatcher did not. Prompt injection via tool results or
+  // dataset metadata could drive arbitrary-path read/write or /vsicurl
+  // fetches through a single call — so the SAME containment + remote
+  // default-deny policy runs here, before submission, and write-shaped
+  // calls get the human Confirm the plan flow already requires.
+  // R1-F1: the gate runs on the DISPATCHER-parsed arguments (the wire shape
+  // is OpenAI's {function:{name, arguments}} — the raw envelope's top-level
+  // "parameters" key never exists there), and the approval card is built
+  // from the same parsed arguments.
+  const Json::Value callArguments = m_toolCallDispatcher.argumentsFor( cppEnvelope );
+  const auto gate = copilot_gate::gateCallArguments( callArguments );
+  // R2: the approval-card route only fits ALGORITHM calls — an interaction
+  // action (view:/roi:/canvas:/layer:/raster:/data:) is not a registered
+  // operator, so a write-slot-looking parameter on one would wrap into a
+  // plan step the executor can never resolve. Interaction actions keep
+  // their synchronous submit; the containment refusal above still applies
+  // to them unconditionally.
+  const std::string callName = cppEnvelope.isMember( "name" ) && cppEnvelope["name"].isString()
+                                   ? cppEnvelope["name"].asString()
+                                   : ( cppEnvelope["function"].isObject() &&
+                                               cppEnvelope["function"]["name"].isString()
+                                           ? cppEnvelope["function"]["name"].asString()
+                                           : std::string() );
+  const bool needsApproval =
+      gate.needsApproval && !processing::ToolCallDispatcher::isInteractionAction( callName );
+  if ( !gate.refusalReason.isEmpty() )
+  {
+    const QString reason = tr( "Tool call blocked by the workspace policy: %1" )
+                               .arg( gate.refusalReason );
+    handleToolCallRejection( reason, toolCallJson );
+    m_lastError = reason;
+    if ( m_toolCallCards.contains( toolCallId ) )
+      updateToolCallCard( toolCallId, tr( "rejected" ), reason );
+    setRunStage( tr( "Failed" ) );
+    updateRunInspector();
+    return;
+  }
+  if ( needsApproval )
+  {
+    // Route the write through the existing human approval card (one-step
+    // plan): the operator sees exactly what will be written where before
+    // anything executes, and the model receives the outcome through the
+    // same role:"tool" follow-up the plan path uses.
+    Json::Value oneStepPlan( Json::objectValue );
+    Json::Value steps( Json::arrayValue );
+    Json::Value step( Json::objectValue );
+    step["id"] = "copilot_single_write";
+    step["name"] = callName;
+    step["params"] = callArguments.isObject() ? callArguments
+                                              : Json::Value( Json::objectValue );
+    steps.append( step );
+    oneStepPlan["steps"] = steps;
+    appendPlanApprovalCard(
+        QJsonObject::fromVariantMap( processing::jsonObjectToVariantMap( oneStepPlan ) ),
+        toolCallJson );
+    if ( m_toolCallCards.contains( toolCallId ) )
+      updateToolCallCard( toolCallId, tr( "awaiting approval" ),
+                          tr( "Write tool call routed to operator approval" ) );
+    setRunStage( tr( "Awaiting approval" ) );
     updateRunInspector();
     return;
   }

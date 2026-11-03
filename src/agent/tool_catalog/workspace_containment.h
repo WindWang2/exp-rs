@@ -282,33 +282,41 @@ inline QString embeddedDriverPath( const QString &rest )
     return path.isEmpty() ? QString() : path;
 }
 
-/// True when a connection-string payload from an UNKNOWN driver is too
-/// dangerous to fall back to workspace-relative treatment: absolute/remote/
-/// home-anchored, quoted, inline-XML config, database key=value parameters,
-/// or a relative path with ".." segments that would climb out of the process
-/// CWD (the MCP server chdir()s into the workspace, so a bare relative
-/// reference stays contained, but ".." does not).
-inline bool unknownDriverPayloadIsDangerous( const QString &rest )
+/// Driver prefixes that are never file-path carriers — they reference
+/// devices, spawn external tools, or address hardware buses. Unknown to the
+/// file-backed/network tables above, they previously fell through to the
+/// relative-name treatment even with a benign-looking payload (#1741).
+inline bool isDeniedGdalDriver( const QString &driver )
 {
-    const QString trimmedRest = rest.trimmed();
-    if ( trimmedRest.isEmpty() )
+    static const QSet<QString> drivers = {
+        // Talks to GPS devices through the external gpsbabel binary.
+        QStringLiteral( "gpsbabel" ),
+    };
+    return drivers.contains( driver.toLower() );
+}
+
+/// True when ONE ':'-separated segment of a connection-string payload is
+/// too dangerous for the workspace-relative fallback: absolute/rooted,
+/// home-anchored, quoted, remote-schemed, vsi-prefixed, a Windows drive,
+/// kv-parameter shaped, or a ".."-climbing relative path.
+inline bool driverPayloadSegmentIsDangerous( const QString &segment )
+{
+    const QString trimmed = segment.trimmed();
+    if ( trimmed.isEmpty() )
         return false;
-    const QChar first = trimmedRest.at( 0 );
+    const QChar first = trimmed.at( 0 );
     if ( first == QLatin1Char( '/' ) || first == QLatin1Char( '\\' )
          || first == QLatin1Char( '~' ) || first == QLatin1Char( '"' )
          || first == QLatin1Char( '<' ) )
         return true;
-    const QString lowered = trimmedRest.toLower();
-    // R1-F1: any scheme:// payload is a remote reference — an unknown driver
-    // carrying one (TileDB:s3://bucket) must not fall back to relative-name
-    // treatment.
+    const QString lowered = trimmed.toLower();
     static const QRegularExpression kPayloadScheme(
         QStringLiteral( "^[a-z][a-z0-9+.-]+://" ) );
     if ( kPayloadScheme.match( lowered ).hasMatch()
          || lowered.startsWith( QStringLiteral( "/vsi" ) ) )
         return true;
-    if ( trimmedRest.size() >= 2 && trimmedRest.at( 1 ) == QLatin1Char( ':' )
-         && trimmedRest.at( 0 ).isLetter() )
+    if ( trimmed.size() >= 2 && trimmed.at( 1 ) == QLatin1Char( ':' )
+         && trimmed.at( 0 ).isLetter() )
         return true; // embedded Windows drive
     static const QStringList kvKeys = { QStringLiteral( "host=" ), QStringLiteral( "server=" ),
                                         QStringLiteral( "url=" ), QStringLiteral( "dbname=" ),
@@ -318,8 +326,33 @@ inline bool unknownDriverPayloadIsDangerous( const QString &rest )
     for ( const QString &key : kvKeys )
         if ( lowered.startsWith( key ) || lowered.contains( QLatin1Char( ' ' ) + key ) )
             return true;
-    const QStringList segments = trimmedRest.split( QLatin1Char( '/' ), Qt::SkipEmptyParts );
+    const QStringList segments = trimmed.split( QLatin1Char( '/' ), Qt::SkipEmptyParts );
     return segments.contains( QStringLiteral( ".." ) );
+}
+
+/// True when a connection-string payload from an UNKNOWN driver is too
+/// dangerous to fall back to workspace-relative treatment. #1741: the check
+/// used to inspect only the FIRST character after the driver colon, so
+/// subdataset syntaxes whose real path sits behind selector segments
+/// (GTIFF_DIR:1:/abs, NITF_IM:0:/abs, HDF4_SDS:…:"/abs", GTIFF_DIR:1:
+/// /vsicurl/http://169.254.169.254/) were judged INSIDE the workspace while
+/// GDAL opened the embedded absolute/remote target. Now EVERY
+/// ':'-separated segment (quoted ones included — the scan sees their
+/// leading quote) must be benign for the fallback to apply; a relative
+/// in-workspace subdataset reference (GTIFF_DIR:1:data.tif) still passes,
+/// because the process CWD is the workspace.
+inline bool unknownDriverPayloadIsDangerous( const QString &rest )
+{
+    const QString trimmedRest = rest.trimmed();
+    if ( trimmedRest.isEmpty() )
+        return false;
+    const QStringList segments = trimmedRest.split( QLatin1Char( ':' ) );
+    for ( const QString &segment : segments )
+    {
+        if ( driverPayloadSegmentIsDangerous( segment ) )
+            return true;
+    }
+    return false;
 }
 
 /// Driver-prefix shape test for @p pathValue: a multi-letter identifier
@@ -453,10 +486,22 @@ inline ReferenceVerdict classifyReference( const QString &pathValue, int depth =
                 verdict.kind = ReferenceKind::Denied;
                 verdict.reason = QStringLiteral( "Remote GDAL driver connection is disabled "
                                                  "(set SICNU_MCP_ALLOW_REMOTE=1): %1" )
-                                     .arg( pathValue );
+                                   .arg( pathValue );
                 return verdict;
             }
             verdict.kind = ReferenceKind::RemoteAllowed;
+            return verdict;
+        }
+        if ( isDeniedGdalDriver( driver ) )
+        {
+            // #1741: never a file-path carrier — device/tool drivers are
+            // denied regardless of payload shape (a benign-looking
+            // "GPSBABEL:garmin:usb:" still reaches hardware/an external
+            // binary).
+            verdict.kind = ReferenceKind::Denied;
+            verdict.reason = QStringLiteral( "GDAL driver prefix '%1:' addresses a device or "
+                                             "external tool, not a workspace file: %2" )
+                                 .arg( driver, pathValue );
             return verdict;
         }
         if ( unknownDriverPayloadIsDangerous( rest ) )

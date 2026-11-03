@@ -24,6 +24,10 @@ struct ChatRequestPayload
 {
   QNetworkRequest request;
   QByteArray body;
+  /// AS-015 (#1802): non-empty when the request must NOT be sent (the API
+  /// key would travel over plaintext http to a non-loopback host); the
+  /// caller emits this through errorOccurred instead of posting.
+  QString refusalReason;
 };
 
 class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
