@@ -294,6 +294,13 @@ TEST_CASE( "Help ↔ registry: no phantom and no uncovered commands (#869 class)
         CHECK( ( helpIds.count( id ) == 1 ||
                  allowed( kAllowedCommandsWithoutHelp, id ) ) );
     }
+    // Rot guard (R2): a phantom-help entry whose command got re-registered
+    // no longer matches any finding — remove it from the ledger.
+    for ( const auto &e : kAllowedPhantomHelpCommands )
+    {
+        INFO( "stale OWNED-BY-CLI-DRIFT entry (now registered): " << e.id );
+        CHECK( report.registeredIds.count( e.id ) != 1 );
+    }
 }
 
 TEST_CASE( "HelpContentStore loads each id exactly once and rejects "

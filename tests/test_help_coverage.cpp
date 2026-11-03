@@ -51,6 +51,19 @@ using namespace sicnu::help;
 namespace
 {
 
+// #1737: data/help documents these commands but the shell source no
+// longer carries them (CLI/help surface drift predating 2026-11,
+// masked by the BCT-04 compile break). Owner: CLI surface maintainers;
+// recorded so NEW stale entries still fail here, with rot guards so the
+// ledger cannot outlive the drift (R2).
+const QSet<QString> kOwnedByCliDrift = {
+    QStringLiteral( "rs.atmospheric" ),     QStringLiteral( "rs.bandMath" ),
+    QStringLiteral( "rs.changeDetection" ), QStringLiteral( "rs.fusion" ),
+    QStringLiteral( "rs.mosaic" ),          QStringLiteral( "rs.pca" ),
+    QStringLiteral( "rs.spectralIndex" ),   QStringLiteral( "rs.terrain" ),
+};
+
+
 /// Composes the full knowledge base against the real operator registry once.
 const CompositionReport &composed()
 {
@@ -185,17 +198,13 @@ TEST_CASE( "Shell command ids all have help knowledge", "[help][coverage][comman
             continue;
         const QString commandId = helpId.mid( QString( "command." ).size() );
         INFO( "knowledge id: " << helpId.toStdString() );
-        // #1737: data/help documents these commands but the shell source no
-        // longer carries them (CLI/help surface drift predating 2026-11,
-        // masked by the BCT-04 compile break). Owner: CLI surface
-        // maintainers; recorded so NEW stale entries still fail here.
-        static const QSet<QString> kOwnedByCliDrift = {
-            QStringLiteral( "rs.atmospheric" ),  QStringLiteral( "rs.bandMath" ),
-            QStringLiteral( "rs.changeDetection" ), QStringLiteral( "rs.fusion" ),
-            QStringLiteral( "rs.mosaic" ),        QStringLiteral( "rs.pca" ),
-            QStringLiteral( "rs.spectralIndex" ), QStringLiteral( "rs.terrain" ),
-        };
         CHECK( ( ids.contains( commandId ) || kOwnedByCliDrift.contains( commandId ) ) );
+    }
+    // Rot guard (R2): a drift entry whose command got re-registered is
+    // stale — remove it so the ledger cannot silently outlive the drift.
+    for ( const QString &drifted : kOwnedByCliDrift ) {
+        INFO( "stale OWNED-BY-CLI-DRIFT entry (now registered): " << drifted.toStdString() );
+        CHECK_FALSE( ids.contains( drifted ) );
     }
 }
 
@@ -203,20 +212,15 @@ TEST_CASE( "Availability fact tables only reference real commands", "[help][cove
 {
     composed();
     const QStringList known = scanShellCommandIds();
-    // #1737: data/help documents these commands but the shell source no
-    // longer carries them (CLI/help surface drift predating 2026-11,
-    // masked by the BCT-04 compile break). Owner: CLI surface
-    // maintainers; recorded so NEW stale entries still fail here.
-    static const QSet<QString> kOwnedByCliDrift = {
-        QStringLiteral( "rs.atmospheric" ),  QStringLiteral( "rs.bandMath" ),
-        QStringLiteral( "rs.changeDetection" ), QStringLiteral( "rs.fusion" ),
-        QStringLiteral( "rs.mosaic" ),        QStringLiteral( "rs.pca" ),
-        QStringLiteral( "rs.spectralIndex" ), QStringLiteral( "rs.terrain" ),
-        };
-
     for ( const QString &commandId : sicnu::app::AvailabilityFactsAdapter::coveredCommandIds() ) {
         INFO( "availability table id: " << commandId.toStdString() );
         CHECK( ( known.contains( commandId ) || kOwnedByCliDrift.contains( commandId ) ) );
+    }
+    // Rot guard (R2): same ledger rule as above — a re-registered command
+    // must have its drift entry removed.
+    for ( const QString &drifted : kOwnedByCliDrift ) {
+        INFO( "stale OWNED-BY-CLI-DRIFT entry (now known): " << drifted.toStdString() );
+        CHECK_FALSE( known.contains( drifted ) );
     }
 }
 

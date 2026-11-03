@@ -132,6 +132,18 @@ TEST_CASE( "Contract graph: no duplicate nodes, no dangling references "
         INFO( "stale OWNED-BY-#885 entry: " << id );
         CHECK( danglingActions.count( id ) == 1 );
     }
+    // Rot guard (R2): every CLI-drift ledger entry must still match a live
+    // finding — when the CLI surface is repaired the entry (and its finding)
+    // disappears and the ledger must shrink with it.
+    std::set<std::string> seenCliDrift;
+    for ( const auto &f : findings )
+        if ( f.kind == "dangling_ref" && kOwnedByCliHelpDrift.count( f.id ) == 1 )
+            seenCliDrift.insert( f.id );
+    for ( const auto &id : kOwnedByCliHelpDrift )
+    {
+        INFO( "stale OWNED-BY-CLI-DRIFT entry (no live finding): " << id );
+        CHECK( seenCliDrift.count( id ) == 1 );
+    }
 }
 
 TEST_CASE( "Contract graph: canonical serialization round-trips",
