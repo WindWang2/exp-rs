@@ -134,7 +134,16 @@ QList<QgsColorRampShader::ColorRampItem> rampShaderItems( const Json::Value &ras
       const double from = min + ( max - min ) * i / static_cast<double>( stopCount );
       const double to = min + ( max - min ) * ( i + 1 ) / static_cast<double>( stopCount );
       entry["min"] = from;
-      entry["max"] = mode == "continuous" ? max : to;
+      entry["max"] = to;
+      // swarm-review AG-M-2: a continuous stop is an interpolation NODE of the
+      // band, not a class with an upper bound. Every stop used to carry the
+      // global max as its shader item value, so all items shared one value and
+      // QGIS collapsed the ramp to the first color for every pixel below max.
+      // Nodes span [min, max] inclusive — the same endpoint convention as the
+      // colorbar gradient — so the band reaches both ends of the stretch.
+      const double node =
+        stopCount > 1 ? min + ( max - min ) * i / static_cast<double>( stopCount - 1 ) : min;
+      entry["value"] = mode == "continuous" ? node : to;
       entry["color"] = stops[i];
       entry["label"] = QStringLiteral( "%1-%2" ).arg( from, 0, 'f', 2 ).arg( to, 0, 'f', 2 ).toStdString();
       classes.append( entry );
@@ -146,7 +155,13 @@ QList<QgsColorRampShader::ColorRampItem> rampShaderItems( const Json::Value &ras
     if ( !entry.isObject() || !entry.isMember( "color" ) )
       continue;
     QgsColorRampShader::ColorRampItem item;
-    item.value = entry.isMember( "max" ) && entry["max"].isNumeric() ? entry["max"].asDouble() : 0.0;
+    // swarm-review AG-M-2: the shader value comes from the explicit `value`
+    // field when present (continuous nodes); explicit classes keep using
+    // their upper bound.
+    item.value = entry.isMember( "value" ) && entry["value"].isNumeric()
+                   ? entry["value"].asDouble()
+                   : ( entry.isMember( "max" ) && entry["max"].isNumeric() ? entry["max"].asDouble()
+                                                                          : 0.0 );
     item.color = QColor( colorString( entry["color"], QStringLiteral( "#000000" ) ) );
     item.label = entry.isMember( "label" ) && entry["label"].isString()
                    ? QString::fromStdString( entry["label"].asString() )

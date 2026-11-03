@@ -190,10 +190,12 @@ SpatialToolResult TemporalCreateCollectionTool::execute( const Json::Value &inpu
   std::string error;
   const QString outputPath = requireStringField( input, "output", &error );
   if ( !error.empty() )
-    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "VALIDATION" );
+    // swarm-review AG-C-8: the category vocabulary is lowercase
+    // validation|io|runtime (spatial_tool.h) — uppercase drifted from it.
+    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "validation" );
   TemporalCollection collection;
   if ( !collectionFromInput( input, &collection, &error ) )
-    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "VALIDATION" );
+    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "validation" );
 
   if ( input.isMember( "name" ) && input["name"].isString() )
     collection.setName( QString::fromStdString( input["name"].asString() ) );
@@ -212,7 +214,7 @@ SpatialToolResult TemporalCreateCollectionTool::execute( const Json::Value &inpu
   if ( !policyOk || ( input.isMember( "duplicate_policy" ) &&
                       !input["duplicate_policy"].isString() ) )
     return SpatialToolResult::failure( "duplicate_policy must be 'keep_all' or 'reject'",
-                                       "INVALID_PARAMETER", "VALIDATION" );
+                                       "INVALID_PARAMETER", "validation" );
   collection.setDuplicatePolicy( policy );
 
   int missingTimes = 0;
@@ -223,11 +225,11 @@ SpatialToolResult TemporalCreateCollectionTool::execute( const Json::Value &inpu
     return SpatialToolResult::failure(
       "collection would contain scenes without acquisition time — supply "
       "'time' entries before using reject policies",
-      "TEMPORAL_MISSING_TIME", "VALIDATION" );
+      "TEMPORAL_MISSING_TIME", "validation" );
 
   if ( !collection.save( outputPath ) )
     return SpatialToolResult::failure( "cannot write descriptor: " + outputPath.toStdString(),
-                                       "DATA_IO", "IO" );
+                                       "DATA_IO", "io" );
 
   Json::Value out( Json::objectValue );
   out["collection"] = outputPath.toStdString();
@@ -297,7 +299,7 @@ SpatialToolResult TemporalDescribeCollectionTool::execute( const Json::Value &in
   std::string error;
   TemporalCollection collection;
   if ( !collectionFromInput( input, &collection, &error ) )
-    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "VALIDATION" );
+    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "validation" );
 
   sicnu::temporal::PreflightOptions options;
   const auto report = sicnu::temporal::runPreflight( collection, options );
@@ -365,15 +367,15 @@ SpatialToolResult TemporalListScenesTool::execute( const Json::Value &input )
   std::string error;
   TemporalCollection collection;
   if ( !collectionFromInput( input, &collection, &error ) )
-    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "VALIDATION" );
+    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "validation" );
 
   const int total = collection.sceneCount();
   if ( input.isMember( "offset" ) && !input["offset"].isNumeric() )
     return SpatialToolResult::failure( "'offset' must be an integer", "INVALID_PARAMETER",
-                                       "VALIDATION" );
+                                       "validation" );
   if ( input.isMember( "limit" ) && !input["limit"].isNumeric() )
     return SpatialToolResult::failure( "'limit' must be an integer", "INVALID_PARAMETER",
-                                       "VALIDATION" );
+                                       "validation" );
   const int offset = std::max( 0, input.isMember( "offset" ) ? input["offset"].asInt() : 0 );
   int limit = input.isMember( "limit" ) ? input["limit"].asInt() : 50;
   if ( limit <= 0 )
@@ -480,7 +482,7 @@ SpatialToolResult TemporalPreflightCollectionTool::execute( const Json::Value &i
   std::string error;
   TemporalCollection collection;
   if ( !collectionFromInput( input, &collection, &error ) )
-    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "VALIDATION" );
+    return SpatialToolResult::failure( error, "INVALID_PARAMETER", "validation" );
 
   sicnu::temporal::PreflightOptions options;
   if ( input.isMember( "required_band_roles" ) && input["required_band_roles"].isArray() )
@@ -498,7 +500,7 @@ SpatialToolResult TemporalPreflightCollectionTool::execute( const Json::Value &i
     SpatialToolResult r = SpatialToolResult::failure(
       "temporal preflight failed: " + report.firstBlocking().message.toStdString() +
           " (see issues array)",
-      "TEMPORAL_PREFLIGHT_FAILED", "VALIDATION" );
+      "TEMPORAL_PREFLIGHT_FAILED", "validation" );
     r.output = out;
     return r;
   }

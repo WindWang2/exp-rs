@@ -41,6 +41,12 @@ namespace {
 // blow the memory budget. Returns false when the band cannot be read.
 bool readBand1Bounded(GDALDataset* dataset, int& width, int& height, std::vector<float>& buffer)
 {
+    // A 0-band raster (or a failed driver open) yields a null band here;
+    // dereferencing it below crashed the tool (same guard as
+    // raster_inspect_tool.cpp).
+    GDALRasterBand* band = dataset->GetRasterBand(1);
+    if (!band)
+        return false;
     const int rawW = dataset->GetRasterXSize();
     const int rawH = dataset->GetRasterYSize();
     const int longest = std::max(rawW, rawH);
@@ -49,8 +55,8 @@ bool readBand1Bounded(GDALDataset* dataset, int& width, int& height, std::vector
     width = std::clamp(width, 1, rawW);
     height = std::clamp(height, 1, rawH);
     buffer.assign(static_cast<size_t>(width) * height, 0.0f);
-    return dataset->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(), width,
-                                               height, GDT_Float32, 0, 0)
+    return band->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(), width,
+                          height, GDT_Float32, 0, 0)
            == CE_None;
 }
 

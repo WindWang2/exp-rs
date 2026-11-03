@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <vector>
 
@@ -101,22 +102,6 @@ namespace
     }
     return out;
   }
-
-  QJsonArray vectorToJson( const std::vector<double> &v )
-  {
-    QJsonArray array;
-    for ( const double x : v )
-      array.append( x );
-    return array;
-  }
-
-  QJsonArray matrixToJson( const std::vector<std::vector<double>> &m )
-  {
-    QJsonArray array;
-    for ( const auto &row : m )
-      array.append( vectorToJson( row ) );
-    return array;
-  }
 } // namespace
 
 ClassificationDiagnosisTool::ClassificationDiagnosisTool( QObject *parent )
@@ -134,7 +119,11 @@ double ClassificationDiagnosisTool::computeJeffriesMatusitaDistance( std::span<c
        || mean2.size() < static_cast<size_t>( dimension )
        || cov1.size() < static_cast<size_t>( dimension ) * dimension
        || cov2.size() < static_cast<size_t>( dimension ) * dimension )
-    return 0.0;
+    // swarm-review AG-C-6: 0.0 means "perfectly inseparable" in JM semantics,
+    // so a failed computation read as total confusion and fired the severe
+    // confusion warning on broken input. Report the failure as NaN instead;
+    // callers skip non-finite distances.
+    return std::numeric_limits<double>::quiet_NaN();
 
   // Pooled covariance and mean difference.
   std::vector<double> pooled( static_cast<size_t>( dimension ) * dimension, 0.0 );
@@ -166,7 +155,9 @@ double ClassificationDiagnosisTool::computeJeffriesMatusitaDistance( std::span<c
       ridge = ridge == 0.0 ? 1e-9 : ridge * 10.0;
   }
   if ( !ok )
-    return 0.0;
+    // swarm-review AG-C-6: see the dimension guard above — a non-SPD input is
+    // a computation failure (NaN), not a separability of zero.
+    return std::numeric_limits<double>::quiet_NaN();
 
   double mahalanobis = 0.0;
   {
@@ -277,9 +268,22 @@ QJsonObject ClassificationDiagnosisTool::execute( const QJsonObject &inputParame
             means[a], covs[a], means[b], covs[b], dim );
           jm[a][b] = distance;
           jm[b][a] = distance;
-          minJm = std::min( minJm, distance );
+          // swarm-review AG-C-6: NaN marks a failed computation, not zero
+          // separability — keep it out of the minimum so the confusion
+          // warning keys off real distances only.
+          if ( std::isfinite( distance ) )
+            minJm = std::min( minJm, distance );
         }
-      out.insert( QStringLiteral( "jm_matrix" ), matrixToJson( jm ) );
+      // JSON has no NaN: failed pairs serialize as null.
+      QJsonArray jmJson;
+      for ( const auto &row : jm )
+      {
+        QJsonArray rowJson;
+        for ( const double value : row )
+          rowJson.append( std::isfinite( value ) ? QJsonValue( value ) : QJsonValue() );
+        jmJson.append( rowJson );
+      }
+      out.insert( QStringLiteral( "jm_matrix" ), jmJson );
     }
 
     // Prune recommendations: negligible gain share AND strong collinearity.
@@ -295,7 +299,10 @@ QJsonObject ClassificationDiagnosisTool::execute( const QJsonObject &inputParame
         if ( share >= 0.02 )
           continue;
         double maxCrossCorrelation = 0.0;
-        if ( correlations.size() == gains.size() )
+        // swarm-review AG-C-6: the row count alone did not bound the row WIDTH
+        // — a ragged feature_correlations matrix read past the end of each
+        // row. Validate the indexed row too.
+        if ( correlations.size() == gains.size() && correlations[f].size() >= gains.size() )
           for ( size_t other = 0; other < gains.size(); ++other )
           {
             if ( other == f )

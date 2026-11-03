@@ -1530,8 +1530,59 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
     {
         // Text mode must be lossless: a binary slice would silently corrupt
         // under lossy UTF-8 conversion, so reject it and point at base64.
+        //
+        // swarm-review AG-H-3: a chunk boundary can fall inside a multi-byte
+        // UTF-8 sequence (256 KiB pages vs CJK text), which strict decoding
+        // then misreports as "not valid UTF-8" for a perfectly valid file.
+        // Paginated reads therefore strip the boundary-incomplete sequence
+        // at each end — counted into length/next_offset so a cursor walk
+        // stays lossless and next_offset keeps strictly advancing. Only a
+        // whole-file read (offset==0 && !truncated) is validated strictly;
+        // a chunk that strips down to nothing keeps the old strict path
+        // (there is no complete character to return, and a non-advancing
+        // page would break the paging contract).
+        int contentStart = 0;
+        int contentEnd = static_cast<int>( slice.size() ); // slice ≤ kMaxArtifactChunk
+        if ( offset != 0 || truncated )
+        {
+            // Leading continuation bytes belong to a sequence begun before
+            // this chunk.
+            while ( contentStart < contentEnd &&
+                    ( static_cast<unsigned char>( slice.at( contentStart ) ) & 0xC0 ) == 0x80 )
+                ++contentStart;
+            // Trailing sequence whose declared length overruns the chunk:
+            // its lead byte (if any) sits within the final 3 bytes.
+            for ( int i = contentEnd - 1; i >= contentStart && i > contentEnd - 4; --i )
+            {
+                const unsigned char c = static_cast<unsigned char>( slice.at( i ) );
+                if ( ( c & 0xC0 ) == 0x80 )
+                    continue; // continuation byte — keep walking back
+                int expected = 1;
+                if ( ( c & 0xE0 ) == 0xC0 )
+                    expected = 2;
+                else if ( ( c & 0xF0 ) == 0xE0 )
+                    expected = 3;
+                else if ( ( c & 0xF8 ) == 0xF0 )
+                    expected = 4;
+                if ( expected > 1 && contentEnd - i < expected )
+                    contentEnd = i; // sequence continues past the chunk end
+                break;
+            }
+        }
         QStringDecoder decoder(QStringConverter::Utf8);
-        const QString text = decoder(slice);
+        QByteArrayView contentView( slice.constData(), slice.size() );
+        if ( contentEnd - contentStart > 0 &&
+             ( contentStart > 0 || contentEnd < slice.size() ) )
+        {
+            contentView = QByteArrayView( slice.constData() + contentStart,
+                                          contentEnd - contentStart );
+            // Report the bytes actually returned; a cursor walk resumes at
+            // the first stripped tail byte so no byte is lost or repeated.
+            result[QStringLiteral("length")] = static_cast<qint64>( contentEnd - contentStart );
+            if ( truncated )
+                result[QStringLiteral("next_offset")] = offset + contentEnd;
+        }
+        const QString text = decoder(contentView);
         if (decoder.hasError())
             throw McpToolError(
                 QStringLiteral("artifact_read: slice is not valid UTF-8; re-read with "

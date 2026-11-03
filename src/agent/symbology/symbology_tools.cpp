@@ -535,6 +535,13 @@ class ApplyRasterRampTool final : public SpatialTool
       if ( !raster )
         return SpatialToolResult::failure( "Raster ramp needs a raster layer", "INVALID_PARAMETER",
                                            "validation" );
+      // swarm-review AG-C-2: an invalid raster layer exposes dataProvider() ==
+      // nullptr and bandCount() == 0 — the band clamp below is std::clamp(v,1,0)
+      // (UB on the empty range) and the statistics/renderer seams would
+      // dereference the null provider. Fail typed instead.
+      if ( !raster->isValid() || !raster->dataProvider() || raster->bandCount() <= 0 )
+        return SpatialToolResult::failure( "Raster layer has no readable bands",
+                                           "EMPTY_DATA", "runtime", true );
       const int band = input.isMember( "band" ) && input["band"].isInt()
                          ? std::clamp( input["band"].asInt(), 1, raster->bandCount() )
                          : 1;

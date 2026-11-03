@@ -47,7 +47,10 @@ class ClassificationDiagnosisTool : public QObject
     /// Jeffries-Matusita distance 2(1 - e^-B) in [0, 2] between two
     /// Gaussian classes from sufficient statistics (@p cov1/@p cov2 are
     /// row-major dimension x dimension).  Identical distributions -> 0;
-    /// Bhattacharyya distance >= 700 saturates at exactly 2.0.
+    /// Bhattacharyya distance >= 700 saturates at exactly 2.0.  A failed
+    /// computation (bad dimensions, non-SPD covariance) returns NaN — never
+    /// 0.0, which is the "perfectly inseparable" result and would invert the
+    /// caller's confusion diagnostic.
     static double computeJeffriesMatusitaDistance( std::span<const double> mean1,
                                                    std::span<const double> cov1,
                                                    std::span<const double> mean2,

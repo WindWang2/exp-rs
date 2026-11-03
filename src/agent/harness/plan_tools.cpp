@@ -65,31 +65,57 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
 /// kMaxRepairLedgerEntries run ids, the oldest-inserted entry is evicted
 /// (FIFO) before a new id is added. An evicted run at worst regains a fresh
 /// budget of kMaxRepairAttempts attempts — a bounded regression, never
-/// unbounded retries. Note the returned reference intentionally stays valid
-/// (std::map references are stable); callers' check-then-increment stays
-/// best-effort exactly as before.
+/// unbounded retries.
 constexpr int kMaxRepairAttempts = 3;
 constexpr std::size_t kMaxRepairLedgerEntries = 256;
 
-/// Guards the kLedger map inside repairAttempts() below.
+/// Guards every access to kLedger / kLedgerOrder below.
 std::mutex kLedgerMutex;
+std::map<std::string, int> kLedger;
+/// Insertion order of run ids, for FIFO eviction of the oldest entry.
+std::deque<std::string> kLedgerOrder;
 
-int &repairAttempts( const std::string &runId )
+/// Find-or-insert with FIFO eviction. MUST be called with kLedgerMutex
+/// held; the returned reference is only valid while the lock is held (it is
+/// never allowed to escape — see consumeRepairAttempt).
+int &ledgerEntryLocked( const std::string &runId )
 {
-  static std::map<std::string, int> kLedger;
-  // Insertion order of run ids, for FIFO eviction of the oldest entry.
-  static std::deque<std::string> kLedgerOrder;
-  std::lock_guard<std::mutex> lock( kLedgerMutex );
-  const auto existing = kLedger.find( runId );
-  if ( existing != kLedger.end() )
-    return existing->second;
-  while ( kLedger.size() >= kMaxRepairLedgerEntries && !kLedgerOrder.empty() )
+  auto entry = kLedger.find( runId );
+  if ( entry == kLedger.end() )
   {
-    kLedger.erase( kLedgerOrder.front() );
-    kLedgerOrder.pop_front();
+    while ( kLedger.size() >= kMaxRepairLedgerEntries && !kLedgerOrder.empty() )
+    {
+      kLedger.erase( kLedgerOrder.front() );
+      kLedgerOrder.pop_front();
+    }
+    entry = kLedger.emplace( runId, 0 ).first;
+    kLedgerOrder.push_back( runId );
   }
-  kLedgerOrder.push_back( runId );
-  return kLedger[ runId ];
+  return entry->second;
+}
+
+/// swarm-review AG-H-2: find + cap-check + increment complete inside ONE
+/// locked section. The previous API returned a reference into kLedger and
+/// let callers run `++attempts` after releasing the mutex, so a concurrent
+/// FIFO eviction (erase) could free that node between read and write — a
+/// use-after-free write on the evicted entry. Returns the attempt number
+/// consumed (1..kMaxRepairAttempts), or 0 when the run id is already at the
+/// cap (nothing consumed, no state change).
+int consumeRepairAttempt( const std::string &runId )
+{
+  std::lock_guard<std::mutex> lock( kLedgerMutex );
+  int &attempts = ledgerEntryLocked( runId );
+  if ( attempts >= kMaxRepairAttempts )
+    return 0;
+  return ++attempts;
+}
+
+/// Locked read of the current attempt count. Unseen run ids get a 0 entry
+/// (registered in the FIFO order), exactly as the old helper did.
+int repairAttempts( const std::string &runId )
+{
+  std::lock_guard<std::mutex> lock( kLedgerMutex );
+  return ledgerEntryLocked( runId );
 }
 
 /// Structural duplicates: deterministic rename pass. Returns the actions
@@ -1208,16 +1234,19 @@ class RunStatusTool final : public SpatialTool
                                message.find( "Transient" ) != std::string::npos ||
                                message.find( "transient" ) != std::string::npos ||
                                normalized.code == error_codes::kTransientFailure;
-        int &attempts = repairAttempts( runId );
-        if ( transient && attempts < kMaxRepairAttempts && !doc.isMember( "auto_resumed" ) )
+        // swarm-review AG-H-2: cap-check + consume are one atomic locked
+        // operation (consumeRepairAttempt); an attempt is consumed only when
+        // a resume is actually about to be tried, exactly as before.
+        const bool mayResume = transient && !doc.isMember( "auto_resumed" );
+        const int attempt = mayResume ? consumeRepairAttempt( runId ) : 0;
+        if ( mayResume && attempt > 0 )
         {
-          ++attempts;
           QString resumeError;
           const long resumed = coordinator.resumeRun( runId, &resumeError );
           Json::Value retry( Json::objectValue );
           retry["attempted"] = resumed > 0;
           retry["policy"] = "ledger_bounded_resume";
-          retry["attempt"] = attempts;
+          retry["attempt"] = attempt;
           retry["attempt_limit"] = kMaxRepairAttempts;
           if ( resumed > 0 )
           {
@@ -1227,7 +1256,7 @@ class RunStatusTool final : public SpatialTool
             {
               doc = runResultDocument( resumedRun, plan ? &*plan : nullptr );
               doc["auto_resumed"] = true;
-              doc["repair_attempts"] = attempts;
+              doc["repair_attempts"] = attempt;
               doc["repair_attempt_limit"] = kMaxRepairAttempts;
             }
           }
@@ -1305,19 +1334,27 @@ Json::Value confirmMapOutput( const AgentPlan &plan, const Json::Value &stepsDoc
     if ( composed.output.isMember( "declared_output" ) )
       confirmation["declared_output"] = composed.output["declared_output"];
 
+    // swarm-review AG-H-1: each repair round must feed cartography:repair's
+    // REPAIRED spec forward — repair is a pure function whose only result
+    // channel is output["mapspec"], so re-feeding the original spec every
+    // round made an initially-failing spec unfixable by construction.
+    Json::Value currentSpec = mapOutput["mapspec"];
     Json::Value preflightInput;
-    preflightInput["mapspec"] = mapOutput["mapspec"];
+    preflightInput["mapspec"] = currentSpec;
     SpatialToolResult checked = ( *preflight )->execute( preflightInput );
     int repairs = 0;
     while ( checked.success && checked.output.isObject() &&
             checked.output.get( "passed", true ).asBool() == false && repairs < 3 && repair )
     {
       Json::Value repairInput;
-      repairInput["mapspec"] = mapOutput["mapspec"];
+      repairInput["mapspec"] = currentSpec;
       repairInput["issues"] = checked.output.get( "issues", Json::Value( Json::arrayValue ) );
       const SpatialToolResult repaired = ( *repair )->execute( repairInput );
-      if ( !repaired.success )
-        break;
+      if ( !repaired.success || !repaired.output.isObject() ||
+           !repaired.output.isMember( "mapspec" ) )
+        break; // no repaired spec to feed forward — re-preflighting is futile
+      currentSpec = repaired.output["mapspec"];
+      preflightInput["mapspec"] = currentSpec;
       checked = ( *preflight )->execute( preflightInput );
       ++repairs;
     }

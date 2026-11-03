@@ -50,12 +50,19 @@ int &diagnoseAttempts( const std::string &runId )
   // of distinct run ids cannot grow the map without end.
   static std::map<std::string, int> kLedger;
   constexpr size_t kMaxTrackedRuns = 256;
-  // FIFO evict like every other bounded ledger here: clearing wholesale
-  // would reset EVERY tracked run's budget and let a caller that spawns
-  // throwaway run ids evade the diagnose cap.
-  if ( kLedger.size() > kMaxTrackedRuns )
-    kLedger.erase( kLedger.begin() );
-  return kLedger[ runId ];
+  // swarm-review AG-H-5: touch the target FIRST, then evict — the victim is
+  // any OTHER entry when one exists (insertBoundedKeepingNewest semantics,
+  // mcp_server.h). Evicting before the insert let the target's own entry be
+  // erased first (its key sorted first), silently resetting the budget.
+  int &attempts = kLedger[ runId ];
+  while ( kLedger.size() > kMaxTrackedRuns && kLedger.size() > 1 )
+  {
+    auto victim = kLedger.begin();
+    if ( victim->first == runId )
+      ++victim; // the just-touched entry is never the victim
+    kLedger.erase( victim );
+  }
+  return attempts;
 }
 /// Proposal-set signature of the LAST issued diagnosis per run. A caller
 /// that re-invokes diagnose WITHOUT changing anything gets a typed
@@ -68,9 +75,21 @@ std::set<std::string> &seenProposalSignatures( const std::string &runId )
 {
   static std::map<std::string, std::set<std::string>> kSeen;
   constexpr size_t kMaxTrackedRuns = 256;
-  if ( kSeen.size() > kMaxTrackedRuns )
-    kSeen.erase( kSeen.begin() );
-  return kSeen[ runId ];
+  // swarm-review AG-H-5: touch the target FIRST, then evict any OTHER entry
+  // (insertBoundedKeepingNewest semantics, mcp_server.h) — the old order
+  // evicted begin() before inserting, so a target whose key sorted first
+  // lost its own entry. Eviction is bounded, never a wholesale clear:
+  // clearing would reset EVERY tracked run's budget and let a caller that
+  // spawns throwaway run ids evade the diagnose cap.
+  std::set<std::string> &seen = kSeen[ runId ];
+  while ( kSeen.size() > kMaxTrackedRuns && kSeen.size() > 1 )
+  {
+    auto victim = kSeen.begin();
+    if ( victim->first == runId )
+      ++victim; // the just-touched entry is never the victim
+    kSeen.erase( victim );
+  }
+  return seen;
 }
 
 std::string &lastProposalSignature( const std::string &runId )
@@ -79,9 +98,18 @@ std::string &lastProposalSignature( const std::string &runId )
   // driving surfaces, bounded by eviction.
   static std::map<std::string, std::string> kSignatures;
   constexpr size_t kMaxTrackedRuns = 256;
-  if ( kSignatures.size() > kMaxTrackedRuns )
-    kSignatures.erase( kSignatures.begin() );
-  return kSignatures[ runId ];
+  // swarm-review AG-H-5: touch the target FIRST, then evict any OTHER entry
+  // (insertBoundedKeepingNewest semantics, mcp_server.h) — the target's own
+  // entry must never be the eviction victim.
+  std::string &signature = kSignatures[ runId ];
+  while ( kSignatures.size() > kMaxTrackedRuns && kSignatures.size() > 1 )
+  {
+    auto victim = kSignatures.begin();
+    if ( victim->first == runId )
+      ++victim; // the just-touched entry is never the victim
+    kSignatures.erase( victim );
+  }
+  return signature;
 }
 
 /// The original scientific intent for the run, from the authoritative plan

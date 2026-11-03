@@ -347,7 +347,10 @@ SpatialToolResult TerrainViewshedInspectTool::execute( const Json::Value &input 
     const size_t n = static_cast<size_t>( width ) * height;
     std::vector<float> dem( n );
     if ( !ds.readBandWindow( 1, 0, 0, width, height, dem.data() ) )
-        return SpatialToolResult::failure( "failed to read the DEM band", "IO", "runtime" );
+        // swarm-review AG-C-8: "IO" was used as a CODE here while the code
+        // vocabulary is SCREAMING_SNAKE (NOT_FOUND, TOO_LARGE, ...); the
+        // category follows the lowercase validation|io|runtime family.
+        return SpatialToolResult::failure( "failed to read the DEM band", "IO_ERROR", "io" );
 
     TerrainVisibility::ViewshedParams params;
     params.obsCol = obsCol;

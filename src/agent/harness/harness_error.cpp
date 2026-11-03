@@ -20,7 +20,7 @@ struct CodeInfo {
 /// The authoritative code table. A code must be added here before producers
 /// may emit it — `isKnownErrorCode` enforces the closed vocabulary, and
 /// `allErrorCodes` derives listing surfaces from this one copy.
-const struct Entry {
+constexpr struct Entry {
     const char *code;
     CodeInfo info;
 } kEntries[] = {
@@ -79,7 +79,9 @@ const struct Entry {
     { "SCENE_TRUTH_INVALID",     { "validation", RetryClass::None } },
     { "ORBIT_SEGMENT_INVALID",   { "validation", RetryClass::None } },
     { "ORBIT_EPOCH_MISMATCH",    { "validation", RetryClass::None } },
-    { "WAVELENGTH_INCOMPATIBLE", { "validation", RetryClass::None } },
+    // WAVELENGTH_INCOMPATIBLE lives in the Compiler 10.0 section above —
+    // swarm-review AG-H-4: it was duplicated here, so allErrorCodes()
+    // emitted it twice.
     { "BASELINE_NO_ZERO_DOPPLER_MASTER", { "validation", RetryClass::None } },
     { "BASELINE_NO_ZERO_DOPPLER_SLAVE",  { "validation", RetryClass::None } },
     { "BASELINE_STATE_INTERPOLATION_FAILED", { "runtime", RetryClass::Manual } },
@@ -112,7 +114,30 @@ const struct Entry {
     { "AUTONOMY_LAB_STUDENT_EXECUTION", { "validation", RetryClass::None } },
     { "AUTONOMY_AGENT_MODE_REQUIRED", { "validation", RetryClass::None } },
 };
-const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
+constexpr const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
+
+/// swarm-review AG-H-4: the table must stay duplicate-free — allErrorCodes()
+/// derives listing surfaces from this one copy, so a repeated code surfaces
+/// twice to clients (WAVELENGTH_INCOMPATIBLE was listed in two sections).
+/// Compile-time uniqueness guard over the whole table.
+constexpr bool entriesHaveUniqueCodes()
+{
+  for ( const Entry *a = kEntries; a != kEntriesEnd; ++a )
+    for ( const Entry *b = a + 1; b != kEntriesEnd; ++b )
+    {
+      const char *x = a->code;
+      const char *y = b->code;
+      while ( *x != '\0' && *x == *y )
+      {
+        ++x;
+        ++y;
+      }
+      if ( *x == *y )
+        return false; // both strings ended together — same code
+    }
+  return true;
+}
+static_assert( entriesHaveUniqueCodes(), "harness error code table has duplicate codes" );
 
 const CodeInfo *codeInfo( const std::string &code )
 {

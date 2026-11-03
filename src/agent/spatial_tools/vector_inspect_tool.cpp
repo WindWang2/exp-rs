@@ -50,9 +50,56 @@ Json::Value describeLayer( OGRLayer *layer, int maxFeatures )
   // Prefer the driver-stored extent: GetExtent(force=true) scans every
   // feature on the calling (MCP) thread for drivers without a stored extent
   // (CSV, GeoJSON, ...), which stalls the tool's bounded-cost contract (#644).
+  // swarm-review AG-C-5: that force=true fallback was itself an unbounded
+  // full-file scan — replace it with a capped manual scan. A layer that
+  // outlives the cap reports extent="unknown" with the reason, the same
+  // honest contract featureCount already follows.
+  constexpr GIntBig kExtentScanCap = 100000;
   OGREnvelope extent;
-  const bool haveExtent = layer->GetExtent( &extent, /*force=*/false ) == OGRERR_NONE
-                          || layer->GetExtent( &extent, /*force=*/true ) == OGRERR_NONE;
+  bool haveExtent = layer->GetExtent( &extent, /*force=*/false ) == OGRERR_NONE;
+  bool extentCapped = false;
+  if ( !haveExtent )
+  {
+    OGREnvelope scanned;
+    bool any = false;
+    GIntBig scannedFeatures = 0;
+    layer->ResetReading();
+    while ( OGRFeature *feature = layer->GetNextFeature() )
+    {
+      if ( const OGRGeometry *geom = feature->GetGeometryRef() )
+      {
+        OGREnvelope geomEnvelope;
+        geom->getEnvelope( &geomEnvelope );
+        if ( !any )
+        {
+          scanned = geomEnvelope;
+          any = true;
+        }
+        else
+        {
+          scanned.Merge( geomEnvelope );
+        }
+      }
+      OGRFeature::DestroyFeature( feature );
+      if ( ++scannedFeatures >= kExtentScanCap )
+        break;
+    }
+    if ( any )
+    {
+      // "cap hit" vs "layer exhausted": one more read decides. Consuming the
+      // probe feature is safe — the sampling loop below resets reading anyway.
+      if ( OGRFeature *probe = layer->GetNextFeature() )
+      {
+        OGRFeature::DestroyFeature( probe );
+        extentCapped = true;
+      }
+      else
+      {
+        extent = scanned;
+        haveExtent = true;
+      }
+    }
+  }
   if ( haveExtent )
   {
     Json::Value ext( Json::objectValue );
@@ -61,6 +108,12 @@ Json::Value describeLayer( OGRLayer *layer, int maxFeatures )
     ext["maxX"] = extent.MaxX;
     ext["maxY"] = extent.MaxY;
     out["extent"] = ext;
+  }
+  else if ( extentCapped )
+  {
+    out["extent"] = "unknown";
+    out["extent_reason"] = "extent scan capped at " + std::to_string( kExtentScanCap ) +
+                           " features; use a format with a stored extent for the full bbox";
   }
 
   if ( const OGRSpatialReference *srs = layer->GetSpatialRef() )

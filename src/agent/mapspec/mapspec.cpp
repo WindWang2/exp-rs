@@ -1610,6 +1610,7 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
     targetCollections.push_back( kCollections[c] );
   if ( spec.isMember( "items" ) && spec["items"].isArray() )
     targetCollections.push_back( "items" );
+  const std::vector<std::string> itemCollections = targetCollections;
 
   for ( const auto &collection : targetCollections )
   {
@@ -1708,7 +1709,37 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
       if ( !value )
       {
         record( "page", "page_if", condition, false, std::string() );
-        spec["page"]["visible"] = false;
+        // swarm-review AG-M-4: a false page_if on the body page used to write
+        // only spec["page"]["visible"] — a flag no consumer reads — so the
+        // declared condition silently did nothing. The header contract
+        // (mapspec.h: pages whose page_if is false are removed together with
+        // the items placed on them) covers the body page as well: drop every
+        // page-0 item (no `page` member or page == 0) and log each drop in the
+        // ledger so the decision stays auditable. The page geometry itself
+        // stays — validateMapSpec requires it — it simply carries no items.
+        for ( const auto &collection : itemCollections )
+        {
+          if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+            continue;
+          Json::Value kept( Json::arrayValue );
+          for ( const auto &item : spec[collection] )
+          {
+            const bool onBodyPage =
+              !item.isObject() || !item.isMember( "page" ) || !item["page"].isIntegral() ||
+              item["page"].asInt() == 0;
+            if ( onBodyPage )
+            {
+              if ( item.isObject() && item.isMember( "id" ) && item["id"].isString() )
+              {
+                removedIds.insert( item["id"].asString() );
+                record( item["id"].asString(), "page_if", condition, false, std::string() );
+              }
+              continue;
+            }
+            kept.append( item );
+          }
+          spec[collection] = kept;
+        }
       }
       else
       {
