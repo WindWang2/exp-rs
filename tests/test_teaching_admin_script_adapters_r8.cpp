@@ -152,7 +152,7 @@ TEST_CASE( "runScript caps captured stdout/stderr and reports the loss",
 {
     if ( !harnessInterpreterPinned() )
     {
-        SUCCEED( "no pinned interpreter on this machine — live subprocess section skipped" );
+        SKIP( "no pinned interpreter on this machine — live subprocess section skipped" );
         return;
     }
     QTemporaryDir dir;
@@ -190,7 +190,7 @@ TEST_CASE( "runScript passes small outputs through untruncated",
 {
     if ( !harnessInterpreterPinned() )
     {
-        SUCCEED( "no pinned interpreter on this machine — live subprocess section skipped" );
+        SKIP( "no pinned interpreter on this machine — live subprocess section skipped" );
         return;
     }
     QTemporaryDir dir;
@@ -234,7 +234,7 @@ TEST_CASE( "verifyOfflineBundle refuses to interpret a truncated transcript",
 {
     if ( !harnessInterpreterPinned() )
     {
-        SUCCEED( "no pinned interpreter on this machine — live subprocess section skipped" );
+        SKIP( "no pinned interpreter on this machine — live subprocess section skipped" );
         return;
     }
     // #1474 review: a transcript past the capture cap is a retained head —
@@ -261,7 +261,7 @@ TEST_CASE( "verifyOfflineBundle reports truncation on the cannot-verify path too
 {
     if ( !harnessInterpreterPinned() )
     {
-        SUCCEED( "no pinned interpreter on this machine — live subprocess section skipped" );
+        SKIP( "no pinned interpreter on this machine — live subprocess section skipped" );
         return;
     }
     // The exit-2 branch used to publish the (possibly head-capped) stderr
@@ -286,7 +286,7 @@ TEST_CASE( "checkLabPackDrift refuses a truncated drift list",
 {
     if ( !harnessInterpreterPinned() )
     {
-        SUCCEED( "no pinned interpreter on this machine — live subprocess section skipped" );
+        SKIP( "no pinned interpreter on this machine — live subprocess section skipped" );
         return;
     }
     // Same fail-closed rule for the foundry drift check: a DRIFT list cut

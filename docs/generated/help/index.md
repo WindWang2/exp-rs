@@ -1,6 +1,6 @@
 # 帮助索引（自动生成）
 
-> 共 2175 个主题。
+> 共 2179 个主题。
 
 ## 未分类
 
@@ -1094,6 +1094,7 @@
 - `parameter.rs.apply_mask.no_data` — no_data
 - `parameter.rs.apply_mask.output` — output
 - `parameter.rs.qa_mask.bits` — bits
+- `parameter.rs.qa_mask.cloud_confidence` — cloud_confidence
 - `parameter.rs.qa_mask.input` — input
 - `parameter.rs.qa_mask.mask` — mask
 - `parameter.rs.qa_mask.output` — output
@@ -2292,9 +2293,11 @@
 ## 分类
 
 - `workbench.classify` — 分类工作区
+- `workbench.classify_studio` — 分类/变化工作室
 
 ## 工作区
 
+- `workbench.georef_dual` — 双窗口几何配准
 - `workbench.georef_i2i` — 影像对影像配准 (I2I)
 - `workbench.georef_i2m` — 影像对地图配准 (I2M)
 - `workbench.map` — 地图工作区
@@ -2303,3 +2306,4 @@
 ## 制图
 
 - `workbench.layout` — 打印布局
+

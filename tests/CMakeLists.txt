@@ -18051,3 +18051,44 @@ if(Python_EXECUTABLE)
   sicnu_set_test_env(r27_t03_python_worker)
 endif()
 # ── END R27-T3 ──
+
+# ── BEGIN R27-T05 ────────────────────────────────────────────────────────────
+# R27-T05 append-only block (workflow/experiment/teaching-grading track).
+# Grader window semantics (#1744) + requiredStages verdict gate (#1773):
+# light lane — Catch2 + sicnu_grader only (same as test_grader_schema).
+add_executable(test_r27_t05_grader_window test_r27_t05_grader_window.cpp)
+target_link_libraries(test_r27_t05_grader_window PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_r27_t05_grader_window TEST_PREFIX "test_r27_t05_grader_window::")
+
+# R27-T05: placeholder policy (#1775/#1776/#1780 detector) — light lane,
+# same link surface as test_placeholder_grammar.
+add_executable(test_r27_t05_workflow_placeholders test_r27_t05_workflow_placeholders.cpp)
+target_link_libraries(test_r27_t05_workflow_placeholders PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_workflow
+  sicnu_workflow_runtime
+)
+target_include_directories(test_r27_t05_workflow_placeholders PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r27_t05_workflow_placeholders TEST_PREFIX "test_r27_t05_workflow_placeholders::")
+
+# R27-T05: experiment integrity oracles (#1768/#1781/#1782/#1785/#1786/#1787/#1770)
+# — same link surface as test_experiment_evaluation.
+add_executable(test_r27_t05_experiment_integrity test_r27_t05_experiment_integrity.cpp)
+target_link_libraries(test_r27_t05_experiment_integrity PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite3::SQLite3
+)
+target_include_directories(test_r27_t05_experiment_integrity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r27_t05_experiment_integrity TEST_PREFIX "test_r27_t05_experiment_integrity::")
+# ── END R27-T05 ──────────────────────────────────────────────────────────────

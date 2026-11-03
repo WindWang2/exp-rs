@@ -114,7 +114,9 @@ struct RegressionMetrics
     double bias = 0.0;
     double mape = 0.0;
     qint64 mapeSkippedZeros = 0; ///< truth==0 rows skipped by MAPE policy
-    qint64 count = 0;
+    qint64 nonFiniteSkipped = 0; ///< #1781: pairs with NaN/Inf truth/prediction,
+                                  ///< excluded so they cannot poison the means
+    qint64 count = 0;            ///< finite pairs actually scored
 
     QJsonObject toJson() const;
 };

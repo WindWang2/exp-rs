@@ -786,3 +786,7 @@ r6_dev.cmd
 .planning/zcode-r25-D/*
 !.planning/zcode-r25-D/*.md
 !.planning/zcode-r25-D/*.sh
+# R27-T05 track (workflow/experiment/teaching-grading/release) planning notes (markdown only).
+!.planning/r27-t05/
+.planning/r27-t05/*
+!.planning/r27-t05/*.md

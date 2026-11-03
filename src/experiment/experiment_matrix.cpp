@@ -134,6 +134,16 @@ Result<void> MatrixDescriptor::validate() const
         return Result<void>::failure( matrixError( QStringLiteral( "experiment.matrix_invalid" ),
                                                    QStringLiteral( "matrix requires at least one axis" ) ) );
     QSet<QString> axisNames;
+    // #1785 (WE-31): pin roles must be unique — a second axis with the same
+    // pin role silently overwrites the earlier axis's pin while cells keep
+    // distinct ids, so two "different" cells submit identical runs. Tag
+    // axes carry no pin and may repeat.
+    QSet<int> pinRoles;
+    // #1786 (WE-32): seeds dedupe on their NUMERIC value and align with the
+    // bundle-import bound — a JSON double round-trips exactly only below
+    // 2^53, and spellings like "01"/"+1" must not inflate the cell count
+    // as distinct-but-equal seeds.
+    static constexpr quint64 kMaxLosslessSeed = 9007199254740992ULL; // 2^53
     qint64 product = 1;
     for ( const MatrixAxis &axis : axes )
     {
@@ -146,11 +156,23 @@ Result<void> MatrixDescriptor::validate() const
                 QStringLiteral( "experiment.matrix_invalid" ),
                 QStringLiteral( "duplicate axis name %1" ).arg( axis.name ) ) );
         axisNames.insert( axis.name );
+        if ( axis.role != AxisRole::Tag )
+        {
+            if ( pinRoles.contains( int( axis.role ) ) )
+                return Result<void>::failure( matrixError(
+                    QStringLiteral( "experiment.matrix_invalid" ),
+                    QStringLiteral( "duplicate axis role %1: a pin role may appear on"
+                                    " at most one axis (later axes would silently"
+                                    " overwrite the earlier pin)" )
+                        .arg( axisRoleToString( axis.role ) ) ) );
+            pinRoles.insert( int( axis.role ) );
+        }
         if ( axis.values.isEmpty() )
             return Result<void>::failure( matrixError(
                 QStringLiteral( "experiment.matrix_invalid" ),
                 QStringLiteral( "axis %1 requires at least one value" ).arg( axis.name ) ) );
         QSet<QString> distinct;
+        QSet<quint64> distinctSeeds;
         for ( const QString &value : axis.values )
         {
             if ( value.isEmpty() )
@@ -163,6 +185,37 @@ Result<void> MatrixDescriptor::validate() const
                     QStringLiteral( "axis %1 has duplicate value %2" )
                         .arg( axis.name, value ) ) );
             distinct.insert( value );
+            if ( axis.role == AxisRole::Seed )
+            {
+                // Canonical decimal only: digits, no sign, no leading zero
+                // ("0" itself allowed). Anything else is a spelling that
+                // normalizes to another seed's value — refuse it instead of
+                // counting the same experiment twice.
+                bool canonical = value.size() > 0
+                                 && ( value.size() == 1 || value.at( 0 ) != QLatin1Char( '0' ) );
+                for ( const QChar ch : value )
+                    canonical = canonical && ch.isDigit();
+                bool numericOk = false;
+                const quint64 seedValue = value.toULongLong( &numericOk );
+                if ( !canonical || !numericOk )
+                    return Result<void>::failure( matrixError(
+                        QStringLiteral( "experiment.matrix_invalid" ),
+                        QStringLiteral( "seed axis %1 value '%2' is not a canonical"
+                                        " decimal integer" )
+                            .arg( axis.name, value ) ) );
+                if ( seedValue >= kMaxLosslessSeed )
+                    return Result<void>::failure( matrixError(
+                        QStringLiteral( "experiment.matrix_invalid" ),
+                        QStringLiteral( "seed axis %1 value %2 must stay below 2^53"
+                                        " (bundle import refuses larger seeds)" )
+                            .arg( axis.name, value ) ) );
+                if ( distinctSeeds.contains( seedValue ) )
+                    return Result<void>::failure( matrixError(
+                        QStringLiteral( "experiment.matrix_invalid" ),
+                        QStringLiteral( "seed axis %1 has duplicate seed value %2" )
+                            .arg( axis.name, value ) ) );
+                distinctSeeds.insert( seedValue );
+            }
         }
         product *= axis.values.size();
         if ( product > kMaxMatrixCells )

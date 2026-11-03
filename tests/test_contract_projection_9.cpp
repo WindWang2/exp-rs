@@ -68,6 +68,29 @@ struct AllowEntry
 };
 
 const std::vector<AllowEntry> kAllowedUndeclaredReads = {
+    // #1737: the change-detection family reads the chunked-fabric execution
+    // substrate parameters (dd73df1775 — chunkedMode/resumeStateBase/
+    // scratchRoot) through the shared run helper. They are execution-plane
+    // knobs, not science parameters; the schemas under-declare them. The
+    // drift was masked from 10-26 by the BCT-04 compile break.
+    { "rs:change_cva", "chunkedMode", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_cva", "resumeStateBase", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_cva", "scratchRoot", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_detection", "chunkedMode", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_detection", "resumeStateBase", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_detection", "scratchRoot", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_difference", "chunkedMode", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_difference", "resumeStateBase", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_difference", "scratchRoot", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_mad", "chunkedMode", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_mad", "resumeStateBase", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_mad", "scratchRoot", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_normalized_difference", "chunkedMode", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_normalized_difference", "resumeStateBase", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_normalized_difference", "scratchRoot", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_ratio", "chunkedMode", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_ratio", "resumeStateBase", "chunked-fabric execution substrate (#1737)" },
+    { "rs:change_ratio", "scratchRoot", "chunked-fabric execution substrate (#1737)" },
     // rs:obia_classify consumes a nested feature-selection sub-object; the
     // shared helper takes that sub-object as its Json::Value parameter, so
     // the scanner attributes its keys to the params root (over-approximation
