@@ -688,14 +688,19 @@ bool parsePluginManifestObject( const Json::Value &json, PluginManifest &out,
     // Every top-level field is TYPE-CHECKED before its cast (issue #1038):
     // `"manifest_version": "1"` or `"id": [...]` used to throw out of
     // PluginDiscovery::scan() and kill the application at startup/refresh.
-    if ( json.isMember( "manifest_version" ) && !json["manifest_version"].isIntegral() )
+    // swarm-review SDK-1: isInt() — not just isIntegral() — is required before
+    // asInt(): isIntegral() accepts values above INT_MAX (e.g. 4294967296), and
+    // jsoncpp's asInt() THROWS Json::LogicError on those, escaping the catch
+    // below (which only guards a sub-parser throwing) into discovery/startup.
+    // The gate must sit on the int domain so both asInt() sites below are safe.
+    if ( json.isMember( "manifest_version" ) && !json["manifest_version"].isInt() )
     {
         error.code = PluginDiagnosticCode::ManifestInvalidField;
         error.field = "manifest_version";
         error.message = "manifest_version must be an integer";
         return false;
     }
-    if ( json.isMember( "abi_version" ) && !json["abi_version"].isIntegral() )
+    if ( json.isMember( "abi_version" ) && !json["abi_version"].isInt() )
     {
         error.code = PluginDiagnosticCode::ManifestInvalidField;
         error.field = "abi_version";
@@ -929,7 +934,10 @@ bool loadManifestFromFile( const std::string &manifestPath, PluginManifest &out,
     }
     // Type-checked BEFORE the cast (issue #1038): a wrong-typed version must
     // be a typed field error, not an exception out of discovery.
-    if ( root.isMember( "manifest_version" ) && !root["manifest_version"].isIntegral() )
+    // swarm-review SDK-1: isInt() — not isIntegral() — so a manifest_version
+    // above INT_MAX (e.g. 4294967296) is a typed field error instead of a
+    // Json::LogicError thrown by the asInt() calls below (#1038 totality).
+    if ( root.isMember( "manifest_version" ) && !root["manifest_version"].isInt() )
     {
         error.code = PluginDiagnosticCode::ManifestInvalidField;
         error.field = "manifest_version";
