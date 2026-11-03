@@ -283,6 +283,25 @@ int main(int argc, char *argv[])
         qputenv( "SICNU_BLOCK_PRIVATE_NETWORKS", "1" );
     }
 
+    // swarm-review WFC-7: --no-execution-cache used to be read only through
+    // the legacy QCommandLineParser below (parser.process runs solely when
+    // !commandMode), so under CLI 3.0 subcommands the flag was rejected as an
+    // unknown flag (or silently ignored by the data family) — the main
+    // surface could not disable the execution cache at all. Strip it from
+    // argv before routing, like --offline, so both modes honor it in one
+    // place; the parser still knows the option so --help documents it.
+    const bool noExecutionCache =
+        routedArguments.removeAll( QStringLiteral( "--no-execution-cache" ) ) > 0;
+    if ( noExecutionCache )
+    {
+        sicnu::data::ExecutionResultCache::instance().setEnabled( false );
+        // Export so the flag survives process boundaries and cannot be
+        // re-enabled by ExecutionResultCache::instance()'s one-shot
+        // SICNU_EXECUTION_CACHE bootstrap (it applies the env on first use,
+        // which can happen after this line).
+        qputenv( "SICNU_EXECUTION_CACHE", "0" );
+    }
+
     // CLI 3.0 commands carry their own parsers and global flags (--json etc.);
     // the legacy parser below must not see them.
     const bool commandMode = routedArguments.size() > 1
@@ -294,10 +313,6 @@ int main(int argc, char *argv[])
 
     if ( !commandMode )
         parser.process(app);
-
-    if (parser.isSet(noCacheOption)) {
-        sicnu::data::ExecutionResultCache::instance().setEnabled(false);
-    }
 
     ensureGdalInit();
 

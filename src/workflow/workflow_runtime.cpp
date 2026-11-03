@@ -4,6 +4,8 @@
 
 #include "builtin_definitions.h"
 #include "workflow_gate.h"
+// swarm-review WFC-2: one timeout policy with the CLI runner.
+#include "workflow/pipeline_timeout.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -452,7 +454,10 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       handle.cancel();
     }
     // Event-loop-free wait for terminal state; respects TaskCenter shutdown.
-    const bool terminal = handle.await( std::chrono::minutes( 30 ) );
+    // swarm-review WFC-2: the await budget is the ONE SICNU_PIPELINE_TIMEOUT_SEC
+    // policy (0 = unlimited) instead of a second hardcoded 30 minutes, so a
+    // long step is not failed while the CLI's own deadline still allows it.
+    const bool terminal = handle.await( sicnu::workflow::pipelineTimeoutMs() );
     if ( !terminal )
     {
       // Timeout — treat as failure; the task may still be running but the

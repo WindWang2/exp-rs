@@ -57,29 +57,33 @@ struct CommonOptions
     QStringList leftover;
 };
 
+// swarm-review WFC-5: hoisted from parseOptions' body to the anonymous
+// namespace so rejectUnknownArgs can tell a known value flag whose value went
+// missing from a genuinely unknown token (same list, one definition).
+const QStringList kValueFlags = {
+    QStringLiteral( "--dataset-db" ), QStringLiteral( "--experiment-db" ),
+    QStringLiteral( "--name" ),       QStringLiteral( "--description" ),
+    QStringLiteral( "--objective" ),  QStringLiteral( "--dataset" ),
+    QStringLiteral( "--version" ),    QStringLiteral( "--from" ),
+    QStringLiteral( "--to" ),         QStringLiteral( "--experiment" ),
+    QStringLiteral( "--a" ),          QStringLiteral( "--b" ),
+    QStringLiteral( "--run" ),        QStringLiteral( "--out" ),
+    QStringLiteral( "--bundle" ),     QStringLiteral( "--schema" ),
+    QStringLiteral( "--schema-version" ), QStringLiteral( "--split" ),
+    QStringLiteral( "--mode" ),       QStringLiteral( "--limit" ),
+    QStringLiteral( "--cursor" ),
+};
+// Global envelope flags: main() reads them off argv and leaves them in
+// place (cli_commands.h "Global output flags"), so the parser tolerates
+// them in any position — they never carry a value of their own.
+const QStringList kGlobalFlags = {
+    QStringLiteral( "--json" ),      QStringLiteral( "--json-lines" ),
+    QStringLiteral( "--quiet" ),     QStringLiteral( "--progress-json" ),
+};
+
 CommonOptions parseOptions( QStringList args )
 {
     CommonOptions options;
-    static const QStringList kValueFlags = {
-        QStringLiteral( "--dataset-db" ), QStringLiteral( "--experiment-db" ),
-        QStringLiteral( "--name" ),       QStringLiteral( "--description" ),
-        QStringLiteral( "--objective" ),  QStringLiteral( "--dataset" ),
-        QStringLiteral( "--version" ),    QStringLiteral( "--from" ),
-        QStringLiteral( "--to" ),         QStringLiteral( "--experiment" ),
-        QStringLiteral( "--a" ),          QStringLiteral( "--b" ),
-        QStringLiteral( "--run" ),        QStringLiteral( "--out" ),
-        QStringLiteral( "--bundle" ),     QStringLiteral( "--schema" ),
-        QStringLiteral( "--schema-version" ), QStringLiteral( "--split" ),
-        QStringLiteral( "--mode" ),       QStringLiteral( "--limit" ),
-        QStringLiteral( "--cursor" ),
-    };
-    // Global envelope flags: main() reads them off argv and leaves them in
-    // place (cli_commands.h "Global output flags"), so the parser tolerates
-    // them in any position — they never carry a value of their own.
-    static const QStringList kGlobalFlags = {
-        QStringLiteral( "--json" ),      QStringLiteral( "--json-lines" ),
-        QStringLiteral( "--quiet" ),     QStringLiteral( "--progress-json" ),
-    };
     while ( !args.isEmpty() )
     {
         const QString flag = args.takeFirst();
@@ -93,7 +97,23 @@ CommonOptions parseOptions( QStringList args )
             continue;
         }
         if ( args.isEmpty() )
+        {
+            // swarm-review WFC-5: a value flag in LAST position used to break
+            // out of the loop, dropping the flag (and its missing value)
+            // silently. Record it so rejectUnknownArgs refuses the call.
+            options.leftover.append( flag );
             break;
+        }
+        // swarm-review WFC-5: a value flag used to swallow the next token
+        // unconditionally, so `dataset list --limit --json` set
+        // limit="--json" (→ 0, silently narrowing the query) and ate the
+        // global envelope flag. A `--` token is a MISSING value, not a value
+        // (same rule as cli_commands.cpp's takeValue).
+        if ( args.first().startsWith( QStringLiteral( "--" ) ) )
+        {
+            options.leftover.append( flag );
+            continue;
+        }
         const QString value = args.takeFirst();
         if ( flag == QLatin1String( "--dataset-db" ) )
             options.datasetDb = value;
@@ -227,6 +247,12 @@ int rejectUnknownArgs( const CommonOptions &options, const std::string &command,
     if ( options.leftover.isEmpty() )
         return 0;
     const QString token = options.leftover.first();
+    // swarm-review WFC-5: a KNOWN value flag reaches the leftover list only
+    // when its value was missing (last position) or was itself a `--` token,
+    // so report the missing value instead of mislabeling the flag unknown.
+    if ( kValueFlags.contains( token ) )
+        return fail( io, command, token.toStdString() + " needs a value", kInvalidInput,
+                     { .expected = "a value after " + token.toStdString() } );
     const std::string reason = token.startsWith( QStringLiteral( "--" ) )
                                    ? std::string( "unknown flag: " )
                                    : std::string( "unknown argument: " );
