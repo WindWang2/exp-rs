@@ -36,33 +36,50 @@ namespace
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }
 
-  /// Answer the modal QFileDialog with @p target (select + accept); close
-  /// any QMessageBox (refusal warnings) instead.
-  void armSaveDialogAnswer( const QString &target, int budget = 20 )
+  /// Persistent modal answerer: one repeating timer runs for the whole
+  /// test, answering every modal QFileDialog with the current pending
+  /// target (select + accept) and closing every QMessageBox (refusal
+  /// warnings). A single-shot dismisser disarms after the first dialog and
+  /// the NEXT modal (the dest==src warning) then spins forever.
+  struct ModalAnswerer
   {
-    if ( budget <= 0 )
-      return;
-    QTimer::singleShot( 0, ensureApp(), [target, budget] {
+    QString pendingFile;
+
+    explicit ModalAnswerer()
+    {
+      timer.setInterval( 10 );
+      QObject::connect( &timer, &QTimer::timeout, &timer, [this] { dismiss(); } );
+    }
+    ~ModalAnswerer() { timer.stop(); }
+
+    void answerNextWith( const QString &file ) { pendingFile = file; }
+
+    void dismiss()
+    {
       for ( QWidget *widget : QApplication::topLevelWidgets() )
       {
-        if ( widget->isModal() )
+        if ( !widget->isModal() )
+          continue;
+        if ( auto *dialog = qobject_cast<QFileDialog *>( widget ) )
         {
-          if ( auto *dialog = qobject_cast<QFileDialog *>( widget ) )
+          if ( !pendingFile.isEmpty() )
           {
-            dialog->selectFile( target );
+            dialog->selectFile( pendingFile );
             // QFileDialog::accept() is protected in Qt6; call the public
             // QDialog::accept (dynamic dispatch applies the selection).
             static_cast<QDialog *>( dialog )->accept();
-            armSaveDialogAnswer( target, 0 );
             return;
           }
-          if ( auto *box = qobject_cast<QMessageBox *>( widget ) )
-            box->close();
+          dialog->close();
+          return;
         }
+        widget->close(); // QMessageBox / any other modal
+        return;
       }
-      armSaveDialogAnswer( target, budget - 1 );
-    } );
-  }
+    }
+
+    QTimer timer;
+  };
 } // namespace
 
 TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
@@ -70,6 +87,8 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
 {
   ensureApp();
   QgsClassificationMainWindow w( nullptr );
+  ModalAnswerer answerer;
+  answerer.timer.start();
 
   const QString src = QDir::temp().filePath( QStringLiteral( "r27t04_export_src.tif" ) );
   {
@@ -85,7 +104,7 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
   }();
 
   // --- dest == src: refused, source intact --------------------------
-  armSaveDialogAnswer( src );
+  answerer.answerNextWith( src );
   const bool refusedSame = !w.copyPathWithDialog( src, QStringLiteral( "Export" ) );
   QApplication::processEvents( QEventLoop::AllEvents, 300 );
   CHECK( refusedSame );
@@ -99,7 +118,7 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
   // --- dest == src via a different spelling (symlink/..): refused ----
   const QString srcDotted = QFileInfo( src ).dir().filePath(
     QStringLiteral( "./" ) + QFileInfo( src ).fileName() );
-  armSaveDialogAnswer( srcDotted );
+  answerer.answerNextWith( srcDotted );
   const bool refusedDotted = !w.copyPathWithDialog( src, QStringLiteral( "Export" ) );
   QApplication::processEvents( QEventLoop::AllEvents, 300 );
   CHECK( refusedDotted );
@@ -108,7 +127,7 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
   // --- healthy copy to a NEW destination -----------------------------
   const QString dest = QDir::temp().filePath( QStringLiteral( "r27t04_export_dest.tif" ) );
   QFile::remove( dest );
-  armSaveDialogAnswer( dest );
+  answerer.answerNextWith( dest );
   CHECK( w.copyPathWithDialog( src, QStringLiteral( "Export" ) ) );
   QApplication::processEvents( QEventLoop::AllEvents, 300 );
   CHECK( QFileInfo::exists( dest ) );
