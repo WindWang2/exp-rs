@@ -429,6 +429,24 @@ std::string fabricChunkMirrorKey( const std::string &identityToken, const std::s
   return sha256Hex( basis ).substr( 0, 32 );
 }
 
+/// RIO-13 (#1803): a manifest carrying ANY 11.0-era signal demands the
+/// per-chunk sha256 proof — deleting the "index" member (or an individual
+/// sha256) must not downgrade the manifest to the pre-checksum v1 contract.
+/// v2 signals: the explicit manifestVersion stamp, the offline index, or
+/// the chunk's own chunkKey (written only by 11.0+ mirrors).
+bool manifestGenerationDemandsChecksum( const Json::Value &manifest )
+{
+  if ( manifest.isMember( "index" ) )
+    return true;
+  const Json::Value &v = manifest["manifestVersion"];
+  return v.isNumeric() && v.asDouble() >= 2;
+}
+
+bool manifestDemandsChecksum( const Json::Value &manifest, const Json::Value &chunk )
+{
+  return manifestGenerationDemandsChecksum( manifest ) || chunk.isMember( "chunkKey" );
+}
+
 std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::string &token,
                               const std::string &chunkKey, std::string *skippedCorrupt )
 {
@@ -694,24 +712,6 @@ ChunkEntryVerdict verifyChunkEntry( const Json::Value &manifest, const std::stri
 }
 
 } // namespace
-
-/// RIO-13 (#1803): a manifest carrying ANY 11.0-era signal demands the
-/// per-chunk sha256 proof — deleting the "index" member (or an individual
-/// sha256) must not downgrade the manifest to the pre-checksum v1 contract.
-/// v2 signals: the explicit manifestVersion stamp, the offline index, or
-/// the chunk's own chunkKey (written only by 11.0+ mirrors).
-bool manifestGenerationDemandsChecksum( const Json::Value &manifest )
-{
-  if ( manifest.isMember( "index" ) )
-    return true;
-  const Json::Value &v = manifest["manifestVersion"];
-  return v.isNumeric() && v.asDouble() >= 2;
-}
-
-bool manifestDemandsChecksum( const Json::Value &manifest, const Json::Value &chunk )
-{
-  return manifestGenerationDemandsChecksum( manifest ) || chunk.isMember( "chunkKey" );
-}
 
 MirrorVerifyReport verifyMirror( const std::string &mirrorDirectory )
 {
@@ -1285,6 +1285,12 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         chunk["file"] = key + ".tif";
         chunk["bytes"] = static_cast<Json::UInt64>( written );
         chunk["assetId"] = asset->record.id;
+        // RIO-13 (#1803): per-entry v2 signal — a manifest whose "index"
+        // member (or version stamp) was deleted still proves its chunks
+        // belong to the checksum-mandatory generation, so stripping
+        // manifest-level markers cannot downgrade it to the pre-sha256
+        // v1 contract.
+        chunk["chunkKey"] = key;
         chunk["window"] = [ & ] {
           Json::Value w( Json::arrayValue );
           w.append( sourceWindow.xOff );

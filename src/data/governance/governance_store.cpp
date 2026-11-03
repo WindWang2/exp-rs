@@ -512,25 +512,22 @@ struct GovernanceStore::Impl
             "INSERT OR REPLACE INTO gov_meta(key,value) VALUES('schema_version','"
             SICNU_GOVERNANCE_SCHEMA_VERSION "');"
             "COMMIT;";
-        if ( const auto r = exec( schema ); !r )
-            return r;
+        if ( !exec( schema ) )
+            return false;
 
         // RIO-11 (#1803): retire the legacy duplicate-copy trigger/table and
         // bound the audit log. audit_log is the superset (gov_audit was
         // trigger-fed FROM it), so dropping gov_audit loses nothing.
-        if ( const auto r = exec( "DROP TRIGGER IF EXISTS trg_audit_log_gov_audit;"
-                                  "DROP TABLE IF EXISTS gov_audit;" );
-             !r )
-            return r;
-        // Bounded retention: keep the newest kMaxAuditRows entries. A log
-        // that never rolls over is an unbounded file the governance store
+        if ( !exec( "DROP TRIGGER IF EXISTS trg_audit_log_gov_audit;"
+                    "DROP TABLE IF EXISTS gov_audit;" ) )
+            return false;
+        // Bounded retention: keep the newest 100000 entries. A log that
+        // never rolls over is an unbounded file the governance store
         // rewrites on every open.
-        if ( const auto r = exec(
-                 "DELETE FROM audit_log WHERE seq <= "
-                 "(SELECT COALESCE(MAX(seq),0) FROM audit_log) - 100000;" );
-             !r )
-            return r;
-        return Result<void>::success();
+        if ( !exec( "DELETE FROM audit_log WHERE seq <= "
+                    "(SELECT COALESCE(MAX(seq),0) FROM audit_log) - 100000;" ) )
+            return false;
+        return true;
     }
 
     // --- readers ------------------------------------------------------------

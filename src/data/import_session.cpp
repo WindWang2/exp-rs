@@ -56,8 +56,13 @@ QString itemName( ImportSessionItemState state )
 }
 } // namespace
 
-ImportSession::ImportSession( DataManager *manager, QStringList sources, Options options )
-    : m_manager( manager ), m_options( std::move( options ) )
+ImportSession::ImportSession( DataManager *manager, QStringList sources )
+    : ImportSession( manager, std::move( sources ), Options{} )
+{
+}
+
+ImportSession::ImportSession( DataManager *manager, QStringList sources, const Options &options )
+    : m_manager( manager ), m_options( options )
 {
     m_items.reserve( static_cast<std::size_t>( sources.size() ) );
     for ( const QString &path : sources )
@@ -117,6 +122,11 @@ QJsonObject ImportSessionSummary::toJson() const
         j.insert( QStringLiteral( "reused_existing" ), item.reusedExisting );
         array.append( j );
     }
+    if ( !journalError.isEmpty() )
+    {
+        root.insert( QStringLiteral( "journal_write_error" ), journalError );
+        root.insert( QStringLiteral( "journal_durable" ), false );
+    }
     root.insert( QStringLiteral( "items" ), array );
     return root;
 }
@@ -126,6 +136,8 @@ ImportSessionSummary ImportSession::summary() const
     ImportSessionSummary s;
     s.state = m_state;
     s.items = m_items;
+    s.journalError = m_journalError;
+    s.journalDurable = m_journalDurable;
     return s;
 }
 
@@ -192,11 +204,61 @@ void ImportSession::resume()
     m_cancelRequested.store( false );
     if ( !m_journalLoaded && !m_options.journalPath.isEmpty() )
         loadJournal();
-    // Re-verify journaled-registered items against the catalog: a source
-    // that no longer resolves is left Registered in the journal but must be
-    // re-attempted here (the journal is a hint, the catalog is the truth).
+    // The journal is a hint; the catalog is the truth. A journaled
+    // "registered" whose source no longer resolves in the catalog (asset
+    // removed, journal restored onto a fresh catalog) goes back to Pending
+    // and is re-attempted — never silently reported done (R1-2).
+    if ( m_manager )
+    {
+        for ( auto &item : m_items )
+        {
+            if ( item.state != ImportSessionItemState::Skipped )
+                continue;
+            const auto existing = m_manager->findByPath( item.path );
+            if ( !existing || existing->id().isNull() )
+                item.state = ImportSessionItemState::Pending;
+        }
+    }
+    // Items that never went through check() in THIS process (cancel during
+    // Checking, cross-restart journal) must not reach registerSource
+    // unexamined — the session never guesses a NeedsUserChoice source
+    // (R1-3).
+    admitPendingItems();
     m_state = ImportSessionState::Importing;
     runPendingItems();
+}
+
+/// Preflight admission over still-Pending items that have no verdict: the
+/// same gate check() applies, factored so resume() cannot bypass it.
+void ImportSession::admitPendingItems()
+{
+    bool anyAdmissible = false;
+    for ( auto &item : m_items )
+    {
+        if ( item.state != ImportSessionItemState::Pending || !item.verdict.isEmpty() )
+            continue;
+        const ImportPreflightReport report = ImportPreflight::inspect( item.path, m_manager );
+        item.verdict = report.verdictString();
+        if ( report.verdict == ImportPreflightVerdict::Importable
+             || report.alreadyRegistered
+             || ( report.verdict == ImportPreflightVerdict::NeedsUserChoice
+                  && !m_options.refuseNeedsUserChoice ) )
+        {
+            anyAdmissible = true;
+            continue;
+        }
+        item.state = ImportSessionItemState::Refused;
+        item.message = report.verdictString();
+        for ( const ImportPreflightFinding &finding : report.findings )
+        {
+            if ( finding.severity == QLatin1String( "error" ) )
+            {
+                item.message = finding.message;
+                break;
+            }
+        }
+    }
+    ( void )anyAdmissible; // admission only REFUSES here; Pending stays Pending
 }
 
 void ImportSession::runPendingItems()
@@ -239,7 +301,30 @@ void ImportSession::runPendingItems()
             anyError = true;
             continue;
         }
-        const RegisterResult result = m_manager->registerSource( request );
+        RegisterResult result;
+        try
+        {
+            result = m_manager->registerSource( request );
+        }
+        catch ( const std::exception &e )
+        {
+            // A throwing registration is a per-item failure: record it and
+            // keep the batch moving — the session must never strand in
+            // Importing without a terminal state (R1-10).
+            item.state = ImportSessionItemState::Error;
+            item.message = QString::fromUtf8( e.what() );
+            anyError = true;
+            saveJournal();
+            continue;
+        }
+        catch ( ... )
+        {
+            item.state = ImportSessionItemState::Error;
+            item.message = QStringLiteral( "registerSource threw an unknown exception" );
+            anyError = true;
+            saveJournal();
+            continue;
+        }
         item.reusedExisting = result.reusedExisting;
         item.assetId = result.assetId.toString();
         if ( !result.assetId.isNull() )
@@ -258,7 +343,7 @@ void ImportSession::runPendingItems()
     saveJournal();
 }
 
-void ImportSession::saveJournal() const
+void ImportSession::saveJournal()
 {
     if ( m_options.journalPath.isEmpty() )
         return;
@@ -267,7 +352,21 @@ void ImportSession::saveJournal() const
     write.targetPath = m_options.journalPath.toStdString();
     write.bytes = doc.toJson( QJsonDocument::Compact ).toStdString();
     write.lastGoodSuffix = ""; // journal must never resurrect a deleted session
-    ( void )sicnu::platform::sidecar::write( write ); // flush failures surface via summary state
+    const sicnu::platform::sidecar::WriteResult result =
+        sicnu::platform::sidecar::write( write );
+    if ( !result )
+    {
+        // R1-4: a journal that cannot be persisted means resume-after-crash
+        // is NOT durable — record it (summary exposes journal_write_error)
+        // instead of pretending a resume point exists. The import itself
+        // keeps going: the catalog remains the truth for idempotent resume.
+        m_journalError = QString::fromUtf8( result.error.c_str() );
+        m_journalDurable = false;
+    }
+    else
+    {
+        m_journalDurable = true;
+    }
 }
 
 void ImportSession::loadJournal()

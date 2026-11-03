@@ -72,6 +72,10 @@ struct ImportSessionSummary
 
     ImportSessionState state = ImportSessionState::Checking;
     std::vector<ImportSessionItem> items;
+    /// Non-empty when the last journal publish FAILED (R1-4): the summary
+    /// says so instead of pretending a durable resume point exists.
+    QString journalError;
+    bool journalDurable = true;
     int registeredCount() const;
     int refusedCount() const;
     int pendingCount() const;
@@ -93,7 +97,9 @@ class ImportSession
     };
 
     /// The session adopts @p sources verbatim (order = import order).
-    ImportSession( DataManager *manager, QStringList sources, Options options = {} );
+    ImportSession( DataManager *manager, QStringList sources, const Options &options );
+    /// Convenience overload with default options (no durable journal).
+    ImportSession( DataManager *manager, QStringList sources );
 
     ImportSessionState state() const { return m_state; }
     ImportSessionSummary summary() const;
@@ -110,7 +116,10 @@ class ImportSession
     void proceed();
 
     /// Requests cancellation of an in-flight proceed()/resume() (or marks a
-    /// not-yet-started session Cancelled).
+    /// not-yet-started session Cancelled). The m_cancelRequested flag is
+    /// atomic so the owning thread observes it promptly, but cancel() ITSELF
+    /// must be called on the DataManager's owning thread like every other
+    /// session call — it also transitions m_state.
     void cancel();
 
     /// Phase 4 — 恢复: after cancel/failure/restart, continues exactly the
@@ -119,12 +128,16 @@ class ImportSession
     void resume();
 
     /// Publishes the journal (atomic sidecar). Called by the session after
-    /// every item; public so a hosting service can flush on shutdown.
-    void saveJournal() const;
+    /// every item; public so a hosting service can flush on shutdown. A
+    /// failed publish surfaces through summary() as journal_write_error
+    /// (resume-after-crash is then not durable — the catalog remains the
+    /// idempotent-resume truth).
+    void saveJournal();
 
   private:
     void runPendingItems();
     void loadJournal();
+    void admitPendingItems();
 
     DataManager *m_manager = nullptr;
     Options m_options;
@@ -132,6 +145,8 @@ class ImportSession
     ImportSessionState m_state = ImportSessionState::Checking;
     std::atomic<bool> m_cancelRequested{ false };
     bool m_journalLoaded = false;
+    QString m_journalError;      ///< non-empty after a failed journal publish
+    bool m_journalDurable = true;
 };
 
 } // namespace sicnu::data

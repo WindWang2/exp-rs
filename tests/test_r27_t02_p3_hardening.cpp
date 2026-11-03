@@ -24,14 +24,16 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <iostream>
 
 namespace
 {
+/// A file PATH under the (already existing) parent — the caller's writers
+/// create the file; pre-creating it as a directory would make every
+/// GDAL/writer open fail.
 std::string scratch( const QString &parent, const char *name )
 {
-    const auto dir = std::filesystem::path( parent.toStdString() ) / name;
-    std::filesystem::create_directories( dir );
-    return dir.string();
+    return ( std::filesystem::path( parent.toStdString() ) / name ).string();
 }
 } // namespace
 
@@ -77,13 +79,13 @@ TEST_CASE( "#1803 RIO-11 governance audit: single authority, bounded retention",
 
     // First open creates the store; second open migrates/dedups.
     {
-        sicnu::data::GovernanceStore store;
+        sicnu::workspace::GovernanceStore store;
         QString err;
         REQUIRE( store.open( dbPath, &err ) );
         REQUIRE( static_cast<bool>( store.appendAudit( "test", "open", "asset", "a1" ) ) );
     }
     {
-        sicnu::data::GovernanceStore store;
+        sicnu::workspace::GovernanceStore store;
         QString err;
         REQUIRE( store.open( dbPath, &err ) );
     }
@@ -209,6 +211,8 @@ TEST_CASE( "#1803 RIO-13 stripping the index does not downgrade a v2 mirror mani
     std::ofstream out( manifestPath, std::ios::trunc );
     out << manifest.toStyledString();
     out.close();
+    // (The manifest snapshot cache is keyed by size+mtime, so the edited
+    // file is naturally re-read — no invalidation needed.)
 
     const sicnu::geo::MirrorVerifyReport attacked = sicnu::geo::verifyMirror( mirrorDir );
     REQUIRE( attacked.badEntries > 0 );

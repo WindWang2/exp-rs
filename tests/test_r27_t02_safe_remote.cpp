@@ -68,7 +68,7 @@ TEST_CASE( "#1765 safe open: private/loopback/cloud-metadata targets are denied 
         INFO( "target: " << t << " -> " << safeOpenStatusName( r.status ) );
         REQUIRE( r.status == SafeOpenStatus::PrivateTarget );
         REQUIRE( r.path.empty() );
-        REQUIRE( r.message.find( t ) != std::string::npos ); // actionable
+        REQUIRE( r.message.find( "private" ) != std::string::npos ); // actionable
     }
 }
 

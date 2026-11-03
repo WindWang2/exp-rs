@@ -192,14 +192,14 @@ TEST_CASE( "#1743 cooperative cancel still unwinds a join graph",
            "[chunk][graph][r27t02]" )
 {
     ChunkGraph graph;
-    std::atomic<bool> cancel{ false };
-    graph.setCancelFlag( &cancel );
-    const auto a = graph.addSource( [n = 0]( TilePayload &out ) mutable
+    auto cancel = std::make_shared<std::atomic<bool>>( false );
+    graph.setCancelFlag( cancel.get() );
+    const auto a = graph.addSource( [n = 0, cancel]( TilePayload &out ) mutable
                                     {
                                         if ( n >= 64 )
                                             return false;
                                         if ( n == 4 )
-                                            cancel.store( true );
+                                            cancel->store( true );
                                         out = makePayload( rowSpec( n, 64 ), 1.f );
                                         ++n;
                                         return true;

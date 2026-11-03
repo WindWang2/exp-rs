@@ -250,6 +250,21 @@ void ResumableTileRun::wipeState( bool includeMarker ) const
 
 ExclusivePathLock ResumableTileRun::acquireStateLock() const
 {
+    // The lock file sits beside the state sidecars; its parent directory
+    // must exist BEFORE the lock (execute() creates the run/state dirs only
+    // after this point). A parent that cannot be created fails closed.
+    const std::filesystem::path lockPath =
+        sicnu::portable::pathFromUtf8( m_config.statePath + ".lock" );
+    if ( !lockPath.parent_path().empty() )
+    {
+        std::error_code dirEc;
+        std::filesystem::create_directories( lockPath.parent_path(), dirEc );
+        if ( dirEc && !std::filesystem::is_directory( lockPath.parent_path() ) )
+            throw std::runtime_error(
+                "resumable tile run: cannot create state lock directory ("
+                + sicnu::portable::pathToUtf8( lockPath.parent_path() ) + ": "
+                + dirEc.message() + ")" );
+    }
     ExclusivePathLock lock;
     std::string error;
     const auto refusal = lock.tryAcquire( m_config.statePath + ".lock", error );

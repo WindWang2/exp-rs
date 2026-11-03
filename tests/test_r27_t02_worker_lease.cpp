@@ -149,5 +149,6 @@ TEST_CASE( "#1764 real pool: recycled worker generations keep the lease table bo
     // population reflects LIVE workers only.
     REQUIRE( health.trackedLeases <= config.maxWorkers );
     pool.shutdown();
-    REQUIRE( health.trackedLeases <= config.maxWorkers );
+    // Post-shutdown: every worker was retired — the table must be EMPTY.
+    REQUIRE( pool.health().trackedLeases == 0 );
 }

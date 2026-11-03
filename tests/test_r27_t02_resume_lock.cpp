@@ -210,12 +210,17 @@ TEST_CASE( "#1766 second execute on the same statePath fails closed while the fi
     std::promise<void> enteredCompute;
     std::future<void> computeGate = enteredCompute.get_future();
     std::promise<void> releaseCompute;
-    std::future<void> release = releaseCompute.get_future().share();
+    std::shared_future<void> release = releaseCompute.get_future().share();
 
     ResumableTileRun::Callbacks cb;
+    bool computeEntered = false; // compute fires per tile — signal ONCE
     cb.compute = [&]( const TileSpec &s )
     {
-        enteredCompute.set_value();
+        if ( !computeEntered )
+        {
+            computeEntered = true;
+            enteredCompute.set_value();
+        }
         release.wait(); // hold the state lock until the test says so
         return truthTile( s );
     };

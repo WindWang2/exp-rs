@@ -187,6 +187,8 @@ std::size_t JobEngine::shutdown()
   // immortal engine, can never pick another job via the generation/stop
   // gates, and its exit bookkeeping needs no join). Returns the stuck count.
   const std::size_t stuck = waitWorkersExitedBounded( m_shutdownJoinTimeoutMs );
+  if ( stuck > 0 )
+    m_abandonedWorkers.store( true, std::memory_order_release );
   // The thread objects were never joined (spawn-time detach): destroying
   // them is a no-op on detached threads.
   toDrop.clear();
@@ -588,6 +590,9 @@ void JobEngine::shutdownForTests()
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     m_stop.store( true );
+    // R1-6: same generation fence as production shutdown — an abandoned
+    // straggler waking after the reset must still exit, never pick jobs.
+    m_generation++;
     // #1767: same bounded discipline as production shutdown — a stuck
     // worker must not hang the test binary either. Stragglers stay
     // generation-gated out of job picking, so reuse stays correct.
@@ -625,6 +630,7 @@ void JobEngine::shutdownForTests()
     m_terminated = false; // explicit test-only reset: the engine is reusable
     m_stop.store( false );
   }
+  m_abandonedWorkers.store( false, std::memory_order_release );
   m_cv.notify_all();
 }
 
@@ -693,6 +699,9 @@ void JobEngine::watchdogLoop()
       }
       auto it = m_jobDeadlines.begin();
       const int64_t earliest = it->second;
+      // Deliberately wall-clock (JobRequest::timeoutMs is documented as a
+      // wall-clock budget): a clock step shifts budgets, it never breaks
+      // the cooperative-cancel contract (R1-11).
       const int64_t now = nowUnixMs();
       if ( now < earliest )
       {
@@ -1009,10 +1018,15 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     const std::string &jobId;
     const std::string &algorithmId;
     std::chrono::steady_clock::time_point start;
+    const std::atomic<bool> *dropTrace = nullptr;
     ~TraceEndGuard()
     {
       using namespace sicnu::runtime::observability::trace;
-      if ( !Trace::enabled() )
+      // R1-5 (#1767): a worker abandoned by a past-deadline shutdown may
+      // unwind AFTER process-exit static destruction began — Trace's
+      // statics (sink/mutex) are exactly such objects, so late unwinds
+      // skip tracing entirely.
+      if ( !Trace::enabled() || ( dropTrace && dropTrace->load( std::memory_order_relaxed ) ) )
         return;
       TraceEvent end;
       end.job = jobId;
@@ -1036,7 +1050,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       }
       Trace::publish( end );
     }
-  } traceEnd{ jobId, request.algorithmId, traceStart };
+  } traceEnd{ jobId, request.algorithmId, traceStart, &m_abandonedWorkers };
 
   // Resolve body. Resolution order (ADR 0062):
   //   per-job executor → prefix executor → RSOperator → fallback (registry).

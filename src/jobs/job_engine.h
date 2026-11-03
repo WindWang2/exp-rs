@@ -285,6 +285,10 @@ class JobEngine
     /// Live worker count: incremented at spawn, decremented + notified at
     /// every worker exit — the observable shutdown() waits on (#1767).
     std::atomic<int> m_liveWorkers{ 0 };
+    /// Set when shutdown() ABANDONED at least one stuck worker (R1-5):
+    /// their late unwind must not touch process-exit-destroyed trace
+    /// statics, so the trace end-guard goes quiet for them.
+    std::atomic<bool> m_abandonedWorkers{ false };
     /// Deadline for shutdown()'s worker-exit wait (ms).
     int m_shutdownJoinTimeoutMs = 5000;
     /// Per-job wall-clock deadlines (#1767): jobId -> absolute unix-ms
