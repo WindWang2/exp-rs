@@ -11,6 +11,13 @@
 //   ||p_train - p_eval||_2 > config.bufferDistance   (strict)
 // Samples inside the guard ring are demoted to ExcludedBuffer and belong to
 // no evaluation set.
+//
+// Sample-scale contract (swarm-review CORE-6): both partition() (guard-ring
+// demotion) and computeMoransI() (ordered-pair sums) are O(n²) in the number
+// of samples. The seam carries no internal cap, so callers must block- or
+// tile-subsample large scenes (a practical ceiling is on the order of 50k
+// samples) instead of feeding a whole raster; there is no silent truncation
+// that would quietly change the split.
 #pragma once
 
 #include <cstdint>

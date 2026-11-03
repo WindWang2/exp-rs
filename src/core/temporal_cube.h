@@ -22,6 +22,9 @@
   and fall back to the first ISO date in the file name (YYYY-MM-DD, YYYYMMDD,
   YYYYDDD). Scenes without a resolvable instant, with mismatched grids, or
   unsupported band layouts are refused at open (typed error text, null cube).
+  A grid mismatch covers size, CRS and geotransform: equal dimensions under
+  an equal CRS still say nothing about registration, and compositing is
+  defined only for pixel-aligned scenes (swarm-review CORE-1).
 
   Pixel access goes exclusively through the Qt-free geospatial foundation
   (`RasterReader` window reads, stored values). Band 1 carries the measurement;
