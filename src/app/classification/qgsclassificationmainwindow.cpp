@@ -3909,13 +3909,19 @@ bool QgsClassificationMainWindow::copyPathTo( const QString &srcPath, const QStr
   const QFileInfo srcInfo( srcPath );
   const QFileInfo destInfo( dest );
   const QString canonicalSrc = srcInfo.canonicalFilePath();
+  // Resolve dest WITHOUT requiring it to exist: existing-dest canonical, or
+  // canonical parent dir + file name (an existing ancestor always exists —
+  // the save dialog picked it). If even the parent does not canonicalise,
+  // leave it empty and fall back to the exact-string compare below.
+  QString destDirCanonical = destInfo.absoluteDir().canonicalPath();
   QString canonicalDest = destInfo.canonicalFilePath();
-  if ( canonicalDest.isEmpty() )
-  {
-    canonicalDest = destInfo.absoluteDir().canonicalPath()
-                    + QLatin1Char( '/' ) + destInfo.fileName();
-  }
-  if ( !canonicalDest.isEmpty() && canonicalDest == canonicalSrc )
+  if ( canonicalDest.isEmpty() && !destDirCanonical.isEmpty() )
+    canonicalDest = destDirCanonical + QLatin1Char( '/' ) + destInfo.fileName();
+  const QString srcExact = srcInfo.absoluteFilePath();
+  const QString destExact = destInfo.absoluteFilePath();
+  const bool sameFile = ( !canonicalDest.isEmpty() && canonicalDest == canonicalSrc )
+                        || ( canonicalSrc.isEmpty() && srcExact == destExact );
+  if ( sameFile )
   {
     QMessageBox::warning(
       this, tr( "Export" ),
@@ -3925,13 +3931,21 @@ bool QgsClassificationMainWindow::copyPathTo( const QString &srcPath, const QStr
 
   // Staged copy + atomic publish (#1792, #1178 discipline): a failed copy
   // must leave any previous destination intact — never remove-then-copy.
-  const QString staged = QStringLiteral( "%1/%2.tmp-%3-%4" )
-                           .arg( destInfo.absolutePath(), destInfo.fileName() )
-                           .arg( QCoreApplication::applicationPid() )
-                           .arg( QDateTime::currentMSecsSinceEpoch() );
-  // Pathological name collision (src literally named like our staged file):
-  // the copy would land ON the source; refuse instead (R1 S3 nit).
-  if ( QFileInfo( staged ).canonicalFilePath() == canonicalSrc )
+  // The staged path lives in the SAME resolved directory as dest, so its
+  // canonical form is derivable without creating it (R2: comparing the
+  // canonical of a not-yet-existing file would always be empty — dead).
+  const QString stagedName = QStringLiteral( "%1.tmp-%2-%3" )
+                               .arg( destInfo.fileName() )
+                               .arg( QCoreApplication::applicationPid() )
+                               .arg( QDateTime::currentMSecsSinceEpoch() );
+  const QString stagedDir = !destDirCanonical.isEmpty()
+                              ? destDirCanonical
+                              : destInfo.absolutePath();
+  const QString staged = stagedDir + QLatin1Char( '/' ) + stagedName;
+  // Pathological collision (src literally named like our staged file in the
+  // same directory): the copy would land ON the source; refuse instead.
+  if ( stagedDir == srcInfo.absoluteDir().canonicalPath()
+       && stagedName == srcInfo.fileName() )
     return false;
   if ( !QFile::copy( srcPath, staged ) )
   {
