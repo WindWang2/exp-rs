@@ -5828,6 +5828,7 @@ sicnu_discover_tests(test_band_ratio)
 if(TARGET qgis_app_classify)
   add_executable(test_classification_task_center
     test_classification_task_center.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
@@ -5863,6 +5864,7 @@ if(TARGET qgis_app_classify)
   # tests need this list — do not add these .cpp files to qgis_app_classify.
   add_executable(test_classification_window
     test_classification_window.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
@@ -6787,6 +6789,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   # Phase 10B.5 — OBIA main window UI smoke tests
   add_executable(test_obia_main_window
     test_obia_main_window.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   )
   target_link_libraries(test_obia_main_window PRIVATE
