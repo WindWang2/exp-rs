@@ -170,7 +170,7 @@ double RsJmSeparability::pairJm( const cv::Mat &xA, const cv::Mat &xB )
   const double term2 = 0.5 * ( logDetBar - 0.5 * ( logDetA + logDetB ) );
 
   double B = term1 + term2;
-  if ( std::isnan( B ) )
+  if ( !std::isfinite( B ) )
   {
     // Not computable — report "n/a" (-1.0) rather than clamping to 0.0, which
     // the JM matrix paints as worst-case inseparable (#1550).

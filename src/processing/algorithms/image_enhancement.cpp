@@ -771,7 +771,10 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -840,7 +843,10 @@ void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -919,7 +925,10 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -940,8 +949,11 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
                         int ny = std::clamp(y + dy, 0, height - 1);
                         float neighbor = input[ny * width + nx];
 
-                        // Skip NaN neighbors
-                    if (std::isnan(neighbor)) continue;
+                        // Skip non-finite neighbours: frost accumulates
+                        // neighbour values directly (no integral-image
+                        // exclusion), so an Inf neighbour would poison every
+                        // window that touches it (#1738 class).
+                        if (!std::isfinite(neighbor)) continue;
 
                     // Use precomputed distance
                     float dist = distLut[(dy + half) * kernelSize + (dx + half)];
@@ -1000,7 +1012,10 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -1073,7 +1088,10 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;

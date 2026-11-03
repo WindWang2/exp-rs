@@ -47,6 +47,12 @@ class ImageFusion
     /// panBand: panchromatic band data (width*height).
     /// All bands must be co-registered and same dimensions.
     /// Returns fused bands (same count as msBands).
+    /// RADIOMETRY CAVEAT (OS-20, #1801): the per-pixel weights sum to 1, so
+    /// with n bands the output magnitude is roughly pan/n — a
+    /// relative-sharpening product, NOT an absolute-reflectance
+    /// reconstruction. Quantitative downstream science (index math,
+    /// calibration audits) must use calibrated inputs or the PCA/GS paths;
+    /// Brovey output is for visual interpretation.
     static QVector<QVector<float>> brovey(
         const QVector<const float *> &msBands, int nBands,
         const float *panBand, int width, int height, float nodata );

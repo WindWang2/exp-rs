@@ -219,14 +219,24 @@ constexpr char kRadiometricStateDigitalNumber[] = "digital_number";
 
 /// Metadata key: "SICNU_NUMERIC_SCALE". When present, stored pixel values are
 /// scaled encodings of the quantity named by kRadiometricStateKey:
-/// physical_value = stored_pixel / scale. Written at import for Level-2
-/// reflectance products whose pixels are stacked verbatim (Sentinel-2 L2A:
-/// the MTD BOA quantification, default 10000; Landsat C2 L2: 1 /
-/// REFLECTANCE_MULT when a single uniform mult covers the stack). Absent
+/// physical_value = (stored_pixel - offset) / scale (offset key below; absent
+/// offset means 0, i.e. the historical divide-only contract). Written at
+/// import for Level-2 reflectance products whose pixels are stacked verbatim
+/// (Sentinel-2 L2A: the MTD BOA quantification, default 10000; Landsat C2 L2:
+/// 1 / REFLECTANCE_MULT when a single uniform mult covers the stack). Absent
 /// means scale 1 — stored values already carry physical units. Scale-
-/// sensitive consumers (EVI/SAVI additive constants) must honour it;
-/// ratio-based indices are scale-invariant and may ignore it.
+/// sensitive consumers (EVI/SAVI additive constants) must honour it.
 constexpr char kNumericScaleKey[] = "SICNU_NUMERIC_SCALE";
+
+/// Metadata key: "SICNU_NUMERIC_OFFSET" (#1740). The affine term of the
+/// scale contract above: physical = (stored - offset) / scale.
+/// Sentinel-2 L2A Processing Baseline >= 04.00 ships DN = rho*Q - 1000
+/// (BOA_ADD_OFFSET = -1000, every L2A since Jan 2022); Landsat C2 L2 carries
+/// REFLECTANCE_ADD = -0.2 -> offset = -add/mult. Absent means offset 0 (old
+/// baselines, pure-scale products) — legacy behaviour is unchanged there.
+/// RATIO consumers beware: NDVI/NDWI are scale-invariant but NOT
+/// offset-invariant; a declared offset must be subtracted before the ratio.
+constexpr char kNumericOffsetKey[] = "SICNU_NUMERIC_OFFSET";
 
 /// Writes the radiometric-state dataset metadata to \p path. Returns false
 /// (with \p errorMessage set) when the file cannot be opened for update.

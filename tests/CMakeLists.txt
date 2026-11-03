@@ -13577,7 +13577,6 @@ set_tests_properties(test_editing_e2e PROPERTIES
 # major refusal, min_reader_schema, symlink escape — plus the PS twin lane
 # when pwsh exists. Python-only on purpose: no C++ tree rebuild is needed to
 # hold the packaging contract, and the verifier is a standalone artifact.
-
 if(Python_EXECUTABLE)
   add_test(NAME bundle_manifest_conformance
     COMMAND "${Python_EXECUTABLE}"
@@ -17278,7 +17277,133 @@ target_include_directories(test_r23_b_run_metric_transaction PRIVATE
 sicnu_discover_tests(test_r23_b_run_metric_transaction TEST_PREFIX test_r23_b_run_metric_transaction:: TIMEOUT 180)
 # --- end R23-B run-metric-transaction registration ---
 
+# BEGIN R25-B (r25-B data/model/experiment track) — append-only block.
+# --- R25-B feature 1: import preflight explanation report --------------------
+qt_add_executable(test_r25_b_import_preflight test_r25_b_import_preflight.cpp)
+target_link_libraries(test_r25_b_import_preflight PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  sicnu_geospatial
+)
+target_include_directories(test_r25_b_import_preflight PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r25_b_import_preflight TEST_PREFIX test_r25_b_import_preflight::)
+# --- end R25-B import-preflight registration ---
+# --- R25-B feature 2: explainable inference plan + quality summary -----------
+# OpenCV-gated (same condition as src/operators compiles the runtime TUs and
+# the test_model_runtime precedent): the plan/engine headers pull opencv2.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
+sicnu_add_test(test_r25_b_inference_plan TIMEOUT 300 TEST_PREFIX "test_r25_b_inference_plan::")
+target_link_libraries(test_r25_b_inference_plan PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r25_b_inference_plan)
+target_include_directories(test_r25_b_inference_plan PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+endif()
+# --- end R25-B inference-plan registration ---
+# --- R25-B feature 3: typed replay deviation entries (schema v2) ------------
+sicnu_add_test(test_r25_b_replay_deviation_v2 TEST_PREFIX "test_r25_b_replay_deviation_v2::" TIMEOUT 300)
+target_link_libraries(test_r25_b_replay_deviation_v2 PRIVATE
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_r25_b_replay_deviation_v2 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+# --- end R25-B replay-deviation-v2 registration ---
+# --- R25-B W7: cross-seam end-to-end (preflight → register → plan → run →
+# quality → experiment record → deviation v2) over production code paths. ---
+# OpenCV-gated (engine headers; same condition as the inference-plan test).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
+sicnu_add_test(test_r25_b_end_to_end TEST_PREFIX "test_r25_b_end_to_end::" TIMEOUT 300)
+target_link_libraries(test_r25_b_end_to_end PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_data
+  sicnu_geospatial
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r25_b_end_to_end)
+target_include_directories(test_r25_b_end_to_end PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+endif()
+# --- end R25-B end-to-end registration ---
+# END R25-B
+# ── R25-E: free-text answer hygiene at both session boundaries (#1695-17d) ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+# Same Qt-free link surface as test_lab_runtime: Catch2 + sicnu_lab_runtime
+# (jsoncpp transitively); the layer guard is the link graph.
+add_executable(test_r25_e_answer_hygiene test_r25_e_answer_hygiene.cpp)
+target_link_libraries(test_r25_e_answer_hygiene PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+sicnu_discover_tests(test_r25_e_answer_hygiene TEST_PREFIX "test_r25_e_answer_hygiene::")
+# --- end R25-E answer-hygiene registration ---
 
+# ── R25-E: cooperative discovery cancellation + CT-C6 single-walk seam ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_discovery_cancel)
+# --- end R25-E discovery-cancel registration ---
+
+# ── R25-E: repo student-flow script ↔ grading authority coherence (CT-D1) ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+add_executable(test_r25_e_repo_flow_contract test_r25_e_repo_flow_contract.cpp)
+target_link_libraries(test_r25_e_repo_flow_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_r25_e_repo_flow_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_definitions(test_r25_e_repo_flow_contract PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r25_e_repo_flow_contract PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_r25_e_repo_flow_contract TEST_PREFIX "test_r25_e_repo_flow_contract::")
+# --- end R25-E repo-flow-contract registration ---
+
+# ── R25-E: feedback pack grading evidence + class summary run integrity ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_feedback_evidence)
+# --- end R25-E feedback-evidence registration ---
+
+# ── R25-E: teacher whole-class E2E on the production seams ──
+# Append-only registration block for this track (docs: .planning/zcode-r25-E).
+sicnu_add_teaching_admin_test(test_r25_e_teacher_e2e)
+
+# ── R25-E: batch durable state under hostile input (fail-closed matrix) ──
+sicnu_add_teaching_admin_test(test_r25_e_adversarial_checkpoint)
+# --- end R25-E e2e+adversarial registration ---
 # ── R25-D (zcode r25-D qt/qgis workbench cartography track) ──────────────────
 # Append-only registration block. Union rule: never reorder/dedupe/delete
 # other tracks' blocks (scripts/check_merge_registration_integrity.py guards).
@@ -17424,136 +17549,6 @@ target_include_directories(test_r25_d_canvas_invalidation PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r25_d_canvas_invalidation TEST_PREFIX test_r25_d_canvas_invalidation::)
-
-# ── R25-E: free-text answer hygiene at both session boundaries (#1695-17d) ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-# Same Qt-free link surface as test_lab_runtime: Catch2 + sicnu_lab_runtime
-# (jsoncpp transitively); the layer guard is the link graph.
-add_executable(test_r25_e_answer_hygiene test_r25_e_answer_hygiene.cpp)
-target_link_libraries(test_r25_e_answer_hygiene PRIVATE
-  Catch2::Catch2WithMain
-  sicnu_lab_runtime
-)
-sicnu_discover_tests(test_r25_e_answer_hygiene TEST_PREFIX "test_r25_e_answer_hygiene::")
-# --- end R25-E answer-hygiene registration ---
-
-# ── R25-E: cooperative discovery cancellation + CT-C6 single-walk seam ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-sicnu_add_teaching_admin_test(test_r25_e_discovery_cancel)
-# --- end R25-E discovery-cancel registration ---
-
-# ── R25-E: repo student-flow script ↔ grading authority coherence (CT-D1) ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-add_executable(test_r25_e_repo_flow_contract test_r25_e_repo_flow_contract.cpp)
-target_link_libraries(test_r25_e_repo_flow_contract PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-)
-target_include_directories(test_r25_e_repo_flow_contract PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-)
-target_compile_definitions(test_r25_e_repo_flow_contract PRIVATE
-  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
-set_target_properties(test_r25_e_repo_flow_contract PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-)
-sicnu_discover_tests(test_r25_e_repo_flow_contract TEST_PREFIX "test_r25_e_repo_flow_contract::")
-# --- end R25-E repo-flow-contract registration ---
-
-# ── R25-E: feedback pack grading evidence + class summary run integrity ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-sicnu_add_teaching_admin_test(test_r25_e_feedback_evidence)
-# --- end R25-E feedback-evidence registration ---
-
-# ── R25-E: teacher whole-class E2E on the production seams ──
-# Append-only registration block for this track (docs: .planning/zcode-r25-E).
-sicnu_add_teaching_admin_test(test_r25_e_teacher_e2e)
-
-# ── R25-E: batch durable state under hostile input (fail-closed matrix) ──
-sicnu_add_teaching_admin_test(test_r25_e_adversarial_checkpoint)
-# --- end R25-E e2e+adversarial registration ---
-
-# BEGIN R25-B (r25-B data/model/experiment track) — append-only block.
-# --- R25-B feature 1: import preflight explanation report --------------------
-qt_add_executable(test_r25_b_import_preflight test_r25_b_import_preflight.cpp)
-target_link_libraries(test_r25_b_import_preflight PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  sicnu_data
-  sicnu_geospatial
-)
-target_include_directories(test_r25_b_import_preflight PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_r25_b_import_preflight TEST_PREFIX test_r25_b_import_preflight::)
-# --- end R25-B import-preflight registration ---
-# --- R25-B feature 2: explainable inference plan + quality summary -----------
-# OpenCV-gated (same condition as src/operators compiles the runtime TUs and
-# the test_model_runtime precedent): the plan/engine headers pull opencv2.
-if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
-sicnu_add_test(test_r25_b_inference_plan TIMEOUT 300 TEST_PREFIX "test_r25_b_inference_plan::")
-target_link_libraries(test_r25_b_inference_plan PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  qgis_core
-  sicnu_processing
-  sicnu_task_center
-  sicnu_operators
-  ${OpenCV_LIBS}
-)
-sicnu_link_jsoncpp(test_r25_b_inference_plan)
-target_include_directories(test_r25_b_inference_plan PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/tests
-  ${CMAKE_BINARY_DIR}
-)
-endif()
-# --- end R25-B inference-plan registration ---
-# --- R25-B feature 3: typed replay deviation entries (schema v2) ------------
-sicnu_add_test(test_r25_b_replay_deviation_v2 TEST_PREFIX "test_r25_b_replay_deviation_v2::" TIMEOUT 300)
-target_link_libraries(test_r25_b_replay_deviation_v2 PRIVATE
-  Sicnu::experiment
-  Sicnu::dataset
-  SQLite::SQLite3
-)
-target_include_directories(test_r25_b_replay_deviation_v2 PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-# --- end R25-B replay-deviation-v2 registration ---
-# --- R25-B W7: cross-seam end-to-end (preflight → register → plan → run →
-# quality → experiment record → deviation v2) over production code paths. ---
-# OpenCV-gated (engine headers; same condition as the inference-plan test).
-if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
-sicnu_add_test(test_r25_b_end_to_end TEST_PREFIX "test_r25_b_end_to_end::" TIMEOUT 300)
-target_link_libraries(test_r25_b_end_to_end PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  qgis_core
-  sicnu_data
-  sicnu_geospatial
-  sicnu_processing
-  sicnu_task_center
-  sicnu_operators
-  Sicnu::experiment
-  Sicnu::dataset
-  SQLite::SQLite3
-  ${OpenCV_LIBS}
-)
-sicnu_link_jsoncpp(test_r25_b_end_to_end)
-target_include_directories(test_r25_b_end_to_end PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/tests
-  ${CMAKE_BINARY_DIR}
-)
-endif()
-# --- end R25-B end-to-end registration ---
-# END R25-B
-
 # BEGIN R25-C
 # R25-C (Pi/MCP harness, workflow execution & plugin tool contracts):
 # capability-honesty entry projection (prerequisites/limitations/guarantees).
@@ -17639,7 +17634,6 @@ target_include_directories(test_r25_a_terrain_solar_latitude PRIVATE
 )
 sicnu_discover_tests(test_r25_a_terrain_solar_latitude TEST_PREFIX test_r25_a_terrain_solar_latitude::)
 # --- end R25-A terrain-solar-latitude registration ---
-
 # ── R25-A DEF-2: exact D8 flow accumulation counts (Float64 product) ──
 add_executable(test_r25_a_terrain_flow_precision test_r25_a_terrain_flow_precision.cpp)
 target_link_libraries(test_r25_a_terrain_flow_precision PRIVATE
@@ -17658,7 +17652,6 @@ target_include_directories(test_r25_a_terrain_flow_precision PRIVATE
 )
 sicnu_discover_tests(test_r25_a_terrain_flow_precision TEST_PREFIX test_r25_a_terrain_flow_precision::)
 # --- end R25-A terrain-flow-precision registration ---
-
 # ── R25-A DEF-4/DEF-5: wavelength-unit honouring + SID disjoint supports ──
 add_executable(test_r25_a_spectral_guards test_r25_a_spectral_guards.cpp)
 target_link_libraries(test_r25_a_spectral_guards PRIVATE
@@ -17677,7 +17670,6 @@ target_include_directories(test_r25_a_spectral_guards PRIVATE
 )
 sicnu_discover_tests(test_r25_a_spectral_guards TEST_PREFIX test_r25_a_spectral_guards::)
 # --- end R25-A spectral-guards registration ---
-
 # ── R25-A FEAT-1: SAR terrain geometry param > metadata > default chain ──
 add_executable(test_r25_a_sar_geometry_fallback test_r25_a_sar_geometry_fallback.cpp)
 target_link_libraries(test_r25_a_sar_geometry_fallback PRIVATE
@@ -17696,7 +17688,6 @@ target_include_directories(test_r25_a_sar_geometry_fallback PRIVATE
 )
 sicnu_discover_tests(test_r25_a_sar_geometry_fallback TEST_PREFIX test_r25_a_sar_geometry_fallback::)
 # --- end R25-A sar-geometry-fallback registration ---
-
 # ── R25-A FEAT-2: qa_mask cloud_confidence + SCL class histogram ──
 add_executable(test_r25_a_qa_confidence test_r25_a_qa_confidence.cpp)
 target_link_libraries(test_r25_a_qa_confidence PRIVATE
@@ -17715,7 +17706,6 @@ target_include_directories(test_r25_a_qa_confidence PRIVATE
 )
 sicnu_discover_tests(test_r25_a_qa_confidence TEST_PREFIX test_r25_a_qa_confidence::)
 # --- end R25-A qa-confidence registration ---
-
 # ── R25-A FEAT-3: post-classification change class-area table ──
 add_executable(test_r25_a_change_area_table test_r25_a_change_area_table.cpp)
 target_link_libraries(test_r25_a_change_area_table PRIVATE
@@ -17734,7 +17724,6 @@ target_include_directories(test_r25_a_change_area_table PRIVATE
 )
 sicnu_discover_tests(test_r25_a_change_area_table TEST_PREFIX test_r25_a_change_area_table::)
 # --- end R25-A change-area-table registration ---
-
 # ── R25-A W7: optical preprocessing chain E2E (qa_mask -> apply_mask -> NDVI) ──
 add_executable(test_r25_a_optical_chain_e2e test_r25_a_optical_chain_e2e.cpp)
 target_link_libraries(test_r25_a_optical_chain_e2e PRIVATE
@@ -17753,7 +17742,6 @@ target_include_directories(test_r25_a_optical_chain_e2e PRIVATE
 )
 sicnu_discover_tests(test_r25_a_optical_chain_e2e TEST_PREFIX test_r25_a_optical_chain_e2e::)
 # --- end R25-A optical-chain-e2e registration ---
-
 # ── R25-A W5: performance baselines (report-only, no wall-clock gate) ──
 add_executable(test_r25_a_perf_baseline test_r25_a_perf_baseline.cpp)
 target_link_libraries(test_r25_a_perf_baseline PRIVATE
@@ -17777,7 +17765,6 @@ sicnu_discover_tests(test_r25_a_perf_baseline TEST_PREFIX test_r25_a_perf_baseli
 # Append-only registration block for this track (docs: .planning/zcode-r26-harness).
 sicnu_add_test(test_r26_harness_evidence_integrity)
 sicnu_link_jsoncpp(test_r26_harness_evidence_integrity)
-
 add_executable(test_r26_planner_fact_gates test_r26_planner_fact_gates.cpp)
 target_link_libraries(test_r26_planner_fact_gates PRIVATE
   Catch2::Catch2WithMain
@@ -17785,7 +17772,6 @@ target_link_libraries(test_r26_planner_fact_gates PRIVATE
 )
 target_include_directories(test_r26_planner_fact_gates PRIVATE ${CMAKE_SOURCE_DIR}/src)
 sicnu_discover_tests(test_r26_planner_fact_gates TEST_PREFIX "test_r26_planner_fact_gates::")
-
 sicnu_add_test(test_r26_capability_family_drift)
 sicnu_link_jsoncpp(test_r26_capability_family_drift)
 # ── END R26-harness ──
@@ -17793,7 +17779,6 @@ sicnu_link_jsoncpp(test_r26_capability_family_drift)
 # ── BEGIN R26-workbench (R26-02): workbench UX regression tests ─────────────
 # Append-only block for the R26-02 workbench track. Sources are compiled
 # directly (existing widget-test pattern) to keep the link surface small.
-
 # WP5: spectral profile NoData honesty
 add_executable(test_r26_workbench_spectral_ux
   test_r26_workbench_spectral_ux.cpp
@@ -17821,7 +17806,6 @@ target_include_directories(test_r26_workbench_spectral_ux PRIVATE
 )
 set_target_properties(test_r26_workbench_spectral_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r26_workbench_spectral_ux)
-
 # WP6/WP7: ROI statistics state recovery + histogram stretch re-anchoring
 add_executable(test_r26_workbench_roi_histogram
   test_r26_workbench_roi_histogram.cpp
@@ -17855,7 +17839,6 @@ target_include_directories(test_r26_workbench_roi_histogram PRIVATE
 )
 set_target_properties(test_r26_workbench_roi_histogram PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r26_workbench_roi_histogram)
-
 # WP1–WP4: classification studio interaction honesty (full window)
 add_executable(test_r26_workbench_classification_ux
   test_r26_workbench_classification_ux.cpp
@@ -17890,14 +17873,12 @@ target_compile_definitions(test_r26_workbench_classification_ux PRIVATE
   SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_r26_workbench_classification_ux)
-
 # WP8: change-detection dialog terminal-state honesty (+ real operator E2E)
 sicnu_add_dialog_test(test_r26_workbench_dialogs
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
 )
-
 # WP9: guided workflow completion honesty
 add_executable(test_r26_workbench_guided
   test_r26_workbench_guided.cpp
@@ -17927,7 +17908,6 @@ target_compile_definitions(test_r26_workbench_guided PRIVATE
 )
 set_target_properties(test_r26_workbench_guided PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r26_workbench_guided)
-
 # WP10: HelpCompact extreme-budget regression (#1614 residual)
 sicnu_add_help_test(test_r26_workbench_help)
 # ── END R26-workbench ────────────────────────────────────────────────────────
@@ -17963,6 +17943,32 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         TIMEOUT 300)
 endif()
 # --- end R26-science oracle registration ---
+
+
+# ── BEGIN R27-T01 (zcode-r27-t01) science numeric-quality oracles ────────────
+# Append-only registration block for this track (docs: .planning/r27-t01).
+# Covers #1738/#1739/#1740/#1752-#1759/#1801: terrain Inf parity, DEM unit
+# fail-closed, SICNU_NUMERIC_OFFSET calibration chain, changeMask/stretch/
+# fusion Inf, DOS DN0 fill, gdal:reproject NoData+categorical, thermal DN0.
+add_executable(test_r27_t01_science_quality test_r27_t01_science_quality.cpp)
+target_link_libraries(test_r27_t01_science_quality PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r27_t01_science_quality)
+target_include_directories(test_r27_t01_science_quality PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+add_test(NAME test_r27_t01_science_quality COMMAND test_r27_t01_science_quality)
+set_tests_properties(test_r27_t01_science_quality PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 600)
+# ── END R27-T01 ──────────────────────────────────────────────────────────────
 
 # ── BEGIN R27-T3: agent approval/sandbox/SDK-plugin hardening (this track) ──
 # Append-only registration block (.planning/r27-t03). P0 #1733 approval gate,

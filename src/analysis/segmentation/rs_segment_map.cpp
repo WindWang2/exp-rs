@@ -167,7 +167,11 @@ RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
         for ( size_t i = 0; i < nPx; ++i )
         {
             float v = floatBuf[i];
-            if ( std::isnan( v ) || v < 0 )
+            // Non-finite, negative and out-of-uint32-range values all map
+            // to label 0 — the float->quint32 cast is UB outside the target
+            // type's range (#853/#1801 review P3-6).
+            if ( !std::isfinite( v ) || v < 0.0f
+                 || v > static_cast<float>( std::numeric_limits<quint32>::max() ) - 1.0f )
                 labels[i] = 0;
             else
                 labels[i] = static_cast<quint32>( v + 0.5f );
