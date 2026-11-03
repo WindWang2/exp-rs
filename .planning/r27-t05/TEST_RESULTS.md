@@ -42,3 +42,9 @@ test_grader_engine 320/17 ✅ · test_grader_schema 241/14 ✅ · test_r16_a_gra
 - `packaging/appimage-tool-checksums.txt`：两工具真实下载 sha256 与记录一致（c20cd7…/15106b…，19.4MB/12.3MB）。
 - `build_offline_bundle.sh` / `build-appimage.sh`：`sh -n`/`bash -n` 通过；#1749 install-tree 分级逻辑就位（完整 assemble 需全量 install 产物，属 release 管道，未在本地跑全量）。
 - `--version` 穿越（#1697，FIXED_IN_MASTER 复核）：`check_version` LC_ALL=C 白名单 + .cmd PowerShell 正则 exit 2 均在。
+
+## 增补：R1/R2 评审后关键 Oracle 重跑 ×2（2026-11-03）
+
+12 套件（含 3 新 oracle + 漂移门 + 受影响面核心）两遍运行逐字节一致全绿：
+81/25/34（新 oracle）、14716/216/34/3473（漂移门，rot guard 后计数增长）、587/101/320/57/484。
+完整清单与一致性 diff 见 /tmp/postr1.txt、/tmp/postr2.txt（会话日志）。
