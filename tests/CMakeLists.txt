@@ -5806,7 +5806,9 @@ set_target_properties(test_roi_io PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_roi_io)
 
 # Band ratio and IHS transform tests
-add_executable(test_band_ratio test_band_ratio.cpp)
+add_executable(test_band_ratio test_band_ratio.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
 target_link_libraries(test_band_ratio PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
@@ -5899,6 +5901,7 @@ if(TARGET qgis_app_classify)
 
   # Phase 10A Task 10.3 — Class table widget tests.
   add_executable(test_class_table_widget test_class_table_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_class_table_widget PRIVATE
     Catch2::Catch2WithMain
@@ -5922,6 +5925,7 @@ if(TARGET qgis_app_classify)
 
   # Global help/tooltip/confirmation sweep — catalog entries + dialog help buttons.
   add_executable(test_global_help_tips test_global_help_tips.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_global_help_tips PRIVATE
@@ -6013,6 +6017,7 @@ sicnu_add_test(test_layout_tools)
 
   # Phase 10A Task 10.4 — ROI polygon map tool (3 clicks + dblclk -> emit)
   add_executable(test_roi_tool_polygon test_roi_tool_polygon.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_roi_tool_polygon PRIVATE
     Catch2::Catch2WithMain
@@ -6062,6 +6067,7 @@ sicnu_add_test(test_layout_tools)
 
   # Phase 10A Task 10.5 — Spectral curve widget tests.
   add_executable(test_spectral_curve test_spectral_curve.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_spectral_curve PRIVATE
     Catch2::Catch2WithMain
@@ -6382,6 +6388,7 @@ sicnu_add_test(test_layout_tools)
 
   # Classification workflow — soft gates + step completion.
   add_executable(test_classify_workflow_controller test_classify_workflow_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     # SicnuUi chrome symbols pulled transitively via qgis_app_classify moc unit.
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
@@ -6522,6 +6529,7 @@ sicnu_add_test(test_layout_tools)
 
   # Phase 10A Task 10.8 — End-to-end classification task test.
   add_executable(test_classification_e2e test_classification_e2e.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_classification_e2e PRIVATE
     Catch2::Catch2WithMain
