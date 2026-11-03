@@ -694,9 +694,12 @@ class ModelCatalog {
                                                    const std::string &manifestPath ) const;
 
     /// Resolve "id" or "id@version" (Platform 4.0 identity reference).
-    /// "id" matches the sole entry with that id (nullopt with @a error set
-    /// when several versions exist); "id@version" matches exactly; an empty
-    /// version part ("id@") resolves the lexicographically latest version.
+    /// "id" matches the sole entry with that id; when several versions share
+    /// the id it resolves the lexicographically latest version (deterministic,
+    /// never a refusal). "id@version" matches exactly; an empty version part
+    /// ("id@") also resolves the lexicographically latest version. The scan
+    /// list is loaded on demand like every other query entry (a cold process
+    /// sees installed models, not an empty registry).
     std::optional<ModelInfo> resolve( const std::string &idVersionRef,
                                       std::string *error = nullptr ) const;
 

@@ -909,6 +909,26 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
           freeMb = ledgerFree;
         else
           freeMb = realFree;
+        // swarm-review OPS-RT-2: this identity's OWN cached reservations on
+        // this device do not compete with this acquisition — a live session
+        // for the same (framework, identity) is exactly what the cache
+        // lookup below serves, and its booking already stands. Counting it
+        // as competing VRAM starved the SECOND acquire of a loaded model:
+        // `auto` silently demoted to a second CPU session (cache-key
+        // mismatch → duplicate load of live weights) and an explicit
+        // cuda:N was refused outright. The ledger remains the admission
+        // authority — this only corrects the FIT verdict, and a peer's or
+        // another model's reservation is never discounted.
+        int ownReservedMb = 0;
+        for ( const auto &cached : m_cache )
+        {
+          if ( cached.second.identity != identityComponent || cached.second.cudaIndex != i )
+            continue;
+          if ( cached.second.session && cached.second.reservedVramMb > 0 )
+            ownReservedMb += cached.second.reservedVramMb;
+        }
+        if ( freeMb >= 0 && ownReservedMb > 0 )
+          freeMb += ownReservedMb;
         freeMbByIndex[static_cast<std::size_t>( i )] = freeMb;
       }
     }
@@ -1226,6 +1246,10 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   CacheEntry entry;
   entry.lastUsed = ++m_useCounter;
   entry.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+  // swarm-review OPS-RT-2: record the identity component so a later
+  // acquisition of the SAME identity can discount its own cached
+  // reservations from the fit verdict (see buildFreeList).
+  entry.identity = identityComponent;
   entry.cudaIndex = device.gpu ? device.cudaIndex : -1;
   entry.reservedVramMb = device.gpu ? std::max( 0, estimateMb ) : 0;
   entry.ledgerHolder = ledgerHolder;

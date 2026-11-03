@@ -571,6 +571,14 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
             GDALRasterBandH rasterBand = GDALGetRasterBand( dataset, index );
             const int width = GDALGetRasterBandXSize( rasterBand );
             const int height = GDALGetRasterBandYSize( rasterBand );
+            // swarm-review OPS-R1-3: a declared NoData sentinel pixel is a
+            // void, not a measurement — running it through DN*gain+bias
+            // fabricates a bogus radiance where the declaration still
+            // promises the sentinel. Skip those pixels (written back
+            // unchanged); undeclared bands keep the historical behavior.
+            int bandHasNoData = 0;
+            const double bandNoData = GDALGetRasterNoDataValue( rasterBand, &bandHasNoData );
+            const bool skipNoData = bandHasNoData && std::isfinite( bandNoData );
             for ( int line = 0; line < height && !transformFailed; ++line )
             {
                 context.throwIfCancelled();
@@ -584,9 +592,13 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
                         break;
                     }
                     for ( int column = 0; column < columns; ++column )
+                    {
+                        const double raw = chunk[static_cast<std::size_t>( column )];
+                        if ( skipNoData && raw == bandNoData )
+                            continue;
                         chunk[static_cast<std::size_t>( column )] =
-                            chunk[static_cast<std::size_t>( column )] * calibrationForBand->gain +
-                            calibrationForBand->bias;
+                            raw * calibrationForBand->gain + calibrationForBand->bias;
+                    }
                     if ( GDALRasterIO( rasterBand, GF_Write, column0, line, columns, 1,
                                        chunk.data(), columns, 1, GDT_Float64, 0, 0 ) != CE_None )
                     {

@@ -2956,6 +2956,12 @@ std::optional<ModelInfo> ModelCatalog::resolve( const std::string &idVersionRef,
                                                 std::string *error ) const
 {
   std::lock_guard<std::mutex> lock( catalogMutex() );
+  // swarm-review OPS-RT-5: resolve() was the ONLY query entry that skipped
+  // ensureLoadedLocked(), so on a cold process (nothing had listed/found a
+  // model yet) it read an empty scan list and refused every installed model
+  // — e.g. plan validation (validatePlanIdentity) rejecting a valid model
+  // pin before any other catalog surface ran. Load like every other entry.
+  ensureLoadedLocked();
   const std::string::size_type at = idVersionRef.rfind( '@' );
   const std::string id = at == std::string::npos ? idVersionRef : idVersionRef.substr( 0, at );
   const std::string version = at == std::string::npos ? std::string() : idVersionRef.substr( at + 1 );

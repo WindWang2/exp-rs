@@ -26,6 +26,41 @@ using namespace params;
 
 namespace {
 
+/// Shared pre-flight every change pair must pass: radiometric-state
+/// comparability and grid consistency — the checks the facade performs for
+/// facade-routed metrics. swarm-review OPS-R1-4: the standalone atoms
+/// (change_sam / change_irmad / change_log_ratio / change_cva_angle) used to
+/// skip both, so a mismatched-state or off-grid pair reached the kernels.
+void validateChangePair( const GdalDatasetWrapper &beforeDs,
+                         const GdalDatasetWrapper &afterDs,
+                         const std::string &beforePath, const std::string &afterPath,
+                         RSOperatorContext &context )
+{
+    const QString beforeState =
+        SatelliteProducts::readRadiometricState( QString::fromStdString( beforePath ) );
+    const QString afterState =
+        SatelliteProducts::readRadiometricState( QString::fromStdString( afterPath ) );
+    if ( !beforeState.isEmpty() && !afterState.isEmpty() && beforeState != afterState )
+    {
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "Before and after rasters are in different radiometric states (" +
+                beforeState.toStdString() + " vs " + afterState.toStdString() +
+                "); calibrate or atmospherically correct both acquisitions to the "
+                "same state before comparing them" );
+    }
+
+    const sicnu::data::GridCompatReport gridReport =
+        sicnu::data::compareGrids( sicnu::processing::gridFromDataset( beforeDs ),
+                                   sicnu::processing::gridFromDataset( afterDs ) );
+    for ( const sicnu::data::GridCompatIssue &issue : gridReport.issues )
+    {
+        if ( issue.blocking )
+            throw RSOperatorError( ErrorCode::InvalidInputData, issue.message.toStdString() );
+        context.logWarning( issue.message.toStdString() );
+    }
+}
+
 /// Shared validation + execution for the single-metric primitives.
 Json::Value runPrimitive( ChangeMetric metric, const std::string &label,
                           const Json::Value &params, RSOperatorContext &context )
@@ -64,27 +99,7 @@ Json::Value runPrimitive( ChangeMetric metric, const std::string &label,
 
     // Same validation as the facade: radiometric comparability, grid
     // compatibility, dimensions, band range / band-count equality.
-    const QString beforeState = SatelliteProducts::readRadiometricState( QString::fromStdString( beforePath ) );
-    const QString afterState = SatelliteProducts::readRadiometricState( QString::fromStdString( afterPath ) );
-    if ( !beforeState.isEmpty() && !afterState.isEmpty() && beforeState != afterState )
-    {
-        throw RSOperatorError(
-            ErrorCode::InvalidInputData,
-            "Before and after rasters are in different radiometric states (" +
-            beforeState.toStdString() + " vs " + afterState.toStdString() +
-            "); calibrate or atmospherically correct both acquisitions to the "
-            "same state before comparing them" );
-    }
-
-    const sicnu::data::GridCompatReport gridReport =
-        sicnu::data::compareGrids( sicnu::processing::gridFromDataset( beforeDs ),
-                                   sicnu::processing::gridFromDataset( afterDs ) );
-    for ( const sicnu::data::GridCompatIssue &issue : gridReport.issues )
-    {
-        if ( issue.blocking )
-            throw RSOperatorError( ErrorCode::InvalidInputData, issue.message.toStdString() );
-        context.logWarning( issue.message.toStdString() );
-    }
+    validateChangePair( beforeDs, afterDs, beforePath, afterPath, context );
 
     if ( afterDs.width() != width || afterDs.height() != height )
     {
@@ -483,6 +498,9 @@ Json::Value RsChangeCvaAngleOperator::run( const Json::Value &params, RSOperator
 
     const int width = beforeDs.width();
     const int height = beforeDs.height();
+    // swarm-review OPS-R1-4: the atoms used to reach the kernel without the
+    // facade's radiometric-state / grid pre-flight.
+    validateChangePair( beforeDs, afterDs, beforePath, afterPath, context );
     if ( afterDs.width() != width || afterDs.height() != height )
         throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
 
@@ -591,6 +609,9 @@ Json::Value RsChangeSamOperator::run( const Json::Value &params, RSOperatorConte
     const int width = beforeDs.width();
     const int height = beforeDs.height();
     const int bandCount = beforeDs.bandCount();
+    // swarm-review OPS-R1-4: the atoms used to reach the kernel without the
+    // facade's radiometric-state / grid pre-flight.
+    validateChangePair( beforeDs, afterDs, beforePath, afterPath, context );
     if ( afterDs.width() != width || afterDs.height() != height )
         throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
     if ( afterDs.bandCount() != bandCount )
@@ -691,6 +712,9 @@ Json::Value RsChangeLogRatioOperator::run( const Json::Value &params, RSOperator
 
     const int width = beforeDs.width();
     const int height = beforeDs.height();
+    // swarm-review OPS-R1-4: the atoms used to reach the kernel without the
+    // facade's radiometric-state / grid pre-flight.
+    validateChangePair( beforeDs, afterDs, beforePath, afterPath, context );
     if ( afterDs.width() != width || afterDs.height() != height )
         throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
 
@@ -818,6 +842,9 @@ Json::Value RsChangeIrMadOperator::run( const Json::Value &params, RSOperatorCon
     const int width = beforeDs.width();
     const int height = beforeDs.height();
     const int bandCount = beforeDs.bandCount();
+    // swarm-review OPS-R1-4: the atoms used to reach the kernel without the
+    // facade's radiometric-state / grid pre-flight.
+    validateChangePair( beforeDs, afterDs, beforePath, afterPath, context );
     if ( afterDs.width() != width || afterDs.height() != height )
         throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
     if ( afterDs.bandCount() != bandCount )

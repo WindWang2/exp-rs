@@ -104,6 +104,15 @@ Json::Value RsRegisterImagesOperator::schema() const
     outputs["coverageRatio"] = makeNumberParam("coverageRatio", "Full-extent coverage ratio", 0.0);
     outputs["rmsePx"] = makeNumberParam("rmsePx", "Quality RMSE (px)", 0.0);
     outputs["ce90Px"] = makeNumberParam("ce90Px", "Empirical CE90 (px)", 0.0);
+    // swarm-review OPS-R1-5: maxDim caps PROCESSING, but the delivered raster
+    // lands on the decimated reference grid when the cap bites — declare the
+    // delivered grid instead of letting consumers assume reference resolution.
+    outputs["outputWidth"] = makeIntegerParam(
+        "outputWidth", "Delivered raster width in px (reference width, or the decimated width when maxDim capped it)", 0);
+    outputs["outputHeight"] = makeIntegerParam(
+        "outputHeight", "Delivered raster height in px (reference height, or the decimated height when maxDim capped it)", 0);
+    outputs["outputGridDecimated"] = makeBooleanParam(
+        "outputGridDecimated", "True when maxDim capped the reference grid and the output is decimated", false);
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"source", "reference", "output"});
@@ -236,6 +245,25 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     // DECIMATION-AWARE reference geotransform so world coordinates stay exact
     // (P0 review finding: mixing pixel-space fits with world-space gts
     // silently warped products; buffer-pixel space keeps one frame).
+    //
+    // swarm-review OPS-R1-5: when maxDim capped the reference, the delivered
+    // raster is the DECIMATED reference grid — a processing cap that used to
+    // silently become the delivery resolution. A full-resolution warp is not
+    // available on this path (it would need the full-resolution source
+    // resident, defeating the bounded-memory contract the cap exists for), so
+    // the output grid is declared explicitly in the result (and warned about
+    // here) instead of assumed to be the reference grid.
+    const bool refDecimated = ( refW != rawRefW || refH != rawRefH );
+    if ( refDecimated )
+    {
+        context.logWarning(
+            "Reference long side " + std::to_string( std::max( rawRefW, rawRefH ) )
+            + " px exceeds maxDim " + std::to_string( maxDim )
+            + "; the delivered output grid is the decimated reference grid "
+            + std::to_string( refW ) + "x" + std::to_string( refH )
+            + " (processing cap, not a delivery-resolution choice) — pass a "
+              "larger maxDim for full-resolution output" );
+    }
     double refGtBuf[6] = {refGt[0], refGt[1] * static_cast<double>(rawRefW) / refW, refGt[2],
                           refGt[3], refGt[4], refGt[5] * static_cast<double>(rawRefH) / refH};
     const double identityGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
@@ -312,6 +340,14 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     result["ce90Px"] = quality.ce90;
     result["matchGrid"] = std::to_string(srcW) + "x" + std::to_string(srcH) + " -> "
                           + std::to_string(refW) + "x" + std::to_string(refH);
+    // swarm-review OPS-R1-5: explicit delivered-grid declaration (see the
+    // decimation note above): consumers must not assume reference resolution.
+    result["outputWidth"] = refW;
+    result["outputHeight"] = refH;
+    result["referenceWidth"] = rawRefW;
+    result["referenceHeight"] = rawRefH;
+    result["maxDim"] = maxDim;
+    result["outputGridDecimated"] = refDecimated;
     return result;
 }
 

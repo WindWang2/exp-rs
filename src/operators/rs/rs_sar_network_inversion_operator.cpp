@@ -452,10 +452,15 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
                         velocityTile[idx] = static_cast<float>( velocity );
                         rmsTile[idx] = static_cast<float>( rms );
                         ++solvedPixels;
-                        for ( int e = 0; e < epochCount; ++e )
-                            epochPlanes[static_cast<size_t>( e )][idx] =
-                                static_cast<float>(
-                                    epochDisplacement[static_cast<size_t>( e )] );
+                        // swarm-review OPS-R2-1: epochPlanes is allocated only
+                        // when the stack output is requested — guard the fill
+                        // loop exactly like the band-write side below, or a
+                        // velocity-only call writes out of bounds.
+                        if ( !stackPath.empty() )
+                            for ( int e = 0; e < epochCount; ++e )
+                                epochPlanes[static_cast<size_t>( e )][idx] =
+                                    static_cast<float>(
+                                        epochDisplacement[static_cast<size_t>( e )] );
                     }
                 }
             }

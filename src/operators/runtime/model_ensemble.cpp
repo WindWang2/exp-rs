@@ -316,6 +316,39 @@ bool readBlock( GDALDatasetH ds, int band, int y, int rows, float *buffer )
                        width, rows, GDT_Float32, 0, 0 ) == CE_None;
 }
 
+/// swarm-review OPS-RT-1: member derived-output contract gate. The ensemble
+/// combination consumes RAW per-class probability planes: every member runs
+/// in Probability mode and the tile engine falls back to the MEMBER's
+/// manifest format when the request mode is Probability, so a member that
+/// declares its own derived contract writes non-probability planes into the
+/// combine — a labels/mask/confidence member contributes a single band of
+/// class codes (averaged as probabilities by weighted_mean, voted into an
+/// all-zero class with agreement 1.0 by weighted_vote), output.uncertainty
+/// appends a band the combine counts as one more class plane, and several
+/// typed heads stack heterogeneous planes under one "probability" reading.
+/// When every member declares the SAME derived shape the grid/channel check
+/// stays silent — the garbage product is published atomically. A static
+/// manifest property is therefore refused HERE, before any member session
+/// is acquired: the same discipline as the zero-weight gate below. Returns
+/// the refusal detail; empty when the member contract is combine-safe.
+std::string memberDerivedContractIssue( const ModelInfo &member )
+{
+  if ( !member.output.format.empty() && member.output.format != "probability" )
+    return "declares output.format '" + member.output.format
+           + "' — ensemble members execute in probability mode (the combination "
+             "owns the product semantics); drop the member's derived output.format";
+  if ( !member.output.uncertainty.empty() && member.output.uncertainty != "none" )
+    return "declares output.uncertainty '" + member.output.uncertainty
+           + "' — the member would append its own uncertainty band to the "
+             "probability stack (the ensemble's uncertainty band is the "
+             "combination's)";
+  if ( member.output.heads.size() > 1 )
+    return "declares " + std::to_string( member.output.heads.size() )
+           + " output.heads — an ensemble member contributes ONE probability "
+             "head; run the multi-head model as a single model instead";
+  return std::string();
+}
+
 /// Resolves and gates every ensemble member BEFORE anything is acquired: a
 /// broken member is a manifest-level failure, not a mid-run one. Applies the
 /// SAME contract gates the single-model service applies (Platform 12.0
@@ -345,6 +378,15 @@ std::vector<ModelInfo> resolveEnsembleMembers( const ModelInfo &ensembleModel,
     // applies to single-model runs.
     rejectUnwiredContracts( member, {} );
     preflightFeatureCube( member, request.inputPath );
+    // swarm-review OPS-RT-1: the member must contribute RAW probability
+    // planes. A derived output.format / uncertainty band / multi-head
+    // contract would silently write non-probability planes into the combine
+    // (see memberDerivedContractIssue) — refused here, before the member's
+    // session is acquired.
+    if ( const std::string derived = memberDerivedContractIssue( member );
+         !derived.empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "ensemble member '" + entry.model + "' " + derived );
     members.push_back( member );
   }
   return members;
@@ -1086,6 +1128,35 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                                + "' is an ensemble: class remapping and morphology are "
                                  "single-model product knobs — the ensemble publishes the "
                                  "combination's product" );
+  }
+
+  // swarm-review OPS-RT-4: class vocabulary equivalence across members. The
+  // scene and detection lanes refuse a disagreement (classId indexes the
+  // vocabulary, so a mismatch would silently relabel the product); the
+  // raster lane used to DEGRADE to no class metadata and mix label domains
+  // instead — the .h contract ("class vocabulary disagreement across
+  // members … is a typed refusal, never a silent mix") was not enforced
+  // here. Silence stays legal (legacy members declare no vocabulary); a
+  // DECLARED vocabulary must be ONE shared vocabulary across every member.
+  {
+    bool anyDeclared = false;
+    for ( const MemberRun &run : runs )
+      anyDeclared = anyDeclared || !run.model.output.classes.empty();
+    if ( anyDeclared )
+    {
+      const std::vector<std::string> &vocabulary = runs.front().model.output.classes;
+      for ( std::size_t i = 1; i < runs.size(); ++i )
+      {
+        if ( runs[i].model.output.classes != vocabulary )
+          throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "ensemble member '" + runs[i].model.stableId()
+              + "' declares a different class vocabulary than the primary member '"
+              + runs.front().model.stableId()
+              + "' — the raster combination aligns per-class planes across "
+                "members; a silent remap would relabel the product" );
+      }
+    }
   }
 
   const QFileInfo outputInfo( QString::fromStdString( request.outputPath ) );

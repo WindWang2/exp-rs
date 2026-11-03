@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 
@@ -59,6 +60,28 @@ ChangeDetection::MorphOp morphOpFromName( const std::string &name )
     if ( name == "open" ) return ChangeDetection::MorphOp::Open;
     if ( name == "close" ) return ChangeDetection::MorphOp::Close;
     return ChangeDetection::MorphOp::None;
+}
+
+/// swarm-review OPS-RS-3: the alreadyPublished recovery path re-parses stats
+/// from raster metadata; std::stod throws a bare std::invalid_argument on a
+/// corrupt value, which escapes the operator's typed-error contract. Parse
+/// with strtod and convert garbage into a typed RSOperatorError instead.
+double parsePublishedStat( const char *raw, const char *key, const std::string &outputPath )
+{
+    if ( !raw || !*raw )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               std::string( "Published change metadata " ) + key
+                                   + " is empty (" + outputPath + ")" );
+    const std::string text( raw );
+    const char *begin = text.c_str();
+    char *end = nullptr;
+    const double value = std::strtod( begin, &end );
+    if ( end == begin || *end != '\0' || !std::isfinite( value ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               std::string( "Published change metadata " ) + key
+                                   + " is not a finite number: '" + text + "' ("
+                                   + outputPath + ")" );
+    return value;
 }
 
 // --- Streaming IR-MAD math -------------------------------------------------
@@ -683,18 +706,18 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
             auto dsH = reinterpret_cast<GDALDatasetH>( pubDs.dataset() );
             const char *m = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MEAN", nullptr );
             const char *s = GDALGetMetadataItem( dsH, "SICNU_CHANGE_STDDEV", nullptr );
-            if ( m ) magStats.mean = std::stod( m );
+            if ( m ) magStats.mean = parsePublishedStat( m, "SICNU_CHANGE_MEAN", opts.outputPath );
             if ( s )
             {
-                const double sd = std::stod( s );
+                const double sd = parsePublishedStat( s, "SICNU_CHANGE_STDDEV", opts.outputPath );
                 magStats.validCount = ( sd > 0.0 ) ? 2 : 1;
                 // Welford invariant: variance() = m2 / validCount, so m2 = sd² × validCount
                 magStats.m2 = sd * sd * static_cast<double>( magStats.validCount );
             }
             const char *mn = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MIN", nullptr );
             const char *mx = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MAX", nullptr );
-            if ( mn ) magStats.minVal = std::stod( mn );
-            if ( mx ) magStats.maxVal = std::stod( mx );
+            if ( mn ) magStats.minVal = parsePublishedStat( mn, "SICNU_CHANGE_MIN", opts.outputPath );
+            if ( mx ) magStats.maxVal = parsePublishedStat( mx, "SICNU_CHANGE_MAX", opts.outputPath );
         }
     }
 

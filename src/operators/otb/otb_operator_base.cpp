@@ -126,14 +126,21 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     QString accumulatedOutput;
 
     // Best-effort output cleanup (#647): OTB applications write their product
-    // at the "-out" argument. On cancellation or a non-zero exit the truncated
+    // at their output parameter. On cancellation or a non-zero exit the truncated
     // file must be removed instead of left looking like a result.
+    // swarm-review OPS-RT-3: the parameter is not always spelled "-out" —
+    // Segmentation writes "-mode.vector.out"/"-mode.raster.out" and
+    // TrainImagesClassifier "-io.out", so the literal "-out" scan missed them
+    // and left truncated products behind on cancel/failure. Match the literal
+    // "-out" OR any dotted parameter name ending in ".out" (the next argument
+    // is the product path in every OTB output parameter).
     // F09: Partial outputs are preserved under a .partial extension for
     // diagnostics and forensics rather than discarded, but never exposed as
     // a valid product.
     QString outputPath;
     for (int i = 0; i + 1 < args.size(); ++i) {
-        if (args.at(i) == QLatin1String("-out")) {
+        const QString &flag = args.at(i);
+        if (flag == QLatin1String("-out") || flag.endsWith(QLatin1String(".out"))) {
             outputPath = args.at(i + 1);
             break;
         }

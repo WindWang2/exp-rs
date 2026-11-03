@@ -16,6 +16,7 @@
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "rs_change_streaming.h"
 
+#include <QFile>
 #include <QString>
 
 #include <limits>
@@ -254,7 +255,20 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
     opts.outputPath = outputPath;
     opts.methodLabel = "sar_change";
 
-    const MaskDerivation derived = thresholdRasterToMask(tempMagPath, opts, context);
+    // swarm-review OPS-RS-1: the work-dir temporary magnitude raster is a
+    // scratch artifact — remove it on both paths (rs_change_streaming.cpp
+    // mask-path pattern), so a finished run never leaks stage-1 output.
+    MaskDerivation derived;
+    try
+    {
+        derived = thresholdRasterToMask( tempMagPath, opts, context );
+        QFile::remove( QString::fromStdString( tempMagPath ) );
+    }
+    catch ( ... )
+    {
+        QFile::remove( QString::fromStdString( tempMagPath ) );
+        throw;
+    }
 
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;

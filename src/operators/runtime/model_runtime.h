@@ -559,6 +559,11 @@ class ModelRuntimeRegistry
       ModelRuntimePtr session;
       std::uint64_t lastUsed = 0; ///< LRU tick (monotonic counter)
       std::int64_t lastUsedMs = 0; ///< wall clock, for idle eviction
+      // swarm-review OPS-RT-2: the framework|identity component of the cache
+      // key, so an acquisition can recognize THIS identity's own cached
+      // reservations (they do not compete with the acquisition — a live
+      // same-identity session is what the cache lookup will serve).
+      std::string identity;
       // Platform 7.0 reservation bookkeeping (GPU sessions only).
       int cudaIndex = -1;       ///< -1 = cpu / no reservation
       int reservedVramMb = 0;   ///< estimate reserved on the ledger
