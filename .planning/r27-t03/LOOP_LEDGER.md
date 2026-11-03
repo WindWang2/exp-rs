@@ -10,3 +10,6 @@
 第6轮 | E/#1802/#1806 | bridge env allow-list、Bearer 明文守卫、SPP-11 超时语义(实测)、SPP-8 | 通过(独立python验证) | commit fe7bdde252
 第7轮 | 全量构建 + 目标测试 | -j2 flock 后台进行中（GCC16 ICE 由仓库自带重试包装器消化） | 进行中 | -
 R1 | 独立对抗评审已派出（安全/并发/契约/测试强度四视角） | - | 进行中 | -
+第8轮 | 构建+测试首跑 | lld 绕过 BFD DWARF reloc bug；发现并修 dock 指针比较真 bug（TTL_EXCESSIVE 误报 MALFORMED）+ 3 个测试驱动缺陷 | 68/68 首跑绿 | 通过
+第9轮 | 双跑 | 同选择器 69/69 ×2；python worker 4/4 ×2；r22 邻接 78+46 断言绿 | 通过 | commit 06e6c67aff
+R2 | 新鲜视角评审已派出（验证 R1 修复+新缺陷+兼容性+负路径） | - | 进行中 | -
