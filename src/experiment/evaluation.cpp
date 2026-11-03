@@ -304,11 +304,14 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                     DiagnosticSeverity::Error } );
             }
             const double raw = cell.toDouble();
-            if ( !std::isfinite( raw ) || std::floor( raw ) != raw )
+            // R1-F1: the cast below is only defined inside qint64's range —
+            // a finite huge literal (e.g. 1e30) must refuse, not wrap.
+            constexpr double kMaxCount = 9223372036854775807.0;
+            if ( !std::isfinite( raw ) || std::floor( raw ) != raw || raw > kMaxCount )
             {
                 return ResultT::failure( Diagnostic{
                     QStringLiteral( "evaluation.invalid" ),
-                    QStringLiteral( "counts[%1][%2] must be a finite integer (got %3)" )
+                    QStringLiteral( "counts[%1][%2] must be a finite 64-bit integer (got %3)" )
                         .arg( row )
                         .arg( column )
                         .arg( raw ),

@@ -2831,6 +2831,10 @@ void TaskCenter::processNextQueuedTasks()
                 firstUnresolvedStepPlaceholder( task.parameterMap );
             if ( !unresolved.isEmpty() )
             {
+                // R1-F2: retire the ready-serial with the popped heap entry —
+                // a lingering serial kept the aging sweep re-examining a
+                // terminal task every pass until unregister.
+                m_readySerial.remove( entry.taskId );
                 setTaskStatusLocked( task, TaskStatus::Failed );
                 task.errorMessage = QStringLiteral(
                                         "Unresolved workflow placeholder %1 in task parameters "
