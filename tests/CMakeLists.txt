@@ -18266,6 +18266,7 @@ add_executable(test_r27_t04_async_bench
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/cross_section_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_r27_t04_async_bench PRIVATE
   Catch2::Catch2WithMain
