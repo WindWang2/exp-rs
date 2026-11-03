@@ -108,11 +108,12 @@ void CrossSectionWidget::extractProfile(const QgsPointXY &start, const QgsPointX
 
                         for (int i = 0; i < steps; ++i)
                         {
-                            // Cooperative cancellation every 128 samples
-                            // (review S2): a superseding request or widget
-                            // death frees the pool worker instead of reading
-                            // a whole remote transect for a dropped result.
-                            if ((i & 127) == 0 &&
+                            // Cooperative cancellation every 16 samples
+                            // (review S2/S3): on a remote COG each sample
+                            // can be its own range request — a superseded
+                            // request or widget death must stop the reads
+                            // quickly, not after 128 network round trips.
+                            if ((i & 15) == 0 &&
                                 sicnu::app::RsScanPool::instance().isStale(scanGeneration, ownerKey))
                             {
                                 GDALClose(ds);

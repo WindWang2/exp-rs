@@ -47,9 +47,13 @@ StacBrowserDialog::StacBrowserDialog( QgsMapCanvas *canvas, QWidget *parent )
            } );
   // A dropped delivery (superseded generation, dialog hidden mid-fetch)
   // also terminates any pending append — a later landing must replace, not
-  // append into the superseded query's rows.
+  // append into the superseded query's rows. The button is settled too
+  // (R1 S3: reopen-with-dropped-fetch left More visible-disabled).
   connect( m_stacClient, &StacClient::searchDropped, this,
-           [this]( const QString & ) { m_awaitingAppend = false; } );
+           [this]( const QString & ) {
+             m_awaitingAppend = false;
+             m_moreButton->setEnabled( false );
+           } );
 }
 
 void StacBrowserDialog::hideEvent( QHideEvent *event )

@@ -149,10 +149,21 @@ QString StacClient::selectCogHref(const QJsonObject &stacItemFeature)
     Json::Value parsed;
     Json::CharReaderBuilder builder;
     builder["collectComments"] = false;
+    // #1793 discipline (R1 S2): this parses a CATALOG-CONTROLLED document —
+    // a hostile nesting bomb must be a typed refusal, never a jsoncpp throw
+    // aborting the GUI inside the load slot. Pinned bound + typed catch.
+    builder["stackLimit"] = 64;
     std::string parseErrors;
     std::istringstream stream(parseText);
-    if (!Json::parseFromStream(builder, stream, &parsed, &parseErrors))
+    try
+    {
+        if (!Json::parseFromStream(builder, stream, &parsed, &parseErrors))
+            return {};
+    }
+    catch (const std::exception &)
+    {
         return {};
+    }
     return QString::fromStdString(sicnu::geo::StacClient::selectCogVsicurlHref(parsed));
 }
 

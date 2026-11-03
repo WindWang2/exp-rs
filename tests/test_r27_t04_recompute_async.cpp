@@ -119,8 +119,9 @@ TEST_CASE( "Spectral-curve recompute runs off the GUI thread (#1794)",
   }
   REQUIRE( curves->curves().size() == 1 );
 
-  // Window destruction with an in-flight recompute must not crash (the
-  // destructor cancels the scan; the landing is dropped by the QPointer).
+  // A second dispatch stays in flight at scope exit; window destruction
+  // runs the destructor's scan cancellation + the QPointer-guarded landing
+  // drop (exercised by the destructor path itself, no post-teardown pump).
   w.recomputeSpectralCurves();
   QApplication::processEvents();
 }

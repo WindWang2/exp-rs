@@ -525,16 +525,17 @@ bool RsObiaMainWindow::loadRasterFile( const QString &path )
     mBandCount = layer->bandCount();
     // #1805 F13: read the geotransform ONCE per raster — the segment tools'
     // map-tool activations reuse the cache instead of GDALOpen per click.
-    mRasterGtValid = false;
-    if ( GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly ) )
-    {
-        mRasterGtValid = GDALGetGeoTransform( rds, mRasterGt ) == CE_None;
-        GDALClose( rds );
-    }
-    if ( !mRasterGtValid )
+    auto resetIdentity = [this]
     {
         mRasterGt[0] = 0; mRasterGt[1] = 1; mRasterGt[2] = 0;
         mRasterGt[3] = 0; mRasterGt[4] = 0; mRasterGt[5] = 1;
+    };
+    resetIdentity(); // never hand the tools a previous raster's transform
+    if ( GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly ) )
+    {
+        if ( GDALGetGeoTransform( rds, mRasterGt ) != CE_None )
+            resetIdentity();
+        GDALClose( rds );
     }
     m_sessionMap->zoomToLayer( layer );
 

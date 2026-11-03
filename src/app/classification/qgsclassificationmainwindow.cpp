@@ -3903,8 +3903,18 @@ bool QgsClassificationMainWindow::copyPathTo( const QString &srcPath, const QStr
 {
   // #1792: dest == src used to remove the SOURCE file (QFile::remove before
   // copy). Canonicalise both sides (symlinks and .. resolved) and refuse.
-  const QString canonicalSrc = QFileInfo( srcPath ).canonicalFilePath();
-  const QString canonicalDest = QFileInfo( dest ).canonicalFilePath();
+  // R1 S2: canonicalFilePath() is empty for a not-yet-existing dest — a
+  // dest through a symlinked DIRECTORY would slip the check and publish
+  // over the source. Resolve the existing ancestor directory instead.
+  const QFileInfo srcInfo( srcPath );
+  const QFileInfo destInfo( dest );
+  const QString canonicalSrc = srcInfo.canonicalFilePath();
+  QString canonicalDest = destInfo.canonicalFilePath();
+  if ( canonicalDest.isEmpty() )
+  {
+    canonicalDest = destInfo.absoluteDir().canonicalPath()
+                    + QLatin1Char( '/' ) + destInfo.fileName();
+  }
   if ( !canonicalDest.isEmpty() && canonicalDest == canonicalSrc )
   {
     QMessageBox::warning(
@@ -3915,11 +3925,14 @@ bool QgsClassificationMainWindow::copyPathTo( const QString &srcPath, const QStr
 
   // Staged copy + atomic publish (#1792, #1178 discipline): a failed copy
   // must leave any previous destination intact — never remove-then-copy.
-  const QFileInfo destInfo( dest );
   const QString staged = QStringLiteral( "%1/%2.tmp-%3-%4" )
                            .arg( destInfo.absolutePath(), destInfo.fileName() )
                            .arg( QCoreApplication::applicationPid() )
                            .arg( QDateTime::currentMSecsSinceEpoch() );
+  // Pathological name collision (src literally named like our staged file):
+  // the copy would land ON the source; refuse instead (R1 S3 nit).
+  if ( QFileInfo( staged ).canonicalFilePath() == canonicalSrc )
+    return false;
   if ( !QFile::copy( srcPath, staged ) )
   {
     QFile::remove( staged );

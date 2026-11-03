@@ -105,9 +105,10 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
   CHECK( w.copyPathTo( src, dest ) );
   CHECK( readFile( dest ) == updated );
 
-  // No staging leftovers in the target directory.
+  // No staging leftovers for OUR exports in the target directory (scoped
+  // to the dest file's own name pattern — the temp dir is shared).
   const QStringList staging = QFileInfo( dest ).dir().entryList(
-    QStringList() << QStringLiteral( "*.tmp-*" ) );
+    QStringList() << QFileInfo( dest ).fileName() + QStringLiteral( ".tmp-*" ) );
   CHECK( staging.isEmpty() );
 
   QFile::remove( src );

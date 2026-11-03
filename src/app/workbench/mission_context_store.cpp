@@ -185,15 +185,27 @@ bool persistMissionContextWithProject( const QString &projectFilePath, QDomDocum
             // #1795 hygiene: a healthy write retires old failure backups —
             // keep the newest one only (the recoverable previous state the
             // issue demands), so repeated failures cannot accumulate.
+            // Manual prefix match (R1 S3): a project name containing glob
+            // metacharacters would break a name-filter pattern.
             const QString side = missionSidecarPathForProject( projectFilePath );
             const QDir sideDir = QFileInfo( side ).dir();
-            const QStringList stale =
-                sideDir.entryList( QStringList()
-                                   << QFileInfo( side ).fileName()
-                                          + QStringLiteral( ".failed-*.bak" ),
-                                   QDir::Files, QDir::Name | QDir::Reversed );
-            for ( int i = 1; i < stale.size(); ++i ) // index 0 = newest, kept
-                QFile::remove( sideDir.filePath( stale.at( i ) ) );
+            const QString prefix =
+                QFileInfo( side ).fileName() + QStringLiteral( ".failed-" );
+            QMap<qulonglong, QString> stale; // ms timestamp -> path
+            for ( const QFileInfo &entry : sideDir.entryInfoList( QDir::Files ) )
+            {
+                const QString name = entry.fileName();
+                if ( !name.startsWith( prefix ) || !name.endsWith( QLatin1String( ".bak" ) ) )
+                    continue;
+                bool okNum = false;
+                const qulonglong ms = QStringView( name ).mid(
+                    prefix.size(), name.size() - prefix.size() - 4 ).toULongLong( &okNum );
+                if ( okNum )
+                    stale.insert( ms, entry.absoluteFilePath() );
+            }
+            // Index 0 (newest) is kept; the rest are retired.
+            for ( int i = 0; i + 1 < stale.size(); ++i )
+                QFile::remove( stale.values().at( i ) );
         }
         else
         {
