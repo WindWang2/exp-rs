@@ -708,13 +708,20 @@ void RsGeorefParamsPanel::setActualGcpCount( int n )
 {
   mActualPtsLabel->setText( QString::number( n ) );
 
-  // Update DOF: actual - min for current method. If actual < min, DOF = 0.
+  // Update DOF: actual - min for current method.
   bool ok = false;
   const int minN = mMinPtsLabel->text().toInt( &ok );
   if ( ok )
   {
-    const int dof = std::max( 0, n - minN );
+    // swarm-review APP-R-4: do NOT clamp a negative DOF to 0 — the label's own
+    // tooltip documents "DOF < 0: not enough points to fit", and clamping hid
+    // that state behind a misleading 0 ("exactly determined"). Show the real
+    // deficit and mark it warn-toned instead.
+    const int dof = n - minN;
     mDofLabel->setText( QString::number( dof ) );
+    mDofLabel->setProperty( "rsTone", dof < 0 ? QStringLiteral( "warn" ) : QVariant() );
+    mDofLabel->style()->unpolish( mDofLabel );
+    mDofLabel->style()->polish( mDofLabel );
   }
 }
 

@@ -196,7 +196,8 @@ void TerrainDialog::setupUi()
   populateRasterLayerCombo( mLayerCombo );
   connect( mLayerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
            [this]( int idx ) {
-             if ( auto *rl = mLayerCombo->itemData( idx ).value<QgsRasterLayer *>() )
+             // swarm-review APP-D-2: resolve the stored layer id via the project.
+             if ( auto *rl = rasterLayerFromComboData( mLayerCombo->itemData( idx ) ) )
              {
                auto extent = rl->extent();
                if ( extent.width() > 0 && extent.height() > 0 && rl->width() > 0 )
@@ -220,7 +221,8 @@ QString TerrainDialog::defaultOutputPath( const QgsRasterLayer *layer ) const
 
 bool TerrainDialog::validateInputs()
 {
-  auto *rl = mLayerCombo ? mLayerCombo->currentData().value<QgsRasterLayer *>() : nullptr;
+  // swarm-review APP-D-2: resolve layer by id through the project registry.
+  auto *rl = currentRasterLayerFromCombo( mLayerCombo );
   if ( !rl || !rl->isValid() )
   {
     QMessageBox::warning( this, dialogTitle(), tr( "Select a valid DEM layer." ) );
@@ -237,7 +239,8 @@ bool TerrainDialog::validateInputs()
 
 void TerrainDialog::onRun()
 {
-  auto *rl = mLayerCombo->currentData().value<QgsRasterLayer *>();
+  // swarm-review APP-D-2: resolve layer by id through the project registry.
+  auto *rl = currentRasterLayerFromCombo( mLayerCombo );
   if ( !rl )
   {
     QMessageBox::warning( this, dialogTitle(), tr( "Select a DEM layer." ) );

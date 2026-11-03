@@ -37,6 +37,12 @@ class RsClassifierSetupBar : public QWidget
     RsClassifierKind currentKind() const { return mKind; }
     void setCurrentKind( RsClassifierKind kind );
     QVector<int> selectedBands() const;
+    /**
+     * swarm-review APP-R-6: false when the band editor holds a token that is
+     * not a positive integer. Callers must refuse the run instead of falling
+     * back to the default bands (the old silent substitution).
+     */
+    bool bandSelectionValid() const;
     double trainRatio() const;
     void setTrainRatio( double ratio );
     QString outputPath() const;
@@ -62,6 +68,11 @@ class RsClassifierSetupBar : public QWidget
 
   private:
     void buildLayout();
+    /// swarm-review APP-R-6: mark the band editor invalid (tooltip + red border)
+    /// and return false, or clear the marker and return true.
+    bool ensureBandsValid();
+    /// Mark / clear the band editor's invalid state (APP-R-6).
+    void setBandsInvalid( bool invalid, const QString &error );
 
     RsClassifierKind mKind = RsClassifierKind::NormalBayes;
     int mSourceBands = 0;

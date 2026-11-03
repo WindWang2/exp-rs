@@ -81,11 +81,19 @@ TEST_CASE( "WorkflowSessionController cancelActiveRun cancels in-flight pipeline
 
   controller.runFullWorkflow();
   REQUIRE( controller.isRunInFlight() );
-  CHECK( ( controller.activePipelineId() >= 0 || controller.pendingTaskId() >= 0 ) );
+  const long pipelineBefore = controller.activePipelineId();
+  const long taskBefore = controller.pendingTaskId();
+  CHECK( ( pipelineBefore >= 0 || taskBefore >= 0 ) );
   controller.cancelActiveRun();
   CHECK_FALSE( controller.isRunInFlight() );
-  CHECK( controller.activePipelineId() == -1 );
-  CHECK( controller.pendingTaskId() == -1 );
+  // swarm-review APP-S-2: cancelling only REQUESTS the cancel now. The
+  // tracked ids stay armed so the terminal callback (Canceled, or Completed
+  // when the work finished before the cancel landed) still matches
+  // onTaskUpdated and can commit the result / register the artifact. Clearing
+  // them here dropped raced Completed results on the floor (orphan temp
+  // files); the terminal callback owns the reset.
+  CHECK( controller.activePipelineId() == pipelineBefore );
+  CHECK( controller.pendingTaskId() == taskBefore );
 
   // Safe idempotent cancel
   controller.cancelActiveRun();

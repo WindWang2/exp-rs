@@ -19,9 +19,23 @@ class QWidget;
 
 /**
  * Populate a combo box with all valid raster layers from the current project.
- * Each item stores the QgsRasterLayer* as QVariant data.
+ * Each item stores the layer id (QString) as QVariant data — never a raw
+ * QgsRasterLayer* — so a layer removed from the project cannot leave a
+ * dangling pointer behind. Resolve entries through
+ * rasterLayerFromComboData() / currentRasterLayerFromCombo().
  */
 void populateRasterLayerCombo( QComboBox *combo, bool clearFirst = true );
+
+/**
+ * Resolve a raster layer from the layer id stored in a combo item's QVariant
+ * data (see populateRasterLayerCombo). Returns nullptr when the data is not a
+ * layer id or the layer no longer exists in the project.
+ */
+class QgsRasterLayer;
+QgsRasterLayer *rasterLayerFromComboData( const QVariant &data );
+
+/// Resolve the currently selected raster layer of a combo (see above).
+QgsRasterLayer *currentRasterLayerFromCombo( const QComboBox *combo );
 
 /**
  * Preflights two raster files against the shared pixel-grid compatibility

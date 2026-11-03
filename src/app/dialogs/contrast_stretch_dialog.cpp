@@ -16,6 +16,9 @@
 #include <QDoubleSpinBox>
 #include <QMessageBox>
 
+#include <algorithm>
+#include <cmath>
+
 ContrastStretchDialog::ContrastStretchDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
@@ -152,6 +155,42 @@ void ContrastStretchDialog::onRun()
   {
     case 0:
     {
+      // swarm-review APP-D-3: "Custom Photoshop Levels" must export whatever the
+      // interactive panel currently defines. Dispatch on the panel algorithm
+      // instead of always serializing the piecewise corner points — that
+      // silently dropped the Levels shadows/highlights/gamma, so the exported
+      // file disagreed with the live preview. Levels is serialized as the same
+      // 257-point piecewise transfer curve the preview applies (gammaCurve in
+      // src/app/display/qgs_display_stretch.cpp), because rs:contrast_stretch
+      // has no native "levels" method.
+      const auto algorithm = m_stretchWidget
+                                 ? m_stretchWidget->algorithm()
+                                 : HistogramStretchWidget::StretchAlgorithm::PiecewiseLinear;
+      if ( algorithm == HistogramStretchWidget::StretchAlgorithm::PhotoshopLevels )
+      {
+        const double black = m_stretchWidget->minValue();
+        const double white = m_stretchWidget->maxValue();
+        const double gamma = m_stretchWidget->gamma();
+        if ( !std::isfinite( black ) || !std::isfinite( white ) || !( white > black ) )
+        {
+          QMessageBox::warning( this, dialogTitle(),
+                                tr( "Photoshop Levels needs a shadows value strictly below the highlights value." ) );
+          return;
+        }
+        constexpr int sampleCount = 256; // matches the preview's gammaCurve sampling
+        const double exponent = 1.0 / std::max( gamma, 0.01 );
+        params["method"] = "piecewise";
+        params["piecewisePoints"] = Json::Value( Json::arrayValue );
+        for ( int i = 0; i <= sampleCount; ++i )
+        {
+          const double t = static_cast<double>( i ) / sampleCount;
+          Json::Value pair( Json::arrayValue );
+          pair.append( black + t * ( white - black ) );
+          pair.append( 255.0 * std::pow( t, exponent ) );
+          params["piecewisePoints"].append( pair );
+        }
+        break;
+      }
       QVector<QPointF> piecewisePoints = m_stretchWidget ? m_stretchWidget->piecewisePoints()
                                                          : QVector<QPointF>();
       if ( piecewisePoints.size() < 2 )

@@ -27,6 +27,7 @@
 #include <QDockWidget>
 #include <QHash>
 #include <QMap>
+#include <QSet>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTreeWidget>

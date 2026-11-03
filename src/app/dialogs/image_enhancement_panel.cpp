@@ -23,6 +23,8 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QFileInfo>
+#include <QRegularExpression>
+#include <QVector>
 
 #include <cmath>
 
@@ -327,6 +329,39 @@ void ImageEnhancementPanel::onRun()
     int filterType = m_filterTypeCombo->currentIndex();
     int kernelSize = m_kernelSizeCombo->currentData().toInt();
     double sigma = m_sigmaSpin->value();
+    // swarm-review APP-D-4: the custom kernel line edit used to be a dead
+    // input — onRun never read it, so a user-typed Laplacian kernel was
+    // silently ignored and the built-in 3x3 kernel ran instead. Parse it
+    // here and refuse on malformed input instead of silently substituting.
+    QVector<double> customKernel;
+    if ( filterType == 4 && m_customKernelEdit )
+    {
+        const QString kernelText = m_customKernelEdit->text().trimmed();
+        if ( !kernelText.isEmpty() )
+        {
+            const QStringList tokens = kernelText.split( QRegularExpression( "\\s+" ),
+                                                         Qt::SkipEmptyParts );
+            bool allNumeric = true;
+            for ( const QString &token : tokens )
+            {
+                bool ok = false;
+                const double value = token.toDouble( &ok );
+                if ( !ok || !std::isfinite( value ) )
+                {
+                    allNumeric = false;
+                    break;
+                }
+                customKernel.append( value );
+            }
+            if ( !allNumeric || customKernel.isEmpty() )
+            {
+                QMessageBox::warning( this, dialogTitle(),
+                    tr( "The custom kernel must be a list of numbers separated by spaces "
+                        "(e.g. \"0 -1 0 -1 5 -1 0 -1 0\")." ) );
+                return;
+            }
+        }
+    }
     int ratioType = m_ratioTypeCombo->currentIndex();
     int band1 = m_band1Combo->currentData().toInt();
     int band2 = m_band2Combo->currentData().toInt();
@@ -376,6 +411,15 @@ void ImageEnhancementPanel::onRun()
         }
         params["kernelSize"] = kernelSize;
         params["sigma"] = sigma;
+        // swarm-review APP-D-4: forward the parsed custom kernel so the value
+        // the user typed reaches the execution contract (rs:image_enhancement
+        // currently ignores it and applies its built-in Laplacian kernel).
+        if ( !customKernel.isEmpty() )
+        {
+            params["customKernel"] = Json::Value( Json::arrayValue );
+            for ( double value : customKernel )
+                params["customKernel"].append( value );
+        }
         break;
     }
     case 2: {

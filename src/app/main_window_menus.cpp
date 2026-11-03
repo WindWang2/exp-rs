@@ -420,15 +420,11 @@ void QgisDesktopWindow::setupMenu()
     tip( preprocessMenu->addAction( ic( "mos_ic" ), tr( "Mosaic..." ),
                                     this, &QgisDesktopWindow::openMosaicDialog ),
          tr( "Mosaic multiple rasters into a continuous image." ) );
-    tip( preprocessMenu->addAction( ic( "extr_ct_b_nd" ), tr( "Extract Band..." ), this, [this]() {
-          ExtractBandDialog dlg( this );
-          if ( m_mapCanvas && m_mapCanvas->currentLayer() )
-          {
-            if ( auto *rl = qobject_cast<QgsRasterLayer *>( m_mapCanvas->currentLayer() ) )
-              dlg.setRasterLayer( rl );
-          }
-          dlg.exec();
-        } ),
+    // swarm-review APP-S-1: "Extract Band..." used to be an inline QAction
+    // parallel to the registry command rs.extractBands, so the menu entry
+    // bypassed the command's availability contract (rasterSelected) and its
+    // shortcut ownership. Use the registry projection like rs.bandMath.
+    tip( addCmd( preprocessMenu, "rs.extractBands" ),
          tr( "Extract and save a single band from a multiband raster." ) );
     tip( preprocessMenu->addAction( ic( "b_nd_co_bo" ), tr( "Band Composition..." ), this, [this]() {
           openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:raster_merge_bands" ) );

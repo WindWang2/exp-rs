@@ -422,6 +422,7 @@ void WorkflowSessionController::onRunClicked()
     return;
   }
   m_runInFlight = true;
+  m_cancelRequested = false; // swarm-review APP-S-2: a fresh submission supersedes any pending cancel
   m_pendingTaskId = taskId;
   m_pendingLoadToMap = m_panel->loadResultToMap();
   m_panel->setRunning( true );
@@ -439,16 +440,99 @@ void WorkflowSessionController::onRunClicked()
   }
 }
 
+bool WorkflowSessionController::syncCanvasDefinitionForRun( QString *reason )
+{
+    auto *scene = m_canvas ? m_canvas->pipelineScene() : nullptr;
+    if ( !scene || scene->nodes().empty() )
+    {
+        // No canvas content: an open session stays authoritative; without one
+        // the caller reports the desync instead of silently doing nothing.
+        if ( m_activeSession.isEmpty() && reason )
+            *reason = tr( "The workflow canvas is empty — add steps before running." );
+        return !m_activeSession.isEmpty();
+    }
+
+    // Document-as-truth: the loaded definition supplies id/title/host, the
+    // export rebuilds the steps (params/gates backfilled by APP-R-1).
+    sicnu::workflow::WorkflowDefinition canvasDef = scene->lastLoadedDefinition();
+    if ( canvasDef.id.empty() )
+    {
+        canvasDef.id = "canvas";
+        canvasDef.title = tr( "Canvas Workflow" ).toStdString();
+    }
+    canvasDef = scene->exportWorkflowDefinition( canvasDef );
+
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    const std::string signature =
+        Json::writeString( builder, sicnu::workflow::workflowDefinitionToJson( canvasDef ) );
+
+    // Register under a canvas-scoped id so builtin definitions are never
+    // overwritten by a canvas edit.
+    canvasDef.id += ".canvas";
+    const QString canvasDefinitionId = QString::fromStdString( canvasDef.id );
+
+    if ( !m_activeSession.isEmpty() && m_activeSession == m_syncedSessionId
+         && m_syncedCanvasDefinitionId == canvasDefinitionId
+         && m_syncedCanvasSignature == signature )
+    {
+        return true; // canvas unchanged since the last sync — session is current
+    }
+
+    m_runtime.registerDefinition( canvasDef );
+    const std::string previousSession = m_activeSession.toStdString();
+    const std::string sessionId = m_runtime.open( canvasDef.id );
+    if ( sessionId.empty() )
+    {
+        if ( reason )
+            *reason = tr( "Cannot open a workflow session for the canvas definition." );
+        return false;
+    }
+    if ( !previousSession.empty() )
+        m_runtime.close( previousSession );
+
+    m_activeSession = QString::fromStdString( sessionId );
+    m_syncedSessionId = m_activeSession;
+    m_syncedCanvasDefinitionId = canvasDefinitionId;
+    m_syncedCanvasSignature = signature;
+
+    // Keep the panel's step cursor valid when the selected step was deleted
+    // from the canvas between runs.
+    const auto def = m_runtime.findDefinitionShared( canvasDef.id );
+    if ( m_activeStepId.isEmpty() || !findStep( def.get(), m_activeStepId.toStdString() ) )
+    {
+        m_activeStepId = ( def && !def->steps.empty() )
+                             ? QString::fromStdString( def->steps.front().id )
+                             : QString();
+    }
+    return true;
+}
+
 void WorkflowSessionController::runFullWorkflow()
 {
-  if ( m_activeSession.isEmpty() )
-    return;
   // One pipeline in flight at a time (duplicate-submission guard): a second
   // startTrackedPipeline would overwrite m_activePipelineId and orphan the
   // first run — Stop could then only cancel the latest.
   if ( m_runInFlight )
   {
     emit statusMessage( tr( "A workflow run is already in flight — stop it before starting another" ) );
+    return;
+  }
+
+  // swarm-review APP-R-2: the canvas Run button executed whatever definition
+  // the session happened to hold (deleted steps included), or silently did
+  // nothing when no session was open. Sync the canvas into the runtime first
+  // so Run executes what the canvas shows.
+  QString syncReason;
+  if ( !syncCanvasDefinitionForRun( &syncReason ) )
+  {
+    emit statusMessage( syncReason );
+    return;
+  }
+
+  if ( m_activeSession.isEmpty() )
+  {
+    emit statusMessage( tr( "No workflow session is open — open a tool or load a workflow on the canvas first." ) );
     return;
   }
 
@@ -483,6 +567,7 @@ void WorkflowSessionController::runFullWorkflow()
   }
 
   m_runInFlight = true;
+  m_cancelRequested = false; // swarm-review APP-S-2: a fresh submission supersedes any pending cancel
   if ( m_panel )
     m_panel->setRunning( true );
   emit statusMessage( tr( "Workflow TaskPipeline submitted to the Task Center for execution..." ) );
@@ -490,6 +575,14 @@ void WorkflowSessionController::runFullWorkflow()
 
 void WorkflowSessionController::runUpToNode( const QString &targetStepId )
 {
+  // swarm-review APP-R-2: same canvas→runtime sync as runFullWorkflow, so a
+  // partial run also executes the canvas state (not a stale session snapshot).
+  QString syncReason;
+  if ( !syncCanvasDefinitionForRun( &syncReason ) )
+  {
+    emit statusMessage( syncReason );
+    return;
+  }
   if ( m_activeSession.isEmpty() || targetStepId.isEmpty() )
     return;
   // Same duplicate-submission guard as runFullWorkflow: the partial-DAG
@@ -547,6 +640,7 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   }
 
   m_runInFlight = true;
+  m_cancelRequested = false; // swarm-review APP-S-2: a fresh submission supersedes any pending cancel
   if ( m_panel )
     m_panel->setRunning( true );
   emit statusMessage( tr( "Workflow TaskPipeline (up to %1) submitted for execution..." ).arg( targetStepId ) );
@@ -554,23 +648,28 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
 
 void WorkflowSessionController::cancelActiveRun()
 {
+  // swarm-review APP-S-2: cancelling used to clear the tracked ids
+  // synchronously, so work that had already finished when the cancel landed
+  // (or that finalizes as Canceled) could no longer match onTaskUpdated: the
+  // Completed result was dropped — no session artifact, no committed output,
+  // orphan temp files. Only REQUEST the cancel here; the terminal callback
+  // owns the ids and performs commitTaskOutput / applyJobResultToSession
+  // before resetting them.
+  const bool hadTrackedWork = ( m_activePipelineId >= 0 || m_pendingTaskId >= 0 );
+
   if ( m_activePipelineId >= 0 )
-  {
     sicnu::TaskCenter::instance().cancelPipeline( m_activePipelineId );
-    m_activePipelineId = -1;
-  }
 
   if ( m_pendingTaskId >= 0 )
-  {
     sicnu::TaskCenter::instance().cancelTask( m_pendingTaskId );
-    m_pendingTaskId = -1;
-  }
 
   m_runInFlight = false;
+  m_cancelRequested = hadTrackedWork;
   if ( m_panel )
     m_panel->setRunning( false );
 
-  emit statusMessage( tr( "Workflow run stopped" ) );
+  emit statusMessage( m_cancelRequested ? tr( "Workflow run stopping..." )
+                                        : tr( "Workflow run stopped" ) );
 }
 
 void WorkflowSessionController::stopWorkflow()
@@ -603,6 +702,12 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
        && info.status != sicnu::TaskStatus::Failed
        && info.status != sicnu::TaskStatus::Canceled )
     return;
+
+  // swarm-review APP-S-2: the tracked work reached a terminal state, so the
+  // cancelling window is over. Reset the flag here (not in cancelActiveRun)
+  // so a Completed result that raced the cancel still runs the bookkeeping
+  // below — the ids it needs were deliberately left armed.
+  m_cancelRequested = false;
 
   if ( isSingleJob )
   {
