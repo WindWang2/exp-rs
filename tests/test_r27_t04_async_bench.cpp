@@ -120,7 +120,7 @@ namespace
   }
 } // namespace
 
-TEST_CASE( "Async sampling slots stay millisecond-scale (#1790/#1791/#1794 bench)",
+TEST_CASE( "Recompute slot cost stays millisecond-scale (#1794 bench)",
            "[bench][r27t04]" )
 {
   ensureApp();
@@ -129,106 +129,120 @@ TEST_CASE( "Async sampling slots stay millisecond-scale (#1790/#1791/#1794 bench
   constexpr int W = 1200, H = 1200;
   const QString raster = makeRaster( tmp.filePath( QStringLiteral( "bench.tif" ) ), W, H, 3 );
 
-  // --- #1794: recomputeSpectralCurves slot cost -----------------------
+  QgsClassificationMainWindow w( nullptr );
+  REQUIRE( w.openSourceRaster( raster ) );
+  auto *layer = sampleLayerOf( w );
+  REQUIRE( layer != nullptr );
+  for ( int cls = 1; cls <= 4; ++cls )
+    for ( int i = 0; i < 10; ++i )
+      addSample( layer, cls, 50.0 + i * 20.0, -( 60.0 + cls * 200.0 + i * 40.0 ) );
+  auto *curves = w.findChild<RsSpectralCurveWidget *>();
+  REQUIRE( curves != nullptr );
+
+  // One measured end-to-end completion, then slot-only cost of 10 more
+  // dispatches (each still schedules the full read on the pool).
+  QElapsedTimer total;
+  total.start();
+  w.recomputeSpectralCurves();
+  const qint64 firstSlotUs = total.nsecsElapsed() / 1000;
+  pumpUntil( [&] { return curves->curves().size() == 4; }, 30000 );
+  const double e2eMs = total.elapsed();
+
+  std::vector<qint64> slotUs{ firstSlotUs };
+  for ( int i = 0; i < 10; ++i )
   {
-    QgsClassificationMainWindow w( nullptr );
-    REQUIRE( w.openSourceRaster( raster ) );
-    auto *layer = sampleLayerOf( w );
-    REQUIRE( layer != nullptr );
-    // 4 classes x 10 samples: rows spread over the raster so the scanline
-    // read covers a realistic row working set.
-    for ( int cls = 1; cls <= 4; ++cls )
-      for ( int i = 0; i < 10; ++i )
-        addSample( layer, cls, 50.0 + i * 20.0, -( 60.0 + cls * 200.0 + i * 40.0 ) );
-    auto *curves = w.findChild<RsSpectralCurveWidget *>();
-    REQUIRE( curves != nullptr );
-
-    std::vector<qint64> slotUs, totalUs;
-    for ( int i = 0; i < 50; ++i )
-    {
-      QElapsedTimer t;
-      t.start();
-      w.recomputeSpectralCurves();
-      slotUs.push_back( t.nsecsElapsed() / 1000 );
-      // End-to-end: until this recompute's curves land. After the first
-      // call the set stays size 4, so gate on the FIRST call's landing and
-      // measure the slot cost only for the rest (each still schedules the
-      // full read on the pool).
-      QElapsedTimer total;
-      total.start();
-      if ( i == 0 )
-      {
-        pumpUntil( [&] { return curves->curves().size() == 4; }, 30000 );
-        totalUs.push_back( total.nsecsElapsed() / 1000 );
-        QElapsedTimer settle;
-        while ( settle.elapsed() < 400 )
-          QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-      }
-      else
-      {
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
-      }
-      QThread::msleep( 1 );
-    }
-    INFO( "recompute slot p50=" << percentile( slotUs, 0.5 ) << "ms p95=" << percentile( slotUs, 0.95 )
-                               << "ms; end-to-end p95=" << percentile( totalUs, 0.95 ) << "ms" );
-    // HEAD did the WHOLE scanline read inside the slot; the async seam must
-    // schedule + snapshot only.
-    CHECK( percentile( slotUs, 0.95 ) < 50.0 );
+    QElapsedTimer t;
+    t.start();
+    w.recomputeSpectralCurves();
+    slotUs.push_back( t.nsecsElapsed() / 1000 );
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+    QThread::msleep( 2 );
   }
+  // Drain the queue so the window destructor cancels nothing mid-read.
+  QElapsedTimer drain;
+  while ( drain.elapsed() < 800 )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
 
-  // --- #1790: CrossSectionWidget::extractProfile slot cost -------------
+  INFO( "recompute slot p50=" << percentile( slotUs, 0.5 ) << "ms p95="
+        << percentile( slotUs, 0.95 ) << "ms; end-to-end first landing=" << e2eMs << "ms" );
+  CHECK( percentile( slotUs, 0.95 ) < 50.0 );
+}
+
+TEST_CASE( "Cross-section slot cost stays millisecond-scale (#1790 bench)",
+           "[bench][r27t04]" )
+{
+  ensureApp();
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString raster = makeRaster( tmp.filePath( QStringLiteral( "cs.tif" ) ), 1200, 1200, 3 );
+
+  QgsRasterLayer layer( raster, QStringLiteral( "bench" ) );
+  REQUIRE( layer.isValid() );
+  CrossSectionWidget w;
+  w.setRasterLayer( &layer );
+
+  std::vector<qint64> slotUs;
+  for ( int i = 0; i < 20; ++i )
   {
-    QgsRasterLayer layer( raster, QStringLiteral( "bench" ) );
-    CrossSectionWidget w;
-    w.setRasterLayer( &layer );
-
-    std::vector<qint64> slotUs;
-    for ( int i = 0; i < 50; ++i )
-    {
-      QElapsedTimer t;
-      t.start();
-      w.extractProfile( QgsPointXY( 0.5, -( 100.0 + i ) ),
-                        QgsPointXY( 1100.5, -( 100.0 + i ) ) );
-      slotUs.push_back( t.nsecsElapsed() / 1000 );
-      QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
-      QThread::msleep( 1 );
-    }
-    INFO( "cross-section slot p50=" << percentile( slotUs, 0.5 ) << "ms p95=" << percentile( slotUs, 0.95 ) << "ms" );
-    // HEAD: 1100 per-sample RasterIO calls inside the slot.
-    CHECK( percentile( slotUs, 0.95 ) < 50.0 );
+    QElapsedTimer t;
+    t.start();
+    w.extractProfile( QgsPointXY( 0.5, -( 100.0 + i ) ),
+                      QgsPointXY( 1100.5, -( 100.0 + i ) ) );
+    slotUs.push_back( t.nsecsElapsed() / 1000 );
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+    QThread::msleep( 2 );
   }
+  QElapsedTimer drain;
+  while ( drain.elapsed() < 600 )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
 
-  // --- #1791: magic wand release-event slot cost -----------------------
+  INFO( "cross-section slot p50=" << percentile( slotUs, 0.5 ) << "ms p95="
+        << percentile( slotUs, 0.95 ) << "ms" );
+  // HEAD: 1100 per-sample RasterIO calls inside the slot.
+  CHECK( percentile( slotUs, 0.95 ) < 50.0 );
+}
+
+TEST_CASE( "Magic-wand slot cost stays millisecond-scale (#1791 bench)",
+           "[bench][r27t04]" )
+{
+  ensureApp();
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  constexpr int W = 1200, H = 1200;
+  const QString raster = makeRaster( tmp.filePath( QStringLiteral( "mw.tif" ) ), W, H, 3 );
+
+  QgsMapCanvas canvas;
+  canvas.resize( 400, 400 );
+  const QgsRectangle extent( 0, 0, W, H );
+  canvas.setExtent( extent );
+  canvas.show();
+  QCoreApplication::processEvents();
+
+  RsRoiToolMagicWand tool( &canvas );
+  tool.setTolerance( 1.0 );
+  tool.setSourceData( raster );
+
+  std::vector<qint64> slotUs;
+  for ( int i = 0; i < 20; ++i )
   {
-    QgsMapCanvas canvas;
-    canvas.resize( 400, 400 );
-    const QgsRectangle extent( 0, 0, W, H );
-    canvas.setExtent( extent );
-    canvas.show();
-    QCoreApplication::processEvents();
-
-    RsRoiToolMagicWand tool( &canvas );
-    tool.setTolerance( 1.0 );
-    tool.setSourceData( raster );
-
-    std::vector<qint64> slotUs;
-    for ( int i = 0; i < 50; ++i )
-    {
-      const double wx = ( 600.5 ) / W * 400;
-      const double wy = ( H - 600.5 ) / H * 400;
-      QMouseEvent me( QEvent::MouseButtonRelease, QPointF( wx, wy ),
-                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
-      QgsMapMouseEvent mme( &canvas, &me );
-      QElapsedTimer t;
-      t.start();
-      tool.canvasReleaseEvent( &mme );
-      slotUs.push_back( t.nsecsElapsed() / 1000 );
-      QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
-      QThread::msleep( 1 );
-    }
-    INFO( "magic-wand slot p50=" << percentile( slotUs, 0.5 ) << "ms p95=" << percentile( slotUs, 0.95 ) << "ms" );
-    // HEAD: 513x513 open+read+flood-fill+contour inside the release event.
-    CHECK( percentile( slotUs, 0.95 ) < 50.0 );
+    const double wx = ( 600.5 ) / W * 400;
+    const double wy = ( H - 600.5 ) / H * 400;
+    QMouseEvent me( QEvent::MouseButtonRelease, QPointF( wx, wy ),
+                    Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    QgsMapMouseEvent mme( &canvas, &me );
+    QElapsedTimer t;
+    t.start();
+    tool.canvasReleaseEvent( &mme );
+    slotUs.push_back( t.nsecsElapsed() / 1000 );
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+    QThread::msleep( 2 );
   }
+  QElapsedTimer drain;
+  while ( drain.elapsed() < 800 )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+
+  INFO( "magic-wand slot p50=" << percentile( slotUs, 0.5 ) << "ms p95="
+        << percentile( slotUs, 0.95 ) << "ms" );
+  // HEAD: 513x513 open+read+flood-fill+contour inside the release event.
+  CHECK( percentile( slotUs, 0.95 ) < 50.0 );
 }
