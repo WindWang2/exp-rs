@@ -670,6 +670,20 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   // from the same parsed arguments.
   const Json::Value callArguments = m_toolCallDispatcher.argumentsFor( cppEnvelope );
   const auto gate = copilot_gate::gateCallArguments( callArguments );
+  // R2: the approval-card route only fits ALGORITHM calls — an interaction
+  // action (view:/roi:/canvas:/layer:/raster:/data:) is not a registered
+  // operator, so a write-slot-looking parameter on one would wrap into a
+  // plan step the executor can never resolve. Interaction actions keep
+  // their synchronous submit; the containment refusal above still applies
+  // to them unconditionally.
+  const std::string callName = cppEnvelope.isMember( "name" ) && cppEnvelope["name"].isString()
+                                   ? cppEnvelope["name"].asString()
+                                   : ( cppEnvelope["function"].isObject() &&
+                                               cppEnvelope["function"]["name"].isString()
+                                           ? cppEnvelope["function"]["name"].asString()
+                                           : std::string() );
+  const bool needsApproval =
+      gate.needsApproval && !processing::ToolCallDispatcher::isInteractionAction( callName );
   if ( !gate.refusalReason.isEmpty() )
   {
     const QString reason = tr( "Tool call blocked by the workspace policy: %1" )
@@ -682,7 +696,7 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     updateRunInspector();
     return;
   }
-  if ( gate.needsApproval )
+  if ( needsApproval )
   {
     // Route the write through the existing human approval card (one-step
     // plan): the operator sees exactly what will be written where before
@@ -692,9 +706,7 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     Json::Value steps( Json::arrayValue );
     Json::Value step( Json::objectValue );
     step["id"] = "copilot_single_write";
-    step["name"] = cppEnvelope.isMember( "name" ) && cppEnvelope["name"].isString()
-                       ? cppEnvelope["name"].asString()
-                       : std::string();
+    step["name"] = callName;
     step["params"] = callArguments.isObject() ? callArguments
                                               : Json::Value( Json::objectValue );
     steps.append( step );
