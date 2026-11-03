@@ -1400,6 +1400,7 @@ add_executable(test_interactive_session_contract
   ${CMAKE_SOURCE_DIR}/src/app/workbench/session_adapters.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/interactive_session.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_interactive_session_contract PRIVATE
   Catch2::Catch2WithMain
@@ -17845,6 +17846,7 @@ add_executable(test_r26_workbench_classification_ux
   test_r26_workbench_classification_ux.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_r26_workbench_classification_ux PRIVATE
   Catch2::Catch2WithMain
