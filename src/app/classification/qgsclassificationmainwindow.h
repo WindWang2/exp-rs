@@ -121,6 +121,10 @@ class QgsClassificationMainWindow : public QMainWindow
     /// Public for offscreen tests (QFileDialog is driven by a timed
     /// dismisser, same pattern as the shell lifecycle suite).
     bool copyPathWithDialog( const QString &srcPath, const QString &title );
+    /// The dialog-free core of copyPathWithDialog (#1792): refuses
+    /// dest==src (canonical compare) and publishes staged-atomically.
+    /// Deterministic seam the tests drive directly.
+    bool copyPathTo( const QString &srcPath, const QString &dest );
 
   signals:
     void requestLoadToMainMap( const QString &rasterPath );

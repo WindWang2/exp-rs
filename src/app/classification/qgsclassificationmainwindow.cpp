@@ -3896,7 +3896,11 @@ bool QgsClassificationMainWindow::copyPathWithDialog( const QString &srcPath,
     tr( "All files (*)" ) );
   if ( dest.isEmpty() )
     return false;
+  return copyPathTo( srcPath, dest );
+}
 
+bool QgsClassificationMainWindow::copyPathTo( const QString &srcPath, const QString &dest )
+{
   // #1792: dest == src used to remove the SOURCE file (QFile::remove before
   // copy). Canonicalise both sides (symlinks and .. resolved) and refuse.
   const QString canonicalSrc = QFileInfo( srcPath ).canonicalFilePath();

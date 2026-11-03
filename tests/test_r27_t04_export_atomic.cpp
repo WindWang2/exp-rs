@@ -3,10 +3,11 @@
 // Contract under test: the classification Step-7 export copy
 //   1. refuses dest == src (canonical compare) — on HEAD QFile::remove(dest)
 //      deleted the SOURCE file before the copy;
-//   2. publishes staged-atomically — a failed publish leaves any previous
-//      destination intact (never remove-then-copy).
-// The QFileDialog inside copyPathWithDialog is answered by a timed
-// dismisser (same technique as the shell lifecycle suite's modal boxes).
+//   2. publishes staged-atomically — the copy goes to a staged temp first
+//      and renames over the destination (never remove-then-copy), leaving
+//      no staging residue.
+// The tests drive the dialog-free seam (copyPathTo) directly; the only
+// modal is the dest==src warning box, closed by a timed dismisser.
 #include <catch2/catch_test_macros.hpp>
 
 #include "classification/qgsclassificationmainwindow.h"
@@ -14,7 +15,6 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QTimer>
@@ -36,50 +36,32 @@ namespace
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }
 
-  /// Persistent modal answerer: one repeating timer runs for the whole
-  /// test, answering every modal QFileDialog with the current pending
-  /// target (select + accept) and closing every QMessageBox (refusal
-  /// warnings). A single-shot dismisser disarms after the first dialog and
-  /// the NEXT modal (the dest==src warning) then spins forever.
-  struct ModalAnswerer
+  /// Close any modal widget (the dest==src warning box) so its exec() ends.
+  void armModalCloser( int budget = 200 )
   {
-    QString pendingFile;
+    if ( budget <= 0 )
+      return;
+    QTimer::singleShot( 10, ensureApp(), [budget] {
+      if ( QWidget *modal = QApplication::activeModalWidget() )
+        modal->close();
+      armModalCloser( budget - 1 );
+    } );
+  }
 
-    explicit ModalAnswerer()
-    {
-      timer.setInterval( 10 );
-      QObject::connect( &timer, &QTimer::timeout, &timer, [this] { dismiss(); } );
-    }
-    ~ModalAnswerer() { timer.stop(); }
+  void writeFile( const QString &path, const QByteArray &bytes )
+  {
+    QFile f( path );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    REQUIRE( f.write( bytes ) == bytes.size() );
+    f.close();
+  }
 
-    void answerNextWith( const QString &file ) { pendingFile = file; }
-
-    void dismiss()
-    {
-      for ( QWidget *widget : QApplication::topLevelWidgets() )
-      {
-        if ( !widget->isModal() )
-          continue;
-        if ( auto *dialog = qobject_cast<QFileDialog *>( widget ) )
-        {
-          if ( !pendingFile.isEmpty() )
-          {
-            dialog->selectFile( pendingFile );
-            // QFileDialog::accept() is protected in Qt6; call the public
-            // QDialog::accept (dynamic dispatch applies the selection).
-            static_cast<QDialog *>( dialog )->accept();
-            return;
-          }
-          dialog->close();
-          return;
-        }
-        widget->close(); // QMessageBox / any other modal
-        return;
-      }
-    }
-
-    QTimer timer;
-  };
+  QByteArray readFile( const QString &path )
+  {
+    QFile f( path );
+    REQUIRE( f.open( QIODevice::ReadOnly ) );
+    return f.readAll();
+  }
 } // namespace
 
 TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
@@ -87,55 +69,41 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
 {
   ensureApp();
   QgsClassificationMainWindow w( nullptr );
-  ModalAnswerer answerer;
-  answerer.timer.start();
 
   const QString src = QDir::temp().filePath( QStringLiteral( "r27t04_export_src.tif" ) );
-  {
-    QFile f( src );
-    REQUIRE( f.open( QIODevice::WriteOnly ) );
-    f.write( QByteArray( 1024, 'x' ) );
-    f.close();
-  }
-  const QByteArray sourceBytes = [&] {
-    QFile f( src );
-    f.open( QIODevice::ReadOnly );
-    return f.readAll();
-  }();
+  const QByteArray sourceBytes( 1024, 'x' );
+  writeFile( src, sourceBytes );
 
   // --- dest == src: refused, source intact --------------------------
-  answerer.answerNextWith( src );
-  const bool refusedSame = !w.copyPathWithDialog( src, QStringLiteral( "Export" ) );
-  QApplication::processEvents( QEventLoop::AllEvents, 300 );
-  CHECK( refusedSame );
-  CHECK( QFileInfo::exists( src ) );                       // RED on HEAD: removed
-  {
-    QFile f( src );
-    REQUIRE( f.open( QIODevice::ReadOnly ) );
-    CHECK( f.readAll() == sourceBytes );
-  }
+  armModalCloser();
+  CHECK_FALSE( w.copyPathTo( src, src ) );
+  QApplication::processEvents( QEventLoop::AllEvents, 200 );
+  CHECK( QFileInfo::exists( src ) );                        // RED on HEAD: removed
+  CHECK( readFile( src ) == sourceBytes );
 
-  // --- dest == src via a different spelling (symlink/..): refused ----
+  // --- dest == src via a different spelling (./name): refused --------
   const QString srcDotted = QFileInfo( src ).dir().filePath(
     QStringLiteral( "./" ) + QFileInfo( src ).fileName() );
-  answerer.answerNextWith( srcDotted );
-  const bool refusedDotted = !w.copyPathWithDialog( src, QStringLiteral( "Export" ) );
-  QApplication::processEvents( QEventLoop::AllEvents, 300 );
-  CHECK( refusedDotted );
+  armModalCloser();
+  CHECK_FALSE( w.copyPathTo( src, srcDotted ) );
+  QApplication::processEvents( QEventLoop::AllEvents, 200 );
   CHECK( QFileInfo::exists( src ) );
+  CHECK( readFile( src ) == sourceBytes );
 
   // --- healthy copy to a NEW destination -----------------------------
   const QString dest = QDir::temp().filePath( QStringLiteral( "r27t04_export_dest.tif" ) );
   QFile::remove( dest );
-  answerer.answerNextWith( dest );
-  CHECK( w.copyPathWithDialog( src, QStringLiteral( "Export" ) ) );
-  QApplication::processEvents( QEventLoop::AllEvents, 300 );
+  CHECK( w.copyPathTo( src, dest ) );
   CHECK( QFileInfo::exists( dest ) );
-  {
-    QFile f( dest );
-    REQUIRE( f.open( QIODevice::ReadOnly ) );
-    CHECK( f.readAll() == sourceBytes );
-  }
+  CHECK( readFile( dest ) == sourceBytes );
+
+  // --- overwrite of an EXISTING destination is atomic ---------------
+  // (a failed publish must leave the previous destination intact; here a
+  // successful publish replaces it wholesale.)
+  const QByteArray updated( 2048, 'y' );
+  writeFile( src, updated );
+  CHECK( w.copyPathTo( src, dest ) );
+  CHECK( readFile( dest ) == updated );
 
   // No staging leftovers in the target directory.
   const QStringList staging = QFileInfo( dest ).dir().entryList(
