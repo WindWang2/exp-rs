@@ -1,6 +1,7 @@
 // remote_source_cache.cpp — see remote_source_cache.h for the contract.
 #include "remote_source_cache.h"
 #include "data/offline_mode.h"
+#include "geospatial/remote/safe_remote_open.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <QDateTime>
@@ -128,6 +129,19 @@ RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int 
     if ( offline::enabled() && offline::isRemoteTarget( url ) )
         return RemoteDatasetLease{};
 
+    // Egress gate (#1803 RIO-6 / #1765): a REMOTE url may only reach the
+    // network through the guarded range-cache transport — scheme, private
+    // network and cache-installation are judged fail-closed by the single
+    // safe-open authority. Local paths keep the direct open.
+    QString openPath = url;
+    if ( offline::isRemoteTarget( url ) )
+    {
+        const auto safe = sicnu::geo::remote::safeRemoteRasterPath( url.toStdString() );
+        if ( !safe.ok() )
+            return RemoteDatasetLease{}; // typed refusal: safe.code()/message
+        openPath = QString::fromStdString( safe.path );
+    }
+
     configureRemoteCachingDefaults();
 
     Impl &pool = impl();
@@ -155,7 +169,7 @@ RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int 
             // and wedges clear()'s in-flight drain.
             auto handle = std::make_shared<PooledRemoteHandle>();
             handle->url = url;
-            const QByteArray utf8 = url.toUtf8();
+            const QByteArray utf8 = openPath.toUtf8();
             lock.unlock();
             GDALDatasetH dataset = nullptr;
             try

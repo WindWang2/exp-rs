@@ -925,12 +925,14 @@ TEST_CASE( "Tier 2 - Area 6: SQLite transaction abort and trigger rejection",
     sicnu::workspace::GovernanceStore store;
     REQUIRE( store.open( dbPath ) );
 
-    // Inject trigger to abort audit inserts
+    // Inject trigger to abort audit inserts. audit_log is the single audit
+    // authority since RIO-11 retired the trigger-fed gov_audit duplicate —
+    // aborting inserts THERE is what must surface as a failed append.
     sqlite3 *raw = nullptr;
     REQUIRE( sqlite3_open( dbPath.toUtf8().constData(), &raw ) == SQLITE_OK );
     char *err = nullptr;
     const char *triggerSql =
-        "CREATE TRIGGER abort_audit BEFORE INSERT ON gov_audit "
+        "CREATE TRIGGER abort_audit BEFORE INSERT ON audit_log "
         "BEGIN SELECT RAISE(ABORT, 'injected audit abort'); END;";
     sqlite3_exec( raw, triggerSql, nullptr, nullptr, &err );
     sqlite3_free( err );

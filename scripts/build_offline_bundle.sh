@@ -141,9 +141,43 @@ else
 fi
 mkdir -p "$bundle/bin" "$bundle/data" "$bundle/labs"
 
-echo "== copying binaries =="
-cp "$cli_bin" "$bundle/bin/"
-cp "$gen_bin" "$bundle/bin/"
+# #1749 (BCT-13): the bundle used to copy only the two CLI binaries — every
+# host without the project's shared libs installed could not run it. Prefer a
+# real install tree: `cmake --install` copies bin/ AND the libsicnu_*.so
+# closure into lib/, with the relocatable INSTALL_RPATH from #1698
+# ($ORIGIN/../lib), plus sicnu_worker. Fallback (no cmake / no install
+# rules): stage the build tree's libsicnu_*.so into lib/ next to the raw
+# build binaries and warn — those keep their build-tree RPATH, so the
+# classroom host still needs LD_LIBRARY_PATH until the install path works.
+staged_from_install=0
+if command -v cmake >/dev/null 2>&1 \
+   && cmake --install "$build_dir" --prefix "$bundle" >/dev/null 2>&1 \
+   && [ -x "$bundle/bin/sicnu_geo_rs_cli" ]; then
+  staged_from_install=1
+  echo "== staged install tree into the bundle (bin/ + lib/ with \$ORIGIN rpath) =="
+else
+  echo "== copying binaries =="
+  cp "$cli_bin" "$bundle/bin/"
+  cp "$gen_bin" "$bundle/bin/"
+  mkdir -p "$bundle/lib"
+  staged_libs=0
+  for lib_home in "$build_dir" "$build_dir/lib" "$build_dir/src"; do
+    for lib in "$lib_home"/libsicnu_*.so*; do
+      [ -e "$lib" ] || continue
+      cp -L "$lib" "$bundle/lib/"
+      staged_libs=1
+    done
+  done
+  if [ "$staged_libs" -eq 1 ]; then
+    echo "   WARNING: staged libsicnu_*.so into bundle/lib but the binaries"
+    echo "   keep their build-tree RPATH — run the CLI with"
+    echo "   LD_LIBRARY_PATH=<bundle>/lib:\$LD_LIBRARY_PATH, or build the"
+    echo "   bundle from a configured tree where 'cmake --install' succeeds."
+  else
+    echo "   WARNING: no libsicnu_*.so found under the build dir — the bundle"
+    echo "   will only run on hosts with the project libraries installed."
+  fi
+fi
 
 echo "== generating sample data (deterministic, offline) =="
 mkdir -p "$bundle/data/samples"

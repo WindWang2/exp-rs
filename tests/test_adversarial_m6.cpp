@@ -17,6 +17,9 @@
 #include <qgsvectorlayer.h>
 #include <qgsrulebasedrenderer.h>
 #include <QApplication>
+#include <QFile>
+#include <QIODevice>
+#include <QTemporaryDir>
 
 #include <cmath>
 #include <vector>
@@ -212,8 +215,94 @@ TEST_CASE( "Adversarial M6 - #782: Rule-based renderer root container and siblin
 TEST_CASE( "Adversarial M6 - #784: Recipe parameter gating branch independence",
            "[adversarial][m6][issue-784]" )
 {
-    const auto &catalog = RecipeCatalog::instance();
-    CHECK( catalog.listRecipes().size() >= 0 );
+    // #1736: the old body was `CHECK(listRecipes().size() >= 0)` — vacuous on
+    // an unsigned size. Ported from the e2e twin (test_e2e_open_issues.cpp
+    // "Tier 1 - #784") so the adversarial lane asserts the real regression
+    // property: a closed gate degrades only its own branch; a global gate
+    // leak would flip the parallel branch's params too.
+    QTemporaryDir dir;
+    const QString recipePath = dir.filePath( QStringLiteral( "adversarial_m6_gates.json" ) );
+    const std::string recipeJson = R"JSON({
+    "schema_version": "2.0",
+    "kind": "harness_recipe",
+    "recipe_id": "adv.m6_gates",
+    "title": "branch gate adversarial",
+    "intent": "test",
+    "slots": [
+      { "name": "optical", "required": false },
+      { "name": "sar", "required": false }
+    ],
+    "outputs": [],
+    "steps": [
+      { "id": "optical_index", "operator_id": "op.optical", "when_param": "enable_optical",
+        "params": { "input": "$optical.path", "mode": "full", "threshold": 0.5 } },
+      { "id": "sar_index", "operator_id": "op.sar", "when_param": "enable_sar",
+        "params": { "input": "$sar.path", "mode": "full", "threshold": 0.5 } },
+      { "id": "sar_post", "operator_id": "op.post", "inputs": [ { "step": "sar_index" } ],
+        "params": { "mode": "full", "threshold": 0.5 },
+        "params_when_skipped": { "mode": "degraded", "threshold": 0 } }
+    ]
+  })JSON";
+    QFile recipeFile( recipePath );
+    REQUIRE( recipeFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    recipeFile.write( recipeJson.data(), static_cast<qint64>( recipeJson.size() ) );
+    recipeFile.close();
+
+    QTemporaryDir dataDir;
+    auto writeDummy = [&dataDir]( const QString &name ) {
+        QFile file( dataDir.filePath( name ) );
+        if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+            return false;
+        file.write( "x" );
+        file.close();
+        return true;
+    };
+    REQUIRE( writeDummy( QStringLiteral( "optical.tif" ) ) );
+    REQUIRE( writeDummy( QStringLiteral( "sar.tif" ) ) );
+
+    auto &catalog = RecipeCatalog::instance();
+    catalog.setDirectory( dir.path().toStdString() );
+    catalog.reload();
+    // The fixture really loaded — a validation failure would silently empty
+    // every plan below and make the branch assertions vacuous in turn.
+    const Json::Value loadedRecipes = catalog.listRecipes();
+    REQUIRE( loadedRecipes.size() == 1 );
+    REQUIRE( loadedRecipes[0]["recipe_id"].asString() == "adv.m6_gates" );
+
+    auto instantiate = [&]( bool enableOptical, bool enableSar ) {
+        Json::Value bindings( Json::objectValue );
+        bindings["slots"]["optical"] = dataDir.filePath( QStringLiteral( "optical.tif" ) ).toStdString();
+        bindings["slots"]["sar"] = dataDir.filePath( QStringLiteral( "sar.tif" ) ).toStdString();
+        bindings["params"]["enable_optical"] = enableOptical;
+        bindings["params"]["enable_sar"] = enableSar;
+        bindings["output_dir"] = dir.filePath( QStringLiteral( "out" ) ).toStdString();
+        sicnu::agent::harness::HarnessError error;
+        return catalog.instantiateRecipe( "adv.m6_gates", bindings, error );
+    };
+    auto findStep = []( const Json::Value &plan, const std::string &id ) -> const Json::Value * {
+        if ( !plan.isMember( "steps" ) || !plan["steps"].isArray() )
+            return nullptr;
+        for ( const auto &step : plan["steps"] )
+            if ( step["id"].asString() == id )
+                return &step;
+        return nullptr;
+    };
+
+    // SAR gate closed: the SAR branch drops/degrades, the parallel optical
+    // branch keeps its full template — a global anyGateClosed leak (#784)
+    // would flip optical_index's params here.
+    const Json::Value plan = instantiate( true, false );
+    REQUIRE( plan.isObject() );
+    CHECK( findStep( plan, "sar_index" ) == nullptr );
+    const Json::Value *sarPost = findStep( plan, "sar_post" );
+    REQUIRE( sarPost != nullptr );
+    CHECK( (*sarPost)["params"]["mode"].asString() == "degraded" );
+    CHECK( (*sarPost)["params"]["threshold"].asDouble() == Approx( 0.0 ) );
+    const Json::Value *optical = findStep( plan, "optical_index" );
+    REQUIRE( optical != nullptr );
+    CHECK( (*optical)["params"]["mode"].asString() == "full" );
+    CHECK( (*optical)["params"]["threshold"].asDouble() == Approx( 0.5 ) );
+    CHECK( (*optical)["params"]["input"].asString().find( "optical.tif" ) != std::string::npos );
 }
 
 // ============================================================================

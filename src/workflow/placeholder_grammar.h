@@ -38,15 +38,39 @@ std::vector<PlaceholderRef> parsePlaceholders( const std::string &text );
  * resolution policy for both fresh dispatch (TaskCenter) and crash resume
  * (WorkflowRunCoordinator) — they must never drift (#727):
  *   1. resultPayload[portName] (exact key, string, non-empty);
- *   2. the canonical/default output: @p canonicalOutputPath when non-empty,
- *      else resultPayload["output"];
- *   3. case-insensitive portName scan of the payload's string values.
+ *   2. for the canonical "output" port only: @p canonicalOutputPath when
+ *      non-empty, else resultPayload["output"] (#1775/WE-14 — a named port
+ *      the producer never declared no longer falls back to the default
+ *      output; it stays unresolved so the caller can refuse).
  * Returns an empty string when nothing matches — the caller leaves the
  * placeholder unresolved, identical on both paths.
  */
 std::string resolvePlaceholderPort( const Json::Value &resultPayload,
                                     const std::string &canonicalOutputPath,
                                     const std::string &portName );
+
+/**
+ * #1780 (WE-21): true when @p text still carries a step/task placeholder
+ * ($step.port, ${task.parent.output}, …). The TaskCenter pre-launch gate
+ * refuses tasks whose substituted parameters test positive — the literal
+ * reference must never be dispatched to an operator.
+ */
+bool containsUnresolvedStepPlaceholder( const std::string &text );
+
+/**
+ * #1776 (WE-15): true when the env name is secret-shaped (key/token/secret/
+ * password/credential fragments) and must never be expanded, even under an
+ * allow-listed prefix.
+ */
+bool envNameLooksSecret( const std::string &name );
+
+/**
+ * #1776 (WE-15): true when a workflow parameter may expand the env var
+ * @p name (shipped pipeline conventions + SICNU_/EXP_RS_ namespaces).
+ * Everything else stays unresolved instead of reading arbitrary process
+ * env into resolvedParams/provenance.
+ */
+bool isEnvExpansionAllowed( const std::string &name );
 
 /**
  * Replaces placeholders in text using a resolver callback.

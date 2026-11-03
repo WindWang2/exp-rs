@@ -248,11 +248,52 @@ void ResumableTileRun::wipeState( bool includeMarker ) const
         std::filesystem::remove( sicnu::portable::pathFromUtf8( m_markerPath ), ec );
 }
 
+ExclusivePathLock ResumableTileRun::acquireStateLock() const
+{
+    // The lock file sits beside the state sidecars; its parent directory
+    // must exist BEFORE the lock (execute() creates the run/state dirs only
+    // after this point). A parent that cannot be created fails closed.
+    const std::filesystem::path lockPath =
+        sicnu::portable::pathFromUtf8( m_config.statePath + ".lock" );
+    if ( !lockPath.parent_path().empty() )
+    {
+        std::error_code dirEc;
+        std::filesystem::create_directories( lockPath.parent_path(), dirEc );
+        if ( dirEc && !std::filesystem::is_directory( lockPath.parent_path() ) )
+            throw std::runtime_error(
+                "resumable tile run: cannot create state lock directory ("
+                + sicnu::portable::pathToUtf8( lockPath.parent_path() ) + ": "
+                + dirEc.message() + ")" );
+    }
+    ExclusivePathLock lock;
+    std::string error;
+    const auto refusal = lock.tryAcquire( m_config.statePath + ".lock", error );
+    switch ( refusal )
+    {
+    case ExclusivePathLock::Refusal::None:
+        return lock;
+    case ExclusivePathLock::Refusal::HeldElsewhere:
+        throw ChunkRunLockHeld( m_config.statePath );
+    case ExclusivePathLock::Refusal::OpenFailed:
+    case ExclusivePathLock::Refusal::LockFailed:
+        // Fail-closed: an unusable lock must never degrade into an unlocked
+        // mutation of shared state (R7).
+        throw std::runtime_error( "resumable tile run: state lock unusable ("
+                                  + std::string( ExclusivePathLock::refusalName( refusal ) )
+                                  + ": " + error + ")" );
+    }
+    throw std::runtime_error( "resumable tile run: unknown lock refusal" );
+}
+
 ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &cancel,
                                                     Callbacks cb )
 {
     if ( !cb.compute || !cb.consume || !cb.publish )
         throw std::logic_error( "resumable tile run: compute/consume/publish callbacks required" );
+
+    // R7: the whole mutation owns the state exclusively; the lock releases
+    // on every exit path (return, cancel throw, error throw) via RAII.
+    ExclusivePathLock stateLock = acquireStateLock();
 
     Result result;
     result.totalTiles = m_totalTiles;
@@ -408,11 +449,13 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
 
 void ResumableTileRun::abandon()
 {
+    ExclusivePathLock stateLock = acquireStateLock();
     wipeState( /*includeMarker=*/false );
 }
 
 void ResumableTileRun::cleanupAfterPublish()
 {
+    ExclusivePathLock stateLock = acquireStateLock();
     std::error_code ec;
     std::filesystem::remove_all( sicnu::portable::pathFromUtf8( m_runDir ), ec );
     std::filesystem::remove( sicnu::portable::pathFromUtf8( m_journalPath ), ec );

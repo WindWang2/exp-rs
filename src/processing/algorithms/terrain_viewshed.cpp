@@ -33,7 +33,7 @@ constexpr Step kSteps[8] = {
 
 inline bool isMissing( float z, float nodata )
 {
-    return z == nodata || std::isnan( z );
+    return z == nodata || !std::isfinite( z );
 }
 
 } // namespace

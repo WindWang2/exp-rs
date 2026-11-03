@@ -77,7 +77,15 @@ def _mount_shm_array(key, width, height, bands, dtype_code):
     from multiprocessing import shared_memory
     # Must stay in sync with SharedMemorySegment::DType (shared_memory_segment.h).
     dtype_map = {0: np.float32, 1: np.uint8, 2: np.int32, 3: np.uint16, 4: np.float64}
-    np_dtype = dtype_map.get(dtype_code, np.float32)
+    # SPP-3 (#1806): an unknown dtype code used to silently default to
+    # float32 — a misinterpreted buffer (e.g. an int16 frame read as float)
+    # is silent data corruption, not a fallback. Fail closed instead.
+    if dtype_code not in dtype_map:
+        raise ValueError(
+            f"Unknown shared-memory dtype code {dtype_code!r}; refusing to "
+            f"mount the segment with a guessed element type"
+        )
+    np_dtype = dtype_map[dtype_code]
     shm = shared_memory.SharedMemory(name=key)
     # Header is 32 bytes: uuid[16] + 4*int32. Payload follows.
     arr = np.ndarray((height, width, bands), dtype=np_dtype, buffer=shm.buf, offset=32)
@@ -453,19 +461,48 @@ def main():
                             if parent_dir not in sys.path:
                                 sys.path.insert(0, parent_dir)
                         mod = importlib.import_module(package_name)
-                        if hasattr(mod, "classFactory"):
-                            iface_obj = SicnuPythonIface(s)
-                            plugin_obj = mod.classFactory(iface_obj)
-                            # Owner evidence for unload-time executor cleanup.
-                            setattr(plugin_obj, "_exprs_iface", iface_obj)
-                            if hasattr(plugin_obj, "initGui"):
-                                plugin_obj.initGui()
-                            loaded_plugins[package_name] = plugin_obj
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
                             "result": {"status": "loaded", "package_name": package_name}
                         }
+                        if hasattr(mod, "classFactory"):
+                            # #1797 (SPP-2): the plugin is committed to
+                            # loaded_plugins BEFORE initGui, and any failure
+                            # in classFactory/initGui rolls the registration
+                            # state back (same pops unload_plugin's
+                            # backstops use). Previously an initGui failure
+                            # after registerProcessingAlgorithm left orphan
+                            # executors/callbacks that no unload path could
+                            # reach — a stale py: id kept executing in the
+                            # reused worker.
+                            iface_obj = SicnuPythonIface(s)
+                            try:
+                                plugin_obj = mod.classFactory(iface_obj)
+                                # Owner evidence for unload-time executor cleanup.
+                                setattr(plugin_obj, "_exprs_iface", iface_obj)
+                                loaded_plugins[package_name] = plugin_obj
+                                if hasattr(plugin_obj, "initGui"):
+                                    plugin_obj.initGui()
+                            except Exception as init_ex:
+                                for algo_id in list(getattr(iface_obj,
+                                                             "registered_algo_ids", [])):
+                                    algo_executors.pop(algo_id, None)
+                                for cb_id in list(getattr(iface_obj,
+                                                          "registered_callback_ids", [])):
+                                    callbacks.pop(cb_id, None)
+                                loaded_plugins.pop(package_name, None)
+                                resp = {
+                                    "jsonrpc": "2.0",
+                                    "id": req_id,
+                                    "error": {
+                                        "code": -32001,
+                                        "message": (
+                                            f"Plugin {package_name} failed to load: "
+                                            f"{init_ex}"
+                                        )
+                                    }
+                                }
                     elif method == "unload_plugin":
                         package_name = params.get("package_name")
                         if package_name in loaded_plugins:
@@ -542,6 +579,14 @@ def main():
                                 }
                             }
                         else:
+                            # #1796 (SPP-1): every mount + the execute sit in
+                            # ONE try whose finally reclaims the shm handles.
+                            # Previously only FileNotFoundError and a clean
+                            # execute reclaimed; a ValueError/TypeError from
+                            # bad tile dims or buffer shape propagated to the
+                            # outer except and left prior successful mounts
+                            # open (FD/segment pressure).
+                            shm_handles = []
                             try:
                                 exec_params = params.get("params", {})
                                 # ADR 0064 zero-copy delivery: when the C++ side
@@ -555,7 +600,6 @@ def main():
                                 # unaffected. Lifetime: close+best-effort unlink
                                 # before reply, consistent with the shm.read
                                 # sync contract.
-                                shm_handles = []
                                 if isinstance(exec_params, dict) and exec_params.get("__shm_key__"):
                                     try:
                                         shm_handle, arr = _mount_shm_array(
@@ -577,7 +621,6 @@ def main():
                                                 "message": f"Shared memory segment not found: {exec_params.get('__shm_key__')}"
                                             }
                                         }
-                                        shm_handles = []
                                         exec_params = None
                                 # ADR 0064 tile-by-tile delivery: when the C++
                                 # side split a tall raster into row-chunk tiles,
@@ -611,29 +654,14 @@ def main():
                                                 "message": f"Shared memory tile segment not found"
                                             }
                                         }
-                                        for h in shm_handles:
-                                            try:
-                                                h.close()
-                                                h.unlink()
-                                            except Exception:
-                                                pass
-                                        shm_handles = []
                                         exec_params = None
                                 if exec_params is not None:
-                                    try:
-                                        # #1608: coerce numpy returns (ndarray,
-                                        # np.int64, ...) here so json.dumps does
-                                        # not choke on them downstream.
-                                        exec_result = _json_safe(
-                                            algo_executors[algo_id](exec_params)
-                                        )
-                                    finally:
-                                        for shm_handle in shm_handles:
-                                            shm_handle.close()
-                                            try:
-                                                shm_handle.unlink()
-                                            except FileNotFoundError:
-                                                pass
+                                    # #1608: coerce numpy returns (ndarray,
+                                    # np.int64, ...) here so json.dumps does
+                                    # not choke on them downstream.
+                                    exec_result = _json_safe(
+                                        algo_executors[algo_id](exec_params)
+                                    )
                                     resp = {
                                         "jsonrpc": "2.0",
                                         "id": req_id,
@@ -670,6 +698,20 @@ def main():
                                         "message": f"Algorithm {algo_id} failed: {ex}"
                                     }
                                 }
+                            finally:
+                                # #1796: single reclaim point — every mounted
+                                # segment is closed and best-effort unlinked
+                                # on ALL paths (clean execute, typed mount
+                                # refusal, unexpected mount/execute failure).
+                                for shm_handle in shm_handles:
+                                    try:
+                                        shm_handle.close()
+                                        shm_handle.unlink()
+                                    except FileNotFoundError:
+                                        pass
+                                    except Exception:
+                                        pass
+                                shm_handles = []
                     elif method == "processing.test_register_algorithm":
                         iface_obj = SicnuPythonIface(s)
                         iface_obj.registerProcessingAlgorithm(

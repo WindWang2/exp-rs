@@ -293,7 +293,11 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
     // cannot claim full blocker resolution.
     const std::size_t maxRequirements = static_cast<std::size_t>( options.maxRequirements );
     const bool requirementsTruncated = requirements.size() > maxRequirements;
-    const std::size_t droppedRequirements = requirements.size() - maxRequirements;
+    // #1774 (WE-13): size_t underflow — computing the drop unconditionally
+    // wrapped every non-truncated plan to a garbage value that rode into
+    // the bounds record (and its digest).
+    const std::size_t droppedRequirements =
+        requirementsTruncated ? requirements.size() - maxRequirements : 0;
     if ( requirementsTruncated )
         requirements.resize( maxRequirements );
 
@@ -367,11 +371,18 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
                                         requirement_kind::kQualityMask ) );
             }
         }
-        // Primary-family candidates rank ahead of equal-cost alternative
-        // families; the rest of the order is candidateLess (total).
+        // Order: refusal-LAST, then primary-family, then candidateLess
+        // (total). #1778 (WE-17): the primary-family preference used to run
+        // FIRST, so with a per-requirement cap a primary-family refusal was
+        // kept while an offerable alternative-family candidate was cut —
+        // an offerable repair must never lose its slot to a refusal.
         const std::string primaryKind = requirement.kind;
         std::stable_sort( candidates.begin(), candidates.end(),
                           [primaryKind]( const RepairAction &a, const RepairAction &b ) {
+                              const bool aRefusal = !a.refusalCause.empty();
+                              const bool bRefusal = !b.refusalCause.empty();
+                              if ( aRefusal != bRefusal )
+                                  return bRefusal;
                               const bool aPrimary = a.ruleId == primaryKind;
                               const bool bPrimary = b.ruleId == primaryKind;
                               if ( aPrimary != bPrimary )

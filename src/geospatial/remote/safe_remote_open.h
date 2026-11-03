@@ -1,0 +1,83 @@
+/***************************************************************************
+ * geospatial/remote/safe_remote_open.h — the single sanctioned entry for
+ * opening a REMOTE raster asset (#1765 / RIO-4 + #1803 RIO-6).
+ *
+ * Every remote COG/GeoTIFF open must reach the network ONLY through the
+ * range cache's guarded transport (per-hop egress policy, redirect guard,
+ * DNS pinning — #1456/#1485/#1545). A raw "/vsicurl/<href>" handed to
+ * GDALOpenEx bypasses ALL of it (CPLHTTPFetch follows redirects
+ * unconditionally and consults its own resolver), which is exactly the hole
+ * the STAC browser dialog HAD (the dialog's own rewire belongs to the
+ * workbench track). This header is the stable backend API for adopters —
+ * RemoteDatasetPool::acquire routes through it today; dialogs/CLI adopt it
+ * as they migrate:
+ *
+ *     const auto r = geo::remote::safeRemoteRasterPath( href );
+ *     if ( !r ) { surface r.code() + r.message; }
+ *     else      GDALOpenEx( r.path.c_str(), ... );
+ *
+ * Contract (fail-closed at every step, no silent fallbacks):
+ *   1. scheme gate  — http/https only ("/vsicurl/" spellings are accepted
+ *                     and unwrapped); anything else is a typed refusal.
+ *   2. offline gate — offline mode refuses before any socket could open.
+ *   3. private-net  — loopback / RFC 1918 / link-local / cloud-metadata
+ *      deny-by-default. IP literals and well-known private NAMES are judged
+ *      without DNS; an arbitrary hostname resolves (getaddrinfo) to judge
+ *      its addresses — the one place this gate can touch the network, and
+ *      the reason callers should keep it off latency-sensitive threads.
+ *   4. cache gate   — the range cache must be installed AND the egress
+ *      policy engaged (process-wide block-private-networks, or
+ *      RangeCacheConfig::blockPrivateNetworks): without the policy the
+ *      cache's transport follows redirects unconditionally, so the Ok path
+ *      would not actually be guarded. CacheUnavailable / GuardUnavailable
+ *      refuse instead of degrading to an unguarded /vsicurl/ open.
+ *
+ * Qt-free; typed statuses, no exceptions for flow control.
+ ***************************************************************************/
+#ifndef SICNU_GEOSPATIAL_REMOTE_SAFE_REMOTE_OPEN_H
+#define SICNU_GEOSPATIAL_REMOTE_SAFE_REMOTE_OPEN_H
+
+#include <cstdint>
+#include <string>
+
+namespace sicnu::geo::remote
+{
+
+enum class SafeOpenStatus : std::uint8_t
+{
+  Ok = 0,
+  SchemeRefused,     ///< not an http(s) remote URL (after /vsicurl/ unwrap)
+  OfflineRefused,    ///< process offline mode engaged
+  PrivateTarget,     ///< loopback / private / link-local / cloud-metadata
+  CacheUnavailable,  ///< range cache not installed — no guarded transport
+  GuardUnavailable   ///< cache present but the egress policy (per-hop
+                     ///< redirect guard / DNS pinning) is not engaged — an
+                     ///< Ok path without it would follow redirects
+                     ///< unconditionally (R2-F5)
+};
+
+struct SafeRemotePathResult
+{
+  SafeOpenStatus status = SafeOpenStatus::SchemeRefused;
+  /// The guarded open path (range-cache VSI prefix + URL); empty on refusal.
+  std::string path;
+  /// Human-readable refusal reason (typed, actionable, no secrets).
+  std::string message;
+
+  bool ok() const { return status == SafeOpenStatus::Ok; }
+  /// Stable machine code for logs/telemetry ("remote.open.*" vocabulary).
+  const char *code() const;
+};
+
+/// Maps @p urlOrVsicurl (bare https URL or "/vsicurl/<url>" spelling) to
+/// the guarded open path, or to a typed refusal. Never throws, never
+/// performs network I/O of its own (the guarded transport does the
+/// fetching, per request, under the egress policy).
+SafeRemotePathResult safeRemoteRasterPath( const std::string &urlOrVsicurl );
+
+/// Stable name of a status (tests / diagnostics).
+const char *safeOpenStatusName( SafeOpenStatus status );
+
+} // namespace sicnu::geo::remote
+
+#endif // SICNU_GEOSPATIAL_REMOTE_SAFE_REMOTE_OPEN_H

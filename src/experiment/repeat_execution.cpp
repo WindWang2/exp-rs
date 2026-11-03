@@ -217,12 +217,12 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
                 const auto recorded = m_store->runRecordById( runId );
                 if ( !recorded )
                 {
-                    const auto &refDiagnostics = recorded.diagnostics();
-                    const bool refCorrupt = !refDiagnostics.isEmpty() &&
-                                            refDiagnostics.constFirst().code ==
-                                                QLatin1String( "experiment.run_corrupt" );
-                    if ( refCorrupt )
-                        ++unreadableByRef;
+                    // #1768 (WE-05): every failed read is unreadable evidence
+                    // — a row that vanished between the listing and this read
+                    // is as unclassifiable as a corrupt one. Counting only
+                    // experiment.run_corrupt let an all-vanished byRef scan
+                    // fall through to a confident "New".
+                    ++unreadableByRef;
                     continue;
                 }
                 ExperimentRun repeatStub;

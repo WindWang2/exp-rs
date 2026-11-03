@@ -292,12 +292,13 @@ TEST_CASE("cli session command: repair approval rides the token channel",
     OpsDriver mintDriver( wiredOptions( mintSeams ) );
     auto minted = runSession({"approve-repair", "--now-ms", "1000", "--ttl-ms", "5000"},
                              &mintDriver);
-    // No projected plan on a fresh coordinator: the refusal is TYPED and by
-    // name (the flags parsed and rode the wire — an unknown flag would have
-    // answered exit 6 instead). The refusal vocabulary maps this code to
+    // #1733: approve-repair is human-channel-only — the CLI is a driver
+    // surface like MCP, so the mint is refused by name (the flags parsed
+    // and rode the wire — an unknown flag would have answered exit 6
+    // instead). The refusal vocabulary maps unmapped codes to
     // GenericError(1) in cliExitCodeForSessionRefusal.
     REQUIRE(minted.exitCode == 1);
-    REQUIRE(minted.envelope["data"]["error"].asString() == "NO_PENDING_REPAIR_PLAN");
+    REQUIRE(minted.envelope["data"]["error"].asString() == "APPROVAL_HUMAN_CHANNEL_ONLY");
 
     // R1-P2-2: the global envelope flags travel with the session family, so
     // a scripted approval flow can ask for --json.

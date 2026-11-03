@@ -291,7 +291,33 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
         }
         for ( int column = 0; column < cells.size(); ++column )
         {
-            const qint64 value = cells.at( column ).toInteger();
+            // #1782 (WE-23): QJsonValue::toInteger() silently maps strings,
+            // nulls and fractional cells to 0 — a torn export then read as a
+            // perfect diagonal-leaning matrix. Only genuine integral numbers
+            // are accepted; everything else refuses with the cell address.
+            const QJsonValue cell = cells.at( column );
+            if ( !cell.isDouble() )
+            {
+                return ResultT::failure( Diagnostic{
+                    QStringLiteral( "evaluation.invalid" ),
+                    QStringLiteral( "counts[%1][%2] is not a number" ).arg( row ).arg( column ),
+                    DiagnosticSeverity::Error } );
+            }
+            const double raw = cell.toDouble();
+            // R1-F1: the cast below is only defined inside qint64's range —
+            // a finite huge literal (e.g. 1e30) must refuse, not wrap.
+            constexpr double kMaxCount = 9223372036854775807.0;
+            if ( !std::isfinite( raw ) || std::floor( raw ) != raw || raw > kMaxCount )
+            {
+                return ResultT::failure( Diagnostic{
+                    QStringLiteral( "evaluation.invalid" ),
+                    QStringLiteral( "counts[%1][%2] must be a finite 64-bit integer (got %3)" )
+                        .arg( row )
+                        .arg( column )
+                        .arg( raw ),
+                    DiagnosticSeverity::Error } );
+            }
+            const qint64 value = qint64( raw );
             if ( value < 0 )
             {
                 return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),
@@ -317,21 +343,48 @@ Result<RegressionMetrics> regressionMetrics( const QVector<double> &truth,
                                              DiagnosticSeverity::Error } );
     }
     RegressionMetrics metrics;
-    metrics.count = truth.size();
+    // #1781 (WE-22): NaN/Inf samples (no-data pixels, torn tensors) used to
+    // poison every mean into NaN. Pairs with a non-finite side are skipped
+    // AND counted; if nothing finite remains the evaluation refuses rather
+    // than emitting NaN metrics that read as success.
+    QVector<double> finiteTruth;
+    QVector<double> finitePredicted;
+    finiteTruth.reserve( truth.size() );
+    finitePredicted.reserve( predicted.size() );
+    for ( int i = 0; i < truth.size(); ++i )
+    {
+        if ( std::isfinite( truth.at( i ) ) && std::isfinite( predicted.at( i ) ) )
+        {
+            finiteTruth.append( truth.at( i ) );
+            finitePredicted.append( predicted.at( i ) );
+        }
+        else
+        {
+            ++metrics.nonFiniteSkipped;
+        }
+    }
+    if ( finiteTruth.isEmpty() )
+    {
+        return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),
+                                             QStringLiteral( "regression metrics: no finite truth/prediction pairs (%1 skipped)" )
+                                                 .arg( metrics.nonFiniteSkipped ),
+                                             DiagnosticSeverity::Error } );
+    }
+    metrics.count = finiteTruth.size();
     double absoluteSum = 0.0;
     double squaredSum = 0.0;
     double signedSum = 0.0;
     double percentageSum = 0.0;
     qint64 mapeCount = 0;
-    for ( int i = 0; i < truth.size(); ++i )
+    for ( int i = 0; i < finiteTruth.size(); ++i )
     {
-        const double difference = predicted.at( i ) - truth.at( i );
+        const double difference = finitePredicted.at( i ) - finiteTruth.at( i );
         absoluteSum += std::fabs( difference );
         squaredSum += difference * difference;
         signedSum += difference;
-        if ( truth.at( i ) != 0.0 )
+        if ( finiteTruth.at( i ) != 0.0 )
         {
-            percentageSum += std::fabs( difference / truth.at( i ) );
+            percentageSum += std::fabs( difference / finiteTruth.at( i ) );
             ++mapeCount;
         }
         else
@@ -348,11 +401,11 @@ Result<RegressionMetrics> regressionMetrics( const QVector<double> &truth,
     // R² = 1 - SSE/SST; a constant-truth series has no variance → 0 by
     // policy (not NaN, not ±inf).
     double mean = 0.0;
-    for ( const double value : truth )
+    for ( const double value : finiteTruth )
         mean += value;
     mean /= double( metrics.count );
     double sst = 0.0;
-    for ( const double value : truth )
+    for ( const double value : finiteTruth )
         sst += ( value - mean ) * ( value - mean );
     metrics.r2 = sst > 0.0 ? 1.0 - squaredSum / sst : 0.0;
     return ResultT::success( metrics );
@@ -368,6 +421,7 @@ QJsonObject RegressionMetrics::toJson() const
     json.insert( QStringLiteral( "bias" ), bias );
     json.insert( QStringLiteral( "mape" ), mape );
     json.insert( QStringLiteral( "mape_skipped_zeros" ), mapeSkippedZeros );
+    json.insert( QStringLiteral( "non_finite_skipped" ), nonFiniteSkipped );
     json.insert( QStringLiteral( "count" ), count );
     return json;
 }

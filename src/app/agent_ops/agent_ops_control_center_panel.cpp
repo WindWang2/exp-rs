@@ -34,6 +34,11 @@ AgentOpsControlCenterPanel::AgentOpsControlCenterPanel(QWidget *parent)
     m_header->setObjectName(QStringLiteral("agentOpsHeader"));
     layout->addWidget(m_header);
 
+    m_approvalStatus = new QLabel(this);
+    m_approvalStatus->setObjectName(QStringLiteral("agentOpsApprovalStatus"));
+    m_approvalStatus->hide();
+    layout->addWidget(m_approvalStatus);
+
     m_timeline = new QTableWidget(0, 4, this);
     m_timeline->setHorizontalHeaderLabels({tr("Seq"), tr("Stage"), tr("Event"), tr("Summary")});
     m_timeline->horizontalHeader()->setStretchLastSection(true);
@@ -76,6 +81,19 @@ AgentOpsControlCenterPanel::AgentOpsControlCenterPanel(QWidget *parent)
     connect(m_approve, &QPushButton::clicked, this,
             &AgentOpsControlCenterPanel::approveRepairRequested);
     connect(m_export, &QPushButton::clicked, this, &AgentOpsControlCenterPanel::exportRequested);
+}
+
+void AgentOpsControlCenterPanel::setApprovalStatus(const QString &status)
+{
+    // #1760: the approval gate's honest state line — every typed refusal
+    // from mint/arm reaches the operator here instead of dying in qWarning.
+    if (status.isEmpty())
+    {
+        m_approvalStatus->hide();
+        return;
+    }
+    m_approvalStatus->setText(status);
+    m_approvalStatus->show();
 }
 
 void AgentOpsControlCenterPanel::updateControls(const Json::Value &controls)

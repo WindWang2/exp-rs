@@ -20,7 +20,7 @@ namespace
 
 inline bool isMissing( float z, float nodata )
 {
-    return z == nodata || std::isnan( z );
+    return z == nodata || !std::isfinite( z );
 }
 
 constexpr double kDegToRad = M_PI / 180.0;

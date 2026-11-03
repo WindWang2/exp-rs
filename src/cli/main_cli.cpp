@@ -2,6 +2,7 @@
 #include "agent/cartography/cartography_operators.h"
 #include "cli_commands.h"
 #include "help_cli_projections.h"
+#include "sdk/exprs/exit_codes.h"
 
 #include "data/offline_mode.h"
 #include "geospatial/remote/process_network_policy.h"
@@ -507,7 +508,11 @@ int main(int argc, char *argv[])
         const auto result = runner.resumeRun(resumeRunId.toStdString());
         if (!result.success) {
             std::cerr << "Resume failed: " << result.errorMessage << "\n";
-            return 1;
+            // #1798: the machine-readable exit-code contract — malformed or
+            // unreadable INPUT is InvalidInput(6), not the generic 1.
+            return result.invalidInput
+                       ? exprs::exitCodeValue(exprs::ExitCode::InvalidInput)
+                       : 1;
         }
         std::cout << "Resumed run succeeded (" << result.steps.size() << " steps)\n";
         return 0;
@@ -571,7 +576,12 @@ int main(int argc, char *argv[])
 
     if (!result.success) {
         std::cerr << "Pipeline failed: " << result.errorMessage << "\n";
-        return 1;
+        // #1798 (SPP-6): malformed/unreadable pipeline input terminates with
+        // the typed invalid_input code (6), never a std::terminate (134)
+        // and never a silently generic 1.
+        return result.invalidInput
+                   ? exprs::exitCodeValue(exprs::ExitCode::InvalidInput)
+                   : 1;
     }
 
     std::cout << "Pipeline succeeded (" << result.steps.size() << " steps)\n";

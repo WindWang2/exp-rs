@@ -177,11 +177,6 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
             result.alreadyPublished = runResult.alreadyPublished;
             if ( publishedAssetId )
                 result.publishedAssetId = *publishedAssetId;
-
-            if ( options.cleanupScratchOnSuccess )
-            {
-                run.cleanupAfterPublish();
-            }
         }
         catch ( const sicnu::runtime::chunk::ChunkCancelled & )
         {
@@ -222,6 +217,21 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
                 options.commitSpec->committer->discardTemporary( options.commitSpec->tempPath );
             }
             throw;
+        }
+        // Success-path scratch cleanup runs OUTSIDE the try: a concurrent
+        // run momentarily holding the state lock (#1766) must not convert a
+        // published, marker-written run into abandon() + temp discard.
+        // Leftover scratch is inert (the sweep / next run cleans it).
+        if ( options.cleanupScratchOnSuccess )
+        {
+            try
+            {
+                run.cleanupAfterPublish();
+            }
+            catch ( const sicnu::runtime::chunk::ChunkRunLockHeld & )
+            {
+                // best-effort cleanup only — see comment above
+            }
         }
         return 0;
     } );

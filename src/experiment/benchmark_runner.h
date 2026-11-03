@@ -149,8 +149,13 @@ class BenchmarkRunner
 };
 
 /// Extract MetricResult list from a confusion matrix for requested names.
+/// @param abstentions #1787 (WE-33): predictions with an empty class that
+/// were skipped by the matrix - the headline accuracy divides the diagonal
+/// by (total + abstentions) so an abstaining model cannot inflate its
+/// score; the scored-only value rides along as accuracy_scored_only.
 QVector<MetricResult> metricResultsFromConfusion( const ConfusionMatrix &matrix,
                                                   const QStringList &metricNames,
-                                                  const QString &scope = QStringLiteral( "overall" ) );
+                                                  const QString &scope = QStringLiteral( "overall" ),
+                                                  qint64 abstentions = 0 );
 
 } // namespace sicnu::experiment
