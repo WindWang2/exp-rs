@@ -217,6 +217,7 @@ class _SicnuHelper:
         """Current project file path (real platform API, #1647-1)."""
         return sicnu_project_path()
 
+    @staticmethod
     def project_info():
         """Get current project information."""
         return sicnu_project_path()

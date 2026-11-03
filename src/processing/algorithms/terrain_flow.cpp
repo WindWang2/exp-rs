@@ -84,7 +84,7 @@ bool fillDepressions( const float *dem, float *filled, int width, int height, fl
         {
             const size_t i = static_cast<size_t>( y ) * width + x;
             filled[i] = dem[i];
-            if ( dem[i] == nodata || std::isnan( dem[i] ) )
+            if ( dem[i] == nodata || !std::isfinite( dem[i] ) )
             {
                 done[i] = 1;
                 continue;
@@ -107,7 +107,7 @@ bool fillDepressions( const float *dem, float *filled, int width, int height, fl
                 {
                     const float vz = dem[static_cast<size_t>( y + nb.dy ) * width
                                          + ( x + nb.dx )];
-                    if ( vz == nodata || std::isnan( vz ) )
+                    if ( vz == nodata || !std::isfinite( vz ) )
                     {
                         bordersNoData = true;
                         break;
@@ -137,7 +137,7 @@ bool fillDepressions( const float *dem, float *filled, int width, int height, fl
             if ( done[j] )
                 continue;
             done[j] = 1;
-            if ( filled[j] == nodata || std::isnan( filled[j] ) )
+            if ( filled[j] == nodata || !std::isfinite( filled[j] ) )
                 continue; // NoData barrier: marked visited, never routed across
             filled[j] = std::max( filled[j], level );
             queue.emplace( filled[j], j );
@@ -155,7 +155,7 @@ bool flowDirections( const float *filled, float *dir, int width, int height, flo
         {
             const size_t i = static_cast<size_t>( y ) * width + x;
             const float z = filled[i];
-            if ( z == nodata || std::isnan( z ) )
+            if ( z == nodata || !std::isfinite( z ) )
             {
                 dir[i] = nodata;
                 continue;
@@ -170,7 +170,7 @@ bool flowDirections( const float *filled, float *dir, int width, int height, flo
                 if ( nx < 0 || ny < 0 || nx >= width || ny >= height )
                     continue;
                 const float zn = filled[static_cast<size_t>( ny ) * width + nx];
-                if ( zn == nodata || std::isnan( zn ) )
+                if ( zn == nodata || !std::isfinite( zn ) )
                     continue; // routing into NoData is not allowed
                 const float slope = ( z - zn ) / nb.dist;
                 if ( slope > bestSlope )
@@ -200,7 +200,7 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
     const size_t n = static_cast<size_t>( width ) * height;
     const bool maskNodata = filled != nullptr;
     const auto isNodata = [&]( size_t i ) {
-        if ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+        if ( maskNodata && ( filled[i] == nodata || !std::isfinite( filled[i] ) ) )
             return true;
         return isDirNoDataValue( dir[i] );
     };
@@ -211,7 +211,7 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
             // Sentinel contract (#783): masked cells carry the declared
             // sentinel (or their own dir sentinel when no mask was given)
             // so the written raster marks them NoData.
-            acc[i] = ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+            acc[i] = ( maskNodata && ( filled[i] == nodata || !std::isfinite( filled[i] ) ) )
                          ? nodata
                          : dir[i];
             continue;
@@ -231,7 +231,7 @@ bool flowAccumulationCounts( const float *dir, int width, int height,
 
     const bool maskNodata = filled != nullptr;
     const auto isNodata = [&]( size_t i ) {
-        if ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+        if ( maskNodata && ( filled[i] == nodata || !std::isfinite( filled[i] ) ) )
             return true;
         return isDirNoDataValue( dir[i] );
     };

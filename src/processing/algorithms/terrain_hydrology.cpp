@@ -40,7 +40,7 @@ constexpr Neighbor kNeighbors[8] = {
 
 inline bool isMissing( float z, float nodata )
 {
-    return z == nodata || std::isnan( z );
+    return z == nodata || !std::isfinite( z );
 }
 
 // Compass table: azimuth k*45° → (dx, dy) with +y = south. Index 0 = N.
@@ -422,11 +422,11 @@ bool dInfAccumulation( const float *angles, float *acc, int width, int height,
     const std::size_t n = static_cast<std::size_t>( width ) * height;
     const auto isSink = [&]( std::size_t i ) {
         const float a = angles[i];
-        return a <= -1.0f || std::isnan( a ) || a == nodata;
+        return a <= -1.0f || !std::isfinite( a ) || a == nodata;
     };
     const auto isNoData = [&]( std::size_t i ) {
         const float a = angles[i];
-        return std::isnan( a ) || a == nodata;
+        return !std::isfinite( a ) || a == nodata;
     };
 
     // Non-sink cells always route into their receiver — including when the

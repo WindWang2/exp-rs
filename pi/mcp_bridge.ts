@@ -270,9 +270,16 @@ export class McpBridge {
     // in an unbounded microtask loop (#669).
     this.exited = false;
     this.startError = null;
+    // AS-011 (#1802): the child is a local tool server, not a shell — it
+    // needs PATH/HOME/locale/tmp and the project's own SICNU_*/QT_*
+    // settings, nothing else. Forwarding the WHOLE launcher environment
+    // leaked every secret the host happened to carry (API keys, tokens,
+    // credentials) into a process the model drives tool calls through.
+    const envAllow =
+      /^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LANGUAGE|LC_[A-Z_]+|TZ|TERM|TMPDIR|TEMP|TMP|XDG_[A-Z_]+|SICNU_[A-Z0-9_]+|QT_[A-Z0-9_]+)$/;
     const childEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
-      if (v !== undefined) childEnv[k] = v;
+      if (v !== undefined && envAllow.test(k)) childEnv[k] = v;
     }
     // The desktop binary resolves its own Qt/QGIS stack; inherited launcher
     // library paths (AppImage mounts, snap/flatpak) break its plugins.

@@ -299,7 +299,17 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     const double demUnitScale = sicnu::sar::demUnitScaleToMetres( demDs, &appliedDemUnit );
     // Also log an UNKNOWN declared unit: demUnitScaleToMetres falls back to
     // metres and says so in appliedDemUnit ("meters (assumed; declared '...')").
-    if ( demUnitScale != 1.0 || appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    if ( appliedDemUnit.contains( QStringLiteral( "assumed" ) ) )
+    {
+        // #1739 fail-closed: an unrecognized declared unit must not silently
+        // scale as metres.
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "Unknown DEM unit '" + appliedDemUnit.toStdString() +
+                                  "' (SICNU_DEM_UNIT); refusing to assume meters. "
+                                  "Declare a known unit (meters/feet/inches/dm/cm/mm/km) "
+                                  "on the DEM or fix its metadata.");
+    }
+    if ( demUnitScale != 1.0 )
     {
         context.logInfo( "DEM unit '" + appliedDemUnit.toStdString() + "' scaled to metres (x"
                          + std::to_string( demUnitScale ) + ")" );
