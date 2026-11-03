@@ -1232,8 +1232,8 @@ TEST_CASE("repair approval tokens bind findings, coordinator and clock window",
     REQUIRE(token.isObject());
     REQUIRE(token["kind"].asString() == std::string(kRepairApprovalKind));
     REQUIRE(token["findings_digest"].asString() == findings);
-    const auto verify = [](const Json::Value &doc, const std::string &digest,
-                           long long coordinator, long long now) {
+    const auto verify = [&secret](const Json::Value &doc, const std::string &digest,
+                                  long long coordinator, long long now) {
         return std::string(verifyRepairApprovalToken(doc, digest, coordinator, now, secret));
     };
     REQUIRE(verify(token, findings, 7, 1000) == approval_check::kOk);
@@ -1273,7 +1273,7 @@ TEST_CASE("repair approval tokens bind findings, coordinator and clock window",
     Json::Value fatWindow = token;
     fatWindow["expires_at_ms"] = Json::Int64(1000 + kRepairApprovalMaxTtlMs + 1);
     fatWindow["digest"] = "0000000000000000"; // shape-valid hex, MAC wrong anyway
-    REQUIRE(validateRepairApprovalTokenShape(fatWindow) == approval_check::kTtlExcessive);
+    REQUIRE(std::string(validateRepairApprovalTokenShape(fatWindow)) == std::string(approval_check::kTtlExcessive));
     REQUIRE(verify(fatWindow, findings, 7, 2000) == approval_check::kTtlExcessive);
 }
 

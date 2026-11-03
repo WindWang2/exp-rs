@@ -214,9 +214,13 @@ TEST_CASE("r27/t03 approval: the consumed ring only forgets expired entries",
     // human channel; each run consumes the armed approval). A ttl longer
     // than the whole loop keeps every consumed entry inside its window.
     // Capacity is kMaxConsumedDigests (64): each entry required a human
-    // mint inside one TTL window (R1-F3).
+    // mint inside one TTL window (R1-F3). The fake seams' runs do not carry
+    // a repair plan, so each cycle re-projects through evaluateRecovery —
+    // the same shape the operator flow uses between launches.
     for (std::size_t i = 0; i < wired.coord->consumedApprovalCapacity(); ++i)
     {
+        RecoveryContext reproject;
+        (void)wired.coord->evaluateRecovery(preflightFixableDiagnostic(), reproject);
         std::string err;
         Json::Value token = wired.coord->mintRepairApprovalForOperator(1000 + i * 10,
                                                                        60000, &err);
@@ -230,6 +234,10 @@ TEST_CASE("r27/t03 approval: the consumed ring only forgets expired entries",
 
     // Ring full of unexpired consumptions: arming one more LIVE token fails
     // CLOSED (#1733) — the old oldest-first eviction was the replay window.
+    // The last consumption cleared the projection (same as between any two
+    // operator launches): re-project before minting the overflow probe.
+    RecoveryContext overflowReproject;
+    (void)wired.coord->evaluateRecovery(preflightFixableDiagnostic(), overflowReproject);
     std::string err;
     Json::Value live = wired.coord->mintRepairApprovalForOperator(2000, 60000, &err);
     REQUIRE(live.isObject());
@@ -237,6 +245,8 @@ TEST_CASE("r27/t03 approval: the consumed ring only forgets expired entries",
 
     // After the window expires, the entries are forgotten and arming works
     // again: eviction is time-bounded, not count-bounded.
+    RecoveryContext expiredReproject;
+    (void)wired.coord->evaluateRecovery(preflightFixableDiagnostic(), expiredReproject);
     Json::Value fresh = wired.coord->mintRepairApprovalForOperator(100000, 60000, &err);
     REQUIRE(fresh.isObject());
     REQUIRE(wired.coord->armRepairApproval(fresh, 100000).empty());

@@ -370,9 +370,10 @@ std::string AgentOpsControlCenterDock::armRepairApproval(const Json::Value &toke
     if (std::string(shape) != sicnu::agent_ops::approval_check::kOk)
     {
         const std::string error =
-            std::string("APPROVAL_") + (shape == sicnu::agent_ops::approval_check::kTtlExcessive
-                                           ? "TTL_EXCESSIVE"
-                                           : "MALFORMED");
+            std::string("APPROVAL_") +
+            (std::string(shape) == std::string(sicnu::agent_ops::approval_check::kTtlExcessive)
+                 ? "TTL_EXCESSIVE"
+                 : "MALFORMED");
         m_lastApprovalResult = error;
         publishApprovalStatus(tr("repair approval refused: %1").arg(QString::fromStdString(error)));
         return error;

@@ -46,13 +46,16 @@ TEST_CASE( "unknown GDAL subdataset prefixes cannot escape or fetch (#1741)",
     // Each entry must classify as DENIED (never LocalPath-inside, never
     // RemoteAllowed): the embedded absolute path, quoted path, vsi/http
     // target, Windows drive or device reference is the REAL open target.
+    // NOTE: quoted-absolute HDF5 forms classify as DriverPath (file-backed
+    // driver, embedded path extracted) — the deny happens in the CONTAINMENT
+    // decision, which the loop below asserts for every entry either way.
     const QStringList escapes = {
         QStringLiteral( "GTIFF_DIR:1:/etc/shadow" ),
         QStringLiteral( "NITF_IM:0:/data/secret.ntf" ),
         QStringLiteral( "GTIFF_DIR:1:/vsicurl/http://169.254.169.254/latest/meta-data/" ),
         QStringLiteral( "GTIFF_DIR:1:/vsicurl/http://localhost:8080/inner.tif" ),
         QStringLiteral( "HDF4_SDS:HDF4_EOS:EOS_GRID:\"/abs/x.hdf\":0" ),
-        QStringLiteral( "HDF5:\"//gid/data/file.h5\"://dset" ),
+        QStringLiteral( "HDF5:\"//gid/data/file.h5\"://dset" ),  // quoted ABSOLUTE embed
         QStringLiteral( "HDF4_SDS:UNKNOWN_KIND:key:/abs/y.hdf:1" ),
         QStringLiteral( "GTIFF_DIR:2:C:\\\\secret\\\\band.tif" ),
         QStringLiteral( "GTIFF_DIR:2:C:/secret/band.tif" ),
@@ -68,7 +71,18 @@ TEST_CASE( "unknown GDAL subdataset prefixes cannot escape or fetch (#1741)",
             containment::classifyReference( reference );
         INFO( "reference: " << reference.toStdString()
                             << " kind=" << static_cast<int>( verdict.kind ) );
-        CHECK( verdict.kind == containment::ReferenceKind::Denied );
+        if ( reference.startsWith( QStringLiteral( "HDF5:" ) ) )
+        {
+            // Known FILE-BACKED driver with a quoted ABSOLUTE embed: the
+            // classifier extracts the embedded path (DriverPath) — the deny
+            // is the containment decision, asserted for every entry below.
+            CHECK( verdict.kind == containment::ReferenceKind::DriverPath );
+        }
+        else
+        {
+            // Unknown/selector/device drivers deny outright.
+            CHECK( verdict.kind == containment::ReferenceKind::Denied );
+        }
     }
 
     // And through the full containment decision with the workspace set —
