@@ -15,6 +15,7 @@
 #include <qgsprocessingfeedback.h>
 
 #include "algorithms/terrain_analysis.h"
+#include "processing/algorithms/math_utils.h"
 
 #include <QFile>
 
@@ -69,7 +70,32 @@ protected:
 
         const int nCols = layer->width();
         const int nRows = layer->height();
-        const double cellSize = layer->rasterUnitsPerPixelX();
+        // Pixel size in the layer's OWN map units — the block extents below
+        // must stay in those units (degrees for a geographic CRS).
+        const double unitsPerPixelX = layer->rasterUnitsPerPixelX();
+        const double unitsPerPixelY = layer->rasterUnitsPerPixelY();
+        // swarm-review PROC-F-1: #612's degree→metre conversion covered only
+        // the rs: operator family; the toolbox surface still handed
+        // rasterUnitsPerPixelX() (DEGREES for EPSG:4326) straight to the
+        // Horn kernels, inflating the gradient by ~1e5 and saturating the
+        // output silently. A geographic CRS is converted at the DEM centre
+        // latitude through the single owner MathUtils::wgs84ArcAtLatitudeDeg
+        // (x uses the longitude arc, y the latitude arc), exactly as
+        // rs_terrain_analysis_operator does. Projected CRS values are map
+        // units (metres) and pass through unchanged.
+        double cellSizeX = unitsPerPixelX;
+        double cellSizeY = unitsPerPixelY;
+        if ( layer->crs().isGeographic() )
+        {
+            const double phiDeg = 0.5 * ( layer->extent().yMinimum() + layer->extent().yMaximum() );
+            const MathUtils::Wgs84ArcMeters arc = MathUtils::wgs84ArcAtLatitudeDeg( phiDeg );
+            cellSizeX *= arc.perDegLon;
+            cellSizeY *= arc.perDegLat;
+        }
+        if ( !( cellSizeX > 0.0 ) )
+            cellSizeX = 30.0;
+        if ( !( cellSizeY > 0.0 ) )
+            cellSizeY = cellSizeX;
 
         // Read band 1 as float
         QgsRasterDataProvider *dp = layer->dataProvider();
@@ -92,10 +118,10 @@ protected:
                 const int bw = std::min( blockSize, nCols - col );
                 const int bh = std::min( blockSize, nRows - row );
                 QgsRectangle blockExtent = layer->extent();
-                const double xMin = blockExtent.xMinimum() + col * cellSize;
-                const double xMax = xMin + bw * cellSize;
-                const double yMax = blockExtent.yMaximum() - row * cellSize;
-                const double yMin = yMax - bh * cellSize;
+                const double xMin = blockExtent.xMinimum() + col * unitsPerPixelX;
+                const double xMax = xMin + bw * unitsPerPixelX;
+                const double yMax = blockExtent.yMaximum() - row * unitsPerPixelY;
+                const double yMin = yMax - bh * unitsPerPixelY;
                 blockExtent = QgsRectangle( xMin, yMin, xMax, yMax );
 
                 std::unique_ptr<QgsRasterBlock> block( dp->block( 1, blockExtent, bw, bh ) );
@@ -124,9 +150,10 @@ protected:
             }
         }
 
-        // Compute hillshade
+        // Compute hillshade (cell sizes in the DEM's own units — metres for a
+        // geographic CRS after the PROC-F-1 conversion above)
         if ( !TerrainAnalysis::hillshade( demData.constData(), hsData.data(), nCols, nRows,
-                                          static_cast<float>( cellSize ), static_cast<float>( cellSize ), nodata,
+                                          static_cast<float>( cellSizeX ), static_cast<float>( cellSizeY ), nodata,
                                           static_cast<float>( sunAzimuth ), static_cast<float>( sunElevation ) ) )
         {
             throw QgsProcessingException( QObject::tr( "Hillshade computation failed" ) );

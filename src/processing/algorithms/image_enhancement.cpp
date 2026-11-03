@@ -929,8 +929,11 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
                         int ny = std::clamp(y + dy, 0, height - 1);
                         float neighbor = input[ny * width + nx];
 
-                        // Skip NaN neighbors
-                    if (std::isnan(neighbor)) continue;
+                        // Skip non-finite neighbours. ±Inf poisons the weighted
+                        // sum exactly like NaN does, so the whole family
+                        // (lee/kuan/gamma) tests std::isfinite — Frost was the
+                        // lone isnan() hold-out (swarm-review PROC-A1-6).
+                        if (!std::isfinite(neighbor)) continue;
 
                     // Use precomputed distance
                     float dist = distLut[(dy + half) * kernelSize + (dx + half)];

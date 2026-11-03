@@ -497,7 +497,7 @@ namespace exp_spectral
     // applies the scale guard, then guards the full denominator expression.
     template <typename Fn>
     bool constantKernel( const float **bands, const size_t bandCount, float *out, size_t count,
-                         bool isScaled, float noData, Fn fn )
+                         bool isUnitReflectance, float noData, Fn fn )
     {
       if ( out == nullptr || count == 0 )
         return false;
@@ -505,7 +505,7 @@ namespace exp_spectral
         if ( bands[b] == nullptr )
           return false;
 
-      const double scale = isScaled ? 1.0 : 1.0 / kScaleFactor;
+      const double scale = isUnitReflectance ? 1.0 : 1.0 / kScaleFactor;
       for ( size_t i = 0; i < count; ++i )
       {
         bool masked = false;
@@ -552,11 +552,11 @@ namespace exp_spectral
   }
 
   bool SpectralIndices::evi( const float *nir, const float *red, const float *blue, float *out,
-                             size_t count, bool isScaled, float noData )
+                             size_t count, bool isUnitReflectance, float noData )
   {
     const float *bands[3] = { nir, red, blue };
     return constantKernel(
-      bands, 3, out, count, isScaled, noData,
+      bands, 3, out, count, isUnitReflectance, noData,
       []( double n, double r, double b ) {
         const double den = n + 6.0 * r - 7.5 * b + 1.0;
         return std::abs( den ) < 1e-12 ? std::numeric_limits<double>::quiet_NaN()
@@ -565,11 +565,11 @@ namespace exp_spectral
   }
 
   bool SpectralIndices::evi2( const float *nir, const float *red, float *out, size_t count,
-                              bool isScaled, float noData )
+                              bool isUnitReflectance, float noData )
   {
     const float *bands[2] = { nir, red };
     return constantKernel(
-      bands, 2, out, count, isScaled, noData,
+      bands, 2, out, count, isUnitReflectance, noData,
       []( double n, double r, double ) {
         const double den = n + 2.4 * r + 1.0;
         return std::abs( den ) < 1e-12 ? std::numeric_limits<double>::quiet_NaN()
@@ -578,11 +578,11 @@ namespace exp_spectral
   }
 
   bool SpectralIndices::savi( const float *nir, const float *red, float *out, size_t count,
-                              float L, bool isScaled, float noData )
+                              float L, bool isUnitReflectance, float noData )
   {
     const float *bands[2] = { nir, red };
     return constantKernel(
-      bands, 2, out, count, isScaled, noData,
+      bands, 2, out, count, isUnitReflectance, noData,
       [L]( double n, double r, double ) {
         const double den = n + r + L;
         return std::abs( den ) < 1e-12 ? std::numeric_limits<double>::quiet_NaN()

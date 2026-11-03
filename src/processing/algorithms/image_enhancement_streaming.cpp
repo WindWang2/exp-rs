@@ -327,8 +327,11 @@ void speckleTileFrost( const GdalBlockStream::Tile &tile, const float *haloBuf,
                 for ( int dx = -half; dx <= half; ++dx )
                 {
                     const float neighbor = row[dx];
-                    // Skip NaN neighbours
-                    if ( std::isnan( neighbor ) )
+                    // Skip non-finite neighbours: ±Inf poisons the weighted
+                    // sum exactly like NaN, so the whole speckle family tests
+                    // std::isfinite — Frost was the lone isnan() hold-out
+                    // (swarm-review PROC-A1-6).
+                    if ( !std::isfinite( neighbor ) )
                         continue;
                     // Weight: exp(-damping * distance * CV²)
                     const float dist = distLut[static_cast<size_t>( dy + half ) * kernelSize + ( dx + half )];

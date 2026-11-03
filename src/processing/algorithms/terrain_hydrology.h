@@ -9,7 +9,11 @@
 //                           and strictly drains every flat: along any
 //                           cell's downstream path on the resolved surface
 //                           the elevation is non-increasing in float steps
-//                           of at least @c report.epsilon.
+//                           of at least @c report.epsilon — a step the DEM's
+//                           ABSOLUTE elevation magnitude keeps representable
+//                           in float32 (PROC-A2-1), so the "float-exact"
+//                           drain guarantee holds on high-altitude low-relief
+//                           DEMs as well, not just near sea level.
 //   * flowDirectionInf    — D∞ (Tarboton 1997) flow direction as the
 //                           steepest-descent angle over the 8 triangular
 //                           facets. Encoding: degrees clockwise from north
@@ -64,10 +68,14 @@ namespace TerrainHydrology
 
 struct FlatResolutionReport
 {
-    /// Elevation step applied by the epsilon gradient (scaled from the DEM's
-    /// own relief: max(relief·2⁻²⁰, 1e-6) so increments stay float-exact).
+    /// Elevation step applied by the epsilon gradient:
+    /// max( max(relief, |zmax|) · 2⁻²⁰, 1e-6 ) so the increment survives
+    /// float32 addition at the DEM's own ABSOLUTE magnitude (a 4000 m
+    /// plateau has ulp 2.44e-4; relief alone would be absorbed there and the
+    /// flat would never drain — swarm-review PROC-A2-1).
     double epsilon = 0.0;
-    /// Number of cells whose value was raised above the input DEM.
+    /// Number of cells whose stored value actually rose above the input DEM
+    /// (verified per cell, not merely "took the raise branch").
     long long raisedCells = 0;
 };
 

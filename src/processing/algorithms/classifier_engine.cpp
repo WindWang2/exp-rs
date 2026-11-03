@@ -339,6 +339,18 @@ namespace
             continue; // re-assign orphaned points before split/merge
           }
 
+          // swarm-review PROC-A1-2: the split/merge decisions below must be
+          // made on THIS pass's Lloyd means, not the previous generation's
+          // centers. A center pair that already converged (or drifted) no
+          // longer owns its points, so a distance computed from m_centers
+          // measures a stale configuration and the merged position would be
+          // a weighted average of centers no sample was assigned to. Empty
+          // clusters (counts == 0) keep their center: they were either
+          // discarded above or reseeded below.
+          for ( size_t c = 0; c < m_centers.size(); ++c )
+            if ( counts[c] > 0 )
+              m_centers[c] = means[c];
+
           // Split: max per-dimension sigma above theta_S with the canonical
           // minimum cluster guard |S_k| >= 2(N_min + 1), capped at
           // kMaxClusters total.
@@ -735,7 +747,11 @@ namespace
       {
         std::vector<size_t> rows;      // indices into m_x
         std::vector<double> y;         // +1 / -1
-        std::vector<double> gram;      // m x m row-major kernel matrix
+        // m x m row-major kernel matrix — training scratch only. Cleared (and
+        // shrunk) at the end of trainMachine: keeping it alive made a trained
+        // model hold O(m^2) doubles per class pair for its lifetime
+        // (swarm-review PROC-A1-4). The decision path recomputes the kernel.
+        std::vector<double> gram;
         std::vector<double> alpha;
         double bias = 0.0;
         int classPositive = 0;
@@ -874,6 +890,13 @@ namespace
           }
           passes = changed == 0 ? passes + 1 : 0;
         }
+        // swarm-review PROC-A1-4: the Gram matrix is only needed to TRAIN
+        // (the SMO sweeps above); the decision function re-evaluates the
+        // kernel on demand. Release it so a trained one-vs-one model does not
+        // hold O(m^2) doubles per class pair for its lifetime (~1.4 GB for
+        // 10 classes over 10k samples).
+        machine.gram.clear();
+        machine.gram.shrink_to_fit();
         m_machines.push_back( std::move( machine ) );
       }
 

@@ -99,7 +99,16 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
                 {
                     g.transform( ct );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException & )
+                {
+                    // swarm-review PROC-F-3: a swallowed transform failure let the
+                    // geometry keep its SOURCE CRS and silently corrupt every
+                    // downstream spatial computation. Report and skip the feature
+                    // (same policy as vector_extract_by_location).
+                    if ( feedback )
+                        feedback->reportError( QObject::tr( "Failed to transform feature %1 geometry" ).arg( feat.id() ) );
+                    continue;
+                }
             }
             // A GeometryCollection sink is the Unknown-CLASS sink the #1043
             // guard below exempts, but providers still store only collection

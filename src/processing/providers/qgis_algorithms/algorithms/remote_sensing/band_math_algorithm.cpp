@@ -2,6 +2,8 @@
 #include "band_math_algorithm.h"
 
 #include "../../../../algorithms/band_math.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/staged_raster_output.h"
 
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
@@ -13,6 +15,14 @@
 #include <qgsrasterfilewriter.h>
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
+
+#include <gdal.h>
+#include <cpl_conv.h>
+#include <cpl_vsi.h>
+
+#include <cstring>
+#include <limits>
+#include <vector>
 
 void BandMathAlgorithm::initAlgorithm( const QVariantMap & )
 {
@@ -138,39 +148,76 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
     // Write output raster
     feedback->setProgressText( QObject::tr( "Writing output raster..." ) );
 
-    QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+    // Stage beside the destination and publish atomically on success: a
+    // failed or cancelled run can neither leave a partial product at the
+    // destination nor destroy the previous result there (#617) — the same
+    // three-piece template raster_calculator / raster_ndvi / raster_merge_bands
+    // already use (swarm-review PROC-F-2).
+    const QString destTarget = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+    auto staged = sicnu::processing::makeStagedRasterOutput( destTarget );
+    if ( !staged )
+        throw QgsProcessingException( QObject::tr( "Could not allocate a staging path next to %1" ).arg( destTarget ) );
+    const QString dest = staged->stagedPath();
 
-    QgsRasterFileWriter writer( dest );
-    writer.setOutputFormat( QStringLiteral( "GTiff" ) );
-    std::unique_ptr<QgsRasterDataProvider> outProvider(
-        writer.createOneBandRaster( Qgis::DataType::Float32, nCols, nRows, extent, crs ) );
-    if ( !outProvider )
-        throw QgsProcessingException( QObject::tr( "Could not create output raster" ) );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    if ( !driver )
+        throw QgsProcessingException( QObject::tr( "GTiff driver not available" ) );
 
-    const double outNodata = std::numeric_limits<double>::quiet_NaN();
-    outProvider->setNoDataValue( 1, outNodata );
+    GDALDatasetH outDs = GDALCreate( driver, dest.toUtf8().constData(), nCols, nRows, 1, GDT_Float32, nullptr );
+    if ( !outDs )
+        throw QgsProcessingException( QObject::tr( "Could not create output file: %1" ).arg( dest ) );
 
-    QgsRasterBlock outBlock( Qgis::DataType::Float32, nCols, nRows );
-    outBlock.setNoDataValue( outNodata );
+    double geoTransform[6] = { extent.xMinimum(), extent.width() / nCols, 0,
+                               extent.yMaximum(), 0, -extent.height() / nRows };
+    GDALSetGeoTransform( outDs, geoTransform );
+    GDALSetProjection( outDs, crs.toWkt().toUtf8().constData() );
+
+    GDALRasterBandH outBand = GDALGetRasterBand( outDs, 1 );
+    GDALSetRasterNoDataValue( outBand, std::numeric_limits<double>::quiet_NaN() );
+
+    // Row-by-row write: a per-row failure must not be swallowed, and GDALClose
+    // is where the GTiff driver reports deferred write failures (disk full,
+    // quota) — a failed final flush must fail the run, never report success
+    // (#617, #1043 contract).
+    std::vector<float> rowBuf( nCols );
     for ( int row = 0; row < nRows; ++row )
     {
+        const size_t offset = static_cast<size_t>( row ) * nCols;
         for ( int col = 0; col < nCols; ++col )
+            rowBuf[col] = result[offset + col];
+        if ( GDALRasterIO( outBand, GF_Write, 0, row, nCols, 1, rowBuf.data(), nCols, 1, GDT_Float32, 0, 0 ) != CE_None )
         {
-            size_t idx = static_cast<size_t>( row ) * nCols + col;
-            float val = result[idx];
-            if ( std::isnan( val ) )
-                outBlock.setIsNoData( row, col );
-            else
-                outBlock.setValue( row, col, static_cast<double>( val ) );
+            GDALClose( outDs );
+            VSIUnlink( dest.toUtf8().constData() );
+            throw QgsProcessingException( QObject::tr( "Failed to write output raster at row %1" ).arg( row ) );
+        }
+        if ( feedback->isCanceled() )
+        {
+            GDALClose( outDs );
+            VSIUnlink( dest.toUtf8().constData() );
+            return {};
         }
     }
 
-    if ( !outProvider->writeBlock( &outBlock, 1 ) )
-        throw QgsProcessingException( QObject::tr( "Error writing output raster" ) );
+    QString closeError;
+    if ( !closeDatasetFailClosed( outDs, &closeError ) )
+    {
+        VSIUnlink( dest.toUtf8().constData() );
+        throw QgsProcessingException( closeError.isEmpty()
+                                          ? QObject::tr( "Failed to flush output raster %1" ).arg( destTarget )
+                                          : closeError );
+    }
+    QString publishError;
+    if ( !staged->publish( &publishError ) )
+        throw QgsProcessingException( publishError.isEmpty()
+                                          ? QObject::tr( "Failed to publish output raster %1" ).arg( destTarget )
+                                          : publishError );
 
     feedback->setProgress( 100 );
 
-    return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
+    QVariantMap results;
+    results[QStringLiteral( "OUTPUT" )] = destTarget;
+    return results;
 }
 
 QString BandMathAlgorithm::shortHelpString() const

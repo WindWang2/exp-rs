@@ -141,16 +141,22 @@ namespace exp_spectral
                           float noData = -9999.0f );
 
         /// EVI = 2.5·(NIR - Red) / (NIR + 6·Red - 7.5·Blue + 1). With
-        /// @p isScaled == false the inputs are integer-scaled reflectance
-        /// (×10⁴) and are divided by 10⁴ first so the +1 constant stays
-        /// physically meaningful.
+        /// @p isUnitReflectance == false the inputs are integer-scaled
+        /// reflectance (×10⁴) and are divided by 10⁴ first so the +1
+        /// constant stays physically meaningful.
+        ///
+        /// swarm-review PROC-A2-2: this parameter was named @c isScaled here
+        /// while ::SpectralIndices::evi uses @c isScaled for the OPPOSITE
+        /// convention (true = integer-scaled DN). Same name, inverted meaning
+        /// across the two seams of one header — renamed to say what it
+        /// actually tests.
         static bool evi( const float *nir, const float *red, const float *blue, float *out, size_t count,
-                         bool isScaled = true, float noData = -9999.0f );
+                         bool isUnitReflectance = true, float noData = -9999.0f );
 
         /// SAVI = (NIR - Red) / (NIR + Red + L)·(1 + L), L = 0.5 default;
-        /// same scale guard as EVI.
+        /// same scale guard as EVI (see PROC-A2-2 on @p isUnitReflectance).
         static bool savi( const float *nir, const float *red, float *out, size_t count,
-                          float L = 0.5f, bool isScaled = true, float noData = -9999.0f );
+                          float L = 0.5f, bool isUnitReflectance = true, float noData = -9999.0f );
 
         /// MNDWI = (Green - SWIR) / (Green + SWIR) ∈ [-1, 1].
         static bool mndwi( const float *green, const float *swir, float *out, size_t count,
@@ -160,8 +166,9 @@ namespace exp_spectral
         static bool ndbi( const float *swir, const float *nir, float *out, size_t count,
                           float noData = -9999.0f );
 
-        /// EVI2 = 2.5·(NIR - Red) / (NIR + 2.4·Red + 1); same scale guard.
+        /// EVI2 = 2.5·(NIR - Red) / (NIR + 2.4·Red + 1); same scale guard
+        /// (see PROC-A2-2 on @p isUnitReflectance).
         static bool evi2( const float *nir, const float *red, float *out, size_t count,
-                          bool isScaled = true, float noData = -9999.0f );
+                          bool isUnitReflectance = true, float noData = -9999.0f );
     };
 } // namespace exp_spectral

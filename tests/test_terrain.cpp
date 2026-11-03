@@ -301,16 +301,45 @@ TEST_CASE( "Gradient scaling: 1-sided border matches 2-sided interior on uniform
     REQUIRE( cornerHs == Approx( centerHs ).margin( 0.02f ) );
 }
 
-TEST_CASE( "Gradient scaling: isolated valid pixel with invalid neighbors yields 0 gradient", "[terrain]" )
+TEST_CASE( "Gradient scaling: isolated valid pixel with invalid neighbors yields nodata", "[terrain]" )
 {
     const int W = 3, H = 3;
     std::vector<float> dem( W * H, NODATA );
     dem[1 * W + 1] = 100.0f; // only center pixel is valid
     std::vector<float> slopeOut( W * H );
+    std::vector<float> aspectOut( W * H );
+    std::vector<float> hsOut( W * H );
+
+    // swarm-review PROC-A2-4: the centre pixel has no valid neighbour on any
+    // axis, so there is no gradient evidence — it used to be reported as a
+    // perfectly flat cell (slope 0, aspect -1, fully-lit hillshade), which
+    // invented data from pixels the DEM says nothing about. GDAL/ArcGIS emit
+    // NoData; so do we now.
+    REQUIRE( TerrainAnalysis::slope( dem.data(), slopeOut.data(), W, H, 1.0f, NODATA ) );
+    REQUIRE( TerrainAnalysis::aspect( dem.data(), aspectOut.data(), W, H, 1.0f, NODATA ) );
+    REQUIRE( TerrainAnalysis::hillshade( dem.data(), hsOut.data(), W, H, 1.0f, NODATA, 315.0f, 45.0f ) );
+    REQUIRE( slopeOut[1 * W + 1] == NODATA );
+    REQUIRE( aspectOut[1 * W + 1] == NODATA );
+    REQUIRE( hsOut[1 * W + 1] == NODATA );
+}
+
+TEST_CASE( "Gradient scaling: partial neighbours keep the one-sided gradient", "[terrain]" )
+{
+    // swarm-review PROC-A2-4 companion pin: a pixel with a valid EAST and
+    // SOUTH neighbour but NoData to the west/north must still derive a
+    // one-sided gradient (the raster-border policy) instead of collapsing
+    // to nodata — only the all-missing axis is undefined.
+    const int W = 3, H = 3;
+    std::vector<float> dem( W * H, NODATA );
+    dem[1 * W + 1] = 100.0f; // centre
+    dem[1 * W + 2] = 110.0f; // east  (+10 over 1 cell)
+    dem[2 * W + 1] = 105.0f; // south (+5 over 1 cell)
+    std::vector<float> slopeOut( W * H );
 
     REQUIRE( TerrainAnalysis::slope( dem.data(), slopeOut.data(), W, H, 1.0f, NODATA ) );
-    // Center pixel has no valid neighbors -> dzdx = 0, dzdy = 0 -> slope = 0
-    REQUIRE( slopeOut[1 * W + 1] == Approx( 0.0f ) );
+    // dzdx = (110-100)/1 = 10, dzdy = (105-100)/1 = 5 -> atan(sqrt(125)).
+    const float expected = std::atan( std::sqrt( 125.0f ) ) * 180.0f / static_cast<float>( M_PI );
+    REQUIRE( slopeOut[1 * W + 1] == Approx( expected ).margin( 0.1f ) );
 }
 
 TEST_CASE( "TerrainAnalysis: rectangular grid 64-bit index safety", "[terrain]" )

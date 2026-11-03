@@ -164,10 +164,16 @@ bool resolveFlats( const float *dem, float *filled, int width, int height,
         return false;
     const std::size_t n = static_cast<std::size_t>( width ) * height;
 
-    // Relief-scaled epsilon: increments must survive float32 addition at the
-    // DEM's own magnitude (2⁻²⁰ relief keeps them ≥ 2³ ulp above absorption
-    // at the largest elevations, and better lower down), with an absolute
-    // floor for constant/tiny DEMs.
+    // Epsilon magnitude: increments must survive float32 addition at the
+    // DEM's own magnitude. Scaling by RELIEF alone was not enough — the raise
+    // happens at ABSOLUTE elevation (a plateau surface at z ≈ 4000 m), where
+    // ulp(4000) = 2.44e-4 is 2^12 times ulp(1 m), so any relief below ~128 m
+    // was rounded away entirely: the "resolved" flat stayed strictly flat,
+    // D8 direction stayed 0, cells became interior sinks and bogus outlets
+    // appeared, while raisedCells reported activity (swarm-review PROC-A2-1).
+    // Including the elevation magnitude keeps the step ≥ 2^3 ulp at every
+    // binade (2^-20 · zmax ≥ 2^-20 · 2^e vs ulp = 2^(e-23)), with the
+    // absolute floor for constant/tiny DEMs.
     double zmin = std::numeric_limits<double>::infinity();
     double zmax = -std::numeric_limits<double>::infinity();
     std::size_t tick = 0;
@@ -190,7 +196,8 @@ bool resolveFlats( const float *dem, float *filled, int width, int height,
         return true;
     }
     const double relief = std::max( 0.0, zmax - zmin );
-    double epsilon = std::max( relief * 9.5367431640625e-07, 1e-6 ); // 2⁻²⁰
+    // 2^-20 = 9.5367431640625e-07
+    double epsilon = std::max( std::max( relief, std::fabs( zmax ) ) * 9.5367431640625e-07, 1e-6 );
     if ( epsilon >= std::numeric_limits<float>::max() / 4.0 )
         epsilon = std::numeric_limits<float>::max() / 4.0;
 
@@ -257,8 +264,15 @@ bool resolveFlats( const float *dem, float *filled, int width, int height,
             {
                 // Epsilon gradient: raise to just above the popped level so
                 // the flat drains in strict float steps.
-                filled[j] = level + fEps;
-                ++raised;
+                const float previous = filled[j];
+                const float raisedTo = level + fEps;
+                filled[j] = raisedTo;
+                // swarm-review PROC-A2-1: raisedCells must count REAL raises
+                // only — with an epsilon the float32 addition can actually
+                // represent (magnitude-aware, see above), this is exact; the
+                // guard keeps the report honest if that ever stops holding.
+                if ( raisedTo > previous )
+                    ++raised;
             }
             queue.emplace( filled[j], j );
         }

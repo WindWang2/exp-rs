@@ -77,8 +77,11 @@ class GcpManager {
 
     // Persistence. CSV columns:
     //   id,source_x,source_y,target_x,target_y,residual_x,residual_y,residual_total,enabled
-    // Malformed rows are skipped on load. JSON is a {"gcps": [...]} envelope
-    // with snake_case keys; fromJson returns false on any parse error.
+    // The id field is RFC-4180 quoted when it contains a comma or a double
+    // quote, and the loader splits on commas OUTSIDE quotes — so an id with
+    // commas round-trips instead of being silently dropped (swarm-review
+    // PROC-A1-7). Malformed rows are skipped on load. JSON is a {"gcps": [...]}
+    // envelope with snake_case keys; fromJson returns false on any parse error.
     bool loadFromCsv(const QString& filePath);
     bool saveToCsv(const QString& filePath) const;
     [[nodiscard]] QString toJson() const;
