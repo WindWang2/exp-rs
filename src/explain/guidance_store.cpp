@@ -4,10 +4,12 @@
 #include "explain/state_vocabulary.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <system_error>
 
 #include <json/json.h>
 
@@ -20,17 +22,32 @@ constexpr const char *kGuidanceSchemaV1 = "exp.step_guidance.v1";
 constexpr size_t kMaxEntriesPerFile = 64;
 constexpr size_t kMaxTotalEntries = 1024;
 
-std::string slurpFile( const std::filesystem::path &path, bool &ok )
+// swarm-review LT2-6: stat-before-read with the same 16 MiB budget the
+// recipes / teaching authored-JSON directory scans use (R14-E audit F5):
+// the guidance directory is a scan surface, so an oversize document is a
+// typed problem, never an unbounded rdbuf slurp into memory.
+constexpr std::uintmax_t kMaxGuidanceFileBytes = 16ull * 1024ull * 1024ull;
+
+/// Reads one guidance document. On failure @p problemCode is set
+/// ("file_oversize" or "file_unreadable") and the result is empty.
+std::string slurpFile( const std::filesystem::path &path, std::string &problemCode )
 {
+  std::error_code sizeEc;
+  const std::uintmax_t size = std::filesystem::file_size( path, sizeEc );
+  if ( !sizeEc && size > kMaxGuidanceFileBytes )
+  {
+    problemCode = "file_oversize";
+    return {};
+  }
   std::ifstream in( path, std::ios::binary );
   if ( !in )
   {
-    ok = false;
+    problemCode = "file_unreadable";
     return {};
   }
   std::ostringstream buffer;
   buffer << in.rdbuf();
-  ok = true;
+  problemCode.clear();
   return buffer.str();
 }
 
@@ -356,11 +373,13 @@ std::unique_ptr<GuidanceStore> GuidanceStore::loadFromDirectory(
       break;
     }
 
-    bool readable = false;
-    const std::string text = slurpFile( file, readable );
-    if ( !readable )
+    std::string problemCode;
+    const std::string text = slurpFile( file, problemCode );
+    if ( !problemCode.empty() )
     {
-      problems.push_back( { fileName, "file_unreadable", "cannot read file" } );
+      const std::string message =
+        problemCode == "file_oversize" ? "file exceeds the 16 MiB read budget" : "cannot read file";
+      problems.push_back( { fileName, problemCode, message } );
       continue;
     }
 

@@ -180,6 +180,12 @@ Json::Value ArtifactVerificationReport::toJson() const
 
 std::string VerificationReport::aggregate( const std::vector< ArtifactVerificationReport > &artifacts )
 {
+    // swarm-review LT2-3: an empty artifact list is "nothing verified" —
+    // it must never aggregate to PASS (zero artifacts is not evidence of
+    // success). Fail closed to the indeterminate sentinel, mirroring the
+    // sicnu::verify lattice (aggregateStatus: empty → Indeterminate).
+    if ( artifacts.empty() )
+        return kVerificationIndeterminate;
     bool warning = false;
     for ( const ArtifactVerificationReport &artifact : artifacts )
     {

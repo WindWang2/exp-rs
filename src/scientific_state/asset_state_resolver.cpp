@@ -897,6 +897,34 @@ void resolveAcquisition( RemoteSensingAssetState &state, const StateResolutionIn
     appendClaim( state, "acquisition.time", merged );
 }
 
+/// Pairing the file's band i with the structure mirror's band i is only
+/// founded when both sides describe the SAME structure: equal band counts
+/// AND aligned 1-based band indices (equal counts alone would still pair a
+/// {2,3} file axis against a {1,2} mirror). A mirror written before the
+/// file gained or lost a band would otherwise label the wrong band — roles
+/// and NoData would travel as Known facts about bands that never declared
+/// them. On any disagreement the mirror contributes nothing and the gap is
+/// recorded; without a dataset the mirror is the only authority and pairing
+/// is unchanged.
+// swarm-review LT1-3: one gate shared by the band facts and the validity
+// noData census — every mirror-by-position projection must agree on when
+// the mirror may be paired at all.
+bool catalogStructurePairable( const DatasetFacts *dataset, const CatalogFacts *catalog )
+{
+    if ( !catalog || catalog->bands.empty() )
+        return false;
+    if ( !dataset || dataset->bands.empty() )
+        return true; // no file: the mirror is the only authority
+    if ( catalog->bands.size() != dataset->bands.size() )
+        return false;
+    for ( std::size_t position = 0; position < dataset->bands.size(); ++position )
+    {
+        if ( dataset->bands[position].index != catalog->bands[position].index )
+            return false;
+    }
+    return true;
+}
+
 void resolveBands( RemoteSensingAssetState &state, const StateResolutionInput &input,
                    const DatasetFacts *dataset, std::vector<ResolutionNote> &notes )
 {
@@ -923,32 +951,14 @@ void resolveBands( RemoteSensingAssetState &state, const StateResolutionInput &i
     }
 
     // Pairing the file's band i with the structure mirror's band i is only
-    // founded when both sides describe the SAME structure: equal band
-    // counts AND aligned 1-based band indices (equal counts alone would
-    // still pair a {2,3} file axis against a {1,2} mirror). A mirror
-    // written before the file gained or lost a band would otherwise label
-    // the wrong band — roles and NoData would travel as Known facts about
-    // bands that never declared them. On any disagreement the mirror
-    // contributes nothing and the gap is recorded; without a dataset the
-    // mirror is the only authority and pairing is unchanged.
-    bool catalogPairable = false;
-    if ( catalog && !catalog->bands.empty() )
-    {
-        if ( !useDataset )
-            catalogPairable = true;
-        else if ( catalog->bands.size() == datasetBands.size() )
-        {
-            catalogPairable = true;
-            for ( std::size_t position = 0; position < datasetBands.size(); ++position )
-            {
-                if ( datasetBands[position].index != catalog->bands[position].index )
-                {
-                    catalogPairable = false;
-                    break;
-                }
-            }
-        }
-    }
+    // founded when both sides describe the SAME structure (see
+    // catalogStructurePairable): a mirror written before the file gained or
+    // lost a band would otherwise label the wrong band — roles and NoData
+    // would travel as Known facts about bands that never declared them. On
+    // any disagreement the mirror contributes nothing and the gap is
+    // recorded; without a dataset the mirror is the only authority and
+    // pairing is unchanged.
+    const bool catalogPairable = catalogStructurePairable( dataset, catalog );
     if ( catalog && useDataset && !catalog->bands.empty() && !catalogPairable )
     {
         addNote( state, "bands.catalog_structure_mismatch", "bands",
@@ -1233,7 +1243,13 @@ void resolveValidity( RemoteSensingAssetState &state, const StateResolutionInput
         input.sensorProfile ? &*input.sensorProfile : nullptr;
 
     // ---- noData policy (declaration census over the band universe) ----
+    // swarm-review LT1-3: the census pairs the mirror by position, so it
+    // must use the SAME structure gate as the band facts (see
+    // catalogStructurePairable). Counting mirror declarations while the
+    // band layer refused to merge them could attest a fully "declared"
+    // policy — Known confidence — over bands that never declared anything.
     const bool useDatasetBands = dataset && !dataset->bands.empty();
+    const bool catalogPairable = catalogStructurePairable( dataset, catalog );
     const std::size_t totalBands = useDatasetBands ? dataset->bands.size()
                                                    : ( catalog ? catalog->bands.size() : 0 );
     if ( totalBands > 0 )
@@ -1245,8 +1261,8 @@ void resolveValidity( RemoteSensingAssetState &state, const StateResolutionInput
         {
             const BandFacts *datasetBand = useDatasetBands ? &dataset->bands[position] : nullptr;
             const CatalogBandFacts *catalogBand =
-                catalog && position < catalog->bands.size() ? &catalog->bands[position]
-                                                            : nullptr;
+                catalogPairable && position < catalog->bands.size() ? &catalog->bands[position]
+                                                                    : nullptr;
             const bool datasetDeclaration =
                 datasetBand && datasetBand->metadata.contains( "NO_DATA_VALUE" );
             const bool catalogDeclaration = catalogBand && catalogBand->hasNoData;

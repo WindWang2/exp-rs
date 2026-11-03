@@ -118,8 +118,12 @@ struct MetricExpectation
     /// threshold (AtLeast/AtMost). 0 = exact.
     double tolerance = 0.0;
     /// Optional teacher-declared linear partial-credit window. For AtLeast:
-    /// earned fraction rises linearly from windowFrom (0) to the threshold
-    /// (full). AtMost mirrors it. Ignored for Equals/Range.
+    /// the earned fraction rises linearly from windowFrom (0) to windowTo
+    /// (full); the gap between windowTo and the full band earns full
+    /// credit. AtMost mirrors it. Ignored for Equals/Range.
+    // swarm-review LT1-5: the comment claimed the ramp tops out at the
+    // threshold; scoreMetricValue (grader_matcher.cpp) clamps at windowTo,
+    // so the (windowTo, threshold) gap is full credit.
     bool hasLinearWindow = false;
     double windowFrom = 0.0;
     double windowTo = 0.0;

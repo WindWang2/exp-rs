@@ -550,6 +550,15 @@ bool ScientificAgentSession::stageRepairApproval()
         recordDecision( stages::kRepairApproval, std::move( decision ) );
     }
 
+    // swarm-review LT2-1: a "fixable" verdict carrying ZERO proposals has
+    // no auto-approvable repair either — routing it through the same
+    // unapproved path as the withheld case keeps the default policy
+    // (allowUnapprovedFixable == false) refusing instead of silently
+    // proceeding unfixed past the verdict.
+    const bool unapprovedFixable =
+        anyWithheld || ( mPreflightReport.proposals.empty()
+                         && mPreflightReport.verdict == "fixable" );
+
     if ( !approved.empty() )
     {
         // Same dedup discipline as stageDiagnose: the same rule id must
@@ -563,7 +572,7 @@ bool ScientificAgentSession::stageRepairApproval()
         return enterStage( stages::kReplan );
     }
 
-    if ( anyWithheld && !mPolicy.repairApproval.allowUnapprovedFixable )
+    if ( unapprovedFixable && !mPolicy.repairApproval.allowUnapprovedFixable )
     {
         DecisionRecord decision;
         decision.selected[ "action" ] = "refuse";
@@ -575,13 +584,13 @@ bool ScientificAgentSession::stageRepairApproval()
         return refuse( stop_reasons::kPreflightBlocked );
     }
 
-    if ( anyWithheld )
+    if ( unapprovedFixable )
     {
         // Policy explicitly allows proceeding with the issues unfixed; the
         // decision is recorded, never silent.
         DecisionRecord decision;
         decision.selected[ "action" ] = "proceed_unfixed";
-        decision.reason = "policy allows proceeding despite unapproved repairs";
+        decision.reason = "policy allows proceeding despite an unapproved fixable preflight";
         decision.evidence.push_back( evidence( "policy", "allow_unapproved_fixable" ) );
         recordDecision( stages::kRepairApproval, std::move( decision ) );
     }
@@ -692,6 +701,21 @@ bool ScientificAgentSession::stageVerify()
         decision.reason = "verification FAILED; the session never reports success";
         recordDecision( stages::kVerify, std::move( decision ) );
         return enterStage( stages::kDiagnose );
+    }
+
+    // swarm-review LT2-3: an indeterminate aggregate means the verifier
+    // verified NOTHING (empty artifact list). Zero verified artifacts is
+    // not a pass — the session refuses with a typed reason instead of
+    // delivering an unverified success.
+    if ( mVerification.verdict() == kVerificationIndeterminate )
+    {
+        mLastFailureCode = stop_reasons::kOutputInvalid;
+        decision.selected[ "action" ] = "refuse";
+        decision.reason = "verification verified no artifact; the session never reports an "
+                          "unverified success";
+        decision.evidence.push_back( evidence( "verification", "no_verified_artifact" ) );
+        recordDecision( stages::kVerify, std::move( decision ) );
+        return refuse( stop_reasons::kOutputInvalid );
     }
 
     decision.selected[ "action" ] = "deliver";

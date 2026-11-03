@@ -43,6 +43,11 @@ class SessionJournal {
   public:
     static constexpr std::size_t kMaxEntries = 4096;
     static constexpr long kMaxDocumentBytes = 1024 * 1024;
+    /// Hard byte ceiling for one journal document, shared by the write
+    /// authority and the load-side bound: the header's "bounded size,
+    /// fail-closed reads" contract fails closed on anything larger rather
+    /// than slurping it into memory.
+    static constexpr std::size_t kJournalWriteCapBytes = 64ull * 1024ull * 1024ull;
 
     SessionJournal() = default;
     explicit SessionJournal( std::string sessionId,

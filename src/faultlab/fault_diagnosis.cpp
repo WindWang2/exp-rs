@@ -43,7 +43,10 @@ bool differs( const ObservableSet &clean, const ObservableSet &faulted, const st
         return false;
     }
     delta = faultedValue - cleanValue;
-    return std::fabs( delta ) > kObservableTolerance;
+    // swarm-review LT1-6: relative tolerance — the band scales with the
+    // clean magnitude, so a 1e-3 wobble on a 1e6-scale observable is noise
+    // while the same wobble on a 1e-3-scale one is a real difference.
+    return std::fabs( delta ) > observableToleranceBand( cleanValue );
 }
 
 } // namespace

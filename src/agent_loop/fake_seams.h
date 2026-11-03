@@ -293,6 +293,20 @@ inline PreflightReport FakePreflight::check( const PlanDraft &plan,
 {
     ( void )snapshot;
     ++mCheckCount;
+    // swarm-review LT2-5: an empty script vector would index size()-1
+    // (SIZE_MAX) — out-of-bounds UB. No script means the fake cannot
+    // fabricate a verdict: it fails closed to "blocked" with a typed issue.
+    if ( mScenario.preflight.empty() )
+    {
+        PreflightReport report;
+        report.verdict = "blocked";
+        PreflightIssue issue;
+        issue.code = "fake_scenario_no_preflight_script";
+        issue.severity = "error";
+        issue.message = "scenario declares no preflight script";
+        report.issues.push_back( issue );
+        return report;
+    }
     const std::size_t index =
         plan.attempt >= 1 && static_cast< std::size_t >( plan.attempt ) <= mScenario.preflight.size()
             ? static_cast< std::size_t >( plan.attempt ) - 1
@@ -354,6 +368,18 @@ inline ExecutionOutcome FakeExecutor::poll( const ExecutionStart &start, long lo
         return outcome;
     }
 
+    // swarm-review LT2-5: an empty script vector would index size()-1
+    // (SIZE_MAX) — out-of-bounds UB. No script means the fake cannot
+    // fabricate an outcome: it reports a typed failure, never success.
+    if ( mScenario.execution.empty() )
+    {
+        outcome.finished = true;
+        outcome.succeeded = false;
+        outcome.state = "failed";
+        outcome.errorCode = "EXECUTION_FAILED";
+        return outcome;
+    }
+
     const std::size_t index =
         attemptIt->second >= 1 && static_cast< std::size_t >( attemptIt->second ) <=
                                       mScenario.execution.size()
@@ -380,13 +406,20 @@ inline void FakeExecutor::cancel( const ExecutionStart &start )
 inline VerificationReport FakeVerifier::verify( const PlanDraft &plan,
                                                 const ExecutionOutcome &outcome )
 {
+    ++mVerifyCount;
+    // swarm-review LT2-5: an empty script vector would index size()-1
+    // (SIZE_MAX) — out-of-bounds UB. No script means nothing was verified:
+    // the default report stays at the indeterminate sentinel (LT2-3), never
+    // a fabricated pass.
+    if ( mScenario.verification.empty() )
+        return VerificationReport{};
+
     const std::size_t index =
         plan.attempt >= 1 && static_cast< std::size_t >( plan.attempt ) <=
                                   mScenario.verification.size()
             ? static_cast< std::size_t >( plan.attempt ) - 1
             : mScenario.verification.size() - 1;
     const VerifyScript &script = mScenario.verification[ index ];
-    ++mVerifyCount;
 
     VerificationReport report;
     std::vector< std::string > paths = outcome.artifacts;
@@ -418,12 +451,19 @@ inline VerificationReport FakeVerifier::verify( const PlanDraft &plan,
 }
 
 inline Diagnosis FakeDiagnoser::diagnose( const PlanDraft &plan,
-                                          const ExecutionOutcome &outcome,
-                                          const VerificationReport &verification )
+                                         const ExecutionOutcome &outcome,
+                                         const VerificationReport &verification )
 {
     ( void )outcome;
     ( void )verification;
     ++mDiagnoseCount;
+    // swarm-review LT2-5: an empty script vector would index size()-1
+    // (SIZE_MAX) — out-of-bounds UB. No script means no proposals: the
+    // session's diagnose stage refuses with a typed reason instead of
+    // retrying, which is the honest reading of "nothing scripted".
+    if ( mScenario.diagnosis.empty() )
+        return Diagnosis{};
+
     const std::size_t index =
         plan.attempt >= 1 && static_cast< std::size_t >( plan.attempt ) <=
                                   mScenario.diagnosis.size()

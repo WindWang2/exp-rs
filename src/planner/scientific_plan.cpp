@@ -550,9 +550,13 @@ bool scientificPlanFromJson( const Json::Value &doc, ScientificPlan &out, std::s
             return false;
         }
         // Wiring must reference EARLIER steps only: acyclic by construction.
+        // swarm-review LT1-2: the own-id insert above must not launder a
+        // self-reference past this check (a 1-step cycle) — reject it
+        // explicitly before the earlier-step lookup.
         for ( const auto &input : step.inputs )
         {
-            if ( !input.fromStepId.empty() && !seenStepIds.count( input.fromStepId ) )
+            if ( !input.fromStepId.empty()
+                 && ( input.fromStepId == step.stepId || !seenStepIds.count( input.fromStepId ) ) )
             {
                 error = json_util::error( "invalid_field",
                                "step \"" + step.stepId + "\" input references unknown or later step \""
@@ -763,7 +767,11 @@ std::vector<std::string> validateScientificPlan( const ScientificPlan &plan )
             if ( input.fromStepId.empty() == input.assetRef.empty() )
                 problems.push_back( "invalid_field: step input must be exactly one form: "
                                     + step.stepId );
-            if ( !input.fromStepId.empty() && !stepIds.count( input.fromStepId ) )
+            // swarm-review LT1-2: stepIds already holds this step's own id,
+            // so a self-reference would pass the earlier-step lookup — a
+            // 1-step cycle. Reject it explicitly.
+            if ( !input.fromStepId.empty()
+                 && ( input.fromStepId == step.stepId || !stepIds.count( input.fromStepId ) ) )
                 problems.push_back( "invalid_field: dangling step input in " + step.stepId );
         }
         for ( const auto &transition : step.expectedTransitions )
