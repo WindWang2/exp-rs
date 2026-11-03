@@ -1010,9 +1010,10 @@ class GUI_EXPORT QgsMapCanvas : public QGraphicsView, public QgsExpressionContex
      * the job may still be drawing. The job's finished() handler is delivered
      * synchronously by that settle (a parallel job's blocking cancel emits
      * finished() on the canceling thread), so the owner cleans up its own
-     * state; it must unregister in that handler. The settle-once semantics
-     * are verified for QgsMapRendererParallelJob; other job subclasses'
-     * blocking cancel() differ and are unverified here.
+     * state; it must unregister in that handler. The settle is subclass
+     * agnostic: it cancels and then waits on the job, so any QgsMapRendererJob
+     * subclass (parallel, sequential, custom painter) is fully wound down
+     * before the caller's layers can die (swarm-review VD-4).
      * \see unregisterExternalRenderJob()
      * \see stopRenderingAndSettle()
      */
@@ -1022,7 +1023,9 @@ class GUI_EXPORT QgsMapCanvas : public QGraphicsView, public QgsExpressionContex
      * Removes \a job from the external-render-job registry (see
      * registerExternalRenderJob()). Call when the job finishes or is taken
      * over by its owner's cancellation path; a destroyed job is pruned
-     * automatically.
+     * automatically. Only the registry's own destroyed() hook is disconnected
+     * here — connections the registrant made to the job's destroyed() signal
+     * are left intact (swarm-review VD-3).
      * \see registerExternalRenderJob()
      */
     void unregisterExternalRenderJob( QgsMapRendererJob *job ) SIP_SKIP;
@@ -1507,6 +1510,11 @@ class GUI_EXPORT QgsMapCanvas : public QGraphicsView, public QgsExpressionContex
     //! raw layer pointers; settled by stopRenderingAndSettle() and the dtor
     //! before those layers can be destroyed (#1389 swipe compare snapshot).
     QSet<QgsMapRendererJob *> mExternalRenderJobs;
+
+    //! The registry's own QObject::destroyed() connection per registered job,
+    //! so unregisterExternalRenderJob() can disconnect exactly that one (see
+    //! swarm-review VD-3).
+    QHash<QgsMapRendererJob *, QMetaObject::Connection> mExternalRenderJobConnections;
 
     //! lock the scale, so zooming can be performed using magnication
     bool mScaleLocked = false;
