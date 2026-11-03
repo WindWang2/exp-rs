@@ -7,3 +7,6 @@ Format: `第N轮 | 改动 | 验证结果 | 通过/未通过 | 下一步`
 - 第2轮 | （进行中） | - | - | -
 - 第2轮 | 全部修复+测试落地；构建（修 5 轮编译/链接问题：QStatusBar/QtTest/QStringLiteral/链接 TU/ld segfault 重试）；12 套件单跑全绿；回归面 8 套件全绿（stac/mission/v3/r26/classify×2/spectral/roi/interactive）；全套 12×2 双跑全绿；bench 三路径双跑稳定并落盘 BENCH_BASELINE（slot p95 ≤1.21ms vs 同步下限 18–362ms） | 全部 exit 0 | 通过 | R1 独立评审
 - 第3轮 | （进行中）R1 | - | - | -
+- 第3轮 | R1 独立评审：0×S0，1×S1（src/python 越白名单→记录），2×S2 + 8×S3 全部修复/记录；修复后 13 套件×2 全绿 + bench 绿 | 全部 exit 0 | 通过 | R2
+- 第4轮 | R2 独立评审：无 S0-S2；R1 修复提交中的死守卫已被 8f382571bd 修复（双方独立确认）；4×S3（2 修复、1 记录、1 提交信息注记）；最终 13×2 全绿 + bench 绿 | 全部 exit 0 | 通过 | PR readiness
+- 第5轮 | （进行中）PR readiness + gh pr create | - | - | -
