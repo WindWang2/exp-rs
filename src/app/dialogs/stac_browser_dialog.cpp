@@ -36,6 +36,24 @@ StacBrowserDialog::StacBrowserDialog( QgsMapCanvas *canvas, QWidget *parent )
   setupUi();
   connect( m_stacClient, &StacClient::searchCompleted,
            this, &StacBrowserDialog::onSearchCompleted );
+  // #1789: a searchNext() that cannot continue terminates HERE (the client
+  // never emits searchCompleted for it) — settle the pending More state so
+  // the button can never stay disabled forever.
+  connect( m_stacClient, &StacClient::searchNextUnavailable, this,
+           [this]( const QString & ) {
+             m_awaitingAppend = false;
+             m_moreButton->setEnabled( false );
+             m_moreButton->hide();
+           } );
+  // A dropped delivery (superseded generation, dialog hidden mid-fetch)
+  // also terminates any pending append — a later landing must replace, not
+  // append into the superseded query's rows. The button is settled too
+  // (R1 S3: reopen-with-dropped-fetch left More visible-disabled).
+  connect( m_stacClient, &StacClient::searchDropped, this,
+           [this]( const QString & ) {
+             m_awaitingAppend = false;
+             m_moreButton->setEnabled( false );
+           } );
 }
 
 void StacBrowserDialog::hideEvent( QHideEvent *event )
@@ -70,6 +88,9 @@ void StacBrowserDialog::setupUi()
   m_moreButton->hide();
   connect( m_moreButton, &QPushButton::clicked, this, [this]() {
       m_moreButton->setEnabled( false );
+      // The completion of THIS click appends (#1788); a terminal
+      // searchNextUnavailable settles it even when no page comes back.
+      m_awaitingAppend = true;
       m_stacClient->searchNext();
   } );
   SicnuDialogHelp::tip( m_endpointEdit, tr( "STAC API root URL." ) );
@@ -140,6 +161,9 @@ void StacBrowserDialog::searchCatalog()
 
     m_searchButton->setEnabled(false);
     m_searchButton->setText(tr("Searching..."));
+    // A fresh search replaces the listing (#1788) — even if its completion
+    // races a More click's landing, the newest user intent wins.
+    m_awaitingAppend = false;
     m_stacClient->search(endpoint, m_collectionEdit->text().trimmed(),
                          m_datetimeEdit->text().trimmed(), bbox);
 }
@@ -149,27 +173,49 @@ void StacBrowserDialog::onSearchCompleted(const QVariantList &features, const QS
 {
     m_searchButton->setEnabled(true);
     m_searchButton->setText(tr("Search"));
-    m_moreButton->setEnabled(true);
 
     if (!error.isEmpty()) {
+        // A failed search terminates its pending append (#1789). A failed
+        // NEXT page keeps the current rows and lets More retry (the current
+        // page's continuation is still valid); a failed fresh search has no
+        // continuation at all — hide More so it can never fire a stranded
+        // no-op click.
+        if (m_awaitingAppend) {
+            m_awaitingAppend = false;
+            m_moreButton->setEnabled(true);
+            m_moreButton->show();
+        } else {
+            m_moreButton->setEnabled(false);
+            m_moreButton->hide();
+        }
         QMessageBox::warning(this, tr("Search Failed"), error);
         return;
     }
 
-    populateResults(features);
+    // #1788: a More click lands as an APPEND — the earlier pages stay in
+    // the table; a fresh search replaces the listing.
+    const bool append = m_awaitingAppend;
+    m_awaitingAppend = false;
+    populateResults(features, append);
 
     // STAC pagination (#634): offer the next page when the server provides
     // a `next` link - the fixed limit previously hid everything past page 1.
+    m_moreButton->setEnabled( nextPage.isValid() && !nextPage.isEmpty() );
     m_moreButton->setVisible( nextPage.isValid() && !nextPage.isEmpty() );
 }
 
-void StacBrowserDialog::populateResults(const QVariantList &features)
+void StacBrowserDialog::populateResults(const QVariantList &features, bool append)
 {
-    m_resultsTable->setRowCount(features.size());
-    m_featureData.clear();
+    if (!append) {
+        m_resultsTable->setRowCount(0);
+        m_featureData.clear();
+    }
+    const int startRow = m_featureData.size();
+    m_resultsTable->setRowCount(startRow + features.size());
 
-    for (int row = 0; row < features.size(); ++row) {
-        const QVariantMap feature = features[row].toMap();
+    for (int i = 0; i < features.size(); ++i) {
+        const int row = startRow + i;
+        const QVariantMap feature = features[i].toMap();
         m_featureData.append(feature);
 
         const QString id = feature.value(QStringLiteral("id")).toString();
@@ -183,7 +229,7 @@ void StacBrowserDialog::populateResults(const QVariantList &features)
         m_resultsTable->setItem(row, 3, new QTableWidgetItem(QString::number(assets.size())));
     }
 
-    m_loadButton->setEnabled(!features.isEmpty());
+    m_loadButton->setEnabled(!m_featureData.isEmpty());
 }
 
 void StacBrowserDialog::loadSelectedAsset()

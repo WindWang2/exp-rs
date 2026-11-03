@@ -45,6 +45,14 @@ signals:
     /// payload is the drop reason — the observable trace for late-arrival
     /// drops, so a silent swallow is impossible (parity landing policy).
     void searchDropped(const QString &reason);
+    /// #1789: searchNext() could not continue (no cached page, superseded
+    /// generation, or no next link). Emitted INSTEAD of silently returning
+    /// so the UI can settle its pending state (the More button must not
+    /// stay disabled forever). A silent no-op is a contract violation:
+    /// every searchNext() call that does not LAUNCH a fetch terminates in
+    /// exactly one terminal signal; a launched fetch that its successor
+    /// supersedes terminates in searchDropped instead.
+    void searchNextUnavailable(const QString &reason);
 
 public:
     explicit StacClient(QObject *parent = nullptr);

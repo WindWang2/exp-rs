@@ -20,6 +20,7 @@
 #include "teaching/lab_cockpit_dock.h"
 #include "workbench/selection_context.h"
 #include "workbench/step_explanation_section.h"
+#include "data_project_serializer.h"
 
 #include <QCoreApplication>
 #include <QBuffer>
@@ -420,10 +421,42 @@ void QgisDesktopWindow::openProject()
         openProjectFrom(filePath);
 }
 
+bool QgisDesktopWindow::refuseUnserializableProjectData()
+{
+    // #1747: a downgrade refusal inside QgsProject::writeProject cannot
+    // abort the save — the file was still overwritten with no SICNU
+    // extension block, destroying the governed state the guard protects.
+    // Refuse BEFORE the write so the on-disk project stays untouched.
+    if ( !m_projectContext )
+        return false;
+    const sicnu::data::Result<void> preflight =
+        sicnu::app::DataProjectSerializer::canWrite( *m_projectContext );
+    if ( preflight )
+        return false;
+
+    QStringList details;
+    for ( const sicnu::data::Diagnostic &diagnostic : preflight.diagnostics() )
+        details.append( QStringLiteral( "[%1] %2" )
+                            .arg( diagnostic.code, diagnostic.message ) );
+    QMessageBox::warning(
+        this, tr( "Save Refused" ),
+        tr( "The project was NOT saved:\n%1\n\n"
+            "Saving in this state would strip the SICNU data catalog from "
+            "the project file. Re-open the project (to restore the "
+            "governance store) or restore the store, then save again." )
+            .arg( details.join( QLatin1Char( '\n' ) ) ) );
+    if ( statusBar() )
+        statusBar()->showMessage( tr( "Save refused — project data would be lost" ), 6000 );
+    return true;
+}
+
 void QgisDesktopWindow::saveProject()
 {
     if (QgsProject::instance()->fileName().isEmpty()) {
         saveProjectAs();
+    } else if (refuseUnserializableProjectData()) {
+        // Downgrade refusal: the on-disk file keeps its SICNU block (#1747).
+        updateWindowTitle();
     } else if (QgsProject::instance()->write()) {
         updateWindowTitle();
         statusBar()->showMessage(tr("Project saved"), 3000);
@@ -450,6 +483,12 @@ bool QgisDesktopWindow::saveProjectAsTo(const QString &filePath)
             tr("Cannot save to:\n%1\n(the path is a directory)").arg(filePath) );
         return false;
     }
+
+    // #1747: same preflight as saveProject — a Save As whose serialization
+    // would be refused must not run (the writeProject refusal cannot abort
+    // the write, and the new file would carry no SICNU block).
+    if ( refuseUnserializableProjectData() )
+        return false;
 
     // #1097: QgsProject::write(filename) sets mFile BEFORE the write. Hold
     // prior identity/governance until the write succeeds so a failure does

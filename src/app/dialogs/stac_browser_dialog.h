@@ -31,7 +31,10 @@ private slots:
 
 private:
     void setupUi();
-    void populateResults(const QVariantList &features);
+    /// Renders one page of features. @p append keeps the existing rows and
+    /// feature data (#1788: "More Results" appends the next page instead of
+    /// replacing the table); a fresh search passes append=false.
+    void populateResults(const QVariantList &features, bool append);
 
     QgsMapCanvas *m_canvas = nullptr;
     QLineEdit *m_endpointEdit = nullptr;
@@ -44,4 +47,7 @@ private:
     QPushButton *m_loadButton = nullptr;
     StacClient *m_stacClient = nullptr;
     QList<QVariantMap> m_featureData;
+    /// True between a More click and its completion: the landing page
+    /// APPENDS instead of replacing (#1788).
+    bool m_awaitingAppend = false;
 };

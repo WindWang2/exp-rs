@@ -9,6 +9,10 @@
 
 #include "project_context.h"
 
+#include <QPointer>
+
+#include <memory>
+
 #include "dialogs/image_enhancement_panel.h"
 #include "dialogs/band_math_dialog.h"
 #include "dialogs/spectral_index_dialog.h"
@@ -340,17 +344,26 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
         m_roiSpectrumTool = nullptr;
         if ( m_mapCanvas && m_mapCanvas->mapTool() == abandoned )
             m_mapCanvas->unsetMapTool( abandoned );
-        delete abandoned;
+        // #1745: unsetMapTool deactivates the tool, and deactivate()
+        // deleteLater()s an unfinished polygon's tool. A sync delete of the
+        // same object would race that deferred release — release ownership
+        // exactly once, always deferred: deleteLater is idempotent (Qt frees
+        // the object a single time even when scheduled repeatedly).
+        abandoned->deleteLater();
     }
 
     // The tool computes the ROI mean spectrum and reports it into the Spectral
     // Profile dock; afterwards the canvas returns to the identify tool. The
     // callback is the tool's sole owner — it always restores the tool and
     // releases (empty values carry an error message in layerName).
+    // selfGuard breaks the constructor self-reference: the lambda outlives
+    // its own creation statement, so the QPointer is filled right after the
+    // tool exists and stays alive exactly as long as the callback does.
+    auto selfGuard = std::make_shared<QPointer<RsRoiSpectrumTool>>();
     auto *roiTool = new RsRoiSpectrumTool(
       m_mapCanvas, rasterLayer,
-      [this](const QVector<double> &values, const QVector<double> &wavelengths,
-             const QVector<QString> &labels, const QString &layerName)
+      [this, selfGuard](const QVector<double> &values, const QVector<double> &wavelengths,
+                        const QVector<QString> &labels, const QString &layerName)
       {
         if (!values.isEmpty() && m_spectralProfile)
         {
@@ -362,11 +375,14 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
         }
         if (m_mapCanvas && m_identifyTool)
           m_mapCanvas->setMapTool(m_identifyTool);
-        // Safe asynchronous deletion: we are inside the tool's own callback,
-        // releasing exactly this tool (re-invocation replaced it earlier).
-        if (m_roiSpectrumTool)
-          m_roiSpectrumTool->deleteLater();
+        // Safe asynchronous deletion — but ONLY of the tool this callback
+        // belongs to (R1 S3): a re-invoke between this watcher's firing and
+        // the deferred delete must not silently release the NEW tool.
+        QPointer<RsRoiSpectrumTool> me = *selfGuard;
+        if (me)
+          me->deleteLater(); // the firing tool itself (alive right now)
       });
+    *selfGuard = roiTool;
     m_roiSpectrumTool = roiTool;
 
     m_mapCanvas->setMapTool(m_roiSpectrumTool.data());

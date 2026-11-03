@@ -149,10 +149,21 @@ QString StacClient::selectCogHref(const QJsonObject &stacItemFeature)
     Json::Value parsed;
     Json::CharReaderBuilder builder;
     builder["collectComments"] = false;
+    // #1793 discipline (R1 S2): this parses a CATALOG-CONTROLLED document —
+    // a hostile nesting bomb must be a typed refusal, never a jsoncpp throw
+    // aborting the GUI inside the load slot. Pinned bound + typed catch.
+    builder["stackLimit"] = 64;
     std::string parseErrors;
     std::istringstream stream(parseText);
-    if (!Json::parseFromStream(builder, stream, &parsed, &parseErrors))
+    try
+    {
+        if (!Json::parseFromStream(builder, stream, &parsed, &parseErrors))
+            return {};
+    }
+    catch (const std::exception &)
+    {
         return {};
+    }
     return QString::fromStdString(sicnu::geo::StacClient::selectCogVsicurlHref(parsed));
 }
 
@@ -175,7 +186,11 @@ void StacClient::search(const QString &endpoint, const QString &collection,
     // F-02: every user-initiated search supersedes every older one (the
     // generation the finished handlers compare against). searchNext()
     // deliberately does NOT bump — pagination continues the same query.
+    // The superseded query's cached continuation is dropped too (#1789):
+    // a searchNext() after a failed/aborted search must report "no
+    // continuation", never silently strand the UI on the old page.
     ++d->searchGeneration;
+    d->lastPage.reset();
 
     // Allow endpoint without path scheme form "https://host/stac"
     const QUrl endpointUrl(endpoint);
@@ -228,11 +243,20 @@ void StacClient::searchNext()
     // cancelInFlight() bump searchGeneration, which strands the cached
     // continuation of the superseded query; re-fetching it would stamp that
     // page with the new generation and deliver the old query's results as
-    // the new query's. A stranded continuation is a no-op, exactly like
-    // "no next page".
+    // the new query's. A stranded continuation terminates here, exactly
+    // like "no next page" — but never silently (#1789): the caller disabled
+    // its UI waiting for a completion, so report the no-op.
     if (!d->lastPage || d->lastPageGeneration != d->searchGeneration ||
         !d->lastPage->hasMore())
+    {
+        const QString reason = !d->lastPage
+            ? QStringLiteral("no previous page to continue")
+            : (d->lastPageGeneration != d->searchGeneration)
+                  ? QStringLiteral("the previous search was superseded")
+                  : QStringLiteral("no further results");
+        emit searchNextUnavailable(reason);
         return;
+    }
     try
     {
         const StacRequest request = domainClientFor(

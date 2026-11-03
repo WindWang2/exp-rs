@@ -117,6 +117,14 @@ class QgsClassificationMainWindow : public QMainWindow
     void loadClassifierModel();
     bool saveClassificationProject( QString path = QString() );
     bool loadProjectFromFile( QString path = QString() );
+    /// Export one file through the staged-atomic copy dialog (#1792).
+    /// Public for offscreen tests (QFileDialog is driven by a timed
+    /// dismisser, same pattern as the shell lifecycle suite).
+    bool copyPathWithDialog( const QString &srcPath, const QString &title );
+    /// The dialog-free core of copyPathWithDialog (#1792): refuses
+    /// dest==src (canonical compare) and publishes staged-atomically.
+    /// Deterministic seam the tests drive directly.
+    bool copyPathTo( const QString &srcPath, const QString &dest );
 
   signals:
     void requestLoadToMainMap( const QString &rasterPath );
@@ -161,7 +169,6 @@ class QgsClassificationMainWindow : public QMainWindow
                          const QString &algorithmId = QString() );
     void exportSelectedStep7();
     void loadClassificationResultToMain();
-    bool copyPathWithDialog( const QString &srcPath, const QString &title );
     /// Register layer in the session map (store + tree; source of truth for canvas).
     void addSessionLayer( QgsMapLayer *layer, bool insertOnTop = true );
     /**
@@ -301,6 +308,13 @@ class QgsClassificationMainWindow : public QMainWindow
 
     QTimer *m_jmRecomputeTimer = nullptr;
     QTimer *m_spectralCurveTimer = nullptr;
+
+    /// Async spectral-curve recompute state (#1794): every recompute bump
+    /// supersedes in-flight work; a stale landing is dropped.
+    quint64 m_spectralRecomputeEpoch = 0;
+    /// RsScanPool generation of the in-flight recompute (0 = none);
+    /// cancelled at window destruction so a dying studio stops the read.
+    quint64 m_spectralRecomputeScan = 0;
 
     std::unique_ptr<RsClassifierBackend> m_loadedBackend;
     RsFeatureScaler m_loadedScaler;
