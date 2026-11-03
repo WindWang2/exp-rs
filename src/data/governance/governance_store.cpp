@@ -505,21 +505,29 @@ struct GovernanceStore::Impl
             "  entity_id TEXT NOT NULL DEFAULT '',"
             "  detail_json TEXT NOT NULL DEFAULT '');"
             "CREATE INDEX IF NOT EXISTS idx_gov_audit_entity ON audit_log(entity_kind, entity_id);"
-            "CREATE TABLE IF NOT EXISTS gov_audit("
-            "  seq INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "  ts_ms INTEGER NOT NULL,"
-            "  actor TEXT NOT NULL DEFAULT '',"
-            "  action TEXT NOT NULL DEFAULT '',"
-            "  entity_kind TEXT NOT NULL DEFAULT '',"
-            "  entity_id TEXT NOT NULL DEFAULT '',"
-            "  detail_json TEXT NOT NULL DEFAULT '');"
-            "CREATE TRIGGER IF NOT EXISTS trg_audit_log_gov_audit AFTER INSERT ON audit_log "
-            "BEGIN INSERT INTO gov_audit(seq, ts_ms, actor, action, entity_kind, entity_id, detail_json) "
-            "VALUES(new.seq, new.ts_ms, new.actor, new.action, new.entity_kind, new.entity_id, new.detail_json); END;"
+            // RIO-11 (#1803): gov_audit was a trigger-fed byte-for-byte
+            // duplicate of audit_log (double write, double growth). The
+            // single audit authority is audit_log; legacy duplicates are
+            // migrated away right after the schema runs (below).
             "INSERT OR REPLACE INTO gov_meta(key,value) VALUES('schema_version','"
             SICNU_GOVERNANCE_SCHEMA_VERSION "');"
             "COMMIT;";
-        return exec( schema );
+        if ( !exec( schema ) )
+            return false;
+
+        // RIO-11 (#1803): retire the legacy duplicate-copy trigger/table and
+        // bound the audit log. audit_log is the superset (gov_audit was
+        // trigger-fed FROM it), so dropping gov_audit loses nothing.
+        if ( !exec( "DROP TRIGGER IF EXISTS trg_audit_log_gov_audit;"
+                    "DROP TABLE IF EXISTS gov_audit;" ) )
+            return false;
+        // Bounded retention: keep the newest 100000 entries. A log that
+        // never rolls over is an unbounded file the governance store
+        // rewrites on every open.
+        if ( !exec( "DELETE FROM audit_log WHERE seq <= "
+                    "(SELECT COALESCE(MAX(seq),0) FROM audit_log) - 100000;" ) )
+            return false;
+        return true;
     }
 
     // --- readers ------------------------------------------------------------

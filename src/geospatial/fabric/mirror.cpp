@@ -429,6 +429,24 @@ std::string fabricChunkMirrorKey( const std::string &identityToken, const std::s
   return sha256Hex( basis ).substr( 0, 32 );
 }
 
+/// RIO-13 (#1803): a manifest carrying ANY 11.0-era signal demands the
+/// per-chunk sha256 proof — deleting the "index" member (or an individual
+/// sha256) must not downgrade the manifest to the pre-checksum v1 contract.
+/// v2 signals: the explicit manifestVersion stamp, the offline index, or
+/// the chunk's own chunkKey (written only by 11.0+ mirrors).
+bool manifestGenerationDemandsChecksum( const Json::Value &manifest )
+{
+  if ( manifest.isMember( "index" ) )
+    return true;
+  const Json::Value &v = manifest["manifestVersion"];
+  return v.isNumeric() && v.asDouble() >= 2;
+}
+
+bool manifestDemandsChecksum( const Json::Value &manifest, const Json::Value &chunk )
+{
+  return manifestGenerationDemandsChecksum( manifest ) || chunk.isMember( "chunkKey" );
+}
+
 std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::string &token,
                               const std::string &chunkKey, std::string *skippedCorrupt )
 {
@@ -488,7 +506,7 @@ std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::str
       return {};
     }
   }
-  else if ( manifest.isMember( "index" ) )
+  else if ( manifestDemandsChecksum( manifest, chunk ) )
   {
     if ( skippedCorrupt )
       *skippedCorrupt = "chunk entry without sha256: " + file;
@@ -663,7 +681,8 @@ enum class ChunkEntryVerdict
 ChunkEntryVerdict verifyChunkEntry( const Json::Value &manifest, const std::string &mirrorDirectory,
                                     const std::string &file, bool hasDeclaredBytes,
                                     std::uint64_t declaredBytes, bool hasSha256,
-                                    const std::string &sha256, std::uint64_t *bytesOut )
+                                    const std::string &sha256, bool hasChunkKey,
+                                    std::uint64_t *bytesOut )
 {
   if ( !isSafeMirrorChunkFileName( file ) )
     return ChunkEntryVerdict::BadEntry;
@@ -679,10 +698,12 @@ ChunkEntryVerdict verifyChunkEntry( const Json::Value &manifest, const std::stri
     if ( digest.empty() || digest != sha256 )
       return ChunkEntryVerdict::ChecksumMismatch;
   }
-  else if ( manifest.isMember( "index" ) )
+  else if ( manifestGenerationDemandsChecksum( manifest ) || hasChunkKey )
   {
-    // An 11.0 manifest (it carries the offline index) demands the proof;
-    // absence is corrupt, exactly like the replay-read contract.
+    // An 11.0 manifest (offline index, version stamp, or v2-era chunk
+    // members like chunkKey) demands the proof; absence is corrupt, exactly
+    // like the replay-read contract — deleting "index" alone must not
+    // downgrade the manifest to the pre-checksum v1 contract (RIO-13).
     return ChunkEntryVerdict::BadEntry;
   }
   if ( bytesOut != nullptr )
@@ -728,7 +749,8 @@ MirrorVerifyReport verifyMirror( const std::string &mirrorDirectory )
       const ChunkEntryVerdict verdict = verifyChunkEntry(
         manifest, mirrorDirectory, file, chunk["bytes"].isUInt64(),
         chunk["bytes"].isUInt64() ? chunk["bytes"].asUInt64() : 0, chunk["sha256"].isString(),
-        chunk["sha256"].isString() ? chunk["sha256"].asString() : std::string(), &entryBytes );
+        chunk["sha256"].isString() ? chunk["sha256"].asString() : std::string(),
+        chunk.isMember( "chunkKey" ), &entryBytes );
       switch ( verdict )
       {
         case ChunkEntryVerdict::Ok:
@@ -858,7 +880,8 @@ RepairCleanupResult repairCleanup( const std::string &mirrorDirectory )
       const ChunkEntryVerdict verdict = verifyChunkEntry(
         manifest, mirrorDirectory, file, chunk["bytes"].isUInt64(),
         chunk["bytes"].isUInt64() ? chunk["bytes"].asUInt64() : 0, chunk["sha256"].isString(),
-        chunk["sha256"].isString() ? chunk["sha256"].asString() : std::string(), nullptr );
+        chunk["sha256"].isString() ? chunk["sha256"].asString() : std::string(),
+        chunk.isMember( "chunkKey" ), nullptr );
       if ( verdict == ChunkEntryVerdict::Ok )
         continue;
       dropKeys.push_back( chunkKey );
@@ -1141,7 +1164,15 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
           fabricChunkMirrorKey( token, indexKey, sourceWindow, "band1" );
         outcome.chunkKey = key;
         {
-          Json::Value &assetIndex = manifest["index"][indexKey];
+          // RIO-13 (#1803): explicit generation stamp — deleting "index"
+        // alone must not make this manifest pass as pre-checksum v1.
+        // (Residual, accepted: a manifest stripped of index, version stamp,
+        // every chunkKey AND every sha256 is byte-indistinguishable from a
+        // genuine v1 manifest and replays size-only — inherent to v1
+        // compatibility; an attacker with manifest write access can equally
+        // mint a matching sha256 for their own bytes.)
+        manifest["manifestVersion"] = 2;
+        Json::Value &assetIndex = manifest["index"][indexKey];
           if ( !assetIndex.isObject() )
             assetIndex = Json::Value( Json::objectValue );
           if ( !assetIndex["token"].isString() || assetIndex["token"].asString() != token )
@@ -1259,6 +1290,12 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         chunk["file"] = key + ".tif";
         chunk["bytes"] = static_cast<Json::UInt64>( written );
         chunk["assetId"] = asset->record.id;
+        // RIO-13 (#1803): per-entry v2 signal — a manifest whose "index"
+        // member (or version stamp) was deleted still proves its chunks
+        // belong to the checksum-mandatory generation, so stripping
+        // manifest-level markers cannot downgrade it to the pre-sha256
+        // v1 contract.
+        chunk["chunkKey"] = key;
         chunk["window"] = [ & ] {
           Json::Value w( Json::arrayValue );
           w.append( sourceWindow.xOff );

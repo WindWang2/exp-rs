@@ -1,5 +1,6 @@
 // src/operators/runtime/detection_tile_engine.cpp
 #include "operators/runtime/detection_tile_engine.h"
+#include "geospatial/crs/crs_policy.h"
 
 #include "runtime/observability/fault_point.h"
 
@@ -151,7 +152,11 @@ void writeDetectionVector( const std::vector<DetectionBox> &boxes,
   if ( !projection.isEmpty() )
   {
     srs = OSRNewSpatialReference( nullptr );
-    if ( OSRSetFromUserInput( srs, projection.toUtf8().constData() ) != OGRERR_NONE )
+    // Model metadata is untrusted input — RIO-12: never let a projection
+    // string fetch a URL or open a file.
+    if ( sicnu::geo::osrSetFromUserInputNoNetworkNoFile(
+             srs, projection.toUtf8().constData() )
+         != OGRERR_NONE )
     {
       OSRDestroySpatialReference( srs );
       srs = nullptr;

@@ -79,6 +79,12 @@ class WorkerLeaseTracker
     /// Post-restart recovery: clears quarantine and the failure streak.
     void reset( const std::string &workerId );
 
+    /// Number of workers currently tracked (#1764 / RIO-2). Diagnostic +
+    /// regression oracle: the host must reset() every worker it tears down,
+    /// so for a fixed pool size this stays bounded by the live worker count
+    /// instead of growing one entry per recycled generation.
+    std::size_t trackedCount() const;
+
     struct Stats
     {
         std::uint64_t expiries = 0;     ///< lease-expiry episodes observed

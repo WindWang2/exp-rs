@@ -30,6 +30,16 @@
 namespace sicnu::geo
 {
 
+/// RIO-12 (#1803): THE safe user-input CRS import — never fetches URLs and
+/// never opens file paths (GDAL >= 3.9: OSRSetFromUserInputEx with
+/// ALLOW_NETWORK_ACCESS=NO / ALLOW_FILE_ACCESS=NO; older GDAL: pre-scan
+/// refusal of network/file spellings). Every OSRSetFromUserInput /
+/// SetFromUserInput call site fed by UNTRUSTED text (model metadata,
+/// dataset-carried projections, tool parameters) must route through this
+/// helper instead of the raw GDAL entry points.
+OGRErr osrSetFromUserInputNoNetworkNoFile( OGRSpatialReferenceH handle,
+                                           const char *text );
+
 /// Axis order used by transform INPUT/OUTPUT coordinates.
 enum class AxisOrder
 {
