@@ -217,10 +217,16 @@ TEST_CASE( "relocation reports conflicts instead of overwriting (WE-30)",
     // The original relocated bytes survived.
     CHECK( destinationHasContent( relocateDir, QStringLiteral( "ndvi.tif" ), payload ) );
 
-    // Explicit opt-in replaces the destination.
+    // Explicit opt-in replaces the destination. The overwrite import needs a
+    // store that has NOT already ingested this bundle (the duplicate-ingest
+    // guard would short-circuit before relocation).
+    ExperimentStore target3;
+    REQUIRE( target3.open( fx.dir.filePath( QStringLiteral( "target-a3.db" ) ) ) );
+    REQUIRE( target3.upsertExperiment( home ).has_value() );
+    ReproductionBundleImporter importer3( target3 );
     ReproductionBundleImportOptions overwrite = options;
     overwrite.overwriteExistingData = true;
-    const auto overwriteReport = importer2.importRun( overwrite );
+    const auto overwriteReport = importer3.importRun( overwrite );
     REQUIRE( overwriteReport.ok );
     CHECK( destinationHasContent( relocateDir, QStringLiteral( "ndvi.tif" ), otherPayload ) );
 }
@@ -295,8 +301,10 @@ TEST_CASE( "dry-run imports check everything and write nothing (WP07)",
     CHECK_FALSE( QFileInfo::exists( QDir( relocateDir ).filePath(
         QStringLiteral( "out.tif" ) ) ) );
 
-    // A second dry-run against an existing destination surfaces the would-be
-    // overwrite as a conflict without touching the file.
+    // A second dry-run against an existing destination surfaces the
+    // conflict without touching the file. WITHOUT the overwrite opt-in the
+    // conflict reads "not overwritten"; WITH the opt-in (still dry-run) it
+    // reads "WOULD be overwritten" and the file is still left untouched.
     {
         QDir( relocateDir ).mkpath( QStringLiteral( "." ) );
         QFile existing( QDir( relocateDir ).filePath( QStringLiteral( "out.tif" ) ) );
@@ -307,7 +315,17 @@ TEST_CASE( "dry-run imports check everything and write nothing (WP07)",
     REQUIRE( conflictReport.ok );
     CHECK( conflictReport.dryRun );
     REQUIRE( conflictReport.conflicts.size() == 1 );
-    CHECK( conflictReport.conflicts.first().contains( QStringLiteral( "WOULD be overwritten" ) ) );
+    CHECK( conflictReport.conflicts.first().contains( QStringLiteral( "not overwritten" ) ) );
+    CHECK( destinationHasContent( relocateDir, QStringLiteral( "out.tif" ),
+                                 QByteArray( "previous" ) ) );
+
+    ReproductionBundleImportOptions dryOverwrite = options;
+    dryOverwrite.overwriteExistingData = true;
+    const auto wouldOverwriteReport = importer.importRun( dryOverwrite );
+    REQUIRE( wouldOverwriteReport.ok );
+    CHECK( wouldOverwriteReport.dryRun );
+    REQUIRE( wouldOverwriteReport.conflicts.size() == 1 );
+    CHECK( wouldOverwriteReport.conflicts.first().contains( QStringLiteral( "WOULD be overwritten" ) ) );
     CHECK( destinationHasContent( relocateDir, QStringLiteral( "out.tif" ),
                                  QByteArray( "previous" ) ) );
 

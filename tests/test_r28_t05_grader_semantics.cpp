@@ -9,6 +9,7 @@
 #include "grader/grader_types.h"
 
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
@@ -80,8 +81,14 @@ TEST_CASE( "evidence index survives a moved source vector (WE-19)",
            "[r28_t05][grader]" )
 {
     std::vector<GradeEvidenceItem> items;
+    // Zero-padded ids so the evidenceId string sort (the index's documented
+    // deterministic order) matches numeric order.
     for ( int i = 0; i < 64; ++i )
-        items.push_back( metricItem( "obs-" + std::to_string( i ), "kappa", 0.5 ) );
+    {
+        char id[16];
+        std::snprintf( id, sizeof( id ), "obs-%02d", i );
+        items.push_back( metricItem( id, "kappa", 0.5 ) );
+    }
     const EvidenceIndex index( items );
 
     // Reallocate/move the source out from under the index: pre-#1804 this
@@ -94,7 +101,7 @@ TEST_CASE( "evidence index survives a moved source vector (WE-19)",
         index.byKey( "kappa" );
     REQUIRE( bucket.size() == 64 );
     // evidenceId-sorted order preserved.
-    CHECK( bucket.front()->evidenceId == "obs-0" );
+    CHECK( bucket.front()->evidenceId == "obs-00" );
     CHECK( bucket.back()->evidenceId == "obs-63" );
     for ( const GradeEvidenceItem *item : bucket )
         CHECK( item->value == 0.5 );
