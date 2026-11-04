@@ -84,6 +84,26 @@ double parsePublishedStat( const char *raw, const char *key, const std::string &
     return value;
 }
 
+/// Same discipline as parsePublishedStat for the unsigned pixel counts
+/// persisted on a published change mask.
+std::uint64_t parsePublishedCount( const char *raw, const char *key, const std::string &outputPath )
+{
+    if ( !raw || !*raw )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               std::string( "Published change metadata " ) + key
+                                   + " is empty (" + outputPath + ")" );
+    const std::string text( raw );
+    const char *begin = text.c_str();
+    char *end = nullptr;
+    const unsigned long long value = std::strtoull( begin, &end, 10 );
+    if ( end == begin || *end != '\0' )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               std::string( "Published change metadata " ) + key
+                                   + " is not an unsigned integer: '" + text + "' ("
+                                   + outputPath + ")" );
+    return static_cast<std::uint64_t>( value );
+}
+
 // --- Streaming IR-MAD math -------------------------------------------------
 //
 // The IR-MAD-specific numerics (sqrt-inverse, the Chi-square survival
@@ -368,9 +388,38 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
     }
     const CPLErr writeErr = GDALRasterIO( maskBand, GF_Write, 0, 0, width, height,
                                           mask.data(), width, height, GDT_Byte, 0, 0 );
+    // Changed-pixel statistics from the in-memory mask (255 = NoData).
+    MaskDerivation derived;
+    derived.thresholdUsed = thresholdUsed;
+    for ( const uint8_t v : mask )
+    {
+        if ( v == 255 )
+            continue;
+        ++derived.evaluated;
+        if ( v == 1 )
+            ++derived.changed;
+    }
     GDALSetMetadataItem( maskDs, "SICNU_CHANGE_METHOD", opts.methodLabel.c_str(), nullptr );
     GDALSetMetadataItem( maskDs, "SICNU_CHANGE_THRESHOLD",
                          QString::number( thresholdUsed, 'g', 10 ).toUtf8().constData(), nullptr );
+    // Full stat set + counts so an execution-cache hit (alreadyPublished) can
+    // return a result identical to the run that actually computed: the
+    // magnitude temp is deleted right after this call, the mask raster is the
+    // only durable record. 'g',17 round-trips a double exactly.
+    GDALSetMetadataItem( maskDs, "SICNU_CHANGE_MEAN",
+                         QString::number( magStats.mean, 'g', 17 ).toUtf8().constData(), nullptr );
+    GDALSetMetadataItem( maskDs, "SICNU_CHANGE_STDDEV",
+                         QString::number( magStats.stddev(), 'g', 17 ).toUtf8().constData(), nullptr );
+    GDALSetMetadataItem( maskDs, "SICNU_CHANGE_MIN",
+                         QString::number( magStats.minVal, 'g', 17 ).toUtf8().constData(), nullptr );
+    GDALSetMetadataItem( maskDs, "SICNU_CHANGE_MAX",
+                         QString::number( magStats.maxVal, 'g', 17 ).toUtf8().constData(), nullptr );
+    GDALSetMetadataItem( maskDs, "SICNU_CHANGE_CHANGED",
+                         QByteArray::number( static_cast<qulonglong>( derived.changed ) ).constData(),
+                         nullptr );
+    GDALSetMetadataItem( maskDs, "SICNU_CHANGE_EVALUATED",
+                         QByteArray::number( static_cast<qulonglong>( derived.evaluated ) ).constData(),
+                         nullptr );
     if ( opts.minAreaPixels > 0 )
     {
         GDALSetMetadataItem( maskDs, "SICNU_CHANGE_MIN_AREA",
@@ -384,18 +433,6 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
                                "Failed to write change mask: " + opts.outputPath );
     }
     maskGuard.committed = true;
-
-    // Changed-pixel statistics from the in-memory mask (255 = NoData).
-    MaskDerivation derived;
-    derived.thresholdUsed = thresholdUsed;
-    for ( const uint8_t v : mask )
-    {
-        if ( v == 255 )
-            continue;
-        ++derived.evaluated;
-        if ( v == 1 )
-            ++derived.changed;
-    }
     return derived;
 }
 
@@ -747,15 +784,58 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     // --- Mask path: threshold from the streaming stats, then the mask. -----
     context.reportProgress( 0.8, "Computing change threshold" );
     MaskDerivation derived;
-    try
+    if ( chunkRes.alreadyPublished )
     {
-        derived = writeMaskFromMagnitude( magPath, beforeDs, width, height, opts, magStats, context );
-        QFile::remove( QString::fromStdString( magPath ) );
+        // Execution-cache hit: the journal's publish marker covers the
+        // magnitude phase only, so this run never wrote (and the first run
+        // already deleted) the magnitude temp — re-deriving the mask from it
+        // would reopen a file that does not exist. The published MASK is the
+        // durable record of the completed run: verify its identity and read
+        // the persisted threshold/counts back instead.
+        GdalDatasetWrapper pubMaskDs;
+        if ( !pubMaskDs.open( QString::fromStdString( opts.outputPath ) ) )
+        {
+            throw RSOperatorError(
+                ErrorCode::GdalError,
+                "Execution cache reports this change run as already published, but the "
+                "change mask output cannot be reopened: "
+                    + opts.outputPath
+                    + " — delete the output and the chunk journal for this run, or pick a "
+                      "different output path" );
+        }
+        auto maskH = reinterpret_cast<GDALDatasetH>( pubMaskDs.dataset() );
+        const char *method = GDALGetMetadataItem( maskH, "SICNU_CHANGE_METHOD", nullptr );
+        if ( !method || opts.methodLabel != method )
+        {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Published change mask at " + opts.outputPath + " was produced by method '"
+                    + ( method ? method : "<none>" ) + "', not '" + opts.methodLabel
+                    + "' — the output no longer matches this run; delete it or pick a "
+                      "different output path" );
+        }
+        derived.thresholdUsed = static_cast<float>( parsePublishedStat(
+            GDALGetMetadataItem( maskH, "SICNU_CHANGE_THRESHOLD", nullptr ),
+            "SICNU_CHANGE_THRESHOLD", opts.outputPath ) );
+        derived.changed = parsePublishedCount(
+            GDALGetMetadataItem( maskH, "SICNU_CHANGE_CHANGED", nullptr ),
+            "SICNU_CHANGE_CHANGED", opts.outputPath );
+        derived.evaluated = parsePublishedCount(
+            GDALGetMetadataItem( maskH, "SICNU_CHANGE_EVALUATED", nullptr ),
+            "SICNU_CHANGE_EVALUATED", opts.outputPath );
     }
-    catch ( ... )
+    else
     {
-        QFile::remove( QString::fromStdString( magPath ) );
-        throw;
+        try
+        {
+            derived = writeMaskFromMagnitude( magPath, beforeDs, width, height, opts, magStats, context );
+            QFile::remove( QString::fromStdString( magPath ) );
+        }
+        catch ( ... )
+        {
+            QFile::remove( QString::fromStdString( magPath ) );
+            throw;
+        }
     }
 
     Json::Value result( Json::objectValue );
