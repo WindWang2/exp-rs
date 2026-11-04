@@ -93,6 +93,17 @@
           "type" : "integer"
         },
         {
+          "default" : "standard",
+          "enum" : 
+          [
+            "standard",
+            "relaxed"
+          ],
+          "name" : "cloud_confidence",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
           "default" : "cloud_and_shadow",
           "enum" : 
           [

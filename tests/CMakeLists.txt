@@ -16101,18 +16101,21 @@ endif()
 #   adversarial  the fail-open battery: a Pass must be impossible without evidence
 # ===========================================================================
 
-set( SICNU_VERIFIER_LANES
-    core
-    checks
-    provenance
-    packs
-    render
-    drift
-    adversarial
+# Explicit target names (not lane suffixes): the build-wiring drift gate
+# matches test file stems textually against this file, and a name produced
+# only by string interpolation inside the loop is invisible to it — the six
+# interpolated lanes were reported "not registered" while being registered.
+set( SICNU_VERIFIER_LANE_TARGETS
+    test_verifier_core_14
+    test_verifier_checks_14
+    test_verifier_provenance_14
+    test_verifier_packs_14
+    test_verifier_render_14
+    test_verifier_drift_14
+    test_verifier_adversarial_14
 )
 
-foreach( LANE ${SICNU_VERIFIER_LANES} )
-    set( LANE_TARGET "test_verifier_${LANE}_14" )
+foreach( LANE_TARGET ${SICNU_VERIFIER_LANE_TARGETS} )
     add_executable( ${LANE_TARGET} ${LANE_TARGET}.cpp )
     target_link_libraries( ${LANE_TARGET} PRIVATE
         Catch2::Catch2WithMain
