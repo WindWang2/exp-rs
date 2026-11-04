@@ -686,7 +686,7 @@
       "name" : "artifact_read"
     },
     {
-      "description" : "Drive a scientific agent session through the OperationsCoordinator (agent_loop is the only state machine). Actions: run (goal[,intent,mode,journal_directory,session_id,domain,role,refs]), resume (journal_directory,session_id,goal), reconcile (journal_directory,session_id \u2014 inspect a journal without resuming, incl. duplicate-submit hazards), status/timeline/export (session_id), pause/cancel/clear_pause/clear_cancel, approve_repair, actions.",
+      "description" : "Drive a scientific agent session through the OperationsCoordinator (agent_loop is the only state machine). Actions: run (goal[,intent,mode,journal_directory,session_id,domain,role,refs]), resume (journal_directory,session_id,goal), reconcile (journal_directory,session_id \u2014 inspect a journal without resuming, incl. duplicate-submit hazards), status/timeline/export (session_id), pause/cancel/clear_pause/clear_cancel, actions. Repair approval is human-only: the operator mints it in the local Control Center UI, never through this tool (#1733).",
       "family" : "meta",
       "inputSchema" : 
       {
