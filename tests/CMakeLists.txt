@@ -18869,3 +18869,14 @@ target_include_directories(test_r28_t03_production_seams PRIVATE
 )
 sicnu_discover_tests(test_r28_t03_production_seams TIMEOUT 600)
 # --- end r28-t03 production seams registration ---
+
+# R28-T03 M2 (WP06): verification aggregation fail-closed matrix.
+add_executable(test_r28_t03_verification_matrix test_r28_t03_verification_matrix.cpp)
+target_link_libraries(test_r28_t03_verification_matrix PRIVATE
+  Catch2::Catch2WithMain
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_verification_matrix PRIVATE jsoncpp)
+endif()
+sicnu_discover_tests(test_r28_t03_verification_matrix)
