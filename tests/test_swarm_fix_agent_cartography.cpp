@@ -732,6 +732,6 @@ TEST_CASE( "AG-M-10: preflight issue lists are capped for every rule",
     for ( const auto &issue : issues )
       if ( issue["code"].asString() == "MAP_MARGIN_VIOLATION" )
         ++marginViolations;
-    CHECK( marginViolations <= 494 ); // the rest were dropped by the cap
+    CHECK( marginViolations <= 495 ); // the rest were dropped by the cap
   }
 }

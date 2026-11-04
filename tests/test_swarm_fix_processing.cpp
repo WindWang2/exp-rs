@@ -232,8 +232,9 @@ TEST_CASE( "PROC-A1-1: computeLogRatio emits NaN for non-finite inputs, "
     REQUIRE( std::isnan( lr[1] ) );
     REQUIRE( std::isnan( lr[2] ) );
     REQUIRE( std::isnan( lr[3] ) );
-    // Non-positive shifted radiance is outside the operator's domain too.
-    REQUIRE( std::isnan( lr[4] ) );
+    // Negative radiance clamps to 0 before the epsilon shift (the library
+    // log-ratio semantics, R26-S9): two identical negatives are "no change".
+    REQUIRE( lr[4] == 0.0f );
 
     // Identical finite inputs still give exactly 0 (the documented anchor).
     const std::vector<float> same = { 10.0f, 0.25f, 1000.0f };
@@ -690,6 +691,7 @@ TEST_CASE( "PROC-A2-2: exp_spectral additive-constant indices honour "
 
     std::vector<float> a( 2, 0.0f );
     std::vector<float> b( 2, 0.0f );
+    std::vector<float> eviUnit( 2, 0.0f );
 
     // EVI: DN input with isUnitReflectance == false must equal the unit input
     // with the flag true (the /10^4 guard is what makes the +1 constant
@@ -697,9 +699,9 @@ TEST_CASE( "PROC-A2-2: exp_spectral additive-constant indices honour "
     REQUIRE( SpectralIndices::evi( nirDn.data(), redDn.data(), blueDn.data(),
                                    a.data(), 2, false, kNoData ) );
     REQUIRE( SpectralIndices::evi( nirUnit.data(), redUnit.data(), blueUnit.data(),
-                                   b.data(), 2, true, kNoData ) );
+                                   eviUnit.data(), 2, true, kNoData ) );
     for ( int i = 0; i < 2; ++i )
-        REQUIRE( a[i] == Approx( b[i] ).margin( 1e-6f ) );
+        REQUIRE( a[i] == Approx( eviUnit[i] ).margin( 1e-6f ) );
 
     // SAVI, same guard.
     REQUIRE( SpectralIndices::savi( nirDn.data(), redDn.data(), a.data(), 2, 0.5f,
@@ -717,7 +719,8 @@ TEST_CASE( "PROC-A2-2: exp_spectral additive-constant indices honour "
 
     // Closed form for the unit path: EVI = 2.5*(0.8-0.2)/(0.8+6*0.2-7.5*0.1+1)
     //                             = 1.5 / (0.8+1.2-0.75+1) = 1.5/2.25 = 0.6667.
-    REQUIRE( b[1] == Approx( 2.0f / 3.0f ).margin( 1e-6f ) );
+    // (eviUnit, not b: b has been reused for SAVI/EVI2 by now.)
+    REQUIRE( eviUnit[1] == Approx( 2.0f / 3.0f ).margin( 1e-6f ) );
 
     // NoData passthrough is unchanged by the rename.
     const std::vector<float> voidBand = { kNoData, 0.5f };

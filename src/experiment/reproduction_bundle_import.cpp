@@ -339,7 +339,8 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     // such bundle). Read it before the gate below; the same
     // always-written contract as model_refs.json applies, so absence is a
     // bundle defect, not a shrug.
-    if ( const auto software = loadJson( dir, QStringLiteral( "software.json" ), &warnings ) )
+    if ( const auto software =
+             loadJson( dir, QStringLiteral( "software.json" ), &warnings, verifiedDigests ) )
     {
         run.setSoftwareRevision(
             software->value( QStringLiteral( "software_revision" ) ).toString() );

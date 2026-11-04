@@ -253,13 +253,14 @@ void PipelineScene::clearWorkflow()
 
 void PipelineScene::loadWorkflowDefinition( const WorkflowDefinition &def )
 {
-  // swarm-review APP-R-1: keep the loaded document as the source of truth for
-  // the fields node items cannot represent (params / gates / resource estimate
-  // / verification policy).
-  mLastLoadedDef = def;
-
   mBulkUpdating = true;
   clearWorkflow();
+
+  // swarm-review APP-R-1: keep the loaded document as the source of truth for
+  // the fields node items cannot represent (params / gates / resource estimate
+  // / verification policy). Set AFTER clearWorkflow() — its reset must not
+  // drop the document being loaded.
+  mLastLoadedDef = def;
 
   for ( const auto &stepDef : def.steps )
   {

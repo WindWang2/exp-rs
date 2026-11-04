@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <string>
 
 namespace sicnu::workflow {
 
@@ -34,9 +35,13 @@ inline std::chrono::milliseconds pipelineTimeoutMs()
   const char *raw = std::getenv( "SICNU_PIPELINE_TIMEOUT_SEC" );
   if ( raw == nullptr || *raw == '\0' )
     return kDefault;
-  const long long seconds = std::atoll( raw );
-  if ( seconds < 0 )
+  // atoll() returns 0 for a non-numeric prefix — and 0 means "unlimited" —
+  // so a malformed value ("abc", "30x") would silently become the unlimited
+  // wall (or 30 seconds). Parse strictly: only an all-digit string counts.
+  const std::string text( raw );
+  if ( text.find_first_not_of( "0123456789" ) != std::string::npos )
     return kDefault;
+  const long long seconds = std::atoll( raw );
   if ( seconds == 0 || seconds >= kUnlimitedSeconds )
     return kUnlimited;
   return std::chrono::duration_cast<std::chrono::milliseconds>(

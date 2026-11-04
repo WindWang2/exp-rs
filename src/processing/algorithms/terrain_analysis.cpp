@@ -126,7 +126,7 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
         const float d = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) - 1 )];
         const float f = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) + 1 )];
         const float g = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
-        const float h = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
+        const float h = dem[( static_cast<size_t>( r ) + 1 ) * w + static_cast<size_t>( c )];
         const float i = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
 
         bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||
@@ -266,7 +266,7 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
             d = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) - 1 )];
             f = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) + 1 )];
             g = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
-            h = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
+            h = dem[( static_cast<size_t>( r ) + 1 ) * w + static_cast<size_t>( c )];
             i = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
         }
 
@@ -389,7 +389,7 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
             d = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) - 1 )];
             f = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) + 1 )];
             g = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
-            h = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
+            h = dem[( static_cast<size_t>( r ) + 1 ) * w + static_cast<size_t>( c )];
             i = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
         }
 

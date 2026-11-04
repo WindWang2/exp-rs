@@ -427,7 +427,7 @@ TEST_CASE( "AssessResult reports the honest band count and class_count semantics
     // was clamped to >= 1, masking a 0-band dataset).
     const auto pass = callTool(
         "spatial:assess_result",
-        params( { { "path", path },
+        params( { { "target", path },
                   { "expectations", params( { { "expected_classes", Json::Value( 3 ) } } ) } } ) );
     REQUIRE( pass.success );
     CHECK( pass.output[ "band_count" ].asInt() == 2 );
@@ -441,7 +441,7 @@ TEST_CASE( "AssessResult reports the honest band count and class_count semantics
     // exists for (pre-fix `observed <= expected` passed exactly then).
     const auto warn = callTool(
         "spatial:assess_result",
-        params( { { "path", path },
+        params( { { "target", path },
                   { "expectations", params( { { "expected_classes", Json::Value( 5 ) } } ) } } ) );
     REQUIRE( warn.success );
     CHECK( warn.output[ "verdict" ].asString() == "warn" );

@@ -500,8 +500,12 @@ TEST_CASE( "EXP-6: unmapped KMeans clusters fall back to the unclassified sentin
     INFO( res.errorMessage.toStdString() );
     REQUIRE( res.ok );
 
-    // Row 1 (truth 0) fell back to the sentinel — not to the real class 0.
-    CHECK( !res.accuracy.classIds.contains( 0 ) );
+    // Row 1 (truth 0) fell back to the sentinel. classIds is the union of
+    // truth and prediction classes (rs_accuracy_assessment.h), so the real
+    // class 0 appears there via the TRUTH column — the fallback shows up as
+    // the -1 prediction, and above all in the metrics: had the unmapped
+    // cluster fallen back to the real class 0 (the pre-fix behaviour), row 1
+    // would have scored correct and OA/kappa would be 1.0/1.0.
     CHECK( res.accuracy.classIds.contains( -1 ) );
     CHECK( res.accuracy.overallAccuracy == Catch::Approx( 0.5 ).epsilon( 1e-12 ) );
     CHECK( res.accuracy.kappa == Catch::Approx( 1.0 / 3.0 ).epsilon( 1e-12 ) );

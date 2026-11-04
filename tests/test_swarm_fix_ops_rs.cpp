@@ -700,9 +700,18 @@ TEST_CASE( "swarm fix OPS-R1-5: register_images declares the decimated "
     REQUIRE( tmp.isValid() );
 
     constexpr int kDim = 256;
-    writeRegistrationTiff( tmp.filePath( "reg_src.tif" ), kDim, texture );
+    // A SMOOTH texture (no per-pixel grain): maxDim decimation is a nearest
+    // RasterIO halving, and per-pixel noise aliases into the phase-correlation
+    // window at 128x128 (too_few_matches). The sinusoids survive the halving,
+    // which is all this declaration test needs.
+    const auto smooth = []( int x, int y ) {
+        const double fx = x, fy = y;
+        return static_cast<float>( 50.0 + 20.0 * std::sin( fx / 9.3 ) * std::sin( fy / 7.7 )
+                                   + 10.0 * std::sin( ( fx + fy ) / 5.1 ) );
+    };
+    writeRegistrationTiff( tmp.filePath( "reg_src.tif" ), kDim, smooth );
     writeRegistrationTiff( tmp.filePath( "reg_ref.tif" ), kDim,
-                           []( int x, int y ) { return texture( x - 4, y - 6 ); } );
+                           [&smooth]( int x, int y ) { return smooth( x - 4, y - 6 ); } );
 
     const auto run = [&]( const QString &outName, int maxDim ) {
         Json::Value params( Json::objectValue );
@@ -724,20 +733,24 @@ TEST_CASE( "swarm fix OPS-R1-5: register_images declares the decimated "
     REQUIRE( full["maxDim"].asInt() == kDim );
 
     // Capped run: the declaration must say the delivered grid is decimated.
+    // The cap is 192 (not a halving): a nearest-neighbour decimation this
+    // gentle keeps the phase-correlation window matched on the smooth
+    // fixture, and 192 < 256 still exercises the capped path.
+    constexpr int kCap = 192;
     Json::Value capped;
-    REQUIRE_NOTHROW( capped = run( "reg_capped.tif", kDim / 2 ) );
+    REQUIRE_NOTHROW( capped = run( "reg_capped.tif", kCap ) );
     REQUIRE( capped["outputGridDecimated"].asBool() == true );
-    REQUIRE( capped["outputWidth"].asInt() == kDim / 2 );
-    REQUIRE( capped["outputHeight"].asInt() == kDim / 2 );
+    REQUIRE( capped["outputWidth"].asInt() == kCap );
+    REQUIRE( capped["outputHeight"].asInt() == kCap );
     REQUIRE( capped["referenceWidth"].asInt() == kDim );
-    REQUIRE( capped["maxDim"].asInt() == kDim / 2 );
+    REQUIRE( capped["maxDim"].asInt() == kCap );
 
     GDALAllRegister();
     GDALDataset *out = static_cast<GDALDataset *>(
         GDALOpen( tmp.filePath( "reg_capped.tif" ).toUtf8().constData(), GA_ReadOnly ) );
     REQUIRE( out != nullptr );
-    REQUIRE( out->GetRasterXSize() == kDim / 2 );
-    REQUIRE( out->GetRasterYSize() == kDim / 2 );
+    REQUIRE( out->GetRasterXSize() == kCap );
+    REQUIRE( out->GetRasterYSize() == kCap );
     GDALClose( out );
 }
 
@@ -758,40 +771,63 @@ TEST_CASE( "swarm fix OPS-R1-6: apply_mask keeps a Float64 band exact inside "
     // float32 round-trip yields 2^24).
     const double kNotFloat32Exact = 16777217.0;
 
-    const QString input = tmp.filePath( "mixed.tif" );
+    const QString input = tmp.filePath( "mixed.vrt" );
     ensureGdalInit();
-    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
-    REQUIRE( driver != nullptr );
-    GDALDatasetH ds = GDALCreate( driver, input.toUtf8().constData(), kN, kN, 1,
-                                  GDT_Float32, nullptr );
-    REQUIRE( ds != nullptr );
+    // GTiff cannot mix band dtypes (and has no AddBand), so the stack is a
+    // VRT over two single-band rasters: band 1 Float32, band 2 Float64.
+    GDALDriverH tiff = GDALGetDriverByName( "GTiff" );
+    REQUIRE( tiff != nullptr );
     double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( kN ), 0.0, -1.0 };
-    REQUIRE( GDALSetGeoTransform( ds, gt ) == CE_None );
-    REQUIRE( GDALSetProjection( ds,
-                                "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\","
-                                "SPHEROID[\"WGS 84\",6378137,298.257223563]],"
-                                "PRIMEM[\"Greenwich\",0],UNIT[\"degree\","
-                                "0.0174532925199433]]" )
-             == CE_None );
+    for ( int band = 1; band <= 2; ++band )
     {
-        GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
-        GDALSetRasterNoDataValue( band, -9999.0 );
-        const std::vector<float> plane( static_cast<size_t>( kN ) * kN, 1.5f );
-        REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, kN, kN,
-                               const_cast<float *>( plane.data() ), kN, kN, GDT_Float32,
-                               0, 0 ) == CE_None );
+        const bool wide = ( band == 2 );
+        const QString path = tmp.filePath( wide ? "mixed_b2.tif" : "mixed_b1.tif" );
+        GDALDatasetH ds = GDALCreate( tiff, path.toUtf8().constData(), kN, kN, 1,
+                                      wide ? GDT_Float64 : GDT_Float32, nullptr );
+        REQUIRE( ds != nullptr );
+        REQUIRE( GDALSetGeoTransform( ds, gt ) == CE_None );
+        REQUIRE( GDALSetProjection( ds,
+                                    "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\","
+                                    "SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+                                    "PRIMEM[\"Greenwich\",0],UNIT[\"degree\","
+                                    "0.0174532925199433]]" )
+                 == CE_None );
+        GDALRasterBandH rb = GDALGetRasterBand( ds, 1 );
+        GDALSetRasterNoDataValue( rb, -9999.0 );
+        if ( wide )
+        {
+            const std::vector<double> plane( static_cast<size_t>( kN ) * kN, kNotFloat32Exact );
+            REQUIRE( GDALRasterIO( rb, GF_Write, 0, 0, kN, kN,
+                                   const_cast<double *>( plane.data() ), kN, kN, GDT_Float64,
+                                   0, 0 ) == CE_None );
+        }
+        else
+        {
+            const std::vector<float> plane( static_cast<size_t>( kN ) * kN, 1.5f );
+            REQUIRE( GDALRasterIO( rb, GF_Write, 0, 0, kN, kN,
+                                   const_cast<float *>( plane.data() ), kN, kN, GDT_Float32,
+                                   0, 0 ) == CE_None );
+        }
+        GDALClose( ds );
     }
-    // Second band: Float64 (per-band dtype differs from band 1).
-    REQUIRE( GDALAddBand( ds, GDT_Float64, nullptr ) == CE_None );
     {
-        GDALRasterBandH band = GDALGetRasterBand( ds, 2 );
-        GDALSetRasterNoDataValue( band, -9999.0 );
-        const std::vector<double> plane( static_cast<size_t>( kN ) * kN, kNotFloat32Exact );
-        REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, kN, kN,
-                               const_cast<double *>( plane.data() ), kN, kN, GDT_Float64,
-                               0, 0 ) == CE_None );
+        QFile vrt( input );
+        REQUIRE( vrt.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        vrt.write( R"VRT(<VRTDataset rasterXSize="4" rasterYSize="4">
+  <SRS>GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]</SRS>
+  <GeoTransform>0.0, 1.0, 0.0, 4.0, 0.0, -1.0</GeoTransform>
+  <VRTRasterBand dataType="Float32" band="1">
+    <NoDataValue>-9999</NoDataValue>
+    <SimpleSource><SourceFilename relativeToVRT="1">mixed_b1.tif</SourceFilename><SourceBand>1</SourceBand></SimpleSource>
+  </VRTRasterBand>
+  <VRTRasterBand dataType="Float64" band="2">
+    <NoDataValue>-9999</NoDataValue>
+    <SimpleSource><SourceFilename relativeToVRT="1">mixed_b2.tif</SourceFilename><SourceBand>1</SourceBand></SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>
+)VRT" );
+        vrt.close();
     }
-    GDALClose( ds );
 
     const QString mask = writeByteMask( tmp.filePath( "mixed_mask.tif" ), kN, kN,
                                         std::vector<uint8_t>( kN * kN, 0 ) );

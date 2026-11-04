@@ -488,7 +488,9 @@ TEST_CASE( "APP-R-6: classifier band editor refuses an unparsable band list",
 
   RsClassifierSetupBar bar;
   auto *bandsEdit = bar.findChild<QLineEdit *>( QStringLiteral( "rsClassifierBands" ) );
-  auto *applyButton = bar.findChild<QPushButton *>( QStringLiteral( "rsClassifierBtnApply" ) );
+  // SicnuUi::markPrimary() renames the button to rsPrimaryButton, so that is
+  // the object name it actually carries (rsClassifierBtnApply is overwritten).
+  auto *applyButton = bar.findChild<QPushButton *>( QStringLiteral( "rsPrimaryButton" ) );
   REQUIRE( bandsEdit != nullptr );
   REQUIRE( applyButton != nullptr );
 

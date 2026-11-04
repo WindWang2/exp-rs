@@ -5848,6 +5848,8 @@ if(TARGET qgis_app_classify)
     test_classification_task_center.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
   )
   target_link_libraries(test_classification_task_center PRIVATE
     Catch2::Catch2WithMain
@@ -5883,6 +5885,8 @@ if(TARGET qgis_app_classify)
     test_classification_window.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
   )
   target_link_libraries(test_classification_window PRIVATE
     Catch2::Catch2WithMain
@@ -5915,6 +5919,8 @@ if(TARGET qgis_app_classify)
 
   # Phase 10A Task 10.3 — Class table widget tests.
   add_executable(test_class_table_widget test_class_table_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_class_table_widget PRIVATE
     Catch2::Catch2WithMain
@@ -5939,6 +5945,8 @@ if(TARGET qgis_app_classify)
   # Global help/tooltip/confirmation sweep — catalog entries + dialog help buttons.
   add_executable(test_global_help_tips test_global_help_tips.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_global_help_tips PRIVATE
     Catch2::Catch2WithMain
@@ -6029,6 +6037,8 @@ sicnu_add_test(test_layout_tools)
 
   # Phase 10A Task 10.4 — ROI polygon map tool (3 clicks + dblclk -> emit)
   add_executable(test_roi_tool_polygon test_roi_tool_polygon.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_roi_tool_polygon PRIVATE
     Catch2::Catch2WithMain
@@ -6053,6 +6063,8 @@ sicnu_add_test(test_layout_tools)
 
   # Magic-wand ROI tool: roiDrawn geometry must reproduce the flooded pixels (#283).
   add_executable(test_roi_tool_magicwand test_roi_tool_magicwand.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_roi_tool_magicwand PRIVATE
     Catch2::Catch2WithMain
@@ -6077,6 +6089,8 @@ sicnu_add_test(test_layout_tools)
 
   # Phase 10A Task 10.5 — Spectral curve widget tests.
   add_executable(test_spectral_curve test_spectral_curve.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_spectral_curve PRIVATE
     Catch2::Catch2WithMain
@@ -6400,6 +6414,10 @@ sicnu_add_test(test_layout_tools)
     # SicnuUi chrome symbols pulled transitively via qgis_app_classify moc unit.
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+    # qgsclassificationmainwindow.cpp drives RsScanPool /
+    # operatorPreflightSummary, both defined in the shell library.
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
   )
   target_link_libraries(test_classify_workflow_controller PRIVATE
     Catch2::Catch2WithMain
@@ -6805,6 +6823,8 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   add_executable(test_obia_main_window
     test_obia_main_window.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
   )
   target_link_libraries(test_obia_main_window PRIVATE
     sicnu_operators
@@ -8112,6 +8132,7 @@ qt_add_executable(test_workflow_session_controller
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_scene.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_canvas_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
 )
 target_link_libraries(test_workflow_session_controller PRIVATE
   Catch2::Catch2WithMain
@@ -9766,6 +9787,7 @@ qt_add_executable(test_workflow_pipeline_ui
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
 )
 target_link_libraries(test_workflow_pipeline_ui PRIVATE
   Catch2::Catch2WithMain
@@ -17876,6 +17898,8 @@ add_executable(test_r26_workbench_classification_ux
   test_r26_workbench_classification_ux.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
 )
 target_link_libraries(test_r26_workbench_classification_ux PRIVATE
   Catch2::Catch2WithMain
@@ -18686,6 +18710,7 @@ qt_add_executable(test_swarm_fix_app
   ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_rms_scatter_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/obia/rs_segment_select_tool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classifier_setup_bar.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
 )
 target_link_libraries(test_swarm_fix_app PRIVATE
   Catch2::Catch2WithMain

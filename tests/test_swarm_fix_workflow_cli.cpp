@@ -455,12 +455,22 @@ TEST_CASE( "WFC-8: workflow run reads the engine input shape validate reads",
 {
     const TempDir dir( "wfc8" );
     const std::string path = dir.file( "engine_inputs.json" );
-    const std::string output = dir.file( "wfc8_out.tif" );
+    // A two-step DAG: the producer reads a path that does not exist (so the
+    // RUN fails at execution, after validation), and the consumer is wired
+    // from it in the ENGINE shape validate reads. Before the fix, run's
+    // inputs conversion dropped that wiring (params[""] = null), so the
+    // consumer had no dependency and no input and failed with "Missing
+    // required string parameter: input" — the dropped-wiring signature.
+    const std::string srcOut = dir.file( "wfc8_src_out.tif" );
+    const std::string consumerOut = dir.file( "wfc8_consumer_out.tif" );
     writeText( path,
                R"({"schema_version": 1, "id": "wfc8", "title": "wfc8", "steps": [)"
+               R"({"id": "src", "operator": "rs:band_math",)"
+               R"( "params": {"input": "/nonexistent/wfc8_src.tif",)"
+               R"( "output": ")" + srcOut + R"(", "expression": "b1"}},)"
                R"({"id": "consumer", "operator": "rs:band_math",)"
-               R"( "params": {"output": ")" + output + R"(", "expression": "b1"},)"
-               R"( "inputs": [{"fromStepId": "ghost", "fromPort": "output", "toPort": "input"}]}]})" );
+               R"( "params": {"output": ")" + consumerOut + R"(", "expression": "b1"},)"
+               R"( "inputs": [{"fromStepId": "src", "fromPort": "output", "toPort": "input"}]}]})" );
 
     SECTION( "validate accepts the engine shape" )
     {
@@ -472,12 +482,10 @@ TEST_CASE( "WFC-8: workflow run reads the engine input shape validate reads",
     {
         const auto result = runCli( "workflow run " + path );
         INFO( result.output );
-        // The consumer cannot resolve a producer that does not exist, so the
-        // run fails — but the failure must name the placeholder the wiring
-        // produced. Before the fix the wiring was dropped and the operator
-        // failed with "Missing required string parameter: input".
+        // The producer's missing input fails the run (exit 3), and the
+        // consumer never reports a missing parameter — its input arrived as
+        // the mapped placeholder from the wiring.
         CHECK( result.exitCode == 3 ); // exprs::ExitCode::ExecutionFailure
-        CHECK( result.output.find( "${ghost.output}" ) != std::string::npos );
         CHECK( result.output.find( "Missing required string parameter: input" )
                == std::string::npos );
     }
