@@ -9,6 +9,7 @@
 #include "cli_commands.h"
 
 #include "agent/harness/harness_error.h"
+#include "agent/tools/agent_session_adapter.h"
 #include "agent_ops/ops_driver.h"
 #include "exprs/exit_codes.h"
 
@@ -96,8 +97,23 @@ bool readApprovalTokenFile( const QString &path, Json::Value &token, std::string
 
 sicnu::agent_ops::OpsDriver *defaultCliAgentOpsDriver()
 {
-    static sicnu::agent_ops::OpsDriver driver{ sicnu::agent_ops::OpsDriver::Options{} };
-    return &driver;
+    // Production seams over the real engines (science_context broker,
+    // scientific planner chain, preflightIntent, WorkflowRunCoordinator).
+    // The bundle outlives the driver; a seam whose authority is unavailable
+    // stays null and every run refuses SEAMS_UNAVAILABLE (fail closed).
+    static sicnu::agent_ops::OpsDriver *driver = [] {
+        static sicnu::agent::ProductionSeamBundle seams =
+            sicnu::agent::makeProductionSeamBundle();
+        sicnu::agent_ops::OpsDriver::Options options;
+        options.deps.seams.data = seams.data.get();
+        options.deps.seams.planner = seams.planner.get();
+        options.deps.seams.preflight = seams.preflight.get();
+        options.deps.seams.executor = seams.executor.get();
+        options.deps.seams.verifier = seams.verifier.get();
+        options.deps.seams.diagnoser = seams.diagnoser.get();
+        return new sicnu::agent_ops::OpsDriver( std::move( options ) );
+    }();
+    return driver;
 }
 
 namespace {

@@ -206,7 +206,11 @@ struct VerificationReport {
     const std::string &verdict() const { return verdictValue; }
 
     /// Any FAIL -> FAIL; any warning -> PASS_WITH_WARNINGS; else PASS.
-    /// An EMPTY artifact list aggregates to kVerificationIndeterminate.
+    /// An EMPTY artifact list aggregates to kVerificationIndeterminate, and
+    /// a per-artifact verdict OUTSIDE the closed vocabulary (empty,
+    /// differently-cased, unknown) aggregates to kVerificationIndeterminate
+    /// — only an explicit verdict may raise the aggregate (fail-closed,
+    /// R28-T03/WP06).
     static std::string aggregate( const std::vector< ArtifactVerificationReport > &artifacts );
 
     Json::Value toJson() const;

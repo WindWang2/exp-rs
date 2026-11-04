@@ -192,7 +192,17 @@ std::string VerificationReport::aggregate( const std::vector< ArtifactVerificati
         if ( artifact.verdict == "FAIL" )
             return "FAIL";
         if ( artifact.verdict == "PASS_WITH_WARNINGS" )
+        {
             warning = true;
+            continue;
+        }
+        // R28-T03 (WP06): a verdict outside the closed vocabulary — empty,
+        // differently-cased, or outright unknown — is "not verified". Only
+        // an EXPLICIT verdict may raise the aggregate to a pass-family
+        // value; anything else fails closed to the indeterminate sentinel
+        // so a garbage verdict can never ride along a PASS upgrade.
+        if ( artifact.verdict != "PASS" )
+            return kVerificationIndeterminate;
     }
     return warning ? "PASS_WITH_WARNINGS" : "PASS";
 }
