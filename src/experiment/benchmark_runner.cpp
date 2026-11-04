@@ -108,9 +108,9 @@ Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
     result.setExperimentRunId( json.value( QStringLiteral( "experiment_run_id" ) ).toString() );
     result.setReproducibilityComplete(
         json.value( QStringLiteral( "reproducibility_complete" ) ).toBool() );
-    for ( const QJsonValue &gap : json.value( QStringLiteral( "reproducibility_gaps" ) ).toArray() )
+    for ( const auto &gap : json.value( QStringLiteral( "reproducibility_gaps" ) ).toArray() )
         result.reproducibilityGaps().append( gap.toString() );
-    for ( const QJsonValue &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
+    for ( const auto &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
         result.metrics().append( MetricResult::fromJson( metric.toObject() ) );
     result.setRawMetrics( json.value( QStringLiteral( "raw_metrics" ) ).toObject() );
     // Protocol parse failure propagates like its siblings (MetricRecord,

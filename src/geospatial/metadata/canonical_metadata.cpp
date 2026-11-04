@@ -268,7 +268,7 @@ BandInfo BandInfo::fromJson( const Json::Value &json )
   band.hasNoData = json.get( "has_nodata", false ).asBool();
   if ( band.hasNoData && json.isMember( "nodata" ) )
   {
-    const Json::Value nodata = json["nodata"];
+    const Json::Value &nodata = json["nodata"];
     if ( nodata.isString() && nodata.asString() == "nan" )
     {
       band.noDataIsNaN = true;
@@ -687,7 +687,7 @@ VariableInfo VariableInfo::fromJson( const Json::Value &json )
   variable.hasNoData = json.get( "has_nodata", false ).asBool();
   if ( variable.hasNoData && json.isMember( "nodata" ) )
   {
-    const Json::Value nodata = json["nodata"];
+    const Json::Value &nodata = json["nodata"];
     if ( nodata.isString() && nodata.asString() == "nan" )
     {
       variable.noDataIsNaN = true;

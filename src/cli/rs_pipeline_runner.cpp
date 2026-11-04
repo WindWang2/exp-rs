@@ -85,7 +85,7 @@ QStringList findPipelineInputPaths( const QVariantMap &params )
     if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
       continue;
 
-    const QVariant value = it.value();
+    const QVariant &value = it.value();
     QStringList candidates;
     if ( value.userType() == qMetaTypeId<QStringList>() )
       candidates = value.toStringList();
@@ -267,11 +267,11 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
                 ? pipelineJson["name"].asString()
                 : "unnamed";
 
-  const Json::Value steps = pipelineJson["steps"];
+  const Json::Value &steps = pipelineJson["steps"];
   std::unordered_set<std::string> allStepIds;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
-    const Json::Value step = steps[i];
+    const Json::Value &step = steps[i];
     std::string sid;
     if ( step.isMember( "id" ) && step["id"].isString() && !step["id"].asString().empty() )
       sid = step["id"].asString();
@@ -290,7 +290,7 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
   std::string prevStepId;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
-    const Json::Value step = steps[i];
+    const Json::Value &step = steps[i];
     sicnu::workflow::StepDef stepDef;
     if ( step.isMember( "id" ) && step["id"].isString() && !step["id"].asString().empty() )
       stepDef.id = step["id"].asString();
@@ -1251,7 +1251,7 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
     return false;
   }
 
-  const Json::Value steps = pipelineJson["steps"];
+  const Json::Value &steps = pipelineJson["steps"];
   if ( static_cast<int>( steps.size() ) > kMaxPipelineSteps )
   {
     if ( errorMessage )
@@ -1265,7 +1265,7 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
   std::unordered_set<std::string> seenStepIds;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
-    const Json::Value step = steps[i];
+    const Json::Value &step = steps[i];
     if ( !step.isObject() )
     {
       if ( errorMessage )

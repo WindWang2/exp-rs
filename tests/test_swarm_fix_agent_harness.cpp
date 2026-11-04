@@ -273,7 +273,7 @@ TEST_CASE( "confirmMapOutput converges: every repair round feeds the repaired ma
     // Precondition: the run itself verifies clean, so the confirmation runs.
     CHECK( doc["verification"]["verdict"].asString() != "FAIL" );
     REQUIRE( doc.isMember( "map_confirmation" ) );
-    const Json::Value confirmation = doc["map_confirmation"];
+    const Json::Value &confirmation = doc["map_confirmation"];
 
     // AG-H-1: the repair loop re-fed the ORIGINAL spec every round, so the
     // missing title survived all three attempts and the verdict was

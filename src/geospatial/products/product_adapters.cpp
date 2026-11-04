@@ -291,7 +291,7 @@ ProductMetadata readSentinel2( const std::string &path )
 {
   // Product-level MTD or the .SAFE directory: locate MTD_MSIL1C/2A.xml beside
   // or inside the given path.
-  std::string base = path;
+  const std::string &base = path;
   std::string mtdPath = path;
   if ( looksLikeSentinel2Directory( path ) )
   {

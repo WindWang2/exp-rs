@@ -637,7 +637,7 @@ TEST_CASE( "swarm fix OPS-R1-4: change atoms refuse mismatched radiometric "
         {
             threw = true;
             REQUIRE( error.code() == ErrorCode::InvalidInputData );
-            const std::string what = error.message();
+            const std::string &what = error.message();
             REQUIRE( what.find( "radiometric states" ) != std::string::npos );
         }
         REQUIRE( threw );

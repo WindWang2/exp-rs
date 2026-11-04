@@ -248,7 +248,7 @@ sicnu::data::Result<LeakageReport> LeakageReport::fromJson( const QJsonObject &j
     if ( json.contains( QStringLiteral( "unbucketed_count" ) ) )
         report.m_unbucketedCount =
             int( json.value( QStringLiteral( "unbucketed_count" ) ).toInteger() );
-    for ( const QJsonValue &value : json.value( QStringLiteral( "findings" ) ).toArray() )
+    for ( const auto &value : json.value( QStringLiteral( "findings" ) ).toArray() )
     {
         auto finding = LeakageFinding::fromJson( value.toObject() );
         if ( !finding )

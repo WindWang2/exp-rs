@@ -721,7 +721,7 @@ sicnu::data::Result<SplitManifest> SplitManifest::fromJson( const QJsonObject &j
             splitError( QStringLiteral( "non-strict determinism requires a note" ) ) );
     }
 
-    for ( const QJsonValue &value : json.value( QStringLiteral( "assignments" ) ).toArray() )
+    for ( const auto &value : json.value( QStringLiteral( "assignments" ) ).toArray() )
     {
         const QJsonObject item = value.toObject();
         SplitAssignment assignment;

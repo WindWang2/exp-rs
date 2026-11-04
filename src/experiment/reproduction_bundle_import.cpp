@@ -115,7 +115,7 @@ QString unmaskedSecretKeyInMetrics( const QJsonValue &value, const QString &key 
     if ( value.isArray() )
     {
         const QJsonArray array = value.toArray();
-        for ( const QJsonValue &item : array )
+        for ( const auto &item : array )
         {
             const QString found = unmaskedSecretKeyInMetrics( item, key );
             if ( !found.isEmpty() )
@@ -393,7 +393,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                           : twinsLookup.diagnostics().first().message ) );
         return report;
     }
-    const QStringList twins = twinsLookup.value();
+    const QStringList &twins = twinsLookup.value();
     if ( !twins.isEmpty() )
     {
         report.ok = true;
@@ -667,7 +667,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     // block — the rewrite source must be the upserted run's
                     // id (identical to report.runId for keepOriginalRunId,
                     // the fresh generated id otherwise).
-                    const QString finalRunId = run.runId();
+                    const QString &finalRunId = run.runId();
                     const bool datasetSide = fromIsRun
                                                  ? kDatasetSideKinds.contains( toKind )
                                                  : kDatasetSideKinds.contains( fromKind );

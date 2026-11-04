@@ -38,7 +38,7 @@ MetricResult MetricResult::fromJson( const QJsonObject &json )
                          ? json.value( QStringLiteral( "support" ) ).toInteger( -1 )
                          : -1;
     const QJsonArray warnings = json.value( QStringLiteral( "warnings" ) ).toArray();
-    for ( const QJsonValue &warning : warnings )
+    for ( const auto &warning : warnings )
         metric.warnings.append( warning.toString() );
     return metric;
 }

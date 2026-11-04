@@ -367,7 +367,7 @@ sicnu::data::Result<SamplePayload> decodePayload( SampleKind kind, const QJsonOb
         case SampleKind::Temporal:
         {
             TemporalSample temporal;
-            for ( const QJsonValue &value : json.value( QStringLiteral( "observations" ) ).toArray() )
+            for ( const auto &value : json.value( QStringLiteral( "observations" ) ).toArray() )
             {
                 const QJsonObject item = value.toObject();
                 TemporalObservation observation;
@@ -396,7 +396,7 @@ sicnu::data::Result<SamplePayload> decodePayload( SampleKind kind, const QJsonOb
         case SampleKind::MultiModal:
         {
             MultiModalSample multi;
-            for ( const QJsonValue &value : json.value( QStringLiteral( "members" ) ).toArray() )
+            for ( const auto &value : json.value( QStringLiteral( "members" ) ).toArray() )
             {
                 const QJsonObject item = value.toObject();
                 MultiModalMember member;
@@ -524,7 +524,7 @@ sicnu::data::Result<SampleRecord> SampleRecord::fromJson( const QJsonObject &jso
         json.value( QStringLiteral( "valid_until_utc" ) ).toString(), Qt::ISODateWithMs );
     sample.m_crs = json.value( QStringLiteral( "crs" ) ).toString();
     sample.m_quality = json.value( QStringLiteral( "quality" ) ).toDouble( -1.0 );
-    for ( const QJsonValue &value : json.value( QStringLiteral( "source_assets" ) ).toArray() )
+    for ( const auto &value : json.value( QStringLiteral( "source_assets" ) ).toArray() )
     {
         const auto ref = decodeSourceAsset( value.toObject() );
         if ( !ref )

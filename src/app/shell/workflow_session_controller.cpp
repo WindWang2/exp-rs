@@ -327,8 +327,12 @@ QString WorkflowSessionController::openBareOperator( const QString &operatorId )
   step.operatorId = operatorId.toStdString();
   step.artifactOnSuccess = "output";
   def.steps.push_back( step );
+  // Capture the id BEFORE the move: a moved-from std::string is valid but
+  // unspecified, so reading def.id afterwards would open the tool with an
+  // empty definition id (clang-tidy bugprone-use-after-move).
+  const std::string definitionId = def.id;
   m_runtime.registerDefinition( std::move( def ) );
-  return openTool( QString::fromStdString( def.id ) );
+  return openTool( QString::fromStdString( definitionId ) );
 }
 
 void WorkflowSessionController::setLayerChoices( const QStringList &ids, const QStringList &names )

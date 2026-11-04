@@ -1486,7 +1486,7 @@ bool planTileGeometry( int width, int height, std::size_t bands, std::size_t max
     int w = width;
     int h = 1;
     const std::size_t perRow = bytesPerPixel * static_cast<std::size_t>( width );
-    if ( perRow <= maxBytes )
+    if ( perRow > 0 && perRow <= maxBytes )
     {
         h = static_cast<int>( maxBytes / perRow );
     }

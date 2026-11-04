@@ -258,7 +258,7 @@ void PluginHost::unloadAll()
             // released memory.
             SicnuPluginInterface *instance = it.value().instance;
             QPluginLoader *loader = it.value().loader;
-            const QString name = it.key();
+            const QString &name = it.key();
             it.value().instance = nullptr;
             it.value().loader = nullptr;
             it.value().loaded = false;

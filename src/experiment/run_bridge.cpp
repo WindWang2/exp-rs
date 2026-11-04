@@ -318,7 +318,7 @@ QString ExperimentRunBridge::resolveRunId( const QString &executionRef ) const
     const auto lookup = m_store->runIdsByExecutionRef( executionRef );
     if ( !lookup )
         return QString(); // the live-event path will surface the store error
-    const QStringList ids = lookup.value();
+    const QStringList &ids = lookup.value();
     if ( ids.isEmpty() )
         return QString();
     // The store scan is newest-first (created_ms DESC, run_id DESC); a ref

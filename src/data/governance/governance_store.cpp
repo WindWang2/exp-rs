@@ -736,7 +736,7 @@ struct GovernanceStore::Impl
         QJsonParseError error{};
         const QJsonDocument doc = QJsonDocument::fromJson( s.text( 2 ).toUtf8(), &error );
         const QJsonArray predicates = doc.object().value( QLatin1String( "predicates" ) ).toArray();
-        for ( const QJsonValue &v : predicates )
+        for ( const auto &v : predicates )
             c.predicates.append( SmartPredicate{ v.toObject().value( QLatin1String( "field" ) ).toString(),
                                                  v.toObject().value( QLatin1String( "op" ) ).toString(),
                                                  v.toObject().value( QLatin1String( "value" ) ).toString() } );
@@ -2981,7 +2981,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             out.cursorError = QStringLiteral( "governance.cursor_invalid" );
             return out;
         }
-        const QStringList parts = decoded.value();
+        const QStringList &parts = decoded.value();
         if ( parts.size() != 3 || parts.at( 0 ) != filterEcho || parts.at( 2 ).isEmpty() )
         {
             out.cursorError = QStringLiteral( "governance.cursor_mismatch" );
