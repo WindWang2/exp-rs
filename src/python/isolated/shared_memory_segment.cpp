@@ -143,14 +143,45 @@ bool SharedMemorySegment::attach( const QString &key )
   m_isOwner = false;
   m_unlinked = false;
 
-  // Read the header to recover payload size.
-  if ( static_cast<size_t>( m_shm->size() ) >= kHeaderSize )
+  // The header is UNTRUSTED input (any process holding the key could have
+  // written it). R28-T03 (WP09): validate it before deriving a payload size
+  // from it — a negative dimension wraps through size_t into a huge claimed
+  // payload, an unknown dtype silently zeroes it, and a header claiming more
+  // bytes than the actual mapping would let later write()/payload() users
+  // walk past the segment end. Any inconsistency detaches and refuses.
+  if ( static_cast<size_t>( m_shm->size() ) < kHeaderSize )
   {
-    Header hdr;
-    std::memcpy( &hdr, m_shm->data(), kHeaderSize );
-    const size_t elemSize = dtypeSize( static_cast<DType>( hdr.dtype ) );
-    m_payloadSize = static_cast<size_t>( hdr.width ) * hdr.height * hdr.bands * elemSize;
+    detach();
+    return false;
   }
+  Header hdr;
+  std::memcpy( &hdr, m_shm->data(), kHeaderSize );
+  if ( hdr.width <= 0 || hdr.height <= 0 || hdr.bands <= 0 )
+  {
+    detach();
+    return false;
+  }
+  if ( hdr.dtype < static_cast<int32_t>( DType::Float32 ) ||
+       hdr.dtype > static_cast<int32_t>( DType::Float64 ) )
+  {
+    detach();
+    return false;
+  }
+  const size_t elemSize = dtypeSize( static_cast<DType>( hdr.dtype ) );
+  if ( elemSize == 0 )
+  {
+    detach();
+    return false;
+  }
+  const size_t payload =
+      static_cast<size_t>( hdr.width ) * static_cast<size_t>( hdr.height ) *
+      static_cast<size_t>( hdr.bands ) * elemSize;
+  if ( payload > static_cast<size_t>( m_shm->size() ) - kHeaderSize )
+  {
+    detach();
+    return false;
+  }
+  m_payloadSize = payload;
   return true;
 }
 

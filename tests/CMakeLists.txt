@@ -18880,3 +18880,21 @@ if(TARGET jsoncpp)
   target_link_libraries(test_r28_t03_verification_matrix PRIVATE jsoncpp)
 endif()
 sicnu_discover_tests(test_r28_t03_verification_matrix)
+
+# R28-T03 M6 (WP09/WP10): untrusted-input gates (SHM header validation,
+# manifest external-tool numeric fields).
+add_executable(test_r28_t03_shm_manifest_gates test_r28_t03_shm_manifest_gates.cpp)
+target_link_libraries(test_r28_t03_shm_manifest_gates PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_python_isolated
+  sicnu_sdk
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_shm_manifest_gates PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r28_t03_shm_manifest_gates PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t03_shm_manifest_gates)

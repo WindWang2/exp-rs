@@ -199,14 +199,32 @@ bool ManifestExternalTool::fromJson( const Json::Value &json, ManifestExternalTo
     out.inheritEnvironment = json.get( "inherit_environment", false ).asBool();
     if ( json.isMember( "working_directory" ) && json["working_directory"].isString() )
         out.workingDirectoryParam = json["working_directory"].asString();
-    if ( json.isMember( "timeout_seconds" ) && json["timeout_seconds"].isNumeric() )
+    // swarm-review SDK-1 discipline (R28-T03 completion): isNumeric() +
+    // asInt() lets a value above INT_MAX throw Json::LogicError out of the
+    // sub-parser (only the whole-document catch sees it, unattributed) and
+    // truncates non-integral values silently. Gate on the int domain with a
+    // field-attributed message so the refusal names the offending field.
+    for ( const char *field : { "timeout_seconds", "stdout_limit_bytes",
+                                "stderr_limit_bytes" } )
+    {
+        if ( json.isMember( field ) && !json[field].isInt() )
+        {
+            error = std::string( "'external." ) + field + "' must be an integer";
+            return false;
+        }
+    }
+    if ( json.isMember( "timeout_seconds" ) )
         out.timeoutSeconds = json["timeout_seconds"].asInt();
-    if ( json.isMember( "stdout_limit_bytes" ) && json["stdout_limit_bytes"].isNumeric() )
+    if ( json.isMember( "stdout_limit_bytes" ) )
         out.stdoutLimitBytes = json["stdout_limit_bytes"].asInt();
-    if ( json.isMember( "stderr_limit_bytes" ) && json["stderr_limit_bytes"].isNumeric() )
+    if ( json.isMember( "stderr_limit_bytes" ) )
         out.stderrLimitBytes = json["stderr_limit_bytes"].asInt();
     if ( out.timeoutSeconds <= 0 )
         out.timeoutSeconds = 3600;
+    if ( out.stdoutLimitBytes < 0 )
+        out.stdoutLimitBytes = 0;
+    if ( out.stderrLimitBytes < 0 )
+        out.stderrLimitBytes = 0;
     return true;
 }
 
