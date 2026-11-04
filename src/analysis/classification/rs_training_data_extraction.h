@@ -13,6 +13,10 @@
 //     full W×H mask); pre-computed pixel-index caches are honored as-is.
 //   * Band values are read with scanline-grouped RasterIO (one row read per
 //     unique sample row per band, not 1×1 reads).
+//   * Feature-matrix memory is bounded by the KEPT samples: NoData/ignore
+//     validity is decided in a first scanline pass and only rows still
+//     carrying kept samples are read into X (never a candidate-count ×
+//     bands pre-allocation).
 //   * RsPixelIgnoreOptions drop NoData / user-ignore samples.
 //   * Optional per-class cap with deterministic std::mt19937(42) subsampling.
 #pragma once

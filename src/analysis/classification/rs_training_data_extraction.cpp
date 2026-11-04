@@ -85,6 +85,15 @@ CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
 /**
  * Shared tail: sample list (+ optional per-class cap), scanline-grouped band
  * reads, NoData/ignore filtering and the minimum-samples policy.
+ *
+ * R28-T01 memory contract: the feature matrix is allocated for the KEPT
+ * rows only. Validity is established in a first scanline pass that records
+ * per-candidate ignore matches (NoData/ignore/non-finite per band —
+ * RsPixelIgnoreOptions::isIgnorePixel decomposes exactly into per-band
+ * isIgnoreScalar calls), and a second pass re-reads only the rows that
+ * still carry kept samples. Previously out.X was allocated for every ROI
+ * candidate (N × B floats, ≈1.2 GB at 100 Mpx × 3 bands) before filtering
+ * and the per-class cap (r26 PERF_BASELINE residual).
  */
 void buildMatrices( GDALDataset *ds,
                     const QVector<int> &bands,
@@ -199,15 +208,25 @@ void buildMatrices( GDALDataset *ds,
     byRow[r].append( qMakePair( s, c ) );
   }
 
-  out.X.create( samples.size(), B, CV_32F );
-  out.y.create( samples.size(), 1, CV_32S );
-  for ( int s = 0; s < samples.size(); ++s )
-    out.y.at<int>( s, 0 ) = samples[s].first;
+  // ADR 0061 — per-band NoData discovery is owned by rsCollectBandNodata
+  // (shared with the pipeline tile path).
+  const RsPixelIgnoreOptions &ignore = options.ignore;
+  std::vector<bool> bandHasNodata;
+  std::vector<float> bandNodata;
+  rsCollectBandNodata( ds, bands, ignore, bandHasNodata, bandNodata );
 
+  // Pass 1 — validity only. isIgnorePixel's per-band decomposition is exact:
+  // AnyBand ignores a pixel iff some band matches isIgnoreScalar, AllBands
+  // iff every band does, so the full feature vector never needs to coexist
+  // in memory (the matrix below therefore stays at kept × B, not N × B).
+  std::vector<int> matchCount( static_cast<size_t>( samples.size() ), 0 );
+  std::vector<unsigned char> anyMatch( static_cast<size_t>( samples.size() ), 0 );
   std::vector<float> rowBuf( static_cast<size_t>( W ) );
   for ( int bi = 0; bi < B; ++bi )
   {
     GDALRasterBand *band = ds->GetRasterBand( bands[bi] );
+    const bool hasNd = bandHasNodata[static_cast<size_t>( bi )];
+    const float nd = bandNodata[static_cast<size_t>( bi )];
     for ( auto it = byRow.constBegin(); it != byRow.constEnd(); ++it )
     {
       const int r = it.key();
@@ -218,41 +237,35 @@ void buildMatrices( GDALDataset *ds,
       {
         out.error = RsTrainingDataResult::Error::RasterReadFailed;
         out.errorMessage = QStringLiteral( "Failed to read raster band %1" ).arg( bands[bi] );
-        out.X.release();
-        out.y.release();
         return;
       }
       for ( const QPair<int, int> &sc : it.value() )
-        out.X.at<float>( sc.first, bi ) = rowBuf[static_cast<size_t>( sc.second )];
+      {
+        if ( ignore.isIgnoreScalar( rowBuf[static_cast<size_t>( sc.second )], hasNd, nd ) )
+        {
+          ++matchCount[static_cast<size_t>( sc.first )];
+          anyMatch[static_cast<size_t>( sc.first )] = 1;
+        }
+      }
     }
     if ( !reportProgress( progress,
-                          0.4 + 0.5 * static_cast<double>( bi + 1 ) / B,
+                          0.4 + 0.25 * static_cast<double>( bi + 1 ) / B,
                           QStringLiteral( "Reading training samples" ) ) )
     {
       out.error = RsTrainingDataResult::Error::Cancelled;
       out.errorMessage = QStringLiteral( "Cancelled" );
-      out.X.release();
-      out.y.release();
       return;
     }
   }
 
-  // Drop samples that fall on NoData / user ignore values (edge/background).
-  // ADR 0061 — per-band NoData discovery is owned by rsCollectBandNodata
-  // (shared with the pipeline tile path).
-  const RsPixelIgnoreOptions &ignore = options.ignore;
-  std::vector<bool> bandHasNodata;
-  std::vector<float> bandNodata;
-  rsCollectBandNodata( ds, bands, ignore, bandHasNodata, bandNodata );
-
-  std::vector<float> feat( static_cast<size_t>( B ) );
   QVector<int> keepRows;
   keepRows.reserve( samples.size() );
   for ( int s = 0; s < samples.size(); ++s )
   {
-    for ( int bi = 0; bi < B; ++bi )
-      feat[static_cast<size_t>( bi )] = out.X.at<float>( s, bi );
-    if ( !ignore.isIgnorePixel( feat.data(), B, bandHasNodata, bandNodata ) )
+    const bool ignored = ( ignore.mode == RsPixelIgnoreOptions::Mode::AnyBand )
+                           ? anyMatch[static_cast<size_t>( s )] != 0
+                           : matchCount[static_cast<size_t>( s )] == B;
+    if ( !ignored )
       keepRows.push_back( s );
   }
 
@@ -260,8 +273,6 @@ void buildMatrices( GDALDataset *ds,
   {
     out.error = RsTrainingDataResult::Error::NoValidPixels;
     out.errorMessage = QStringLiteral( "No valid training pixels extracted" );
-    out.X.release();
-    out.y.release();
     return;
   }
 
@@ -274,7 +285,7 @@ void buildMatrices( GDALDataset *ds,
   {
     std::map<int, std::vector<std::pair<int, int>>> keptByClass; // class → (rank, sampleIdx)
     for ( int s : keepRows )
-      keptByClass[out.y.at<int>( s, 0 )].emplace_back( sampleRank[static_cast<size_t>( s )], s );
+      keptByClass[samples[s].first].emplace_back( sampleRank[static_cast<size_t>( s )], s );
     std::vector<char> keepFlag( static_cast<size_t>( samples.size() ), 0 );
     for ( auto &kv : keptByClass )
     {
@@ -296,8 +307,6 @@ void buildMatrices( GDALDataset *ds,
     {
       out.error = RsTrainingDataResult::Error::NoValidPixels;
       out.errorMessage = QStringLiteral( "No valid training pixels extracted" );
-      out.X.release();
-      out.y.release();
       return;
     }
   }
@@ -307,32 +316,61 @@ void buildMatrices( GDALDataset *ds,
     out.error = RsTrainingDataResult::Error::InsufficientSamples;
     out.errorMessage = QStringLiteral( "Insufficient training samples (%1 kept, %2 required)" )
                          .arg( keepRows.size() ).arg( options.minSamples );
-    out.X.release();
-    out.y.release();
     return;
   }
 
-  // Build per-sample group id vector before filtering
-  std::vector<int> allGroupIds = sampleGroups;
-  if ( keepRows.size() != samples.size() )
+  // Pass 2 — fill the kept-rows-only feature matrix. Re-group so rows whose
+  // samples were all dropped (NoData or capped away) are not read again.
+  QHash<int, QVector<QPair<int, int>>> byRowKept;
+  byRowKept.reserve( keepRows.size() );
+  for ( int i = 0; i < keepRows.size(); ++i )
   {
-    cv::Mat X2( keepRows.size(), B, CV_32F );
-    cv::Mat y2( keepRows.size(), 1, CV_32S );
-    std::vector<int> keptGroups;
-    keptGroups.reserve( keepRows.size() );
-    for ( int i = 0; i < keepRows.size(); ++i )
-    {
-      out.X.row( keepRows[i] ).copyTo( X2.row( i ) );
-      y2.at<int>( i, 0 ) = out.y.at<int>( keepRows[i], 0 );
-      keptGroups.push_back( allGroupIds[static_cast<size_t>( keepRows[i] )] );
-    }
-    out.X = X2;
-    out.y = y2;
-    out.sampleGroupIds = std::move( keptGroups );
+    const quint64 idx = samples[keepRows[i]].second;
+    const int r = static_cast<int>( idx / static_cast<quint64>( W ) );
+    const int c = static_cast<int>( idx % static_cast<quint64>( W ) );
+    byRowKept[r].append( qMakePair( i, c ) );
   }
-  else
+
+  out.X.create( keepRows.size(), B, CV_32F );
+  out.y.create( keepRows.size(), 1, CV_32S );
+  out.sampleGroupIds.clear();
+  out.sampleGroupIds.reserve( keepRows.size() );
+  for ( int i = 0; i < keepRows.size(); ++i )
   {
-    out.sampleGroupIds = std::move( allGroupIds );
+    out.y.at<int>( i, 0 ) = samples[keepRows[i]].first;
+    out.sampleGroupIds.push_back( sampleGroups[static_cast<size_t>( keepRows[i] )] );
+  }
+
+  for ( int bi = 0; bi < B; ++bi )
+  {
+    GDALRasterBand *band = ds->GetRasterBand( bands[bi] );
+    for ( auto it = byRowKept.constBegin(); it != byRowKept.constEnd(); ++it )
+    {
+      const int r = it.key();
+      const CPLErr err = band->RasterIO(
+        GF_Read, 0, r, W, 1, rowBuf.data(),
+        W, 1, GDT_Float32, 0, 0 );
+      if ( err != CE_None )
+      {
+        out.error = RsTrainingDataResult::Error::RasterReadFailed;
+        out.errorMessage = QStringLiteral( "Failed to read raster band %1" ).arg( bands[bi] );
+        out.X.release();
+        out.y.release();
+        return;
+      }
+      for ( const QPair<int, int> &sc : it.value() )
+        out.X.at<float>( sc.first, bi ) = rowBuf[static_cast<size_t>( sc.second )];
+    }
+    if ( !reportProgress( progress,
+                          0.65 + 0.35 * static_cast<double>( bi + 1 ) / B,
+                          QStringLiteral( "Reading training samples" ) ) )
+    {
+      out.error = RsTrainingDataResult::Error::Cancelled;
+      out.errorMessage = QStringLiteral( "Cancelled" );
+      out.X.release();
+      out.y.release();
+      return;
+    }
   }
 
   for ( int s = 0; s < out.y.rows; ++s )
