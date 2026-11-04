@@ -87,11 +87,13 @@ Json::Value RsBandMathOperator::run(const Json::Value& params,
     context.reportProgress(0.2, "Running band math");
 
     QString errorMessage;
+    BandMath::OutputStats stats;
     if (!BandMath::processFile(QString::fromStdString(inputPath),
                                QString::fromStdString(outputPath),
                                QString::fromStdString(expression),
                                &errorMessage,
-                               [&context] { return context.isCancelled(); })) {
+                               [&context] { return context.isCancelled(); },
+                               &stats)) {
         if (context.isCancelled())
             throw RSOperatorError(ErrorCode::Cancelled, "Cancelled");
         throw RSOperatorError(ErrorCode::ComputationError,
@@ -113,6 +115,14 @@ Json::Value RsBandMathOperator::run(const Json::Value& params,
         result["width"] = 0;
         result["height"] = 0;
     }
+    // Quality summary from the actual evaluated pixels (R28-T01 WP10, same
+    // convention as rs:spectral_index): a divide-by-zero or masked input
+    // turns silently into NaN output pixels — surface the counts and share.
+    result["valid_pixels"] = static_cast<Json::UInt64>(stats.validPixels);
+    result["nonfinite_output_pixels"] = static_cast<Json::UInt64>(stats.nonFinitePixels);
+    result["valid_pixel_ratio"] = stats.totalPixels == 0
+        ? 0.0
+        : static_cast<double>(stats.validPixels) / static_cast<double>(stats.totalPixels);
     return result;
 }
 

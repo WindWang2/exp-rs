@@ -6,6 +6,7 @@
 
 #include <QString>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <vector>
@@ -37,6 +38,18 @@
 namespace BandMath
 {
     /**
+     * Output pixel statistics from processFile (R28-T01 WP10): a divide-by-
+     * zero or masked input silently produces NaN pixels — the counters make
+     * that visible in operator results without a re-read of the output.
+     */
+    struct OutputStats
+    {
+        uint64_t totalPixels = 0;      ///< W × H actually evaluated.
+        uint64_t validPixels = 0;      ///< finite output values.
+        uint64_t nonFinitePixels = 0;  ///< NaN/Inf output (incl. NoData propagation — output NoData is NaN).
+    };
+
+    /**
      * Evaluate an expression over multi-band pixel data using SIMD execution kernels.
      *
      * @param expression  The math expression string (e.g., "(b1 - b2) / (b1 + b2)")
@@ -59,11 +72,13 @@ namespace BandMath
      * and write a single-band output GeoTIFF.
      * @param isCancelled polled once per streamed tile; returning true aborts
      *   with errorMessage "Cancelled" and removes the partial output.
+     * @param stats optional per-pixel output counters (may be null).
      * @return true on success; optional errorMessage receives failure reason.
      */
     bool processFile(const QString &sourcePath, const QString &outputPath,
                      const QString &expression, QString *errorMessage = nullptr,
-                     const std::function<bool()> &isCancelled = {});
+                     const std::function<bool()> &isCancelled = {},
+                     OutputStats *stats = nullptr);
 
     /// Return sorted unique band numbers referenced by @a expression (e.g. "b1+b3" -> {1,3}).
     /// Returns empty vector on parse error.
